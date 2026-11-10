@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process'
 import { mkdirSync, mkdtempSync, realpathSync, symlinkSync, writeFileSync } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
 import { isAbsolute, join, parse, relative, resolve, sep } from 'node:path'
@@ -173,6 +174,16 @@ describe('code hosts use the irreversible rules', () => {
     ['gh secret set DEPLOY_KEY', 'deny'],
     ['gh repo edit --visibility public', 'deny'],
     ['flatpak-spawn --host gh pr merge 1', 'ask'],
+    // Asking for help, or no command at all, does nothing on the host.
+    ['gh', 'allow'],
+    ['glab', 'allow'],
+    ['gh release', 'allow'],
+    ['gh pr merge 12 --help', 'allow'],
+    ['gh pr review 12 --approve --version', 'allow'],
+    ['gh repo delete meridian/api --yes', 'ask'],
+    // Without a method, gh api reads, unless a field makes it a POST.
+    ['gh api repos/x/pulls', 'allow'],
+    ['gh api repos/x/issues -f title=x', 'ask'],
     ['flatpak-spawn --host security find-generic-password -w', 'deny'],
     ['gh auth token', 'deny'],
     ['gh auth status --show-token', 'deny'],
@@ -627,6 +638,7 @@ describe('a role that only reads', () => {
       'git stash list',
       'git stash show -p stash@{0}',
       'git reflog show --oneline',
+      'git branch --no-column',
       'git -C ../other --no-pager log -1',
       'git diff --stat main',
       'date -u +%Y',
@@ -1644,6 +1656,8 @@ describe('what could lose work or a secret (DEV-69)', () => {
     assert.strictEqual(verdictOf('git branch -d althar/retry'), 'allow')
     assert.strictEqual(verdictOf('git branch -m althar/retry althar/retry-2'), 'allow')
     assert.strictEqual(verdictOf('git branch spike'), 'allow')
+    // A ref here that is no branch, as a tag, moves nothing anyone else has.
+    assert.strictEqual(verdictOf('git update-ref refs/tags/v1 HEAD'), 'allow')
     // Unstaging in another checkout loses nothing, but it is git in another folder still.
     assert.strictEqual(verdictOf('git -C /Users/someone/code/app restore --staged src/app.ts'), 'ask')
     assert.notInclude(reasonOf(run('git -C /Users/someone/code/app restore --staged src/app.ts', rules({}))), 'throw away')
@@ -1659,6 +1673,8 @@ describe('what could lose work or a secret (DEV-69)', () => {
       'rsync -a --remove-source-files /Users/someone/inbox/ ./inbox/',
     ])
       assert.strictEqual(verdictOf(command, { mode: 'allow' }), 'ask', command)
+    // `find` with no folder deletes from where it runs, the worktree; `-exec` with nothing after it runs nothing.
+    for (const command of ['find -delete', 'find . -exec']) assert.strictEqual(verdictOf(command, { mode: 'allow' }), 'allow', command)
     // A file an agent's own tool deletes outside the worktree; one it edits there only writes.
     const removed = request({ kind: 'delete', title: 'Delete', paths: ['/Users/someone/code/app/src/app.ts'] })
     assert.strictEqual(decide(removed, { ...context, ...rules({ mode: 'allow' }) }).verdict, 'ask')
@@ -1683,6 +1699,8 @@ describe('what could lose work or a secret (DEV-69)', () => {
       'pip install --user requests',
       'python3 -m pip install --break-system-packages requests',
       'sudo apt-get install -y jq',
+      'pacman -S ripgrep',
+      'sudo pacman -Syu',
     ]) {
       const verdict = run(command, rules({}))
       assert.deepInclude(verdict, { verdict: 'ask', held: true }, command)
@@ -1695,6 +1713,7 @@ describe('what could lose work or a secret (DEV-69)', () => {
       'pip install -r requirements.txt',
       'uv pip install ruff',
       'brew list',
+      'pacman -Q',
     ])
       assert.strictEqual(verdictOf(command), 'allow', command)
   })
@@ -2246,6 +2265,12 @@ describe('a quoted heredoc is text, not a command', () => {
     assert.notStrictEqual(run(`${heredoc('cat', "'EOF'")}\ngit push --force origin main`).verdict, 'allow')
   })
 
+  it('drops its body after an escaped quote or space before it, and where a lone `&` follows it', () => {
+    assert.strictEqual(withoutQuotedHeredocs(`cat "a\\"b" <<'EOF'\n$(rm -rf /)\nEOF\n`), `cat "a\\"b" <<'EOF'\n`)
+    assert.strictEqual(withoutQuotedHeredocs(`cat a\\ b <<'EOF'\n$(rm -rf /)\nEOF\n`), `cat a\\ b <<'EOF'\n`)
+    assert.strictEqual(withoutQuotedHeredocs(`cat <<'EOF' &\n$(rm -rf /)\nEOF\n`), `cat <<'EOF' &\n`)
+  })
+
   it('keeps an unquoted heredoc as shell, which expands $(…) and backticks', () => {
     const unquoted = heredoc('cat', '', 'now $(rm -rf /) and `git push`')
     assert.isTrue(parseCommandLine(unquoted).opaque)
@@ -2654,6 +2679,8 @@ describe('the asks and refusals left once the sandbox is the boundary (DEV-185)'
       'git stash drop stash@{3}',
       'git stash clear',
       'git stash drop abc123',
+      // Two named, both its own: git takes only one, and which isn't read.
+      'git stash drop stash@{0} stash@{2}',
     ])
       assert.strictEqual(verdictOf(command, rules({}, { stashes })), 'ask', command)
     // Throwing away what git keeps to recover lost work still asks.
@@ -2661,6 +2688,47 @@ describe('the asks and refusals left once the sandbox is the boundary (DEV-185)'
     // With everything allowed, these go ahead, as before (ADR-067): they ask the person only where the rules do.
     for (const command of ['git stash drop stash@{1}', 'git stash clear', 'git reflog expire --expire=now --all', 'git gc --prune=now'])
       assert.strictEqual(verdictOf(command, rules(allow, { stashes })), 'allow', command)
+  })
+
+  it('reads which stash entry is the task’s from git’s own record, in a worktree and in the checkout whose git folder it shares', () => {
+    const root = realpathSync(mkdtempSync(join(tmpdir(), 'althar-stash-')))
+    const git = (cwd: string, ...args: Array<string>) =>
+      execFileSync('git', ['-c', 'user.name=Fake', '-c', 'user.email=fake@althar.test', '-c', 'commit.gpgsign=false', ...args], {
+        cwd,
+        stdio: 'pipe',
+      })
+    const checkout = join(root, 'app')
+    mkdirSync(checkout)
+    git(checkout, 'init', '-q', '-b', 'main')
+    git(checkout, 'commit', '-q', '--allow-empty', '-m', 'Start')
+    // The person stashes in their checkout, on main; the task, in its worktree on its branch, after them.
+    writeFileSync(join(checkout, 'mine.txt'), 'mine\n')
+    git(checkout, 'add', 'mine.txt')
+    git(checkout, 'stash', 'push', '-q', '-m', 'mine')
+    const task = join(root, 'retry')
+    git(checkout, 'worktree', 'add', '-q', '-b', 'althar/retry', task)
+    writeFileSync(join(task, 'wip.txt'), 'wip\n')
+    git(task, 'add', 'wip.txt')
+    git(task, 'stash', 'push', '-q', '-m', 'wip')
+    // Both read the one record: the newest entry is the task's, the one before it the person's.
+    for (const at of [task, checkout]) {
+      assert.strictEqual(verdictOf('git stash drop', rules({}, { worktree: at })), 'allow', at)
+      assert.strictEqual(verdictOf('git stash drop stash@{1}', rules({}, { worktree: at })), 'ask', at)
+    }
+  })
+
+  it('asks before an MCP tool speaks for the person, force-pushes or deletes, even with everything allowed', () => {
+    for (const tool of ['add_issue_comment', 'force_push_branch', 'delete_branch']) {
+      const call = request({
+        kind: 'other',
+        title: `mcp__github__${tool}`,
+        mcp: { server: 'github', tool },
+        rawInput: { owner: 'meridian', repo: 'api', branch: 'spike', body: 'Done.' },
+      })
+      const verdict = decide(call, rules(allow))
+      assert.strictEqual(verdict.verdict, 'ask', tool)
+      assert.match(reasonOf(verdict), /^\S.* through github asks even with everything allowed:/, tool)
+    }
   })
 
   it('asks before tearing down, deleting or publishing, even with everything allowed; a deploy goes ahead', () => {

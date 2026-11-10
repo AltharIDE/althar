@@ -1,9 +1,20 @@
-import type { AllowedBy, AttachedFile, FileMention, Picture, ShownPicture, ThreadItem, Unfurl } from '@althar/contracts'
+import type {
+  PresetParts,
+  AllowedBy,
+  AttachedFile,
+  FileMention,
+  Picture,
+  ShownPicture,
+  ThreadItem,
+  TurnTime,
+  Unfurl,
+} from '@althar/contracts'
 import { Delivery, headingOf, oneLine, PlanState, ToolKind, ToolState } from '@althar/ui'
 
 import { type Handed, handedBy, type OutputSoFar, type PartHanded, type Ran, ranOf } from './handed'
 import { isSending } from './items'
 import { took } from './time'
+import { type Spent, spentOf, turnOfItems } from './turnTime'
 
 /*
  * A thread's items as the blocks the kit draws, in order: what the person
@@ -94,6 +105,8 @@ export type Part =
       readonly id: string
       readonly text: string
       readonly tone: 'info' | 'warning' | 'error'
+      /** Parts the person set up twice, which the coordinator offers to keep as a preset (a task is a conversation plus parts). */
+      readonly offer?: { readonly name: string; readonly parts: PresetParts }
       /** For an agent's turn that failed: why, as the runtime classes it (`auth_required`…), and the agent's own words, apart. */
       readonly failure?: string
       readonly detail?: string
@@ -157,8 +170,18 @@ export type Block =
       readonly doing: Doing | null
       /** What it handed back beside its words: pictures, documents, files. */
       readonly handed: Handed
+      /** Once it is over, where its time went, as the runtime kept it for its turns; null where none of them did. */
+      readonly spent: Spent | null
     }
   | { readonly kind: 'divider'; readonly id: string; readonly text: string }
+  /** What the coordinator offers to keep, such as parts set up twice as a preset (a task is a conversation plus parts): its line and button. */
+  | {
+      readonly kind: 'offer'
+      readonly id: string
+      readonly text: string
+      readonly detail: string | null
+      readonly offer: { readonly name: string; readonly parts: PresetParts }
+    }
   | {
       readonly kind: 'step'
       readonly id: string
@@ -478,6 +501,15 @@ const partOf = (
           failure,
           ...(description === null ? {} : { detail: description }),
         }
+      if (item.content.offer !== undefined)
+        return {
+          kind: 'notice',
+          id: item.id,
+          text: title,
+          tone: severity,
+          offer: { name: item.content.offer.name, parts: item.content.offer.parts },
+          ...(description === null ? {} : { detail: description }),
+        }
       return { kind: 'notice', id: item.id, text: noticeText(item.content), tone: severity }
     }
     case 'pictures':
@@ -510,6 +542,8 @@ export interface ThreadSource {
   readonly turnEnded?: string | null
   /** When the newest of what comes before these items was written, where they are the last stretch of a longer thread. */
   readonly earlierAt?: string
+  /** Where each turn's time went, by its id, as the snapshot carries them (`turnsById`). */
+  readonly turns?: ReadonlyMap<string, TurnTime>
 }
 
 /** What a part handed back, for the turn to gather. */
@@ -654,6 +688,7 @@ export const blocksOf = (
       took: '',
       doing: null,
       handed: handedBy([], null),
+      spent: null,
     })
     spans.set(part.id, { from: at, to: at })
   }
@@ -743,6 +778,17 @@ export const blocksOf = (
       case 'notice':
         // A restart is Althar's business, not the person's; earlier versions said so in the thread.
         if (item.content.source === 'runtime' && item.content.title === RESTARTED) continue
+        // What Althar offers to keep, such as a preset, stands on its own with its button.
+        if (item.content.offer !== undefined) {
+          blocks.push({
+            kind: 'offer',
+            id: item.id,
+            text: item.content.title,
+            detail: item.content.description,
+            offer: { name: item.content.offer.name, parts: item.content.offer.parts },
+          })
+          continue
+        }
         // What Althar itself says, such as a change of agent, is a line across the thread.
         if (item.content.source === 'runtime') {
           blocks.push({ kind: 'divider', id: item.id, text: noticeText(item.content) })
@@ -810,6 +856,8 @@ export const blocksOf = (
     const since = merged.slice(index + 1).every((block) => block.kind === 'step')
     return since && (askedWhen == null || Date.parse(askedWhen) <= Date.parse(span.to)) ? ended : span.to
   }
+  // Each item's turn, by which a block over is told where its time went.
+  const turnOf = turnOfItems(source.items)
   const drawn = merged.map((block, index): Block => {
     if (block.kind !== 'turn') return block
     const known = spans.get(block.id)
@@ -831,6 +879,13 @@ export const blocksOf = (
       took: span === undefined || until === undefined ? '' : took(span.from, until),
       doing: running ? doingOf(work, writing?.kind === 'message') : null,
       handed: handedBy(block.parts.map(partHanded), worktree),
+      spent:
+        running || source.turns === undefined
+          ? null
+          : spentOf(
+              block.parts.flatMap((part) => turnOf.get(part.id) ?? []),
+              source.turns,
+            ),
     }
   })
   if (!waiting || askedWhen == null) return drawn

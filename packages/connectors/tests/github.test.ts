@@ -351,6 +351,10 @@ describe('GitHub as a code host', () => {
       const described = github([['PATCH', `${REPO}/pulls/12`, { json: pull({ body: 'Only this' }) }]])
       yield* described.host.editChange(repository, pullChange, { body: 'Only this' })
       assert.deepStrictEqual(described.sent[0]?.body, { body: 'Only this' })
+      // A stacked change goes into another branch once the one below merges: only its base is sent.
+      const based = github([['PATCH', `${REPO}/pulls/12`, { json: pull() }]])
+      yield* based.host.editChange(repository, pullChange, { base: 'main' })
+      assert.deepStrictEqual(based.sent[0]?.body, { base: 'main' })
       // An upstream the account can't push to refuses it, in GitHub's words.
       const refusing = github([['PATCH', `${REPO}/pulls/12`, { status: 403, json: { message: 'Resource not accessible by integration' } }]])
       assert.deepInclude(yield* Effect.flip(refusing.host.editChange(repository, pullChange, { title: 'Renamed' })), {

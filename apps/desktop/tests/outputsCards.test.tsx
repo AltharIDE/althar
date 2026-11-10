@@ -55,6 +55,8 @@ const show = (
     onConnect: vi.fn(),
     onReplace: vi.fn(),
     onBringIn: vi.fn(),
+    onShip: vi.fn(),
+    onMergeWaiting: vi.fn(),
   }
   withServices(
     <Outputs
@@ -72,6 +74,18 @@ const show = (
 }
 
 describe('what a task changed, card by card', () => {
+  it('offers Review and merge, or Merge now, beside Ship where commits wait for it', async () => {
+    const changes = [pr('api', 1, { localHead: 'def456', unpushed: 2 })]
+    const { onMergeWaiting, onShip } = show(task({ changes, held: { since: '2026-11-10T09:00:00.000Z', commits: 2 } }))
+    await userEvent.click(screen.getByRole('button', { name: 'Ship 2 commits' }))
+    expect(onShip).toHaveBeenCalled()
+    await userEvent.click(screen.getByRole('button', { name: 'Review and merge' }))
+    expect(onMergeWaiting).toHaveBeenLastCalledWith('review')
+    await userEvent.click(screen.getByRole('button', { name: 'Other ways to merge' }))
+    await userEvent.click(await screen.findByRole('menuitem', { name: 'Merge now' }))
+    expect(onMergeWaiting).toHaveBeenLastCalledWith('now')
+  })
+
   it('accepts every pull request still open in a task of several, at the head each showed, and not one merged already', async () => {
     const changes = [
       pr('api', 1),

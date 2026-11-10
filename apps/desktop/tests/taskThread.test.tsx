@@ -151,6 +151,7 @@ describe('a task’s thread', () => {
       live: true,
       counts: '',
       doing: { tool: null, text: 'Thinking' },
+      spent: null,
     }
     const working: Round = {
       ...round('r3', 'unused'),

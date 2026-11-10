@@ -1113,6 +1113,7 @@ export const makeGitLab = (options: AdapterOptions): CodeHost & Tracker => {
             http.json(MergeAnswer, 'PUT', `${project(repository)}/merge_requests/${change.number}`, {
               ...(title === undefined ? {} : { title }),
               ...(edit.body === undefined ? {} : { description: edit.body }),
+              ...(edit.base === undefined ? {} : { target_branch: edit.base }),
             }),
           ),
         )

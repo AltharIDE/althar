@@ -1,4 +1,4 @@
-import type { AgentStatus, BoardCall, BoardTask, ChangeSummary, PlanStep, ReviewBrief } from '@althar/contracts'
+import type { AgentStatus, BoardCall, BoardTask, ChangeSummary, HeldForShip, PlanStep, ReviewBrief } from '@althar/contracts'
 import {
   Board,
   BoardCard,
@@ -26,11 +26,13 @@ import {
   Outcome,
   PullChip,
   SettledRow,
+  ScratchShelf,
   SettleWays,
   TaskKind,
   TaskStatus,
   Thumbs,
   trackOf as trackItems,
+  type ChangeMarkTone,
   unreachable,
   Wait,
 } from '@althar/ui'
@@ -42,7 +44,18 @@ import { localText } from '../../shared/local'
 import { askOf, callKindOf, isAnswered, isSettleable, kindWords, takesDone, whereOf } from '../../shared/calls'
 import { moreOf as questionMore } from '../../shared/questions'
 import { productBrand, productName } from '../../shared/products'
-import { doingWords, doneHere, factsOf, labelWords, nextWords, readyWordOf, standingOf, standingText } from '../../shared/standing'
+import {
+  doingWords,
+  doneHere,
+  factsOf,
+  labelWords,
+  nextWords,
+  readyWordOf,
+  afterMergeText,
+  shipText,
+  standingOf,
+  standingText,
+} from '../../shared/standing'
 import { afterSteps, isAutomatedStep, stepText } from '../../shared/steps'
 import { ago, clock, running } from '../../shared/time'
 import { text as stuckText } from '../task/StuckCall'
@@ -69,6 +82,9 @@ import type { WorkActions } from './useWorkActions'
 
 export const text = {
   label: 'The project’s work',
+  /** Chats on Scratch, off the lanes (a task is a conversation plus parts): the chip that lists them. */
+  scratch: (count: number) => `Scratch · ${count}`,
+  scratchLabel: 'Chats on Scratch',
   startsIn: (seconds: number) => (seconds <= 0 ? 'Starting' : `Starts in ${seconds}s`),
   held: 'Held. Starts when you say',
   /** The quiet divider over the tasks that wait for a free agent before any has worked on them, and, under them, the plans. */
@@ -221,8 +237,91 @@ export const kindWordOf = (task: Pick<BoardTask, 'kind' | 'local'>): string | un
 
 /** In the person's own checkout, as its kind's word says (ADR-091). */
 const localOf = (task: Pick<BoardTask, 'local'>): Pick<Card, 'local'> => (task.local === true ? { local: true } : {})
+type ChangeMark = NonNullable<BoardTask['changeMarks']>[number]
+type Stands = ChangeMark['stands']
+
+/** Where one of several changes stands, in the card's words. */
+const standsWords: Record<Stands, string> = {
+  unshipped: 'not shipped',
+  draft: 'a draft',
+  checking: 'waiting for checks',
+  failing: 'checks failing',
+  ready: 'ready to merge',
+  merged: 'merged',
+  closed: 'closed',
+}
+const markTones: Record<Stands, ChangeMarkTone> = {
+  unshipped: 'still',
+  draft: 'still',
+  checking: 'live',
+  failing: 'danger',
+  ready: 'signal',
+  merged: 'ok',
+  closed: 'still',
+}
+const factTones: Record<Stands, 'quiet' | 'ok' | 'danger' | 'live'> = {
+  unshipped: 'quiet',
+  draft: 'quiet',
+  checking: 'live',
+  failing: 'danger',
+  ready: 'quiet',
+  merged: 'ok',
+  closed: 'quiet',
+}
+/** The most pressing first: what the sentence names, where its changes stand apart. */
+const PRESSING: ReadonlyArray<Stands> = ['failing', 'unshipped', 'checking', 'draft', 'ready', 'closed', 'merged']
+
+/**
+ * The card's one sentence across several changes (a task is a conversation plus parts, "The card keeps one fact"): what's
+ * alike counted, "Both ready to merge", "Waiting for checks on all 3"; else the most pressing named, "Lane heights: checks
+ * failing", or counted where several share it. Merged and closed ones are left out while any is still open.
+ */
+export const severalSaid = (marks: ReadonlyArray<ChangeMark>): { readonly words: string; readonly stands: Stands } | null => {
+  const open = marks.filter((mark) => mark.stands !== 'merged' && mark.stands !== 'closed')
+  const counted = open.length === 0 ? marks : open
+  const [pressing] = PRESSING.flatMap((stands) => {
+    const alike = counted.filter((mark) => mark.stands === stands)
+    return alike.length === 0 ? [] : [{ stands, alike }]
+  })
+  if (pressing === undefined) return null
+  const { stands, alike } = pressing
+  const [one] = alike
+  if (alike.length === 1 && one !== undefined) return { words: `${one.name}: ${standsWords[stands]}`, stands }
+  const every = alike.length === counted.length
+  const all = every ? (alike.length === 2 ? 'both' : `all ${alike.length}`) : `${alike.length} of ${counted.length}`
+  const All = `${all.charAt(0).toUpperCase()}${all.slice(1)}`
+  const words =
+    stands === 'checking'
+      ? `Waiting for checks on ${all}`
+      : stands === 'failing'
+        ? `Checks failing on ${all}`
+        : stands === 'draft'
+          ? `${All} drafts`
+          : stands === 'unshipped'
+            ? every
+              ? alike.length === 2
+                ? 'Neither shipped yet'
+                : 'None shipped yet'
+              : `${All} not shipped`
+            : `${All} ${standsWords[stands]}`
+  return { words, stands }
+}
+
 /** Toward a branch other than the default, quietly at its foot (ADR-093). */
-const towardOf = (task: Pick<BoardTask, 'toward'>): Pick<Card, 'toward'> => (task.toward === undefined ? {} : { toward: task.toward })
+const towardOf = (task: Pick<BoardTask, 'toward' | 'changeCount' | 'changeMarks'>): Pick<Card, 'toward' | 'changes' | 'marks'> => ({
+  ...(task.toward === undefined ? {} : { toward: task.toward }),
+  // How many changes it holds, where several (a task is a conversation plus parts), behind a mark for each.
+  ...(task.changeCount === undefined || task.changeCount < 2 ? {} : { changes: task.changeCount }),
+  ...(task.changeMarks === undefined || task.changeMarks.length < 2
+    ? {}
+    : {
+        marks: task.changeMarks.map((mark) => ({
+          name: mark.name,
+          says: `${mark.name}: ${standsWords[mark.stands]}`,
+          tone: markTones[mark.stands],
+        })),
+      }),
+})
 
 /** A pull request as its chip shows it: its host's mark, its repository's own name, its number in the host's words, and its size. */
 const pullChip = (change: ChangeSummary) => {
@@ -485,6 +584,19 @@ export const waitingCardOf = ({ task, call }: Waiting, name: (id: string | null)
  */
 export const readyCardOf = (work: BoardTask, actions?: CardActions): Card => {
   const base = { status: TaskStatus.Yours, kind: kindOf(work), ...localOf(work), ...towardOf(work), title: work.title, ...fromOf(work) }
+  // What its review after a merge found comes first: the person's Fix it or Leave it, for the change that merged.
+  if (work.afterMerge?.state === 'found')
+    return { ...base, word: afterMergeText.word(work.afterMerge.findings), ...afterMergeOf(work, actions) }
+  // Held for Ship, whatever kind it is: what waits, and Ship, which is all the person has to do for it.
+  if (work.held !== undefined && work.kind !== 'review') {
+    const change = work.change?.state === 'open' ? work.change : null
+    return {
+      ...base,
+      word: shipText.word,
+      ...(change === null ? (work.branch === null ? {} : { object: <BranchChip name={work.branch} /> }) : { object: pullChip(change) }),
+      ...shipOf(work, work.held, change, actions),
+    }
+  }
   switch (work.kind) {
     case 'plain': {
       const pictures = (work.handed?.pictures ?? []).flatMap((picture, index) =>
@@ -570,9 +682,125 @@ export const readyCardOf = (work: BoardTask, actions?: CardActions): Card => {
   }
 }
 
-/** What a ready card does without opening its task: push, and merge, mark done or keep for later, and how they stand. */
+/**
+ * A ready card of a task holding commits for Ship (a task is a conversation
+ * plus parts, "A tweak waits for Ship"): how many wait, what else stands on
+ * its open pull request that Ship's push answers (a failed check, a
+ * conflict), and Ship, done right there, as Push is. One that failed says
+ * why, and offers it again.
+ */
+const shipOf = (
+  work: BoardTask,
+  held: HeldForShip,
+  change: ChangeSummary | null,
+  actions: CardActions | undefined,
+): Pick<Card, 'foot' | 'next'> => {
+  const failure = actions?.failed[work.taskId]
+  const failed = failure?.action === 'ship' ? failure.message : null
+  const also = change === null ? [] : factsOf(change).filter((one) => one.tone === 'danger' || one.icon === 'branch')
+  const ship = actions?.ship
+  const step =
+    ship === undefined ? (
+      <NextStep>{shipText.ship}</NextStep>
+    ) : (
+      <NextStep
+        signal
+        busy={actions?.shipping?.has(work.taskId) === true}
+        doing={shipText.shipping}
+        label={failed === null ? shipText.label(held.commits) : shipText.again(held.commits)}
+        onPress={() => void ship(work.taskId)}
+      >
+        {failed === null ? shipText.ship : standingText.nextFailed.again}
+      </NextStep>
+    )
+  return {
+    foot: (
+      <FactLine>
+        {failed !== null && (
+          <Fact key="failed" icon="close" tone="danger" role="alert">
+            {shipText.failed(failed)}
+          </Fact>
+        )}
+        <Fact key="held" icon="up" tone="warm">
+          {shipText.commits(held.commits)}
+        </Fact>
+        {also.map((one) => (
+          <Fact key={one.words} tone={one.tone}>
+            {one.words}
+          </Fact>
+        ))}
+      </FactLine>
+    ),
+    next: step,
+  }
+}
+
+/** What a ready card does without opening its task: push, and merge, ship, mark done or keep for later, and how they stand. */
 export type CardActions = Pick<WorkActions, 'push' | 'merge' | 'pushing' | 'merging' | 'failed'> &
-  Partial<Pick<WorkActions, 'markDone' | 'keep' | 'settling' | 'resolveNow' | 'resolving' | 'sendBack' | 'sending'>>
+  Partial<
+    Pick<
+      WorkActions,
+      | 'markDone'
+      | 'keep'
+      | 'settling'
+      | 'resolveNow'
+      | 'resolving'
+      | 'sendBack'
+      | 'sending'
+      | 'ship'
+      | 'shipping'
+      | 'fixAfterMerge'
+      | 'leaveAfterMerge'
+      | 'answeringAfterMerge'
+    >
+  >
+
+/**
+ * What a task's review after a merge found (a task is a conversation plus parts): which merge, at its foot, and Fix it, which
+ * hands the findings to the lead, with Leave it, quiet, before it.
+ */
+const afterMergeOf = (work: BoardTask, actions: CardActions | undefined): Pick<Card, 'foot' | 'next'> => {
+  const found = work.afterMerge
+  if (found === undefined) return {}
+  const answering = actions?.answeringAfterMerge?.has(work.taskId) === true
+  const fix = actions?.fixAfterMerge
+  const leave = actions?.leaveAfterMerge
+  return {
+    foot: (
+      <FactLine>
+        <Fact key="after" icon="pr" tone="warm">
+          {afterMergeText.after(found.words)}
+        </Fact>
+      </FactLine>
+    ),
+    next:
+      fix === undefined ? (
+        <NextStep>{afterMergeText.fix}</NextStep>
+      ) : (
+        <>
+          {leave !== undefined && (
+            <NextStep
+              busy={answering}
+              doing={afterMergeText.leaving}
+              label={afterMergeText.leaveHint}
+              onPress={() => void leave(work.taskId)}
+            >
+              {afterMergeText.leave}
+            </NextStep>
+          )}
+          <NextStep
+            signal
+            busy={answering}
+            doing={afterMergeText.fixing}
+            label={afterMergeText.fixHint(found.words)}
+            onPress={() => void fix(work.taskId)}
+          >
+            {afterMergeText.fix}
+          </NextStep>
+        </>
+      ),
+  }
+}
 
 /**
  * A conflict that is the person's, handed back or not asked of its lead: why, in one line, at its foot, and Resolve now, which
@@ -643,11 +871,20 @@ const readyOf = (work: BoardTask, change: ChangeSummary, actions: CardActions | 
   const failed = failure !== undefined && failure.action === here?.kind ? failure.message : null
   // Not looked at for a conflict here, whatever its host says: why, first, as the host's word may be out of date.
   const unchecked = work.conflictUnchecked ?? null
-  const facts = factsOf(change, standing).map((one, i) => (
-    <Fact key={one.words} {...(!(i === 0 && unchecked !== null) && one.icon !== undefined ? { icon: one.icon } : {})} tone={one.tone}>
-      {one.words}
-    </Fact>
-  ))
+  // Several changes: one sentence for them all, in place of the one pull request's facts.
+  const several = work.changeMarks === undefined || work.changeMarks.length < 2 ? null : severalSaid(work.changeMarks)
+  const facts =
+    several === null
+      ? factsOf(change, standing).map((one, i) => (
+          <Fact key={one.words} {...(!(i === 0 && unchecked !== null) && one.icon !== undefined ? { icon: one.icon } : {})} tone={one.tone}>
+            {one.words}
+          </Fact>
+        ))
+      : [
+          <Fact key="several" tone={factTones[several.stands]}>
+            {several.words}
+          </Fact>,
+        ]
   // Failing checks its lead brought to the person (ADR-070): not asking it again. Why is in its task, not on the card.
   const step =
     next === null || (next.kind === 'fix' && work.checksBack != null) ? null : here === null || actions === undefined ? (
@@ -730,6 +967,8 @@ export function BoardView({
   team?: TeamActions
 }) {
   const name = (id: string | null) => agents.find((agent) => agent.id === id)?.name ?? id ?? ''
+  // Clearing a chat off Scratch settles it, as Done does a task.
+  const clear = actions?.markDone
   // Which of Settled's tabs shows, while something is kept for later.
   const [shelf, setShelf] = useState<'settled' | 'kept'>('settled')
   // Each needs-you card in when its call came: tasks waiting on a call and calls no task waits on together.
@@ -839,6 +1078,25 @@ export function BoardView({
         lane={BoardLane.Next}
         count={shown.upNext}
         filled={shown.next.length > 0}
+        // Chats on Scratch, off the lanes: one chip, opened in place, by their latest exchange; Clear settles one. It heads
+        // Up next whether anything waits there or not.
+        lead={
+          <ScratchShelf
+            chats={lanes.scratch.map((chat) => ({
+              id: chat.taskId,
+              title: chat.title,
+              ...(chat.latest === undefined ? {} : { said: { by: chat.latest.by, text: chat.latest.said } }),
+              at: ago(chat.latest?.at ?? chat.createdAt, new Date(now)),
+              ...(chat.phase === 'running' ? { running: true } : {}),
+            }))}
+            onOpen={(taskId) => {
+              const chat = lanes.scratch.find((one) => one.taskId === taskId)
+              if (chat !== undefined) onOpen(chat.threadId)
+            }}
+            {...(clear === undefined ? {} : { onClear: (taskId: string) => void clear(taskId) })}
+            text={{ chip: text.scratch, label: text.scratchLabel }}
+          />
+        }
         // Whenever nothing is in Up next, it says where work comes from.
         {...(shown.next.length === 0
           ? {

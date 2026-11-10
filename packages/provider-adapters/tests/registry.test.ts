@@ -78,6 +78,27 @@ describe('the agent registry', () => {
     }
   })
 
+  it('switches off each agent’s own helpers in the background at its launch, and says where it can’t (ADR-087)', () => {
+    const env = (id: keyof typeof agents) => agents[id].launch('/usr/bin/node').env ?? {}
+    assert.strictEqual(env('claude-code').CLAUDE_CODE_DISABLE_BACKGROUND_TASKS, '1')
+    assert.strictEqual(env('opencode').OPENCODE_EXPERIMENTAL_BACKGROUND_SUBAGENTS, 'false')
+    assert.strictEqual(env('grok').GROK_SUBAGENTS, '0')
+    assert.strictEqual(env('mistral-vibe').VIBE_ENABLE_SUBAGENTS, 'false')
+    assert.deepStrictEqual((agents.copilot.launch('/usr/bin/node').args ?? []).slice(-2), ['--excluded-tools', 'task'])
+    const codex = JSON.parse(agents.codex.sessionEnv?.({}, {}).CODEX_CONFIG ?? '{}') as Record<string, unknown>
+    assert.strictEqual(codex['features.multi_agent'], false)
+    assert.deepStrictEqual(agents.antigravity.sessionMeta?.(), { agy: { disabledTools: ['start_subagent'] } })
+    // Each says what it switches off and what it keeps; those it can't switch off say so.
+    for (const agent of Object.values(agents)) assert.isNotEmpty(agent.ownHelpers.how)
+    assert.deepStrictEqual(
+      Object.values(agents)
+        .filter((agent) => !agent.ownHelpers.off)
+        .map((agent) => agent.id)
+        .toSorted(),
+      ['junie', 'kimi', 'qwen-code'],
+    )
+  })
+
   it('runs Antigravity’s server as Google’s registry launches it, its sign-in its home’s own, with no browser and a temporary folder of its own', () => {
     const spec = agents.antigravity.launch('/usr/bin/node')
     assert.strictEqual(spec.command, 'agy_acp_server.par')

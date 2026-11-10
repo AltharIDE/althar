@@ -47,21 +47,34 @@ started with, and the next round takes the new one.
   `finish_step`: fixed, with a line saying what changed and the commit that
   made it, or set aside, with the reason. A set-aside finding with no reason
   counts as unsettled.
-- **Another round runs only if settling changed the code,** up to the
-  person's review rounds setting (1, 2, 3 or 5; 3 by default).
-- **When rounds run out** with changes no review has seen, the person's
-  "When rounds run out" setting decides. By default, "Carry on when every
-  finding is settled": the task goes on to its ending with the last fixes
+- **A fix is checked only where it needs it, never by another whole review**
+  (a task is a conversation plus parts, [tasks](tasks.md#changing-parts)):
+  - **A tiny fix isn't read again:** ten changed lines or fewer, every one in
+    a file a finding of that review named, read against the copy the review
+    read. The task goes on to its ending, its seal kept, and the folded
+    review names the files.
+  - **A bigger fix gets one short check** by the same reviewer: told it is
+    a check of the fixes, not another review, it reads only what the fixes
+    changed (`git diff` from the copy it read) against its findings, and
+    reopens only one a fix didn't settle.
+  - **A finding the check reopened** goes back to the lead once more, and
+    that second fix isn't read again.
+- **When a check finds more** and the lead settles it, the person's "When a
+  check finds more" setting decides. By default, "Carry on when every
+  finding is settled": the task goes on to its ending with the second fix
   unreviewed, and the person decides on any merge. Its thread and pull
   request say the last fixes weren't reviewed, and it carries no seal. With
   "Ask me", or with findings still open, the task is stuck in Needs you for
-  the person to say.
+  the person to say. The old "Review rounds" setting is kept as it was and
+  read by nothing.
 - **The person can skip a round's review** from the task's menu: a review
   under way stops, and a round whose lead is done concludes. The next round
   has its review again.
-- **A follow-up round is reviewed as the plan says.** It reads from where the
-  last run left the task, so what the lead committed in between, such as a
-  fix for checks, is in it ([tasks](tasks.md)).
+- **Ship is reviewed as the plan says,** where it has a reviewer before the
+  work ships: one pass over what came after the commit the last review read,
+  found by its tree, as pushing may have credited it since. What the person's
+  turns with the lead committed and any fix for checks in between are in it
+  ([tasks](tasks.md#rounds-back-to-work-and-shipping-again)).
 - **No agent approves its own work.** Approving a pull request a task opened,
   making a commit status or a check run, and dismissing a review are refused
   to agents ([what agents may do](what-agents-may-do.md)).
@@ -70,12 +83,28 @@ started with, and the next round takes the new one.
 
 A change of a few lines takes the fast lane ([tasks](tasks.md)): one step on
 a light model, no countdown, and a review step that names its reviewer but is
-skipped. Its pull request merges on the person's word, and the merge starts a
-**review task of its own** on the merged pull request (`Reviews.start` with
-`afterMerge`), which reads and posts as any review of a pull request does.
-Nothing blocks the merge until then.
+skipped. Its pull request merges on the person's word, and the merge ends
+that change: the task settles where it was its last. Then **the task's own
+reviewer reads what merged, in the same task** (`MergeReviews.ts`, a
+decision of a task is a conversation plus parts, [tasks](tasks.md#a-task-holds-as-many-changes-as-it-needs)):
 
-The review after a merge is refused where the plan named no reviewer, or
+- It is owed as the merge is heard, kept before it is tried
+  (`merge_reviews`), and started in a thread of the task's own
+  (`merge_review`), on a copy at the merged head, from what the last review
+  read. Settling spares it, and a restart starts it again.
+- It reports in the task's thread, naming the pull request it read. Nothing
+  is posted on the merged pull request.
+- **Nothing found** is a line in the thread, and nothing more.
+- **Findings** bring the task back to Needs you, "Review found 2 after #715
+  merged", with **Fix it**, which hands them to the lead as the person's word
+  and ships its fix as a new pull request after the merged one once its turn
+  ends, and **Leave it**, which closes them. Agents answer it on the person's
+  word with `answer_review_after_merge`.
+
+What Merge now merges with commits not shipped is reviewed after the merge
+the same way, where the task has a reviewer.
+
+The review after a merge isn't owed where the plan named no reviewer, or
 where the pull request closed without merging. "Make it a full task", on the
 small change's card, moves its review back before the merge.
 
@@ -122,16 +151,43 @@ its own kind.
 - **Posted, the card folds to a line** with the review's link, and the task
   settles.
 
-Not built yet:
+### Run it
 
-- A pull request by the repository's own people getting a worktree at its
-  head with the setup replayed, and its code run in the sandbox. This, and
-  the in-task reviewer's tool list, wait on the work that makes a task a
-  conversation plus parts.
-- "Run it", the person's word in the thread that turns an outside author's
-  review into the team's kind, still offline for its commands.
-- Posting on the person's word in the thread (`post_review`), as well as
-  from the card.
+A review that runs code is a review whose Access moved: "Run it" is the
+person's word, from the buttons under its reach line or to its lead, whose
+`run_it` only relays it. How far is kept on the review's workspace
+(`workspaces.trust`), and the lead starts afresh in the role that gives it,
+told to run its tests and its app.
+
+- **The team's own pull request** runs at once, trusted as their code:
+  the copy is set up with the recorded setup and files, as a worktree is,
+  with the network, and any agent may lead it.
+- **An outside author's** asks how far: **Run safely** installs from the
+  lockfile with install scripts off, after putting back the base branch's
+  registry settings (`.npmrc`, `.yarnrc`, `bunfig.toml`) in place of any the
+  pull request changed, copies nothing of the person's setup, and runs its
+  commands in the sandbox, offline, with every lead tool; what didn't
+  install is said, with Trust fully beside it, and so is each of the
+  lockfile's entries from a git host or a tarball off a registry that isn't
+  in `node_modules` after it (npm's, bun's, yarn's and pnpm's lockfiles,
+  `lockOutside.ts`). **Trust fully** runs it as the team's code.
+- **Stop running it,** beside how far it trusts the code while it runs,
+  takes that back: what its lead started of it stops, its copy is read only
+  again, and its lead starts afresh as a reader, told so.
+- **"When I say Run it on code from outside the team"** (Settings, Pull
+  requests): ask each time, the default, run safely, or trust fully. It only
+  answers the question: the code runs once the person says Run it.
+
+### Any task can review a pull request
+
+`add_review` gives a task with work of its own a read-only copy of a related
+pull request's head beside its worktree, a workspace of its own
+(`workspaces.reviewing`), which its lead drafts a review of with
+`draft_review`, as a review task's lead does. The task stays its work's: it
+isn't a review task on its card, and posting the review doesn't settle it.
+
+Not built yet: posting on the person's word in the thread (`post_review`),
+as well as from the card.
 
 ## What a pull request shows of its review
 
@@ -151,7 +207,10 @@ matter to nobody. A commit is shown only where it is one the lead made
 settling that pass, and the sha is the one the host has after crediting. The
 commit the last pass read must hold the tree it read, or there is no seal.
 Where the code changed after the last pass, there is no seal either, and the
-folded review says the last fixes weren't reviewed.
+folded review says the last fixes weren't reviewed, unless every fix after
+it was tiny: then the seal stands, naming the commit the last pass read, and
+the folded review names the tiny fixes under "Fixed after it, too small to
+read again".
 
 - **The site draws the seal:** a Worker route, `/seal/<look>.svg`, renders
   the kit's pure drawing (`packages/ui/src/seal`) from its query, with glyph
@@ -215,3 +274,6 @@ A round that forgets `kept_views` shows less, never something stale.
 
 - 8 Nov 2026: written from the ADRs under Replaces.
 - 8 Nov 2026: the limits sweep (#696) built: a review of the repository's own people gets every lead tool and the network.
+- 9 Nov 2026: a fix is checked only where it needs it, tiny ones not at all, and Ship is reviewed from where the last review left off (a task is a conversation plus parts, [tasks](tasks.md#changing-parts)).
+- 10 Nov 2026: Run it, safely or trusted, with its setting; any task can review a related pull request beside its own work (a task is a conversation plus parts).
+- 10 Nov 2026: Stop running it; Run safely names the lockfile's entries from a git host or a tarball that didn't install.

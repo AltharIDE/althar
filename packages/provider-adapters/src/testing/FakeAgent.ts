@@ -654,7 +654,8 @@ const playStall = async (
 /**
  * Calls Althar's tools over the MCP server a session was given. The fake
  * plays a role when its prompt carries a marker, as a task's description or
- * the person's message can: `[coordinator:plan]` drafts and plans a task,
+ * the person's message can: `[coordinator:plan]` drafts and plans a task (`[coordinator:plan-small]` as a small change, reviewed
+ * only once it merged),
  * passing on the `[lead:…]` and `[review:…]` markers it was given
  * (`[coordinator:plan-effort]` puts its lead on the large model at high
  * effort), and `[coordinator:start]` starts one at once, without a plan;
@@ -674,10 +675,11 @@ const playStall = async (
  * the change changes, and finishes; a later review round passes. The session remembers its
  * markers: `[review:always]` finds something every round, and
  * `[lead:set-aside]` settles without changing anything, `[lead:decline-quietly]` changes something and sets each finding aside with no reason, and `[lead:leave-open]` settles only the first finding it is given. `[lead:wait]` works
- * until it is stopped, and so does `[review:wait]` reviewing, or `[review:wait-later]` from its second round: never ending
+ * until it is stopped, and so does `[review:wait]` reviewing, or `[review:wait-later]` from its second round (a check of the fixes, or a Ship's review): never ending
  * by itself, but only when its turn is cancelled, its session closed, or the test opens the marker's hold;
  * `[review:slowly]` takes some seconds before it reports, long enough for what it reviews for to change meanwhile;
- * `[lead:settle-quietly]` settles without reporting; `[lead:fix-elsewhere]` names a commit from before the round as its fix. `[lead:slowly]` takes some
+ * `[lead:settle-quietly]` settles without reporting; `[lead:fix-tiny]` settles with one line in README.md, the file
+ * `[review:findings]` names, a fix too small to be checked again; `[lead:fix-elsewhere]` names a commit from before the round as its fix. `[lead:slowly]` takes some
  * seconds over what it was asked before it plays its part. Either takes until a test opens its hold instead, where
  * the test holds it (`FakeAgentOptions.holds`).
  * `[lead:edit]` commits a change when it finishes, as a lead is asked to; `[lead:nothing]` says it built
@@ -921,7 +923,13 @@ const playRole = async (
   },
 ): Promise<string | undefined> => {
   for (const marker of text.match(/\[(coordinator|lead|review):[a-z-]+\]/g) ?? []) session.markers.add(marker)
-  const asked = session.markers.size > 0 || text.includes('Settle each') || text.startsWith('Round ') || text.startsWith('More to review')
+  // A later round of review: told to check the fixes, or to read a Ship, as a round once was by its number.
+  // Told in its brief too, as a reviewer started afresh for it is: the words say it wherever they stand.
+  const laterRound =
+    text.startsWith('Round ') ||
+    text.includes('A check of the fixes, not another review.') ||
+    text.includes('More to review. The person ships')
+  const asked = session.markers.size > 0 || text.includes('Settle each') || laterRound || text.startsWith('More to review')
   if (session.tools === undefined || !asked) return undefined
   const client = new Client({ name: 'fake-agent', version: '1.0.0' })
   const transport = new StreamableHTTPClientTransport(new URL(session.tools.url), { requestInit: { headers: session.tools.headers } })
@@ -934,9 +942,17 @@ const playRole = async (
       const content = Array.isArray(result.content) ? result.content : []
       return content.map((part) => (typeof part === 'object' && part !== null && 'text' in part ? String(part.text) : '')).join('')
     }
+    // A lead's helper (ADR-087) has no step to finish: it does what its brief's markers say in its folder, slowly
+    // (`[lead:slowly]`), writing a file (`[lead:write]`) or committing one (`[lead:commit]`), and its last words are its result.
+    if (text.includes('You are a helper in Althar')) {
+      if (text.includes('[lead:slowly]')) await takesAWhile(session, '[lead:slowly]', 6_000)
+      if (text.includes('[lead:write]')) appendFileSync(join(session.cwd, 'draft.md'), 'A first draft.\n')
+      if (text.includes('[lead:commit]')) await commitIn(session.cwd, 'change.txt', 'Change it')
+      return `Done in ${session.cwd}: what I was asked is there.`
+    }
     if (available.has('report_review')) {
       // Reviews until it is stopped: for a review cut short in the middle; or, `[review:wait-later]`, a later round.
-      const later = session.markers.has('[review:wait-later]') && text.startsWith('Round ')
+      const later = session.markers.has('[review:wait-later]') && laterRound
       if (session.markers.has('[review:wait]') || later) {
         await untilStopped(session, later ? '[review:wait-later]' : '[review:wait]')
         return 'Stopped reviewing.'
@@ -958,14 +974,14 @@ const playRole = async (
             .map(([, path = '']) => `${path.split(/[\\/]/).at(-1) ?? ''} (${statSync(path).size} bytes)`)
             .join(', ')}.`
         : ''
-      if (text.includes('[review:findings]') && !text.startsWith('Round '))
+      if (text.includes('[review:findings]') && !laterRound)
         return await call('report_review', {
           verdict: 'changes_requested',
           summary: `The heading needs fixing.${looked}`,
           findings: [{ severity: 'major', file: 'README.md', line: 1, claim: 'The heading is wrong.' }],
         })
       // A round of work after the plan is reviewed for what changed since, as a later round is.
-      if (text.includes('[review:') || text.startsWith('Round ') || text.startsWith('More to review'))
+      if (text.includes('[review:') || laterRound || text.startsWith('More to review'))
         return await call('report_review', { verdict: 'pass', summary: `The change holds.${looked}` })
       return undefined
     }
@@ -1110,7 +1126,8 @@ const playRole = async (
       if (text.includes('Settle each')) {
         if (session.markers.has('[lead:settle-quietly]')) return 'Settled, without saying so.'
         const aside = session.markers.has('[lead:set-aside]')
-        if (!aside) await commitIn(session.cwd, 'settled.txt', 'Settle the review')
+        // `[lead:fix-tiny]` fixes in a line of the file the finding named, README.md: a fix too small to check again.
+        if (!aside) await commitIn(session.cwd, session.markers.has('[lead:fix-tiny]') ? 'README.md' : 'settled.txt', 'Settle the review')
         // `[lead:fix-elsewhere]` names a commit from before the round, which made none of the fix.
         const fix = aside
           ? null
@@ -1254,7 +1271,8 @@ const playRole = async (
       }
       // Asked to tidy up, it commits and ends its turn: what goes up, and when, isn't its to say.
       if (session.markers.has('[lead:commit]') && /\btidy pls\b/i.test(text)) {
-        commitIn(session.cwd, 'tidied.txt', 'Tidy up')
+        // Within its turn, as a lead commits before it answers: what the turn's end looks at has it.
+        await commitIn(session.cwd, 'tidied.txt', 'Tidy up')
         return 'Tidied up, and committed it.'
       }
       // What people said on the task's pull request, and its checks.
@@ -1430,6 +1448,8 @@ const playRole = async (
           reason: 'It knows the code.',
         },
         review: ask.includes('[coordinator:plan-no-review]') ? null : { agent: 'codex' },
+        // `[coordinator:plan-small]`: a small change, reviewed only once it merged.
+        ...(ask.includes('[coordinator:plan-small]') ? { small_change: true } : {}),
       })
     }
     return undefined
@@ -1772,6 +1792,8 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
       const ended = (usage?: acp.Usage): acp.PromptResponse => ({ stopReason: 'end_turn', ...(usage === undefined ? {} : { usage }) })
       // Signed out, as its account no longer is, where the prompt says `[signed-out]`.
       if (text.includes('[signed-out]')) throw acp.RequestError.authRequired()
+      // Its service busy, every time it is asked (`[overloaded]`): a failure tried again, as a service's is.
+      if (text.includes('[overloaded]')) throw acp.RequestError.internalError({ details: 'The engine is currently overloaded' })
       // Slow to say its first word, as a model can be, where the prompt says so: `[answers-after:5s]` says nothing for five
       // seconds, then a sentence; `[thinks-after:5s]` and `[reads-after:5s]` first think aloud, or read a file, for a second and a
       // half; `[fails-after:5s]` gives up after them, as when Anthropic's API fails; `[ends-after:5s]` ends its turn having said

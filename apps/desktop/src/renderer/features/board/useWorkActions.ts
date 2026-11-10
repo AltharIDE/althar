@@ -19,7 +19,7 @@ import { headsOf } from '../../shared/mergeHere'
 
 /** What went wrong with a task's last push or merge. */
 export interface ActionFailure {
-  readonly action: 'push' | 'merge' | 'other'
+  readonly action: 'push' | 'merge' | 'ship' | 'other'
   readonly message: string
 }
 
@@ -39,6 +39,10 @@ export interface WorkActions {
   readonly opening: ReadonlySet<string>
   /** The tasks whose commits are being pushed. */
   readonly pushing: ReadonlySet<string>
+  /** The tasks being shipped: what waits on their branch, reviewed first where their plan says, then sent up. */
+  readonly shipping: ReadonlySet<string>
+  /** The tasks whose review after a merge the person is answering, Fix it or Leave it. */
+  readonly answeringAfterMerge: ReadonlySet<string>
   /** The tasks being marked done or kept for later. */
   readonly settling: ReadonlySet<string>
   /** The tasks whose conflict the lead is being asked to resolve, by the person's Resolve now. */
@@ -55,6 +59,12 @@ export interface WorkActions {
   readonly mergeHere: (task: BoardTask) => Promise<boolean>
   /** Pushes a task's branch to its pull request, up to the commit the person saw; whether it went through. */
   readonly push: (taskId: string, head: string, url?: string) => Promise<boolean>
+  /** Ships what waits on a task's branch for Ship; whether Althar took it. */
+  readonly ship: (taskId: string) => Promise<boolean>
+  /** Fix it, on what a review after a merge found: the lead takes the findings, and its fix ships after the merged pull request. */
+  readonly fixAfterMerge: (taskId: string) => Promise<boolean>
+  /** Leave it, on what a review after a merge found: the findings close. */
+  readonly leaveAfterMerge: (taskId: string) => Promise<boolean>
   /** Sends a ready task back to its lead with a note, starting the lead again if it stopped; whether it went through. `onePress` where the note is the card's own, as Carry on's. */
   readonly sendBack: (task: BoardTask, note: string, onePress?: boolean) => Promise<boolean>
   /** Opens the pull request of a task whose work ended on its branch. */
@@ -93,6 +103,8 @@ export const useWorkActions = (tasks: ReadonlyArray<BoardTask> | null = null): W
   const [sending, setSending] = useState<ReadonlySet<string>>(new Set())
   const [opening, setOpening] = useState<ReadonlySet<string>>(new Set())
   const [pushing, setPushing] = useState<ReadonlySet<string>>(new Set())
+  const [shipping, setShipping] = useState<ReadonlySet<string>>(new Set())
+  const [answeringAfterMerge, setAnsweringAfterMerge] = useState<ReadonlySet<string>>(new Set())
   const [settling, setSettling] = useState<ReadonlySet<string>>(new Set())
   const [resolving, setResolving] = useState<ReadonlySet<string>>(new Set())
   const fail = useCallback((failure: unknown) => setError(messageOf(failure)), [])
@@ -114,7 +126,7 @@ export const useWorkActions = (tasks: ReadonlyArray<BoardTask> | null = null): W
       mark: Dispatch<SetStateAction<ReadonlySet<string>>>,
       taskId: string,
       act: () => Promise<unknown>,
-      action: 'push' | 'merge' | 'other' = 'other',
+      action: 'push' | 'merge' | 'ship' | 'other' = 'other',
     ) => {
       const set = (on: boolean) =>
         mark((now) => {
@@ -147,6 +159,8 @@ export const useWorkActions = (tasks: ReadonlyArray<BoardTask> | null = null): W
     sending,
     opening,
     pushing,
+    shipping,
+    answeringAfterMerge,
     settling,
     resolving,
     resolveNow: useCallback(
@@ -171,6 +185,29 @@ export const useWorkActions = (tasks: ReadonlyArray<BoardTask> | null = null): W
     push: useCallback(
       async (taskId, head, url) =>
         pressed(inNeeds(taskId), await busy(setPushing, taskId, () => client.push(taskId, head, url), 'push'), { taskId, action: 'push' }),
+      [busy, client, pressed, inNeeds],
+    ),
+    // Ship is the push the person's tweaks wait for: kept as one, as Push is.
+    ship: useCallback(
+      async (taskId) =>
+        pressed(inNeeds(taskId), await busy(setShipping, taskId, () => client.ship(taskId), 'ship'), { taskId, action: 'push' }),
+      [busy, client, pressed, inNeeds],
+    ),
+    // What a review after a merge found: the person's Fix it or Leave it, each the one decision it waited on.
+    fixAfterMerge: useCallback(
+      async (taskId) =>
+        pressed(inNeeds(taskId), await busy(setAnsweringAfterMerge, taskId, () => client.fixAfterMerge(taskId)), {
+          taskId,
+          action: 'resolve',
+        }),
+      [busy, client, pressed, inNeeds],
+    ),
+    leaveAfterMerge: useCallback(
+      async (taskId) =>
+        pressed(inNeeds(taskId), await busy(setAnsweringAfterMerge, taskId, () => client.leaveAfterMerge(taskId)), {
+          taskId,
+          action: 'done',
+        }),
       [busy, client, pressed, inNeeds],
     ),
     // Its card says why it didn't merge (`failures`), as the window keeps it.

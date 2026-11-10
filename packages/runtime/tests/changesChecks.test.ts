@@ -252,7 +252,9 @@ describe('a change whose checks Althar sees through', () => {
           yield* until(notices(threadId), (said) => said.some((title) => title.includes('still fail after'))),
           `The checks on PR #1 still fail after ${FIX_ROUNDS} fixes.`,
         )
-        // Its lead says what it tried, and tries no more: the card says why, and nothing is asked of the person to push.
+        // Its lead says what it tried, and tries no more: the card says why, and nothing is asked of the person to push. Until it
+        // has, the card says only that they still fail.
+        yield* until(notices(threadId), (said) => said.some((title) => title.startsWith('Tried three fixes')))
         const [why] = yield* until(cards(projectId), (all) => all[0]?.checksBack != null)
         assert.strictEqual(
           why?.checksBack,

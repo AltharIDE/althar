@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process'
-import { existsSync, mkdirSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, rmSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs'
 import { basename, join } from 'node:path'
 
 import type { ProjectId, WorksIn } from '@althar/domain'
@@ -204,6 +204,47 @@ describe('a lead reading another task', () => {
       assert.include(later, `its branch ${branch} as committed`)
       assert.include(later, '+Log in with a passkey.')
       assert.notInclude(later, 'login.ts')
+    }).pipe(Effect.provide(runtime()))
+  })
+})
+
+describe('a lead reading the files of another task', () => {
+  it.live('reads a renamed file under both its names, and says what it can’t show of new files: binary, empty, a link', () => {
+    const root = repository()
+    return Effect.gen(function* () {
+      const projectId = yield* opened(root)
+      const mine = yield* made(projectId, 'Retry the checkout')
+      const theirs = yield* made(projectId, 'Tidy the docs')
+      git(theirs.path, 'mv', 'README.md', 'ABOUT.md')
+      git(theirs.path, 'commit', '-q', '-m', 'Rename')
+      writeFileSync(join(theirs.path, 'logo.png'), Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0x0d]))
+      writeFileSync(join(theirs.path, 'empty.txt'), '')
+      if (process.platform !== 'win32') symlinkSync('ABOUT.md', join(theirs.path, 'readme'))
+      const lead = leadOf(projectId, mine)
+      const diff = yield* callTool(lead, 'read_task_diff', { task: theirs.slug })
+      assert.include(diff, '- ABOUT.md: renamed from README.md, +0 −0')
+      assert.include(diff, 'diff --git a/README.md b/ABOUT.md\nsimilarity index 100%\nrename from README.md\nrename to ABOUT.md')
+      assert.include(diff, '- empty.txt: added, +0 −0, not committed yet')
+      assert.include(diff, '- logo.png: added, binary, not committed yet')
+      assert.include(diff, 'diff --git a/logo.png b/logo.png\nnew file, not added to git yet\nBinary file, not shown.')
+      if (process.platform !== 'win32') assert.include(diff, '+++ b/readme\n@@ -0,0 +1,1 @@ (a link, to)\n+ABOUT.md')
+      // Asked for alone, by the name it has now, the renamed file is read.
+      const renamed = yield* callTool(lead, 'read_task_diff', { task: theirs.slug, paths: ['ABOUT.md'] })
+      assert.include(renamed, 'rename to ABOUT.md')
+      assert.notInclude(renamed, 'Binary file, not shown.')
+    }).pipe(Effect.provide(runtime()))
+  })
+
+  it.live('says a task changed nothing yet, whatever files are asked for', () => {
+    const root = repository()
+    return Effect.gen(function* () {
+      const projectId = yield* opened(root)
+      const lead = leadOf(projectId, yield* made(projectId, 'Retry the checkout'))
+      const fresh = yield* made(projectId, 'Nothing yet')
+      for (const paths of [undefined, ['README.md']]) {
+        const read = yield* callTool(lead, 'read_task_diff', { task: fresh.slug, ...(paths === undefined ? {} : { paths }) })
+        assert.match(read, /what isn't committed included\.\n\nIt has changed no files yet\.$/)
+      }
     }).pipe(Effect.provide(runtime()))
   })
 })

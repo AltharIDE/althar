@@ -11,7 +11,7 @@
 -- plan_state: proposed, accepted, replaced, declined
 -- run_state: admitted, running, suspended, succeeded, failed, cancelled
 -- run_attempt_state: active, succeeded, failed, cancelled, interrupted
--- workspace_state: preparing, ready, published, cleaned, failed
+-- workspace_state: preparing, ready, published, cleaned, failed, away
 -- snapshot_reason: node_started, node_ended, switch, interrupt
 -- execution_state: running, succeeded, failed, cancelled
 -- graph_revision_cause: materialized, patch
@@ -61,6 +61,7 @@
 -- automation_occurrence_cause: schedule, now
 -- automation_occurrence_state: starting, running, made, nothing, failed, missed, skipped
 -- works_in: worktree, checkout
+-- workspace_kind: worktree, checkout, copy
 
 CREATE TABLE "schema_migrations" (
   migration_id integer PRIMARY KEY NOT NULL,
@@ -190,7 +191,7 @@ CREATE TABLE tasks (
   created_by_actor_id TEXT NOT NULL REFERENCES actors (id),
   created_at TEXT NOT NULL CHECK (created_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
   settled_at TEXT CHECK (settled_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
-  revision INTEGER NOT NULL DEFAULT 1 CHECK (revision >= 1), request TEXT, resolve_conflicts INTEGER CHECK (resolve_conflicts IN (0, 1)), seen_at TEXT CHECK (seen_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'), allow_everything INTEGER NOT NULL DEFAULT 0 CHECK (allow_everything IN (0, 1)), line_at TEXT CHECK (line_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'), kept_at TEXT CHECK (kept_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'), opened_at TEXT CHECK (opened_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'), parent_task_id TEXT REFERENCES tasks(id) ON DELETE SET NULL,
+  revision INTEGER NOT NULL DEFAULT 1 CHECK (revision >= 1), request TEXT, resolve_conflicts INTEGER CHECK (resolve_conflicts IN (0, 1)), seen_at TEXT CHECK (seen_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'), allow_everything INTEGER NOT NULL DEFAULT 0 CHECK (allow_everything IN (0, 1)), line_at TEXT CHECK (line_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'), kept_at TEXT CHECK (kept_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'), opened_at TEXT CHECK (opened_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'), parent_task_id TEXT REFERENCES tasks(id) ON DELETE SET NULL, shelf TEXT CHECK (shelf IN ('scratch')),
   UNIQUE (project_id, slug),
   UNIQUE (id, project_id)
 ) STRICT;
@@ -290,27 +291,6 @@ CREATE TABLE run_attempts (
   revision INTEGER NOT NULL DEFAULT 1 CHECK (revision >= 1),
   UNIQUE (run_id, attempt_number),
   FOREIGN KEY (run_id, project_id) REFERENCES runs (id, project_id),
-  UNIQUE (id, project_id)
-) STRICT;
-
-CREATE TABLE workspaces (
-  id TEXT PRIMARY KEY NOT NULL CHECK (substr(id, 1, 3) = 'ws_' AND length(id) = 35 AND substr(id, 4) NOT GLOB '*[^0-9a-f]*'),
-  project_id TEXT NOT NULL REFERENCES projects (id),
-  task_id TEXT NOT NULL,
-  binding_id TEXT NOT NULL,
-  device_id TEXT NOT NULL REFERENCES devices (id),
-  access TEXT NOT NULL REFERENCES vocab_repository_access (word),
-  path TEXT NOT NULL,
-  base_ref TEXT NOT NULL,
-  base_commit TEXT CHECK (length(base_commit) IN (40, 64) AND base_commit NOT GLOB '*[^0-9a-f]*'),
-  branch TEXT NOT NULL,
-  state TEXT NOT NULL REFERENCES vocab_workspace_state (word),
-  created_at TEXT NOT NULL CHECK (created_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
-  cleaned_at TEXT CHECK (cleaned_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
-  revision INTEGER NOT NULL DEFAULT 1 CHECK (revision >= 1), setup TEXT CHECK (json_valid(setup)), branched_at TEXT CHECK (branched_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'), kind TEXT REFERENCES vocab_works_in (word), returns_to TEXT, returned_at TEXT CHECK (returned_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'), toward TEXT,
-  UNIQUE (task_id, binding_id, device_id),
-  FOREIGN KEY (task_id, project_id) REFERENCES tasks (id, project_id),
-  FOREIGN KEY (binding_id, project_id) REFERENCES repository_bindings (id, project_id),
   UNIQUE (id, project_id)
 ) STRICT;
 
@@ -423,7 +403,7 @@ CREATE TABLE turn_deliveries (
   requested_at TEXT NOT NULL CHECK (requested_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
   delivered_at TEXT CHECK (delivered_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
   ended_at TEXT CHECK (ended_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
-  revision INTEGER NOT NULL DEFAULT 1 CHECK (revision >= 1), prompt TEXT, origin TEXT NOT NULL DEFAULT 'system' CHECK (origin IN ('person', 'news', 'system')),
+  revision INTEGER NOT NULL DEFAULT 1 CHECK (revision >= 1), prompt TEXT, origin TEXT NOT NULL DEFAULT 'system' CHECK (origin IN ('person', 'news', 'system')), heads TEXT CHECK (json_valid(heads)), timings TEXT CHECK (json_valid(timings)),
   FOREIGN KEY (thread_id, project_id) REFERENCES threads (id, project_id),
   FOREIGN KEY (provider_session_id, project_id) REFERENCES provider_sessions (id, project_id),
   FOREIGN KEY (node_attempt_id, project_id) REFERENCES node_attempts (id, project_id),
@@ -1467,6 +1447,95 @@ CREATE TABLE reviews_after_merge (
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
   ) STRICT;
+
+CREATE TABLE merge_reviews (
+    url TEXT PRIMARY KEY NOT NULL,
+    task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+    project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    number INTEGER,
+    base TEXT CHECK (base IS NULL OR (length(base) IN (40, 64) AND base NOT GLOB '*[^0-9a-f]*')),
+    head TEXT,
+    state TEXT NOT NULL CHECK (state IN ('owed', 'running', 'clear', 'found', 'fixing', 'left', 'stopped')),
+    reviewer TEXT CHECK (json_valid(reviewer)),
+    verdict TEXT CHECK (verdict IN ('pass', 'changes_requested')),
+    summary TEXT,
+    findings TEXT NOT NULL DEFAULT '[]' CHECK (json_valid(findings)),
+    attempts INTEGER NOT NULL DEFAULT 0 CHECK (attempts >= 0),
+    message TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  ) STRICT;
+
+CREATE INDEX merge_reviews_by_task ON merge_reviews (task_id);
+
+CREATE TABLE "workspaces" (
+  id TEXT PRIMARY KEY NOT NULL CHECK (substr(id, 1, 3) = 'ws_' AND length(id) = 35 AND substr(id, 4) NOT GLOB '*[^0-9a-f]*'),
+  project_id TEXT NOT NULL REFERENCES projects (id),
+  task_id TEXT NOT NULL,
+  binding_id TEXT NOT NULL,
+  device_id TEXT NOT NULL REFERENCES devices (id),
+  access TEXT NOT NULL REFERENCES vocab_repository_access (word),
+  path TEXT NOT NULL,
+  base_ref TEXT NOT NULL,
+  base_commit TEXT CHECK (length(base_commit) IN (40, 64) AND base_commit NOT GLOB '*[^0-9a-f]*'),
+  branch TEXT NOT NULL,
+  state TEXT NOT NULL REFERENCES vocab_workspace_state (word),
+  created_at TEXT NOT NULL CHECK (created_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
+  cleaned_at TEXT CHECK (cleaned_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
+  revision INTEGER NOT NULL DEFAULT 1 CHECK (revision >= 1),
+  setup TEXT CHECK (json_valid(setup)),
+  branched_at TEXT CHECK (branched_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
+  kind TEXT REFERENCES vocab_workspace_kind (word),
+  returns_to TEXT,
+  returned_at TEXT CHECK (returned_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
+  toward TEXT,
+  held_at TEXT CHECK (held_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
+  name TEXT,
+  reviewing TEXT,
+  moving_to TEXT CHECK (moving_to IN ('worktree', 'checkout')), trust TEXT CHECK (trust IN ('safe', 'full')), waits_for TEXT,
+  FOREIGN KEY (task_id, project_id) REFERENCES tasks (id, project_id),
+  FOREIGN KEY (binding_id, project_id) REFERENCES repository_bindings (id, project_id),
+  UNIQUE (id, project_id)
+) STRICT;
+
+CREATE UNIQUE INDEX workspaces_one_per_branch ON workspaces (task_id, binding_id, device_id, branch) WHERE reviewing IS NULL;
+
+CREATE UNIQUE INDEX workspaces_one_per_review ON workspaces (task_id, binding_id, device_id, reviewing) WHERE reviewing IS NOT NULL;
+
+CREATE INDEX workspaces_by_task ON workspaces (task_id);
+
+CREATE TABLE presets (
+    id TEXT PRIMARY KEY NOT NULL,
+    name TEXT NOT NULL CHECK (length(name) BETWEEN 1 AND 40),
+    parts TEXT NOT NULL CHECK (json_valid(parts)),
+    builtin INTEGER NOT NULL DEFAULT 0 CHECK (builtin IN (0, 1)),
+    project_id TEXT REFERENCES projects(id) ON DELETE CASCADE,
+    from_task_id TEXT,
+    created_at TEXT NOT NULL CHECK (created_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
+    updated_at TEXT NOT NULL CHECK (updated_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z')
+  ) STRICT;
+
+CREATE UNIQUE INDEX presets_by_name ON presets (coalesce(project_id, ''), lower(name));
+
+CREATE TABLE helpers (
+    id TEXT PRIMARY KEY NOT NULL,
+    task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+    project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    thread_id TEXT NOT NULL,
+    workspace_id TEXT,
+    name TEXT NOT NULL CHECK (length(name) BETWEEN 1 AND 60),
+    brief TEXT NOT NULL,
+    agent_id TEXT NOT NULL,
+    model TEXT,
+    state TEXT NOT NULL CHECK (state IN ('working', 'done', 'stopped', 'failed')),
+    result TEXT,
+    started_at TEXT NOT NULL CHECK (started_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
+    ended_at TEXT CHECK (ended_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z')
+  , copy_path TEXT, snapshot TEXT, writes INTEGER NOT NULL DEFAULT 0 CHECK (writes IN (0, 1)), kept_ref TEXT) STRICT;
+
+CREATE INDEX helpers_by_task ON helpers (task_id);
+
+CREATE UNIQUE INDEX helpers_by_thread ON helpers (thread_id);
 
 CREATE TABLE canvases (
     id TEXT PRIMARY KEY NOT NULL CHECK (substr(id, 1, 4) = 'cnv_' AND length(id) = 36 AND substr(id, 5) NOT GLOB '*[^0-9a-f]*'),

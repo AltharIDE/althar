@@ -838,6 +838,7 @@ export const makeFakeService = (options: FakeServiceOptions = {}): FakeService =
         update(change.number, {
           ...(edit.title === undefined ? {} : { title: edit.title }),
           ...(edit.body === undefined ? {} : { body: edit.body }),
+          ...(edit.base === undefined ? {} : { target: edit.base }),
         })
         return Effect.succeed(changeNumbered(change.number))
       }),

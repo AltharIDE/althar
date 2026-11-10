@@ -681,6 +681,7 @@ export const makeBitbucketCloud = (options: AdapterOptions): CodeHost => {
           reviewers: (now.reviewers ?? []).flatMap((reviewer) => (reviewer.uuid === undefined ? [] : [{ uuid: reviewer.uuid }])),
           ...(now.close_source_branch === undefined ? {} : { close_source_branch: now.close_source_branch }),
           ...(now.draft === undefined ? {} : { draft: now.draft }),
+          ...(edit.base === undefined ? {} : { destination: { branch: { name: edit.base } } }),
         })
         return changeOf(repository, edited)
       }),

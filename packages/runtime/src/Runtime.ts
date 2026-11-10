@@ -15,6 +15,7 @@ import { Connectivity } from './Connectivity'
 import { Installs, type InstallsOptions } from './Installs'
 import { Instance } from './Instance'
 import { IssueChanges } from './IssueChanges'
+import { Helpers } from './Helpers'
 import { IssueDrafts } from './IssueDrafts'
 import { Issues } from './Issues'
 import { Fetches } from './Fetches'
@@ -49,6 +50,7 @@ import { shippedSkillsLayer } from './Skills'
 import { Limits } from './Limits'
 import { AutoModels } from './modelMoves'
 import { FastLane } from './fastLane'
+import { MergeReviews } from './MergeReviews'
 import { ModelFacts } from './ModelFacts'
 import { Models } from './Models'
 import { SignIns } from './SignIns'
@@ -151,8 +153,10 @@ export const layer = (options: RuntimeLayerOptions) => {
   const tracked = IssueChanges.layer.pipe(Layer.provideMerge(Issues.layer.pipe(Layer.provideMerge(busy))))
   // A task's pull request, the issues the coordinator drafts and the reviews leads draft, through the person's connections to code hosts and trackers.
   // Its merge starts the review of a small change, and Make it a full task starts one before it merges (fastLane.ts).
-  const reviewing = Layer.mergeAll(Reviews.layer, IssueDrafts.layer).pipe(Layer.provideMerge(tracked))
-  const fastLane = FastLane.layer.pipe(Layer.provideMerge(reviewing))
+  // A lead's helpers, each a session of its own on one of its task's changes (ADR-087).
+  const reviewing = Layer.mergeAll(Reviews.layer, IssueDrafts.layer, Helpers.layer).pipe(Layer.provideMerge(tracked))
+  // Reviews after a merge run in their own task (MergeReviews.ts), which the fast lane's merges and Merge now owe.
+  const fastLane = FastLane.layer.pipe(Layer.provideMerge(MergeReviews.layer.pipe(Layer.provideMerge(reviewing))))
   const linked = Changes.layer.pipe(Layer.provideMerge(fastLane), Layer.provideMerge(reviewing), Layer.provideMerge(tracked))
   // A task's screenshots, in one comment on its pull request, kept as its Outputs show them (ADR-077).
   const shown = PullRequestScreenshots.layer.pipe(Layer.provideMerge(linked))

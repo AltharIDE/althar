@@ -1729,14 +1729,14 @@ describe('a task', () => {
 
   it('offers stopping and abandoning in its menu while it works, as the runtime says', async () => {
     const { client, offered } = await taskMenu({})
-    expect(offered).toEqual(['Open in Zed', 'Attach a pull request…', 'Stop the task', 'Abandon'])
+    expect(offered).toEqual(['Open in Zed', 'Attach a pull request…', 'Save as preset', 'Stop the task', 'Abandon'])
     await userEvent.click(screen.getByRole('menuitem', { name: /Stop the task/ }))
     await waitFor(() => expect(client.stopTask).toHaveBeenCalledWith('t1'))
   })
 
   it('offers resuming a task stopped in the middle of its step', async () => {
     const { client, offered } = await taskMenu({ phase: 'stopped', actions: ['resume', 'abandon'] }, null)
-    expect(offered).toEqual(['Resume', 'Open in Zed', 'Attach a pull request…', 'Abandon'])
+    expect(offered).toEqual(['Resume', 'Open in Zed', 'Attach a pull request…', 'Save as preset', 'Abandon'])
     expect(screen.getByText('Stopped')).toBeTruthy()
     await userEvent.click(screen.getByRole('menuitem', { name: /Resume/ }))
     await waitFor(() => expect(client.resumeTask).toHaveBeenCalledWith({ taskId: 't1' }))
@@ -1837,20 +1837,23 @@ describe('a task', () => {
 
   it('offers its folder for a plain task with no branch, and none where it has no worktree', async () => {
     const plain = await taskMenu({ phase: 'ready', branch: null, actions: ['abandon'] }, null)
-    expect(plain.offered).toEqual(['Open in Zed', 'Attach a pull request…', 'Abandon'])
+    expect(plain.offered).toEqual(['Open in Zed', 'Attach a pull request…', 'Save as preset', 'Abandon'])
     plain.view.unmount()
-    expect((await taskMenu({ phase: 'held', branch: null, worktree: null, actions: ['abandon'] }, null)).offered).toEqual(['Abandon'])
+    expect((await taskMenu({ phase: 'held', branch: null, worktree: null, actions: ['abandon'] }, null)).offered).toEqual([
+      'Save as preset',
+      'Abandon',
+    ])
   })
 
   it('offers no say on its conflicts once it settles', async () => {
     const { offered } = await taskMenu({ phase: 'settled', state: 'done', actions: [] }, null)
-    expect(offered).toEqual(['Open in Zed'])
+    expect(offered).toEqual(['Open in Zed', 'Save as preset'])
     expect(screen.queryByRole('menuitemradio')).toBeNull()
   })
 
   it('offers starting its plan now while it waits to start', async () => {
     const { client, offered } = await taskMenu({ phase: 'held', actions: ['start', 'abandon'], planId: 'pln1' }, null)
-    expect(offered).toEqual(['Start now', 'Open in Zed', 'Attach a pull request…', 'Abandon'])
+    expect(offered).toEqual(['Start now', 'Open in Zed', 'Attach a pull request…', 'Save as preset', 'Abandon'])
     await userEvent.click(screen.getByRole('menuitem', { name: /Start now/ }))
     await waitFor(() => expect(client.startPlan).toHaveBeenCalledWith('pln1'))
   })
@@ -1946,7 +1949,7 @@ describe('a task', () => {
       { phase: 'ready', actions: ['abandon'], changes: [...drafts, change({ state: 'merged' })] },
       null,
     )
-    expect(offered).toEqual(['Mark ready for review', 'Open in Zed', 'Attach a pull request…', 'Abandon'])
+    expect(offered).toEqual(['Mark ready for review', 'Open in Zed', 'Attach a pull request…', 'Save as preset', 'Abandon'])
     await userEvent.click(screen.getByRole('menuitem', { name: /Mark ready for review/ }))
     await waitFor(() => expect(client.markReady).toHaveBeenCalledTimes(2))
     expect(vi.mocked(client.markReady).mock.calls).toEqual(drafts.map((one) => ['t1', one.url]))
@@ -1955,13 +1958,13 @@ describe('a task', () => {
   it('says an abandoned task was abandoned, and offers reopening it, and only its folder once merged', async () => {
     const drafts = [change({ draft: true })]
     const abandoned = await taskMenu({ phase: 'settled', state: 'abandoned', actions: ['reopen'], changes: drafts }, null)
-    expect(abandoned.offered).toEqual(['Reopen', 'Open in Zed'])
+    expect(abandoned.offered).toEqual(['Reopen', 'Open in Zed', 'Save as preset'])
     expect(screen.getByText('Abandoned')).toBeTruthy()
     await userEvent.click(screen.getByRole('menuitem', { name: /Reopen/ }))
     await waitFor(() => expect(abandoned.client.reopenTask).toHaveBeenCalledWith('t1'))
     abandoned.view.unmount()
     // Merged, it is done for good.
-    expect((await taskMenu({ phase: 'settled', state: 'done', actions: [] }, null)).offered).toEqual(['Open in Zed'])
+    expect((await taskMenu({ phase: 'settled', state: 'done', actions: [] }, null)).offered).toEqual(['Open in Zed', 'Save as preset'])
   })
 
   it('offers abandoning a merged task with commits after its pull request, which keep it in Needs you: it stays merged', async () => {
@@ -1975,7 +1978,7 @@ describe('a task', () => {
       },
       null,
     )
-    expect(after.offered).toEqual(['Open in Zed', 'Abandon'])
+    expect(after.offered).toEqual(['Open in Zed', 'Save as preset', 'Abandon'])
     expect(screen.getByRole('menuitem', { name: /Abandon/ }).textContent).toContain('Its pull request stays merged.')
     await userEvent.click(screen.getByRole('menuitem', { name: /Abandon/ }))
     // Asked first, it says what stays merged and what is left out, and offers no reopening.
