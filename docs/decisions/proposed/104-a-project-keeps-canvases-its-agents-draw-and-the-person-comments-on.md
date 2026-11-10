@@ -7,8 +7,8 @@
 > [what-agents-may-do.md § Althar's tools outside the sandbox](../what-agents-may-do.md#althars-tools-outside-the-sandbox)
 > (the canvas tools).
 
-- **Status:** Proposed
-- **Date:** 2026-11-09 (revised the same day, after review)
+- **Status:** Proposed, and partly built: see [What is built](#what-is-built)
+- **Date:** 2026-11-09 (revised the same day, after review; first slice built 2026-11-10)
 - **Owner:** Runtime and desktop maintainers
 - **Amends:**
   - [ADR-020](../tasks.md#what-agents-hand-back): the artifact store also
@@ -582,9 +582,10 @@ is kept as a page's is.
 
 #### The project's canvases
 
-**The project's canvases are one list,** opened from the board's header and
-from the command menu, so the board needs no sidebar. Each canvas in it
-shows:
+**The project's canvases are one list,** a view of the project's own,
+Canvases, beside Automations in its header, so the board needs no sidebar.
+One opened takes the view, and its Close comes back to the list. Each
+canvas in it shows:
 
 - a picture of the latest version, taken when it was published
 - its name and title
@@ -937,6 +938,39 @@ and a story or an end-to-end spec that shows it.
    - **What it adds.** `althar.state` and `althar.shared` over the binding,
      with revisions; `althar.send` into the bound composer; and
      `tokens.css`.
+
+## What is built
+
+The first slice, on 10 November 2026: everything an agent and the person
+need to draw, see, comment and draw again, across the project.
+
+| Part | Built |
+|---|---|
+| The store | Canvases, versions (each with its entry's digest), working copies, comments and resolutions, each with its actor; versions' files and manifests in the artifact store |
+| The tools | `canvas_list`, `canvas_get`, `canvas_publish`, `canvas_read`, `canvas_open`, `canvas_resolve` and `canvas_archive`, to the pool; the reading three to reviewers |
+| Working copies | Never overwritten: reused, replaced when untouched, else the version set aside at `<name>@<n>/`, then `-2`, `-3`; a stale base refused and the latest set aside |
+| Drawing | Markdown with its diagrams, Mermaid, SVG and pictures in the window; HTML in a view of its own, at `althar-canvas://<id>/v<n>/`, served only in the project's canvas partition, for versions a window opened |
+| Guards | No preload; every web permission refused but writing what the person copies; downloads refused; navigation kept to the version, web links to the person's browser; Althar's own listeners refused, as the runtime tells main its port |
+| The person's word | Comments on the whole canvas or the words selected, waiting in the composer as drafts, kept with the message that sends them; answered ones with the lead's reply |
+| On screen | The canvas's line in the turn that drew it; the panel on the workbench, with its versions, "v2 is out" and Show; a canvas published or opened opening as it arrives; the project's Canvases view |
+| Briefs | The lead's and the coordinator's say when to draw one |
+| Proof | Runtime, main, window and kit tests, and `apps/desktop/e2e/canvases.spec.ts`, which draws, comments and draws again in the built app |
+
+**Not built yet:**
+
+- `canvas_look`, and the offscreen drawing with a snapshot bridge it
+  needs.
+- The `page_*` tools on a canvas (`on: "canvas"`).
+- The bridge: `althar.state`, `althar.shared` and `althar.send`, over the
+  view's debugger.
+- Picks: `group` is kept and listed, but directions don't show side by side
+  with Choose.
+- Comments on an area of a picture and on an element of a page: those take
+  whole-canvas comments for now.
+- Refusing hosts under the person's Never in the canvas partition: only
+  Althar's own listeners are refused today.
+- The list's pictures, Save files, a task's Outputs' canvases, and
+  deleting a canvas.
 
 ## Not now
 

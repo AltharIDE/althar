@@ -52,7 +52,7 @@ Proposals waiting now:
 - [ADR-103](proposed/103-projects-live-locally-or-on-a-host-and-place-work-in-pools.md):
   projects on a host, and work placed across pools.
 - [ADR-104](proposed/104-a-project-keeps-canvases-its-agents-draw-and-the-person-comments-on.md):
-  canvases the project's agents draw, version and hear comments on.
+  canvases the project's agents draw, version and hear comments on; the first slice is built.
 
 ## The old ADRs
 
@@ -169,4 +169,4 @@ one.
 | 101 | Clearing a coordinator's chat is one question with two kinds: clear only the view (a mark on the thread; the coordinator keeps the conversation; Show earlier and Undo) or forget the conversation too (the session ends and its messages are deleted); both keep what is still open and the project's records | [coordinator § Clearing its chat](coordinator.md#clearing-its-chat) |
 | 102 | A change of a few lines is one step on a light model, starts at once, and is reviewed after it merges, with one card in its thread; Auto moves a lead to a lighter model of its agent as the plan runs out, with Keep for the task | [tasks § The small-change lane](tasks.md#the-small-change-lane), [reviews § A small change is reviewed after it merges](reviews.md#a-small-change-is-reviewed-after-it-merges) |
 | [103](proposed/103-projects-live-locally-or-on-a-host-and-place-work-in-pools.md) | A project's runtime and database live locally, on a personal host or on Althar hosting; automatic task placement uses its assigned worker pools, with SSH or Connect access, forwarded previews and explicit local test copies | Proposed; would fold into [foundations § Where the runtime runs, and who may reach it](foundations.md#where-the-runtime-runs-and-who-may-reach-it) |
-| [104](proposed/104-a-project-keeps-canvases-its-agents-draw-and-the-person-comments-on.md) | A project keeps canvases: its agents write files and publish them as versions any lead or the coordinator can get, change and look at; HTML runs in a view and scheme of its own; the person's comments go to the conversation and stay on the canvas | Proposed; would fold into [desktop-app](desktop-app.md), [tasks § What agents hand back](tasks.md#what-agents-hand-back) and [what-agents-may-do § Althar's tools outside the sandbox](what-agents-may-do.md#althars-tools-outside-the-sandbox) |
+| [104](proposed/104-a-project-keeps-canvases-its-agents-draw-and-the-person-comments-on.md) | A project keeps canvases: its agents write files and publish them as versions any lead or the coordinator can get, change and look at; HTML runs in a view and scheme of its own; the person's comments go to the conversation and stay on the canvas | Proposed, first slice built; would fold into [desktop-app](desktop-app.md), [tasks § What agents hand back](tasks.md#what-agents-hand-back) and [what-agents-may-do § Althar's tools outside the sandbox](what-agents-may-do.md#althars-tools-outside-the-sandbox) |
