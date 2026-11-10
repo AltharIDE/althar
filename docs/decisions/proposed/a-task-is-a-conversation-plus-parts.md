@@ -1256,6 +1256,21 @@ Built since, in #739:
   person to close. Held for Ship, the fresh branch stays here until Ship
   opens it. The commits each move rewrote are kept beside their copies, so
   the mark of what the last review read moves with them.
+- **Run it:** the person's word, under a review's reach line or to its
+  lead (`run_it`). The team's own pull request runs at once, trusted as
+  their code; an outside author's asks Run safely or Trust fully, unless
+  the setting ("When I say Run it on code from outside the team") answers.
+  Run safely installs from the lockfile with install scripts off, after
+  putting back the base branch's registry settings, and its lead runs its
+  commands in the sandbox, offline, with every lead tool; Trust fully sets
+  the copy up as a worktree is, with the network. How far is kept on the
+  review's workspace (`workspaces.trust`), and its lead starts afresh in
+  the role that gives it.
+- **Any task can review a pull request:** `add_review` gives a task with
+  work of its own a read-only copy of a related pull request's head beside
+  its worktree (`workspaces.reviewing`), which its lead drafts a review of
+  with `draft_review`. The task stays its work's: posting the review
+  doesn't settle it.
 
 Compatibility: every change to the store is additive, with nullable
 columns an older build reads past; a run with no `ships` and a workspace
@@ -1264,8 +1279,8 @@ update finishes as a round; the API only gains fields and a command; the
 old "Review rounds" setting is kept and read by nothing; the lead's tools
 keep their names, `make_it_a_change` included.
 
-Still to build, as the rest of this proposal says: "Run it", the parts
-tools, Scratch and presets.
+Still to build, as the rest of this proposal says: the parts tools,
+Scratch and presets.
 
 It is done when:
 

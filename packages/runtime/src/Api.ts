@@ -114,7 +114,7 @@ import { SettingsTools } from './SettingsTools'
 import { TaskActions } from './TaskActions'
 import { IssueChanges } from './IssueChanges'
 import { IssueDrafts } from './IssueDrafts'
-import { postTeamReviews, Reviews, setPostTeamReviews } from './Reviews'
+import { postTeamReviews, Reviews, runOutside, setPostTeamReviews, setRunOutside } from './Reviews'
 import { FastLane } from './fastLane'
 import { MergeReviews } from './MergeReviews'
 import { Plans } from './Plans'
@@ -1059,6 +1059,7 @@ export const handlers = Api.toLayer(
               coAuthor: { on, line: coAuthorLine },
               reviewSeal: yield* reviewSeal,
               postTeamReviews: yield* postTeamReviews,
+              runOutside: yield* runOutside,
               automationsPaused: yield* automations.allPaused,
               folderWait: yield* cleanup.wait,
               agentsAtOnce: {
@@ -1172,6 +1173,8 @@ export const handlers = Api.toLayer(
       LineOldestFirst: ({ commandId, projectId }) => once(commandId, api(busy.oldestFirst(projectId))),
       SetPostTeamReviews: ({ commandId, on }) =>
         once(commandId, api(setPostTeamReviews(on)).pipe(Effect.provideService(SqlClient.SqlClient, sql))),
+      SetRunOutside: ({ commandId, to }) => once(commandId, api(setRunOutside(to)).pipe(Effect.provideService(SqlClient.SqlClient, sql))),
+      RunIt: ({ commandId, taskId, how }) => once(commandId, api(reviews.runIt({ taskId, ...(how === undefined ? {} : { how }) }))),
       GetAutomations: ({ projectId }) =>
         api(
           Effect.gen(function* () {

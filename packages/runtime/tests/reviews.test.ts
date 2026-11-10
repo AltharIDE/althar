@@ -242,13 +242,15 @@ describe('reviewing someone else’s pull request', () => {
       assert.include(read, 'No checks have run.')
       assert.include(read, 'Nobody has said anything on it.')
       assert.notInclude(read, 'Its head is')
-      // An outside author's review keeps the reading six (ADR-097: their code doesn't run without the person's word).
+      // An outside author's review keeps the reading six (ADR-097: their code doesn't run without the person's word), and
+      // run_it, which runs it only as far as the person says (a task is a conversation plus parts, "Run it").
       assert.deepStrictEqual(yield* listTools(outsideLead), [
         'draft_review',
         'find_issues',
         'read_checks',
         'read_issue',
         'read_pull_request',
+        'run_it',
         'settle_task',
       ])
       assert.strictEqual(

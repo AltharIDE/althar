@@ -1492,7 +1492,7 @@ CREATE TABLE "workspaces" (
   held_at TEXT CHECK (held_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
   name TEXT,
   reviewing TEXT,
-  moving_to TEXT CHECK (moving_to IN ('worktree', 'checkout')),
+  moving_to TEXT CHECK (moving_to IN ('worktree', 'checkout')), trust TEXT CHECK (trust IN ('safe', 'full')),
   FOREIGN KEY (task_id, project_id) REFERENCES tasks (id, project_id),
   FOREIGN KEY (binding_id, project_id) REFERENCES repository_bindings (id, project_id),
   UNIQUE (id, project_id)

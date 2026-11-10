@@ -79,7 +79,7 @@ import { listeningText, listeningOf, useHeard, waitOf } from './behind'
 import { ChangesCard } from '../../shared/ChangesCard'
 import { DraftCard } from '../../shared/DraftCard'
 import { PermissionCalls } from './PermissionCall'
-import { reachOf, ReviewCard, reviewedUnfurl } from './ReviewCard'
+import { reachOf, reachText, ReviewCard, reviewedUnfurl } from './ReviewCard'
 import { usePostTeamReviews } from '../settings/usePostTeamReviews'
 import { HeldLimit } from './LimitCall'
 import { StuckCall } from './StuckCall'
@@ -1172,6 +1172,27 @@ export function TaskView({
           {/* What a review's lead can reach, in a sentence under the header. */}
           {snapshot.task.review != null && (
             <ReachLine className={s.reach} phrases={reachOf(snapshot.task.review, postsTeamReviews)} aria-label={text.reach} />
+          )}
+          {/* Run it, the person's word: how far to trust the pull request's code, an outside author's asked, the team's at once. */}
+          {snapshot.task.review != null && snapshot.task.phase !== 'settled' && snapshot.task.review.trust !== 'full' && (
+            <div className={s.runIt}>
+              {snapshot.task.review.outside ? (
+                <>
+                  {snapshot.task.review.trust === undefined && (
+                    <Button size="small" variant="quiet" onClick={() => void model.runIt('safe')}>
+                      {reachText.runSafely}
+                    </Button>
+                  )}
+                  <Button size="small" variant="quiet" onClick={() => void model.runIt('full')}>
+                    {reachText.trustFully}
+                  </Button>
+                </>
+              ) : (
+                <Button size="small" variant="quiet" onClick={() => void model.runIt()}>
+                  {reachText.runIt}
+                </Button>
+              )}
+            </div>
           )}
           {shown === 'graph' && graph !== null ? (
             <GraphFace

@@ -665,6 +665,8 @@ export const AppSettings = Schema.Struct({
   agentsAtOnce: AgentsAtOnce,
   /** A review of the team's pull request posts itself once drafted, without asking; off unless the person turns it on. Outside ones always wait. */
   postTeamReviews: Schema.Boolean,
+  /** What "Run it" on code from outside the team does without asking: `ask` each time, its default, run `safe`ly, or trust it `full`y. */
+  runOutside: Schema.optional(Schema.Literals(['ask', 'safe', 'full'])),
   /** Every automation is paused: none starts until the person resumes them. Runs under way finish. */
   automationsPaused: Schema.Boolean,
   /** When finished tasks' folders go: `smart` unless the person chose otherwise. */
@@ -2122,6 +2124,11 @@ export const ReviewBrief = Schema.Struct({
    * person's to mark done or keep for later, as a quick task is (ADR-051).
    */
   waiting: Schema.optional(Schema.Boolean),
+  /**
+   * How far its code is trusted, once the person said Run it (a task is a conversation plus parts): `safe`, it runs offline
+   * with its install scripts off; `full`, as the team's code. Absent while its lead only reads.
+   */
+  trust: Schema.optional(Schema.Literals(['safe', 'full'])),
 })
 export type ReviewBrief = typeof ReviewBrief.Type
 
@@ -4514,6 +4521,21 @@ export const Api = RpcGroup.make(
   command('SetCoAuthor', { on: Schema.Boolean }, Schema.Void),
   /** Whether a review of the person's team's pull request posts itself once drafted; an outside one always waits. */
   command('SetPostTeamReviews', { on: Schema.Boolean }, Schema.Void),
+  /** What "Run it" on code from outside the team does without asking: ask each time, run safely, or trust it fully. */
+  command('SetRunOutside', { to: Schema.Literals(['ask', 'safe', 'full']) }, Schema.Void),
+  /**
+   * "Run it" on the pull request a review task reviews, as the person said (a task is a conversation plus parts): the team's
+   * code is trusted fully; an outside author's runs as `how` says, else as their setting answers, else they are asked
+   * (`asks`). What it did, in words.
+   */
+  command(
+    'RunIt',
+    { taskId: Schema.String, how: Schema.optional(Schema.Literals(['safe', 'full'])) },
+    Schema.Union([
+      Schema.Struct({ kind: Schema.Literal('ran'), trust: Schema.Literals(['safe', 'full']), said: Schema.String }),
+      Schema.Struct({ kind: Schema.Literal('asks') }),
+    ]),
+  ),
   /** Whether a pull request Althar opens says how its change was reviewed: the seal and the folded review. */
   command('SetReviewSeal', { on: Schema.Boolean }, Schema.Void),
   /** How the review seal looks. */

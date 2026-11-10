@@ -94,6 +94,38 @@ describe('a task’s parts', () => {
     await waitFor(() => expect(client.workToward).toHaveBeenCalledWith(base.task.id, 'release/0.8.0'))
   })
 
+  it('runs an outside author’s pull request only as far as the person says, and the team’s at once', async () => {
+    const review = {
+      product: 'github' as const,
+      repository: 'meridian/api',
+      number: 1199,
+      url: 'https://github.com/meridian/api/pull/1199',
+      title: 'Send back won’t restart a dead lead session',
+      author: 'ninemate',
+      outside: true,
+      additions: 58,
+      deletions: 20,
+      findings: 0,
+      blocking: 0,
+      verdict: null,
+      posted: null,
+    }
+    const outside = snapshot({ task: { ...base.task, phase: 'running', review } })
+    const { client } = fakeClient({ getThread: vi.fn(async () => outside) })
+    const shown = withServices(<Task />, client)
+    expect(await screen.findByRole('button', { name: 'Run safely' })).toBeTruthy()
+    await userEvent.click(screen.getByRole('button', { name: 'Trust fully' }))
+    await waitFor(() => expect(client.runIt).toHaveBeenCalledWith(base.task.id, 'full'))
+    shown.unmount()
+    // Run safely already, it offers only to trust it fully; the team's own offers Run it.
+    const team = snapshot({ task: { ...base.task, phase: 'running', review: { ...review, outside: false } } })
+    const second = fakeClient({ getThread: vi.fn(async () => team) })
+    withServices(<Task />, second.client)
+    await userEvent.click(await screen.findByRole('button', { name: 'Run it' }))
+    await waitFor(() => expect(second.client.runIt).toHaveBeenCalledWith(base.task.id, undefined))
+    expect(screen.queryByRole('button', { name: 'Run safely' })).toBeNull()
+  })
+
   it('posts a review draft from its row', async () => {
     const { client } = fakeClient({ getThread: vi.fn(async () => snapshot({ items: [items.review({ state: 'pending' })] })) })
     withServices(<Task />, client)

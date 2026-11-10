@@ -79,6 +79,7 @@ import { useEdgeGlance } from './useEdgeGlance'
 import { TasksSection } from './TasksSection'
 import { type EdgePlaceModel, useEdgePlace } from './useEdgePlace'
 import { usePostTeamReviews } from './usePostTeamReviews'
+import { type RunOutside, useRunOutside } from './useRunOutside'
 import { useTaskFolders } from './useTaskFolders'
 import { ServersSection, SkillsSection } from './ToolSections'
 
@@ -408,6 +409,7 @@ const face = <img src={altharFace} alt="" />
 
 function ReviewsSection({ connections }: { connections: ConnectionsModel }) {
   const postTeam = usePostTeamReviews()
+  const runOutside = useRunOutside()
   const coAuthor = useCoAuthor()
   const seal = useReviewSeal()
   // The person, on the commit co-author is shown on, as GitHub names them.
@@ -423,6 +425,22 @@ function ReviewsSection({ connections }: { connections: ConnectionsModel }) {
             checked={postTeam.on}
             onChange={postTeam.set}
           />
+        )}
+        {runOutside !== null && (
+          <SettingRow title={text.runOutsideTitle} note={text.runOutsideNote} glyph={<Icon name="lock" size={15} />}>
+            {() => (
+              <Segmented<RunOutside>
+                label={text.runOutsideTitle}
+                value={runOutside.to}
+                onChange={runOutside.set}
+                options={[
+                  { value: 'ask', label: text.runOutsideAsk },
+                  { value: 'safe', label: text.runOutsideSafe },
+                  { value: 'full', label: text.runOutsideFull },
+                ]}
+              />
+            )}
+          </SettingRow>
         )}
         {coAuthor !== null && (
           <SettingSwitch
@@ -454,7 +472,7 @@ function ReviewsSection({ connections }: { connections: ConnectionsModel }) {
           </div>
         </>
       )}
-      <Failed when={postTeam?.failed === true || coAuthor?.failed === true || seal?.failed === true} />
+      <Failed when={postTeam?.failed === true || runOutside?.failed === true || coAuthor?.failed === true || seal?.failed === true} />
     </>
   )
 }

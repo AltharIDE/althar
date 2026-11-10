@@ -20,6 +20,7 @@ import { commitsOf } from './git'
 import { Instance } from './Instance'
 import { answeredIn, quickIn } from './kinds'
 import { MergeReviews } from './MergeReviews'
+import { Reviews } from './Reviews'
 import { Projects } from './Projects'
 import { Plans } from './Plans'
 import { PlanUsage } from './PlanUsage'
@@ -145,6 +146,7 @@ type Store =
   | Sessions
   | Runs
   | MergeReviews
+  | Reviews
   | Projects
   | Errands
   | Busy
@@ -269,6 +271,7 @@ export class TaskActions extends Context.Service<
       const sessions = yield* Sessions
       const runs = yield* Runs
       const mergeReviews = yield* MergeReviews
+      const reviews = yield* Reviews
       const projects = yield* Projects
       const errands = yield* Errands
       const busy = yield* Busy
@@ -880,6 +883,11 @@ export class TaskActions extends Context.Service<
         repository: Schema.optional(Schema.String),
         why: Schema.optional(Schema.String),
       })
+      const ReviewAsked = Schema.Struct({
+        task: Schema.optional(Schema.String),
+        pull_request: Schema.Union([Schema.String, Schema.Number]),
+        why: Schema.optional(Schema.String),
+      })
       const TowardAsked = Schema.Struct({
         task: Schema.optional(Schema.String),
         toward: Schema.NullOr(Schema.String),
@@ -960,6 +968,19 @@ export class TaskActions extends Context.Service<
        * Starts another change in a task (a task is a conversation plus parts): its own branch and worktree, beside the others,
        * shipped and reviewed on its own. The task's thread marks it as a step in the work.
        */
+      /** Adds a review of a pull request to a task with work of its own: a copy beside its worktree, drafted by its lead. */
+      const addReview = (access: ToolAccess, input: unknown) =>
+        Effect.gen(function* () {
+          const asked = yield* read(ReviewAsked, input)
+          const task = yield* named(access, asked.task)
+          const pullRequest = typeof asked.pull_request === 'number' ? `#${asked.pull_request}` : asked.pull_request.trim()
+          const added = yield* plainly(reviews.reviewIn({ taskId: task.id, pullRequest, actorId: actorOf(access) }), task.slug)
+          yield* touchTask(task.id)
+          return added.already
+            ? `${task.slug} reviews ${added.name} already: its copy is in ${added.path}.`
+            : `${task.slug} reviews ${added.name} now, beside its own work: a read-only copy of its head is in ${added.path}. Its lead reads it and drafts the review with draft_review; nothing is posted until the person posts it.`
+        })
+
       /** Points a running task at another branch to work toward, on the person's word, as its header does. */
       const workToward = (access: ToolAccess, input: unknown) =>
         Effect.gen(function* () {
@@ -1237,6 +1258,20 @@ export class TaskActions extends Context.Service<
             required: ['name'],
           },
           startChange,
+        ),
+        tool(
+          'add_review',
+          'Adds a review of a pull request to a task that has work of its own (a task can review a related pull request beside its change): a read-only copy of its head, beside the task’s worktree, which its lead reads and reviews with draft_review, as a review task’s lead does. Nothing is posted until the person posts the draft. By its link, or its number in the project’s repository (#123). For a review on its own, the coordinator plans one with review_pull_request. It acts at once, with a line in the task’s thread.',
+          {
+            type: 'object',
+            properties: {
+              task: optionalTask,
+              why,
+              pull_request: { type: 'string', description: 'Its link, or its number in the project’s repository: #123.' },
+            },
+            required: ['pull_request'],
+          },
+          addReview,
         ),
         tool(
           'work_toward',

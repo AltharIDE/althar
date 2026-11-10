@@ -1171,6 +1171,8 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
     })),
     setCoAuthor: vi.fn(async () => {}),
     setPostTeamReviews: vi.fn(async () => {}),
+    setRunOutside: vi.fn(async () => {}),
+    runIt: vi.fn(async () => ({ kind: 'ran' as const, trust: 'safe' as const, said: '' })),
     setReviewSeal: vi.fn(async () => {}),
     setReviewSealStyle: vi.fn(async () => {}),
     getAutomations: vi.fn(async () => automationsSnapshot({ automations: [] })),

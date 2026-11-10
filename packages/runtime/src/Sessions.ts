@@ -211,9 +211,17 @@ interface TaskThread {
   /**
    * Someone else's pull request the task reviews, where it is a review: its
    * lead then reads a read-only copy of it, under the rules of a role that
-   * only reads, and, for one from outside the project, offline.
+   * only reads, and, for one from outside the project, offline. Null for a
+   * task with work of its own, which reads any pull request it reviews
+   * beside it (a task is a conversation plus parts, "Reviewing").
    */
   readonly review: Reviewed | null
+  /**
+   * How far the person trusts that pull request's code ("Run it"): null, its
+   * lead only reads; `safe`, it runs its commands in the sandbox, offline;
+   * `full`, as the team's code, set up and with the network.
+   */
+  readonly trust: 'safe' | 'full' | null
 }
 
 /**
@@ -306,8 +314,10 @@ const askedFor = (thread: { readonly title: string; readonly description: string
  * repository's own settings. Selected skills are independent of this role; only offline outside reviews omit them.
  */
 export const onlyReads = (
-  thread: { readonly role: 'task'; readonly review: object | null } | { readonly role: Exclude<ThreadContext['role'], 'task'> },
-) => thread.role !== 'task' || thread.review !== null
+  thread:
+    | { readonly role: 'task'; readonly review: object | null; readonly trust?: 'safe' | 'full' | null }
+    | { readonly role: Exclude<ThreadContext['role'], 'task'> },
+) => thread.role !== 'task' || (thread.review !== null && (thread.trust ?? null) === null)
 
 /** The other tasks planned from the message a task came from, for its lead's brief (siblings.ts). */
 const alongside = (taskId: string) => siblingsOf(taskId).pipe(Effect.map((others) => (others.length === 0 ? [] : [alsoPlanned(others)])))
@@ -1338,7 +1348,7 @@ export class Sessions extends Context.Service<
             defaultBranch: first.defaultBranch,
             repositories,
             cwd: startIn(repositories),
-            review: yield* reviewOf(task.taskId),
+            ...(yield* reviewingOf(task.taskId)),
           } satisfies ThreadContext as ThreadContext
         })
 
@@ -2434,8 +2444,9 @@ export class Sessions extends Context.Service<
           // A review's lead only reads, as the coordinator and a reviewer do, and loads nothing of the repository's own settings,
           // hooks or plugins (the pull request's to write); offline, for a pull request from outside the project.
           const reads = onlyReads(thread)
-          const untrusted = thread.role === 'task' && thread.review !== null
-          const offline = thread.role === 'task' && thread.review?.outside === true
+          // Trusted fully, by the person's word or as the team's, it runs as the team's code does: no longer untrusted or offline.
+          const untrusted = thread.role === 'task' && thread.review !== null && thread.trust !== 'full'
+          const offline = thread.role === 'task' && thread.review?.outside === true && thread.trust !== 'full'
           // Only an agent its session holds to reading leads a review (the registry's `reviewing`): never one that runs what its
           // sandbox contains without asking, which could run the pull request's code, a team's too.
           if (untrusted && definition.reviewing?.outside !== true) {
@@ -2635,7 +2646,7 @@ export class Sessions extends Context.Service<
                 toolRoleOf(thread),
                 thread.projectId,
                 connection.info.mcp.http,
-                !(thread.role === 'task' && thread.review?.outside === true),
+                !(thread.role === 'task' && thread.review?.outside === true && thread.trust !== 'full'),
               ).pipe(Effect.provideService(RuntimeConfig, runtimeConfig), Effect.provideService(SqlClient.SqlClient, sessionsSql))
               const agent = yield* connection.newSession({
                 cwd: cwdOf(thread),
@@ -3300,6 +3311,25 @@ export class Sessions extends Context.Service<
         )
 
       /**
+       * The pull request a task reviews, where reviewing is all it does, and how far its code is trusted: a task with work of
+       * its own reviews what it reviews beside that, as its brief says, and reads its own code as any lead does.
+       */
+      const reviewingOf = (taskId: string) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const review = yield* reviewOf(taskId)
+          if (review === null) return { review: null, trust: null }
+          const [own] = yield* sql<{ n: number }>`
+            SELECT count(*) AS n FROM workspaces WHERE task_id = ${taskId} AND device_id = ${instance.deviceId} AND access = 'write'
+              AND state = 'ready'`
+          if ((own?.n ?? 0) > 0) return { review: null, trust: null }
+          const [trusted] = yield* sql<{ trust: 'safe' | 'full' | null }>`
+            SELECT trust FROM workspaces WHERE task_id = ${taskId} AND device_id = ${instance.deviceId} AND access = 'read'
+            ORDER BY created_at LIMIT 1`
+          return { review, trust: trusted?.trust ?? null }
+        })
+
+      /**
        * The brief a session starts from (ADR-005): for a task, the task, where
        * its worktree stands (the plan, and the change so far), and the thread;
        * for the coordinator, its role, the project, and the thread.
@@ -3316,9 +3346,11 @@ export class Sessions extends Context.Service<
       /** A review task's lead's brief: someone else's pull request, where its copy is, what it may do, and how it drafts. */
       const reviewTaskBrief = (thread: TaskThread, review: Reviewed) =>
         Effect.gen(function* () {
-          return [...reviewingBrief({ cwd: thread.cwd, review }), ...askedFor(thread), ...(yield* threadSoFar(thread.threadId))].join(
-            '\n\n',
-          )
+          return [
+            ...reviewingBrief({ cwd: thread.cwd, review, trust: thread.trust }),
+            ...askedFor(thread),
+            ...(yield* threadSoFar(thread.threadId)),
+          ].join('\n\n')
         })
 
       /** A reviewer's brief: the task, how to see the change, what it may do, and how to report. */

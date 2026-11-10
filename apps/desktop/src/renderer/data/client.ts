@@ -260,6 +260,13 @@ export interface Client {
   readonly lineOldestFirst: (projectId: string) => Promise<void>
   /** Whether a review of the person's team's pull request posts itself once drafted; an outside one always waits. */
   readonly setPostTeamReviews: (on: boolean) => Promise<void>
+  /** What "Run it" on code from outside the team does without asking. */
+  readonly setRunOutside: (to: 'ask' | 'safe' | 'full') => Promise<void>
+  /** "Run it" on the pull request a review task reviews, as far as `how` trusts it; `asks` where nothing says how far. */
+  readonly runIt: (
+    taskId: string,
+    how?: 'safe' | 'full',
+  ) => Promise<{ readonly kind: 'ran'; readonly trust: 'safe' | 'full'; readonly said: string } | { readonly kind: 'asks' }>
   /** Whether a pull request Althar opens says how its change was reviewed: the seal and the folded review. */
   readonly setReviewSeal: (on: boolean) => Promise<void>
   /** How the review seal looks. */
@@ -799,6 +806,8 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
     signInToolServer: (agent, name) => command((commandId) => api.SignInToolServer({ commandId, agent, name })),
     setCoAuthor: (on) => command((commandId) => api.SetCoAuthor({ commandId, on })),
     setPostTeamReviews: (on) => command((commandId) => api.SetPostTeamReviews({ commandId, on })),
+    setRunOutside: (to) => command((commandId) => api.SetRunOutside({ commandId, to })),
+    runIt: (taskId, how) => command((commandId) => api.RunIt({ commandId, taskId, ...(how === undefined ? {} : { how }) })),
     setReviewSeal: (on) => command((commandId) => api.SetReviewSeal({ commandId, on })),
     setReviewSealStyle: (style) => command((commandId) => api.SetReviewSealStyle({ commandId, style })),
     getAutomations: (projectId) => settle(api.GetAutomations({ projectId })),
