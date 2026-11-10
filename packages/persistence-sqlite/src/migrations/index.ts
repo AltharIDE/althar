@@ -70,6 +70,7 @@ import { statements as settingChanges } from './0065_setting_changes'
 import { statements as clearedView } from './0066_cleared_view'
 import { statements as fastLane } from './0067_fast_lane'
 import { statements as reviewsAfterMerge } from './0068_reviews_after_merge'
+import { statements as canvases } from './0069_canvases'
 
 export interface Migration {
   /** `<number>_<name>`, the order they run in. */
@@ -157,6 +158,7 @@ export const migrations: ReadonlyArray<Migration> = [
   { key: '0066_cleared_view', statements: clearedView },
   { key: '0067_fast_lane', statements: fastLane },
   { key: '0068_reviews_after_merge', statements: reviewsAfterMerge },
+  { key: '0069_canvases', statements: canvases },
 ]
 
 const run = (statements: ReadonlyArray<string>) =>

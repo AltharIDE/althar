@@ -125,6 +125,8 @@ export const ThreadItemKind = Schema.Literals([
   'small_change',
   /** Auto moving a task's lead to a lighter model because the plan is nearly out, with the way back. Althar posts it and keeps it current. */
   'model_move',
+  /** A version of one of the project's canvases an agent published (ADR-104): its name, title and version, which open it beside the conversation. Althar posts it. */
+  'canvas',
 ])
 export type ThreadItemKind = typeof ThreadItemKind.Type
 
@@ -331,6 +333,8 @@ export const ArtifactKind = Schema.Literals([
   'summary',
   'other',
   'image',
+  /** A file of a canvas's version, or the manifest that lists them (ADR-104): kept until the person deletes the canvas. */
+  'canvas',
 ])
 export type ArtifactKind = typeof ArtifactKind.Type
 
@@ -376,5 +380,6 @@ export const AggregateType = Schema.Literals([
   'automation_occurrence',
   'skill',
   'setting',
+  'canvas',
 ])
 export type AggregateType = typeof AggregateType.Type

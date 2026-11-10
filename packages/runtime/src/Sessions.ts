@@ -1,5 +1,5 @@
 import { errandLines } from './Errands'
-import type { MessageSender } from '@althar/contracts'
+import type { MessageSender, SentCanvasComment } from '@althar/contracts'
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
 
@@ -44,6 +44,7 @@ import { SqlClient, type SqlError } from 'effect/sql'
 
 import { thisDevice } from './device'
 import { type Account, Accounts } from './Accounts'
+import { CANVAS_BRIEF, keepComments } from './Canvases'
 import { Artifacts } from './Artifacts'
 import { Agents, type AgentEntry, RuntimeConfig, SIGNED_OUT_GIT_CONFIG } from './Config'
 import { refusalOf, runSkills, type RunSkills } from './Skills'
@@ -2983,6 +2984,7 @@ export class Sessions extends Context.Service<
         readonly images?: ReadonlyArray<InputImage>
         readonly files?: ReadonlyArray<InputFile>
         readonly dictated?: boolean
+        readonly canvasComments?: ReadonlyArray<SentCanvasComment>
         readonly sender?: MessageSender
         readonly origin?: 'news' | 'system'
         readonly quiet?: boolean
@@ -3042,6 +3044,15 @@ export class Sessions extends Context.Service<
                   return { artifact, picture: { artifactId, ...image, bytes: image.size } }
                 }),
               )
+              // Its comments on canvases, kept with it and nowhere before (ADR-104): until now each was only the person's draft.
+              if (input.canvasComments !== undefined && input.canvasComments.length > 0)
+                yield* keepComments({
+                  projectId: thread.projectId,
+                  threadId: input.threadId,
+                  inputId,
+                  actorId: input.envelope.actorId,
+                  comments: input.canvasComments,
+                })
               // Its files, in order, each by where its copy is; the copies are there already.
               for (const [index, file] of files.entries())
                 yield* sql`INSERT INTO user_input_files ${sql.insert({
@@ -3402,6 +3413,8 @@ export class Sessions extends Context.Service<
             "Show each screenshot once. Don't hand over again, or take again, one you have already handed over, unless the screen has changed since. Never list your screenshots in a table or a list in a message: each one shows with its caption already.",
             // Althar draws a mermaid block as a diagram, in the thread and in a Markdown file the thread opens (packages/ui, Diagram).
             'When you explain something architectural or otherwise complicated, such as how parts of the code fit together or how a flow runs, include a diagram without being asked: a ```mermaid block, in a message or in a Markdown file you link, is drawn as a diagram in Althar.',
+            // The project's canvases, which every lead and the coordinator reach (ADR-104).
+            CANVAS_BRIEF,
             // Outputs, and the pull request, show the work as built: options and explorations stay in the thread.
             'A change\'s Outputs and its pull request show the work as it is now, from your screenshots in finish_step. Give each picture of the work as built a `view`, a short name you keep each time you take it again ("Running page"), so a later picture replaces it. Mark each option or direction the person chooses between, and each exploration, with `option`: those stay in the thread, where the person saw them. A step\'s pictures replace the earlier ones, but for the views it takes again and those it names in `kept_views`; one that only takes known views again leaves the others as they were.',
             // Pictures the person asks to see show in the thread at any time, not as file names (show_pictures).
@@ -3526,6 +3539,8 @@ export class Sessions extends Context.Service<
           LAST_MESSAGE_COORDINATOR,
           // Althar draws a mermaid block as a diagram, in the thread and in a document it opens (packages/ui, Diagram).
           'When you explain something architectural or otherwise complicated, such as how parts of the code fit together or how a flow runs, include a diagram without being asked: a ```mermaid block in your reply is drawn as a diagram in Althar.',
+          // The project's canvases, which every lead and the coordinator reach (ADR-104).
+          CANVAS_BRIEF,
         ]
       }
 
