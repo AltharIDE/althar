@@ -495,6 +495,23 @@ describe('an OpenCode account’s usage, by the provider each turn ran on', () =
     }).pipe(Effect.provide(withMixed())),
   )
 
+  it.live('counts each model’s tokens on a line where several ran, as a lead’s helpers do', () =>
+    Effect.gen(function* () {
+      const { openCode, created, here } = yield* mixedTask()
+      // A helper on another model through the same provider: one line, its tokens by model.
+      yield* ran(here, 'opencode', openCode, 'opencode/claude-haiku-5', 7, 8, { inputTokens: 15_000, outputTokens: 5_000 })
+      const zen = (yield* usageOf(created.threadId)).find((line) => line.provider === 'opencode')
+      assert.deepStrictEqual(zen?.models, ['opencode/gpt-6-astra', 'opencode/claude-haiku-5'])
+      assert.deepStrictEqual(zen?.byModel, [
+        { model: 'opencode/gpt-6-astra', tokens: 110_000 },
+        { model: 'opencode/claude-haiku-5', tokens: 20_000 },
+      ])
+      // One model on a line says no more than it did.
+      const go = (yield* usageOf(created.threadId)).find((line) => line.provider === 'opencode-go')
+      assert.isUndefined(go?.byModel)
+    }).pipe(Effect.provide(withMixed())),
+  )
+
   it.live('gives Go its share of the account’s own week, which a Zen turn then doesn’t draw on', () =>
     Effect.gen(function* () {
       const { openCode, created } = yield* mixedTask()

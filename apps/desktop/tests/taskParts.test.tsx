@@ -211,6 +211,32 @@ describe('a task’s parts', () => {
     await waitFor(() => expect(client.ship).toHaveBeenCalledWith(base.task.id, 'Lane heights'))
   })
 
+  it('opens a helper’s row in place to what it said and ran, read from its own thread', async () => {
+    const started = items.notice(
+      {
+        source: 'runtime',
+        title: 'Helper · Split the migration, on the task’s change (Haiku 4.5).',
+        step: { kind: 'helper', name: 'Split the migration', branch: 'on the task’s change, Haiku 4.5', toward: null, thread: 'thh1' },
+      },
+      null,
+    )
+    const lead = snapshot({ task: { ...base.task, phase: 'running' }, items: [started] })
+    const helper = snapshot({
+      threadId: 'thh1',
+      items: [items.tool({ title: 'git grep migrate' }), items.says('Split it in two: the schema first, then the data.')],
+    })
+    const getThread = vi.fn(async (threadId: string) => (threadId === 'thh1' ? helper : lead))
+    const { client } = fakeClient({ getThread })
+    withServices(<Task />, client)
+    await userEvent.click(await screen.findByRole('button', { name: 'See its work' }))
+    const work = await screen.findByRole('list', { name: 'Its work' })
+    expect(within(work).getByText('Ran git grep migrate')).toBeTruthy()
+    expect(within(work).getByText('Split it in two: the schema first, then the data.')).toBeTruthy()
+    expect(getThread).toHaveBeenCalledWith('thh1', expect.objectContaining({ limit: 40 }))
+    await userEvent.click(screen.getByRole('button', { name: 'Hide its work' }))
+    expect(screen.queryByRole('list', { name: 'Its work' })).toBeNull()
+  })
+
   it('offers Keep them together on a change its lead split, and Drop it on one its git made', async () => {
     const step = (name: string, by: 'lead' | 'git') =>
       items.notice(

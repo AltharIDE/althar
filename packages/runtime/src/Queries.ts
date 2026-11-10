@@ -3353,7 +3353,25 @@ export class Queries extends Context.Service<
               } satisfies RunRows
             }),
           )
-          return graphOf(shaped)
+          // Each helper on the round it started in, a lane of its model's on the Graph face (ADR-087).
+          const rounds = graphOf(shaped)
+          const helpers = yield* sql<{
+            id: string
+            name: string
+            agentId: string
+            model: string | null
+            state: 'working' | 'done' | 'stopped' | 'failed'
+            startedAt: string
+            endedAt: string | null
+          }>`SELECT id, name, agent_id, model, state, started_at, ended_at FROM helpers WHERE task_id = ${taskId} ORDER BY started_at`
+          if (helpers.length === 0) return rounds
+          return rounds.map((round, index) => {
+            const next = rounds[index + 1]
+            const its = helpers.filter(
+              (helper) => (index === 0 || helper.startedAt >= round.createdAt) && (next === undefined || helper.startedAt < next.createdAt),
+            )
+            return its.length === 0 ? round : { ...round, helpers: its }
+          })
         })
 
       /** A task's thread: its head, and a page of its items; `fresh` reads the files it changed from git, whatever is kept. */

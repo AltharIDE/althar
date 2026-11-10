@@ -205,6 +205,14 @@ export class Helpers extends Context.Service<
                 severity: 'info',
                 title: `Helper · ${name}, ${copy === undefined ? 'on' : 'in a copy of'} ${changeWords} (${input.modelName}).`,
                 description: null,
+                // A row of the work's own, opening in place to what the helper does.
+                step: {
+                  kind: 'helper',
+                  name,
+                  branch: `${copy === undefined ? 'on' : 'in a copy of'} ${changeWords}, ${input.modelName}`,
+                  toward: null,
+                  thread: threadId,
+                },
               })
             const started = yield* Effect.exit(
               Effect.gen(function* () {

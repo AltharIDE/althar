@@ -28,6 +28,8 @@ export interface UsageLine {
   /** The models that ran on it, by name. */
   readonly models: ReadonlyArray<string>
   readonly tokens: number
+  /** Its tokens by model, where several ran on it: each model's share said beside its name. */
+  readonly byModel?: ReadonlyArray<{ readonly name: string; readonly tokens: number }>
   /** Why there is no figure, where it can't be known: said on the "—". */
   readonly why?: string
 }
@@ -47,6 +49,8 @@ export interface UsageText {
   estimateNote: string
   /** Under the name: the models, and their tokens. */
   what: (models: ReadonlyArray<string>, tokens: number) => string
+  /** Several models on one account: each with its tokens. */
+  byModel: (models: ReadonlyArray<{ readonly name: string; readonly tokens: number }>) => string
   /** How long its agents' turns took, all added up, and over how many. */
   worked: (took: string, turns: number) => string
 }
@@ -64,6 +68,7 @@ export const usageText: UsageText = {
   estimate: (figure) => `~${figure}`,
   estimateNote: 'An estimate',
   what: (models, tokens) => [...models, `${tokensWord(tokens)} tokens`].join(' · '),
+  byModel: (models) => models.map((model) => `${model.name} ${tokensWord(model.tokens)}`).join(' · ') + ' tokens',
   worked: (took, turns) => `Worked for ${took} over ${turns} ${turns === 1 ? 'turn' : 'turns'}`,
 }
 
@@ -123,7 +128,7 @@ export function UsageLines({ lines, heading, text }: UsageLinesProps) {
               <span>{line.name}</span>
             </span>
             <span className={s.what} data-marked={line.mark !== undefined || undefined}>
-              {t.what(line.models, line.tokens)}
+              {line.byModel !== undefined && line.byModel.length > 1 ? t.byModel(line.byModel) : t.what(line.models, line.tokens)}
             </span>
             <Figure line={line} t={t} />
           </li>

@@ -438,6 +438,11 @@ export const spendingOf = (
       const account = accounts.find((each) => each.id === accountId)
       const tokens = its.reduce((sum, turn) => sum + tokensIn(turn.usage), 0)
       const models = [...new Set(its.flatMap((turn) => (turn.model === null ? [] : [turn.model])))]
+      // Its tokens by model, as a task's usage reads by model, its helpers' sessions too (ADR-087).
+      const byModel = models.map((model) => ({
+        model,
+        tokens: its.filter((turn) => turn.model === model).reduce((sum, turn) => sum + tokensIn(turn.usage), 0),
+      }))
 
       // Paid per use: each session's own figure where its agent said one in dollars, else its turns at list prices.
       const { spent, estimated: listPriced } = spentOf(
@@ -467,6 +472,7 @@ export const spendingOf = (
         several: account !== undefined && account.several === 1,
         models,
         tokens,
+        ...(byModel.length > 1 ? { byModel } : {}),
         // A model OpenCode named without its provider: the agent's own line, priced per use.
         ...(provider === undefined || provider === '' ? {} : { provider }),
       }

@@ -76,6 +76,24 @@ export const TwoPlans: Story = {
     await expect(within(canvasElement).getByText('Claude Opus 5 · Claude Sonnet 5 · 13M tokens')).toBeInTheDocument()
   },
 }
+/** A lead and its helpers on one plan, on several models: each model's tokens beside its name (ADR-087). */
+export const ByModel: Story = {
+  args: {
+    heading: 'This task so far',
+    lines: [
+      {
+        ...TWO_PLANS[0]!,
+        byModel: [
+          { name: 'Claude Opus 5', tokens: 11_200_000 },
+          { name: 'Claude Haiku 5', tokens: 2_200_000 },
+        ],
+      },
+    ],
+  },
+  play: async ({ canvasElement }) => {
+    await expect(within(canvasElement).getByText('Claude Opus 5 11M · Claude Haiku 5 2.2M tokens')).toBeInTheDocument()
+  },
+}
 /** Paid per use: dollars at list prices said as an estimate, and with no price anyone said, a dash, never a guess. */
 export const PerUse: Story = {
   args: { lines: PER_USE },

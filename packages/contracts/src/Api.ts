@@ -1869,8 +1869,8 @@ export const NoticeItem = Schema.Struct({
      */
     step: Schema.optional(
       Schema.Struct({
-        /** A change started, shipped, merged, kept together with another, or dropped. */
-        kind: Schema.Literals(['new_change', 'shipped', 'merged', 'joined', 'dropped']),
+        /** A change started, shipped, merged, kept together with another, or dropped; or a helper its lead started (ADR-087). */
+        kind: Schema.Literals(['new_change', 'shipped', 'merged', 'joined', 'dropped', 'helper']),
         name: Schema.String,
         /** Its branch; for one shipped or merged, its pull request as people say it (PR #714). */
         branch: Schema.String,
@@ -1880,6 +1880,8 @@ export const NoticeItem = Schema.Struct({
         by: Schema.optional(Schema.Literals(['lead', 'coordinator', 'git', 'person'])),
         /** The change it waits for to merge, without building on its code. */
         waits: Schema.optional(Schema.String),
+        /** A helper's own thread, which its row opens to in place: what it did, as it did it. */
+        thread: Schema.optional(Schema.String),
       }),
     ),
     /**
@@ -3024,6 +3026,8 @@ export const AccountUse = Schema.Struct({
   /** The models that ran on it, by id, in the order they first did. */
   models: Schema.Array(Schema.String),
   tokens: Schema.Number,
+  /** Its tokens by model, in the order the models first ran (ADR-087: a task's usage by model, its helpers' too). */
+  byModel: Schema.optional(Schema.Array(Schema.Struct({ model: Schema.String, tokens: Schema.Number }))),
   /** The provider within the agent these turns ran on, by id (OpenCode's `opencode`, Zen); absent for an agent with one. */
   provider: Schema.optional(Schema.String),
   /** Why there is no figure, where it can't be known: said on the figure, as its place stays quiet. */
@@ -3481,6 +3485,20 @@ export const GraphRound = Schema.Struct({
   /** When a change to its steps added to them, if one did. */
   changedAt: Schema.NullOr(Schema.String),
   steps: Schema.Array(GraphStep),
+  /** The helpers its lead started in it (ADR-087), each a lane of its model's on the Graph face. Absent where none. */
+  helpers: Schema.optional(
+    Schema.Array(
+      Schema.Struct({
+        id: Schema.String,
+        name: Schema.String,
+        agentId: Schema.String,
+        model: Schema.NullOr(Schema.String),
+        state: Schema.Literals(['working', 'done', 'stopped', 'failed']),
+        startedAt: Schema.String,
+        endedAt: Schema.NullOr(Schema.String),
+      }),
+    ),
+  ),
 })
 export type GraphRound = typeof GraphRound.Type
 
