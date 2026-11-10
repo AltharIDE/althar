@@ -1623,6 +1623,36 @@ describe('finding pull requests to review', () => {
 })
 
 describe('the coordinator reading a pull request', () => {
+  it.live('reads queue failure details, job listings and whole logs by pull-request number', () => {
+    const at = hosted()
+    const github = makeFakeService({
+      pushUrl: () => at.bare,
+      checksOn: (sha) =>
+        sha === 'queue-build'
+          ? [{ name: 'queue-test', state: 'failed', log: 'queue failure', url: 'https://ci.test/queue-job' }]
+          : undefined,
+    })
+    github.addRepository(['meridian', 'api'])
+    github.addPullRequest({ path: ['meridian', 'api'], title: 'Change', author: 'dana' })
+    github.mergeQueue()
+    github.queueCommit(1, 'queue-build')
+    github.dequeue(1, 'checks')
+    return Effect.gen(function* () {
+      const { coordinator } = yield* project(at.working)
+      const read = yield* callTool(coordinator, 'read_pull_request', { pull_request: 1 })
+      assert.include(read, 'queue-test')
+      assert.include(read, 'queue failure')
+      assert.include(read, 'https://ci.test/queue-job')
+      const listed = yield* callTool(coordinator, 'read_checks', { pull_request: 1, queue: true })
+      assert.include(listed, 'Checks on queue-build')
+      assert.include(listed, 'queue-test')
+      assert.include(yield* callTool(coordinator, 'read_checks', { pull_request: 1, queue: true, check: 'queue-test' }), 'queue failure')
+      assert.include(
+        yield* callTool(coordinator, 'read_check_log', { pull_request: 1, queue: true, check: 'queue-test' }),
+        "PR #1's merge-queue build",
+      )
+    }).pipe(Effect.provide(withQueries(github)))
+  })
   it.live(
     'reads any of the project’s, by its number or link: where it stands, whether it conflicts, what it says and how its checks went',
     () => {
