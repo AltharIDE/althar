@@ -483,6 +483,13 @@ export interface AgentCli {
   readonly node?: true
   /** The copy that ships with Althar, by its path; null where this platform has none. */
   readonly bundled?: () => string | null
+  /**
+   * The variable an adapter that wraps it (rather than being it) reads for
+   * which copy to drive: where the person has their own, its session names
+   * that copy there, so it drives theirs, not the one the adapter ships with
+   * (`usingLocated`). Codex's adapter reads `CODEX_PATH`.
+   */
+  readonly drivenBy?: string
   /** Where Althar can download it. */
   readonly download?: AgentDownload
   /** Its maker's page on installing it, for a person who installs it themselves: https only. */
@@ -1033,7 +1040,9 @@ export const agents: Readonly<Record<AgentId, AgentDefinition>> = {
      * its adapter drives — the person's own, out on the device, where the
      * sandbox cannot reach it — and the bus address carries it to
      * `flatpak-spawn`; both only in a Flatpak, so a person's own `CODEX_PATH`
-     * never changes which Codex runs elsewhere.
+     * never changes which Codex runs elsewhere. Elsewhere, where the person
+     * has their own Codex, `usingLocated` names it in `CODEX_PATH` itself
+     * (`cli.drivenBy`), so the adapter drives theirs rather than its own.
      */
     launch: (node) => ({
       command: node,
@@ -1125,6 +1134,8 @@ export const agents: Readonly<Record<AgentId, AgentDefinition>> = {
     ],
     cli: {
       name: 'codex',
+      // The person's own Codex (a patched or wrapped build too) is what sessions drive, where they have one.
+      drivenBy: 'CODEX_PATH',
       // In a Flatpak sessions use the host's Codex bridge too; reporting the
       // bundled CLI here would show an unrelated sign-in state.
       ...(process.env.FLATPAK_ID === undefined ? { bundled: () => bundledCodex() } : {}),
