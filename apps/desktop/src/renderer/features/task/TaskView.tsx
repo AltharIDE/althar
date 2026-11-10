@@ -865,6 +865,7 @@ export function TaskView({
           workToward: (branch) => void model.workToward(branch),
         }
       : {}),
+    ...(snapshot.task.helpers === undefined ? {} : { stopHelper: (helper: string) => void model.stopHelper(helper) }),
     merge: (change) => (change.head === null ? undefined : void model.accept([{ head: change.head, url: change.url }])),
     postReview: (draftId) => void model.postReview(draftId),
     stopLaunch: (id) => void model.stopLaunch(id),

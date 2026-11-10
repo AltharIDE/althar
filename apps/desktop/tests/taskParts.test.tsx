@@ -138,6 +138,23 @@ describe('a task’s parts', () => {
     await waitFor(() => expect(client.shelveTask).toHaveBeenCalledWith(base.task.id, null))
   })
 
+  it('shows each helper its lead started on its row, with Stop', async () => {
+    const helped = snapshot({
+      task: {
+        ...base.task,
+        phase: 'running',
+        helpers: [{ id: 'hlp_1', name: 'Split the migration', change: 'Lane heights', model: 'Haiku 4.5' }],
+      },
+    })
+    const { client } = fakeClient({ getThread: vi.fn(async () => helped) })
+    withServices(<Task />, client)
+    const popover = await parts()
+    expect(popover.getByText('On Lane heights, Haiku 4.5')).toBeTruthy()
+    await userEvent.click(popover.getByText('Helper · Split the migration'))
+    await userEvent.click(await popover.findByRole('button', { name: 'Stop' }))
+    await waitFor(() => expect(client.stopHelper).toHaveBeenCalledWith(base.task.id, 'hlp_1'))
+  })
+
   it('posts a review draft from its row', async () => {
     const { client } = fakeClient({ getThread: vi.fn(async () => snapshot({ items: [items.review({ state: 'pending' })] })) })
     withServices(<Task />, client)

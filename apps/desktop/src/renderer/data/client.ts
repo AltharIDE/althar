@@ -266,6 +266,8 @@ export interface Client {
   readonly setRunOutside: (to: 'ask' | 'safe' | 'full') => Promise<void>
   /** Puts a task on Scratch, or on the board with null. */
   readonly shelveTask: (taskId: string, shelf: 'scratch' | null) => Promise<void>
+  /** Stops a helper the task's lead started. */
+  readonly stopHelper: (taskId: string, helper: string) => Promise<void>
   /** The presets the person has, in a project where one is named. */
   readonly listPresets: (projectId?: string) => Promise<ReadonlyArray<Preset>>
   /** Saves a preset from a task, or the parts the coordinator offered. */
@@ -823,6 +825,7 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
     setPostTeamReviews: (on) => command((commandId) => api.SetPostTeamReviews({ commandId, on })),
     setRunOutside: (to) => command((commandId) => api.SetRunOutside({ commandId, to })),
     shelveTask: (taskId, shelf) => command((commandId) => api.ShelveTask({ commandId, taskId, shelf })),
+    stopHelper: (taskId, helper) => command((commandId) => api.StopHelper({ commandId, taskId, helper })),
     listPresets: (projectId) => settle(api.ListPresets(projectId === undefined ? {} : { projectId })),
     savePreset: (input) => command((commandId) => api.SavePreset({ commandId, ...input })),
     removePreset: (id) => command((commandId) => api.RemovePreset({ commandId, id })),

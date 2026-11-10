@@ -1516,3 +1516,23 @@ CREATE TABLE presets (
   ) STRICT;
 
 CREATE UNIQUE INDEX presets_by_name ON presets (coalesce(project_id, ''), lower(name));
+
+CREATE TABLE helpers (
+    id TEXT PRIMARY KEY NOT NULL,
+    task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+    project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    thread_id TEXT NOT NULL,
+    workspace_id TEXT,
+    name TEXT NOT NULL CHECK (length(name) BETWEEN 1 AND 60),
+    brief TEXT NOT NULL,
+    agent_id TEXT NOT NULL,
+    model TEXT,
+    state TEXT NOT NULL CHECK (state IN ('working', 'done', 'stopped', 'failed')),
+    result TEXT,
+    started_at TEXT NOT NULL CHECK (started_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
+    ended_at TEXT CHECK (ended_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z')
+  ) STRICT;
+
+CREATE INDEX helpers_by_task ON helpers (task_id);
+
+CREATE UNIQUE INDEX helpers_by_thread ON helpers (thread_id);

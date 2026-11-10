@@ -1289,6 +1289,18 @@ Built since, in #739:
   start of its brief; the coordinator's thread offers one, with a button,
   once the same parts were set up twice running; Settings lists them, with
   Remove for the person's own.
+- **Helpers handed a change** (ADR-087's tasks 1 to 5, as this amends
+  them): `start_helper` starts one on any model, the lead's own without one,
+  in a session of its own (a step thread, `helpers`), working in the
+  worktree of the change it was handed, the only one writing there until
+  it reports; its commits stay on the change's branch for Ship. Its last
+  message, once it is done, is kept on its thread and in the lead's scratch
+  folder, and comes to the lead as quiet news, starting a lead that
+  stopped. While one works, the step's watch counts it as a turn to come
+  and `finish_step` waits; the lead's brief lists them; a helper reads and
+  works in its folder but ships, asks and starts nothing. Four at once,
+  fifty in a task's life. The header's parts show each at work, with Stop;
+  `stop_helper` is the lead's. Leads had `list_models` already.
 
 Compatibility: every change to the store is additive, with nullable
 columns an older build reads past; a run with no `ships` and a workspace
@@ -1297,8 +1309,7 @@ update finishes as a round; the API only gains fields and a command; the
 old "Review rounds" setting is kept and read by nothing; the lead's tools
 keep their names, `make_it_a_change` included.
 
-Still to build, as the rest of this proposal says: helpers handed a
-change.
+What the build left for later, and why, is in [Not built yet](#not-built-yet).
 
 It is done when:
 

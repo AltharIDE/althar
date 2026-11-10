@@ -65,6 +65,7 @@ export const WINDOW_ACTIONS = {
   runIt: { person: 'says how far to trust a pull request’s code: a lead’s run_it only relays their word' },
   shelve: { tool: 'change_part' },
   savePreset: { person: 'keeps a task’s parts as a preset of their own, in their settings' },
+  stopHelper: { person: 'stops a helper its lead started: the lead stops its own with stop_helper' },
   handOverHeld: { tool: 'change_lead' },
   answerQuestion: { person: 'answers what an agent asked them' },
   // The Change card.

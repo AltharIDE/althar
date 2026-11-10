@@ -116,6 +116,7 @@ import { IssueChanges } from './IssueChanges'
 import { IssueDrafts } from './IssueDrafts'
 import { postTeamReviews, Reviews, runOutside, setPostTeamReviews, setRunOutside } from './Reviews'
 import { shelve } from './scratch'
+import { Helpers } from './Helpers'
 import { describe as describePreset, partsOfTask, presetsIn, removePreset, savePreset } from './presets'
 import { FastLane } from './fastLane'
 import { MergeReviews } from './MergeReviews'
@@ -250,6 +251,7 @@ export const handlers = Api.toLayer(
     const issueDrafts = yield* IssueDrafts
     const issueChanges = yield* IssueChanges
     const reviews = yield* Reviews
+    const helpers = yield* Helpers
     const fastLane = yield* FastLane
     const mergeReviews = yield* MergeReviews
     const runs = yield* Runs
@@ -1605,6 +1607,7 @@ export const handlers = Api.toLayer(
           ),
         ),
       WorkToward: ({ commandId, taskId, toward }) => once(commandId, api(runs.workToward({ taskId, toward }))),
+      StopHelper: ({ commandId, taskId, helper }) => once(commandId, api(Effect.asVoid(helpers.stop({ taskId, helper, by: 'person' })))),
       DropMove: ({ commandId, taskId }) =>
         once(
           commandId,

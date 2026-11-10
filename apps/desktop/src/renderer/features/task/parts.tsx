@@ -26,6 +26,10 @@ export const partsText = {
   switchIt: 'Switch it',
   stayInWorktree: 'Stay in the worktree',
   callOff: 'Call it off',
+  /** A helper its lead started, at work on one of its changes (ADR-087). */
+  helper: (name: string) => `Helper · ${name}`,
+  helperOn: (change: string | null, model: string) => `${change === null ? 'On the task’s change' : `On ${change}`}, ${model}`,
+  stopHelper: 'Stop',
   /** The branch a running task works toward, changed (a task is a conversation plus parts). */
   towardField: 'Another branch to work toward',
   towardIt: 'Work toward it',
@@ -124,6 +128,8 @@ export interface PartsActions {
   readonly dropMove?: () => void
   /** Points the running task at another branch to work toward. */
   readonly workToward?: (branch: string) => void
+  /** Stops a helper its lead started. */
+  readonly stopHelper?: (helper: string) => void
 }
 
 /** The review drafts in the thread still waiting to be posted: the latest of each. */
@@ -223,6 +229,20 @@ export const partsOf = (snapshot: ThreadSnapshot, act: PartsActions): ReadonlyAr
               },
             ]),
       ],
+    })
+  }
+  // Its lead's helpers at work, each on one of its changes, with Stop (ADR-087).
+  for (const helper of task.helpers ?? []) {
+    const { stopHelper } = act
+    parts.push({
+      id: `helper:${helper.id}`,
+      icon: 'agents',
+      name: t.helper(helper.name),
+      detail: t.helperOn(helper.change, helper.model),
+      // At work for the task, beside what its lead left running; Stop in its row.
+      tone: 'live',
+      facts: [],
+      actions: stopHelper === undefined ? [] : [{ label: t.stopHelper, onClick: () => stopHelper(helper.id), variant: 'quiet' as const }],
     })
   }
   for (const change of task.changes) {

@@ -55,6 +55,7 @@ import { finishedBy, listWords, type PullRequestFacts, sectionWords } from './pu
 import { Policies, worksInOf } from './Policies'
 import { localTakenFor, worksLocal } from './local'
 import { Projects } from './Projects'
+import { Helpers } from './Helpers'
 import { ReviewRefused, Reviews } from './Reviews'
 import { shelve } from './scratch'
 import { findTasks, foundWords } from './Search'
@@ -138,6 +139,7 @@ type Store =
   | Busy
   | Accounts
   | Reviews
+  | Helpers
   | Tasks
   | Runs
   | Connections
@@ -367,6 +369,7 @@ export class Coordinator extends Context.Service<
       const issues = yield* Issues
       const issueDrafts = yield* IssueDrafts
       const reviews = yield* Reviews
+      const helpers = yield* Helpers
       const automations = yield* Automations
       /* How a task's pull requests stand: set by Queries, which can read them (it needs this service, so this can't need it). */
       let pullRequests: (taskId: string) => Effect.Effect<PullRequestFacts | undefined> = () =>
@@ -2673,7 +2676,69 @@ export class Coordinator extends Context.Service<
       yield* toolServer.serve('reviewer', [...readTasksTools, findIssuesTool])
       // A quick task's lead makes it a change when the person asks: offered only on a quick task not made one yet; refused,
       // with why, on any other. Any other kind becomes a change as a task of its own: draft_task and propose_plan.
+      // A lead's helpers (ADR-087): started on any model, each on one of the task's changes, heard as a new turn when done.
+      const HelperAsked = Schema.Struct({
+        brief: Schema.String,
+        name: Schema.String,
+        model: Schema.optional(Schema.String),
+        effort: Schema.optional(Schema.NullOr(Schema.String)),
+        change: Schema.optional(Schema.String),
+      })
+      const startHelper = (access: ToolAccess, input: unknown) =>
+        Effect.gen(function* () {
+          if (access.taskId === null) return yield* new ToolRefused({ message: 'Helpers are a task lead’s.' })
+          const asked = yield* read(HelperAsked, input)
+          // The lead's own model and effort, where it names none.
+          const own = yield* sessions.running(access.threadId)
+          const pick =
+            asked.model !== undefined
+              ? yield* stepOf(access.projectId, { model: asked.model, ...(asked.effort == null ? {} : { effort: asked.effort }) })
+              : Option.isSome(own)
+                ? { agentId: own.value.agentId, model: null, effort: undefined }
+                : yield* new ToolRefused({ message: 'Name the model it runs on, as list_models writes it.' })
+          const named = yield* modelNamer
+          return yield* helpers.start({
+            taskId: access.taskId,
+            name: asked.name,
+            brief: asked.brief,
+            agentId: pick.agentId,
+            model: pick.model ?? null,
+            modelName: named({ key: 'implement', agentId: pick.agentId, model: pick.model ?? null, skipped: false }),
+            ...(pick.effort == null ? {} : { effort: pick.effort }),
+            ...(asked.change === undefined ? {} : { change: asked.change }),
+          })
+        })
+      const StopAsked = Schema.Struct({ helper: Schema.String })
+      const stopHelper = (access: ToolAccess, input: unknown) =>
+        Effect.gen(function* () {
+          if (access.taskId === null) return yield* new ToolRefused({ message: 'Helpers are a task lead’s.' })
+          const asked = yield* read(StopAsked, input)
+          return yield* helpers.stop({ taskId: access.taskId, helper: asked.helper, by: 'lead' })
+        })
+
       yield* toolServer.serve('lead', [
+        tool(
+          'start_helper',
+          'Starts a helper (a task is a conversation plus parts, ADR-087): another agent, on any model, that works in the background on one of this task’s changes while you and the person carry on; its result comes to you as a new turn when it ends. Hand it a change (change: its name; the task’s first without one): it works in that change’s worktree, the only one writing there until it reports, and its commits stay on the change’s branch for Ship. brief is what to do, whole: it reads nothing of your conversation. name is a few words shown in the thread ("Split the migration"). model as list_models writes it, and effort: a quicker, cheaper model for searching and reading, a different maker’s for a second opinion, the strongest for hard reasoning, a plan over a key; your own without one. Four at once, fifty in a task’s life. Don’t wait or poll for it.',
+          {
+            type: 'object',
+            properties: {
+              brief: { type: 'string' },
+              name: { type: 'string', maxLength: 60 },
+              model: { type: 'string' },
+              effort,
+              change: { type: 'string', description: 'One of the task’s changes, by name; its first without one.' },
+            },
+            required: ['brief', 'name'],
+          },
+          startHelper,
+        ),
+        tool(
+          'stop_helper',
+          'Stops one of your helpers, by its name: nothing of it comes back, and its change is yours to write in again.',
+          { type: 'object', properties: { helper: { type: 'string' } }, required: ['helper'] },
+          stopHelper,
+        ),
         tool(
           'make_it_a_change',
           `Makes this quick task a real change, with a review and a pull request: call it only when the person asks to turn what you made into a real thing (to keep it, review it, or open a pull request), never on your own. Give the task a title for what the change does now (at most ${TITLE_LENGTH} characters); the model that reviews it, which only reads (pick a strong one, from another maker than yours where there is one), or null only where the person said it needs no review; and whether its pull request opens as a draft or ready for review (a draft, unless the person said ready). Its work goes on a branch of its own if it has none; then commit what belongs in the change, and call finish_step: the review comes next, then the pull request. Any other task, such as a prototype that should become the real build, or a review whose findings need a fix, starts the change as a task of its own: draft_task, then propose_plan.`,

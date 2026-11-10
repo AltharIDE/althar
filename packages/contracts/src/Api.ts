@@ -3476,6 +3476,10 @@ export const ThreadSnapshot = Schema.Struct({
     local: Schema.optional(Schema.Boolean),
     /** A chat on Scratch, off the board's lanes (a task is a conversation plus parts); absent for a task on the board. */
     scratch: Schema.optional(Schema.Boolean),
+    /** The helpers its lead started that are at work (ADR-087): each by name, the change it works on, and its model. */
+    helpers: Schema.optional(
+      Schema.Array(Schema.Struct({ id: Schema.String, name: Schema.String, change: Schema.NullOr(Schema.String), model: Schema.String })),
+    ),
     /**
      * A move between a worktree and Local the person asked for that waits (a task is a conversation plus parts): where to,
      * and why, in words. `seen`, where it asks first, about a checkout on a branch of the person's own: what it was on and at,
@@ -4856,6 +4860,8 @@ export const Api = RpcGroup.make(
   ),
   /** Calls off a move that waits: the task stays where it works. */
   command('DropMove', { taskId: Schema.String }, Schema.Void),
+  /** Stops a helper the task's lead started, by its id (ADR-087): what it had said stays on its thread. */
+  command('StopHelper', { taskId: Schema.String, helper: Schema.String }, Schema.Void),
   /** Puts a task on Scratch, or on the board with null (a task is a conversation plus parts, "Chats and Scratch"). */
   command('ShelveTask', { taskId: Schema.String, shelf: Schema.NullOr(Schema.Literal('scratch')) }, Schema.Void),
   /**

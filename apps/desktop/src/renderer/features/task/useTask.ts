@@ -174,6 +174,8 @@ export interface TaskModel {
   readonly shelve: (shelf: 'scratch' | null) => Promise<void>
   /** Saves the task's parts, team and the start of its brief as a preset, by name. */
   readonly savePreset: (name: string) => Promise<void>
+  /** Stops a helper its lead started, by its id. */
+  readonly stopHelper: (helper: string) => Promise<void>
   /** Hands its step held for a usage limit to another agent, on the account and model picked, rather than waiting for the reset. */
   readonly handOverHeld: (to: { readonly agentId: string; readonly accountId?: string; readonly model?: string }) => Promise<void>
   /** Answers an agent's question: what went wrong, in words, or null when it went through. */
@@ -702,6 +704,7 @@ export const useTask = (threadId: string): TaskModel => {
     runIt: (how) => onTask((taskId) => client.runIt(taskId, how)),
     shelve: (shelf) => onTask((taskId) => client.shelveTask(taskId, shelf)),
     savePreset: (name) => onTask((taskId) => client.savePreset({ name, taskId })),
+    stopHelper: (helper) => onTask((taskId) => client.stopHelper(taskId, helper)),
     handOverHeld: (to) => onTask((taskId) => client.handOverHeld({ taskId, ...to })),
     answerQuestion: (attentionId, answers) =>
       client.answerQuestion({ attentionId, answers }).then(

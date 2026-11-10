@@ -558,6 +558,7 @@ describe('the API', () => {
               DropMove: () => Effect.die('unused'),
               WorkToward: () => Effect.die('unused'),
               ShelveTask: () => Effect.die('unused'),
+              StopHelper: () => Effect.die('unused'),
               ListPresets: () => Effect.die('unused'),
               SavePreset: () => Effect.die('unused'),
               RemovePreset: () => Effect.die('unused'),

@@ -222,6 +222,11 @@ interface TaskThread {
    * `full`, as the team's code, set up and with the network.
    */
   readonly trust: 'safe' | 'full' | null
+  /**
+   * A helper its lead started (ADR-087, as "a task is a conversation plus parts" amends it): a session of its own, in a step
+   * thread of the task's, working in the worktree of the change it was handed; absent for the task's lead.
+   */
+  readonly helper?: { readonly name: string; readonly brief: string; readonly change: string | null }
 }
 
 /**
@@ -1298,6 +1303,9 @@ export class Sessions extends Context.Service<
           // A review after a merge reads a copy at the merged head, beside the task's folder: whether that folder is here or not.
           const merged = kind?.kind === 'step' ? yield* mergedReviewOf(threadId) : undefined
           if (merged !== undefined) return merged
+          // A helper works in the worktree of the change it was handed, not a reviewer's copy.
+          const helped = kind?.kind === 'step' ? yield* helperThreadOf(threadId) : undefined
+          if (helped !== undefined) return helped
           // A finished task's folder that was removed comes back before an agent starts in it, and is set up again (ADR-056).
           if (kind !== undefined && kind.kind !== 'coordinator') {
             const back = yield* bringBackFor(threadId, instance.systemId)
@@ -1386,6 +1394,43 @@ export class Sessions extends Context.Service<
             ...task,
             repositories: copies,
             cwd: startIn(copies),
+          } satisfies ThreadContext as ThreadContext
+        })
+
+      /** A helper's thread, as its session reads it: its task, its change's worktree, and what it was asked. */
+      const helperThreadOf = (threadId: string) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const [helper] = yield* sql<{ name: string; brief: string; workspaceId: string | null }>`
+            SELECT name, brief, workspace_id FROM helpers WHERE thread_id = ${threadId}`
+          if (helper === undefined) return undefined
+          const repositories = yield* sql<TaskRepository>`
+            SELECT b.display_name AS name, b.role, w.path AS worktree, w.branch, w.branched_at IS NOT NULL AS branched, w.base_ref,
+              w.base_commit, coalesce(b.default_base_ref, w.base_ref) AS default_branch, w.toward, b.folder AS within,
+              w.kind IS 'checkout' AS local, w.name AS change
+            FROM threads t JOIN workspaces w ON w.task_id = t.task_id AND w.device_id = ${instance.deviceId} AND w.state = 'ready'
+              AND w.access = 'write'
+            JOIN repository_bindings b ON b.id = w.binding_id
+            WHERE t.id = ${threadId} AND (${helper.workspaceId} IS NULL OR w.id = ${helper.workspaceId})
+            ORDER BY b.created_at, b.rowid LIMIT 1`
+          const [task] = yield* sql<{ projectId: ProjectId; taskId: string; title: string; description: string; request: string | null }>`
+            SELECT t.project_id, t.task_id, k.title, k.description, k.request FROM threads t JOIN tasks k ON k.id = t.task_id WHERE t.id = ${threadId}`
+          const [first] = repositories
+          if (task === undefined || first === undefined) return yield* new NotFound({ kind: 'helper with a ready worktree', id: threadId })
+          return {
+            role: 'task',
+            threadId,
+            ...task,
+            worktree: first.worktree,
+            branch: first.branch,
+            baseRef: first.baseRef,
+            baseCommit: first.baseCommit,
+            defaultBranch: first.defaultBranch,
+            repositories,
+            cwd: first.worktree,
+            review: null,
+            trust: null,
+            helper: { name: helper.name, brief: helper.brief, change: first.change ?? null },
           } satisfies ThreadContext as ThreadContext
         })
 
@@ -3339,9 +3384,21 @@ export class Sessions extends Context.Service<
           ? coordinatorBrief(thread)
           : thread.role === 'reviewer'
             ? reviewBrief(thread)
-            : thread.review !== null
-              ? reviewTaskBrief(thread, thread.review)
-              : taskBrief(thread, why)
+            : thread.helper !== undefined
+              ? Effect.succeed(helperBrief(thread, thread.helper))
+              : thread.review !== null
+                ? reviewTaskBrief(thread, thread.review)
+                : taskBrief(thread, why)
+
+      /** A helper's brief (ADR-087): what it was asked, whole, where it works, and how it ends: its last message is its result. */
+      const helperBrief = (thread: TaskThread, helper: { readonly name: string; readonly brief: string; readonly change: string | null }) =>
+        [
+          `You are a helper in Althar, "${helper.name}", started by the lead of the task "${thread.title}" to do one thing in the background while the person keeps talking with the lead. You read nothing of their conversation: what you were asked is below, whole.`,
+          `You work in ${thread.cwd}, the worktree of ${helper.change === null ? 'the task’s change' : `its change “${helper.change}”`}, on ${thread.branch}. You're the only one writing there until you end: commit what you change there, in commits of their own with clear messages. Push nothing and open no pull request: the change ships with the person's Ship, after its review.`,
+          "You can't ask the person anything, and you start no helpers of your own. Where something stops you, say so in your result rather than guess.",
+          'When you are done, end your turn with your result, short: what you did or found, with paths and lines, and what you couldn’t do. That last message is what the lead reads, as a new turn.',
+          `What you were asked:\n\n${helper.brief}`,
+        ].join('\n\n')
 
       /** A review task's lead's brief: someone else's pull request, where its copy is, what it may do, and how it drafts. */
       const reviewTaskBrief = (thread: TaskThread, review: Reviewed) =>
@@ -3527,6 +3584,18 @@ export class Sessions extends Context.Service<
             OTHER_TASKS,
             // The person's decisions the code doesn't show, which the coordinator keeps: whether issues are filed at once among them.
             ...(yield* Effect.map(notesOf(thread.projectId), (notes) => (notes.length === 0 ? [] : [notesSection(notes)]))),
+            // Its helpers at work (ADR-087): a handed-over lead knows of them, and that their results come as new turns.
+            ...(yield* Effect.map(
+              sql<{ name: string; change: string | null }>`
+                SELECT h.name, w.name AS change FROM helpers h LEFT JOIN workspaces w ON w.id = h.workspace_id
+                WHERE h.task_id = ${thread.taskId} AND h.state = 'working' ORDER BY h.started_at`,
+              (working) =>
+                working.length === 0
+                  ? []
+                  : [
+                      `Your helpers at work, each on a change it was handed, the only one writing there until it reports; their results come to you as new turns, so don't wait or poll: ${working.map((one) => `"${one.name}" on ${one.change ?? 'the task’s change'}`).join(', ')}. stop_helper stops one.`,
+                    ],
+            )),
             // Several changes (a task is a conversation plus parts): each its own worktree and branch, named, side by side.
             changes
               ? `It holds several changes, each one line of work with its own branch, worktree and pull request, which ships and is reviewed on its own. They are side by side in ${thread.cwd}; commit each change's work in its own folder, and say which change a commit went to:\n${thread.repositories.map((repository) => `- ${repository.change ?? thread.title}${new Set(thread.repositories.map((one) => one.name)).size > 1 ? ` (${withRole(repository.name, repository.role)})` : ''}: ${where(repository)}.`).join('\n')}\nWhat the person says is for the task, not one change: work out which change it is about, as you would in a conversation. Start another change with start_change where work should be reviewed or merged apart, or go elsewhere.`

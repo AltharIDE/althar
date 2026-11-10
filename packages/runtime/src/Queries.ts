@@ -3410,6 +3410,10 @@ export class Queries extends Context.Service<
           // What it used of each account its agents ran on: a reading that fails leaves it out, never the thread (ADR-084).
           const usage = yield* spendingOf({ taskId: head.taskId }).pipe(Effect.orElseSucceed(() => []))
           const time = yield* taskTimeOf(head.taskId)
+          // Its lead's helpers at work (ADR-087), each on its change.
+          const helpersAtWork = yield* sql<{ id: string; name: string; change: string | null; agentId: string; model: string | null }>`
+            SELECT h.id, h.name, w.name AS change, h.agent_id, h.model FROM helpers h LEFT JOIN workspaces w ON w.id = h.workspace_id
+            WHERE h.task_id = ${head.taskId} AND h.state = 'working' ORDER BY h.started_at`
           // A move between a worktree and Local that waits: where to, why, and what it asks of the person, as last said.
           const [moving] = yield* sql<{ to: 'worktree' | 'checkout'; why: string | null; branch: string | null; head: string | null }>`
             SELECT w.moving_to AS "to", json_extract(e.payload, '$.why') AS why, json_extract(e.payload, '$.seen.branch') AS branch,
@@ -3438,6 +3442,16 @@ export class Queries extends Context.Service<
               worktree: head.worktree,
               ...(card?.local === true ? { local: true } : {}),
               ...(card?.scratch === true ? { scratch: true } : {}),
+              ...(helpersAtWork.length === 0
+                ? {}
+                : {
+                    helpers: helpersAtWork.map((one) => ({
+                      id: one.id,
+                      name: one.name,
+                      change: one.change,
+                      model: one.model ?? one.agentId,
+                    })),
+                  }),
               ...(moving === undefined
                 ? {}
                 : {

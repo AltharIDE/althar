@@ -29,6 +29,8 @@ const OWN = [
   'read_checks',
   'record_setup',
   'run_it',
+  'start_helper',
+  'stop_helper',
   'wait_for_person',
 ]
 

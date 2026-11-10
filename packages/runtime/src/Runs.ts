@@ -2208,8 +2208,13 @@ export class Runs extends Context.Service<
           const live = yield* sessions.running(event.threadId)
           if (Option.isSome(live) && turn?.sessionId != null && live.value.sessionId !== turn.sessionId) return
           // More input waits on the thread, so another turn comes, which may yet report; or one came already, or the step reported.
+          // A helper of its lead's at work is another turn to come too (ADR-087): its result starts one.
           const [queued] = yield* sql<{ id: string }>`
-            SELECT id FROM user_inputs WHERE thread_id = ${event.threadId} AND state = 'queued' LIMIT 1`
+            SELECT id FROM user_inputs WHERE thread_id = ${event.threadId} AND state = 'queued'
+            UNION ALL
+            SELECT h.id FROM helpers h JOIN threads t ON t.task_id = h.task_id AND t.id = ${event.threadId} AND t.kind = 'task'
+            WHERE h.state = 'working'
+            LIMIT 1`
           if (queued !== undefined || (yield* pastTurn(event.threadId, event.turnId, on.attemptId))) return
           const inARow = event.state === 'completed' && event.errorClass === undefined ? yield* blanks(event.threadId, event.turnId) : 0
           if (inARow > 0) return yield* blankTurn(event.threadId, event.turnId, on, inARow, info)
