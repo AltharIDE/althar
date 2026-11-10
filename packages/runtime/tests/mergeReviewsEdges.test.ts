@@ -388,6 +388,9 @@ describe('the review after a merge, at its edges', () => {
     return Effect.gen(function* () {
       const task = yield* opened(working, '[review:wait]')
       const pushed = git(bare, 'rev-parse', BRANCH)
+      // Its lead stopped first: on Windows no folder an agent works in can be removed.
+      yield* Effect.ignore((yield* Sessions).stop(task.threadId))
+      yield* gone(task.threadId)
       rmSync(task.path, { recursive: true, force: true })
       yield* mergeIt(bare, github, task.taskId)
       yield* until(reviewOf(task.url), (row) => row?.state === 'running')
@@ -498,7 +501,10 @@ describe('the review after a merge, at its edges', () => {
       execFileSync('touch', [blocker])
       yield* mergeIt(bare, github, task.taskId)
       yield* until(reviewOf(task.url), (row) => (row?.attempts ?? 0) > 0)
-      // Its worktree gone and its repository moved: what merged isn't anywhere here.
+      // Its worktree gone and its repository moved: what merged isn't anywhere here. Its lead stopped first, as on Windows no
+      // folder an agent works in can be removed.
+      yield* Effect.ignore((yield* Sessions).stop(task.threadId))
+      yield* gone(task.threadId)
       rmSync(task.path, { recursive: true, force: true })
       renameSync(working, `${working}-moved`)
       yield* (yield* FastLane).retryPendingReviews()
