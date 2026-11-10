@@ -293,6 +293,12 @@ describe('a lead’s helpers', () => {
       assert.isTrue(existsSync(join(task.path, 'change.txt')))
       assert.isFalse(existsSync(wrote.copyPath ?? ''))
       assert.throws(() => git(bare, 'rev-parse', '--verify', wrote.keptRef ?? ''))
+      // Once its task settles, its kept commit's ref goes.
+      yield* sql`UPDATE tasks SET settled_at = ${new Date().toISOString()} WHERE id = ${task.taskId}`
+      yield* (yield* Helpers).lookAtHours
+      assert.throws(() => git(task.path, 'rev-parse', '--verify', '-q', wrote.keptRef ?? ''))
+      const [cleared] = yield* sql<{ keptRef: string | null }>`SELECT kept_ref FROM helpers WHERE id = ${wrote.id}`
+      assert.isNull(cleared?.keptRef ?? null)
     }).pipe(Effect.provide(runtimeWith(github)))
   })
 

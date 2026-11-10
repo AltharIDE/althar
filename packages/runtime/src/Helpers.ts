@@ -444,6 +444,8 @@ export class Helpers extends Context.Service<
             yield* Effect.sleep(Duration.millis(200))
             const [still] = yield* sql<{ state: string }>`SELECT state FROM helpers WHERE id = ${helper.id}`
             if (still?.state !== 'working') return
+            // Its task settled, which stops everything of it: it stops with it, and its lead isn't woken (ADR-068).
+            if (yield* settled(helper.taskId)) return yield* ended(helper.id, 'stopped', 'Its task settled.')
             yield* ended(helper.id, 'failed', 'Its agent stopped before it was done.')
             const lead = yield* leadThreadOf(helper.taskId)
             if (lead !== undefined)
@@ -468,9 +470,28 @@ export class Helpers extends Context.Service<
           )
         })
 
+      /** Whether a task is settled: what stops everything of it, its helpers too. */
+      const settled = (taskId: string) =>
+        Effect.map(
+          SqlClient.SqlClient.pipe(
+            Effect.flatMap((sql) => sql<{ settledAt: string | null }>`SELECT settled_at FROM tasks WHERE id = ${taskId}`),
+          ),
+          ([task]) => task?.settledAt != null,
+        )
+
       /** A helper past its hour is stopped, and its lead told: what it said is on its thread, and nothing more comes. */
       const overTime = Effect.gen(function* () {
         const sql = yield* SqlClient.SqlClient
+        // A writing helper's kept commit goes once its task settles: nothing is left to bring it into (ADR-087, task 6).
+        const kept = yield* sql<{ id: string; keptRef: string; path: string | null }>`
+          SELECT h.id, h.kept_ref, coalesce(
+              (SELECT l.path FROM workspaces w JOIN repository_locations l ON l.binding_id = w.binding_id WHERE w.id = h.workspace_id LIMIT 1),
+              (SELECT w.path FROM workspaces w WHERE w.id = h.workspace_id)) AS path
+          FROM helpers h JOIN tasks k ON k.id = h.task_id WHERE h.kept_ref IS NOT NULL AND k.settled_at IS NOT NULL`
+        for (const one of kept) {
+          if (one.path !== null) yield* git(one.path, 'update-ref', '-d', one.keptRef).pipe(Effect.ignore)
+          yield* sql`UPDATE helpers SET kept_ref = NULL WHERE id = ${one.id}`
+        }
         const before = new Date((yield* Clock.currentTimeMillis) - Duration.toMillis(HELPER_HOUR)).toISOString()
         const late = yield* sql<HelperRow & { taskId: string }>`
           SELECT id, name, thread_id, agent_id, model, state, task_id FROM helpers WHERE state = 'working' AND started_at <= ${before}`

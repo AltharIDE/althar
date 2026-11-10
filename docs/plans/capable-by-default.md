@@ -263,7 +263,7 @@ lasted of it).
   (ADR-071's review steps). *Moved to phase 4* when phase 2 was built: its
   copy becomes a worktree it can install in, as a team pull request's
   review's does, and both are one change to how a review's copy is made.
-- **Helpers** (ADR-087, when built) get their lead's MCP servers and skills.
+- **Helpers** ([tasks § Helpers](../decisions/tasks.md#helpers)) get their lead's MCP servers and skills.
 
 **As built.** One tool set: each tool is defined once and served to both
 roles (`ToolServer.serve(POOL, …)`); the coordinator has every tool but a

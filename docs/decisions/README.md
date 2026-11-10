@@ -39,10 +39,6 @@ There are no more numbered ADRs. A proposal that isn't decided yet lives in
 
 Proposals waiting now:
 
-- [ADR-087](proposed/087-a-lead-starts-helpers-on-any-agent-in-copies-of-their-own.md):
-  a lead's helpers. Its tasks 1 to 5 are built for a helper handed one of
-  its task's changes ([tasks § Helpers](tasks.md#helpers)); a helper in a
-  copy of its own, and its tasks 6 to 8, are still proposed.
 - [ADR-103](proposed/103-projects-live-locally-or-on-a-host-and-place-work-in-pools.md):
   projects on a host, and work placed across pools.
 
@@ -50,15 +46,17 @@ Proposals waiting now:
 
 ADR-002 to ADR-102 were folded into the area documents and removed. The
 documents hold what is current; git history keeps the old texts, last
-under `docs/decisions/archive/` at commit `997f0e99b`. Two of the old ADRs,
-ADR-087 and ADR-103, are still proposals in [`proposed/`](proposed/).
+under `docs/decisions/archive/` at commit `997f0e99b`. ADR-087 was built in
+#739 and folded into [tasks § Helpers](tasks.md#helpers); its text is in git
+history under `docs/decisions/proposed/`. One of the old ADRs, ADR-103, is
+still a proposal in [`proposed/`](proposed/).
 
 "A task is a conversation plus parts", decided on 8 November and built in
 #739, folded into [tasks](tasks.md), [workspaces and
 runs](workspaces-and-runs.md), [reviews](reviews.md), [code
 hosts](code-hosts.md), [agents](agents.md), [what agents may
 do](what-agents-may-do.md) and [the desktop app](desktop-app.md); what it
-decided and isn't built is in [tasks § Not built yet](tasks.md#not-built-yet).
+decided was built there too.
 Its text, with the products it read and the alternatives it turned down, is
 in git history under `docs/decisions/proposed/`.
 
@@ -153,7 +151,7 @@ one.
 | 084 | What a task, or the coordinator's day, used is said per plan and per credit, as the share of a week or dollars, in the context ring and a Usage card in Outputs, with no total | [agents § What a task used](agents.md#what-a-task-used) |
 | 085 | A fork's branches go upstream by a choice of the project's, offered once on what its host says; remotes are never rewritten, and open pull requests stay where they are | [code-hosts § A fork's branches](code-hosts.md#a-forks-branches) |
 | 086 | The coordinator stops, holds, restarts and settles a task when the person's message in that turn asks, with a line in both threads; any other turn asks on a card, and discarding deletes nothing | [coordinator § Moving a task](coordinator.md#moving-a-task) |
-| [087](proposed/087-a-lead-starts-helpers-on-any-agent-in-copies-of-their-own.md) | A lead starts helpers on any agent, each in a copy of its own, and hears each one's result as a new turn | Proposed; would fold into [tasks § Helpers (proposed)](tasks.md#helpers-proposed) |
+| 087 | A lead starts helpers on any agent, each in a copy of its own or on a change it hands them, and hears each one's result as a new turn | [tasks § Helpers](tasks.md#helpers) |
 | 088 | The plan countdown, review rounds and new-project defaults are settings, read where they apply and seeding a project's first rules | [tasks § Plan and review settings](tasks.md#plan-and-review-settings) |
 | 089 | The asks and refusals left once the sandbox is the boundary are what can't be undone: a crossing goes unread, a line is read from the shell's folder, and tearing down or publishing asks | [what-agents-may-do § Git's guard](what-agents-may-do.md#gits-guard) |
 | 090 | Run opens its list, and runs where it is picked | [workspaces-and-runs § Run and where it runs](workspaces-and-runs.md#run-and-where-it-runs) |

@@ -18,9 +18,10 @@ was decided. These are what they leave open.
 
 **Tasks and the coordinator**
 
-- [x] **The Scratch shelf and presets.** Built: chats sit on Scratch and
-  presets name a task's starting parts ([tasks](decisions/tasks.md#chats-and-scratch)).
-  Scratch's own look waits on a prototype.
+- [x] **The Scratch shelf and presets.** Built: chats sit on Scratch, its own
+  shelf listing them by their latest exchange, and presets name a task's
+  starting parts ([tasks](decisions/tasks.md#chats-and-scratch)). Whether
+  Scratch offers to clear chats untouched for a while is still open.
 - [x] **Moving a running task.** Built: it moves between a worktree and Local,
   and changes the branch it works toward, at any time
   ([workspaces and runs](decisions/workspaces-and-runs.md#moving-a-running-task)).
@@ -30,8 +31,10 @@ was decided. These are what they leave open.
 - [ ] **The coordinator off Claude Code.** OpenCode and Windows have no
   sandbox to hold it, so its copies and the reader rules are its boundary
   there ([the coordinator](decisions/coordinator.md#its-copies-of-the-repositories)).
-- [ ] **Helpers** in a copy of their own stay a proposal ([ADR-087](decisions/proposed/087-a-lead-starts-helpers-on-any-agent-in-copies-of-their-own.md)).
-  A helper handed one of its task's changes is built ([tasks](decisions/tasks.md#helpers)).
+- [x] **Helpers.** Built: handed a change or in a copy of their own, on any
+  agent, their results coming back as turns ([tasks](decisions/tasks.md#helpers)).
+  Kimi's, Qwen Code's and Junie's own background helpers stay on, as nothing
+  Althar owns switches them off.
 
 **What agents may do, and the person's setup**
 

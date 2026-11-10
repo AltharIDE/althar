@@ -167,8 +167,13 @@ told to run its tests and its app.
   registry settings (`.npmrc`, `.yarnrc`, `bunfig.toml`) in place of any the
   pull request changed, copies nothing of the person's setup, and runs its
   commands in the sandbox, offline, with every lead tool; what didn't
-  install is said, with Trust fully beside it. **Trust fully** runs it as
-  the team's code.
+  install is said, with Trust fully beside it, and so is each of the
+  lockfile's entries from a git host or a tarball off a registry that isn't
+  in `node_modules` after it (npm's, bun's, yarn's and pnpm's lockfiles,
+  `lockOutside.ts`). **Trust fully** runs it as the team's code.
+- **Stop running it,** beside how far it trusts the code while it runs,
+  takes that back: what its lead started of it stops, its copy is read only
+  again, and its lead starts afresh as a reader, told so.
 - **"When I say Run it on code from outside the team"** (Settings, Pull
   requests): ask each time, the default, run safely, or trust fully. It only
   answers the question: the code runs once the person says Run it.
@@ -271,3 +276,4 @@ A round that forgets `kept_views` shows less, never something stale.
 - 8 Nov 2026: the limits sweep (#696) built: a review of the repository's own people gets every lead tool and the network.
 - 9 Nov 2026: a fix is checked only where it needs it, tiny ones not at all, and Ship is reviewed from where the last review left off (a task is a conversation plus parts, [tasks](tasks.md#changing-parts)).
 - 10 Nov 2026: Run it, safely or trusted, with its setting; any task can review a related pull request beside its own work (a task is a conversation plus parts).
+- 10 Nov 2026: Stop running it; Run safely names the lockfile's entries from a git host or a tarball that didn't install.
