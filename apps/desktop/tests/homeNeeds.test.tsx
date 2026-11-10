@@ -161,6 +161,22 @@ describe('the home', () => {
     expect(client.push).not.toHaveBeenCalled()
   })
 
+  it('says what a review after a merge found, and hands it to the lead with Fix it from its line', async () => {
+    const found = task({
+      taskId: 't7',
+      threadId: 'th7',
+      title: 'Rename the setting',
+      state: 'done',
+      change: change({ state: 'merged', draft: false }),
+      afterMerge: { url: 'https://github.com/meridian/api/pull/12', words: '#12', state: 'found', findings: 2 },
+    })
+    const { client } = fakeClient({ getHome: vi.fn(async () => home({ tasks: [found] })) })
+    withServices(<Home />, client)
+    expect(await screen.findByText('After #12 merged')).toBeTruthy()
+    await userEvent.click(await screen.findByRole('button', { name: /new pull request after #12/ }))
+    await waitFor(() => expect(client.fixAfterMerge).toHaveBeenCalledWith('t7'))
+  })
+
   it('takes a change out of what waits on the person while it merges, and puts it back with why where it didn’t', async () => {
     const ready = task({ taskId: 't5', threadId: 'th5', title: 'Name it better', change: change({ draft: false, checks: null }) })
     let refuse = (_: unknown) => undefined as void

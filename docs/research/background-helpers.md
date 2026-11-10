@@ -4,7 +4,7 @@ Research for [DEV-181](https://linear.app/althar/issue/DEV-181/leads-start-helpe
 a task's lead starts a helper on any agent and model, its turn ends so the
 person keeps talking to it, and the helper's result reaches it as a new turn.
 The design it led to is
-[ADR-087](../decisions/proposed/087-a-lead-starts-helpers-on-any-agent-in-copies-of-their-own.md).
+[ADR-087](../decisions/tasks.md#helpers).
 
 Read on 2 November 2026, from primary sources: each product's docs and
 changelog, its source where it is open (cited at a commit or tag), protocol
@@ -1544,7 +1544,7 @@ Only what bears on "start a helper, keep talking, be woken with its result".
 
 ### What this means for Althar
 
-[ADR-087](../decisions/proposed/087-a-lead-starts-helpers-on-any-agent-in-copies-of-their-own.md)
+[ADR-087](../decisions/tasks.md#helpers)
 takes these: Althar, as the client that owns the lead's conversation, sends
 the result as a turn of its own, the same on every agent, after the turn
 under way and batched; a helper works in a copy of its own and brings

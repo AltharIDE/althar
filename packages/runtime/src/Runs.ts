@@ -53,7 +53,23 @@ import { branchOnFirstWrite, unbranched } from './firstWrite'
 import { Instance } from './Instance'
 import { Issues } from './Issues'
 import { makeKeyedLock } from './keyedLock'
-import { type CheckoutConsent, type CheckoutSeen, checkoutsHeld, giveBackSpot, place, settledHolding, type Spot } from './local'
+import {
+  type CheckoutConsent,
+  type CheckoutSeen,
+  checkoutsHeld,
+  dropMove,
+  giveBackSpot,
+  type MoveConsent,
+  type Moved,
+  moveToLocal,
+  moveToWorktree,
+  movesWaiting,
+  place,
+  settledHolding,
+  type Spot,
+  waitMove,
+} from './local'
+import { Setups } from './Setups'
 import { quickIn } from './kinds'
 import { capitalized, Limits, lowWords, NEARLY_OUT, noReportWords, type Out, outStep, outWords, type Room, whenWords } from './Limits'
 import { NO_REPORT } from './missedReports'
@@ -63,7 +79,7 @@ import { roundsNow, roundsOutNow } from './plansAndReviews'
 import { unreviewedLine } from './pullRequestReview'
 import { Policies, usageLimitOf } from './Policies'
 import { conventionsAt } from './conventions'
-import { commitOf, commitsAhead, git, treeOf, uncommittedFiles } from './git'
+import { commitOf, commitsAhead, git, gitOutcome, treeOf, uncommittedFiles } from './git'
 import { DESCRIPTION_SHAPE, descriptionAsk, filesLine, type Undescribed } from './pullRequestWords'
 import { evidenceFolderOf, reviewCopyOf, snapshotForReview } from './reviewCopy'
 import { change, fact, timestamp } from './records'
@@ -89,6 +105,7 @@ import {
 } from './evidence'
 import { Sessions } from './Sessions'
 import { LeftBehind } from './LeftBehind'
+import { MergeReviews } from './MergeReviews'
 import { type GiveUp, watchStalls } from './Stalls'
 import type { Tried } from './stallWatch'
 import { addItem } from './threads'
@@ -205,7 +222,28 @@ export const PlanParameters = Schema.Struct({
    * hold. Absent from every other run, so a store written before reads the
    * same.
    */
-  ships: Schema.optional(Schema.Struct({ from: Schema.Record(Schema.String, Schema.String) })),
+  ships: Schema.optional(
+    Schema.Struct({
+      from: Schema.Record(Schema.String, Schema.String),
+      /**
+       * Review and merge (a task is a conversation plus parts, "Merge, with commits not shipped"): once what waited is up, its
+       * pull requests merge, unless the lead set a finding of its review aside, which brings the task back to the person
+       * first. Absent from a plain Ship.
+       */
+      merges: Schema.optional(Schema.Boolean),
+      /**
+       * The change this Ship sends, by workspace, where its task has several (a task is a conversation plus parts, "Each
+       * change ships and is followed on its own"): its review reads it alone, and only it goes up. Absent where the task has
+       * one, which ships whole as before.
+       */
+      only: Schema.optional(Schema.Array(Schema.String)),
+      /**
+       * The changes that ship after it, each in a Ship of its own with its own review, in order: the bottom of a stack first.
+       * Each is its workspaces' ids, joined by commas: a change in several repositories ships as one.
+       */
+      next: Schema.optional(Schema.Array(Schema.String)),
+    }),
+  ),
   /**
    * The fast lane (README section 6): reviewed after it merges, not before.
    * Its one step implements, its review step names who reads it once it
@@ -420,6 +458,8 @@ type Store =
   | Artifacts
   | Connectivity
   | LeftBehind
+  | MergeReviews
+  | Setups
 
 /**
  * Whether a publish step's failure may pass if tried again (DEV-173): the
@@ -505,6 +545,10 @@ export type StuckAnswer =
 class RunStopped extends Schema.TaggedError<RunStopped>()('RunStopped', { runId: Schema.String }) {}
 
 /** Nothing, where the run was stopped as a step was on its way. */
+/** How often, and how many times, the next change's Ship is tried again while the task is still at work. */
+const NEXT_SHIP_EVERY = Duration.millis(500)
+const NEXT_SHIP_TRIES = 240
+
 const unlessStopped = <A, E, R>(effect: Effect.Effect<A, E | RunStopped, R>) =>
   effect.pipe(
     Effect.catchIf(
@@ -717,6 +761,22 @@ export class Runs extends Context.Service<
       readonly taskId: string
       /** Its own lead asked in its turn: it ships once that turn ends, refused then only where nothing waits. */
       readonly afterTurn?: boolean
+      /** One of its changes, by name: it ships alone, after what waits beneath it in its stack. Every change waiting without. */
+      readonly change?: string
+    }): Effect.Effect<void, unknown>
+    /**
+     * Merge, with commits not shipped (a task is a conversation plus parts):
+     * `review`, Review and merge, ships them with one review of what waited
+     * and merges once they are up, unless the lead set a finding aside; `now`,
+     * Merge now, sends them up and merges at once, and they are reviewed after
+     * the merge where the task has a reviewer. With nothing waiting, it merges
+     * as it stands.
+     */
+    mergeWaiting(input: {
+      readonly envelope: CommandEnvelope
+      readonly taskId: string
+      readonly how: 'review' | 'now'
+      readonly url?: string
     }): Effect.Effect<void, unknown>
     /** Whether the task's plan waits for a place before its first step, nothing of it started yet: the person can still change it. */
     planWaits(taskId: string): Effect.Effect<boolean, SqlError.SqlError, SqlClient.SqlClient>
@@ -777,6 +837,33 @@ export class Runs extends Context.Service<
     }): Effect.Effect<void, unknown>
     /** Looks again at what waits for a checkout, as a plan changed where it works, or a task settled. */
     readonly checkoutsMoved: Effect.Effect<void>
+    /**
+     * Moves a running task's change between a worktree and Local, between its lead's turns (a task is a conversation plus
+     * parts, "Moving between a worktree and Local"): at once where nothing holds it, else once it can, tried again every few
+     * seconds; or the person is asked first, about a checkout on a branch of their own.
+     */
+    move(input: {
+      readonly envelope: CommandEnvelope
+      readonly taskId: string
+      readonly to: 'worktree' | 'checkout'
+      readonly change?: string | null
+      readonly consent?: MoveConsent
+    }): Effect.Effect<Moved, unknown>
+    /** Calls off a move that waits: the task stays where it works. */
+    dropMove(input: { readonly envelope: CommandEnvelope; readonly taskId: string }): Effect.Effect<void, unknown>
+    /**
+     * Points a running task at another branch to work toward (a task is a conversation plus parts, "Changing the branch a
+     * task works toward"), or its default with null: between its lead's turns, the person's word waiting for one under way;
+     * its lead's own, from its tool, at once. A conflict goes to its lead; a change pushed already opens its new pull
+     * request into the new branch, unless it waits for Ship. What it did, in words.
+     */
+    workToward(input: {
+      readonly taskId: string
+      readonly toward: string | null
+      readonly change?: string | null
+      /** Its lead asked, in its turn: no turn to wait for. */
+      readonly byLead?: boolean
+    }): Effect.Effect<ReadonlyArray<string>, unknown>
   }
 >()('@althar/runtime/Runs') {
   static readonly layer: Layer.Layer<Runs, never, Store> = Layer.effect(
@@ -786,6 +873,7 @@ export class Runs extends Context.Service<
       const instance = yield* Instance
       const sessions = yield* Sessions
       const leftBehind = yield* LeftBehind
+      const mergeReviews = yield* MergeReviews
       /**
        * Tasks with something still at work here: an agent, in a turn or idle,
        * or a settling not done stopping what they ran. A settled Local task's
@@ -814,6 +902,8 @@ export class Runs extends Context.Service<
       const provide = <A, E>(effect: Effect.Effect<A, E, Store>) => Effect.provideContext(effect, context)
       // Starts a thread's budget again, as a step that starts does: the stall watch's, once it is running below.
       let freshen: (threadId: string) => Effect.Effect<void> = () => Effect.void
+      // Ships the next change of a task's queue, in a Ship of its own: set once Ship is made below.
+      let shipNext: (taskId: string, merges: boolean, queued: ReadonlyArray<string>) => Effect.Effect<void> = () => Effect.void
 
       /** The workflow every task runs, for now: made once per profile. */
       const workflowVersion = Effect.gen(function* () {
@@ -1645,7 +1735,7 @@ export class Runs extends Context.Service<
             JOIN nodes n ON n.execution_id = e.id
             JOIN node_attempts a ON a.node_id = n.id AND a.state = 'running'
             WHERE t.id = ${threadId}
-              AND ((t.kind = 'task' AND n.node_key IN ('implement', 'settle')) OR (t.kind = 'step' AND n.node_key = 'review'))
+              AND ((t.kind = 'task' AND n.node_key IN ('implement', 'settle')) OR (t.kind = 'step' AND t.node_key = 'review' AND n.node_key = 'review'))
             ORDER BY a.admitted_at DESC LIMIT 1`
           if (row === undefined) return undefined
           const run = yield* currentRun(row.taskId)
@@ -2137,8 +2227,13 @@ export class Runs extends Context.Service<
           const live = yield* sessions.running(event.threadId)
           if (Option.isSome(live) && turn?.sessionId != null && live.value.sessionId !== turn.sessionId) return
           // More input waits on the thread, so another turn comes, which may yet report; or one came already, or the step reported.
+          // A helper of its lead's at work is another turn to come too (ADR-087): its result starts one.
           const [queued] = yield* sql<{ id: string }>`
-            SELECT id FROM user_inputs WHERE thread_id = ${event.threadId} AND state = 'queued' LIMIT 1`
+            SELECT id FROM user_inputs WHERE thread_id = ${event.threadId} AND state = 'queued'
+            UNION ALL
+            SELECT h.id FROM helpers h JOIN threads t ON t.task_id = h.task_id AND t.id = ${event.threadId} AND t.kind = 'task'
+            WHERE h.state = 'working'
+            LIMIT 1`
           if (queued !== undefined || (yield* pastTurn(event.threadId, event.turnId, on.attemptId))) return
           const inARow = event.state === 'completed' && event.errorClass === undefined ? yield* blanks(event.threadId, event.turnId) : 0
           if (inARow > 0) return yield* blankTurn(event.threadId, event.turnId, on, inARow, info)
@@ -2390,7 +2485,9 @@ export class Runs extends Context.Service<
        */
       const shipToReview = (run: RunRow, from: Readonly<Record<string, string>>) =>
         Effect.gen(function* () {
-          const worktrees = yield* worktreesOf(run.taskId)
+          // A change's own Ship is reviewed on its own: only its worktree.
+          const only = (yield* stepsOf(run)).ships?.only
+          const worktrees = (yield* worktreesOf(run.taskId)).filter((one) => only === undefined || only.includes(one.id))
           const parts = yield* Effect.forEach(worktrees, (worktree) =>
             Effect.gen(function* () {
               const head = from[worktree.path] ?? worktree.base ?? ''
@@ -2399,7 +2496,12 @@ export class Runs extends Context.Service<
                 Effect.orElseSucceed(() => ''),
               )
               const lines = listed.split('\n').filter((line) => line !== '')
-              return { name: worktree.name, head: head.slice(0, 12), lines }
+              // Among several changes, each is named, and read on its own: a stacked one from the one below's head.
+              return {
+                name: worktree.change === null ? worktree.name : `${worktree.change} (${worktree.branch})`,
+                head: head.slice(0, 12),
+                lines,
+              }
             }),
           )
           const shown = parts.filter((part) => part !== undefined)
@@ -2408,7 +2510,10 @@ export class Runs extends Context.Service<
               ? `with \`git diff ${shown[0]?.head ?? ''}\` in your copy`
               : shown.map((one) => `\n- ${one.name}: \`git diff ${one.head}\``).join('')
           const listed = shown.flatMap((one) => (one.lines.length === 0 || one.lines.length > SHIPPED_LISTED ? [] : one.lines))
-          return `More to review. The person ships what they and the lead did since the last review${listed.length === 0 ? '' : `:\n\n${listed.join('\n')}`}\n\nReview what changed since, ${how}. Look at the earlier work only where the new work touches it.`
+          const several = worktrees.length > 1 && worktrees.some((one) => one.change !== null)
+          // One change of several, named: the others ship apart, each after its own review.
+          const one = only !== undefined && shown.length === 1 ? shown[0]?.name : undefined
+          return `More to review. The person ships ${one === undefined ? 'what they and the lead did since the last review' : `${one}, one of the task’s changes: what they and the lead did on it since its last review`}${listed.length === 0 ? '' : `:\n\n${listed.join('\n')}`}\n\nReview what changed since, ${how}. Look at the earlier work only where the new work touches it.${several ? ' Each change ships as its own pull request: review each on its own, and say which change each finding is in.' : ''}`
         })
 
       /**
@@ -2427,12 +2532,45 @@ export class Runs extends Context.Service<
               JOIN nodes n ON n.id = a.node_id
               WHERE s.workspace_id = ${worktree.id} AND n.node_key = 'review' AND s.commit_sha IS NOT NULL
               ORDER BY s.taken_at DESC, s.rowid DESC LIMIT 1`
-            const read = last?.commitSha == null ? null : yield* onBranchAs(worktree.path, last.commitSha, worktree.base)
+            const read =
+              last?.commitSha == null
+                ? null
+                : ((yield* onBranchAs(worktree.path, last.commitSha, worktree.base)) ??
+                  (yield* rewrittenAs(worktree.id, worktree.path, last.commitSha)))
             const from = read ?? worktree.base
             if (from !== null) marks[worktree.path] = from
           }
           return marks
         })
+
+      /**
+       * Where what a review read went when its branch was moved onto another
+       * to work toward (a task is a conversation plus parts): the commit it
+       * matched, by its tree, rebased or cherry-picked, as each move kept it,
+       * where the branch has that copy. Null where none does.
+       */
+      const rewrittenAs = (workspaceId: string, path: string, snapshot: string) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const moves = yield* sql<{ rewritten: string | null }>`
+            SELECT json_extract(payload, '$.rewritten') AS rewritten FROM record_events
+            WHERE aggregate_type = 'workspace' AND aggregate_id = ${workspaceId} AND type = 'workspace.toward_set'
+              AND json_extract(payload, '$.rewritten') IS NOT NULL
+            ORDER BY rowid`
+          if (moves.length === 0) return null
+          const tree = yield* git(path, 'rev-parse', `${snapshot}^{tree}`)
+          let at: string | null = null
+          for (const move of moves) {
+            const rewritten = JSON.parse(move.rewritten ?? '{}') as Record<string, string>
+            if (at !== null) at = rewritten[at] ?? null
+            else
+              for (const old of Object.keys(rewritten))
+                if ((yield* git(path, 'rev-parse', `${old}^{tree}`).pipe(Effect.orElseSucceed(() => ''))) === tree)
+                  at = rewritten[old] ?? null
+          }
+          if (at === null) return null
+          return (yield* gitOutcome(path, 'merge-base', '--is-ancestor', at, 'HEAD')).code === 0 ? at : null
+        }).pipe(Effect.orElseSucceed(() => null))
 
       /**
        * The newest commit on the branch here that holds what a review's
@@ -2457,10 +2595,20 @@ export class Runs extends Context.Service<
       const worktreesOf = (taskId: string) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
-          return yield* sql<{ id: string; path: string; branch: string; name: string; slug: string; base: string | null }>`
-            SELECT w.id, w.path, w.branch, b.display_name AS name, b.slug, coalesce(w.base_commit, w.base_ref) AS base
+          // Each change's own: a change whose folder another took (away) has none, and a pull request the task reviews isn't its work.
+          return yield* sql<{
+            id: string
+            path: string
+            branch: string
+            name: string
+            slug: string
+            base: string | null
+            change: string | null
+          }>`
+            SELECT w.id, w.path, w.branch, b.display_name AS name, b.slug, coalesce(w.base_commit, w.base_ref) AS base, w.name AS change
             FROM workspaces w JOIN repository_bindings b ON b.id = w.binding_id
-            WHERE w.task_id = ${taskId} AND w.device_id = ${instance.deviceId} ORDER BY b.created_at, b.rowid`
+            WHERE w.task_id = ${taskId} AND w.device_id = ${instance.deviceId} AND w.state <> 'away' AND w.reviewing IS NULL
+            ORDER BY b.created_at, b.rowid, w.created_at, w.rowid`
         })
 
       /** What the task's worktrees hold, together: it changes when any of them does. */
@@ -2736,7 +2884,7 @@ export class Runs extends Context.Service<
        * waits. The run: once its review has started, or, with none, once what
        * waited is up or couldn't go, as the press waits on the host.
        */
-      const ship = (taskId: string, actorId: ActorId) =>
+      const ship = (taskId: string, actorId: ActorId, merges = false, change?: string, queued?: ReadonlyArray<string>) =>
         oneRound(
           taskId,
           Effect.gen(function* () {
@@ -2760,17 +2908,50 @@ export class Runs extends Context.Service<
             const unpushed = (yield* changes.aheadOfOpen(taskId)).length > 0
             const after = yield* changes.unshipped(taskId)
             if (held.length === 0 && !unpushed && after.length === 0) return yield* new ShipRefused({ taskId, why: 'nothing' })
+            // Several changes: each ships on its own, with its own review, the bottom of a stack first; one named, with what waits
+            // beneath it. One change ships whole, as it always did.
+            // A change is its workspaces of one name, one in each repository it changes: counted and shipped as one.
+            const [several] = yield* sql<{ n: number }>`
+              SELECT count(DISTINCT coalesce(name, '')) AS n FROM workspaces
+              WHERE task_id = ${taskId} AND access = 'write' AND reviewing IS NULL AND state = 'ready'`
+            const apart = (several?.n ?? 0) > 1 || change !== undefined
+            const groups: ReadonlyArray<ReadonlyArray<string>> =
+              queued !== undefined
+                ? queued.map((group) => group.split(','))
+                : apart
+                  ? [
+                      ...(yield* changes.waitingChanges(taskId, change))
+                        .reduce(
+                          (byName, one) => byName.set(one.name ?? '', [...(byName.get(one.name ?? '') ?? []), one.id]),
+                          new Map<string, Array<string>>(),
+                        )
+                        .values(),
+                    ]
+                  : []
+            if (apart && groups.length === 0) return yield* new ShipRefused({ taskId, why: 'nothing' })
+            const [first, ...rest] = groups
             // Its steps and ending are the plan's: Checked by is the plan's reviewer, unless it reads only once the work merged.
             const [planned] = yield* sql<{ parameters: string }>`
               SELECT parameters FROM runs WHERE task_id = ${taskId} AND plan_id IS NOT NULL ORDER BY created_at, rowid LIMIT 1`
             const plan = yield* Schema.decodeUnknownEffect(Schema.fromJsonString(PlanParameters))(planned?.parameters ?? last.parameters)
-            const from = yield* reviewMarksOf(taskId)
+            const marks = yield* reviewMarksOf(taskId)
+            // Its own review reads only the change it ships, from where that change's last review left off.
+            const shipping =
+              first === undefined
+                ? undefined
+                : (yield* sql<{ path: string }>`SELECT path FROM workspaces WHERE id IN ${sql.in(first)}`).map((one) => one.path)
+            const from =
+              shipping === undefined ? marks : Object.fromEntries(Object.entries(marks).filter(([path]) => shipping.includes(path)))
             const parameters: PlanParameters = {
               ...plan,
               steps: plan.steps.map((step) =>
                 step.key === 'implement' || (step.key === 'review' && plan.reviewAfterMerge === true) ? { ...step, skipped: true } : step,
               ),
-              ships: { from },
+              ships: {
+                from,
+                ...(merges ? { merges: true } : {}),
+                ...(first === undefined ? {} : { only: [...first], next: rest.map((group) => group.join(',')) }),
+              },
             }
             const encoded = JSON.stringify(parameters)
             const policyId = yield* policyOf(task.projectId)
@@ -2840,6 +3021,28 @@ export class Runs extends Context.Service<
             return current
           }),
         )
+      // Once the Ship before it is over and nothing of the task is at work (its reviewer's turn closing, its lead told what went up).
+      shipNext = (taskId, merges, queued) =>
+        Effect.asVoid(
+          Effect.forkIn(
+            provide(
+              Effect.catchCause(
+                Effect.gen(function* () {
+                  for (let tries = 0; ; tries += 1) {
+                    const sent = yield* Effect.exit(ship(taskId, instance.systemId, merges, undefined, queued))
+                    if (sent._tag === 'Success') return
+                    const error = Cause.findErrorOption(sent.cause)
+                    const working = Option.isSome(error) && error.value instanceof ShipRefused && error.value.why === 'working'
+                    if (!working || tries >= NEXT_SHIP_TRIES) return yield* Effect.failCause(sent.cause)
+                    yield* Effect.sleep(NEXT_SHIP_EVERY)
+                  }
+                }),
+                (cause) => Effect.logWarning('Could not ship the next change', cause),
+              ),
+            ),
+            scope,
+          ),
+        )
 
       /**
        * A Ship's ending, once its review is settled, or at once with none:
@@ -2872,11 +3075,21 @@ export class Runs extends Context.Service<
           if (admitted === undefined) return
           const { nodeId, attemptId } = admitted
           yield* touchCard(run.taskId)
+          const only = (yield* stepsOf(run)).ships?.only
           const shipped = yield* Effect.exit(
             Effect.gen(function* () {
-              const went = yield* changes.shipToOpen(run.taskId)
-              const after = yield* changes.unshipped(run.taskId)
-              if (after.length === 0 || end === null) return { went, published: undefined }
+              const went = yield* changes.shipToOpen(run.taskId, only)
+              const after = (yield* changes.unshipped(run.taskId)).filter((one) => only === undefined || only.includes(one.workspaceId))
+              // A change of several with no pull request yet opens its first; one whose last merged or closed, its next.
+              const fresh =
+                only === undefined
+                  ? []
+                  : (yield* sql<{ id: string }>`
+                      SELECT w.id FROM workspaces w WHERE w.task_id = ${run.taskId} AND w.access = 'write' AND w.state = 'ready'
+                        AND NOT EXISTS (SELECT 1 FROM repository_changes c WHERE c.workspace_id = w.id AND c.pull_request_url IS NOT NULL)`).filter(
+                      (one) => only.includes(one.id),
+                    )
+              if ((after.length === 0 && fresh.length === 0) || end === null) return { went, published: undefined }
               const opened = yield* changes.ofTask(run.taskId)
               // Its new work going out, a merged task is open again, until that merges too.
               yield* reopened(run.taskId, run.projectId)
@@ -2885,8 +3098,9 @@ export class Runs extends Context.Service<
                 taskId: run.taskId,
                 runId: run.runId,
                 end: end === 'none' ? 'draft' : end,
-                ...(opened.length > 0 ? { again: true } : {}),
+                ...(opened.length > 0 && fresh.length === 0 ? { again: true } : {}),
                 ships: true,
+                ...(only === undefined ? {} : { only }),
               })
               return { went, published }
             }),
@@ -2908,7 +3122,41 @@ export class Runs extends Context.Service<
             )
           }
           const { went, published } = shipped.value
-          yield* changes.releaseHolds(run.taskId, 'shipped')
+          yield* changes.releaseHolds(run.taskId, 'shipped', only)
+          // Each change of several that shipped, a stamped row of the thread's: its name, and the pull request it went to.
+          // With one change, the thread's line on its pull request says it.
+          const [thread] = yield* sql<{ id: string }>`SELECT id FROM threads WHERE task_id = ${run.taskId} AND kind = 'task'`
+          if (thread !== undefined && only !== undefined)
+            for (const id of only) {
+              const [one] = yield* sql<{
+                name: string | null
+                branch: string
+                number: number | null
+                short: string | null
+                prefix: string | null
+              }>`
+                SELECT w.name, w.branch, json_extract(l.snapshot, '$.number') AS number, json_extract(l.snapshot, '$.words.short') AS short,
+                  json_extract(l.snapshot, '$.words.prefix') AS prefix
+                FROM workspaces w
+                LEFT JOIN repository_changes c ON c.rowid = (
+                  SELECT max(x.rowid) FROM repository_changes x WHERE x.workspace_id = w.id AND x.pull_request_url IS NOT NULL)
+                LEFT JOIN external_links l ON l.url = c.pull_request_url AND l.kind = 'change'
+                WHERE w.id = ${id}`
+              if (one === undefined || one.number === null) continue
+              const name = one.name ?? one.branch
+              const where = `${one.short ?? 'PR'} ${one.prefix ?? '#'}${one.number}`
+              const count = went.find((sent) => sent.change === one.name)?.count
+              yield* addItem({ projectId: run.projectId, threadId: thread.id }, 'notice', {
+                source: 'runtime',
+                severity: 'info',
+                title: `Shipped · ${name}${count === undefined ? '' : `, ${count === 1 ? '1 commit' : `${count} commits`}`} to ${where}.`,
+                description: null,
+                step: { kind: 'shipped', name, branch: where, toward: null },
+              })
+            }
+          // Review and merge: what went up merges now, unless the lead set a finding aside, which is the person's to read first.
+          const merging = (yield* stepsOf(run)).ships?.merges === true
+          if (merging) yield* mergeShipped(run)
           const sent = went.map((one) => `${one.count === 1 ? '1 commit' : `${one.count} commits`} to ${one.where}`)
           const opened = published === undefined ? undefined : publishedSummary(published, end === 'none' || end === null ? 'draft' : end)
           const summary = [sent.length === 0 ? undefined : `Shipped ${sent.join(', ')}.`, opened]
@@ -2936,6 +3184,66 @@ export class Runs extends Context.Service<
           yield* rest(run.taskId)
           yield* Effect.ignore(changes.settleIfMerged(run.taskId))
           yield* touchCard(run.taskId)
+          // The next change waiting ships now, in a Ship of its own, with its own review.
+          const next = (yield* stepsOf(run)).ships?.next ?? []
+          if (next.length > 0) yield* shipNext(run.taskId, (yield* stepsOf(run)).ships?.merges === true, next)
+        })
+
+      /**
+       * Review and merge's last step: each of the task's open pull requests merges at what it has now, its waiting commits
+       * up; unless the lead set a finding of this Ship's review aside, which a line says, leaving Merge to the person.
+       */
+      const mergeShipped = (run: RunRow) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const [aside] = yield* sql<{ n: number }>`
+            SELECT count(*) AS n FROM findings f JOIN node_attempts a ON a.id = f.review_attempt_id JOIN nodes n ON n.id = a.node_id
+            WHERE n.execution_id = ${run.executionId} AND f.state = 'set_aside'`
+          if ((aside?.n ?? 0) > 0)
+            return yield* addItem({ projectId: run.projectId, threadId: run.threadId }, 'notice', {
+              source: 'runtime',
+              severity: 'warning',
+              title: `Not merged: the lead set ${aside?.n === 1 ? 'a finding' : `${aside?.n} findings`} of the review aside. Read why, then merge it yourself.`,
+              description: null,
+            })
+          for (const one of yield* changes.ofTask(run.taskId))
+            if (one.state === 'open')
+              yield* changes.mergeAsItStands(run.taskId, one.url).pipe(
+                Effect.catchCause((cause) =>
+                  addItem({ projectId: run.projectId, threadId: run.threadId }, 'notice', {
+                    source: 'runtime',
+                    severity: 'warning',
+                    title: `Shipped, but not merged: ${summarize(cause) || 'its host refused the merge.'}`,
+                    description: null,
+                  }),
+                ),
+              )
+        })
+
+      /**
+       * Merge, with commits not shipped. Review and merge is a Ship that merges once what waited is up (`mergeShipped`). Merge
+       * now owes a review after the merge of what no review read, where the task has a reviewer, then sends the commits up,
+       * past the hold, and merges each open pull request at what it has then.
+       */
+      const mergeWaiting = (input: {
+        readonly envelope: CommandEnvelope
+        readonly taskId: string
+        readonly how: 'review' | 'now'
+        readonly url?: string
+      }) =>
+        Effect.gen(function* () {
+          const waits = (yield* changes.aheadOfOpen(input.taskId)).length > 0 || (yield* changes.holds(input.taskId)).length > 0
+          if (input.how === 'review' && waits) return yield* Effect.asVoid(ship(input.taskId, input.envelope.actorId, true))
+          const marks = yield* reviewMarksOf(input.taskId)
+          const open = (yield* changes.ofTask(input.taskId)).filter(
+            (one) => one.state === 'open' && (input.url === undefined || one.url === input.url),
+          )
+          if (waits) for (const one of open) yield* mergeReviews.owe(input.taskId, one.url, marks)
+          if (waits) {
+            yield* changes.shipToOpen(input.taskId)
+            yield* changes.releaseHolds(input.taskId, 'shipped')
+          }
+          for (const one of open) yield* changes.mergeAsItStands(input.taskId, one.url)
         })
 
       /** A merged task whose new work goes out is open again, until that merges too; inside its own transaction. */
@@ -3058,8 +3366,11 @@ export class Runs extends Context.Service<
       ) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
+          // A change's own Ship reads only that change: the others' marks stay where their last review left them.
+          const only = (yield* stepsOf(run)).ships?.only
+          const read = (yield* worktreesOf(run.taskId)).filter((one) => only === undefined || only.includes(one.id))
           // A check after the first round reads only the fixes: from what the round before read, in the first repository.
-          const [first] = yield* worktreesOf(run.taskId)
+          const [first] = read
           const [before] =
             round === 0 || first === undefined
               ? []
@@ -3070,7 +3381,7 @@ export class Runs extends Context.Service<
                   ORDER BY s.taken_at DESC, s.rowid DESC LIMIT 1`
           const reread = before?.commitSha ?? null
           // The round reads a copy of the work as it stands now, in each repository, and the record keeps which code that was (ADR-008).
-          for (const workspace of yield* worktreesOf(run.taskId)) {
+          for (const workspace of read) {
             const snapshot = yield* snapshotForReview(workspace.path, round)
             yield* sql`INSERT INTO workspace_snapshots ${sql.insert({
               id: yield* newId(Ids.workspaceSnapshot),
@@ -4100,8 +4411,84 @@ export class Runs extends Context.Service<
           yield* lookAgain(row).pipe(
             Effect.catchCause((cause) => Effect.logWarning('Could not place a task waiting for its checkout', cause)),
           )
-        return held.length > 0 || (yield* checkoutsHeld)
+        // Moves that wait for a checkout to be free or clean, or for the lead's turn to end, are tried again.
+        const moves = yield* movesWaiting
+        for (const one of moves)
+          yield* moving(one.taskId, one.movingTo, one.change, instance.systemId).pipe(
+            Effect.catchCause((cause) => Effect.logWarning('Could not move a task between a worktree and its checkout', cause)),
+          )
+        return held.length > 0 || moves.length > 0 || (yield* checkoutsHeld)
       })
+
+      const workToward = (input: {
+        readonly taskId: string
+        readonly toward: string | null
+        readonly change?: string | null
+        readonly byLead?: boolean
+      }): Effect.Effect<ReadonlyArray<string>, unknown, Store> =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const [task] = yield* sql<{ projectId: ProjectId; threadId: string; state: string }>`
+            SELECT k.project_id, t.id AS thread_id, k.state FROM tasks k JOIN threads t ON t.task_id = k.id AND t.kind = 'task'
+            WHERE k.id = ${input.taskId}`
+          if (task === undefined) return yield* new NotFound({ kind: 'task', id: input.taskId })
+          // Between turns: one under way ends first, so nothing moves under it.
+          if (input.byLead !== true) yield* sessions.untilIdle(task.threadId, Duration.minutes(30))
+          const done = yield* changes.retarget(input.taskId, input.toward, input.change ?? null)
+          if (done.conflicts.length > 0 && input.byLead !== true) {
+            const body = `The task works toward another branch now (${done.said.join(' ')}) Resolve the conflicts in ${done.conflicts.join(', ')}, then carry on: where a rebase stopped, \`git add\` them and \`git rebase --continue\`.`
+            yield* sessions
+              .send({
+                envelope: yield* envelope('thread.send', { threadId: task.threadId }),
+                threadId: task.threadId,
+                body,
+                quiet: true,
+              })
+              .pipe(Effect.catchCause((cause) => Effect.logWarning('Could not tell the lead about a conflict on its new target', cause)))
+          }
+          if (done.opens.length > 0) {
+            const [run] = yield* sql<{ id: string }>`
+              SELECT id FROM runs WHERE task_id = ${input.taskId} ORDER BY created_at DESC, rowid DESC LIMIT 1`
+            if (run !== undefined)
+              yield* changes
+                .publish({ projectId: task.projectId, taskId: input.taskId, runId: run.id, end: 'draft', only: done.opens })
+                .pipe(Effect.catchCause((cause) => Effect.logWarning('Could not open the pull request into the new branch', cause)))
+          }
+          yield* touchCard(input.taskId)
+          return done.said
+        })
+
+      /**
+       * Moves a task's change where the person asked, between its lead's turns: its lead in one, the move waits for it to end.
+       * Moved, its plan says where it works now, its lead's next turn starts afresh in the new folder, and a new worktree is set
+       * up as any is.
+       */
+      const moving = (
+        taskId: string,
+        to: 'worktree' | 'checkout',
+        change: string | null,
+        actorId: ActorId,
+        consent?: MoveConsent,
+      ): Effect.Effect<Moved, unknown, Store> =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const [thread] = yield* sql<{ id: string }>`SELECT id FROM threads WHERE task_id = ${taskId} AND kind = 'task'`
+          if (thread === undefined) return yield* new NotFound({ kind: 'task', id: taskId })
+          const lead = yield* sessions.running(thread.id)
+          if (Option.isSome(lead) && lead.value.turnRunning) {
+            const why = to === 'checkout' ? 'Moves to Local once its lead’s turn ends.' : 'Moves to a worktree once its lead’s turn ends.'
+            yield* waitMove(taskId, change, to, why)
+            return { kind: 'waits', why } as Moved
+          }
+          const moved = to === 'checkout' ? yield* moveToLocal(taskId, change, consent) : yield* moveToWorktree(taskId, change)
+          if (moved.kind === 'moved') {
+            yield* sql.withTransaction(moveTo(taskId, to, actorId))
+            yield* sessions.moved(thread.id)
+            if (to === 'worktree') yield* (yield* Setups).begin(taskId)
+          }
+          yield* touchCard(taskId)
+          return moved
+        })
 
       /** Where a task's plan and run say it works: as the person's answer moved it. Inside the caller's transaction. */
       const moveTo = (taskId: string, worksIn: WorksIn, actorId: ActorId) =>
@@ -4826,6 +5213,14 @@ export class Runs extends Context.Service<
             const line = titleOf(title)
             return line === null ? finding : { ...finding, title: line }
           })
+          // A review after a merge reports in its own thread, to the person rather than the lead (MergeReviews.ts).
+          if (yield* mergeReviews.owns(access.threadId))
+            return yield* mergeReviews.reported(access, {
+              verdict: reviewed.verdict,
+              summary: reviewed.summary,
+              findings: findings.map((finding) => ({ ...finding, file: finding.file ?? null, line: finding.line ?? null })),
+              model,
+            })
           const current = access.taskId === null ? undefined : yield* currentRun(access.taskId)
           const attempt = current === undefined ? undefined : yield* running(current, ['review'])
           if (current === undefined || attempt === undefined) return yield* new ToolRefused({ message: 'No review is waiting on you.' })
@@ -6382,13 +6777,15 @@ export class Runs extends Context.Service<
                 SELECT state, hold_reason FROM node_attempts WHERE id = ${row.attemptId}`
               if (still?.state !== 'held' || still.holdReason !== 'machine_busy') return false
               const revision = yield* change('node_attempts', row.attemptId, { state: 'admitted', holdReason: null, output: null })
+              // How long it waited, in milliseconds: what the first turn of the session it starts counts as waiting for a place.
+              const placedAfter = Math.max(0, (yield* Clock.currentTimeMillis) - Date.parse(waited.since))
               yield* fact({
                 projectId: current.projectId,
                 aggregateType: 'node_attempt',
                 aggregateId: row.attemptId,
                 revision,
                 type: 'node_attempt.admitted',
-                payload: { node: row.nodeKey, iteration: row.iteration, placed: waited.place.how },
+                payload: { node: row.nodeKey, iteration: row.iteration, placed: waited.place.how, waited: placedAfter },
                 actorId: instance.systemId,
               })
               return true
@@ -6891,6 +7288,7 @@ export class Runs extends Context.Service<
       return Runs.of({
         run: (planId) => provide(run(planId)),
         skipReview: (input) => provide(skipReview(input)),
+        mergeWaiting: (input) => provide(mergeWaiting(input)),
         ship: (input) =>
           provide(
             input.afterTurn === true
@@ -6900,7 +7298,7 @@ export class Runs extends Context.Service<
                       const sql = yield* SqlClient.SqlClient
                       const [thread] = yield* sql<{ id: string }>`SELECT id FROM threads WHERE task_id = ${input.taskId} AND kind = 'task'`
                       if (thread !== undefined) yield* sessions.untilIdle(thread.id, AFTER_TURN_WAIT)
-                      yield* ship(input.taskId, input.envelope.actorId)
+                      yield* ship(input.taskId, input.envelope.actorId, false, input.change)
                     }).pipe(
                       Effect.catchCause((cause) =>
                         Cause.hasInterruptsOnly(cause)
@@ -6912,7 +7310,7 @@ export class Runs extends Context.Service<
                     scope,
                   ),
                 )
-              : Effect.asVoid(ship(input.taskId, input.envelope.actorId)),
+              : Effect.asVoid(ship(input.taskId, input.envelope.actorId, false, input.change)),
           ),
         workflowVersion: provide(workflowVersion),
         publish: (taskId) => provide(publish(taskId)),
@@ -6926,6 +7324,25 @@ export class Runs extends Context.Service<
         makeChange,
         madeRound: (taskId, sessionId) => provide(Effect.map(openRound(taskId, sessionId), (opened) => opened !== undefined)),
         answerCheckout: (input) => provide(answerCheckout(input)),
+        move: (input) =>
+          provide(
+            Effect.andThen(
+              Effect.gen(function* () {
+                const sql = yield* SqlClient.SqlClient
+                const [task] = yield* sql<{ state: string }>`SELECT state FROM tasks WHERE id = ${input.taskId}`
+                if (task === undefined) return yield* new NotFound({ kind: 'task', id: input.taskId })
+              }),
+              moving(input.taskId, input.to, input.change ?? null, input.envelope.actorId, input.consent),
+            ).pipe(Effect.tap(() => Queue.offer(checkoutWakes, undefined))),
+          ),
+        workToward: (input) => provide(workToward(input)),
+        dropMove: (input) =>
+          provide(
+            Effect.gen(function* () {
+              yield* dropMove(input.taskId)
+              yield* touchCard(input.taskId)
+            }),
+          ),
         checkoutsMoved: Queue.offer(checkoutWakes, undefined).pipe(Effect.asVoid),
         changeWaiting: (taskId, parameters, actorId) =>
           Effect.gen(function* () {

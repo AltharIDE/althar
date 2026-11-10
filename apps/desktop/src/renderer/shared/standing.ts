@@ -40,6 +40,8 @@ export type Next =
   | { readonly kind: 'ship'; readonly commits: number }
   | { readonly kind: 'resolve' }
   | { readonly kind: 'fix'; readonly failing: ReadonlyArray<string> }
+  /** What a review after a merge found goes to the lead, its fix shipping after the merged pull request (a task is a conversation plus parts). */
+  | { readonly kind: 'fix_after_merge'; readonly words: string }
 
 export interface Standing {
   /** Most pressing first. */
@@ -80,6 +82,7 @@ export const standingText = {
     merge: (why: string) => `Merge failed: ${why}`,
     push: (why: string) => `Push failed: ${why}`,
     ship: (why: string) => `Ship failed: ${why}`,
+    fix_after_merge: (why: string) => `Fix it failed: ${why}`,
     again: 'Try again',
   },
   /** What a screen reader hears of the button for a next thing, naming the pull request it acts on. */
@@ -217,18 +220,26 @@ export const factsOf = (change: ChangeSummary, standing: Standing = standingOf(c
 }
 
 /** Whether the next thing is the person's own, done from where it is shown: pushing, merging and shipping. The others are the lead's, and open the task. */
-export type DoneHere = Extract<Next, { kind: 'merge' | 'push' | 'ship' }>
+export type DoneHere = Extract<Next, { kind: 'merge' | 'push' | 'ship' | 'fix_after_merge' }>
 
-export const doneHere = (next: Next): next is DoneHere => next.kind === 'merge' || next.kind === 'push' || next.kind === 'ship'
+export const doneHere = (next: Next): next is DoneHere =>
+  next.kind === 'merge' || next.kind === 'push' || next.kind === 'ship' || next.kind === 'fix_after_merge'
 
 /** The next thing while it is under way. */
 export const doingWords = (next: DoneHere): string =>
-  next.kind === 'merge' ? standingText.doing.merge : next.kind === 'ship' ? shipText.shipping : standingText.doing.push(next.commits)
+  next.kind === 'merge'
+    ? standingText.doing.merge
+    : next.kind === 'ship'
+      ? shipText.shipping
+      : next.kind === 'fix_after_merge'
+        ? afterMergeText.fixing
+        : standingText.doing.push(next.commits)
 
 /** The next thing's button, for a screen reader: what it does and to which pull request; or, after it failed, that it tries again. */
 export const labelWords = (next: DoneHere, where: string, failed = false): string => {
   const t = standingText.label
   if (next.kind === 'ship') return failed ? shipText.again(next.commits) : shipText.label(next.commits)
+  if (next.kind === 'fix_after_merge') return afterMergeText.fixHint(next.words)
   return next.kind === 'merge'
     ? failed
       ? t.mergeAgain(where)
@@ -252,6 +263,8 @@ export const nextWords = (next: Next): string => {
       return t.resolve
     case 'fix':
       return t.fix
+    case 'fix_after_merge':
+      return afterMergeText.fix
   }
 }
 
@@ -272,6 +285,25 @@ export const shipText = {
   hint: (n: number, reviewed: boolean) =>
     reviewed ? `Its review reads ${standingText.commits(n)} first, then they go up` : `${standingText.commits(n)} go up`,
   again: (n: number) => `Try shipping ${standingText.commits(n)} again`,
+}
+
+/**
+ * A review after a merge, in the same task (a task is a conversation plus
+ * parts): what it found waits on the person, for the change that merged, as
+ * its card, its header and Needs you say it, with Fix it and Leave it.
+ */
+export const afterMergeText = {
+  word: (n: number) => `Review found ${n}`,
+  /** Under the word, which already says what it found: which merge it was about. */
+  after: (words: string) => `After ${words} merged`,
+  sentence: (n: number, words: string) => `Review found ${n} after ${words} merged`,
+  fix: 'Fix it',
+  fixing: 'Fixing',
+  /** What Fix it does, on hover. */
+  fixHint: (words: string) => `The lead fixes them, and its fix goes up as a new pull request after ${words}`,
+  leave: 'Leave it',
+  leaving: 'Leaving',
+  leaveHint: 'Close the findings: they stay in the thread',
 }
 
 /** A ready change's word, where it isn't plainly ready to accept. */
@@ -299,10 +331,13 @@ export const readyWordOf = (
     readonly nothingBuilt?: boolean | undefined
     readonly held?: unknown
     readonly replied?: string | undefined
+    readonly afterMerge?: { readonly state: string; readonly findings: number } | undefined
   },
   latest: ChangeSummary | null,
 ): string => {
   const change = task.unshipped == null || latest?.state === 'open' ? latest : null
+  // What a review after a merge found is the person's first: Fix it or Leave it.
+  if (task.afterMerge?.state === 'found') return afterMergeText.word(task.afterMerge.findings)
   // Held for Ship, the person's word is what it waits on, whatever its pull request says: Ship's push replaces its head.
   if (task.held !== undefined) return shipText.word
   // Its lead answered them, unread, where no open pull request says more of where it stands.

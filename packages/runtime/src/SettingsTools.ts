@@ -1406,7 +1406,11 @@ export const SCREEN_CHANGES: Readonly<Record<string, string>> = {
   setPostTeamReviews: 'althar/pull-requests.postTeamReviews',
   setCoAuthor: 'althar/pull-requests.coAuthor',
   setReviewSeal: 'althar/pull-requests.reviewSeal',
+  setRunOutside: 'person: how far an outside author’s code is trusted without asking is the person’s word alone, as Run it is',
   setReviewSealStyle: 'althar/pull-requests.reviewSealStyle',
+  // althar/tasks: presets (a task is a conversation plus parts)
+  editPreset: 'person: a preset is the person’s own: the coordinator offers one to keep, and only they keep, change or remove it',
+  removePreset: 'person: a preset is the person’s own: the coordinator offers one to keep, and only they keep, change or remove it',
   // althar/notifications, althar/appearance, althar/editor-and-browser, althar/about
   notifyCalls: 'window: kept in the window on this computer',
   notifyReady: 'window: kept in the window on this computer',

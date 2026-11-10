@@ -23,7 +23,7 @@ import { Accounts } from './Accounts'
 import { AutomationRefused, Automations } from './Automations'
 import { localZone } from './slots'
 import { Agents, RuntimeConfig } from './Config'
-import { AttachRefused, NotFound, TaskRefused } from './errors'
+import { AttachRefused, ChangeRefused, NotFound, TaskRefused } from './errors'
 import { taskShown } from './evidence'
 import { branchOnFirstWrite } from './firstWrite'
 import { commitsOf } from './git'
@@ -55,7 +55,9 @@ import { finishedBy, listWords, type PullRequestFacts, sectionWords } from './pu
 import { Policies, worksInOf } from './Policies'
 import { localTakenFor, worksLocal } from './local'
 import { Projects } from './Projects'
+import { Helpers } from './Helpers'
 import { ReviewRefused, Reviews } from './Reviews'
+import { shelve } from './scratch'
 import { findTasks, foundWords } from './Search'
 import { changeOf, diffWords, touchedWords } from './otherTasks'
 import { taskFindingsOf } from './taskFindings'
@@ -76,6 +78,7 @@ import { setToward } from './towards'
 import { addItem, transcript } from './threads'
 import { personsWords, quoted } from './TaskActions'
 import { ToolRefused, ToolServer, type Tool, type ToolAccess } from './ToolServer'
+import { describe as describePreset, presetsIn } from './presets'
 import { stepOf, StepPick } from './stepPick'
 import { describeModels, usableModels } from './usableModels'
 
@@ -137,6 +140,7 @@ type Store =
   | Busy
   | Accounts
   | Reviews
+  | Helpers
   | Tasks
   | Runs
   | Connections
@@ -210,6 +214,8 @@ const Proposed = Schema.Struct({
   review: Schema.optional(Schema.NullOr(StepPick)),
   /* The fast lane: one step, no countdown, and its review after it merges instead of before. */
   small_change: Schema.optional(Schema.Boolean),
+  /* The preset its parts are, by name: its parts replace the plan's. */
+  preset: Schema.optional(Schema.String),
   ...Where,
 })
 /* A mini task: what to do, and the one model that does it. */
@@ -366,6 +372,7 @@ export class Coordinator extends Context.Service<
       const issues = yield* Issues
       const issueDrafts = yield* IssueDrafts
       const reviews = yield* Reviews
+      const helpers = yield* Helpers
       const automations = yield* Automations
       /* How a task's pull requests stand: set by Queries, which can read them (it needs this service, so this can't need it). */
       let pullRequests: (taskId: string) => Effect.Effect<PullRequestFacts | undefined> = () =>
@@ -1107,6 +1114,9 @@ export class Coordinator extends Context.Service<
           })
           if (byLead)
             return `Planned ${created.slug}, started from this task: its lead starts in 25 seconds unless the person holds it, with no review, and nothing goes outside the project when it is done. The person sees it as a card, started by this task; say in a sentence what it does.`
+          // A chat: it sits on Scratch, off the board's lanes, until it takes a worktree or an output (a task is a conversation plus
+          // parts, "Chats and Scratch").
+          yield* shelve(created.taskId, 'scratch', instance.coordinatorId)
           const started = yield* plans.start(planId, instance.coordinatorId)
           if (started === 'waiting' && worksIn === 'checkout') {
             const taken = yield* localTakenFor(created.taskId)
@@ -1433,7 +1443,7 @@ export class Coordinator extends Context.Service<
           const sql = yield* SqlClient.SqlClient
           const [held] = yield* sql<{ id: string }>`
             SELECT id FROM task_plans WHERE task_id = ${task.id} AND state = 'proposed' AND starts_at IS NULL`
-          yield* plans.propose({
+          const planId = yield* plans.propose({
             projectId: access.projectId as ProjectId,
             taskId: task.id,
             steps: smallSteps ?? steps,
@@ -1446,7 +1456,23 @@ export class Coordinator extends Context.Service<
             // A plan the person held stays held; otherwise a small change starts at once.
             ...(small ? { reviewAfterMerge: true, ...(held === undefined ? { startsIn: Duration.zero } : {}) } : {}),
           })
-          const where = yield* localLine(access.projectId, task.id, worksIn)
+          // Planned from a preset: its parts replace the plan's, and its card names it.
+          const preset =
+            proposed.preset === undefined || proposed.preset.trim() === ''
+              ? undefined
+              : yield* plans.applyPreset(planId, proposed.preset, instance.coordinatorId).pipe(
+                  Effect.catch((error) =>
+                    Effect.fail(
+                      new ToolRefused({
+                        message:
+                          error instanceof ChangeRefused
+                            ? `The plan is proposed as you gave it, but not as ${proposed.preset}: ${error.message}`
+                            : `The plan is proposed as you gave it: there's no preset “${proposed.preset}”. list_presets names them.`,
+                      }),
+                    ),
+                  ),
+                )
+          const where = `${preset === undefined ? '' : ` As ${preset}.`}${yield* localLine(access.projectId, task.id, worksIn)}`
           if (held !== undefined)
             return `Changed ${task.slug}'s plan.${where} It stays held until the person starts it; they see it as a card, so there's no need to describe the plan again.`
           if (small)
@@ -2335,6 +2361,15 @@ export class Coordinator extends Context.Service<
         ...releaseTools(provide, tool),
         draftIssueTool,
         tool(
+          'list_presets',
+          'The person’s presets (a named set of a task’s starting parts: where it works, Checked by and when, its ending, where it sits, its lead and reviewer, and a few lines of brief), the built-in ones first, then theirs, those kept to this project with them, each with what it holds. Plan from the one that fits what the person asked with propose_plan’s preset; its card names it, and they can pick another there.',
+          nothing,
+          (access) =>
+            Effect.map(presetsIn(access.projectId), (all) =>
+              all.map((one) => `- ${one.name}${one.builtin ? '' : ' (theirs)'}: ${describePreset(one.parts)}.`).join('\n'),
+            ),
+        ),
+        tool(
           'list_models',
           'The models you can give work to now, by who makes them, with how each scores, whether a plan pays for it, and the efforts it takes: their ids, the one it starts at by itself, and the person’s default where they set one.',
           nothing,
@@ -2379,6 +2414,11 @@ export class Coordinator extends Context.Service<
                 type: 'string',
                 description:
                   "The branch it works toward, such as release/0.8.0: it starts from it, and its pull request goes into it. Only where the person asked for that branch, or the task is a fix for it; the project's Work toward without it. Its repository's remote must have it.",
+              },
+              preset: {
+                type: 'string',
+                description:
+                  'The preset its parts are, by name as list_presets writes it, where one fits what the person asked: its parts replace the plan’s (its lead and reviewer where it names them, Checked by, its ending, where it works and sits, and its brief). Left out, the plan is as you propose it.',
               },
             },
             required: ['task', 'lead'],
@@ -2669,7 +2709,84 @@ export class Coordinator extends Context.Service<
       yield* toolServer.serve('reviewer', [...readTasksTools, findIssuesTool])
       // A quick task's lead makes it a change when the person asks: offered only on a quick task not made one yet; refused,
       // with why, on any other. Any other kind becomes a change as a task of its own: draft_task and propose_plan.
+      // A lead's helpers (ADR-087): started on any model, each on one of the task's changes, heard as a new turn when done.
+      const HelperAsked = Schema.Struct({
+        brief: Schema.String,
+        name: Schema.String,
+        agent: Schema.optional(Schema.String),
+        model: Schema.optional(Schema.String),
+        effort: Schema.optional(Schema.NullOr(Schema.String)),
+        change: Schema.optional(Schema.String),
+        in_copy: Schema.optional(Schema.Boolean),
+        writes: Schema.optional(Schema.Boolean),
+      })
+      const startHelper = (access: ToolAccess, input: unknown) =>
+        Effect.gen(function* () {
+          if (access.taskId === null) return yield* new ToolRefused({ message: 'Helpers are a task lead’s.' })
+          const asked = yield* read(HelperAsked, input)
+          // The lead's own model and effort, where it names none.
+          const own = yield* sessions.running(access.threadId)
+          const pick =
+            asked.model !== undefined || asked.agent !== undefined
+              ? yield* stepOf(access.projectId, {
+                  ...(asked.model === undefined ? {} : { model: asked.model }),
+                  ...(asked.agent === undefined ? {} : { agent: asked.agent }),
+                  ...(asked.effort == null ? {} : { effort: asked.effort }),
+                })
+              : Option.isSome(own)
+                ? { agentId: own.value.agentId, model: null, effort: undefined }
+                : yield* new ToolRefused({ message: 'Name the model it runs on, as list_models writes it.' })
+          const named = yield* modelNamer
+          return yield* helpers.start({
+            taskId: access.taskId,
+            name: asked.name,
+            brief: asked.brief,
+            agentId: pick.agentId,
+            model: pick.model ?? null,
+            modelName: named({ key: 'implement', agentId: pick.agentId, model: pick.model ?? null, skipped: false }),
+            ...(pick.effort == null ? {} : { effort: pick.effort }),
+            ...(asked.change === undefined ? {} : { change: asked.change }),
+            ...(asked.in_copy === true || asked.writes === true ? { inCopy: true } : {}),
+            ...(asked.writes === true ? { writes: true } : {}),
+          })
+        })
+      const StopAsked = Schema.Struct({ helper: Schema.String })
+      const stopHelper = (access: ToolAccess, input: unknown) =>
+        Effect.gen(function* () {
+          if (access.taskId === null) return yield* new ToolRefused({ message: 'Helpers are a task lead’s.' })
+          const asked = yield* read(StopAsked, input)
+          return yield* helpers.stop({ taskId: access.taskId, helper: asked.helper, by: 'lead' })
+        })
+
       yield* toolServer.serve('lead', [
+        tool(
+          'start_helper',
+          'Starts a helper (a task is a conversation plus parts, ADR-087): another agent, on any model, that works in the background on one of this task’s changes while you and the person carry on; its result comes to you as a new turn when it ends. Hand it a change (change: its name; the task’s first without one): it works in that change’s worktree, the only one writing there until it reports, and its commits stay on the change’s branch for Ship. brief is what to do, whole: it reads nothing of your conversation. name is a few words shown in the thread ("Split the migration"). model as list_models writes it, and effort: a quicker, cheaper model for searching and reading, a different maker’s for a second opinion, the strongest for hard reasoning, a plan over a key; your own without one. Or, with in_copy, it works in a copy of its own of that change’s worktree as it stands now, untracked files too, beside your work rather than on it: for reading, trying or checking something without a change of its own. What it changes there is thrown away, unless writes: then it is kept as a commit, never pushed, which its result names for you to bring in with git cherry-pick, settling any conflict as you do with main. Four at work at once, ten at work or waiting, fifty in a task’s life, an hour each. Don’t wait or poll for it.',
+          {
+            type: 'object',
+            properties: {
+              brief: { type: 'string' },
+              name: { type: 'string', maxLength: 60 },
+              model: { type: 'string' },
+              agent: { type: 'string', description: 'The agent it runs on, where a model goes more than one way: claude-code, codex.' },
+              effort,
+              change: { type: 'string', description: 'One of the task’s changes, by name; its first without one.' },
+              in_copy: { type: 'boolean', description: 'In a copy of its own of that change’s worktree, not in it.' },
+              writes: {
+                type: 'boolean',
+                description: 'In a copy, what it changes is kept as a commit for you to bring in; thrown away without it.',
+              },
+            },
+            required: ['brief', 'name'],
+          },
+          startHelper,
+        ),
+        tool(
+          'stop_helper',
+          'Stops one of your helpers, by its name: nothing of it comes back, and its change is yours to write in again.',
+          { type: 'object', properties: { helper: { type: 'string' } }, required: ['helper'] },
+          stopHelper,
+        ),
         tool(
           'make_it_a_change',
           `Makes this quick task a real change, with a review and a pull request: call it only when the person asks to turn what you made into a real thing (to keep it, review it, or open a pull request), never on your own. Give the task a title for what the change does now (at most ${TITLE_LENGTH} characters); the model that reviews it, which only reads (pick a strong one, from another maker than yours where there is one), or null only where the person said it needs no review; and whether its pull request opens as a draft or ready for review (a draft, unless the person said ready). Its work goes on a branch of its own if it has none; then commit what belongs in the change, and call finish_step: the review comes next, then the pull request. Any other task, such as a prototype that should become the real build, or a review whose findings need a fix, starts the change as a task of its own: draft_task, then propose_plan.`,

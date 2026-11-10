@@ -80,7 +80,7 @@ import { change, fact, timestamp } from './records'
 import type { Reach } from './sandboxReach'
 import { withRole } from './roles'
 import { git, PUSHED } from './git'
-import { evidenceFolderOf, reviewCopyOf } from './reviewCopy'
+import { evidenceFolderOf, MERGE_REVIEW, mergeCopyOf, reviewCopyOf } from './reviewCopy'
 import { LAST_MESSAGE_COORDINATOR, LAST_MESSAGE_LEAD, LAST_MESSAGE_REVIEWER } from './lastMessage'
 import { reviewBrief as reviewingBrief, type Reviewed, reviewOf } from './reviewing'
 import { Setups } from './Setups'
@@ -94,6 +94,7 @@ import { quickIn } from './kinds'
 import { defaultEffortOf } from './preferences'
 import { makeKeyedLock } from './keyedLock'
 import { makeInputBatches } from './inputBatches'
+import { type Starting, toolClock } from './turnTimes'
 import { addItem, betweenTurns, keepAltharCall, moveToEnd, type OutputSoFar, recorder, toolItem, transcript } from './threads'
 import {
   addressOf,
@@ -173,6 +174,8 @@ interface TaskRepository {
   readonly within: string | null
   /** 1 where it is the repository's own checkout, where the person works, as a Local task's is (ADR-091); 0 for a worktree. */
   readonly local: number
+  /** The change it is the worktree of, by its name, where the task has several (a task is a conversation plus parts); null for its first. */
+  readonly change?: string | null
 }
 
 /** What a project works toward in one of its repositories (ADR-093): null for its default branch. */
@@ -208,9 +211,29 @@ interface TaskThread {
   /**
    * Someone else's pull request the task reviews, where it is a review: its
    * lead then reads a read-only copy of it, under the rules of a role that
-   * only reads, and, for one from outside the project, offline.
+   * only reads, and, for one from outside the project, offline. Null for a
+   * task with work of its own, which reads any pull request it reviews
+   * beside it (a task is a conversation plus parts, "Reviewing").
    */
   readonly review: Reviewed | null
+  /**
+   * How far the person trusts that pull request's code ("Run it"): null, its
+   * lead only reads; `safe`, it runs its commands in the sandbox, offline;
+   * `full`, as the team's code, set up and with the network.
+   */
+  readonly trust: 'safe' | 'full' | null
+  /**
+   * A helper its lead started (ADR-087, as "a task is a conversation plus parts" amends it): a session of its own, in a step
+   * thread of the task's, working in the worktree of the change it was handed; absent for the task's lead.
+   */
+  readonly helper?: {
+    readonly name: string
+    readonly brief: string
+    readonly change: string | null
+    /** In a copy of its own, not the change's worktree; `writes`, what it changes there kept as a commit for its lead. */
+    readonly copy?: boolean
+    readonly writes?: boolean
+  }
 }
 
 /**
@@ -233,6 +256,8 @@ interface CoordinatorThread {
  */
 interface ReviewThread {
   readonly role: 'reviewer'
+  /** A review after a merge (MergeReviews.ts): the pull request that merged, as its host names it. */
+  readonly merged?: { readonly words: string } | undefined
   readonly threadId: string
   readonly projectId: ProjectId
   readonly taskId: string
@@ -301,8 +326,10 @@ const askedFor = (thread: { readonly title: string; readonly description: string
  * repository's own settings. Selected skills are independent of this role; only offline outside reviews omit them.
  */
 export const onlyReads = (
-  thread: { readonly role: 'task'; readonly review: object | null } | { readonly role: Exclude<ThreadContext['role'], 'task'> },
-) => thread.role !== 'task' || thread.review !== null
+  thread:
+    | { readonly role: 'task'; readonly review: object | null; readonly trust?: 'safe' | 'full' | null }
+    | { readonly role: Exclude<ThreadContext['role'], 'task'> },
+) => thread.role !== 'task' || (thread.review !== null && (thread.trust ?? null) === null)
 
 /** The other tasks planned from the message a task came from, for its lead's brief (siblings.ts). */
 const alongside = (taskId: string) => siblingsOf(taskId).pipe(Effect.map((others) => (others.length === 0 ? [] : [alsoPlanned(others)])))
@@ -393,6 +420,10 @@ interface Running {
   handover: 'none' | 'under_way' | 'left'
   /** When its turn running started, in milliseconds: what the person's wait for its first word is counted from. */
   turnStartedAt: number | null
+  /** Its lead ran a command in this session: a chat's copy made without setup was set up then (`heardRun`). */
+  ranOnce?: boolean
+  /** In a task of several changes, where each change's branch stood as its turn started: what it committed to each is counted from. */
+  turnHeads?: ReadonlyArray<{ readonly name: string; readonly path: string; readonly head: string }> | undefined
   /** When its last turn ended, in milliseconds; null before its first. */
   turnEndedAt: number | null
   /**
@@ -400,6 +431,19 @@ interface Running {
    * between turns, as what is said to it next is delivered, never in one.
    */
   nextLead: { readonly agentId: string; readonly model?: string; readonly effort?: string } | undefined
+  /**
+   * Its folder moved under it (a task moving between a worktree and Local): what is said to it next goes to a fresh session
+   * there, handed the work so far, as a handover's would, since an agent's session can't follow its folder.
+   */
+  moved: boolean
+  /**
+   * Where the next turn's time went before it was delivered (turnTimes.ts):
+   * how long its session took to start or be handed over, and its folder's
+   * setup it waited for, which only a session's first turn counts; and how
+   * long it waited for a place among the agents at work here. Taken by the
+   * turn it was for.
+   */
+  before: { session: number; starting: Starting | null; place: number }
 }
 
 /** How often, at most, a thread's agent is looked at while a round waits for it to be done. */
@@ -446,6 +490,8 @@ interface Brief {
   readonly closing: string
   /** The person started or switched to the agent: its first turn is theirs, and goes on at once (ADR-037). */
   readonly byPerson?: boolean
+  /** A fresh session taking over from one whose context was full, rather than one started for the work: its first turn's line says which. */
+  readonly starting?: Starting
 }
 
 type Store =
@@ -844,6 +890,8 @@ export class Sessions extends Context.Service<
         readonly taskId: string
         /** A task's reviewer, not its lead. */
         readonly reviewer: boolean
+        /** One of its lead's helpers (ADR-087): a place of its own. */
+        readonly helper: boolean
         readonly turnRunning: boolean
         readonly background: boolean
         /** The agent's process, where it runs as one: what its left running is a part of, and is read for CPU (Busy.ts). */
@@ -863,6 +911,14 @@ export class Sessions extends Context.Service<
      * task is a conversation plus parts), so what the turn commits waits for
      * Ship. It is done once, and never fails the turn.
      */
+    /**
+     * What happens as any turn of a task's lead begins, before the agent
+     * reads its prompt: what the person committed by hand since the lead's
+     * last turn is held for Ship then (Changes.ts; a task is a conversation
+     * plus parts), before the lead can commit on top of it. Never fails the
+     * turn.
+     */
+    onLeadTurn(next: (lead: { readonly taskId: string; readonly threadId: string }) => Effect.Effect<void>): Effect.Effect<void>
     onPersonsTurn(
       next: (lead: {
         readonly taskId: string
@@ -878,6 +934,8 @@ export class Sessions extends Context.Service<
           readonly threadId: string
           readonly sessionId: string
           readonly review: boolean
+          /** One of a lead's helpers (ADR-087), by its thread: a place of its own. */
+          readonly helper?: string
           /** Its first turn after the person started or switched to it: theirs, as what they say is. */
           readonly byPerson: boolean
         },
@@ -897,6 +955,11 @@ export class Sessions extends Context.Service<
      * it is still at work once `within` has passed (`late`).
      */
     untilIdle(threadId: string, within: Duration.Duration): Effect.Effect<'idle' | 'gone' | 'late'>
+    /**
+     * The lead's folder moved (a worktree to Local, or back): what is said to it next starts a fresh session in the new
+     * folder, handed the work so far. Nothing where no session is: the next starts there anyway.
+     */
+    moved(threadId: string): Effect.Effect<void>
   }
 >()('@althar/runtime/Sessions') {
   static readonly layer: Layer.Layer<Sessions, never, Store> = Layer.effect(
@@ -948,6 +1011,30 @@ export class Sessions extends Context.Service<
           if (io !== undefined) noteServerStatus(io, 'claude', server.name, server.status, why)
         }).pipe(Effect.ignore)
       }
+      /**
+       * Where each of a task's several changes stands as its lead's turn starts (a task is a conversation plus parts, "Where
+       * a turn's time goes": with several changes, its line says where its commits went). None for one change, or another
+       * thread.
+       */
+      const changeHeads = (threadId: string) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const rows = yield* sql<{ name: string; own: string | null; path: string }>`
+            SELECT coalesce(w.name, w.branch) AS name, w.name AS own, w.path FROM threads t JOIN workspaces w ON w.task_id = t.task_id
+            WHERE t.id = ${threadId} AND t.kind = 'task' AND w.access = 'write' AND w.reviewing IS NULL AND w.state = 'ready'
+              AND w.branched_at IS NOT NULL
+            ORDER BY w.created_at, w.rowid`
+          // One change, though in several repositories, has nothing to tell apart.
+          if (new Set(rows.map((row) => row.own ?? '')).size < 2) return undefined
+          const heads = yield* Effect.forEach(rows, (row) =>
+            git(row.path, 'rev-parse', 'HEAD').pipe(
+              Effect.map((head) => ({ ...row, head })),
+              Effect.orElseSucceed(() => undefined),
+            ),
+          )
+          return heads.filter((one) => one !== undefined)
+        }).pipe(Effect.orElseSucceed(() => undefined))
+
       const heardPlan = (running: Running, event: SessionEvent) => {
         const windows = event._tag === 'PlanWindows' ? event.windows : event._tag === 'ContextUsage' ? event.planWindows : undefined
         return Effect.andThen(
@@ -977,6 +1064,8 @@ export class Sessions extends Context.Service<
       // Sessions live in a scope of their own, closed only after the finalizer below has stopped each one and recorded it.
       const sessionsScope = yield* Scope.fork(yield* Effect.scope, 'sequential')
       const threads = new Map<string, Running>()
+      /* What any turn of a task's lead starts, once Changes says (onLeadTurn): until then, nothing. */
+      let leadTurn = (_lead: { readonly taskId: string; readonly threadId: string }): Effect.Effect<void> => Effect.void
       /* What a lead's turn that delivers the person's words starts, once Runs says (onPersonsTurn): until then, nothing. */
       let personsTurn = (_lead: {
         readonly taskId: string
@@ -991,6 +1080,7 @@ export class Sessions extends Context.Service<
           readonly threadId: string
           readonly sessionId: string
           readonly review: boolean
+          readonly helper?: string
           readonly byPerson: boolean
         },
         work: (begun: Effect.Effect<void>) => Effect.Effect<void>,
@@ -1131,6 +1221,17 @@ export class Sessions extends Context.Service<
           }
         })
 
+      /**
+       * A chat's copy is made without setup (a task is a conversation plus parts, "Chats and Scratch"): the first command its
+       * lead runs sets it up, once per session, beside the command, as its thread shows. Nothing for one set up already.
+       */
+      const heardRun = (running: Running, event: SessionEvent) => {
+        const { thread } = running
+        if (thread.role !== 'task' || running.ranOnce === true || event._tag !== 'ToolCall' || event.kind !== 'execute') return Effect.void
+        running.ranOnce = true
+        return setups.begin(thread.taskId, true)
+      }
+
       /** Keeps what the agent says of what it left running, from an event it streamed, in a turn or between. */
       const heardBackground = (running: Running, event: SessionEvent) =>
         run(
@@ -1250,6 +1351,12 @@ export class Sessions extends Context.Service<
           const sql = yield* SqlClient.SqlClient
           const [kind] = yield* sql<{ kind: string; projectId: ProjectId; projectName: string }>`
             SELECT t.kind, t.project_id, p.name AS project_name FROM threads t JOIN projects p ON p.id = t.project_id WHERE t.id = ${threadId}`
+          // A review after a merge reads a copy at the merged head, beside the task's folder: whether that folder is here or not.
+          const merged = kind?.kind === 'step' ? yield* mergedReviewOf(threadId) : undefined
+          if (merged !== undefined) return merged
+          // A helper works in the worktree of the change it was handed, not a reviewer's copy.
+          const helped = kind?.kind === 'step' ? yield* helperThreadOf(threadId) : undefined
+          if (helped !== undefined) return helped
           // A finished task's folder that was removed comes back before an agent starts in it, and is set up again (ADR-056).
           if (kind !== undefined && kind.kind !== 'coordinator') {
             const back = yield* bringBackFor(threadId, instance.systemId)
@@ -1267,7 +1374,7 @@ export class Sessions extends Context.Service<
           const repositories = yield* sql<TaskRepository>`
             SELECT b.display_name AS name, b.role, w.path AS worktree, w.branch, w.branched_at IS NOT NULL AS branched, w.base_ref,
               w.base_commit, coalesce(b.default_base_ref, w.base_ref) AS default_branch, w.toward, b.folder AS within,
-              w.kind IS NOT NULL AS local
+              w.kind IS 'checkout' AS local, w.name AS change
             FROM threads t
             JOIN workspaces w ON w.task_id = t.task_id AND w.device_id = ${instance.deviceId} AND w.state = 'ready'
             JOIN repository_bindings b ON b.id = w.binding_id
@@ -1300,7 +1407,93 @@ export class Sessions extends Context.Service<
             defaultBranch: first.defaultBranch,
             repositories,
             cwd: startIn(repositories),
-            review: yield* reviewOf(task.taskId),
+            ...(yield* reviewingOf(task.taskId)),
+          } satisfies ThreadContext as ThreadContext
+        })
+
+      /**
+       * The thread of a review after a merge, where it is one (MergeReviews.ts): its copy is at the merged head, and the change is
+       * what merged since what the last review read. Undefined for any other thread.
+       */
+      const mergedReviewOf = (threadId: string) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const [review] = yield* sql<{ number: number | null; base: string | null; url: string }>`
+            SELECT r.number, r.base, r.url FROM threads t JOIN merge_reviews r ON r.task_id = t.task_id
+            WHERE t.id = ${threadId} AND t.kind = 'step' AND t.node_key = ${MERGE_REVIEW} AND r.state IN ('running', 'owed')
+            ORDER BY r.state = 'running' DESC, r.updated_at DESC LIMIT 1`
+          if (review === undefined) return undefined
+          const repositories = yield* sql<TaskRepository>`
+            SELECT b.display_name AS name, b.role, w.path AS worktree, w.branch, w.branched_at IS NOT NULL AS branched, w.base_ref,
+              w.base_commit, coalesce(b.default_base_ref, w.base_ref) AS default_branch, w.toward, b.folder AS within,
+              w.kind IS 'checkout' AS local
+            FROM threads t
+            JOIN workspaces w ON w.task_id = t.task_id AND w.device_id = ${instance.deviceId}
+            JOIN repository_bindings b ON b.id = w.binding_id
+            LEFT JOIN repository_changes c ON c.workspace_id = w.id AND c.pull_request_url = ${review.url}
+            WHERE t.id = ${threadId}
+            ORDER BY c.id IS NULL, b.created_at, b.rowid LIMIT 1`
+          const [task] = yield* sql<{ projectId: ProjectId; taskId: string; title: string; description: string; request: string | null }>`
+            SELECT t.project_id, t.task_id, k.title, k.description, k.request FROM threads t JOIN tasks k ON k.id = t.task_id WHERE t.id = ${threadId}`
+          const [first] = repositories
+          if (task === undefined || first === undefined) return yield* new NotFound({ kind: 'review after a merge', id: threadId })
+          const copies = [{ ...first, worktree: mergeCopyOf(first.worktree, review.number), baseCommit: review.base ?? first.baseCommit }]
+          return {
+            role: 'reviewer',
+            merged: { words: review.number === null ? 'the pull request' : `#${review.number}` },
+            threadId,
+            ...task,
+            repositories: copies,
+            cwd: startIn(copies),
+          } satisfies ThreadContext as ThreadContext
+        })
+
+      /** A helper's thread, as its session reads it: its task, its change's worktree, and what it was asked. */
+      const helperThreadOf = (threadId: string) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const [helper] = yield* sql<{
+            name: string
+            brief: string
+            workspaceId: string | null
+            copyPath: string | null
+            writes: number
+          }>`SELECT name, brief, workspace_id, copy_path, writes FROM helpers WHERE thread_id = ${threadId}`
+          if (helper === undefined) return undefined
+          const repositories = yield* sql<TaskRepository>`
+            SELECT b.display_name AS name, b.role, w.path AS worktree, w.branch, w.branched_at IS NOT NULL AS branched, w.base_ref,
+              w.base_commit, coalesce(b.default_base_ref, w.base_ref) AS default_branch, w.toward, b.folder AS within,
+              w.kind IS 'checkout' AS local, w.name AS change
+            FROM threads t JOIN workspaces w ON w.task_id = t.task_id AND w.device_id = ${instance.deviceId} AND w.state = 'ready'
+              AND w.access = 'write'
+            JOIN repository_bindings b ON b.id = w.binding_id
+            WHERE t.id = ${threadId} AND (${helper.workspaceId} IS NULL OR w.id = ${helper.workspaceId})
+            ORDER BY b.created_at, b.rowid LIMIT 1`
+          const [task] = yield* sql<{ projectId: ProjectId; taskId: string; title: string; description: string; request: string | null }>`
+            SELECT t.project_id, t.task_id, k.title, k.description, k.request FROM threads t JOIN tasks k ON k.id = t.task_id WHERE t.id = ${threadId}`
+          const [found] = repositories
+          if (task === undefined || found === undefined) return yield* new NotFound({ kind: 'helper with a ready worktree', id: threadId })
+          // One given no change works in a copy of its own, its only folder (ADR-087, task 6).
+          const first = helper.copyPath === null ? found : { ...found, worktree: helper.copyPath }
+          return {
+            role: 'task',
+            threadId,
+            ...task,
+            worktree: first.worktree,
+            branch: first.branch,
+            baseRef: first.baseRef,
+            baseCommit: first.baseCommit,
+            defaultBranch: first.defaultBranch,
+            repositories: helper.copyPath === null ? repositories : [first],
+            cwd: first.worktree,
+            review: null,
+            trust: null,
+            helper: {
+              name: helper.name,
+              brief: helper.brief,
+              change: first.change ?? null,
+              ...(helper.copyPath === null ? {} : { copy: true, writes: helper.writes === 1 }),
+            },
           } satisfies ThreadContext as ThreadContext
         })
 
@@ -1536,6 +1729,13 @@ export class Sessions extends Context.Service<
             }
             yield* settleLead(running, next)
           }
+          // Its folder moved: a fresh session there takes up what is said now, handed the work so far.
+          if (running.moved && running.handover === 'none' && (yield* inputWaiting(thread.threadId))) {
+            running.moved = false
+            running.handover = 'under_way'
+            yield* Effect.forkIn(run(handOver(running, undefined, true)), sessionsScope)
+            return false
+          }
           // A compaction the person asked for comes first: it may leave nothing to hand over.
           if (running.handover === 'none' && !(yield* compactQueued(thread.threadId)) && (yield* dueToHandOver(running))) {
             running.handover = 'under_way'
@@ -1688,6 +1888,12 @@ export class Sessions extends Context.Service<
             )
             .pipe(Effect.catchTag('TakenBack', () => Effect.succeed(false)))
           if (!claimed) return true
+          // What the person committed by hand since the lead's last turn is held before the lead reads anything, so it can't commit
+          // on top of it first.
+          if (thread.role === 'task')
+            yield* leadTurn({ taskId: thread.taskId, threadId: thread.threadId }).pipe(
+              Effect.catchCause((cause) => Effect.logWarning('Could not look at commits made by hand', cause)),
+            )
           // What the person says to a task's lead after its plan is a turn: where its worktrees stand is kept before the turn is
           // delivered (Runs.ts), so what it commits can wait for Ship, and its card says it works as soon as it is.
           if (thread.role === 'task' && inputs.some((input) => input.shown === 1))
@@ -1726,6 +1932,7 @@ export class Sessions extends Context.Service<
           if (!compacting) running.brief = undefined
           running.turnRunning = true
           running.turnStartedAt = yield* Clock.currentTimeMillis
+          running.turnHeads = yield* changeHeads(thread.threadId)
           // What it did outside a turn before is over with: this turn is what it is at.
           running.callsOpen.clear()
           running.workedAt = null
@@ -1793,6 +2000,10 @@ export class Sessions extends Context.Service<
           running.recording = items
           let ended: Extract<SessionEvent, { _tag: 'TurnEnded' }> | undefined
           let compactFailed = false
+          // What the turn spent before it was delivered is its own, and the next one's starts from nothing.
+          const spent = running.before
+          running.before = { session: 0, starting: null, place: 0 }
+          const tools = toolClock()
           // A failure to record one event doesn't stop the runtime reading the rest of the turn.
           const record = (event: SessionEvent) =>
             items.record(event).pipe(Effect.catchCause((cause) => Effect.logWarning('Could not record an agent event', cause)))
@@ -1857,11 +2068,13 @@ export class Sessions extends Context.Service<
           const streamed = yield* Stream.runForEach(running.agent.prompt(prompt, parts, started), (event) =>
             Effect.gen(function* () {
               if (event._tag === 'TurnEnded') ended = event
+              tools.heard(event, yield* Clock.currentTimeMillis)
               // An agent may say its compaction failed in a call of its own, and end its turn as usual (Claude Code).
               if (compacting && event._tag === 'ToolCallUpdate' && event.status === 'failed') compactFailed = true
               heardContext(running, event)
               yield* heardPlan(running, event)
               yield* record(event)
+              yield* heardRun(running, event)
               yield* heardBackground(running, event)
               yield* live.publish({ _tag: 'Agent', threadId: thread.threadId, event })
               if (event._tag === 'AgentMessage' || event._tag === 'AgentThought' || event._tag === 'ToolCallUpdate') yield* stream
@@ -1872,6 +2085,33 @@ export class Sessions extends Context.Service<
           running.turnRunning = false
           running.promptSent = null
           running.turnEndedAt = yield* Clock.currentTimeMillis
+          // A session started for a step that waited for a place counts that wait in its first turn (Runs' `startPlaced`).
+          const [placed] =
+            spent.starting === null
+              ? []
+              : yield* sql<{ waited: number | null }>`
+                  SELECT json_extract(f.payload, '$.waited') AS waited FROM record_events f
+                  JOIN node_attempts a ON a.id = f.aggregate_id AND f.aggregate_type = 'node_attempt'
+                  WHERE a.provider_session_id = ${running.sessionId} AND f.type = 'node_attempt.admitted'
+                    AND json_extract(f.payload, '$.waited') IS NOT NULL
+                  ORDER BY f.sequence DESC LIMIT 1`.pipe(Effect.orElseSucceed(() => []))
+          // In a task of several changes, how many commits it made in each, from where each stood as it began.
+          const went = yield* Effect.forEach(running.turnHeads ?? [], (one) =>
+            git(one.path, 'rev-list', '--count', `${one.head}..HEAD`).pipe(
+              Effect.map((count) => ({ name: one.name, commits: Number(count) || 0 })),
+              Effect.orElseSucceed(() => ({ name: one.name, commits: 0 })),
+            ),
+          )
+          running.turnHeads = undefined
+          const committed = went.filter((one) => one.commits > 0)
+          const timings = {
+            place: spent.place + Math.max(0, placed?.waited ?? 0),
+            session: spent.starting === null ? 0 : spent.session,
+            starting: spent.starting,
+            work: Math.max(0, running.turnEndedAt - (running.turnStartedAt ?? running.turnEndedAt)),
+            tools: tools.total(running.turnEndedAt),
+            ...(committed.length === 0 ? {} : { changes: committed }),
+          }
 
           const failure = Exit.isFailure(streamed) ? Cause.findErrorOption(streamed.cause) : Option.none()
           const errorClass = errorClassOf(failure, Exit.isFailure(streamed)) ?? ended?.failure?.failure
@@ -1892,6 +2132,7 @@ export class Sessions extends Context.Service<
                 usage: ended?.usage === undefined ? null : JSON.stringify(ended.usage),
                 errorClass: errorClass ?? null,
                 endedAt: yield* timestamp,
+                timings: JSON.stringify(timings),
               })
               yield* fact({
                 projectId: thread.projectId,
@@ -1927,6 +2168,8 @@ export class Sessions extends Context.Service<
           // A brief the agent never read goes with the next turn: refused, or out of usage before it began.
           // A compaction left the brief where it was.
           if ((refused || held) && !compacting) running.brief = brief
+          // Refused, its prompt never went: what it spent before is the turn's that tries again.
+          if (refused) running.before = spent
           running.retryBrief = state === 'failed' && !compacting ? brief : undefined
           if (refused) {
             // Tried again shortly, rather than straight away.
@@ -2077,8 +2320,12 @@ export class Sessions extends Context.Service<
           Effect.gen(function* () {
             yield* Queue.take(running.wake)
             // A lead's first turn waits for its worktrees to be set up (Setups.ts), and so has what was said meanwhile. It
-            // waits before it holds the turn, so the lead can be stopped meanwhile.
-            if (running.thread.role === 'task' && running.brief !== undefined) yield* setups.ready(running.thread.taskId)
+            // waits before it holds the turn, so the lead can be stopped meanwhile. Its first turn counts the wait as its start.
+            if (running.thread.role === 'task' && running.brief !== undefined) {
+              const from = yield* Clock.currentTimeMillis
+              yield* setups.ready(running.thread.taskId)
+              running.before.session += Math.max(0, (yield* Clock.currentTimeMillis) - from)
+            }
             const { thread } = running
             // A turn that couldn't be delivered is kept to that turn: the next message wakes the loop again.
             if (thread.role === 'coordinator')
@@ -2129,18 +2376,22 @@ export class Sessions extends Context.Service<
               if (!running.stopping) yield* Queue.offer(running.wake, undefined)
               return
             }
+            // From asking for a place to being given one: what its turn counts as waiting for one.
+            const asked = yield* Clock.currentTimeMillis
             yield* gate(
               {
                 taskId: thread.taskId,
                 threadId: thread.threadId,
                 sessionId: running.sessionId,
                 review: thread.role === 'reviewer',
+                ...(thread.role === 'task' && thread.helper !== undefined ? { helper: thread.threadId } : {}),
                 byPerson: running.brief?.byPerson === true,
               },
               (begun) =>
-                Effect.suspend(() => {
+                Effect.flatMap(Clock.currentTimeMillis, (given) => {
                   if (running.stopping) return Effect.succeed(false)
                   running.begun = begun
+                  running.before.place += Math.max(0, given - asked)
                   return run(running.delivering.withPermits(1)(deliver(running)))
                 }).pipe(
                   Effect.flatMap((delivered) => (delivered ? Queue.offer(running.wake, undefined) : Effect.succeed(false))),
@@ -2314,8 +2565,9 @@ export class Sessions extends Context.Service<
           // A review's lead only reads, as the coordinator and a reviewer do, and loads nothing of the repository's own settings,
           // hooks or plugins (the pull request's to write); offline, for a pull request from outside the project.
           const reads = onlyReads(thread)
-          const untrusted = thread.role === 'task' && thread.review !== null
-          const offline = thread.role === 'task' && thread.review?.outside === true
+          // Trusted fully, by the person's word or as the team's, it runs as the team's code does: no longer untrusted or offline.
+          const untrusted = thread.role === 'task' && thread.review !== null && thread.trust !== 'full'
+          const offline = thread.role === 'task' && thread.review?.outside === true && thread.trust !== 'full'
           // Only an agent its session holds to reading leads a review (the registry's `reviewing`): never one that runs what its
           // sandbox contains without asking, which could run the pull request's code, a team's too.
           if (untrusted && definition.reviewing?.outside !== true) {
@@ -2515,7 +2767,7 @@ export class Sessions extends Context.Service<
                 toolRoleOf(thread),
                 thread.projectId,
                 connection.info.mcp.http,
-                !(thread.role === 'task' && thread.review?.outside === true),
+                !(thread.role === 'task' && thread.review?.outside === true && thread.trust !== 'full'),
               ).pipe(Effect.provideService(RuntimeConfig, runtimeConfig), Effect.provideService(SqlClient.SqlClient, sessionsSql))
               const agent = yield* connection.newSession({
                 cwd: cwdOf(thread),
@@ -2689,6 +2941,9 @@ export class Sessions extends Context.Service<
         return Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
           const { sessionId, entry, account, thread, connection, agent, scope, revokeTools, requestContext, skills, upFront } = connected
+          // How long it took to start, from its row to now: what its first turn counts as starting or handing over.
+          const [made] = yield* sql<{ startedAt: string }>`SELECT started_at FROM provider_sessions WHERE id = ${sessionId}`
+          const opened = made === undefined ? 0 : Math.max(0, (yield* Clock.currentTimeMillis) - Date.parse(made.startedAt))
           const { definition } = entry
           const options = yield* agent.options
           yield* sql.withTransaction(
@@ -2748,6 +3003,8 @@ export class Sessions extends Context.Service<
             turnStartedAt: null,
             turnEndedAt: null,
             nextLead: undefined,
+            moved: false,
+            before: { session: opened, starting: brief.starting ?? 'start', place: 0 },
           }
           threads.set(thread.threadId, running)
           // Closed, it stops what it left running with all that started, before its agent ends their shells only (stopping.ts).
@@ -3175,6 +3432,25 @@ export class Sessions extends Context.Service<
         )
 
       /**
+       * The pull request a task reviews, where reviewing is all it does, and how far its code is trusted: a task with work of
+       * its own reviews what it reviews beside that, as its brief says, and reads its own code as any lead does.
+       */
+      const reviewingOf = (taskId: string) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const review = yield* reviewOf(taskId)
+          if (review === null) return { review: null, trust: null }
+          const [own] = yield* sql<{ n: number }>`
+            SELECT count(*) AS n FROM workspaces WHERE task_id = ${taskId} AND device_id = ${instance.deviceId} AND access = 'write'
+              AND state = 'ready'`
+          if ((own?.n ?? 0) > 0) return { review: null, trust: null }
+          const [trusted] = yield* sql<{ trust: 'safe' | 'full' | null }>`
+            SELECT trust FROM workspaces WHERE task_id = ${taskId} AND device_id = ${instance.deviceId} AND access = 'read'
+            ORDER BY created_at LIMIT 1`
+          return { review, trust: trusted?.trust ?? null }
+        })
+
+      /**
        * The brief a session starts from (ADR-005): for a task, the task, where
        * its worktree stands (the plan, and the change so far), and the thread;
        * for the coordinator, its role, the project, and the thread.
@@ -3184,16 +3460,32 @@ export class Sessions extends Context.Service<
           ? coordinatorBrief(thread)
           : thread.role === 'reviewer'
             ? reviewBrief(thread)
-            : thread.review !== null
-              ? reviewTaskBrief(thread, thread.review)
-              : taskBrief(thread, why)
+            : thread.helper !== undefined
+              ? Effect.succeed(helperBrief(thread, thread.helper))
+              : thread.review !== null
+                ? reviewTaskBrief(thread, thread.review)
+                : taskBrief(thread, why)
+
+      /** A helper's brief (ADR-087): what it was asked, whole, where it works, and how it ends: its last message is its result. */
+      const helperBrief = (thread: TaskThread, helper: NonNullable<TaskThread['helper']>) =>
+        [
+          `You are a helper in Althar, "${helper.name}", started by the lead of the task "${thread.title}" to do one thing in the background while the person keeps talking with the lead. You read nothing of their conversation: what you were asked is below, whole.`,
+          helper.copy === true
+            ? `You work in ${thread.cwd}, a copy of your own of ${helper.change === null ? 'the task’s change' : `its change “${helper.change}”`} as it stood when you started, untracked files too, apart from the lead's work. ${helper.writes === true ? 'What you change there is kept as a commit for the lead to bring in once you end: change only what you were asked to, and leave it, committed or not.' : 'What you change there is thrown away when you end: read, run and try what you were asked, and say what you found.'} Push nothing and open no pull request.`
+            : `You work in ${thread.cwd}, the worktree of ${helper.change === null ? 'the task’s change' : `its change “${helper.change}”`}, on ${thread.branch}. You're the only one writing there until you end: commit what you change there, in commits of their own with clear messages. Push nothing and open no pull request: the change ships with the person's Ship, after its review.`,
+          "You can't ask the person anything, and you start no helpers of your own. Where something stops you, say so in your result rather than guess.",
+          'When you are done, end your turn with your result, short: what you did or found, with paths and lines, and what you couldn’t do. That last message is what the lead reads, as a new turn.',
+          `What you were asked:\n\n${helper.brief}`,
+        ].join('\n\n')
 
       /** A review task's lead's brief: someone else's pull request, where its copy is, what it may do, and how it drafts. */
       const reviewTaskBrief = (thread: TaskThread, review: Reviewed) =>
         Effect.gen(function* () {
-          return [...reviewingBrief({ cwd: thread.cwd, review }), ...askedFor(thread), ...(yield* threadSoFar(thread.threadId))].join(
-            '\n\n',
-          )
+          return [
+            ...reviewingBrief({ cwd: thread.cwd, review, trust: thread.trust }),
+            ...askedFor(thread),
+            ...(yield* threadSoFar(thread.threadId)),
+          ].join('\n\n')
         })
 
       /** A reviewer's brief: the task, how to see the change, what it may do, and how to report. */
@@ -3212,6 +3504,20 @@ export class Sessions extends Context.Service<
             taskThread === undefined || first === undefined
               ? ''
               : yield* evidenceForReview(taskThread.id, evidenceFolderOf(first.worktree)).pipe(Effect.orElseSucceed(() => ''))
+          // A review after a merge reads what merged, for the person, who decides what becomes of it.
+          if (thread.merged !== undefined) {
+            const [copy] = thread.repositories
+            return [
+              `You are reviewing a change that merged already, as ${thread.merged.words}, in Althar. You only read: you may read files, search, and run commands that only look, such as git diff. You change nothing; the person reads what you find and decides whether the task's lead fixes it, in a change after this one.`,
+              `The task: ${thread.title}${thread.description === '' ? '' : `\n\n${thread.description}`}`,
+              ...askedFor(thread),
+              `What merged is in ${copy?.worktree ?? thread.cwd}: a copy at the merged head, which Althar throws away after. See what merged that no review read before with \`git diff ${copy?.baseCommit ?? 'HEAD~1'}\` there.`,
+              ...(summary === '' ? [] : [`The lead says:\n${summary}`]),
+              "Look for what would make the change wrong or unsafe: bugs, missed cases, broken behaviour, security, tests that don't test it. Not style the project doesn't ask for. Then call Althar's report_review tool once: a verdict (pass, or changes_requested), a summary of a few lines, and your findings, each with its severity (blocking, major, minor or nit), a title saying what is wrong in one short line, where it is (the file and line), and what is wrong in full. With no findings worth fixing, the verdict is pass.",
+              LAST_MESSAGE_REVIEWER,
+              ...(yield* threadSoFar(thread.threadId)),
+            ].join('\n\n')
+          }
           return [
             "You are reviewing another agent's change, in Althar. You only read: you may read files, search, and run commands that only look, such as git diff. You change nothing; the task's lead settles what you find.",
             `The task: ${thread.title}${thread.description === '' ? '' : `\n\n${thread.description}`}`,
@@ -3333,6 +3639,8 @@ export class Sessions extends Context.Service<
               : `each worktree's scratch folder, .althar/scratch`
           // Local, its folders are the person's own checkouts (ADR-091).
           const local = thread.repositories.some((repository) => repository.local === 1)
+          // More than one change of its own: some repository has more than one worktree.
+          const changes = thread.repositories.some((repository) => repository.change != null)
           const folders = local ? (several ? 'checkouts' : 'checkout') : several ? 'worktrees' : 'worktree'
           return [
             why.kind === 'start'
@@ -3354,9 +3662,24 @@ export class Sessions extends Context.Service<
             OTHER_TASKS,
             // The person's decisions the code doesn't show, which the coordinator keeps: whether issues are filed at once among them.
             ...(yield* Effect.map(notesOf(thread.projectId), (notes) => (notes.length === 0 ? [] : [notesSection(notes)]))),
-            several
-              ? `Its repositories are side by side in ${thread.cwd}, each with its own branch and history; commit in each one you change:\n${thread.repositories.map((repository) => `- ${withRole(repository.name, repository.role)}: ${where(repository)}.`).join('\n')}`
-              : `The ${local ? 'checkout' : 'worktree'} is ${thread.repositories[0] === undefined ? thread.worktree : `${where(thread.repositories[0])}. The repository is ${withRole(thread.repositories[0].name, thread.repositories[0].role)}`}.`,
+            // Its helpers at work (ADR-087): a handed-over lead knows of them, and that their results come as new turns.
+            ...(yield* Effect.map(
+              sql<{ name: string; change: string | null }>`
+                SELECT h.name, w.name AS change FROM helpers h LEFT JOIN workspaces w ON w.id = h.workspace_id
+                WHERE h.task_id = ${thread.taskId} AND h.state = 'working' ORDER BY h.started_at`,
+              (working) =>
+                working.length === 0
+                  ? []
+                  : [
+                      `Your helpers at work, each on a change it was handed, the only one writing there until it reports; their results come to you as new turns, so don't wait or poll: ${working.map((one) => `"${one.name}" on ${one.change ?? 'the task’s change'}`).join(', ')}. stop_helper stops one.`,
+                    ],
+            )),
+            // Several changes (a task is a conversation plus parts): each its own worktree and branch, named, side by side.
+            changes
+              ? `It holds several changes, each one line of work with its own branch, worktree and pull request, which ships and is reviewed on its own. They are side by side in ${thread.cwd}; commit each change's work in its own folder, and say which change a commit went to:\n${thread.repositories.map((repository) => `- ${repository.change ?? thread.title}${new Set(thread.repositories.map((one) => one.name)).size > 1 ? ` (${withRole(repository.name, repository.role)})` : ''}: ${where(repository)}.`).join('\n')}\nWhat the person says is for the task, not one change: work out which change it is about, as you would in a conversation. Start another change with start_change where work should be reviewed or merged apart, or go elsewhere.`
+              : several
+                ? `Its repositories are side by side in ${thread.cwd}, each with its own branch and history; commit in each one you change:\n${thread.repositories.map((repository) => `- ${withRole(repository.name, repository.role)}: ${where(repository)}.`).join('\n')}`
+                : `The ${local ? 'checkout' : 'worktree'} is ${thread.repositories[0] === undefined ? thread.worktree : `${where(thread.repositories[0])}. The repository is ${withRole(thread.repositories[0].name, thread.repositories[0].role)}`}.`,
             ...(local ? [localBrief(several)] : []),
             ...(others.length === 0
               ? []
@@ -3418,6 +3741,8 @@ export class Sessions extends Context.Service<
             STANDING_DICTATED,
             // Althar runs the project for the person itself (ADR-023): the lead keeps how, when it changes it.
             'Althar runs the project for the person, with no agent, from a command it works out from the repository or keeps for it, and the more things it keeps to run beside it, such as Storybook. If you change how the project runs, such as its dev script, its port or what it needs installed first, keep it with set_run_command; if you add something worth running by hand, keep it with keep_run.',
+            // Its agent's own helpers in the background are off (ADR-087): within its turn they stay where the agent has them.
+            "Your agent's own helpers that would work in the background are switched off. Use its helpers within your turn where it has them, for quick work on your own model; start_helper for another model or agent, for work the person should see and can stop, or for work that should outlive your turn. A dev server goes through run_project, never a command left running.",
             // What a lead would otherwise do around its sandbox, Althar does outside it: install, run, and draw a page.
             "To run the project in your worktree, a dev server or Storybook, use run_project rather than starting it yourself, and stop_project once you're done: Althar runs it outside your sandbox, and the person sees it running. screenshot gives you a picture of any HTTP page, drawn by Althar, so you needn't start a browser. The page beside your conversation is the person's own, in a session of its own that may be signed in to things: read it with page_snapshot and page_screenshot, drive it with page_click, page_type and the other page_ tools, and open an address in it with page_open (what run_project runs, say); you need not ask, the person sees you at work there, and what they do in the page comes before what you do. Where an install fails in your sandbox (a lock in .git, the package manager's cache), or what you changed needs installing, install_dependencies runs the project's setup again outside it.",
             // Commands inherit code-host identity; Althar's fetch remains available and preferred (ADR-097).
@@ -3663,7 +3988,7 @@ export class Sessions extends Context.Service<
        * fails, or a reviewer's, which isn't handed over, stops it, so Try again
        * starts a fresh one.
        */
-      const handOver = (previous: Running, lost?: string): Effect.Effect<void, never, Store> =>
+      const handOver = (previous: Running, lost?: string, moved = false): Effect.Effect<void, never, Store> =>
         exclusive(
           previous.thread.threadId,
           Effect.gen(function* () {
@@ -3677,7 +4002,12 @@ export class Sessions extends Context.Service<
             // A lead's task as it is now, not as its session found it: it may have a branch, a pull request or a new name since.
             const thread = previous.thread.role === 'task' ? yield* loadThread(previous.thread.threadId) : previous.thread
             // Something it left running since it was due would stop with it: it carries on as it is, and is looked at again.
-            if (lost === undefined && thread.role === 'task' && [...previous.background.values()].some((left) => left.ended === null)) {
+            if (
+              lost === undefined &&
+              !moved &&
+              thread.role === 'task' &&
+              [...previous.background.values()].some((left) => left.ended === null)
+            ) {
               previous.handover = 'none'
               return yield* Queue.offer(previous.wake, undefined)
             }
@@ -3692,8 +4022,10 @@ export class Sessions extends Context.Service<
                 : { text: yield* briefFor(thread, { kind: 'handover', ...(lost === undefined ? {} : { lost: true }) }), open: null }
             // A brief that would fill a fresh session as far would only be due again, and a lead's that saves little isn't
             // worth its thread of thought: the old one carries on as it is. A lost one can't.
+            // Its folder moved, it can't carry on where it is: it is handed over whatever its context.
             if (
               lost === undefined &&
+              !moved &&
               (!roomFor(brief.text, previous.context) || (thread.role === 'task' && !shrinks(brief.text, previous.context)))
             ) {
               yield* Effect.logWarning(
@@ -3712,9 +4044,11 @@ export class Sessions extends Context.Service<
                 title:
                   lost !== undefined
                     ? startedAfreshWords(previous.entry.definition.name)
-                    : brief.open === null
-                      ? `Started ${previous.entry.definition.name} afresh.`
-                      : 'Started a fresh session.',
+                    : moved
+                      ? `Started ${previous.entry.definition.name} afresh in its new folder.`
+                      : brief.open === null
+                        ? `Started ${previous.entry.definition.name} afresh.`
+                        : 'Started a fresh session.',
               }),
             ).pipe(beforeTakingOver(connected))
             yield* activate(connected, {
@@ -3723,6 +4057,7 @@ export class Sessions extends Context.Service<
                 thread.role === 'coordinator'
                   ? 'Carry the conversation on from where it stands.'
                   : 'Carry on with the task from where it stands.',
+              starting: 'handover',
             })
           }),
         ).pipe(
@@ -3911,6 +4246,11 @@ export class Sessions extends Context.Service<
             }).pipe(Effect.orDie),
           ),
         switchAgent: (input) => run(switchAgent(input)),
+        moved: (threadId) =>
+          Effect.sync(() => {
+            const running = threads.get(threadId)
+            if (running !== undefined) running.moved = true
+          }),
         interrupt: (threadId) =>
           Effect.suspend(() => {
             const running = threads.get(threadId)
@@ -4007,6 +4347,10 @@ export class Sessions extends Context.Service<
           Effect.sync(() => {
             gate = next
           }),
+        onLeadTurn: (next) =>
+          Effect.sync(() => {
+            leadTurn = next
+          }),
         onPersonsTurn: (next) =>
           Effect.sync(() => {
             personsTurn = next
@@ -4020,6 +4364,7 @@ export class Sessions extends Context.Service<
                     threadId: running.thread.threadId,
                     taskId: running.thread.taskId,
                     reviewer: running.thread.role === 'reviewer',
+                    helper: running.thread.role === 'task' && running.thread.helper !== undefined,
                     turnRunning: running.turnRunning,
                     background: [...running.background.values()].some((left) => left.ended === null),
                     pid: running.connection.process?.pid ?? null,

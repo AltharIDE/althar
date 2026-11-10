@@ -5,14 +5,14 @@ import { join } from 'node:path'
 import { expect, test } from '@playwright/test'
 
 import { repository } from '../tests/repository'
-import { launch, openFirstProject, planTask, say } from './support'
+import { launch, openFirstProject, planTask, say, toBoard } from './support'
 
 /*
  * A board of every kind of task, in a real window with the fake agent
  * (DEV-96, ADR-035): a change ready to accept, its branch on its card; a
  * task whose lead asks the person, its question its card's why; a change at
- * work, its steps on its card; and a plain task, started with no plan, that
- * finished and waits in Needs you as Finished, opened or not, until the
+ * work, its steps on its card; and a plain task, started with no plan and
+ * moved off Scratch to the board, that finished and waits in Needs you as Finished, opened or not, until the
  * person presses Done or Keep for later (ADR-051). No other card has
  * anything to press but itself. Kept, it waits under Kept, named beside
  * Settled in its head; Done, it settles; written to again, its round ends
@@ -35,8 +35,10 @@ test('shows each kind of task on the board, with nothing to press, and finds one
     await page.getByRole('button', { name: 'Start now' }).last().click()
     await expect(work.getByText('Ready to accept')).toBeVisible()
 
-    // A plain task, started with no plan: it finishes, and waits as Finished.
+    // A plain task, started with no plan: a chat, on Scratch until the person moves it to the board, where it finishes and
+    // waits as Finished.
     await say(page, 'Which partners still call the v1 endpoint? [coordinator:start] [lead:finish]')
+    await toBoard(page, 'Which partners still call the v1 endpoint')
     await expect(work.getByText('Finished', { exact: true })).toBeVisible()
 
     // A task whose lead asks the person: one card, in Needs you, that says so.

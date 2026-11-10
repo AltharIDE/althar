@@ -4,12 +4,14 @@ import { Clock, Context, type Crypto, Duration, Effect, Layer, Queue } from 'eff
 import { SqlClient } from 'effect/sql'
 
 import { postCard, touchCard } from './cards'
-import { NotFound } from './errors'
+import { ChangeRefused, NotFound } from './errors'
 import { backoff, keptGoing } from './Failures'
 import { RuntimeConfig } from './Config'
 import { countdownNow } from './plansAndReviews'
 import { Reviews } from './Reviews'
 import { Instance } from './Instance'
+import { offerPreset, planFromPreset, presetsIn } from './presets'
+import { shelve } from './scratch'
 import { change, fact, timestamp } from './records'
 import { setToward } from './towards'
 import { type PlanStep, Runs, type TaskEnd } from './Runs'
@@ -80,6 +82,12 @@ export class Plans extends Context.Service<
       /** The branch it works toward, until its first step starts (ADR-093); null for the default branch, as it was without it. */
       toward?: string | null,
     ): Effect.Effect<void, unknown>
+    /**
+     * Picks another preset for a plan before it starts (a task is a conversation plus parts, "How a task starts"): its parts
+     * change to match, by the preset's id or name: its lead and reviewer where it names them, Checked by and when, its ending,
+     * where it works and sits, and its brief added to the task's description. The preset's name.
+     */
+    applyPreset(planId: string, preset: string, actorId: ActorId): Effect.Effect<string, unknown>
   }
 >()('@althar/runtime/Plans') {
   static readonly layer: Layer.Layer<Plans, never, Store> = Layer.effect(
@@ -145,6 +153,7 @@ export class Plans extends Context.Service<
           worksIn?: WorksIn
           worksInWhy?: string | null
           proposal?: string
+          reviewAfterMerge?: boolean
         }
 
       /** Whether a plan still counts down. */
@@ -230,6 +239,11 @@ export class Plans extends Context.Service<
           )
           const plan = yield* load(planId)
           const parameters = parametersOf(plan)
+          // The same parts set up twice running: the coordinator offers them as a preset, once (a task is a conversation plus parts).
+          if (accepted)
+            yield* offerPreset(plan.projectId, instance.coordinatorId).pipe(
+              Effect.catchCause((cause) => Effect.logWarning('Could not offer a preset', cause)),
+            )
           if (parameters.reads === true) {
             // A review's lead starts in its thread; accepted before, it started then, or its thread says why it couldn't.
             const [lead] = parameters.steps
@@ -287,7 +301,6 @@ export class Plans extends Context.Service<
         change: (planId, steps, actorId, end, worksIn, toward) =>
           provide(
             Effect.gen(function* () {
-              const sql = yield* SqlClient.SqlClient
               const changed = (plan: PlanRow) => {
                 const before = parametersOf(plan)
                 const where = worksIn ?? before.worksIn
@@ -302,52 +315,112 @@ export class Plans extends Context.Service<
                   ...(where === undefined ? {} : { worksIn: where }),
                   ...(why == null ? {} : { worksInWhy: why }),
                   ...(before.proposal === undefined ? {} : { proposal: before.proposal }),
+                  ...(before.reviewAfterMerge === true ? { reviewAfterMerge: true } : {}),
                 })
               }
-              const plan = yield* load(planId)
               // A review's lead only reads: an agent that can't be held to that can't take it, whoever picks it.
-              if (parametersOf(plan).reads === true) for (const step of steps) if (!step.skipped) yield* reviews.canLead(step.agentId)
-              if (plan.state === 'proposed') {
-                // Pointed at another branch first: one the remote doesn't have changes nothing of the plan.
-                if (toward !== undefined) yield* setToward(plan.taskId, toward)
-                yield* transition(
-                  planId,
-                  (now) => now.state === 'proposed',
-                  (now) => ({ parameters: changed(now) }),
-                  'task_plan.changed',
-                  actorId,
-                )
-                return
+              if (parametersOf(yield* load(planId)).reads === true)
+                for (const step of steps) if (!step.skipped) yield* reviews.canLead(step.agentId)
+              return yield* reshape(planId, changed, actorId, toward, worksIn !== undefined)
+            }),
+          ),
+        applyPreset: (planId, asked, actorId) =>
+          provide(
+            Effect.gen(function* () {
+              const sql = yield* SqlClient.SqlClient
+              const plan = yield* load(planId)
+              const presets = yield* presetsIn(plan.projectId)
+              const preset = presets.find((one) => one.id === asked || one.name.toLowerCase() === asked.trim().toLowerCase())
+              if (preset === undefined) return yield* new NotFound({ kind: 'preset', id: asked })
+              const before = parametersOf(plan)
+              // A review of someone's pull request is its own: a plan of work doesn't become one, nor one of those work.
+              if ((preset.parts.reviews === true) !== (before.reads === true))
+                return yield* new ChangeRefused({
+                  message: before.reads === true ? 'A review stays a review.' : 'Review a PR starts from a pull request.',
+                })
+              const steps = planFromPreset(before, preset.parts).steps
+              if (before.reads === true) for (const step of steps) if (!step.skipped) yield* reviews.canLead(step.agentId)
+              yield* reshape(planId, (now) => JSON.stringify(planFromPreset(parametersOf(now), preset.parts)), actorId, undefined, true)
+              // Where it sits, and a few lines for its lead, as the preset has them.
+              yield* shelve(plan.taskId, preset.parts.shelf === 'scratch' ? 'scratch' : null, actorId)
+              const brief = preset.parts.brief.trim()
+              if (brief !== '') {
+                const [task] = yield* sql<{ description: string }>`SELECT description FROM tasks WHERE id = ${plan.taskId}`
+                if (task !== undefined && !task.description.includes(brief))
+                  yield* sql.withTransaction(
+                    Effect.gen(function* () {
+                      const revision = yield* change('tasks', plan.taskId, {
+                        description: task.description.trim() === '' ? brief : `${task.description.trim()}\n\n${brief}`,
+                      })
+                      yield* fact({
+                        projectId: plan.projectId,
+                        aggregateType: 'task',
+                        aggregateId: plan.taskId,
+                        revision,
+                        type: 'task.described',
+                        payload: { preset: preset.name },
+                        actorId,
+                      })
+                    }),
+                  )
               }
-              // Started, it can still be changed while its first step waits for a place, nothing of it begun: its run with it.
-              if (plan.state !== 'accepted') return
-              const done = yield* sql.withTransaction(
-                Effect.gen(function* () {
-                  const now = yield* load(planId)
-                  if (now.state !== 'accepted') return false
-                  const parameters = changed(now)
-                  if (!(yield* runs.changeWaiting(now.taskId, parameters, actorId))) return false
-                  if (toward !== undefined) yield* setToward(now.taskId, toward)
-                  const revision = yield* change('task_plans', planId, { parameters })
-                  yield* fact({
-                    projectId: now.projectId,
-                    aggregateType: 'task_plan',
-                    aggregateId: planId,
-                    revision,
-                    type: 'task_plan.changed',
-                    actorId,
-                  })
-                  return true
-                }),
-              )
-              if (done) {
-                yield* touchCard(plan.taskId)
-                // Moved between a worktree and its checkout as it waits: placed again now (ADR-091).
-                if (worksIn !== undefined) yield* runs.checkoutsMoved
-              }
+              yield* touchCard(plan.taskId)
+              return preset.name
             }),
           ),
       })
+
+      /** Rewrites a plan's parameters before it starts: proposed, or started with its first step waiting for a place. */
+      function reshape(
+        planId: string,
+        changed: (plan: PlanRow) => string,
+        actorId: ActorId,
+        toward: string | null | undefined,
+        moved: boolean,
+      ) {
+        return Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const plan = yield* load(planId)
+          if (plan.state === 'proposed') {
+            // Pointed at another branch first: one the remote doesn't have changes nothing of the plan.
+            if (toward !== undefined) yield* setToward(plan.taskId, toward)
+            yield* transition(
+              planId,
+              (now) => now.state === 'proposed',
+              (now) => ({ parameters: changed(now) }),
+              'task_plan.changed',
+              actorId,
+            )
+            return
+          }
+          // Started, it can still be changed while its first step waits for a place, nothing of it begun: its run with it.
+          if (plan.state !== 'accepted') return
+          const done = yield* sql.withTransaction(
+            Effect.gen(function* () {
+              const now = yield* load(planId)
+              if (now.state !== 'accepted') return false
+              const parameters = changed(now)
+              if (!(yield* runs.changeWaiting(now.taskId, parameters, actorId))) return false
+              if (toward !== undefined) yield* setToward(now.taskId, toward)
+              const revision = yield* change('task_plans', planId, { parameters })
+              yield* fact({
+                projectId: now.projectId,
+                aggregateType: 'task_plan',
+                aggregateId: planId,
+                revision,
+                type: 'task_plan.changed',
+                actorId,
+              })
+              return true
+            }),
+          )
+          if (done) {
+            yield* touchCard(plan.taskId)
+            // Moved between a worktree and its checkout as it waits: placed again now (ADR-091).
+            if (moved) yield* runs.checkoutsMoved
+          }
+        })
+      }
     }),
   )
 }

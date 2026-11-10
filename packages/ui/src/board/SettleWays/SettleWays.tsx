@@ -25,18 +25,26 @@ import s from './SettleWays.module.css'
  * parts, "A tweak waits for Ship") has Ship there too, in its header, first:
  * the one way on that sends them up, its review first where its plan has
  * one before the work ships.
+ *
+ * A task whose review after a merge found something has Fix it, which hands
+ * the findings to its lead, and Leave it, which closes them, in its header,
+ * first: what the person decides for the change that merged.
  */
 
 export interface SettleWaysText {
   done: string
   keep: string
   ship: string
+  fix: string
+  leave: string
 }
 
 export const settleWaysText: SettleWaysText = {
   done: 'Done',
   keep: 'Keep for later',
   ship: 'Ship',
+  fix: 'Fix it',
+  leave: 'Leave it',
 }
 
 export type SettleWaysProps = RootProps<
@@ -53,8 +61,14 @@ export type SettleWaysProps = RootProps<
     onShip?: () => void
     /** What Ship does, on hover: how many commits go, and that its review runs first. */
     shipHint?: string
+    /** Hands what a review after a merge found to the lead; in its header only, first. */
+    onFix?: () => void
+    fixHint?: string
+    /** Closes what a review after a merge found; in its header only, after Fix it. */
+    onLeave?: () => void
+    leaveHint?: string
     /** Which of them is under way: it says so, and the others wait. */
-    busy?: 'done' | 'keep' | 'ship'
+    busy?: 'done' | 'keep' | 'ship' | 'fix' | 'leave'
     /** On a card, two glyphs for its corner; in the task's header, segments of the chip that says where it stands. */
     place?: 'card' | 'header'
     text?: Partial<SettleWaysText>
@@ -77,6 +91,10 @@ export function SettleWays({
   keepHint,
   onShip,
   shipHint,
+  onFix,
+  fixHint,
+  onLeave,
+  leaveHint,
   busy,
   place = 'card',
   text,
@@ -85,10 +103,11 @@ export function SettleWays({
 }: SettleWaysProps) {
   const t = { ...settleWaysText, ...text }
   const ships = place === 'header' && onShip !== undefined
-  if (onDone === undefined && onKeep === undefined && !ships) return null
+  const answers = place === 'header' && (onFix !== undefined || onLeave !== undefined)
+  if (onDone === undefined && onKeep === undefined && !ships && !answers) return null
   if (place === 'header') {
     // A segment of the chip: under way, it says so and stays where focus is; the others wait.
-    const part = (which: 'done' | 'keep' | 'ship', run: () => void) => ({
+    const part = (which: 'done' | 'keep' | 'ship' | 'fix' | 'leave', run: () => void) => ({
       type: 'button' as const,
       className: s.part,
       disabled: busy !== undefined && busy !== which,
@@ -100,6 +119,22 @@ export function SettleWays({
     })
     return (
       <span className={cx(s.parts, className)} {...rest}>
+        {onFix &&
+          hinted(
+            fixHint,
+            <button {...part('fix', onFix)}>
+              {busy === 'fix' ? <Spinner size="small" /> : <Icon name="pencil" size={12} />}
+              {t.fix}
+            </button>,
+          )}
+        {onLeave &&
+          hinted(
+            leaveHint,
+            <button {...part('leave', onLeave)}>
+              {busy === 'leave' ? <Spinner size="small" /> : <Icon name="close" size={12} />}
+              {t.leave}
+            </button>,
+          )}
         {ships &&
           hinted(
             shipHint,
