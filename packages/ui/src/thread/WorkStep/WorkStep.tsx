@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react'
 
 import { cx } from '../../lib/cx'
+import { LinkButton } from '../../primitives/LinkButton/LinkButton'
 import type { RootProps } from '../../lib/props'
 import { Rhythm } from '../../lib/rhythm'
 import s from './WorkStep.module.css'
@@ -34,9 +35,9 @@ export function WorkStep({ stamp, tone = 'new', children, title, action, classNa
       <span className={cx(s.stamp, tone === 'done' && s.done)}>{stamp}</span>
       <span className={s.words}>{children}</span>
       {action !== undefined && (
-        <button type="button" className={s.action} aria-busy={action.busy || undefined} disabled={action.busy} onClick={action.onPress}>
+        <LinkButton className={s.action} aria-busy={action.busy || undefined} disabled={action.busy} onClick={action.onPress}>
           {action.label}
-        </button>
+        </LinkButton>
       )}
     </p>
   )

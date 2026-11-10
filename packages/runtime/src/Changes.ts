@@ -1368,11 +1368,16 @@ export class Changes extends Context.Service<
        * change is there already is left out. The files they conflict in, with
        * nothing picked left half done, or null once all are on it.
        */
+      /** Who git writes a commit as: the person, as their own git commits, or Althar where this Mac names no one. */
+      const committerIn = (path: string) =>
+        Effect.map(gitOutcome(path, 'config', 'user.email'), (email) =>
+          email.stdout !== '' || process.env.GIT_COMMITTER_EMAIL !== undefined
+            ? []
+            : ['-c', 'user.name=Althar', '-c', 'user.email=althar@localhost'],
+        )
       const pickOnto = (path: string, commits: ReadonlyArray<string>) =>
         Effect.gen(function* () {
-          // As the person's own git commits, or as Althar where this Mac names no one.
-          const named = (yield* gitOutcome(path, 'config', 'user.email')).stdout !== '' || process.env.GIT_COMMITTER_EMAIL !== undefined
-          const as = named ? [] : ['-c', 'user.name=Althar', '-c', 'user.email=althar@localhost']
+          const as = yield* committerIn(path)
           for (const commit of commits) {
             if ((yield* gitOutcome(path, ...as, 'cherry-pick', commit)).code === 0) continue
             const conflicted = (yield* gitOutcome(path, 'diff', '--name-only', '--diff-filter=U')).stdout
@@ -2298,8 +2303,7 @@ export class Changes extends Context.Service<
         Effect.gen(function* () {
           if ((yield* uncommittedFiles(path)).length === 0) return false
           yield* git(path, 'add', '-A')
-          const named = (yield* gitOutcome(path, 'config', 'user.email')).stdout !== ''
-          yield* git(path, ...(named ? [] : ['-c', 'user.name=Althar', '-c', 'user.email=althar@localhost']), 'commit', '-q', '-m', message)
+          yield* git(path, ...(yield* committerIn(path)), 'commit', '-q', '-m', message)
           return true
         })
       const lineIn = (row: Pick<ChangeRow, 'projectId' | 'threadId'>, title: string, step?: Record<string, unknown>) =>
@@ -2576,12 +2580,19 @@ export class Changes extends Context.Service<
             let branch = row.branch
             let stopped: Array<string> = []
             if (open === undefined) {
-              // Nothing pushed: the branch is rebased onto the new one. A conflict stops it there, for the lead to finish.
-              const rebased = yield* gitOutcome(row.path, 'rebase', '--onto', baseCommit, from)
+              // Nothing pushed: the branch is rebased onto the new one, its commits written as the person's or Althar's. A conflict
+              // stops it there, for the lead to finish; anything else puts it back as it was.
+              const rebased = yield* gitOutcome(row.path, ...(yield* committerIn(row.path)), 'rebase', '--onto', baseCommit, from)
               if (rebased.code !== 0) {
                 stopped = (yield* gitOutcome(row.path, 'diff', '--name-only', '--diff-filter=U')).stdout
                   .split('\n')
                   .filter((file) => file !== '')
+                if (stopped.length === 0) {
+                  yield* gitOutcome(row.path, 'rebase', '--abort')
+                  return yield* new ToolRefused({
+                    message: `${row.name} couldn’t be rebased onto ${base}, so it still works toward ${row.toward ?? row.base ?? 'its default branch'}, as it was.`,
+                  })
+                }
                 conflicts.push(...stopped)
               }
             } else {
@@ -3260,8 +3271,8 @@ export class Changes extends Context.Service<
           const sql = yield* SqlClient.SqlClient
           const [one] = yield* sql<{ projectId: ProjectId; threadId: string | null; name: string | null; branch: string; changes: number }>`
             SELECT w.project_id, t.id AS thread_id, w.name, w.branch,
-              (SELECT count(*) FROM workspaces o WHERE o.task_id = w.task_id AND o.access = 'write' AND o.reviewing IS NULL
-                AND o.state IN ('ready', 'away')) AS changes
+              (SELECT count(DISTINCT coalesce(o.name, '')) FROM workspaces o WHERE o.task_id = w.task_id AND o.access = 'write'
+                AND o.reviewing IS NULL AND o.state IN ('ready', 'away')) AS changes
             FROM repository_changes c JOIN workspaces w ON w.id = c.workspace_id
             LEFT JOIN threads t ON t.task_id = w.task_id AND t.kind = 'task'
             WHERE c.pull_request_url = ${merged.url} AND w.task_id = ${link.taskId} LIMIT 1`

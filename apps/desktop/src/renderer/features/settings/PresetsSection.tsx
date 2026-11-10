@@ -58,12 +58,15 @@ function PresetEditor({ preset, onDone }: { preset: Preset; onDone: () => void }
   const [failed, setFailed] = useState<string | null>(null)
   const ids = useId()
   const set = (patch: Partial<Parts>) => setParts({ ...parts, ...patch })
-  const save = () =>
-    void client
-      .editPreset({ id: preset.id, name, parts, ...(preset.from === undefined ? {} : { projectOnly: only }) })
-      .then(() => cache.invalidateQueries({ queryKey: PRESETS }))
-      .then(onDone)
-      .catch((error: unknown) => setFailed(error instanceof Error ? error.message : String(error)))
+  const save = async () => {
+    try {
+      await client.editPreset({ id: preset.id, name, parts, ...(preset.from === undefined ? {} : { projectOnly: only }) })
+      await cache.invalidateQueries({ queryKey: PRESETS })
+      onDone()
+    } catch (error) {
+      setFailed(error instanceof Error ? error.message : String(error))
+    }
+  }
   return (
     <div>
       <FormRow label={presetsText.name} htmlFor={`${ids}-name`}>
@@ -91,7 +94,7 @@ function PresetEditor({ preset, onDone }: { preset: Preset; onDone: () => void }
         </FormRow>
       )}
       {failed !== null && <p role="alert">{failed}</p>}
-      <Button size="small" onClick={save}>
+      <Button size="small" onClick={() => void save()}>
         {presetsText.save}
       </Button>{' '}
       <Button size="small" variant="quiet" onClick={onDone}>

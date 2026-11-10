@@ -237,7 +237,10 @@ export const PlanParameters = Schema.Struct({
        * one, which ships whole as before.
        */
       only: Schema.optional(Schema.Array(Schema.String)),
-      /** The changes that ship after it, each in a Ship of its own with its own review, in order: the bottom of a stack first. */
+      /**
+       * The changes that ship after it, each in a Ship of its own with its own review, in order: the bottom of a stack first.
+       * Each is its workspaces' ids, joined by commas: a change in several repositories ships as one.
+       */
       next: Schema.optional(Schema.Array(Schema.String)),
     }),
   ),
@@ -2907,26 +2910,38 @@ export class Runs extends Context.Service<
             if (held.length === 0 && !unpushed && after.length === 0) return yield* new ShipRefused({ taskId, why: 'nothing' })
             // Several changes: each ships on its own, with its own review, the bottom of a stack first; one named, with what waits
             // beneath it. One change ships whole, as it always did.
+            // A change is its workspaces of one name, one in each repository it changes: counted and shipped as one.
             const [several] = yield* sql<{ n: number }>`
-              SELECT count(*) AS n FROM workspaces WHERE task_id = ${taskId} AND access = 'write' AND reviewing IS NULL AND state = 'ready'`
-            const queue =
+              SELECT count(DISTINCT coalesce(name, '')) AS n FROM workspaces
+              WHERE task_id = ${taskId} AND access = 'write' AND reviewing IS NULL AND state = 'ready'`
+            const apart = (several?.n ?? 0) > 1 || change !== undefined
+            const groups: ReadonlyArray<ReadonlyArray<string>> =
               queued !== undefined
-                ? queued
-                : (several?.n ?? 0) > 1 || change !== undefined
-                  ? (yield* changes.waitingChanges(taskId, change)).map((one) => one.id)
+                ? queued.map((group) => group.split(','))
+                : apart
+                  ? [
+                      ...(yield* changes.waitingChanges(taskId, change))
+                        .reduce(
+                          (byName, one) => byName.set(one.name ?? '', [...(byName.get(one.name ?? '') ?? []), one.id]),
+                          new Map<string, Array<string>>(),
+                        )
+                        .values(),
+                    ]
                   : []
-            if (((several?.n ?? 0) > 1 || change !== undefined) && queue.length === 0)
-              return yield* new ShipRefused({ taskId, why: 'nothing' })
-            const [first, ...rest] = queue
+            if (apart && groups.length === 0) return yield* new ShipRefused({ taskId, why: 'nothing' })
+            const [first, ...rest] = groups
             // Its steps and ending are the plan's: Checked by is the plan's reviewer, unless it reads only once the work merged.
             const [planned] = yield* sql<{ parameters: string }>`
               SELECT parameters FROM runs WHERE task_id = ${taskId} AND plan_id IS NOT NULL ORDER BY created_at, rowid LIMIT 1`
             const plan = yield* Schema.decodeUnknownEffect(Schema.fromJsonString(PlanParameters))(planned?.parameters ?? last.parameters)
             const marks = yield* reviewMarksOf(taskId)
             // Its own review reads only the change it ships, from where that change's last review left off.
-            const [shipping] = first === undefined ? [] : yield* sql<{ path: string }>`SELECT path FROM workspaces WHERE id = ${first}`
+            const shipping =
+              first === undefined
+                ? undefined
+                : (yield* sql<{ path: string }>`SELECT path FROM workspaces WHERE id IN ${sql.in(first)}`).map((one) => one.path)
             const from =
-              shipping === undefined ? marks : Object.fromEntries(Object.entries(marks).filter(([path]) => path === shipping.path))
+              shipping === undefined ? marks : Object.fromEntries(Object.entries(marks).filter(([path]) => shipping.includes(path)))
             const parameters: PlanParameters = {
               ...plan,
               steps: plan.steps.map((step) =>
@@ -2935,7 +2950,7 @@ export class Runs extends Context.Service<
               ships: {
                 from,
                 ...(merges ? { merges: true } : {}),
-                ...(first === undefined ? {} : { only: [first], next: rest }),
+                ...(first === undefined ? {} : { only: [...first], next: rest.map((group) => group.join(',')) }),
               },
             }
             const encoded = JSON.stringify(parameters)

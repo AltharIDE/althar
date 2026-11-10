@@ -2344,12 +2344,13 @@ export class Queries extends Context.Service<
                   said: (lastSaid.text ?? '').trim().split('\n')[0]?.slice(0, 200) ?? '',
                 }
           // Where each stands, by its latest pull request, for the card's one sentence and its marks: none yet, not shipped.
+          const named = yield* sql<{ id: string; name: string | null; branch: string }>`
+            SELECT id, name, branch FROM workspaces WHERE task_id = ${taskId} AND access = 'write' AND reviewing IS NULL
+              AND state NOT IN ('failed', 'preparing') ORDER BY created_at, rowid`
           const marks =
-            changeCount < 2
+            new Set(named.map((one) => one.name ?? '')).size < 2
               ? []
-              : (yield* sql<{ id: string; name: string | null; branch: string }>`
-                  SELECT id, name, branch FROM workspaces WHERE task_id = ${taskId} AND access = 'write' AND reviewing IS NULL
-                    AND state NOT IN ('failed', 'preparing') ORDER BY created_at, rowid`).map((one) => {
+              : named.map((one) => {
                   const pull = changes.findLast((candidate) => candidate.change?.id === one.id)
                   const stands =
                     pull === undefined
@@ -3501,10 +3502,11 @@ export class Queries extends Context.Service<
             FROM workspaces w
             WHERE w.task_id = ${head.taskId} AND w.access = 'write' AND w.reviewing IS NULL AND w.state IN ('ready', 'away')
             ORDER BY w.created_at, w.rowid`
-          const waitingLines =
-            lineRows.length < 2
-              ? new Set<string>()
-              : new Set((yield* (yield* Changes).waitingChanges(head.taskId).pipe(Effect.orElseSucceed(() => []))).map((one) => one.id))
+          // Several changes, by name: one in several repositories is one change, with its row there as it was.
+          const severalChanges = new Set(lineRows.map((row) => row.name ?? '')).size > 1
+          const waitingLines = !severalChanges
+            ? new Set<string>()
+            : new Set((yield* (yield* Changes).waitingChanges(head.taskId).pipe(Effect.orElseSucceed(() => []))).map((one) => one.id))
           // A move between a worktree and Local that waits: where to, why, and what it asks of the person, as last said.
           const [moving] = yield* sql<{ to: 'worktree' | 'checkout'; why: string | null; branch: string | null; head: string | null }>`
             SELECT w.moving_to AS "to", json_extract(e.payload, '$.why') AS why, json_extract(e.payload, '$.seen.branch') AS branch,
@@ -3533,7 +3535,7 @@ export class Queries extends Context.Service<
               worktree: head.worktree,
               ...(card?.local === true ? { local: true } : {}),
               ...(card?.scratch === true ? { scratch: true } : {}),
-              ...(lineRows.length < 2
+              ...(!severalChanges
                 ? {}
                 : {
                     lines: lineRows.map((one) => ({

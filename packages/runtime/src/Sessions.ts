@@ -1019,12 +1019,13 @@ export class Sessions extends Context.Service<
       const changeHeads = (threadId: string) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
-          const rows = yield* sql<{ name: string; path: string }>`
-            SELECT coalesce(w.name, w.branch) AS name, w.path FROM threads t JOIN workspaces w ON w.task_id = t.task_id
+          const rows = yield* sql<{ name: string; own: string | null; path: string }>`
+            SELECT coalesce(w.name, w.branch) AS name, w.name AS own, w.path FROM threads t JOIN workspaces w ON w.task_id = t.task_id
             WHERE t.id = ${threadId} AND t.kind = 'task' AND w.access = 'write' AND w.reviewing IS NULL AND w.state = 'ready'
               AND w.branched_at IS NOT NULL
             ORDER BY w.created_at, w.rowid`
-          if (rows.length < 2) return undefined
+          // One change, though in several repositories, has nothing to tell apart.
+          if (new Set(rows.map((row) => row.own ?? '')).size < 2) return undefined
           const heads = yield* Effect.forEach(rows, (row) =>
             git(row.path, 'rev-parse', 'HEAD').pipe(
               Effect.map((head) => ({ ...row, head })),
