@@ -466,9 +466,9 @@ export function Outputs({
     const stops = open.map((one, i): TrackStop => {
       const brand = productBrand(one.product)
       // Its files are under its repository's folder here, which needn't be named as the host names it.
-      const folder = one.slug ?? nameOf(one.repository)
+      const folder = one.slug ?? labelOf(one)
       return {
-        name: nameOf(one.repository),
+        name: labelOf(one),
         number: `${one.prefix}${one.number}`,
         url: one.url,
         host: { name: productName(one.product), ...(brand === undefined ? {} : { brand }) },
@@ -488,7 +488,7 @@ export function Outputs({
       accepting && next !== undefined && next.queued !== true ? (
         left.length === 1 ? (
           <Button key="accept" variant="signal" {...pressed(doing.accept)} onClick={() => merge(left)}>
-            {left.length === open.length ? text.accept(1) : text.acceptLeft([nameOf(next.repository)])}
+            {left.length === open.length ? text.accept(1) : text.acceptLeft([labelOf(next)])}
           </Button>
         ) : (
           <SplitButton
@@ -500,11 +500,11 @@ export function Outputs({
             onClick={() => merge(left)}
             menu={(trigger) => (
               <Menu trigger={trigger} label={text.eachAlone} align="end">
-                <MenuItem onSelect={() => merge([next])}>{text.mergeOnly(nameOf(next.repository))}</MenuItem>
+                <MenuItem onSelect={() => merge([next])}>{text.mergeOnly(labelOf(next))}</MenuItem>
               </Menu>
             )}
           >
-            {left.length === open.length ? text.accept(left.length) : text.acceptLeft(left.map((one) => nameOf(one.repository)))}
+            {left.length === open.length ? text.accept(left.length) : text.acceptLeft(left.map((one) => labelOf(one)))}
           </SplitButton>
         )
       ) : null
@@ -524,7 +524,7 @@ export function Outputs({
             <Menu trigger={trigger} label={text.eachAlone} align="end">
               {drafts.map((one) => (
                 <MenuItem key={one.url} onSelect={() => onMarkReady(one.url)}>
-                  {text.markReadyIn(nameOf(one.repository))}
+                  {text.markReadyIn(labelOf(one))}
                 </MenuItem>
               ))}
             </Menu>
@@ -545,7 +545,7 @@ export function Outputs({
             {...pressed(doing.push(one.url))}
             onClick={() => onPush(one.localHead ?? '', one.url)}
           >
-            {text.pushTo(one.unpushed, nameOf(one.repository))}
+            {text.pushTo(one.unpushed, labelOf(one))}
           </Button>
         )),
       ...(accept === null ? [] : [accept]),
@@ -814,9 +814,10 @@ const PAGE_HOSTS: ReadonlyArray<readonly [RegExp, string]> = [
  * ones of its rounds of work before it, newest first.
  */
 export const latestOf = (changes: ReadonlyArray<ChangeSummary>) => {
+  // By the change each belongs to, where the task has several in a repository; else by repository, as before.
   const byRepository = new Map<string, Array<ChangeSummary>>()
   for (const change of changes) {
-    const where = change.slug ?? change.repository
+    const where = change.change?.id ?? change.slug ?? change.repository
     byRepository.set(where, [...(byRepository.get(where) ?? []), change])
   }
   const latest = [...byRepository.values()].flatMap((all) => {
@@ -825,6 +826,9 @@ export const latestOf = (changes: ReadonlyArray<ChangeSummary>) => {
   })
   return { latest, earlier: changes.filter((change) => !latest.includes(change)).toReversed() }
 }
+
+/** A pull request as its change's line names it: the change's name, where the task has several, else its repository. */
+const labelOf = (change: ChangeSummary) => change.change?.name ?? nameOf(change.repository)
 
 /** Whether a task has outputs to show: a pull request, or anything changed or committed on its branch. */
 export const hasOutputs = ({ task }: ThreadSnapshot) =>

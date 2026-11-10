@@ -102,6 +102,9 @@ export const ChangeTowardARelease: Story = {
     await expect(within(canvasElement).getByText('Toward release/0.8.0')).toBeInTheDocument()
   },
 }
+
+/** Several changes in one task (a task is a conversation plus parts): how many, quietly at its foot, apart from where it stands. */
+export const SeveralChanges: Story = { args: { ...CHANGE_RUNNING_PR, changes: 3 } }
 export const ChangeTowardAReleaseDark: Story = { ...ChangeTowardARelease, globals: { theme: 'dark' } }
 export const ReadyToAccept: Story = {
   args: CHANGE_READY,

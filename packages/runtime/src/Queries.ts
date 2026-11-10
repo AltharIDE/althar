@@ -1824,10 +1824,16 @@ export class Queries extends Context.Service<
             // of it: commits the person hasn't pushed yet.
             (found) =>
               Effect.gen(function* () {
-                const [binding] = yield* sql<{ slug: string }>`
-                  SELECT b.slug FROM repository_changes c JOIN repository_bindings b ON b.id = c.binding_id
+                const [binding] = yield* sql<{ slug: string; workspaceId: string | null; name: string | null }>`
+                  SELECT b.slug, c.workspace_id, w.name FROM repository_changes c JOIN repository_bindings b ON b.id = c.binding_id
+                  LEFT JOIN workspaces w ON w.id = c.workspace_id
                   WHERE c.pull_request_url = ${found.url} ORDER BY c.updated_at DESC LIMIT 1`
-                return { ...found, slug: binding?.slug ?? null }
+                return {
+                  ...found,
+                  slug: binding?.slug ?? null,
+                  // The change it belongs to: everything hangs on the change, never on a folder.
+                  ...(binding?.workspaceId == null ? {} : { change: { id: binding.workspaceId, name: binding.name } }),
+                }
               }).pipe(
                 Effect.flatMap((change) =>
                   change.state !== 'open'
@@ -2269,6 +2275,11 @@ export class Queries extends Context.Service<
           // Its review after a merge (a task is a conversation plus parts): under way beside its other work, or what it found,
           // which brings it back to Needs you, settled or not, until the person says Fix it or Leave it.
           const afterMerge = yield* afterMergeOf(taskId)
+          // How many changes it holds: its own worktrees, each a change's, those whose folder went included.
+          const [counted] = yield* sql<{ n: number }>`
+            SELECT count(*) AS n FROM workspaces WHERE task_id = ${taskId} AND access = 'write' AND reviewing IS NULL
+              AND state NOT IN ('failed', 'preparing')`
+          const changeCount = counted?.n ?? 0
           // Someone else's pull request it reviews (DEV-96); and whether a draft of its review waits for the person.
           const reviewing = yield* reviewBriefOf(taskId)
           const [draftWaits] =
@@ -2492,6 +2503,7 @@ export class Queries extends Context.Service<
             ...(held === undefined ? {} : { held }),
             ...(replied === undefined ? {} : { replied }),
             ...(afterMerge === undefined ? {} : { afterMerge }),
+            ...(changeCount > 1 ? { changeCount } : {}),
             // Resolving a conflict, or fixing the checks on the merge, is a step of its own while it lasts.
             step:
               task.step ??

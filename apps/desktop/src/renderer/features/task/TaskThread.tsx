@@ -16,6 +16,7 @@ import {
   Thinking,
   ThreadDivider,
   WorkedFor,
+  WorkStep as StepRow,
   WorkLine,
   WorkNote,
   WorkNow,
@@ -39,6 +40,12 @@ import { PublishedReport, ReviewReport } from './Reports'
 import s from './TaskThread.module.css'
 import { duration, mostOf, spentWords } from '../../shared/turnTime'
 
+/** A step of the work's row (a task is a conversation plus parts): its stamp, and the whole of it on hover. */
+export const workStepText = {
+  newChange: 'New change',
+  whole: (name: string, branch: string, toward: string | null) =>
+    `New change · ${name}, on ${branch}${toward === null ? '' : `, into ${toward}`}`,
+}
 /*
  * A task's thread in rounds (shared/rounds.ts, ADR-042), as the kit draws
  * them: each ask, then its lead's acknowledgement, the line of its work and
@@ -462,6 +469,25 @@ export function TaskThread({ rounds, versionOf, onOpenTask, settledOf, reviewing
             {block.text}
           </ThreadDivider>
         )
+      case 'work_step': {
+        // A change started: its name in ink, its branch as code, and what it works toward where that isn't the task's.
+        const { step } = block
+        return (
+          <StepRow
+            key={block.id}
+            data-item={block.id}
+            stamp={workStepText.newChange}
+            title={workStepText.whole(step.name, step.branch, step.toward)}
+          >
+            <strong>{step.name}</strong>, on <code>{step.branch}</code>
+            {step.toward === null ? null : (
+              <>
+                , into <code>{step.toward}</code>
+              </>
+            )}
+          </StepRow>
+        )
+      }
       case 'skills':
         return <SkillsSeen key={block.id} title={block.title} skills={block.skills} data-item={block.id} />
       case 'verdict': {

@@ -1218,6 +1218,18 @@ Built since, in #739:
   pushes on its own. Told by when it was written, which crediting keeps,
   rather than by a head kept as each turn ends, which the person could
   outrun.
+- **A task holds several changes:** `start_change`, for its lead and the
+  coordinator, starts one on a branch and worktree of its own beside the
+  first's, toward another branch or stacked on another change
+  (`workspaces.name`, a row per change, unique per branch); the lead's brief
+  lists them, Ship opens each one's pull request, and the task settles once
+  all have merged. A branch the lead makes with git in a change's folder
+  becomes a change of the task's, the change it left keeping its branch and
+  pull request with no folder (`away`) until it is worked on again; one left
+  detached, or on what it works toward, gets a line. A pull request opened
+  outside Althar from a change's own branch, into what it works toward, is
+  that change's. The thread says when a change starts, Outputs groups the
+  pull requests by change, and the card says how many there are.
 
 Compatibility: every change to the store is additive, with nullable
 columns an older build reads past; a run with no `ships` and a workspace
@@ -1226,13 +1238,10 @@ update finishes as a round; the API only gains fields and a command; the
 old "Review rounds" setting is kept and read by nothing; the lead's tools
 keep their names, `make_it_a_change` included.
 
-Still to build, as the rest of this proposal says: several changes in a
-task, the workspace moving up and between a worktree and Local, "Run it",
-the parts tools, Scratch and presets.
-
-Where it was all to be built together, recording each turn's time went in
-first, so the rest could be measured against today's turns. It is the next
-to build.
+Still to build, as the rest of this proposal says: a stack shipping and
+merging as one, the workspace moving between a worktree and Local and the
+branch a task works toward changing, "Run it", the parts tools, Scratch and
+presets.
 
 It is done when:
 

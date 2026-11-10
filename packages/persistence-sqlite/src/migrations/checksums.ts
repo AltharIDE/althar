@@ -75,4 +75,5 @@ export const checksums: Readonly<Record<string, string>> = {
   '0069_held_for_ship': 'ca526db1f6b50c7b0880bfd1e1b6f4bb5f8da861cd2d794ba4574c6e9cffc67a',
   '0070_turn_timings': 'caac9eb5e1b549158261e8131bc84ad99ceb5c1b94e1399b0f4fcaf3ecbd027e',
   '0071_merge_reviews': '682500c21c25421c38ae724986fe53d241c553d6a419d0b4fc8db7706fb3f838',
+  '0072_several_changes': 'df44a1cc68877fa2af8c274c8dfc07c01a9c133811580ad914221f6789f397d6',
 }

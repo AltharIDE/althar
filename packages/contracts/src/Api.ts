@@ -1393,6 +1393,12 @@ export const ChangeSummary = Schema.Struct({
   repository: Schema.String,
   /** Its repository's folder here, which its files' paths start with in a task of several; null where it isn't known. */
   slug: Schema.NullOr(Schema.String),
+  /**
+   * The change of the task it is the pull request of (a task is a conversation plus parts, "A task holds as many changes as
+   * it needs"): by its worktree's id, and its name where the task has several (null for its first, which the task's title
+   * names). Absent where Althar can't tell, as for one it was only told of.
+   */
+  change: Schema.optional(Schema.Struct({ id: Schema.String, name: Schema.NullOr(Schema.String) })),
   additions: Schema.NullOr(Schema.Number),
   deletions: Schema.NullOr(Schema.Number),
   changedFiles: Schema.NullOr(Schema.Number),
@@ -1805,6 +1811,19 @@ export const NoticeItem = Schema.Struct({
     ),
     /** A task the line is about, which it links to: one this task's lead started (ADR-097). */
     task: Schema.optional(Schema.Struct({ taskId: Schema.String, slug: Schema.String, title: Schema.String, threadId: Schema.String })),
+    /**
+     * A step of the work it marks, drawn as a stamped row of its own (a task is a conversation plus parts, "How it reads"): a
+     * change started, by its name and branch, and what it works toward where that isn't the task's.
+     */
+    step: Schema.optional(
+      Schema.Struct({
+        kind: Schema.Literals(['new_change']),
+        name: Schema.String,
+        branch: Schema.String,
+        /** What it works toward, where that isn't the task's: another change's branch it stacks on, or a branch of its own. */
+        toward: Schema.NullOr(Schema.String),
+      }),
+    ),
     /** For what a lead's agent could see: each skill, and whether it is the person's or the repository's. */
     skills: Schema.optional(
       Schema.Array(Schema.Struct({ name: Schema.String, path: Schema.String, from: Schema.Literals(['person', 'repository']) })),
@@ -2269,6 +2288,8 @@ export const TaskCard = Schema.Struct({
    * person for Fix it or Leave it. Absent otherwise, and from a runtime before it.
    */
   afterMerge: Schema.optional(AfterMergeReview),
+  /** How many changes it holds, where it holds more than one (a task is a conversation plus parts); absent for one. */
+  changeCount: Schema.optional(Schema.Int),
   /** A change ready that built nothing: no commits on its branch and no pull request open or merged. Absent otherwise. */
   nothingBuilt: Schema.optional(Schema.Boolean),
   /**

@@ -142,6 +142,7 @@ export const agentSaid = (error: unknown): string | undefined => {
     // What the fast lane couldn't do, as it was written for the person.
     case 'FastLaneRefused':
     case 'MergeReviewRefused':
+    case 'ChangeRefused':
       return text(error, 'message')
     default:
       return undefined
@@ -357,6 +358,7 @@ export const words = (
       case 'ReviewRefused':
       case 'FastLaneRefused':
       case 'MergeReviewRefused':
+      case 'ChangeRefused':
       case 'ScreenshotsRefused':
         return text(error, 'message')
       case 'AutomationRefused':

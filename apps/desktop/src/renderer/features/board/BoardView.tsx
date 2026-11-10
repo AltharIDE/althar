@@ -233,7 +233,11 @@ export const kindWordOf = (task: Pick<BoardTask, 'kind' | 'local'>): string | un
 /** In the person's own checkout, as its kind's word says (ADR-091). */
 const localOf = (task: Pick<BoardTask, 'local'>): Pick<Card, 'local'> => (task.local === true ? { local: true } : {})
 /** Toward a branch other than the default, quietly at its foot (ADR-093). */
-const towardOf = (task: Pick<BoardTask, 'toward'>): Pick<Card, 'toward'> => (task.toward === undefined ? {} : { toward: task.toward })
+const towardOf = (task: Pick<BoardTask, 'toward' | 'changeCount'>): Pick<Card, 'toward' | 'changes'> => ({
+  ...(task.toward === undefined ? {} : { toward: task.toward }),
+  // How many changes it holds, where several (a task is a conversation plus parts).
+  ...(task.changeCount === undefined || task.changeCount < 2 ? {} : { changes: task.changeCount }),
+})
 
 /** A pull request as its chip shows it: its host's mark, its repository's own name, its number in the host's words, and its size. */
 const pullChip = (change: ChangeSummary) => {

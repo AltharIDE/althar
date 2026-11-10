@@ -109,6 +109,8 @@ export type RoundBlock =
     }
   /** Its folder went, or came back: a line across the thread, a change of scene (ADR-056). */
   | { readonly kind: 'folder'; readonly id: string; readonly text: string }
+  /** A step of the work: a change started, a stamped row of its own (a task is a conversation plus parts). */
+  | { readonly kind: 'work_step'; readonly id: string; readonly step: NonNullable<NoticeContent['step']> }
   /** What a lead's agent could see of the person's skills and the repository's. */
   | { readonly kind: 'skills'; readonly id: string; readonly title: string; readonly skills: NonNullable<NoticeContent['skills']> }
   /**
@@ -369,6 +371,12 @@ export const roundsOf = (
           if (said === lastSkillsSaid) return
           lastSkillsSaid = said
           out.push({ kind: 'skills', id: block.id, title: content.title, skills: content.skills ?? [] })
+          return
+        }
+        // A step of the work is a row of its own, between rounds.
+        if (content.step !== undefined) {
+          close()
+          out.push({ kind: 'work_step', id: block.id, step: content.step })
           return
         }
         const role = roleOf(content)

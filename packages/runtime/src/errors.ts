@@ -180,6 +180,9 @@ export class NoChangeToOpen extends Schema.TaggedError<NoChangeToOpen>()('NoChan
  * Ship, and only Ship pushes it (`held`); the task is at work, and ships once
  * that's done (`working`); or nothing waits to go up (`nothing`).
  */
+/** A change the task can't start or change as asked (a task is a conversation plus parts), in words for whoever asked. */
+export class ChangeRefused extends Schema.TaggedError<ChangeRefused>()('ChangeRefused', { message: Schema.String }) {}
+
 export class ShipRefused extends Schema.TaggedError<ShipRefused>()('ShipRefused', {
   taskId: Schema.String,
   why: Schema.Literals(['held', 'working', 'nothing']),

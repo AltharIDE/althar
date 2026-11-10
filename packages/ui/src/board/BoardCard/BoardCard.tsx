@@ -38,6 +38,8 @@ export interface BoardCardText {
   startedBy: (task: string) => string
   /** What its work goes into, where it isn't the default branch (ADR-093), for a screen reader: the card shows an arrow. */
   toward: (branch: string) => string
+  /** How many changes it holds, where it holds several (a task is a conversation plus parts). */
+  changes: (count: number) => string
 }
 
 export const boardCardText: BoardCardText = {
@@ -50,6 +52,7 @@ export const boardCardText: BoardCardText = {
   from: (automation) => `From ${automation}`,
   startedBy: (task) => `Started by ${task}`,
   toward: (branch) => `Toward ${branch}`,
+  changes: (count) => `${count} changes`,
 }
 
 export type BoardCardProps = RootProps<
@@ -92,6 +95,11 @@ export type BoardCardProps = RootProps<
     startedBy?: string
     /** The branch its work goes into, where it isn't the default (ADR-093): release/0.8.0, quietly, at its foot. */
     toward?: string
+    /**
+     * How many changes it holds, where it holds several (a task is a conversation plus parts): "3 changes", quietly, at its
+     * foot, apart from where it stands, so a count is never read as so many pull requests in that state.
+     */
+    changes?: number
     /** Open beside the board. */
     current?: boolean
     onOpen?: () => void
@@ -133,6 +141,7 @@ export function BoardCard({
   from,
   startedBy,
   toward,
+  changes,
   current,
   onOpen,
   text,
@@ -168,6 +177,7 @@ export function BoardCard({
       {track !== undefined && track.length > 0 && <StepTrack steps={track} labels status={status} className={s.track} />}
       {object !== undefined && object !== null && <div className={s.object}>{object}</div>}
       {foot !== undefined && foot !== null && <div className={b.foot}>{foot}</div>}
+      {changes !== undefined && changes > 1 && <p className={s.changes}>{t.changes(changes)}</p>}
       {toward !== undefined && toward !== '' && (
         <p className={s.toward} title={t.toward(toward)}>
           <span aria-hidden="true">→</span>

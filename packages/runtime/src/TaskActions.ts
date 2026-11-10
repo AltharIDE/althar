@@ -20,6 +20,7 @@ import { commitsOf } from './git'
 import { Instance } from './Instance'
 import { answeredIn, quickIn } from './kinds'
 import { MergeReviews } from './MergeReviews'
+import { Projects } from './Projects'
 import { Plans } from './Plans'
 import { PlanUsage } from './PlanUsage'
 import { fact } from './records'
@@ -27,6 +28,7 @@ import { Runs, type StuckAnswer, type StuckInfo } from './Runs'
 import { Sessions } from './Sessions'
 import { actionsOf, standingOf, Tasks } from './Tasks'
 import { addItem, updateItem } from './threads'
+import { touchTask } from './cards'
 import { POOL, ToolRefused, ToolServer, type Tool, type ToolAccess } from './ToolServer'
 import { expected, words } from './words'
 
@@ -143,6 +145,7 @@ type Store =
   | Sessions
   | Runs
   | MergeReviews
+  | Projects
   | Errands
   | Busy
   | Agents
@@ -266,6 +269,7 @@ export class TaskActions extends Context.Service<
       const sessions = yield* Sessions
       const runs = yield* Runs
       const mergeReviews = yield* MergeReviews
+      const projects = yield* Projects
       const errands = yield* Errands
       const busy = yield* Busy
       const provide = <A, E>(effect: Effect.Effect<A, E, Store>) => Effect.provideContext(effect, context)
@@ -867,6 +871,15 @@ export class TaskActions extends Context.Service<
       })
       const Named = Schema.Struct({ task: Schema.optional(Schema.String) })
       const AfterMerge = Schema.Struct({ task: Schema.optional(Schema.String), answer: Schema.Literals(['fix', 'leave']) })
+      const NewChange = Schema.Struct({
+        task: Schema.optional(Schema.String),
+        name: Schema.String,
+        branch: Schema.optional(Schema.String),
+        on: Schema.optional(Schema.String),
+        toward: Schema.optional(Schema.String),
+        repository: Schema.optional(Schema.String),
+        why: Schema.optional(Schema.String),
+      })
       const Branches = Schema.Struct({
         task: Schema.optional(Schema.String),
         heads: Schema.optional(Schema.Array(Schema.Struct({ repository: Schema.String, head: Schema.String }))),
@@ -935,6 +948,57 @@ export class TaskActions extends Context.Service<
           yield* plainly(runs.ship({ envelope: said, taskId: task.id, ...(own ? { afterTurn: true } : {}) }), task.slug)
           yield* did(access, input, task, `Shipped “${task.title}”`, 'shipped this task')
           return `${own ? 'Althar ships this task once your turn ends' : `Shipping ${task.slug}`}: where its plan has a reviewer before the work ships, the review runs first, over everything since the last one, and the lead settles what it finds; then its commits go up, to the open pull request, or a new one after the last merged or closed. read_task shows where it stands. Both threads have a line saying so.`
+        })
+
+      /**
+       * Starts another change in a task (a task is a conversation plus parts): its own branch and worktree, beside the others,
+       * shipped and reviewed on its own. The task's thread marks it as a step in the work.
+       */
+      const startChange = (access: ToolAccess, input: unknown) =>
+        Effect.gen(function* () {
+          const asked = yield* read(NewChange, input)
+          const task = yield* named(access, asked.task)
+          const started = yield* plainly(
+            projects.startChange({
+              taskId: task.id,
+              name: asked.name,
+              ...(asked.branch === undefined ? {} : { branch: asked.branch }),
+              ...(asked.on === undefined ? {} : { on: asked.on }),
+              ...(asked.toward === undefined ? {} : { toward: asked.toward }),
+              ...(asked.repository === undefined ? {} : { repository: asked.repository }),
+              actorId: actorOf(access),
+            }),
+            task.slug,
+          )
+          const sql = yield* SqlClient.SqlClient
+          const [thread] = yield* sql<{ id: string; projectId: ProjectId }>`
+            SELECT t.id, t.project_id FROM threads t WHERE t.task_id = ${task.id} AND t.kind = 'task'`
+          if (thread !== undefined)
+            yield* addItem({ projectId: thread.projectId, threadId: thread.id }, 'notice', {
+              source: 'runtime',
+              severity: 'info',
+              title: `New change · ${started.name}, on ${started.branch}.`,
+              description: asked.why ?? null,
+              step: {
+                kind: 'new_change',
+                name: started.name,
+                branch: started.branch,
+                // Named only where it isn't what the task's first change works toward.
+                toward: started.elsewhere ? started.toward : null,
+              },
+            })
+          // Started by someone else, its lead hears where the change is, as its own tool would have told it.
+          if (!(access.role === 'lead' && access.taskId === task.id) && thread !== undefined)
+            yield* sessions
+              .send({
+                envelope: yield* envelope('thread.send', { threadId: thread.id, change: started.workspaceId }, undefined, actorOf(access)),
+                threadId: thread.id,
+                body: `A new change of this task, “${started.name}”, is in ${started.path}, on ${started.branch}, working toward ${started.toward}. Commit its work there; it ships and is reviewed on its own.${asked.why === undefined ? '' : ` Why: ${asked.why}`}`,
+                quiet: true,
+              })
+              .pipe(Effect.ignore)
+          yield* touchTask(task.id)
+          return `Started a change of ${task.slug}, “${started.name}”: its worktree is ${started.path}, on ${started.branch}${started.on === null ? `, working toward ${started.toward}` : `, stacked on ${started.on} (its pull request goes into ${started.toward})`}. Commit its work there, in that folder: it ships, and is reviewed, on its own, and its pull request opens with Ship, or with open_pull_request.`
         })
 
       /** What a review after a merge found, answered on the person's word, as the task's Fix it and Leave it do. */
@@ -1128,6 +1192,27 @@ export class TaskActions extends Context.Service<
           'Ships what waits on a task’s branch, as its Ship button does, on the person’s word ("ship it", "push it"): what the person’s turns with its lead committed after its plan stays on the branch until then. Where its plan has a reviewer before the work ships, one review runs first, over everything since the last review, and its lead settles what it finds; then the commits go up, to its open pull request, or a new one after the last merged or closed. A lead shipping its own task ships it once its turn ends. It acts at once, with a line in your thread and the task’s.',
           { type: 'object', properties: { task: optionalTask, why } },
           shipTask,
+        ),
+        tool(
+          'start_change',
+          'Starts another change in a task (a task holds as many as it needs): a branch of its own, in a worktree of its own beside the task’s others, set up as they were, which ships, is reviewed and has its pull request on its own. For work that should be reviewed or merged apart from the rest, or go to another branch or repository; what only works together stays one change. It branches from what the task works toward, or, with on, from another of its changes’ branch, stacked on it, its pull request going into that one (only where it needs that change’s code); or toward another branch with toward. name is a few words for what it does. It acts at once, and the task’s thread marks it.',
+          {
+            type: 'object',
+            properties: {
+              task: optionalTask,
+              why,
+              name: { type: 'string', description: 'A few words for what the change does: "Lane heights".' },
+              branch: { type: 'string', description: 'Its branch, where you want one named; else Althar names it by the project’s rule.' },
+              on: {
+                type: 'string',
+                description: 'Another change of the task’s to stack on, by its name or branch: only where it needs that one’s code.',
+              },
+              toward: { type: 'string', description: 'A branch it works toward other than the task’s, such as release/0.8.0.' },
+              repository: { type: 'string', description: 'The repository, where the task has several.' },
+            },
+            required: ['name'],
+          },
+          startChange,
         ),
         tool(
           'answer_review_after_merge',

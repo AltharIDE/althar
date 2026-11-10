@@ -1833,8 +1833,9 @@ export class Changes extends Context.Service<
             SELECT w.id AS workspace_id, w.path, w.branch, w.base_commit, w.branched_at IS NOT NULL AS branched, b.id AS binding_id,
               b.display_name AS name, b.remote_fingerprints AS remotes, b.change_target
             FROM workspaces w JOIN repository_bindings b ON b.id = w.binding_id
-            WHERE w.task_id = ${input.taskId} AND w.device_id = ${instance.deviceId} AND w.access = 'write'
-            ORDER BY b.created_at, b.rowid`
+            WHERE w.task_id = ${input.taskId} AND w.device_id = ${instance.deviceId} AND w.access = 'write' AND w.state = 'ready'
+              AND w.reviewing IS NULL
+            ORDER BY b.created_at, b.rowid, w.created_at, w.rowid`
           // Each repository, where its pull requests are: its own on its host, and the one a fork came from.
           const places = (yield* Effect.forEach(rows, (row) =>
             Effect.gen(function* () {
@@ -1850,6 +1851,10 @@ export class Changes extends Context.Service<
             }),
           )).flat()
           const same = (a: ReadonlyArray<string>, b: ReadonlyArray<string>) => a.join('/').toLowerCase() === b.join('/').toLowerCase()
+          // A repository's first change stands for it; which change takes the pull request is worked out once it is read.
+          const repositories = places.filter(
+            (one, index) => places.findIndex((other) => other.row.bindingId === one.row.bindingId) === index,
+          )
           const asked = input.pullRequest.trim()
           const chosen = yield* Effect.gen(function* () {
             if (/^https?:\/\//i.test(asked)) {
@@ -1859,7 +1864,7 @@ export class Changes extends Context.Service<
               if (resolved.ref.kind !== 'change') return yield* refuse('That link isn’t to a pull request.')
               const ref = resolved.ref
               // On the host the repository is on, not one of the same path on another host Althar is connected to.
-              const place = places.find(
+              const place = repositories.find(
                 (one) =>
                   one.found.connectionId === resolved.connectionId &&
                   (same(one.found.path, ref.path) || (one.fork !== null && same(one.fork.upstream.path, ref.path))),
@@ -1870,12 +1875,12 @@ export class Changes extends Context.Service<
             }
             const number = /^#?(\d+)$/.exec(asked)?.[1]
             if (number === undefined) return yield* refuse('Give the pull request’s link, or its number: #123.')
-            const [only] = places
+            const [only] = repositories
             if (only === undefined)
               return yield* refuse('The task’s repository isn’t on a code host Althar is connected to. Connect it in Settings.')
-            if (places.length > 1)
+            if (repositories.length > 1)
               return yield* refuse(
-                `The task changes several repositories (${places.map((one) => one.row.name).join(', ')}): give the pull request’s link.`,
+                `The task changes several repositories (${repositories.map((one) => one.row.name).join(', ')}): give the pull request’s link.`,
               )
             // By its number, where the repository's pull requests open: the one a fork came from, where the project sends them there.
             const path =
@@ -1884,7 +1889,8 @@ export class Changes extends Context.Service<
                 : only.found.path
             return { ...only, path, number: Number(number) }
           })
-          const { row, fork, found } = chosen
+          const { fork, found } = chosen
+          let row = chosen.row
           const { host } = found
           const said = (error: ConnectorFailed) =>
             refuse(
@@ -1898,6 +1904,9 @@ export class Changes extends Context.Service<
           const path = repository.path
           const name = `${host.words.short} ${host.words.prefix}${pull.number}`
           if (pull.state !== 'open') return yield* refuse(`${name} is ${pull.state}: only an open one can be attached.`)
+          // One whose branch is a change's own is that change's: recorded on it, in place of any open one it had, and the task
+          // follows the rest as before (a task is a conversation plus parts).
+          row = rows.find((one) => one.bindingId === row.bindingId && one.branch === pull.source && existsSync(one.path)) ?? row
           // Its branch is on the repository this clone pushes to, or nowhere Althar can push: the fork, else the repository itself;
           // for a fork whose branches go to the repository it came from (ADR-085), that one too, as the person can push there.
           // Where the host doesn't say which repository it is on, a branch of the same name here may be another's: none is pushed to.
@@ -6561,7 +6570,11 @@ export class Changes extends Context.Service<
               ORDER BY l.created_at DESC LIMIT 1`
             if (link === undefined) continue
             const seen = yield* decodeSnapshot(link.snapshot)
-            const here = yield* aheadOf(row.path, null, [yield* sentTo(row.projectId, seen.url), seen.headSha])
+            const sent = yield* sentTo(row.projectId, seen.url)
+            // As it mostly is: the folder is where it was sent, and nothing in it waits.
+            const tip = yield* commitOf(row.path, 'HEAD').pipe(Effect.orElseSucceed(() => ''))
+            if (tip === seen.headSha || tip === sent) continue
+            const here = yield* aheadOf(row.path, null, [sent, seen.headSha])
             if (here.kind !== 'ahead' || here.count === 0) continue
             const written = yield* git(row.path, 'log', '--format=%H %at', `${here.from}..${here.head}`).pipe(
               Effect.orElseSucceed(() => ''),
@@ -6573,6 +6586,212 @@ export class Changes extends Context.Service<
             if (byHand) moved[row.id] = here.from
           }
           if (Object.keys(moved).length > 0) yield* holdAfterTurn(taskId, moved)
+        })
+
+      /*
+       * Althar follows what the lead does with git, rather than forbid it (a task is a conversation plus parts): as each turn of
+       * its lead ends, once it is done, each of the task's folders is read for its branch. A folder now on another branch makes
+       * that branch a change of the task's, working toward what the change it left did; the change it left keeps its branch and
+       * pull request, with no folder (`away`) until it is worked on again. One left detached, or on the branch its change works
+       * toward, gets a line, once, and the lead puts it right. Then a change with no open pull request recorded takes one its
+       * host has from its own branch into what it works toward, opened by `gh pr create`, an MCP server or on the website.
+       */
+      const followed = new Set<string>()
+      const saidOf = new Set<string>()
+      const followTurns = (event: LiveEvent): Effect.Effect<void, unknown, Store> =>
+        Effect.gen(function* () {
+          if (event._tag !== 'TurnEnded' || followed.has(event.threadId)) return
+          const sql = yield* SqlClient.SqlClient
+          const [thread] = yield* sql<{ taskId: string }>`
+            SELECT t.task_id FROM threads t JOIN tasks k ON k.id = t.task_id
+            WHERE t.id = ${event.threadId} AND t.kind = 'task' AND k.state IN ('open', 'done')`
+          if (thread === undefined) return
+          followed.add(event.threadId)
+          yield* Effect.forkIn(
+            Effect.sleep(reportsWithin).pipe(
+              Effect.andThen(sessions.untilIdle(event.threadId, busyUpTo)),
+              Effect.ensuring(Effect.sync(() => followed.delete(event.threadId))),
+              Effect.andThen(locked(thread.taskId)(followBranches(thread.taskId))),
+              Effect.andThen(adoptOpen(thread.taskId)),
+              Effect.catchCause((cause) => Effect.logWarning('Could not follow what the lead did with git', cause)),
+              provide,
+            ),
+            scope,
+          )
+        })
+
+      const followBranches = (taskId: string) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const rows = yield* sql<{
+            id: string
+            projectId: ProjectId
+            bindingId: string
+            path: string
+            branch: string
+            name: string | null
+            toward: string | null
+            baseRef: string
+            baseCommit: string | null
+            target: string
+            threadId: string
+          }>`
+            SELECT w.id, w.project_id, w.binding_id, w.path, w.branch, w.name, w.toward, w.base_ref, w.base_commit,
+              coalesce(w.toward, b.default_base_ref, 'main') AS target,
+              (SELECT t.id FROM threads t WHERE t.task_id = w.task_id AND t.kind = 'task') AS thread_id
+            FROM workspaces w JOIN repository_bindings b ON b.id = w.binding_id
+            WHERE w.task_id = ${taskId} AND w.device_id = ${instance.deviceId} AND w.access = 'write' AND w.state = 'ready'
+              AND w.reviewing IS NULL AND w.branched_at IS NOT NULL AND w.kind IS NOT 'checkout'
+            ORDER BY w.created_at, w.rowid`
+          for (const row of rows) {
+            if (!existsSync(row.path)) continue
+            const now = (yield* gitOutcome(row.path, 'symbolic-ref', '--short', '-q', 'HEAD')).stdout.trim()
+            if (now === row.branch) continue
+            const changeName = row.name ?? row.branch
+            if (now === '' || now === row.target) {
+              const key = `${row.id}:${now}`
+              if (saidOf.has(key)) continue
+              saidOf.add(key)
+              yield* addItem({ projectId: row.projectId, threadId: row.threadId }, 'notice', {
+                source: 'runtime',
+                severity: 'warning',
+                title:
+                  now === ''
+                    ? `The folder of ${changeName} is on no branch: its lead puts it back on ${row.branch}.`
+                    : `The folder of ${changeName} is on ${now}, the branch its change works toward: its lead puts it back on ${row.branch}.`,
+                description: null,
+              })
+              continue
+            }
+            // Another change of the task's on that branch takes the folder back; else the branch is a new change.
+            const [other] = yield* sql<{ id: string; name: string | null }>`
+              SELECT id, name FROM workspaces WHERE task_id = ${taskId} AND device_id = ${instance.deviceId} AND binding_id = ${row.bindingId}
+                AND branch = ${now} AND reviewing IS NULL AND id <> ${row.id} LIMIT 1`
+            const met = (yield* gitOutcome(row.path, 'merge-base', 'HEAD', row.target)).stdout.trim()
+            const at = yield* timestamp
+            const made = other === undefined ? yield* newId(Ids.workspace) : null
+            yield* sql.withTransaction(
+              Effect.gen(function* () {
+                const away = yield* change('workspaces', row.id, { state: 'away' })
+                yield* fact({
+                  projectId: row.projectId,
+                  aggregateType: 'workspace',
+                  aggregateId: row.id,
+                  revision: away,
+                  type: 'workspace.folder_left',
+                  payload: { to: now },
+                  actorId: instance.systemId,
+                })
+                if (other !== undefined) {
+                  const back = yield* change('workspaces', other.id, { state: 'ready', path: row.path })
+                  yield* fact({
+                    projectId: row.projectId,
+                    aggregateType: 'workspace',
+                    aggregateId: other.id,
+                    revision: back,
+                    type: 'workspace.folder_back',
+                    payload: { from: row.branch },
+                    actorId: instance.systemId,
+                  })
+                  return
+                }
+                if (made === null) return
+                yield* sql`INSERT INTO workspaces ${sql.insert({
+                  id: made,
+                  projectId: row.projectId,
+                  taskId,
+                  bindingId: row.bindingId,
+                  deviceId: instance.deviceId,
+                  access: 'write',
+                  path: row.path,
+                  baseRef: row.baseRef,
+                  ...(/^[0-9a-f]{40,64}$/.test(met) ? { baseCommit: met } : row.baseCommit === null ? {} : { baseCommit: row.baseCommit }),
+                  branch: now,
+                  state: 'ready',
+                  createdAt: at,
+                  branchedAt: at,
+                  kind: 'worktree',
+                  name: now,
+                  ...(row.toward === null ? {} : { toward: row.toward }),
+                })}`
+                yield* fact({
+                  projectId: row.projectId,
+                  aggregateType: 'workspace',
+                  aggregateId: made,
+                  revision: 1,
+                  type: 'workspace.change_started',
+                  payload: { name: now, branch: now, toward: row.toward, followed: row.id },
+                  actorId: instance.systemId,
+                })
+              }),
+            )
+            if (other === undefined)
+              yield* addItem({ projectId: row.projectId, threadId: row.threadId }, 'notice', {
+                source: 'runtime',
+                severity: 'info',
+                title: `New change · ${now}, on ${now}.`,
+                description: `Its lead switched ${changeName}'s folder to it. ${changeName} keeps its branch and pull request.`,
+                step: { kind: 'new_change', name: now, branch: now, toward: null },
+              })
+            yield* touchTask(taskId)
+          }
+        })
+
+      /** A change with no open pull request recorded takes the one its host has from its own branch into what it works toward. */
+      const adoptOpen = (taskId: string): Effect.Effect<void, unknown, Store> =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const rows = yield* sql<{
+            path: string
+            branch: string
+            target: string
+            remotes: string
+            threadId: string
+            projectId: ProjectId
+          }>`
+            SELECT w.path, w.branch, coalesce(w.toward, b.default_base_ref, 'main') AS target, b.remote_fingerprints AS remotes,
+              (SELECT t.id FROM threads t WHERE t.task_id = w.task_id AND t.kind = 'task') AS thread_id, w.project_id
+            FROM workspaces w JOIN repository_bindings b ON b.id = w.binding_id
+            WHERE w.task_id = ${taskId} AND w.device_id = ${instance.deviceId} AND w.access = 'write' AND w.state = 'ready'
+              AND w.reviewing IS NULL AND w.branched_at IS NOT NULL
+              AND NOT EXISTS (SELECT 1 FROM repository_changes c JOIN external_links l ON l.url = c.pull_request_url AND l.kind = 'change'
+                WHERE c.workspace_id = w.id AND json_extract(l.snapshot, '$.state') = 'open')
+              AND EXISTS (SELECT 1 FROM tasks k WHERE k.id = w.task_id AND k.state IN ('open', 'draft'))`
+          for (const row of rows) {
+            if (!existsSync(row.path)) continue
+            const named = yield* namedRemotes(row.path).pipe(Effect.orElseSucceed(() => []))
+            const fork = forkOf(named)
+            const remotes =
+              fork === null
+                ? workRemotes(named, Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Array(Schema.String)))(row.remotes))
+                : [fork.fork.url]
+            const found = yield* connections.hostOf(remotes, { fromCli: false }).pipe(Effect.orElseSucceed(() => null))
+            if (found === null) continue
+            const open = yield* Effect.option(
+              Effect.flatMap(found.host.repository(found.path), (repository) => found.host.findChange(repository, row.branch)),
+            )
+            if (Option.isNone(open) || open.value === null || open.value.state !== 'open') continue
+            const pull = open.value
+            // One from the change's branch into another base, such as a backport, isn't the change's: named in a line, not taken.
+            if ((pull.target ?? row.target) !== row.target) {
+              const key = `${pull.url}:other`
+              if (saidOf.has(key)) continue
+              saidOf.add(key)
+              yield* addItem({ projectId: row.projectId, threadId: row.threadId }, 'notice', {
+                source: 'runtime',
+                severity: 'info',
+                title: `${found.host.words.short} ${found.host.words.prefix}${pull.number}, from ${row.branch} into ${pull.target ?? ''}, isn't taken as its change's: attach it if it is.`,
+                description: null,
+              })
+              continue
+            }
+            // By its number where the task has one repository, as it is that repository's; else by its link.
+            const [several] = yield* sql<{ n: number }>`
+              SELECT count(DISTINCT binding_id) AS n FROM workspaces WHERE task_id = ${taskId} AND access = 'write' AND reviewing IS NULL`
+            yield* attach({ taskId, pullRequest: (several?.n ?? 1) > 1 ? pull.url : `#${pull.number}`, actorId: instance.systemId }).pipe(
+              Effect.catchCause((cause) => Effect.logWarning('Could not take a pull request opened from a change’s branch', cause)),
+            )
+          }
         })
 
       /** What each open task's lead left waiting, of a project or of all, goes up where their rules push it on its own (ADR-072). */
@@ -6637,7 +6856,10 @@ export class Changes extends Context.Service<
               Effect.catchCause((cause) => Effect.logWarning('Could not look at the checks the lead was to fix', cause)),
             ),
           ),
-          lookAtCommits(event).pipe(Effect.catchCause((cause) => Effect.logWarning('Could not look at what the lead committed', cause))),
+          Effect.andThen(
+            lookAtCommits(event).pipe(Effect.catchCause((cause) => Effect.logWarning('Could not look at what the lead committed', cause))),
+            followTurns(event).pipe(Effect.catchCause((cause) => Effect.logWarning('Could not follow what the lead did with git', cause))),
+          ),
         )
 
       yield* Effect.forkScoped(provide(Stream.runForEach(yield* live.subscribe, onLive)))

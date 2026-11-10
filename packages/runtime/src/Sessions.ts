@@ -174,6 +174,8 @@ interface TaskRepository {
   readonly within: string | null
   /** 1 where it is the repository's own checkout, where the person works, as a Local task's is (ADR-091); 0 for a worktree. */
   readonly local: number
+  /** The change it is the worktree of, by its name, where the task has several (a task is a conversation plus parts); null for its first. */
+  readonly change?: string | null
 }
 
 /** What a project works toward in one of its repositories (ADR-093): null for its default branch. */
@@ -1293,7 +1295,7 @@ export class Sessions extends Context.Service<
           const repositories = yield* sql<TaskRepository>`
             SELECT b.display_name AS name, b.role, w.path AS worktree, w.branch, w.branched_at IS NOT NULL AS branched, w.base_ref,
               w.base_commit, coalesce(b.default_base_ref, w.base_ref) AS default_branch, w.toward, b.folder AS within,
-              w.kind IS 'checkout' AS local
+              w.kind IS 'checkout' AS local, w.name AS change
             FROM threads t
             JOIN workspaces w ON w.task_id = t.task_id AND w.device_id = ${instance.deviceId} AND w.state = 'ready'
             JOIN repository_bindings b ON b.id = w.binding_id
@@ -3452,6 +3454,8 @@ export class Sessions extends Context.Service<
               : `each worktree's scratch folder, .althar/scratch`
           // Local, its folders are the person's own checkouts (ADR-091).
           const local = thread.repositories.some((repository) => repository.local === 1)
+          // More than one change of its own: some repository has more than one worktree.
+          const changes = thread.repositories.some((repository) => repository.change != null)
           const folders = local ? (several ? 'checkouts' : 'checkout') : several ? 'worktrees' : 'worktree'
           return [
             why.kind === 'start'
@@ -3473,9 +3477,12 @@ export class Sessions extends Context.Service<
             OTHER_TASKS,
             // The person's decisions the code doesn't show, which the coordinator keeps: whether issues are filed at once among them.
             ...(yield* Effect.map(notesOf(thread.projectId), (notes) => (notes.length === 0 ? [] : [notesSection(notes)]))),
-            several
-              ? `Its repositories are side by side in ${thread.cwd}, each with its own branch and history; commit in each one you change:\n${thread.repositories.map((repository) => `- ${withRole(repository.name, repository.role)}: ${where(repository)}.`).join('\n')}`
-              : `The ${local ? 'checkout' : 'worktree'} is ${thread.repositories[0] === undefined ? thread.worktree : `${where(thread.repositories[0])}. The repository is ${withRole(thread.repositories[0].name, thread.repositories[0].role)}`}.`,
+            // Several changes (a task is a conversation plus parts): each its own worktree and branch, named, side by side.
+            changes
+              ? `It holds several changes, each one line of work with its own branch, worktree and pull request, which ships and is reviewed on its own. They are side by side in ${thread.cwd}; commit each change's work in its own folder, and say which change a commit went to:\n${thread.repositories.map((repository) => `- ${repository.change ?? thread.title}${new Set(thread.repositories.map((one) => one.name)).size > 1 ? ` (${withRole(repository.name, repository.role)})` : ''}: ${where(repository)}.`).join('\n')}\nWhat the person says is for the task, not one change: work out which change it is about, as you would in a conversation. Start another change with start_change where work should be reviewed or merged apart, or go elsewhere.`
+              : several
+                ? `Its repositories are side by side in ${thread.cwd}, each with its own branch and history; commit in each one you change:\n${thread.repositories.map((repository) => `- ${withRole(repository.name, repository.role)}: ${where(repository)}.`).join('\n')}`
+                : `The ${local ? 'checkout' : 'worktree'} is ${thread.repositories[0] === undefined ? thread.worktree : `${where(thread.repositories[0])}. The repository is ${withRole(thread.repositories[0].name, thread.repositories[0].role)}`}.`,
             ...(local ? [localBrief(several)] : []),
             ...(others.length === 0
               ? []
