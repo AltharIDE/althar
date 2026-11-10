@@ -16,6 +16,7 @@ import {
   type Next,
   nextWords,
   standingOf,
+  shipText,
   standingText,
 } from '../../shared/standing'
 import { text as stuckText } from '../task/StuckCall'
@@ -136,6 +137,14 @@ export const briefOf = (task: HomeTask): string | undefined => {
   // A change that built nothing: what its lead leaves to the person; its word says the rest.
   if (task.nothingBuilt === true) return askOf(task.summary) ?? undefined
   const change = task.change
+  // Held for Ship: how many commits wait, and on which pull request where one is open.
+  if (task.held !== undefined)
+    return [
+      ...(change?.state === 'open'
+        ? [`${change.repository.slice(change.repository.lastIndexOf('/') + 1)} ${change.prefix}${change.number}`]
+        : []),
+      shipText.commits(task.held.commits),
+    ].join(' · ')
   // Commits after its last pull request merged or closed: a new one is the person's to open.
   const after = task.unshipped
   if (after != null && isUnshipped(task)) return needText.inNone(after.commits, after.add, after.del)
@@ -160,9 +169,11 @@ const unsentBriefOf = (task: HomeTask): string | undefined => {
 
 /** The one next thing a ready task's open pull request needs, where it has one: none for a review, a plain task, a conflict handed back, or checks its lead brought to the person. */
 export const nextOf = (task: HomeTask): Next | null =>
-  task.kind !== 'change' || task.handedBack != null || task.checksBack != null || task.change === null || task.change.state !== 'open'
-    ? null
-    : standingOf(task.change).next
+  task.held !== undefined && task.kind !== 'review'
+    ? { kind: 'ship', commits: task.held.commits }
+    : task.kind !== 'change' || task.handedBack != null || task.checksBack != null || task.change === null || task.change.state !== 'open'
+      ? null
+      : standingOf(task.change).next
 
 /** The calls first, then the tasks ready to accept; any in a project not known yet waits until it is. */
 export const needsOf = ({

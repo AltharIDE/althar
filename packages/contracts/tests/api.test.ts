@@ -684,6 +684,7 @@ describe('the API', () => {
               SignInAccount: () => Effect.succeed({ line: 'codex login', opened: false }),
               OpenChange: () => Effect.void,
               SkipReview: () => Effect.void,
+              Ship: () => Effect.void,
               RefreshTask: () => Effect.void,
               StopListening: () => Effect.void,
               AttachPullRequest: () =>

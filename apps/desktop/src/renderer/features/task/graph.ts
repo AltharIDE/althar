@@ -17,7 +17,13 @@ export const graphText = {
   label: { ...stepText.label, settle: 'Settle', publish: 'Pull request' },
   review: (n: number) => `Review ${n}`,
   althar: 'Althar',
-  by: { asked: 'You asked', followedUp: 'You followed up', relayed: 'From the coordinator', followUp: 'Follow-up' },
+  by: {
+    asked: 'You asked',
+    followedUp: 'You followed up',
+    relayed: 'From the coordinator',
+    followUp: 'Follow-up',
+    shipped: 'You shipped',
+  },
   later: (minutes: number) =>
     minutes < 60
       ? `${minutes}m later`
@@ -290,13 +296,16 @@ export function taskGraphOf(snapshot: ThreadSnapshot, named: NameModel, now: str
 
     // Its marker: who started it, how long after the round before, what they said, and what a change to its steps put in.
     const said = round.said
-    const by = !round.followUp
-      ? graphText.by.asked
-      : said === null
-        ? graphText.by.followUp
-        : said.relayed
-          ? graphText.by.relayed
-          : graphText.by.followedUp
+    const by =
+      round.ships === true
+        ? graphText.by.shipped
+        : !round.followUp
+          ? graphText.by.asked
+          : said === null
+            ? graphText.by.followUp
+            : said.relayed
+              ? graphText.by.relayed
+              : graphText.by.followedUp
     const gap = before === undefined ? null : minutesBetween(before.endedAt ?? before.createdAt, round.createdAt)
     const added = [
       ...new Set(

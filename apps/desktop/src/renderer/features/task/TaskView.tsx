@@ -58,7 +58,7 @@ import { pendingText } from '../../shared/Pending'
 import { useModelNames } from '../../shared/modelNames'
 import { type Choice, runningOn } from '../../shared/models'
 import { issuePriority, issueStatus, productBrand, productName } from '../../shared/products'
-import { readyWordOf } from '../../shared/standing'
+import { readyWordOf, shipText } from '../../shared/standing'
 import { stepText, trackFor } from '../../shared/steps'
 import { inMergeQueue, MERGE_QUEUE_STEP } from '../../data/merges'
 import { ago, clock, running, useNow } from '../../shared/time'
@@ -227,6 +227,9 @@ export const statusOf = (
   // A review drafted is the person's to post (DEV-96).
   if (phase === 'ready' && snapshot.task.review != null && !isAnswered(snapshot.task.review))
     return { status: TaskStatus.Yours, state: text.drafted }
+  // Held for Ship: what waits on its branch, and Ship beside it, whatever kind of task it is.
+  if (phase === 'ready' && snapshot.task.held !== undefined)
+    return { status: TaskStatus.Yours, state: shipText.commits(snapshot.task.held.commits) }
   // A task that isn't a change, finished: settling it, or keeping it for later, is the person's.
   if (phase === 'ready' && (snapshot.task.kind === 'plain' || snapshot.task.kind === 'review'))
     return { status: TaskStatus.Yours, state: text.finished }
@@ -794,16 +797,34 @@ export function TaskView({
     reviewing: snapshot.task.review,
     nothingBuilt: snapshot.task.nothingBuilt,
   })
-  const settle = settleable ? (
-    <SettleWays
-      place="header"
-      {...(done ? { onDone: () => void model.markDone(), doneHint: boardText.doneHint } : {})}
-      {...(snapshot.task.phase === 'ready' && snapshot.task.kind !== 'change'
-        ? { onKeep: () => void model.keep(), keepHint: boardText.keepHint }
-        : {})}
-      {...(model.doing === doing.markDone ? { busy: 'done' as const } : model.doing === doing.keep ? { busy: 'keep' as const } : {})}
-    />
-  ) : null
+  // Held for Ship, Ship is its one way on, first in the chip; a finished task that isn't a change keeps Done and Keep beside it.
+  const held = !busy && snapshot.task.phase === 'ready' ? snapshot.task.held : undefined
+  const settle =
+    settleable || held !== undefined ? (
+      <SettleWays
+        place="header"
+        {...(held === undefined
+          ? {}
+          : {
+              onShip: () => void model.ship(),
+              shipHint: shipText.hint(
+                held.commits,
+                snapshot.task.steps.some((step) => step.key === 'review' && !step.skipped),
+              ),
+            })}
+        {...(settleable && done ? { onDone: () => void model.markDone(), doneHint: boardText.doneHint } : {})}
+        {...(settleable && snapshot.task.phase === 'ready' && snapshot.task.kind !== 'change'
+          ? { onKeep: () => void model.keep(), keepHint: boardText.keepHint }
+          : {})}
+        {...(model.doing === doing.ship
+          ? { busy: 'ship' as const }
+          : model.doing === doing.markDone
+            ? { busy: 'done' as const }
+            : model.doing === doing.keep
+              ? { busy: 'keep' as const }
+              : {})}
+      />
+    ) : null
   // Its parts, just before the faces: what it changed is in its worktree's, which opens the changes over the window (ADR-097).
   const partsActions: PartsActions = {
     seeChanges: () => changes.show(),
@@ -1152,6 +1173,7 @@ export function TaskView({
                   onAccept={(changes) => void model.accept(changes)}
                   onMergeHere={() => void model.mergeHere()}
                   onOpenChange={() => void model.openChange()}
+                  onShip={() => void model.ship()}
                   onPush={(head, url) => void model.push(head, url)}
                   refused={model.refused}
                   onReplace={(head, replaces, url) => void model.replace(head, replaces, url)}

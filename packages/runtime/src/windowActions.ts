@@ -71,6 +71,7 @@ export const WINDOW_ACTIONS = {
   pushBranch: { tool: 'push_task_branch' },
   accept: { word: 'merge_pull_request' },
   push: { tool: 'push_task' },
+  ship: { tool: 'ship_task' },
   replace: { person: 'a force push, which can’t be undone: the person confirms what it replaces' },
   mergeNote: { tool: 'message_lead' },
   stopListening: { tool: 'stop_following' },

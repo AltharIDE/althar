@@ -1,14 +1,16 @@
 # A task is a conversation plus parts, changeable at any time
 
-> A proposal, not built. It would fold into [tasks](../tasks.md),
+> A proposal, its core being built (#722, [Building it](#building-it)). It
+> folds into [tasks](../tasks.md),
 > [workspaces and runs](../workspaces-and-runs.md), [reviews](../reviews.md),
 > [code hosts](../code-hosts.md), [agents](../agents.md) and
 > [what agents may do](../what-agents-may-do.md).
 > [What this changes](#what-this-changes-in-the-decision-documents) lists
 > each section.
 
-- **Status:** Proposed
-- **Date:** 2026-11-08
+- **Status:** Proposed; talking to a lead, Ship and checking fixes built
+  (#722)
+- **Date:** 2026-11-08; how it reads, 2026-11-09
 - **Owner:** Runtime and desktop maintainers
 - **Amends:** the sections in
   [What this changes](#what-this-changes-in-the-decision-documents), among
@@ -50,24 +52,40 @@
   each, or no change, they chose the first: "As hard as it is, it has to be
   A. People's asks are not always clear cut."
 
+  On 9 November a design round (#722) worked every case this adds through on
+  the real window, and the person chose how it reads: a task stays one piece
+  of work however many changes it holds, with one sentence and one button
+  ([How it reads](#how-it-reads)). Two flows of theirs shaped it: a release
+  whose checks fail with main's, so main is fixed first, and a second ticket
+  asked for in the same conversation. Whether two tickets go up as one pull
+  request or two is the lead's call (the person, 9 November).
+
 ## Decision
 
 - **A task is a conversation with its lead, plus five parts:** Workspace,
   Checked by, Reviewing, Outputs and Access. The team belongs to the
   conversation, and already changes at any time.
 - **Every part changes at any time, at once,** by the person, the lead or the
-  coordinator, with a line in the thread. Only two moves wait for the person:
-  running an outside author's code, and a removal that would lose something.
+  coordinator. A change someone else made gets a line in the thread, and the
+  lead's own fold into its work. Only two moves wait for the person: running
+  an outside author's code, and a removal that would lose something.
 - **A task holds as many changes as it needs, at once,** in one repository
   or several. Each has its own branch, worktree and pull request, and ships
   and is reviewed on its own. Everything hangs on the change, never on a
   folder, and Althar follows what the lead does with git rather than
   forbid it.
+- **It reads as one piece of work, however many changes it holds:** one
+  sentence and one button, the same on its card, in its header and in Needs
+  you. The sentence names a change only where that change is the exception,
+  and counts what's alike.
+- **What the person says goes to the task.** The lead works out which change
+  it's for, and each turn's line says where its commits went.
 - **The workspace moves up a step at a time:** none, a copy, a worktree,
   Local. It moves back between a worktree and Local, and down only where
   nothing would be lost. A review that runs code comes from this move.
 - **"Run it" on an outside author's code asks how far to trust it:** Run
-  safely, the default, or Trust fully. A setting can answer for the person.
+  safely, the default, or Trust fully, or Not now. A setting can answer for
+  the person.
 - **Clear-cut tasks don't change.** A task sent off with a plan comes back
   reviewed and up as a pull request, draft or ready as its plan says.
 - **Talking to a lead is a turn, not a round:** the same session, with no
@@ -96,11 +114,13 @@
   person saves their own from a task, the coordinator offers one when it sees
   a set repeat, and Settings can edit them.
 - **The coordinator works out from the person's message** whether it's a
-  chat or a task and which preset fits. The person changes it from the
-  task's header afterwards, as they change its team.
+  chat or a task and which preset fits. Its plan card names the preset, and
+  the person can pick another there. Once the task starts, its parts change
+  from the parts row, and nothing names the preset.
 - **Nothing new stores a task's kind.** Parts are read from the rows that
   already hold them. The [new data](#the-data-model) is small.
-- **It is built all together,** once this proposal is accepted.
+- **Its core is built first** (the person, 9 November): talking to a lead,
+  Ship and checking fixes, then the rest ([Building it](#building-it)).
 
 ## The parts
 
@@ -131,8 +151,12 @@ where it stands: Read only, Runs safely or Trusted.
   it, with `add_part`, `change_part` and `remove_part`, each with a reason.
   For example, a chat whose lead has to write takes a worktree. They share
   these tools, as they share every tool.
-- **Every change writes one line in the thread,** saying who changed which
-  part and why: "Took a worktree, to write the fix."
+- **A change the lead makes on its way folds into its work,** with the rest
+  of its turn: "Took a worktree, to write the fix." A change gets a line of
+  its own in the thread only where someone else made it (the person, the
+  coordinator or Althar), or where it offers a way on, such as Keep them
+  together or Drop it. Every change is recorded either way, with who made it
+  and why.
 - **Two moves wait for the person's own word:**
   - Running an outside author's code ("Run it", below). It is the
     [What stays](../what-agents-may-do.md#what-stays-and-why) line on a
@@ -180,7 +204,8 @@ these:
   branch and target,** never guessed from a name or a folder.
 - **A merge ends only its own change,** never the task, its session or what
   runs.
-- **Every turn, line and badge names the pull request it's about.**
+- **Every turn, line and badge names the change it's about,** by its name,
+  and every push, review and merge its pull request.
 
 Parallel work comes from a helper in the change's own worktree, so nothing
 needs bringing back.
@@ -198,6 +223,13 @@ everything below it.
   set, which already holds a branch and a pull request per repository. A
   task held one at a time. Now it holds as many as it needs, and a task
   that never splits has one, as now.
+- **A change has a name,** a few words such as "Lane heights", given by
+  whoever starts it, as a task is named. A task with one change never shows
+  it, since the task's title says it. Once a task has two, the window calls
+  each by its name, and lines of record add the pull request's number:
+  "Merged · Lane heights (#714)."
+- **A change records the issues it closes,** one or several, and its pull
+  request closes them all.
 - **Everything hangs on the change, never on a folder.** Its pull requests,
   checks, hold for Ship, review mark and place on the card belong to the
   change. A folder is only where a change is checked out at the moment.
@@ -261,15 +293,23 @@ everything below it.
 ### Starting and splitting
 
 - **A change starts at once,** on the word of the person, the lead or the
-  coordinator, with a line in the thread: "Started a second change,
-  `althar/rename-setting`, toward main, to keep the rename apart." The person
-  asks for one ("split this into two pull requests", "fix that too, but
-  separately"), or the lead starts one.
-- **The lead splits where the parts should be reviewed or merged apart,**
-  or where the person asked. What only works together stays one change, and
-  so does a fix the change under way needs. The thread's line lets the
-  person say "keep them together", which joins two changes again before
-  either ships: the lead carries one's commits onto the other.
+  coordinator, and the thread marks it as a step in the work: "New change ·
+  Rename, on `althar/rename-setting`." It names the target only where it
+  isn't the task's: "into `release/0.8.0`". The person asks for one ("split
+  this into two pull requests", "fix that too, but separately"), or the lead
+  starts one.
+- **Whether work is one change or several is the lead's call,** where the
+  person hasn't said (the person, 9 November). It splits where the parts
+  should be reviewed or merged apart, or go to another target or
+  repository. Two tickets asked for in one conversation can be one change
+  whose pull request closes both, or a change each. What only works
+  together stays one change, and so does a fix the change under way needs,
+  unless it fixes what the change didn't break, such as main: that goes
+  first, as a change of its own (below).
+- **Keep them together** joins two changes again before either ships, where
+  the lead split on its own choice: the lead carries one's commits, and the
+  issues it closes, onto the other. The row that started the change offers
+  it. It is never offered where the person asked for the work apart.
 - **A change branches from the task's target unless it needs another
   change's code.** Siblings merge in any order. A change that needs
   another's work stacks on it: it branches from that change's branch, and
@@ -277,6 +317,16 @@ everything below it.
   retargets the one above to what the merged one worked toward, as
   changing the target does
   ([below](#changing-the-branch-a-task-works-toward)).
+- **A change can go first** without being stacked under another. Where a
+  change waits for another to merge but doesn't build on its code, such as
+  a release whose checks fail until main is fixed, both work toward the same
+  target, and the one waiting says what it waits for: "Waits for Fix main to
+  merge". Its failing checks that the first change fixes don't ask for the
+  person. When the first merges, Althar brings the target into the one
+  waiting, as keeping a branch current does, and holds it there with any
+  commits of its waiting for Ship. Stacking the fix under the release would
+  point the release's pull request at the fix's branch, show the fix in its
+  diff, and keep main red for everyone until the release merged.
 - **A hold reaches up a stack.** A push sends a branch's whole history, so
   a change whose branch carries commits that wait for Ship on a change
   below it is held as if they were its own. Nothing pushes it but a Ship
@@ -284,10 +334,10 @@ everything below it.
   checks, or keeping the stack current. Althar works this out from git
   before each push, rather than keeping it.
 - **Ship on a stacked change ships what waits beneath it first,** from the
-  bottom up, and says so before it starts: "Ship #715, and the 2 commits
-  waiting on #714 below it". Each change gets its own review of everything
-  since its last, and goes up only after it. "Ship them all" goes in the
-  same order.
+  bottom up, and says so before it starts: "Held: 2 commits waiting on Lane
+  heights below · Ship". Each change gets its own review of everything since
+  its last, and goes up only after it, with a "Shipped" row of its own. The
+  task's Ship, for every change waiting, goes in the same order.
 - **Keeping a stack current takes only what's shipped.** Althar's own
   course brings the target into the bottom change, and into each change
   above the pushed head of the one below, never its commits waiting. The
@@ -311,10 +361,11 @@ everything below it.
 ### Each change ships and is followed on its own
 
 - **Each change has its own hold for Ship, its own review mark, and its own
-  pull request, checks and seal.** Ship on a change ships that one. "Ship
-  it" in the thread ships what the person was just working on, and the lead
-  asks which in a line where that isn't plain. "Ship them all" ships every
-  change waiting, each with its own review.
+  pull request, checks and seal.** The task's Ship ships every change
+  waiting, the bottom of a stack first, each with its own review, and a
+  change's own row ships only it. "Ship it" in the thread ships what the
+  person means, which the lead works out as it does for any message, asking
+  in a line only where it can't.
 - **Each pull request is followed on its own:** the checks of its head, what
   people say on it, and its conflicts. What Althar's course brings for
   several at once, such as failing checks on two, reaches the lead as one
@@ -322,7 +373,8 @@ everything below it.
   pull request, as T3 Code's was, and never "your pull request", as Agent
   Orchestrator's was.
 - **Every line in the thread, card and message to the lead names the change
-  it is about,** and every push, review and merge names its pull request.
+  it is about,** by its name once a task has two, and every push, review and
+  merge names its pull request.
 - **In a plan's steps, a change goes up as it does now.** Its commits push
   as the lead's turns end, and a lead that needs a change's checks before
   the plan ends opens its pull request as a draft with `open_pull_request`.
@@ -386,20 +438,25 @@ everything below it.
   longer stops following the one before. One whose head is a change's own
   branch is recorded on that change instead, in place of any open one it
   had.
-- **The card keeps one fact.** With one change it is as now. With several,
-  it names the pull request that most needs the person, with its state, and
-  says how many more there are: "#714 checks failing · 2 more". Where none
-  needs them, it says what the changes wait on: "Waiting for checks on
-  #714, #715", as DEV-176 asks. The count stands apart from the state: T3
-  Code's "+6" beside a green icon read as six open pull requests. Its Ship
-  offers each change waiting.
-- **Which one needs the person is worked out each time the card is drawn,**
+- **The card keeps one fact,** the task's one sentence
+  ([How it reads](#the-one-sentence)). With one change it is as now. With
+  several, it names a change only where that change is the exception,
+  "Lane heights: checks failing", and counts what's alike: "Both ready to
+  merge", or "Waiting for checks on both", as DEV-176 asks. A mark for each
+  change and a count, "3 changes", sit at the card's foot, apart from the
+  state: T3 Code's "+6" beside a green icon read as six open pull requests.
+- **Which change the sentence names is worked out each time it's drawn,**
   never kept as a "current" pull request. T3 Code and Orca each kept one
   beside the list for code that still read one, and a contributor to Orca
   counted 57 files reading it (#9213).
-- **The header lists every change,** with its branch, pull request, checks,
-  commits waiting, and any helper on it. The task's diff shows one change at
-  a time, starting with the one that most needs the person.
+- **The header lists every change** behind its marks. Each opens to a row
+  with the change's name, branch, pull request, where it stands, commits
+  waiting, any helper on it, and its own quiet button.
+- **Outputs shows every change on one page,** in the task's order, each a
+  line (its mark, name, pull request, where it stands, its size) that opens
+  to all it made. The one the sentence names starts open, a settled one
+  folded where it was, and one whose after-merge review found something
+  open.
 
 ## The workspace moves up
 
@@ -543,6 +600,7 @@ flowchart LR
 - **Trust fully:** the code runs as the team's does, with the recorded setup
   and its files, install scripts and the network. The prompt says so in
   those words.
+- **Not now** leaves the code Read only, and the prompt goes.
 
 **A setting can answer the prompt:** "When I say Run it on code from outside
 the team": ask each time (the default), run safely, or trust fully. It sits
@@ -552,7 +610,7 @@ it".
 
 A project that needs install scripts to run, such as an Electron or
 Playwright download, won't fully set up under Run safely. The thread says
-what didn't install, and Trust fully is one press away.
+what didn't install, with Trust fully in the same line.
 
 ## Talking to a lead, and shipping
 
@@ -582,6 +640,11 @@ flowchart LR
   settling a review.
 - **A lead still at its plan's steps** takes the message into the step under
   way, as now.
+- **The message goes to the task, never to one of its changes.** The person
+  doesn't pick a change to talk to. The lead works out which one the message
+  is about, as it would in a conversation, and each turn's line says where
+  its commits went: "1 commit to Lane heights". A commit to the wrong change
+  shows at once, and the person says so.
 - **A reply the person hasn't seen** puts the task in Needs you until they
   open it. One they watched arrive doesn't. A question from the lead, or a
   permission it waits on, shows there as now.
@@ -604,8 +667,11 @@ flowchart LR
 - **Commits the person makes by hand** in the task's folder hold it too.
   Althar records the branch's head as each turn ends, and commits past that,
   when the next turn begins or before Althar next pushes, are the person's.
-- **The header and the card say how much is waiting,** "3 commits not
-  shipped", with **Ship**.
+- **Commits not shipped keep the task in Needs you,** as commits to push do
+  now. Its sentence says how much is waiting, "3 commits not shipped ·
+  Ship", and its card's word is "Not shipped". Failing checks of the pushed
+  head and replies waiting go in the same sentence: "3 commits not shipped ·
+  lint fails on #714 · Ship".
 - **Shipping is the person's word:** Ship, or "ship it" or "push it" in the
   thread. "Do this and ship it" is the word to ship once that turn is done.
   A lead or the coordinator ships when the person asked it to, as
@@ -662,6 +728,8 @@ offers two:
 What the person says to an agent already never waits for a place among the
 agents at work ([scheduling](../scheduling.md)). What the coordinator passes
 on from the person counts as theirs too, so it goes first in the same way.
+Within one task too: a round of Althar's own, such as fixing failing checks,
+that waits for a place runs after the person's message to the same lead.
 
 ### A lead's session lasts until it's full
 
@@ -686,8 +754,10 @@ on from the person counts as theirs too, so it goes first in the same way.
 - the agent's own work, and the tools it ran.
 
 A ship adds its review and its checks. The turn's line in the thread shows
-the total, and opening the line shows the parts. The task adds up all its
-turns. A slow turn then says what made it slow.
+the total, and names the part that took most where one did: "Worked for 4m
+· 3m 10s waiting for a place". With several changes, it says where the
+turn's commits went. Opening the line shows every part. The task adds up
+all its turns. A slow turn then says what made it slow.
 
 ## Checked by: a task's own review
 
@@ -771,10 +841,12 @@ and its session carry on ([above](#when-one-merges)).
 - **If the review finds nothing,** the thread gets a line, with no
   notification and nothing in Needs you.
 - **If it finds something,** the task is in Needs you with the findings,
-  which name the merged pull request, and two ways on:
+  which name the merged pull request: "Review found 2 after #715 merged · Fix
+  it", the card's word "Review found 2". Two ways on:
   - **Fix it** opens a round. The lead gets the findings, and its fix goes
-    out as a new change, "After #N", as any round after a merge does now.
-    The task's other changes are left as they are.
+    out as a new change, "After #N", as any round after a merge does now:
+    "New change · `althar/rename-later-fix`, after #715, for its 2
+    findings". The task's other changes are left as they are.
   - **Leave it** closes the findings, which stay in the thread. The task
     settles where nothing else of its is open or at work, and otherwise
     carries on.
@@ -836,7 +908,8 @@ direction overtook that.
 - **It sits on Scratch, off the board's lanes.** Scratch lists chats by
   their latest exchange. It opens in place from the board, as one chip at
   most, and never as a sidebar ([DESIGN.md](../../../DESIGN.md)). Its look is
-  settled by a prototype first.
+  settled by a prototype of its own: the 9 November round set it aside for
+  one.
 - **A chat never waits in Needs you for being finished.** Its questions and
   permission requests still show there, as every task's do.
 - **It moves to the board as soon as it takes a worktree or an output,**
@@ -865,6 +938,10 @@ and changing them never changes the preset.
   - Review a PR
   - Prototype, led by Claude Opus 5.5 at an effort set by its size (the
     person's notes), reviewed only once it ships
+- **The plan card names the preset** as the first word of its kicker,
+  "Change · Task board-still", in the kicker's own type. A press on it opens
+  the others. Nothing names the preset once the task starts: a preset is
+  only a start, and the parts say what the task has.
 - **Save as preset,** from any task's menu, takes its parts, team and the
   first lines of its brief.
 - **The coordinator offers one.** When it sees the person set up the same
@@ -882,14 +959,78 @@ One saved from a task can be kept to that project.
   A message that wants a conversation of its own with an agent starts a chat
   at once. One that wants work done gets a plan, whose card names the preset.
   The coordinator still answers itself what it can answer in a line or two.
-- **The person changes it afterwards** from the task's header, where a chip
-  names the preset, as they change its team. Picking another preset there
-  changes the parts to match, under the rules above, so nothing is lost.
+- **The person changes it on the plan card,** before the task starts:
+  picking another preset there changes the plan's parts to match. Once it
+  starts, they change the parts themselves, from the parts row, under the
+  rules above, so nothing is lost.
 - **Tasks that start without going through the coordinator,** from the board
   or from a lead, start as Change unless whoever starts them names a preset.
   The coordinator is always on either way.
 
-## What the board, Needs you and the thread show
+## How it reads
+
+The window shows all of this the way it shows a task now. The 9 November
+design round (#722) chose how, from three ways of hiding a task's changes,
+and worked every case through on the real window. It went by these rules:
+
+1. **One thing asks at a time.** A task has one sentence and one button,
+   worked out each time it's drawn. Only what that sentence is about is
+   violet.
+2. **Defaults stay invisible.** A task that never splits reads as now. A
+   part shows once it's there and matters.
+3. **Counts over lists:** "Both ready to merge", "3 changes".
+4. **Changes have names** once a task has two. Lines of record add the pull
+   request's number.
+5. **Copy never narrates the screen.** A line only where the person needs to
+   know something, or can act.
+6. **Nothing fails quietly.** Every stop says what happened and offers the
+   way on, in place.
+7. **The window stays still while agents work.** Things change in place, and
+   only the steps of the work stand out of the thread.
+8. **The person acts in place:** Ship, Merge, Call it off and Run it work
+   from the card, the header or the thread.
+9. **Nothing is lost,** and Althar asks only where something would be, or
+   before running a stranger's code.
+10. **Each colour has one meaning:** violet waits on the person, cobalt is
+    under way, red failed, green shipped or merged.
+
+### The one sentence
+
+- **A task is one sentence and one button,** the same on its board card, in
+  its header's pill and in Needs you: "Lane heights: checks failing · Fix
+  it". The card leaves out what its status word already says: under "Review
+  found 2" it reads "After #715 merged".
+- **The sentence is about what most needs the person,** in this order: an
+  ask, a failure, a conflict, ready to merge, commits not shipped, a draft to
+  post, a move waiting, a helper at work, checks running. With several
+  changes it names a change only where that change is the exception, and
+  counts what's alike. A change waiting for another to go first doesn't take
+  the sentence for what the other fixes.
+- **The button acts on every change it can:** "Merge both" merges the bottom
+  of a stack first, and Ship ships each held change, bottom up, each with
+  its own review.
+- **A mark for each change sits inside the pill,** before the sentence, and
+  opens to a row for each change with its own quiet button. A change that
+  waits on the person but isn't the one the sentence is about has an ink
+  mark, not a violet one.
+
+### The thread
+
+- **A part change** someone else made, or one that offers a way on, is one
+  plain grey line, its button in its sentence: "Your checkout is on
+  `balazs/notes` · Switch". The lead's own fold into its work.
+- **The steps of the work are rows of their own,** as a review is: a small
+  stamp where "Althar" stands ("New change" in cobalt, "Shipped" and
+  "Merged" in green), then a few words, the change named in ink and branches
+  as code, and the row's button at their end: "New change · Terms page, on
+  `althar/terms-page`, for DEV-141. Keep them together". A row never wraps;
+  what doesn't fit ends in an ellipsis, the whole on hover.
+- **Each turn's line** says where its time went, and where its commits went
+  ([above](#where-a-turns-time-goes)).
+- **Althar's lines after an answer sit with it,** in the room its hidden Copy
+  row already keeps, rather than a round away.
+
+### The board, Needs you and the header
 
 - **The board** holds every task but chats. A card's kind is read from its
   parts:
@@ -899,17 +1040,28 @@ One saved from a task can be kept to that project.
   - **nothing:** anything else, such as a prototype.
 
   "Local" and "→ release/0.8.0" show where they apply, as now. A card with
-  commits not shipped says how many. One with several changes names the
-  pull request that most needs the person, and counts the rest
-  ([above](#local-attaching-and-the-card)).
-- **Needs you** is unchanged, but for three things: a chat doesn't wait
-  there for being finished, a reply the person hasn't seen waits there until
-  they open it, and a task comes back when the after-merge review of one of
-  its changes finds something, settled or not.
-- **The thread** gets a line for each part change, and each turn's line
-  shows where its time went. The header's parts row keeps what #684 built,
-  adds Checked by, and adds Access where it shows. A chip names the preset,
-  and Ship shows when commits are waiting.
+  several changes has their marks and "3 changes" at its foot.
+- **Needs you** is unchanged, but for four things: a chat doesn't wait there
+  for being finished; a reply the person hasn't seen waits there until they
+  open it; commits not shipped keep a task there; and a task comes back when
+  the after-merge review of one of its changes finds something, settled or
+  not.
+- **The header's parts row** keeps what #684 built, adds Checked by, and adds
+  Access where it shows. It holds what the task has as a whole, and each
+  change's own are in its row. Ship shows when commits are waiting.
+
+### When work can't go on
+
+Each says what happened and offers the way on, where the person is looking:
+
+| What | What it says | The way on |
+|---|---|---|
+| The account is out of usage | "Claude is out of usage until 14:00 · Use another model" | The models free to take the work over, each with how it's reached, or Wait |
+| No place for an agent | "Rename's fix waits for a free agent" | It starts once one is free, and the turn's line counts the wait |
+| A step stopped | "The review for Ship stopped · Try again" | Try again, or another model takes it |
+| The host refused a push | "GitHub refused the push · Sign and ship" | Set up signing, or Try again |
+| A move waits on the person's edits | "Moves to a worktree once `Board.tsx` is committed · Call it off" | Call it off, and the task stays in the checkout |
+| A pull request Althar won't take as the change's | A line: "#718, from `althar/rename` into `release/0.8.0` · Attach it" | Attach it, or leave it. The sentence doesn't change |
 
 ## The data model
 
@@ -929,8 +1081,8 @@ What is new:
 - **`tasks.shelf`,** `board` or `scratch`: set by the preset, moved to the
   board by Althar when a task takes a worktree or an output, and moved either
   way by the person.
-- **`tasks.preset`:** the preset a task started from, for the header's chip
-  and for Save as preset. Nothing reads it for behaviour.
+- **`tasks.preset`:** the preset a task started from, for its plan card and
+  for Save as preset. Nothing reads it for behaviour.
 - **`when` on the review step and `trust` on a reviewed pull request,** as
   the table says.
 - **Several open change sets per task.** Each is a change, and its
@@ -1015,10 +1167,51 @@ What is new:
 
 ## Building it
 
-The person's choice (8 November): this proposal ships first, and then all
-of it is built together, rather than in slices that each ship on their own.
-Within that build, recording each turn's time goes in first, so the rest can
-be measured against today's turns.
+The person's choice (8 November) was for this proposal to ship first, and
+then all of it to be built together. On 9 November they asked for its core
+to be built at once, with the design round (#722), keeping what clients and
+stores had working on upgrade. Built there, each in its area document:
+
+- **A message is a turn, not a round,** for the person's words and what the
+  coordinator passes on: no step, report, reminder or review; a
+  `finish_step` in it keeps its summary and opens nothing; a blank one is
+  told to carry on, as a step's is
+  ([tasks](../tasks.md#rounds-back-to-work-and-shipping-again)).
+- **A tweak waits for Ship:** the hold (`workspaces.held_at`, from where each
+  turn began, `turn_deliveries.heads`, so a restart keeps it), with every
+  push and publish but Ship's refused past it, failing checks and conflicts
+  waiting for Ship; Ship as a run of its own, its review reading only what
+  came after the last, its ending pushing to the open pull request, or
+  opening the next or the first; `ship_task`, the Ship command, and Ship on
+  the card, in the header's chip, on Home and in Outputs
+  ([code hosts](../code-hosts.md#a-leads-commits-go-up-as-its-turn-ends)).
+- **Fixes are checked only where they need it,** tiny ones not at all and
+  named on the pull request, the seal kept
+  ([reviews](../reviews.md#how-a-review-round-runs)).
+- **A reply the person hasn't seen waits in Needs you**
+  ([tasks](../tasks.md#needs-you-and-settling)).
+- **A lead starts afresh only when its context is full**
+  ([agents](../agents.md#keeping-context-small)).
+
+Compatibility: every change to the store is additive, with nullable
+columns an older build reads past; a run with no `ships` and a workspace
+with no `held_at` behave as before, so a round under way from before the
+update finishes as a round; the API only gains fields and a command; the
+old "Review rounds" setting is kept and read by nothing; the lead's tools
+keep their names, `make_it_a_change` included.
+
+Still to build, as the rest of this proposal says: several changes in a
+task, the review after a merge in the same task, each turn's time, the
+workspace moving up and between a worktree and Local, "Run it", the parts
+tools, Scratch and presets. Merge with commits not shipped merges the pull
+request as it is meanwhile, and what waited stays held, for Ship's next pull
+request; settling with commits not shipped leaves them on the branch,
+letting go of the hold. Commits the person makes by hand in the task's
+folder don't hold it yet.
+
+Where it was all to be built together, recording each turn's time went in
+first, so the rest could be measured against today's turns. It is the next
+to build.
 
 It is done when:
 
@@ -1068,7 +1261,7 @@ It is done when:
 | [tasks § What a task is](../tasks.md#what-a-task-is) | Four parts: a workspace, a review, outputs and access. The Scratch shelf, presets and moving a running task are not built | Five, with the review split into Checked by and Reviewing. All three are built |
 | [tasks § Kinds](../tasks.md#kinds-read-from-what-a-task-has) (ADR-035) | Plain, review or change, read from a task's plan, pull requests and review. A quick task becomes a change through `make_it_a_change` | Change, review or none, read from its parts. A chat sits on Scratch, and adding parts replaces `make_it_a_change` |
 | [tasks § Rounds](../tasks.md#rounds-back-to-work-and-shipping-again) | The person's words to a finished lead open a round with the plan's steps and review. No report means a reminder, then the person. A task has as many pull requests as it needs, one per repository at a time | A turn, with no step, report or review. Its commits wait for Ship. A task has a pull request for each of its changes, several in one repository at once included |
-| [tasks § Needs you and settling](../tasks.md#needs-you-and-settling) | A finished task that isn't a change waits there. A merged change is done, and only another round brings a settled task back | A task settles once all its changes are done, not as one merges. A chat doesn't wait there for being finished. A reply the person hasn't seen waits there until they open it, and a task comes back when an after-merge review of one of its changes finds something |
+| [tasks § Needs you and settling](../tasks.md#needs-you-and-settling) | A finished task that isn't a change waits there. A merged change is done, and only another round brings a settled task back | A task settles once all its changes are done, not as one merges. A chat doesn't wait there for being finished. A reply the person hasn't seen waits there until they open it, commits not shipped keep a task there, and a task comes back when an after-merge review of one of its changes finds something |
 | [tasks § The small-change lane](../tasks.md#the-small-change-lane) and [reviews § A small change is reviewed after it merges](../reviews.md#a-small-change-is-reviewed-after-it-merges) (ADR-102) | A merged small change is reviewed in a task of its own, which posts what it finds as any review of a pull request does | Reviewed in the same task, as is what Merge now merges, and nothing is posted on the merged pull request. The merge ends only that change, and the task settles where it was its last |
 | [tasks § Plan and review settings](../tasks.md#plan-and-review-settings) | Rounds of review: 1, 2, 3 or 5, and what happens when they run out | The rounds setting goes. "When rounds run out" stays, for a finding the check reopened |
 | [reviews § How a review round runs](../reviews.md#how-a-review-round-runs) | A fix that changed code sets off another whole round, up to the "Review rounds" setting | Tiny fixes aren't checked, others get one short check by the same reviewer, and the setting goes |
@@ -1076,7 +1269,8 @@ It is done when:
 | [reviews § Reviewing someone else's pull request](../reviews.md#reviewing-someone-elses-pull-request) (ADR-050, ADR-097) | An outside author's code is only read, and a team's is read in a copy | "Run it" asks Run safely or Trust fully, and a team's runs in a worktree |
 | [code-hosts § A lead's commits go up as its turn ends](../code-hosts.md#a-leads-commits-go-up-as-its-turn-ends) (ADR-072) | Every turn's commits push as it ends, and commits the person made by hand go up with the lead's | What the person's turns or hands commit holds the branch, and every change stacked on it, and only Ship pushes them until then. Otherwise Althar's own course pushes as now |
 | [tasks § Helpers (proposed)](../tasks.md#helpers-proposed) (ADR-087) | A helper works in a copy of its own, and the lead takes its commits in | It can also be handed one of the task's changes, and works in that change's worktree. This build takes ADR-087's tasks 1 to 5 |
-| [tasks § The board card](../tasks.md#the-board-card) | One fact: a change's branch, pull request, checks or conflict | With several changes, how many pull requests, and the state of the one that most needs the person, or what they wait on |
+| [tasks § The board card](../tasks.md#the-board-card) | One fact: a change's branch, pull request, checks or conflict | The task's one sentence, in its order. With several changes it names one only where it's the exception, counts what's alike, and has a mark for each at its foot |
+| [desktop-app § How the window reads](../desktop-app.md#how-the-window-reads) and [§ A thread reads in rounds](../desktop-app.md#a-thread-reads-in-rounds) | A task's header shows its pull request's state | One sentence and one button in the header's pill, with a mark for each change. The steps of the work (a new change, Shipped, Merged) are stamped rows in the thread, and Althar's lines after an answer sit with it |
 | [workspaces-and-runs § Worktree](../workspaces-and-runs.md#worktree) | One worktree per repository | One for each change in each repository, all in the task's folder |
 | [code-hosts § Attaching a pull request a task didn't open](../code-hosts.md#attaching-a-pull-request-a-task-didnt-open) (ADR-052) | A task follows one pull request per repository, and attaching another stops following the one before | Attaching adds a change, and the task follows every one |
 | [code-hosts § Not built yet](../code-hosts.md#not-built-yet) and [what-agents-may-do § Asking is the person's word](../what-agents-may-do.md#asking-is-the-persons-word) | `create_branch` and `open_pull_request` go only on the person's word | At once, for a lead and the coordinator |
@@ -1100,8 +1294,16 @@ It is done when:
   product read hit bugs there when it made the same move. The rules above
   name the change in everything, and record each pull request as it is made.
 - **A lead can lose track of which folder it's in,** and commit to the wrong
-  change. Its brief names each change's folder, and each turn's line says
-  which change a commit went to, so the person sees it at once.
+  change, more so since the person never picks one to talk to. Its brief
+  names each change's folder, and each turn's line says which change a
+  commit went to, so the person sees it at once.
+- **The one sentence's order decides what the person sees first.** A wrong
+  order would hide what's urgent behind what's routine. The design round
+  drew it against every case here, and the build tests it against the same
+  ones.
+- **The lead's call between one change and two** will sometimes be wrong for
+  the person. Keep them together undoes a split it chose, and "split this"
+  makes one.
 - **Each worktree takes disk and a setup.** Several changes in one task
   multiply that. A change's folder goes after the usual wait once it's done.
 - **A changed target can conflict.** The rebase and the cherry-picks stop
@@ -1129,11 +1331,10 @@ It is done when:
 - **The coordinator will sometimes guess wrong** between a chat and a task.
   Parts changing at any time makes that cheap to fix from the header.
 - **Scratch grows** until the person clears it. Whether it offers to clear
-  chats untouched for a while is left to the prototype.
+  chats untouched for a while is left to Scratch's own prototype.
 - **A branch the lead makes only to try something** becomes a change, and
-  "Ship them all" would ship it. The thread's line says it started one, and
-  the lead or the person drops it as any change is dropped, by removing its
-  workspace, which keeps the branch.
+  the task's Ship would ship it. The thread's row says it started one, with
+  Drop it, which removes its workspace and keeps the branch.
 - **Each change needs its setup replayed** in its own worktree, which is
   slow in a large repository. Where the volume clones files copy-on-write,
   Althar clones the first worktree's ignored dependency folders instead, as
@@ -1231,3 +1432,17 @@ It is done when:
   person chose to build it all together.
 - **Merging two tasks into one** stays out (the person's note of 7
   November).
+- **The window on one change at a time,** with a switch after the task's
+  title, which the design round drew as B. The person keeps a mode in mind,
+  and a wait on another change hides behind the switch.
+- **A tab for each change over the message box,** drawn as C. It adds a row
+  for as long as a task has two, and a choice on every message.
+- **Always one pull request per ticket,** or always one for all of them.
+  Neither fits every ask (the person, 9 November). The lead judges, and Keep
+  them together undoes a split it made.
+- **Stacking a fix that main needs under the work it unblocks.** The fix
+  would show in the other's diff, and main would stay red until both merged.
+- **A chip naming the preset** in the header or on the card. It would say
+  what the parts already show.
+- **A line in the thread for every part change.** The lead's own, made on
+  its way, would fill the thread with what it is plainly doing.
