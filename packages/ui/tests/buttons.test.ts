@@ -87,6 +87,8 @@ const PLAIN: Readonly<Record<string, string>> = {
   'home/Island/Island.tsx': 'the mark and the count, on the notch’s black',
   'board/NextRow/NextRow.tsx': 'Start, in a held row’s line, in the line’s own place, words and colour while the row is pointed at',
   'board/SettleWays/SettleWays.tsx': 'Done and the pin in a task’s header, segments of the chip that says where it stands',
+  'board/ScratchShelf/ScratchShelf.tsx': 'a chat on Scratch, the whole of its row, its title, last words and when, which opens it',
+  'coordinator/TaskLaunch/TaskLaunch.tsx': 'the preset, the kicker’s first word in the kicker’s own type, which opens the others',
   /* close to a primitive, not yet moved onto one */
   'chrome/BackCrumb/BackCrumb.tsx': 'a ChromeButton that is never pressed',
 }

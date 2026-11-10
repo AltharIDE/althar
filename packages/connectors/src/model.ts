@@ -339,10 +339,15 @@ export interface PictureUpload {
   readonly mediaType: string
 }
 
-/** What `editChange` sets on a change: its title, its description, or both. */
+/**
+ * What `editChange` sets on a change: its title, its description, the branch
+ * it goes into (as a stacked change's does once the one below merges), or any
+ * of them.
+ */
 export interface ChangeEdit {
   readonly title?: string
   readonly body?: string
+  readonly base?: string
 }
 
 /** How git pushes to a repository: its URL, and the header that signs the push in. */

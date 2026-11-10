@@ -523,7 +523,7 @@ describe('the fast lane at its edges', () => {
     }).pipe(Effect.provide(layer)),
   )
 
-  it.effect('owes nothing for a task with no reviewer or no change, and clears it once a review is there', () =>
+  it.effect('owes nothing for a task with no reviewer or no change, and a merged one with a reviewer its review', () =>
     Effect.gen(function* () {
       const projects = yield* Projects
       const plans = yield* Plans
@@ -574,15 +574,15 @@ describe('the fast lane at its edges', () => {
             })}`
         })
       const owed = (taskId: string) =>
-        Effect.map(sql<{ n: number }>`SELECT count(*) AS n FROM reviews_after_merge WHERE task_id = ${taskId}`, ([row]) => row?.n)
+        Effect.map(sql<{ n: number }>`SELECT count(*) AS n FROM merge_reviews WHERE task_id = ${taskId}`, ([row]) => row?.n)
       // No reviewer to start one.
       const noReviewer = yield* make('No reviewer', false)
       yield* change(noReviewer.taskId, 'https://github.test/meridian/api/pull/1')
-      yield* fastLane.reviewMerged(noReviewer.taskId)
+      yield* fastLane.reviewMerged(noReviewer.taskId, 'https://github.test/meridian/api/pull/1')
       assert.strictEqual(yield* owed(noReviewer.taskId), 0)
       // A reviewer, but no change to read.
       const noChange = yield* make('No change', true)
-      yield* fastLane.reviewMerged(noChange.taskId)
+      yield* fastLane.reviewMerged(noChange.taskId, 'https://github.test/meridian/api/pull/3')
       assert.strictEqual(yield* owed(noChange.taskId), 0)
       // Already reviewed: nothing is owed.
       const reviewed = yield* make('Reviewed', true)
@@ -604,8 +604,14 @@ describe('the fast lane at its edges', () => {
           createdAt: when,
           updatedAt: when,
         })}`
-      yield* fastLane.reviewMerged(reviewed.taskId)
+      yield* fastLane.reviewMerged(reviewed.taskId, url)
       assert.strictEqual(yield* owed(reviewed.taskId), 0)
+      // A merged small change with a reviewer and no review yet: owed, in the task itself, not a review task of its own.
+      const merged = yield* make('Merged', true)
+      const mergedUrl = 'https://github.test/meridian/api/pull/4'
+      yield* change(merged.taskId, mergedUrl)
+      yield* fastLane.reviewMerged(merged.taskId, mergedUrl)
+      assert.strictEqual(yield* owed(merged.taskId), 1)
     }).pipe(Effect.provide(layer)),
   )
 

@@ -114,8 +114,12 @@ import { SettingsTools } from './SettingsTools'
 import { TaskActions } from './TaskActions'
 import { IssueChanges } from './IssueChanges'
 import { IssueDrafts } from './IssueDrafts'
-import { postTeamReviews, Reviews, setPostTeamReviews } from './Reviews'
+import { postTeamReviews, Reviews, runOutside, setPostTeamReviews, setRunOutside } from './Reviews'
+import { shelve } from './scratch'
+import { Helpers } from './Helpers'
+import { describe as describePreset, editPreset, partsOfTask, presetsIn, removePreset, savePreset } from './presets'
 import { FastLane } from './fastLane'
+import { MergeReviews } from './MergeReviews'
 import { Plans } from './Plans'
 import { Runs } from './Runs'
 import { findTasks } from './Search'
@@ -247,7 +251,9 @@ export const handlers = Api.toLayer(
     const issueDrafts = yield* IssueDrafts
     const issueChanges = yield* IssueChanges
     const reviews = yield* Reviews
+    const helpers = yield* Helpers
     const fastLane = yield* FastLane
+    const mergeReviews = yield* MergeReviews
     const runs = yield* Runs
     const tasks = yield* Tasks
     const coordinator = yield* Coordinator
@@ -327,6 +333,8 @@ export const handlers = Api.toLayer(
       Effect.catchCause(effect, (cause) => {
         if (Cause.hasInterruptsOnly(cause)) return Effect.interrupt
         const error = Cause.findErrorOption(cause)
+        // Refused by the call itself, in the window's own words already: as it is, and nothing went wrong.
+        if (Option.isSome(error) && error.value instanceof ApiError) return Effect.fail(error.value)
         const said = words(Option.getOrUndefined(error), agentName)
         const told =
           Option.isSome(error) && expected.has(said.reason)
@@ -1057,6 +1065,7 @@ export const handlers = Api.toLayer(
               coAuthor: { on, line: coAuthorLine },
               reviewSeal: yield* reviewSeal,
               postTeamReviews: yield* postTeamReviews,
+              runOutside: yield* runOutside,
               automationsPaused: yield* automations.allPaused,
               folderWait: yield* cleanup.wait,
               agentsAtOnce: {
@@ -1170,6 +1179,9 @@ export const handlers = Api.toLayer(
       LineOldestFirst: ({ commandId, projectId }) => once(commandId, api(busy.oldestFirst(projectId))),
       SetPostTeamReviews: ({ commandId, on }) =>
         once(commandId, api(setPostTeamReviews(on)).pipe(Effect.provideService(SqlClient.SqlClient, sql))),
+      SetRunOutside: ({ commandId, to }) => once(commandId, api(setRunOutside(to)).pipe(Effect.provideService(SqlClient.SqlClient, sql))),
+      RunIt: ({ commandId, taskId, how }) => once(commandId, api(reviews.runIt({ taskId, ...(how === undefined ? {} : { how }) }))),
+      StopRunning: ({ commandId, taskId }) => once(commandId, api(reviews.stopRunning({ taskId, actorId: instance.personId }))),
       GetAutomations: ({ projectId }) =>
         api(
           Effect.gen(function* () {
@@ -1435,6 +1447,7 @@ export const handlers = Api.toLayer(
       HoldPlan: ({ commandId, planId }) => once(commandId, api(plans.hold(planId, instance.personId))),
       ChangePlan: ({ commandId, planId, steps, end, worksIn, toward }) =>
         once(commandId, api(plans.change(planId, steps, instance.personId, end, worksIn, toward))),
+      ApplyPreset: ({ commandId, planId, preset }) => once(commandId, api(plans.applyPreset(planId, preset, instance.personId))),
       ChangeTeam: ({ commandId, taskId, steps }) =>
         once(
           commandId,
@@ -1543,6 +1556,92 @@ export const handlers = Api.toLayer(
               })
             }),
           ),
+        ),
+      MoveTask: ({ commandId, taskId, to, change, consent }) =>
+        once(
+          commandId,
+          api(
+            Effect.flatMap(envelope('task.move', { taskId, to }, commandId), (said) =>
+              runs.move({
+                envelope: said,
+                taskId,
+                to,
+                ...(change === undefined ? {} : { change }),
+                ...(consent === undefined ? {} : { consent }),
+              }),
+            ),
+          ),
+        ),
+      ListPresets: ({ projectId }) =>
+        api(
+          Effect.gen(function* () {
+            const all = yield* presetsIn(projectId ?? null)
+            // The projects they're kept to, or can be, by name, for Settings to say.
+            const named = new Map(
+              (yield* sql<{ id: string; name: string }>`SELECT id, name FROM projects`).map((one) => [one.id, one.name] as const),
+            )
+            return all.map(({ fromProjectId, ...one }) => {
+              const keptTo = one.projectId === null ? undefined : named.get(one.projectId)
+              const from = fromProjectId == null ? undefined : named.get(fromProjectId)
+              return {
+                ...one,
+                about: describePreset(one.parts),
+                ...(keptTo === undefined ? {} : { keptTo }),
+                ...(from === undefined ? {} : { from }),
+              }
+            })
+          }).pipe(Effect.provideService(SqlClient.SqlClient, sql)),
+        ),
+      EditPreset: ({ commandId, id, name, parts, projectOnly }) =>
+        once(
+          commandId,
+          api(
+            editPreset({ id, name, parts, ...(projectOnly === undefined ? {} : { projectOnly }) }).pipe(
+              Effect.provideService(SqlClient.SqlClient, sql),
+            ),
+          ),
+        ),
+      SavePreset: ({ commandId, name, taskId, parts, projectOnly }) =>
+        once(
+          commandId,
+          api(
+            Effect.provideContext(
+              Effect.gen(function* () {
+                const from = taskId === undefined ? null : yield* partsOfTask(taskId)
+                const kept = parts ?? from?.parts
+                if (kept === undefined)
+                  return yield* new ApiError({ reason: 'Invalid', message: 'Say which task, or what parts, to keep.' })
+                return yield* savePreset({
+                  name,
+                  parts: kept,
+                  projectId: projectOnly === true ? (from?.projectId ?? null) : null,
+                  fromTaskId: taskId ?? null,
+                  actorId: instance.personId,
+                })
+              }),
+              folderStore,
+            ),
+          ),
+        ),
+      RemovePreset: ({ commandId, id }) => once(commandId, api(removePreset(id).pipe(Effect.provideService(SqlClient.SqlClient, sql)))),
+      ShelveTask: ({ commandId, taskId, shelf }) =>
+        once(
+          commandId,
+          api(
+            Effect.flatMap(envelope('task.shelve', { taskId, shelf }, commandId), (said) =>
+              Effect.provideContext(shelve(taskId, shelf, said.actorId), folderStore),
+            ),
+          ),
+        ),
+      WorkToward: ({ commandId, taskId, toward }) => once(commandId, api(runs.workToward({ taskId, toward }))),
+      JoinChanges: ({ commandId, taskId, change, into }) =>
+        once(commandId, api(pullRequests.joinChanges(taskId, change, into ?? null, instance.personId))),
+      DropChange: ({ commandId, taskId, change }) => once(commandId, api(pullRequests.dropChange(taskId, change, instance.personId))),
+      StopHelper: ({ commandId, taskId, helper }) => once(commandId, api(Effect.asVoid(helpers.stop({ taskId, helper, by: 'person' })))),
+      DropMove: ({ commandId, taskId }) =>
+        once(
+          commandId,
+          api(Effect.flatMap(envelope('task.drop_move', { taskId }, commandId), (said) => runs.dropMove({ envelope: said, taskId }))),
         ),
       AnswerCheckout: ({ commandId, attentionId, answer }) =>
         once(
@@ -1825,9 +1924,43 @@ export const handlers = Api.toLayer(
           commandId,
           api(Effect.flatMap(envelope('task.skip_review', { taskId }, commandId), (said) => runs.skipReview({ envelope: said, taskId }))),
         ),
-      Ship: ({ commandId, taskId }) =>
-        once(commandId, api(Effect.flatMap(envelope('task.ship', { taskId }, commandId), (said) => runs.ship({ envelope: said, taskId })))),
-      Merge: ({ commandId, taskId, head, url }) => once(commandId, api(pullRequests.merge(taskId, head, url))),
+      Ship: ({ commandId, taskId, change }) =>
+        once(
+          commandId,
+          api(
+            Effect.flatMap(envelope('task.ship', { taskId, change: change ?? null }, commandId), (said) =>
+              runs.ship({ envelope: said, taskId, ...(change === undefined ? {} : { change }) }),
+            ),
+          ),
+        ),
+      // Fix it: the findings go to the lead, and once its turn is over its fix ships as the next pull request.
+      FixAfterMerge: ({ commandId, taskId, url }) =>
+        once(
+          commandId,
+          api(
+            Effect.gen(function* () {
+              const sent = yield* mergeReviews.fix(taskId, url)
+              const said = yield* envelope('task.ship', { taskId, afterMerge: url ?? null }, commandId)
+              yield* Effect.forkDetach(
+                Effect.andThen(mergeReviews.afterTurnOf(sent.threadId, sent.inputId), runs.ship({ envelope: said, taskId })).pipe(
+                  Effect.catchCause((cause) => Effect.logWarning('Could not ship a fix after a merge', cause)),
+                ),
+              )
+            }),
+          ),
+        ),
+      LeaveAfterMerge: ({ commandId, taskId, url }) => once(commandId, api(mergeReviews.leave(taskId, url))),
+      Merge: ({ commandId, taskId, head, url, how }) =>
+        once(
+          commandId,
+          api(
+            how === undefined
+              ? pullRequests.merge(taskId, head, url)
+              : Effect.flatMap(envelope('task.merge', { taskId, how }, commandId), (said) =>
+                  runs.mergeWaiting({ envelope: said, taskId, how, ...(url === undefined ? {} : { url }) }),
+                ),
+          ),
+        ),
       ClosePullRequest: ({ commandId, taskId, url, deleteBranch }) =>
         once(commandId, api(Effect.map(pullRequests.close(taskId, url, { deleteBranch }), ({ branch }) => ({ branch })))),
       MergeHere: ({ commandId, taskId, heads }) => once(commandId, api(Effect.asVoid(pullRequests.mergeHere(taskId, heads)))),

@@ -623,3 +623,113 @@ describe('a Ship', () => {
     }).pipe(Effect.provide(runtimeWith(github)))
   })
 })
+
+describe('commits the person makes by hand', () => {
+  it.live('hold the branch for Ship as the next turn begins, and nothing pushes them first', () => {
+    const { working, bare, github } = onGitHub()
+    return Effect.gen(function* () {
+      const task = yield* opened(working)
+      const pushed = git(bare, 'rev-parse', BRANCH)
+      assert.isNull(yield* heldAt(task.taskId))
+      // The person commits by hand in the task's folder, a while after the lead's last turn, then says something to its lead.
+      writeFileSync(join(task.path, 'by-hand.txt'), 'mine\n')
+      git(task.path, 'add', 'by-hand.txt')
+      const later = new Date(Date.now() + 10 * 60_000).toISOString()
+      execFileSync('git', ['commit', '-q', '-m', 'By hand'], { cwd: task.path, env: { ...process.env, GIT_AUTHOR_DATE: later } })
+      yield* say(task.threadId, 'What do you think of it?')
+      yield* until(heldAt(task.taskId), (at) => at !== null)
+      yield* answered(task.threadId, task.turns + 1)
+      // Held: nothing pushed it, and its card says it waits for Ship.
+      assert.strictEqual(git(bare, 'rev-parse', BRANCH), pushed)
+      const [card] = yield* until(cards(task.projectId), (all) => all[0]?.held !== undefined)
+      assert.strictEqual(card?.held?.commits, 1)
+    }).pipe(Effect.provide(runtimeWith(github)))
+  })
+})
+
+describe('Merge, with commits not shipped', () => {
+  it.live('Merge now sends what waits up and merges at once, and its review after the merge reads only that', () => {
+    const { working, bare, github } = onGitHub()
+    return Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const runs = yield* Runs
+      const task = yield* opened(working)
+      const reviewed = git(task.path, 'rev-parse', 'HEAD')
+      yield* say(task.threadId, 'Make it retry twice. tidy pls [lead:commit]')
+      yield* until(heldAt(task.taskId), (at) => at !== null)
+      const tweak = git(task.path, 'rev-parse', 'HEAD')
+
+      yield* runs.mergeWaiting({
+        envelope: yield* Runtime.envelope('task.merge', { taskId: task.taskId, how: 'now' }),
+        taskId: task.taskId,
+        how: 'now',
+      })
+      // Up and merged at once: no review before it, no Ship run.
+      assert.strictEqual(git(bare, 'log', '-1', '--format=%s', BRANCH), git(task.path, 'log', '-1', '--format=%s', tweak))
+      assert.deepStrictEqual(
+        github.merged.map((one) => [one.number, one.how]),
+        [[1, 'merge']],
+      )
+      assert.isNull(yield* heldAt(task.taskId))
+      assert.lengthOf(yield* runsOf(task.taskId), 1)
+      // Reviewed after the merge, in the task, from what the plan's review read: only the tweak.
+      const [owed] = yield* until(
+        sql<{ state: string; base: string | null }>`SELECT state, base FROM merge_reviews WHERE task_id = ${task.taskId}`,
+        (rows) => rows[0]?.state === 'clear' || rows[0]?.state === 'found',
+      )
+      assert.strictEqual(owed?.base, reviewed)
+    }).pipe(Effect.provide(runtimeWith(github)))
+  })
+
+  it.live('Review and merge ships what waits with one review, then merges it', () => {
+    const { working, bare, github } = onGitHub()
+    return Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const runs = yield* Runs
+      const task = yield* opened(working)
+      yield* say(task.threadId, 'Make it retry twice. tidy pls [lead:commit]')
+      yield* until(heldAt(task.taskId), (at) => at !== null)
+      const tweak = git(task.path, 'rev-parse', 'HEAD')
+
+      yield* runs.mergeWaiting({
+        envelope: yield* Runtime.envelope('task.merge', { taskId: task.taskId, how: 'review' }),
+        taskId: task.taskId,
+        how: 'review',
+      })
+      // A Ship's run that merges: its review reads what waited, then it goes up and merges.
+      yield* until(
+        Effect.sync(() => github.merged.length),
+        (count) => count === 1,
+      )
+      assert.strictEqual(git(bare, 'log', '-1', '--format=%s', BRANCH), git(task.path, 'log', '-1', '--format=%s', tweak))
+      const runs_ = yield* runsOf(task.taskId)
+      assert.lengthOf(runs_, 2)
+      assert.include(runs_[1]?.parameters ?? '', '"merges":true')
+      const asked = yield* sql<{ body: string }>`
+        SELECT i.body FROM user_inputs i JOIN threads t ON t.id = i.thread_id
+        WHERE t.task_id = ${task.taskId} AND t.kind = 'step' AND i.body LIKE 'More to review. The person ships%'`
+      assert.lengthOf(asked, 1)
+      // Reviewed before it merged: nothing is owed after.
+      const [after] = yield* sql<{ n: number }>`SELECT count(*) AS n FROM merge_reviews WHERE task_id = ${task.taskId}`
+      assert.strictEqual(after?.n, 0)
+    }).pipe(Effect.provide(runtimeWith(github)))
+  })
+
+  it.live('with nothing waiting, either merges it as it stands', () => {
+    const { working, github } = onGitHub()
+    return Effect.gen(function* () {
+      const runs = yield* Runs
+      const task = yield* opened(working)
+      yield* runs.mergeWaiting({
+        envelope: yield* Runtime.envelope('task.merge', { taskId: task.taskId, how: 'review' }),
+        taskId: task.taskId,
+        how: 'review',
+      })
+      assert.deepStrictEqual(
+        github.merged.map((one) => one.number),
+        [1],
+      )
+      assert.lengthOf(yield* runsOf(task.taskId), 1)
+    }).pipe(Effect.provide(runtimeWith(github)))
+  })
+})

@@ -45,7 +45,7 @@ import {
 import { SqlClient } from 'effect/sql'
 
 import { Busy } from './Busy'
-import { touchCard, touchTask } from './cards'
+import { offScratch, touchCard, touchTask } from './cards'
 import { ChecksAsked, inspectChecks } from './readChecks'
 import { hostName, logForLead, logPage, readLog } from './checkLogs'
 import { Agents, RuntimeConfig } from './Config'
@@ -75,6 +75,7 @@ import { envelope } from './envelope'
 import { evidencePaths, taskShown } from './evidence'
 import {
   AttachRefused,
+  BranchNotFound,
   CantMerge,
   ChangedSinceSeen,
   GitFailed,
@@ -109,6 +110,7 @@ import {
 } from './git'
 import { Instance } from './Instance'
 import { Live, type LiveEvent } from './Live'
+import { hasBranch, startCommitOf, startOf, towardIn } from './Projects'
 import { applyMerges, conflictsOf, planMerge } from './localMerge'
 import { outward, reconcileOutward } from './outward'
 import {
@@ -319,6 +321,8 @@ interface PublishInput {
    * tweak waits for Ship"); without it, publishing refuses one.
    */
   readonly ships?: boolean | undefined
+  /** Only these workspaces: a change pointed at another branch opens its new pull request alone. */
+  readonly only?: ReadonlyArray<string> | undefined
 }
 
 /** One of the task's repositories, as publishing reads it. */
@@ -733,11 +737,26 @@ export class Changes extends Context.Service<
      * Ship's push, after its review: each of the task's open pull requests
      * takes its branch up to its head here, past the hold. What went where.
      */
-    shipToOpen(taskId: string): Effect.Effect<ReadonlyArray<{ readonly where: string; readonly count: number }>, unknown>
+    shipToOpen(
+      taskId: string,
+      only?: ReadonlyArray<string>,
+    ): Effect.Effect<
+      ReadonlyArray<{ readonly where: string; readonly count: number; readonly url: string; readonly change: string | null }>,
+      unknown
+    >
+    /**
+     * The task's changes with something for Ship (a task is a conversation plus parts, "Each change ships and is followed on
+     * its own"): held, ahead of their pull request, or with work in none yet; by workspace, the bottom of each stack first.
+     * Of one change, by name: it and what waits beneath it in its stack.
+     */
+    waitingChanges(
+      taskId: string,
+      change?: string,
+    ): Effect.Effect<ReadonlyArray<{ readonly id: string; readonly name: string | null }>, unknown>
     /** What Ship would send to the task's open pull requests now, by pull request, sending nothing. */
     aheadOfOpen(taskId: string): Effect.Effect<ReadonlyArray<{ readonly where: string; readonly count: number }>, unknown>
     /** Lets go of the task's holds for Ship: what waited went up (`shipped`), or the person left it on the branch (`left`). */
-    releaseHolds(taskId: string, why: 'shipped' | 'left'): Effect.Effect<void, unknown>
+    releaseHolds(taskId: string, why: 'shipped' | 'left', only?: ReadonlyArray<string>): Effect.Effect<void, unknown>
     /**
      * Replaces the commits on the task's pull request with its branch here, up
      * to the commit the person saw, after its published commits were rewritten:
@@ -772,6 +791,35 @@ export class Changes extends Context.Service<
      * isn't merged. Agents never merge.
      */
     merge(taskId: string, head: string, url?: string): Effect.Effect<void, unknown>
+    /**
+     * Merges the task's pull request at the head its host has now, where the
+     * person's word covered what waited and has just gone up: Review and merge
+     * once its review passed, or Merge now (a task is a conversation plus
+     * parts, "Merge, with commits not shipped").
+     */
+    mergeAsItStands(taskId: string, url: string): Effect.Effect<void, unknown>
+    /**
+     * Points a running task's change at another branch to work toward, or back at its repository's default with null (a
+     * task is a conversation plus parts, "Changing the branch a task works toward"), between its lead's turns. Nothing pushed
+     * yet, its branch is rebased onto the new one; a conflict stops the rebase, which is its lead's to finish. Pushed, its
+     * own commits are cherry-picked onto a fresh branch from the new one, and the old pull request is no longer followed:
+     * the caller opens the new one where nothing holds it for Ship. What it did, for each repository, in words; the
+     * workspaces whose new pull request is to open; and the files a rebase or the cherry-picks stopped on.
+     */
+    /** Keep them together: one change's commits carried onto another of the task's, before either ships; its folder goes. */
+    joinChanges(taskId: string, change: string, into: string | null, actorId: ActorId): Effect.Effect<void, unknown>
+    /** Drop it: a change's folder goes, what it hadn't committed committed first; its branch and pull request stay. */
+    dropChange(taskId: string, change: string, actorId: ActorId): Effect.Effect<void, unknown>
+    /** A task's only worktree removed: it moves down to a copy, its branch keeping all its work. */
+    leaveWorktree(taskId: string, actorId: ActorId): Effect.Effect<void, unknown>
+    retarget(
+      taskId: string,
+      toward: string | null,
+      change?: string | null,
+    ): Effect.Effect<
+      { readonly said: ReadonlyArray<string>; readonly opens: ReadonlyArray<string>; readonly conflicts: ReadonlyArray<string> },
+      unknown
+    >
     /**
      * Merges the task's branch into each of its repositories' default
      * branches on this Mac, up to the commit the person saw in each, where it
@@ -1269,8 +1317,11 @@ export class Changes extends Context.Service<
             WHERE k.id = ${input.taskId} ORDER BY b.created_at, b.rowid`
           if (tasks.length === 0) return yield* new NotFound({ kind: 'task', id: input.taskId })
           // Held for Ship, a worktree goes up only with Ship, after its review: nothing else publishes past the person's commits.
-          if (input.ships !== true && tasks.some((task) => task.heldAt !== null))
-            return yield* new ShipRefused({ taskId: input.taskId, why: 'held' })
+          // A change stacked on one held is held too, where it carries what waits there.
+          if (input.ships !== true)
+            for (const task of tasks)
+              if (task.heldAt !== null || (yield* heldBelow(input.taskId, { id: task.workspaceId, path: task.path })) !== null)
+                return yield* new ShipRefused({ taskId: input.taskId, why: 'held' })
           const [bound] = yield* sql<{ n: number }>`
             SELECT count(*) AS n FROM repository_bindings WHERE project_id = ${input.projectId} AND detached_at IS NULL`
           // Its next pull request goes only where the last one merged or closed with commits after it; the rest stand as they are.
@@ -1280,6 +1331,7 @@ export class Changes extends Context.Service<
           const done: Array<PublishedOne> = []
           let unconnected: NotConnected | undefined
           for (const task of tasks) {
+            if (input.only !== undefined && !input.only.includes(task.workspaceId)) continue
             const next = after.find((one) => one.workspaceId === task.workspaceId)
             if (input.again === true && next === undefined) continue
             const one = yield* Effect.exit(publishOne(input, task, { several: tasks.length > 1, ofSeveral: (bound?.n ?? 0) > 1 }, next))
@@ -1291,6 +1343,8 @@ export class Changes extends Context.Service<
             }
           }
           if (unconnected !== undefined) return yield* unconnected
+          // A chat on Scratch with a pull request now moves to the board.
+          if (done.length > 0) yield* offScratch(input.taskId)
           return done
         })
 
@@ -1314,11 +1368,16 @@ export class Changes extends Context.Service<
        * change is there already is left out. The files they conflict in, with
        * nothing picked left half done, or null once all are on it.
        */
+      /** Who git writes a commit as: the person, as their own git commits, or Althar where this Mac names no one. */
+      const committerIn = (path: string) =>
+        Effect.map(gitOutcome(path, 'config', 'user.email'), (email) =>
+          email.stdout !== '' || process.env.GIT_COMMITTER_EMAIL !== undefined
+            ? []
+            : ['-c', 'user.name=Althar', '-c', 'user.email=althar@localhost'],
+        )
       const pickOnto = (path: string, commits: ReadonlyArray<string>) =>
         Effect.gen(function* () {
-          // As the person's own git commits, or as Althar where this Mac names no one.
-          const named = (yield* gitOutcome(path, 'config', 'user.email')).stdout !== '' || process.env.GIT_COMMITTER_EMAIL !== undefined
-          const as = named ? [] : ['-c', 'user.name=Althar', '-c', 'user.email=althar@localhost']
+          const as = yield* committerIn(path)
           for (const commit of commits) {
             if ((yield* gitOutcome(path, ...as, 'cherry-pick', commit)).code === 0) continue
             const conflicted = (yield* gitOutcome(path, 'diff', '--name-only', '--diff-filter=U')).stdout
@@ -1826,8 +1885,9 @@ export class Changes extends Context.Service<
             SELECT w.id AS workspace_id, w.path, w.branch, w.base_commit, w.branched_at IS NOT NULL AS branched, b.id AS binding_id,
               b.display_name AS name, b.remote_fingerprints AS remotes, b.change_target
             FROM workspaces w JOIN repository_bindings b ON b.id = w.binding_id
-            WHERE w.task_id = ${input.taskId} AND w.device_id = ${instance.deviceId} AND w.access = 'write'
-            ORDER BY b.created_at, b.rowid`
+            WHERE w.task_id = ${input.taskId} AND w.device_id = ${instance.deviceId} AND w.access = 'write' AND w.state = 'ready'
+              AND w.reviewing IS NULL
+            ORDER BY b.created_at, b.rowid, w.created_at, w.rowid`
           // Each repository, where its pull requests are: its own on its host, and the one a fork came from.
           const places = (yield* Effect.forEach(rows, (row) =>
             Effect.gen(function* () {
@@ -1843,6 +1903,10 @@ export class Changes extends Context.Service<
             }),
           )).flat()
           const same = (a: ReadonlyArray<string>, b: ReadonlyArray<string>) => a.join('/').toLowerCase() === b.join('/').toLowerCase()
+          // A repository's first change stands for it; which change takes the pull request is worked out once it is read.
+          const repositories = places.filter(
+            (one, index) => places.findIndex((other) => other.row.bindingId === one.row.bindingId) === index,
+          )
           const asked = input.pullRequest.trim()
           const chosen = yield* Effect.gen(function* () {
             if (/^https?:\/\//i.test(asked)) {
@@ -1852,7 +1916,7 @@ export class Changes extends Context.Service<
               if (resolved.ref.kind !== 'change') return yield* refuse('That link isn’t to a pull request.')
               const ref = resolved.ref
               // On the host the repository is on, not one of the same path on another host Althar is connected to.
-              const place = places.find(
+              const place = repositories.find(
                 (one) =>
                   one.found.connectionId === resolved.connectionId &&
                   (same(one.found.path, ref.path) || (one.fork !== null && same(one.fork.upstream.path, ref.path))),
@@ -1863,12 +1927,12 @@ export class Changes extends Context.Service<
             }
             const number = /^#?(\d+)$/.exec(asked)?.[1]
             if (number === undefined) return yield* refuse('Give the pull request’s link, or its number: #123.')
-            const [only] = places
+            const [only] = repositories
             if (only === undefined)
               return yield* refuse('The task’s repository isn’t on a code host Althar is connected to. Connect it in Settings.')
-            if (places.length > 1)
+            if (repositories.length > 1)
               return yield* refuse(
-                `The task changes several repositories (${places.map((one) => one.row.name).join(', ')}): give the pull request’s link.`,
+                `The task changes several repositories (${repositories.map((one) => one.row.name).join(', ')}): give the pull request’s link.`,
               )
             // By its number, where the repository's pull requests open: the one a fork came from, where the project sends them there.
             const path =
@@ -1877,7 +1941,8 @@ export class Changes extends Context.Service<
                 : only.found.path
             return { ...only, path, number: Number(number) }
           })
-          const { row, fork, found } = chosen
+          const { fork, found } = chosen
+          let row = chosen.row
           const { host } = found
           const said = (error: ConnectorFailed) =>
             refuse(
@@ -1891,6 +1956,9 @@ export class Changes extends Context.Service<
           const path = repository.path
           const name = `${host.words.short} ${host.words.prefix}${pull.number}`
           if (pull.state !== 'open') return yield* refuse(`${name} is ${pull.state}: only an open one can be attached.`)
+          // One whose branch is a change's own is that change's: recorded on it, in place of any open one it had, and the task
+          // follows the rest as before (a task is a conversation plus parts).
+          row = rows.find((one) => one.bindingId === row.bindingId && one.branch === pull.source && existsSync(one.path)) ?? row
           // Its branch is on the repository this clone pushes to, or nowhere Althar can push: the fork, else the repository itself;
           // for a fork whose branches go to the repository it came from (ADR-085), that one too, as the person can push there.
           // Where the host doesn't say which repository it is on, a branch of the same name here may be another's: none is pushed to.
@@ -2097,6 +2165,8 @@ export class Changes extends Context.Service<
             yield* tellLead(link, [
               `This task follows ${name} on ${path.join('/')} now, "${pull.title}": ${pull.url}. ${started ? `Your branch ${row.branch} starts from its head now, with your own commits on top. ` : ''}read_pull_request reads it, reply_on_pull_request answers on it, and push_to_pull_request pushes your commits to its branch, or asks the person to, ${pull.source}.`,
             ])
+          // A chat on Scratch that follows a pull request now moves to the board.
+          yield* offScratch(input.taskId)
           yield* touchCard(input.taskId)
           yield* news(input.taskId)
           wakeNow(input.taskId)
@@ -2158,6 +2228,468 @@ export class Changes extends Context.Service<
           yield* touchCard(link.taskId)
         })
 
+      /**
+       * Whether a change is held by the one it is stacked on (a task is a
+       * conversation plus parts, "A hold reaches up a stack"): a push sends a
+       * branch's whole history, so one whose branch carries commits that wait
+       * for Ship on a change below it is held as if they were its own. Worked
+       * out from git each time, rather than kept: what the change below has
+       * that its pull request doesn't, as far as this branch has taken it in.
+       * When the one below was held, or null.
+       */
+      const heldBelow = (
+        taskId: string,
+        above: { readonly id: string; readonly path: string },
+        depth = 0,
+      ): Effect.Effect<string | null, unknown, Store> =>
+        Effect.gen(function* () {
+          if (depth > 8) return null
+          const sql = yield* SqlClient.SqlClient
+          const [below] = yield* sql<{ id: string; path: string; branch: string; heldAt: string | null; projectId: string }>`
+            SELECT w.id, w.path, w.branch, w.held_at, w.project_id FROM workspaces w JOIN workspaces a ON a.id = ${above.id}
+            WHERE w.task_id = ${taskId} AND w.binding_id = a.binding_id AND w.branch = a.toward AND w.id <> a.id
+              AND w.reviewing IS NULL AND w.state <> 'cleaned'
+            LIMIT 1`
+          if (below === undefined) return null
+          const held = below.heldAt ?? (yield* heldBelow(taskId, below, depth + 1))
+          if (held === null || !existsSync(above.path)) return null
+          const [open] = yield* sql<{ url: string; head: string | null }>`
+            SELECT l.url, json_extract(l.snapshot, '$.headSha') AS head FROM repository_changes c
+            JOIN external_links l ON l.url = c.pull_request_url AND l.kind = 'change'
+            WHERE c.workspace_id = ${below.id} ORDER BY l.created_at DESC LIMIT 1`
+          // Never sent, all the branch below has waits with it.
+          if (open === undefined) return held
+          const sent = (yield* sentTo(below.projectId, open.url)) ?? open.head
+          if (sent === null) return held
+          const met = yield* git(above.path, 'merge-base', 'HEAD', `refs/heads/${below.branch}`).pipe(Effect.orElseSucceed(() => ''))
+          if (met === '') return null
+          return (yield* commitsAhead(above.path, sent, met).pipe(Effect.orElseSucceed(() => 0))) > 0 ? held : null
+        })
+
+      /*
+       * Changes the lead split, put back together or dropped (a task is a conversation plus parts, "Starting and splitting"),
+       * and a task's only worktree moved down to a copy. Nothing is lost: what a folder hadn't committed is committed before it
+       * goes, and every branch stays.
+       */
+      interface ChangeRow {
+        readonly id: string
+        readonly projectId: ProjectId
+        readonly threadId: string | null
+        readonly bindingId: string
+        readonly name: string | null
+        readonly path: string
+        readonly branch: string
+        readonly baseCommit: string | null
+        readonly toward: string | null
+        readonly state: string
+        readonly kind: string | null
+      }
+      const changesOf = (taskId: string) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          return yield* sql<ChangeRow>`
+            SELECT w.id, w.project_id, (SELECT t.id FROM threads t WHERE t.task_id = w.task_id AND t.kind = 'task') AS thread_id,
+              w.binding_id, w.name, w.path, w.branch, w.base_commit, w.toward, w.state, w.kind
+            FROM workspaces w WHERE w.task_id = ${taskId} AND w.device_id = ${instance.deviceId} AND w.access = 'write'
+              AND w.reviewing IS NULL AND w.state IN ('ready', 'away')
+            ORDER BY w.created_at, w.rowid`
+        })
+      const findChange = (all: ReadonlyArray<ChangeRow>, asked: string) => {
+        const wanted = asked.trim().toLowerCase()
+        return all.find((one) => (one.name ?? '').toLowerCase() === wanted || one.branch.toLowerCase() === wanted)
+      }
+      const changeWords = (one: Pick<ChangeRow, 'name' | 'branch'>) => (one.name === null ? 'the task’s first change' : `“${one.name}”`)
+      const commitLeftIn = (path: string, message: string) =>
+        Effect.gen(function* () {
+          if ((yield* uncommittedFiles(path)).length === 0) return false
+          yield* git(path, 'add', '-A')
+          yield* git(path, ...(yield* committerIn(path)), 'commit', '-q', '-m', message)
+          return true
+        })
+      const lineIn = (row: Pick<ChangeRow, 'projectId' | 'threadId'>, title: string, step?: Record<string, unknown>) =>
+        row.threadId === null
+          ? Effect.void
+          : addItem({ projectId: row.projectId, threadId: row.threadId }, 'notice', {
+              source: 'runtime',
+              severity: 'info',
+              title,
+              description: null,
+              ...(step === undefined ? {} : { step }),
+            })
+      const leadHears = (row: Pick<ChangeRow, 'threadId'>, body: string) =>
+        Effect.gen(function* () {
+          if (row.threadId === null) return
+          yield* sessions
+            .send({
+              envelope: yield* envelope('thread.send', { threadId: row.threadId }),
+              threadId: row.threadId,
+              body,
+              origin: 'system',
+              quiet: true,
+            })
+            .pipe(Effect.ignore)
+        })
+      const pulledOf = (workspaceId: string) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          return yield* sql<{ url: string; state: string | null }>`
+            SELECT c.pull_request_url AS url, json_extract(l.snapshot, '$.state') AS state FROM repository_changes c
+            LEFT JOIN external_links l ON l.url = c.pull_request_url AND l.kind = 'change'
+            WHERE c.workspace_id = ${workspaceId} AND c.pull_request_url IS NOT NULL`
+        })
+      const goneRow = (row: ChangeRow, type: string, payload: Readonly<Record<string, unknown>>, actorId: ActorId) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          yield* sql.withTransaction(
+            Effect.gen(function* () {
+              const revision = yield* change('workspaces', row.id, { state: 'cleaned', cleanedAt: yield* timestamp, waitsFor: null })
+              yield* fact({ projectId: row.projectId, aggregateType: 'workspace', aggregateId: row.id, revision, type, payload, actorId })
+            }),
+          )
+        })
+
+      /**
+       * Keep them together: one change's commits carried onto another of the task's, before either ships, cherry-picked onto
+       * its branch in its folder; then the joined one's folder goes, and its branch stays. Refused where either has a pull
+       * request, where either folder has what it hasn't committed, or where the commits conflict, saying which files.
+       */
+      const joinChanges = (taskId: string, asked: string, intoAsked: string | null, actorId: ActorId) =>
+        Effect.gen(function* () {
+          const all = yield* changesOf(taskId)
+          const from = findChange(all, asked)
+          if (from === undefined || from.state !== 'ready')
+            return yield* new ToolRefused({ message: `The task has no change “${asked}” here to keep together with another.` })
+          // Into the change named; else the task's first, or, where that one has shipped, another that hasn't.
+          const candidates = all.filter((one) => one.id !== from.id && one.bindingId === from.bindingId && one.state === 'ready')
+          let into = intoAsked === null ? undefined : findChange(all, intoAsked)
+          if (intoAsked === null)
+            for (const one of [...candidates.filter((c) => c.name === null), ...candidates.filter((c) => c.name !== null)])
+              if ((yield* pulledOf(one.id)).length === 0) {
+                into = one
+                break
+              }
+          if (into === undefined || into.id === from.id || into.bindingId !== from.bindingId || into.state !== 'ready')
+            return yield* new ToolRefused({
+              message: `Name the change of the task's to keep ${changeWords(from)} together with: one in the same repository.`,
+            })
+          for (const one of [from, into])
+            if ((yield* pulledOf(one.id)).length > 0)
+              return yield* new ToolRefused({
+                message: `${changeWords(one)} has a pull request already: changes go together only before either ships.`,
+              })
+          for (const one of [from, into]) {
+            const left = yield* uncommittedFiles(one.path)
+            if (left.length > 0)
+              return yield* new ToolRefused({ message: `Commit what's changed in ${changeWords(one)} first (${filesWord(left)}).` })
+          }
+          const head = yield* commitOf(from.path, 'HEAD')
+          const start = from.baseCommit ?? (yield* git(from.path, 'merge-base', 'HEAD', into.branch))
+          const own = (yield* git(from.path, 'rev-list', '--reverse', '--no-merges', `${start}..${head}`))
+            .split('\n')
+            .filter((line) => line !== '')
+          const conflicted = yield* pickOnto(into.path, own)
+          if (conflicted !== null)
+            return yield* new ToolRefused({
+              message: `${changeWords(from)}'s commits conflict with ${changeWords(into)} in ${filesWord(conflicted)}: both stay as they were.`,
+            })
+          if (from.path !== into.path) {
+            const root = (yield* git(from.path, 'rev-parse', '--git-common-dir').pipe(Effect.orElseSucceed(() => ''))).replace(
+              /\/\.git$/,
+              '',
+            )
+            yield* git(root === '' ? into.path : root, 'worktree', 'remove', from.path).pipe(
+              Effect.catch(() => git(into.path, 'worktree', 'remove', '--force', from.path)),
+              Effect.ignore,
+            )
+          }
+          yield* goneRow(from, 'workspace.joined', { into: into.id, commits: own.length }, actorId)
+          const named = from.name ?? from.branch
+          yield* lineIn(
+            from,
+            `Kept together: ${named}'s ${commitsWord(own.length)} ${own.length === 1 ? 'is' : 'are'} on ${into.branch} now.`,
+            {
+              kind: 'joined',
+              name: named,
+              branch: into.branch,
+              toward: null,
+            },
+          )
+          yield* leadHears(
+            from,
+            `${changeWords(from)} is kept together with ${changeWords(into)}: its ${commitsWord(own.length)} ${own.length === 1 ? 'is' : 'are'} on ${into.branch}, in ${into.path}. Its folder went; its branch, ${from.branch}, stays. Work on it there from now on.`,
+          )
+          yield* touchCard(taskId)
+        })
+
+      /**
+       * Drop it: a change's folder goes, what it hadn't committed committed first; its branch, and any pull request, stay, the
+       * pull request followed no more. A branch the lead made in another change's folder gives that folder back to that change.
+       */
+      const dropChange = (taskId: string, asked: string, actorId: ActorId) =>
+        Effect.gen(function* () {
+          const all = yield* changesOf(taskId)
+          const row = findChange(all, asked)
+          if (row === undefined || row.state !== 'ready')
+            return yield* new ToolRefused({ message: `The task has no change “${asked}” here.` })
+          if (row.kind === 'checkout')
+            return yield* new ToolRefused({ message: `${changeWords(row)} works Local: move it to a worktree first.` })
+          const others = all.filter((one) => one.id !== row.id && one.state === 'ready')
+          // The folder another change left, as the lead made this branch there: it goes back to that change, clean or not at all.
+          const left = all.find((one) => one.id !== row.id && one.state === 'away' && one.path === row.path)
+          if (others.length === 0 && left === undefined)
+            return yield* new ToolRefused({
+              message: `${changeWords(row)} is the task's only change: its lead needs a folder. Remove the task's worktree instead, which keeps its branch.`,
+            })
+          const committed = yield* commitLeftIn(row.path, 'Work in progress, as its change was dropped')
+          if (left !== undefined) {
+            yield* git(row.path, 'switch', '--quiet', left.branch)
+            const sql = yield* SqlClient.SqlClient
+            yield* sql.withTransaction(
+              Effect.gen(function* () {
+                const revision = yield* change('workspaces', left.id, { state: 'ready' })
+                yield* fact({
+                  projectId: left.projectId,
+                  aggregateType: 'workspace',
+                  aggregateId: left.id,
+                  revision,
+                  type: 'workspace.back',
+                  payload: { from: row.id },
+                  actorId,
+                })
+              }),
+            )
+          } else {
+            const root = (yield* git(row.path, 'rev-parse', '--git-common-dir').pipe(Effect.orElseSucceed(() => ''))).replace(
+              /\/\.git$/,
+              '',
+            )
+            yield* git(root, 'worktree', 'remove', row.path).pipe(
+              Effect.catch(() => git(root, 'worktree', 'remove', '--force', row.path)),
+              Effect.ignore,
+            )
+          }
+          for (const pulled of yield* pulledOf(row.id))
+            if (pulled.state === 'open') yield* stopListening(taskId, pulled.url).pipe(Effect.ignore)
+          yield* goneRow(row, 'workspace.dropped', { committed }, actorId)
+          const named = row.name ?? row.branch
+          yield* lineIn(row, `Dropped ${named}: its folder went, ${row.branch} stays.`, {
+            kind: 'dropped',
+            name: named,
+            branch: row.branch,
+            toward: null,
+          })
+          yield* leadHears(
+            row,
+            `${changeWords(row)} was dropped: its folder went${committed ? ', what it hadn’t committed committed first' : ''}, and its branch, ${row.branch}, stays. Its work isn't the task's any more; start it again with start_change if it is needed.`,
+          )
+          yield* touchCard(taskId)
+        })
+
+      /**
+       * A task's only worktree removed, as its workspace part's Remove says while it runs: it moves down to a copy, detached
+       * where its work starts from, what it hadn't committed committed on its branch first, which stays. Its lead carries on in
+       * the same folder, told so, and takes a branch again where it writes.
+       */
+      const leaveWorktree = (taskId: string, actorId: ActorId) =>
+        Effect.gen(function* () {
+          const all = (yield* changesOf(taskId)).filter((one) => one.state === 'ready')
+          const [row] = all
+          if (row === undefined) return yield* new ToolRefused({ message: 'The task has no worktree here to remove.' })
+          if (all.length > 1) return yield* new ToolRefused({ message: 'The task has several changes: name the one to drop.' })
+          if (row.kind === 'checkout') return yield* new ToolRefused({ message: 'The task works Local: move it to a worktree first.' })
+          const committed = yield* commitLeftIn(row.path, 'Work in progress, as the task’s worktree was removed')
+          const base = row.baseCommit ?? (yield* commitOf(row.path, 'HEAD'))
+          yield* git(row.path, 'switch', '--quiet', '--detach', base)
+          const sql = yield* SqlClient.SqlClient
+          yield* sql.withTransaction(
+            Effect.gen(function* () {
+              const revision = yield* change('workspaces', row.id, { branchedAt: null })
+              yield* fact({
+                projectId: row.projectId,
+                aggregateType: 'workspace',
+                aggregateId: row.id,
+                revision,
+                type: 'workspace.to_copy',
+                payload: { branch: row.branch, committed },
+                actorId,
+              })
+            }),
+          )
+          yield* lineIn(row, `The worktree is a copy now: ${row.branch} stays, with all its work.`)
+          yield* leadHears(
+            row,
+            `The task's worktree was removed: ${row.path} is a copy now, detached where the work started, and ${row.branch} keeps all of it${committed ? ', what you hadn’t committed committed first' : ''}. Where you write again, Althar makes the task a branch where it stands.`,
+          )
+          yield* touchCard(taskId)
+        })
+
+      /*
+       * A running task's change pointed at another branch to work toward (a task is a conversation plus parts). Its own
+       * commits are what it has past where it started; each it rewrites is kept beside its copy (`rewritten`), so the mark of
+       * what its last review read moves with it, and the next review reads only what came since.
+       */
+      const retarget = (taskId: string, asked: string | null, changeName: string | null) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const rows = yield* sql<{
+            id: string
+            projectId: ProjectId
+            threadId: string
+            path: string
+            branch: string
+            toward: string | null
+            baseCommit: string | null
+            heldAt: string | null
+            repository: string
+            base: string | null
+            changeTarget: string | null
+            name: string
+          }>`
+            SELECT w.id, w.project_id, (SELECT t.id FROM threads t WHERE t.task_id = w.task_id AND t.kind = 'task') AS thread_id,
+              w.path, w.branch, w.toward, w.base_commit, w.held_at, l.path AS repository, b.default_base_ref AS base, b.change_target,
+              b.display_name AS name
+            FROM workspaces w JOIN repository_bindings b ON b.id = w.binding_id
+            JOIN repository_locations l ON l.binding_id = b.id AND l.device_id = w.device_id
+            WHERE w.task_id = ${taskId} AND w.device_id = ${instance.deviceId} AND w.access = 'write' AND w.reviewing IS NULL
+              AND w.state = 'ready' AND w.branched_at IS NOT NULL AND w.name IS ${changeName}
+            ORDER BY b.created_at, b.rowid`
+          const said: Array<string> = []
+          const conflicts: Array<string> = []
+          const opens: Array<string> = []
+          for (const row of rows) {
+            const toward = yield* towardIn({ ...row, workToward: null }, asked)
+            if (toward === row.toward) continue
+            const { remote, base } = yield* startOf({ ...row, toward })
+            if (!(yield* hasBranch(row.repository, base, remote))) return yield* new BranchNotFound({ branch: base, repository: row.name })
+            const left = yield* uncommittedFiles(row.path)
+            if (left.length > 0)
+              return yield* new ToolRefused({ message: `Commit what's changed in ${row.name} first (${filesWord(left)}): then it moves.` })
+            const { baseRef, baseCommit } = yield* startCommitOf(row.repository, base, remote)
+            const head = yield* commitOf(row.path, 'HEAD')
+            const from = row.baseCommit ?? head
+            const own = (yield* git(row.path, 'rev-list', '--reverse', '--no-merges', `${from}..${head}`))
+              .split('\n')
+              .filter((line) => line !== '')
+            const [open] = yield* sql<{ id: string; url: string; number: number }>`
+              SELECT l.id, l.url, json_extract(l.snapshot, '$.number') AS number FROM external_links l
+              JOIN repository_changes c ON c.pull_request_url = l.url
+              WHERE c.workspace_id = ${row.id} AND l.kind = 'change' AND l.listening = 1
+                AND json_extract(l.snapshot, '$.state') = 'open'
+                AND coalesce(json_extract(l.snapshot, '$.source'), ${row.branch}) = ${row.branch}
+              ORDER BY l.created_at DESC LIMIT 1`
+            let branch = row.branch
+            let stopped: Array<string> = []
+            if (open === undefined) {
+              // Nothing pushed: the branch is rebased onto the new one, its commits written as the person's or Althar's. A conflict
+              // stops it there, for the lead to finish; anything else puts it back as it was.
+              const rebased = yield* gitOutcome(row.path, ...(yield* committerIn(row.path)), 'rebase', '--onto', baseCommit, from)
+              if (rebased.code !== 0) {
+                stopped = (yield* gitOutcome(row.path, 'diff', '--name-only', '--diff-filter=U')).stdout
+                  .split('\n')
+                  .filter((file) => file !== '')
+                if (stopped.length === 0) {
+                  yield* gitOutcome(row.path, 'rebase', '--abort')
+                  return yield* new ToolRefused({
+                    message: `${row.name} couldn’t be rebased onto ${base}, so it still works toward ${row.toward ?? row.base ?? 'its default branch'}, as it was.`,
+                  })
+                }
+                conflicts.push(...stopped)
+              }
+            } else {
+              // Pushed: its pull request can't change its history, so its own commits go onto a fresh branch from the new one.
+              let fresh = `${row.branch}-2`
+              for (let n = 3; yield* branchExists(row.path, fresh); n += 1) fresh = `${row.branch}-${n}`
+              yield* git(row.path, 'checkout', '-q', '-b', fresh, baseCommit)
+              const conflicted = yield* pickOnto(row.path, own)
+              if (conflicted !== null) {
+                yield* Effect.ignore(git(row.path, 'checkout', '-q', row.branch))
+                yield* Effect.ignore(git(row.path, 'branch', '-D', fresh))
+                // Put back as it was: nothing is left for its lead to resolve, which `conflicts` is for, and `said` says why.
+                said.push(
+                  `${row.name} still works toward ${row.toward ?? row.base ?? 'its default branch'}: its commits conflict with ${base} in ${filesWord(conflicted)}.`,
+                )
+                continue
+              }
+              branch = fresh
+            }
+            const now = yield* commitOf(row.path, 'HEAD')
+            const copies =
+              stopped.length > 0
+                ? []
+                : (yield* git(row.path, 'rev-list', '--reverse', '--no-merges', `${baseCommit}..${now}`))
+                    .split('\n')
+                    .filter((line) => line !== '')
+            const rewritten = copies.length === own.length ? Object.fromEntries(own.map((old, index) => [old, copies[index] ?? ''])) : {}
+            yield* sql.withTransaction(
+              Effect.gen(function* () {
+                const revision = yield* change('workspaces', row.id, { toward, baseRef, baseCommit, branch })
+                yield* fact({
+                  projectId: row.projectId,
+                  aggregateType: 'workspace',
+                  aggregateId: row.id,
+                  revision,
+                  type: 'workspace.toward_set',
+                  payload: { toward, from: row.branch, branch, rewritten, ...(open === undefined ? {} : { left: open.url }) },
+                  actorId: instance.systemId,
+                })
+                // The old pull request stays open on its host, for the person to close: Althar follows it no more.
+                if (open !== undefined) yield* change('external_links', open.id, { listening: 0, updatedAt: yield* timestamp })
+              }),
+            )
+            if (open !== undefined) {
+              if (row.heldAt === null) opens.push(row.id)
+              said.push(
+                `${row.name} works toward ${base} now, on ${branch}: its ${commitsWord(own.length)} cherry-picked from ${row.branch}. PR #${open.number} still goes into ${row.toward ?? row.base ?? 'its default branch'}: close it once the new one is open.`,
+              )
+            } else
+              said.push(
+                stopped.length === 0
+                  ? `${row.name} works toward ${base} now: its ${commitsWord(own.length)} rebased onto it.`
+                  : `${row.name} works toward ${base} now, but rebasing onto it stopped on conflicts in ${filesWord(stopped)}.`,
+              )
+            if (row.threadId !== null)
+              yield* addItem({ projectId: row.projectId, threadId: row.threadId }, 'notice', {
+                source: 'runtime',
+                severity: stopped.length === 0 ? 'info' : 'warning',
+                title: said.at(-1) ?? '',
+              })
+          }
+          yield* touchCard(taskId)
+          return { said, opens, conflicts }
+        })
+
+      /**
+       * A task's pull requests, the bottom of each stack before what is
+       * stacked on it, as Ship and Merge go through them; otherwise in the
+       * order they came.
+       */
+      const bottomUp = (taskId: string, links: ReadonlyArray<LinkRow>) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const rows = yield* sql<{ url: string; id: string; bindingId: string; branch: string; toward: string | null }>`
+            SELECT c.pull_request_url AS url, w.id, w.binding_id, w.branch, w.toward FROM repository_changes c
+            JOIN workspaces w ON w.id = c.workspace_id WHERE w.task_id = ${taskId} AND c.pull_request_url IS NOT NULL`
+          const depthOf = (url: string) => {
+            let depth = 0
+            let at = rows.find((row) => row.url === url)
+            const seen = new Set<string>()
+            while (at !== undefined && at.toward !== null && !seen.has(at.id)) {
+              seen.add(at.id)
+              const { bindingId, toward } = at
+              at = rows.find((row) => row.bindingId === bindingId && row.branch === toward)
+              if (at !== undefined) depth += 1
+            }
+            return depth
+          }
+          const urls = yield* Effect.forEach(links, (link) =>
+            Effect.map(Effect.option(decodeSnapshot(link.snapshot)), (seen) => (Option.isSome(seen) ? seen.value.url : '')),
+          )
+          return links
+            .map((link, index) => ({ link, depth: depthOf(urls[index] ?? ''), index }))
+            .toSorted((a, b) => a.depth - b.depth || a.index - b.index)
+            .map((one) => one.link)
+        })
+
       /** The worktree of the repository a pull request is from, with its default branch and the task's thread; the task's first, where the record doesn't say. */
       const worktreeOf = (taskId: string, url: string) =>
         Effect.gen(function* () {
@@ -2170,15 +2702,22 @@ export class Changes extends Context.Service<
             baseCommit: string | null
             threadId: string
             heldAt: string | null
+            stacked: number
           }>`
             SELECT w.id, w.path, w.branch, coalesce(w.toward, b.default_base_ref, w.base_ref) AS base, w.base_commit,
-              (SELECT t.id FROM threads t WHERE t.task_id = w.task_id AND t.kind = 'task') AS thread_id, w.held_at
+              (SELECT t.id FROM threads t WHERE t.task_id = w.task_id AND t.kind = 'task') AS thread_id, w.held_at,
+              EXISTS (SELECT 1 FROM workspaces s WHERE s.task_id = w.task_id AND s.binding_id = w.binding_id AND s.branch = w.toward
+                AND s.id <> w.id AND s.reviewing IS NULL) AS stacked
             FROM workspaces w JOIN repository_bindings b ON b.id = w.binding_id
             WHERE w.task_id = ${taskId} AND w.device_id = ${instance.deviceId} AND w.access = 'write'
             ORDER BY w.id = (SELECT c.workspace_id FROM repository_changes c WHERE c.pull_request_url = ${url} LIMIT 1) DESC,
               b.created_at, b.rowid
             LIMIT 1`
-          return workspace
+          if (workspace === undefined) return undefined
+          const { stacked, ...rest } = workspace
+          // Held by what waits beneath it, it goes up only with the Ship that ships that too.
+          if (rest.heldAt !== null || stacked !== 1) return rest
+          return { ...rest, heldAt: yield* heldBelow(taskId, rest) }
         })
 
       /** The commit Althar last pushed to a pull request, as the record of its push keeps it. */
@@ -2612,10 +3151,29 @@ export class Changes extends Context.Service<
        * settles then: reading it back can still say open for a moment, and
        * what was said on it last is listened to after, not before.
        */
-      const merge = (taskId: string, head: string, url?: string) =>
+      const merge = (taskId: string, head: string, url?: string): Effect.Effect<void, unknown, Store> =>
         Effect.gen(function* () {
           const { link, snapshot, host, repository } = yield* current(taskId, url)
           if (snapshot.state !== 'open') return
+          const sql = yield* SqlClient.SqlClient
+          // Stacked on another of the task's changes, the one below merges first, as it stands, and this goes into what it went
+          // into once it has (a task is a conversation plus parts, "Merge on a stacked change offers the whole stack").
+          const [below] = yield* sql<{ url: string }>`
+            SELECT l.url FROM repository_changes c JOIN workspaces w ON w.id = c.workspace_id
+            JOIN workspaces a ON a.task_id = w.task_id AND a.binding_id = w.binding_id AND a.toward = w.branch AND a.id <> w.id
+            JOIN repository_changes ac ON ac.workspace_id = a.id AND ac.pull_request_url = ${snapshot.url}
+            JOIN external_links l ON l.url = c.pull_request_url AND l.kind = 'change' AND l.task_id = ${taskId}
+            WHERE w.task_id = ${taskId} AND json_extract(l.snapshot, '$.state') = 'open'
+            ORDER BY l.created_at DESC LIMIT 1`
+          if (below !== undefined) {
+            const under = yield* current(taskId, below.url)
+            const now = yield* under.host.change(under.repository, under.snapshot.number)
+            yield* merge(taskId, now.headSha ?? under.snapshot.headSha ?? '', below.url)
+            const after = yield* current(taskId, below.url)
+            if (after.snapshot.state !== 'merged')
+              return yield* sayOn(link, `${nameOf(snapshot)} merges once ${nameOf(under.snapshot)} below it has: press Merge again then.`)
+            return yield* merge(taskId, head, snapshot.url)
+          }
           const read = yield* host.change(repository, snapshot.number, { queue: true })
           // In its merge queue already, put there from outside Althar before a turn heard it, it isn't merged again: it is kept
           // in it, and its thread says so where it hasn't.
@@ -2687,6 +3245,180 @@ export class Changes extends Context.Service<
           }
         }).pipe(Effect.catchCause((cause) => Effect.logWarning('Could not hear whether a merge landed', cause)))
 
+      /** The change a pull request's change waits for to merge, by name, while that one's pull request is open; else null. */
+      const waitingOn = (taskId: string, url: string) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const [waits] = yield* sql<{ name: string | null; branch: string }>`
+            SELECT o.name, o.branch FROM repository_changes c JOIN workspaces w ON w.id = c.workspace_id
+            JOIN workspaces o ON o.id = w.waits_for
+            WHERE c.pull_request_url = ${url} AND w.task_id = ${taskId} AND w.waits_for IS NOT NULL LIMIT 1`
+          return waits === undefined ? null : (waits.name ?? waits.branch)
+        })
+
+      /**
+       * Once a change merges, each change of the task that waited for it waits no more: what it goes into, with what merged,
+       * is brought into its branch, as keeping a branch current does, and goes up as Althar's course has it, held where it is
+       * held. A conflict is its lead's, as any is.
+       */
+      /**
+       * A merged change of several, a stamped row of the thread's: "Merged ·
+       * Lane heights into main." With one change, the thread's line on the
+       * pull request says it.
+       */
+      const stampMerged = (link: LinkRow, merged: Snapshot) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const [one] = yield* sql<{ projectId: ProjectId; threadId: string | null; name: string | null; branch: string; changes: number }>`
+            SELECT w.project_id, t.id AS thread_id, w.name, w.branch,
+              (SELECT count(DISTINCT coalesce(o.name, '')) FROM workspaces o WHERE o.task_id = w.task_id AND o.access = 'write'
+                AND o.reviewing IS NULL AND o.state IN ('ready', 'away')) AS changes
+            FROM repository_changes c JOIN workspaces w ON w.id = c.workspace_id
+            LEFT JOIN threads t ON t.task_id = w.task_id AND t.kind = 'task'
+            WHERE c.pull_request_url = ${merged.url} AND w.task_id = ${link.taskId} LIMIT 1`
+          if (one === undefined || one.changes < 2) return
+          const name = one.name ?? one.branch
+          const into = merged.target ?? 'main'
+          yield* lineIn(one, `Merged · ${name} into ${into}.`, { kind: 'merged', name, branch: into, toward: null })
+        }).pipe(Effect.catchCause((cause) => Effect.logWarning('Could not stamp a merged change', cause)))
+      const bringInWaiting = (link: LinkRow, merged: Snapshot) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const waiting = yield* sql<{
+            id: string
+            projectId: ProjectId
+            path: string
+            name: string | null
+            branch: string
+            toward: string | null
+          }>`
+            SELECT w.id, w.project_id, w.path, w.name, w.branch, w.toward FROM workspaces w
+            WHERE w.task_id = ${link.taskId} AND w.waits_for IN (
+              SELECT c.workspace_id FROM repository_changes c WHERE c.pull_request_url = ${merged.url})`
+          for (const one of waiting) {
+            yield* sql.withTransaction(
+              Effect.gen(function* () {
+                const revision = yield* change('workspaces', one.id, { waitsFor: null })
+                yield* fact({
+                  projectId: one.projectId,
+                  aggregateType: 'workspace',
+                  aggregateId: one.id,
+                  revision,
+                  type: 'workspace.wait_over',
+                  payload: { merged: merged.url },
+                  actorId: instance.systemId,
+                })
+              }),
+            )
+            const into = merged.target ?? one.toward ?? 'main'
+            const brought = yield* Effect.exit(
+              Effect.gen(function* () {
+                yield* git(one.path, 'fetch', '--quiet', 'origin', into).pipe(Effect.ignore)
+                const tip = (yield* gitOutcome(one.path, 'rev-parse', '--verify', '-q', `refs/remotes/origin/${into}`)).stdout
+                if (tip === '') return 'none' as const
+                const done = yield* gitOutcome(
+                  one.path,
+                  '-c',
+                  'user.name=Althar',
+                  '-c',
+                  'user.email=althar@localhost',
+                  'merge',
+                  '--no-edit',
+                  tip,
+                )
+                if (done.code === 0) return 'merged' as const
+                yield* gitOutcome(one.path, 'merge', '--abort')
+                return 'conflicts' as const
+              }),
+            )
+            const named = one.name ?? one.branch
+            const said =
+              brought._tag === 'Success' && brought.value === 'merged'
+                ? `${nameOf(merged)} merged: ${named} has ${into} in now, and waits no more.`
+                : `${nameOf(merged)} merged: ${named} waits no more, but bringing ${into} in ${brought._tag === 'Success' && brought.value === 'conflicts' ? 'conflicts' : 'didn’t work'}; its lead brings it in.`
+            yield* sayOn(link, said)
+          }
+          if (waiting.length > 0) {
+            yield* touchCard(link.taskId)
+            yield* pushLeft(link.taskId).pipe(Effect.ignore)
+          }
+        })
+
+      /**
+       * Once a change's pull request merges, each change of the task stacked
+       * on it goes into what the merged one went into (a task is a
+       * conversation plus parts, "Starting and splitting"): its workspace
+       * works toward that from here, and its open pull request, which went
+       * into the merged one's branch, is pointed there on its host, said in
+       * the thread. One its host won't point elsewhere is said too, and the
+       * person points it.
+       */
+      const retargetAbove = (link: LinkRow, merged: Snapshot) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const [below] = yield* sql<{ id: string; bindingId: string; branch: string; toward: string | null }>`
+            SELECT w.id, w.binding_id, w.branch, w.toward FROM repository_changes c JOIN workspaces w ON w.id = c.workspace_id
+            WHERE c.pull_request_url = ${merged.url} AND w.task_id = ${link.taskId} ORDER BY c.created_at DESC LIMIT 1`
+          if (below === undefined) return
+          const into = merged.target ?? below.toward
+          const above = yield* sql<{ id: string; projectId: ProjectId }>`
+            SELECT id, project_id FROM workspaces
+            WHERE task_id = ${link.taskId} AND binding_id = ${below.bindingId} AND toward = ${below.branch} AND reviewing IS NULL
+              AND state <> 'cleaned' AND id <> ${below.id}`
+          for (const one of above) {
+            yield* sql.withTransaction(
+              Effect.gen(function* () {
+                const revision = yield* change('workspaces', one.id, { toward: below.toward })
+                yield* fact({
+                  projectId: one.projectId,
+                  aggregateType: 'workspace',
+                  aggregateId: one.id,
+                  revision,
+                  type: 'workspace.toward_set',
+                  payload: { toward: below.toward, below: merged.url },
+                  actorId: instance.systemId,
+                })
+              }),
+            )
+            if (into == null) continue
+            const [open] = yield* sql<{ url: string }>`
+              SELECT l.url FROM repository_changes c JOIN external_links l ON l.url = c.pull_request_url AND l.kind = 'change'
+              WHERE c.workspace_id = ${one.id} AND json_extract(l.snapshot, '$.state') = 'open'
+                AND json_extract(l.snapshot, '$.target') = ${below.branch}
+              ORDER BY l.created_at DESC LIMIT 1`
+            if (open === undefined) continue
+            const pointed = yield* Effect.exit(
+              Effect.gen(function* () {
+                const on = yield* current(link.taskId, open.url)
+                const now = yield* on.host.change(on.repository, on.snapshot.number)
+                const edited = yield* outward({
+                  projectId: on.link.projectId,
+                  subject: { type: 'external_link', id: on.link.id },
+                  target: `${on.host.product}:${on.snapshot.repository.join('/')}`,
+                  operation: 'edit_change',
+                  key: `retarget:${on.link.id}:${merged.url}`,
+                  request: { number: on.snapshot.number, base: into },
+                  retryable: true,
+                  perform: on.host.editChange(on.repository, now, { base: into }),
+                  encode: (answer) => answer,
+                  decode: (kept) => Option.getOrUndefined(Schema.decodeUnknownOption(ChangeRequest)(kept)),
+                })
+                yield* saveSnapshot(on.link, { ...on.snapshot, target: edited.target })
+                return nameOf(on.snapshot)
+              }),
+            )
+            if (pointed._tag === 'Success') yield* sayOn(link, `${pointed.value} goes into ${into} now, as ${nameOf(merged)} merged.`)
+            else {
+              yield* Effect.logWarning('Could not point a stacked pull request elsewhere', pointed.cause)
+              yield* sayOn(
+                link,
+                `${nameOf(merged)} merged, but the pull request stacked on it still goes into ${below.branch}: point it at ${into} on its host.`,
+              )
+            }
+          }
+          if (above.length > 0) yield* touchCard(link.taskId)
+        })
+
       /**
        * A change as its host has it now, kept: said in the task's thread where
        * it merged or closed since it was seen, and listened to no more; what
@@ -2708,12 +3440,15 @@ export class Changes extends Context.Service<
             yield* arrive(link, { kind: after.state, from: null, where: nameOf(before), url: before.url })
           if (settled) for (const asked of yield* askedOf(link.taskId, before.url)) yield* settleAsked(asked, 'closed')
           if (after.state === 'merged' && before.state !== 'merged') {
-            // Owed before it is tried, so a stop before it starts loses no review (README section 6).
-            yield* fastLane.markReviewPending(link.taskId, link.projectId)
             yield* Effect.andThen(
-              Effect.andThen(follow(link.taskId, 'merged', before), baseMoved),
-              // The fast lane's review reads the change now that it merged.
-              Effect.forkIn(fastLane.reviewMerged(link.taskId), scope).pipe(Effect.asVoid),
+              Effect.andThen(
+                Effect.andThen(Effect.andThen(stampMerged(link, before), follow(link.taskId, 'merged', before)), baseMoved),
+                Effect.andThen(retargetAbove(link, before), bringInWaiting(link, before)).pipe(
+                  Effect.catchCause((cause) => Effect.logWarning('Could not point what was stacked on a merged change elsewhere', cause)),
+                ),
+              ),
+              // Its review after the merge, where it is owed, reads the change now that it merged, in the task itself.
+              Effect.forkIn(fastLane.reviewMerged(link.taskId, before.url), scope).pipe(Effect.asVoid),
             )
           }
           if (after.state === 'merged') yield* settleIfDone(link.taskId)
@@ -4367,12 +5102,15 @@ export class Changes extends Context.Service<
           // Merged or closed, it takes no more pushes: what the lead asked to push to it is closed.
           if (settled) for (const asked of yield* askedOf(link.taskId, before.url)) yield* settleAsked(asked, 'closed')
           if (after.state === 'merged' && before.state !== 'merged') {
-            // Owed before it is tried, so a stop before it starts loses no review (README section 6).
-            yield* fastLane.markReviewPending(link.taskId, link.projectId)
             yield* Effect.andThen(
-              Effect.andThen(follow(link.taskId, 'merged', before), baseMoved),
-              // The fast lane's review reads the change now that it merged.
-              Effect.forkIn(fastLane.reviewMerged(link.taskId), scope).pipe(Effect.asVoid),
+              Effect.andThen(
+                Effect.andThen(Effect.andThen(stampMerged(link, before), follow(link.taskId, 'merged', before)), baseMoved),
+                Effect.andThen(retargetAbove(link, before), bringInWaiting(link, before)).pipe(
+                  Effect.catchCause((cause) => Effect.logWarning('Could not point what was stacked on a merged change elsewhere', cause)),
+                ),
+              ),
+              // Its review after the merge, where it is owed, reads the change now that it merged, in the task itself.
+              Effect.forkIn(fastLane.reviewMerged(link.taskId, before.url), scope).pipe(Effect.asVoid),
             )
           }
           if (after.state === 'merged') yield* settleIfDone(link.taskId)
@@ -4395,7 +5133,9 @@ export class Changes extends Context.Service<
           // them through. Another pull request's round leaves this one's checks to the lead.
           const rounds = theRounds || began || (yield* roundUnderWay(link.taskId, before.url))
           // Held for Ship, the checks that failed are the pushed head's, which Ship replaces: they start no fix, and show beside Ship.
-          const forShip = (yield* worktreeOf(link.taskId, before.url))?.heldAt != null
+          // Waiting for another change of the task's to merge, its failures are that one's to fix: they start no fix either.
+          const forShip =
+            (yield* worktreeOf(link.taskId, before.url))?.heldAt != null || (yield* waitingOn(link.taskId, before.url)) !== null
           yield* tellLead(
             link,
             rounds || forShip ? forLead.filter((part) => !part.startsWith('Checks failed')) : forLead,
@@ -4523,7 +5263,10 @@ export class Changes extends Context.Service<
             })
           const seen =
             repository.snapshot === null ? undefined : Option.getOrUndefined(yield* Effect.option(decodeSnapshot(repository.snapshot)))
-          if (seen?.state === 'open') return undefined
+          // Open, it takes the branch's pushes: unless the change moved to a branch of its own since, pointed at another to work
+          // toward, and Althar follows it no more (a task is a conversation plus parts), whose work goes in a new one.
+          const leftOpen = seen?.state === 'open' && repository.listening === 0 && repository.branch !== repository.changeBranch
+          if (seen?.state === 'open' && !leftOpen) return undefined
           let head: string | undefined
           let moved = false
           if (seen === undefined) {
@@ -4726,7 +5469,13 @@ export class Changes extends Context.Service<
             const merged = yield* gitOutcome(repository.root, 'merge-base', '--is-ancestor', head, `refs/heads/${repository.base}`)
             if (head === '' || merged.code !== 0) unmerged.push(repository.name)
           }
-          return { repositories, open, unmerged, merged: latest.length > 0 && open.length === 0 && unmerged.length === 0 }
+          return {
+            repositories,
+            open,
+            unmerged,
+            merged: latest.length > 0 && open.length === 0 && unmerged.length === 0,
+            someMerged: seen.some((one) => one.state === 'merged'),
+          }
         })
 
       const settleIfDone = (
@@ -4746,15 +5495,17 @@ export class Changes extends Context.Service<
           // A round of work under way settles it when it ends, by what it left (ADR-034).
           const [working] = yield* sql<{ id: string }>`SELECT id FROM runs WHERE task_id = ${taskId} AND state = 'running' LIMIT 1`
           if (working !== undefined) return yield* touchCard(taskId)
-          const { open, unmerged } = yield* mergeOf(taskId)
+          const { open, unmerged, someMerged } = yield* mergeOf(taskId)
           // Commits after a merged pull request are in none yet: a new one takes them.
           const after =
             open.length > 0
               ? []
               : (yield* unshippedOf(taskId)).flatMap((one) => (one.change === null ? [] : [{ ...one, change: one.change }]))
           if (open.length > 0 || unmerged.length > 0 || after.length > 0) {
-            // Abandoned, it is nobody's to finish: nothing is said.
+            // Abandoned, it is nobody's to finish: nothing is said. Nor where nothing of it merged yet, as when Ship opened another
+            // of its changes' pull requests: what is open is said where one merged and the rest are still to go.
             if (task.state === 'abandoned') return
+            if (!someMerged && by.here === undefined) return yield* touchCard(taskId)
             yield* addItem({ projectId: task.projectId, threadId: task.threadId }, 'notice', {
               source: 'runtime',
               severity: 'info',
@@ -6405,11 +7156,13 @@ export class Changes extends Context.Service<
        * or the person left it on the branch. Its commits go up as Althar's
        * course has them from here.
        */
-      const releaseHolds = (taskId: string, why: 'shipped' | 'left') =>
+      const releaseHolds = (taskId: string, why: 'shipped' | 'left', only?: ReadonlyArray<string>) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
-          const held = yield* sql<{ id: string; projectId: ProjectId }>`
-            SELECT id, project_id FROM workspaces WHERE task_id = ${taskId} AND held_at IS NOT NULL`
+          const held = (yield* sql<{ id: string; projectId: ProjectId }>`
+              SELECT id, project_id FROM workspaces WHERE task_id = ${taskId} AND held_at IS NOT NULL`).filter(
+            (row) => only === undefined || only.includes(row.id),
+          )
           for (const row of held)
             yield* sql.withTransaction(
               Effect.gen(function* () {
@@ -6433,22 +7186,94 @@ export class Changes extends Context.Service<
        * push. What went where, by pull request; with `send` false, what would,
        * and nothing goes up.
        */
-      const shipToOpen = (taskId: string, send = true) =>
+      const shipToOpen = (taskId: string, send = true, only?: ReadonlyArray<string>) =>
         Effect.gen(function* () {
-          const went: Array<{ readonly where: string; readonly count: number }> = []
-          for (const link of yield* linksOf(taskId)) {
+          const went: Array<{ readonly where: string; readonly count: number; readonly url: string; readonly change: string | null }> = []
+          // The bottom of a stack first: each change goes up before what is stacked on it.
+          for (const link of yield* bottomUp(taskId, yield* linksOf(taskId))) {
             if (link.listening !== 1) continue
             const seen = yield* decodeSnapshot(link.snapshot)
             if (seen.state !== 'open') continue
             const workspace = yield* worktreeOf(taskId, seen.url)
             if (workspace === undefined || !existsSync(workspace.path)) continue
+            // A change's own Ship sends it alone (and what waits beneath it, which ships first, as its own).
+            if (only !== undefined && !only.includes(workspace.id)) continue
             const sent = yield* sentTo(link.projectId, seen.url)
             const here = yield* aheadOf(workspace.path, null, [sent, seen.headSha])
             if (here.kind !== 'ahead' || here.count === 0) continue
             if (send) yield* push(taskId, here.head, seen.url, 'ship')
-            went.push({ where: nameOf(seen), count: here.count })
+            const sql = yield* SqlClient.SqlClient
+            const [named] = yield* sql<{ name: string | null }>`SELECT name FROM workspaces WHERE id = ${workspace.id}`
+            went.push({ where: nameOf(seen), count: here.count, url: seen.url, change: named?.name ?? null })
           }
           return went
+        })
+
+      const waitingChanges = (taskId: string, asked?: string) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const rows = yield* sql<{
+            id: string
+            name: string | null
+            path: string
+            branch: string
+            toward: string | null
+            bindingId: string
+            heldAt: string | null
+            baseCommit: string | null
+            branched: number
+          }>`
+            SELECT id, name, path, branch, toward, binding_id, held_at, base_commit, branched_at IS NOT NULL AS branched FROM workspaces
+            WHERE task_id = ${taskId} AND device_id = ${instance.deviceId} AND access = 'write' AND reviewing IS NULL AND state = 'ready'
+            ORDER BY created_at, rowid`
+          const unshipped = new Set((yield* unshippedOf(taskId)).map((one) => one.workspaceId))
+          const waits = (row: (typeof rows)[number]) =>
+            Effect.gen(function* () {
+              if (row.heldAt !== null || unshipped.has(row.id)) return true
+              const [open] = yield* sql<{ url: string; head: string | null; projectId: string }>`
+                SELECT l.url, json_extract(l.snapshot, '$.headSha') AS head, l.project_id FROM repository_changes c
+                JOIN external_links l ON l.url = c.pull_request_url AND l.kind = 'change' AND l.listening = 1
+                WHERE c.workspace_id = ${row.id} AND json_extract(l.snapshot, '$.state') = 'open' LIMIT 1`
+              if (open === undefined || !existsSync(row.path)) return false
+              const here = yield* aheadOf(row.path, null, [yield* sentTo(open.projectId, open.url), open.head])
+              return here.kind === 'ahead' && here.count > 0
+            }).pipe(Effect.orElseSucceed(() => false))
+          // Bottom of each stack first.
+          const depthOf = (row: (typeof rows)[number]) => {
+            let depth = 0
+            let at: (typeof rows)[number] | undefined = row
+            const seen = new Set<string>()
+            while (at !== undefined && at.toward !== null && !seen.has(at.id)) {
+              seen.add(at.id)
+              const toward: string = at.toward
+              const binding: string = at.bindingId
+              at = rows.find((one) => one.bindingId === binding && one.branch === toward)
+              if (at !== undefined) depth += 1
+            }
+            return depth
+          }
+          const ordered = rows
+            .map((row, index) => ({ row, index, depth: depthOf(row) }))
+            .toSorted((a, b) => a.depth - b.depth || a.index - b.index)
+          // Of one change: it, and what waits beneath it in its stack.
+          let wanted = ordered
+          if (asked !== undefined) {
+            const named = rows.find((one) => (one.name ?? '').toLowerCase() === asked.trim().toLowerCase() || one.branch === asked.trim())
+            if (named === undefined) return yield* new ToolRefused({ message: `The task has no change “${asked}” here.` })
+            const chain = new Set<string>([named.id])
+            let at: (typeof rows)[number] | undefined = named
+            while (at !== undefined && at.toward !== null) {
+              const toward: string = at.toward
+              const binding: string = at.bindingId
+              at = rows.find((one) => one.bindingId === binding && one.branch === toward)
+              if (at !== undefined && !chain.has(at.id)) chain.add(at.id)
+              else break
+            }
+            wanted = ordered.filter((one) => chain.has(one.row.id))
+          }
+          const out: Array<{ readonly id: string; readonly name: string | null }> = []
+          for (const one of wanted) if (yield* waits(one.row)) out.push({ id: one.row.id, name: one.row.name })
+          return out
         })
 
       /**
@@ -6466,6 +7291,8 @@ export class Changes extends Context.Service<
           if (thread === undefined) return
           const lead = yield* sessions.running(thread.id)
           if (Option.isSome(lead) && lead.value.turnRunning) return
+          // What the person committed by hand meanwhile is held first: Althar's own push would carry it up.
+          yield* holdHands(taskId)
           for (const link of yield* linksOf(taskId)) {
             if (link.listening !== 1) continue
             yield* pushLeftOn(taskId, link, late).pipe(
@@ -6518,6 +7345,268 @@ export class Changes extends Context.Service<
             ),
             scope,
           )
+        })
+
+      /*
+       * Commits the person makes by hand in a task's folder hold it for Ship, as their turns' do (a task is a conversation plus
+       * parts, "A tweak waits for Ship"): of what isn't sent yet, a commit written outside every turn of the task's agents (from
+       * a moment before each began to a while after it ended, as a lead may commit just after) is the person's. Told by when it
+       * was written, which crediting what Althar sends keeps. Looked at as each turn of its lead begins, before it reads
+       * anything, and before Althar pushes on its own.
+       */
+      const HAND_GRACE_MS = 2 * 60_000
+      const holdHands = (taskId: string) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const rows = yield* sql<{ id: string; path: string; projectId: string }>`
+            SELECT w.id, w.path, w.project_id FROM workspaces w JOIN tasks k ON k.id = w.task_id
+            WHERE w.task_id = ${taskId} AND w.device_id = ${instance.deviceId} AND w.access = 'write' AND w.state = 'ready'
+              AND w.branched_at IS NOT NULL AND w.held_at IS NULL AND NOT ${sql.unsafe(quickIn('k'))}`
+          if (rows.length === 0) return
+          const turns = yield* sql<{ from: string | null; to: string | null }>`
+            SELECT d.delivered_at AS "from", d.ended_at AS "to" FROM turn_deliveries d JOIN threads t ON t.id = d.thread_id
+            WHERE t.task_id = ${taskId} AND d.delivered_at IS NOT NULL`
+          const now = yield* Clock.currentTimeMillis
+          const windows = turns.flatMap((turn) =>
+            turn.from === null
+              ? []
+              : [{ from: Date.parse(turn.from) - 5_000, to: (turn.to === null ? now : Date.parse(turn.to)) + HAND_GRACE_MS }],
+          )
+          const inATurn = (at: number) => windows.some((window) => at >= window.from && at <= window.to)
+          const moved: Record<string, string> = {}
+          for (const row of rows) {
+            if (!existsSync(row.path)) continue
+            // What isn't sent yet: past what its open pull request has, or what Althar last pushed of it.
+            const [link] = yield* sql<{ url: string; snapshot: string }>`
+              SELECT l.url, l.snapshot FROM external_links l JOIN repository_changes c ON c.pull_request_url = l.url
+              WHERE c.workspace_id = ${row.id} AND l.kind = 'change' AND json_extract(l.snapshot, '$.state') = 'open'
+              ORDER BY l.created_at DESC LIMIT 1`
+            if (link === undefined) continue
+            const seen = yield* decodeSnapshot(link.snapshot)
+            const sent = yield* sentTo(row.projectId, seen.url)
+            // As it mostly is: the folder is where it was sent, and nothing in it waits.
+            const tip = yield* commitOf(row.path, 'HEAD').pipe(Effect.orElseSucceed(() => ''))
+            if (tip === seen.headSha || tip === sent) continue
+            const here = yield* aheadOf(row.path, null, [sent, seen.headSha])
+            if (here.kind !== 'ahead' || here.count === 0) continue
+            const written = yield* git(row.path, 'log', '--format=%H %at', `${here.from}..${here.head}`).pipe(
+              Effect.orElseSucceed(() => ''),
+            )
+            const byHand = written
+              .split('\n')
+              .filter((line) => line !== '')
+              .some((line) => !inATurn(Number(line.split(' ')[1] ?? '0') * 1000))
+            if (byHand) moved[row.id] = here.from
+          }
+          if (Object.keys(moved).length > 0) yield* holdAfterTurn(taskId, moved)
+        })
+
+      /*
+       * Althar follows what the lead does with git, rather than forbid it (a task is a conversation plus parts): as each turn of
+       * its lead ends, once it is done, each of the task's folders is read for its branch. A folder now on another branch makes
+       * that branch a change of the task's, working toward what the change it left did; the change it left keeps its branch and
+       * pull request, with no folder (`away`) until it is worked on again. One left detached, or on the branch its change works
+       * toward, gets a line, once, and the lead puts it right. Then a change with no open pull request recorded takes one its
+       * host has from its own branch into what it works toward, opened by `gh pr create`, an MCP server or on the website.
+       */
+      const followed = new Set<string>()
+      const saidOf = new Set<string>()
+      const followTurns = (event: LiveEvent): Effect.Effect<void, unknown, Store> =>
+        Effect.gen(function* () {
+          if (event._tag !== 'TurnEnded' || followed.has(event.threadId)) return
+          const sql = yield* SqlClient.SqlClient
+          const [thread] = yield* sql<{ taskId: string }>`
+            SELECT t.task_id FROM threads t JOIN tasks k ON k.id = t.task_id
+            WHERE t.id = ${event.threadId} AND t.kind = 'task' AND k.state IN ('open', 'done')`
+          if (thread === undefined) return
+          followed.add(event.threadId)
+          yield* Effect.forkIn(
+            Effect.sleep(reportsWithin).pipe(
+              Effect.andThen(sessions.untilIdle(event.threadId, busyUpTo)),
+              Effect.ensuring(Effect.sync(() => followed.delete(event.threadId))),
+              Effect.andThen(locked(thread.taskId)(followBranches(thread.taskId))),
+              Effect.andThen(adoptOpen(thread.taskId)),
+              Effect.catchCause((cause) => Effect.logWarning('Could not follow what the lead did with git', cause)),
+              provide,
+            ),
+            scope,
+          )
+        })
+
+      const followBranches = (taskId: string) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const rows = yield* sql<{
+            id: string
+            projectId: ProjectId
+            bindingId: string
+            path: string
+            branch: string
+            name: string | null
+            toward: string | null
+            baseRef: string
+            baseCommit: string | null
+            setup: string | null
+            target: string
+            threadId: string
+          }>`
+            SELECT w.id, w.project_id, w.binding_id, w.path, w.branch, w.name, w.toward, w.base_ref, w.base_commit, w.setup,
+              coalesce(w.toward, b.default_base_ref, 'main') AS target,
+              (SELECT t.id FROM threads t WHERE t.task_id = w.task_id AND t.kind = 'task') AS thread_id
+            FROM workspaces w JOIN repository_bindings b ON b.id = w.binding_id
+            WHERE w.task_id = ${taskId} AND w.device_id = ${instance.deviceId} AND w.access = 'write' AND w.state = 'ready'
+              AND w.reviewing IS NULL AND w.branched_at IS NOT NULL AND w.kind IS NOT 'checkout'
+            ORDER BY w.created_at, w.rowid`
+          for (const row of rows) {
+            if (!existsSync(row.path)) continue
+            const now = (yield* gitOutcome(row.path, 'symbolic-ref', '--short', '-q', 'HEAD')).stdout.trim()
+            if (now === row.branch) continue
+            const changeName = row.name ?? row.branch
+            if (now === '' || now === row.target) {
+              const key = `${row.id}:${now}`
+              if (saidOf.has(key)) continue
+              saidOf.add(key)
+              yield* addItem({ projectId: row.projectId, threadId: row.threadId }, 'notice', {
+                source: 'runtime',
+                severity: 'warning',
+                title:
+                  now === ''
+                    ? `The folder of ${changeName} is on no branch: its lead puts it back on ${row.branch}.`
+                    : `The folder of ${changeName} is on ${now}, the branch its change works toward: its lead puts it back on ${row.branch}.`,
+                description: null,
+              })
+              continue
+            }
+            // Another change of the task's on that branch takes the folder back; else the branch is a new change.
+            const [other] = yield* sql<{ id: string; name: string | null }>`
+              SELECT id, name FROM workspaces WHERE task_id = ${taskId} AND device_id = ${instance.deviceId} AND binding_id = ${row.bindingId}
+                AND branch = ${now} AND reviewing IS NULL AND id <> ${row.id} LIMIT 1`
+            const met = (yield* gitOutcome(row.path, 'merge-base', 'HEAD', row.target)).stdout.trim()
+            const at = yield* timestamp
+            const made = other === undefined ? yield* newId(Ids.workspace) : null
+            yield* sql.withTransaction(
+              Effect.gen(function* () {
+                const away = yield* change('workspaces', row.id, { state: 'away' })
+                yield* fact({
+                  projectId: row.projectId,
+                  aggregateType: 'workspace',
+                  aggregateId: row.id,
+                  revision: away,
+                  type: 'workspace.folder_left',
+                  payload: { to: now },
+                  actorId: instance.systemId,
+                })
+                if (other !== undefined) {
+                  const back = yield* change('workspaces', other.id, { state: 'ready', path: row.path })
+                  yield* fact({
+                    projectId: row.projectId,
+                    aggregateType: 'workspace',
+                    aggregateId: other.id,
+                    revision: back,
+                    type: 'workspace.folder_back',
+                    payload: { from: row.branch },
+                    actorId: instance.systemId,
+                  })
+                  return
+                }
+                if (made === null) return
+                yield* sql`INSERT INTO workspaces ${sql.insert({
+                  id: made,
+                  projectId: row.projectId,
+                  taskId,
+                  bindingId: row.bindingId,
+                  deviceId: instance.deviceId,
+                  access: 'write',
+                  path: row.path,
+                  baseRef: row.baseRef,
+                  ...(/^[0-9a-f]{40,64}$/.test(met) ? { baseCommit: met } : row.baseCommit === null ? {} : { baseCommit: row.baseCommit }),
+                  branch: now,
+                  state: 'ready',
+                  createdAt: at,
+                  branchedAt: at,
+                  // A worktree as the task's first is (kind null), in the folder the change it left was set up in: set up already.
+                  ...(row.setup === null ? {} : { setup: row.setup }),
+                  name: now,
+                  ...(row.toward === null ? {} : { toward: row.toward }),
+                })}`
+                yield* fact({
+                  projectId: row.projectId,
+                  aggregateType: 'workspace',
+                  aggregateId: made,
+                  revision: 1,
+                  type: 'workspace.change_started',
+                  payload: { name: now, branch: now, toward: row.toward, followed: row.id },
+                  actorId: instance.systemId,
+                })
+              }),
+            )
+            if (other === undefined)
+              yield* addItem({ projectId: row.projectId, threadId: row.threadId }, 'notice', {
+                source: 'runtime',
+                severity: 'info',
+                title: `New change · ${now}, on ${now}.`,
+                description: `Its lead switched ${changeName}'s folder to it. ${changeName} keeps its branch and pull request.`,
+                step: { kind: 'new_change', name: now, branch: now, toward: null, by: 'git' },
+              })
+            yield* touchTask(taskId)
+          }
+        })
+
+      /** A change with no open pull request recorded takes the one its host has from its own branch into what it works toward. */
+      const adoptOpen = (taskId: string): Effect.Effect<void, unknown, Store> =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const rows = yield* sql<{
+            path: string
+            branch: string
+            target: string
+            remotes: string
+            threadId: string
+            projectId: ProjectId
+          }>`
+            SELECT w.path, w.branch, coalesce(w.toward, b.default_base_ref, 'main') AS target, b.remote_fingerprints AS remotes,
+              (SELECT t.id FROM threads t WHERE t.task_id = w.task_id AND t.kind = 'task') AS thread_id, w.project_id
+            FROM workspaces w JOIN repository_bindings b ON b.id = w.binding_id
+            WHERE w.task_id = ${taskId} AND w.device_id = ${instance.deviceId} AND w.access = 'write' AND w.state = 'ready'
+              AND w.reviewing IS NULL AND w.branched_at IS NOT NULL
+              AND NOT EXISTS (SELECT 1 FROM repository_changes c JOIN external_links l ON l.url = c.pull_request_url AND l.kind = 'change'
+                WHERE c.workspace_id = w.id AND json_extract(l.snapshot, '$.state') = 'open')
+              AND EXISTS (SELECT 1 FROM tasks k WHERE k.id = w.task_id AND k.state IN ('open', 'draft'))`
+          for (const row of rows) {
+            if (!existsSync(row.path)) continue
+            const named = yield* namedRemotes(row.path).pipe(Effect.orElseSucceed(() => []))
+            const fork = forkOf(named)
+            const remotes =
+              fork === null
+                ? workRemotes(named, Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Array(Schema.String)))(row.remotes))
+                : [fork.fork.url]
+            const found = yield* connections.hostOf(remotes, { fromCli: false }).pipe(Effect.orElseSucceed(() => null))
+            if (found === null) continue
+            const open = yield* Effect.option(
+              Effect.flatMap(found.host.repository(found.path), (repository) => found.host.findChange(repository, row.branch)),
+            )
+            if (Option.isNone(open) || open.value === null || open.value.state !== 'open') continue
+            const pull = open.value
+            // One from the change's branch into another base, such as a backport, isn't the change's: named in a line, not taken.
+            if ((pull.target ?? row.target) !== row.target) {
+              const key = `${pull.url}:other`
+              if (saidOf.has(key)) continue
+              saidOf.add(key)
+              yield* addItem({ projectId: row.projectId, threadId: row.threadId }, 'notice', {
+                source: 'runtime',
+                severity: 'info',
+                title: `${found.host.words.short} ${found.host.words.prefix}${pull.number}, from ${row.branch} into ${pull.target ?? ''}, isn't taken as its change's: attach it if it is.`,
+                description: null,
+              })
+              continue
+            }
+            // By its number where the task has one repository, as it is that repository's; else by its link.
+            const [several] = yield* sql<{ n: number }>`
+              SELECT count(DISTINCT binding_id) AS n FROM workspaces WHERE task_id = ${taskId} AND access = 'write' AND reviewing IS NULL`
+            yield* attach({ taskId, pullRequest: (several?.n ?? 1) > 1 ? pull.url : `#${pull.number}`, actorId: instance.systemId }).pipe(
+              Effect.catchCause((cause) => Effect.logWarning('Could not take a pull request opened from a change’s branch', cause)),
+            )
+          }
         })
 
       /** What each open task's lead left waiting, of a project or of all, goes up where their rules push it on its own (ADR-072). */
@@ -6582,10 +7671,15 @@ export class Changes extends Context.Service<
               Effect.catchCause((cause) => Effect.logWarning('Could not look at the checks the lead was to fix', cause)),
             ),
           ),
-          lookAtCommits(event).pipe(Effect.catchCause((cause) => Effect.logWarning('Could not look at what the lead committed', cause))),
+          Effect.andThen(
+            lookAtCommits(event).pipe(Effect.catchCause((cause) => Effect.logWarning('Could not look at what the lead committed', cause))),
+            followTurns(event).pipe(Effect.catchCause((cause) => Effect.logWarning('Could not follow what the lead did with git', cause))),
+          ),
         )
 
       yield* Effect.forkScoped(provide(Stream.runForEach(yield* live.subscribe, onLive)))
+      // As a lead's turn begins, before it reads anything, what the person committed by hand since its last is held first.
+      yield* sessions.onLeadTurn((lead) => provide(holdHands(lead.taskId)).pipe(Effect.ignore))
 
       // A round an earlier launch left under way has no lead on it now: what the branch holds says how it ended. One that waited
       // for a place to ask its lead still waits, and is asked once it has one.
@@ -7617,9 +8711,10 @@ export class Changes extends Context.Service<
             ),
           ),
         holds: (taskId) => provide(holdsOf(taskId)),
-        shipToOpen: (taskId) => provide(locked(taskId)(shipToOpen(taskId))),
+        shipToOpen: (taskId, only) => provide(locked(taskId)(shipToOpen(taskId, true, only))),
+        waitingChanges: (taskId, change) => provide(waitingChanges(taskId, change)),
         aheadOfOpen: (taskId) => provide(shipToOpen(taskId, false)),
-        releaseHolds: (taskId, why) => provide(releaseHolds(taskId, why)),
+        releaseHolds: (taskId, why, only) => provide(releaseHolds(taskId, why, only)),
         replace: (taskId, head, replaces, url) =>
           provide(locked(taskId)(Effect.andThen(taken(taskId, 'pushed'), replace(taskId, head, replaces, url)))),
         mergeNote: (taskId, url) => provide(locked(taskId)(mergeNote(taskId, url))),
@@ -7628,6 +8723,21 @@ export class Changes extends Context.Service<
         close: (taskId, url, options) => provide(locked(taskId)(close(taskId, url, options.deleteBranch))),
         exclusive: (taskId, effect) => locked(taskId)(effect),
         merge: (taskId, head, url) => provide(locked(taskId)(merge(taskId, head, url))),
+        retarget: (taskId, toward, change) => provide(locked(taskId)(retarget(taskId, toward, change ?? null))),
+        joinChanges: (taskId, change, into, actorId) => provide(locked(taskId)(joinChanges(taskId, change, into, actorId))),
+        dropChange: (taskId, change, actorId) => provide(locked(taskId)(dropChange(taskId, change, actorId))),
+        leaveWorktree: (taskId, actorId) => provide(locked(taskId)(leaveWorktree(taskId, actorId))),
+        mergeAsItStands: (taskId, url) =>
+          provide(
+            locked(taskId)(
+              Effect.gen(function* () {
+                const { snapshot, host, repository } = yield* current(taskId, url)
+                if (snapshot.state !== 'open') return
+                const read = yield* host.change(repository, snapshot.number)
+                yield* merge(taskId, read.headSha ?? snapshot.headSha ?? '', url)
+              }),
+            ),
+          ),
         mergeHere: (taskId, heads, stands = Effect.void) =>
           provide(locked(taskId)(branches.withPermits(1)(Effect.andThen(stands, mergeHere(taskId, heads))))),
         pushHere: (taskId, stands = Effect.void) =>

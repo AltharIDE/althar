@@ -154,6 +154,13 @@ agent's words, and one live line (`WorkedFor`).
   on the message. Claude Code and OpenCode don't, so a message after the work
   that is longer than 280 characters, or holds a list, heading, table or
   code, is taken for the answer; a short one folds as the turn ends.
+- **The line says where its time went** (a task is a conversation plus
+  parts, "Where a turn's time goes"): the total, from what the runtime kept
+  of each turn (waiting for a place, starting or handing over its session,
+  the agent's own work and its tools), and the part that took most where it
+  wasn't the agent's own work and took a quarter of it or more: "Worked for
+  4m · 3m 10s waiting for a place". Opened, every part comes first in the
+  trail. A task adds its turns up under its Usage in Outputs.
 - **What needs the person never folds:** a stuck step, a question, a
   permission, an error and its way out.
 - **What stands open carries the whole turn.** A lead's last message (or its
@@ -561,3 +568,5 @@ way of what is done often. The tokens and their values are in
 
 - 8 Nov 2026: written from the ADRs under Replaces.
 - 8 Nov 2026: what stands open after a turn folds carries everything the person needs, never "see above" (#699).
+- 10 Nov 2026: a thread marks a new change as a stamped row of its own; the board keeps chats on Scratch behind one chip; the plan card's kicker names its preset; the header's parts move a task, point it elsewhere, run a review's code and stop a helper ([tasks](tasks.md#changing-parts)).
+- 10 Nov 2026: Scratch is a shelf of its own, by each chat's latest exchange, with Clear; the board card says one sentence across a task's changes with a mark for each; Shipped, Merged and Helper rows in the thread, a helper's opening in place to its work, and helpers' lanes on the Graph face; the plan card's preset picks another; Settings edits presets ([tasks](tasks.md#chats-and-scratch)).

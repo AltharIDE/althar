@@ -73,4 +73,12 @@ export const checksums: Readonly<Record<string, string>> = {
   '0067_fast_lane': '40aea3565549b777401c1bd8a8b34d2fc806ecffb6253fea5fa7320469eb5111',
   '0068_reviews_after_merge': 'a57cffdcbf9d31a4263dde84ed6243fd16db5d42c45ac447d0cde27397431f2a',
   '0069_held_for_ship': 'ca526db1f6b50c7b0880bfd1e1b6f4bb5f8da861cd2d794ba4574c6e9cffc67a',
+  '0070_turn_timings': 'caac9eb5e1b549158261e8131bc84ad99ceb5c1b94e1399b0f4fcaf3ecbd027e',
+  '0071_merge_reviews': '682500c21c25421c38ae724986fe53d241c553d6a419d0b4fc8db7706fb3f838',
+  '0072_several_changes': 'df44a1cc68877fa2af8c274c8dfc07c01a9c133811580ad914221f6789f397d6',
+  '0073_review_trust': 'a46e0470ea267ae01e4a80bfeca4adf5bfb715bd5a3f963e2c83c00d67b53a73',
+  '0074_scratch_and_presets': 'a87cee43a3b348aa6d41f86f89d12b8e2439aa0294b552914dc8aef0d81cfc39',
+  '0075_helpers': '81eb220a40c0ba5d76b91e64dd380c5ba0cd823047769bfb80b94d231340cac1',
+  '0076_change_waits': '377b00faa1422cf19a0c48579ca67ca8a85c3604fc9afd88dd29a1fa9f7d61a9',
+  '0077_helper_copies': '227f03fdb43df2006d705f9fe7026ede76c43a39390f0f5ac8e5c364b6a7430a',
 }

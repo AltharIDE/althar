@@ -44,7 +44,7 @@ export type RunState = typeof RunState.Type
 export const RunAttemptState = Schema.Literals(['active', 'succeeded', 'failed', 'cancelled', 'interrupted'])
 export type RunAttemptState = typeof RunAttemptState.Type
 
-export const WorkspaceState = Schema.Literals(['preparing', 'ready', 'published', 'cleaned', 'failed'])
+export const WorkspaceState = Schema.Literals(['preparing', 'ready', 'published', 'cleaned', 'failed', 'away'])
 export type WorkspaceState = typeof WorkspaceState.Type
 
 /**
@@ -53,6 +53,13 @@ export type WorkspaceState = typeof WorkspaceState.Type
  */
 export const WorksIn = Schema.Literals(['worktree', 'checkout'])
 export type WorksIn = typeof WorksIn.Type
+
+/**
+ * What a workspace is (a task is a conversation plus parts, "The workspace moves up"): a worktree, its own branch, kept; the
+ * person's checkout (Local); or a copy, a checkout detached at a commit that keeps nothing.
+ */
+export const WorkspaceKind = Schema.Literals(['worktree', 'checkout', 'copy'])
+export type WorkspaceKind = typeof WorkspaceKind.Type
 
 export const ExecutionState = Schema.Literals(['running', 'succeeded', 'failed', 'cancelled'])
 export type ExecutionState = typeof ExecutionState.Type

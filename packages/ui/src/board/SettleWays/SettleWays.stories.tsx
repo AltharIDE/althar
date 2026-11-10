@@ -76,6 +76,24 @@ export const Shipping: Story = {
   },
 }
 /** A drafted review: Keep for later alone, as it settles once posted. */
+/** What a review after a merge found, in the task's header: Fix it hands it to the lead, Leave it closes it. */
+export const AfterMerge: Story = {
+  args: {
+    place: 'header',
+    onFix: fn(),
+    fixHint: 'The lead fixes them, and its fix goes up as a new pull request after #715',
+    onLeave: fn(),
+    leaveHint: 'Close the findings: they stay in the thread',
+    onDone: undefined,
+    onKeep: undefined,
+  },
+  play: async ({ args, canvasElement }) => {
+    const c = within(canvasElement)
+    await userEvent.click(c.getByRole('button', { name: 'Fix it' }))
+    await expect(args.onFix).toHaveBeenCalled()
+  },
+}
+
 export const Review: Story = { args: { onDone: undefined } }
 /** Done under way: it says so and keeps its place for the keyboard; the pin waits. */
 export const Settling: Story = {
