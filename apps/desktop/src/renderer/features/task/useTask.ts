@@ -198,6 +198,8 @@ export interface TaskModel {
   readonly openChange: () => Promise<void>
   /** Ships what waits on its branch for Ship: its review first, where its plan has one before the work ships, then the commits go up. */
   readonly ship: () => Promise<void>
+  /** Ships one of its several changes, in a Ship of its own, with what waits beneath it in its stack: its row's Ship. */
+  readonly shipChange: (change: string) => Promise<void>
   /** Fix it, on what its review after a merge found: the lead takes the findings, and its fix ships after the merged pull request. */
   readonly fixAfterMerge: () => Promise<void>
   /** Leave it, on what its review after a merge found: the findings close, and stay in the thread. */
@@ -733,6 +735,7 @@ export const useTask = (threadId: string): TaskModel => {
       }, doing.markAllReady),
     openChange: () => act(async () => (snapshot === null ? undefined : client.openChange(snapshot.task.id)), doing.openChange),
     ship: () => act(async () => (snapshot === null ? undefined : client.ship(snapshot.task.id)), doing.ship),
+    shipChange: (change) => act(async () => (snapshot === null ? undefined : client.ship(snapshot.task.id, change)), doing.ship),
     fixAfterMerge: () =>
       act(
         async () => (snapshot === null ? undefined : client.fixAfterMerge(snapshot.task.id, snapshot.task.afterMerge?.url)),

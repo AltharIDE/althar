@@ -737,11 +737,26 @@ export class Changes extends Context.Service<
      * Ship's push, after its review: each of the task's open pull requests
      * takes its branch up to its head here, past the hold. What went where.
      */
-    shipToOpen(taskId: string): Effect.Effect<ReadonlyArray<{ readonly where: string; readonly count: number }>, unknown>
+    shipToOpen(
+      taskId: string,
+      only?: ReadonlyArray<string>,
+    ): Effect.Effect<
+      ReadonlyArray<{ readonly where: string; readonly count: number; readonly url: string; readonly change: string | null }>,
+      unknown
+    >
+    /**
+     * The task's changes with something for Ship (a task is a conversation plus parts, "Each change ships and is followed on
+     * its own"): held, ahead of their pull request, or with work in none yet; by workspace, the bottom of each stack first.
+     * Of one change, by name: it and what waits beneath it in its stack.
+     */
+    waitingChanges(
+      taskId: string,
+      change?: string,
+    ): Effect.Effect<ReadonlyArray<{ readonly id: string; readonly name: string | null }>, unknown>
     /** What Ship would send to the task's open pull requests now, by pull request, sending nothing. */
     aheadOfOpen(taskId: string): Effect.Effect<ReadonlyArray<{ readonly where: string; readonly count: number }>, unknown>
     /** Lets go of the task's holds for Ship: what waited went up (`shipped`), or the person left it on the branch (`left`). */
-    releaseHolds(taskId: string, why: 'shipped' | 'left'): Effect.Effect<void, unknown>
+    releaseHolds(taskId: string, why: 'shipped' | 'left', only?: ReadonlyArray<string>): Effect.Effect<void, unknown>
     /**
      * Replaces the commits on the task's pull request with its branch here, up
      * to the commit the person saw, after its published commits were rewritten:
@@ -3235,6 +3250,26 @@ export class Changes extends Context.Service<
        * is brought into its branch, as keeping a branch current does, and goes up as Althar's course has it, held where it is
        * held. A conflict is its lead's, as any is.
        */
+      /**
+       * A merged change of several, a stamped row of the thread's: "Merged ·
+       * Lane heights into main." With one change, the thread's line on the
+       * pull request says it.
+       */
+      const stampMerged = (link: LinkRow, merged: Snapshot) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const [one] = yield* sql<{ projectId: ProjectId; threadId: string | null; name: string | null; branch: string; changes: number }>`
+            SELECT w.project_id, t.id AS thread_id, w.name, w.branch,
+              (SELECT count(*) FROM workspaces o WHERE o.task_id = w.task_id AND o.access = 'write' AND o.reviewing IS NULL
+                AND o.state IN ('ready', 'away')) AS changes
+            FROM repository_changes c JOIN workspaces w ON w.id = c.workspace_id
+            LEFT JOIN threads t ON t.task_id = w.task_id AND t.kind = 'task'
+            WHERE c.pull_request_url = ${merged.url} AND w.task_id = ${link.taskId} LIMIT 1`
+          if (one === undefined || one.changes < 2) return
+          const name = one.name ?? one.branch
+          const into = merged.target ?? 'main'
+          yield* lineIn(one, `Merged · ${name} into ${into}.`, { kind: 'merged', name, branch: into, toward: null })
+        }).pipe(Effect.catchCause((cause) => Effect.logWarning('Could not stamp a merged change', cause)))
       const bringInWaiting = (link: LinkRow, merged: Snapshot) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
@@ -3396,7 +3431,7 @@ export class Changes extends Context.Service<
           if (after.state === 'merged' && before.state !== 'merged') {
             yield* Effect.andThen(
               Effect.andThen(
-                Effect.andThen(follow(link.taskId, 'merged', before), baseMoved),
+                Effect.andThen(Effect.andThen(stampMerged(link, before), follow(link.taskId, 'merged', before)), baseMoved),
                 Effect.andThen(retargetAbove(link, before), bringInWaiting(link, before)).pipe(
                   Effect.catchCause((cause) => Effect.logWarning('Could not point what was stacked on a merged change elsewhere', cause)),
                 ),
@@ -5058,7 +5093,7 @@ export class Changes extends Context.Service<
           if (after.state === 'merged' && before.state !== 'merged') {
             yield* Effect.andThen(
               Effect.andThen(
-                Effect.andThen(follow(link.taskId, 'merged', before), baseMoved),
+                Effect.andThen(Effect.andThen(stampMerged(link, before), follow(link.taskId, 'merged', before)), baseMoved),
                 Effect.andThen(retargetAbove(link, before), bringInWaiting(link, before)).pipe(
                   Effect.catchCause((cause) => Effect.logWarning('Could not point what was stacked on a merged change elsewhere', cause)),
                 ),
@@ -7110,11 +7145,13 @@ export class Changes extends Context.Service<
        * or the person left it on the branch. Its commits go up as Althar's
        * course has them from here.
        */
-      const releaseHolds = (taskId: string, why: 'shipped' | 'left') =>
+      const releaseHolds = (taskId: string, why: 'shipped' | 'left', only?: ReadonlyArray<string>) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
-          const held = yield* sql<{ id: string; projectId: ProjectId }>`
-            SELECT id, project_id FROM workspaces WHERE task_id = ${taskId} AND held_at IS NOT NULL`
+          const held = (yield* sql<{ id: string; projectId: ProjectId }>`
+              SELECT id, project_id FROM workspaces WHERE task_id = ${taskId} AND held_at IS NOT NULL`).filter(
+            (row) => only === undefined || only.includes(row.id),
+          )
           for (const row of held)
             yield* sql.withTransaction(
               Effect.gen(function* () {
@@ -7138,9 +7175,9 @@ export class Changes extends Context.Service<
        * push. What went where, by pull request; with `send` false, what would,
        * and nothing goes up.
        */
-      const shipToOpen = (taskId: string, send = true) =>
+      const shipToOpen = (taskId: string, send = true, only?: ReadonlyArray<string>) =>
         Effect.gen(function* () {
-          const went: Array<{ readonly where: string; readonly count: number }> = []
+          const went: Array<{ readonly where: string; readonly count: number; readonly url: string; readonly change: string | null }> = []
           // The bottom of a stack first: each change goes up before what is stacked on it.
           for (const link of yield* bottomUp(taskId, yield* linksOf(taskId))) {
             if (link.listening !== 1) continue
@@ -7148,13 +7185,84 @@ export class Changes extends Context.Service<
             if (seen.state !== 'open') continue
             const workspace = yield* worktreeOf(taskId, seen.url)
             if (workspace === undefined || !existsSync(workspace.path)) continue
+            // A change's own Ship sends it alone (and what waits beneath it, which ships first, as its own).
+            if (only !== undefined && !only.includes(workspace.id)) continue
             const sent = yield* sentTo(link.projectId, seen.url)
             const here = yield* aheadOf(workspace.path, null, [sent, seen.headSha])
             if (here.kind !== 'ahead' || here.count === 0) continue
             if (send) yield* push(taskId, here.head, seen.url, 'ship')
-            went.push({ where: nameOf(seen), count: here.count })
+            const sql = yield* SqlClient.SqlClient
+            const [named] = yield* sql<{ name: string | null }>`SELECT name FROM workspaces WHERE id = ${workspace.id}`
+            went.push({ where: nameOf(seen), count: here.count, url: seen.url, change: named?.name ?? null })
           }
           return went
+        })
+
+      const waitingChanges = (taskId: string, asked?: string) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const rows = yield* sql<{
+            id: string
+            name: string | null
+            path: string
+            branch: string
+            toward: string | null
+            bindingId: string
+            heldAt: string | null
+            baseCommit: string | null
+            branched: number
+          }>`
+            SELECT id, name, path, branch, toward, binding_id, held_at, base_commit, branched_at IS NOT NULL AS branched FROM workspaces
+            WHERE task_id = ${taskId} AND device_id = ${instance.deviceId} AND access = 'write' AND reviewing IS NULL AND state = 'ready'
+            ORDER BY created_at, rowid`
+          const unshipped = new Set((yield* unshippedOf(taskId)).map((one) => one.workspaceId))
+          const waits = (row: (typeof rows)[number]) =>
+            Effect.gen(function* () {
+              if (row.heldAt !== null || unshipped.has(row.id)) return true
+              const [open] = yield* sql<{ url: string; head: string | null; projectId: string }>`
+                SELECT l.url, json_extract(l.snapshot, '$.headSha') AS head, l.project_id FROM repository_changes c
+                JOIN external_links l ON l.url = c.pull_request_url AND l.kind = 'change' AND l.listening = 1
+                WHERE c.workspace_id = ${row.id} AND json_extract(l.snapshot, '$.state') = 'open' LIMIT 1`
+              if (open === undefined || !existsSync(row.path)) return false
+              const here = yield* aheadOf(row.path, null, [yield* sentTo(open.projectId, open.url), open.head])
+              return here.kind === 'ahead' && here.count > 0
+            }).pipe(Effect.orElseSucceed(() => false))
+          // Bottom of each stack first.
+          const depthOf = (row: (typeof rows)[number]) => {
+            let depth = 0
+            let at: (typeof rows)[number] | undefined = row
+            const seen = new Set<string>()
+            while (at !== undefined && at.toward !== null && !seen.has(at.id)) {
+              seen.add(at.id)
+              const toward: string = at.toward
+              const binding: string = at.bindingId
+              at = rows.find((one) => one.bindingId === binding && one.branch === toward)
+              if (at !== undefined) depth += 1
+            }
+            return depth
+          }
+          const ordered = rows
+            .map((row, index) => ({ row, index, depth: depthOf(row) }))
+            .toSorted((a, b) => a.depth - b.depth || a.index - b.index)
+          // Of one change: it, and what waits beneath it in its stack.
+          let wanted = ordered
+          if (asked !== undefined) {
+            const named = rows.find((one) => (one.name ?? '').toLowerCase() === asked.trim().toLowerCase() || one.branch === asked.trim())
+            if (named === undefined) return yield* new ToolRefused({ message: `The task has no change “${asked}” here.` })
+            const chain = new Set<string>([named.id])
+            let at: (typeof rows)[number] | undefined = named
+            while (at !== undefined && at.toward !== null) {
+              const toward: string = at.toward
+              const binding: string = at.bindingId
+              at = rows.find((one) => one.bindingId === binding && one.branch === toward)
+              if (at !== undefined && !chain.has(at.id)) chain.add(at.id)
+              else break
+            }
+            wanted = ordered.filter((one) => chain.has(one.row.id))
+          }
+          const out: Array<{ readonly id: string; readonly name: string | null }> = []
+          for (const one of wanted) if (yield* waits(one.row)) out.push({ id: one.row.id, name: one.row.name })
+          return out
         })
 
       /**
@@ -8590,9 +8698,10 @@ export class Changes extends Context.Service<
             ),
           ),
         holds: (taskId) => provide(holdsOf(taskId)),
-        shipToOpen: (taskId) => provide(locked(taskId)(shipToOpen(taskId))),
+        shipToOpen: (taskId, only) => provide(locked(taskId)(shipToOpen(taskId, true, only))),
+        waitingChanges: (taskId, change) => provide(waitingChanges(taskId, change)),
         aheadOfOpen: (taskId) => provide(shipToOpen(taskId, false)),
-        releaseHolds: (taskId, why) => provide(releaseHolds(taskId, why)),
+        releaseHolds: (taskId, why, only) => provide(releaseHolds(taskId, why, only)),
         replace: (taskId, head, replaces, url) =>
           provide(locked(taskId)(Effect.andThen(taken(taskId, 'pushed'), replace(taskId, head, replaces, url)))),
         mergeNote: (taskId, url) => provide(locked(taskId)(mergeNote(taskId, url))),

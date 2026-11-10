@@ -231,6 +231,14 @@ export const PlanParameters = Schema.Struct({
        * first. Absent from a plain Ship.
        */
       merges: Schema.optional(Schema.Boolean),
+      /**
+       * The change this Ship sends, by workspace, where its task has several (a task is a conversation plus parts, "Each
+       * change ships and is followed on its own"): its review reads it alone, and only it goes up. Absent where the task has
+       * one, which ships whole as before.
+       */
+      only: Schema.optional(Schema.Array(Schema.String)),
+      /** The changes that ship after it, each in a Ship of its own with its own review, in order: the bottom of a stack first. */
+      next: Schema.optional(Schema.Array(Schema.String)),
     }),
   ),
   /**
@@ -534,6 +542,10 @@ export type StuckAnswer =
 class RunStopped extends Schema.TaggedError<RunStopped>()('RunStopped', { runId: Schema.String }) {}
 
 /** Nothing, where the run was stopped as a step was on its way. */
+/** How often, and how many times, the next change's Ship is tried again while the task is still at work. */
+const NEXT_SHIP_EVERY = Duration.millis(500)
+const NEXT_SHIP_TRIES = 240
+
 const unlessStopped = <A, E, R>(effect: Effect.Effect<A, E | RunStopped, R>) =>
   effect.pipe(
     Effect.catchIf(
@@ -746,6 +758,8 @@ export class Runs extends Context.Service<
       readonly taskId: string
       /** Its own lead asked in its turn: it ships once that turn ends, refused then only where nothing waits. */
       readonly afterTurn?: boolean
+      /** One of its changes, by name: it ships alone, after what waits beneath it in its stack. Every change waiting without. */
+      readonly change?: string
     }): Effect.Effect<void, unknown>
     /**
      * Merge, with commits not shipped (a task is a conversation plus parts):
@@ -885,6 +899,8 @@ export class Runs extends Context.Service<
       const provide = <A, E>(effect: Effect.Effect<A, E, Store>) => Effect.provideContext(effect, context)
       // Starts a thread's budget again, as a step that starts does: the stall watch's, once it is running below.
       let freshen: (threadId: string) => Effect.Effect<void> = () => Effect.void
+      // Ships the next change of a task's queue, in a Ship of its own: set once Ship is made below.
+      let shipNext: (taskId: string, merges: boolean, queued: ReadonlyArray<string>) => Effect.Effect<void> = () => Effect.void
 
       /** The workflow every task runs, for now: made once per profile. */
       const workflowVersion = Effect.gen(function* () {
@@ -2466,7 +2482,9 @@ export class Runs extends Context.Service<
        */
       const shipToReview = (run: RunRow, from: Readonly<Record<string, string>>) =>
         Effect.gen(function* () {
-          const worktrees = yield* worktreesOf(run.taskId)
+          // A change's own Ship is reviewed on its own: only its worktree.
+          const only = (yield* stepsOf(run)).ships?.only
+          const worktrees = (yield* worktreesOf(run.taskId)).filter((one) => only === undefined || only.includes(one.id))
           const parts = yield* Effect.forEach(worktrees, (worktree) =>
             Effect.gen(function* () {
               const head = from[worktree.path] ?? worktree.base ?? ''
@@ -2489,8 +2507,10 @@ export class Runs extends Context.Service<
               ? `with \`git diff ${shown[0]?.head ?? ''}\` in your copy`
               : shown.map((one) => `\n- ${one.name}: \`git diff ${one.head}\``).join('')
           const listed = shown.flatMap((one) => (one.lines.length === 0 || one.lines.length > SHIPPED_LISTED ? [] : one.lines))
-          const several = worktrees.some((one) => one.change !== null)
-          return `More to review. The person ships what they and the lead did since the last review${listed.length === 0 ? '' : `:\n\n${listed.join('\n')}`}\n\nReview what changed since, ${how}. Look at the earlier work only where the new work touches it.${several ? ' Each change ships as its own pull request: review each on its own, and say which change each finding is in.' : ''}`
+          const several = worktrees.length > 1 && worktrees.some((one) => one.change !== null)
+          // One change of several, named: the others ship apart, each after its own review.
+          const one = only !== undefined && shown.length === 1 ? shown[0]?.name : undefined
+          return `More to review. The person ships ${one === undefined ? 'what they and the lead did since the last review' : `${one}, one of the task’s changes: what they and the lead did on it since its last review`}${listed.length === 0 ? '' : `:\n\n${listed.join('\n')}`}\n\nReview what changed since, ${how}. Look at the earlier work only where the new work touches it.${several ? ' Each change ships as its own pull request: review each on its own, and say which change each finding is in.' : ''}`
         })
 
       /**
@@ -2861,7 +2881,7 @@ export class Runs extends Context.Service<
        * waits. The run: once its review has started, or, with none, once what
        * waited is up or couldn't go, as the press waits on the host.
        */
-      const ship = (taskId: string, actorId: ActorId, merges = false) =>
+      const ship = (taskId: string, actorId: ActorId, merges = false, change?: string, queued?: ReadonlyArray<string>) =>
         oneRound(
           taskId,
           Effect.gen(function* () {
@@ -2885,17 +2905,38 @@ export class Runs extends Context.Service<
             const unpushed = (yield* changes.aheadOfOpen(taskId)).length > 0
             const after = yield* changes.unshipped(taskId)
             if (held.length === 0 && !unpushed && after.length === 0) return yield* new ShipRefused({ taskId, why: 'nothing' })
+            // Several changes: each ships on its own, with its own review, the bottom of a stack first; one named, with what waits
+            // beneath it. One change ships whole, as it always did.
+            const [several] = yield* sql<{ n: number }>`
+              SELECT count(*) AS n FROM workspaces WHERE task_id = ${taskId} AND access = 'write' AND reviewing IS NULL AND state = 'ready'`
+            const queue =
+              queued !== undefined
+                ? queued
+                : (several?.n ?? 0) > 1 || change !== undefined
+                  ? (yield* changes.waitingChanges(taskId, change)).map((one) => one.id)
+                  : []
+            if (((several?.n ?? 0) > 1 || change !== undefined) && queue.length === 0)
+              return yield* new ShipRefused({ taskId, why: 'nothing' })
+            const [first, ...rest] = queue
             // Its steps and ending are the plan's: Checked by is the plan's reviewer, unless it reads only once the work merged.
             const [planned] = yield* sql<{ parameters: string }>`
               SELECT parameters FROM runs WHERE task_id = ${taskId} AND plan_id IS NOT NULL ORDER BY created_at, rowid LIMIT 1`
             const plan = yield* Schema.decodeUnknownEffect(Schema.fromJsonString(PlanParameters))(planned?.parameters ?? last.parameters)
-            const from = yield* reviewMarksOf(taskId)
+            const marks = yield* reviewMarksOf(taskId)
+            // Its own review reads only the change it ships, from where that change's last review left off.
+            const [shipping] = first === undefined ? [] : yield* sql<{ path: string }>`SELECT path FROM workspaces WHERE id = ${first}`
+            const from =
+              shipping === undefined ? marks : Object.fromEntries(Object.entries(marks).filter(([path]) => path === shipping.path))
             const parameters: PlanParameters = {
               ...plan,
               steps: plan.steps.map((step) =>
                 step.key === 'implement' || (step.key === 'review' && plan.reviewAfterMerge === true) ? { ...step, skipped: true } : step,
               ),
-              ships: { from, ...(merges ? { merges: true } : {}) },
+              ships: {
+                from,
+                ...(merges ? { merges: true } : {}),
+                ...(first === undefined ? {} : { only: [first], next: rest }),
+              },
             }
             const encoded = JSON.stringify(parameters)
             const policyId = yield* policyOf(task.projectId)
@@ -2965,6 +3006,28 @@ export class Runs extends Context.Service<
             return current
           }),
         )
+      // Once the Ship before it is over and nothing of the task is at work (its reviewer's turn closing, its lead told what went up).
+      shipNext = (taskId, merges, queued) =>
+        Effect.asVoid(
+          Effect.forkIn(
+            provide(
+              Effect.catchCause(
+                Effect.gen(function* () {
+                  for (let tries = 0; ; tries += 1) {
+                    const sent = yield* Effect.exit(ship(taskId, instance.systemId, merges, undefined, queued))
+                    if (sent._tag === 'Success') return
+                    const error = Cause.findErrorOption(sent.cause)
+                    const working = Option.isSome(error) && error.value instanceof ShipRefused && error.value.why === 'working'
+                    if (!working || tries >= NEXT_SHIP_TRIES) return yield* Effect.failCause(sent.cause)
+                    yield* Effect.sleep(NEXT_SHIP_EVERY)
+                  }
+                }),
+                (cause) => Effect.logWarning('Could not ship the next change', cause),
+              ),
+            ),
+            scope,
+          ),
+        )
 
       /**
        * A Ship's ending, once its review is settled, or at once with none:
@@ -2997,11 +3060,21 @@ export class Runs extends Context.Service<
           if (admitted === undefined) return
           const { nodeId, attemptId } = admitted
           yield* touchCard(run.taskId)
+          const only = (yield* stepsOf(run)).ships?.only
           const shipped = yield* Effect.exit(
             Effect.gen(function* () {
-              const went = yield* changes.shipToOpen(run.taskId)
-              const after = yield* changes.unshipped(run.taskId)
-              if (after.length === 0 || end === null) return { went, published: undefined }
+              const went = yield* changes.shipToOpen(run.taskId, only)
+              const after = (yield* changes.unshipped(run.taskId)).filter((one) => only === undefined || only.includes(one.workspaceId))
+              // A change of several with no pull request yet opens its first; one whose last merged or closed, its next.
+              const fresh =
+                only === undefined
+                  ? []
+                  : (yield* sql<{ id: string }>`
+                      SELECT w.id FROM workspaces w WHERE w.task_id = ${run.taskId} AND w.access = 'write' AND w.state = 'ready'
+                        AND NOT EXISTS (SELECT 1 FROM repository_changes c WHERE c.workspace_id = w.id AND c.pull_request_url IS NOT NULL)`).filter(
+                      (one) => only.includes(one.id),
+                    )
+              if ((after.length === 0 && fresh.length === 0) || end === null) return { went, published: undefined }
               const opened = yield* changes.ofTask(run.taskId)
               // Its new work going out, a merged task is open again, until that merges too.
               yield* reopened(run.taskId, run.projectId)
@@ -3010,8 +3083,9 @@ export class Runs extends Context.Service<
                 taskId: run.taskId,
                 runId: run.runId,
                 end: end === 'none' ? 'draft' : end,
-                ...(opened.length > 0 ? { again: true } : {}),
+                ...(opened.length > 0 && fresh.length === 0 ? { again: true } : {}),
                 ships: true,
+                ...(only === undefined ? {} : { only }),
               })
               return { went, published }
             }),
@@ -3033,7 +3107,38 @@ export class Runs extends Context.Service<
             )
           }
           const { went, published } = shipped.value
-          yield* changes.releaseHolds(run.taskId, 'shipped')
+          yield* changes.releaseHolds(run.taskId, 'shipped', only)
+          // Each change of several that shipped, a stamped row of the thread's: its name, and the pull request it went to.
+          // With one change, the thread's line on its pull request says it.
+          const [thread] = yield* sql<{ id: string }>`SELECT id FROM threads WHERE task_id = ${run.taskId} AND kind = 'task'`
+          if (thread !== undefined && only !== undefined)
+            for (const id of only) {
+              const [one] = yield* sql<{
+                name: string | null
+                branch: string
+                number: number | null
+                short: string | null
+                prefix: string | null
+              }>`
+                SELECT w.name, w.branch, json_extract(l.snapshot, '$.number') AS number, json_extract(l.snapshot, '$.words.short') AS short,
+                  json_extract(l.snapshot, '$.words.prefix') AS prefix
+                FROM workspaces w
+                LEFT JOIN repository_changes c ON c.rowid = (
+                  SELECT max(x.rowid) FROM repository_changes x WHERE x.workspace_id = w.id AND x.pull_request_url IS NOT NULL)
+                LEFT JOIN external_links l ON l.url = c.pull_request_url AND l.kind = 'change'
+                WHERE w.id = ${id}`
+              if (one === undefined || one.number === null) continue
+              const name = one.name ?? one.branch
+              const where = `${one.short ?? 'PR'} ${one.prefix ?? '#'}${one.number}`
+              const count = went.find((sent) => sent.change === one.name)?.count
+              yield* addItem({ projectId: run.projectId, threadId: thread.id }, 'notice', {
+                source: 'runtime',
+                severity: 'info',
+                title: `Shipped · ${name}${count === undefined ? '' : `, ${count === 1 ? '1 commit' : `${count} commits`}`} to ${where}.`,
+                description: null,
+                step: { kind: 'shipped', name, branch: where, toward: null },
+              })
+            }
           // Review and merge: what went up merges now, unless the lead set a finding aside, which is the person's to read first.
           const merging = (yield* stepsOf(run)).ships?.merges === true
           if (merging) yield* mergeShipped(run)
@@ -3064,6 +3169,9 @@ export class Runs extends Context.Service<
           yield* rest(run.taskId)
           yield* Effect.ignore(changes.settleIfMerged(run.taskId))
           yield* touchCard(run.taskId)
+          // The next change waiting ships now, in a Ship of its own, with its own review.
+          const next = (yield* stepsOf(run)).ships?.next ?? []
+          if (next.length > 0) yield* shipNext(run.taskId, (yield* stepsOf(run)).ships?.merges === true, next)
         })
 
       /**
@@ -3243,8 +3351,11 @@ export class Runs extends Context.Service<
       ) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
+          // A change's own Ship reads only that change: the others' marks stay where their last review left them.
+          const only = (yield* stepsOf(run)).ships?.only
+          const read = (yield* worktreesOf(run.taskId)).filter((one) => only === undefined || only.includes(one.id))
           // A check after the first round reads only the fixes: from what the round before read, in the first repository.
-          const [first] = yield* worktreesOf(run.taskId)
+          const [first] = read
           const [before] =
             round === 0 || first === undefined
               ? []
@@ -3255,7 +3366,7 @@ export class Runs extends Context.Service<
                   ORDER BY s.taken_at DESC, s.rowid DESC LIMIT 1`
           const reread = before?.commitSha ?? null
           // The round reads a copy of the work as it stands now, in each repository, and the record keeps which code that was (ADR-008).
-          for (const workspace of yield* worktreesOf(run.taskId)) {
+          for (const workspace of read) {
             const snapshot = yield* snapshotForReview(workspace.path, round)
             yield* sql`INSERT INTO workspace_snapshots ${sql.insert({
               id: yield* newId(Ids.workspaceSnapshot),
@@ -7172,7 +7283,7 @@ export class Runs extends Context.Service<
                       const sql = yield* SqlClient.SqlClient
                       const [thread] = yield* sql<{ id: string }>`SELECT id FROM threads WHERE task_id = ${input.taskId} AND kind = 'task'`
                       if (thread !== undefined) yield* sessions.untilIdle(thread.id, AFTER_TURN_WAIT)
-                      yield* ship(input.taskId, input.envelope.actorId)
+                      yield* ship(input.taskId, input.envelope.actorId, false, input.change)
                     }).pipe(
                       Effect.catchCause((cause) =>
                         Cause.hasInterruptsOnly(cause)
@@ -7184,7 +7295,7 @@ export class Runs extends Context.Service<
                     scope,
                   ),
                 )
-              : Effect.asVoid(ship(input.taskId, input.envelope.actorId)),
+              : Effect.asVoid(ship(input.taskId, input.envelope.actorId, false, input.change)),
           ),
         workflowVersion: provide(workflowVersion),
         publish: (taskId) => provide(publish(taskId)),

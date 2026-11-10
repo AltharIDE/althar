@@ -598,7 +598,8 @@ export interface Client {
   /** Pushes the task's branch to its pull request, up to the commit the person saw; in a task of several repositories, the one at `url`. */
   readonly push: (taskId: string, head: string, url?: string) => Promise<void>
   /** Ships what waits on the task's branch for Ship: its review first, where its plan has one before the work ships, then the commits go up. */
-  readonly ship: (taskId: string) => Promise<void>
+  /** Ships what waits; with a change named, only it, and what waits beneath it in its stack. */
+  readonly ship: (taskId: string, change?: string) => Promise<void>
   /** Fix it, on what the task's review after a merge found: the lead takes the findings, and its fix ships after the merged pull request. */
   readonly fixAfterMerge: (taskId: string, url?: string) => Promise<void>
   /** Leave it, on what the task's review after a merge found: the findings close, and stay in the thread. */
@@ -999,7 +1000,7 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
     openCode: (input) => command((commandId) => api.OpenCode({ commandId, ...input })),
     installAgent: (agentId) => command((commandId) => api.InstallAgent({ commandId, agentId })),
     push: (taskId, head, url) => command((commandId) => api.Push({ commandId, taskId, head, ...(url === undefined ? {} : { url }) })),
-    ship: (taskId) => command((commandId) => api.Ship({ commandId, taskId })),
+    ship: (taskId, change) => command((commandId) => api.Ship({ commandId, taskId, ...(change === undefined ? {} : { change }) })),
     fixAfterMerge: (taskId, url) => command((commandId) => api.FixAfterMerge({ commandId, taskId, ...(url === undefined ? {} : { url }) })),
     leaveAfterMerge: (taskId, url) =>
       command((commandId) => api.LeaveAfterMerge({ commandId, taskId, ...(url === undefined ? {} : { url }) })),

@@ -3422,6 +3422,31 @@ export class Queries extends Context.Service<
           const helpersAtWork = yield* sql<{ id: string; name: string; change: string | null; agentId: string; model: string | null }>`
             SELECT h.id, h.name, w.name AS change, h.agent_id, h.model FROM helpers h LEFT JOIN workspaces w ON w.id = h.workspace_id
             WHERE h.task_id = ${head.taskId} AND h.state = 'working' ORDER BY h.started_at`
+          // Its changes, where it holds several: each with its stack, its wait, its pull request, what waits for Ship and its helper.
+          const lineRows = yield* sql<{
+            id: string
+            name: string | null
+            branch: string
+            stackedOn: string | null
+            waitsFor: string | null
+            url: string | null
+            helper: string | null
+          }>`
+            SELECT w.id, w.name, w.branch,
+              (SELECT coalesce(o.name, o.branch) FROM workspaces o WHERE o.task_id = w.task_id AND o.binding_id = w.binding_id
+                AND o.branch = w.toward AND o.id <> w.id LIMIT 1) AS stacked_on,
+              (SELECT coalesce(o.name, o.branch) FROM workspaces o WHERE o.id = w.waits_for) AS waits_for,
+              (SELECT c.pull_request_url FROM repository_changes c WHERE c.workspace_id = w.id AND c.pull_request_url IS NOT NULL
+                ORDER BY c.created_at DESC, c.rowid DESC LIMIT 1) AS url,
+              (SELECT h.name FROM helpers h WHERE h.task_id = w.task_id AND h.workspace_id = w.id AND h.state = 'working'
+                ORDER BY h.started_at LIMIT 1) AS helper
+            FROM workspaces w
+            WHERE w.task_id = ${head.taskId} AND w.access = 'write' AND w.reviewing IS NULL AND w.state IN ('ready', 'away')
+            ORDER BY w.created_at, w.rowid`
+          const waitingLines =
+            lineRows.length < 2
+              ? new Set<string>()
+              : new Set((yield* (yield* Changes).waitingChanges(head.taskId).pipe(Effect.orElseSucceed(() => []))).map((one) => one.id))
           // A move between a worktree and Local that waits: where to, why, and what it asks of the person, as last said.
           const [moving] = yield* sql<{ to: 'worktree' | 'checkout'; why: string | null; branch: string | null; head: string | null }>`
             SELECT w.moving_to AS "to", json_extract(e.payload, '$.why') AS why, json_extract(e.payload, '$.seen.branch') AS branch,
@@ -3450,6 +3475,20 @@ export class Queries extends Context.Service<
               worktree: head.worktree,
               ...(card?.local === true ? { local: true } : {}),
               ...(card?.scratch === true ? { scratch: true } : {}),
+              ...(lineRows.length < 2
+                ? {}
+                : {
+                    lines: lineRows.map((one) => ({
+                      id: one.id,
+                      name: one.name ?? one.branch,
+                      branch: one.branch,
+                      stackedOn: one.stackedOn,
+                      waitsFor: one.waitsFor,
+                      url: one.url,
+                      waiting: waitingLines.has(one.id),
+                      helper: one.helper,
+                    })),
+                  }),
               ...(helpersAtWork.length === 0
                 ? {}
                 : {

@@ -1897,8 +1897,15 @@ export const handlers = Api.toLayer(
           commandId,
           api(Effect.flatMap(envelope('task.skip_review', { taskId }, commandId), (said) => runs.skipReview({ envelope: said, taskId }))),
         ),
-      Ship: ({ commandId, taskId }) =>
-        once(commandId, api(Effect.flatMap(envelope('task.ship', { taskId }, commandId), (said) => runs.ship({ envelope: said, taskId })))),
+      Ship: ({ commandId, taskId, change }) =>
+        once(
+          commandId,
+          api(
+            Effect.flatMap(envelope('task.ship', { taskId, change: change ?? null }, commandId), (said) =>
+              runs.ship({ envelope: said, taskId, ...(change === undefined ? {} : { change }) }),
+            ),
+          ),
+        ),
       // Fix it: the findings go to the lead, and once its turn is over its fix ships as the next pull request.
       FixAfterMerge: ({ commandId, taskId, url }) =>
         once(

@@ -875,6 +875,7 @@ export class TaskActions extends Context.Service<
         pull_request: Schema.optional(Schema.String),
       })
       const Named = Schema.Struct({ task: Schema.optional(Schema.String) })
+      const ShipAsked = Schema.Struct({ task: Schema.optional(Schema.String), change: Schema.optional(Schema.String) })
       const AfterMerge = Schema.Struct({ task: Schema.optional(Schema.String), answer: Schema.Literals(['fix', 'leave']) })
       const NewChange = Schema.Struct({
         task: Schema.optional(Schema.String),
@@ -967,12 +968,20 @@ export class TaskActions extends Context.Service<
 
       const shipTask = (access: ToolAccess, input: unknown) =>
         Effect.gen(function* () {
-          const asked = yield* read(Named, input)
+          const asked = yield* read(ShipAsked, input)
           const task = yield* named(access, asked.task)
           // Its own lead asks in its turn: it ships once that turn ends, with all the turn committed.
           const own = access.role === 'lead' && task.id === access.taskId
-          const said = yield* envelope('task.ship', { taskId: task.id }, undefined, actorOf(access))
-          yield* plainly(runs.ship({ envelope: said, taskId: task.id, ...(own ? { afterTurn: true } : {}) }), task.slug)
+          const said = yield* envelope('task.ship', { taskId: task.id, change: asked.change ?? null }, undefined, actorOf(access))
+          yield* plainly(
+            runs.ship({
+              envelope: said,
+              taskId: task.id,
+              ...(own ? { afterTurn: true } : {}),
+              ...(asked.change === undefined ? {} : { change: asked.change }),
+            }),
+            task.slug,
+          )
           yield* did(access, input, task, `Shipped “${task.title}”`, 'shipped this task')
           return `${own ? 'Althar ships this task once your turn ends' : `Shipping ${task.slug}`}: where its plan has a reviewer before the work ships, the review runs first, over everything since the last one, and the lead settles what it finds; then its commits go up, to the open pull request, or a new one after the last merged or closed. read_task shows where it stands. Both threads have a line saying so.`
         })
@@ -1413,8 +1422,18 @@ export class TaskActions extends Context.Service<
         ),
         tool(
           'ship_task',
-          'Ships what waits on a task’s branch, as its Ship button does, on the person’s word ("ship it", "push it"): what the person’s turns with its lead committed after its plan stays on the branch until then. Where its plan has a reviewer before the work ships, one review runs first, over everything since the last review, and its lead settles what it finds; then the commits go up, to its open pull request, or a new one after the last merged or closed. A lead shipping its own task ships it once its turn ends. It acts at once, with a line in your thread and the task’s.',
-          { type: 'object', properties: { task: optionalTask, why } },
+          'Ships what waits on a task’s branch, as its Ship button does, on the person’s word ("ship it", "push it"): what the person’s turns with its lead committed after its plan stays on the branch until then. Where its plan has a reviewer before the work ships, one review runs first, over everything since the last review, and its lead settles what it finds; then the commits go up, to its open pull request, or a new one after the last merged or closed. A task of several changes ships each waiting in a Ship of its own, the bottom of a stack first, each after its own review; with change, only that one, and what waits beneath it in its stack. A lead shipping its own task ships it once its turn ends. It acts at once, with a line in your thread and the task’s.',
+          {
+            type: 'object',
+            properties: {
+              task: optionalTask,
+              why,
+              change: {
+                type: 'string',
+                description: 'One change to ship, by its name or branch, with what waits beneath it; else every change waiting.',
+              },
+            },
+          },
           shipTask,
         ),
         tool(

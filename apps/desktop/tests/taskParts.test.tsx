@@ -155,6 +155,35 @@ describe('a task’s parts', () => {
     await waitFor(() => expect(client.stopHelper).toHaveBeenCalledWith(base.task.id, 'hlp_1'))
   })
 
+  it('lists each of several changes in its row, and ships one alone with its own Ship', async () => {
+    const line = (id: string, name: string, waiting: boolean, helper: string | null = null) => ({
+      id,
+      name,
+      branch: `althar/${id}`,
+      stackedOn: null,
+      waitsFor: null,
+      url: null,
+      waiting,
+      helper,
+    })
+    const several = snapshot({
+      task: {
+        ...base.task,
+        phase: 'ready',
+        lines: [line('lanes', 'Lane heights', true, 'Split the migration'), line('cards', 'Card sizes', false)],
+      },
+    })
+    const { client } = fakeClient({ getThread: vi.fn(async () => several) })
+    withServices(<Task />, client)
+    const popover = await parts()
+    expect(popover.getByText('No pull request yet · Commits waiting for Ship')).toBeTruthy()
+    expect(popover.getByText('Card sizes')).toBeTruthy()
+    await userEvent.click(popover.getByText('Lane heights'))
+    expect(popover.getByText('Split the migration')).toBeTruthy()
+    await userEvent.click(await popover.findByRole('button', { name: 'Ship' }))
+    await waitFor(() => expect(client.ship).toHaveBeenCalledWith(base.task.id, 'Lane heights'))
+  })
+
   it('offers Keep them together on a change its lead split, and Drop it on one its git made', async () => {
     const step = (name: string, by: 'lead' | 'git') =>
       items.notice(

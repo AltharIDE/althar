@@ -3490,6 +3490,25 @@ export const ThreadSnapshot = Schema.Struct({
     local: Schema.optional(Schema.Boolean),
     /** A chat on Scratch, off the board's lanes (a task is a conversation plus parts); absent for a task on the board. */
     scratch: Schema.optional(Schema.Boolean),
+    /**
+     * Its changes, where it holds several (a task is a conversation plus parts, "The header lists every change"): each by
+     * name and branch, the change it is stacked on or waits for, its pull request's link, whether commits wait for Ship on
+     * it, and the helper at work on it. Absent with one change, whose row is the worktree's and its pull request's.
+     */
+    lines: Schema.optional(
+      Schema.Array(
+        Schema.Struct({
+          id: Schema.String,
+          name: Schema.String,
+          branch: Schema.String,
+          stackedOn: Schema.NullOr(Schema.String),
+          waitsFor: Schema.NullOr(Schema.String),
+          url: Schema.NullOr(Schema.String),
+          waiting: Schema.Boolean,
+          helper: Schema.NullOr(Schema.String),
+        }),
+      ),
+    ),
     /** The helpers its lead started that are at work (ADR-087): each by name, the change it works on, and its model. */
     helpers: Schema.optional(
       Schema.Array(Schema.Struct({ id: Schema.String, name: Schema.String, change: Schema.NullOr(Schema.String), model: Schema.String })),
@@ -5056,7 +5075,8 @@ export const Api = RpcGroup.make(
    * last; then its commits go up. Refused while the task is at work, or
    * where nothing waits (`ShipRefused`).
    */
-  command('Ship', { taskId: Schema.String }, Schema.Void),
+  // A change named ships alone, with what waits beneath it in its stack; none, every change waiting, the bottom of a stack first.
+  command('Ship', { taskId: Schema.String, change: Schema.optional(Schema.String) }, Schema.Void),
   /**
    * Fix it, on what a review after a merge found (a task is a conversation
    * plus parts, "After merge, in the same task"): the findings go to the

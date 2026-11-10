@@ -59,8 +59,8 @@ const cards = (projectId: string) =>
     return snapshot.items.flatMap((item) => (item.kind === 'task' ? [item.content] : []))
   })
 
-/** A planned task whose lead did its part and whose draft pull request opened, with no review. */
-const opened = (working: string) =>
+/** A planned task whose lead did its part and whose draft pull request opened, with no review, or reviewed as `markers` say. */
+const opened = (working: string, markers = '[coordinator:plan-no-review]') =>
   Effect.gen(function* () {
     const connections = yield* Connections
     const instance = yield* Instance
@@ -69,7 +69,7 @@ const opened = (working: string) =>
     const coordinator = yield* Coordinator
     const project = yield* projects.open({ envelope: yield* Runtime.envelope('project.open', {}), path: working })
     const threadId = yield* coordinator.thread(project.projectId)
-    const body = 'Add a retry. [coordinator:plan] [coordinator:plan-no-review] [lead:finish] [lead:edit]'
+    const body = `Add a retry. [coordinator:plan] ${markers} [lead:finish] [lead:edit]`
     yield* coordinator.say({ envelope: yield* Runtime.envelope('thread.send', { body }), threadId, body, disposition: 'after_current' })
     const [ready] = yield* until(cards(project.projectId), (all) => all[0]?.phase === 'ready' && all[0].change !== null)
     const card = ready ?? assert.fail('no card')
@@ -422,6 +422,70 @@ describe('a task with several changes', () => {
         (lines) => lines.some((line) => line.includes('Release notes has main in now, and waits no more.')),
       )
       assert.isTrue(existsSync(join(waiting?.path ?? '', 'main-fix.txt')))
+    }).pipe(Effect.provide(runtimeWith(github)))
+  })
+
+  it.live('ships each change in a Ship of its own, each reviewed on its own, with a Shipped row for each', () => {
+    const { working, github } = onGitHub()
+    return Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const task = yield* opened(working, '[review:pass]')
+      yield* callTool(task.lead, 'start_change', { name: 'Lane heights' })
+      yield* callTool(task.lead, 'start_change', { name: 'Card sizes' })
+      const [, lanes, sizes] = yield* workspacesOf(task.taskId)
+      const commit = (path: string, file: string, subject: string) => {
+        writeFileSync(join(path, file), `${subject}\n`)
+        git(path, 'add', file)
+        git(path, '-c', 'user.name=Fake', '-c', 'user.email=fake@althar.test', 'commit', '-q', '-m', subject)
+      }
+      commit(lanes?.path ?? '', 'lanes.txt', 'Taller lanes')
+      commit(sizes?.path ?? '', 'cards.txt', 'Bigger cards')
+
+      // The task's Ship: a Ship for each change waiting, in turn, each reading only its own.
+      yield* (yield* Runs).ship({ envelope: yield* Runtime.envelope('task.ship', { taskId: task.taskId }), taskId: task.taskId })
+      yield* until(
+        Effect.sync(() => github.changes.length),
+        (count) => count === 3,
+      )
+      assert.deepStrictEqual(
+        github.changes.slice(1).map((change) => change.source),
+        ['althar/lane-heights', 'althar/card-sizes'],
+      )
+      const ships = yield* until(
+        sql<{ only: string | null; state: string }>`
+          SELECT json_extract(parameters, '$.ships.only') AS only, state FROM runs
+          WHERE task_id = ${task.taskId} AND json_extract(parameters, '$.ships') IS NOT NULL ORDER BY created_at, rowid`,
+        (rows) => rows.length === 2 && rows.every((row) => row.state === 'succeeded'),
+      )
+      assert.deepStrictEqual(
+        ships.map((run) => JSON.parse(run.only ?? '[]')),
+        [[lanes?.id], [sizes?.id]],
+      )
+      const briefs = yield* sql<{ body: string }>`
+        SELECT i.body FROM user_inputs i JOIN threads t ON t.id = i.thread_id
+        WHERE t.task_id = ${task.taskId} AND t.kind = 'step' AND i.body LIKE 'More to review. The person ships%' ORDER BY i.rowid`
+      assert.lengthOf(briefs, 2)
+      assert.include(briefs[0]?.body, 'Lane heights (althar/lane-heights), one of the task’s changes')
+      assert.include(briefs[0]?.body, '- Taller lanes')
+      assert.notInclude(briefs[0]?.body, 'Bigger cards')
+      assert.include(briefs[1]?.body, '- Bigger cards')
+      assert.notInclude(briefs[1]?.body, 'Taller lanes')
+      // Each change shipped has its stamped row.
+      const stamped = (yield* items(task.threadId)).flatMap((item) => {
+        const step = item.kind === 'notice' ? (item.content as { step?: { kind: string; name: string } }).step : undefined
+        return step?.kind === 'shipped' ? [step.name] : []
+      })
+      assert.deepStrictEqual(stamped, ['Lane heights', 'Card sizes'])
+      // The header has a row for each change, its pull request's link in it, and nothing waits for Ship now.
+      const snapshot = yield* (yield* Queries).thread(task.threadId)
+      assert.deepStrictEqual(
+        snapshot.task.lines?.map((line) => [line.name, line.url !== null, line.waiting]),
+        [
+          ['althar/add-a-retry', true, false],
+          ['Lane heights', true, false],
+          ['Card sizes', true, false],
+        ],
+      )
     }).pipe(Effect.provide(runtimeWith(github)))
   })
 })

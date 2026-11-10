@@ -82,6 +82,7 @@ export const WINDOW_ACTIONS = {
   mergeWaiting: { word: 'merge_pull_request' },
   push: { tool: 'push_task' },
   ship: { tool: 'ship_task' },
+  shipChange: { tool: 'ship_task' },
   fixAfterMerge: { tool: 'answer_review_after_merge' },
   leaveAfterMerge: { tool: 'answer_review_after_merge' },
   replace: { person: 'a force push, which can’t be undone: the person confirms what it replaces' },
