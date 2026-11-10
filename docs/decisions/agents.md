@@ -146,4 +146,5 @@ People asked what a task cost. What they want to know is how much of each subscr
 ## Changes
 
 - 8 Nov 2026: written from the ADRs under Replaces.
-- 9 Nov 2026: a lead starts afresh only once its context is full, never at a break ([a task is a conversation plus parts](proposed/a-task-is-a-conversation-plus-parts.md#a-leads-session-lasts-until-its-full)).
+- 9 Nov 2026: a lead starts afresh only once its context is full, never at a break (a task is a conversation plus parts, [tasks](tasks.md#changing-parts)).
+- 10 Nov 2026: a lead's helpers, on any model it picks with `list_models`, each handed one of its task's changes ([tasks](tasks.md#helpers)).

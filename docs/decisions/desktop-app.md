@@ -568,3 +568,4 @@ way of what is done often. The tokens and their values are in
 
 - 8 Nov 2026: written from the ADRs under Replaces.
 - 8 Nov 2026: what stands open after a turn folds carries everything the person needs, never "see above" (#699).
+- 10 Nov 2026: a thread marks a new change as a stamped row of its own; the board keeps chats on Scratch behind one chip; the plan card's kicker names its preset; the header's parts move a task, point it elsewhere, run a review's code and stop a helper ([tasks](tasks.md#changing-parts)).

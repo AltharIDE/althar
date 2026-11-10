@@ -39,16 +39,10 @@ There are no more numbered ADRs. A proposal that isn't decided yet lives in
 
 Proposals waiting now:
 
-- [A task is a conversation plus parts, changeable at any time](proposed/a-task-is-a-conversation-plus-parts.md):
-  the parts, as many changes and pull requests in a task as it needs, the
-  workspace moving up, reviews that run code, talking to a lead as plain
-  turns with a review only when the person ships, the review
-  after a merge in the same task, chats on Scratch and presets. It would fold
-  into [tasks](tasks.md), [workspaces and runs](workspaces-and-runs.md),
-  [reviews](reviews.md), [code hosts](code-hosts.md), [agents](agents.md)
-  and [what agents may do](what-agents-may-do.md).
 - [ADR-087](proposed/087-a-lead-starts-helpers-on-any-agent-in-copies-of-their-own.md):
-  a lead's helpers.
+  a lead's helpers. Its tasks 1 to 5 are built for a helper handed one of
+  its task's changes ([tasks § Helpers](tasks.md#helpers)); a helper in a
+  copy of its own, and its tasks 6 to 8, are still proposed.
 - [ADR-103](proposed/103-projects-live-locally-or-on-a-host-and-place-work-in-pools.md):
   projects on a host, and work placed across pools.
 
@@ -58,6 +52,15 @@ ADR-002 to ADR-102 were folded into the area documents and removed. The
 documents hold what is current; git history keeps the old texts, last
 under `docs/decisions/archive/` at commit `997f0e99b`. Two of the old ADRs,
 ADR-087 and ADR-103, are still proposals in [`proposed/`](proposed/).
+
+"A task is a conversation plus parts", decided on 8 November and built in
+#739, folded into [tasks](tasks.md), [workspaces and
+runs](workspaces-and-runs.md), [reviews](reviews.md), [code
+hosts](code-hosts.md), [agents](agents.md), [what agents may
+do](what-agents-may-do.md) and [the desktop app](desktop-app.md); what it
+decided and isn't built is in [tasks § Not built yet](tasks.md#not-built-yet).
+Its text, with the products it read and the alternatives it turned down, is
+in git history under `docs/decisions/proposed/`.
 
 Code and older docs cite decisions as `ADR-NNN`. This table resolves each
 one.

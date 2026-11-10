@@ -439,3 +439,4 @@ Anything else that blocks, refuses or asks is a bug.
 
 - 8 Nov 2026: written from the ADRs under Replaces.
 - 8 Nov 2026: the limits sweep (#696) built: every command reaches the rules inside the sandbox too, the network is open to every role, `gh` and `glab` are read as git is, an unreadable command runs beside a Never, and screenshots draw any http or https page.
+- 10 Nov 2026: an outside author's code runs only as far as the person says with Run it, safely (install scripts off, offline) or trusted fully, and a setting can answer how far, never whether ([reviews](reviews.md#run-it)).

@@ -48,7 +48,7 @@ started with, and the next round takes the new one.
   made it, or set aside, with the reason. A set-aside finding with no reason
   counts as unsettled.
 - **A fix is checked only where it needs it, never by another whole review**
-  ([a task is a conversation plus parts](proposed/a-task-is-a-conversation-plus-parts.md#fixes-are-checked-by-the-same-reviewer-only-where-they-need-it)):
+  (a task is a conversation plus parts, [tasks](tasks.md#changing-parts)):
   - **A tiny fix isn't read again:** ten changed lines or fewer, every one in
     a file a finding of that review named, read against the copy the review
     read. The task goes on to its ending, its seal kept, and the folded
@@ -86,7 +86,7 @@ a light model, no countdown, and a review step that names its reviewer but is
 skipped. Its pull request merges on the person's word, and the merge ends
 that change: the task settles where it was its last. Then **the task's own
 reviewer reads what merged, in the same task** (`MergeReviews.ts`, a
-proposal of [a task is a conversation plus parts](proposed/a-task-is-a-conversation-plus-parts.md#after-merge-in-the-same-task)):
+decision of a task is a conversation plus parts, [tasks](tasks.md#a-task-holds-as-many-changes-as-it-needs)):
 
 - It is owed as the merge is heard, kept before it is tried
   (`merge_reviews`), and started in a thread of the task's own
@@ -151,16 +151,38 @@ its own kind.
 - **Posted, the card folds to a line** with the review's link, and the task
   settles.
 
-Not built yet:
+### Run it
 
-- A pull request by the repository's own people getting a worktree at its
-  head with the setup replayed, and its code run in the sandbox. This, and
-  the in-task reviewer's tool list, wait on the work that makes a task a
-  conversation plus parts.
-- "Run it", the person's word in the thread that turns an outside author's
-  review into the team's kind, still offline for its commands.
-- Posting on the person's word in the thread (`post_review`), as well as
-  from the card.
+A review that runs code is a review whose Access moved: "Run it" is the
+person's word, from the buttons under its reach line or to its lead, whose
+`run_it` only relays it. How far is kept on the review's workspace
+(`workspaces.trust`), and the lead starts afresh in the role that gives it,
+told to run its tests and its app.
+
+- **The team's own pull request** runs at once, trusted as their code:
+  the copy is set up with the recorded setup and files, as a worktree is,
+  with the network, and any agent may lead it.
+- **An outside author's** asks how far: **Run safely** installs from the
+  lockfile with install scripts off, after putting back the base branch's
+  registry settings (`.npmrc`, `.yarnrc`, `bunfig.toml`) in place of any the
+  pull request changed, copies nothing of the person's setup, and runs its
+  commands in the sandbox, offline, with every lead tool; what didn't
+  install is said, with Trust fully beside it. **Trust fully** runs it as
+  the team's code.
+- **"When I say Run it on code from outside the team"** (Settings, Pull
+  requests): ask each time, the default, run safely, or trust fully. It only
+  answers the question: the code runs once the person says Run it.
+
+### Any task can review a pull request
+
+`add_review` gives a task with work of its own a read-only copy of a related
+pull request's head beside its worktree, a workspace of its own
+(`workspaces.reviewing`), which its lead drafts a review of with
+`draft_review`, as a review task's lead does. The task stays its work's: it
+isn't a review task on its card, and posting the review doesn't settle it.
+
+Not built yet: posting on the person's word in the thread (`post_review`),
+as well as from the card.
 
 ## What a pull request shows of its review
 
@@ -247,4 +269,5 @@ A round that forgets `kept_views` shows less, never something stale.
 
 - 8 Nov 2026: written from the ADRs under Replaces.
 - 8 Nov 2026: the limits sweep (#696) built: a review of the repository's own people gets every lead tool and the network.
-- 9 Nov 2026: a fix is checked only where it needs it, tiny ones not at all, and Ship is reviewed from where the last review left off ([a task is a conversation plus parts](proposed/a-task-is-a-conversation-plus-parts.md)).
+- 9 Nov 2026: a fix is checked only where it needs it, tiny ones not at all, and Ship is reviewed from where the last review left off (a task is a conversation plus parts, [tasks](tasks.md#changing-parts)).
+- 10 Nov 2026: Run it, safely or trusted, with its setting; any task can review a related pull request beside its own work (a task is a conversation plus parts).

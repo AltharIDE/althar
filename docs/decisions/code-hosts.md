@@ -230,6 +230,20 @@ the merge, in the same task, where it has a reviewer
 would, and says what it did; otherwise it shows the person the commits with
 Push.
 
+**A hold reaches up a stack.** A push sends a branch's whole history, so a
+change whose branch carries commits that wait for Ship on the change it is
+stacked on is held as if they were its own: nothing pushes it but the Ship
+that ships the one below too, which goes first. Althar works this out from
+git before each push (where the branch meets the one below, past what that
+one's pull request has), rather than keeping it
+([tasks](tasks.md#a-task-holds-as-many-changes-as-it-needs)).
+
+**A stacked change follows the one below.** Once a change's pull request
+merges, the pull request of each change stacked on it goes into what the
+merged one went into: `editChange` sets its base on every host (GitHub's
+`base`, GitLab's `target_branch`, Bitbucket's destination and `toRef`), and
+the thread says so. One its host won't move is said, for the person to move.
+
 ## Attaching a pull request a task didn't open
 
 The person, or an agent, attaches a task to an open pull request by its
@@ -643,5 +657,6 @@ The decisions above are current. These parts of them aren't built on main:
 
 - 8 Nov 2026: written from the ADRs under Replaces.
 - 8 Nov 2026: the limits sweep (#696) built: agents carry the person's own sign-in, and `gh` and `glab` are read as git is.
-- 9 Nov 2026: what a turn the person's words began after the plan commits holds the branch for Ship ([a task is a conversation plus parts](proposed/a-task-is-a-conversation-plus-parts.md#a-tweak-waits-for-ship)).
-- 10 Nov 2026: commits made by hand hold the branch too; Merge with commits not shipped offers Review and merge or Merge now ([a task is a conversation plus parts](proposed/a-task-is-a-conversation-plus-parts.md#merge-with-commits-not-shipped)).
+- 9 Nov 2026: what a turn the person's words began after the plan commits holds the branch for Ship (a task is a conversation plus parts, [tasks](tasks.md#changing-parts)).
+- 10 Nov 2026: commits made by hand hold the branch too; Merge with commits not shipped offers Review and merge or Merge now (a task is a conversation plus parts, [tasks](tasks.md#changing-parts)).
+- 10 Nov 2026: a task follows several pull requests at once, one for each change; stacks hold, ship, merge and retarget from the bottom up, and a pull request opened outside Althar from a change's own branch is that change's (a task is a conversation plus parts, [tasks](tasks.md#a-task-holds-as-many-changes-as-it-needs)).
