@@ -59,6 +59,9 @@ describe('a chat on Scratch', () => {
       const [chat] = yield* until(cards(projectId), (all) => all[0]?.phase === 'ready')
       assert.isTrue(chat?.scratch === true)
       assert.strictEqual(chat?.plan?.preset, 'Chat')
+      // Scratch lists it by its latest exchange: its lead's last word.
+      const [said] = yield* until(cards(projectId), (all) => all[0]?.latest !== undefined)
+      assert.strictEqual(said?.latest?.by, 'lead')
       yield* until(
         Effect.flatMap(Sessions, (sessions) => sessions.busy(chat?.threadId ?? '')),
         (busy) => !busy,
@@ -91,6 +94,34 @@ describe('a chat on Scratch', () => {
       )
       assert.isTrue((yield* cards(projectId))[0]?.scratch === true)
       assert.include(yield* callTool(access, 'change_part', { part: 'access', why: 'Run it.' }), 'the person’s word alone')
+    }).pipe(Effect.provide(runtimeWith(github)))
+  })
+})
+
+describe('a chat’s copy', () => {
+  it.live('is made without setup, which replays the first time its lead runs something', () => {
+    const { working, bare } = hosted()
+    const github = makeFakeService({ pushUrl: () => bare })
+    github.addRepository(['meridian', 'api'])
+    return Effect.gen(function* () {
+      const { projectId, coordinator } = yield* opened(working)
+      const sql = yield* SqlClient.SqlClient
+      yield* callTool(coordinator, 'start_task', {
+        title: 'Talk it over',
+        description: 'Talk. [lead:finish]',
+        lead: { agent: 'claude-code' },
+      })
+      const [chat] = yield* until(cards(projectId), (all) => all[0]?.phase === 'ready')
+      const setupOf = sql<{ setup: string | null }>`SELECT setup FROM workspaces WHERE task_id = ${chat?.taskId ?? ''}`
+      // Only talking, nothing was set up.
+      assert.isNull((yield* setupOf)[0]?.setup ?? null)
+      // Its lead runs something: its setup replays then.
+      yield* (yield* Sessions).send({
+        envelope: yield* Runtime.envelope('thread.send', { threadId: chat?.threadId ?? '' }),
+        threadId: chat?.threadId ?? '',
+        body: 'Run it. [lead:serve] [lead:finish]',
+      })
+      yield* until(setupOf, (rows) => rows[0]?.setup != null)
     }).pipe(Effect.provide(runtimeWith(github)))
   })
 })

@@ -2377,6 +2377,11 @@ export const TaskCard = Schema.Struct({
    * exchange, unless something of it waits on the person. Absent for a task on the board.
    */
   scratch: Schema.optional(Schema.Boolean),
+  /**
+   * A chat's latest exchange, as Scratch lists it (a task is a conversation plus parts, "Chats and Scratch"): when, who said
+   * it, and its first line. Absent for a task on the board, and for a chat with nothing said yet.
+   */
+  latest: Schema.optional(Schema.Struct({ at: Schema.String, by: Schema.Literals(['person', 'lead']), said: Schema.String })),
   /** A change ready that built nothing: no commits on its branch and no pull request open or merged. Absent otherwise. */
   nothingBuilt: Schema.optional(Schema.Boolean),
   /**

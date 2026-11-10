@@ -29,16 +29,3 @@
   text-wrap: pretty;
 }
 
-/* Chats on Scratch, off the lanes: one chip at the head of Up next, which lists them in place. */
-.scratch {
-  padding: 0 0 8px;
-}
-
-.scratchList {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  margin: 0;
-  padding: 8px 12px;
-  list-style: none;
-}

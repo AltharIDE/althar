@@ -283,14 +283,18 @@ interface Again extends Unset {
 export class Setups extends Context.Service<
   Setups,
   {
-    /** Sets up each of the task's worktrees that isn't yet, without waiting: as they are made. */
-    begin(taskId: string): Effect.Effect<void>
+    /**
+     * Sets up each of the task's worktrees that isn't yet, without waiting: as they are made. A chat's copy, on Scratch and
+     * on no branch of its own, is made without setup; `replay`, the first time its lead runs something, sets it up too.
+     */
+    begin(taskId: string, replay?: boolean): Effect.Effect<void>
     /**
      * Waits until each of the task's worktrees is set up, setting up any that
      * isn't yet: before its lead's first turn. Never fails; one that doesn't
-     * set up says so in the thread, and to the lead.
+     * set up says so in the thread, and to the lead. A chat's copy only with
+     * `replay`, as something is about to run from it.
      */
-    ready(taskId: string): Effect.Effect<void>
+    ready(taskId: string, replay?: boolean): Effect.Effect<void>
     /** What the task's lead is told of how its worktrees were set up; null where nothing ran. */
     told(taskId: string): Effect.Effect<string | null>
   }
@@ -496,13 +500,17 @@ export class Setups extends Context.Service<
           ),
         ).pipe(Effect.catchCause((cause) => Effect.logWarning('Could not set up a task’s worktree', cause)))
 
-      const ready = (taskId: string) =>
+      const ready = (taskId: string, replay = false) =>
         provide(
           Effect.gen(function* () {
             const sql = yield* SqlClient.SqlClient
+            // A chat's copy, on Scratch and on no branch of its own, waits for something to run from it (a task is a conversation
+            // plus parts, "Chats and Scratch"): a chat that only talks never pays for an install.
             const unset = yield* sql<{ id: string }>`
               SELECT w.id FROM workspaces w JOIN repository_bindings b ON b.id = w.binding_id
               WHERE w.task_id = ${taskId} AND w.device_id = ${instance.deviceId} AND w.state = 'ready' AND (w.access = 'write' OR w.trust = 'full') AND w.kind IS NULL AND w.setup IS NULL
+                AND (${replay ? 1 : 0} = 1 OR w.branched_at IS NOT NULL
+                  OR coalesce((SELECT k.shelf FROM tasks k WHERE k.id = w.task_id), '') <> 'scratch')
               ORDER BY b.created_at, b.rowid`
             // Each in a fiber of Althar's own, side by side: a lead that stops waiting doesn't stop its worktree's setup.
             const fibers = yield* Effect.forEach(unset, (workspace) => Effect.forkIn(settle(workspace.id), setupsScope))
@@ -738,7 +746,7 @@ export class Setups extends Context.Service<
       yield* (yield* ToolServer).serve('lead', [recordTool])
 
       return Setups.of({
-        begin: (taskId) => Effect.asVoid(Effect.forkIn(ready(taskId), setupsScope)),
+        begin: (taskId, replay) => Effect.asVoid(Effect.forkIn(ready(taskId, replay === true), setupsScope)),
         ready,
         told,
       })

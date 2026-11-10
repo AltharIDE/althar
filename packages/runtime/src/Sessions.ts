@@ -413,6 +413,8 @@ interface Running {
   handover: 'none' | 'under_way' | 'left'
   /** When its turn running started, in milliseconds: what the person's wait for its first word is counted from. */
   turnStartedAt: number | null
+  /** Its lead ran a command in this session: a chat's copy made without setup was set up then (`heardRun`). */
+  ranOnce?: boolean
   /** In a task of several changes, where each change's branch stood as its turn started: what it committed to each is counted from. */
   turnHeads?: ReadonlyArray<{ readonly name: string; readonly path: string; readonly head: string }> | undefined
   /** When its last turn ended, in milliseconds; null before its first. */
@@ -1205,6 +1207,17 @@ export class Sessions extends Context.Service<
             yield* Effect.sleep(SERVING_EVERY)
           }
         })
+
+      /**
+       * A chat's copy is made without setup (a task is a conversation plus parts, "Chats and Scratch"): the first command its
+       * lead runs sets it up, once per session, beside the command, as its thread shows. Nothing for one set up already.
+       */
+      const heardRun = (running: Running, event: SessionEvent) => {
+        const { thread } = running
+        if (thread.role !== 'task' || running.ranOnce === true || event._tag !== 'ToolCall' || event.kind !== 'execute') return Effect.void
+        running.ranOnce = true
+        return setups.begin(thread.taskId, true)
+      }
 
       /** Keeps what the agent says of what it left running, from an event it streamed, in a turn or between. */
       const heardBackground = (running: Running, event: SessionEvent) =>
@@ -2036,6 +2049,7 @@ export class Sessions extends Context.Service<
               heardContext(running, event)
               yield* heardPlan(running, event)
               yield* record(event)
+              yield* heardRun(running, event)
               yield* heardBackground(running, event)
               yield* live.publish({ _tag: 'Agent', threadId: thread.threadId, event })
               if (event._tag === 'AgentMessage' || event._tag === 'AgentThought' || event._tag === 'ToolCallUpdate') yield* stream

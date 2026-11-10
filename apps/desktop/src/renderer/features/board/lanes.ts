@@ -182,7 +182,8 @@ export const lanesOf = (board: BoardSnapshot, merging: ReadonlySet<string> = new
   const unread = all.flatMap(({ task, call }) => (call === null ? [{ ...task, phase: 'running' as const }] : []))
   const folded = new Set(all.map(({ task }) => task.taskId))
   return {
-    scratch: scratch.toSorted((a, b) => b.createdAt.localeCompare(a.createdAt)),
+    // By their latest exchange, the latest first; one with nothing said yet, by when it began.
+    scratch: scratch.toSorted((a, b) => (b.latest?.at ?? b.createdAt).localeCompare(a.latest?.at ?? a.createdAt)),
     ...laid(
       [...of('running'), ...unread],
       of('planned', 'held').toSorted((a, b) => (a.plan?.startsAt ?? '￿').localeCompare(b.plan?.startsAt ?? '￿')),

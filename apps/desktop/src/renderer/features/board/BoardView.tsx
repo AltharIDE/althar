@@ -20,13 +20,13 @@ import {
   Findings,
   KeptRow,
   LinkButton,
-  Popover,
   NextLine,
   NextRow,
   NextStep,
   Outcome,
   PullChip,
   SettledRow,
+  ScratchShelf,
   SettleWays,
   TaskKind,
   TaskStatus,
@@ -967,6 +967,8 @@ export function BoardView({
   team?: TeamActions
 }) {
   const name = (id: string | null) => agents.find((agent) => agent.id === id)?.name ?? id ?? ''
+  // Clearing a chat off Scratch settles it, as Done does a task.
+  const clear = actions?.markDone
   // Which of Settled's tabs shows, while something is kept for later.
   const [shelf, setShelf] = useState<'settled' | 'kept'>('settled')
   // Each needs-you card in when its call came: tasks waiting on a call and calls no task waits on together.
@@ -1076,6 +1078,25 @@ export function BoardView({
         lane={BoardLane.Next}
         count={shown.upNext}
         filled={shown.next.length > 0}
+        // Chats on Scratch, off the lanes: one chip, opened in place, by their latest exchange; Clear settles one. It heads
+        // Up next whether anything waits there or not.
+        lead={
+          <ScratchShelf
+            chats={lanes.scratch.map((chat) => ({
+              id: chat.taskId,
+              title: chat.title,
+              ...(chat.latest === undefined ? {} : { said: { by: chat.latest.by, text: chat.latest.said } }),
+              at: ago(chat.latest?.at ?? chat.createdAt, new Date(now)),
+              ...(chat.phase === 'running' ? { running: true } : {}),
+            }))}
+            onOpen={(taskId) => {
+              const chat = lanes.scratch.find((one) => one.taskId === taskId)
+              if (chat !== undefined) onOpen(chat.threadId)
+            }}
+            {...(clear === undefined ? {} : { onClear: (taskId: string) => void clear(taskId) })}
+            text={{ chip: text.scratch, label: text.scratchLabel }}
+          />
+        }
         // Whenever nothing is in Up next, it says where work comes from.
         {...(shown.next.length === 0
           ? {
@@ -1090,25 +1111,6 @@ export function BoardView({
             }
           : {})}
       >
-        {/* Chats on Scratch, off the lanes: one chip, opened in place. */}
-        {lanes.scratch.length > 0 && (
-          <div className={s.scratch}>
-            <Popover
-              label={text.scratchLabel}
-              placement="below"
-              align="start"
-              trigger={<LinkButton>{text.scratch(lanes.scratch.length)}</LinkButton>}
-            >
-              <ul className={s.scratchList}>
-                {lanes.scratch.map((chat) => (
-                  <li key={chat.taskId}>
-                    <LinkButton onClick={() => onOpen(chat.threadId)}>{chat.title}</LinkButton>
-                  </li>
-                ))}
-              </ul>
-            </Popover>
-          </div>
-        )}
         {continuing > 0 && <BoardList>{shown.next.slice(0, continuing).map(nextRow)}</BoardList>}
         {free > 0 && (
           <BoardDivider

@@ -2328,6 +2328,21 @@ export class Queries extends Context.Service<
           const { issue, issueConnection, changes } = links ?? (yield* linksOf(taskId))
           // The first still open, for the person to act on: one merged while another isn't leaves the other. Else its latest.
           const shown = changes.find((candidate) => candidate.state === 'open') ?? changes.at(-1) ?? null
+          // A chat's latest exchange, as Scratch lists it: who said it, when, and its first line.
+          const [lastSaid] =
+            task.shelf === 'scratch'
+              ? yield* sql<{ kind: string; text: string | null; createdAt: string }>`
+                  SELECT kind, json_extract(content, '$.text') AS text, created_at FROM thread_items
+                  WHERE thread_id = ${task.threadId} AND kind IN ('agent_message', 'user_message') ORDER BY sequence DESC LIMIT 1`
+              : []
+          const exchange =
+            lastSaid === undefined
+              ? undefined
+              : {
+                  at: lastSaid.createdAt,
+                  by: lastSaid.kind === 'user_message' ? ('person' as const) : ('lead' as const),
+                  said: (lastSaid.text ?? '').trim().split('\n')[0]?.slice(0, 200) ?? '',
+                }
           // Where each stands, by its latest pull request, for the card's one sentence and its marks: none yet, not shipped.
           const marks =
             changeCount < 2
@@ -2571,6 +2586,7 @@ export class Queries extends Context.Service<
             ...(afterMerge === undefined ? {} : { afterMerge }),
             ...(changeCount > 1 ? { changeCount, changeMarks: marks } : {}),
             ...(task.shelf === 'scratch' ? { scratch: true } : {}),
+            ...(exchange === undefined ? {} : { latest: exchange }),
             // Resolving a conflict, or fixing the checks on the merge, is a step of its own while it lasts.
             step:
               task.step ??

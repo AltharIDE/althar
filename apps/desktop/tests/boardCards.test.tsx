@@ -269,6 +269,38 @@ describe('a ready card’s own ways', () => {
     ...more,
   })
 
+  it('lists Scratch by each chat’s latest exchange, opens one in place, and clears one by settling it', async () => {
+    const said = (at: string, text: string, by: 'person' | 'lead' = 'lead') => ({ at, by, said: text })
+    const older = task({
+      taskId: 't9',
+      threadId: 'th9',
+      title: 'How does retry work?',
+      phase: 'ready',
+      scratch: true,
+      latest: said('2026-10-01T09:00:00.000Z', 'It doubles the wait each time.'),
+    })
+    const newer = task({
+      taskId: 't10',
+      threadId: 'th10',
+      title: 'Which lane heights?',
+      phase: 'ready',
+      scratch: true,
+      createdAt: '2026-09-01T09:00:00.000Z',
+      latest: said('2026-10-01T09:50:00.000Z', 'Try 52 and 64.', 'person'),
+    })
+    const lanes = lanesOf(board([older, newer]))
+    expect(lanes.scratch.map((work) => work.taskId)).toEqual(['t10', 't9'])
+    const onOpen = vi.fn()
+    const actions = ways()
+    show(lanes, { onOpen, actions })
+    await userEvent.click(screen.getByRole('button', { name: 'Scratch · 2' }))
+    expect(await screen.findByText('Try 52 and 64.')).toBeTruthy()
+    await userEvent.click(screen.getByRole('button', { name: /^How does retry work\?/ }))
+    expect(onOpen).toHaveBeenCalledWith('th9')
+    await userEvent.click(await screen.findByRole('button', { name: 'Clear “Which lane heights?”' }))
+    expect(actions.markDone).toHaveBeenCalledWith('t10')
+  })
+
   it('says Done is under way, and keeps Keep for later from being pressed meanwhile', () => {
     const finished = task({ taskId: 'f1', threadId: 'thf1', title: 'Prototype the tabs', phase: 'ready', kind: 'plain', branch: null })
     show(lanesOf(board([finished])), { actions: ways({ settling: new Set(['f1']) }) })
