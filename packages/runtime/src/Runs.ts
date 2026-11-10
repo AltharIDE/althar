@@ -1324,10 +1324,11 @@ export class Runs extends Context.Service<
               SELECT json_extract(a.output, '$.answered') AS answered FROM node_attempts a JOIN nodes n ON n.id = a.node_id
               WHERE n.execution_id = ${run.executionId} AND n.node_key = 'implement' AND a.state = 'succeeded'
               ORDER BY a.ended_at DESC, a.rowid DESC LIMIT 1`
+            // Said before the round ends, so whatever reads it ended finds it said.
             if ((end !== 'draft' && end !== 'ready') || last?.answered === 1) {
+              yield* unsaid
               yield* finish(run, 'succeeded')
               yield* Effect.ignore(changes.settleIfMerged(run.taskId))
-              yield* unsaid
               return
             }
             // Under way from before the round ends until it opens or can't, so its card never reads Ready in between (DEV-173).

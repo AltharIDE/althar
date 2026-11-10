@@ -116,6 +116,12 @@ describe('the coordinator loop', () => {
         Effect.map(touches, (revision) => (revision >= before + 2 ? [revision] : [])),
         (rows) => rows.length === 1,
       )
+      // Other touches of the card count too, so the turn is over only once its delivery ended.
+      yield* until(
+        turns(ready?.threadId ?? ''),
+        (rows) =>
+          rows.some((row) => row.prompt?.includes('hello') === true) && rows.every((row) => !['pending', 'delivered'].includes(row.state)),
+      )
       // What the person said is a turn, not a round (a task is a conversation plus parts): no run opens, and the task is ready as it was.
       assert.lengthOf(yield* sql<{ state: string }>`SELECT state FROM runs WHERE plan_id IS NULL`, 0)
       assert.strictEqual((yield* cardsOf(projectId))[0]?.phase, 'ready')
