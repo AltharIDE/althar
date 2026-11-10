@@ -113,6 +113,14 @@ export const ChangeRequest = Schema.Struct({
    */
   leftQueue: Schema.optional(Schema.NullOr(Schema.Literals(['checks', 'conflict', 'removed', 'merged', 'other']))),
   /**
+   * The merge-group commit whose checks the queue judged, identified from its
+   * entry, workflow runs or train pipeline (not the PR head). Null where it
+   * can't be found, or it never was in a queue. Read with `queue`.
+   */
+  queueSha: Schema.optional(Schema.NullOr(Schema.String)),
+  /** Why the host couldn't identify the queue build, where that lookup failed. */
+  queueError: Schema.optional(Schema.NullOr(Schema.String)),
+  /**
    * Whether the host is set to merge it by itself once its checks pass:
    * GitLab's auto-merge, a merge train's entry included, and Data Center's
    * (read with `queue`). Absent where the host doesn't say.
@@ -403,10 +411,11 @@ export interface CodeHost extends HostReleases {
   ): Effect.Effect<ChangeRequest, ConnectorFailed>
   /**
    * A change as the host has it now. With `queue`, whether an open one is in
-   * its target branch's merge queue too, and why the queue last took it out,
-   * however it got there: asked only where that branch has a queue, as the
-   * host learns once a while per branch, so one without costs nothing more.
-   * Absent where the branch has none, or the host couldn't say.
+   * its target branch's merge queue too, why the queue last took it out, and
+   * the merge-group commit it judged, however it got there: asked only where
+   * that branch has a queue, as the host learns once a while per branch, so
+   * one without costs nothing more. Absent where the branch has none, or the
+   * host couldn't say.
    */
   change(repository: Repository, number: number, ask?: { readonly queue?: boolean }): Effect.Effect<ChangeRequest, ConnectorFailed>
   /**
@@ -509,7 +518,8 @@ export interface CodeHost extends HostReleases {
     change: ChangeRequest,
     ask: { readonly expectedHead: string },
   ): Effect.Effect<BranchUpdate, ConnectorFailed>
-  checks(repository: Repository, sha: string): Effect.Effect<ReadonlyArray<Check>, ConnectorFailed>
+  /** With strict, don't hide a denied check-run listing behind commit statuses alone (queue diagnosis needs every job). */
+  checks(repository: Repository, sha: string, ask?: { readonly strict?: boolean }): Effect.Effect<ReadonlyArray<Check>, ConnectorFailed>
   /**
    * The end of a check's log, or with `whole` all of it. Null for a check the
    * host keeps no log of, such as one another CI service reported; one it

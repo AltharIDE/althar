@@ -5,9 +5,29 @@ on:
   workflow_call:
   push:
     branches: [main]
-    paths: ['apps/report/**', 'package.json', 'bun.lock', 'vite.config.ts', 'packages/testing/**', '.github/actions/flaky/**', '.github/workflows/report.yml']
+    paths:
+      [
+        'apps/report/**',
+        'package.json',
+        'bun.lock',
+        'vite.config.ts',
+        'packages/testing/**',
+        '.github/actions/flaky/**',
+        '.github/actions/electron/**',
+        '.github/workflows/report.yml',
+      ]
   pull_request:
-    paths: ['apps/report/**', 'package.json', 'bun.lock', 'vite.config.ts', 'packages/testing/**', '.github/actions/flaky/**', '.github/workflows/report.yml']
+    paths:
+      [
+        'apps/report/**',
+        'package.json',
+        'bun.lock',
+        'vite.config.ts',
+        'packages/testing/**',
+        '.github/actions/flaky/**',
+        '.github/actions/electron/**',
+        '.github/workflows/report.yml',
+      ]
 
 permissions:
   contents: read
@@ -36,8 +56,9 @@ jobs:
       - uses: actions/setup-node@v5
         with:
           node-version-file: .node-version
-      - run: bun install --frozen-lockfile
-        working-directory: .
+      - uses: ./.github/actions/electron
+        with:
+          binary: 'false'
       # Tests with an open flaky issue run, but don't fail this job (packages/testing).
       - uses: ./.github/actions/flaky/quarantine
       - run: bun run verify

@@ -248,6 +248,8 @@ export interface FakeControls {
   mergeQueue(): void
   /** Someone puts a change in the merge queue outside Althar, as on the host's site. */
   enqueueByHand(number: number): void
+  /** The merge-group commit the queue built for a change, whose checks the queue judged: read with `queue`. */
+  queueCommit(number: number, sha: string): void
   /** The merge queue takes a change out unmerged, saying why. */
   dequeue(number: number, why: NonNullable<ChangeRequest['leftQueue']>): void
   /** Someone else writes to a branch of a repository (its first unless said), outside Althar: its new head. */
@@ -410,6 +412,8 @@ export const makeFakeService = (options: FakeServiceOptions = {}): FakeService =
   let queues = false
   const inQueue = new Set<number>()
   const leftQueue = new Map<number, NonNullable<ChangeRequest['leftQueue']>>()
+  /** The merge-group commit the queue built for each change, read with `queue`. */
+  const queueShas = new Map<number, string>()
   /** Changes set to merge by themselves, as GitLab's and Data Center's auto-merge, until `mergeByHand` lands one. */
   const autoMerging = new Set<number>()
   const autoMerges = options.autoMerge ?? (product === 'gitlab' || product === 'bitbucket_dc')
@@ -667,7 +671,7 @@ export const makeFakeService = (options: FakeServiceOptions = {}): FakeService =
           ...(conflicts === undefined ? {} : { conflicts }),
           ...(options.saysHead === false ? {} : { headRepository: fork === undefined ? null : fork === '' ? [] : fork.split('/') }),
           ...(ask?.queue === true && queues && found.state === 'open'
-            ? { queued: inQueue.has(number), leftQueue: leftQueue.get(number) ?? null }
+            ? { queued: inQueue.has(number), leftQueue: leftQueue.get(number) ?? null, queueSha: queueShas.get(number) ?? null }
             : {}),
           // GitLab says it on every read, Data Center when asked.
           ...(autoMerges && (product === 'gitlab' || ask?.queue === true) ? { autoMerge: autoMerging.has(number) } : {}),
@@ -762,6 +766,8 @@ export const makeFakeService = (options: FakeServiceOptions = {}): FakeService =
         if (queues && (product === 'github' || product === 'bitbucket_cloud')) {
           mergesAsked.push({ number: change.number, how: 'queue', method: null, head: change.headSha })
           inQueue.add(change.number)
+          leftQueue.delete(change.number)
+          queueShas.delete(change.number)
           return Effect.succeed({ ...changeNumbered(change.number), queued: true })
         }
         mergesAsked.push({ number: change.number, how: 'merge', method, head: change.headSha })
@@ -794,6 +800,7 @@ export const makeFakeService = (options: FakeServiceOptions = {}): FakeService =
         mergesAsked.push({ number: change.number, how: 'queue', method: null, head: change.headSha })
         inQueue.add(change.number)
         leftQueue.delete(change.number)
+        queueShas.delete(change.number)
         if (product === 'gitlab') autoMerging.add(change.number)
         return Effect.succeed({ ...now, queued: true })
       }),
@@ -1244,7 +1251,12 @@ export const makeFakeService = (options: FakeServiceOptions = {}): FakeService =
     landLater: () => void (landsLater = true),
     readBackLater: () => void (readsBackLater = true),
     mergeQueue: () => void (queues = true),
-    enqueueByHand: (number) => void inQueue.add(number),
+    enqueueByHand: (number) => {
+      inQueue.add(number)
+      leftQueue.delete(number)
+      queueShas.delete(number)
+    },
+    queueCommit: (number, sha) => void queueShas.set(number, sha),
     dequeue: (number, why) => {
       inQueue.delete(number)
       autoMerging.delete(number)

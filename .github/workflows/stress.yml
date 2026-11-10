@@ -63,7 +63,9 @@ jobs:
       - uses: actions/setup-node@v5
         with:
           node-version-file: .node-version
-      - run: bun install --frozen-lockfile
+      - uses: ./.github/actions/electron
+        with:
+          binary: 'false'
       # Ubuntu 24.04 keeps unprivileged user namespaces from apps, and Chromium's sandbox needs them.
       - run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
       - env:
@@ -91,8 +93,7 @@ jobs:
       - uses: actions/setup-node@v5
         with:
           node-version-file: .node-version
-      - run: bun install --frozen-lockfile
-        working-directory: .
+      - uses: ./.github/actions/electron
       # As in e2e.yml: Chromium's sandbox, and a keyring on a virtual display.
       - run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
       - run: sudo apt-get update && sudo apt-get install -y gnome-keyring libsecret-1-0

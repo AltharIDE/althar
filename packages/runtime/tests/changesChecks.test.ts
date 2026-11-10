@@ -729,6 +729,49 @@ describe('what failed, in full', () => {
     }).pipe(Effect.provide(runtimeWith({ github })))
   })
 
+  it.live('reads the merge-queue build by pull-request number through its check tools', () => {
+    const { working, bare } = hosted()
+    const github = makeFakeService({
+      pushUrl: () => bare,
+      headOf: tipOf(bare),
+      checksOn: (sha) =>
+        sha === 'group-sha'
+          ? [
+              { name: 'queue-test', state: 'failed', log: 'line 1\nFAIL queue', url: 'https://example.com/queue/1' },
+              { name: 'queue-lint', state: 'passed', log: 'ok' },
+            ]
+          : undefined,
+    })
+    github.addRepository(['meridian', 'api'])
+    github.mergeQueue()
+    return Effect.gen(function* () {
+      yield* connect('github', HOST)
+      const projectId = yield* ask(working, 'Add a retry. [coordinator:plan-no-review] [coordinator:plan] [lead:finish] [lead:edit]')
+      const [card] = yield* until(cards(projectId), (all) => all[0]?.change != null)
+      const lead = { role: 'lead' as const, projectId, threadId: card?.threadId ?? '', sessionId: 'none', taskId: card?.taskId ?? '' }
+      // Before any build, its head reads instead; with queue: true and none named, it says so.
+      assert.include(yield* callTool(lead, 'read_checks', { queue: true }), 'has no merge-queue build to read')
+      github.queueCommit(1, 'group-sha')
+      // read_checks queue: by number, lists the build's jobs; with a name, reads its tail.
+      const listed = yield* callTool(lead, 'read_checks', { pull_request: 1, queue: true })
+      assert.include(listed, 'Checks on group-sha')
+      assert.include(listed, 'queue-test')
+      assert.include(listed, 'failed')
+      assert.include(listed, 'https://example.com/queue/1')
+      const tail = yield* callTool(lead, 'read_checks', { pull_request: 1, queue: true, check: 'queue-test', grep: 'FAIL', context: 0 })
+      assert.include(tail, 'FAIL queue')
+      // read_check_log queue: reads a page of the build's job log, as the head's tools do.
+      assert.match(
+        yield* callTool(lead, 'read_check_log', { check: 'queue-test', queue: true }),
+        /^Lines 1 to 2 of 2 of queue-test's log on PR #1's merge-queue build:\n```\n[\s\S]*FAIL queue\n```$/,
+      )
+      assert.include(
+        yield* callTool(lead, 'read_check_log', { check: 'head-only', queue: true }),
+        'merge-queue build has no check called "head-only"',
+      )
+    }).pipe(Effect.provide(runtimeWith({ github })))
+  })
+
   it.live('makes a change the person’s when its checks run too long, and says so', () => {
     const { working, bare } = hosted()
     const github = makeFakeService({ pushUrl: () => bare, headOf: tipOf(bare), checksFor: () => [{ name: 'test', state: 'running' }] })

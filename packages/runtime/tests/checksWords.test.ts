@@ -8,10 +8,12 @@ import {
   filesLine,
   fromAlthar,
   gaveUpLine,
+  leftQueueForLead,
   leftQueueNote,
   nameInLine,
   outsidersLine,
   queuedNote,
+  queueMainLine,
   signed,
   spentLine,
   stoppedLine,
@@ -90,6 +92,48 @@ describe('the merge queue, in the task’s thread', () => {
     assert.strictEqual(leftQueueNote('PR #1', 'checks'), 'The merge queue took PR #1 out: its checks failed.')
     assert.strictEqual(leftQueueNote('PR #1', 'conflict'), "The merge queue took PR #1 out: it conflicts with what's ahead of it.")
     assert.strictEqual(leftQueueNote('PR #1', undefined), 'The merge queue took PR #1 out.')
+  })
+
+  it('says, on a sendback for failing checks, which merge-group jobs failed, their logs, and the default branch on the same jobs', () => {
+    const detail = {
+      queueSha: 'abcdef1234567890',
+      failing: ['test'],
+      logs: ['The end of test\u2019s log:\n```\nFAIL\n```'],
+      main: 'Passes on main.',
+    }
+    const said = leftQueueForLead('PR #1', 'checks', detail)
+    assert.include(said, 'The merge queue took PR #1 out: its checks failed.')
+    assert.include(said, 'Failed on the queue build (abcdef1): test.')
+    assert.include(said, 'FAIL')
+    assert.include(said, 'Passes on main.')
+    assert.include(said, 'read_checks (queue: true)')
+    assert.include(said, 'read_check_log (queue: true)')
+    // A sendback whose build its host doesn't name, and one for another reason, say alone.
+    assert.strictEqual(leftQueueForLead('PR #1', 'checks', null), leftQueueNote('PR #1', 'checks'))
+    assert.strictEqual(leftQueueForLead('PR #1', 'checks'), leftQueueNote('PR #1', 'checks'))
+    assert.strictEqual(leftQueueForLead('PR #1', 'removed', detail), leftQueueNote('PR #1', 'removed'))
+    assert.include(
+      leftQueueForLead('PR #1', 'checks', { queueSha: null, failing: [], logs: [], main: null }),
+      'Which merge-group jobs failed is not named here.',
+    )
+  })
+
+  it('compares the queue\u2019s failures with the default branch: only what it reports counts', () => {
+    const base = (...rows: Array<[string, 'passed' | 'failed' | 'running']>) => rows.map(([name, state]) => ({ name, state }))
+    assert.strictEqual(queueMainLine('main', ['test'], base(['test', 'failed'])), 'Fails on main too on test.')
+    assert.strictEqual(queueMainLine('main', ['test'], base(['test', 'passed'])), 'test passes on main.')
+    assert.strictEqual(
+      queueMainLine('main', ['test'], base()),
+      'No checks have run on main, so this says nothing of whether main is broken.',
+    )
+    assert.strictEqual(
+      queueMainLine('main', ['a', 'b'], base(['b', 'failed'], ['a', 'passed'])),
+      'Fails on main too on b. a passes on main.',
+    )
+    assert.strictEqual(queueMainLine('main', ['a', 'b'], base(['b', 'failed'])), "Fails on main too on b. main hasn't reported on a yet.")
+    assert.strictEqual(queueMainLine('main', ['a'], base(['a', 'running'])), "main hasn't reported on a yet.")
+    assert.strictEqual(queueMainLine('main', ['a'], base(['a', 'passed'], ['a', 'running'])), "main hasn't reported on a yet.")
+    assert.strictEqual(queueMainLine('main', ['a'], base(['b', 'failed'])), "main hasn't reported on a yet.")
   })
 })
 
