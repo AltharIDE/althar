@@ -247,6 +247,38 @@ describe('a plain task', () => {
     ),
   )
 
+  it.live('stops telling a lead whose turns keep doing nothing to carry on, and says so once, for the person to write again', () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const place = yield* opened
+      const task = yield* started(place, 'Check the partners', 'Look. [lead:finish] [lead:terse]')
+      yield* cardOnce(task.id, (one) => one.phase === 'ready')
+      const told = sql<{ id: string }>`SELECT id FROM user_inputs WHERE thread_id = ${task.threadId} AND body LIKE 'Your last turn%'`
+      const gaveUp = Effect.map(notices(task.threadId), (all) =>
+        all.filter((notice) => notice.title === 'Its turns ended without doing anything. Write to it again to carry on.'),
+      )
+      // Each of its turns does nothing: told to carry on three times, then the thread says so, and it is told no more.
+      yield* say(task.threadId, 'And the v2 ones?')
+      yield* until(gaveUp, (said) => said.length === 1)
+      yield* Effect.sleep(Duration.millis(500))
+      assert.lengthOf(yield* told, 3)
+      assert.lengthOf(yield* gaveUp, 1)
+    }).pipe(
+      Effect.provide(
+        Queries.layer.pipe(
+          Layer.provideMerge(
+            runtime(
+              ':memory:',
+              // What it did nothing with it reads again with the next prompt: every one after the person's words holds them.
+              { blank: (prompt) => prompt.includes('And the v2 ones?') },
+              { idle: { blank: Duration.millis(100) } },
+            ),
+          ),
+        ),
+      ),
+    ),
+  )
+
   it.live('stays plain for what its lead throws away and the pictures it hands back', () =>
     Effect.gen(function* () {
       const place = yield* opened
@@ -1033,4 +1065,169 @@ describe('making a quick task a change', () => {
       )
     }).pipe(Effect.provide(withQueries())),
   )
+
+  it.live('opens a round that, once its lead reports with nothing new, leaves the task back where it was', () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const place = yield* opened
+      const task = yield* started(place, 'Look around', 'Look. [lead:finish] [lead:terse]')
+      yield* cardOnce(task.id, (one) => one.phase === 'ready')
+      const [session] = yield* sql<{ id: string }>`SELECT id FROM provider_sessions WHERE thread_id = ${task.threadId}`
+      const lead: ToolAccess = { role: 'lead', ...place, threadId: task.threadId, sessionId: session?.id ?? '', taskId: task.id }
+      assert.match(
+        yield* callTool(lead, 'make_it_a_change', { title: 'Keep the notes', review: null, output: 'draft' }),
+        /^The task is a change now, called “Keep the notes”\./,
+      )
+      const [round] = yield* sql<{ state: string }>`SELECT state FROM runs WHERE task_id = ${task.id} AND plan_id IS NULL`
+      assert.strictEqual(round?.state, 'running')
+      // It reports having changed nothing since the task began: the round ends, and the task is as it was before it.
+      const said = yield* callTool(lead, 'finish_step', { summary: 'Nothing to change.', built: 'Nothing new.' })
+      assert.match(said, /^Althar has your summary\. Nothing .* changed this round, so the task is back where it was\.$/)
+      yield* until(
+        sql<{ state: string }>`SELECT state FROM runs WHERE task_id = ${task.id} AND plan_id IS NULL`,
+        (rows) => rows[0]?.state === 'succeeded',
+      )
+      yield* cardOnce(task.id, (one) => one.phase === 'ready')
+    }).pipe(Effect.provide(withQueries())),
+  )
+
+  it.live('opens a settled one again for its round, and settles it again where the round made nothing new', () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const tasks = yield* Tasks
+      const place = yield* opened
+      const task = yield* started(place, 'Look around', 'Look. [lead:finish] [lead:terse]')
+      yield* cardOnce(task.id, (one) => one.phase === 'ready')
+      const state = sql<{ state: string }>`SELECT state FROM tasks WHERE id = ${task.id}`
+      yield* until(
+        Effect.flatMap(Runtime.envelope('task.mark_done', { taskId: task.id }), (envelope) =>
+          Effect.map(tasks.markDone({ envelope, taskId: task.id }), (done) => [done]),
+        ),
+        ([done]) => done === true,
+      )
+      yield* until(state, (rows) => rows[0]?.state === 'done')
+      const [session] = yield* sql<{ id: string }>`SELECT id FROM provider_sessions WHERE thread_id = ${task.threadId}`
+      const lead: ToolAccess = { role: 'lead', ...place, threadId: task.threadId, sessionId: session?.id ?? '', taskId: task.id }
+      assert.match(
+        yield* callTool(lead, 'make_it_a_change', { title: 'Keep the notes', review: null, output: 'draft' }),
+        /^The task is a change now/,
+      )
+      // Open again for the round.
+      assert.strictEqual((yield* state)[0]?.state, 'open')
+      assert.match(
+        yield* callTool(lead, 'finish_step', { summary: 'Nothing to change.', built: 'Nothing new.' }),
+        /so the task is back where it was\.$/,
+      )
+      yield* until(state, (rows) => rows[0]?.state === 'done')
+    }).pipe(Effect.provide(withQueries())),
+  )
+
+  it.live('takes what its lead left uncommitted in its round as new work: the task isn’t back where it was', () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const place = yield* opened
+      const task = yield* started(place, 'Look around', 'Look. [lead:finish] [lead:terse]')
+      yield* cardOnce(task.id, (one) => one.phase === 'ready')
+      const [session] = yield* sql<{ id: string }>`SELECT id FROM provider_sessions WHERE thread_id = ${task.threadId}`
+      const lead: ToolAccess = { role: 'lead', ...place, threadId: task.threadId, sessionId: session?.id ?? '', taskId: task.id }
+      yield* callTool(lead, 'make_it_a_change', { title: 'Keep the notes', review: null, output: 'draft' })
+      // It writes notes and leaves them uncommitted before it reports.
+      writeFileSync(join((yield* worktreeOf(task.id)).path, 'notes.md'), 'What the partners use.\n')
+      const said = yield* callTool(lead, 'finish_step', { summary: 'Wrote the notes.', built: 'Notes on the partners.' })
+      assert.notInclude(said, 'back where it was')
+      yield* until(
+        sql<{ state: string }>`SELECT state FROM runs WHERE task_id = ${task.id} AND plan_id IS NULL`,
+        (rows) => rows[0]?.state === 'succeeded',
+      )
+    }).pipe(Effect.provide(withQueries())),
+  )
+
+  it.live('ends a quick task’s round opened before talking became turns where it is, sending nothing anywhere', () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const place = yield* opened
+      const task = yield* started(place, 'Sketch the settings', 'Sketch it. [lead:commit] [lead:finish] [review:pass]')
+      yield* cardOnce(task.id, (one) => one.phase === 'ready' && one.kind === 'plain')
+      const [session] = yield* sql<{ id: string }>`SELECT id FROM provider_sessions WHERE thread_id = ${task.threadId}`
+      const lead: ToolAccess = { role: 'lead', ...place, threadId: task.threadId, sessionId: session?.id ?? '', taskId: task.id }
+      yield* callTool(lead, 'make_it_a_change', { title: 'Settings, for real', review: null, output: 'draft' })
+      // As a quick task's round read before the update: one that stays on this Mac and doesn't publish.
+      yield* sql`
+        UPDATE runs SET parameters = json_set(json_remove(parameters, '$.publishes'), '$.here', json('true'))
+        WHERE task_id = ${task.id} AND plan_id IS NULL`
+      yield* callTool(lead, 'finish_step', { summary: 'Made it real.', built: 'The settings page.' })
+      yield* until(
+        sql<{ state: string }>`SELECT state FROM runs WHERE task_id = ${task.id} AND plan_id IS NULL`,
+        (rows) => rows[0]?.state === 'succeeded',
+      )
+      assert.notInclude(
+        (yield* notices(task.threadId)).map((notice) => notice.title),
+        "What the follow-up committed isn't in a pull request yet.",
+      )
+    }).pipe(Effect.provide(withQueries())),
+  )
+
+  it.live('has nothing to ship while it has no branch, nor while it is a draft', () =>
+    Effect.gen(function* () {
+      const runs = yield* Runs
+      const projects = yield* Projects
+      const place = yield* opened
+      const task = yield* started(place, 'Look around', 'Look. [lead:finish] [lead:terse]')
+      yield* cardOnce(task.id, (one) => one.phase === 'ready')
+      const ship = (taskId: string) =>
+        Effect.flatMap(Runtime.envelope('task.ship', { taskId }), (envelope) => Effect.flip(runs.ship({ envelope, taskId })))
+      const unbranched = yield* ship(task.id)
+      assert.deepInclude(unbranched, { _tag: 'ShipRefused', why: 'nothing' })
+      const draft = yield* projects.createTask({
+        envelope: yield* Runtime.envelope('task.create', {}),
+        projectId: place.projectId,
+        title: 'Retry the checkout',
+        draft: true,
+      })
+      assert.deepInclude(yield* ship(draft.taskId), { _tag: 'ShipRefused', why: 'nothing' })
+    }).pipe(Effect.provide(withQueries())),
+  )
+
+  it.live('ends a round opened before talking became turns as it did: reviewed for what it changed, its commits on its branch', () => {
+    const { working, bare } = hosted()
+    const github = makeFakeService({ pushUrl: () => bare })
+    github.addRepository(['meridian', 'api'])
+    return Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const place = yield* onHost(github, working)
+      const task = yield* started(place, 'Sketch the settings', 'Sketch it. [lead:commit] [lead:finish] [review:pass]')
+      yield* cardOnce(task.id, (one) => one.phase === 'ready' && one.kind === 'plain')
+      const [session] = yield* sql<{ id: string }>`SELECT id FROM provider_sessions WHERE thread_id = ${task.threadId}`
+      const lead: ToolAccess = { role: 'lead', ...place, threadId: task.threadId, sessionId: session?.id ?? '', taskId: task.id }
+      assert.match(
+        yield* callTool(lead, 'make_it_a_change', { title: 'Settings, for real', review: { agent: 'codex' }, output: 'draft' }),
+        /^The task is a change now/,
+      )
+      // As a round a person's words opened before the update reads, still under way after it: one that doesn't publish.
+      yield* sql`UPDATE runs SET parameters = json_remove(parameters, '$.publishes') WHERE task_id = ${task.id} AND plan_id IS NULL`
+      yield* callTool(lead, 'finish_step', {
+        summary: 'Made it real.',
+        built: 'The settings page.',
+        descriptions: [{ text: 'Settings were a sketch; this makes them real.' }],
+      })
+      // Its review reads what changed since the round began.
+      const [brief] = yield* until(
+        sql<{ body: string }>`
+          SELECT i.body FROM user_inputs i JOIN threads t ON t.id = i.thread_id
+          WHERE t.task_id = ${task.id} AND t.kind = 'step' AND i.body LIKE 'More to review. The task''s earlier work%'`,
+        (rows) => rows.length === 1,
+      )
+      assert.include(brief?.body, 'Made it real.')
+      // Passed, it ends as such a round did: what it committed waits on the branch, said so, with no pull request opened.
+      yield* until(
+        sql<{ state: string }>`SELECT state FROM runs WHERE task_id = ${task.id} AND plan_id IS NULL`,
+        (rows) => rows[0]?.state === 'succeeded',
+      )
+      assert.include(
+        (yield* notices(task.threadId)).map((notice) => notice.title),
+        "What the follow-up committed isn't in a pull request yet.",
+      )
+      assert.lengthOf(github.changes, 0)
+    }).pipe(Effect.provide(withGitHub(github)))
+  })
 })

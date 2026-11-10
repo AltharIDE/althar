@@ -1716,14 +1716,14 @@ export class Runs extends Context.Service<
           if (thread === undefined) return false
           const inARow = yield* blanks(threadId, turnId)
           if (inARow === 0) return false
+          // At most BLANKS + 1 are counted: past BLANKS, it has been told to carry on as often as it is, and the thread says so.
           if (inARow > BLANKS) {
-            if (inARow === BLANKS + 1)
-              yield* addItem({ projectId: thread.projectId, threadId }, 'notice', {
-                source: 'runtime',
-                severity: 'warning',
-                title: 'Its turns ended without doing anything. Write to it again to carry on.',
-                about: 'stall',
-              })
+            yield* addItem({ projectId: thread.projectId, threadId }, 'notice', {
+              source: 'runtime',
+              severity: 'warning',
+              title: 'Its turns ended without doing anything. Write to it again to carry on.',
+              about: 'stall',
+            })
             return false
           }
           yield* addItem({ projectId: thread.projectId, threadId }, 'notice', {
@@ -2581,19 +2581,18 @@ export class Runs extends Context.Service<
       const oneRound = roundLocks.withLock
 
       /**
-       * Opens a round of work on a task whose latest run is over, as what the
-       * person said reaches its lead, or its lead reports with no step open
-       * (ADR-034): a run of its own, with no plan, whose steps and ending are
-       * the plan's run's, and its Implement step under way at once on the
-       * lead's session, which is at work already in its turn. A merged task
+       * Opens the round a quick task is made a change in, once its latest run
+       * is over (ADR-034), the one round that opens now that talking to a lead
+       * is a turn: a run of its own, with no plan, whose steps and ending are
+       * the plan's run's, publishing as it would, and its Implement step under
+       * way at once on the lead's session, which is at work already in its
+       * turn. All the quick task did counts as the round's. A merged task
        * opens again for it. None while a run runs or is stopped, the task is
        * a draft or abandoned, its project removed, or a conflict round is
        * under way, which is its own course. The round's run and its attempt,
-       * or undefined where none opened. `rested`, for a round the lead's
-       * report opens, it starts where the last run left the task, so what the
-       * lead did before it reported counts as the round's.
+       * or undefined where none opened.
        */
-      const openRound = (taskId: string, sessionId: string, rested = false, made = false) =>
+      const openRound = (taskId: string, sessionId: string) =>
         oneRound(
           taskId,
           Effect.gen(function* () {
@@ -2617,13 +2616,11 @@ export class Runs extends Context.Service<
             if (task === undefined || task.archived !== null || task.rounds > 0 || (task.state !== 'open' && task.state !== 'done'))
               return undefined
             const was: RoundBack['state'] = task.state
-            // Its steps and ending are the plan's: a reviewed task's round has a review, whatever the last round skipped. The round a
-            // quick task is made a change in publishes as its plan's run would, as the person asked.
+            // Its steps and ending are the plan's: a reviewed task's round has a review, whatever the last round skipped. It publishes
+            // as its plan's run would, as the person asked.
             const [planned] = yield* sql<{ parameters: string }>`
               SELECT parameters FROM runs WHERE task_id = ${taskId} AND plan_id IS NOT NULL ORDER BY created_at, rowid LIMIT 1`
-            const parameters = made
-              ? JSON.stringify({ ...(JSON.parse(planned?.parameters ?? last.parameters) as object), publishes: true })
-              : (planned?.parameters ?? last.parameters)
+            const parameters = JSON.stringify({ ...(JSON.parse(planned?.parameters ?? last.parameters) as object), publishes: true })
             const implement = (yield* Schema.decodeUnknownEffect(Schema.fromJsonString(PlanParameters))(parameters)).steps.find(
               (step) => step.key === 'implement',
             )
@@ -2633,7 +2630,7 @@ export class Runs extends Context.Service<
               SELECT s.id FROM provider_sessions s JOIN threads t ON t.id = s.thread_id
               WHERE s.id = ${sessionId} AND t.task_id = ${taskId} AND t.kind = 'task'`
             if (lead === undefined) return undefined
-            const start = made ? yield* fromItsStart(taskId) : rested ? yield* restedOf(taskId) : yield* startOf(taskId)
+            const start = yield* fromItsStart(taskId)
             const policyId = yield* policyOf(task.projectId)
             const runId = yield* newId(Ids.run)
             const opened = yield* sql.withTransaction(
@@ -6926,7 +6923,7 @@ export class Runs extends Context.Service<
         reviewerChange,
         changeTeam: (input) => provide(changeTeam(input)),
         makeChange,
-        madeRound: (taskId, sessionId) => provide(Effect.map(openRound(taskId, sessionId, false, true), (opened) => opened !== undefined)),
+        madeRound: (taskId, sessionId) => provide(Effect.map(openRound(taskId, sessionId), (opened) => opened !== undefined)),
         answerCheckout: (input) => provide(answerCheckout(input)),
         checkoutsMoved: Queue.offer(checkoutWakes, undefined).pipe(Effect.asVoid),
         changeWaiting: (taskId, parameters, actorId) =>
