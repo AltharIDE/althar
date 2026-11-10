@@ -1240,6 +1240,14 @@ Built since, in #739:
   what it went into, on the host (`editChange` sets a base on every host)
   and in its workspace, said in the thread. "Not done yet" is said only
   once something of the task has merged.
+- **A running task moves between a worktree and Local,** between its
+  lead's turns, from its folder's row in the header: into Local with what
+  its worktree hadn't committed, once the checkout is free and clean,
+  asking first about a branch of the person's own; out of Local once the
+  checkout can let go of the task's branch. What holds a move is kept on
+  the workspace (`workspaces.moving_to`), said once, tried again every few
+  seconds, and can be called off. The lead's next turn starts a fresh
+  session in the new folder, handed the work so far.
 
 Compatibility: every change to the store is additive, with nullable
 columns an older build reads past; a run with no `ships` and a workspace
@@ -1248,9 +1256,8 @@ update finishes as a round; the API only gains fields and a command; the
 old "Review rounds" setting is kept and read by nothing; the lead's tools
 keep their names, `make_it_a_change` included.
 
-Still to build, as the rest of this proposal says: the workspace moving between a worktree and Local and the
-branch a task works toward changing, "Run it", the parts tools, Scratch and
-presets.
+Still to build, as the rest of this proposal says: the branch a running
+task works toward changing, "Run it", the parts tools, Scratch and presets.
 
 It is done when:
 
