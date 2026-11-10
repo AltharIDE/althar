@@ -6,6 +6,7 @@ import { mergeInCopy } from './branchCopy'
 import { ConnectorFailed } from './errors'
 import { makeHttp, paged } from './http'
 import { makeGitHubReleases } from './githubReleases'
+import { mergeRulesOf, mergeRulesQuery, NEWER_FIELDS, NO_RULESETS, PullRulesAnswer, RulesetsAnswer, rulesetsOf } from './githubRules'
 import type {
   Account,
   Activity,
@@ -26,6 +27,7 @@ import type {
   IssuePage,
   IssueQuery,
   ListedChange,
+  MergeRules,
   Person,
   BranchUpdate,
   Repository,
@@ -779,6 +781,9 @@ export const LISTING_KEPT_MS = 60_000
  */
 export const NO_QUEUE_KEPT_MS = 60 * 60_000
 
+/** How long whether a branch's classic protection requires it up to date is kept: an admin's setting, read once an hour. */
+export const STRICT_KEPT_MS = 60 * 60_000
+
 export const makeGitHub = (options: AdapterOptions): CodeHost & Tracker => {
   const product = 'github' as const
   const api = options.apiUrl.replace(/\/+$/, '')
@@ -928,6 +933,42 @@ export const makeGitHub = (options: AdapterOptions): CodeHost & Tracker => {
       (made) => made.parents.length === 2 && made.parents[0]?.sha === from,
     )
   const queueKey = (repository: Repository, target: string) => `${repository.path.join('/')} ${target}`
+
+  /** Whether this server knows `refUpdateRule`: false once it said it doesn't, as an older Enterprise Server does. */
+  let readsRule = true
+  /** Whether each `owner/name branch` must be up to date before merging, as its classic protection last said, and when. */
+  const stricts = new Map<string, { readonly at: number; readonly strict: boolean | null }>()
+  /**
+   * Whether a branch's classic protection requires it up to date before a
+   * merge: only an admin may read it, so for anyone else it is null, unknown.
+   * Kept an hour per branch, so it costs one call an hour, whoever reads it.
+   */
+  const strictOf = (repository: Repository, target: string) =>
+    Effect.gen(function* () {
+      const key = queueKey(repository, target)
+      const now = yield* Clock.currentTimeMillis
+      const kept = stricts.get(key)
+      if (kept !== undefined && now - kept.at < STRICT_KEPT_MS) return kept.strict
+      const said = yield* http
+        .json(
+          Schema.Struct({ strict: Schema.optional(Schema.Boolean) }),
+          'GET',
+          `${repo(repository)}/branches/${branchPath(target)}/protection/required_status_checks`,
+        )
+        .pipe(
+          Effect.map((checks) => ({ strict: checks.strict ?? null, kept: true })),
+          // To an admin, a branch with no required checks says so; to anyone else, GitHub says only Not Found, or Forbidden:
+          // either is kept. A failure on the way (limited, unreachable, a server's error) isn't, so the next read asks again.
+          Effect.catch((error) =>
+            Effect.succeed({
+              strict: error.status === 404 && /not enabled|not protected/i.test(error.message) ? false : null,
+              kept: error.reason === 'not_found' || error.reason === 'forbidden',
+            }),
+          ),
+        )
+      if (said.kept) stricts.set(key, { at: now, strict: said.strict })
+      return said.strict
+    })
 
   /** A branch as a pull request's head names it: with its owner, the fork's where it is on one. */
   const headOf = (repository: Repository, source: string, from?: Repository) => `${(from ?? repository).path[0]}:${source}`
@@ -1474,6 +1515,62 @@ export const makeGitHub = (options: AdapterOptions): CodeHost & Tracker => {
         for (const [asked, listing] of listings) if (now - listing.at >= LISTING_KEPT_MS) listings.delete(asked)
         listings.set(key, { at: now, list })
         return list
+      }),
+    mergeRules: (repository, change) =>
+      Effect.gen(function* () {
+        const variables = { owner: repository.path[0], name: repository.path[1], number: change.number }
+        const ask = (full: boolean) => http.graphql(PullRulesAnswer, graphqlUrl, mergeRulesQuery(full), variables)
+        // An Enterprise Server too old to know the newer fields is asked without them from then on. Its branch's rulesets, by
+        // ETag, alongside: one a server has none of, or won't say, adds nothing; GitHub's BLOCKED still shows.
+        const [answer, rulesets] = yield* Effect.all(
+          [
+            readsRule
+              ? ask(true).pipe(
+                  Effect.catchIf(
+                    (error) => error.reason === 'rejected' && NEWER_FIELDS.test(error.message),
+                    () => {
+                      readsRule = false
+                      return ask(false)
+                    },
+                  ),
+                )
+              : ask(false),
+            http.cached(RulesetsAnswer, `${repo(repository)}/rules/branches/${branchPath(change.target)}`).pipe(
+              Effect.map(rulesetsOf),
+              Effect.catchIf(
+                (error) => error.reason === 'not_found' || error.reason === 'forbidden' || error.reason === 'rejected',
+                () => Effect.succeed(NO_RULESETS),
+              ),
+            ),
+          ],
+          { concurrency: 'unbounded' },
+        )
+        const pull = answer.repository?.pullRequest
+        if (pull == null)
+          return yield* new ConnectorFailed({
+            product,
+            reason: 'not_found',
+            message: `No pull request #${change.number} in ${repository.path.join('/')}`,
+          })
+        const rule = pull.baseRef?.refUpdateRule ?? null
+        // Required up to date where its rulesets or GitHub say; else as classic protection says, which only an admin reads, and
+        // where there are no required checks, or no protection, it needs nothing.
+        const said = rulesets.strict || pull.mergeStateStatus === 'BEHIND'
+        const classic =
+          said || (readsRule && (rule === null || (rule.requiredStatusCheckContexts ?? []).length === 0))
+            ? false
+            : yield* strictOf(repository, change.target)
+        const strict = said ? true : classic
+        const behind =
+          strict === false || change.headSha === null
+            ? null
+            : yield* http
+                .cached(CompareAnswer, `${repo(repository)}/compare/${branchPath(change.target)}...${encodeURIComponent(change.headSha)}`)
+                .pipe(
+                  Effect.map((compared) => compared.behind_by),
+                  Effect.orElseSucceed(() => null),
+                )
+        return mergeRulesOf({ pull, rulesets, behind, strict: classic, merges: repository.merges }) satisfies MergeRules
       }),
     // REST, not the search: its list has an ETag, so a quiet repository answers 304 for nothing.
     openChanges: (repository) =>

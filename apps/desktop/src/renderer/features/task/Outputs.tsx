@@ -426,6 +426,9 @@ export function Outputs({
               host={{ name: productName(first.product), ...(brand === undefined ? {} : { brand }) }}
               prs={prs}
               {...(checked ? { checks: open.flatMap((one) => (one.checks?.list ?? []).map(checkOf)) } : {})}
+              {...(first.state === 'open' && first.needs !== undefined && first.needs.length > 0
+                ? { needs: first.needs, ...(first.target === undefined || first.target === null ? {} : { target: first.target }) }
+                : {})}
               {...(review === undefined ? {} : { review })}
               {...(actions.length === 0 ? {} : { actions })}
               {...files}
