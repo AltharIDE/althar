@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process'
-import { existsSync, mkdtempSync, renameSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -501,12 +501,10 @@ describe('the review after a merge, at its edges', () => {
       execFileSync('touch', [blocker])
       yield* mergeIt(bare, github, task.taskId)
       yield* until(reviewOf(task.url), (row) => (row?.attempts ?? 0) > 0)
-      // Its worktree gone and its repository moved: what merged isn't anywhere here. Its lead stopped first, as on Windows no
-      // folder an agent works in can be removed.
-      yield* Effect.ignore((yield* Sessions).stop(task.threadId))
-      yield* gone(task.threadId)
-      rmSync(task.path, { recursive: true, force: true })
-      renameSync(working, `${working}-moved`)
+      // Its worktree gone and its repository moved: what merged isn't anywhere here. Said in the records, as Althar would find
+      // them: on Windows a folder something still works in can't be removed or moved under it.
+      yield* sql`UPDATE workspaces SET path = path || '-gone' WHERE task_id = ${task.taskId}`
+      yield* sql`UPDATE repository_locations SET path = path || '-moved'`
       yield* (yield* FastLane).retryPendingReviews()
       assert.deepInclude(yield* reviewOf(task.url), {
         state: 'owed',
