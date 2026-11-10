@@ -31,6 +31,12 @@ const MB = 1024 * 1024
  * A stand-in computer: four cores, a quarter of them busy; and the processes the test lists, each reading `n` having used `n`
  * times its share; `reaped`, each one's time counting its reaped children's, as on a Mac with its reader and on Linux.
  */
+/**
+ * Where a test's computer has no Althar of its own in its listing: no pid. Left to itself, the load takes this process's pid
+ * for Althar's, and a pid a listing makes up can be this one's, as one on Windows was (700), taking its share as Althar's.
+ */
+const NO_APP = -1
+
 const machine = (listed: (n: number) => ReadonlyArray<readonly [number, Listed]> | null, reaped = false) => {
   let reads = 0
   const read = Effect.sync((): Reading => {
@@ -149,7 +155,7 @@ describe('this computer’s load', () => {
       assert.strictEqual(yield* machineLoad.now, load)
       assert.strictEqual(stand.reads(), 2)
       yield* launches.stop(started.id)
-    }).pipe(Effect.provide(runtime(':memory:', {}, { load: { read: stand.read, settle: Duration.millis(1) } })))
+    }).pipe(Effect.provide(runtime(':memory:', {}, { load: { read: stand.read, app: NO_APP, settle: Duration.millis(1) } })))
   })
 
   it.live('counts a task’s run as the task’s, and its lead names its agent before its steps’', () => {
@@ -187,7 +193,7 @@ describe('this computer’s load', () => {
       })
       assert.deepStrictEqual(share?.agent, { id: 'process', name: 'Fake process' })
       yield* launches.stop(started.id)
-    }).pipe(Effect.provide(runtime(':memory:', {}, { load: { read: stand.read, settle: Duration.millis(1) } })))
+    }).pipe(Effect.provide(runtime(':memory:', {}, { load: { read: stand.read, app: NO_APP, settle: Duration.millis(1) } })))
   })
 
   it.live('starts the readings afresh after a gap, and keeps two minutes of them', () => {
@@ -207,7 +213,11 @@ describe('this computer’s load', () => {
       const reads = stand.reads()
       assert.lengthOf((yield* machineLoad.now).history, 1)
       assert.strictEqual(stand.reads(), reads + 2)
-    }).pipe(Effect.provide(runtime(':memory:', {}, { load: { read: stand.read, every: Duration.millis(50), settle: Duration.millis(1) } })))
+    }).pipe(
+      Effect.provide(
+        runtime(':memory:', {}, { load: { read: stand.read, app: NO_APP, every: Duration.millis(50), settle: Duration.millis(1) } }),
+      ),
+    )
   })
 
   it.live('says Althar’s part is unknown where processes can’t be listed, and measures CPU only from a listing before', () => {
@@ -225,7 +235,11 @@ describe('this computer’s load', () => {
       assert.deepInclude((yield* machineLoad.now).shares?.[0], { taskId: created.taskId, cpu: 0, memory: 5 * MB, processes: 1 })
       yield* Effect.sleep(Duration.millis(60))
       assert.deepInclude((yield* machineLoad.now).shares?.[0], { taskId: created.taskId, cpu: 0.05 })
-    }).pipe(Effect.provide(runtime(':memory:', {}, { load: { read: stand.read, every: Duration.millis(50), settle: Duration.millis(1) } })))
+    }).pipe(
+      Effect.provide(
+        runtime(':memory:', {}, { load: { read: stand.read, app: NO_APP, every: Duration.millis(50), settle: Duration.millis(1) } }),
+      ),
+    )
   })
 
   it.live('counts as a task’s a server its lead left in the background, and what ended between two readings', () => {
@@ -274,7 +288,7 @@ describe('this computer’s load', () => {
       assert.notInclude(asked, world.lead)
     }).pipe(
       Effect.provide(
-        runtime(':memory:', {}, { load: { read: stand.read, marks, every: Duration.millis(50), settle: Duration.millis(1) } }),
+        runtime(':memory:', {}, { load: { read: stand.read, app: NO_APP, marks, every: Duration.millis(50), settle: Duration.millis(1) } }),
       ),
     )
   })
@@ -305,7 +319,7 @@ describe('this computer’s load', () => {
           processes: 1,
         },
       ])
-    }).pipe(Effect.provide(runtime(':memory:', {}, { load: { read: stand.read, marks, settle: Duration.millis(1) } })))
+    }).pipe(Effect.provide(runtime(':memory:', {}, { load: { read: stand.read, app: NO_APP, marks, settle: Duration.millis(1) } })))
   })
 
   it.live('counts Althar itself, the app and what it started that is no work’s, in Althar’s part', () => {
