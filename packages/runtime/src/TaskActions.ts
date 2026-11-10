@@ -1541,7 +1541,7 @@ export class TaskActions extends Context.Service<
         ),
         tool(
           'add_review',
-          'Adds a review of a pull request to a task that has work of its own (a task can review a related pull request beside its change): a read-only copy of its head, beside the task’s worktree, which its lead reads and reviews with draft_review, as a review task’s lead does. Nothing is posted until the person posts the draft. By its link, or its number in the project’s repository (#123). For a review on its own, the coordinator plans one with review_pull_request. It acts at once, with a line in the task’s thread.',
+          'Adds a review of a pull request to this task, whatever else it does: a chat asked to review one, or a change reviewing a related one beside its own work. A read-only copy of its head, beside the task’s folder, which its lead reads and reviews with draft_review, as a review task’s lead does: the review is a card the person posts in one press. Nothing is posted until the person posts the draft. By its link, or its number in the project’s repository (#123). For a review on its own, the coordinator plans one with review_pull_request. It acts at once, with a line in the task’s thread.',
           {
             type: 'object',
             properties: {
