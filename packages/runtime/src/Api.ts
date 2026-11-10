@@ -135,6 +135,7 @@ import { makeBranch } from './newBranch'
 import { agentTools, forgetSkillRoles, setSkillRoles, setToolInProject, setToolRoles, syncIo } from './agentTools'
 import { addServer, removeServer, serverDetail } from './mcpAdd'
 import { checkHealth } from './mcpHealth'
+import { Canvases } from './Canvases'
 import * as mcpSync from './mcpSync'
 import * as skillSync from './skillSync'
 
@@ -257,6 +258,7 @@ export const handlers = Api.toLayer(
     const runs = yield* Runs
     const tasks = yield* Tasks
     const coordinator = yield* Coordinator
+    const canvases = yield* Canvases
     const instance = yield* Instance
     const sql = yield* SqlClient.SqlClient
     const ledger = yield* Ledger
@@ -970,6 +972,9 @@ export const handlers = Api.toLayer(
       GetThreadItem: ({ threadId, itemId }) => api(queries.item(threadId, itemId)),
       ReadOutput: ({ threadId, itemId }) => api(queries.output(threadId, itemId)),
       ReadDocument: ({ threadId, path }) => api(queries.document(threadId, path)),
+      ListCanvases: ({ projectId, archived }) => api(canvases.list(projectId, archived === true)),
+      GetCanvas: ({ canvasId }) => api(canvases.get(canvasId)),
+      ReadCanvasText: ({ canvasId, version }) => api(canvases.text(canvasId, version)),
       FindCode: ({ threadId, messages }) => api(queries.findCode(threadId, messages)),
       ReadCode: ({ threadId, path, commit, line }) => api(queries.readCode(threadId, path, commit, line)),
       GetFileDiff: ({ taskId, path, untouched }) => api(queries.fileDiff(taskId, path, untouched === true)),
@@ -1367,7 +1372,7 @@ export const handlers = Api.toLayer(
           commandId,
           api(Effect.flatMap(envelope('task.reopen', { taskId }, commandId), (said) => tasks.reopen({ envelope: said, taskId }))),
         ),
-      Send: ({ commandId, threadId, body, disposition, images, files, dictated }) =>
+      Send: ({ commandId, threadId, body, disposition, images, files, dictated, canvasComments }) =>
         api(
           sessions.accepting(
             threadId,
@@ -1379,7 +1384,15 @@ export const handlers = Api.toLayer(
                 // The command says its images by their digests, never their bytes, and how many files, never their paths.
                 envelope: yield* envelope(
                   'thread.send',
-                  { threadId, body, disposition, ...imagesSaid(kept), ...filesSaid(copied), ...(dictated === true ? { dictated } : {}) },
+                  {
+                    threadId,
+                    body,
+                    disposition,
+                    ...imagesSaid(kept),
+                    ...filesSaid(copied),
+                    ...(dictated === true ? { dictated } : {}),
+                    ...(canvasComments === undefined || canvasComments.length === 0 ? {} : { canvasComments }),
+                  },
                   commandId,
                 ),
                 threadId,
@@ -1389,6 +1402,7 @@ export const handlers = Api.toLayer(
                 ...(kept.length === 0 ? {} : { images: kept }),
                 ...(copied.length === 0 ? {} : { files: copied }),
                 ...(dictated === true ? { dictated } : {}),
+                ...(canvasComments === undefined || canvasComments.length === 0 ? {} : { canvasComments }),
               }
               // What the person says to the coordinator starts it, if it isn't running.
               const [thread] = yield* sql<{ kind: string; taskId: string | null }>`SELECT kind, task_id FROM threads WHERE id = ${threadId}`

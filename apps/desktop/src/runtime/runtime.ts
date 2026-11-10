@@ -16,6 +16,7 @@ import {
   Folders,
   Nudges,
   Secrets,
+  ToolServer,
   services,
   settledAmong,
   settling,
@@ -315,6 +316,8 @@ const program = Effect.gen(function* () {
   yield* Effect.logInfo('Startup profile').pipe(Effect.annotateLogs({ ...size, database_bytes: statSync(databaseIn(profile)).size }))
   isReady(context)
   parent.postMessage({ type: 'runtime-ready' })
+  // The ports the runtime listens on, which no canvas may reach (ADR-104).
+  parent.postMessage({ type: 'listening', ports: [Context.get(context, ToolServer).port] })
   yield* Effect.logInfo('Runtime ready').pipe(Effect.annotateLogs({ version: options.appVersion, pid: process.pid }))
   // What needs the person goes to the main process, which notifies them and keeps the Dock's count.
   yield* Effect.forkScoped(

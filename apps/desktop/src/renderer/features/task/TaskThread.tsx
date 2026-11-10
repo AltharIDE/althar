@@ -34,7 +34,7 @@ import { type Round as RoundModel, type RoundBlock, type Said, type Shown, type 
 import type { Block, StepResult } from '../../shared/thread'
 import { RuleReceipt } from '../../shared/RuleReceipt'
 import { SaidIn } from '../../shared/code/CodeHost'
-import { McpActs, PartView, ThreadBlocks } from '../../shared/ThreadBlocks'
+import { CanvasLines, McpActs, PartView, ThreadBlocks } from '../../shared/ThreadBlocks'
 import { WayOut } from '../../shared/WayOut'
 import { PublishedReport, ReviewReport } from './Reports'
 import { HelperWork } from './HelperWork'
@@ -253,6 +253,7 @@ const RoundView = memo(function RoundView({
           ))}
         </WorkLine>
         <McpActs parts={block.parts} />
+        <CanvasLines drawn={block.drawn} />
       </>
     )
   const report = block.report
@@ -338,6 +339,7 @@ const RoundView = memo(function RoundView({
         </>
       )}
       {pictures(block.shown.after)}
+      <CanvasLines drawn={block.drawn} />
       {block.failed !== null && (
         <>
           <AltharLine tone="warning">{block.failed.text}</AltharLine>

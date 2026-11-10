@@ -24,6 +24,7 @@ import { Live } from './Live'
 import { MachineLoad } from './MachineLoad'
 import { Overlaps } from './Overlaps'
 import { PageTools } from './PageTools'
+import { Canvases } from './Canvases'
 import { Situations } from './Situations'
 import { PlanUsage } from './PlanUsage'
 import { Permissions } from './Permissions'
@@ -180,6 +181,8 @@ export const layer = (options: RuntimeLayerOptions) => {
         SettingsTools.layer,
         // The page beside a conversation, read and driven by its lead and the coordinator (ADR-100).
         PageTools.layer,
+        // The project's canvases, drawn by its agents and commented on by the person (ADR-104).
+        Canvases.layer,
         MachineLoad.layer,
         Overlaps.layer,
         // A child that ended, and a call that waits while the person is away (Situations.ts).

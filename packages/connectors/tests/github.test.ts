@@ -252,22 +252,118 @@ describe('GitHub as a code host', () => {
         })
         assert.lengthOf(plain.sent.filter(enqueuing), 0)
       }
-      // Read, it says where it stands with the queue only when asked: out of it, and why the queue took it out.
+      // Read, it says where it stands with the queue only when asked: out of it, why the queue took it out, and the merge-group commit it judged.
+      const groupRun = (head_sha: string, number = 12) => ({
+        head_sha,
+        head_branch: `gh-readonly-queue/main/pr-${number}-abc`,
+        event: 'merge_group',
+        created_at: '2026-10-01T10:00:00Z',
+      })
       const reading = github([
         ['GET', `${REPO}/pulls/12`, { json: pull({ draft: false }) }],
-        ['POST', `${API}/graphql`, queue({ timelineItems: { nodes: [{ reason: 'failed_checks' }] } })],
+        ['POST', `${API}/graphql`, queue({ timelineItems: { nodes: [{ reason: 'failed_checks', beforeCommit: { oid: 'queue-sha' } }] } })],
+        ['GET', `${REPO}/actions/runs?event=merge_group&per_page=100`, { json: { workflow_runs: [groupRun('queue-sha')] } }],
       ])
       assert.notProperty(yield* reading.host.change(repository, 12), 'queued')
       assert.lengthOf(
         reading.sent.filter((request) => request.method === 'POST'),
         0,
       )
-      assert.deepInclude(yield* reading.host.change(repository, 12, { queue: true }), { queued: false, leftQueue: 'checks' })
+      assert.deepInclude(yield* reading.host.change(repository, 12, { queue: true }), {
+        queued: false,
+        leftQueue: 'checks',
+        queueSha: 'queue-sha',
+      })
+      // Without its before commit, a sendback still says why, with none named.
+      const unnamed = github([
+        ['GET', `${REPO}/pulls/12`, { json: pull({ draft: false }) }],
+        ['POST', `${API}/graphql`, queue({ timelineItems: { nodes: [{ reason: 'failed_checks' }] } })],
+        ['GET', `${REPO}/actions/runs?event=merge_group&per_page=100`, { json: { workflow_runs: [] } }],
+      ])
+      assert.deepInclude(yield* unnamed.host.change(repository, 12, { queue: true }), {
+        queued: false,
+        leftQueue: 'checks',
+        queueSha: null,
+      })
+      // In it, the merge-group commit is its entry's head; one not yet read has none named.
       const inIt = github([
+        ['GET', `${REPO}/pulls/12`, { json: pull({ draft: false }) }],
+        ['POST', `${API}/graphql`, queue({ isInMergeQueue: true, mergeQueueEntry: { headCommit: { oid: 'group-sha' } } })],
+      ])
+      assert.deepInclude(yield* inIt.host.change(repository, 12, { queue: true }), { queued: true, leftQueue: null, queueSha: 'group-sha' })
+      const unread = github([
         ['GET', `${REPO}/pulls/12`, { json: pull({ draft: false }) }],
         ['POST', `${API}/graphql`, queue({ isInMergeQueue: true })],
       ])
-      assert.deepInclude(yield* inIt.host.change(repository, 12, { queue: true }), { queued: true, leftQueue: null })
+      assert.deepInclude(yield* unread.host.change(repository, 12, { queue: true }), { queued: true, leftQueue: null, queueSha: null })
+      // While in it, the current entry wins over an older removal's commit.
+      const againQueued = github([
+        ['GET', `${REPO}/pulls/12`, { json: pull({ draft: false }) }],
+        [
+          'POST',
+          `${API}/graphql`,
+          queue({
+            isInMergeQueue: true,
+            mergeQueueEntry: { headCommit: { oid: 'current-group' } },
+            timelineItems: { nodes: [{ reason: 'failed_checks', beforeCommit: { oid: 'stale-group' } }] },
+          }),
+        ],
+      ])
+      assert.deepInclude(yield* againQueued.host.change(repository, 12, { queue: true }), { queued: true, queueSha: 'current-group' })
+      // A removal commit that is the pull request's own head isn't a queue build: the merge-group workflow runs name the build.
+      const fallback = github([
+        ['GET', `${REPO}/pulls/12`, { json: pull({ draft: false }) }],
+        ['POST', `${API}/graphql`, queue({ timelineItems: { nodes: [{ reason: 'failed_checks', beforeCommit: { oid: 'abc' } }] } })],
+        [
+          'GET',
+          `${REPO}/actions/runs?event=merge_group&per_page=100`,
+          { json: { workflow_runs: [groupRun('wrong-pr', 120), groupRun('group-sha')] } },
+        ],
+        ['GET', `${REPO}/commits/group-sha`, { json: { parents: [{ sha: 'base-sha' }, { sha: 'abc' }] } }],
+      ])
+      assert.deepInclude(yield* fallback.host.change(repository, 12, { queue: true }), {
+        queued: false,
+        leftQueue: 'checks',
+        queueSha: 'group-sha',
+      })
+      // Some entry heads are the PR head too. While queued, an older build from before this enqueue must not win.
+      const queuedHead = github([
+        ['GET', `${REPO}/pulls/12`, { json: pull({ draft: false }) }],
+        [
+          'POST',
+          `${API}/graphql`,
+          queue({ isInMergeQueue: true, mergeQueueEntry: { enqueuedAt: '2026-10-01T09:59:00Z', headCommit: { oid: 'abc' } } }),
+        ],
+        [
+          'GET',
+          `${REPO}/actions/runs?event=merge_group&per_page=100`,
+          { json: { workflow_runs: [{ ...groupRun('old-group'), created_at: '2026-10-01T09:00:00Z' }, groupRun('group-sha')] } },
+        ],
+        ['GET', `${REPO}/commits/group-sha`, { json: { parents: [{ sha: 'abc' }] } }],
+      ])
+      assert.deepInclude(yield* queuedHead.host.change(repository, 12, { queue: true }), { queued: true, queueSha: 'group-sha' })
+      const deniedBuild = github([
+        ['GET', `${REPO}/pulls/12`, { json: pull({ draft: false }) }],
+        ['POST', `${API}/graphql`, queue({ timelineItems: { nodes: [{ reason: 'failed_checks', beforeCommit: { oid: 'abc' } }] } })],
+        ['GET', `${REPO}/actions/runs?event=merge_group&per_page=100`, { status: 403, json: { message: 'Actions read denied' } }],
+      ])
+      const denied = yield* deniedBuild.host.change(repository, 12, { queue: true })
+      assert.isFalse(denied.queued)
+      assert.isNull(denied.queueSha)
+      assert.include(denied.queueError, '403')
+      assert.include(denied.queueError, 'Actions read denied')
+      // And where no run matches, none is named rather than the head.
+      const noMatch = github([
+        ['GET', `${REPO}/pulls/12`, { json: pull({ draft: false }) }],
+        ['POST', `${API}/graphql`, queue({ timelineItems: { nodes: [{ reason: 'failed_checks', beforeCommit: { oid: 'abc' } }] } })],
+        ['GET', `${REPO}/actions/runs?event=merge_group&per_page=100`, { json: { workflow_runs: [groupRun('other-sha')] } }],
+        ['GET', `${REPO}/commits/other-sha`, { json: { parents: [{ sha: 'base-sha' }] } }],
+      ])
+      assert.deepInclude(yield* noMatch.host.change(repository, 12, { queue: true }), {
+        queued: false,
+        leftQueue: 'checks',
+        queueSha: null,
+      })
       // A pull request GraphQL doesn't find, as REST did a moment before, on a branch known to have a queue, isn't taken for
       // one out of it.
       let found = true
@@ -630,6 +726,11 @@ describe('GitHub as a code host', () => {
       assert.deepStrictEqual(yield* host.checks(repository, 'abc'), [
         { id: 'status:3', name: 'ci/circle', state: 'passed', url: null, summary: null },
       ])
+      assert.deepInclude(yield* Effect.flip(host.checks(repository, 'abc', { strict: true })), {
+        reason: 'forbidden',
+        status: 403,
+        message: 'Resource not accessible by personal access token',
+      })
       // Anything else that keeps check runs from being read still fails the checks.
       const limited = github([
         [

@@ -422,13 +422,14 @@ const EVENTS: Readonly<Record<ReviewEvent, string>> = { approve: 'APPROVE', requ
 /** What GitHub answers a merge: whether it merged, and its commit. */
 const MergeAnswer = Schema.Struct({ merged: Schema.optional(Schema.Boolean), sha: Schema.optional(Schema.NullOr(Schema.String)) })
 
-/** Whether a pull request's target branch merges through a merge queue, whether it is in it, and why the queue last took it out. */
+/** Queue membership, the removal reason, and candidate commits. A removal's beforeCommit is not necessarily a merge-group build. */
 const QUEUE = `query($owner: String!, $name: String!, $number: Int!) {
   repository(owner: $owner, name: $name) {
     pullRequest(number: $number) {
       isMergeQueueEnabled
       isInMergeQueue
-      timelineItems(last: 1, itemTypes: [REMOVED_FROM_MERGE_QUEUE_EVENT]) { nodes { ... on RemovedFromMergeQueueEvent { reason } } }
+      mergeQueueEntry { enqueuedAt headCommit { oid } }
+      timelineItems(last: 1, itemTypes: [REMOVED_FROM_MERGE_QUEUE_EVENT]) { nodes { ... on RemovedFromMergeQueueEvent { reason createdAt beforeCommit { oid } } } }
     }
   }
 }`
@@ -440,8 +441,24 @@ const QueueAnswer = Schema.Struct({
         Schema.Struct({
           isMergeQueueEnabled: Schema.Boolean,
           isInMergeQueue: Schema.Boolean,
+          mergeQueueEntry: Schema.optional(
+            Schema.NullOr(
+              Schema.Struct({
+                enqueuedAt: Schema.optional(Schema.String),
+                headCommit: Schema.optional(Schema.NullOr(Schema.Struct({ oid: Schema.optional(Schema.NullOr(Schema.String)) }))),
+              }),
+            ),
+          ),
           timelineItems: Schema.Struct({
-            nodes: Schema.Array(Schema.NullOr(Schema.Struct({ reason: Schema.optional(Schema.NullOr(Schema.String)) }))),
+            nodes: Schema.Array(
+              Schema.NullOr(
+                Schema.Struct({
+                  reason: Schema.optional(Schema.NullOr(Schema.String)),
+                  createdAt: Schema.optional(Schema.String),
+                  beforeCommit: Schema.optional(Schema.NullOr(Schema.Struct({ oid: Schema.optional(Schema.NullOr(Schema.String)) }))),
+                }),
+              ),
+            ),
           }),
         }),
       ),
@@ -778,6 +795,8 @@ export const makeGitHub = (options: AdapterOptions): CodeHost & Tracker => {
   const listings = new Map<string, { readonly at: number; readonly list: ChangeList }>()
   /** Whether each `owner/name branch` merges through a merge queue, as GitHub last said, and when. */
   const queues = new Map<string, { readonly at: number; readonly enabled: boolean }>()
+  // Successful removal lookups are immutable, scoped to this connection, and bounded.
+  const removedBuilds = new Map<string, string>()
   const http = makeHttp({
     product,
     fetch: options.fetch,
@@ -844,6 +863,60 @@ export const makeGitHub = (options: AdapterOptions): CodeHost & Tracker => {
       queues.set(queueKey(repository, target), { at: yield* Clock.currentTimeMillis, enabled: pull.isMergeQueueEnabled })
       return pull
     })
+  /**
+   * Validate a removal's candidate against merge-group workflow runs for this
+   * PR's queue branch. Otherwise use the newest such build containing the PR
+   * head as a parent, no later than the removal. Never mistake its PR checks
+   * for the queue build. Bounded to the latest 100 merge-group workflow runs;
+   * a missing build or refused lookup is reported explicitly by the caller.
+   */
+  const mergeGroupShaOf = (
+    repository: Repository,
+    number: number,
+    target: string,
+    headSha: string | null,
+    candidate: string | null,
+    removedAt?: string,
+    enqueuedAt?: string,
+  ) =>
+    Effect.gen(function* () {
+      const runs = yield* http.json(
+        Schema.Struct({
+          workflow_runs: Schema.Array(
+            Schema.Struct({
+              head_sha: Schema.String,
+              head_branch: Schema.NullOr(Schema.String),
+              event: Schema.String,
+              created_at: Schema.String,
+            }),
+          ),
+        }),
+        'GET',
+        `${repo(repository)}/actions/runs?event=merge_group&per_page=100`,
+      )
+      const matching = runs.workflow_runs.filter(
+        (run) =>
+          run.event === 'merge_group' &&
+          run.head_branch?.replace(/^refs\/heads\//, '').startsWith(`gh-readonly-queue/${target}/pr-${number}-`) &&
+          (removedAt === undefined || run.created_at <= removedAt) &&
+          (enqueuedAt === undefined || run.created_at >= enqueuedAt) &&
+          run.head_sha !== headSha,
+      )
+      if (candidate !== null && matching.some((run) => run.head_sha === candidate)) return candidate
+      const seen = new Set<string>()
+      for (const run of matching.toSorted((a, b) => b.created_at.localeCompare(a.created_at))) {
+        if (seen.has(run.head_sha)) continue
+        seen.add(run.head_sha)
+        const parents = yield* http.json(
+          Schema.Struct({ parents: Schema.Array(Schema.Struct({ sha: Schema.String })) }),
+          'GET',
+          `${repo(repository)}/commits/${encodeURIComponent(run.head_sha)}`,
+        )
+        if (parents.parents.some((parent) => parent.sha === headSha || parent.sha === candidate)) return run.head_sha
+      }
+      return null as string | null
+    })
+
   /** Whether a commit is the merge GitHub's update-branch made from `from`: two parents, the first of them `from`. */
   const madeFrom = (repository: Repository, sha: string, from: string) =>
     Effect.map(
@@ -1341,7 +1414,43 @@ export const makeGitHub = (options: AdapterOptions): CodeHost & Tracker => {
         )
         if (queue === null) return change
         if (!queue.isMergeQueueEnabled) return outside
-        return { ...change, queued: queue.isInMergeQueue, leftQueue: leftQueueOf(queue.timelineItems.nodes.at(-1)?.reason) }
+        // The merge-group commit the queue judged: while in the queue, its current entry's head; after it left, the removal's before commit.
+        const removed = queue.timelineItems.nodes.at(-1)
+        const candidate = queue.isInMergeQueue ? (queue.mergeQueueEntry?.headCommit?.oid ?? null) : (removed?.beforeCommit?.oid ?? null)
+        // A candidate that is the pull request's own head isn't a queue build: fall back to the merge-group workflow runs, else none.
+        const key = `${repo(repository)} ${number} ${removed?.createdAt ?? ''} ${candidate ?? ''}`
+        const knownBuild = queue.isInMergeQueue ? undefined : removedBuilds.get(key)
+        const build =
+          knownBuild !== undefined
+            ? { queueSha: knownBuild, queueError: null }
+            : (queue.isInMergeQueue && candidate !== change.headSha) || (!queue.isInMergeQueue && leftQueueOf(removed?.reason) !== 'checks')
+              ? { queueSha: queue.isInMergeQueue ? candidate : null, queueError: null }
+              : yield* mergeGroupShaOf(
+                  repository,
+                  number,
+                  change.target,
+                  change.headSha,
+                  candidate,
+                  queue.isInMergeQueue ? undefined : removed?.createdAt,
+                  queue.isInMergeQueue ? queue.mergeQueueEntry?.enqueuedAt : undefined,
+                ).pipe(
+                  Effect.map((queueSha) => ({
+                    queueSha,
+                    queueError:
+                      queueSha === null ? 'No matching merge-group build was found among the latest 100 merge-group workflow runs.' : null,
+                  })),
+                  Effect.catch((error) =>
+                    Effect.succeed({
+                      queueSha: null,
+                      queueError: `GitHub couldn't identify the merge-group build (${error.reason}${error.status === undefined ? '' : `, ${error.status}`}): ${error.message}`,
+                    }),
+                  ),
+                )
+        if (!queue.isInMergeQueue && build.queueSha !== null) {
+          removedBuilds.set(key, build.queueSha)
+          if (removedBuilds.size > 100) removedBuilds.delete(removedBuilds.keys().next().value!)
+        }
+        return { ...change, queued: queue.isInMergeQueue, leftQueue: leftQueueOf(removed?.reason), ...build }
       }),
     listChanges: (repository, query) =>
       Effect.gen(function* () {
@@ -1558,7 +1667,7 @@ export const makeGitHub = (options: AdapterOptions): CodeHost & Tracker => {
         const after = yield* http.json(PullAnswer, 'GET', at)
         return { outcome: 'updated', head: after.head.sha === now.head.sha ? null : after.head.sha } satisfies BranchUpdate
       }),
-    checks: (repository, sha) =>
+    checks: (repository, sha, ask) =>
       Effect.gen(function* () {
         const at = `${repo(repository)}/commits/${encodeURIComponent(sha)}`
         // A fine-grained token is given no check runs, and GitHub refuses them: the commit's statuses are read alone.
@@ -1569,7 +1678,7 @@ export const makeGitHub = (options: AdapterOptions): CodeHost & Tracker => {
           })),
         ).pipe(
           Effect.catchIf(
-            (error) => error.reason === 'forbidden',
+            (error) => error.reason === 'forbidden' && ask?.strict !== true,
             () => Effect.succeed<ReadonlyArray<CheckRun>>([]),
           ),
         )

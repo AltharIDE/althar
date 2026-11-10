@@ -3,6 +3,7 @@ import { createContext, useContext, type ReactNode } from 'react'
 import type { ModelInfo } from '../../primitives/Model/Model'
 import type { StepState } from '../../foundations/vocabulary'
 import type { FoundCode } from '../Code/code'
+import type { CanvasRef } from '../Canvas/canvas'
 
 /*
  * What a thread's host offers the parts inside it: a side panel for reading
@@ -94,6 +95,10 @@ export interface ThreadShell {
   openLink?: (href: string) => void
   /** What a link says it does, for assistive technology, where `openLink` takes it. */
   linkNote?: string
+  /** Opens one of the project's canvases beside the conversation (ADR-104): a line naming it is pressed. */
+  openCanvas?: (canvas: CanvasRef) => void
+  /** The canvas open beside the conversation, by its id: its lines show it open. */
+  openedCanvas?: string | null
 }
 
 const ThreadShellContext = createContext<ThreadShell>({})
