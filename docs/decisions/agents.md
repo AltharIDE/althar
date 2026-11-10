@@ -33,6 +33,7 @@ Ten agents join: Claude Code, Codex, OpenCode, GitHub Copilot, Junie, Grok Build
   - `home.accounts: 'one'` keeps an agent whose sign-in every folder shares to its usual account.
   - `permissions.questions` marks tool calls on which a permission request is the model asking the person.
   - `cli.download` pins a download from its maker.
+  - `ownHelpers` says how its launch switches off its own helpers that would work in the background, and what it keeps within a turn, or why they stay on ([tasks § Helpers](tasks.md#helpers)).
 - **Four agents wait,** each for a reason that can change:
   - Cursor: its current build hasn't been probed signed in.
   - Devin: no mode asks before an edit.
@@ -99,10 +100,11 @@ People choose who does work by model, not by the tool that runs it. The coordina
 
 ## Keeping context small
 
-Every call reads the whole context again, so long sessions cost most of the usage. A lead is started afresh at large sizes and at breaks, and the person can compact any agent at once. The coordinator's own handover is in [coordinator.md](coordinator.md).
+Every call reads the whole context again, so long sessions cost most of the usage. A lead is started afresh only once its context is full, and the person can compact any agent at once. The coordinator's own handover is in [coordinator.md](coordinator.md).
 
 - **A lead is handed to a fresh session between turns, never during one.** It keeps the same agent, account, model and effort, and is briefed from the task as any agent taking it over is. The thread shows a quiet line ("Started Claude Code afresh.").
-- **When:** before a turn, once its context is past 200,000 tokens or 80% of its window, whichever comes first. At a break it happens past 80,000 tokens (`packages/runtime/src/handover.ts`). A break is when its last turn finished a step or round, or made its task a change, or when it has sat idle past its prompt cache's life (five minutes).
+- **When:** only once its context is full: before a turn, once it's past 200,000 tokens or 80% of its window, whichever comes first (`packages/runtime/src/handover.ts`). A break hands nothing over at any size, whether its last turn finished a step or round, made its task a change, or it sat idle past its prompt cache's life. Coming back to a task after a pause carries the conversation on, with all the lead knows of the work.
+- **The cost:** after a pause longer than its prompt cache's life, the next message reads the whole context at full price. The context ring shows the size, and Compact is one press away.
 - **It happens lazily,** only when the lead has a turn to take, so a finished task costs nothing.
 - **Some leads are left as they are,** and their agent compacts on its own:
   - one whose left-running processes are still going, since closing its session would stop them;
@@ -134,7 +136,7 @@ Althar shows how much of each plan's windows is left, and steers new work away f
 
 People asked what a task cost. What they want to know is how much of each subscription it took and how much of each top-up it spent, so Althar shows that and no total. Adding a share of a week to dollars means nothing.
 
-- **One line per account the task's agents ran on,** named as the plan gauge names it, with the models and their tokens under it, and its figure at the end. On a plan the figure is its share of the week ("~8% of week"). Paid per use, it is dollars. Nothing is shown per step or per round.
+- **One line per account the task's agents ran on,** named as the plan gauge names it, with the models and their tokens under it (each model's own tokens where several ran, as a lead's helpers do), and its figure at the end. On a plan the figure is its share of the week ("~8% of week"). Paid per use, it is dollars. Nothing is shown per step or per round.
 - **An agent that reaches several providers has a line for each** (OpenCode Zen, OpenCode Go), since each is paid its own way. ChatGPT through OpenCode shares Codex's week and is never counted twice.
 - **A dash says why on hover** where a figure can't be known.
 - **A task's line covers every thread of the task,** its reviews included, across handovers. The coordinator's covers its conversation since this computer's midnight.
@@ -145,3 +147,6 @@ People asked what a task cost. What they want to know is how much of each subscr
 ## Changes
 
 - 8 Nov 2026: written from the ADRs under Replaces.
+- 9 Nov 2026: a lead starts afresh only once its context is full, never at a break (a task is a conversation plus parts, [tasks](tasks.md#changing-parts)).
+- 10 Nov 2026: a lead's helpers, on any model it picks with `list_models`, each handed one of its task's changes ([tasks](tasks.md#helpers)).
+- 10 Nov 2026: each agent's own helpers that would work in the background are switched off at its launch, and a task's usage says each model's tokens (ADR-087, [tasks § Helpers](tasks.md#helpers)).

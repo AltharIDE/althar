@@ -133,6 +133,47 @@ export type CheckoutAsk = typeof CheckoutAsk.Type
 export const CheckoutAnswer = Schema.Literals(['wait', 'worktree', 'switch', 'from_branch'])
 export type CheckoutAnswer = typeof CheckoutAnswer.Type
 
+/** What moving a running task did: moved; waiting, and why; or asking first, about the checkout as it was seen. */
+/** A preset's parts (a task is a conversation plus parts, "Presets"): only a start; the parts are what a task has. */
+export const PresetParts = Schema.Struct({
+  workspace: Schema.Literals(['copy', 'worktree', 'local']),
+  checked: Schema.Literals(['before', 'after', 'none']),
+  end: Schema.Literals(['draft', 'ready', 'none']),
+  shelf: Schema.Literals(['scratch', 'board']),
+  lead: Schema.NullOr(Schema.String),
+  reviewer: Schema.NullOr(Schema.String),
+  brief: Schema.String,
+  reviews: Schema.optional(Schema.Boolean),
+})
+export type PresetParts = typeof PresetParts.Type
+
+/** A named set of starting parts: built in, or the person's own, kept to a project where `projectId` says. */
+export const Preset = Schema.Struct({
+  id: Schema.String,
+  name: Schema.String,
+  parts: PresetParts,
+  builtin: Schema.Boolean,
+  projectId: Schema.NullOr(Schema.String),
+  /** What it holds, in words. */
+  about: Schema.String,
+  /** The project it is kept to, by name; absent for every project. */
+  keptTo: Schema.optional(Schema.String),
+  /** The project of the task it was saved from, by name: the one it can be kept to. Absent for one it can't. */
+  from: Schema.optional(Schema.String),
+})
+export type Preset = typeof Preset.Type
+
+export const MoveOutcome = Schema.Union([
+  Schema.Struct({ kind: Schema.Literal('moved') }),
+  Schema.Struct({ kind: Schema.Literal('waits'), why: Schema.String }),
+  Schema.Struct({
+    kind: Schema.Literal('asks'),
+    ask: CheckoutAsk,
+    seen: Schema.Struct({ branch: Schema.NullOr(Schema.String), head: Schema.String }),
+  }),
+])
+export type MoveOutcome = typeof MoveOutcome.Type
+
 export const SignIn = Schema.Literals(['signed_in', 'signed_out', 'unknown'])
 export type SignIn = typeof SignIn.Type
 
@@ -426,14 +467,20 @@ export const PLANS_AND_REVIEWS: PlansAndReviews = { countdown: 25, rounds: 3, ro
  * project afterwards on its rules screen.
  */
 export const NewProjectDefaults = Schema.Struct({
-  /** What no rule keeps: allowed, judged by the coordinator, or asked about. */
-  permissions: Schema.Literals(['rules', 'coordinator', 'ask']),
   /** What happens to the work when an agent's account runs out. */
   usageLimit: Schema.Literals(['move', 'wait', 'ask']),
   /** Whether work goes on with an agent's next account before the limit applies. */
   rotateAccounts: Schema.Boolean,
   /** How a task ends when its plan doesn't say. */
   end: Schema.Literals(['draft', 'ready', 'none']),
+  /** Whether a lead's commits go up to its pull request on their own. */
+  pushCommits: Schema.Boolean,
+  /** Whether a task's screenshots are posted to its pull request on their own. */
+  postScreenshots: Schema.Boolean,
+  /** Whether a lead resolves a conflict with the default branch on its own. */
+  resolveConflicts: Schema.Boolean,
+  /** Whether a task's issue moves along with it. */
+  moveIssues: Schema.Boolean,
 })
 export type NewProjectDefaults = typeof NewProjectDefaults.Type
 
@@ -441,7 +488,15 @@ export type NewProjectDefaults = typeof NewProjectDefaults.Type
 export type NewProjectDefaultsChange = { readonly [Key in keyof NewProjectDefaults]?: NewProjectDefaults[Key] | undefined }
 
 /** What a project's rules are made with when the person has chosen nothing. */
-export const NEW_PROJECT_DEFAULTS: NewProjectDefaults = { permissions: 'rules', usageLimit: 'move', rotateAccounts: false, end: 'draft' }
+export const NEW_PROJECT_DEFAULTS: NewProjectDefaults = {
+  usageLimit: 'move',
+  rotateAccounts: false,
+  end: 'draft',
+  pushCommits: true,
+  postScreenshots: false,
+  resolveConflicts: true,
+  moveIssues: true,
+}
 
 /** How the review seal on a pull request looks: a round engraved stamp, a pressed wax seal, or a printer's colophon. */
 export const SealStyle = Schema.Literals(['ring', 'wax', 'colophon'])
@@ -455,7 +510,7 @@ export type ToolRole = typeof ToolRole.Type
 export const SyncedAgent = Schema.Literals(['claude', 'codex', 'opencode'])
 export type SyncedAgent = typeof SyncedAgent.Type
 
-/** Where a server or a skill was found: one of the person's agents, a repository of the project, a plugin, or Althar's catalog. */
+/** Where a server or a skill was found: one of the person's agents, a repository of the project, a plugin, or Althar's store (a skill added from GitHub). */
 export const ToolSource = Schema.Struct({
   from: Schema.Literals(['claude', 'codex', 'opencode', 'repository', 'plugin', 'althar']),
   /** The file or folder, as the person names it: ~/.claude.json, .mcp.json. */
@@ -467,17 +522,98 @@ export type ToolSource = typeof ToolSource.Type
 export const ToolHere = Schema.Literals(['in', 'added', 'missing', 'out', 'differs', 'cant'])
 export type ToolHere = typeof ToolHere.Type
 
-/** One of the person's MCP servers or skills, a row of Settings' table: where it was found, which roles get it, and how it stands in each agent. */
+/**
+ * Whether one of the person's agents is signed in to a server, as the agent's own command says (`claude mcp list`,
+ * `codex mcp list`, `opencode mcp list`): yes; no, which the person fixes with that agent's Sign in; none, for a
+ * server that needs none; unknown, where that agent says nothing of it or hasn't been asked yet.
+ */
+export const ToolSignIn = Schema.Literals(['yes', 'no', 'none', 'unknown'])
+export type ToolSignIn = typeof ToolSignIn.Type
+
+/** Why a server's last start failed, where it did, in the words the agent or the server gave. */
+export const ToolFailure = Schema.Struct({
+  /** The agent that said so; null where Althar's own check of the server did. */
+  agent: Schema.NullOr(SyncedAgent),
+  why: Schema.String,
+  at: Schema.String,
+})
+export type ToolFailure = typeof ToolFailure.Type
+
+/**
+ * One of the person's MCP servers or skills, a tile of Settings: where it was found, which roles get it and where,
+ * and how it stands in each agent. A repository's own (a project's `.mcp.json` or `.claude/skills`) has `repository`.
+ */
 export const ToolRow = Schema.Struct({
   name: Schema.String,
   /** What a server runs or calls; what a skill is for. */
   about: Schema.String,
   sources: Schema.Array(ToolSource),
-  /** The roles that get it, here: for every project, or the project asked about. */
+  /** The roles that get it, in every project. A repository's own is in no role until the person turns it on. */
   roles: Schema.Array(ToolRole),
   here: Schema.Record(SyncedAgent, ToolHere),
+  /** The projects whose marks the person pressed out: it isn't given in them, whatever the roles say. Empty for a repository's own. */
+  offIn: Schema.Array(Schema.String),
+  /** The project whose repository it is in; null for the person's own. */
+  repository: Schema.NullOr(Schema.String),
+  /** A server: whether it runs a command or opens an address. A skill: command. */
+  way: Schema.Literals(['command', 'address']),
+  /** A server: signed in or not, by agent, for the agents that run it. A skill: every agent unknown. */
+  signIn: Schema.Record(SyncedAgent, ToolSignIn),
+  /** A server: why its last start failed, while it has; null otherwise. */
+  failed: Schema.NullOr(ToolFailure),
+  /** A skill: where it lives, as the person names it (a folder, a plugin, Althar's store); a server: null. */
+  home: Schema.NullOr(Schema.String),
+  /** A skill added from GitHub through Althar: where it came from, and the commit it is at. */
+  from: Schema.NullOr(Schema.Struct({ repo: Schema.String, subpath: Schema.String, ref: Schema.String, sha: Schema.String })),
 })
 export type ToolRow = typeof ToolRow.Type
+
+/**
+ * One agent's own file, as it keeps a server: how it stands there, and its lines as that agent writes them. Lines
+ * Althar copied are shown as they are in the file; lines it keeps out, as it would write them, to be struck through.
+ * Values of env and headers that aren't references to a variable are masked.
+ */
+export const ToolFile = Schema.Struct({
+  agent: Schema.Literals(['claude', 'codex', 'opencode', 'repository']),
+  /** As the person names it: ~/.claude.json, ~/.codex/config.toml, .mcp.json. */
+  where: Schema.String,
+  /**
+   * yours: set up there by the person; copied: Althar added it; differs: it runs another way there; out: kept out of it;
+   * missing: not there; cant: Althar can't put it there.
+   */
+  state: Schema.Literals(['yours', 'copied', 'differs', 'out', 'missing', 'cant']),
+  lines: Schema.Array(Schema.String),
+  /** What it runs in this agent, in a line. */
+  runs: Schema.String,
+  /** Where Althar can't put it, why, in words. */
+  why: Schema.NullOr(Schema.String),
+  signIn: ToolSignIn,
+})
+export type ToolFile = typeof ToolFile.Type
+
+/** A server opened out: each agent's file as it keeps it, and what it exposes, where Althar's own check could read that. */
+export const ServerDetail = Schema.Struct({
+  name: Schema.String,
+  /** What it runs, in a line: its address or its command. */
+  runs: Schema.String,
+  files: Schema.Array(ToolFile),
+  /** How many tools it offers, from Althar's own check; null where that couldn't be read. */
+  tools: Schema.NullOr(Schema.Int),
+  /** Why there is no count, where there is none: it needs a sign-in, it didn't start, it isn't one Althar can ask. Null otherwise. */
+  toolsWhy: Schema.NullOr(Schema.String),
+})
+export type ServerDetail = typeof ServerDetail.Type
+
+/** A server the person adds: a name, and an address or a command. Values of `env` and `headers` may be `${VARIABLE}` references. */
+export const NewServer = Schema.Struct({
+  name: Schema.String,
+  url: Schema.optional(Schema.String),
+  command: Schema.optional(Schema.String),
+  args: Schema.optional(Schema.Array(Schema.String)),
+  env: Schema.optional(Schema.Record(Schema.String, Schema.String)),
+  headers: Schema.optional(Schema.Record(Schema.String, Schema.String)),
+})
+export type NewServer = typeof NewServer.Type
 
 /** Something sync can't do alone, which the person settles: under To settle, problems first. */
 export const SyncSettle = Schema.Union([
@@ -540,6 +676,10 @@ export const AgentTools = Schema.Struct({
   skills: Schema.Array(ToolRow),
   serverSync: SyncView,
   skillSync: SyncView,
+  /** Where each agent keeps its servers (a file) and its skills (a folder), as the person names them. */
+  places: Schema.Array(Schema.Struct({ agent: SyncedAgent, file: Schema.String, folder: Schema.String })),
+  /** When the agents' own checks last ran, for the sign-ins and failures the rows say; null before the first. */
+  checkedAt: Schema.NullOr(Schema.String),
 })
 export type AgentTools = typeof AgentTools.Type
 
@@ -554,6 +694,8 @@ export const AppSettings = Schema.Struct({
   agentsAtOnce: AgentsAtOnce,
   /** A review of the team's pull request posts itself once drafted, without asking; off unless the person turns it on. Outside ones always wait. */
   postTeamReviews: Schema.Boolean,
+  /** What "Run it" on code from outside the team does without asking: `ask` each time, its default, run `safe`ly, or trust it `full`y. */
+  runOutside: Schema.optional(Schema.Literals(['ask', 'safe', 'full'])),
   /** Every automation is paused: none starts until the person resumes them. Runs under way finish. */
   automationsPaused: Schema.Boolean,
   /** When finished tasks' folders go: `smart` unless the person chose otherwise. */
@@ -1294,6 +1436,21 @@ export const ChangeSummary = Schema.Struct({
   repository: Schema.String,
   /** Its repository's folder here, which its files' paths start with in a task of several; null where it isn't known. */
   slug: Schema.NullOr(Schema.String),
+  /**
+   * The change of the task it is the pull request of (a task is a conversation plus parts, "A task holds as many changes as
+   * it needs"): by its worktree's id, and its name where the task has several (null for its first, which the task's title
+   * names). Absent where Althar can't tell, as for one it was only told of. `below`, for one stacked on another of the
+   * task's changes whose pull request is still open, names that one (PR #714): Merge merges it first.
+   */
+  change: Schema.optional(
+    Schema.Struct({
+      id: Schema.String,
+      name: Schema.NullOr(Schema.String),
+      below: Schema.optional(Schema.String),
+      /** The change it waits for to merge, without building on its code: its failing checks wait with it. */
+      waitsFor: Schema.optional(Schema.String),
+    }),
+  ),
   additions: Schema.NullOr(Schema.Number),
   deletions: Schema.NullOr(Schema.Number),
   changedFiles: Schema.NullOr(Schema.Number),
@@ -1415,6 +1572,8 @@ const itemFields = {
    */
   model: Schema.optional(Schema.NullOr(Schema.String)),
   createdAt: Schema.String,
+  /** The turn it came in, by its delivery's id, where an agent's turn wrote it: what its line's time is read from (`TurnTime`). */
+  turn: Schema.optional(Schema.String),
 }
 
 /**
@@ -1704,6 +1863,32 @@ export const NoticeItem = Schema.Struct({
     ),
     /** A task the line is about, which it links to: one this task's lead started (ADR-097). */
     task: Schema.optional(Schema.Struct({ taskId: Schema.String, slug: Schema.String, title: Schema.String, threadId: Schema.String })),
+    /**
+     * A step of the work it marks, drawn as a stamped row of its own (a task is a conversation plus parts, "How it reads"): a
+     * change started, by its name and branch, and what it works toward where that isn't the task's.
+     */
+    step: Schema.optional(
+      Schema.Struct({
+        /** A change started, shipped, merged, kept together with another, or dropped; or a helper its lead started (ADR-087). */
+        kind: Schema.Literals(['new_change', 'shipped', 'merged', 'joined', 'dropped', 'helper']),
+        name: Schema.String,
+        /** Its branch; for one shipped or merged, its pull request as people say it (PR #714). */
+        branch: Schema.String,
+        /** What it works toward, where that isn't the task's: another change's branch it stacks on, or a branch of its own. */
+        toward: Schema.NullOr(Schema.String),
+        /** Who split the work: its lead or the coordinator on their own, or its lead's git; Keep them together and Drop it offer only then. */
+        by: Schema.optional(Schema.Literals(['lead', 'coordinator', 'git', 'person'])),
+        /** The change it waits for to merge, without building on its code. */
+        waits: Schema.optional(Schema.String),
+        /** A helper's own thread, which its row opens to in place: what it did, as it did it. */
+        thread: Schema.optional(Schema.String),
+      }),
+    ),
+    /**
+     * What the line offers to keep, in the coordinator's thread (a task is a conversation plus parts, "Presets"): parts the
+     * person set up twice, as a preset by that name, which its button saves.
+     */
+    offer: Schema.optional(Schema.Struct({ kind: Schema.Literal('preset'), name: Schema.String, parts: PresetParts })),
     /** For what a lead's agent could see: each skill, and whether it is the person's or the repository's. */
     skills: Schema.optional(
       Schema.Array(Schema.Struct({ name: Schema.String, path: Schema.String, from: Schema.Literals(['person', 'repository']) })),
@@ -1782,6 +1967,8 @@ export const StepResultItem = Schema.Struct({
     unverified: Schema.NullOr(Schema.Array(Schema.String)),
     /** For the lead's steps: its pull request's description, by the slug of the repository each is for, where it gave one. */
     descriptions: Schema.optional(Schema.Record(Schema.String, Schema.String)),
+    /** For a review after a merge: the pull request that merged, which it read, as its host names it. Absent for any other. */
+    afterMerge: Schema.optional(Schema.Struct({ url: Schema.String, words: Schema.String })),
     /** Who reported it, for a review. */
     agentId: Schema.NullOr(Schema.String),
     /**
@@ -1907,6 +2094,13 @@ export type Queued = typeof Queued.Type
  * Commits on a task's branch after its last pull request merged or closed,
  * in none yet: what Open a new pull request opens one with (ADR-034).
  */
+/** What waits on a task's branch for Ship: since when it's held, and how many commits wait, across its repositories. */
+export const HeldForShip = Schema.Struct({
+  since: Schema.String,
+  commits: Schema.Number,
+})
+export type HeldForShip = typeof HeldForShip.Type
+
 export const Unshipped = Schema.Struct({
   commits: Schema.Int,
   /** Lines they add and remove, all together. */
@@ -1982,6 +2176,11 @@ export const ReviewBrief = Schema.Struct({
    * person's to mark done or keep for later, as a quick task is (ADR-051).
    */
   waiting: Schema.optional(Schema.Boolean),
+  /**
+   * How far its code is trusted, once the person said Run it (a task is a conversation plus parts): `safe`, it runs offline
+   * with its install scripts off; `full`, as the team's code. Absent while its lead only reads.
+   */
+  trust: Schema.optional(Schema.Literals(['safe', 'full'])),
 })
 export type ReviewBrief = typeof ReviewBrief.Type
 
@@ -2045,6 +2244,18 @@ export type HeldForConnection = typeof HeldForConnection.Type
  * where it stands, its plan, the issue it came from, its pull request, the
  * step it is on, what its lead last reported, who leads it.
  */
+/** A task's review after a merge, as its card and header say it: which pull request, and where the review stands. */
+export const AfterMergeReview = Schema.Struct({
+  url: Schema.String,
+  /** The pull request, as its host names it: `#715`. */
+  words: Schema.String,
+  /** Under way, or what it found waits on the person. */
+  state: Schema.Literals(['running', 'found']),
+  /** How many it found, once it has. */
+  findings: Schema.Number,
+})
+export type AfterMergeReview = typeof AfterMergeReview.Type
+
 export const TaskCard = Schema.Struct({
   /** Open errands concerning this task, from durable records. */
   errands: Schema.optional(Schema.Array(Schema.String)),
@@ -2101,6 +2312,8 @@ export const TaskCard = Schema.Struct({
       agents: Schema.optional(Schema.Array(Schema.String)),
       /** Where it works (ADR-091); absent for a worktree, as a review's. */
       worksIn: Schema.optional(WorksIn),
+      /** The preset its parts are, as the card's kicker names it first (a task is a conversation plus parts): Change, Chat. */
+      preset: Schema.optional(Schema.String),
       /** Why it works where it does, in the coordinator's words, where that isn't the project's default; null otherwise. */
       worksInWhy: Schema.optional(Schema.NullOr(Schema.String)),
       /** The task working Local now, which it would wait for there; null where Local is free. */
@@ -2131,6 +2344,48 @@ export const TaskCard = Schema.Struct({
   earlier: Schema.optional(Schema.Array(ChangeSummary)),
   /** Commits after its last pull request merged or closed, in none yet; null or absent where there are none. */
   unshipped: Schema.optional(Schema.NullOr(Unshipped)),
+  /**
+   * What the person's turns with its lead committed after its plan waits on
+   * its branch for Ship, which reviews it and then sends it up (a task is a
+   * conversation plus parts, "A tweak waits for Ship"): since when, and how
+   * many commits. Absent while nothing is held, and from a runtime before it.
+   */
+  held: Schema.optional(HeldForShip),
+  /**
+   * When its lead answered a turn the person's words began after its plan, where they haven't had the task open since: it
+   * waits in Needs you until they do (a task is a conversation plus parts). Absent otherwise, and from a runtime before it.
+   */
+  replied: Schema.optional(Schema.String),
+  /**
+   * Its review after a merge (a task is a conversation plus parts, "After merge, in the same task"): the task's own reviewer
+   * reading a pull request of its that merged with something no review read, under way, or what it found, waiting on the
+   * person for Fix it or Leave it. Absent otherwise, and from a runtime before it.
+   */
+  afterMerge: Schema.optional(AfterMergeReview),
+  /** How many changes it holds, where it holds more than one (a task is a conversation plus parts); absent for one. */
+  changeCount: Schema.optional(Schema.Int),
+  /**
+   * Where each of its several changes stands, in the task's order (a task is a conversation plus parts, "The card keeps one
+   * fact"): what its one sentence counts and names the exception of, and the marks at its foot. Absent with one change.
+   */
+  changeMarks: Schema.optional(
+    Schema.Array(
+      Schema.Struct({
+        name: Schema.String,
+        stands: Schema.Literals(['unshipped', 'draft', 'checking', 'failing', 'ready', 'merged', 'closed']),
+      }),
+    ),
+  ),
+  /**
+   * A chat on Scratch (a task is a conversation plus parts, "Chats and Scratch"): off the board's lanes, listed by its latest
+   * exchange, unless something of it waits on the person. Absent for a task on the board.
+   */
+  scratch: Schema.optional(Schema.Boolean),
+  /**
+   * A chat's latest exchange, as Scratch lists it (a task is a conversation plus parts, "Chats and Scratch"): when, who said
+   * it, and its first line. Absent for a task on the board, and for a chat with nothing said yet.
+   */
+  latest: Schema.optional(Schema.Struct({ at: Schema.String, by: Schema.Literals(['person', 'lead']), said: Schema.String })),
   /** A change ready that built nothing: no commits on its branch and no pull request open or merged. Absent otherwise. */
   nothingBuilt: Schema.optional(Schema.Boolean),
   /**
@@ -2723,6 +2978,37 @@ export type ContextUse = typeof ContextUse.Type
  * agent that reaches several providers, each paid its own way (OpenCode), has
  * one for each provider its turns ran on.
  */
+/**
+ * Where a turn's time went, in milliseconds (a task is a conversation plus
+ * parts, "Where a turn's time goes"): waiting for a place among the agents at
+ * work here, starting its session or handing it over to a fresh one, and the
+ * agent's own work, of which the tools it ran are a part. Kept as the turn
+ * ends; a turn before Althar kept it has none.
+ */
+export const TurnTime = Schema.Struct({
+  /** The turn, by its delivery's id, as its items name it (`turn`). */
+  id: Schema.String,
+  place: Schema.Number,
+  session: Schema.Number,
+  /** How its session began, where it was its first turn: started for the work, or handed over to a fresh one; null otherwise. */
+  starting: Schema.NullOr(Schema.Literals(['start', 'handover'])),
+  work: Schema.Number,
+  tools: Schema.Number,
+  /** In a task of several changes, where its commits went: each change it committed to, by name, and how many. */
+  changes: Schema.optional(Schema.Array(Schema.Struct({ name: Schema.String, commits: Schema.Number }))),
+})
+export type TurnTime = typeof TurnTime.Type
+
+/** All a task's turns added up, its reviewers' too, as `TurnTime` counts them: what Outputs' Usage says it took. */
+export const TaskTime = Schema.Struct({
+  turns: Schema.Number,
+  place: Schema.Number,
+  session: Schema.Number,
+  work: Schema.Number,
+  tools: Schema.Number,
+})
+export type TaskTime = typeof TaskTime.Type
+
 export const AccountUse = Schema.Struct({
   accountId: Schema.String,
   agentId: Schema.String,
@@ -2742,6 +3028,8 @@ export const AccountUse = Schema.Struct({
   /** The models that ran on it, by id, in the order they first did. */
   models: Schema.Array(Schema.String),
   tokens: Schema.Number,
+  /** Its tokens by model, in the order the models first ran (ADR-087: a task's usage by model, its helpers' too). */
+  byModel: Schema.optional(Schema.Array(Schema.Struct({ model: Schema.String, tokens: Schema.Number }))),
   /** The provider within the agent these turns ran on, by id (OpenCode's `opencode`, Zen); absent for an agent with one. */
   provider: Schema.optional(Schema.String),
   /** Why there is no figure, where it can't be known: said on the figure, as its place stays quiet. */
@@ -3190,6 +3478,8 @@ export const GraphRound = Schema.Struct({
   /** Its run's id. */
   id: Schema.String,
   followUp: Schema.Boolean,
+  /** A Ship's run (a task is a conversation plus parts): the person shipped what waited, with no work step. Absent otherwise. */
+  ships: Schema.optional(Schema.Boolean),
   createdAt: Schema.String,
   endedAt: Schema.NullOr(Schema.String),
   /** What the person said that started it, for a follow-up: their message, or what the coordinator passed on. */
@@ -3197,6 +3487,20 @@ export const GraphRound = Schema.Struct({
   /** When a change to its steps added to them, if one did. */
   changedAt: Schema.NullOr(Schema.String),
   steps: Schema.Array(GraphStep),
+  /** The helpers its lead started in it (ADR-087), each a lane of its model's on the Graph face. Absent where none. */
+  helpers: Schema.optional(
+    Schema.Array(
+      Schema.Struct({
+        id: Schema.String,
+        name: Schema.String,
+        agentId: Schema.String,
+        model: Schema.NullOr(Schema.String),
+        state: Schema.Literals(['working', 'done', 'stopped', 'failed']),
+        startedAt: Schema.String,
+        endedAt: Schema.NullOr(Schema.String),
+      }),
+    ),
+  ),
 })
 export type GraphRound = typeof GraphRound.Type
 
@@ -3206,6 +3510,8 @@ export const ThreadSnapshot = Schema.Struct({
   cursor: Cursor,
   /** What the task used of each account its agents ran on, in every thread of it, its reviews' too (ADR-084). */
   usage: Schema.optional(Schema.Array(AccountUse)),
+  /** Where all its turns' time went, added up; absent where none kept it. */
+  time: Schema.optional(TaskTime),
   project: Schema.Struct({ id: Schema.String, name: Schema.String }),
   /** Where the project's repository is hosted, and whether Althar is connected there: what a pull request needs. */
   host: Schema.NullOr(Schema.Struct({ product: Product, name: Schema.String, webUrl: Schema.String, connected: Schema.Boolean })),
@@ -3225,6 +3531,43 @@ export const ThreadSnapshot = Schema.Struct({
     worktree: Schema.NullOr(Schema.String),
     /** It works Local, its folder the repository's own checkout here (ADR-091); absent for a worktree. */
     local: Schema.optional(Schema.Boolean),
+    /** A chat on Scratch, off the board's lanes (a task is a conversation plus parts); absent for a task on the board. */
+    scratch: Schema.optional(Schema.Boolean),
+    /**
+     * Its changes, where it holds several (a task is a conversation plus parts, "The header lists every change"): each by
+     * name and branch, the change it is stacked on or waits for, its pull request's link, whether commits wait for Ship on
+     * it, and the helper at work on it. Absent with one change, whose row is the worktree's and its pull request's.
+     */
+    lines: Schema.optional(
+      Schema.Array(
+        Schema.Struct({
+          id: Schema.String,
+          name: Schema.String,
+          branch: Schema.String,
+          stackedOn: Schema.NullOr(Schema.String),
+          waitsFor: Schema.NullOr(Schema.String),
+          url: Schema.NullOr(Schema.String),
+          waiting: Schema.Boolean,
+          helper: Schema.NullOr(Schema.String),
+        }),
+      ),
+    ),
+    /** The helpers its lead started that are at work (ADR-087): each by name, the change it works on, and its model. */
+    helpers: Schema.optional(
+      Schema.Array(Schema.Struct({ id: Schema.String, name: Schema.String, change: Schema.NullOr(Schema.String), model: Schema.String })),
+    ),
+    /**
+     * A move between a worktree and Local the person asked for that waits (a task is a conversation plus parts): where to,
+     * and why, in words. `seen`, where it asks first, about a checkout on a branch of the person's own: what it was on and at,
+     * which Switch it holds for.
+     */
+    moving: Schema.optional(
+      Schema.Struct({
+        to: WorksIn,
+        why: Schema.String,
+        seen: Schema.optional(Schema.Struct({ branch: Schema.NullOr(Schema.String), head: Schema.String })),
+      }),
+    ),
     /** Started Local, what it waits for before its lead starts, as its card says. */
     waitsForCheckout: Schema.optional(Schema.NullOr(CheckoutWait)),
     /** The branch its work goes into, where it isn't its repository's default (ADR-093): release/0.8.0; absent for the default. */
@@ -3290,6 +3633,12 @@ export const ThreadSnapshot = Schema.Struct({
     changes: Schema.Array(ChangeSummary),
     /** Commits after its last pull request merged or closed, in none yet: what Open a new pull request opens one with. */
     unshipped: Schema.optional(Schema.NullOr(Unshipped)),
+    /** What waits on its branch for Ship, as its card has it (`TaskCard.held`). Absent while nothing is held. */
+    held: Schema.optional(HeldForShip),
+    /** When its lead last answered the person unseen, as its card has it (`TaskCard.replied`). */
+    replied: Schema.optional(Schema.String),
+    /** Its review after a merge, under way or waiting on the person, as its card has it (`TaskCard.afterMerge`). */
+    afterMerge: Schema.optional(AfterMergeReview),
     /** A change ready that built nothing: no commits on its branch, no pull request open or merged. Absent otherwise. */
     nothingBuilt: Schema.optional(Schema.Boolean),
     /** The review of its run under way can still be skipped, as the person may (ADR-034). */
@@ -3336,6 +3685,8 @@ export const ThreadSnapshot = Schema.Struct({
   earlier: Schema.Boolean,
   /** Its steps' reports, on this page or not, newest two hundred: its finished view is read from the lead's, its graph from all. */
   reports: Schema.Array(ThreadItem),
+  /** Where the time went of each turn its page's items came in, that kept it; absent from a runtime before it. */
+  turns: Schema.optional(Schema.Array(TurnTime)),
 })
 export type ThreadSnapshot = typeof ThreadSnapshot.Type
 
@@ -3491,6 +3842,8 @@ export const CoordinatorSnapshot = Schema.Struct({
   ),
   items: Schema.Array(ThreadItem),
   earlier: Schema.Boolean,
+  /** Where the time went of each turn its page's items came in, that kept it; absent from a runtime before it. */
+  turns: Schema.optional(Schema.Array(TurnTime)),
   view: ConversationView,
   /** Where the project's repository is hosted, when its remote says, and whether Althar is connected to it there. */
   host: Schema.NullOr(Schema.Struct({ product: Product, name: Schema.String, webUrl: Schema.String, connected: Schema.Boolean })),
@@ -3746,8 +4099,8 @@ export const Load = Schema.Struct({
 })
 export type Load = typeof Load.Type
 
-/** Where an installed skill came from: the catalog Althar ships, GitHub, or a folder the person imported. */
-export const SkillSource = Schema.Literals(['althar-default', 'github', 'local'])
+/** Where an installed skill came from: GitHub, or a folder the person imported. Althar ships none of its own. */
+export const SkillSource = Schema.Literals(['github', 'local'])
 
 /** One installed skill, as the skills page lists it. */
 export const InstalledSkill = Schema.Struct({
@@ -3761,11 +4114,9 @@ export const InstalledSkill = Schema.Struct({
   ref: Schema.NullOr(Schema.String),
   sha: Schema.NullOr(Schema.String),
   treeHash: Schema.String,
-  review: Schema.Literals(['not-reviewed', 'reviewed', 'default']),
+  review: Schema.Literals(['not-reviewed', 'reviewed']),
   /** Whether later runs are given it. */
   active: Schema.Boolean,
-  /** What a harness must be able to do to be given it: `subagents`. */
-  needs: Schema.Array(Schema.String),
   /** Whether it has an earlier version to go back to. */
   canRollBack: Schema.Boolean,
   /**
@@ -3776,10 +4127,9 @@ export const InstalledSkill = Schema.Struct({
 })
 export type InstalledSkill = typeof InstalledSkill.Type
 
-/** The skills store: off where the runtime has none; the catalog revision it was seeded from. */
+/** The skills store: off where the runtime has none. */
 export const SkillList = Schema.Struct({
   enabled: Schema.Boolean,
-  catalogRevision: Schema.NullOr(Schema.String),
   skills: Schema.Array(InstalledSkill),
 })
 export type SkillList = typeof SkillList.Type
@@ -3813,7 +4163,7 @@ export const SkillReviewCard = Schema.Struct({
     Schema.Struct({
       source: SkillSource,
       treeHash: Schema.String,
-      review: Schema.Literals(['not-reviewed', 'reviewed', 'default']),
+      review: Schema.Literals(['not-reviewed', 'reviewed']),
       active: Schema.Boolean,
       repo: Schema.optional(Schema.String),
       subpath: Schema.optional(Schema.String),
@@ -4240,9 +4590,11 @@ export const Api = RpcGroup.make(
   /** Switches one of an agent's models off, or on again: one switched off is never planned, and no picker offers it. */
   command('SetModelBlocked', { agentId: Schema.String, model: Schema.String, blocked: Schema.Boolean }, Schema.Void),
   call('GetSettings', {}, AppSettings),
+  /** The presets the person has, in a project where one is named: built in, then their own. */
+  call('ListPresets', { projectId: Schema.optional(Schema.String) }, Schema.Array(Preset)),
   /** The person's MCP servers and skills, which roles get each, for every project or one, and how sync stands (ADR-097). */
   call('GetAgentTools', { projectId: Schema.NullOr(Schema.String) }, AgentTools),
-  /** Which roles get one of the person's servers or skills: for every project, or for one. */
+  /** Which roles get one of the person's servers or skills in every project; `repository` names the project whose own it is. A skill added from GitHub is on while any role gets it. */
   command(
     'SetToolRoles',
     {
@@ -4250,9 +4602,24 @@ export const Api = RpcGroup.make(
       name: Schema.String,
       roles: Schema.Array(ToolRole),
       projectId: Schema.NullOr(Schema.String),
+      repository: Schema.optional(Schema.NullOr(Schema.String)),
     },
     Schema.Void,
   ),
+  /** One project's mark pressed out or in on a server or skill: out, it isn't given in that project; in, it goes by the roles again. */
+  command(
+    'SetToolInProject',
+    { kind: Schema.Literals(['server', 'skill']), name: Schema.String, projectId: Schema.String, on: Schema.Boolean },
+    Schema.Void,
+  ),
+  /** A server opened out: each agent's file as it keeps it, and its tools counted by Althar's own check. May take a few seconds. */
+  call('GetServerDetail', { name: Schema.String, repository: Schema.NullOr(Schema.String) }, ServerDetail),
+  /** Asks each of the person's agents, through its own command, how each server stands: signed in, or why it failed to start. */
+  command('CheckServers', {}, Schema.Void),
+  /** Adds a server to each of the agents listed, in its own file, as the person's own there. Refused where the name is taken in one of them. */
+  command('AddServer', { server: NewServer, agents: Schema.Array(SyncedAgent) }, Schema.Void),
+  /** Takes a server out of every one of the agents' files that has it, and out of what sync keeps for it. */
+  command('RemoveServer', { name: Schema.String }, Schema.Void),
   /** Turns a sync switch on, or off with what it added left in or taken back out. */
   command('SetToolSync', { kind: Schema.Literals(['server', 'skill']), on: Schema.Boolean, takeBack: Schema.Boolean }, Schema.Void),
   /** Keeps a server or a skill out of one agent (taken back out where sync added it), or puts it back. */
@@ -4275,6 +4642,53 @@ export const Api = RpcGroup.make(
   command('SetCoAuthor', { on: Schema.Boolean }, Schema.Void),
   /** Whether a review of the person's team's pull request posts itself once drafted; an outside one always waits. */
   command('SetPostTeamReviews', { on: Schema.Boolean }, Schema.Void),
+  /** What "Run it" on code from outside the team does without asking: ask each time, run safely, or trust it fully. */
+  command('SetRunOutside', { to: Schema.Literals(['ask', 'safe', 'full']) }, Schema.Void),
+  /**
+   * Saves a preset: a task's parts, team and first lines of its brief (Save as preset), or the parts the coordinator offered;
+   * kept to the task's project with `projectOnly`. Its name, as kept.
+   */
+  command(
+    'SavePreset',
+    {
+      name: Schema.String,
+      taskId: Schema.optional(Schema.String),
+      parts: Schema.optional(PresetParts),
+      projectOnly: Schema.optional(Schema.Boolean),
+    },
+    Schema.Struct({ name: Schema.String }),
+  ),
+  /** Removes one of the person's presets; a built-in one stays. */
+  command('RemovePreset', { id: Schema.String }, Schema.Void),
+  /** Edits one of the person's presets, from Settings: its name, its parts, and whether it is kept to its task's project. */
+  command(
+    'EditPreset',
+    { id: Schema.String, name: Schema.String, parts: PresetParts, projectOnly: Schema.optional(Schema.Boolean) },
+    Schema.Void,
+  ),
+  /**
+   * Picks another preset for a plan before it starts (a task is a conversation plus parts, "How a task starts"), by its id or
+   * name: the plan's parts change to match. The preset's name.
+   */
+  command('ApplyPreset', { planId: Schema.String, preset: Schema.String }, Schema.String),
+  /**
+   * "Run it" on the pull request a review task reviews, as the person said (a task is a conversation plus parts): the team's
+   * code is trusted fully; an outside author's runs as `how` says, else as their setting answers, else they are asked
+   * (`asks`). What it did, in words.
+   */
+  command(
+    'RunIt',
+    { taskId: Schema.String, how: Schema.optional(Schema.Literals(['safe', 'full'])) },
+    Schema.Union([
+      Schema.Struct({ kind: Schema.Literal('ran'), trust: Schema.Literals(['safe', 'full']), said: Schema.String }),
+      Schema.Struct({ kind: Schema.Literal('asks') }),
+    ]),
+  ),
+  /**
+   * Stop running it (a task is a conversation plus parts, "Access moving back"): what its lead started of the pull request
+   * stops, its copy is read only again, and its lead starts afresh as a reader. What it did, in words.
+   */
+  command('StopRunning', { taskId: Schema.String }, Schema.String),
   /** Whether a pull request Althar opens says how its change was reviewed: the seal and the folded review. */
   command('SetReviewSeal', { on: Schema.Boolean }, Schema.Void),
   /** How the review seal looks. */
@@ -4347,10 +4761,13 @@ export const Api = RpcGroup.make(
   command(
     'SetNewProjectDefaults',
     {
-      permissions: Schema.optional(NewProjectDefaults.fields.permissions),
       usageLimit: Schema.optional(NewProjectDefaults.fields.usageLimit),
       rotateAccounts: Schema.optional(NewProjectDefaults.fields.rotateAccounts),
       end: Schema.optional(NewProjectDefaults.fields.end),
+      pushCommits: Schema.optional(NewProjectDefaults.fields.pushCommits),
+      postScreenshots: Schema.optional(NewProjectDefaults.fields.postScreenshots),
+      resolveConflicts: Schema.optional(NewProjectDefaults.fields.resolveConflicts),
+      moveIssues: Schema.optional(NewProjectDefaults.fields.moveIssues),
     },
     Schema.Void,
   ),
@@ -4518,6 +4935,39 @@ export const Api = RpcGroup.make(
   command('AnswerQuestion', { attentionId: Schema.String, answers: Schema.Record(Schema.String, FieldAnswer) }, Schema.Void),
   /** The person's answer to what Althar asked before a Local task takes a checkout (ADR-091). */
   command('AnswerCheckout', { attentionId: Schema.String, answer: CheckoutAnswer }, Schema.Void),
+  /**
+   * Moves a running task between a worktree and Local, between its lead's turns (a task is a conversation plus parts): moved
+   * at once, or waiting, and why, tried again until it can; or asking first, about a checkout on a branch of the person's own,
+   * which `consent`, what they were shown, answers.
+   */
+  command(
+    'MoveTask',
+    {
+      taskId: Schema.String,
+      to: WorksIn,
+      change: Schema.optional(Schema.NullOr(Schema.String)),
+      consent: Schema.optional(Schema.Struct({ branch: Schema.NullOr(Schema.String), head: Schema.String })),
+    },
+    MoveOutcome,
+  ),
+  /** Calls off a move that waits: the task stays where it works. */
+  command('DropMove', { taskId: Schema.String }, Schema.Void),
+  /**
+   * Keep them together: carries one change's commits onto another of the task's, before either ships, and its folder goes;
+   * its branch stays (a task is a conversation plus parts). Into the task's first change unless `into` names one.
+   */
+  command('JoinChanges', { taskId: Schema.String, change: Schema.String, into: Schema.optional(Schema.String) }, Schema.Void),
+  /** Drop it: a change's folder goes, after what it hadn't committed is; its branch, and any pull request, stay. */
+  command('DropChange', { taskId: Schema.String, change: Schema.String }, Schema.Void),
+  /** Stops a helper the task's lead started, by its id (ADR-087): what it had said stays on its thread. */
+  command('StopHelper', { taskId: Schema.String, helper: Schema.String }, Schema.Void),
+  /** Puts a task on Scratch, or on the board with null (a task is a conversation plus parts, "Chats and Scratch"). */
+  command('ShelveTask', { taskId: Schema.String, shelf: Schema.NullOr(Schema.Literal('scratch')) }, Schema.Void),
+  /**
+   * Points a running task at another branch to work toward, or its default with null (a task is a conversation plus parts):
+   * rebased where nothing is pushed, else onto a fresh branch whose pull request opens into it. What it did, in words.
+   */
+  command('WorkToward', { taskId: Schema.String, toward: Schema.NullOr(Schema.String) }, Schema.Array(Schema.String)),
   /** The person's answer to a permission; with `always`, it is also kept in the project's rules by that scope, one of those offered. */
   command(
     'Answer',
@@ -4678,11 +5128,43 @@ export const Api = RpcGroup.make(
   /** Skips the review of the task's run under way: a review under way stops, and work whose lead is done is ready (ADR-034). */
   command('SkipReview', { taskId: Schema.String }, Schema.Void),
   /**
+   * Ships what waits on the task's branch, as the person said (a task is a
+   * conversation plus parts, "A tweak waits for Ship"): its review first,
+   * where its plan has one before the work ships, over everything since the
+   * last; then its commits go up. Refused while the task is at work, or
+   * where nothing waits (`ShipRefused`).
+   */
+  // A change named ships alone, with what waits beneath it in its stack; none, every change waiting, the bottom of a stack first.
+  command('Ship', { taskId: Schema.String, change: Schema.optional(Schema.String) }, Schema.Void),
+  /**
+   * Fix it, on what a review after a merge found (a task is a conversation
+   * plus parts, "After merge, in the same task"): the findings go to the
+   * task's lead as the person's word, and once its turn is over its fix
+   * ships as a new pull request after the merged one. `url` names the merged
+   * pull request where the task has several waiting; the latest otherwise.
+   */
+  command('FixAfterMerge', { taskId: Schema.String, url: Schema.optional(Schema.String) }, Schema.Void),
+  /** Leave it, on what a review after a merge found: the findings close, and stay in the thread. */
+  command('LeaveAfterMerge', { taskId: Schema.String, url: Schema.optional(Schema.String) }, Schema.Void),
+  /**
    * Merges the task's pull request at the head the person saw, because they
    * said to; a draft is marked ready first. A pull request that moved on
-   * since isn't merged. Agents never merge.
+   * since isn't merged. Agents never merge. With commits not shipped (a task
+   * is a conversation plus parts), `how` says which of the two the person
+   * pressed: `review`, Review and merge, one review of what waits, then it
+   * goes up and merges; `now`, Merge now, up and merged at once, reviewed
+   * after the merge where the task has a reviewer.
    */
-  command('Merge', { taskId: Schema.String, head: Schema.String, url: Schema.optional(Schema.String) }, Schema.Void),
+  command(
+    'Merge',
+    {
+      taskId: Schema.String,
+      head: Schema.String,
+      url: Schema.optional(Schema.String),
+      how: Schema.optional(Schema.Literals(['review', 'now'])),
+    },
+    Schema.Void,
+  ),
   /**
    * Merges a task without a pull request into each of its repositories'
    * default branches on this Mac, up to the commit the person saw in each:
@@ -4837,7 +5319,7 @@ export const Api = RpcGroup.make(
   command('StopLaunch', { id: Schema.String }, Schema.Void),
   /** Clears a run that ended by itself from the list. */
   command('ClearLaunch', { id: Schema.String }, Schema.Void),
-  /** The skills a task's lead is given, from the catalog Althar ships and what the person installed. */
+  /** The skills a task's lead is given: what the person added from GitHub and turned on. */
   call('ListSkills', {}, SkillList),
   /** The skill folders in a GitHub repository (a URL or `owner/name`), at the ref given or its default branch. */
   call('FindSkills', { source: Schema.String, ref: Schema.optional(Schema.String) }, SkillsFound),
@@ -4861,8 +5343,6 @@ export const Api = RpcGroup.make(
   call('CheckSkillUpdates', {}, Schema.Array(SkillUpdate)),
   /** Puts a skill back to the version before its last update. */
   command('RollBackSkill', { id: Schema.String }, InstalledSkill),
-  /** Turns a skill on or off for later runs. */
-  command('SetSkillActive', { id: Schema.String, active: Schema.Boolean }, InstalledSkill),
   /** Removes a skill the person installed; one Althar ships can only be turned off. */
   command('UninstallSkill', { id: Schema.String }, Schema.Void),
   /** What changes after `since`, or from now without it. */

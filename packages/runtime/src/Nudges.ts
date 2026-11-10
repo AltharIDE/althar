@@ -148,7 +148,7 @@ export class Nudges extends Context.Service<
         // and no agent of its is starting or mid-turn.
         const ready = yield* sql<{ taskId: string; threadId: string; title: string; review: string | null; latest: string | null }>`
           SELECT k.id AS task_id, t.id AS thread_id, k.title,
-            (SELECT s.id FROM threads s WHERE s.task_id = k.id AND s.kind = 'step' LIMIT 1) AS review,
+            (SELECT s.id FROM threads s WHERE s.task_id = k.id AND s.kind = 'step' AND s.node_key = 'review' LIMIT 1) AS review,
             (SELECT i.content FROM thread_items i WHERE i.thread_id = t.id AND i.kind = 'step_result'
               AND json_extract(i.content, '$.step') IN ('implement', 'settle') ORDER BY i.sequence DESC LIMIT 1) AS latest
           FROM tasks k

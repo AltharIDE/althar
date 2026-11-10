@@ -45,6 +45,10 @@ its installs, builds and tests easily takes several GB and many cores.
 - **These count:** a task's lead while a step of its run is under way, while
   it resolves a conflict or fixes checks, or while it is in a turn. A task's
   reviewer counts while a review is under way, or while it is in a turn.
+  Each of a lead's helpers takes a place of its own while it starts or is in
+  a turn, apart from its lead's and its reviewer's: four of a task's at
+  once, the rest waiting their turn whatever is free ([tasks §
+  Helpers](tasks.md#helpers)).
 - **These don't count:** the coordinator, the permission judge, and the runs
   Althar makes itself (`run_project`). They are light or the person's own, and
   counting the coordinator would let a task waiting on its plan deadlock the
@@ -292,3 +296,4 @@ Althar's work is the cause, and which task.
 ## Changes
 
 - 8 Nov 2026: written from the ADRs under Replaces.
+- 10 Nov 2026: a lead's helpers each take a place of their own, four of a task's at once (ADR-087, [tasks § Helpers](tasks.md#helpers)).

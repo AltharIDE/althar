@@ -168,6 +168,18 @@ describe('the board’s lanes', () => {
     expect(yoursOf(lanes)).toBe(3)
   })
 
+  it('keeps chats on Scratch off the lanes, until they settle', () => {
+    const chat = task({ taskId: 't9', threadId: 'th9', title: 'How does retry work?', slug: 'how-retry', phase: 'ready', scratch: true })
+    const working = task({ taskId: 't10', threadId: 'th10', title: 'Looking', slug: 'looking', phase: 'running', scratch: true })
+    const lanes = lanesOf(board({ tasks: [...board().tasks, chat, working] }))
+    expect(lanes.scratch.map((work) => work.taskId).toSorted()).toEqual(['t10', 't9'])
+    expect(lanes.ready.map((work) => work.taskId)).not.toContain('t9')
+    expect(lanes.running.map((work) => work.taskId)).not.toContain('t10')
+    // Settled, a chat leaves Scratch.
+    const cleared = lanesOf(board({ tasks: [...board().tasks, { ...chat, phase: 'settled', settledAt: '2026-10-01T10:00:00.000Z' }] }))
+    expect(cleared.scratch).toEqual([])
+  })
+
   it('keeps a task only drafted off the board until its plan comes', () => {
     const drafted = task({
       taskId: 't8',

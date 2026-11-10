@@ -1,4 +1,4 @@
-import { type ComponentProps, Fragment, memo, type ReactNode, useCallback, useLayoutEffect, useRef } from 'react'
+import { type ComponentProps, Fragment, memo, type ReactNode, useCallback, useLayoutEffect, useRef, useState } from 'react'
 
 import {
   AltharLine,
@@ -16,6 +16,7 @@ import {
   Thinking,
   ThreadDivider,
   WorkedFor,
+  WorkStep as StepRow,
   WorkLine,
   WorkNote,
   WorkNow,
@@ -36,8 +37,53 @@ import { SaidIn } from '../../shared/code/CodeHost'
 import { McpActs, PartView, ThreadBlocks } from '../../shared/ThreadBlocks'
 import { WayOut } from '../../shared/WayOut'
 import { PublishedReport, ReviewReport } from './Reports'
+import { HelperWork } from './HelperWork'
 import s from './TaskThread.module.css'
+import { duration, lineOf, spentWords } from '../../shared/turnTime'
 
+/** A helper's row in its lead's thread: who and where, opening in place to what it does (HelperWork). */
+function HelperRow({
+  id,
+  step,
+}: {
+  id: string
+  step: { readonly name: string; readonly branch: string; readonly thread?: string | undefined }
+}) {
+  const [open, setOpen] = useState(false)
+  const thread = step.thread
+  return (
+    <>
+      <StepRow
+        data-item={id}
+        stamp={workStepText.helper}
+        title={`${workStepText.helper} · ${step.name}, ${step.branch}`}
+        {...(thread === undefined
+          ? {}
+          : { action: { label: open ? workStepText.hideWork : workStepText.seeWork, onPress: () => setOpen(!open) } })}
+      >
+        <strong>{step.name}</strong>, {step.branch}
+      </StepRow>
+      {open && thread !== undefined && <HelperWork threadId={thread} />}
+    </>
+  )
+}
+
+/** A step of the work's row (a task is a conversation plus parts): its stamp, and the whole of it on hover. */
+export const workStepText = {
+  newChange: 'New change',
+  shipped: 'Shipped',
+  merged: 'Merged',
+  joined: 'Kept together',
+  dropped: 'Dropped',
+  helper: 'Helper',
+  seeWork: 'See its work',
+  hideWork: 'Hide its work',
+  keepTogether: 'Keep them together',
+  dropIt: 'Drop it',
+  whole: (name: string, branch: string, toward: string | null) =>
+    `New change · ${name}, on ${branch}${toward === null ? '' : `, into ${toward}`}`,
+  waits: (name: string) => `, waits for ${name} to merge`,
+}
 /*
  * A task's thread in rounds (shared/rounds.ts, ADR-042), as the kit draws
  * them: each ask, then its lead's acknowledgement, the line of its work and
@@ -78,6 +124,10 @@ export interface TaskThreadProps extends Shared {
   readonly settledOf?: (review: string) => string | undefined
   /** A review running now, by who and for how long: a line at the thread's end. */
   readonly reviewing?: { readonly model: ModelInfo; readonly took: string } | null
+  /** A step of the work's one way on, where it has one: Keep them together on a change its lead split, Drop it on one its git made. */
+  readonly stepAction?: (
+    step: Extract<RoundBlock, { kind: 'work_step' }>['step'],
+  ) => { readonly label: string; readonly onPress: () => void } | undefined
 }
 
 /** One step of a round's work, as its header opens to it. */
@@ -193,7 +243,11 @@ const RoundView = memo(function RoundView({
   )
     return (
       <>
-        <WorkLine who={model} took={work.took} summary={work.counts}>
+        <WorkLine
+          who={model}
+          took={work.spent === null ? work.took : duration(work.spent.total)}
+          summary={[work.counts, ...(work.spent === null ? [] : [lineOf(work.spent) ?? ''])].filter((words) => words !== '').join(' · ')}
+        >
           {work.steps.map((step) => (
             <StepView key={step.id} step={step} threadId={threadId} worktree={worktree} />
           ))}
@@ -241,7 +295,9 @@ const RoundView = memo(function RoundView({
     <Round model={model} at={block.at} {...(copy === undefined ? {} : { copy })} {...(report === null ? {} : { 'data-item': report.id })}>
       {work !== null && (
         <WorkedFor
-          took={work.took}
+          took={work.spent === null ? work.took : duration(work.spent.total)}
+          {...(work.spent === null ? {} : { spent: spentWords(work.spent) })}
+          {...(work.spent === null || lineOf(work.spent) === undefined ? {} : { most: lineOf(work.spent) })}
           live={work.live && !block.answered}
           {...(onTheWay.length === 0
             ? {}
@@ -362,7 +418,7 @@ function Situation({
   )
 }
 
-export function TaskThread({ rounds, versionOf, onOpenTask, settledOf, reviewing = null, ...shared }: TaskThreadProps) {
+export function TaskThread({ rounds, versionOf, onOpenTask, settledOf, reviewing = null, stepAction, ...shared }: TaskThreadProps) {
   const { threadId, worktree = null, openFile, session, project, onTryAgain, onCompact, onSignIn } = shared
   const named = useModelNames()
   // A round on the model its own turn ran, as the runtime recorded it; an older one without, on the thread's current
@@ -455,6 +511,45 @@ export function TaskThread({ rounds, versionOf, onOpenTask, settledOf, reviewing
             {block.text}
           </ThreadDivider>
         )
+      case 'work_step': {
+        // A step of the work: a change started, its name in ink, its branch as code, and what it works toward where that isn't
+        // the task's; shipped or merged, with its pull request; kept together with another, or dropped.
+        const { step } = block
+        const action = stepAction?.(step)
+        // A helper its lead started: its row opens in place to its work (ADR-087).
+        if (step.kind === 'helper') return <HelperRow key={block.id} id={block.id} step={step} />
+        if (step.kind !== 'new_change')
+          return (
+            <StepRow
+              key={block.id}
+              data-item={block.id}
+              stamp={workStepText[step.kind]}
+              tone={step.kind === 'shipped' || step.kind === 'merged' ? 'done' : 'new'}
+              title={`${workStepText[step.kind]} · ${step.name}, ${step.branch}`}
+            >
+              <strong>{step.name}</strong>
+              {step.kind === 'joined' ? ', onto ' : step.kind === 'dropped' ? ', its branch stays: ' : ', '}
+              <code>{step.branch}</code>
+            </StepRow>
+          )
+        return (
+          <StepRow
+            key={block.id}
+            data-item={block.id}
+            stamp={workStepText.newChange}
+            title={`${workStepText.whole(step.name, step.branch, step.toward)}${step.waits === undefined ? '' : workStepText.waits(step.waits)}`}
+            {...(action === undefined ? {} : { action })}
+          >
+            <strong>{step.name}</strong>, on <code>{step.branch}</code>
+            {step.toward === null ? null : (
+              <>
+                , into <code>{step.toward}</code>
+              </>
+            )}
+            {step.waits === undefined ? null : workStepText.waits(step.waits)}
+          </StepRow>
+        )
+      }
       case 'skills':
         return <SkillsSeen key={block.id} title={block.title} skills={block.skills} data-item={block.id} />
       case 'verdict': {

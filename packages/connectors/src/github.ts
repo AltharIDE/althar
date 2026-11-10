@@ -1490,6 +1490,7 @@ export const makeGitHub = (options: AdapterOptions): CodeHost & Tracker => {
         http.json(PullAnswer, 'PATCH', `${repo(repository)}/pulls/${change.number}`, {
           ...(edit.title === undefined ? {} : { title: edit.title }),
           ...(edit.body === undefined ? {} : { body: edit.body }),
+          ...(edit.base === undefined ? {} : { base: edit.base }),
         }),
         changeOf,
       ),

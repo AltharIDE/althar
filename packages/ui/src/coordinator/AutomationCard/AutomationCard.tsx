@@ -98,6 +98,8 @@ export interface AutomationCardText {
   hideLimits: string
   tryOnce: string
   turnOn: string
+  /** The button on a changed card: the automation exists, so it is updated. */
+  update: string
   undo: string
   open: string
 }
@@ -133,11 +135,12 @@ export const automationCardText: AutomationCardText = {
   reviewOwner: 'Reviewer for each run',
   proposed: 'Off',
   holds: (next) => (next === null ? 'Holds from its next run.' : `Holds from its next run, ${next}.`),
-  again: 'Off',
+  again: 'Off until you update it',
   limits: 'Its limits',
   hideLimits: 'Hide its limits',
   tryOnce: 'Try it once now',
   turnOn: 'Turn on',
+  update: 'Update',
   undo: 'Undo',
   open: 'Open in Automations',
 }
@@ -207,6 +210,12 @@ export type AutomationCardProps = RootProps<
 
 const DAYS = [1, 2, 3, 4, 5, 6, 7] as const
 
+/** When it runs next, without the time When already says: "tonight at 2:00" under "Every night at 2:00" is "tonight". */
+function nextWithout(next: string, when: string): string {
+  const at = / at \d{1,2}:\d{2}$/.exec(next)?.[0]
+  return at !== undefined && when.endsWith(at) ? next.slice(0, -at.length) : next
+}
+
 /** An old value, struck through, said as what it was. */
 function Was({ value, t }: { value: string; t: AutomationCardText }) {
   return (
@@ -226,7 +235,7 @@ function Row({ icon, label, who, why, act }: { icon: IconName; label: string; wh
       </span>
       <span className={l.label}>{label}</span>
       <span className={l.who}>{who}</span>
-      <span className={l.why}>{why}</span>
+      <span className={cx(l.why, s.why)}>{why}</span>
       <span className={l.act}>{act}</span>
     </li>
   )
@@ -543,7 +552,7 @@ export function AutomationCard({
           {...(onPromptChange === undefined ? {} : { onPromptChange })}
         />
       </div>
-      <ol className={l.steps}>
+      <ol className={cx(l.steps, s.rows)}>
         <Row
           icon="clock"
           label={t.when}
@@ -556,7 +565,13 @@ export function AutomationCard({
               {...(onTimeChange === undefined || time === undefined ? {} : { another: t.another, onAnother: () => setAnother(true) })}
             />
           }
-          why={whenWas !== undefined ? <Was value={whenWas} t={t} /> : next !== undefined ? t.next(next) : undefined}
+          why={
+            whenWas !== undefined ? (
+              <Was value={whenWas} t={t} />
+            ) : next !== undefined ? (
+              t.next(nextWithout(next, when.find((option) => option.value === whenValue)?.label ?? whenValue))
+            ) : undefined
+          }
         />
         {another && time !== undefined && onTimeChange !== undefined && (
           <AnotherTime
@@ -607,12 +622,14 @@ export function AutomationCard({
         </div>
       )}
       {!kept && (
-        <div className={l.foot}>
+        <div className={cx(l.foot, s.foot)}>
           <span className={l.estimate}>
             {stage === 'proposed' ? t.proposed : holds ? t.holds(next ?? null) : t.again}
             {limits !== undefined && limits.length > 0 && (
               <>
-                {' '}
+                <span className={s.dot} aria-hidden="true">
+                  {' · '}
+                </span>
                 <LinkButton aria-expanded={limitsShown} onClick={() => setLimitsShown(!limitsShown)}>
                   {limitsShown ? t.hideLimits : t.limits}
                 </LinkButton>
@@ -637,7 +654,7 @@ export function AutomationCard({
               )
             : onTurnOn !== undefined && (
                 <Button onClick={onTurnOn} busy={busy}>
-                  {t.turnOn}
+                  {stage === 'changed' ? t.update : t.turnOn}
                 </Button>
               )}
         </div>

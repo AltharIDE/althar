@@ -3,7 +3,7 @@ import { ThreadWaysContext } from '../../shared/ThreadBlocks'
 import { useNavigate } from '@tanstack/react-router'
 import { type CSSProperties, type ReactNode, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 
-import type { AttentionRequest, TaskAction, ThreadSnapshot } from '@althar/contracts'
+import type { AttentionRequest, TaskAction, ThreadItem, ThreadSnapshot } from '@althar/contracts'
 import {
   CheckoutAsk,
   AbandonTask,
@@ -58,7 +58,7 @@ import { pendingText } from '../../shared/Pending'
 import { useModelNames } from '../../shared/modelNames'
 import { type Choice, runningOn } from '../../shared/models'
 import { issuePriority, issueStatus, productBrand, productName } from '../../shared/products'
-import { readyWordOf } from '../../shared/standing'
+import { afterMergeText, readyWordOf, shipText } from '../../shared/standing'
 import { stepText, trackFor } from '../../shared/steps'
 import { inMergeQueue, MERGE_QUEUE_STEP } from '../../data/merges'
 import { ago, clock, running, useNow } from '../../shared/time'
@@ -79,11 +79,11 @@ import { listeningText, listeningOf, useHeard, waitOf } from './behind'
 import { ChangesCard } from '../../shared/ChangesCard'
 import { DraftCard } from '../../shared/DraftCard'
 import { PermissionCalls } from './PermissionCall'
-import { reachOf, ReviewCard, reviewedUnfurl } from './ReviewCard'
+import { reachOf, reachText, ReviewCard, reviewedUnfurl } from './ReviewCard'
 import { usePostTeamReviews } from '../settings/usePostTeamReviews'
 import { HeldLimit } from './LimitCall'
 import { StuckCall } from './StuckCall'
-import { TaskThread } from './TaskThread'
+import { TaskThread, workStepText } from './TaskThread'
 import { SmallChangeOf } from './SmallChangeOf'
 import { ModelMoveOf } from './ModelMoveOf'
 import { latestReport, reviewsIn, useReviewOutcomes } from './reviewOutcomes'
@@ -106,6 +106,7 @@ import { composerComment, cropsOf, drop, giveBack as giveCommentsBack, takeAll, 
 import { REQUEST, taskGraphOf } from './graph'
 import { GraphFace } from './GraphFace'
 import { reveal } from './reveal'
+import { turnsById } from '../../shared/turnTime'
 
 /*
  * A task, with its faces under its header, as in the prototype: the
@@ -227,6 +228,15 @@ export const statusOf = (
   // A review drafted is the person's to post (DEV-96).
   if (phase === 'ready' && snapshot.task.review != null && !isAnswered(snapshot.task.review))
     return { status: TaskStatus.Yours, state: text.drafted }
+  // What its review after a merge found: the person's Fix it or Leave it, beside it.
+  if (phase === 'ready' && snapshot.task.afterMerge?.state === 'found')
+    return {
+      status: TaskStatus.Yours,
+      state: afterMergeText.sentence(snapshot.task.afterMerge.findings, snapshot.task.afterMerge.words),
+    }
+  // Held for Ship: what waits on its branch, and Ship beside it, whatever kind of task it is.
+  if (phase === 'ready' && snapshot.task.held !== undefined)
+    return { status: TaskStatus.Yours, state: shipText.commits(snapshot.task.held.commits) }
   // A task that isn't a change, finished: settling it, or keeping it for later, is the person's.
   if (phase === 'ready' && (snapshot.task.kind === 'plain' || snapshot.task.kind === 'review'))
     return { status: TaskStatus.Yours, state: text.finished }
@@ -653,6 +663,7 @@ export function TaskView({
         worktree: snapshot.task.worktree,
         queue,
         outputs: model.outputs,
+        turns: turnsById(snapshot.turns),
       },
       model.streaming,
       (iso) => ago(iso),
@@ -794,16 +805,64 @@ export function TaskView({
     reviewing: snapshot.task.review,
     nothingBuilt: snapshot.task.nothingBuilt,
   })
-  const settle = settleable ? (
-    <SettleWays
-      place="header"
-      {...(done ? { onDone: () => void model.markDone(), doneHint: boardText.doneHint } : {})}
-      {...(snapshot.task.phase === 'ready' && snapshot.task.kind !== 'change'
-        ? { onKeep: () => void model.keep(), keepHint: boardText.keepHint }
-        : {})}
-      {...(model.doing === doing.markDone ? { busy: 'done' as const } : model.doing === doing.keep ? { busy: 'keep' as const } : {})}
-    />
-  ) : null
+  // Held for Ship, Ship is its one way on, first in the chip; a finished task that isn't a change keeps Done and Keep beside it.
+  const held = !busy && snapshot.task.phase === 'ready' ? snapshot.task.held : undefined
+  // What its review after a merge found: Fix it and Leave it, first in the chip.
+  const found = !busy && snapshot.task.afterMerge?.state === 'found' ? snapshot.task.afterMerge : undefined
+  const settle =
+    settleable || held !== undefined || found !== undefined ? (
+      <SettleWays
+        place="header"
+        {...(found === undefined
+          ? {}
+          : {
+              onFix: () => void model.fixAfterMerge(),
+              fixHint: afterMergeText.fixHint(found.words),
+              onLeave: () => void model.leaveAfterMerge(),
+              leaveHint: afterMergeText.leaveHint,
+            })}
+        {...(held === undefined
+          ? {}
+          : {
+              onShip: () => void model.ship(),
+              shipHint: shipText.hint(
+                held.commits,
+                snapshot.task.steps.some((step) => step.key === 'review' && !step.skipped),
+              ),
+            })}
+        {...(settleable && done ? { onDone: () => void model.markDone(), doneHint: boardText.doneHint } : {})}
+        {...(settleable && snapshot.task.phase === 'ready' && snapshot.task.kind !== 'change'
+          ? { onKeep: () => void model.keep(), keepHint: boardText.keepHint }
+          : {})}
+        {...(model.doing === doing.ship
+          ? { busy: 'ship' as const }
+          : model.doing === doing.fixAfterMerge
+            ? { busy: 'fix' as const }
+            : model.doing === doing.leaveAfterMerge
+              ? { busy: 'leave' as const }
+              : model.doing === doing.markDone
+                ? { busy: 'done' as const }
+                : model.doing === doing.keep
+                  ? { busy: 'keep' as const }
+                  : {})}
+      />
+    ) : null
+  // A change its lead or the coordinator split, before it ships: Keep them together; one its lead's git made: Drop it. Never once
+  // it was kept together, dropped, or opened its pull request.
+  const settledSteps = new Set(
+    snapshot.items.flatMap((item) =>
+      item.kind === 'notice' && (item.content.step?.kind === 'joined' || item.content.step?.kind === 'dropped')
+        ? [item.content.step.name]
+        : [],
+    ),
+  )
+  const stepAction = (step: NonNullable<Extract<ThreadItem, { kind: 'notice' }>['content']['step']>) => {
+    if (step.kind !== 'new_change' || step.by === undefined || step.by === 'person' || settledSteps.has(step.name)) return undefined
+    if (snapshot.task.phase === 'settled') return undefined
+    const shipped = snapshot.task.changes.some((one) => one.change?.name === step.name)
+    if (step.by === 'git') return { label: workStepText.dropIt, onPress: () => void model.dropChange(step.name) }
+    return shipped ? undefined : { label: workStepText.keepTogether, onPress: () => void model.joinChanges(step.name) }
+  }
   // Its parts, just before the faces: what it changed is in its worktree's, which opens the changes over the window (ADR-097).
   const partsActions: PartsActions = {
     seeChanges: () => changes.show(),
@@ -814,6 +873,16 @@ export function TaskView({
     ...(snapshot.task.phase === 'settled' && snapshot.task.worktree !== null
       ? { removeFolder: () => void client.removeTaskFolder(snapshot.task.id, null) }
       : {}),
+    // A running task moves between a worktree and Local, between its lead's turns.
+    ...(snapshot.task.phase !== 'settled' && snapshot.task.worktree !== null && snapshot.task.branch !== null
+      ? {
+          move: (to, consent) => void model.move(to, consent),
+          dropMove: () => void model.dropMove(),
+          workToward: (branch) => void model.workToward(branch),
+        }
+      : {}),
+    ...(snapshot.task.helpers === undefined ? {} : { stopHelper: (helper: string) => void model.stopHelper(helper) }),
+    ...(snapshot.task.lines === undefined ? {} : { shipChange: (change: string) => void model.shipChange(change) }),
     merge: (change) => (change.head === null ? undefined : void model.accept([{ head: change.head, url: change.url }])),
     postReview: (draftId) => void model.postReview(draftId),
     stopLaunch: (id) => void model.stopLaunch(id),
@@ -859,6 +928,17 @@ export function TaskView({
             }
           : {})}
         {...(snapshot.task.skipReview === true ? { onSkipReview: () => void model.skipReview() } : {})}
+        // Its parts kept as a preset, named for it; and a chat moved between Scratch and the board, either way.
+        onSavePreset={() => void model.savePreset(snapshot.task.title.slice(0, 40))}
+        {...(snapshot.task.phase !== 'settled' &&
+        (snapshot.task.scratch === true || (snapshot.task.kind === 'plain' && snapshot.task.changes.length === 0))
+          ? {
+              shelf: {
+                to: snapshot.task.scratch === true ? ('board' as const) : ('scratch' as const),
+                onMove: () => void model.shelve(snapshot.task.scratch === true ? null : 'scratch'),
+              },
+            }
+          : {})}
         {...(can('stop') ? { onStop: () => void model.stop() } : {})}
         {...(can('resume') ? { onResume: () => void model.resume() } : {})}
         // A merged task abandons the commits after its pull request, and stays merged: one Abandon, said for what it does.
@@ -1122,6 +1202,33 @@ export function TaskView({
           {snapshot.task.review != null && (
             <ReachLine className={s.reach} phrases={reachOf(snapshot.task.review, postsTeamReviews)} aria-label={text.reach} />
           )}
+          {/* Run it, the person's word: how far to trust the pull request's code, an outside author's asked, the team's at once. */}
+          {snapshot.task.review != null && snapshot.task.phase !== 'settled' && (
+            <div className={s.runIt}>
+              {/* Running it, the person takes it back: its copy read only again, and its lead a reader. */}
+              {snapshot.task.review.trust !== undefined && (
+                <Button size="small" variant="quiet" onClick={() => void model.stopRunning()}>
+                  {reachText.stopRunning}
+                </Button>
+              )}
+              {snapshot.task.review.trust === 'full' ? null : snapshot.task.review.outside ? (
+                <>
+                  {snapshot.task.review.trust === undefined && (
+                    <Button size="small" variant="quiet" onClick={() => void model.runIt('safe')}>
+                      {reachText.runSafely}
+                    </Button>
+                  )}
+                  <Button size="small" variant="quiet" onClick={() => void model.runIt('full')}>
+                    {reachText.trustFully}
+                  </Button>
+                </>
+              ) : (
+                <Button size="small" variant="quiet" onClick={() => void model.runIt()}>
+                  {reachText.runIt}
+                </Button>
+              )}
+            </div>
+          )}
           {shown === 'graph' && graph !== null ? (
             <GraphFace
               className={s.graphFace}
@@ -1150,8 +1257,10 @@ export function TaskView({
                   error={model.error}
                   errorMore={model.errorMore}
                   onAccept={(changes) => void model.accept(changes)}
+                  onMergeWaiting={(how) => void model.mergeWaiting(how)}
                   onMergeHere={() => void model.mergeHere()}
                   onOpenChange={() => void model.openChange()}
+                  onShip={() => void model.ship()}
                   onPush={(head, url) => void model.push(head, url)}
                   refused={model.refused}
                   onReplace={(head, replaces, url) => void model.replace(head, replaces, url)}
@@ -1241,6 +1350,7 @@ export function TaskView({
                   <ThreadWaysContext.Provider value={ways}>
                     <TaskThread
                       rounds={blocks}
+                      stepAction={stepAction}
                       versionOf={versionOf}
                       settledOf={settledOf}
                       reviewing={reviewing}
@@ -1385,6 +1495,18 @@ export function TaskView({
                 host: productName(one.product),
               }))}
               abandoned={leftOpen !== null}
+              // Commits that wait for Ship: settling asks first, Ship them or leave them on the branch.
+              {...(snapshot.task.held === undefined
+                ? {}
+                : {
+                    held: {
+                      commits: snapshot.task.held.commits,
+                      onShip: () => {
+                        endAbandoning()
+                        void model.ship()
+                      },
+                    },
+                  })}
               {...(mergedChange === undefined || !can('leaveOut')
                 ? {}
                 : {

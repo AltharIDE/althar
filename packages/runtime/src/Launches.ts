@@ -525,7 +525,7 @@ export class Launches extends Context.Service<
                   Effect.gen(function* () {
                     const sql = yield* SqlClient.SqlClient
                     // A task's folder is set up before anything runs from it, however it came back: here, or as it opened, or before (ADR-056).
-                    if (input.taskId !== null) yield* setups.ready(input.taskId)
+                    if (input.taskId !== null) yield* setups.ready(input.taskId, true)
                     const places = yield* placesOf(input.projectId, input.taskId, input.repository)
                     if (places.length === 0)
                       return yield* new LaunchRefused({

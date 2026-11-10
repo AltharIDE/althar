@@ -38,8 +38,9 @@ const PLAIN: Readonly<Record<string, string>> = {
   'thread/Reviewer/FindingNote.tsx': 'a finding’s title, which opens it under its line in the code',
   'chrome/TaskParts/TaskParts.tsx':
     'the parts’ marks in the bar, the whole of which opens them; a part’s row or chip, which opens it in place; Add and Back, a popover’s own head',
-  'setup/AgentTools/AgentTools.tsx':
-    'a server’s marks, which open its menu; a server’s chip in a file, the whole of which takes it out or puts it back',
+  'setup/ToolTiles/ToolParts.tsx':
+    'a dashed tile, the whole of which adds one; a role’s round switch with its name under it; a project’s mark and name, pressed in or out',
+  'setup/ToolTiles/AddServerDialog.tsx': 'an agent’s mark and name, pressed in or out, as a project’s are',
   /* opens and closes what is below it */
   'thread/Reasoning/Reasoning.tsx': 'the row that folds the reasoning',
   'outputs/Usage/Usage.tsx': 'the card’s head, which folds its lines',
@@ -86,6 +87,8 @@ const PLAIN: Readonly<Record<string, string>> = {
   'home/Island/Island.tsx': 'the mark and the count, on the notch’s black',
   'board/NextRow/NextRow.tsx': 'Start, in a held row’s line, in the line’s own place, words and colour while the row is pointed at',
   'board/SettleWays/SettleWays.tsx': 'Done and the pin in a task’s header, segments of the chip that says where it stands',
+  'board/ScratchShelf/ScratchShelf.tsx': 'a chat on Scratch, the whole of its row, its title, last words and when, which opens it',
+  'coordinator/TaskLaunch/TaskLaunch.tsx': 'the preset, the kicker’s first word in the kicker’s own type, which opens the others',
   /* close to a primitive, not yet moved onto one */
   'chrome/BackCrumb/BackCrumb.tsx': 'a ChromeButton that is never pressed',
 }

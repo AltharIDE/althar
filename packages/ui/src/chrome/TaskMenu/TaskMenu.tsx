@@ -43,6 +43,11 @@ export interface TaskMenuText {
   changeTeam: string
   markReady: string
   attach: string
+  /** Its parts kept as a preset of the person's own (a task is a conversation plus parts). */
+  savePreset: string
+  /** A chat moved off Scratch to the board, or a task to Scratch. */
+  toBoard: string
+  toScratch: string
   skipReview: string
   stop: string
   resume: string
@@ -75,6 +80,9 @@ export const taskMenuText: TaskMenuText = {
   changeTeam: 'Change the team…',
   markReady: 'Mark ready for review',
   attach: 'Attach a pull request…',
+  savePreset: 'Save as preset',
+  toBoard: 'Move to the board',
+  toScratch: 'Move to Scratch',
   skipReview: 'Skip the review',
   stop: 'Stop the task',
   resume: 'Resume',
@@ -110,6 +118,10 @@ export interface TaskMenuProps {
   onMarkReady?: () => void
   /** Attaches it to an open pull request it didn't open; the consumer asks which. */
   onAttach?: () => void
+  /** Saves its parts, team and the start of its brief as a preset. */
+  onSavePreset?: () => void
+  /** Moves it between Scratch and the board: `to` says which way. */
+  shelf?: { readonly to: 'scratch' | 'board'; readonly onMove: () => void }
   /** Skips the review of the work under way, while it still has one to come or under way. */
   onSkipReview?: () => void
   onStop?: () => void
@@ -152,6 +164,8 @@ export function TaskMenu({
   onChangeTeam,
   onMarkReady,
   onAttach,
+  onSavePreset,
+  shelf,
   onSkipReview,
   onStop,
   onResume,
@@ -230,6 +244,16 @@ export function TaskMenu({
     onAttach && (
       <MenuItem key="attach" icon="clip" onSelect={onAttach}>
         {t.attach}
+      </MenuItem>
+    ),
+    shelf && (
+      <MenuItem key="shelf" icon="move" onSelect={shelf.onMove}>
+        {shelf.to === 'scratch' ? t.toScratch : t.toBoard}
+      </MenuItem>
+    ),
+    onSavePreset && (
+      <MenuItem key="preset" icon="list" onSelect={onSavePreset}>
+        {t.savePreset}
       </MenuItem>
     ),
   ].filter(present)

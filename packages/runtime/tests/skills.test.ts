@@ -4,9 +4,9 @@ import { join } from 'node:path'
 
 import type { ProjectId } from '@althar/domain'
 import { agents, type SessionEvent } from '@althar/provider-adapters'
-import { installLocalCatalog, setActive } from '@althar/skills'
+import { putObject, setActive } from '@althar/skills'
 import { assert, describe, it } from '@effect/vitest'
-import { writeCatalog } from '../../skills/tests/support'
+import { install, tree } from '../../skills/tests/support'
 import { Effect, Layer, Stream } from 'effect'
 import { SqlClient } from 'effect/sql'
 
@@ -26,18 +26,11 @@ const skill = (name: string) => ({
   'SKILL.md': `---\nname: ${name}\ndescription: Use when testing ${name}.\n---\nDo ${name}.\n`,
 })
 
-const makeStore = async (
-  skills: Record<string, Record<string, string>>,
-  needs: Record<string, Array<string>> = {},
-  off: ReadonlyArray<string> = [],
-) => {
+/** A store of the person's own skills, each turned on but those left off. */
+const makeStore = async (skills: Record<string, Record<string, string>>, off: ReadonlyArray<string> = []) => {
   const root = mkdtempSync(join(tmpdir(), 'althar-skills-store-'))
-  const catalog = mkdtempSync(join(tmpdir(), 'althar-skills-catalog-'))
-  await writeCatalog(catalog, skills, needs)
-  // The catalog's skills are off until the person turns them on: here, all of them but those left off.
-  await Effect.runPromise(installLocalCatalog(root, catalog))
-  for (const id of Object.keys(skills)) if (!off.includes(id)) await Effect.runPromise(setActive(root, id, true))
-  return { root, catalog }
+  for (const [id, files] of Object.entries(skills)) await install(root, id, files, !off.includes(id))
+  return { root }
 }
 
 /** Every SKILL.md under a folder, however deep. */
@@ -84,22 +77,21 @@ const worktreeOf = (threadId: string) =>
     return row?.path ?? ''
   })
 
-/** Runs a test against a runtime with a skills store seeded from a local catalog of the given skills. */
+/** Runs a test against a runtime with a skills store of the given skills. */
 const withStore = <A, E, R>(
   skills: Record<string, Record<string, string>>,
-  needs: Record<string, Array<string>>,
   body: (store: NonNullable<RuntimeOptions['skills']>) => Effect.Effect<A, E, R>,
   off: ReadonlyArray<string> = [],
 ) =>
   Effect.flatMap(
-    Effect.promise(() => makeStore(skills, needs, off)),
+    Effect.promise(() => makeStore(skills, off)),
     // With failures said to a listener, as the app's are, so a test hears what is reported.
     (store) => body(store).pipe(Effect.provide(runtime(':memory:', {}, { skills: store }).pipe(Layer.provideMerge(failuresLayer)))),
   )
 
 describe('skills for a task’s lead', () => {
   it.live('gives the lead the active skills as a plugin in the store, outside the worktree, and removes it when the session ends', () =>
-    withStore({ alpha: skill('alpha'), beta: skill('beta') }, { beta: ['subagents'] }, (skills) =>
+    withStore({ alpha: skill('alpha'), beta: skill('beta') }, (skills) =>
       Effect.gen(function* () {
         const sessions = yield* Sessions
         const { task: created } = yield* task()
@@ -117,7 +109,6 @@ describe('skills for a task’s lead', () => {
           | { claudeCode?: { options?: { plugins?: unknown } } }
           | undefined
         assert.deepStrictEqual(asked?.claudeCode?.options?.plugins, [{ type: 'local', path: plugin }])
-        // Beta needs subagents, which Claude Code has.
         assert.isTrue(existsSync(join(plugin, 'skills', 'beta', 'SKILL.md')))
         // Never in the worktree: no skill root, no copy of a skill file in it.
         const worktree = yield* worktreeOf(created.threadId)
@@ -140,8 +131,8 @@ describe('skills for a task’s lead', () => {
     ),
   )
 
-  it.live('gives a Codex lead the same skills as an added directory, less one it cannot use, and says so', () =>
-    withStore({ alpha: skill('alpha'), beta: skill('beta') }, { beta: ['subagents'] }, (skills) =>
+  it.live('gives a Codex lead the same skills as an added directory', () =>
+    withStore({ alpha: skill('alpha'), beta: skill('beta') }, (skills) =>
       Effect.gen(function* () {
         const sessions = yield* Sessions
         const { task: created } = yield* task()
@@ -151,22 +142,12 @@ describe('skills for a task’s lead', () => {
         assert.include(readFileSync(join(folder, '.agents', 'skills', 'alpha', 'SKILL.md'), 'utf8'), 'name: alpha')
         // Its session is asked to add that folder, whose `.agents/skills` codex-acp makes one of Codex's skill roots.
         assert.deepStrictEqual(sessionsAsked.findLast((one) => one.agentId === 'codex')?.params.additionalDirectories, [folder])
-        // Beta needs subagents, which Codex isn't counted on for: left out, and the thread says so.
-        assert.isFalse(existsSync(join(folder, '.agents', 'skills', 'beta')))
-        const said = yield* notices(created.threadId)
-        assert.isTrue(
-          said.some(
-            (notice) =>
-              notice.title?.endsWith("codex wasn't given a skill it can't use.") === true && notice.description === 'beta needs subagents',
-          ),
-          JSON.stringify(said),
-        )
-        // Its brief names only what it got.
-        assert.include(yield* briefOf(created.threadId), 'Althar has given you skills for this task: alpha.')
-        // Recorded as given: what it got, not what it couldn't use.
+        assert.include(readFileSync(join(folder, '.agents', 'skills', 'beta', 'SKILL.md'), 'utf8'), 'name: beta')
+        // Its brief names what it got.
+        assert.include(yield* briefOf(created.threadId), 'Althar has given you skills for this task: alpha, beta.')
         assert.deepStrictEqual(
           (yield* givenTo(created.threadId)).map(({ id }) => id),
-          ['alpha'],
+          ['alpha', 'beta'],
         )
         const worktree = yield* worktreeOf(created.threadId)
         for (const root of ['.claude', '.agents', '.opencode', 'openspec']) assert.isFalse(existsSync(join(worktree, root)), root)
@@ -177,7 +158,7 @@ describe('skills for a task’s lead', () => {
   )
 
   it.live('gives an OpenCode lead the same skills through its environment', () =>
-    withStore({ alpha: skill('alpha'), beta: skill('beta') }, { beta: ['subagents'] }, (skills) =>
+    withStore({ alpha: skill('alpha'), beta: skill('beta') }, (skills) =>
       Effect.gen(function* () {
         const sessions = yield* Sessions
         const { task: created } = yield* task()
@@ -206,7 +187,6 @@ describe('skills for a task’s lead', () => {
         () =>
           withStore(
             { alpha: skill('alpha'), beta: skill('beta'), gamma: skill('gamma') },
-            {},
             (skills) =>
               Effect.gen(function* () {
                 const sessions = yield* Sessions
@@ -243,7 +223,6 @@ describe('skills for a task’s lead', () => {
   it.live('gives a skill turned on while a lead works only to the session after', () =>
     withStore(
       { alpha: skill('alpha'), gamma: skill('gamma') },
-      {},
       (skills) =>
         Effect.gen(function* () {
           const sessions = yield* Sessions
@@ -273,7 +252,7 @@ describe('skills for a task’s lead', () => {
   )
 
   it.live('gives the coordinator selected skills on every supported agent', () =>
-    withStore({ alpha: skill('alpha') }, {}, (skills) =>
+    withStore({ alpha: skill('alpha') }, (skills) =>
       Effect.gen(function* () {
         const sessions = yield* Sessions
         const { project } = yield* task()
@@ -317,7 +296,7 @@ describe('skills for a task’s lead', () => {
   )
 
   it.live('gives the lead the skills that read when one install in the store does not', () =>
-    withStore({ alpha: skill('alpha'), beta: skill('beta') }, {}, (skills) =>
+    withStore({ alpha: skill('alpha'), beta: skill('beta') }, (skills) =>
       Effect.gen(function* () {
         const path = join(skills.root, 'installs.json')
         const file = JSON.parse(readFileSync(path, 'utf8')) as { installs: Array<unknown> }
@@ -336,10 +315,10 @@ describe('skills for a task’s lead', () => {
     ),
   )
 
-  it.live('still starts the session, without skills, when the catalog is damaged, and the thread and a report say so', () =>
-    withStore({ alpha: skill('alpha') }, {}, (skills) =>
+  it.live('still starts the session, without skills, when the store is damaged, and the thread and a report say so', () =>
+    withStore({ alpha: skill('alpha') }, (skills) =>
       Effect.gen(function* () {
-        writeFileSync(join(skills.catalog, 'catalog.json'), '{}')
+        writeFileSync(join(skills.root, 'installs.json'), '{ not json')
         const heard: Array<Failure> = []
         yield* Effect.forkChild(Stream.runForEach((yield* Failures).events, (failure) => Effect.sync(() => void heard.push(failure))))
         yield* Effect.sleep('20 millis')
@@ -350,7 +329,7 @@ describe('skills for a task’s lead', () => {
         const said = yield* notices(created.threadId)
         const notice = said.find((one) => one.title?.endsWith('started without its skills.'))
         assert.deepInclude(notice, { severity: 'warning', description: "Althar couldn't lay them out. Its log has the details." })
-        // Althar's own catalog not loading is not the person's to put right: it is reported, by the agent.
+        // Althar's own store not reading is not the person's to put right: it is reported, by the agent.
         yield* Effect.sleep('20 millis')
         assert.deepInclude(
           heard.find((one) => one.where === 'skills'),
@@ -365,7 +344,7 @@ describe('skills for a task’s lead', () => {
 describe('setting skills up for several leads at once', () => {
   it.live('keeps the store consistent and gives each its own run', () =>
     Effect.gen(function* () {
-      const skills = yield* Effect.promise(() => makeStore({ alpha: skill('alpha'), beta: skill('beta') }, {}))
+      const skills = yield* Effect.promise(() => makeStore({ alpha: skill('alpha'), beta: skill('beta') }))
       const claude = { id: 'claude-code', skills: { layout: 'claude-plugin', capabilities: [], via: { kind: 'meta' } } } as const
       const runs = (yield* Effect.forEach(
         Array.from({ length: 8 }, (_, at) => at),
@@ -746,7 +725,7 @@ describe('a skill loaded', () => {
 describe('the skills the window lists', () => {
   const listed = (config: NonNullable<RuntimeOptions['skills']>) => listSkills(config).pipe(Effect.provide(failuresLayer))
 
-  it.live('says what each skill’s own SKILL.md says, and the catalog’s licence where it says none', () =>
+  it.live('says what each skill’s own SKILL.md says, and no licence where it names none', () =>
     Effect.gen(function* () {
       const store = yield* Effect.promise(() =>
         makeStore({
@@ -755,27 +734,23 @@ describe('the skills the window lists', () => {
         }),
       )
       const list = yield* listed(store)
-      assert.strictEqual(list.catalogRevision, 'fixture-1')
       assert.deepStrictEqual(
         list.skills.map((one) => [one.id, one.description, one.license, 'problem' in one ? one.problem : null]),
         [
           ['alpha', 'Use when testing alpha.', 'MIT', null],
-          // One whose SKILL.md names no licence has the catalog's.
-          ['beta', 'Use when testing beta.', 'Apache-2.0', null],
+          ['beta', 'Use when testing beta.', null, null],
         ],
       )
     }),
   )
 
-  it.live('lists an install whose record doesn’t read, given to no run, and the rest without a catalog that loads', () =>
+  it.live('lists an install whose record doesn’t read, given to no run, and the rest as they are', () =>
     Effect.gen(function* () {
       const store = yield* Effect.promise(() => makeStore({ alpha: skill('alpha') }))
       const path = join(store.root, 'installs.json')
       const file = JSON.parse(readFileSync(path, 'utf8')) as { installs: Array<unknown> }
       writeFileSync(path, JSON.stringify({ ...file, installs: [...file.installs, { id: 'gamma', active: 'yes' }] }))
-      writeFileSync(join(store.catalog, 'catalog.json'), '{ not json')
       const list = yield* listed(store)
-      assert.isNull(list.catalogRevision)
       assert.deepStrictEqual(
         list.skills.map((one) => [one.id, one.active, one.license, 'problem' in one ? one.problem : null]),
         [
@@ -791,5 +766,95 @@ describe('the skills the window lists', () => {
       const store = yield* Effect.promise(() => makeStore({ alpha: skill('alpha') }))
       assert.isUndefined(yield* runSkills(store, { id: 'claude-code', skills: null }, 'run-1', []))
     }),
+  )
+})
+
+describe('the skills Althar used to ship', () => {
+  /** The store of an older Althar: two of its own skills (one on), the catalog's hash, and one the person added from GitHub. */
+  const olderStore = async () => {
+    const root = mkdtempSync(join(tmpdir(), 'althar-skills-older-'))
+    const hashes = {
+      shipped: await Effect.runPromise(putObject(root, tree(skill('shipped')))),
+      unused: await Effect.runPromise(putObject(root, tree(skill('unused')))),
+      mine: await Effect.runPromise(putObject(root, tree(skill('mine')))),
+    }
+    writeFileSync(
+      join(root, 'installs.json'),
+      JSON.stringify({
+        version: 1,
+        catalog: 'c'.repeat(64),
+        installs: [
+          {
+            id: 'mine',
+            source: 'github',
+            repo: 'o/r',
+            sha: 'a'.repeat(40),
+            subpath: 'skills/mine',
+            ref: 'main',
+            treeHash: hashes.mine,
+            review: 'reviewed',
+            active: true,
+          },
+          { id: 'shipped', source: 'althar-default', treeHash: hashes.shipped, review: 'default', active: true },
+          { id: 'unused', source: 'althar-default', treeHash: hashes.unused, review: 'default', active: false },
+        ],
+      }),
+    )
+    return { root, hashes }
+  }
+
+  it.live('come out of the person’s store on the first start, so a run is given only what they added', () =>
+    Effect.gen(function* () {
+      const { root, hashes } = yield* Effect.promise(olderStore)
+      yield* Effect.gen(function* () {
+        // The runtime was built over the older store: the first start took them out.
+        const file = JSON.parse(readFileSync(join(root, 'installs.json'), 'utf8')) as { catalog?: string; installs: Array<{ id: string }> }
+        assert.deepStrictEqual(
+          file.installs.map(({ id }) => id),
+          ['mine'],
+        )
+        assert.isUndefined(file.catalog)
+        assert.isFalse(existsSync(join(root, 'objects', hashes.shipped)))
+        assert.isFalse(existsSync(join(root, 'objects', hashes.unused)))
+        assert.isTrue(existsSync(join(root, 'objects', hashes.mine)))
+        const sessions = yield* Sessions
+        const { task: created } = yield* task()
+        yield* sessions.start({ threadId: created.threadId, agentId: 'claude-code' })
+        assert.deepStrictEqual(readdirSync(skillsFolderOf('claude-code', root)), ['mine'])
+        assert.deepStrictEqual(
+          (yield* givenTo(created.threadId)).map(({ id }) => id),
+          ['mine'],
+        )
+        yield* sessions.stop(created.threadId)
+        const list = yield* listSkills({ root }).pipe(Effect.provide(failuresLayer))
+        assert.deepStrictEqual(
+          list.skills.map((one) => [one.id, one.source, one.active]),
+          [['mine', 'github', true]],
+        )
+      }).pipe(Effect.provide(runtime(':memory:', {}, { skills: { root } }).pipe(Layer.provideMerge(failuresLayer))))
+    }),
+  )
+
+  // Windows has no read-only folder by mode, and root ignores it.
+  it.live.skipIf(process.platform === 'win32')(
+    'are left out of the list even where the store could not be changed, and the start still goes on',
+    () =>
+      Effect.gen(function* () {
+        const { root } = yield* Effect.promise(olderStore)
+        // Unwritable: the folder holding installs.json is read-only, so the first start cannot rewrite it.
+        const { chmodSync } = yield* Effect.promise(() => import('node:fs'))
+        chmodSync(root, 0o555)
+        yield* Effect.gen(function* () {
+          const list = yield* listSkills({ root }).pipe(Effect.provide(failuresLayer))
+          assert.deepStrictEqual(
+            list.skills.map((one) => one.id),
+            ['mine'],
+          )
+          assert.include(readFileSync(join(root, 'installs.json'), 'utf8'), 'althar-default')
+        }).pipe(
+          Effect.provide(runtime(':memory:', {}, { skills: { root } }).pipe(Layer.provideMerge(failuresLayer))),
+          Effect.ensuring(Effect.sync(() => chmodSync(root, 0o755))),
+        )
+      }),
   )
 })

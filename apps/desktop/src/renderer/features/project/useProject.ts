@@ -105,6 +105,8 @@ export interface ProjectModel {
     worksIn?: WorksIn,
     toward?: string | null,
   ) => Promise<void>
+  /** Picks another preset for a plan before it starts, by name: its parts change to match. */
+  readonly applyPreset: (planId: string, preset: string) => Promise<void>
   /** Holds the plan, makes a branch the remote doesn't have from the default branch, then points the plan at it (ADR-093). */
   readonly changePlanToNewBranch: (
     planId: string,
@@ -509,6 +511,7 @@ export const useProject = (projectId: string): ProjectModel => {
             ? client.changePlan(planId, steps, end)
             : client.changePlan(planId, steps, end, worksIn),
       ),
+    applyPreset: (planId, preset) => act(() => client.applyPreset(planId, preset)),
     changePlanToNewBranch: (planId, steps, end, repositoryId, branch) =>
       act(async () => {
         // Held first, so its countdown can't start it toward the old branch while the host makes the new one; it then

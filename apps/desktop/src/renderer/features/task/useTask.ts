@@ -162,6 +162,26 @@ export interface TaskModel {
   readonly answerStuck: (attentionId: string, answer: StuckAnswer) => Promise<boolean>
   /** The person's answer to what Althar asked before a Local task takes their checkout (ADR-091). */
   readonly answerCheckout: (attentionId: string, answer: CheckoutAnswer) => Promise<void>
+  /** Moves the running task between a worktree and Local; with what it asked about the person's checkout, as they saw it, Switch it. */
+  readonly move: (to: 'worktree' | 'checkout', consent?: { readonly branch: string | null; readonly head: string }) => Promise<void>
+  /** Calls off a move that waits: the task stays where it works. */
+  readonly dropMove: () => Promise<void>
+  /** Points the running task at another branch to work toward, or its default with null. */
+  readonly workToward: (toward: string | null) => Promise<void>
+  /** Run it, on the pull request a review task reviews: as far as `how` trusts it, the team's own fully. */
+  readonly runIt: (how?: 'safe' | 'full') => Promise<void>
+  /** Stop running it: the pull request's copy read only again, and its lead a reader. */
+  readonly stopRunning: () => Promise<void>
+  /** Puts the task on Scratch, or on the board with null (a task is a conversation plus parts). */
+  readonly shelve: (shelf: 'scratch' | null) => Promise<void>
+  /** Saves the task's parts, team and the start of its brief as a preset, by name. */
+  readonly savePreset: (name: string) => Promise<void>
+  /** Stops a helper its lead started, by its id. */
+  readonly stopHelper: (helper: string) => Promise<void>
+  /** Keep them together: a change its lead split carried onto the task's first. */
+  readonly joinChanges: (change: string) => Promise<void>
+  /** Drop it: a change's folder goes, its branch stays. */
+  readonly dropChange: (change: string) => Promise<void>
   /** Hands its step held for a usage limit to another agent, on the account and model picked, rather than waiting for the reset. */
   readonly handOverHeld: (to: { readonly agentId: string; readonly accountId?: string; readonly model?: string }) => Promise<void>
   /** Answers an agent's question: what went wrong, in words, or null when it went through. */
@@ -178,6 +198,14 @@ export interface TaskModel {
   readonly markAllReady: (urls: ReadonlyArray<string>) => Promise<void>
   /** Opens the pull request of a task whose work ended on its branch. */
   readonly openChange: () => Promise<void>
+  /** Ships what waits on its branch for Ship: its review first, where its plan has one before the work ships, then the commits go up. */
+  readonly ship: () => Promise<void>
+  /** Ships one of its several changes, in a Ship of its own, with what waits beneath it in its stack: its row's Ship. */
+  readonly shipChange: (change: string) => Promise<void>
+  /** Fix it, on what its review after a merge found: the lead takes the findings, and its fix ships after the merged pull request. */
+  readonly fixAfterMerge: () => Promise<void>
+  /** Leave it, on what its review after a merge found: the findings close, and stay in the thread. */
+  readonly leaveAfterMerge: () => Promise<void>
   /** Merges the task into its repositories' default branches here, up to the heads it showed; it has no pull request. */
   readonly mergeHere: () => Promise<void>
   /** Pushes what it merged here to the remotes its default branches follow. */
@@ -190,6 +218,11 @@ export interface TaskModel {
    * wait; pending throughout.
    */
   readonly accept: (changes: ReadonlyArray<{ readonly head: string; readonly url: string }>) => Promise<void>
+  /**
+   * Merge, with commits not shipped (a task is a conversation plus parts): `review`, Review and merge, one review of what
+   * waits, then it goes up and merges; `now`, Merge now, up and merged at once, reviewed after the merge.
+   */
+  readonly mergeWaiting: (how: 'review' | 'now') => Promise<void>
   /** Pushes the task's branch to its pull request, up to the commit the person saw: the one at `url`, in a task of several. */
   readonly push: (head: string, url?: string) => Promise<void>
   /**
@@ -673,6 +706,16 @@ export const useTask = (threadId: string): TaskModel => {
       return through
     },
     answerCheckout: (attentionId, answer) => act(() => client.answerCheckout({ attentionId, answer })),
+    move: (to, consent) => onTask((taskId) => client.moveTask({ taskId, to, ...(consent === undefined ? {} : { consent }) })),
+    dropMove: () => onTask((taskId) => client.dropMove(taskId)),
+    workToward: (toward) => onTask((taskId) => client.workToward(taskId, toward)),
+    runIt: (how) => onTask((taskId) => client.runIt(taskId, how)),
+    stopRunning: () => onTask((taskId) => client.stopRunning(taskId)),
+    shelve: (shelf) => onTask((taskId) => client.shelveTask(taskId, shelf)),
+    savePreset: (name) => onTask((taskId) => client.savePreset({ name, taskId })),
+    stopHelper: (helper) => onTask((taskId) => client.stopHelper(taskId, helper)),
+    joinChanges: (change) => onTask((taskId) => client.joinChanges(taskId, change)),
+    dropChange: (change) => onTask((taskId) => client.dropChange(taskId, change)),
     handOverHeld: (to) => onTask((taskId) => client.handOverHeld({ taskId, ...to })),
     answerQuestion: (attentionId, answers) =>
       client.answerQuestion({ attentionId, answers }).then(
@@ -694,6 +737,18 @@ export const useTask = (threadId: string): TaskModel => {
         for (const url of urls) await client.markReady(snapshot.task.id, url)
       }, doing.markAllReady),
     openChange: () => act(async () => (snapshot === null ? undefined : client.openChange(snapshot.task.id)), doing.openChange),
+    ship: () => act(async () => (snapshot === null ? undefined : client.ship(snapshot.task.id)), doing.ship),
+    shipChange: (change) => act(async () => (snapshot === null ? undefined : client.ship(snapshot.task.id, change)), doing.ship),
+    fixAfterMerge: () =>
+      act(
+        async () => (snapshot === null ? undefined : client.fixAfterMerge(snapshot.task.id, snapshot.task.afterMerge?.url)),
+        doing.fixAfterMerge,
+      ),
+    leaveAfterMerge: () =>
+      act(
+        async () => (snapshot === null ? undefined : client.leaveAfterMerge(snapshot.task.id, snapshot.task.afterMerge?.url)),
+        doing.leaveAfterMerge,
+      ),
     markDone: () => act(async () => (snapshot === null ? undefined : client.markTaskDone(snapshot.task.id)), doing.markDone),
     keep: () => act(async () => (snapshot === null ? undefined : client.keepTaskForLater(snapshot.task.id)), doing.keep),
     mergeHere: () =>
@@ -719,6 +774,13 @@ export const useTask = (threadId: string): TaskModel => {
         )
         await client.pushBranch(snapshot.task.id, heads)
       }, doing.pushBranch),
+    mergeWaiting: (how) =>
+      act(async () => {
+        if (snapshot === null) return
+        const open = snapshot.task.changes.find((one) => one.state === 'open')
+        if (open === undefined) return
+        await client.merge(snapshot.task.id, open.head ?? '', open.url, how)
+      }, doing.mergeWaiting),
     accept: (changes) =>
       act(async () => {
         setMergeFailed(null)

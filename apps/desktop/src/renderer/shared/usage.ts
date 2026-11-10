@@ -72,6 +72,10 @@ export const usageLines = (
       estimated: use.estimated,
       models: use.models.map((model) => named(use.agentId, model).name),
       tokens: use.tokens,
+      // Several models on one account, its helpers' among them: each one's tokens.
+      ...(use.byModel === undefined
+        ? {}
+        : { byModel: use.byModel.map((one) => ({ name: named(use.agentId, one.model).name, tokens: one.tokens })) }),
       ...(use.why === undefined ? {} : { why: use.why }),
     }
   })

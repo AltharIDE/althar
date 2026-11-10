@@ -5,7 +5,7 @@ import { describe, expect, it, vi } from 'vitest'
 
 import { ApiError, type ProjectRulesView } from '@althar/contracts'
 
-import { RulesSection } from '../src/renderer/features/rules/RulesSection'
+import { RulesSection, TaskRules } from '../src/renderer/features/rules/RulesSection'
 import { useRules, withChange } from '../src/renderer/features/rules/useRules'
 import { agents, changed, fakeClient, projectRules, usual } from './fixtures'
 import { withServices } from './render'
@@ -13,6 +13,22 @@ import { withServices } from './render'
 /** The rules, as their section of the project's settings has them: named by the page around them, so with no title of their own. */
 function Rules() {
   return <RulesSection model={useRules('p1')} />
+}
+
+/** The rules and the Tasks' sentences over one model, as the project's settings keep them while the person goes from one to the other. */
+function Both() {
+  const model = useRules('p1')
+  return (
+    <>
+      <RulesSection model={model} />
+      <TaskRules model={model} headingLevel={3} />
+    </>
+  )
+}
+
+/** What a task does when it is finished and when an account runs out: the Finished and Limits sentences, which a project's Tasks say. */
+function Tasks() {
+  return <TaskRules model={useRules('p1')} headingLevel={3} />
 }
 
 const rulesOf = (rules: Partial<ProjectRulesView>) => vi.fn(async () => ({ ...projectRules, ...rules }))
@@ -57,8 +73,6 @@ describe('a project’s rules', () => {
       'The rest',
       'Sandbox',
       'Last 14 days',
-      'Finished',
-      'Limits',
     ])
     expect(says('Never')).toBe('Agents never force push, and never run npm publish.')
     expect(says('Ask me')).toBe('They ask you before deploying or publishing, and before running psql.')
@@ -66,6 +80,15 @@ describe('a project’s rules', () => {
     expect(says('The rest')).toBe(
       'Everything else, like pushing to the default branch, pushing several branches or tags, deleting other branches and posting for you: allowed. What Althar can’t read comes to you.',
     )
+    // How a task ends and what a usage limit does are the project's Tasks, not its rules.
+    expect(screen.queryByRole('listitem', { name: 'Finished' })).toBeNull()
+    expect(screen.queryByRole('listitem', { name: 'Limits' })).toBeNull()
+  })
+
+  it('says in the Tasks how a finished task ends, and what a usage limit does, as sentences', async () => {
+    withServices(<Tasks />, fakeClient().client)
+    await screen.findByRole('heading', { name: 'Finished', level: 3 })
+    expect(screen.getAllByRole('heading', { level: 3 }).map((heading) => heading.textContent)).toEqual(['Finished', 'Limits'])
     expect(says('Finished')).toBe(
       'A finished task opens a draft pull request, on a branch named althar/MER-128-fix-login and titled Fix login, described in Althar’s own words.',
     )
@@ -420,7 +443,7 @@ describe('a project’s rules', () => {
     vi.mocked(client.setProjectRules).mockRejectedValueOnce(
       new ApiError({ reason: 'RulesChanged', message: "The project's rules changed meanwhile, so that change wasn't made." }),
     )
-    withServices(<Rules />, client)
+    withServices(<Both />, client)
     await choose(await screen.findByRole('button', { name: 'force pushing' }), 'Never')
     await waitFor(() => expect(client.setProjectRules).toHaveBeenLastCalledWith(expect.objectContaining({ expectedRevision: 3 })))
     expect(await screen.findByText("The project's rules changed meanwhile, so that change wasn't made.")).toBeTruthy()
@@ -455,7 +478,7 @@ describe('a project’s rules', () => {
 
   it('changes how a task ends and what a usage limit does, and offers only what Althar does', async () => {
     const { client } = fakeClient()
-    withServices(<Rules />, client)
+    withServices(<Tasks />, client)
     await choose(await screen.findByRole('button', { name: 'a draft pull request' }), 'Push the branch only')
     await waitFor(() => expect(client.setProjectRules).toHaveBeenLastCalledWith({ projectId: 'p1', end: 'none' }))
     expect(says('Finished')).toContain(
@@ -488,7 +511,7 @@ describe('a project’s rules', () => {
         agents: [{ ...codex, accounts: [usual('acc_main', 'signed_in'), { ...usual('acc_work', 'signed_in'), name: 'work', home: '/w' }] }],
       })),
     })
-    withServices(<Rules />, client)
+    withServices(<Tasks />, client)
     await waitFor(() =>
       expect(says('Limits')).toBe('When an account runs out, the work moves to the strongest model with usage left. Codex works on main.'),
     )
@@ -521,7 +544,7 @@ describe('a project’s rules', () => {
         ],
       }),
     })
-    withServices(<Rules />, client)
+    withServices(<Tasks />, client)
     await userEvent.click(await screen.findByRole('button', { name: 'each repository’s template' }))
     expect(await screen.findByText('.github/pull_request_template.md, filled in by the lead')).toBeTruthy()
     await userEvent.keyboard('{Escape}')
@@ -546,7 +569,7 @@ describe('a project’s rules', () => {
         ],
       }),
     })
-    withServices(<Rules />, client)
+    withServices(<Tasks />, client)
     expect(await screen.findByRole('button', { name: 'as each repository says' })).toBeTruthy()
     expect(screen.getByRole('button', { name: 'each repository’s template, where it has one' })).toBeTruthy()
   })

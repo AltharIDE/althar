@@ -75,7 +75,7 @@ const INPUTS = [
 ]
 
 function Page() {
-  return <SettingsPage start={useStart({ recheck: true })} section="dictation" onSection={() => {}} />
+  return <SettingsPage start={useStart({ recheck: true })} section="this-mac" onSection={() => {}} />
 }
 
 const show = (dictation?: DictationHost) =>

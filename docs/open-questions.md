@@ -18,34 +18,29 @@ was decided. These are what they leave open.
 
 **Tasks and the coordinator**
 
-- [ ] **The Scratch shelf and presets.** The 13 October direction makes a
-  temporary chat the lightest form of a task, kept off the board, with
-  common uses as presets. Neither is built, and their shape is open
-  ([tasks](decisions/tasks.md#what-a-task-is)). Proposed in
-  [a task is a conversation plus parts](decisions/proposed/a-task-is-a-conversation-plus-parts.md#chats-and-scratch).
-- [ ] **Moving a running task.** A task's place (Local or a worktree) and the
-  branch it works toward change only until its first step. The container
-  direction implies they change at any time, as its team now does. Proposed
-  in [a task is a conversation plus parts](decisions/proposed/a-task-is-a-conversation-plus-parts.md#the-workspace-moves-up).
+- [x] **The Scratch shelf and presets.** Built: chats sit on Scratch, its own
+  shelf listing them by their latest exchange, and presets name a task's
+  starting parts ([tasks](decisions/tasks.md#chats-and-scratch)). Whether
+  Scratch offers to clear chats untouched for a while is still open.
+- [x] **Moving a running task.** Built: it moves between a worktree and Local,
+  and changes the branch it works toward, at any time
+  ([workspaces and runs](decisions/workspaces-and-runs.md#moving-a-running-task)).
 - [ ] **Keeping what agents hand back.** Nothing in the artifact store is
   swept yet. How long each kind is kept, and a mark-and-sweep, are open
   ([tasks](decisions/tasks.md#what-agents-hand-back)).
 - [ ] **The coordinator off Claude Code.** OpenCode and Windows have no
   sandbox to hold it, so its copies and the reader rules are its boundary
   there ([the coordinator](decisions/coordinator.md#its-copies-of-the-repositories)).
-- [ ] **Helpers** stay a proposal ([ADR-087](decisions/proposed/087-a-lead-starts-helpers-on-any-agent-in-copies-of-their-own.md)).
-  Whether to build them as written is open.
+- [x] **Helpers.** Built: handed a change or in a copy of their own, on any
+  agent, their results coming back as turns ([tasks](decisions/tasks.md#helpers)).
+  Kimi's, Qwen Code's and Junie's own background helpers stay on, as nothing
+  Althar owns switches them off.
 
 **What agents may do, and the person's setup**
 
-- [ ] **"Run it" for an outside author's review.** A review of a stranger's
-  pull request runs none of their code and stays offline. A "Run it" step,
-  not built, would run it in the sandbox, and its installs would need the
-  package registries. The leaning is a short list of the download hosts the
-  recorded setup already uses, for that step only. Proposed instead: "Run it"
-  asks Run safely (a lockfile install from the registries, scripts off,
-  commands offline) or Trust fully
-  ([a task is a conversation plus parts](decisions/proposed/a-task-is-a-conversation-plus-parts.md#running-someone-elses-pull-request)).
+- [x] **"Run it" for an outside author's review.** Built: Run safely (a
+  lockfile install with scripts off, from the base branch's registries,
+  commands offline) or Trust fully ([reviews](decisions/reviews.md#run-it)).
 - [ ] **Claude Code's own memory.** ADR-097 turned it on; main still turns it
   off, because it writes into the person's `~/.claude`
   ([the person's setup](decisions/the-persons-setup.md#claude-codes-own-memory)).
@@ -56,7 +51,7 @@ was decided. These are what they leave open.
 - [ ] **An MCP broker.** Build one only if MCP calls are seen slipping past
   the agents' own hooks.
 - [ ] **Skills per project.** There is no per-project choice of skills, and
-  Codex may drop catalog skills over its budget without saying so.
+  Codex may drop skills over its budget without saying so.
 
 **Code hosts and trackers**
 

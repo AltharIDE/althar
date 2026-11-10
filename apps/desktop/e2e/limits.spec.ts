@@ -45,14 +45,14 @@ const startWhileOut = async (out: string, { asks = false, waits = false }: { rea
     .click()
   await expect(page.getByRole('heading', { name: 'meridian', level: 1 })).toBeVisible()
   if (waits) {
-    await projectSettings(page, 'Rules')
+    await projectSettings(page, 'Tasks')
     await page.getByRole('button', { name: 'moves to the strongest model with usage left', exact: true }).click()
     await page.getByRole('menuitemradio', { name: 'Wait for the reset' }).click()
     await expect(page.getByRole('listitem', { name: 'Limits' })).toContainText('When an account runs out, the work waits for the reset')
     await backToWork(page)
   }
   if (asks) {
-    await projectSettings(page, 'Rules')
+    await projectSettings(page, 'Tasks')
     await page.getByRole('button', { name: 'moves to the strongest model with usage left', exact: true }).click()
     await page.getByRole('menuitemradio', { name: 'Ask me' }).click()
     const limits = page.getByRole('listitem', { name: 'Limits' })

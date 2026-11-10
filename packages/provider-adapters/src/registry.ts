@@ -3,6 +3,7 @@ import { spawnSync } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { delimiter, dirname, join } from 'node:path'
+import { claudeHolding, codexHolding, type HeldSkill, openCodeHolding } from './heldSkills'
 import { codexWithoutOwnTools, openCodeWithoutOwnTools, type StartingAt, upToRepository } from './ownTools'
 import { SECRET_PLACES, secretReadRules } from './secrets'
 import { claudeShellFolder } from './shellFolder'
@@ -279,6 +280,12 @@ export interface AgentDefinition {
    */
   readonly sessionMeta?: (role?: 'lead' | 'reader', options?: SessionOptions) => Readonly<Record<string, unknown>>
   /**
+   * Its own helpers (ADR-087, "Agents' own subagents"): how its launch switches off those that would work in the
+   * background, which over ACP hold its turn, lose their result or start turns Althar didn't ask for, and what it keeps
+   * within a turn. `off` is false where nothing can switch them off, said rather than left silent.
+   */
+  readonly ownHelpers: { readonly off: boolean; readonly how: string; readonly kept: string }
+  /**
    * Whether, here, `sessionMeta` holds a reader given `contained` to a
    * sandbox it never runs a command outside of, in its folder and off the
    * network (ADR-058). Where it is, what a command writes stays in that
@@ -412,6 +419,11 @@ export interface SessionOptions {
    * written to.
    */
   readonly skills?: string
+  /**
+   * The person's own skills it is not given, from its agent's folders, plugins or the repository: each held back in
+   * the agent itself, the way it documents (`heldSkills.ts`). Althar's own selection leaves them out before `skills`.
+   */
+  readonly heldSkills?: ReadonlyArray<HeldSkill>
 }
 
 /** How a session's sandbox holds its shell commands: see `AgentDefinition.holds`. */
@@ -952,6 +964,24 @@ const claudeContains = (
   },
 })
 
+/** A Claude Code session's settings with the person's skills it isn't given held back (`heldSkills.ts`). */
+const claudeWithout = <
+  Meta extends { readonly claudeCode: { readonly options: { readonly settings: Settings } } },
+  Settings extends { readonly permissions: { readonly deny?: ReadonlyArray<string> } },
+>(
+  meta: Meta,
+  held: ReadonlyArray<HeldSkill> | undefined,
+): Meta =>
+  held === undefined || held.length === 0
+    ? meta
+    : {
+        ...meta,
+        claudeCode: {
+          ...meta.claudeCode,
+          options: { ...meta.claudeCode.options, settings: claudeHolding(meta.claudeCode.options.settings, held) },
+        },
+      }
+
 // claude-agent-acp 0.88.0 forwards this explicit tools array to the SDK.
 // Removing the tool set also removes Read/Grep/Glob, which never ask in plan mode.
 const claudeJudges = {
@@ -987,9 +1017,10 @@ export const agents: Readonly<Record<AgentId, AgentDefinition>> = {
     launch: (node) => ({
       command: node,
       args: [bundled('@agentclientprotocol/claude-agent-acp', 'dist/index.js')],
-      env: { NODE_USE_ENV_PROXY: '1', CLAUDE_CODE_DISABLE_AUTO_MEMORY: '1' },
+      env: { NODE_USE_ENV_PROXY: '1', CLAUDE_CODE_DISABLE_AUTO_MEMORY: '1', CLAUDE_CODE_DISABLE_BACKGROUND_TASKS: '1' },
       inheritEnv: ['CLAUDE_CONFIG_DIR'],
     }),
+    ownHelpers: { off: true, how: 'CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1', kept: 'Agent within the turn' },
     modes: { ask: 'default', readOnly: 'plan', reader: 'default' },
     options: { mode: 'mode', model: 'model', effort: 'effort' },
     signIn: {
@@ -1028,17 +1059,20 @@ export const agents: Readonly<Record<AgentId, AgentDefinition>> = {
      * a Flatpak, where the sandbox can't start, the rules are what holds it.
      */
     sessionMeta: (role = 'lead', options = {}) =>
-      role !== 'reader'
-        ? claudeAsks(options.sandbox, options.skills, claudeSandboxStarts(), options.web === true && options.offline !== true)
-        : options.contained !== undefined && options.untrusted !== true && options.offline !== true
-          ? claudeContains(options.contained, options.skills, options.sandbox?.deniedHosts)
-          : claudeReads(
-              process.env.FLATPAK_ID !== undefined,
-              options.offline === true,
-              options.untrusted === true,
-              options.web,
-              options.skills,
-            ),
+      claudeWithout(
+        role !== 'reader'
+          ? claudeAsks(options.sandbox, options.skills, claudeSandboxStarts(), options.web === true && options.offline !== true)
+          : options.contained !== undefined && options.untrusted !== true && options.offline !== true
+            ? claudeContains(options.contained, options.skills, options.sandbox?.deniedHosts)
+            : claudeReads(
+                process.env.FLATPAK_ID !== undefined,
+                options.offline === true,
+                options.untrusted === true,
+                options.web,
+                options.skills,
+              ),
+        options.heldSkills,
+      ),
     contains: claudeSandboxStarts,
     upFront: true,
     /* A local plugin its session loads (claudeAsks); it dispatches subagents. */
@@ -1067,6 +1101,7 @@ export const agents: Readonly<Record<AgentId, AgentDefinition>> = {
   },
   codex: {
     id: 'codex',
+    ownHelpers: { off: true, how: 'features.multi_agent = false', kept: 'none: its children never block' },
     name: 'Codex',
     service: { name: 'OpenAI', url: 'https://api.openai.com' },
     source: 'bundled',
@@ -1125,13 +1160,20 @@ export const agents: Readonly<Record<AgentId, AgentDefinition>> = {
       // Every command Codex doesn't read as safe reaches Althar, so the irreversible list holds inside its sandbox too
       // (ADR-097); everything else is answered at once. The adapter's patch puts it on the turn's approval policy.
       ALTHAR_APPROVAL_POLICY: 'untrusted',
-      CODEX_CONFIG: JSON.stringify({
-        ...JSON.parse(own.CODEX_CONFIG ?? '{}'),
-        ...(options.web === undefined && options.offline !== true
-          ? {}
-          : { web_search: options.web === true && options.offline !== true ? 'live' : 'disabled' }),
-        'sandbox_workspace_write.network_access': options.offline !== true,
-      }),
+      CODEX_CONFIG: JSON.stringify(
+        codexHolding(
+          {
+            ...JSON.parse(own.CODEX_CONFIG ?? '{}'),
+            ...(options.web === undefined && options.offline !== true
+              ? {}
+              : { web_search: options.web === true && options.offline !== true ? 'live' : 'disabled' }),
+            'sandbox_workspace_write.network_access': options.offline !== true,
+            // Its own helpers off (ADR-087): their results never wake an idle lead.
+            'features.multi_agent': false,
+          },
+          options.heldSkills,
+        ),
+      ),
     }),
     /*
      * codex-acp 2.2.2 sets Codex's extra skill roots to `<dir>/.agents/skills` of each of a session's added directories
@@ -1175,9 +1217,10 @@ export const agents: Readonly<Record<AgentId, AgentDefinition>> = {
     launch: () => ({
       command: 'opencode',
       args: ['acp'],
-      env: { OPENCODE_CONFIG_CONTENT: openCodeConfig },
+      env: { OPENCODE_CONFIG_CONTENT: openCodeConfig, OPENCODE_EXPERIMENTAL_BACKGROUND_SUBAGENTS: 'false' },
       inheritEnv: ['OPENCODE_CONFIG_DIR'],
     }),
+    ownHelpers: { off: true, how: 'OPENCODE_EXPERIMENTAL_BACKGROUND_SUBAGENTS=false', kept: 'task within the turn' },
     /*
      * It has no sandbox: a reader, offline or not, is held by Althar's
      * rules alone, and a lead's known commands and hosts (`UpFront`) have
@@ -1294,16 +1337,15 @@ export const agents: Readonly<Record<AgentId, AgentDefinition>> = {
       via: { kind: 'env', env: (folder, own) => openCodeSkills(folder, own) },
     },
     sessionEnv: (own, options) => {
-      if (options.web === undefined && options.offline !== true) return {}
+      const config = JSON.parse(own.OPENCODE_CONFIG_CONTENT ?? openCodeConfig) as Readonly<Record<string, unknown>>
       const web = options.web === true && options.offline !== true ? 'allow' : 'ask'
       const permission = { ...asks, webfetch: web, websearch: web }
-      return {
-        OPENCODE_CONFIG_CONTENT: JSON.stringify({
-          ...JSON.parse(own.OPENCODE_CONFIG_CONTENT ?? openCodeConfig),
-          permission,
-          agent: { build: { permission }, plan: { permission } },
-        }),
-      }
+      const opened =
+        options.web === undefined && options.offline !== true
+          ? config
+          : { ...config, permission, agent: { build: { permission }, plan: { permission } } }
+      const held = openCodeHolding(opened, options.heldSkills)
+      return held === config ? {} : { OPENCODE_CONFIG_CONTENT: JSON.stringify(held) }
     },
     /*
      * MIT licensed; its releases are at anomalyco/opencode (sst/opencode before), each file with GitHub's sha256.
@@ -1345,6 +1387,7 @@ export const agents: Readonly<Record<AgentId, AgentDefinition>> = {
    */
   copilot: {
     id: 'copilot',
+    ownHelpers: { off: true, how: '--excluded-tools task', kept: 'none: one tool runs both ways' },
     skills: null,
     name: 'GitHub Copilot',
     service: { name: 'GitHub', url: 'https://api.githubcopilot.com' },
@@ -1360,7 +1403,7 @@ export const agents: Readonly<Record<AgentId, AgentDefinition>> = {
     failsInText: 'Error: ',
     launch: () => ({
       command: 'copilot',
-      args: ['--acp', '--no-auto-update'],
+      args: ['--acp', '--no-auto-update', '--excluded-tools', 'task'],
       env: { COPILOT_AUTO_UPDATE: 'false', COPILOT_DISABLE_LOGIN_SHELL_ENV: '1' },
       // GH_HOST names a GHE.com tenant (`yourorg.ghe.com`) for those whose Copilot is there, as `copilot login --host` does.
       inheritEnv: ['COPILOT_HOME', 'GH_HOST'],
@@ -1436,6 +1479,7 @@ export const agents: Readonly<Record<AgentId, AgentDefinition>> = {
    */
   junie: {
     id: 'junie',
+    ownHelpers: { off: false, how: 'no switch found', kept: 'its own: the brief asks for waitForResult' },
     skills: null,
     name: 'Junie',
     source: 'user_installed',
@@ -1489,6 +1533,7 @@ export const agents: Readonly<Record<AgentId, AgentDefinition>> = {
    */
   grok: {
     id: 'grok',
+    ownHelpers: { off: true, how: 'GROK_SUBAGENTS=0', kept: 'none' },
     skills: null,
     name: 'Grok Build',
     service: { name: 'xAI', url: 'https://api.x.ai' },
@@ -1503,6 +1548,7 @@ export const agents: Readonly<Record<AgentId, AgentDefinition>> = {
       args: ['agent', '--no-leader', 'stdio'],
       env: {
         GROK_DISABLE_AUTOUPDATER: '1',
+        GROK_SUBAGENTS: '0',
         GROK_CLAUDE_MCPS_ENABLED: '0',
         GROK_CURSOR_MCPS_ENABLED: '0',
         GROK_CLAUDE_HOOKS_ENABLED: '0',
@@ -1554,6 +1600,11 @@ export const agents: Readonly<Record<AgentId, AgentDefinition>> = {
    */
   kimi: {
     id: 'kimi',
+    ownHelpers: {
+      off: false,
+      how: 'TaskList, TaskOutput and TaskStop go in [tools] disabled of its config, which is the person’s own: left as they set it',
+      kept: 'Agent within the turn',
+    },
     skills: null,
     name: 'Kimi Code',
     source: 'user_installed',
@@ -1601,6 +1652,7 @@ export const agents: Readonly<Record<AgentId, AgentDefinition>> = {
    */
   'mistral-vibe': {
     id: 'mistral-vibe',
+    ownHelpers: { off: true, how: 'VIBE_ENABLE_SUBAGENTS=false', kept: 'none: its children never block' },
     skills: null,
     name: 'Mistral Vibe',
     service: { name: 'Mistral', url: 'https://api.mistral.ai' },
@@ -1615,6 +1667,7 @@ export const agents: Readonly<Record<AgentId, AgentDefinition>> = {
         VIBE_SMART_APPROVE_DEFAULT: 'false',
         VIBE_SMART_APPROVE_AVAILABLE: 'false',
         VIBE_ENABLE_UPDATE_CHECKS: 'false',
+        VIBE_ENABLE_SUBAGENTS: 'false',
       },
       inheritEnv: ['VIBE_HOME'],
     }),
@@ -1656,6 +1709,7 @@ export const agents: Readonly<Record<AgentId, AgentDefinition>> = {
    */
   'qwen-code': {
     id: 'qwen-code',
+    ownHelpers: { off: false, how: 'none: left on', kept: 'its own, whose results come back as turns of its own over ACP' },
     skills: null,
     name: 'Qwen Code',
     source: 'user_installed',
@@ -1699,6 +1753,7 @@ export const agents: Readonly<Record<AgentId, AgentDefinition>> = {
    */
   antigravity: {
     id: 'antigravity',
+    ownHelpers: { off: true, how: '_meta.agy.disabledTools: ["start_subagent"] on session/new', kept: 'none: all are background' },
     skills: null,
     name: 'Google Antigravity',
     source: 'user_installed',
@@ -1717,6 +1772,8 @@ export const agents: Readonly<Record<AgentId, AgentDefinition>> = {
       privateTemp: true,
     }),
     modes: { ask: 'default', readOnly: null, reader: 'default' },
+    /* Its own helpers, all of which work in the background, are off for every session it starts (ADR-087). */
+    sessionMeta: () => ({ agy: { disabledTools: ['start_subagent'] } }),
     /* Its effort is in its model's id (`gemini-3.8-flash-high`); `yolo`, a mode, is held off by holding the mode. */
     options: { mode: 'mode', model: 'model', held: { mode: 'default' } },
     /*

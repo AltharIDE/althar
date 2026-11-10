@@ -1,19 +1,26 @@
+import type { ReactNode } from 'react'
+
+import { Icon } from '../../foundations/Icon/Icon'
 import { LinkButton } from '../../primitives/LinkButton/LinkButton'
 import { Select } from '../../primitives/Select/Select'
 import { SettingList, SettingRow } from '../Preferences/Preferences'
 
 /*
- * How plans start and how long review goes on, as rows of the Settings tab:
- * how long a plan waits before it starts on its own, how many rounds of
- * review a task has, and what it does when they run out. Each is a choice
- * from a few, kept at once. A row that
+ * How plans start and what review does, as rows of the Settings tab: how
+ * long a plan waits before it starts on its own, and what a task does when
+ * the check of its fixes reopens a finding the lead then settles again (a
+ * task is a conversation plus parts: a fix is checked once at most, so there
+ * are no rounds to count). Each is a choice from a few, kept at once. A row that
  * isn't at today's value says so, and goes back to it in one click. Nothing
  * here says what is running now: settings are calm.
  */
 
 /** Seconds a proposed plan waits before it starts on its own; 0 starts it at once. */
 export type Countdown = 0 | 10 | 25 | 60
-/** Review rounds before the task goes on or is left to the person. */
+/**
+ * Review rounds before the task goes on or is left to the person, as it once was: kept with the setting, so a store or a
+ * client before the check reads the same, and read by nothing now.
+ */
 export type ReviewRounds = 1 | 2 | 3 | 5
 
 /**
@@ -51,15 +58,15 @@ export const plansAndReviewsText: PlansAndReviewsText = {
     label: (rounds) => (rounds === 1 ? '1 round' : `${rounds} rounds`),
   },
   roundsOut: {
-    title: 'When rounds run out',
-    note: (choice) => (choice === 'settled' ? 'A finding left open stops the task.' : 'The task waits for you.'),
+    title: 'When a check finds more',
+    note: (choice) =>
+      choice === 'settled' ? 'The lead’s second fix is not read again. A finding left open stops the task.' : 'The task waits for you.',
     label: (choice) => (choice === 'settled' ? 'Carry on when every finding is settled' : 'Ask me'),
   },
   reset: (label) => `Default: ${label}`,
 }
 
 const COUNTDOWNS: readonly Countdown[] = [0, 10, 25, 60]
-const ROUNDS: readonly ReviewRounds[] = [1, 2, 3, 5]
 const ROUNDS_OUT: readonly RoundsOut[] = ['settled', 'ask']
 
 export interface PlansAndReviewsProps {
@@ -79,6 +86,7 @@ export function PlansAndReviews({ value, onChange, text }: PlansAndReviewsProps)
     note: string,
     choices: readonly V[],
     label: (choice: V) => string,
+    picture: { glyph: ReactNode } | { mark: ReactNode },
     width = 150,
   ) => {
     const chosen = value[key] as V
@@ -86,6 +94,7 @@ export function PlansAndReviews({ value, onChange, text }: PlansAndReviewsProps)
     return (
       <SettingRow
         title={title}
+        {...picture}
         note={
           <>
             {note}
@@ -112,9 +121,18 @@ export function PlansAndReviews({ value, onChange, text }: PlansAndReviewsProps)
   }
   return (
     <SettingList>
-      {row('countdown', t.countdown.title, t.countdown.note(value.countdown), COUNTDOWNS, t.countdown.label)}
-      {row('rounds', t.rounds.title, t.rounds.note, ROUNDS, t.rounds.label)}
-      {row('roundsOut', t.roundsOut.title, t.roundsOut.note(value.roundsOut), ROUNDS_OUT, t.roundsOut.label, 280)}
+      {row('countdown', t.countdown.title, t.countdown.note(value.countdown), COUNTDOWNS, t.countdown.label, {
+        glyph: <Icon name="clock" size={15} />,
+      })}
+      {row(
+        'roundsOut',
+        t.roundsOut.title,
+        t.roundsOut.note(value.roundsOut),
+        ROUNDS_OUT,
+        t.roundsOut.label,
+        { glyph: <Icon name="hold" size={15} /> },
+        280,
+      )}
     </SettingList>
   )
 }
