@@ -165,6 +165,16 @@ const Drafted = Schema.Struct({
   repositories: Schema.optional(Schema.Array(Schema.String)),
   ...Where,
 })
+/**
+ * Whether the person's words ask for a pull request to be reviewed: "review" (not its comments or findings, which are work on
+ * it) beside a pull request named by its link or its number. Such a request is a review task's, read only and drafted to post
+ * from its card (review_pull_request), never a task of work.
+ */
+export const asksForReview = (words: string) =>
+  /(?<!\b(?:no|without|skip|skipping|skip the|needs no|without a)[\s-]+)\breview(?:s|ing)?\b(?!\s+(?:comments?|feedback|findings|threads?|notes|needed))/i.test(
+    words,
+  ) && /\/(?:pull|pulls|merge_requests|pull-requests)\/\d+|(?:^|[\s(])(?:#|PR\s*#?|MR\s*!?|!)\d+\b/i.test(words)
+
 /* A task drafted to work on an open pull request, such as to answer its review: it starts on that pull request's head (ADR-052). */
 const DraftedTask = Schema.Struct({ ...Drafted.fields, pull_request: Schema.optional(Schema.Union([Schema.String, Schema.Number])) })
 /* A task attached to an open pull request, by its link or number; `start_from_head`, the person's word to start its branch there. */
@@ -1023,9 +1033,26 @@ export class Coordinator extends Context.Service<
         }).pipe(Effect.catchCause((cause) => Effect.logWarning('Could not tell the coordinator its draft has no plan', cause)))
       yield* Effect.forkScoped(Stream.runForEach(yield* live.subscribe, (event) => provide(unplannedNews(event))))
 
+      /**
+       * The person asked, in the words that started this turn, for a pull request to be reviewed: that is review_pull_request's,
+       * whose lead reads it read only and drafts a review the person posts from its card. A task of work, started or drafted
+       * instead, would review it with nothing to post (work on a pull request names it: draft_task's pull_request).
+       */
+      const notAReview = (access: ToolAccess) =>
+        Effect.gen(function* () {
+          const said = yield* personsWords(access)
+          if (said === undefined || !asksForReview(said)) return
+          return yield* new ToolRefused({
+            message:
+              'The person asked for a pull request to be reviewed: plan that with review_pull_request, whose lead reads it read only and drafts a review they post from its card. A task of work is for changing code; one that works on a pull request, such as answering its review, is draft_task with its pull_request.',
+          })
+        })
+
       const draft = (access: ToolAccess, input: unknown) =>
         Effect.gen(function* () {
           const { pull_request: pullRequest, ...drafted } = yield* read(DraftedTask, input)
+          // Work on a pull request names it; asked only to review one, the person gets a review task.
+          if (pullRequest === undefined) yield* notAReview(access)
           const { created, issue } = yield* drafting(access, drafted)
           if (access.role === 'coordinator')
             draftedThisTurn.set(access.threadId, (draftedThisTurn.get(access.threadId) ?? new Map()).set(created.taskId, created.slug))
@@ -1093,6 +1120,7 @@ export class Coordinator extends Context.Service<
           const { lead: pick, ...drafted } = yield* read(Started, input)
           // The lead is found first, so a model that can't be used drafts nothing.
           const lead = yield* stepOf(access.projectId, pick)
+          yield* notAReview(access)
           const { created } = yield* drafting(access, drafted, true)
           // Called again, unsure the first worked, it doesn't start the same task twice.
           if ((yield* taskOf(access, created.taskId)).state !== 'draft') return `${created.slug} has started already.`
