@@ -113,12 +113,15 @@ export type Part =
     }
   /** Pictures the agent showed the person, in order, each with its caption: open under its work, where it showed them. */
   | { readonly kind: 'pictures'; readonly id: string; readonly pictures: ReadonlyArray<ShownPicture> }
+  /** A version of one of the project's canvases the agent published or opened (ADR-104): open under its work, a line that opens it. */
+  | { readonly kind: 'canvas'; readonly id: string; readonly canvas: CanvasContent }
 
 export type StepResult = Extract<ThreadItem, { kind: 'step_result' }>['content']
 export type TaskCardContent = Extract<ThreadItem, { kind: 'task' }>['content']
 export type ArrivalContent = Extract<ThreadItem, { kind: 'arrival' }>['content']
 export type QuestionContent = Extract<ThreadItem, { kind: 'question' }>['content']
 export type RunContent = Extract<ThreadItem, { kind: 'run' }>['content']
+export type CanvasContent = Extract<ThreadItem, { kind: 'canvas' }>['content']
 export type IssueDraftContent = Extract<ThreadItem, { kind: 'issue_draft' }>['content']
 export type IssueChangesContent = Extract<ThreadItem, { kind: 'issue_changes' }>['content']
 export type SetupContent = Extract<ThreadItem, { kind: 'setup' }>['content']
@@ -396,7 +399,7 @@ export interface Streamed {
 const noticeText = (content: NoticeContent) => (content.description === null ? content.title : `${content.title} ${content.description}`)
 
 const partOf = (
-  item: Extract<ThreadItem, { kind: 'agent_message' | 'agent_thought' | 'tool_call' | 'plan' | 'notice' | 'pictures' }>,
+  item: Extract<ThreadItem, { kind: 'agent_message' | 'agent_thought' | 'tool_call' | 'plan' | 'notice' | 'pictures' | 'canvas' }>,
   streaming: ReadonlyMap<string, Streamed>,
   turnRunning: boolean,
   worktree: string | null,
@@ -511,6 +514,8 @@ const partOf = (
     }
     case 'pictures':
       return { kind: 'pictures', id: item.id, pictures: item.content.pictures }
+    case 'canvas':
+      return { kind: 'canvas', id: item.id, canvas: item.content }
   }
 }
 
@@ -568,7 +573,7 @@ const splitOf = (parts: ReadonlyArray<Part>, beforeStep: boolean, running: boole
     : beforeStep
       ? -1
       : parts.findLastIndex((part) => part.kind === 'message')
-  const open = (part: Part, index: number) => index === last || index === failed || part.kind === 'pictures'
+  const open = (part: Part, index: number) => index === last || index === failed || part.kind === 'pictures' || part.kind === 'canvas'
   return {
     work: parts.filter((part, index) => !open(part, index)),
     said: parts.filter(open),

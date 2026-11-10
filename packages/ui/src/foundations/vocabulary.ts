@@ -546,6 +546,8 @@ export enum Room {
   Both = 'both',
   /** The work that starts by itself, on a schedule: the project's automations, each opening as its own page. */
   Automations = 'automations',
+  /** What the project's agents made to keep (ADR-104), every lead's and the coordinator's: its canvases today, more kinds later. */
+  Artifacts = 'artifacts',
   /** The project's settings, in place of its work. */
   Settings = 'settings',
 }

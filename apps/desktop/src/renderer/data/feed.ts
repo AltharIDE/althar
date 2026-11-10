@@ -164,6 +164,13 @@ const wholeReads = (cache: QueryClient, event: Changed): ReadonlyArray<Due> => [
           .map((query) => ({ key: query.queryKey, offScreen: false })),
       ]
     : []),
+  // The project's canvases and the one that changed (ADR-104): a version published, a comment sent or answered, one archived.
+  ...(event.projectId !== null && event.aggregateType === 'canvas'
+    ? [
+        { key: keys.canvases(event.projectId), offScreen: false },
+        { key: keys.canvas(event.aggregateId), offScreen: false },
+      ]
+    : []),
   // Finished tasks' folders, which go and come back with their worktrees and with tasks settling, only while they show (ADR-056).
   ...(event.aggregateType === 'workspace' || event.aggregateType === 'task' ? [{ key: keys.folders, offScreen: false }] : []),
 ]

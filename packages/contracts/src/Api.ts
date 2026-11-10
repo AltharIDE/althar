@@ -1,6 +1,7 @@
 import { Context, Schema } from 'effect'
 import { Rpc, RpcGroup, RpcMiddleware } from 'effect/rpc'
 
+import { CanvasDetail, CanvasKind, CanvasSummary, CanvasText, SentCanvasComment } from './canvases'
 import { MESSAGE_FILES } from './files'
 import { AutomationCard, AutomationDefinition, AutomationSnapshot, AutomationsSnapshot, FromAutomation } from './automations'
 import { MESSAGE_IMAGES } from './pictures'
@@ -1995,6 +1996,30 @@ export const PicturesItem = Schema.Struct({
   content: Schema.Struct({ pictures: Schema.Array(ShownPicture) }),
 })
 
+/**
+ * A version of one of the project's canvases an agent published (ADR-104),
+ * in the thread it was published from: its name, title, kind and version,
+ * which open it beside the conversation. Althar posts it; the canvas is the
+ * project's, so it opens from any conversation, and this is only where it
+ * was drawn.
+ */
+export const CanvasItem = Schema.Struct({
+  ...itemFields,
+  kind: Schema.Literal('canvas'),
+  content: Schema.Struct({
+    canvasId: Schema.String,
+    name: Schema.String,
+    title: Schema.String,
+    canvasKind: CanvasKind,
+    version: Schema.Number,
+    note: Schema.NullOr(Schema.String),
+    /** What the agent did: published this version, or opened it beside its conversation. */
+    action: Schema.Literals(['published', 'opened']),
+    /** Whether it opens beside the conversation as it arrives: a publish or an open that asked to. */
+    open: Schema.Boolean,
+  }),
+})
+
 /** A failed check's log, as its arrival shows it: its end, or why there is none to read ("GitHub refused (401)"). */
 export const CheckLogShown = Schema.Struct({
   name: Schema.String,
@@ -2964,6 +2989,7 @@ export const ThreadItem = Schema.Union([
   AutomationItem,
   PicturesItem,
   TaskAskItem,
+  CanvasItem,
 ])
 export type ThreadItem = typeof ThreadItem.Type
 
@@ -4209,6 +4235,9 @@ const socketCalls = new Set<string>([
   'GetThreadItem',
   'ReadOutput',
   'ReadDocument',
+  'ListCanvases',
+  'GetCanvas',
+  'ReadCanvasText',
   'FindCode',
   'ReadCode',
   'GetFileDiff',
@@ -4436,6 +4465,12 @@ export const Api = RpcGroup.make(
    * file inside one of the task's worktrees, and not too large to read.
    */
   call('ReadDocument', { threadId: Schema.String, path: Schema.String }, DocumentText),
+  /** A project's canvases (ADR-104), each with its latest version, newest first; archived ones only where asked. */
+  call('ListCanvases', { projectId: Schema.String, archived: Schema.optional(Schema.Boolean) }, Schema.Array(CanvasSummary)),
+  /** One of a project's canvases whole: its versions, and the comments sent on it. */
+  call('GetCanvas', { canvasId: Schema.String }, CanvasDetail),
+  /** A version's entry as the window draws it, for a document, a diagram or an SVG: its words, read from the artifact store. */
+  call('ReadCanvasText', { canvasId: Schema.String, version: Schema.Number }, CanvasText),
   /**
    * What the names in a thread's messages name, where its agent works
    * (CodePlace): for each message, by the item it is where it has one, so
@@ -4890,6 +4925,8 @@ export const Api = RpcGroup.make(
       files: Schema.optional(SentFiles),
       /** Any of its words came from dictation, even if the person edited them after: the agent is told, so it reads past what was misheard. */
       dictated: Schema.optional(Schema.Boolean),
+      /** The person's comments on canvases (ADR-104), kept with the message and in the same command: until it is sent, each is only the person's draft. */
+      canvasComments: Schema.optional(Schema.Array(SentCanvasComment).check(Schema.isMaxLength(50))),
     },
     Schema.Void,
   ),

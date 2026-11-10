@@ -1,4 +1,4 @@
-import type { MessageSender } from '@althar/contracts'
+import type { MessageSender, SentCanvasComment } from '@althar/contracts'
 import { createHash } from 'node:crypto'
 
 import { type CommandEnvelope, type ProjectId, type WorksIn } from '@althar/domain'
@@ -338,6 +338,8 @@ export class Coordinator extends Context.Service<
       readonly files?: ReadonlyArray<InputFile>
       /** Some of its words came from dictation: the coordinator is told it may have been misheard. */
       readonly dictated?: boolean
+      /** The person's comments on canvases, kept with the message (ADR-104). */
+      readonly canvasComments?: ReadonlyArray<SentCanvasComment>
       readonly sender?: MessageSender
       readonly origin?: 'news' | 'system'
       /** Written by Althar for the person, such as an answer to a question the coordinator asked before it went: not shown as their message. */

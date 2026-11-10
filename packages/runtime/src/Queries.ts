@@ -705,6 +705,26 @@ export const itemOf = (row: ItemRow): ThreadItem | undefined => {
     }
     case 'pictures':
       return { ...base, kind: 'pictures', content: { pictures: shownOf(field(content, 'pictures')) } }
+    case 'canvas': {
+      const canvasKind = text(content, 'canvasKind')
+      const version = field(content, 'version')
+      const note = text(content, 'note')
+      return {
+        ...base,
+        kind: 'canvas',
+        content: {
+          canvasId: text(content, 'canvasId'),
+          name: text(content, 'name'),
+          title: text(content, 'title'),
+          canvasKind:
+            canvasKind === 'markdown' || canvasKind === 'mermaid' || canvasKind === 'svg' || canvasKind === 'picture' ? canvasKind : 'html',
+          version: typeof version === 'number' ? version : 1,
+          note: note === '' ? null : note,
+          action: text(content, 'action') === 'opened' ? 'opened' : 'published',
+          open: field(content, 'open') === true,
+        },
+      }
+    }
     case 'question': {
       const payload = parse(row.questionPayload ?? '{}')
       const state = row.questionState === 'answered' ? 'answered' : row.questionState === 'open' ? 'open' : 'withdrawn'

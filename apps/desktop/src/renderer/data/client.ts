@@ -1,4 +1,8 @@
 import {
+  type CanvasDetail,
+  type CanvasSummary,
+  type CanvasText,
+  type SentCanvasComment,
   type CheckoutAnswer,
   type MoveOutcome,
   type Preset,
@@ -171,6 +175,12 @@ export interface Client {
   readonly readBackgroundOutput: (threadId: string, id: string) => Promise<OutputText>
   /** A markdown document an agent in a thread wrote, as it is now in the task's worktree. */
   readonly readDocument: (threadId: string, path: string) => Promise<DocumentText>
+  /** A project's canvases (ADR-104), newest first; archived ones too where asked. */
+  readonly listCanvases: (projectId: string, archived?: boolean) => Promise<ReadonlyArray<CanvasSummary>>
+  /** One of a project's canvases whole: its versions and the comments sent on it. */
+  readonly getCanvas: (canvasId: string) => Promise<CanvasDetail>
+  /** A version's entry, as the window draws a document, a diagram or an SVG. */
+  readonly readCanvasText: (canvasId: string, version: number) => Promise<CanvasText>
   /** One file a task changed, as a diff from its base to its worktree; with `untouched`, one it left as it was, every line unchanged. */
   readonly getFileDiff: (taskId: string, path: string, untouched?: boolean) => Promise<FileDiff>
   /** What the reviews of a task's run found, each where it is in the change now: the run of the review reported in `review`, else the latest. */
@@ -406,6 +416,8 @@ export interface Client {
     readonly files?: ReadonlyArray<SentFile>
     /** Any of its words came from dictation, even if edited after. */
     readonly dictated?: boolean
+    /** The person's comments on canvases, kept with it (ADR-104). */
+    readonly canvasComments?: ReadonlyArray<SentCanvasComment>
   }) => Promise<void>
   /** Takes back a message still waiting its turn, by its item. */
   readonly takeBack: (itemId: string) => Promise<void>
@@ -796,6 +808,9 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
     readOutput: (threadId, itemId) => settle(api.ReadOutput({ threadId, itemId })),
     readBackgroundOutput: (threadId, id) => settle(api.ReadBackgroundOutput({ threadId, id })),
     readDocument: (threadId, path) => settle(api.ReadDocument({ threadId, path })),
+    listCanvases: (projectId, archived) => settle(api.ListCanvases({ projectId, ...(archived === true ? { archived } : {}) })),
+    getCanvas: (canvasId) => settle(api.GetCanvas({ canvasId })),
+    readCanvasText: (canvasId, version) => settle(api.ReadCanvasText({ canvasId, version })),
     getFileDiff: (taskId, path, untouched) => settle(api.GetFileDiff({ taskId, path, ...(untouched === true ? { untouched } : {}) })),
     getTaskFindings: (taskId, review) => settle(api.GetTaskFindings({ taskId, ...(review === undefined ? {} : { review }) })),
     findCode: (threadId, messages) => settle(api.FindCode({ threadId, messages })),

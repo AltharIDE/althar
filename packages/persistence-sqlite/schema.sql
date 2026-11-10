@@ -5,7 +5,7 @@
 -- repository_access: read, write, observe
 -- location_kind: existing, managed
 -- location_state: ready, needs_access, changed, unavailable
--- artifact_kind: brief, message, transcript, patch, log, report, findings, summary, other, image
+-- artifact_kind: brief, message, transcript, patch, log, report, findings, summary, other, image, canvas
 -- sensitivity: normal, may_contain_secrets
 -- task_state: draft, open, done, abandoned
 -- plan_state: proposed, accepted, replaced, declined
@@ -20,7 +20,7 @@
 -- node_attempt_state: ready, admitted, running, waiting_attention, verifying, succeeded, failed, cancelling, cancelled, uncertain, reconciling, held, superseded
 -- hold_reason: usage_limit, agent_unavailable, machine_busy, checkout
 -- thread_kind: coordinator, task, step
--- thread_item_kind: user_message, agent_message, agent_thought, tool_call, plan, step_result, notice, task, arrival, question, run, issue_draft, setup, push_request, review_draft, issue_changes, automation, pictures, task_ask, setting, small_change, model_move
+-- thread_item_kind: user_message, agent_message, agent_thought, tool_call, plan, step_result, notice, task, arrival, question, run, issue_draft, setup, push_request, review_draft, issue_changes, automation, pictures, task_ask, setting, small_change, model_move, canvas
 -- input_disposition: after_current, interrupt_and_continue, supersede_pending, cancel_run
 -- user_input_state: queued, delivered, superseded, withdrawn
 -- turn_delivery_state: pending, delivered, completed, interrupted, interruption_uncertain, failed
@@ -43,7 +43,7 @@
 -- pull_request_state: none, draft, ready, merged, closed
 -- work_item_state: pending, claimed, done, failed, uncertain
 -- mutation_state: intended, confirmed, failed, uncertain
--- aggregate_type: project, task, task_plan, run, run_attempt, workspace, workflow_execution, node, node_attempt, thread, user_input, turn_delivery, provider_session, permission_request, attention_request, decision, finding, change_set, mutation_receipt, agent_installation, account_status, thread_item, connection, external_link, policy, agent_account, issue_draft, conflict_resolution, project_note, review_draft, issue_change, automation, automation_occurrence, errand, followed_pull, skill, setting
+-- aggregate_type: project, task, task_plan, run, run_attempt, workspace, workflow_execution, node, node_attempt, thread, user_input, turn_delivery, provider_session, permission_request, attention_request, decision, finding, change_set, mutation_receipt, agent_installation, account_status, thread_item, connection, external_link, policy, agent_account, issue_draft, conflict_resolution, project_note, review_draft, issue_change, automation, automation_occurrence, errand, followed_pull, skill, setting, canvas
 -- connection_product: github, gitlab, bitbucket_cloud, bitbucket_dc, linear, jira_cloud, jira_dc, trello
 -- connection_auth: device_flow, pkce, token
 -- connection_state: ready, reauth_required, removed
@@ -1536,3 +1536,82 @@ CREATE TABLE helpers (
 CREATE INDEX helpers_by_task ON helpers (task_id);
 
 CREATE UNIQUE INDEX helpers_by_thread ON helpers (thread_id);
+
+CREATE TABLE canvases (
+    id TEXT PRIMARY KEY NOT NULL CHECK (substr(id, 1, 4) = 'cnv_' AND length(id) = 36 AND substr(id, 5) NOT GLOB '*[^0-9a-f]*'),
+    project_id TEXT NOT NULL REFERENCES projects (id) ON DELETE CASCADE,
+    name TEXT NOT NULL CHECK (length(name) BETWEEN 1 AND 60 AND name NOT GLOB '*[^a-z0-9-]*'),
+    title TEXT NOT NULL CHECK (length(title) BETWEEN 1 AND 120),
+    kind TEXT NOT NULL CHECK (kind IN ('markdown', 'mermaid', 'svg', 'picture', 'html')),
+    group_name TEXT CHECK (group_name IS NULL OR (length(group_name) BETWEEN 1 AND 60 AND group_name NOT GLOB '*[^a-z0-9-]*')),
+    created_by_actor_id TEXT NOT NULL REFERENCES actors (id),
+    created_at TEXT NOT NULL CHECK (created_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
+    archived_at TEXT,
+    archived_by_actor_id TEXT REFERENCES actors (id),
+    UNIQUE (project_id, name),
+    UNIQUE (id, project_id)
+  ) STRICT;
+
+CREATE TABLE canvas_versions (
+    canvas_id TEXT NOT NULL REFERENCES canvases (id) ON DELETE CASCADE,
+    number INTEGER NOT NULL CHECK (number >= 1),
+    base INTEGER CHECK (base IS NULL OR (base >= 1 AND base < number)),
+    manifest TEXT NOT NULL CHECK (length(manifest) = 64 AND manifest NOT GLOB '*[^0-9a-f]*'),
+    entry TEXT NOT NULL,
+    entry_sha256 TEXT NOT NULL CHECK (length(entry_sha256) = 64 AND entry_sha256 NOT GLOB '*[^0-9a-f]*'),
+    kind TEXT NOT NULL CHECK (kind IN ('markdown', 'mermaid', 'svg', 'picture', 'html')),
+    title TEXT NOT NULL,
+    note TEXT,
+    files INTEGER NOT NULL CHECK (files >= 1),
+    bytes INTEGER NOT NULL CHECK (bytes >= 0),
+    actor_id TEXT NOT NULL REFERENCES actors (id),
+    thread_id TEXT NOT NULL REFERENCES threads (id) ON DELETE CASCADE,
+    task_id TEXT REFERENCES tasks (id) ON DELETE SET NULL,
+    session_id TEXT,
+    created_at TEXT NOT NULL CHECK (created_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
+    PRIMARY KEY (canvas_id, number)
+  ) STRICT;
+
+CREATE TABLE canvas_copies (
+    folder TEXT NOT NULL,
+    path TEXT NOT NULL,
+    canvas_id TEXT NOT NULL REFERENCES canvases (id) ON DELETE CASCADE,
+    version INTEGER NOT NULL CHECK (version >= 1),
+    manifest TEXT NOT NULL CHECK (length(manifest) = 64 AND manifest NOT GLOB '*[^0-9a-f]*'),
+    thread_id TEXT NOT NULL REFERENCES threads (id) ON DELETE CASCADE,
+    task_id TEXT REFERENCES tasks (id) ON DELETE SET NULL,
+    updated_at TEXT NOT NULL CHECK (updated_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
+    PRIMARY KEY (folder, path)
+  ) STRICT;
+
+CREATE TABLE canvas_comments (
+    id TEXT PRIMARY KEY NOT NULL CHECK (substr(id, 1, 4) = 'ccm_' AND length(id) = 36 AND substr(id, 5) NOT GLOB '*[^0-9a-f]*'),
+    canvas_id TEXT NOT NULL REFERENCES canvases (id) ON DELETE CASCADE,
+    version INTEGER NOT NULL CHECK (version >= 1),
+    anchor TEXT NOT NULL CHECK (json_valid(anchor)),
+    body TEXT NOT NULL,
+    author_actor_id TEXT NOT NULL REFERENCES actors (id),
+    user_input_id TEXT NOT NULL REFERENCES user_inputs (id) ON DELETE CASCADE,
+    thread_id TEXT NOT NULL REFERENCES threads (id) ON DELETE CASCADE,
+    position INTEGER NOT NULL CHECK (position >= 1),
+    created_at TEXT NOT NULL CHECK (created_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
+    UNIQUE (user_input_id, position)
+  ) STRICT;
+
+CREATE TABLE canvas_resolutions (
+    comment_id TEXT NOT NULL REFERENCES canvas_comments (id) ON DELETE CASCADE,
+    sequence INTEGER NOT NULL CHECK (sequence >= 1),
+    resolved INTEGER NOT NULL CHECK (resolved IN (0, 1)),
+    by_version INTEGER CHECK (by_version IS NULL OR by_version >= 1),
+    note TEXT,
+    actor_id TEXT NOT NULL REFERENCES actors (id),
+    session_id TEXT,
+    created_at TEXT NOT NULL CHECK (created_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
+    PRIMARY KEY (comment_id, sequence)
+  ) STRICT;
+
+CREATE INDEX canvases_by_project ON canvases (project_id, archived_at);
+
+CREATE INDEX canvas_copies_by_canvas ON canvas_copies (canvas_id);
+
+CREATE INDEX canvas_comments_by_canvas ON canvas_comments (canvas_id, version);

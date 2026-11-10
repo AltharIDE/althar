@@ -65,6 +65,8 @@ export const Ids = {
   automation: kind('auto', 'AutomationId'),
   automationOccurrence: kind('occ', 'AutomationOccurrenceId'),
   onePress: kind('press', 'OnePressId'),
+  canvas: kind('cnv', 'CanvasId'),
+  canvasComment: kind('ccm', 'CanvasCommentId'),
 } as const
 
 export type IdKind = keyof typeof Ids
@@ -180,3 +182,5 @@ export const newId = <S extends Schema.Top & { make(input: string): S['Type'] }>
     const uuid = yield* Effect.orDie(crypto.randomUUIDv7())
     return definition.schema.make(`${definition.prefix}_${uuid.replaceAll('-', '')}`)
   })
+export const CanvasId = Ids.canvas.schema
+export type CanvasId = typeof CanvasId.Type

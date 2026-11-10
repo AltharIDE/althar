@@ -12,6 +12,7 @@ import {
   gather,
   type GatheredComment,
   giveBack,
+  type PageSpot,
   rewrite,
   takeAll,
   withComments,
@@ -98,7 +99,7 @@ describe('comments waiting in a draft', () => {
     gather('task:t', comment('a', 'First'))
     rewrite('task:t', 'a', 'First, again')
     expect(commentsOf('task:t')[0]?.note).toBe('First, again')
-    rewrite('task:t', 'a', 'Moved', { on: { ...comment('a', '').on, viewport: 'phone' }, crop: null })
+    rewrite('task:t', 'a', 'Moved', { on: { ...(comment('a', '').on as PageSpot), viewport: 'phone' }, crop: null })
     expect(commentsOf('task:t')[0]).toMatchObject({ note: 'Moved', crop: null, on: { viewport: 'phone' } })
   })
 

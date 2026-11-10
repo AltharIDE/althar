@@ -1056,6 +1056,47 @@ const playRole = async (
         })
         return 'Those are the two states.'
       }
+      // Asked to draw (`[lead:canvas]`), it writes three of the project's canvases in its folder and publishes them (ADR-104):
+      // a document of directions with a diagram in it, a chart as an SVG, and a page of the sign-in, which opens beside it.
+      // Asked again (`[lead:canvas-again]`), it gets the directions, reads what the person said on them, changes them in
+      // answer, publishes the next version and resolves what it answered. `[lead:canvas-list]` lists the project's canvases.
+      if (text.includes('[lead:canvas') && available.has('canvas_publish')) {
+        const said: Array<string> = []
+        const told = async (name: string, args: Record<string, unknown>) => {
+          const answer = await call(name, args)
+          said.push(`${name}: ${answer}`)
+          return answer
+        }
+        const draw = (name: string, files: Readonly<Record<string, string>>) => {
+          for (const [path, words] of Object.entries(files)) {
+            mkdirSync(join(session.cwd, '.althar', 'canvases', name, ...path.split('/').slice(0, -1)), { recursive: true })
+            writeFileSync(join(session.cwd, '.althar', 'canvases', name, ...path.split('/')), words)
+          }
+        }
+        if (text.includes('[lead:canvas-list]')) return await told('canvas_list', {})
+        if (text.includes('[lead:canvas-again]')) {
+          await told('canvas_get', { name: 'sign-in' })
+          const read = await told('canvas_read', { name: 'sign-in' })
+          const open = [...read.matchAll(/\[(ccm_[0-9a-f]{32})\]/g)].map((found) => found[1] ?? '')
+          draw('sign-in', {
+            'README.md': CANVAS_DIRECTIONS.replace(
+              '- **C, guided:**',
+              '- **B, split:** the picture now on the left, as asked.\n- **C, guided:**',
+            ),
+          })
+          await told('canvas_publish', { name: 'sign-in', note: 'The picture on the left, as asked' })
+          if (open.length > 0)
+            await told('canvas_resolve', { name: 'sign-in', comments: open, note: 'Moved the picture to the left in v2.' })
+          return said.join('\n\n')
+        }
+        draw('sign-in', { 'README.md': CANVAS_DIRECTIONS })
+        await told('canvas_publish', { name: 'sign-in', title: 'Sign-in, three directions', note: 'First directions', open: false })
+        draw('checkout-funnel', { 'funnel.svg': CANVAS_FUNNEL })
+        await told('canvas_publish', { name: 'checkout-funnel', title: 'Checkout funnel', open: false })
+        draw('sign-in-page', { 'index.html': CANVAS_PAGE, 'site.css': CANVAS_PAGE_CSS })
+        await told('canvas_publish', { name: 'sign-in-page', title: 'Sign-in page', note: 'Direction A, as a page' })
+        return said.join('\n\n')
+      }
       // Asked to work on the page beside its task, `[lead:page]` with `page: <address>` and `shot: <file>`, it opens it there,
       // reads it, types in its Note field, presses Approve, reads it again and writes its screenshot to the file, and says
       // what each of Althar's tools answered.
@@ -2514,3 +2555,51 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
       }
     })
 }
+
+/** The directions the fake lead draws as a canvas (`[lead:canvas]`): a document with a diagram in it. */
+const CANVAS_DIRECTIONS = `## Sign in
+
+Three directions for the sign-in page. Each keeps the email first and the providers under it.
+
+\`\`\`mermaid
+flowchart LR
+  Open[Open Althar] --> Email{Email known?}
+  Email -- yes --> Code[Send a code]
+  Email -- no --> Make[Make an account]
+  Code --> In[Signed in]
+  Make --> In
+\`\`\`
+
+- **A, quiet:** one field, one button, the providers folded under it.
+- **B, split:** the field beside a picture of the app.
+- **C, guided:** a step at a time, with a line that fills.
+`
+
+/** A chart the fake lead draws as an SVG canvas. */
+const CANVAS_FUNNEL = `<svg xmlns="http://www.w3.org/2000/svg" width="420" height="220" viewBox="0 0 420 220">
+<rect width="420" height="220" fill="#ffffff"/>
+<text x="24" y="30" font-family="Inter, sans-serif" font-size="14" font-weight="600" fill="#141417">Checkout, this week</text>
+<rect x="24" y="48" width="360" height="30" rx="6" fill="#2b3bff"/><text x="34" y="68" font-family="Inter, sans-serif" font-size="12" fill="#fff">Visited · 12,480</text>
+<rect x="24" y="88" width="252" height="30" rx="6" fill="#5563ff"/><text x="34" y="108" font-family="Inter, sans-serif" font-size="12" fill="#fff">Basket · 8,736</text>
+<rect x="24" y="128" width="158" height="30" rx="6" fill="#8a94ff"/><text x="34" y="148" font-family="Inter, sans-serif" font-size="12" fill="#fff">Paid · 5,490</text>
+<rect x="24" y="168" width="92" height="30" rx="6" fill="#bcc2ff"/><text x="34" y="188" font-family="Inter, sans-serif" font-size="12" fill="#141417">Came back · 3,190</text>
+</svg>
+`
+
+/** A page the fake lead draws as an HTML canvas, its style in a file of its own, linked relatively. */
+const CANVAS_PAGE = `<!doctype html><html><head><meta charset="utf-8"><title>Sign in</title><link rel="stylesheet" href="site.css"></head>
+<body><main class="card"><h1>Sign in to Althar</h1><p>We’ll send a code to your email.</p>
+<label>Email <input id="email" placeholder="you@company.com"></label><button id="send" type="button">Send a code</button>
+<p class="or">or</p><button class="provider" type="button">Continue with GitHub</button></main>
+<script>document.getElementById('send').onclick = () => (document.getElementById('send').textContent = 'Code sent')</script></body></html>
+`
+
+const CANVAS_PAGE_CSS = `body { margin: 0; min-height: 100vh; display: grid; place-items: center; background: #f4f2ec; color: #141417; font: 14px/1.45 Inter, -apple-system, system-ui, sans-serif }
+.card { width: 320px; padding: 28px; border-radius: 14px; background: #fff; box-shadow: 0 1px 2px rgba(60,50,30,.06), 0 10px 24px -12px rgba(60,50,30,.14) }
+h1 { margin: 0 0 4px; font-size: 18px } p { margin: 0 0 18px; color: #63636b }
+label { display: flex; flex-direction: column; gap: 6px; font-size: 12.5px; color: #45454c }
+input { box-sizing: border-box; width: 100%; padding: 9px 11px; border: 1px solid #85858b; border-radius: 8px; font: inherit; margin-bottom: 10px }
+button { width: 100%; padding: 9px; border: 0; border-radius: 8px; background: #141417; color: #fff; font: inherit; font-weight: 600 }
+.or { margin: 12px 0; text-align: center; font-size: 12px }
+.provider { background: #fff; color: #141417; box-shadow: inset 0 0 0 1px rgba(20,20,28,.18) }
+`
