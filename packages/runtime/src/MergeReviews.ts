@@ -558,26 +558,32 @@ export class MergeReviews extends Context.Service<
           if (row === undefined) return yield* new ToolRefused({ message: 'No review is waiting on you.' })
           const sql = yield* SqlClient.SqlClient
           const found = report.verdict === 'changes_requested' && report.findings.length > 0
-          yield* setState(row.url, {
-            state: found ? 'found' : 'clear',
-            verdict: report.verdict,
-            summary: report.summary,
-            findings: JSON.stringify(report.findings),
-            message: null,
-          })
           const [reviewer] = yield* sql<{ agentId: string }>`SELECT agent_id FROM provider_sessions WHERE id = ${access.sessionId}`
           const threadId = yield* taskThreadOf(row.taskId)
-          if (threadId !== undefined)
-            yield* addItem({ projectId: row.projectId, threadId, sessionId: access.sessionId }, 'step_result', {
-              step: 'review',
-              round: 0,
-              verdict: report.verdict,
-              summary: report.summary,
-              findings: report.findings,
-              agentId: reviewer?.agentId ?? null,
-              ...(report.model === null ? {} : { model: report.model }),
-              afterMerge: { url: row.url, words: wordsOf(row) },
-            })
+          // Its state and its report in the task's thread together: where the report can't be kept, the review still waits for
+          // it, and the reviewer's Try again is taken.
+          yield* sql.withTransaction(
+            Effect.gen(function* () {
+              yield* setState(row.url, {
+                state: found ? 'found' : 'clear',
+                verdict: report.verdict,
+                summary: report.summary,
+                findings: JSON.stringify(report.findings),
+                message: null,
+              })
+              if (threadId !== undefined)
+                yield* addItem({ projectId: row.projectId, threadId, sessionId: access.sessionId }, 'step_result', {
+                  step: 'review',
+                  round: 0,
+                  verdict: report.verdict,
+                  summary: report.summary,
+                  findings: report.findings,
+                  agentId: reviewer?.agentId ?? null,
+                  ...(report.model === null ? {} : { model: report.model }),
+                  afterMerge: { url: row.url, words: wordsOf(row) },
+                })
+            }),
+          )
           yield* touchTask(row.taskId)
           yield* Effect.forkIn(provide(doneWith(row, access.threadId)), scope)
           return found

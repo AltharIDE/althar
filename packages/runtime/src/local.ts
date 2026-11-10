@@ -11,7 +11,7 @@ import { type Checkout, giveBack, holdupOf, isClean, readCheckout, takeCheckout 
 import { RuntimeConfig } from './Config'
 import { makeScratch } from './firstWrite'
 import { makeKeyedLock } from './keyedLock'
-import { branchExists, commitOf, git, uncommittedFiles } from './git'
+import { branchExists, commitOf, git, gitOutcome, uncommittedFiles } from './git'
 import { Instance } from './Instance'
 import { branchName, prepareWorktree, startCommitOf, startOf, towardHere } from './Projects'
 import { change, fact, timestamp } from './records'
@@ -344,7 +344,7 @@ const givingBack = (was: Spot, told: (spot: Spot) => boolean, atWork: AtWork) =>
     if (spot === null || spot.kind !== 'checkout' || spot.state !== 'ready' || spot.returnedAt !== null) return 'back' as const
     // Opened again, or still stopping: it is the task's yet. Read under the lock, as nothing starts a settled task's agent.
     if (!overHere(spot) || (yield* atWork).has(spot.taskId)) return 'held' as const
-    const returnsTo = spot.returnsTo ?? spot.base ?? 'main'
+    const returnsTo = yield* returnsToOf(spot)
     const gave = yield* giveBack(spot.repository, spot.branch, returnsTo)
     if (gave.kind === 'changes' && spot.removed === 1) {
       yield* record(spot, { returnedAt: yield* timestamp }, 'workspace.returned', { to: returnsTo, moved: false, left: true })
@@ -362,6 +362,14 @@ const givingBack = (was: Spot, told: (spot: Spot) => boolean, atWork: AtWork) =>
     yield* record(spot, { returnedAt: yield* timestamp }, 'workspace.returned', { to: returnsTo, moved: gave.kind === 'moved' })
     if (gave.kind === 'back') yield* say(spot, `${spot.name} is back on ${shortRef(returnsTo)}`)
     return 'back' as const
+  })
+
+/** Where a checkout goes back to: where it was, or its default branch where that branch was deleted meanwhile. */
+const returnsToOf = (spot: Spot) =>
+  Effect.gen(function* () {
+    const was = spot.returnsTo ?? spot.base ?? 'main'
+    const there = (yield* gitOutcome(spot.repository, 'rev-parse', '--verify', '-q', `${was}^{commit}`)).code === 0
+    return there ? was : (spot.base ?? 'main')
   })
 
 /** A commit, as a branch it went back to may be, short; a branch as it is. */
@@ -595,10 +603,12 @@ const commitLeft = (spot: Spot) =>
  * their word holds while the checkout is as it was when they were asked.
  */
 export const moveToLocal = (taskId: string, change: string | null = null, consent?: MoveConsent) =>
-  Effect.flatMap(changeSpots(taskId, change), (spots) =>
+  Effect.flatMap(changeSpots(taskId, change), (before) =>
     lockingCheckouts(
-      spots.map((spot) => spot.repository),
+      before.map((spot) => spot.repository),
       Effect.gen(function* () {
+        // Read again once the checkouts are held: a move that waited may have gone through since, from the loop that retries it.
+        const spots = yield* changeSpots(taskId, change)
         const others = (yield* spotsOf(taskId)).filter((one) => one.kind === 'checkout' && (one.change ?? null) !== change)
         if (others.length > 0) return { kind: 'waits', why: 'Another change of this task works Local: one change at a time can.' } as Moved
         const moving = spots.filter((spot) => spot.kind === null && spot.state === 'ready')
@@ -666,10 +676,12 @@ export const moveToLocal = (taskId: string, change: string | null = null, consen
  * the move waits and the task carries on in Local.
  */
 export const moveToWorktree = (taskId: string, change: string | null = null) =>
-  Effect.flatMap(changeSpots(taskId, change), (spots) =>
+  Effect.flatMap(changeSpots(taskId, change), (before) =>
     lockingCheckouts(
-      spots.map((spot) => spot.repository),
+      before.map((spot) => spot.repository),
       Effect.gen(function* () {
+        // Read again once the checkouts are held, as a move to Local is.
+        const spots = yield* changeSpots(taskId, change)
         const config = yield* RuntimeConfig
         const moving = spots.filter((spot) => spot.kind === 'checkout' && spot.state === 'ready' && spot.returnedAt === null)
         for (const spot of moving) {
@@ -681,7 +693,7 @@ export const moveToWorktree = (taskId: string, change: string | null = null) =>
           }
         }
         for (const spot of moving) {
-          const returnsTo = spot.returnsTo ?? spot.base ?? 'main'
+          const returnsTo = yield* returnsToOf(spot)
           // Changed since it was read, as by an agent still writing there: git refuses the switch, and the move waits.
           const gave = yield* giveBack(spot.repository, spot.branch, returnsTo).pipe(
             Effect.catchTag('GitFailed', () => Effect.succeed({ kind: 'changes', files: [] } as const)),

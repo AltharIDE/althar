@@ -1029,7 +1029,10 @@ export class TaskActions extends Context.Service<
               return yield* addReview(access, { task: asked.task, pull_request: pullRequest })
             case 'output': {
               if (pullRequest === undefined) return yield* new ToolRefused({ message: 'Name the pull request it follows: pull_request.' })
-              yield* plainly(changes.attach({ taskId: task.id, pullRequest, actorId: actorOf(access) }), task.slug)
+              const done = yield* plainly(changes.attach({ taskId: task.id, pullRequest, actorId: actorOf(access) }), task.slug)
+              // Its branch not based on that pull request's head, nothing is followed yet: starting from there is the person's word.
+              if (done.kind === 'start')
+                return `Nothing changed yet: ${task.slug}'s branch isn't based on ${done.name}'s head. Starting it from there ${done.own === 0 ? 'loses nothing: it has no commits of its own' : `keeps its ${done.own === 1 ? 'one commit' : `${done.own} commits`} of its own, on top of the head`}. Ask the person; once they agree, call attach_pull_request with start_from_head: true.`
               yield* touchTask(task.id)
               return `${task.slug} follows ${pullRequest} now, as a change of its own.`
             }
@@ -1337,7 +1340,17 @@ export class TaskActions extends Context.Service<
         Effect.gen(function* () {
           const asked = yield* read(Following, input)
           const task = yield* named(access, asked.task)
-          yield* plainly(changes.stopListening(task.id, asked.pull_request), task.slug)
+          // By its link, or its number, as add_part takes it: one the task doesn't follow is said, and nothing changes.
+          const sql = yield* SqlClient.SqlClient
+          const number = /^#?(\d+)$/.exec(asked.pull_request.trim())?.[1]
+          const [followed] = yield* sql<{ url: string }>`
+            SELECT json_extract(snapshot, '$.url') AS url FROM external_links
+            WHERE task_id = ${task.id} AND kind = 'change' AND listening = 1
+              AND (json_extract(snapshot, '$.url') = ${asked.pull_request.trim()} OR json_extract(snapshot, '$.number') = ${Number(number ?? -1)})
+            ORDER BY created_at DESC LIMIT 1`
+          if (followed === undefined)
+            return yield* new ToolRefused({ message: `${task.slug} doesn't follow ${asked.pull_request}: nothing changed.` })
+          yield* plainly(changes.stopListening(task.id, followed.url), task.slug)
           yield* did(
             access,
             input,

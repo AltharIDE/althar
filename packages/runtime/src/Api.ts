@@ -333,6 +333,8 @@ export const handlers = Api.toLayer(
       Effect.catchCause(effect, (cause) => {
         if (Cause.hasInterruptsOnly(cause)) return Effect.interrupt
         const error = Cause.findErrorOption(cause)
+        // Refused by the call itself, in the window's own words already: as it is, and nothing went wrong.
+        if (Option.isSome(error) && error.value instanceof ApiError) return Effect.fail(error.value)
         const said = words(Option.getOrUndefined(error), agentName)
         const told =
           Option.isSome(error) && expected.has(said.reason)

@@ -624,6 +624,19 @@ export class Busy extends Context.Service<
               left.push(waiter.taskId)
               continue
             }
+            // A task's helpers take four places at most at once (ADR-087), however many are free: the rest wait their turn, after a
+            // restart too, where what waited is started from here.
+            if (
+              waiter.helper !== undefined &&
+              !busy.has(key) &&
+              [...busy].filter((one) => {
+                const agent = agentOf(one)
+                return agent.taskId === waiter.taskId && agent.helper !== undefined
+              }).length >= HELPERS_AT_ONCE
+            ) {
+              left.push(waiter.taskId)
+              continue
+            }
             const kept = taken.has(waiter.taskId) ? undefined : keptPlace(waiter.taskId, holders)
             // Owed its task's place, which its agent has freed since: it takes that place, though others hold every one.
             const back = owed.has(waiter.taskId) && !holders.some((holder) => holder.taskId === waiter.taskId)

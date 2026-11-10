@@ -53,8 +53,9 @@ const fromBun = (text: string): ReadonlyArray<OutsideEntry> =>
 const fromYarn = (text: string): ReadonlyArray<OutsideEntry> =>
   text.split(/\n(?=\S)/).flatMap((block) => {
     const header = block.split('\n')[0] ?? ''
+    // Where no resolved line says it, the header's own source: a git URL keeps its scheme's colon, the header's last colon goes.
     const name = /^"?((?:@[^"@/]+\/)?[^"@,]+)@/.exec(header)?.[1]
-    const resolved = /^\s+resolved:?\s+"?([^"\s]+)"?/m.exec(block)?.[1] ?? /@((?:git\+|github:)[^",:]+)/.exec(header)?.[1]
+    const resolved = /^\s+resolved:?\s+"?([^"\s]+)"?/m.exec(block)?.[1] ?? /@((?:git\+|github:)[^",\s]*[^",\s:])/.exec(header)?.[1]
     return name !== undefined && resolved !== undefined && outsideRegistry(resolved) ? [{ name, from: resolved }] : []
   })
 

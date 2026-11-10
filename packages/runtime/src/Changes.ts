@@ -2604,7 +2604,7 @@ export class Changes extends Context.Service<
               if (conflicted !== null) {
                 yield* Effect.ignore(git(row.path, 'checkout', '-q', row.branch))
                 yield* Effect.ignore(git(row.path, 'branch', '-D', fresh))
-                conflicts.push(...conflicted)
+                // Put back as it was: nothing is left for its lead to resolve, which `conflicts` is for, and `said` says why.
                 said.push(
                   `${row.name} still works toward ${row.toward ?? row.base ?? 'its default branch'}: its commits conflict with ${base} in ${filesWord(conflicted)}.`,
                 )
@@ -7446,10 +7446,11 @@ export class Changes extends Context.Service<
             toward: string | null
             baseRef: string
             baseCommit: string | null
+            setup: string | null
             target: string
             threadId: string
           }>`
-            SELECT w.id, w.project_id, w.binding_id, w.path, w.branch, w.name, w.toward, w.base_ref, w.base_commit,
+            SELECT w.id, w.project_id, w.binding_id, w.path, w.branch, w.name, w.toward, w.base_ref, w.base_commit, w.setup,
               coalesce(w.toward, b.default_base_ref, 'main') AS target,
               (SELECT t.id FROM threads t WHERE t.task_id = w.task_id AND t.kind = 'task') AS thread_id
             FROM workspaces w JOIN repository_bindings b ON b.id = w.binding_id
@@ -7523,7 +7524,8 @@ export class Changes extends Context.Service<
                   state: 'ready',
                   createdAt: at,
                   branchedAt: at,
-                  kind: 'worktree',
+                  // A worktree as the task's first is (kind null), in the folder the change it left was set up in: set up already.
+                  ...(row.setup === null ? {} : { setup: row.setup }),
                   name: now,
                   ...(row.toward === null ? {} : { toward: row.toward }),
                 })}`

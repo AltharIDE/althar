@@ -176,6 +176,9 @@ const kinds: Readonly<Record<string, string>> = {
   document: 'document',
   file: 'file',
   note: 'note',
+  preset: 'preset',
+  helper: 'helper',
+  change: 'change',
 }
 
 /** What went wrong, for the window: the error's tag as its reason, and words for the person. */
@@ -359,6 +362,8 @@ export const words = (
       case 'FastLaneRefused':
       case 'MergeReviewRefused':
       case 'ChangeRefused':
+      // A tool's refusal, said as the agents' tools say it: Keep them together and Drop it, from the window, are those tools'.
+      case 'ToolRefused':
       case 'ScreenshotsRefused':
         return text(error, 'message')
       case 'AutomationRefused':
@@ -566,6 +571,9 @@ const reviewIncomplete = {
 
 /** Errors the person caused or can put right; anything else is worth the log. */
 export const expected = new Set([
+  'ChangeRefused',
+  'MergeReviewRefused',
+  'ToolRefused',
   'SkillRefused',
   'ServerRefused',
   'LaunchRefused',

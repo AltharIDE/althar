@@ -399,7 +399,7 @@ export class Helpers extends Context.Service<
             const why =
               errorClass === 'usage_limit'
                 ? `${helper.model ?? helper.agentId} is out of usage.`
-                : `${helper.model ?? helper.agentId} kept failing${failure === undefined ? '' : ` (${failure})`}, tried ${tried + 1} times.`
+                : `${helper.model ?? helper.agentId} kept failing${failure === undefined ? '' : ` (${failure})`}, tried ${tried === 0 ? 'once' : `${tried + 1} times`}.`
             return yield* failedForGood(helper, why)
           }
           tries.set(helper.id, tried + 1)

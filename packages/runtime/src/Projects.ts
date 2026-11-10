@@ -768,7 +768,9 @@ export class Projects extends Context.Service<
             WHERE w.task_id = ${input.taskId} AND w.device_id = ${instance.deviceId} AND w.access = 'write' AND w.reviewing IS NULL
             ORDER BY w.created_at, w.rowid`
           const [first] = own
-          if (first === undefined) return yield* new NotFound({ kind: 'task with a worktree here', id: input.taskId })
+          // A review reads a copy, and a plain task has its worktree once its lead writes: neither has one to start a change beside.
+          if (first === undefined)
+            return yield* new ChangeRefused({ message: 'The task has no worktree of its own here to start a change beside.' })
           const asked = input.repository?.trim().toLowerCase()
           const where =
             asked === undefined || asked === ''
@@ -843,7 +845,7 @@ export class Projects extends Context.Service<
                 state: 'ready',
                 createdAt: at,
                 branchedAt: at,
-                kind: 'worktree',
+                // A worktree as the task's first is (kind null): set up, cleaned and moved as any.
                 name,
                 ...(toward === null ? {} : { toward }),
                 ...(waited === undefined ? {} : { waitsFor: waited.id }),

@@ -214,13 +214,14 @@ export const savePreset = (input: {
 }) =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient
-    const name = input.name.trim().slice(0, 40)
+    const given = input.name.trim().slice(0, 40)
+    const name = given === '' ? 'Preset' : given
     const id = yield* newId(Ids.artifact)
     const at = yield* timestamp
     yield* sql`
       INSERT INTO presets ${sql.insert({
         id: `pst_${id.slice(4)}`,
-        name: name === '' ? 'Preset' : name,
+        name,
         parts: JSON.stringify(input.parts),
         projectId: input.projectId,
         fromTaskId: input.fromTaskId,
