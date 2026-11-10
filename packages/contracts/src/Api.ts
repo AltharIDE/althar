@@ -1935,6 +1935,8 @@ export const Evidence = Schema.Struct({
   view: Schema.optional(Schema.String),
   /** For a picture: one of the options the person chose between, or an exploration, not the work as built. It stays in the thread, and out of a change's Outputs and its pull request. */
   option: Schema.optional(Schema.Boolean),
+  /** For a picture: the work before the change, the before of the view it names (`view`, or its caption's name). Shown beside that view's picture in the pull request's comment. */
+  before: Schema.optional(Schema.Boolean),
 })
 export type Evidence = typeof Evidence.Type
 
