@@ -11,6 +11,7 @@ import { SqlClient } from 'effect/sql'
 import { Changes } from '../src/Changes'
 import { Connections } from '../src/Connections'
 import { Coordinator } from '../src/Coordinator'
+import { ShipRefused } from '../src/errors'
 import { Instance } from '../src/Instance'
 import { Projects } from '../src/Projects'
 import { Queries } from '../src/Queries'
@@ -456,8 +457,21 @@ describe('a task with several changes', () => {
       commit(lanes?.path ?? '', 'lanes.txt', 'Taller lanes')
       commit(sizes?.path ?? '', 'cards.txt', 'Bigger cards')
 
-      // The task's Ship: a Ship for each change waiting, in turn, each reading only its own.
-      yield* (yield* Runs).ship({ envelope: yield* Runtime.envelope('task.ship', { taskId: task.taskId }), taskId: task.taskId })
+      // The task's Ship: a Ship for each change waiting, in turn, each reading only its own. Pressed once its lead is done, as
+      // the person can: after its run the lead may yet take a turn on what it is told, and Ship refuses while one is under way
+      // (ship.test has the refusal), so a press at a set moment would race it.
+      const runs = yield* Runs
+      yield* until(
+        Effect.gen(function* () {
+          return yield* runs.ship({ envelope: yield* Runtime.envelope('task.ship', { taskId: task.taskId }), taskId: task.taskId }).pipe(
+            Effect.as('shipped' as const),
+            Effect.catch((refused) =>
+              refused instanceof ShipRefused && refused.why === 'working' ? Effect.succeed('working' as const) : Effect.fail(refused),
+            ),
+          )
+        }),
+        (pressed) => pressed === 'shipped',
+      )
       yield* until(
         Effect.sync(() => github.changes.length),
         (count) => count === 3,
