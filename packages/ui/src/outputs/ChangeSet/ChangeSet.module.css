@@ -59,46 +59,66 @@
   font-weight: 500;
   color: var(--t-3);
 }
-/* work with no pull request: its branch, as code */
+/* work with no pull request: its branch under what the card is, as code, whole: a long name wraps rather than being cut */
 .branch {
-  display: inline-flex;
-  align-items: center;
+  display: flex;
+  align-items: flex-start;
   gap: 7px;
   min-width: 0;
+  margin: 0;
+  color: var(--t-2);
 }
 .branch > svg {
   flex: none;
+  margin-top: 2px;
   color: var(--t-3);
 }
 .branchName {
-  overflow: hidden;
-  font: 500 12.5px/1.4 var(--mono);
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  min-width: 0;
+  font: 500 12px/1.45 var(--mono);
+  overflow-wrap: anywhere;
 }
-/* what of it isn't pushed, with the push beside it */
+/* what of it isn't pushed, or committed: plain text, as readable as the rest */
 .standing {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 2px 10px;
-  min-height: 24px;
   margin: 0;
   font-size: 12.5px;
+  line-height: 1.5;
   color: var(--t-2);
+}
+/* each repository of several: its name, what changed in it, and the host's page for its pull request where there is one */
+.repos {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 4px 0 0;
+  padding: 0;
+  list-style: none;
 }
 .repo {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  justify-content: space-between;
-  gap: 2px 10px;
-  margin: 0;
+  gap: 2px 12px;
+  min-height: 24px;
   font-size: 12.5px;
 }
 .repoName {
   font: 500 12px/1.4 var(--mono);
   color: var(--t-1);
+}
+.repoSize {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--t-2);
+  font-variant-numeric: tabular-nums;
+}
+.repo .page {
+  margin-left: auto;
 }
 .page {
   display: inline-flex;
@@ -206,6 +226,20 @@ span.you {
   padding: 4px 0 6px;
 }
 
+/* its actions, and a line under them where one needs it said */
+.doing {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+.hint {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--t-2);
+  text-wrap: pretty;
+}
 /* narrow, one button as wide as the card, two side by side where it is a choice */
 .actions {
   display: flex;
@@ -341,10 +375,17 @@ span.you {
   .state {
     margin-left: 4px;
   }
-  .acting .actions {
+  .acting .doing {
     grid-column: 2;
     grid-row: 1;
+  }
+  .acting .actions {
     justify-content: flex-end;
+  }
+  .acting .hint {
+    max-width: 32ch;
+    margin-left: auto;
+    text-align: right;
   }
   .actions > * {
     flex: none;

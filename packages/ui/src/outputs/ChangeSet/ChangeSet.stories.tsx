@@ -151,38 +151,41 @@ export const OnItsBranch: Story = {
         <Button variant="signal" onClick={open}>
           Open a draft pull request
         </Button>
-        <Button>Merge into main here</Button>
+        <Button>Merge into main on this Mac</Button>
       </>
     ),
+    hint: 'Merging on this Mac doesn’t push, and skips review on a pull request.',
   },
   parameters: { width: ALONE },
 }
 
 /**
- * A nightly check its lead stopped, alone on the page: its branch by name, the two commits since it was pushed, and its draft pull
- * request the one thing to do. Each file is listed with its lines: a heading over each lone manifest would only repeat its path.
+ * A nightly check its lead stopped, alone on the page: what it is, its branch by name, the two commits since it was pushed, and its
+ * draft pull request the way forward, which pushes them first; pushing them alone is a button of its own beside it. Each file is
+ * listed with its lines: a heading over each lone manifest would only repeat its path.
  */
 export const NightlyCheck: Story = {
   args: {
     ...CHANGE_NIGHTLY,
     checks: undefined,
     review: undefined,
-    push: (
-      <Button variant="quiet" size="small" onClick={push}>
-        Push to origin
-      </Button>
-    ),
     actions: (
-      <Button variant="signal" onClick={open}>
-        Open a draft pull request
-      </Button>
+      <>
+        <Button variant="signal" onClick={open}>
+          Open a draft pull request
+        </Button>
+        <Button onClick={push}>Push to origin</Button>
+      </>
     ),
   },
   parameters: { width: ALONE },
   play: async ({ args, canvasElement }) => {
     const c = within(canvasElement)
+    await expect(c.getByText('On its branch, no pull request')).toBeInTheDocument()
     await expect(c.getByText('althar/nightly-dependency-check-27-oct')).toBeInTheDocument()
     await expect(c.getByText('2 commits not pushed')).toBeInTheDocument()
+    await userEvent.click(c.getByRole('button', { name: 'Push to origin' }))
+    await expect(push).toHaveBeenCalled()
     await expect(c.queryByText(/Not on origin/)).toBeNull()
     await expect(c.queryByText(/Top level|more folders/)).toBeNull()
     await expect(groupsOf(CHANGE_NIGHTLY.prs[0]?.files ?? [])).toBeNull()
@@ -223,7 +226,7 @@ export const NightlyCheckPushed: Story = {
   },
 }
 
-/** Althar can't open its pull request until GitHub is connected: connecting is the button, pushing it alone stays quiet. */
+/** Althar can't open its pull request until GitHub is connected: connecting is the way forward, pushing it alone a button beside it. */
 export const NotConnected: Story = {
   args: {
     ...CHANGE_NIGHTLY,
@@ -231,17 +234,20 @@ export const NotConnected: Story = {
     review: undefined,
     remote: { name: 'origin', pushed: false, ahead: 2 },
     note: 'Althar opens its pull request once GitHub is connected.',
-    push: (
-      <Button variant="quiet" size="small">
-        Push to origin
-      </Button>
+    actions: (
+      <>
+        <Button variant="signal">Connect GitHub</Button>
+        <Button>Push to origin</Button>
+      </>
     ),
-    actions: <Button variant="signal">Connect GitHub</Button>,
   },
   parameters: { width: ALONE },
 }
 
-/** Althar can tell no code host for it, its remote on a host it doesn't know: the card says so, beside merging it here. */
+/**
+ * Althar can tell no code host for it, its remote on a host it doesn't know: the card says so. With no pull request for any of the
+ * task, merging it here is the way forward, saying what it skips; pushing it is a button of its own.
+ */
 export const NoCodeHost: Story = {
   args: {
     ...CHANGE_NIGHTLY,
@@ -249,12 +255,13 @@ export const NoCodeHost: Story = {
     review: undefined,
     remote: { name: 'origin', pushed: false, ahead: 11 },
     note: 'No code host: origin isn’t on a host Althar can open a pull request on.',
-    push: (
-      <Button variant="quiet" size="small">
-        Push to origin
-      </Button>
+    actions: (
+      <>
+        <Button>Push to origin</Button>
+        <Button variant="signal">Merge into main on this Mac</Button>
+      </>
     ),
-    actions: <Button variant="signal">Merge into main on this Mac</Button>,
+    hint: 'Merging on this Mac doesn’t push, and skips review on a pull request.',
   },
   parameters: { width: ALONE },
 }
@@ -278,9 +285,10 @@ export const BranchPushed: Story = {
     actions: (
       <>
         <Button variant="signal">Connect GitHub</Button>
-        <Button>Merge into main here</Button>
+        <Button>Merge into main on this Mac</Button>
       </>
     ),
+    hint: 'Merging on this Mac doesn’t push, and skips review on a pull request.',
   },
   play: async ({ canvasElement }) => {
     const c = within(canvasElement)
@@ -301,12 +309,13 @@ export const RefusedHere: Story = {
   args: {
     ...CHANGE_REDIRECTS,
     checks: undefined,
-    push: (
-      <Button variant="quiet" size="small" onClick={push}>
-        Push to origin
-      </Button>
+    actions: (
+      <>
+        <Button variant="signal">Merge into main on this Mac</Button>
+        <Button onClick={push}>Push to origin</Button>
+      </>
     ),
-    actions: <Button variant="signal">Merge into main on this Mac</Button>,
+    hint: 'Merging on this Mac doesn’t push, and skips review on a pull request.',
     error: 'Your main checkout has uncommitted changes to middleware.ts.',
   },
   play: async ({ canvasElement }) => {
@@ -497,4 +506,97 @@ export const AllStates: Story = {
       ]}
     />
   ),
+}
+
+const BESIDE = {
+  ...CHANGE_BRANCH,
+  branch: 'fnt/fix-staging-character-assets-at-the-cdn-edge',
+  review: undefined,
+  checks: undefined,
+  hint: 'Merging on this Mac doesn’t push, and skips review on a pull request.',
+}
+
+/**
+ * Two repositories of a task whose other has a pull request, on no host Althar opens one on: what they are in a line, the branch
+ * whole, and what changed in each. The rest goes through review, so pushing them, for review where they're hosted, comes before
+ * merging them here, which says what it skips.
+ */
+export const BesidePullRequest: Story = {
+  args: {
+    ...BESIDE,
+    title: 'engine and infra: on its branch, no pull request',
+    prs: [
+      {
+        repo: 'engine',
+        files: [
+          { path: 'engine/src/assets/characters.ts', add: 38, del: 12 },
+          { path: 'engine/src/assets/cdn.ts', add: 9, del: 3 },
+        ],
+      },
+      { repo: 'infra', files: [{ path: 'infra/staging/cdn.tf', add: 14, del: 2 }] },
+    ],
+    remote: { name: 'origin', pushed: false, ahead: 3 },
+    note: 'No code host: origin isn’t on a host Althar can open a pull request on.',
+    actions: (
+      <>
+        <Button variant="signal" onClick={push}>
+          Push to origin
+        </Button>
+        <Button>Merge engine and infra into main on this Mac</Button>
+      </>
+    ),
+  },
+  play: async ({ canvasElement }) => {
+    const c = within(canvasElement)
+    await expect(c.getByText('engine and infra: on its branch, no pull request')).toBeInTheDocument()
+    // The branch whole, never cut.
+    const branch = c.getByText('fnt/fix-staging-character-assets-at-the-cdn-edge')
+    await expect(branch.scrollWidth).toBeLessThanOrEqual(branch.clientWidth)
+    await expect(c.getByText('Merging on this Mac doesn’t push, and skips review on a pull request.')).toBeInTheDocument()
+    await expect(within(c.getByText('engine').closest('li')!).getByText('2 files')).toBeInTheDocument()
+    await expect(within(c.getByText('infra').closest('li')!).getByText('1 file')).toBeInTheDocument()
+  },
+}
+
+/** The same alone on the page: the buttons beside what they act on, the line under them. */
+export const BesidePullRequestAlone: Story = { args: BesidePullRequest.args, parameters: { width: ALONE } }
+
+/**
+ * Two repositories beside the rest's pull request, on the host it is on: Althar opens one for them, which pushes them first, so that
+ * is the way forward, before pushing them alone or merging them here.
+ */
+export const BesidePullRequestOpens: Story = {
+  args: {
+    ...BesidePullRequest.args,
+    note: undefined,
+    actions: (
+      <>
+        <Button variant="signal" onClick={open}>
+          Open a draft pull request
+        </Button>
+        <Button onClick={push}>Push to origin</Button>
+        <Button>Merge engine and infra into main on this Mac</Button>
+      </>
+    ),
+  },
+}
+
+/**
+ * One repository beside the rest's pull request, whose commits change no file shown: how many there are says what merging takes,
+ * all of it on its remote already, so merging here is all there is.
+ */
+export const BesidePullRequestOne: Story = {
+  args: {
+    ...BESIDE,
+    title: 'engine: on its branch, no pull request',
+    prs: [{ repo: 'engine', files: [], commits: 2 }],
+    remote: { name: 'origin', pushed: true, ahead: 0 },
+    note: 'No code host: origin isn’t on a host Althar can open a pull request on.',
+    actions: <Button variant="signal">Merge engine into main on this Mac</Button>,
+  },
+  play: async ({ canvasElement }) => {
+    const c = within(canvasElement)
+    await expect(c.getByText('engine: on its branch, no pull request')).toBeInTheDocument()
+    await expect(c.getByText('2 commits')).toBeInTheDocument()
+  },
 }

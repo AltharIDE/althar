@@ -232,6 +232,57 @@ describe('what a task changed, card by card', () => {
     expect(screen.getByRole('button', { name: 'Merge into main on this Mac' })).toBeTruthy()
   })
 
+  it('says what repositories beside the rest’s pull request are, what changed in each, and puts pushing them before merging here', async () => {
+    const remote = { name: 'origin', branch: 'althar/fix', pushed: false, ahead: 2, newPullRequest: null }
+    const here = [
+      { repository: 'engine', name: 'engine', branch: 'main', head: 'abc111', commits: 2, remote },
+      { repository: 'infra', name: 'infra', branch: 'main', head: 'def222', commits: 1, remote: { ...remote, ahead: 1 } },
+    ]
+    const files = [
+      { ...FILE, path: 'engine/src/cdn.ts', add: 9, del: 3 },
+      { ...FILE, path: 'engine/src/assets.ts', add: 2, del: 0 },
+      { ...FILE, path: 'web/src/checkout.ts' },
+    ]
+    const { onMergeHere, onPushBranch } = show(
+      task(
+        { files, commits: 4, here, changes: [pr('web', 7)] },
+        { host: { product: 'github', name: 'GitHub', webUrl: 'https://github.com', connected: true } },
+      ),
+    )
+    const card = within(screen.getByText('engine and infra: on its branch, no pull request').closest('article')!)
+    // Each repository with what changed in it: its files, else its commits.
+    expect(within(card.getByText('engine').closest('li')!).getByText('2 files')).toBeTruthy()
+    expect(within(card.getByText('infra').closest('li')!).getByText('1 commit')).toBeTruthy()
+    expect(card.getByText('3 commits not pushed')).toBeTruthy()
+    expect(card.getByText('No code host: origin isn’t on a host Althar can open a pull request on.')).toBeTruthy()
+    // The rest goes through review: pushing them comes first, merging here after, saying what it skips.
+    const names = card.getAllByRole('button', { name: /^(Push to origin|Merge engine)/ }).map((button) => button.textContent)
+    expect(names).toEqual(['Push to origin', 'Merge engine and infra into main on this Mac'])
+    expect(card.getByText('Merging on this Mac doesn’t push, and skips review on a pull request.')).toBeTruthy()
+    await userEvent.click(card.getByRole('button', { name: 'Push to origin' }))
+    expect(onPushBranch).toHaveBeenCalled()
+    await userEvent.click(card.getByRole('button', { name: 'Merge engine and infra into main on this Mac' }))
+    expect(onMergeHere).toHaveBeenCalled()
+  })
+
+  it('opens a pull request for repositories beside the rest’s from their own card, where Althar can, before merging them here', async () => {
+    const here = [{ repository: 'engine', name: 'engine', branch: 'main', head: 'abc111', commits: 2 }]
+    const { onOpenChange } = show(
+      task(
+        { files: [], commits: 3, here, changes: [pr('web', 7)], unshipped: { commits: 2, add: 4, del: 1 } },
+        { host: { product: 'github', name: 'GitHub', webUrl: 'https://github.com', connected: true } },
+      ),
+    )
+    const card = within(screen.getByText('engine: on its branch, no pull request').closest('article')!)
+    expect(card.getByText('2 commits')).toBeTruthy()
+    // Only on their card: the pull request's own doesn't offer it again.
+    expect(screen.getAllByRole('button', { name: /draft pull request/ })).toHaveLength(1)
+    const names = card.getAllByRole('button', { name: /^(Open|Merge)/ }).map((button) => button.textContent)
+    expect(names).toEqual(['Open a draft pull request', 'Merge engine into main on this Mac'])
+    await userEvent.click(card.getByRole('button', { name: 'Open a draft pull request' }))
+    expect(onOpenChange).toHaveBeenCalled()
+  })
+
   it('says a merge here with no remote has nowhere to push to, with its review and what went wrong', async () => {
     const merged = [{ repository: 'meridian', name: 'meridian', branch: 'main', remote: null, ahead: 0 }]
     show(

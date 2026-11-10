@@ -406,6 +406,8 @@ describe('merging a task here', () => {
       const head = commit(worktrees[0]?.path ?? '', 'retry.ts', 'retry\n')
       const queries = yield* Queries
       assert.isNull((yield* queries.thread(task.threadId, {})).task.here[0]?.remote)
+      // What merging it takes, its files aside: its one commit.
+      assert.strictEqual((yield* queries.thread(task.threadId, {})).task.here[0]?.commits, 1)
       const changes = yield* Changes
       const none = yield* Effect.flip(changes.pushBranch(task.taskId, [{ repository: worktrees[0]?.slug ?? '', head }]))
       assert.deepStrictEqual([(none as { _tag?: string })._tag, (none as { kind?: string }).kind], ['NotFound', 'remote'])

@@ -3234,6 +3234,8 @@ export const TaskRepositoryHere = Schema.Struct({
   name: Schema.String,
   branch: Schema.String,
   head: Schema.NullOr(Schema.String),
+  /** How many commits its branch has since it started, where what it changed was read: what merging it takes, its files aside. */
+  commits: Schema.optional(Schema.Number),
   /**
    * Where the task's own branch stands on the repository's remote, for
    * pushing it without a connection: the remote it goes to, whether the

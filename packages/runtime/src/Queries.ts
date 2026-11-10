@@ -1448,6 +1448,7 @@ export class Queries extends Context.Service<
                             name: worktree.name,
                             branch: worktree.defaultBranch,
                             head,
+                            ...(wants.changed && head !== null ? { commits: changed.commits } : {}),
                             remote:
                               head === null || worktree.root === null
                                 ? null

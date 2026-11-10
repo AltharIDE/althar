@@ -18,7 +18,8 @@ import s from './ChangeSet.module.css'
 /*
  * What a task changed, beside what it is, for deciding on it: each thing
  * said once. Its pull requests, each the one link to its host; work with
- * none, its branch by name, and what of it isn't pushed, if anything. Its
+ * none, what it is in a line, its branch by name under it, each
+ * repository's files or commits, and what of it isn't pushed, if anything. Its
  * checks in a line, what failed named, opening to the list; its review in a
  * line, by whom. Then what can be done now, which the page gives: one
  * button, or two where it is a choice, beside the facts where the card is
@@ -38,6 +39,8 @@ export interface PullRequest {
   /** Where it lives on the code host; a link only when it is http or https. */
   url?: string
   files: readonly ChangedFile[]
+  /** For work on its branch: how many commits it has, said where its files can't be, as for a branch whose commits change none shown. */
+  commits?: number
 }
 
 /** What its review said, and who reviewed it. */
@@ -59,6 +62,8 @@ export interface ChangeSetText {
   /** Work on its branch: its commits the remote doesn't have, and its files with changes no commit has, which no push takes. */
   unpushed: (n: number) => string
   uncommitted: (n: number) => string
+  /** A repository's commits on its branch, where it has no files to show. */
+  commits: (n: number) => string
   /** The host's page for a new pull request from the branch, pushed without a connection. */
   newPullRequest: (host: string | undefined) => string
   checksPassed: (n: number) => string
@@ -84,13 +89,14 @@ export const changeSetText: ChangeSetText = {
     [ChangeState.Ready]: 'Ready to accept',
     [ChangeState.Merged]: 'Merged',
     [ChangeState.Queued]: 'In the merge queue',
-    [ChangeState.Branch]: 'On its branch',
+    [ChangeState.Branch]: 'On its branch, no pull request',
   },
   pr: (n) => `PR #${n}`,
   named: (repo, n) => `${repo.slice(repo.lastIndexOf('/') + 1)} #${n}`,
   onHostLabel: (repo, n, host) => `Open ${repo} #${n} on ${host}`,
   unpushed: (n) => (n === 1 ? '1 commit not pushed' : `${n.toLocaleString('en-US')} commits not pushed`),
   uncommitted: (n) => (n === 1 ? 'Uncommitted changes in 1 file' : `Uncommitted changes in ${n.toLocaleString('en-US')} files`),
+  commits: (n) => (n === 0 ? 'Nothing to merge' : n === 1 ? '1 commit' : `${n.toLocaleString('en-US')} commits`),
   newPullRequest: (host) => (host === undefined ? 'Open a pull request' : `Open a pull request on ${host}`),
   checksPassed: (n) => (n === 1 ? '1 check passed' : `${n} checks passed`),
   checksFailed: (names) => (names.length === 1 ? `${names[0] ?? ''} failed` : `${names.length} checks failed: ${names.join(', ')}`),
@@ -111,14 +117,14 @@ export interface ChangeSetProps {
   /** Where its pull requests live; none for work on its branch. */
   host?: CodeHost
   prs: readonly PullRequest[]
-  /** Work on its branch, with no pull request: the branch, by name, which heads the card. */
+  /** Work on its branch, with no pull request: the branch, by name, whole, under what the card is. */
   branch?: string
+  /** Work on its branch: what the card is, in a line, as beside another repository's pull request; else it says it has none. */
+  title?: ReactNode
   /** Work on its branch, as its remote has it: the remote's name, whether it has the branch, and how many commits it doesn't have. */
   remote?: { readonly name: string; readonly pushed: boolean; readonly ahead: number }
   /** Work on its branch: how many of its files have changes not committed yet, which no push takes. */
   uncommitted?: number
-  /** What pushes the commits its remote doesn't have, beside them: a quiet button. */
-  push?: ReactNode
   /** A line under where it stands, where there is more to it: merged here, and whether its remote has it. */
   note?: ReactNode
   /** Its host's checks; without them, no line for them, and with none yet, a line saying so, unless it merged: none will run now. */
@@ -126,6 +132,8 @@ export interface ChangeSetProps {
   review?: ChangeReview
   /** What can be done with it now: one button, or two where it's a choice; the first is the one to press. */
   actions?: ReactNode
+  /** A line under its actions, for what one of them does that its words can't hold: a merge here pushes nothing, and no one reviews it. */
+  hint?: ReactNode
   /** Why the last action did not go through: a note in a line or two, with a quiet button where one puts it right. */
   error?: ReactNode
   /** Open the whole diff. */
@@ -145,13 +153,14 @@ export function ChangeSet({
   host,
   prs,
   branch,
+  title,
   remote,
   uncommitted = 0,
-  push,
   note,
   checks,
   review,
   actions,
+  hint,
   error,
   onReviewDiff,
   diffKey,
@@ -178,7 +187,7 @@ export function ChangeSet({
     <article className={cx(s.change, className)} aria-label={t.label}>
       <div className={cx(s.decide, acting && !many && s.acting)}>
         <div className={s.facts}>
-          <Head state={state} host={host} prs={prs} branch={branch} remote={remote} uncommitted={uncommitted} push={push} t={t} />
+          <Head state={state} host={host} prs={prs} branch={branch} title={title} remote={remote} uncommitted={uncommitted} t={t} />
           {note !== undefined && <p className={s.note}>{note}</p>}
           {(checked || review !== undefined) && (
             <div className={s.lines}>
@@ -187,7 +196,12 @@ export function ChangeSet({
             </div>
           )}
         </div>
-        {acting && <div className={s.actions}>{actions}</div>}
+        {acting && (
+          <div className={s.doing}>
+            <div className={s.actions}>{actions}</div>
+            {hint !== undefined && <p className={s.hint}>{hint}</p>}
+          </div>
+        )}
         {error && (
           <p className={s.error} role="alert">
             {error}
@@ -224,11 +238,11 @@ function Head({
   host,
   prs,
   branch,
+  title,
   remote,
   uncommitted,
-  push,
   t,
-}: Pick<ChangeSetProps, 'state' | 'host' | 'prs' | 'branch' | 'remote' | 'push'> & { uncommitted: number; t: ChangeSetText }) {
+}: Pick<ChangeSetProps, 'state' | 'host' | 'prs' | 'branch' | 'title' | 'remote'> & { uncommitted: number; t: ChangeSetText }) {
   const several = prs.length > 1
   const numbered = prs.filter((pr) => pr.number !== undefined)
   const said = state === ChangeState.Draft || state === ChangeState.Merged || state === ChangeState.Queued ? t.state[state] : null
@@ -266,25 +280,24 @@ function Head({
     return url === undefined ? [] : [{ repo: pr.repo, url, host: pr.newPullRequest?.host }]
   })
   const [page] = pages
+  const onBranch = state === ChangeState.Branch
+  // A single repository's files are under the card; with none to show, its commits say what there is to it.
+  const [only] = prs
+  const lone = !several && only !== undefined && only.files.length === 0 && only.commits !== undefined ? only.commits : null
   return (
     <div className={s.head}>
       <p className={s.pr}>
-        {branch === undefined || state !== ChangeState.Branch ? (
-          <span className={s.prName}>{t.state[state]}</span>
-        ) : (
-          <span className={s.branch} title={branch}>
-            <Icon name="branch" size={13} />
-            <span className={s.branchName}>{branch}</span>
-          </span>
-        )}
+        <span className={s.prName}>{onBranch ? (title ?? t.state[state]) : t.state[state]}</span>
       </p>
-      {ahead > 0 && (
-        <p className={s.standing}>
-          <span>{t.unpushed(ahead)}</span>
-          {push}
+      {onBranch && branch !== undefined && (
+        <p className={s.branch}>
+          <Icon name="branch" size={13} />
+          <span className={s.branchName}>{branch}</span>
         </p>
       )}
-      {state === ChangeState.Branch && uncommitted > 0 && <p className={s.standing}>{t.uncommitted(uncommitted)}</p>}
+      {lone !== null && <p className={s.standing}>{t.commits(lone)}</p>}
+      {ahead > 0 && <p className={s.standing}>{t.unpushed(ahead)}</p>}
+      {onBranch && uncommitted > 0 && <p className={s.standing}>{t.uncommitted(uncommitted)}</p>}
       {!several && page !== undefined && (
         <p className={s.standing}>
           <a className={s.page} href={page.url} target="_blank" rel="noreferrer">
@@ -293,21 +306,34 @@ function Head({
           </a>
         </p>
       )}
-      {several &&
-        prs.map((pr) => {
-          const its = pages.find((one) => one.repo === pr.repo)
-          return (
-            <p key={pr.repo} className={s.repo}>
-              <span className={s.repoName}>{pr.repo}</span>
-              {its !== undefined && (
-                <a className={s.page} href={its.url} target="_blank" rel="noreferrer">
-                  {t.newPullRequest(its.host)}
-                  <Icon name="external" size={10} />
-                </a>
-              )}
-            </p>
-          )
-        })}
+      {several && (
+        <ul className={s.repos}>
+          {prs.map((pr) => {
+            const its = pages.find((one) => one.repo === pr.repo)
+            return (
+              <li key={pr.repo} className={s.repo}>
+                <span className={s.repoName}>{pr.repo}</span>
+                <span className={s.repoSize}>
+                  {pr.files.length > 0 ? (
+                    <>
+                      <span>{t.files(pr.files.length)}</span>
+                      <Delta add={pr.files.reduce((n, f) => n + f.add, 0)} del={pr.files.reduce((n, f) => n + f.del, 0)} />
+                    </>
+                  ) : pr.commits !== undefined ? (
+                    <span>{t.commits(pr.commits)}</span>
+                  ) : null}
+                </span>
+                {its !== undefined && (
+                  <a className={s.page} href={its.url} target="_blank" rel="noreferrer">
+                    {t.newPullRequest(its.host)}
+                    <Icon name="external" size={10} />
+                  </a>
+                )}
+              </li>
+            )
+          })}
+        </ul>
+      )}
     </div>
   )
 }

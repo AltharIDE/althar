@@ -10,7 +10,7 @@ import { queuedWords, reconnectsWords, waitsWords } from '../../shared/agents'
 import { useModelNames } from '../../shared/modelNames'
 import { callKindOf, whereOf } from '../../shared/calls'
 import { checkOf } from '../../shared/checks'
-import { mergeHereLabel } from '../../shared/mergeHere'
+import { mergeHereHint, mergeHereLabel } from '../../shared/mergeHere'
 import { productBrand, productName } from '../../shared/products'
 import { personPushes } from '../../shared/standing'
 import { ago, clock } from '../../shared/time'
@@ -196,7 +196,12 @@ export function DockView({
           )}
           {/* A repository of the task that ended on its branch merges here, beside the pull request of the rest. */}
           {task.here.length > 0 && (
-            <ActionButton icon="branch" disabled={model.merging.has(task.taskId)} onClick={() => void model.mergeHere(task)}>
+            <ActionButton
+              icon="branch"
+              title={mergeHereHint}
+              disabled={model.merging.has(task.taskId)}
+              onClick={() => void model.mergeHere(task)}
+            >
               {mergeHereLabel(task.here, true)}
             </ActionButton>
           )}
@@ -258,7 +263,12 @@ export function DockView({
         )}
         {/* Work that ended on its branch merges here, or can still open its pull request, as the person says. */}
         {task.phase === 'ready' && task.nothingBuilt !== true && change === null && task.here.length > 0 && (
-          <ActionButton icon="branch" disabled={model.merging.has(task.taskId)} onClick={() => void model.mergeHere(task)}>
+          <ActionButton
+            icon="branch"
+            title={mergeHereHint}
+            disabled={model.merging.has(task.taskId)}
+            onClick={() => void model.mergeHere(task)}
+          >
             {mergeHereLabel(task.here)}
           </ActionButton>
         )}

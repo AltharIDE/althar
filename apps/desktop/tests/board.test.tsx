@@ -1374,12 +1374,12 @@ describe('the board', () => {
     const { client } = fakeClient({ mergeHere, getBoard: vi.fn(async () => board({ tasks })) })
     withServices(<Docked target={{ kind: 'task', id: 't5' }} />, client)
     const dock = await screen.findByRole('complementary', { name: 'Beside the board' })
-    await userEvent.click(within(dock).getByRole('button', { name: 'Merge into main' }))
+    await userEvent.click(within(dock).getByRole('button', { name: 'Merge into main on this Mac' }))
     expect(await within(dock).findByRole('alert')).toHaveProperty(
       'textContent',
       'It conflicts with the default branch, in README.md. Tell the lead to bring its branch up to date, then merge again.',
     )
-    await userEvent.click(within(dock).getByRole('button', { name: 'Merge into main' }))
+    await userEvent.click(within(dock).getByRole('button', { name: 'Merge into main on this Mac' }))
     await waitFor(() => expect(mergeHere).toHaveBeenCalledTimes(2))
     expect(mergeHere).toHaveBeenLastCalledWith('t5', [{ repository: 'meridian', head: 'abc111' }])
   })
@@ -1392,7 +1392,7 @@ describe('the board', () => {
     withServices(<Docked target={{ kind: 'task', id: 't4' }} />, client)
     const dock = await screen.findByRole('complementary', { name: 'Beside the board' })
     expect(within(dock).getByRole('button', { name: /Accept and merge/ })).toBeTruthy()
-    await userEvent.click(within(dock).getByRole('button', { name: 'Merge tools into main' }))
+    await userEvent.click(within(dock).getByRole('button', { name: 'Merge tools into main on this Mac' }))
     await waitFor(() => expect(mergeHere).toHaveBeenCalledWith('t4', [{ repository: 'tools', head: 'abc111' }]))
   })
 
