@@ -1,7 +1,7 @@
 import { execFileSync } from 'node:child_process'
-import { mkdtempSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { basename, dirname, join } from 'node:path'
 
 import { type FakeService, makeFakeService } from '@althar/connectors/testing'
 import { holds } from '@althar/provider-adapters/testing'
@@ -272,10 +272,11 @@ describe('the review after a merge, in the same task', () => {
       const task = yield* smallChange(working, '[review:pass]')
       // Its copy can't be made where it goes: the folder is a file.
       const [workspace] = yield* sql<{ path: string }>`SELECT path FROM workspaces WHERE task_id = ${task.taskId}`
+      // Named by the path's parts, which Windows writes with backslashes.
       const reviewRoot = join(workspace?.path ?? '', '..', '..', '.review')
-      execFileSync('mkdir', ['-p', reviewRoot])
-      const blocker = join(reviewRoot, `${(workspace?.path ?? '').split('/').at(-2) ?? ''}-after-1`)
-      execFileSync('touch', [blocker])
+      mkdirSync(reviewRoot, { recursive: true })
+      const blocker = join(reviewRoot, `${basename(dirname(workspace?.path ?? ''))}-after-1`)
+      writeFileSync(blocker, '')
       yield* mergeIt(bare, github, task.taskId)
       const owed = yield* until(
         sql<{
@@ -295,7 +296,7 @@ describe('the review after a merge, in the same task', () => {
       yield* (yield* FastLane).retryPendingReviews()
       assert.lengthOf(yield* said(), 1)
       // Once it can, it starts, and reads.
-      execFileSync('rm', ['-f', blocker])
+      rmSync(blocker, { force: true })
       yield* (yield* FastLane).retryPendingReviews()
       yield* until(reviewOf(task.url), (row) => row?.state === 'clear')
     }).pipe(Effect.provide(runtimeWith(github)))

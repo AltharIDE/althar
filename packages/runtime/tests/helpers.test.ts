@@ -1,7 +1,7 @@
 import { execFileSync } from 'node:child_process'
 import { existsSync, mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, sep } from 'node:path'
 
 import { type FakeService, makeFakeService } from '@althar/connectors/testing'
 import { assert, describe, it } from '@effect/vitest'
@@ -321,9 +321,10 @@ describe('a lead’s helpers', () => {
         const [session] = yield* sql<{ agentId: string }>`
           SELECT agent_id FROM provider_sessions WHERE thread_id = ${done?.threadId ?? ''} ORDER BY started_at LIMIT 1`
         assert.strictEqual(session?.agentId, agent)
-        const launched = launches.filter((one) => one.agentId === agent && one.cwd.includes('/.helpers/'))
+        // Its folder as this computer writes it: with backslashes on Windows.
+        const launched = launches.filter((one) => one.agentId === agent && one.cwd.includes(`${sep}.helpers${sep}`))
         assert.isNotEmpty(launched)
-        assert.isTrue(launched.every((one) => !one.cwd.startsWith(`${task.path}/`) && one.cwd !== task.path))
+        assert.isTrue(launched.every((one) => !one.cwd.startsWith(`${task.path}${sep}`) && one.cwd !== task.path))
         // Its result comes to the lead as news.
         yield* until(
           sql<{ body: string }>`SELECT body FROM user_inputs WHERE thread_id = ${task.threadId} AND body LIKE ${`Helper "${name}"%`}`,

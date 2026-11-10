@@ -305,7 +305,10 @@ describe('this computer’s load', () => {
           processes: 1,
         },
       ])
-    }).pipe(Effect.provide(runtime(':memory:', {}, { load: { read: stand.read, marks, settle: Duration.millis(1) } })))
+    }).pipe(
+      // Althar's own pid named, not the test's: on Windows that can be 700, and then all of it would be Althar's.
+      Effect.provide(runtime(':memory:', {}, { load: { read: stand.read, marks, app: 2, settle: Duration.millis(1) } })),
+    )
   })
 
   it.live('counts Althar itself, the app and what it started that is no work’s, in Althar’s part', () => {
