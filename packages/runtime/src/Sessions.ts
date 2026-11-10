@@ -50,7 +50,7 @@ import { refusalOf, runSkills, type RunSkills } from './Skills'
 import { type CoordinatorFolder, coordinatorFolder } from './coordinatorFolder'
 import { coordinatorNews, type ModelNamer, modelNamer } from './coordinatorNews'
 import { coordinatorRow, forgetItems } from './chatView'
-import { CACHE_LIFE, dueForHandover, dueForLeadHandover, handoverRecord, notesSection, roomFor, shrinks } from './handover'
+import { dueForHandover, dueForLeadHandover, handoverRecord, notesSection, roomFor, shrinks } from './handover'
 import { notesOf } from './notes'
 import {
   AlreadyDelivered,
@@ -393,10 +393,8 @@ interface Running {
   handover: 'none' | 'under_way' | 'left'
   /** When its turn running started, in milliseconds: what the person's wait for its first word is counted from. */
   turnStartedAt: number | null
-  /** When its last turn ended, in milliseconds; null before its first. A lead idle past its cache's life is at a break. */
+  /** When its last turn ended, in milliseconds; null before its first. */
   turnEndedAt: number | null
-  /** Its last turn ended a step of its work, or made its task a change (`atBreak`): a break, where a lead may start afresh. */
-  atBreak: boolean
   /**
    * Who leads it from its next turn, where the person or a tool changed that while it worked or waited (`changeLead`): taken up
    * between turns, as what is said to it next is delivered, never in one.
@@ -860,10 +858,10 @@ export class Sessions extends Context.Service<
      */
     /**
      * What happens as a lead's turn that delivers the person's own words
-     * begins, before the agent reads them: a round of work after its task's
-     * plan opens (Runs.ts, ADR-034), with the turn's delivery, which the
-     * round's first step is then known by. It is done once, and never fails
-     * the turn.
+     * begins, before the agent reads them: after its task's plan, where each
+     * of its worktrees stands is kept with the turn's delivery (Runs.ts; a
+     * task is a conversation plus parts), so what the turn commits waits for
+     * Ship. It is done once, and never fails the turn.
      */
     onPersonsTurn(
       next: (lead: {
@@ -886,12 +884,6 @@ export class Sessions extends Context.Service<
         work: (begun: Effect.Effect<void>) => Effect.Effect<void>,
       ) => Effect.Effect<boolean>,
     ): Effect.Effect<void>
-    /**
-     * Says the turn the thread's lead is in ends at a break in its work: it
-     * finished a step, or made its task a change. Its next turn may then
-     * start in a fresh session, briefed from the task (ADR-038).
-     */
-    atBreak(threadId: string): Effect.Effect<void>
     /**
      * Whether the thread's agent is still at work, though its turn has ended:
      * it left a command running, is in a call of its own, or spoke outside a
@@ -1458,8 +1450,7 @@ export class Sessions extends Context.Service<
           // Still at work though its turn ended, or within the moment an agent takes to say what it left running (Codex says so
           // after its turn): not yet.
           if (yield* busyNow(thread.threadId)) return false
-          const idle = running.turnEndedAt !== null && (yield* Clock.currentTimeMillis) - running.turnEndedAt >= CACHE_LIFE
-          return dueForLeadHandover(running.context, running.atBreak || idle)
+          return dueForLeadHandover(running.context)
         })
 
       /** Whether anything waits in the thread's queue. */
@@ -1697,6 +1688,12 @@ export class Sessions extends Context.Service<
             )
             .pipe(Effect.catchTag('TakenBack', () => Effect.succeed(false)))
           if (!claimed) return true
+          // What the person says to a task's lead after its plan is a turn: where its worktrees stand is kept before the turn is
+          // delivered (Runs.ts), so what it commits can wait for Ship, and its card says it works as soon as it is.
+          if (thread.role === 'task' && inputs.some((input) => input.shown === 1))
+            yield* personsTurn({ taskId: thread.taskId, threadId: thread.threadId, sessionId: running.sessionId, deliveryId: turnId }).pipe(
+              Effect.catchCause((cause) => Effect.logWarning('Could not keep where the person’s turn began', cause)),
+            )
           // Recorded as delivered before the prompt goes out: after a crash, a delivered turn may have acted.
           yield* sql.withTransaction(
             Effect.gen(function* () {
@@ -1726,16 +1723,9 @@ export class Sessions extends Context.Service<
               )
             }),
           )
-          // What the person says to a task's lead after its plan opens a round of work, before the lead reads it, or its card says it
-          // works (ADR-034).
-          if (thread.role === 'task' && inputs.some((input) => input.shown === 1))
-            yield* personsTurn({ taskId: thread.taskId, threadId: thread.threadId, sessionId: running.sessionId, deliveryId: turnId }).pipe(
-              Effect.catchCause((cause) => Effect.logWarning('Could not open a round of work for the person’s turn', cause)),
-            )
           if (!compacting) running.brief = undefined
           running.turnRunning = true
           running.turnStartedAt = yield* Clock.currentTimeMillis
-          running.atBreak = false
           // What it did outside a turn before is over with: this turn is what it is at.
           running.callsOpen.clear()
           running.workedAt = null
@@ -2757,7 +2747,6 @@ export class Sessions extends Context.Service<
             handover: 'none',
             turnStartedAt: null,
             turnEndedAt: null,
-            atBreak: false,
             nextLead: undefined,
           }
           threads.set(thread.threadId, running)
@@ -3356,7 +3345,7 @@ export class Sessions extends Context.Service<
             `Task: ${thread.title}${thread.description === '' ? '' : `\n\n${thread.description}`}`,
             ...(why.kind === 'start' && standing?.state === 'done'
               ? [
-                  "This task is settled: it is done, in the person's Settled, and the session that worked on it stopped as it settled. Don't do it again: what they ask now is a round of work of its own, on the work as it stands.",
+                  "This task is settled: it is done, in the person's Settled, and the session that worked on it stopped as it settled. Don't do it again: what they ask now is new work on the work as it stands, and what you commit for it waits for their Ship.",
                 ]
               : []),
             ...askedFor(thread),
@@ -3390,8 +3379,8 @@ export class Sessions extends Context.Service<
                 ]),
             // How the step ends: the lead says so, with what the person reads instead of the whole turn.
             "When you have done the task, call Althar's finish_step tool with a summary of a few lines: what you changed, how you checked it, and anything left open. The person reads that summary rather than everything you did. If you can't go further without the person's answer, call wait_for_person with your question and end your turn: the task waits in their Needs you, and their answer starts you again. Don't use finish_step for work that waits on them.",
-            // After its plan, what the person asks for is a round of work of its own (ADR-034).
-            "Once the plan's steps are done, what the person asks you for is a round of work of its own: when you have done it, call finish_step the same way, with your summary and evidence. Where they only asked something and you changed nothing, answer them; there is nothing to finish. What you commit after the task's pull request merged or closed goes in a new pull request, which Althar opens as a draft once you finish; where they only asked something and you committed in passing as you answered, call finish_step with `answered`, and the person opens it from the task if they want it.",
+            // After its plan, what the person says is a turn, not a round (a task is a conversation plus parts): its commits wait for Ship.
+            'Once the plan\'s steps are done, what the person says to you is a turn of the conversation, not a step: do what they ask and answer; your last message is your answer, and there is no report to give and no finish_step to call. What you commit stays on the task\'s branch, where they can try it, and nothing pushes it: it waits for their Ship, which runs the review over everything since the last one and then sends it up (to the open pull request, or a new one after the last merged or closed). Where they ask you to ship it ("ship it", "push it"), call ship_task once your work for it is committed. Where what you commit goes in a new pull request (the last merged or closed, or there is none yet), call finish_step with its description once it\'s committed, so Ship opens it with yours.',
             // The thread reads in rounds: what was asked, the lead's word on it, its work folded into one line, and what it did.
             'When you pick up something to do, whether the task, a message from the person, what the coordinator passes on or the findings of a review, first say in a sentence or two what you understood and what you will do, then do it. Say little while you work: your words along the way are folded in with your work. When you are done, end with a message that says what you did, what to look at, and what is left.',
             // What stands open of a round is its last message, or its report where nothing follows it: it carries everything (ADR-099).
@@ -4017,11 +4006,6 @@ export class Sessions extends Context.Service<
         gateTurns: (next) =>
           Effect.sync(() => {
             gate = next
-          }),
-        atBreak: (threadId) =>
-          Effect.sync(() => {
-            const running = threads.get(threadId)
-            if (running !== undefined) running.atBreak = true
           }),
         onPersonsTurn: (next) =>
           Effect.sync(() => {

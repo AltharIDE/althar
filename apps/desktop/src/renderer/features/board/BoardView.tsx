@@ -1,4 +1,4 @@
-import type { AgentStatus, BoardCall, BoardTask, ChangeSummary, PlanStep, ReviewBrief } from '@althar/contracts'
+import type { AgentStatus, BoardCall, BoardTask, ChangeSummary, HeldForShip, PlanStep, ReviewBrief } from '@althar/contracts'
 import {
   Board,
   BoardCard,
@@ -42,7 +42,17 @@ import { localText } from '../../shared/local'
 import { askOf, callKindOf, isAnswered, isSettleable, kindWords, takesDone, whereOf } from '../../shared/calls'
 import { moreOf as questionMore } from '../../shared/questions'
 import { productBrand, productName } from '../../shared/products'
-import { doingWords, doneHere, factsOf, labelWords, nextWords, readyWordOf, standingOf, standingText } from '../../shared/standing'
+import {
+  doingWords,
+  doneHere,
+  factsOf,
+  labelWords,
+  nextWords,
+  readyWordOf,
+  shipText,
+  standingOf,
+  standingText,
+} from '../../shared/standing'
 import { afterSteps, isAutomatedStep, stepText } from '../../shared/steps'
 import { ago, clock, running } from '../../shared/time'
 import { text as stuckText } from '../task/StuckCall'
@@ -485,6 +495,16 @@ export const waitingCardOf = ({ task, call }: Waiting, name: (id: string | null)
  */
 export const readyCardOf = (work: BoardTask, actions?: CardActions): Card => {
   const base = { status: TaskStatus.Yours, kind: kindOf(work), ...localOf(work), ...towardOf(work), title: work.title, ...fromOf(work) }
+  // Held for Ship, whatever kind it is: what waits, and Ship, which is all the person has to do for it.
+  if (work.held !== undefined && work.kind !== 'review') {
+    const change = work.change?.state === 'open' ? work.change : null
+    return {
+      ...base,
+      word: shipText.word,
+      ...(change === null ? (work.branch === null ? {} : { object: <BranchChip name={work.branch} /> }) : { object: pullChip(change) }),
+      ...shipOf(work, work.held, change, actions),
+    }
+  }
   switch (work.kind) {
     case 'plain': {
       const pictures = (work.handed?.pictures ?? []).flatMap((picture, index) =>
@@ -570,9 +590,62 @@ export const readyCardOf = (work: BoardTask, actions?: CardActions): Card => {
   }
 }
 
-/** What a ready card does without opening its task: push, and merge, mark done or keep for later, and how they stand. */
+/**
+ * A ready card of a task holding commits for Ship (a task is a conversation
+ * plus parts, "A tweak waits for Ship"): how many wait, what else stands on
+ * its open pull request that Ship's push answers (a failed check, a
+ * conflict), and Ship, done right there, as Push is. One that failed says
+ * why, and offers it again.
+ */
+const shipOf = (
+  work: BoardTask,
+  held: HeldForShip,
+  change: ChangeSummary | null,
+  actions: CardActions | undefined,
+): Pick<Card, 'foot' | 'next'> => {
+  const failure = actions?.failed[work.taskId]
+  const failed = failure?.action === 'ship' ? failure.message : null
+  const also = change === null ? [] : factsOf(change).filter((one) => one.tone === 'danger' || one.icon === 'branch')
+  const ship = actions?.ship
+  const step =
+    ship === undefined ? (
+      <NextStep>{shipText.ship}</NextStep>
+    ) : (
+      <NextStep
+        signal
+        busy={actions?.shipping?.has(work.taskId) === true}
+        doing={shipText.shipping}
+        label={failed === null ? shipText.label(held.commits) : shipText.again(held.commits)}
+        onPress={() => void ship(work.taskId)}
+      >
+        {failed === null ? shipText.ship : standingText.nextFailed.again}
+      </NextStep>
+    )
+  return {
+    foot: (
+      <FactLine>
+        {failed !== null && (
+          <Fact key="failed" icon="close" tone="danger" role="alert">
+            {shipText.failed(failed)}
+          </Fact>
+        )}
+        <Fact key="held" icon="up" tone="warm">
+          {shipText.commits(held.commits)}
+        </Fact>
+        {also.map((one) => (
+          <Fact key={one.words} tone={one.tone}>
+            {one.words}
+          </Fact>
+        ))}
+      </FactLine>
+    ),
+    next: step,
+  }
+}
+
+/** What a ready card does without opening its task: push, and merge, ship, mark done or keep for later, and how they stand. */
 export type CardActions = Pick<WorkActions, 'push' | 'merge' | 'pushing' | 'merging' | 'failed'> &
-  Partial<Pick<WorkActions, 'markDone' | 'keep' | 'settling' | 'resolveNow' | 'resolving' | 'sendBack' | 'sending'>>
+  Partial<Pick<WorkActions, 'markDone' | 'keep' | 'settling' | 'resolveNow' | 'resolving' | 'sendBack' | 'sending' | 'ship' | 'shipping'>>
 
 /**
  * A conflict that is the person's, handed back or not asked of its lead: why, in one line, at its foot, and Resolve now, which

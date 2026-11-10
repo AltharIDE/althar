@@ -203,9 +203,17 @@ is a unit of work, so commits aren't pushed one by one as they're made.
   else pushed to PR #402"). Commits on their way show "1 commit going up to
   the PR", with no Accept, so the pull request is never merged before them.
 - Off, every push but a fix for failing checks is the person's.
+- **Held for Ship, nothing goes up but Ship.** What a turn the person's words
+  began after the plan committed holds the branch until the person ships it
+  ([tasks](tasks.md#rounds-back-to-work-and-shipping-again)): this rule, the
+  Push card, `push_to_pull_request` and publishing all refuse it, failing
+  checks of the pushed head aren't put to the lead, and a conflict waits for
+  Ship's push. Ship reviews first, where the plan has a reviewer before the
+  work ships, then pushes past the hold.
 
 Commits the person made in the task's own folder and never pushed go up
-with the lead's: Althar can't tell them apart there.
+with the lead's: Althar can't tell them apart there. Not built yet: those
+holding the branch for Ship too, read against each turn's last head.
 
 `push_to_pull_request` pushes at once wherever the rule or a checks fix
 would, and says what it did; otherwise it shows the person the commits with
@@ -677,4 +685,5 @@ The decisions above are current. These parts of them aren't built on main:
 
 - 8 Nov 2026: written from the ADRs under Replaces.
 - 8 Nov 2026: the limits sweep (#696) built: agents carry the person's own sign-in, and `gh` and `glab` are read as git is.
-- 8 Nov 2026: review and triage bots (DEV-205) built: the person trusts each in the project's settings, off by default; a trusted bot's words reach the lead as findings quoted as data, never obeyed.
+- 9 Nov 2026: what a turn the person's words began after the plan commits holds the branch for Ship ([a task is a conversation plus parts](proposed/a-task-is-a-conversation-plus-parts.md#a-tweak-waits-for-ship)).
+- 10 Nov 2026: review and triage bots (DEV-205) built: the person trusts each in the project's settings, off by default; a trusted bot's words reach the lead as findings quoted as data, never obeyed.

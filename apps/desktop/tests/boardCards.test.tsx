@@ -277,6 +277,59 @@ describe('a ready card’s own ways', () => {
     expect(shown.getByRole('button', { name: 'Keep for later' }).hasAttribute('disabled')).toBe(true)
   })
 
+  it('says what waits for Ship and ships it from the card, whatever its pull request’s checks say (a task is a conversation plus parts)', async () => {
+    const ship = vi.fn(async () => true)
+    const actions = ways({ ship, shipping: new Set<string>() })
+    const held = task({
+      taskId: 'h1',
+      threadId: 'thh1',
+      title: 'Retry twice',
+      phase: 'ready',
+      change: change({ draft: false, localHead: 'def456', unpushed: 2, checks: checks(1, 1) }),
+      held: { since: NOW, commits: 2 },
+    })
+    show(lanesOf(board([held])), { actions })
+    const shown = cardOf('Retry twice')
+    expect(shown.getByText('Not shipped')).toBeTruthy()
+    expect(shown.getByText('2 commits not shipped')).toBeTruthy()
+    // Its checks are the pushed head's, which Ship replaces: said beside it, and no Push of its own.
+    expect(shown.getByText('1 check failed')).toBeTruthy()
+    expect(shown.queryByRole('button', { name: /^Push/ })).toBeNull()
+    await userEvent.click(shown.getByRole('button', { name: 'Ship 2 commits' }))
+    expect(ship).toHaveBeenCalledWith('h1')
+  })
+
+  it('says Ship is under way, and why it failed, offering it again', () => {
+    const held = task({ taskId: 'h2', threadId: 'thh2', title: 'Retry twice', phase: 'ready', held: { since: NOW, commits: 1 } })
+    show(lanesOf(board([held])), { actions: ways({ ship: vi.fn(async () => true), shipping: new Set(['h2']) }) })
+    expect(cardOf('Retry twice').getByRole('button', { name: 'Ship 1 commit' }).getAttribute('aria-busy')).toBe('true')
+    show(lanesOf(board([held])), {
+      actions: ways({
+        ship: vi.fn(async () => true),
+        shipping: new Set(),
+        failed: { h2: { action: 'ship', message: 'GitHub refused the push' } },
+      }),
+    })
+    const failed = screen.getAllByRole('alert').map((one) => one.textContent)
+    expect(failed).toContain('Ship failed: GitHub refused the push')
+    expect(screen.getAllByRole('button', { name: 'Try shipping 1 commit again' }).length).toBeGreaterThan(0)
+  })
+
+  it('says a settled change’s lead replied, until the person reads it', () => {
+    const merged = change({ state: 'merged', draft: false, checks: checks(2, 0) })
+    const replied = task({
+      taskId: 'r1',
+      threadId: 'thr1',
+      title: 'Add a retry',
+      phase: 'ready',
+      state: 'done',
+      change: merged,
+      replied: NOW,
+    })
+    show(lanesOf(board([replied])))
+    expect(cardOf('Add a retry').getByText('Replied')).toBeTruthy()
+  })
+
   it('merges a pull request whose head its host didn’t say, as the card showed it', async () => {
     const actions = ways()
     const ready = task({

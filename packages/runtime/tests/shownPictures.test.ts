@@ -17,6 +17,7 @@ import { Plans } from '../src/Plans'
 import { Projects } from '../src/Projects'
 import { Queries } from '../src/Queries'
 import * as Runtime from '../src/Runtime'
+import { transcript } from '../src/threads'
 import type { ToolAccess } from '../src/ToolServer'
 import { callTool, repository, runtime, task, until } from './support'
 
@@ -94,6 +95,8 @@ describe('pictures a lead shows in its thread', () => {
       const digest = item?.content.pictures[0]?.picture.digest ?? null
       assert.match(digest ?? '', /^[0-9a-f]{64}$/)
       assert.strictEqual(item?.content.pictures[0]?.picture.mediaType, 'image/png')
+      // An agent that takes the thread over reads what the person was shown, by its captions.
+      assert.include((yield* transcript(threadId, 10_000)).text, 'showed the person] Settings, light / Settings, dark')
       // Its copy is Althar's: the worktree's folders going doesn't take it.
       rmSync(join(worktree, 'test-results'), { recursive: true })
       rmSync(join(worktree, '.althar', 'scratch'), { recursive: true })

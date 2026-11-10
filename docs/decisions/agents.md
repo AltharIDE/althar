@@ -99,10 +99,11 @@ People choose who does work by model, not by the tool that runs it. The coordina
 
 ## Keeping context small
 
-Every call reads the whole context again, so long sessions cost most of the usage. A lead is started afresh at large sizes and at breaks, and the person can compact any agent at once. The coordinator's own handover is in [coordinator.md](coordinator.md).
+Every call reads the whole context again, so long sessions cost most of the usage. A lead is started afresh only once its context is full, and the person can compact any agent at once. The coordinator's own handover is in [coordinator.md](coordinator.md).
 
 - **A lead is handed to a fresh session between turns, never during one.** It keeps the same agent, account, model and effort, and is briefed from the task as any agent taking it over is. The thread shows a quiet line ("Started Claude Code afresh.").
-- **When:** before a turn, once its context is past 200,000 tokens or 80% of its window, whichever comes first. At a break it happens past 80,000 tokens (`packages/runtime/src/handover.ts`). A break is when its last turn finished a step or round, or made its task a change, or when it has sat idle past its prompt cache's life (five minutes).
+- **When:** only once its context is full: before a turn, once it's past 200,000 tokens or 80% of its window, whichever comes first (`packages/runtime/src/handover.ts`). A break hands nothing over at any size, whether its last turn finished a step or round, made its task a change, or it sat idle past its prompt cache's life. Coming back to a task after a pause carries the conversation on, with all the lead knows of the work.
+- **The cost:** after a pause longer than its prompt cache's life, the next message reads the whole context at full price. The context ring shows the size, and Compact is one press away.
 - **It happens lazily,** only when the lead has a turn to take, so a finished task costs nothing.
 - **Some leads are left as they are,** and their agent compacts on its own:
   - one whose left-running processes are still going, since closing its session would stop them;
@@ -145,3 +146,4 @@ People asked what a task cost. What they want to know is how much of each subscr
 ## Changes
 
 - 8 Nov 2026: written from the ADRs under Replaces.
+- 9 Nov 2026: a lead starts afresh only once its context is full, never at a break ([a task is a conversation plus parts](proposed/a-task-is-a-conversation-plus-parts.md#a-leads-session-lasts-until-its-full)).

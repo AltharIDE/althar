@@ -72,6 +72,7 @@ import { graphOf, type RunRows, type StepRow } from './graph'
 import { taskFindingsOf } from './taskFindings'
 import { filesOf, outputOf, picturesOf } from './handed'
 import { answeredIn, handedOf, issueCardsWaiting, kindOf } from './kinds'
+import { repliedAt } from './replied'
 import { BETWEEN_AGENTS_MS, betweenAgents, byItself, DRAFTING_MS, isMergeable, stillDrafting } from './needsYou'
 import { documentKept, documentText, outputText } from './reading'
 import { type CodeRoot, type CodeRoots, findCode, readCode } from './code'
@@ -1912,6 +1913,22 @@ export class Queries extends Context.Service<
        * from its plan, its run, the calls waiting and the agents working.
        */
       /** A task's card, as its item in the coordinator's thread shows it. */
+      /**
+       * What waits on a task's branch for Ship (a task is a conversation plus parts, "A tweak waits for Ship"): since its first
+       * hold, and how many commits, those ahead of its open pull requests and `after`, those after its last merged or closed or
+       * in none yet. Undefined while nothing is held: read only then, so a board of tasks holding nothing asks git nothing more.
+       */
+      const heldOf = (taskId: string, after: number) =>
+        Effect.gen(function* () {
+          const changes = yield* Changes
+          const [first] = yield* changes.holds(taskId).pipe(Effect.orElseSucceed(() => []))
+          if (first === undefined) return undefined
+          const open = yield* changes.aheadOfOpen(taskId).pipe(Effect.orElseSucceed(() => []))
+          const commits = open.reduce((sum, one) => sum + one.count, 0) + after
+          // Held with nothing left to send, as where the person pushed it by hand, it waits on nothing: Ship lets go of it.
+          return commits === 0 ? undefined : { since: first.heldAt, commits }
+        })
+
       const cardOf = (row: ItemRow) =>
         Effect.map(cardFor(text(parse(row.content), 'taskId')), (content): ThreadItem | undefined =>
           content === undefined
@@ -2233,6 +2250,12 @@ export class Queries extends Context.Service<
                   add: after.reduce((sum, one) => sum + one.add, 0),
                   del: after.reduce((sum, one) => sum + one.del, 0),
                 }
+          // Held for Ship (a task is a conversation plus parts, "A tweak waits for Ship"): what the person's turns with its lead
+          // committed after its plan waits on its branch, on its open pull requests or after the last, and only Ship sends it up.
+          const held = yield* heldOf(taskId, unshipped?.commits ?? 0)
+          // A reply the person hasn't seen (a task is a conversation plus parts): its lead answered a turn their words began after
+          // its plan, since they last had the task open. It waits in Needs you until they open it, settled or not.
+          const replied = yield* repliedAt(taskId)
           // Someone else's pull request it reviews (DEV-96); and whether a draft of its review waits for the person.
           const reviewing = yield* reviewBriefOf(taskId)
           const [draftWaits] =
@@ -2298,8 +2321,12 @@ export class Queries extends Context.Service<
             // A review has no run: drafted, it is the person's to post, as a change is to accept. Posted, and written to again, it
             // is open once more: its lead answered, it is finished as a quick task is, the person's to settle (ADR-051).
             if (task.state === 'open' && (draftWaits !== undefined || reviewing?.posted != null)) return 'ready'
-            // Merged, it is settled, unless commits after its pull requests are in none yet.
-            if (task.state === 'done') return unshipped === null ? 'settled' : 'ready'
+            // Held for Ship, it waits on the person's word, whatever its pushed head's checks say: Ship replaces that head. Not while
+            // a run is under way, as Ship's own is as it reviews and sends what waited.
+            if (held !== undefined && task.runState !== 'running') return 'ready'
+            // Merged, it is settled, unless commits after its pull requests are in none yet, or its lead answered the person since
+            // they last had it open.
+            if (task.state === 'done') return unshipped === null && replied === undefined ? 'settled' : 'ready'
             // Failing checks its lead is told or at are its lead's, not the person's, while they are (ADR-070, DEV-173): not once a
             // conflict round whose merge they fail on handed them back, its lead not told again.
             const withLead = fixing?.withLead === true && round?.state !== 'handed_back'
@@ -2447,6 +2474,8 @@ export class Queries extends Context.Service<
             change: shown,
             earlier: changes.filter((candidate) => candidate !== shown).toReversed(),
             unshipped,
+            ...(held === undefined ? {} : { held }),
+            ...(replied === undefined ? {} : { replied }),
             // Resolving a conflict, or fixing the checks on the merge, is a step of its own while it lasts.
             step:
               task.step ??
@@ -3085,13 +3114,15 @@ export class Queries extends Context.Service<
               const publishes =
                 run.endedAt === null &&
                 parameters !== null &&
-                (run.planId !== null || parameters.publishes === true) &&
+                (run.planId !== null || parameters.publishes === true || parameters.ships !== undefined) &&
                 (parameters.end ??
                   (here ? null : yield* (yield* Changes).endFor(projectId, taskId).pipe(Effect.orElseSucceed(() => null)))) !== null
               // What started a follow-up: the person's message, or what the coordinator passed on, after the round before began.
               const before = runs[index - 1]?.createdAt ?? ''
+              const ships = parameters?.ships !== undefined
+              // A Ship is started by the person's press, not by what they said last.
               const [said] =
-                run.planId === null
+                run.planId === null && !ships
                   ? yield* sql<{ id: string; kind: string; content: string }>`
                       SELECT id, kind, content FROM thread_items
                       WHERE thread_id = ${threadId} AND created_at <= ${run.createdAt} AND created_at > ${before}
@@ -3125,6 +3156,7 @@ export class Queries extends Context.Service<
                 endedAt: run.endedAt,
                 planned: parameters?.steps ?? [],
                 publishes,
+                ...(ships ? { ships: true } : {}),
                 began,
                 changedAt: mine.find((one) => one.cause === 'patch')?.createdAt ?? null,
                 said: said === undefined ? null : saidOf(said),
@@ -3290,6 +3322,8 @@ export class Queries extends Context.Service<
               settledAt: head.settledAt,
               ...links,
               unshipped: card?.unshipped ?? null,
+              ...(card?.held === undefined ? {} : { held: card.held }),
+              ...(card?.replied === undefined ? {} : { replied: card.replied }),
               // As the board reads it: a ready change whose branch holds nothing and whose pull request, if any, closed.
               ...(card?.phase === 'ready' &&
               card.kind === 'change' &&

@@ -286,7 +286,7 @@ describe('a lead’s later description', () => {
     const { working, github } = seeded()
     return Effect.gen(function* () {
       const { lead, leadThread } = yield* withSlug(working)
-      // A later round, as the lead's own session finishes a step after its pull request opened.
+      // A turn after its plan, as the lead's own session gives a summary after its pull request opened: kept, opening nothing.
       const sql = yield* SqlClient.SqlClient
       const [session] = yield* sql<{ id: string }>`
         SELECT id FROM provider_sessions WHERE thread_id = ${leadThread} ORDER BY started_at DESC LIMIT 1`
@@ -295,10 +295,7 @@ describe('a lead’s later description', () => {
         built: 'Retries twice.',
         descriptions: [{ text: 'Retries twice now, and no more.' }],
       })
-      assert.strictEqual(
-        said,
-        'Althar has your summary. Nothing on the branch changed this round, so the task is back where it was. PR #1 has your new description.',
-      )
+      assert.strictEqual(said, 'Althar has your summary. PR #1 has your new description.')
       assert.strictEqual(github.changes[0]?.body, `Retries twice now, and no more.\n\n${CREDIT}`)
     }).pipe(Effect.provide(runtimeWith(github)))
   })

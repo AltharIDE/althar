@@ -1857,6 +1857,8 @@ export const handlers = Api.toLayer(
           commandId,
           api(Effect.flatMap(envelope('task.skip_review', { taskId }, commandId), (said) => runs.skipReview({ envelope: said, taskId }))),
         ),
+      Ship: ({ commandId, taskId }) =>
+        once(commandId, api(Effect.flatMap(envelope('task.ship', { taskId }, commandId), (said) => runs.ship({ envelope: said, taskId })))),
       Merge: ({ commandId, taskId, head, url }) => once(commandId, api(pullRequests.merge(taskId, head, url))),
       ClosePullRequest: ({ commandId, taskId, url, deleteBranch }) =>
         once(commandId, api(Effect.map(pullRequests.close(taskId, url, { deleteBranch }), ({ branch }) => ({ branch })))),

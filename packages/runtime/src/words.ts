@@ -6,7 +6,16 @@ import { Cause, Option } from 'effect'
 
 import { thisDevice } from './device'
 import type { AccountRefused } from './Accounts'
-import type { CantMerge, DocumentRefused, FileRefused, ImageRefused, NoChangeToOpen, ProjectRefused, TaskRefused } from './errors'
+import type {
+  CantMerge,
+  DocumentRefused,
+  FileRefused,
+  ImageRefused,
+  NoChangeToOpen,
+  ProjectRefused,
+  ShipRefused,
+  TaskRefused,
+} from './errors'
 import { NOTE_LENGTH, type NoteRefused, NOTES_KEPT } from './notes'
 import { MESSAGE_IMAGES } from './pictures'
 import { pushDetailOf, secondsOf } from './pushFailure'
@@ -340,6 +349,8 @@ export const words = (
       }
       case 'NoChangeToOpen':
         return (noChangeToOpen[text(error, 'why') as NoChangeToOpen['why']] ?? noChangeToOpen.working)(text(error, 'detail'))
+      case 'ShipRefused':
+        return shipRefused[text(error, 'why') as ShipRefused['why']] ?? shipRefused.working
       case 'LaunchRefused':
       case 'AttachRefused':
       case 'ReviewRefused':
@@ -500,6 +511,13 @@ const noChangeToOpen = {
   conflicts: (files: string) =>
     `It conflicts with the default branch${files === '' ? '' : `, in ${files}`}. Ask the lead to merge the default branch in, then open the pull request again.`,
 } as const satisfies Record<NoChangeToOpen['why'], (detail: string) => string>
+
+/** Why a task can't ship as asked, by reason (a task is a conversation plus parts, "A tweak waits for Ship"). */
+const shipRefused = {
+  held: 'These commits wait for Ship, which runs the review first.',
+  working: 'The task is at work. Ship once it’s done.',
+  nothing: 'Nothing waits to ship.',
+} as const satisfies Record<ShipRefused['why'], string>
 
 /** Why a task can't be abandoned, reopened or renamed, by reason. */
 const taskRefused = {
