@@ -33,6 +33,7 @@ export const statements: ReadonlyArray<string> = [
     base INTEGER CHECK (base IS NULL OR (base >= 1 AND base < number)),
     manifest TEXT NOT NULL CHECK (length(manifest) = 64 AND manifest NOT GLOB '*[^0-9a-f]*'),
     entry TEXT NOT NULL,
+    entry_sha256 TEXT NOT NULL CHECK (length(entry_sha256) = 64 AND entry_sha256 NOT GLOB '*[^0-9a-f]*'),
     kind TEXT NOT NULL CHECK (kind IN ('markdown', 'mermaid', 'svg', 'picture', 'html')),
     title TEXT NOT NULL,
     note TEXT,

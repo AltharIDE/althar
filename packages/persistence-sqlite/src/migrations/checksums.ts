@@ -72,5 +72,5 @@ export const checksums: Readonly<Record<string, string>> = {
   '0066_cleared_view': '5efc4e4410fb19c19521c65ba7db8bd4b514effd9e341e1226fc3d5db09417e1',
   '0067_fast_lane': '40aea3565549b777401c1bd8a8b34d2fc806ecffb6253fea5fa7320469eb5111',
   '0068_reviews_after_merge': 'a57cffdcbf9d31a4263dde84ed6243fd16db5d42c45ac447d0cde27397431f2a',
-  '0069_canvases': 'c68eb00683c6c4aeaedb5fffbe85fe300418d9f54ae828f3488967bab0d0a807',
+  '0069_canvases': '1820f0a0a8808821ab4e44ff799b2c3a76eb4c6d9b14ac47b8a9ec5f0298a568',
 }

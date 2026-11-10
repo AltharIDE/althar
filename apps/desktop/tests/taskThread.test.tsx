@@ -47,6 +47,7 @@ const round = (id: string, text: string, files: ReadonlyArray<HandedFile> = []):
   failed: null,
   handed: NOTHING_HANDED,
   shown: { before: [], after: [] },
+  drawn: [],
   live: false,
   parts: [],
 })

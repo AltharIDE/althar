@@ -1089,6 +1089,11 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
       bytes: 42,
       lines: 3,
     })),
+    listCanvases: vi.fn(async () => []),
+    getCanvas: vi.fn(async () => {
+      throw new Error('No canvas')
+    }),
+    readCanvasText: vi.fn(async () => ({ path: 'README.md', text: '# Canvas', bytes: 8 })),
     getBoard: vi.fn(async () => ({ cursor: 1, tasks: [], calls: [], settledTotal: 0 })),
     getOlderSettled: vi.fn(async () => []),
     getHome: vi.fn(async () => home()),

@@ -45,7 +45,16 @@ import { useThreadHost } from '../../shared/ThreadHost'
 import { type Outgoing, outgoingOf, takesImages, useAttachments } from '../../shared/useAttachments'
 import { PageOpenerProvider, useOpener } from '../browser/opener'
 import { pages } from '../browser/pages'
-import { composerComment, cropsOf, drop, giveBack as giveCommentsBack, takeAll, useComments, withComments } from '../../shared/comments'
+import {
+  composerComment,
+  cropsOf,
+  drop,
+  giveBack as giveCommentsBack,
+  takeAll,
+  useComments,
+  withComments,
+  canvasCommentsOf,
+} from '../../shared/comments'
 import { AutomationInThread } from '../automations/AutomationInThread'
 import { AutomationsView } from '../automations/AutomationsView'
 import { useAutomationActions, useAutomations } from '../automations/useAutomations'
@@ -414,7 +423,13 @@ export function ProjectView({
     const gathered = takeAll(draftOf)
     const pictures = receiver.takes !== false
     const crops = pictures ? cropsOf(gathered) : { sent: [], pictures: [] }
-    const outgoing: Outgoing = { ...own, sent: [...own.sent, ...crops.sent], pictures: [...own.pictures, ...crops.pictures] }
+    const outgoing: Outgoing = {
+      ...own,
+      sent: [...own.sent, ...crops.sent],
+      pictures: [...own.pictures, ...crops.pictures],
+      // Comments on canvases are kept with the message itself, in its command, and nowhere before (ADR-104).
+      canvasComments: canvasCommentsOf(gathered),
+    }
     const words = withComments(body, gathered, own.sent.length, pictures)
     setDraft('')
     images.clear()

@@ -2,6 +2,7 @@ import { useQuery } from '@tanstack/react-query'
 import { type CSSProperties, useEffect, useMemo, useState, type ReactNode } from 'react'
 
 import {
+  type CanvasRef,
   DocPanel,
   type DocRef,
   type FoundCode,
@@ -18,6 +19,7 @@ import { useServices } from '../data/services'
 import type { PageOpener } from '../features/browser/opener'
 import { pages, usePage } from '../features/browser/pages'
 import { PageView } from '../features/browser/PageView'
+import { CanvasHost, type OpenCanvas } from '../features/canvases/CanvasHost'
 import { type BenchWidth, PAGE_BENCH, useBenchWidth } from './code/bench'
 import { type CodeOpen, useCodeHost } from './code/CodeHost'
 
@@ -53,6 +55,10 @@ export interface ThreadHost {
   readonly closeDoc: () => void
   /** The file open beside the thread, if one is. */
   readonly code: CodeOpen | null
+  /** The canvas open beside the thread, if one is (ADR-104). */
+  readonly canvas: OpenCanvas | null
+  /** Opens a canvas beside the thread: at a version, or the latest; following the latest, as one its agent opens. */
+  readonly openCanvas: (canvasId: string, version: number | null, follow: boolean) => void
   /** The workbench's width, as the person drags it. */
   readonly bench: BenchWidth
   /**
@@ -84,6 +90,7 @@ export const useThreadHost = (
   const [pictures, setPictures] = useState<{ readonly set: readonly ImageRef[]; readonly at: number } | null>(null)
   const [doc, setDoc] = useState<DocRef | null>(null)
   const [opened, setOpen] = useState<(CodeOpen & { readonly threadId: string | null }) | null>(null)
+  const [canvas, setCanvas] = useState<(OpenCanvas & { readonly threadId: string | null }) | null>(null)
   const owner = page?.owner ?? null
   const beside = usePage(owner, useServices().host.pages).where === 'beside' && conversation
   // A page opened beside the conversation takes the workbench from a document or a file; one of those opened takes it back.
@@ -91,20 +98,31 @@ export const useThreadHost = (
     if (!beside) return
     setDoc(null)
     setOpen(null)
+    setCanvas(null)
   }, [beside])
   const hidePage = () => {
     if (owner !== null && pages.where(owner) === 'beside') pages.hide(owner)
   }
   const docBench = useBenchWidth()
   const pageBench = useBenchWidth(undefined, PAGE_BENCH)
-  const bench = beside ? pageBench : docBench
   const threadId = code?.threadId ?? null
+  // The canvas open is the thread's: another conversation opens its own.
+  const shownCanvas = canvas !== null && canvas.threadId === threadId ? canvas : null
+  // A canvas is as wide as a page: it is often one.
+  const bench = beside || shownCanvas !== null ? pageBench : docBench
+  const openCanvas = (canvasId: string, version: number | null, follow: boolean) => {
+    setDoc(null)
+    setOpen(null)
+    hidePage()
+    setCanvas({ canvasId, version, follow, threadId })
+  }
   // The file open is the thread's: another thread's names name other files.
   const open = opened !== null && opened.threadId === threadId ? opened : null
   // A file opened from the thread takes the workbench; one opened from what is on it goes on top of it.
   const openCode = (found: FoundCode, from: HTMLElement | null) => {
     const onTop = from?.closest('[data-workbench]') != null
     if (!onTop) setDoc(null)
+    if (!onTop) setCanvas(null)
     hidePage()
     setOpen({ found, from, onTop, threadId })
   }
@@ -126,6 +144,7 @@ export const useThreadHost = (
         ? {
             openDoc: (opened: DocRef) => {
               setOpen(null)
+              setCanvas(null)
               setDoc(opened)
               if (owner !== null && pages.where(owner) === 'beside') pages.hide(owner)
             },
@@ -133,8 +152,19 @@ export const useThreadHost = (
         : {}),
       ...(coded.shell === undefined ? {} : { code: coded.shell }),
       ...(page === null ? {} : { openLink: page.opener.link, ...(page.opener.links === 'beside' ? { linkNote: text.beside } : {}) }),
+      ...(threadId === null
+        ? {}
+        : {
+            openCanvas: (ref: CanvasRef) => {
+              setDoc(null)
+              setOpen(null)
+              if (owner !== null && pages.where(owner) === 'beside') pages.hide(owner)
+              setCanvas({ canvasId: ref.canvasId, version: ref.version, follow: false, threadId })
+            },
+            openedCanvas: shownCanvas?.canvasId ?? null,
+          }),
     }),
-    [documents, coded.shell, page, owner],
+    [documents, coded.shell, page, owner, threadId, shownCanvas?.canvasId],
   )
   const workbench: ThreadHost['workbench'] = (docPanel, over) => {
     // Over something, a sliver of it beside the panel is of no use: the panel takes it all, as wide as it can be.
@@ -145,6 +175,15 @@ export const useThreadHost = (
     const shown =
       beside && page !== null ? (
         <PageView owner={page.owner} kind={page.kind} draft={page.draft} where="beside" onDock={page.onDock} />
+      ) : shownCanvas !== null && threadId !== null ? (
+        <CanvasHost
+          key={shownCanvas.canvasId}
+          threadId={threadId}
+          open={shownCanvas}
+          draft={page?.draft ?? null}
+          onVersion={(version) => setCanvas({ ...shownCanvas, version, follow: false })}
+          onClose={() => setCanvas(null)}
+        />
       ) : null
     if ((docPanel === null || docPanel === undefined || docPanel === false) && file === null && shown === null) return undefined
     return (
@@ -177,6 +216,8 @@ export const useThreadHost = (
     doc,
     closeDoc: () => setDoc(null),
     code: open,
+    canvas: shownCanvas,
+    openCanvas,
     bench,
     workbench,
   }

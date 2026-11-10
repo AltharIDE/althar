@@ -130,6 +130,7 @@ interface VersionRow {
   readonly base: number | null
   readonly manifest: string
   readonly entry: string
+  readonly entrySha256: string
   readonly kind: CanvasKind
   readonly title: string
   readonly note: string | null
@@ -147,6 +148,7 @@ const factsOf = (row: VersionRow): CanvasVersionFacts => ({
   kind: row.kind,
   entry: row.entry,
   manifest: row.manifest,
+  entrySha256: row.entrySha256,
   note: row.note,
   files: row.files,
   bytes: row.bytes,
@@ -174,7 +176,7 @@ export const CANVAS_TOOLS = [
 ] as const
 
 /** Selects a project's canvases with their latest versions. */
-const VERSION_COLUMNS = `v.canvas_id, v.number, v.base, v.manifest, v.entry, v.kind, v.title, v.note, v.files, v.bytes, v.task_id, t.title AS task_title, v.created_at`
+const VERSION_COLUMNS = `v.canvas_id, v.number, v.base, v.manifest, v.entry, v.entry_sha256, v.kind, v.title, v.note, v.files, v.bytes, v.task_id, t.title AS task_title, v.created_at`
 
 export class Canvases extends Context.Service<
   Canvases,
@@ -594,8 +596,8 @@ export class Canvases extends Context.Service<
               }
               if (row === null) return null
               const number = ((yield* latestOf(row.id))?.number ?? 0) + 1
-              yield* sql`INSERT INTO canvas_versions (canvas_id, number, base, manifest, entry, kind, title, note, files, bytes, actor_id, thread_id, task_id, session_id, created_at)
-                  VALUES (${row.id}, ${number}, ${base}, ${putManifest.sha256}, ${entry}, ${kind}, ${title ?? latest?.title ?? row.title}, ${note},
+              yield* sql`INSERT INTO canvas_versions (canvas_id, number, base, manifest, entry, entry_sha256, kind, title, note, files, bytes, actor_id, thread_id, task_id, session_id, created_at)
+                  VALUES (${row.id}, ${number}, ${base}, ${putManifest.sha256}, ${entry}, ${manifest.files.find((file) => file.path === entry)?.sha256 ?? ''}, ${kind}, ${title ?? latest?.title ?? row.title}, ${note},
                     ${read.files.length}, ${read.files.reduce((sum, file) => sum + file.bytes.length, 0)}, ${actorId}, ${access.threadId}, ${access.taskId}, ${access.sessionId}, ${at})`
               const subject = { type: 'canvas_version' as const, id: `${row.id}:${number}`, role: 'file' as const }
               const kept = {

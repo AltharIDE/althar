@@ -102,7 +102,16 @@ import type { TaskModel } from './useTask'
 import { chooseFace, chosenFaces } from './chosenFaces'
 import { PageOpenerProvider, useOpener } from '../browser/opener'
 import { pages } from '../browser/pages'
-import { composerComment, cropsOf, drop, giveBack as giveCommentsBack, takeAll, useComments, withComments } from '../../shared/comments'
+import {
+  composerComment,
+  cropsOf,
+  drop,
+  giveBack as giveCommentsBack,
+  takeAll,
+  useComments,
+  withComments,
+  canvasCommentsOf,
+} from '../../shared/comments'
 import { REQUEST, taskGraphOf } from './graph'
 import { GraphFace } from './GraphFace'
 import { reveal } from './reveal'
@@ -727,7 +736,13 @@ export function TaskView({
     const gathered = takeAll(kept)
     const pictures = receiver.takes !== false
     const crops = pictures ? cropsOf(gathered) : { sent: [], pictures: [] }
-    const outgoing: Outgoing = { ...own, sent: [...own.sent, ...crops.sent], pictures: [...own.pictures, ...crops.pictures] }
+    const outgoing: Outgoing = {
+      ...own,
+      sent: [...own.sent, ...crops.sent],
+      pictures: [...own.pictures, ...crops.pictures],
+      // Comments on canvases are kept with the message itself, in its command, and nowhere before (ADR-104).
+      canvasComments: canvasCommentsOf(gathered),
+    }
     const said = withComments(body, gathered, own.sent.length, pictures)
     const picked = waiting
     void send(said, now, outgoing).then((accepted) => {

@@ -60,6 +60,9 @@ export interface Work {
 /** Pictures the lead showed the person (show_pictures), as one set. */
 export type Shown = Extract<Part, { kind: 'pictures' }>
 
+/** A canvas the lead drew or opened in the round (ADR-104): a line under its work, that opens it. */
+export type Drawn = Extract<Part, { kind: 'canvas' }>
+
 export interface Round {
   readonly kind: 'round'
   readonly id: string
@@ -83,6 +86,8 @@ export interface Round {
   readonly handed: Handed
   /** Pictures it showed the person, in order, where it showed them: before its result, or after it. */
   readonly shown: { readonly before: ReadonlyArray<Shown>; readonly after: ReadonlyArray<Shown> }
+  /** The canvases it drew or opened, in order: open under its work, each a line that opens it. */
+  readonly drawn: ReadonlyArray<Drawn>
   readonly live: boolean
   /** Everything its lead did, in order: what a document it wrote was last changed by is read from them. */
   readonly parts: ReadonlyArray<Part>
@@ -339,6 +344,7 @@ export const roundsOf = (
             failed: null,
             handed: handedBy([], worktree),
             shown: { before: [], after: [] },
+            drawn: [],
             live: false,
             parts: [],
           })
@@ -441,8 +447,10 @@ const roundOf = (open: Gathering, live: boolean, at: ReadonlyMap<string, string>
   const afterReport = new Set(open.steps.slice(open.reportedAfter).map((step) => step.id))
   // Pictures it showed the person stand open in the round, not in its work.
   const pictures = open.steps.flatMap((step) => (step.kind === 'pictures' ? [step] : []))
+  // The canvases it drew stand open too, under its work.
+  const drawn = open.steps.flatMap((step) => (step.kind === 'canvas' ? [step] : []))
   const steps: ReadonlyArray<WorkStep> = open.steps.flatMap((step) =>
-    step === failed || step.kind === 'pictures'
+    step === failed || step.kind === 'pictures' || step.kind === 'canvas'
       ? []
       : step.kind === 'notice'
         ? [{ kind: 'aside' as const, id: step.id, text: step.text }]
@@ -526,6 +534,7 @@ const roundOf = (open: Gathering, live: boolean, at: ReadonlyMap<string, string>
       before: pictures.filter((shown) => result === undefined || open.steps.indexOf(shown) < open.steps.indexOf(result)),
       after: pictures.filter((shown) => result !== undefined && open.steps.indexOf(shown) > open.steps.indexOf(result)),
     },
+    drawn,
     live,
     parts: open.steps.filter((step): step is Part => step.kind !== 'aside' && step !== failed),
   }

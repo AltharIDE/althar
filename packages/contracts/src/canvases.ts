@@ -212,6 +212,8 @@ export const CanvasVersionFacts = Schema.Struct({
   entry: Schema.String,
   /** Its manifest's digest: what the main process serves its files from. */
   manifest: Schema.String,
+  /** Its entry's digest in the artifact store: what the window draws a picture from. */
+  entrySha256: Schema.String,
   note: Schema.NullOr(Schema.String),
   files: Schema.Number,
   bytes: Schema.Number,

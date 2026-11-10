@@ -6,6 +6,7 @@ import {
   Arrived,
   CodeBlock,
   FailedLogs,
+  CanvasLine,
   Gallery,
   glyphOf,
   Issue,
@@ -187,6 +188,24 @@ function SetupView({ setup }: { setup: SetupContent }) {
  * under its work (ADR-097): what acted on the world stands out of what only
  * read, which stays folded in the work.
  */
+/** A canvas an agent drew or opened (ADR-104): its line, which opens it beside the conversation. */
+export function CanvasOf({ part }: { part: Extract<Part, { kind: 'canvas' }> }) {
+  const { canvas } = part
+  return (
+    <CanvasLine
+      data-item={part.id}
+      canvas={{ canvasId: canvas.canvasId, name: canvas.name, title: canvas.title, kind: canvas.canvasKind, version: canvas.version }}
+      action={canvas.action}
+      note={canvas.note}
+    />
+  )
+}
+
+/** The canvases a round drew or opened, each its line, in order. */
+export function CanvasLines({ drawn }: { drawn: ReadonlyArray<Extract<Part, { kind: 'canvas' }>> }) {
+  return drawn.map((part) => <CanvasOf key={part.id} part={part} />)
+}
+
 export function McpActs({ parts }: { parts: ReadonlyArray<Part> }) {
   const acts = parts.flatMap((part) =>
     part.kind === 'tool' && part.mcp?.acts === true && part.state === ToolState.Done ? [{ id: part.id, mcp: part.mcp }] : [],
@@ -309,6 +328,8 @@ export function PartView({ part, threadId }: { part: Part; threadId: string }) {
       )
     case 'pictures':
       return <Gallery shots={shotsOf(part.id, part.pictures)} />
+    case 'canvas':
+      return <CanvasOf part={part} />
   }
 }
 
