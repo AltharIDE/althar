@@ -73,6 +73,8 @@ export interface CanvasPanelComment {
   /** Where it points, in words: “Whole canvas”, the words it is on. */
   readonly place: string
   readonly answered: boolean
+  /** What the agent that answered it said, where it said something. */
+  readonly answer?: string | null
 }
 
 export interface CanvasPanelProps {
@@ -92,8 +94,11 @@ export interface CanvasPanelProps {
    * Null where the one shown follows the latest, or is it.
    */
   newer?: number | null
-  /** Writes a comment on the version shown: on the words selected in it, where the host says so, else on the whole canvas. */
-  onComment?: (body: string) => void
+  /**
+   * Writes a comment on the version shown: on the words selected in it as Comment was pressed (`on`), else on the whole
+   * canvas. The words are kept as it opens, so typing the comment, which moves the selection, doesn't change what it is on.
+   */
+  onComment?: (body: string, on: string | null) => void
   /** The words selected in the canvas, which a comment would be on; null for none. */
   selected?: string | null
   /** Comments already sent on the canvas, any version. */
@@ -133,6 +138,8 @@ export function CanvasPanel({
 }: CanvasPanelProps) {
   const t = { ...canvasPanelText, ...text }
   const [writing, setWriting] = useState(false)
+  // What the comment is on, as Comment was pressed.
+  const [aimed, setAimed] = useState<string | null>(null)
   const older = version > 1
   const later = version < latest
   return (
@@ -163,7 +170,14 @@ export function CanvasPanel({
           )}
           {onReload !== undefined && <IconButton icon="reload" label={t.reload} size="small" onClick={onReload} />}
           {onComment !== undefined && (
-            <ActionButton icon="comment" aria-pressed={writing} onClick={() => setWriting((was) => !was)}>
+            <ActionButton
+              icon="comment"
+              aria-pressed={writing}
+              onClick={() => {
+                setAimed(selected)
+                setWriting((was) => !was)
+              }}
+            >
               {t.comment}
             </ActionButton>
           )}
@@ -204,9 +218,9 @@ export function CanvasPanel({
           {writing && onComment !== undefined && (
             <NoteForm
               className={s.write}
-              text={{ placeholder: selected === null ? t.commentOn(version) : t.commentOnWords(selected), submit: t.add }}
+              text={{ placeholder: aimed === null ? t.commentOn(version) : t.commentOnWords(aimed), submit: t.add }}
               onSubmit={(body) => {
-                onComment(body)
+                onComment(body, aimed)
                 setWriting(false)
               }}
               onCancel={() => setWriting(false)}
@@ -221,6 +235,9 @@ export function CanvasPanel({
                     {comment.place} · {t.onVersion(comment.version)}
                     {comment.answered ? ` · ${t.answered}` : ''}
                   </span>
+                  {comment.answered && comment.answer !== undefined && comment.answer !== null && comment.answer !== '' && (
+                    <span className={s.answer}>{comment.answer}</span>
+                  )}
                 </li>
               ))}
             </ol>

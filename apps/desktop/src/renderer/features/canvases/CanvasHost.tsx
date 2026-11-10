@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query'
-import { useCallback, useEffect, useLayoutEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 
 import type { CanvasAnchor, CanvasDetail, CanvasVersionFacts } from '@althar/contracts'
 import { CanvasPagePlace, CanvasPanel, type CanvasPanelComment, CanvasPicture, Markdown } from '@althar/ui'
@@ -59,6 +59,7 @@ export const commentsShown = (detail: CanvasDetail): ReadonlyArray<CanvasPanelCo
       body: comment.body,
       place: canvasPlace(comment.anchor),
       answered: comment.resolved !== null,
+      answer: comment.resolved?.note ?? null,
     }))
     .toSorted((a, b) => Number(a.answered) - Number(b.answered))
 
@@ -136,12 +137,17 @@ export function CanvasHost({ threadId, open, draft, onVersion, onClose }: Canvas
 
   const summary = detail.data?.summary
   const comments = useMemo(() => (detail.data === undefined ? [] : commentsShown(detail.data)), [detail.data])
+  // The last words selected, with the heading they are under: what a comment pressed on them is on.
+  const lastPassage = useRef<{ readonly text: string; readonly heading: string | null } | null>(null)
+  useEffect(() => {
+    if (passage !== null) lastPassage.current = passage
+  }, [passage])
   const comment =
     draft === null || summary === undefined || version === null
       ? undefined
-      : (note: string) => {
-          const anchor: CanvasAnchor =
-            selected === null ? { kind: 'whole' } : { kind: 'passage', text: selected.text, heading: selected.heading }
+      : (note: string, on: string | null) => {
+          const heading = on !== null && lastPassage.current?.text === on ? lastPassage.current.heading : null
+          const anchor: CanvasAnchor = on === null ? { kind: 'whole' } : { kind: 'passage', text: on, heading }
           gather(draft, {
             id: `canvas-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
             note,

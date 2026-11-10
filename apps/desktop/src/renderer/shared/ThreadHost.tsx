@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query'
-import { type CSSProperties, useEffect, useMemo, useState, type ReactNode } from 'react'
+import { type CSSProperties, useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
 
 import {
   type CanvasRef,
@@ -110,12 +110,15 @@ export const useThreadHost = (
   const shownCanvas = canvas !== null && canvas.threadId === threadId ? canvas : null
   // A canvas is as wide as a page: it is often one.
   const bench = beside || shownCanvas !== null ? pageBench : docBench
-  const openCanvas = (canvasId: string, version: number | null, follow: boolean) => {
-    setDoc(null)
-    setOpen(null)
-    hidePage()
-    setCanvas({ canvasId, version, follow, threadId })
-  }
+  const openCanvas = useCallback(
+    (canvasId: string, version: number | null, follow: boolean) => {
+      setDoc(null)
+      setOpen(null)
+      if (owner !== null && pages.where(owner) === 'beside') pages.hide(owner)
+      setCanvas({ canvasId, version, follow, threadId })
+    },
+    [owner, threadId],
+  )
   // The file open is the thread's: another thread's names name other files.
   const open = opened !== null && opened.threadId === threadId ? opened : null
   // A file opened from the thread takes the workbench; one opened from what is on it goes on top of it.

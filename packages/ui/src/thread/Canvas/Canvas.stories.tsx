@@ -139,7 +139,14 @@ export const Commenting: Story = {
   args: {
     selected: 'B, split',
     comments: [
-      { id: 'c1', version: 2, body: 'The providers should stay visible, not folded.', place: 'Whole canvas', answered: true },
+      {
+        id: 'c1',
+        version: 2,
+        body: 'The providers should stay visible, not folded.',
+        place: 'Whole canvas',
+        answered: true,
+        answer: 'Unfolded in v3.',
+      },
       { id: 'c2', version: 3, body: 'C feels slow for people who know their email.', place: '“C, guided”', answered: false },
     ],
     children: <Markdown source={plan} size="panel" />,
@@ -151,7 +158,7 @@ export const Commenting: Story = {
     const field = c.getByPlaceholderText('Comment on “B, split”')
     await userEvent.type(field, 'Try the picture on the left')
     await userEvent.click(c.getByRole('button', { name: 'Add to message' }))
-    await expect(args.onComment).toHaveBeenCalledWith('Try the picture on the left')
+    await expect(args.onComment).toHaveBeenCalledWith('Try the picture on the left', 'B, split')
   },
 }
 

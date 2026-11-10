@@ -45,6 +45,8 @@ import { useThreadHost } from '../../shared/ThreadHost'
 import { type Outgoing, outgoingOf, takesImages, useAttachments } from '../../shared/useAttachments'
 import { PageOpenerProvider, useOpener } from '../browser/opener'
 import { pages } from '../browser/pages'
+import { useCanvasArrivals } from '../canvases/arrivals'
+import { CanvasesView } from '../canvases/CanvasesView'
 import {
   composerComment,
   cropsOf,
@@ -325,6 +327,8 @@ export function ProjectView({
           },
         },
   )
+  // A canvas the coordinator publishes or opens beside its conversation opens on the workbench as it arrives (ADR-104).
+  useCanvasArrivals(model.coordinator?.items, shown.openCanvas)
   const coordinatorThread = model.coordinator?.threadId ?? null
   const voice = useDictation(draftOf, {
     projectId: about,
@@ -675,6 +679,8 @@ export function ProjectView({
             onOpen={setAutomation}
             onTask={onTask}
           />
+        ) : room === Room.Canvases ? (
+          <CanvasesView projectId={projectId} threadId={coordinator?.threadId ?? null} draft={draftOf} />
         ) : room === Room.Settings ? (
           <div className={s.settings}>
             <ProjectSettingsPage

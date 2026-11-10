@@ -1,0 +1,50 @@
+/* A project's Canvases view: one column down the middle of the project's ground, its canvases as cards; one opened, it takes the view. */
+
+.view {
+  container-type: inline-size;
+  height: 100%;
+  overflow: auto;
+}
+
+.column {
+  max-width: 880px;
+  margin: 0 auto;
+  padding: 36px 40px 96px;
+}
+
+.head {
+  margin-bottom: 24px;
+}
+
+.title {
+  margin: 0;
+  font-size: 22px;
+  font-weight: 600;
+  line-height: 1.2;
+  letter-spacing: -0.02em;
+  color: var(--t-1);
+}
+
+.line {
+  margin: 6px 0 0 2px;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--t-2);
+}
+
+.error {
+  margin: 0 0 20px 2px;
+  font-size: 12.5px;
+  color: var(--danger);
+}
+
+/* one canvas open: the panel in the view's place, as wide as the view, its Close back to the list */
+.open {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+.open > * {
+  flex: 1;
+  min-height: 0;
+}

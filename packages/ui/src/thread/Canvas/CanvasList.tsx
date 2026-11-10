@@ -71,20 +71,20 @@ export function CanvasList({ canvases, onOpen, opened = null, text, className, .
         {canvases.map((canvas) => (
           <li key={canvas.id} className={s.card}>
             <button type="button" className={s.cardButton} aria-pressed={opened === canvas.id} onClick={() => onOpen(canvas)}>
-              <span className={s.cardFace} aria-hidden="true">
-                <Icon name="canvas" size={22} />
-              </span>
-              <span className={s.cardMain}>
+              <span className={s.cardHead}>
+                <span className={s.lineTile} aria-hidden="true">
+                  <Icon name="canvas" size={14} />
+                </span>
                 <span className={s.cardTitle}>{canvas.title}</span>
-                <span className={s.cardName}>
-                  {canvas.name} · {t.version(canvas.version)}
+              </span>
+              <span className={s.cardName}>
+                {canvas.name} · {t.version(canvas.version)}
+              </span>
+              <span className={s.cardFacts}>
+                <span>
+                  {t.kinds[canvas.kind]} · {canvas.by}
                 </span>
-                <span className={s.cardFacts}>
-                  <span>
-                    {t.kinds[canvas.kind]} · {canvas.by}
-                  </span>
-                  {canvas.openComments > 0 && <span className={cx(s.cardOpen)}>{t.open(canvas.openComments)}</span>}
-                </span>
+                {canvas.openComments > 0 && <span className={cx(s.cardOpen)}>{t.open(canvas.openComments)}</span>}
               </span>
             </button>
           </li>

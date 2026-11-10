@@ -102,6 +102,7 @@ import type { TaskModel } from './useTask'
 import { chooseFace, chosenFaces } from './chosenFaces'
 import { PageOpenerProvider, useOpener } from '../browser/opener'
 import { pages } from '../browser/pages'
+import { useCanvasArrivals } from '../canvases/arrivals'
 import {
   composerComment,
   cropsOf,
@@ -482,6 +483,8 @@ export function TaskView({
         },
     conversation,
   )
+  // A canvas its lead publishes or opens beside the conversation opens on the workbench as it arrives (ADR-104).
+  useCanvasArrivals(model.snapshot?.items, host.openCanvas)
   // Report this, on a stuck step: Report a problem, with this task (DEV-61).
   const { reportProblem } = useServices().host
   const files = model.snapshot?.task.files ?? []
