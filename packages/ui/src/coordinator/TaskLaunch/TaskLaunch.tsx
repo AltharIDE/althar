@@ -56,6 +56,8 @@ export interface LaunchPick {
 
 export interface TaskLaunchText {
   task: (task: string) => string
+  /** The list of presets the kicker's first word opens, to start from another. */
+  presets: string
   from: string
   owner: (stepIndex: number, step: LaunchStep, k: number) => string
   skipped: string
@@ -96,6 +98,7 @@ export interface TaskLaunchText {
 
 export const taskLaunchText: TaskLaunchText = {
   task: (task) => `Task ${task}`,
+  presets: 'Start from',
   from: 'from',
   owner: (i, step, k) => {
     if (i === 0) return 'Lead for this task'
@@ -155,6 +158,10 @@ export interface TaskLaunchProps {
   task: string
   /** The preset its parts are (a task is a conversation plus parts), the kicker's first word: Change, Chat. */
   preset?: string
+  /** The presets it can start from instead, each with what it holds: a press on the kicker's first word lists them. */
+  presets?: readonly { name: string; about: string }[]
+  /** Picks another preset: its parts become the plan's. */
+  onPresetChange?: (name: string) => void
   title: string
   from?: IssueRefProps
   steps?: readonly LaunchStep[]
@@ -221,6 +228,8 @@ export interface TaskLaunchProps {
 export function TaskLaunch({
   task,
   preset,
+  presets,
+  onPresetChange,
   title,
   from,
   steps: stepsProp,
@@ -325,7 +334,32 @@ export function TaskLaunch({
     <div className={cx(s.launch, held && s.held)} ref={ref} data-rhythm={Rhythm.Card}>
       <div className={s.head}>
         <span className={s.kicker}>
-          {preset !== undefined && `${preset} · `}
+          {preset !== undefined &&
+            (presets === undefined || presets.length < 2 || onPresetChange === undefined ? (
+              `${preset} · `
+            ) : (
+              <>
+                <Menu
+                  label={t.presets}
+                  width={320}
+                  trigger={
+                    <button type="button" className={s.preset}>
+                      {preset}
+                      <Icon name="chevronD" size={9} />
+                    </button>
+                  }
+                >
+                  <MenuRadioGroup label={t.presets} value={preset} onChange={onPresetChange}>
+                    {presets.map((one) => (
+                      <MenuRadioItem key={one.name} value={one.name} description={one.about}>
+                        {one.name}
+                      </MenuRadioItem>
+                    ))}
+                  </MenuRadioGroup>
+                </Menu>
+                {' · '}
+              </>
+            ))}
           {t.task(task)}
           {from && (
             <>

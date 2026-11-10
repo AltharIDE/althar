@@ -90,6 +90,27 @@ export const AboutToStart: Story = { render: () => <Launch /> }
 /** Its kicker names the preset its parts are first (a task is a conversation plus parts), in the kicker's own type. */
 export const NamesItsPreset: Story = { render: () => <Launch preset="Change" /> }
 
+const PRESETS = [
+  { name: 'Chat', about: 'a copy, no review, ends here, the coordinator picks its lead' },
+  { name: 'Change', about: 'a worktree, reviewed before it ships, a draft pull request, the coordinator picks its lead' },
+  { name: 'Small change', about: 'a worktree, reviewed after it merges, a pull request ready for review, the coordinator picks its lead' },
+  { name: 'Prototype', about: 'a worktree, reviewed after it merges, ends here, led by claude-opus-5-5' },
+]
+
+/** A press on the preset lists the others, each with what it holds: picking one changes the plan's parts to match. */
+export const PicksAnotherPreset: Story = {
+  render: function Render() {
+    const [preset, setPreset] = useState('Change')
+    return <Launch preset={preset} presets={PRESETS} onPresetChange={setPreset} />
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await userEvent.click(canvas.getByRole('button', { name: 'Change' }))
+    const body = within(canvasElement.ownerDocument.body)
+    await expect(await body.findByRole('menuitemradio', { name: /Prototype/ })).toBeVisible()
+  },
+}
+
 /** A review proposed with two agents can go down to one: the second's picker has Remove from this step. */
 export const OneReviewerInsteadOfTwo: Story = {
   render: () => <Launch />,

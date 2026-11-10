@@ -117,7 +117,7 @@ import { IssueDrafts } from './IssueDrafts'
 import { postTeamReviews, Reviews, runOutside, setPostTeamReviews, setRunOutside } from './Reviews'
 import { shelve } from './scratch'
 import { Helpers } from './Helpers'
-import { describe as describePreset, partsOfTask, presetsIn, removePreset, savePreset } from './presets'
+import { describe as describePreset, editPreset, partsOfTask, presetsIn, removePreset, savePreset } from './presets'
 import { FastLane } from './fastLane'
 import { MergeReviews } from './MergeReviews'
 import { Plans } from './Plans'
@@ -1445,6 +1445,7 @@ export const handlers = Api.toLayer(
       HoldPlan: ({ commandId, planId }) => once(commandId, api(plans.hold(planId, instance.personId))),
       ChangePlan: ({ commandId, planId, steps, end, worksIn, toward }) =>
         once(commandId, api(plans.change(planId, steps, instance.personId, end, worksIn, toward))),
+      ApplyPreset: ({ commandId, planId, preset }) => once(commandId, api(plans.applyPreset(planId, preset, instance.personId))),
       ChangeTeam: ({ commandId, taskId, steps }) =>
         once(
           commandId,
@@ -1571,8 +1572,31 @@ export const handlers = Api.toLayer(
         ),
       ListPresets: ({ projectId }) =>
         api(
-          Effect.map(presetsIn(projectId ?? null), (all) => all.map((one) => ({ ...one, about: describePreset(one.parts) }))).pipe(
-            Effect.provideService(SqlClient.SqlClient, sql),
+          Effect.gen(function* () {
+            const all = yield* presetsIn(projectId ?? null)
+            // The projects they're kept to, or can be, by name, for Settings to say.
+            const named = new Map(
+              (yield* sql<{ id: string; name: string }>`SELECT id, name FROM projects`).map((one) => [one.id, one.name] as const),
+            )
+            return all.map(({ fromProjectId, ...one }) => {
+              const keptTo = one.projectId === null ? undefined : named.get(one.projectId)
+              const from = fromProjectId == null ? undefined : named.get(fromProjectId)
+              return {
+                ...one,
+                about: describePreset(one.parts),
+                ...(keptTo === undefined ? {} : { keptTo }),
+                ...(from === undefined ? {} : { from }),
+              }
+            })
+          }).pipe(Effect.provideService(SqlClient.SqlClient, sql)),
+        ),
+      EditPreset: ({ commandId, id, name, parts, projectOnly }) =>
+        once(
+          commandId,
+          api(
+            editPreset({ id, name, parts, ...(projectOnly === undefined ? {} : { projectOnly }) }).pipe(
+              Effect.provideService(SqlClient.SqlClient, sql),
+            ),
           ),
         ),
       SavePreset: ({ commandId, name, taskId, parts, projectOnly }) =>

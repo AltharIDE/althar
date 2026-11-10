@@ -6,6 +6,7 @@ import { SqlClient } from 'effect/sql'
 import { Connections } from '../src/Connections'
 import { Coordinator } from '../src/Coordinator'
 import { Instance } from '../src/Instance'
+import { Plans } from '../src/Plans'
 import { partsOfTask, presetsIn, savePreset } from '../src/presets'
 import { Projects } from '../src/Projects'
 import { Queries } from '../src/Queries'
@@ -137,6 +138,66 @@ describe('presets', () => {
         (found) => found.length === 1,
       )
       assert.strictEqual(String(offers[0]?.content.title), 'You set up these parts twice. Keep them as a preset?')
+    }).pipe(Effect.provide(runtimeWith(github)))
+  })
+
+  it.live('are what the coordinator plans from, and picking another on the plan card changes its parts to match', () => {
+    const { working, bare } = hosted()
+    const github = makeFakeService({ pushUrl: () => bare })
+    github.addRepository(['meridian', 'api'])
+    return Effect.gen(function* () {
+      const { projectId, coordinator } = yield* opened(working)
+      const sql = yield* SqlClient.SqlClient
+      // The coordinator lists them, and plans from the one that fits.
+      assert.include(yield* callTool(coordinator, 'list_presets', {}), '- Small change: a worktree, reviewed after it merges')
+      yield* callTool(coordinator, 'draft_task', { title: 'Fix a typo' })
+      const said = yield* callTool(coordinator, 'propose_plan', {
+        task: 'fix-a-typo',
+        lead: { agent: 'codex', model: 'large' },
+        review: { agent: 'claude-code' },
+        preset: 'Small change',
+      })
+      assert.include(said, 'As Small change.')
+      const plan = () =>
+        Effect.map(
+          sql<{
+            id: string
+            taskId: string
+            parameters: string
+          }>`SELECT id, task_id, parameters FROM task_plans ORDER BY rowid DESC LIMIT 1`,
+          ([row]) => ({ id: row?.id ?? '', taskId: row?.taskId ?? '', parameters: JSON.parse(row?.parameters ?? '{}') }),
+        )
+      const first = yield* plan()
+      yield* (yield* Plans).hold(first.id, (yield* Instance).personId)
+      assert.deepInclude(first.parameters, { end: 'ready', reviewAfterMerge: true })
+      assert.deepStrictEqual(
+        first.parameters.steps.map((step: { key: string; skipped: boolean }) => [step.key, step.skipped]),
+        [
+          ['implement', false],
+          ['review', true],
+        ],
+      )
+      const [card] = yield* until(cards(projectId), (all) => all[0]?.plan?.preset === 'Small change')
+      assert.strictEqual(card?.plan?.preset, 'Small change')
+
+      // Prototype, picked on its card: its lead, ending and brief.
+      const instance = yield* Instance
+      assert.strictEqual(yield* (yield* Plans).applyPreset(first.id, 'Prototype', instance.personId), 'Prototype')
+      const now = yield* plan()
+      assert.deepInclude(now.parameters.steps[0], { agentId: 'claude-code', model: 'claude-opus-5-5' })
+      assert.strictEqual(now.parameters.end, 'none')
+      const [task] = yield* sql<{ description: string }>`SELECT description FROM tasks WHERE id = ${now.taskId}`
+      assert.include(task?.description, 'A prototype: show the idea working, quickly.')
+      yield* until(cards(projectId), (all) => all[0]?.plan?.preset === 'Prototype')
+      // Chat: a copy on Scratch, nothing checked.
+      yield* (yield* Plans).applyPreset(first.id, 'Chat', instance.personId)
+      const chat = yield* plan()
+      assert.deepInclude(chat.parameters, { here: true, end: 'none' })
+      const [shelved] = yield* sql<{ shelf: string | null }>`SELECT shelf FROM tasks WHERE id = ${now.taskId}`
+      assert.strictEqual(shelved?.shelf, 'scratch')
+      // A plan of work never becomes a review.
+      const refused = yield* Effect.flip((yield* Plans).applyPreset(first.id, 'Review a PR', instance.personId))
+      assert.include(String((refused as { message?: string }).message), 'Review a PR starts from a pull request')
     }).pipe(Effect.provide(runtimeWith(github)))
   })
 })

@@ -371,6 +371,12 @@ export function ProjectView({
     (suggested?.available === true ? { agentId: suggested.agentId, model: suggested.model, effort: suggested.effort } : null) ??
     (first === undefined ? null : { agentId: first.id, model: null, effort: null })
   const name = model.project?.name ?? coordinator?.project.name ?? text.project
+  // The presets a plan can start from, this project's own with them: what the plan card's kicker lists.
+  const { client } = useServices()
+  const presets = useQuery({
+    queryKey: ['presets', about ?? null],
+    queryFn: () => client.listPresets(about ?? undefined),
+  }).data
 
   const actions: CardActions = {
     project: name,
@@ -386,6 +392,12 @@ export function ProjectView({
     onStopBackground: (threadId, id) => void model.stopBackground(threadId, id),
     // Every waiting card has the same holders, so only the newest says them.
     holdersOn: newestWaiting(coordinator?.items ?? []),
+    ...(presets === undefined
+      ? {}
+      : {
+          presets: presets.map((one) => ({ name: one.name, about: one.about, reviews: one.parts.reviews === true })),
+          onPreset: (planId: string, preset: string) => void model.applyPreset(planId, preset),
+        }),
   }
   const draftActions: DraftActions = {
     onFile: (draftId) => void model.fileIssueDraft(draftId),

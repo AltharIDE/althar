@@ -156,6 +156,10 @@ export const Preset = Schema.Struct({
   projectId: Schema.NullOr(Schema.String),
   /** What it holds, in words. */
   about: Schema.String,
+  /** The project it is kept to, by name; absent for every project. */
+  keptTo: Schema.optional(Schema.String),
+  /** The project of the task it was saved from, by name: the one it can be kept to. Absent for one it can't. */
+  from: Schema.optional(Schema.String),
 })
 export type Preset = typeof Preset.Type
 
@@ -4631,6 +4635,17 @@ export const Api = RpcGroup.make(
   ),
   /** Removes one of the person's presets; a built-in one stays. */
   command('RemovePreset', { id: Schema.String }, Schema.Void),
+  /** Edits one of the person's presets, from Settings: its name, its parts, and whether it is kept to its task's project. */
+  command(
+    'EditPreset',
+    { id: Schema.String, name: Schema.String, parts: PresetParts, projectOnly: Schema.optional(Schema.Boolean) },
+    Schema.Void,
+  ),
+  /**
+   * Picks another preset for a plan before it starts (a task is a conversation plus parts, "How a task starts"), by its id or
+   * name: the plan's parts change to match. The preset's name.
+   */
+  command('ApplyPreset', { planId: Schema.String, preset: Schema.String }, Schema.String),
   /**
    * "Run it" on the pull request a review task reviews, as the person said (a task is a conversation plus parts): the team's
    * code is trusted fully; an outside author's runs as `how` says, else as their setting answers, else they are asked

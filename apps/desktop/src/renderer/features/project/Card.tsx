@@ -73,6 +73,10 @@ export interface CardActions {
   readonly onStopBackground: (threadId: string, id: string) => void
   /** The one waiting task that shows who holds the places, the newest: the others only wait. */
   readonly holdersOn?: string | null
+  /** The presets a plan can start from instead, each with what it holds; a review's only with the others that review. */
+  readonly presets?: ReadonlyArray<{ readonly name: string; readonly about: string; readonly reviews: boolean }>
+  /** Picks another preset for a plan: its parts change to match. */
+  readonly onPreset?: (planId: string, preset: string) => void
 }
 
 type Plan = NonNullable<TaskCardContent['plan']>
@@ -153,6 +157,13 @@ function PlanCard({
     <TaskLaunch
       task={card.slug}
       {...(plan.preset === undefined ? {} : { preset: plan.preset })}
+      // A press on the preset lists the others it can start from: a review only reviews, and work never becomes one.
+      {...(actions.presets === undefined || actions.onPreset === undefined
+        ? {}
+        : {
+            presets: actions.presets.filter((one) => one.reviews === (card.reviewing != null)),
+            onPresetChange: (name: string) => actions.onPreset?.(plan.id, name),
+          })}
       title={card.title}
       {...(from === undefined ? {} : { from })}
       project={actions.project}

@@ -2,7 +2,7 @@ import { Ids, newId, type ActorId, type ProjectId } from '@althar/domain'
 import { Effect, Schema } from 'effect'
 import { SqlClient } from 'effect/sql'
 
-import { NotFound } from './errors'
+import { ChangeRefused, NotFound } from './errors'
 import { fact, timestamp } from './records'
 import { addItem } from './threads'
 
@@ -41,6 +41,8 @@ export interface Preset {
   readonly builtin: boolean
   /** The project it is kept to; null for every project. */
   readonly projectId: string | null
+  /** The project of the task it was saved from, where it was: the one it can be kept to. */
+  readonly fromProjectId?: string | null
 }
 
 /** The presets Althar has built in. */
@@ -92,18 +94,61 @@ export const BUILT_IN: ReadonlyArray<Preset> = [
 
 const decodeParts = Schema.decodeUnknownOption(Schema.fromJsonString(PresetParts))
 
-/** The presets the person has in a project: the built-in ones, then their own, those kept to the project included. */
+/**
+ * The presets the person has in a project: the built-in ones, then their own, those kept to the project included. With no
+ * project, as Settings lists them, every one of theirs, wherever it is kept.
+ */
 export const presetsIn = (projectId: string | null) =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient
-    const rows = yield* sql<{ id: string; name: string; parts: string; projectId: string | null }>`
-      SELECT id, name, parts, project_id FROM presets
-      WHERE builtin = 0 AND (project_id IS NULL OR project_id = ${projectId ?? ''}) ORDER BY created_at, rowid`
+    const rows = yield* sql<{ id: string; name: string; parts: string; projectId: string | null; fromProjectId: string | null }>`
+      SELECT p.id, p.name, p.parts, p.project_id, (SELECT k.project_id FROM tasks k WHERE k.id = p.from_task_id) AS from_project_id
+      FROM presets p
+      WHERE p.builtin = 0 AND (${projectId === null ? 1 : 0} = 1 OR p.project_id IS NULL OR p.project_id = ${projectId ?? ''})
+      ORDER BY p.created_at, p.rowid`
     const own = rows.flatMap((row): ReadonlyArray<Preset> => {
       const parts = decodeParts(row.parts)
-      return parts._tag === 'Some' ? [{ id: row.id, name: row.name, parts: parts.value, builtin: false, projectId: row.projectId }] : []
+      return parts._tag === 'Some'
+        ? [
+            {
+              id: row.id,
+              name: row.name,
+              parts: parts.value,
+              builtin: false,
+              projectId: row.projectId,
+              fromProjectId: row.fromProjectId ?? row.projectId,
+            },
+          ]
+        : []
     })
     return [...BUILT_IN, ...own]
+  })
+
+/**
+ * Edits one of the person's presets, as Settings does: its name, its parts, and whether it is kept to the project of the
+ * task it was saved from. A built-in one stays as it is; a name another of theirs in the same place has is refused.
+ */
+export const editPreset = (input: {
+  readonly id: string
+  readonly name: string
+  readonly parts: PresetParts
+  readonly projectOnly?: boolean | undefined
+}) =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient
+    const [row] = yield* sql<{ projectId: string | null; fromProjectId: string | null }>`
+      SELECT p.project_id, (SELECT k.project_id FROM tasks k WHERE k.id = p.from_task_id) AS from_project_id
+      FROM presets p WHERE p.id = ${input.id} AND p.builtin = 0`
+    if (row === undefined) return yield* new NotFound({ kind: 'preset', id: input.id })
+    const name = input.name.trim().slice(0, 40)
+    const projectId = input.projectOnly === undefined ? row.projectId : input.projectOnly ? (row.projectId ?? row.fromProjectId) : null
+    const [taken] = yield* sql<{ id: string }>`
+      SELECT id FROM presets WHERE id <> ${input.id} AND coalesce(project_id, '') = ${projectId ?? ''} AND lower(name) = lower(${name})`
+    if (taken !== undefined) return yield* new ChangeRefused({ message: `Another preset is called ${name}.` })
+    yield* sql`
+      UPDATE presets SET name = ${name === '' ? 'Preset' : name}, parts = ${JSON.stringify(input.parts)}, project_id = ${projectId},
+        updated_at = ${yield* timestamp}
+      WHERE id = ${input.id}`
   })
 
 /** The parts of a plan, as a preset holds them. */
@@ -265,3 +310,59 @@ export const describe = (parts: PresetParts) =>
     parts.end === 'none' ? 'ends here' : parts.end === 'ready' ? 'a pull request ready for review' : 'a draft pull request',
     parts.lead === null ? 'the coordinator picks its lead' : `led by ${parts.lead.split('/').at(-1) ?? parts.lead}`,
   ].join(', ')
+
+/** A plan's parameters, as a preset rewrites them: its steps, how it ends, where it works, and how it's checked. */
+export interface PresetPlan {
+  readonly steps: ReadonlyArray<{
+    readonly key: 'implement' | 'review'
+    readonly agentId: string
+    readonly model: string | null
+    readonly effort?: string | null | undefined
+    readonly skipped: boolean
+  }>
+  readonly end?: 'draft' | 'ready' | 'none' | null | undefined
+  readonly here?: boolean | undefined
+  readonly reads?: boolean | undefined
+  readonly reviewAfterMerge?: boolean | undefined
+  readonly worksIn?: 'worktree' | 'checkout' | undefined
+}
+
+/** A preset's `agent/model` as a step names its agent and model: `default`, the agent's own. */
+const pickOf = (named: string) => {
+  const at = named.indexOf('/')
+  const agentId = at < 0 ? named : named.slice(0, at)
+  const model = at < 0 ? null : named.slice(at + 1)
+  return { agentId, model: model === null || model === '' || model === 'default' ? null : model }
+}
+
+/**
+ * A plan with a preset's parts (a task is a conversation plus parts, "How a task starts": picking another preset on the
+ * plan card changes the plan's parts to match): its lead and reviewer where the preset names them, its review kept, run
+ * after the merge or skipped as Checked by says, its ending, and where it works, a copy being a quick task's place. A
+ * review step it needs and lacks reads with the lead's agent.
+ */
+export const planFromPreset = <P extends PresetPlan>(before: P, parts: PresetParts): P => {
+  const lead = before.steps.find((step) => step.key === 'implement')
+  const review = before.steps.find((step) => step.key === 'review')
+  const implement = lead === undefined ? undefined : { ...lead, ...(parts.lead === null ? {} : pickOf(parts.lead)), skipped: false }
+  const reviewing =
+    parts.checked === 'none'
+      ? review === undefined
+        ? undefined
+        : { ...review, skipped: true }
+      : {
+          ...(review ?? implement ?? { agentId: 'claude-code', model: null }),
+          key: 'review' as const,
+          ...(parts.reviewer === null ? {} : pickOf(parts.reviewer)),
+          // After the merge, nothing waits on it before: skipped in the run, read once the work merged.
+          skipped: parts.checked === 'after',
+        }
+  const { reviewAfterMerge: _after, here: _here, worksIn: _worksIn, ...rest } = before
+  return {
+    ...rest,
+    steps: [...(implement === undefined ? [] : [implement]), ...(reviewing === undefined ? [] : [reviewing])],
+    end: parts.end,
+    ...(parts.checked === 'after' ? { reviewAfterMerge: true } : {}),
+    ...(parts.workspace === 'copy' ? { here: true } : { worksIn: parts.workspace === 'local' ? 'checkout' : 'worktree' }),
+  } as unknown as P
+}

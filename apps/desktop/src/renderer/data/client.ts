@@ -274,6 +274,15 @@ export interface Client {
   readonly dropChange: (taskId: string, change: string) => Promise<void>
   /** The presets the person has, in a project where one is named. */
   readonly listPresets: (projectId?: string) => Promise<ReadonlyArray<Preset>>
+  /** Edits one of the person's presets: its name, its parts, and whether it is kept to its task's project. */
+  readonly editPreset: (input: {
+    readonly id: string
+    readonly name: string
+    readonly parts: Preset['parts']
+    readonly projectOnly?: boolean
+  }) => Promise<void>
+  /** Picks another preset for a plan before it starts: its parts change to match. The preset's name. */
+  readonly applyPreset: (planId: string, preset: string) => Promise<string>
   /** Saves a preset from a task, or the parts the coordinator offered. */
   readonly savePreset: (input: {
     readonly name: string
@@ -837,6 +846,8 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
       command((commandId) => api.JoinChanges({ commandId, taskId, change, ...(into === undefined ? {} : { into }) })),
     dropChange: (taskId, change) => command((commandId) => api.DropChange({ commandId, taskId, change })),
     listPresets: (projectId) => settle(api.ListPresets(projectId === undefined ? {} : { projectId })),
+    applyPreset: (planId, preset) => command((commandId) => api.ApplyPreset({ commandId, planId, preset })),
+    editPreset: (input) => command((commandId) => api.EditPreset({ commandId, ...input })),
     savePreset: (input) => command((commandId) => api.SavePreset({ commandId, ...input })),
     removePreset: (id) => command((commandId) => api.RemovePreset({ commandId, id })),
     runIt: (taskId, how) => command((commandId) => api.RunIt({ commandId, taskId, ...(how === undefined ? {} : { how }) })),

@@ -1181,6 +1181,8 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
     removePreset: vi.fn(async () => {}),
     runIt: vi.fn(async () => ({ kind: 'ran' as const, trust: 'safe' as const, said: '' })),
     stopRunning: vi.fn(async () => ''),
+    applyPreset: vi.fn(async () => ''),
+    editPreset: vi.fn(async () => undefined),
     setReviewSeal: vi.fn(async () => {}),
     setReviewSealStyle: vi.fn(async () => {}),
     getAutomations: vi.fn(async () => automationsSnapshot({ automations: [] })),

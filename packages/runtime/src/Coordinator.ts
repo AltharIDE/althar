@@ -23,7 +23,7 @@ import { Accounts } from './Accounts'
 import { AutomationRefused, Automations } from './Automations'
 import { localZone } from './slots'
 import { Agents, RuntimeConfig } from './Config'
-import { AttachRefused, NotFound, TaskRefused } from './errors'
+import { AttachRefused, ChangeRefused, NotFound, TaskRefused } from './errors'
 import { taskShown } from './evidence'
 import { branchOnFirstWrite } from './firstWrite'
 import { commitsOf } from './git'
@@ -78,6 +78,7 @@ import { setToward } from './towards'
 import { addItem, transcript } from './threads'
 import { personsWords, quoted } from './TaskActions'
 import { ToolRefused, ToolServer, type Tool, type ToolAccess } from './ToolServer'
+import { describe as describePreset, presetsIn } from './presets'
 import { stepOf, StepPick } from './stepPick'
 import { describeModels, usableModels } from './usableModels'
 
@@ -213,6 +214,8 @@ const Proposed = Schema.Struct({
   review: Schema.optional(Schema.NullOr(StepPick)),
   /* The fast lane: one step, no countdown, and its review after it merges instead of before. */
   small_change: Schema.optional(Schema.Boolean),
+  /* The preset its parts are, by name: its parts replace the plan's. */
+  preset: Schema.optional(Schema.String),
   ...Where,
 })
 /* A mini task: what to do, and the one model that does it. */
@@ -1440,7 +1443,7 @@ export class Coordinator extends Context.Service<
           const sql = yield* SqlClient.SqlClient
           const [held] = yield* sql<{ id: string }>`
             SELECT id FROM task_plans WHERE task_id = ${task.id} AND state = 'proposed' AND starts_at IS NULL`
-          yield* plans.propose({
+          const planId = yield* plans.propose({
             projectId: access.projectId as ProjectId,
             taskId: task.id,
             steps: smallSteps ?? steps,
@@ -1453,7 +1456,23 @@ export class Coordinator extends Context.Service<
             // A plan the person held stays held; otherwise a small change starts at once.
             ...(small ? { reviewAfterMerge: true, ...(held === undefined ? { startsIn: Duration.zero } : {}) } : {}),
           })
-          const where = yield* localLine(access.projectId, task.id, worksIn)
+          // Planned from a preset: its parts replace the plan's, and its card names it.
+          const preset =
+            proposed.preset === undefined || proposed.preset.trim() === ''
+              ? undefined
+              : yield* plans.applyPreset(planId, proposed.preset, instance.coordinatorId).pipe(
+                  Effect.catch((error) =>
+                    Effect.fail(
+                      new ToolRefused({
+                        message:
+                          error instanceof ChangeRefused
+                            ? `The plan is proposed as you gave it, but not as ${proposed.preset}: ${error.message}`
+                            : `The plan is proposed as you gave it: there's no preset “${proposed.preset}”. list_presets names them.`,
+                      }),
+                    ),
+                  ),
+                )
+          const where = `${preset === undefined ? '' : ` As ${preset}.`}${yield* localLine(access.projectId, task.id, worksIn)}`
           if (held !== undefined)
             return `Changed ${task.slug}'s plan.${where} It stays held until the person starts it; they see it as a card, so there's no need to describe the plan again.`
           if (small)
@@ -2342,6 +2361,15 @@ export class Coordinator extends Context.Service<
         ...releaseTools(provide, tool),
         draftIssueTool,
         tool(
+          'list_presets',
+          'The person’s presets (a named set of a task’s starting parts: where it works, Checked by and when, its ending, where it sits, its lead and reviewer, and a few lines of brief), the built-in ones first, then theirs, those kept to this project with them, each with what it holds. Plan from the one that fits what the person asked with propose_plan’s preset; its card names it, and they can pick another there.',
+          nothing,
+          (access) =>
+            Effect.map(presetsIn(access.projectId), (all) =>
+              all.map((one) => `- ${one.name}${one.builtin ? '' : ' (theirs)'}: ${describePreset(one.parts)}.`).join('\n'),
+            ),
+        ),
+        tool(
           'list_models',
           'The models you can give work to now, by who makes them, with how each scores, whether a plan pays for it, and the efforts it takes: their ids, the one it starts at by itself, and the person’s default where they set one.',
           nothing,
@@ -2386,6 +2414,11 @@ export class Coordinator extends Context.Service<
                 type: 'string',
                 description:
                   "The branch it works toward, such as release/0.8.0: it starts from it, and its pull request goes into it. Only where the person asked for that branch, or the task is a fix for it; the project's Work toward without it. Its repository's remote must have it.",
+              },
+              preset: {
+                type: 'string',
+                description:
+                  'The preset its parts are, by name as list_presets writes it, where one fits what the person asked: its parts replace the plan’s (its lead and reviewer where it names them, Checked by, its ending, where it works and sits, and its brief). Left out, the plan is as you propose it.',
               },
             },
             required: ['task', 'lead'],
