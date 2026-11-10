@@ -167,7 +167,8 @@ test('a lead draws the project’s canvases, the person comments, the lead draws
         .locator('xpath=..')
         .textContent()) ?? ''
     expect(said).toContain('on “B, split:” under Sign in: Put the picture on the left, so the field is read first.')
-    await directions.last().click()
+    // Its line for v2: the reply streams in before the window has read the line, so it is waited for, not taken as the last.
+    await directions.filter({ hasText: 'v2' }).click()
     const again = page.getByRole('complementary', { name: 'Sign-in, three directions' })
     await expect(again.getByText('The picture on the left, as asked')).toBeVisible()
     await expect(again.getByText('v2', { exact: true })).toBeVisible()

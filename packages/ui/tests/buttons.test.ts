@@ -18,6 +18,8 @@ const PLAIN: Readonly<Record<string, string>> = {
   'outputs/WhatItMade/WhatItMade.tsx': 'a picture, which opens full size',
   'thread/External/External.tsx': 'the row of an external call',
   'thread/FileArtifact/FileArtifact.tsx': 'the preview, which opens the file',
+  'thread/Canvas/CanvasLine.tsx': 'a canvas’s title and version in its line, which opens it beside the conversation',
+  'thread/Canvas/CanvasList.tsx': 'a canvas’s card, the whole of which opens it',
   'chrome/ProjectSwitcher/ProjectSwitcher.tsx': 'the switcher’s trigger and its project rows',
   'home/SinceRow/SinceRow.tsx': 'what happened, stretched over its row',
   'home/NeedLine/NeedLine.tsx': 'the call’s title, which opens its task',

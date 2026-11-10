@@ -72,7 +72,7 @@ export const Busy: Story = {
       within(views)
         .getAllByRole('radio')
         .map((view) => view.textContent),
-    ).toEqual(['Home', 'Conversation', 'Board', 'Automations', 'Settings'])
+    ).toEqual(['Home', 'Conversation', 'Board', 'Automations', 'Canvases', 'Settings'])
     await expect(within(views).getByRole('radio', { name: 'Board' })).toBeChecked()
   },
 }

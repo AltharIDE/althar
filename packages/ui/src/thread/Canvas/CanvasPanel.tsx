@@ -4,6 +4,7 @@ import { Icon } from '../../foundations/Icon/Icon'
 import { cx } from '../../lib/cx'
 import { ActionButton } from '../../primitives/ActionButton/ActionButton'
 import { IconButton } from '../../primitives/IconButton/IconButton'
+import { LinkButton } from '../../primitives/LinkButton/LinkButton'
 import { NoteForm } from '../../primitives/NoteForm/NoteForm'
 import { SidePanel, SidePanelTitle, sidePanelText, type SidePanelText } from '../../primitives/SidePanel/SidePanel'
 import { Skeleton } from '../../primitives/Skeleton/Skeleton'
@@ -192,9 +193,7 @@ export function CanvasPanel({
         {later && onVersion !== undefined && (
           <span className={s.behind}>
             {newer !== null ? t.newerOut(newer) : t.notLatest}
-            <button type="button" className={s.behindButton} onClick={() => onVersion(newer ?? latest)}>
-              {newer !== null ? t.show : t.latest}
-            </button>
+            <LinkButton onClick={() => onVersion(newer ?? latest)}>{newer !== null ? t.show : t.latest}</LinkButton>
           </span>
         )}
       </div>
