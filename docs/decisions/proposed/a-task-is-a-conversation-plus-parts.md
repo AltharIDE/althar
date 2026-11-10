@@ -1248,6 +1248,14 @@ Built since, in #739:
   the workspace (`workspaces.moving_to`), said once, tried again every few
   seconds, and can be called off. The lead's next turn starts a fresh
   session in the new folder, handed the work so far.
+- **A running task changes the branch it works toward,** from its folder's
+  row or the lead's `work_toward`: nothing pushed, its branch is rebased
+  onto the new one, a conflict left for the lead; pushed, its own commits
+  are cherry-picked onto a fresh `-2` branch from it, whose pull request
+  opens into it, and the old one is left open, followed no more, for the
+  person to close. Held for Ship, the fresh branch stays here until Ship
+  opens it. The commits each move rewrote are kept beside their copies, so
+  the mark of what the last review read moves with them.
 
 Compatibility: every change to the store is additive, with nullable
 columns an older build reads past; a run with no `ships` and a workspace
@@ -1256,8 +1264,8 @@ update finishes as a round; the API only gains fields and a command; the
 old "Review rounds" setting is kept and read by nothing; the lead's tools
 keep their names, `make_it_a_change` included.
 
-Still to build, as the rest of this proposal says: the branch a running
-task works toward changing, "Run it", the parts tools, Scratch and presets.
+Still to build, as the rest of this proposal says: "Run it", the parts
+tools, Scratch and presets.
 
 It is done when:
 

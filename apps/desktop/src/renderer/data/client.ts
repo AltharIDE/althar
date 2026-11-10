@@ -634,6 +634,8 @@ export interface Client {
   }) => Promise<MoveOutcome>
   /** Calls off a move that waits. */
   readonly dropMove: (taskId: string) => Promise<void>
+  /** Points a running task at another branch to work toward, or its default with null: what it did, in words. */
+  readonly workToward: (taskId: string, toward: string | null) => Promise<ReadonlyArray<string>>
   /** Hands the task's step held for a usage limit to an agent, on the account and model picked, rather than waiting for the reset. */
   readonly handOverHeld: (input: {
     readonly taskId: string
@@ -989,6 +991,7 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
     answerCheckout: (input) => command((commandId) => api.AnswerCheckout({ commandId, ...input })),
     moveTask: (input) => command((commandId) => api.MoveTask({ commandId, ...input })),
     dropMove: (taskId) => command((commandId) => api.DropMove({ commandId, taskId })),
+    workToward: (taskId, toward) => command((commandId) => api.WorkToward({ commandId, taskId, toward })),
     handOverHeld: (input) => command((commandId) => api.HandOverHeld({ commandId, ...input })),
     watch: (listener, since, onWatching) => {
       let cursor = since

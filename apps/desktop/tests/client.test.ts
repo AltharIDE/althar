@@ -360,6 +360,7 @@ describe('the client', () => {
           AnswerCheckout: () => Effect.die('unused'),
           MoveTask: () => Effect.die('unused'),
           DropMove: () => Effect.die('unused'),
+          WorkToward: () => Effect.die('unused'),
           HandOverHeld: () => Effect.die('unused'),
           ListConnections: () => Effect.die('unused'),
           StartSignIn: () => Effect.die('unused'),

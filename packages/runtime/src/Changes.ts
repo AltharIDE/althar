@@ -75,6 +75,7 @@ import { envelope } from './envelope'
 import { evidencePaths, taskShown } from './evidence'
 import {
   AttachRefused,
+  BranchNotFound,
   CantMerge,
   ChangedSinceSeen,
   GitFailed,
@@ -109,6 +110,7 @@ import {
 } from './git'
 import { Instance } from './Instance'
 import { Live, type LiveEvent } from './Live'
+import { hasBranch, startCommitOf, startOf, towardIn } from './Projects'
 import { applyMerges, conflictsOf, planMerge } from './localMerge'
 import { outward, reconcileOutward } from './outward'
 import {
@@ -319,6 +321,8 @@ interface PublishInput {
    * tweak waits for Ship"); without it, publishing refuses one.
    */
   readonly ships?: boolean | undefined
+  /** Only these workspaces: a change pointed at another branch opens its new pull request alone. */
+  readonly only?: ReadonlyArray<string> | undefined
 }
 
 /** One of the task's repositories, as publishing reads it. */
@@ -779,6 +783,22 @@ export class Changes extends Context.Service<
      * parts, "Merge, with commits not shipped").
      */
     mergeAsItStands(taskId: string, url: string): Effect.Effect<void, unknown>
+    /**
+     * Points a running task's change at another branch to work toward, or back at its repository's default with null (a
+     * task is a conversation plus parts, "Changing the branch a task works toward"), between its lead's turns. Nothing pushed
+     * yet, its branch is rebased onto the new one; a conflict stops the rebase, which is its lead's to finish. Pushed, its
+     * own commits are cherry-picked onto a fresh branch from the new one, and the old pull request is no longer followed:
+     * the caller opens the new one where nothing holds it for Ship. What it did, for each repository, in words; the
+     * workspaces whose new pull request is to open; and the files a rebase or the cherry-picks stopped on.
+     */
+    retarget(
+      taskId: string,
+      toward: string | null,
+      change?: string | null,
+    ): Effect.Effect<
+      { readonly said: ReadonlyArray<string>; readonly opens: ReadonlyArray<string>; readonly conflicts: ReadonlyArray<string> },
+      unknown
+    >
     /**
      * Merges the task's branch into each of its repositories' default
      * branches on this Mac, up to the commit the person saw in each, where it
@@ -1290,6 +1310,7 @@ export class Changes extends Context.Service<
           const done: Array<PublishedOne> = []
           let unconnected: NotConnected | undefined
           for (const task of tasks) {
+            if (input.only !== undefined && !input.only.includes(task.workspaceId)) continue
             const next = after.find((one) => one.workspaceId === task.workspaceId)
             if (input.again === true && next === undefined) continue
             const one = yield* Effect.exit(publishOne(input, task, { several: tasks.length > 1, ofSeveral: (bound?.n ?? 0) > 1 }, next))
@@ -2213,6 +2234,134 @@ export class Changes extends Context.Service<
           const met = yield* git(above.path, 'merge-base', 'HEAD', `refs/heads/${below.branch}`).pipe(Effect.orElseSucceed(() => ''))
           if (met === '') return null
           return (yield* commitsAhead(above.path, sent, met).pipe(Effect.orElseSucceed(() => 0))) > 0 ? held : null
+        })
+
+      /*
+       * A running task's change pointed at another branch to work toward (a task is a conversation plus parts). Its own
+       * commits are what it has past where it started; each it rewrites is kept beside its copy (`rewritten`), so the mark of
+       * what its last review read moves with it, and the next review reads only what came since.
+       */
+      const retarget = (taskId: string, asked: string | null, changeName: string | null) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const rows = yield* sql<{
+            id: string
+            projectId: ProjectId
+            threadId: string
+            path: string
+            branch: string
+            toward: string | null
+            baseCommit: string | null
+            heldAt: string | null
+            repository: string
+            base: string | null
+            changeTarget: string | null
+            name: string
+          }>`
+            SELECT w.id, w.project_id, (SELECT t.id FROM threads t WHERE t.task_id = w.task_id AND t.kind = 'task') AS thread_id,
+              w.path, w.branch, w.toward, w.base_commit, w.held_at, l.path AS repository, b.default_base_ref AS base, b.change_target,
+              b.display_name AS name
+            FROM workspaces w JOIN repository_bindings b ON b.id = w.binding_id
+            JOIN repository_locations l ON l.binding_id = b.id AND l.device_id = w.device_id
+            WHERE w.task_id = ${taskId} AND w.device_id = ${instance.deviceId} AND w.access = 'write' AND w.reviewing IS NULL
+              AND w.state = 'ready' AND w.branched_at IS NOT NULL AND w.name IS ${changeName}
+            ORDER BY b.created_at, b.rowid`
+          const said: Array<string> = []
+          const conflicts: Array<string> = []
+          const opens: Array<string> = []
+          for (const row of rows) {
+            const toward = yield* towardIn({ ...row, workToward: null }, asked)
+            if (toward === row.toward) continue
+            const { remote, base } = yield* startOf({ ...row, toward })
+            if (!(yield* hasBranch(row.repository, base, remote))) return yield* new BranchNotFound({ branch: base, repository: row.name })
+            const left = yield* uncommittedFiles(row.path)
+            if (left.length > 0)
+              return yield* new ToolRefused({ message: `Commit what's changed in ${row.name} first (${filesWord(left)}): then it moves.` })
+            const { baseRef, baseCommit } = yield* startCommitOf(row.repository, base, remote)
+            const head = yield* commitOf(row.path, 'HEAD')
+            const from = row.baseCommit ?? head
+            const own = (yield* git(row.path, 'rev-list', '--reverse', '--no-merges', `${from}..${head}`))
+              .split('\n')
+              .filter((line) => line !== '')
+            const [open] = yield* sql<{ id: string; url: string; number: number }>`
+              SELECT l.id, l.url, json_extract(l.snapshot, '$.number') AS number FROM external_links l
+              JOIN repository_changes c ON c.pull_request_url = l.url
+              WHERE c.workspace_id = ${row.id} AND l.kind = 'change' AND l.listening = 1
+                AND json_extract(l.snapshot, '$.state') = 'open'
+                AND coalesce(json_extract(l.snapshot, '$.source'), ${row.branch}) = ${row.branch}
+              ORDER BY l.created_at DESC LIMIT 1`
+            let branch = row.branch
+            let stopped: Array<string> = []
+            if (open === undefined) {
+              // Nothing pushed: the branch is rebased onto the new one. A conflict stops it there, for the lead to finish.
+              const rebased = yield* gitOutcome(row.path, 'rebase', '--onto', baseCommit, from)
+              if (rebased.code !== 0) {
+                stopped = (yield* gitOutcome(row.path, 'diff', '--name-only', '--diff-filter=U')).stdout
+                  .split('\n')
+                  .filter((file) => file !== '')
+                conflicts.push(...stopped)
+              }
+            } else {
+              // Pushed: its pull request can't change its history, so its own commits go onto a fresh branch from the new one.
+              let fresh = `${row.branch}-2`
+              for (let n = 3; yield* branchExists(row.path, fresh); n += 1) fresh = `${row.branch}-${n}`
+              yield* git(row.path, 'checkout', '-q', '-b', fresh, baseCommit)
+              const conflicted = yield* pickOnto(row.path, own)
+              if (conflicted !== null) {
+                yield* Effect.ignore(git(row.path, 'checkout', '-q', row.branch))
+                yield* Effect.ignore(git(row.path, 'branch', '-D', fresh))
+                conflicts.push(...conflicted)
+                said.push(
+                  `${row.name} still works toward ${row.toward ?? row.base ?? 'its default branch'}: its commits conflict with ${base} in ${filesWord(conflicted)}.`,
+                )
+                continue
+              }
+              branch = fresh
+            }
+            const now = yield* commitOf(row.path, 'HEAD')
+            const copies =
+              stopped.length > 0
+                ? []
+                : (yield* git(row.path, 'rev-list', '--reverse', '--no-merges', `${baseCommit}..${now}`))
+                    .split('\n')
+                    .filter((line) => line !== '')
+            const rewritten = copies.length === own.length ? Object.fromEntries(own.map((old, index) => [old, copies[index] ?? ''])) : {}
+            yield* sql.withTransaction(
+              Effect.gen(function* () {
+                const revision = yield* change('workspaces', row.id, { toward, baseRef, baseCommit, branch })
+                yield* fact({
+                  projectId: row.projectId,
+                  aggregateType: 'workspace',
+                  aggregateId: row.id,
+                  revision,
+                  type: 'workspace.toward_set',
+                  payload: { toward, from: row.branch, branch, rewritten, ...(open === undefined ? {} : { left: open.url }) },
+                  actorId: instance.systemId,
+                })
+                // The old pull request stays open on its host, for the person to close: Althar follows it no more.
+                if (open !== undefined) yield* change('external_links', open.id, { listening: 0, updatedAt: yield* timestamp })
+              }),
+            )
+            if (open !== undefined) {
+              if (row.heldAt === null) opens.push(row.id)
+              said.push(
+                `${row.name} works toward ${base} now, on ${branch}: its ${commitsWord(own.length)} cherry-picked from ${row.branch}. PR #${open.number} still goes into ${row.toward ?? row.base ?? 'its default branch'}: close it once the new one is open.`,
+              )
+            } else
+              said.push(
+                stopped.length === 0
+                  ? `${row.name} works toward ${base} now: its ${commitsWord(own.length)} rebased onto it.`
+                  : `${row.name} works toward ${base} now, but rebasing onto it stopped on conflicts in ${filesWord(stopped)}.`,
+              )
+            if (row.threadId !== null)
+              yield* addItem({ projectId: row.projectId, threadId: row.threadId }, 'notice', {
+                source: 'runtime',
+                severity: stopped.length === 0 ? 'info' : 'warning',
+                title: said.at(-1) ?? '',
+              })
+          }
+          yield* touchCard(taskId)
+          return { said, opens, conflicts }
         })
 
       /**
@@ -4719,7 +4868,10 @@ export class Changes extends Context.Service<
             })
           const seen =
             repository.snapshot === null ? undefined : Option.getOrUndefined(yield* Effect.option(decodeSnapshot(repository.snapshot)))
-          if (seen?.state === 'open') return undefined
+          // Open, it takes the branch's pushes: unless the change moved to a branch of its own since, pointed at another to work
+          // toward, and Althar follows it no more (a task is a conversation plus parts), whose work goes in a new one.
+          const leftOpen = seen?.state === 'open' && repository.listening === 0 && repository.branch !== repository.changeBranch
+          if (seen?.state === 'open' && !leftOpen) return undefined
           let head: string | undefined
           let moved = false
           if (seen === undefined) {
@@ -8100,6 +8252,7 @@ export class Changes extends Context.Service<
         close: (taskId, url, options) => provide(locked(taskId)(close(taskId, url, options.deleteBranch))),
         exclusive: (taskId, effect) => locked(taskId)(effect),
         merge: (taskId, head, url) => provide(locked(taskId)(merge(taskId, head, url))),
+        retarget: (taskId, toward, change) => provide(locked(taskId)(retarget(taskId, toward, change ?? null))),
         mergeAsItStands: (taskId, url) =>
           provide(
             locked(taskId)(

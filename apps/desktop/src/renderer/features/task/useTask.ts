@@ -166,6 +166,8 @@ export interface TaskModel {
   readonly move: (to: 'worktree' | 'checkout', consent?: { readonly branch: string | null; readonly head: string }) => Promise<void>
   /** Calls off a move that waits: the task stays where it works. */
   readonly dropMove: () => Promise<void>
+  /** Points the running task at another branch to work toward, or its default with null. */
+  readonly workToward: (toward: string | null) => Promise<void>
   /** Hands its step held for a usage limit to another agent, on the account and model picked, rather than waiting for the reset. */
   readonly handOverHeld: (to: { readonly agentId: string; readonly accountId?: string; readonly model?: string }) => Promise<void>
   /** Answers an agent's question: what went wrong, in words, or null when it went through. */
@@ -690,6 +692,7 @@ export const useTask = (threadId: string): TaskModel => {
     answerCheckout: (attentionId, answer) => act(() => client.answerCheckout({ attentionId, answer })),
     move: (to, consent) => onTask((taskId) => client.moveTask({ taskId, to, ...(consent === undefined ? {} : { consent }) })),
     dropMove: () => onTask((taskId) => client.dropMove(taskId)),
+    workToward: (toward) => onTask((taskId) => client.workToward(taskId, toward)),
     handOverHeld: (to) => onTask((taskId) => client.handOverHeld({ taskId, ...to })),
     answerQuestion: (attentionId, answers) =>
       client.answerQuestion({ attentionId, answers }).then(

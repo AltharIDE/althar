@@ -556,6 +556,7 @@ describe('the API', () => {
               AnswerCheckout: () => Effect.die('unused'),
               MoveTask: () => Effect.die('unused'),
               DropMove: () => Effect.die('unused'),
+              WorkToward: () => Effect.die('unused'),
               UndoAutomationChange: () => Effect.die('unused'),
               AnswerSettingChange: () => Effect.die('unused'),
               UndoSettingChange: () => Effect.die('unused'),

@@ -4777,6 +4777,11 @@ export const Api = RpcGroup.make(
   ),
   /** Calls off a move that waits: the task stays where it works. */
   command('DropMove', { taskId: Schema.String }, Schema.Void),
+  /**
+   * Points a running task at another branch to work toward, or its default with null (a task is a conversation plus parts):
+   * rebased where nothing is pushed, else onto a fresh branch whose pull request opens into it. What it did, in words.
+   */
+  command('WorkToward', { taskId: Schema.String, toward: Schema.NullOr(Schema.String) }, Schema.Array(Schema.String)),
   /** The person's answer to a permission; with `always`, it is also kept in the project's rules by that scope, one of those offered. */
   command(
     'Answer',

@@ -79,7 +79,7 @@ import { roundsNow, roundsOutNow } from './plansAndReviews'
 import { unreviewedLine } from './pullRequestReview'
 import { Policies, usageLimitOf } from './Policies'
 import { conventionsAt } from './conventions'
-import { commitOf, commitsAhead, git, treeOf, uncommittedFiles } from './git'
+import { commitOf, commitsAhead, git, gitOutcome, treeOf, uncommittedFiles } from './git'
 import { DESCRIPTION_SHAPE, descriptionAsk, filesLine, type Undescribed } from './pullRequestWords'
 import { evidenceFolderOf, reviewCopyOf, snapshotForReview } from './reviewCopy'
 import { change, fact, timestamp } from './records'
@@ -834,6 +834,19 @@ export class Runs extends Context.Service<
     }): Effect.Effect<Moved, unknown>
     /** Calls off a move that waits: the task stays where it works. */
     dropMove(input: { readonly envelope: CommandEnvelope; readonly taskId: string }): Effect.Effect<void, unknown>
+    /**
+     * Points a running task at another branch to work toward (a task is a conversation plus parts, "Changing the branch a
+     * task works toward"), or its default with null: between its lead's turns, the person's word waiting for one under way;
+     * its lead's own, from its tool, at once. A conflict goes to its lead; a change pushed already opens its new pull
+     * request into the new branch, unless it waits for Ship. What it did, in words.
+     */
+    workToward(input: {
+      readonly taskId: string
+      readonly toward: string | null
+      readonly change?: string | null
+      /** Its lead asked, in its turn: no turn to wait for. */
+      readonly byLead?: boolean
+    }): Effect.Effect<ReadonlyArray<string>, unknown>
   }
 >()('@althar/runtime/Runs') {
   static readonly layer: Layer.Layer<Runs, never, Store> = Layer.effect(
@@ -2491,12 +2504,45 @@ export class Runs extends Context.Service<
               JOIN nodes n ON n.id = a.node_id
               WHERE s.workspace_id = ${worktree.id} AND n.node_key = 'review' AND s.commit_sha IS NOT NULL
               ORDER BY s.taken_at DESC, s.rowid DESC LIMIT 1`
-            const read = last?.commitSha == null ? null : yield* onBranchAs(worktree.path, last.commitSha, worktree.base)
+            const read =
+              last?.commitSha == null
+                ? null
+                : ((yield* onBranchAs(worktree.path, last.commitSha, worktree.base)) ??
+                  (yield* rewrittenAs(worktree.id, worktree.path, last.commitSha)))
             const from = read ?? worktree.base
             if (from !== null) marks[worktree.path] = from
           }
           return marks
         })
+
+      /**
+       * Where what a review read went when its branch was moved onto another
+       * to work toward (a task is a conversation plus parts): the commit it
+       * matched, by its tree, rebased or cherry-picked, as each move kept it,
+       * where the branch has that copy. Null where none does.
+       */
+      const rewrittenAs = (workspaceId: string, path: string, snapshot: string) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const moves = yield* sql<{ rewritten: string | null }>`
+            SELECT json_extract(payload, '$.rewritten') AS rewritten FROM record_events
+            WHERE aggregate_type = 'workspace' AND aggregate_id = ${workspaceId} AND type = 'workspace.toward_set'
+              AND json_extract(payload, '$.rewritten') IS NOT NULL
+            ORDER BY rowid`
+          if (moves.length === 0) return null
+          const tree = yield* git(path, 'rev-parse', `${snapshot}^{tree}`)
+          let at: string | null = null
+          for (const move of moves) {
+            const rewritten = JSON.parse(move.rewritten ?? '{}') as Record<string, string>
+            if (at !== null) at = rewritten[at] ?? null
+            else
+              for (const old of Object.keys(rewritten))
+                if ((yield* git(path, 'rev-parse', `${old}^{tree}`).pipe(Effect.orElseSucceed(() => ''))) === tree)
+                  at = rewritten[old] ?? null
+          }
+          if (at === null) return null
+          return (yield* gitOutcome(path, 'merge-base', '--is-ancestor', at, 'HEAD')).code === 0 ? at : null
+        }).pipe(Effect.orElseSucceed(() => null))
 
       /**
        * The newest commit on the branch here that holds what a review's
@@ -4242,6 +4288,44 @@ export class Runs extends Context.Service<
           )
         return held.length > 0 || moves.length > 0 || (yield* checkoutsHeld)
       })
+
+      const workToward = (input: {
+        readonly taskId: string
+        readonly toward: string | null
+        readonly change?: string | null
+        readonly byLead?: boolean
+      }): Effect.Effect<ReadonlyArray<string>, unknown, Store> =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const [task] = yield* sql<{ projectId: ProjectId; threadId: string; state: string }>`
+            SELECT k.project_id, t.id AS thread_id, k.state FROM tasks k JOIN threads t ON t.task_id = k.id AND t.kind = 'task'
+            WHERE k.id = ${input.taskId}`
+          if (task === undefined) return yield* new NotFound({ kind: 'task', id: input.taskId })
+          // Between turns: one under way ends first, so nothing moves under it.
+          if (input.byLead !== true) yield* sessions.untilIdle(task.threadId, Duration.minutes(30))
+          const done = yield* changes.retarget(input.taskId, input.toward, input.change ?? null)
+          if (done.conflicts.length > 0 && input.byLead !== true) {
+            const body = `The task works toward another branch now (${done.said.join(' ')}) Resolve the conflicts in ${done.conflicts.join(', ')}, then carry on: where a rebase stopped, \`git add\` them and \`git rebase --continue\`.`
+            yield* sessions
+              .send({
+                envelope: yield* envelope('thread.send', { threadId: task.threadId }),
+                threadId: task.threadId,
+                body,
+                quiet: true,
+              })
+              .pipe(Effect.catchCause((cause) => Effect.logWarning('Could not tell the lead about a conflict on its new target', cause)))
+          }
+          if (done.opens.length > 0) {
+            const [run] = yield* sql<{ id: string }>`
+              SELECT id FROM runs WHERE task_id = ${input.taskId} ORDER BY created_at DESC, rowid DESC LIMIT 1`
+            if (run !== undefined)
+              yield* changes
+                .publish({ projectId: task.projectId, taskId: input.taskId, runId: run.id, end: 'draft', only: done.opens })
+                .pipe(Effect.catchCause((cause) => Effect.logWarning('Could not open the pull request into the new branch', cause)))
+          }
+          yield* touchCard(input.taskId)
+          return done.said
+        })
 
       /**
        * Moves a task's change where the person asked, between its lead's turns: its lead in one, the move waits for it to end.
@@ -7120,6 +7204,7 @@ export class Runs extends Context.Service<
               moving(input.taskId, input.to, input.change ?? null, input.envelope.actorId, input.consent),
             ).pipe(Effect.tap(() => Queue.offer(checkoutWakes, undefined))),
           ),
+        workToward: (input) => provide(workToward(input)),
         dropMove: (input) =>
           provide(
             Effect.gen(function* () {

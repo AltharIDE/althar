@@ -859,7 +859,11 @@ export function TaskView({
       : {}),
     // A running task moves between a worktree and Local, between its lead's turns.
     ...(snapshot.task.phase !== 'settled' && snapshot.task.worktree !== null && snapshot.task.branch !== null
-      ? { move: (to, consent) => void model.move(to, consent), dropMove: () => void model.dropMove() }
+      ? {
+          move: (to, consent) => void model.move(to, consent),
+          dropMove: () => void model.dropMove(),
+          workToward: (branch) => void model.workToward(branch),
+        }
       : {}),
     merge: (change) => (change.head === null ? undefined : void model.accept([{ head: change.head, url: change.url }])),
     postReview: (draftId) => void model.postReview(draftId),

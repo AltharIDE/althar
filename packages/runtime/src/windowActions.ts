@@ -61,6 +61,7 @@ export const WINDOW_ACTIONS = {
   answerCheckout: { person: 'lets a Local task take their own checkout' },
   move: { person: 'moves a running task into or out of their own checkout: only they say when it switches' },
   dropMove: { person: 'calls off a move into or out of their own checkout' },
+  workToward: { tool: 'work_toward' },
   handOverHeld: { tool: 'change_lead' },
   answerQuestion: { person: 'answers what an agent asked them' },
   // The Change card.

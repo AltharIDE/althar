@@ -1561,6 +1561,7 @@ export const handlers = Api.toLayer(
             ),
           ),
         ),
+      WorkToward: ({ commandId, taskId, toward }) => once(commandId, api(runs.workToward({ taskId, toward }))),
       DropMove: ({ commandId, taskId }) =>
         once(
           commandId,

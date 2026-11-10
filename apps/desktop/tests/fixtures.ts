@@ -1250,6 +1250,7 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
     answerCheckout: vi.fn(async () => {}),
     moveTask: vi.fn(async () => ({ kind: 'moved' as const })),
     dropMove: vi.fn(async () => {}),
+    workToward: vi.fn(async () => []),
     handOverHeld: vi.fn(async () => {}),
     listConnections: vi.fn(async () => connectionList),
     startSignIn: vi.fn(async () => ({

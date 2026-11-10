@@ -83,6 +83,17 @@ describe('a task’s parts', () => {
     await waitFor(() => expect(client.dropMove).toHaveBeenCalledWith(base.task.id))
   })
 
+  it('points a running task at another branch to work toward from its folder’s row', async () => {
+    const working = snapshot({ task: { ...base.task, worktree: '/tmp/w/api', branch: 'althar/add-a-retry', phase: 'ready' } })
+    const { client } = fakeClient({ getThread: vi.fn(async () => working) })
+    withServices(<Task />, client)
+    const popover = await parts()
+    await userEvent.click(popover.getByRole('button', { name: /^Worktree/ }))
+    await userEvent.type(await popover.findByRole('textbox', { name: 'Another branch to work toward' }), 'release/0.8.0')
+    await userEvent.click(popover.getByRole('button', { name: 'Work toward it' }))
+    await waitFor(() => expect(client.workToward).toHaveBeenCalledWith(base.task.id, 'release/0.8.0'))
+  })
+
   it('posts a review draft from its row', async () => {
     const { client } = fakeClient({ getThread: vi.fn(async () => snapshot({ items: [items.review({ state: 'pending' })] })) })
     withServices(<Task />, client)

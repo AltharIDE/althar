@@ -26,6 +26,10 @@ export const partsText = {
   switchIt: 'Switch it',
   stayInWorktree: 'Stay in the worktree',
   callOff: 'Call it off',
+  /** The branch a running task works toward, changed (a task is a conversation plus parts). */
+  towardField: 'Another branch to work toward',
+  towardIt: 'Work toward it',
+  towardNote: 'Nothing pushed, its branch moves onto it; pushed, its commits go to a new pull request into it.',
   files: (n: number) => (n === 0 ? 'No changes' : `${n} ${n === 1 ? 'file' : 'files'} changed`),
   branch: 'Branch',
   where: 'Where',
@@ -118,6 +122,8 @@ export interface PartsActions {
   readonly move?: (to: 'worktree' | 'checkout', consent?: { readonly branch: string | null; readonly head: string }) => void
   /** Calls off a move that waits. */
   readonly dropMove?: () => void
+  /** Points the running task at another branch to work toward. */
+  readonly workToward?: (branch: string) => void
 }
 
 /** The review drafts in the thread still waiting to be posted: the latest of each. */
@@ -168,18 +174,26 @@ export const partsOf = (snapshot: ThreadSnapshot, act: PartsActions): ReadonlyAr
         : { tone: 'you' as const, act: { label: t.switchIt, onClick: () => move(moving.to, moving.seen) } }),
       facts: [
         ...(task.branch === null ? [] : [[t.branch, <code key="b">{task.branch}</code>] as const]),
+        ...(task.toward === undefined ? [] : [[t.into, <code key="t">{task.toward}</code>] as const]),
         [t.where, <code key="w">{task.worktree}</code>],
       ],
-      ...(task.files.length === 0
+      ...(task.files.length === 0 && act.workToward === undefined
         ? {}
         : {
             body: (
-              <PartLines
-                lines={[
-                  ...task.files.slice(0, SHOWN).map((file) => [file.path, file.binary ? '' : `+${file.add} −${file.del}`] as const),
-                  ...(task.files.length > SHOWN ? [[t.more(task.files.length - SHOWN), ''] as const] : []),
-                ]}
-              />
+              <>
+                {task.files.length > 0 && (
+                  <PartLines
+                    lines={[
+                      ...task.files.slice(0, SHOWN).map((file) => [file.path, file.binary ? '' : `+${file.add} −${file.del}`] as const),
+                      ...(task.files.length > SHOWN ? [[t.more(task.files.length - SHOWN), ''] as const] : []),
+                    ]}
+                  />
+                )}
+                {act.workToward !== undefined && (
+                  <OneField label={t.towardField} button={t.towardIt} note={t.towardNote} onGo={act.workToward} done={() => undefined} />
+                )}
+              </>
             ),
           }),
       actions: [

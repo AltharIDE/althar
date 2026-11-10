@@ -880,6 +880,12 @@ export class TaskActions extends Context.Service<
         repository: Schema.optional(Schema.String),
         why: Schema.optional(Schema.String),
       })
+      const TowardAsked = Schema.Struct({
+        task: Schema.optional(Schema.String),
+        toward: Schema.NullOr(Schema.String),
+        change: Schema.optional(Schema.String),
+        why: Schema.optional(Schema.String),
+      })
       const Branches = Schema.Struct({
         task: Schema.optional(Schema.String),
         heads: Schema.optional(Schema.Array(Schema.Struct({ repository: Schema.String, head: Schema.String }))),
@@ -954,6 +960,24 @@ export class TaskActions extends Context.Service<
        * Starts another change in a task (a task is a conversation plus parts): its own branch and worktree, beside the others,
        * shipped and reviewed on its own. The task's thread marks it as a step in the work.
        */
+      /** Points a running task at another branch to work toward, on the person's word, as its header does. */
+      const workToward = (access: ToolAccess, input: unknown) =>
+        Effect.gen(function* () {
+          const asked = yield* read(TowardAsked, input)
+          const task = yield* named(access, asked.task)
+          const said = yield* plainly(
+            runs.workToward({
+              taskId: task.id,
+              toward: asked.toward === null || asked.toward.trim() === '' ? null : asked.toward.trim(),
+              ...(asked.change === undefined ? {} : { change: asked.change }),
+              byLead: access.role === 'lead' && access.taskId === task.id,
+            }),
+            task.slug,
+          )
+          yield* touchTask(task.id)
+          return said.length === 0 ? `${task.slug} works toward that already: nothing changed.` : said.join(' ')
+        })
+
       const startChange = (access: ToolAccess, input: unknown) =>
         Effect.gen(function* () {
           const asked = yield* read(NewChange, input)
@@ -1213,6 +1237,21 @@ export class TaskActions extends Context.Service<
             required: ['name'],
           },
           startChange,
+        ),
+        tool(
+          'work_toward',
+          'Points a running task at another branch to work toward, such as release/0.8.0, or back at its repository’s default with null, on the person’s word. Nothing pushed yet, its branch is rebased onto the new one; a conflict stops the rebase, for its lead to finish. Pushed already, its own commits are cherry-picked onto a fresh branch from the new one, whose pull request opens into it, unless what waits for Ship holds it; the old pull request is left open for the person to close. Its review’s mark moves with its commits. change names one of its changes, where it has several (its first otherwise). It acts at once, with a line in the task’s thread.',
+          {
+            type: 'object',
+            properties: {
+              task: optionalTask,
+              why,
+              toward: { type: ['string', 'null'], description: 'The branch, or null for the repository’s default.' },
+              change: { type: 'string', description: 'One of the task’s changes, by name, where it has several.' },
+            },
+            required: ['toward'],
+          },
+          workToward,
         ),
         tool(
           'answer_review_after_merge',
