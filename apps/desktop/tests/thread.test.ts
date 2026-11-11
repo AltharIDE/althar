@@ -603,3 +603,34 @@ describe('tool calls', () => {
     expect(tools).toEqual([{ pattern: 'git status', match: 'prefix' }, null])
   })
 })
+
+describe('repeated host news in a thread', () => {
+  const kinds = (blocks: ReadonlyArray<Block>) =>
+    blocks.map((block) => (block.kind === 'arrival' ? `${block.arrival.kind}×${block.count}` : block.kind))
+  const passed = (id: string, where = 'PR #766') => ({
+    ...items.arrival({ kind: 'checks', from: null, text: null, passed: 3, failed: 0, where }),
+    id,
+  })
+  const failed = (id: string) => ({
+    ...items.arrival({ kind: 'checks', from: null, text: null, passed: 1, failed: 2, where: 'PR #766' }),
+    id,
+  })
+  const build = (thread: ReadonlyArray<ThreadItem>) => blocksOf(source(thread), new Map(), (iso) => iso)
+
+  it('folds back-to-back lines of the same outcome on the same PR into the latest, counted', () => {
+    const blocks = build([passed('a1'), passed('a2')])
+    expect(kinds(blocks)).toEqual(['checks×2'])
+    expect(blocks[0]).toMatchObject({ id: 'a1' })
+  })
+
+  it('keeps a lone line uncounted, and other PRs, other outcomes and lines split by something else apart', () => {
+    expect(kinds(build([passed('a1')]))).toEqual(['checks×1'])
+    expect(kinds(build([passed('a1'), passed('a2', 'PR #767')]))).toEqual(['checks×1', 'checks×1'])
+    expect(kinds(build([passed('a1'), failed('a2'), passed('a3')]))).toEqual(['checks×1', 'checks×1', 'checks×1'])
+    expect(kinds(build([passed('a1'), items.you('Hi'), passed('a2')]))).toEqual(['checks×1', 'you', 'checks×1'])
+  })
+
+  it('never folds what people said', () => {
+    expect(kinds(build([items.arrival({ text: 'a' }), items.arrival({ text: 'a' })]))).toEqual(['comment×1', 'comment×1'])
+  })
+})
