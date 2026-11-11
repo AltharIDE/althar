@@ -4,6 +4,7 @@ import { commandDown, keys, modKey } from '../../foundations/keys'
 import { device } from '../../foundations/device'
 import type { CodeHost } from '../../foundations/codeHost'
 import { Icon } from '../../foundations/Icon/Icon'
+import type { IconName } from '../../foundations/Icon/icons'
 import { BrandMark } from '../../foundations/Marks/Marks'
 import type { ProjectInk } from '../../foundations/ProjectMark/drawing'
 import { ProjectMark } from '../../foundations/ProjectMark/ProjectMark'
@@ -61,6 +62,8 @@ export type NewProjectFolder =
       readonly host: CodeHost | null
       /** Its remote, as its host names it: northwind-co/app; null without one. */
       readonly remote: string | null
+      /** What it is, said in place of its remote where that isn't the point: not a repository yet. */
+      readonly fact?: ReactNode
     }
 
 /** A repository on this computer that could be added in one press. */
@@ -99,6 +102,14 @@ export type NewProjectFinding =
       readonly remote: string
       /** What its tasks would open there, connected: pull requests, merge requests. */
       readonly changes: string
+    }
+  | {
+      readonly id: string
+      /** Anything else reading found, in its own words, with what puts it right beside them. */
+      readonly kind: 'note'
+      readonly icon: IconName
+      readonly words: ReactNode
+      readonly action?: ReactNode
     }
   | {
       readonly id: string
@@ -234,6 +245,8 @@ export type NewProjectProps = RootProps<
     creating?: boolean
     /** Why the last try didn't go through, said in the foot. */
     error?: ReactNode
+    /** More to ask under the folders, before what reading found. */
+    extra?: ReactNode
     text?: Partial<NewProjectText>
   }
 >
@@ -282,6 +295,7 @@ export function NewProject({
   onCancel,
   creating = false,
   error,
+  extra,
   className,
   text,
   onKeyDown,
@@ -508,6 +522,7 @@ export function NewProject({
               )}
             </div>
           )}
+          {extra}
           {(findings.length > 0 || (found !== null && found.first.length + found.more.length > 0)) && (
             <div className={s.below}>
               {findings.length > 0 && <Findings findings={findings} t={t} {...(onConnect === undefined ? {} : { onConnect })} />}
@@ -581,7 +596,9 @@ function FolderRow({ folder, t, onRemove }: { folder: NewProjectFolder; t: NewPr
         <span className={s.folderName}>{folder.name}</span>
         <span className={s.facts}>
           <span className={s.mono}>{folder.where}</span>
-          {folder.host !== null && folder.remote !== null ? (
+          {folder.fact !== undefined ? (
+            <span className={s.fact}>{folder.fact}</span>
+          ) : folder.host !== null && folder.remote !== null ? (
             <span className={s.fact}>
               {folder.host.name} · <span className={s.mono}>{folder.remote}</span>
             </span>
@@ -616,6 +633,7 @@ function Findings({
           <li key={finding.id} className={s.finding}>
             <FindingMark finding={finding} />
             <span>{findingWords(finding, t)}</span>
+            {finding.kind === 'note' && finding.action}
             {finding.kind === 'unconnected' && onConnect !== undefined && (
               <LinkButton onClick={() => onConnect(finding.id)}>{t.connect(finding.host.name)}</LinkButton>
             )}
@@ -633,6 +651,8 @@ function FindingMark({ finding }: { finding: NewProjectFinding }) {
       return finding.host.brand === undefined ? <Icon name="globe" size={13} /> : <BrandMark brand={finding.host.brand} size={13} />
     case 'shared':
       return <Icon name="folder" size={13} />
+    case 'note':
+      return <Icon name={finding.icon} size={13} />
     default:
       return unreachable(finding)
   }
@@ -655,6 +675,8 @@ const findingWords = (finding: NewProjectFinding, t: NewProjectText): ReactNode 
       return t.unconnected(<code className={s.code}>{finding.remote}</code>, finding.host.name, finding.changes)
     case 'shared':
       return t.shared(finding.name, finding.project)
+    case 'note':
+      return finding.words
     default:
       return unreachable(finding)
   }

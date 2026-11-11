@@ -1,0 +1,127 @@
+:global(html),
+:global(body),
+:global(#root) {
+  height: 100%;
+  margin: 0;
+}
+.lab {
+  display: grid;
+  grid-template-rows: 1fr auto;
+  height: 100%;
+  background: var(--n-1);
+  color: var(--t-1);
+}
+.scene {
+  min-height: 0;
+  overflow: auto;
+  display: flex;
+}
+.scene > * {
+  flex: 1;
+  min-width: 0;
+}
+/* A project's settings sheet and a task's outputs, as the app lays them. */
+.project {
+  padding: 24px 48px 48px;
+  background: var(--n-2);
+  display: grid;
+  gap: 16px;
+  align-content: start;
+}
+.sheet {
+  max-width: 980px;
+  padding: 18px 22px;
+  border-radius: 12px;
+  background: var(--n-1);
+}
+.remoteRow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+  font-size: 13px;
+  color: var(--t-3);
+}
+.outputs {
+  max-width: 980px;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  align-items: start;
+}
+.where {
+  font-size: 12px;
+  color: var(--t-3);
+  margin: 0 0 6px;
+}
+.extra {
+  margin-top: 18px;
+  display: grid;
+  gap: 10px;
+}
+.extraLabel {
+  font-size: 12px;
+  font-weight: 550;
+  color: var(--t-2);
+}
+.extraNote {
+  font-size: 12px;
+  color: var(--t-3);
+  margin: 0;
+}
+.branchRow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+  color: var(--t-2);
+}
+.branchRow input {
+  width: 140px;
+}
+/* The lab's own bar: what's shown, and what happens today. */
+.bars {
+  border-top: 1px solid var(--line);
+  background: var(--n-2);
+  font-size: 12px;
+}
+.bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  padding: 5px 10px;
+}
+.bar + .bar {
+  border-top: 1px solid var(--line);
+}
+.barName {
+  width: 70px;
+  color: var(--t-4);
+}
+.bar button {
+  padding: 4px 10px;
+  border-radius: 6px;
+  color: var(--t-2);
+}
+.bar button[aria-pressed='true'] {
+  background: var(--n-0);
+  color: var(--t-1);
+  box-shadow: 0 0 0 1px var(--line-2);
+}
+.bar kbd {
+  font-family: var(--mono);
+  color: var(--t-4);
+  margin-right: 4px;
+}
+.spacer {
+  flex: 1;
+}
+.caption {
+  padding: 6px 10px 8px 84px;
+  color: var(--t-2);
+  line-height: 1.45;
+  max-width: 1100px;
+}
