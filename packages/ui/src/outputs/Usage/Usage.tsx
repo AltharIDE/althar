@@ -69,12 +69,28 @@ export const usageText: UsageText = {
   byModel: (models) => models.map((model) => `${model.name} ${tokensWord(model.tokens)}`).join(' · ') + ' tokens',
 }
 
-/** A known figure, said as an estimate where it is one. */
+/** Under a tenth of a point, the figure is a bound already ("< 0.1%"), so it takes no "~" as well. */
+const bounded = (line: UsageLine) => line.took !== undefined && line.took !== null && line.took < 0.1
+
+/** A known figure, said as an estimate where it is one: one qualifier at most. */
 const said = (line: UsageLine, figure: string, t: UsageText) =>
-  figure !== t.unknown && line.estimated === true ? t.estimate(figure) : figure
+  figure !== t.unknown && line.estimated === true && !bounded(line) ? t.estimate(figure) : figure
 
 /** A line's figure, said whole: ~8% of week, or $21.59. */
 const figureOf = (line: UsageLine, t: UsageText) => said(line, wholeOf(line, t), t)
+
+/** A line's figure, said whole, for a consumer that lays its lines out itself (the composer's context ring). */
+export const usageFigure = (line: UsageLine, text?: Partial<UsageText>) => figureOf(line, { ...usageText, ...text })
+
+/** What ran on a line, and its tokens, as its second line says it; the models in `known` left out, as already said nearby. */
+export const usageWhat = (line: UsageLine, known: ReadonlyArray<string> = [], text?: Partial<UsageText>) => {
+  const t = { ...usageText, ...text }
+  if (line.byModel !== undefined && line.byModel.length > 1) return t.byModel(line.byModel)
+  return t.what(
+    line.models.filter((model) => !known.includes(model)),
+    line.tokens,
+  )
+}
 
 const wholeOf = (line: UsageLine, t: UsageText) =>
   line.took !== undefined
@@ -118,7 +134,7 @@ export function UsageLines({ lines, heading, text }: UsageLinesProps) {
               <span>{line.name}</span>
             </span>
             <span className={s.what} data-marked={line.mark !== undefined || undefined}>
-              {line.byModel !== undefined && line.byModel.length > 1 ? t.byModel(line.byModel) : t.what(line.models, line.tokens)}
+              {usageWhat(line, [], text)}
             </span>
             <Figure line={line} t={t} />
           </li>
