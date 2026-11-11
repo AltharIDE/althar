@@ -603,6 +603,7 @@ describe('the API', () => {
               HoldPlan: () => Effect.void,
               ChangePlan: () => Effect.void,
               ChangeTeam: () => Effect.void,
+              DeclineReview: () => Effect.void,
               ChangeIssueDraft: () => Effect.void,
               FileIssueDraft: () => Effect.void,
               DiscardIssueDraft: () => Effect.void,

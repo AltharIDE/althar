@@ -144,3 +144,8 @@
 .mark-ok {
   background: var(--ok);
 }
+
+/* the offer made once: quiet, a step above the card's strip */
+.offered {
+  min-width: 0;
+}

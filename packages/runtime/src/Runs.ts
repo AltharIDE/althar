@@ -767,6 +767,11 @@ export class Runs extends Context.Service<
      */
     skipReview(input: { readonly envelope: CommandEnvelope; readonly taskId: string }): Effect.Effect<void, unknown>
     /**
+     * Turns down the review a change was offered as its work turned real: it isn't offered again. Nothing where it was turned
+     * down already. NotFound for a task that isn't one.
+     */
+    declineReview(taskId: string, actorId: ActorId): Effect.Effect<void, unknown>
+    /**
      * Ships what waits on the task's branch, on the person's word (a task is
      * a conversation plus parts, "A tweak waits for Ship"): its review first,
      * where the plan has one before the work ships, over everything since the
@@ -7087,6 +7092,27 @@ export class Runs extends Context.Service<
           return underWay
         })
 
+      /** Turns down the review a task's change was offered: kept once, so it isn't offered again, whoever turned it down. */
+      const declineReview = (taskId: string, actorId: ActorId) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const [task] = yield* sql<{ projectId: ProjectId; revision: number }>`SELECT project_id, revision FROM tasks WHERE id = ${taskId}`
+          if (task === undefined) return yield* new NotFound({ kind: 'task', id: taskId })
+          const [known] = yield* sql<{ one: number }>`
+            SELECT 1 AS one FROM record_events WHERE aggregate_type = 'task' AND aggregate_id = ${taskId}
+              AND type = 'task.review_offer_declined' LIMIT 1`
+          if (known !== undefined) return
+          yield* fact({
+            projectId: task.projectId,
+            aggregateType: 'task',
+            aggregateId: taskId,
+            revision: task.revision,
+            type: 'task.review_offer_declined',
+            actorId,
+          })
+          yield* touchCard(taskId)
+        })
+
       /**
        * A review added after the task's work went up (a skipped review can be added back until merge): once its lead's turn is
        * over and the run that was ending is, a round of the review's own reads the task's head, from the last review or, with
@@ -7259,6 +7285,8 @@ export class Runs extends Context.Service<
                 : ('now' as const)
               : ('now' as const)
           yield* touchCard(input.taskId)
+          // A review the person took off is one they turned down: it isn't offered again.
+          if (reviewChanges && reviewed && !reviews) yield* declineReview(input.taskId, input.actorId)
           // A review added where its run is over, or at its ending, has no round to come in it: it reads the head now.
           if (reviewChanges && reviews && !reviewed && reviewWhen === 'now') {
             const [last] = yield* sql<{ state: string; late: number }>`
@@ -7377,6 +7405,7 @@ export class Runs extends Context.Service<
       return Runs.of({
         run: (planId) => provide(run(planId)),
         skipReview: (input) => provide(skipReview(input)),
+        declineReview: (taskId, actorId) => provide(declineReview(taskId, actorId)),
         mergeWaiting: (input) => provide(mergeWaiting(input)),
         ship: (input) =>
           provide(

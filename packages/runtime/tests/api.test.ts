@@ -2021,6 +2021,13 @@ describe('the coordinator, through the API', () => {
             .message,
           "That task isn't there any more.",
         )
+        // Turning down an offered review is kept once, for a task that is there, and refused for one that isn't.
+        yield* client.DeclineReview({ commandId: commandId(), taskId: task.id })
+        yield* client.DeclineReview({ commandId: commandId(), taskId: task.id })
+        assert.strictEqual(
+          (yield* Effect.flip(client.DeclineReview({ commandId: commandId(), taskId: 'tsk_missing' }))).message,
+          "That task isn't there any more.",
+        )
       }),
     ),
   )

@@ -2474,9 +2474,16 @@ export const TaskCard = Schema.Struct({
   nothingBuilt: Schema.optional(Schema.Boolean),
   /**
    * When a change of its reviewer takes effect, once its steps have begun: `now`, before its review round starts or between
-   * rounds; `next_round`, in a round under way; `never`, once its review is done. Absent before its plan runs.
+   * rounds; `next_round`, in a round under way; `never`, once a review of it ran to its end: a skipped review is not a done one.
+   * Absent before its plan runs.
    */
   reviewerChange: Schema.optional(Schema.Literals(['now', 'next_round', 'never'])),
+  /**
+   * A change whose work turned real with no review (a prototype or chat asked to harden it, a pull request opened on it) is
+   * offered one, once: the reviewer the project's rules would pick, another maker's than the lead's. The person adds it
+   * (ChangeTeam with this step) or turns it down (DeclineReview), and it doesn't come back. Absent otherwise.
+   */
+  reviewOffer: Schema.optional(PlanStep),
   /** The step it is on, by key, while it runs. */
   step: Schema.NullOr(Schema.String),
   /** It runs a round of work after its plan, as the person asked its lead for more (ADR-034). */
@@ -4597,7 +4604,8 @@ export const Api = RpcGroup.make(
   ),
   /**
    * Changes who leads and who reviews a task at any time before it merges. Its lead changes from its next turn, never in the one it
-   * is in; its reviewer until its review round starts, and from the next round during one, not once its review is done.
+   * is in; its reviewer until its review round starts, and from the next round during one, not once a review of it ran to its
+   * end. A review skipped or never planned can be added until the task merges; where its work is up already, it starts a round.
    */
   command('ChangeTeam', { taskId: Schema.String, steps: Schema.Array(PlanStep) }, Schema.Void),
   /** Changes what an issue the coordinator drafted says, before it is filed. */
@@ -5223,6 +5231,8 @@ export const Api = RpcGroup.make(
   command('OpenChange', { taskId: Schema.String }, Schema.Void),
   /** Skips the review of the task's run under way: a review under way stops, and work whose lead is done is ready (ADR-034). */
   command('SkipReview', { taskId: Schema.String }, Schema.Void),
+  /** Turns down the review a change was offered as its work turned real: it isn't offered again. */
+  command('DeclineReview', { taskId: Schema.String }, Schema.Void),
   /**
    * Ships what waits on the task's branch, as the person said (a task is a
    * conversation plus parts, "A tweak waits for Ship"): its review first,

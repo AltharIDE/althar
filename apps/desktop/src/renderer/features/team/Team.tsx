@@ -23,8 +23,9 @@ import { ENDS, endOf } from '../project/Card'
  * free agent, nothing of it begun, can still change (`planWaits`), as its
  * card says. Once it has begun, its team still changes until it is settled, through
  * ChangeTeam: its lead from its next turn, its reviewer until its review round
- * starts, from the next round during one, and not once its review is done. Merged,
- * it stays as it is.
+ * starts, from the next round during one, and not once a review of it ran to its end:
+ * a review that was skipped, or never planned, is not a done one, and can be added
+ * until the task merges. Merged, it stays as it is.
  */
 
 export const text = {
@@ -43,6 +44,8 @@ export const text = {
   nextTurn: 'From its next turn.',
   nextRound: 'From the next round.',
   reviewDone: 'The review is done, so the reviewer stays.',
+  /** A review added to a change whose work is up already: it starts on saving. */
+  readsNow: 'Its review starts now, on the change as it stands.',
   merged: 'It’s merged, so its team stays.',
   settled: 'It’s settled, so its team stays.',
 }
@@ -200,6 +203,8 @@ export function ChangeTeam({
         ]
       : plan.steps
   const steps = withEdits(given, edits)
+  // Its review was skipped or never planned: adding one now reads the change as it stands.
+  const wasUnreviewed = plan.steps.find((step) => step.key === 'review')?.skipped !== false
   const ending = end === undefined ? plan.end : end
   // Only the agents the plan allows: a review's lead only reads, so an agent that can't be held to that isn't offered.
   const allowed = plan.agents
@@ -257,7 +262,9 @@ export function ChangeTeam({
                       ? text.nextTurn
                       : now.reviewerChange === 'next_round'
                         ? text.nextRound
-                        : undefined,
+                        : step.key === 'review' && !step.skipped && wasUnreviewed && now.change?.state === 'open'
+                          ? text.readsNow
+                          : undefined,
                 }
               : step.key === 'implement' && plan.reason !== null
                 ? { why: plan.reason }

@@ -36,6 +36,35 @@ The person can change who reviews at any time before the task merges, as
 Change the team does; a review under way finishes with the reviewer it
 started with, and the next round takes the new one.
 
+### A skipped review is not a done review
+
+A reviewer can't change once a review of the task **ran to its end** (it
+passed, or went on to the run's ending). A review that was **skipped**,
+taken off or never planned (a prototype's plan has none) is not that: until
+the task merges, the person adds a reviewer from Change the team, and picks
+its model; the coordinator's `change_lead` does the same, as one path
+(`Runs.changeTeam`, `reviewerChange`). A review that really ran keeps its
+rule: it can't change, though Review again stays.
+
+Adding one after the work is pushed starts a review round on the task's
+current head (`reviewHead`, a Ship run that only reviews: `ships.reviewOnly`),
+once the lead's turn is over: it reads only what changed since the last
+review where one ran, else the whole change. Its findings go to the lead to
+settle as any round's, before merge or Ship. Where work still waits for Ship,
+nothing starts: Ship reviews it all, as the plan says. The fast lane's review
+reads after the merge, and isn't added to.
+
+### The review is offered once, as the work turns real
+
+When a task's work turns into a real change with no review (its lead made
+a prototype or chat a change, or opened a pull request on a task whose plan
+has none), its card says "Add a review?" quietly, with the reviewer the
+project's rules would pick: the strongest free model, another maker's than
+the lead's (`reviewOffer`, `Limits.free`). It adds nothing by itself. Add
+goes through Change the team's command; No thanks (`DeclineReview`)
+turns it down, and so does taking a review off: it isn't offered again
+(`task.review_offer_declined`).
+
 ## How a review round runs
 
 - **The reviewer reads a copy, not the lead's worktree:** a throwaway copy of
@@ -69,7 +98,8 @@ started with, and the next round takes the new one.
   read by nothing.
 - **The person can skip a round's review** from the task's menu: a review
   under way stops, and a round whose lead is done concludes. The next round
-  has its review again.
+  has its review again, and a skipped review can be added back until the
+  task merges ([above](#a-skipped-review-is-not-a-done-review)).
 - **Ship is reviewed as the plan says,** where it has a reviewer before the
   work ships: one pass over what came after the commit the last review read,
   found by its tree, as pushing may have credited it since. What the person's

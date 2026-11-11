@@ -63,6 +63,7 @@ import { teamChangeOf, TeamMenu } from '../team/Team'
 import s from './Board.module.css'
 import { type Held, heldOf, holding, type Lanes, type Waiting } from './lanes'
 import type { LineActions } from './useBoard'
+import { ReviewOfferOf } from './ReviewOfferOf'
 import type { WorkActions } from './useWorkActions'
 
 /*
@@ -387,6 +388,9 @@ const findingsOf = (reviewing: ReviewBrief) => {
 
 /** The card's own props, without how it opens. */
 type Card = Omit<BoardCardProps, 'onOpen' | 'current' | 'text'>
+
+/** The review a change is offered once, quietly, on its card: only where it has one to offer. */
+const offerOf = (work: BoardTask): Pick<Card, 'offer'> => (work.reviewOffer === undefined ? {} : { offer: <ReviewOfferOf work={work} /> })
 
 /** The automation whose run a task is, as its card says it, quietly. */
 /** Where it came from, at its foot: the automation whose run it is, or the task whose lead started it (ADR-097). */
@@ -1163,6 +1167,7 @@ export function BoardView({
             data-move={work.taskId}
             {...runningCardOf(work, now, name, actions)}
             errands={work.errands}
+            {...offerOf(work)}
             onOpen={() => onOpen(work.threadId)}
           />
         ))}
@@ -1183,7 +1188,13 @@ export function BoardView({
           ),
         )}
         {lanes.stopped.map((work) => (
-          <BoardCard key={work.taskId} {...stoppedCardOf(work, now, actions)} errands={work.errands} onOpen={() => onOpen(work.threadId)} />
+          <BoardCard
+            key={work.taskId}
+            {...stoppedCardOf(work, now, actions)}
+            errands={work.errands}
+            {...offerOf(work)}
+            onOpen={() => onOpen(work.threadId)}
+          />
         ))}
         {lanes.ready.map((work) => (
           <BoardCard
@@ -1191,6 +1202,7 @@ export function BoardView({
             data-move={work.taskId}
             {...readyCardOf(work, actions)}
             errands={work.errands}
+            {...offerOf(work)}
             onOpen={() => onOpen(work.threadId)}
           />
         ))}

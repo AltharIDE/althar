@@ -106,6 +106,28 @@ describe('changing the team of a task that has begun', () => {
     expect(plain.getByRole('button', { name: /^Implement:/ })).toBeTruthy()
   })
 
+  it('adds a skipped review back to a change whose work is up, and says its review starts now', async () => {
+    const skipped = {
+      kind: 'change' as const,
+      phase: 'ready' as const,
+      change: change({ state: 'open' }),
+      reviewerChange: 'now' as const,
+      plan: { ...card().plan!, steps: card().plan!.steps.map((step) => (step.key === 'review' ? { ...step, skipped: true } : step)) },
+    }
+    const { client } = fakeClient()
+    const dialog = opened(skipped, client)
+    expect(dialog.getByText('No review')).toBeTruthy()
+    await userEvent.click(dialog.getByRole('button', { name: 'Add a review' }))
+    expect(dialog.getByText('Its review starts now, on the change as it stands.')).toBeTruthy()
+    await userEvent.click(dialog.getByRole('button', { name: 'Save' }))
+    await waitFor(() =>
+      expect(client.changeTeam).toHaveBeenCalledWith('r', [
+        { key: 'implement', agentId: 'claude-code', model: null, skipped: false },
+        { key: 'review', agentId: 'codex', model: null, skipped: false },
+      ]),
+    )
+  })
+
   it('offers adding a review to a plan made with no review step at all, and saves it as one', async () => {
     const none = (kind: BoardTask['kind']) => ({
       kind,

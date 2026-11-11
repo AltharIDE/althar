@@ -1401,6 +1401,48 @@ describe('changing the team of a task that has begun', () => {
     }).pipe(Effect.provide(runtimeWith(github, ':memory:', { holds: slow })))
   })
 
+  it.live('offers a review once, as the work turns into a real change, and not again once turned down', () => {
+    const { working, github } = onGitHub()
+    const slow = holds()
+    return Effect.gen(function* () {
+      const instance = yield* Instance
+      const task = yield* start(working, '[lead:slowly] [lead:finish] [lead:edit] [review:pass]')
+      const offer = () => Effect.map(cards(task.projectId), (all) => all[0]?.reviewOffer)
+      // Planned with a reviewer: nothing to offer.
+      assert.strictEqual(yield* offer(), undefined)
+      // A plan made with no review, as a prototype's: its person never turned one down.
+      yield* withoutReview(task.taskId)
+      slow.open('[lead:slowly]')
+      yield* until(cards(task.projectId), (all) => all[0]?.phase === 'ready' && all[0]?.change != null)
+      // Its pull request is open and it has no review: the one the rules would pick, another maker's than the lead's.
+      const offered = yield* offer()
+      assert.deepStrictEqual([offered?.key, offered?.agentId, offered?.skipped], ['review', 'codex', false])
+      // Nothing was added by itself.
+      assert.deepStrictEqual(
+        (yield* planOf(task.taskId)).steps.map((one) => [one.key, one.skipped]),
+        [['implement', false]],
+      )
+      // Turned down, it doesn't come back, however often it is asked again, and the review can still be added by hand.
+      yield* (yield* Runs).declineReview(task.taskId, instance.personId)
+      yield* (yield* Runs).declineReview(task.taskId, instance.personId)
+      assert.strictEqual(yield* offer(), undefined)
+      assert.strictEqual((yield* cards(task.projectId))[0]?.reviewerChange, 'now')
+    }).pipe(Effect.provide(runtimeWith(github, ':memory:', { holds: slow })))
+  })
+
+  it.live('offers no review to a change whose review the person took off', () => {
+    const { working, github } = onGitHub()
+    const slow = holds()
+    return Effect.gen(function* () {
+      const task = yield* start(working, '[lead:slowly] [lead:finish] [lead:edit] [review:pass]')
+      yield* changeTeam(task.taskId, [step('implement', 'claude-code'), step('review', 'codex', null, true)])
+      slow.open('[lead:slowly]')
+      yield* until(cards(task.projectId), (all) => all[0]?.phase === 'ready' && all[0]?.change != null)
+      // Taken off before: the person turned it down.
+      assert.strictEqual((yield* cards(task.projectId))[0]?.reviewOffer, undefined)
+    }).pipe(Effect.provide(runtimeWith(github, ':memory:', { holds: slow })))
+  })
+
   it.live('lets a skipped review be added where its run is at its publishing, which has no review in it', () => {
     const { working, github } = onGitHub()
     const slow = holds()
