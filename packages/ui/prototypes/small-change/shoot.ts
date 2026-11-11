@@ -24,7 +24,7 @@ const shot = async (name: string, query: string) => {
   await page.waitForTimeout(700)
   await page.screenshot({ path: join(out, `${name}.png`), fullPage: true })
 }
-for (const d of ['now', 'a', 'b', 'c', 'd']) {
+for (const d of (process.argv[2] ?? 'now,a,b,c,d,e,f,g,h').split(',')) {
   await shot(`${d}-grid-light`, `d=${d}&theme=light&only=grid`)
   await shot(`${d}-grid-dark`, `d=${d}&theme=dark&only=grid`)
   await page.setViewportSize({ width: 640, height: 900 })

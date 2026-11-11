@@ -17,6 +17,7 @@ import { StrictMode, useEffect, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 
 import { DIRECTIONS, type Direction } from './directions'
+import { EXPLAINS } from './explain'
 import { type SmallState, SOL, SONNET, STATES } from './states'
 import p from './page.module.css'
 
@@ -77,7 +78,9 @@ const NOW: Direction = {
   Card: Now,
 }
 
-const ALL: readonly Direction[] = [NOW, ...DIRECTIONS]
+const ALL: readonly Direction[] = [NOW, ...DIRECTIONS, ...EXPLAINS]
+/** The second round, which explains the lane: its card opens the thread. */
+const OPENS = new Set(EXPLAINS.map((d) => d.key))
 const params = new URLSearchParams(location.search)
 const SHOT = params.has('shot')
 const ONLY = params.get('only')
@@ -92,18 +95,21 @@ const PLAN: LaunchStep[] = [
 function Neighbours({ dir, state }: { dir: Direction; state: SmallState }) {
   return (
     <div className={p.thread}>
-      <TaskLaunch
-        task="762"
-        preset="Change"
-        title="Launch screen loses its startup status text"
-        project="althar"
-        estimate="About 25 min"
-        steps={PLAN}
-        picker={({ agent }) => <Model model={agent} short />}
-        held
-        onStart={() => {}}
-      />
-      <dir.Card key={dir.key + state.key} state={state} />
+      {OPENS.has(dir.key) && <dir.Card key={dir.key + state.key} state={state} />}
+      {!OPENS.has(dir.key) && (
+        <TaskLaunch
+          task="762"
+          preset="Change"
+          title="Launch screen loses its startup status text"
+          project="althar"
+          estimate="About 25 min"
+          steps={PLAN}
+          picker={({ agent }) => <Model model={agent} short />}
+          held
+          onStart={() => {}}
+        />
+      )}
+      {!OPENS.has(dir.key) && <dir.Card key={dir.key + state.key} state={state} />}
       <ChangeSet
         state={ChangeState.Ready}
         prs={[
@@ -135,7 +141,7 @@ function Neighbours({ dir, state }: { dir: Direction; state: SmallState }) {
 }
 
 function Page() {
-  const [dirKey, setDir] = useState(() => ALL.find((d) => d.key === params.get('d'))?.key ?? 'a')
+  const [dirKey, setDir] = useState(() => ALL.find((d) => d.key === params.get('d'))?.key ?? 'e')
   const [theme, setTheme] = useState(params.get('theme') === 'dark' ? 'dark' : 'light')
   const [live, setLive] = useState(() => Math.max(0, Number(params.get('s') ?? 5) - 1))
   const dir = ALL.find((d) => d.key === dirKey) ?? NOW

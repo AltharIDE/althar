@@ -1,0 +1,100 @@
+.sentence {
+  margin: -6px 0 10px;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--t-2);
+  text-wrap: pretty;
+}
+.gap {
+  height: 10px;
+}
+.skipped {
+  color: var(--t-4);
+}
+.dash {
+  display: block;
+  width: 6px;
+  height: 1.2px;
+  background: var(--t-4);
+}
+.why {
+  margin-left: 8px;
+  font-size: 12px;
+  color: var(--t-3);
+}
+/* G: the meta line, which opens to how small changes work */
+.trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: -6px;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  color: var(--t-3);
+  cursor: pointer;
+}
+.trigger:hover span {
+  color: var(--t-2);
+}
+.how {
+  display: grid;
+  gap: 6px;
+  margin: 8px 0 0;
+  padding: 10px 12px;
+  border-radius: var(--r-md, 8px);
+  background: var(--n-2);
+  list-style: none;
+  font-size: 12.5px;
+  line-height: 1.45;
+  color: var(--t-2);
+}
+.how li {
+  display: grid;
+  grid-template-columns: 14px minmax(0, 1fr);
+  gap: 8px;
+}
+.how li > svg {
+  margin-top: 3px;
+  color: var(--t-3);
+}
+.how b {
+  font-weight: 550;
+  color: var(--t-1);
+}
+.out {
+  padding-top: 6px;
+  border-top: 1px solid var(--line);
+}
+/* H: small beside full */
+.table {
+  display: grid;
+  gap: 0;
+  margin-top: -2px;
+  font-size: 12.5px;
+}
+.headRow,
+.row {
+  display: grid;
+  grid-template-columns: 64px minmax(0, 1fr) minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+  min-height: 24px;
+}
+.headRow {
+  font-size: 12px;
+  font-weight: 550;
+}
+.row {
+  border-top: 1px solid var(--line);
+}
+.row [role='rowheader'] {
+  color: var(--t-3);
+}
+.on {
+  color: var(--t-1);
+}
+.off {
+  color: var(--t-3);
+}
