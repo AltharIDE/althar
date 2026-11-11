@@ -630,6 +630,26 @@ describe('repeated host news in a thread', () => {
     expect(kinds(build([passed('a1'), items.you('Hi'), passed('a2')]))).toEqual(['checks×1', 'you', 'checks×1'])
   })
 
+  it('keeps same-numbered PRs in different repositories apart', () => {
+    const at = (id: string, url: string) => ({
+      ...items.arrival({ kind: 'checks', from: null, text: null, passed: 3, failed: 0, url }),
+      id,
+    })
+    expect(kinds(build([at('a1', 'https://github.com/o/x/pull/12'), at('a2', 'https://github.com/o/y/pull/12')]))).toEqual([
+      'checks×1',
+      'checks×1',
+    ])
+  })
+
+  it('folds failures only when they show the same details', () => {
+    const bad = (id: string, failing: string[]) => ({
+      ...items.arrival({ kind: 'checks', from: null, text: null, passed: 1, failed: 1, failing }),
+      id,
+    })
+    expect(kinds(build([bad('a1', ['lint']), bad('a2', ['test'])]))).toEqual(['checks×1', 'checks×1'])
+    expect(kinds(build([bad('a1', ['lint']), bad('a2', ['lint'])]))).toEqual(['checks×2'])
+  })
+
   it('never folds what people said', () => {
     expect(kinds(build([items.arrival({ text: 'a' }), items.arrival({ text: 'a' })]))).toEqual(['comment×1', 'comment×1'])
   })
