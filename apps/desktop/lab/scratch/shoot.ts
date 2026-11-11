@@ -82,8 +82,12 @@ async function asides() {
     return page
   }
   const top = async (page: Page) => {
-    await page.evaluate(() => document.querySelector('[class*="Project-module__talk"] [class*="TaskFace-module__scroll"]')?.scrollTo(0, 0))
-    await page.waitForTimeout(300)
+    await page.evaluate(() =>
+      [...document.querySelectorAll('[class*="Project-module__talk"] article[class*="Turn-module__turn"]')]
+        .find((one) => one.textContent?.includes('It backs off in two places'))
+        ?.scrollIntoView({ block: 'center' }),
+    )
+    await page.waitForTimeout(400)
   }
   const shoot = async (page: Page, name: string, clip?: { x: number; y: number; width: number; height: number }) => {
     await page.screenshot({ path: join(out, `${name}.png`), ...(clip === undefined ? {} : { clip }) })
@@ -94,7 +98,7 @@ async function asides() {
     for (const theme of at === 0 ? ['light', 'dark'] : ['light']) {
       const page = await open(`l=1&m=${mark}&theme=${theme}`)
       await top(page)
-      await shoot(page, `c1-mark-${at + 6}-${mark}${theme === 'dark' ? '-dark' : ''}`, { x: 0, y: 44, width: 1360, height: 340 })
+      await shoot(page, `c1-mark-${at + 6}-${mark}${theme === 'dark' ? '-dark' : ''}`, { x: 0, y: 44, width: 1360, height: 560 })
       await page.close()
     }
   }
