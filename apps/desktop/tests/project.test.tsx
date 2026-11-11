@@ -499,7 +499,7 @@ describe('the Talk room', () => {
     expect(client.startPlan).toHaveBeenCalledWith('pln1')
   })
 
-  it('plans a review of someone else’s pull request with its one lead, offering only agents held to reading', async () => {
+  it('plans a review of someone else’s pull request with its one lead, offering every agent', async () => {
     const review = card({
       slug: 'review-1199-send-back',
       title: 'Review #1199: Send back won’t restart a dead lead session',
@@ -523,7 +523,6 @@ describe('the Talk room', () => {
         ...card().plan!,
         steps: [{ key: 'implement', agentId: 'claude-code', model: null, skipped: false }],
         reason: 'Strong at reading.',
-        agents: ['claude-code'],
       },
     })
     const { client } = fakeClient({ getCoordinator: vi.fn(async () => coordinatorSnapshot({ items: [items.card(review)] })) })
@@ -534,10 +533,10 @@ describe('the Talk room', () => {
     expect(screen.queryByText('Strong at reading.')).toBeNull()
     expect(screen.queryByRole('button', { name: 'Skip' })).toBeNull()
     expect(screen.queryByText('When the work is done')).toBeNull()
-    // Codex can't be held to reading only, so it isn't offered.
+    // Any agent may lead it: Codex is offered too.
     await userEvent.click(lead)
     expect(await screen.findByRole('radio', { name: /Claude Code default/ })).toBeTruthy()
-    expect(screen.queryByRole('radio', { name: /gpt-5\.2-codex/ })).toBeNull()
+    expect(screen.getByRole('radio', { name: /gpt-5\.2-codex/ })).toBeTruthy()
     await userEvent.click(screen.getByRole('radio', { name: 'High' }))
     await waitFor(() =>
       expect(client.changePlan).toHaveBeenLastCalledWith(

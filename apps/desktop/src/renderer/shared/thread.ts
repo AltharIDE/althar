@@ -172,7 +172,7 @@ export type Block =
     }
   | { readonly kind: 'card'; readonly id: string; readonly card: TaskCardContent }
   /** Something heard from outside: a comment on the task's pull request, its checks, its merge. */
-  | { readonly kind: 'arrival'; readonly id: string; readonly at: string; readonly arrival: ArrivalContent }
+  | { readonly kind: 'arrival'; readonly id: string; readonly at: string; readonly arrival: ArrivalContent; readonly count: number }
   /** A question an agent asked the person, standing on its own, as the turn waited on it: answered where it is. */
   | { readonly kind: 'question'; readonly id: string; readonly at: string; readonly question: QuestionContent }
   /** A run of the project Althar started, where it was asked for (ADR-023). */
@@ -610,6 +610,27 @@ const ANSWER_BLOCK = /^ {0,3}(?:[-*+] |\d{1,3}[.)] |#{1,6} |```|~~~|\|)/m
 export const answers = (message: { readonly text: string; readonly answer?: boolean }): boolean =>
   message.answer ?? (message.text.trim().length > NOTE_LENGTH || ANSWER_BLOCK.test(message.text))
 
+/** Whether news is only that: it says the same again, with no words of someone's to lose. */
+const FOLDS = new Set(['checks', 'merged', 'closed', 'ready'])
+
+/**
+ * Where the news repeats the line just before it (same kind, outcome, pull
+ * request and sender, nothing between), one line with the latest time and a
+ * count. The records keep both.
+ */
+export const foldArrival = (last: Block | undefined, next: Extract<Block, { kind: 'arrival' }>): Block => {
+  if (last?.kind !== 'arrival') return next
+  const a = last.arrival
+  const b = next.arrival
+  const same =
+    FOLDS.has(b.kind) &&
+    a.kind === b.kind &&
+    a.where === b.where &&
+    a.from === b.from &&
+    ((a.failed ?? 0) === 0) === ((b.failed ?? 0) === 0)
+  return same ? { ...next, id: last.id, count: last.count + 1 } : next
+}
+
 export const text = { thinking: 'Thinking' }
 
 /** The blocks of a thread, oldest first, with what is still being written but not yet read at the end. */
@@ -697,7 +718,15 @@ export const blocksOf = (
         continue
       }
       case 'arrival':
-        blocks.push({ kind: 'arrival', id: item.id, at: ago(item.createdAt), arrival: item.content })
+        const folded = foldArrival(blocks.at(-1), {
+          kind: 'arrival',
+          id: item.id,
+          at: ago(item.createdAt),
+          arrival: item.content,
+          count: 1,
+        })
+        if (folded.kind === 'arrival' && folded.count > 1) blocks[blocks.length - 1] = folded
+        else blocks.push(folded)
         continue
       case 'step_result': {
         // The step ended with this: the turn that did the work ran until now.

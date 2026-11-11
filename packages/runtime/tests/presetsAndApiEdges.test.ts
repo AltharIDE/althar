@@ -174,7 +174,7 @@ describe('presets, through the API', () => {
           reviewer: null,
           brief: 'Retry the checkout.\nTwice at most.\nThen give up.',
         })
-        assert.strictEqual(own[2]?.about, 'Local, reviewed before it ships, a pull request ready for review, led by large')
+        assert.strictEqual(own[2]?.about, 'Local, reviewed before it ships, a pull request ready for review, led by Large')
 
         // With neither a task nor parts there is nothing to keep, and a task that went has none either: neither is saved.
         assert.strictEqual(
@@ -295,6 +295,7 @@ describe('a preset a task’s card offers', () => {
     proposer: ActorId,
     steps: ReadonlyArray<{ key: 'implement' | 'review'; agentId: string; model: string | null; skipped: boolean }>,
     titles: ReadonlyArray<string>,
+    end: 'draft' | 'ready' | null = null,
   ) =>
     Effect.forEach(titles, (title) =>
       Effect.gen(function* () {
@@ -302,7 +303,15 @@ describe('a preset a task’s card offers', () => {
         yield* store(
           Effect.gen(function* () {
             const plans = yield* Plans
-            yield* plans.propose({ projectId: project.id as ProjectId, taskId: one.id, steps, reason: null, actorId: proposer, held: true })
+            yield* plans.propose({
+              projectId: project.id as ProjectId,
+              taskId: one.id,
+              steps,
+              reason: null,
+              actorId: proposer,
+              held: true,
+              end,
+            })
             // Started, without running it: the offer looks at started plans.
             const sql = yield* SqlClient.SqlClient
             yield* sql`UPDATE task_plans SET state = 'accepted' WHERE task_id = ${one.id}`
@@ -357,10 +366,16 @@ describe('a preset a task’s card offers', () => {
     Effect.scoped(
       Effect.gen(function* () {
         const made = yield* connected
-        // Prototype but for its review after merge.
+        // Prototype as it is: nothing new to keep.
         const opus = [{ key: 'implement', agentId: 'claude-code', model: 'claude-opus-5-5', skipped: false }] as const
-        const near = yield* started(made, made.personId, opus, ['Try a', 'Try b', 'Try c'])
-        assert.deepInclude((yield* offerOn(made, near[2] ?? ''))?.near, { preset: 'Prototype', differs: 'without its review after merge' })
+        const prototypes = yield* started(made, made.personId, opus, ['Try a', 'Try b', 'Try c'])
+        assert.isUndefined(yield* offerOn(made, prototypes[2] ?? ''))
+        // Prototype but for its pull request: it says so, rather than offer another.
+        const near = yield* started(made, made.personId, opus, ['Ship a', 'Ship b', 'Ship c'], 'ready')
+        assert.deepInclude((yield* offerOn(made, near[2] ?? ''))?.near, {
+          preset: 'Prototype',
+          differs: 'ending in a pull request ready for review',
+        })
         // One of the person’s holds these parts, led by the same model: nothing to offer.
         yield* made.client.SavePreset({
           commandId: commandId(),
@@ -829,21 +844,24 @@ describe('a preset’s parts, on a plan', () => {
     )
   })
 
-  it('reviews with the lead’s agent where it needs a review it lacks, and with Claude Code where it has no lead either', () => {
-    assert.deepStrictEqual(planFromPreset(proposed({ steps: [LEAD] }), parts({})).steps[1], { ...LEAD, key: 'review' })
+  it('never reviews with the lead’s own model: it skips a review it needs and can’t name, to add back, and keeps the plan’s own', () => {
+    assert.deepStrictEqual(planFromPreset(proposed({ steps: [LEAD] }), parts({})).steps[1], {
+      key: 'review',
+      agentId: 'claude-code',
+      model: null,
+      skipped: true,
+    })
     assert.deepStrictEqual(planFromPreset(proposed({ steps: [] }), parts({ checked: 'after', workspace: 'copy' })), {
       steps: [{ key: 'review', agentId: 'claude-code', model: null, skipped: true }],
       end: 'draft',
       reviewAfterMerge: true,
       here: true,
     })
+    assert.deepStrictEqual(planFromPreset(proposed({ steps: [LEAD, REVIEW] }), parts({})).steps[1], { ...REVIEW, skipped: false })
   })
 
-  it('skips a review it has where nothing checks it, and adds none where it has none', () => {
-    assert.deepStrictEqual(planFromPreset(proposed({ steps: [LEAD, REVIEW] }), parts({ checked: 'none' })).steps, [
-      LEAD,
-      { ...REVIEW, skipped: true },
-    ])
+  it('leaves no review row where nothing checks it, one it had included, and adds none where it has none', () => {
+    assert.deepStrictEqual(planFromPreset(proposed({ steps: [LEAD, REVIEW] }), parts({ checked: 'none' })).steps, [LEAD])
     assert.deepStrictEqual(planFromPreset(proposed({ steps: [LEAD], worksIn: 'checkout' }), parts({ checked: 'none' })), {
       steps: [LEAD],
       end: 'draft',

@@ -122,14 +122,17 @@ its own kind.
 
 - **Its lead reads a read-only copy of the pull request's head** that Althar
   fetched: detached, on no branch, with git running with none of the person's
-  config (`addReadCopy`). It runs in reader mode under the reader rules and
-  runs nothing of the pull request's code. No setup or run touches the copy.
+  config (`addReadCopy`). It runs in reader mode under the reader rules. No
+  setup or run touches the copy, and nothing it does reaches the host but the
+  draft review the person posts.
 - **A review of the repository's own people** gets every lead tool, and its
   commands reach the network as a lead's do. **An outside author's** gets
   the six reading tools.
-- **Only an agent its session can hold to reading leads one.** One that runs
-  whatever its sandbox contains without asking, such as Codex, could run the
-  pull request's code, so it is refused with the names of those that can.
+- **Any model leads one,** Codex's GPT models included. Codex runs what its
+  read-only sandbox contains without asking, so as a review's lead it may run
+  the pull request's scripts there: offline for an outside author's, writing
+  nothing, held by the OS sandbox. That is the sandbox doing its job, not a
+  reason to refuse the agent (the person's note of 11 Nov).
 - **An outside author's pull request stays offline.** An outside author is
   someone on a fork, or someone the host doesn't name a member or
   collaborator. The review's commands reach no network, and none of the
@@ -277,3 +280,4 @@ A round that forgets `kept_views` shows less, never something stale.
 - 9 Nov 2026: a fix is checked only where it needs it, tiny ones not at all, and Ship is reviewed from where the last review left off (a task is a conversation plus parts, [tasks](tasks.md#changing-parts)).
 - 10 Nov 2026: Run it, safely or trusted, with its setting; any task can review a related pull request beside its own work (a task is a conversation plus parts).
 - 10 Nov 2026: Stop running it; Run safely names the lockfile's entries from a git host or a tarball that didn't install.
+- 11 Nov 2026: any model leads a review of someone else's pull request; the refusal of agents that "can't be held to reading only" is gone.

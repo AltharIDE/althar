@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
-import { useMemo, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { expect, userEvent, waitFor, within } from 'storybook/test'
 
 import { Behind } from '../../composer/Behind/Behind'
@@ -218,3 +218,97 @@ export const LastMessageClearsTheEdge: Story = {
     await expect(alert.getBoundingClientRect().bottom).toBeLessThanOrEqual(keep.getBoundingClientRect().top)
   },
 }
+
+const LONG = (
+  <>
+    {THREAD}
+    {Array.from({ length: 6 }, (_, i) => (
+      <Turn key={i} model={OPUS} at={`12:${10 + i}`}>
+        <Prose>Checked another batch of refunds against the keys: nothing to change, the dry run still matches the ledger.</Prose>
+      </Turn>
+    ))}
+  </>
+)
+const PR_PILL = { id: 'pr', mark: Brand.GitHub, label: 'PR #317', what: 'review comments and checks' }
+const TWO_PROCESSES = [
+  { id: 'site', name: 'Site dev server', command: 'bun run dev', url: 'localhost:5173', since: '41m' },
+  { id: 'sb', name: 'Storybook', command: 'bun run storybook', url: 'localhost:6116', since: '22m' },
+]
+
+/* The thread's scroller: the one inside the face that has more to scroll than it shows. */
+const scrollerOf = (root: HTMLElement | null) =>
+  Array.from(root?.querySelectorAll<HTMLElement>('[data-floats-host] *') ?? []).find(
+    (el) => getComputedStyle(el).overflowY === 'auto' && el.scrollHeight > el.clientHeight,
+  )
+
+/* Scrolls the thread inside it to the top once it has a size, as a reader scrolling up would. */
+function ReadingUp({ children, width = 640 }: { children: ReactNode; width?: number }) {
+  const box = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    // after the thread has settled at its end, so the following doesn't take the reader back down
+    const timer = setTimeout(() => scrollerOf(box.current)?.scrollTo({ top: 0 }), 400)
+    return () => clearTimeout(timer)
+  }, [])
+  return (
+    <div ref={box} style={{ height: 520, width }}>
+      {children}
+    </div>
+  )
+}
+
+/* The thread scrolled up to read, so the Latest pill shows, over a composer with `above` on its edge (and a notice, if given). */
+function scrolledUp(above?: ReactNode, opts: { width?: number; notice?: string } = {}): Story {
+  return {
+    render: () => (
+      <ReadingUp width={opts.width}>
+        <TaskFace
+          composer={
+            <Composer value="" onChange={() => {}} onSubmit={() => {}} placeholder="Tell the lead" above={above} notice={opts.notice} />
+          }
+        >
+          <Thread label="Task 432">{LONG}</Thread>
+        </TaskFace>
+      </ReadingUp>
+    ),
+    play: async ({ canvasElement }) => {
+      const c = within(canvasElement)
+      // Needs layout, so these stories are in BROWSER_ONLY (tests/stories.ts): jsdom draws no boxes.
+      const scroller = scrollerOf(canvasElement)
+      await expect(scroller).toBeTruthy()
+      scroller!.scrollTo({ top: 0 })
+      const jump = await c.findByRole('button', { name: /latest/i })
+      // What floats on the edge is one box, however its pills wrap; its top is what the pill must clear.
+      const floats = canvasElement.querySelector('[class*="floats"]')!
+      if (above || opts.notice) {
+        await expect(floats).not.toBeNull()
+        await expect(floats!.childElementCount).toBeGreaterThan(0)
+        await expect(jump.getBoundingClientRect().bottom).toBeLessThan(floats!.getBoundingClientRect().top)
+      } else {
+        // the composer draws no edge at all when nothing floats on it
+        await expect(floats?.childElementCount ?? 0).toBe(0)
+      }
+    },
+  }
+}
+
+/** Scrolled up with nothing on the composer's edge: the pill keeps its place just above the composer. */
+export const ScrolledUp: Story = scrolledUp()
+export const ScrolledUpDark: Story = { ...ScrolledUp, globals: { theme: 'dark' } }
+
+/** One pill on the composer's edge ("Listening to PR #317"): the Latest pill rests above it, not on it. */
+export const ScrolledUpWithOnePill: Story = scrolledUp(<Behind sources={[PR_PILL]} />)
+export const ScrolledUpWithOnePillDark: Story = { ...ScrolledUpWithOnePill, globals: { theme: 'dark' } }
+
+/** Two pills ("Listening to PR #317", "Running 2 processes"): the Latest pill clears both. */
+export const ScrolledUpWithTwoPills: Story = scrolledUp(<Behind sources={[PR_PILL]} processes={TWO_PROCESSES} />)
+export const ScrolledUpWithTwoPillsDark: Story = { ...ScrolledUpWithTwoPills, globals: { theme: 'dark' } }
+
+/** Two things on the edge (a PR chip and a processes chip) and a notice, in a narrow composer: the row wraps, grows taller, and the Latest pill still clears it. */
+export const ScrolledUpWrapped: Story = scrolledUp(
+  <>
+    <Behind sources={[PR_PILL]} />
+    <Behind processes={TWO_PROCESSES} />
+  </>,
+  { width: 300, notice: 'Sending hands this to the lead, who takes over from here and reads what you wrote before it carries on.' },
+)
+export const ScrolledUpWrappedDark: Story = { ...ScrolledUpWrapped, globals: { theme: 'dark' } }

@@ -45,7 +45,6 @@ import {
   QuestionField,
   type ThreadItem,
   ModelMoveItem,
-  type TaskTime,
   type ThreadSnapshot,
   type TurnTime,
   type ScreenshotsOnChange,
@@ -75,7 +74,7 @@ import { taskFindingsOf } from './taskFindings'
 import { filesOf, outputOf, picturesOf } from './handed'
 import { answeredIn, handedOf, issueCardsWaiting, kindOf } from './kinds'
 import { repliedAt } from './replied'
-import { BETWEEN_AGENTS_MS, betweenAgents, byItself, DRAFTING_MS, isMergeable, stillDrafting } from './needsYou'
+import { BETWEEN_AGENTS_MS, betweenAgents, byItself, DRAFTING_MS, isMergeable, stillAsked, stillDrafting } from './needsYou'
 import { mergeNeedsOf, withPushed } from './mergeNeeds'
 import { documentKept, documentText, outputText } from './reading'
 import { type CodeRoot, type CodeRoots, findCode, readCode } from './code'
@@ -171,7 +170,8 @@ const ROUND_REACH = 2_000
  * a pull request.
  */
 const ROUND_ASK = `(i.kind = 'user_message' AND coalesce(u.state, 'delivered') = 'delivered')
-  OR (i.kind = 'notice' AND json_extract(i.content, '$.source') = 'runtime' AND coalesce(json_extract(i.content, '$.role'), '') NOT IN ('aside', 'folder', 'skills'))
+  OR (i.kind = 'notice' AND json_extract(i.content, '$.source') = 'runtime' AND coalesce(json_extract(i.content, '$.role'), '') NOT IN ('aside', 'folder', 'skills')
+    AND json_extract(i.content, '$.situation') IS NULL)
   OR (i.kind = 'step_result' AND json_extract(i.content, '$.step') IN ('review', 'publish'))
   OR i.kind = 'arrival'`
 
@@ -251,15 +251,6 @@ const skillOf = (skill: unknown) => {
     ? { skill: { names: names.filter((name): name is string => typeof name === 'string'), reported: field(skill, 'reported') === true } }
     : {}
 }
-
-/** What a lead's agent could see, as `threads.ts` keeps it. */
-const skillsSeenOf = (skills: unknown) =>
-  (Array.isArray(skills) ? skills : []).flatMap((skill) => {
-    const name = text(skill, 'name')
-    return name === ''
-      ? []
-      : [{ name, path: text(skill, 'path'), from: text(skill, 'from') === 'repository' ? ('repository' as const) : ('person' as const) }]
-  })
 
 interface ItemRow {
   readonly id: string
@@ -534,7 +525,7 @@ const decodePushRequest = Schema.decodeUnknownOption(PushRequestItem.fields.cont
 const decodeTaskAsk = Schema.decodeUnknownOption(TaskAskItem.fields.content)
 const decodeSettingChange = Schema.decodeUnknownOption(SettingChangeCard)
 const decodeModelMove = Schema.decodeUnknownOption(ModelMoveItem.fields.content)
-/** The task a notice is about, which the thread links to: one its lead started (ADR-097). */
+/** The task a notice is about, which the thread links to: one its lead started (ADR-097), in one line. */
 const decodeNoticeTask = Schema.decodeUnknownOption(
   Schema.Struct({ taskId: Schema.String, slug: Schema.String, title: Schema.String, threadId: Schema.String }),
 )
@@ -651,8 +642,10 @@ export const itemOf = (row: ItemRow): ThreadItem | undefined => {
       if (title === 'Resumed after a rejection.') return undefined
       // The coordinator's offer of a preset, as a line of its own, from before its task's card offered it: the card says it now.
       if (field(content, 'offer') !== undefined) return undefined
-      // A session's line of skills that said nothing new, kept for its list only: it never reaches the window.
-      if (role === 'skills' && field(content, 'hidden') === true) return undefined
+      // What a lead's agent could see is kept for `skillsRead`, not for a chat: a line for it never reaches the window.
+      if (role === 'skills') return undefined
+      // What older threads said of another task (one that ended, or one changing the same files): news for the lead, not for the chat.
+      if (field(content, 'situation') !== undefined) return undefined
       // Likewise the coordinator's receipt of a denial, kept by older threads.
       if (title?.startsWith('Denied ') && description?.startsWith('By the coordinator:') && text(content, 'about') === 'permission')
         return undefined
@@ -664,8 +657,7 @@ export const itemOf = (row: ItemRow): ThreadItem | undefined => {
           severity: severity === 'error' || severity === 'warning' ? severity : 'info',
           title: text(content, 'title'),
           description: description === '' ? null : description,
-          ...(role === 'aside' || role === 'relayed' || role === 'folder' || role === 'skills' ? { role } : {}),
-          ...(role === 'skills' ? { skills: skillsSeenOf(field(content, 'skills')) } : {}),
+          ...(role === 'aside' || role === 'relayed' || role === 'folder' ? { role } : {}),
           ...(failure === undefined || failure === '' ? {} : { failure }),
           ...Option.match(decodeNoticeTask(field(content, 'task')), { onNone: () => ({}), onSome: (task) => ({ task }) }),
         },
@@ -2303,6 +2295,30 @@ export class Queries extends Context.Service<
             task.starting > 0 ||
             Option.exists(lead, (session) => session.turnRunning) ||
             Option.exists(reviewer, (session) => session.turnRunning)
+          // What the person asked of its lead, its turn not begun yet: Fix it on a review after a merge, which says so from the
+          // moment it is answered until the turn that takes it is over (its folder coming back, its lead starting, are on the
+          // way meanwhile); or a message waiting for a lead that holds a session. Under way, as the turn is, so a merged task
+          // is never settled, nor stopped, in the moment between the asking and the turn.
+          const [askedOf] = yield* sql<{ fixSince: string | null; told: number; takenSince: string | null }>`
+            SELECT
+              (SELECT r.updated_at FROM merge_reviews r WHERE r.task_id = ${taskId} AND r.state = 'fixing'
+                AND NOT EXISTS (SELECT 1 FROM turn_deliveries d WHERE d.thread_id = ${task.threadId}
+                  AND d.ended_at IS NOT NULL AND d.ended_at >= r.updated_at)
+                ORDER BY r.updated_at DESC LIMIT 1) AS fix_since,
+              EXISTS (SELECT 1 FROM user_inputs i WHERE i.thread_id = ${task.threadId} AND i.state = 'queued'
+                AND i.sender_kind IN ('window', 'paired_device')) AS told,
+              (SELECT d.requested_at FROM turn_deliveries d WHERE d.thread_id = ${task.threadId} AND d.origin = 'person'
+                AND d.state IN ('pending', 'delivered') AND d.ended_at IS NULL
+                ORDER BY d.requested_at DESC LIMIT 1) AS taken_since
+            FROM tasks t WHERE t.id = ${taskId}`
+          const asked =
+            !busy &&
+            task.state !== 'abandoned' &&
+            ((askedOf?.fixSince != null && stillAsked(askedOf.fixSince, yield* Clock.currentTimeMillis)) ||
+              // The turn taking it is claimed, then its input delivered, and only after that is the session busy: none of those
+              // moments leaves the task settled.
+              ((askedOf?.told === 1 || (askedOf?.takenSince != null && stillAsked(askedOf.takenSince, yield* Clock.currentTimeMillis))) &&
+                Option.isSome(lead)))
           // Waiting for a place among the agents at work on this machine: under way, and it starts on its own.
           const queued = task.heldFor === 'machine_busy' || task.roundWaits > 0 || task.answersWait > 0 || task.turnWaits > 0
           // Waiting so with none of its agents at work, it is up next (ADR-065): under way, it continues first; before any agent
@@ -2435,7 +2451,7 @@ export class Queries extends Context.Service<
             // A call waiting on the person, and work under way, come before anything else (ADR-034): work sent back isn't ready
             // again until its lead is done with the note, and a merged task whose lead works on it again is running.
             if (task.waiting > 0) return 'waiting'
-            if (busy || queued || resolving !== undefined || opening) return 'running'
+            if (busy || queued || resolving !== undefined || opening || asked) return 'running'
             // Drafted, its plan not yet proposed: nowhere on the board yet.
             if (drafting) return 'drafting'
             // A review has no run: drafted, it is the person's to post, as a change is to accept. Posted, and written to again, it
@@ -2582,13 +2598,9 @@ export class Queries extends Context.Service<
                         '',
                       ),
                     ),
-                    // A review's lead only reads: only an agent its session holds to that may take it (Reviews.canLead).
+                    // Any agent may lead a review: the card offers them all.
                     ...(field(parameters, 'reads') === true
-                      ? {
-                          agents: (yield* Agents).list
-                            .filter((entry) => entry.definition.reviewing?.outside === true)
-                            .map((entry) => entry.definition.id),
-                        }
+                      ? {}
                       : {
                           // Where it works (ADR-091), why where the coordinator said, and who works Local now, while it can change.
                           worksIn: text(parameters, 'worksIn') === 'checkout' ? ('checkout' as const) : ('worktree' as const),
@@ -2635,8 +2647,10 @@ export class Queries extends Context.Service<
                         ? busy || !checksRun
                           ? 'checks'
                           : 'checks_running'
-                        : goes),
-            followUp: task.runState === 'running' && task.runPlan === null,
+                        : asked
+                          ? 'implement'
+                          : goes),
+            followUp: (task.runState === 'running' && task.runPlan === null) || asked,
             summary: latest === undefined ? null : text(parse(latest.content), 'summary') || null,
             lead: task.lead ?? (implement?.agentId || null),
             // Its session's model once one started; the plan's until then.
@@ -3236,30 +3250,6 @@ export class Queries extends Context.Service<
           })
         })
 
-      /** All a task's turns added up, its reviewers' too, where they kept where their time went; undefined where none did. */
-      const taskTimeOf = (taskId: string) =>
-        Effect.gen(function* () {
-          const sql = yield* SqlClient.SqlClient
-          const rows = yield* sql<{ timings: string | null }>`
-            SELECT d.timings FROM turn_deliveries d JOIN threads t ON t.id = d.thread_id
-            WHERE t.task_id = ${taskId} AND d.timings IS NOT NULL`
-          const kept = rows.flatMap((row) => {
-            const timings = timingsFrom(row.timings)
-            return timings === null ? [] : [timings]
-          })
-          if (kept.length === 0) return undefined
-          return kept.reduce<TaskTime>(
-            (sum, one) => ({
-              turns: sum.turns + 1,
-              place: sum.place + one.place,
-              session: sum.session + one.session,
-              work: sum.work + one.work,
-              tools: sum.tools + one.tools,
-            }),
-            { turns: 0, place: 0, session: 0, work: 0, tools: 0 },
-          )
-        })
-
       /**
        * A task's rounds of work as its graph had them (`graph.ts`): its newest runs, their steps and each step's tries with the
        * agent each ran on, what each began with and when a change added to it, what started each follow-up, and whether the
@@ -3508,7 +3498,6 @@ export class Queries extends Context.Service<
           )
           // What it used of each account its agents ran on: a reading that fails leaves it out, never the thread (ADR-084).
           const usage = yield* spendingOf({ taskId: head.taskId }).pipe(Effect.orElseSucceed(() => []))
-          const time = yield* taskTimeOf(head.taskId)
           // Its lead's helpers at work (ADR-087), each on its change.
           const helpersAtWork = yield* sql<{ id: string; name: string; change: string | null; agentId: string; model: string | null }>`
             SELECT h.id, h.name, w.name AS change, h.agent_id, h.model FROM helpers h LEFT JOIN workspaces w ON w.id = h.workspace_id
@@ -3551,7 +3540,6 @@ export class Queries extends Context.Service<
             threadId,
             cursor: at,
             usage,
-            ...(time === undefined ? {} : { time }),
             project: { id: head.projectId, name: head.projectName },
             host,
             task: {

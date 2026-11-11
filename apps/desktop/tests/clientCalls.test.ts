@@ -62,7 +62,7 @@ const standIn = async (): Promise<{ client: Client; heard: Array<Heard> }> => {
   // Every handler the stand-in has needs nothing, whatever the contract allows them.
   const server = RpcServer.layer(Api).pipe(
     Layer.provide(Layer.succeed(ClientAuthority, (effect) => effect)),
-    Layer.provide(Api.toLayer(Effect.succeed(Api.of(handlers as Parameters<typeof Api.of>[0])))),
+    Layer.provide(Api.toLayer(Effect.succeed(Api.of(handlers as never)))),
     Layer.provide(serverProtocol(emitterPort(channel.port1 as never, (data) => data))),
   ) as Layer.Layer<never>
   await Effect.runPromise(Effect.forkIn(Layer.launch(server), scope))

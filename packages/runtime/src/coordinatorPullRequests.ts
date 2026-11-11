@@ -6,25 +6,28 @@ import { hostName, logForLead, readLog } from './checkLogs'
 import { Connections } from './Connections'
 import { withoutAgentCredit } from './credit'
 import { checksOf, nameOf, sameDescription, signed, titleWords, withDescribed } from './pullRequestWords'
-import { ToolRefused } from './ToolServer'
+import { type ToolAccess, ToolRefused } from './ToolServer'
 
 /*
  * What the coordinator does on the code host to the project's pull requests
  * (ADR-081): run a failed check again, read the default branch's checks,
  * mark a pull request ready, close and reopen one, reply on one, and give
  * one another title or description. Each works on any of the project's pull
- * requests, whoever opened them, within the kind the ADR gives it:
+ * requests, whoever opened them (the person's note of 11 Nov: who opened a
+ * pull request is no reason to refuse it):
  *
- * - run again, read: any pull request, and the default branch;
- * - mark ready, close, reopen: Althar's own, the ones a task opened;
- * - bring up to date: any pull request, a merge of the default branch into
- *   its branch, never a rebase and never forced;
- * - reply, and retitle or redescribe: Althar's own, the connected account's,
- *   and the repository's own people's. An outside author's, and closing on
- *   Bitbucket Cloud (where declining is final), are *asked-for*: they wait
- *   for the person's word,
- *   which is another task's (ADR-081, "The person's word"). Until that is
- *   on main they are refused here, with a line for the person.
+ * - run again, read, bring up to date: any pull request, at once;
+ * - mark ready, close, reopen: Althar's own and the person's own at once;
+ *   anyone else's on the person's word;
+ * - reply, and retitle or redescribe: Althar's own, the connected account's
+ *   and the repository's own people's at once; an outside author's on the
+ *   person's word.
+ *
+ * The person's word is their own message in this turn, from the window or a
+ * paired device, which the call names (`message`, from read_turn), as
+ * merging takes it (Errands). Closing on Bitbucket Cloud, where declining is
+ * final, is on the irreversible list: it goes on their word whoever opened
+ * it.
  *
  * Every call reads the pull request from its host first, so a stale picture
  * of it is never acted on, and each leaves it where it can be undone in a
@@ -150,22 +153,58 @@ const readOne = (projectId: string, asked: string) =>
     return { ...place, change, own, name: nameOf({ number: change.number, words: place.host.words }) }
   })
 
+/** Whether the connected account, the person's own, opened a pull request. */
+const authoredByPerson = (host: CodeHost, author: { readonly id: string } | null) =>
+  Effect.gen(function* () {
+    if (author === null) return false
+    const account = yield* host.account.pipe(Effect.orElseSucceed(() => null))
+    return account?.id === author.id
+  })
+
 /**
- * What can't be undone, or reaches someone outside, waits for the person's
- * word. Said to the coordinator so that it tells them instead.
- *
- * TODO(the-person-s-word-errands-receipts-who-sent-it): once that task puts
- * an asked-for kind on tools, run in a turn the person's message started,
- * these go ahead on their word instead of being refused. Until then there
- * is no telling their turn from news, and no second mechanism is built here.
+ * The person's word for an act on a pull request: their message in this
+ * turn that asks it, which the call names (`message`, from read_turn).
+ * Their words where it stands; refused where it doesn't (no message, news's
+ * turn, an errand of it paused). The coordinator gives `Errands.stands`.
  */
-const askedFor = (what: string, name: string, url: string) =>
-  refused(
-    `${what} on ${name} waits for the person’s word, which Althar can’t yet tell from news, so it isn’t done from here. Tell the person what you would do and why; they can do it on the host: ${url}`,
+export type PersonsWord = (tool: string, target: string, message: string | undefined) => Effect.Effect<string, ToolRefused>
+
+/** The person's word as Errands keeps it, for one session's call: as merging takes it, their message in this turn, no errand of it paused. */
+export const personsWordOf =
+  (
+    errands: {
+      readonly stands: (
+        tool: string,
+        access: ToolAccess,
+        action: { readonly messageId: string | undefined; readonly target: string; readonly request: Readonly<Record<string, unknown>> },
+      ) => Effect.Effect<string, ToolRefused>
+    },
+    access: ToolAccess,
+  ): PersonsWord =>
+  (tool, target, message) =>
+    errands.stands(tool, access, { messageId: message, target, request: { target } })
+
+/** A message id as a call gives it, or undefined. */
+const MessageAsked = Schema.optional(Schema.NullOr(Schema.String))
+
+/**
+ * Takes the person's word for `what` on a pull request, where it needs it:
+ * said so the agent knows what to name, or to ask the person rather than do it.
+ */
+const onWord = (word: PersonsWord, tool: string, url: string, message: string | null | undefined, why: string) =>
+  word(tool, url, message ?? undefined).pipe(
+    Effect.mapError((error) =>
+      refused(
+        message == null || message.trim() === ''
+          ? `${why}, so it goes on the person’s word: name their message in this turn that asks it (message, from read_turn). Where they haven’t asked, tell them what you would do and why.`
+          : error.message,
+      ),
+    ),
   )
 
-const notOurs = (name: string, what: string) =>
-  refused(`${name} isn’t one Althar opened, so ${what} it is the person’s call. Tell them what you would do and why.`)
+/** Who opened a pull request, as a refusal says it. */
+const whose = (change: { readonly author: { readonly login: string } | null }) =>
+  change.author === null ? 'someone else’s' : `${change.author.login}’s`
 
 // ---- Running checks again ---------------------------------------------------
 
@@ -287,19 +326,31 @@ export const readDefaultBranchChecks = (projectId: string, input: unknown) =>
 
 // ---- Marking ready, closing and reopening -----------------------------------
 
-const PullAsked = Schema.Struct({ pull_request: Schema.Union([Schema.Number, Schema.String]) })
+const PullAsked = Schema.Struct({ pull_request: Schema.Union([Schema.Number, Schema.String]), message: MessageAsked })
 
 const decodePull = (input: unknown) =>
   Schema.decodeUnknownEffect(PullAsked)(input).pipe(
-    Effect.map((asked) => String(asked.pull_request)),
+    Effect.map((asked) => ({ pull: String(asked.pull_request), message: asked.message })),
     Effect.mapError((error) => refused(`Althar couldn't read that: ${error.message}`)),
   )
 
-/** Marks one of Althar's pull requests ready for review. It can go back to a draft on the host. */
-export const markReady = (projectId: string, input: unknown) =>
+/**
+ * A pull request to mark ready, close or reopen: at once where Althar or the
+ * person opened it, on the person's word where anyone else did.
+ */
+const readToMove = (projectId: string, input: unknown, tool: string, word: PersonsWord) =>
   Effect.gen(function* () {
-    const { host, repository, change, name, own } = yield* readOne(projectId, yield* decodePull(input))
-    if (!own) return yield* notOurs(name, 'marking')
+    const { pull, message } = yield* decodePull(input)
+    const found = yield* readOne(projectId, pull)
+    const mine = found.own || (yield* authoredByPerson(found.host, found.change.author))
+    if (!mine) yield* onWord(word, tool, found.change.url, message, `${found.name} is ${whose(found.change)}`)
+    return { ...found, message }
+  })
+
+/** Marks a pull request ready for review. It can go back to a draft on the host. */
+export const markReady = (projectId: string, input: unknown, word: PersonsWord) =>
+  Effect.gen(function* () {
+    const { host, repository, change, name } = yield* readToMove(projectId, input, 'mark_ready', word)
     if (change.state !== 'open') return yield* refused(`${name} is ${change.state}, so it can't be marked ready.`)
     if (!change.draft) return `${name} is ready for review already.`
     if (!host.capabilities.drafts) return yield* refused(`${hostName(host)} has no drafts, so there's nothing to mark ready on ${name}.`)
@@ -309,25 +360,24 @@ export const markReady = (projectId: string, input: unknown) =>
       : `${name} is ready for review. It can go back to a draft on ${hostName(host)} if that was a mistake.`
   })
 
-/** Closes one of Althar's pull requests unmerged. On Bitbucket Cloud declining is final, so there it waits for the person. */
-export const closePullRequest = (projectId: string, input: unknown) =>
+/** Closes a pull request unmerged. On Bitbucket Cloud declining is final, so there it goes on the person's word, whoever opened it. */
+export const closePullRequest = (projectId: string, input: unknown, word: PersonsWord) =>
   Effect.gen(function* () {
-    const { host, repository, change, name, own } = yield* readOne(projectId, yield* decodePull(input))
-    if (!own) return yield* notOurs(name, 'closing')
+    const { host, repository, change, name, message } = yield* readToMove(projectId, input, 'close_pull_request', word)
     if (change.state !== 'open') return `${name} is ${change.state} already.`
-    // Declining can't be taken back where the host can't reopen (Bitbucket Cloud): asked-for.
-    if (!host.capabilities.reopen) return yield* askedFor('Declining', name, change.url)
+    // Declining can't be taken back where the host can't reopen (Bitbucket Cloud): on the irreversible list.
+    if (!host.capabilities.reopen)
+      yield* onWord(word, 'close_pull_request', change.url, message, `Declining ${name} on ${hostName(host)} is final`)
     const closed = yield* viaHost(host.closeChange(repository, change))
     return closed.state === 'closed'
       ? `${name} is closed, unmerged. reopen_pull_request opens it again.`
       : `${name} is ${closed.state} now, so it wasn't closed.`
   })
 
-/** Opens one of Althar's closed pull requests again, where the host can; else it says so in the host's own words. */
-export const reopenPullRequest = (projectId: string, input: unknown) =>
+/** Opens a closed pull request again, where the host can; else it says so in the host's own words. */
+export const reopenPullRequest = (projectId: string, input: unknown, word: PersonsWord) =>
   Effect.gen(function* () {
-    const { host, repository, change, name, own } = yield* readOne(projectId, yield* decodePull(input))
-    if (!own) return yield* notOurs(name, 'reopening')
+    const { host, repository, change, name } = yield* readToMove(projectId, input, 'reopen_pull_request', word)
     if (change.state === 'open') return `${name} is open already.`
     const opened = yield* viaHost(host.reopenChange(repository, change))
     return `${name} is open again.${opened.draft ? ' It is a draft.' : ''}`
@@ -338,7 +388,7 @@ export const reopenPullRequest = (projectId: string, input: unknown) =>
 /**
  * What to say to an outside author who can be asked to update their own
  * branch, for the coordinator to offer the person. Posting it is a reply on
- * an outside author's pull request, which waits for the person's word.
+ * an outside author's pull request, which goes on the person's word.
  */
 const askAuthor = (target: string) =>
   `Could you bring this branch up to date with ${target}? It has fallen behind, and Althar's account can't push to your fork. Thank you!`
@@ -350,13 +400,13 @@ const askAuthor = (target: string) =>
  * a forced push, so it can be undone by the branch's author resetting to its
  * old head. A conflict stops and names the files, and Althar settles none. On
  * a fork's branch the account can't push to, nothing is done and the answer
- * says the author can be asked, which is a reply and waits for the person's
- * word. Shared by the coordinator's `update_branch` and, once row 15 gives
+ * says the author can be asked: a reply on an outside author's pull
+ * request, on the person's word. Shared by the coordinator's `update_branch` and, once row 15 gives
  * leads the call, theirs.
  */
 export const updateBranch = (projectId: string, input: unknown) =>
   Effect.gen(function* () {
-    const { host, repository, change, name } = yield* readOne(projectId, yield* decodePull(input))
+    const { host, repository, change, name } = yield* readOne(projectId, (yield* decodePull(input)).pull)
     if (change.state !== 'open') return yield* refused(`${name} is ${change.state}, so its branch isn't brought up to date.`)
     if (change.headSha === null) return yield* refused(`${name} has no commits to bring up to date.`)
     const result = yield* viaHost(host.updateBranch(repository, change, { expectedHead: change.headSha }))
@@ -375,7 +425,7 @@ export const updateBranch = (projectId: string, input: unknown) =>
       case 'moved':
         return `${name}'s branch moved on since it was read${result.head === null ? '' : ` (now at ${result.head.slice(0, 12)})`}, so nothing was merged, to leave that push as it is. Read it again with read_pull_request and call this again if it is still behind.`
       case 'no_access':
-        return `Althar's account can't push to ${name}'s branch, so it wasn't updated: ${result.reason} The author can bring it up to date. Asking them is a reply on an outside author's pull request, which waits for the person's word: tell the person, with something like “${askAuthor(target)}”`
+        return `Althar's account can't push to ${name}'s branch, so it wasn't updated: ${result.reason} The author can bring it up to date. Asking them is a reply on an outside author's pull request, which goes on the person's word: where they asked for it, reply_on_pull_request with their message; else offer them something like “${askAuthor(target)}”`
     }
   })
 
@@ -385,6 +435,7 @@ const ReplyAsked = Schema.Struct({
   pull_request: Schema.Union([Schema.Number, Schema.String]),
   body: Schema.String,
   thread_id: Schema.optional(Schema.NullOr(Schema.String)),
+  message: MessageAsked,
 })
 
 /**
@@ -405,11 +456,11 @@ const authoredByOwn = (host: CodeHost, repository: Repository, number: number, a
 
 /**
  * Replies on a pull request, in a line comment's thread or its conversation,
- * signed as from Althar: on one Althar opened, or whose author is the
+ * signed as from Althar: at once on one Althar opened, or whose author is the
  * connected account or one of the repository's people. A reply to an outside
- * author notifies them for good, so that one waits for the person.
+ * author notifies them for good, so that one goes on the person's word.
  */
-export const replyOnPullRequest = (projectId: string, input: unknown, by: string | null) =>
+export const replyOnPullRequest = (projectId: string, input: unknown, by: string | null, word: PersonsWord) =>
   Effect.gen(function* () {
     const asked = yield* Schema.decodeUnknownEffect(ReplyAsked)(input).pipe(
       Effect.mapError((error) => refused(`Althar couldn't read that: ${error.message}`)),
@@ -417,7 +468,7 @@ export const replyOnPullRequest = (projectId: string, input: unknown, by: string
     if (asked.body.trim() === '') return yield* refused('Say what to reply.')
     const { host, repository, change, name, own } = yield* readOne(projectId, String(asked.pull_request))
     if (!own && !(yield* authoredByOwn(host, repository, change.number, change.author)))
-      return yield* askedFor('A reply', `${name}, an outside author’s`, change.url)
+      yield* onWord(word, 'reply_on_pull_request', change.url, asked.message, `${name} is ${whose(change)}, an outside author’s`)
     const comment = yield* viaHost(
       host.reply(repository, change.number, { body: signed(asked.body, by), threadId: asked.thread_id ?? null }),
     )
@@ -430,6 +481,7 @@ const EditAsked = Schema.Struct({
   pull_request: Schema.Union([Schema.Number, Schema.String]),
   title: Schema.optional(Schema.NullOr(Schema.String)),
   description: Schema.optional(Schema.NullOr(Schema.String)),
+  message: MessageAsked,
 })
 
 /** The task of the project that follows a pull request, the one that opened it or was attached to it: the latest, where several did. */
@@ -443,9 +495,9 @@ const taskFollowing = (projectId: string, url: string) =>
   })
 
 /**
- * Gives a pull request another title, description, or both: on one Althar
- * opened, or whose author is the connected account or one of the
- * repository's people; an outside author's waits for the person. On one a
+ * Gives a pull request another title, description, or both: at once on one
+ * Althar opened, or whose author is the connected account or one of the
+ * repository's people; an outside author's on the person's word. On one a
  * task follows, as that task's lead would (`viaTask`): by the project's
  * naming, the task's title following. On any other, as given, without the
  * agents' credit, what Althar put around a description it wrote staying.
@@ -459,6 +511,7 @@ export const editPullRequest = <R>(
     edit: { readonly title?: string; readonly body?: string; readonly url: string },
   ) => Effect.Effect<string, unknown, R>,
   agents: ReadonlyArray<string>,
+  word: PersonsWord,
 ) =>
   Effect.gen(function* () {
     const asked = yield* Schema.decodeUnknownEffect(EditAsked)(input).pipe(
@@ -471,7 +524,7 @@ export const editPullRequest = <R>(
     if (given.title === undefined && given.body === undefined) return yield* refused('Give a title, a description, or both.')
     const { host, repository, change, name, own } = yield* readOne(projectId, String(asked.pull_request))
     if (!own && !(yield* authoredByOwn(host, repository, change.number, change.author)))
-      return yield* askedFor('Changing the title or description', `${name}, an outside author’s`, change.url)
+      yield* onWord(word, 'edit_pull_request', change.url, asked.message, `${name} is ${whose(change)}, an outside author’s`)
     if (change.state !== 'open') return yield* refused(`${name} is ${change.state}, so its title and description stay as they are.`)
     const task = yield* taskFollowing(projectId, change.url)
     if (task !== null)

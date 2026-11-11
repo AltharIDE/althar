@@ -121,6 +121,8 @@ import { declinePresetOffer, describe as describePreset, editPreset, partsOfTask
 import { FastLane } from './fastLane'
 import { MergeReviews } from './MergeReviews'
 import { Plans } from './Plans'
+import { presetModels } from './presetModels'
+import { usableModels } from './usableModels'
 import { Runs } from './Runs'
 import { findTasks } from './Search'
 import { Tasks } from './Tasks'
@@ -1590,6 +1592,8 @@ export const handlers = Api.toLayer(
         api(
           Effect.gen(function* () {
             const all = yield* presetsIn(projectId ?? null)
+            // Each lead as people know its model, where the agents offer it.
+            const models = presetModels(yield* usableModels(projectId ?? undefined).pipe(Effect.orElseSucceed(() => [])))
             // The projects they're kept to, or can be, by name, for Settings to say.
             const named = new Map(
               (yield* sql<{ id: string; name: string }>`SELECT id, name FROM projects`).map((one) => [one.id, one.name] as const),
@@ -1599,7 +1603,7 @@ export const handlers = Api.toLayer(
               const from = fromProjectId == null ? undefined : named.get(fromProjectId)
               return {
                 ...one,
-                about: describePreset(one.parts),
+                about: describePreset(one.parts, models),
                 ...(keptTo === undefined ? {} : { keptTo }),
                 ...(from === undefined ? {} : { from }),
               }

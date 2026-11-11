@@ -3,6 +3,7 @@ import { Effect, Schema } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { ChangeRefused, NotFound } from './errors'
+import { type ModelPick, type PresetModels } from './presetModels'
 import { fact, timestamp } from './records'
 import { touchCard } from './cards'
 
@@ -82,7 +83,7 @@ export const BUILT_IN: ReadonlyArray<Preset> = [
     projectId: null,
     parts: {
       workspace: 'worktree',
-      checked: 'after',
+      checked: 'none',
       end: 'none',
       shelf: 'board',
       lead: 'claude-code/claude-opus-5-5',
@@ -346,8 +347,10 @@ export const offerPreset = (input: {
       SELECT id FROM record_events WHERE aggregate_type = 'project' AND aggregate_id = ${input.projectId}
         AND type = 'project.preset_offered' AND json_extract(payload, '$.signature') = ${signature} LIMIT 1`
     if (offered !== undefined) return
+    // One step from a built-in preset; one that names the same lead fits closer than one that names none.
     const near = presets
       .filter((one) => one.builtin)
+      .toSorted((a, b) => Number(b.parts.lead === parts.lead) - Number(a.parts.lead === parts.lead))
       .flatMap((one) => {
         const differs = nearly(one, parts)
         return differs === null ? [] : [{ preset: one.name, differs }]
@@ -421,13 +424,18 @@ export const presetOfferOn = (projectId: string, taskId: string) =>
     }
   })
 
-/** What a preset holds, in words: where it works, how it's checked, how it ends, and who leads. */
-export const describe = (parts: PresetParts) =>
+/**
+ * What a preset holds, in words: where it works, how it's checked, how it ends, and who leads, its model as people know it
+ * where `models` knows it (Claude Opus 5.5), else as its id.
+ */
+export const describe = (parts: PresetParts, models?: Omit<PresetModels, 'named' | 'reviewerFor'>) =>
   [
     parts.workspace === 'copy' ? 'a copy' : parts.workspace === 'local' ? 'Local' : 'a worktree',
     parts.checked === 'none' ? 'no review' : parts.checked === 'after' ? 'reviewed after it merges' : 'reviewed before it ships',
     parts.end === 'none' ? 'ends here' : parts.end === 'ready' ? 'a pull request ready for review' : 'a draft pull request',
-    parts.lead === null ? 'the coordinator picks its lead' : `led by ${parts.lead.split('/').at(-1) ?? parts.lead}`,
+    parts.lead === null
+      ? 'the coordinator picks its lead'
+      : `led by ${models?.nameOf(pickOf(parts.lead)) ?? parts.lead.split('/').at(-1) ?? parts.lead}`,
   ].join(', ')
 
 /** A plan's parameters, as a preset rewrites them: its steps, how it ends, where it works, and how it's checked. */
@@ -455,27 +463,56 @@ const pickOf = (named: string) => {
 }
 
 /**
+ * The reviewer a preset's plan takes: none where nothing checks the work; the preset's own, else the plan's where it is
+ * another maker's than the lead's, else one picked as the coordinator picks one. Null where a review is needed and nobody
+ * but the lead's own model can give it: `planFromPreset` then leaves its row skipped, and applying the preset refuses.
+ */
+export const reviewerOfPreset = (before: PresetPlan, parts: PresetParts, models?: PresetModels): ModelPick | null => {
+  const lead = before.steps.find((step) => step.key === 'implement')
+  const review = before.steps.find((step) => step.key === 'review')
+  const named = models?.named ?? ((pick: ModelPick) => pick)
+  const implement = lead === undefined ? undefined : { ...lead, ...(parts.lead === null ? {} : named(pickOf(parts.lead))) }
+  return parts.checked === 'none'
+    ? null
+    : parts.reviewer !== null
+      ? named(pickOf(parts.reviewer))
+      : implement === undefined || models === undefined
+        ? review === undefined
+          ? null
+          : { agentId: review.agentId, model: review.model }
+        : models.reviewerFor(implement, review === undefined ? undefined : { agentId: review.agentId, model: review.model })
+}
+
+/**
  * A plan with a preset's parts (a task is a conversation plus parts, "How a task starts": picking another preset on the
  * plan card changes the plan's parts to match): its lead and reviewer where the preset names them, its review kept, run
  * after the merge or skipped as Checked by says, its ending, and where it works, a copy being a quick task's place. A
- * review step it needs and lacks reads with the lead's agent.
+ * review it needs and the preset doesn't name goes to the plan's own reviewer where that is another maker's than the lead's,
+ * else to one picked as the coordinator picks one (`models`), never the lead's own model. A preset that checks nothing leaves no review step.
  */
-export const planFromPreset = <P extends PresetPlan>(before: P, parts: PresetParts): P => {
+export const planFromPreset = <P extends PresetPlan>(before: P, parts: PresetParts, models?: PresetModels): P => {
   const lead = before.steps.find((step) => step.key === 'implement')
   const review = before.steps.find((step) => step.key === 'review')
-  const implement = lead === undefined ? undefined : { ...lead, ...(parts.lead === null ? {} : pickOf(parts.lead)), skipped: false }
+  const named = models?.named ?? ((pick: ModelPick) => pick)
+  const implement = lead === undefined ? undefined : { ...lead, ...(parts.lead === null ? {} : named(pickOf(parts.lead))), skipped: false }
+  const reviewer = reviewerOfPreset(before, parts, models)
   const reviewing =
     parts.checked === 'none'
-      ? review === undefined
-        ? undefined
-        : { ...review, skipped: true }
-      : {
-          ...(review ?? implement ?? { agentId: 'claude-code', model: null }),
-          key: 'review' as const,
-          ...(parts.reviewer === null ? {} : pickOf(parts.reviewer)),
-          // After the merge, nothing waits on it before: skipped in the run, read once the work merged.
-          skipped: parts.checked === 'after',
-        }
+      ? // Nothing checks the work, so no review row to add back; a review of a pull request keeps its own second row, skipped.
+        parts.reviews === true && review !== undefined
+        ? { ...review, skipped: true }
+        : undefined
+      : reviewer === null
+        ? // Nobody to review it: its row is there to add back.
+          { ...(review ?? { agentId: 'claude-code', model: null }), key: 'review' as const, skipped: true }
+        : {
+            // Its effort was for the model it had.
+            ...(review !== undefined && review.agentId === reviewer.agentId && review.model === reviewer.model ? review : {}),
+            ...reviewer,
+            key: 'review' as const,
+            // After the merge, nothing waits on it before: skipped in the run, read once the work merged.
+            skipped: parts.checked === 'after',
+          }
   const { reviewAfterMerge: _after, here: _here, worksIn: _worksIn, ...rest } = before
   return {
     ...rest,

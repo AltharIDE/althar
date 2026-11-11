@@ -178,9 +178,6 @@ function PlanCard({
     else actions.onChange(plan.id, next, nextEnd, nextWhere, nextToward)
   }
   const from = fromOf(card)
-  // Only the agents the plan allows: a review's lead only reads, so an agent that can't be held to that isn't offered.
-  const allowed = plan.agents
-  const agents = allowed === undefined ? actions.agents : actions.agents.filter((agent) => allowed.includes(agent.id))
   return (
     <TaskLaunch
       task={card.slug}
@@ -205,7 +202,7 @@ function PlanCard({
           planned !== undefined && (
             <ModelChoice
               owner={owner}
-              agents={agents}
+              agents={actions.agents}
               value={{ agentId: planned.agentId, model: planned.model, effort: planned.effort ?? null }}
               {...(actions.projectId === undefined ? {} : { projectId: actions.projectId })}
               onChange={(choice) => change(steps.map((candidate) => (candidate.key === step.id ? { ...candidate, ...choice } : candidate)))}
