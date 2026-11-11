@@ -402,6 +402,43 @@ describe('the review after a merge, at its edges', () => {
     }).pipe(Effect.provide(runtimeWith(github, { holds: place })))
   })
 
+  it.live(
+    'is under way across the turn’s claim and its delivery, before its lead is busy: its input no longer queued, its turn not yet running',
+    () => {
+      const { working, bare, github } = onGitHub()
+      const place = holds()
+      return Effect.gen(function* () {
+        const sessions = yield* Sessions
+        const sql = yield* SqlClient.SqlClient
+        const task = yield* found(working, bare, github)
+        yield* (yield* MergeReviews).leave(task.taskId, task.url)
+        yield* gone(task.threadId)
+        yield* until(standingOf(task.threadId), (now) => now.phase === 'settled')
+        yield* sessions.startLast(task.threadId)
+        const live = yield* until(sessions.running(task.threadId), (now) => Option.isSome(now))
+        const sessionId = Option.getOrThrow(live).sessionId
+        // The moment a controlled pause stands for: the turn recorded as delivered with its input, the session not yet marked busy.
+        const turn = `turn_${'a'.repeat(32)}`
+        const at = new Date().toISOString()
+        yield* sql`INSERT INTO turn_deliveries (id, project_id, thread_id, provider_session_id, controller_generation, state, requested_at, delivered_at, origin)
+        VALUES (${turn}, ${task.projectId}, ${task.threadId}, ${sessionId}, 1, 'pending', ${at}, NULL, 'person')`
+        const claimed = yield* standingOf(task.threadId)
+        assert.strictEqual(
+          claimed.phase,
+          'running',
+          `claimed: ${JSON.stringify([claimed, Option.isSome(yield* sessions.running(task.threadId))])}`,
+        )
+        yield* sql`UPDATE turn_deliveries SET state = 'delivered', delivered_at = ${at} WHERE id = ${turn}`
+        assert.strictEqual(Option.getOrThrow(yield* sessions.running(task.threadId)).turnRunning, false)
+        assert.deepInclude(yield* standingOf(task.threadId), { phase: 'running', step: 'implement', followUp: true })
+        // Its turn over, the person's: not under way any more.
+        yield* sql`UPDATE turn_deliveries SET state = 'completed', ended_at = ${at} WHERE id = ${turn}`
+        assert.notStrictEqual((yield* standingOf(task.threadId)).phase, 'running')
+        place.open('[review:wait]')
+      }).pipe(Effect.provide(runtimeWith(github, { holds: place })))
+    },
+  )
+
   it.live('names the pull request by its link where its number isn’t known, and its reviewer reads it as the pull request', () => {
     const { working, bare, github } = onGitHub()
     return Effect.gen(function* () {
