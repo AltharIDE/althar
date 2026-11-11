@@ -44,9 +44,10 @@
   background: var(--face-surface, var(--n-2));
   scrollbar-gutter: stable both-edges;
 }
+/* Rests above whatever floats on the composer's edge: --composer-floats (set by Composer on the face) is that row's height, 0 with none. Where the row ends is the composer's to say: it floats 8px over the composer's wrapper (.floats in Composer.module.css), which this pill's 12px is measured from too, so change those together; tests/jumpClearsFloats.test.tsx keeps the two joined. */
 .jump {
   position: absolute;
-  bottom: 12px;
+  bottom: calc(var(--composer-floats, 0px) + 12px);
   left: 50%;
   translate: -50% 0;
 }
