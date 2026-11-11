@@ -100,19 +100,19 @@ export const SCREENSHOTS: readonly Screenshot[] = [
     crop: true,
   },
   {
-    file: 'project-home-dark',
-    story: 'screens-projecthome--busy',
-    width: 1680,
-    height: 1010,
-    dark: true,
-    shows: "A project's home in the dark appearance: the coordinator's conversation beside the board",
-  },
-  {
     file: 'at-rest',
     story: 'screens-home--at-rest-all-quiet',
     width: 1440,
     height: 900,
     shows: 'The home with nothing waiting: "Nothing needs you", the mark rising out of the launch\'s light, and the projects beside it',
+  },
+  {
+    file: 'at-rest-dark',
+    story: 'screens-home--at-rest-all-quiet',
+    width: 1440,
+    height: 900,
+    dark: true,
+    shows: 'The home with nothing waiting, in the dark appearance',
   },
   {
     file: 'evidence',
