@@ -50,8 +50,9 @@ const meta = {
     needs: NEEDS,
     onYours: fn(),
     inProgress: 3,
-    room: Room.Board,
+    room: Room.Both,
     onRoom: fn(),
+    panes: { shown: { talk: true, board: true }, onToggle: fn(), swapped: false, onSwap: fn(), keys: { talk: 'c', board: 'b' } },
     parts: PARTS,
     run,
   },
@@ -59,7 +60,7 @@ const meta = {
 export default meta
 type Story = StoryObj<typeof meta>
 
-/** Its name as the screen's heading, where it stands in one violet chip, its five views, Run, and ⋯. */
+/** Its name as the screen's heading, where it stands in one violet chip, its four views, the panes' toggles, Run, and ⋯. */
 export const Busy: Story = {
   play: async ({ canvasElement }) => {
     const c = within(canvasElement)
@@ -72,8 +73,11 @@ export const Busy: Story = {
       within(views)
         .getAllByRole('radio')
         .map((view) => view.textContent),
-    ).toEqual(['Home', 'Conversation', 'Board', 'Automations', 'Artifacts', 'Settings'])
-    await expect(within(views).getByRole('radio', { name: 'Board' })).toBeChecked()
+    ).toEqual(['Home', 'Automations', 'Artifacts', 'Settings'])
+    await expect(within(views).getByRole('radio', { name: 'Home' })).toBeChecked()
+    const panes = c.getByRole('group', { name: 'Panes' })
+    await expect(within(panes).getByRole('button', { name: 'Conversation' })).toHaveAttribute('aria-pressed', 'true')
+    await expect(within(panes).getByRole('button', { name: 'Board' })).toHaveAttribute('aria-pressed', 'true')
   },
 }
 
@@ -127,6 +131,17 @@ export const Views: Story = {
     await expect(within(views).getByRole('radio', { name: 'Automations, needs you' })).toBeVisible()
     await userEvent.click(within(views).getByRole('radio', { name: 'Settings, needs you' }))
     await expect(args.onRoom).toHaveBeenCalledWith(Room.Settings)
+  },
+}
+
+/** The board alone is the home still: Home stays on, and the conversation's toggle brings it back. */
+export const BoardAlone: Story = {
+  args: { room: Room.Board, panes: { shown: { talk: false, board: true }, onToggle: fn(), swapped: false, onSwap: fn() } },
+  play: async ({ args, canvasElement }) => {
+    const c = within(canvasElement)
+    await expect(c.getByRole('radio', { name: 'Home' })).toBeChecked()
+    await userEvent.click(c.getByRole('button', { name: 'Conversation' }))
+    await expect(args.panes?.onToggle).toHaveBeenCalledWith('talk')
   },
 }
 

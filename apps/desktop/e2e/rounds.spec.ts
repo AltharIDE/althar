@@ -6,7 +6,7 @@ import { join } from 'node:path'
 import { expect, test } from '@playwright/test'
 
 import { repository } from '../tests/repository'
-import { connectGitHub, launch, openFirstProject, say, toConversation } from './support'
+import { connectGitHub, launch, openFirstProject, say, toConversation, showPanes } from './support'
 
 /*
  * A task goes back to work, and ships again (ADR-034), in a real window
@@ -55,7 +55,7 @@ test('a merged task’s lead works on what the person asks, and Ship opens what 
     await page.getByRole('button', { name: 'Accept and merge' }).click()
     squashMerge(remote, branch)
     await page.getByRole('button', { name: 'Back to meridian' }).click()
-    await page.getByRole('radio', { name: /^Board/ }).click()
+    await showPanes(page, { conversation: false, board: true })
     const work = page.getByRole('region', { name: 'The project’s work' })
     await expect(work.getByText('PR #1 merged')).toBeVisible()
 
@@ -174,7 +174,7 @@ test('a task of two repositories: one’s pull request open beside the other’s
     await page.getByRole('button', { name: /^Accept and merge/ }).click()
     squashMerge(remotes.api ?? '', branch)
     await page.getByRole('button', { name: 'Back to api' }).click()
-    await page.getByRole('radio', { name: /^Board/ }).click()
+    await showPanes(page, { conversation: false, board: true })
     await expect(work.getByText('PR #1 merged')).toBeVisible()
 
     // Its lead changes web for the first time: web's first pull request opens from the task.

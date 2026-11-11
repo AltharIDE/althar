@@ -9,7 +9,8 @@ import { cx } from '../../lib/cx'
 import { Heading, type HeadingLevel } from '../../primitives/Heading/Heading'
 import { Menu, MenuGroup, MenuItem } from '../../primitives/Menu/Menu'
 import { ChromeButton } from '../ChromeButton/ChromeButton'
-import { roomOptions, type RoomSwitchText } from '../RoomSwitch/RoomSwitch'
+import { PaneToggles, type PaneTogglesProps } from '../PaneToggles/PaneToggles'
+import { roomFace, roomOptions, type RoomSwitchText } from '../RoomSwitch/RoomSwitch'
 import { TaskHeader } from '../TaskHeader/TaskHeader'
 import { TitleBar, type TitleBarProps } from '../TitleBar/TitleBar'
 import { type WorkNeed, WorkStatus, workStatusText } from '../WorkStatus/WorkStatus'
@@ -26,11 +27,12 @@ import s from './ProjectHeader.module.css'
  * into the first of it (pointed at, what each is); blue while work runs, how
  * much; grey and checked when neither. Until the work is read, no chip.
  *
- * Its views are all five, home, the conversation, the board, its automations
- * and its settings, a violet dot on the last two where one paused itself or
- * a connection waits on you. The window's bar keeps only the tabs.
+ * Its views are its home, its automations, its artifacts and its settings, a
+ * violet dot on automations and settings where one paused itself or a
+ * connection waits on you. The window's bar keeps only the tabs.
  *
- * At the end, what it runs (a RunButton), then ⋯, what it is made of: its
+ * At the end, the home's panes (PaneToggles): the conversation, the board,
+ * and their sides; then what it runs (a RunButton), then ⋯, what it is made of: its
  * repositories, each with its host's mark, and the tracker its tasks name,
  * each opening where it lives. The project's colour is in its mark alone.
  */
@@ -77,9 +79,7 @@ export interface ProjectHeaderProps {
   onYours?: () => void
   /** How many tasks are at work. */
   inProgress?: number
-  /** Which views its faces offer, in their order; all six without. */
-  rooms?: ReadonlyArray<Room>
-  /** The view it is on. */
+  /** The view it is on; the conversation or the board alone is the home. */
   room: Room
   onRoom: (room: Room) => void
   /** The conversation has something you haven't seen. */
@@ -90,6 +90,8 @@ export interface ProjectHeaderProps {
   automationsNeedYou?: boolean
   /** What the project is made of, its repositories first; with none, no ⋯. */
   parts?: ReadonlyArray<ProjectPart>
+  /** The home's panes, which show and which side each is on; without it, no toggles. */
+  panes?: PaneTogglesProps
   /** What it runs, with no agent: a RunButton. */
   run?: ReactNode
   /** Under the tabs, none; a window of its own leaves room for the system's lights. */
@@ -107,13 +109,13 @@ export function ProjectHeader({
   needs,
   onYours,
   inProgress,
-  rooms,
   room,
   onRoom,
   news,
   settingsNeedYou,
   automationsNeedYou,
   parts = [],
+  panes,
   run,
   lights = 'none',
   headingLevel = 1,
@@ -132,19 +134,19 @@ export function ProjectHeader({
           status={status}
           {...(state === null ? {} : { state })}
           faces={roomOptions({
-            ...(rooms === undefined ? {} : { rooms }),
             ...(news === undefined ? {} : { news }),
             ...(settingsNeedYou === undefined ? {} : { needsYou: settingsNeedYou }),
             ...(automationsNeedYou === undefined ? {} : { automationsNeedYou }),
             // The views have no shortcut of their own: ⌘ and a number belongs to the window's tabs.
             text: { key: () => '', ...t.rooms },
           })}
-          face={room}
+          face={roomFace(room)}
           onFace={onRoom}
           text={{ faces: t.views }}
           actions={
-            (run != null || parts.length > 0) && (
+            (panes !== undefined || run != null || parts.length > 0) && (
               <>
+                {panes !== undefined && <PaneToggles {...panes} className={s.panes} />}
                 {run}
                 <MadeOf parts={parts} label={t.madeOf} />
               </>

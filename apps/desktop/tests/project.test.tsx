@@ -232,25 +232,81 @@ describe('the project’s bar', () => {
     expect(await screen.findByText('Kept as “opus change”: Settings has your presets.')).toBeTruthy()
   })
 
-  it('steps through the views by b, never while typing, and has no button to start a task', async () => {
+  it('hides and shows the conversation by c and the board by b, keeps one showing, never while typing, and has no button to start a task', async () => {
     const { client } = fakeClient({ getCoordinator: vi.fn(async () => coordinatorSnapshot()) })
     const view = withServices(<Project />, client)
-    const checked = () => screen.getAllByRole('radio').find((radio) => radio.getAttribute('aria-checked') === 'true')?.textContent
-    await waitFor(() => expect(checked()).toMatch(/^Home/))
+    const pressed = (name: string) => screen.getByRole('button', { name }).getAttribute('aria-pressed')
+    const showing = () => [pressed('Conversation'), pressed('Board')]
+    await waitFor(() => expect(showing()).toEqual(['true', 'true']))
     ;(document.activeElement as HTMLElement | null)?.blur()
     await userEvent.keyboard('b')
-    expect(checked()).toMatch(/^Conversation/)
+    expect(showing()).toEqual(['true', 'false'])
+    // The only pane showing stays.
+    await userEvent.keyboard('c')
+    expect(showing()).toEqual(['true', 'false'])
+    expect(screen.getByRole('button', { name: 'Conversation' }).getAttribute('aria-disabled')).toBe('true')
     await userEvent.keyboard('b')
-    expect(checked()).toMatch(/^Board/)
-    await userEvent.keyboard('b')
-    expect(checked()).toMatch(/^Home/)
-    await userEvent.keyboard('b')
-    expect(checked()).toMatch(/^Conversation/)
-    await userEvent.type(screen.getByRole('textbox', { name: /Tell the coordinator/ }), 'b')
-    expect(checked()).toMatch(/^Conversation/)
+    expect(showing()).toEqual(['true', 'true'])
+    await userEvent.keyboard('c')
+    expect(showing()).toEqual(['false', 'true'])
+    // Home stays on whichever panes show.
+    expect(screen.getByRole('radio', { name: 'Home' }).getAttribute('aria-checked')).toBe('true')
+    // Hidden, the conversation leaves its composer under the board, where a c is only a letter.
+    await userEvent.type(screen.getByRole('textbox', { name: /Tell the coordinator/ }), 'c')
+    expect(showing()).toEqual(['false', 'true'])
     // A task starts by telling the coordinator; nothing else starts one.
     expect(screen.queryByRole('button', { name: 'New task' })).toBeNull()
     view.unmount()
+  })
+
+  it('swaps the conversation to the board’s right while both show, kept for the window, and keeps the toggles in place', async () => {
+    const { client } = fakeClient({ getCoordinator: vi.fn(async () => coordinatorSnapshot()) })
+    const view = withServices(<Project />, client)
+    const swap = await screen.findByRole('button', { name: 'Swap sides' })
+    const order = () =>
+      screen
+        .getAllByRole('button')
+        .filter((button) => ['Conversation', 'Board', 'Swap sides'].includes(button.getAttribute('aria-label') ?? ''))
+        .map((button) => button.getAttribute('aria-label'))
+    await userEvent.click(swap)
+    expect(swap.getAttribute('aria-pressed')).toBe('true')
+    expect(window.localStorage.getItem('althar.swapped')).toBe('true')
+    // The divider is the conversation's left edge now.
+    expect(screen.getByRole('separator', { name: 'Width of the conversation' }).className).toMatch(/start/)
+    expect(order()).toEqual(['Conversation', 'Board', 'Swap sides'])
+    // One pane alone has no sides: Swap sides stays, faint, and does nothing.
+    await userEvent.click(screen.getByRole('button', { name: 'Board' }))
+    expect(swap.getAttribute('aria-disabled')).toBe('true')
+    await userEvent.click(swap)
+    expect(window.localStorage.getItem('althar.swapped')).toBe('true')
+    expect(order()).toEqual(['Conversation', 'Board', 'Swap sides'])
+    window.localStorage.removeItem('althar.swapped')
+    view.unmount()
+  })
+
+  it('sends from the composer under the board, and brings the conversation back for the answer', async () => {
+    const { client } = fakeClient({ getCoordinator: vi.fn(async () => coordinatorSnapshot()) })
+    withServices(<Project room={Room.Board} />, client)
+    const composer = await screen.findByRole('textbox', { name: /Tell the coordinator/ })
+    expect(screen.queryByRole('region', { name: 'Conversation' })).toBeNull()
+    await userEvent.type(composer, 'What needs me?{Enter}')
+    await waitFor(() => expect(client.send).toHaveBeenCalled())
+    expect(await screen.findByRole('region', { name: 'Conversation' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Board' }).getAttribute('aria-pressed')).toBe('true')
+  })
+
+  it('goes back to the home as it was left, from another view, or by a pane’s toggle with that pane showing', async () => {
+    const { client } = fakeClient({ getCoordinator: vi.fn(async () => coordinatorSnapshot()) })
+    withServices(<Project room={Room.Board} />, client)
+    const views = await screen.findByRole('radiogroup', { name: 'View' })
+    await userEvent.click(within(views).getByRole('radio', { name: 'Settings' }))
+    expect(screen.getByRole('button', { name: 'Board' }).getAttribute('aria-pressed')).toBe('false')
+    await userEvent.click(within(views).getByRole('radio', { name: 'Home' }))
+    expect(screen.getByRole('button', { name: 'Conversation' }).getAttribute('aria-pressed')).toBe('false')
+    await userEvent.click(within(views).getByRole('radio', { name: 'Settings' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Conversation' }))
+    expect(screen.getByRole('button', { name: 'Conversation' }).getAttribute('aria-pressed')).toBe('true')
+    expect(screen.getByRole('button', { name: 'Board' }).getAttribute('aria-pressed')).toBe('true')
   })
 
   it('opens on Home where no view was named or kept', async () => {
@@ -270,8 +326,9 @@ describe('the project’s bar', () => {
       within(views)
         .getAllByRole('radio')
         .map((radio) => radio.textContent),
-    ).toEqual(['Home', 'Conversation', 'Board', 'Automations', 'Artifacts', 'Settings'])
-    await userEvent.click(within(views).getByRole('radio', { name: 'Board' }))
+    ).toEqual(['Home', 'Automations', 'Artifacts', 'Settings'])
+    // The conversation hidden, the board alone is the home's layout, kept too.
+    await userEvent.click(screen.getByRole('button', { name: 'Conversation' }))
     expect(onRoomChange).toHaveBeenLastCalledWith(Room.Board)
     // Its settings are a view too, kept like the others to open on again.
     await userEvent.click(within(views).getByRole('radio', { name: 'Settings' }))

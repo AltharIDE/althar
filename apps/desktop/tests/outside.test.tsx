@@ -1456,7 +1456,7 @@ describe('a project, reaching outside', () => {
     await userEvent.click(dialog.getByRole('button', { name: 'Done' }))
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
     // From the board too: the settings are a view of their own, whichever the project was on.
-    await userEvent.click(screen.getByRole('radio', { name: 'Board' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Conversation' }))
     await connectFromSettings()
     expect(await screen.findByRole('dialog', { name: 'GitHub' })).toBeTruthy()
   })

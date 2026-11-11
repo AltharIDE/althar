@@ -19,6 +19,8 @@ import {
   startTask,
   still,
   toConversation,
+  expectPanes,
+  showPanes,
 } from './support'
 
 /*
@@ -309,7 +311,7 @@ test('connects GitHub, and a planned task ends in a draft pull request', async (
 
     // The task's bar goes back to the project: its board has it ready to accept, and so does the bar.
     await page.getByRole('button', { name: 'Back to meridian' }).click()
-    await page.getByRole('radio', { name: /^Board/ }).click()
+    await showPanes(page, { conversation: false, board: true })
     const work = page.getByRole('region', { name: 'The project’s work' })
     await expect(work.getByText('Ready to accept')).toBeVisible()
     await page.getByRole('button', { name: '1 needs you' }).hover()
@@ -326,7 +328,7 @@ test('connects GitHub, and a planned task ends in a draft pull request', async (
     await page.getByRole('button', { name: /Accept and merge/ }).click()
     // Back goes to the view it came from, the board.
     await page.getByRole('button', { name: 'Back to meridian' }).click()
-    await expect(page.getByRole('radio', { name: 'Board', checked: true })).toBeVisible()
+    await expectPanes(page, { conversation: false, board: true })
     await expect(work.getByText('PR #1 merged')).toBeVisible()
     await page.screenshot({ path: 'test-results/settled.png', animations: 'disabled' })
   } finally {

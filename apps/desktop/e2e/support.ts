@@ -256,6 +256,26 @@ export const holdRuntime = async (page: Page) => {
   return () => page.evaluate(() => (window as unknown as { release: () => void }).release())
 }
 
+/** A pane's toggle at the end of the project's header: the conversation's or the board's. */
+const paneToggle = (page: Page, name: 'Conversation' | 'Board') =>
+  page.getByRole('group', { name: 'Panes' }).getByRole('button', { name, exact: true })
+
+/** The project's home with these of its panes showing, by their toggles: those wanted on first, so one always shows. */
+export const showPanes = async (page: Page, want: { conversation: boolean; board: boolean }) => {
+  const panes = [['Conversation', want.conversation] as const, ['Board', want.board] as const]
+  for (const [name, on] of [...panes.filter(([, on]) => on), ...panes.filter(([, on]) => !on)]) {
+    const toggle = paneToggle(page, name)
+    if (((await toggle.getAttribute('aria-pressed')) === 'true') !== on) await toggle.click()
+    await expect(toggle).toHaveAttribute('aria-pressed', String(on))
+  }
+}
+
+/** The home's panes showing are these, as their toggles say. */
+export const expectPanes = async (page: Page, shown: { conversation: boolean; board: boolean }) => {
+  await expect(paneToggle(page, 'Conversation')).toHaveAttribute('aria-pressed', String(shown.conversation))
+  await expect(paneToggle(page, 'Board')).toHaveAttribute('aria-pressed', String(shown.board))
+}
+
 export const say = async (page: Page, words: string) => {
   const box = page.getByRole('textbox', { name: /^(Tell .* something|Add to the queue)/ })
   // A click waits until the window takes input, as it doesn't while the launch plays over it; typing alone wouldn't.
@@ -320,12 +340,10 @@ export const projectSettings = async (page: Page, section: 'General' | 'Code and
     .click()
 }
 
-/** From the project's settings back to its work: the conversation with its coordinator. */
+/** From the project's settings back to its work: home, with the conversation with its coordinator showing. */
 export const backToWork = async (page: Page) => {
-  await page
-    .getByRole('radiogroup', { name: 'View' })
-    .getByRole('radio', { name: /^Conversation/ })
-    .click()
+  await paneToggle(page, 'Conversation').click()
+  await expect(paneToggle(page, 'Conversation')).toHaveAttribute('aria-pressed', 'true')
 }
 
 /**

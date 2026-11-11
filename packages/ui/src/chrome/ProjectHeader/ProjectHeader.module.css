@@ -34,3 +34,10 @@
   border: 1px dashed var(--line-3);
   border-radius: 3px;
 }
+
+/* The panes' toggles, set off from what the project runs by a hairline. */
+.bar .panes {
+  padding-right: 6px;
+  margin-right: 2px;
+  box-shadow: inset -1px 0 0 var(--line-2);
+}

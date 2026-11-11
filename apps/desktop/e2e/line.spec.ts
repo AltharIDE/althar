@@ -6,7 +6,7 @@ import { join } from 'node:path'
 import { expect, test } from '@playwright/test'
 
 import { author, repository } from '../tests/repository'
-import { connectGitHub, launch, openFirstProject, say, startTask, still, toBoard } from './support'
+import { connectGitHub, launch, openFirstProject, say, startTask, still, toBoard, showPanes } from './support'
 
 /*
  * The line up next, in a real window with the fake agent and the fake
@@ -74,7 +74,7 @@ test('lists reviews and a quick task waiting for an agent in Up next, and starts
     await say(page, 'Try the double jump. [coordinator:start] [lead:wait]')
     await expect(page.getByText(/^Waiting: 1 of 1 agents busy/)).toHaveCount(4)
 
-    await page.getByRole('radio', { name: /^Board/ }).click()
+    await showPanes(page, { conversation: false, board: true })
     const work = page.getByRole('region', { name: 'The project’s work' })
     // A chat starts on Scratch, off the lanes: the person moves it to the board, where it waits in line with the reviews.
     await toBoard(page, 'Try the double jump')
@@ -201,7 +201,7 @@ test('lists reviews and a quick task waiting for an agent in Up next, and starts
       .first()
       .click()
     await page.getByRole('button', { name: 'Back to meridian' }).click()
-    await page.getByRole('radio', { name: /^Board/ }).click()
+    await showPanes(page, { conversation: false, board: true })
     await expect(running.getByRole('button', { name: `Review #3: ${PULLS[2] ?? ''}`, exact: true })).toBeVisible()
     await expect(running.getByRole('button', { name: /^Try the double jump/ })).toBeVisible()
     await expect(rows).toHaveCount(2)

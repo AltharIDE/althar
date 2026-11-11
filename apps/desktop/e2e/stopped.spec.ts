@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { expect, test } from '@playwright/test'
 
 import { repository } from '../tests/repository'
-import { launch, openFirstProject, startTask } from './support'
+import { launch, openFirstProject, startTask, showPanes } from './support'
 
 /*
  * A task whose lead was stopped, in a real window: it leaves Running, which
@@ -29,7 +29,7 @@ test('a stopped task waits in Needs you with Carry on, and goes back to Running 
     await expect(page.getByText('Stopped', { exact: true }).first()).toBeVisible()
 
     await page.getByRole('button', { name: 'Back to meridian' }).click()
-    await page.getByRole('radio', { name: /^Board/ }).click()
+    await showPanes(page, { conversation: false, board: true })
     const work = page.getByRole('region', { name: 'The project’s work' })
     const yours = work.getByRole('region', { name: 'Needs you' })
     const running = work.getByRole('region', { name: 'Running' })

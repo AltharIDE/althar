@@ -167,7 +167,7 @@ describe('a project’s settings', () => {
     ])
     expect(side.getByRole('button', { name: 'General' }).getAttribute('aria-current')).toBe('page')
     // Back to its work, the conversation is where it was.
-    await userEvent.click((await views()).getByRole('radio', { name: 'Conversation' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Board' }))
     expect(screen.queryByRole('navigation', { name: 'Project settings' })).toBeNull()
   })
 

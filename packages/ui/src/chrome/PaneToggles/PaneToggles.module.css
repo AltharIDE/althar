@@ -1,0 +1,11 @@
+/* Three glyphs side by side, as wide whatever they say. */
+.toggles {
+  display: inline-flex;
+  flex: none;
+  gap: 2px;
+  align-items: center;
+  min-inline-size: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}

@@ -28,12 +28,28 @@
 .button:active:not(:disabled, [aria-disabled='true']) {
   transform: scale(var(--scale-press));
 }
-.button[aria-expanded='true'] {
+.button[aria-expanded='true'],
+.button[aria-pressed='true'] {
   background: var(--line-2);
   color: var(--t-1);
 }
-.button[aria-expanded='true'] svg {
-  color: var(--t-2);
+.button[aria-expanded='true'] svg,
+.button[aria-pressed='true'] svg {
+  color: var(--t-1);
+}
+/* it can't act now, and stays where it is: faint, with no wash under the pointer */
+.button[aria-disabled='true'],
+.button:disabled {
+  cursor: default;
+}
+.button[aria-disabled='true']:not([aria-pressed='true']),
+.button:disabled:not([aria-pressed='true']) {
+  background: none;
+  color: var(--t-4);
+}
+.button[aria-disabled='true']:not([aria-pressed='true']) svg,
+.button:disabled:not([aria-pressed='true']) svg {
+  color: var(--t-4);
 }
 .compact {
   width: 26px;

@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { expect, test } from '@playwright/test'
 
 import { repository } from '../tests/repository'
-import { launch, openFirstProject, planTask, startTask, still } from './support'
+import { launch, openFirstProject, planTask, startTask, still, showPanes } from './support'
 
 /*
  * Tasks started while every place is taken wait in the board's Up next, in the
@@ -58,7 +58,7 @@ test('lists the tasks that wait for a free agent in Up next, in the order they s
     await expect(page.getByRole('region', { name: 'Conversation' }).getByText('Held. Starts when you say')).toBeVisible()
     await planTask(page, 'Plan the release')
 
-    await page.getByRole('radio', { name: /^Board/ }).click()
+    await showPanes(page, { conversation: false, board: true })
     const work = page.getByRole('region', { name: 'The project’s work' })
     const next = work.getByRole('region', { name: 'Up next' })
     const running = work.getByRole('region', { name: 'Running' })
@@ -82,13 +82,13 @@ test('lists the tasks that wait for a free agent in Up next, in the order they s
     await expect(running.getByRole('article')).toHaveCount(0)
 
     // The place frees: the first that waited starts by itself, and moves to Running.
-    await page.getByRole('radio', { name: /^Conversation/ }).click()
+    await showPanes(page, { conversation: true, board: false })
     await page
       .getByRole('button', { name: /^Keeping a place/ })
       .first()
       .click()
     await page.getByRole('dialog', { name: 'Keeping a place' }).getByRole('button', { name: /^Stop/ }).click()
-    await page.getByRole('radio', { name: /^Board/ }).click()
+    await showPanes(page, { conversation: false, board: true })
     await expect(running.getByRole('button', { name: 'Add a retry' })).toBeVisible()
     await expect(rows.nth(0)).toContainText('Tidy the docs')
     await still(page)
