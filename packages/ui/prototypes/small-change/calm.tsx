@@ -37,7 +37,7 @@ export const ReviewMode = createContext<ReviewMode>('major')
 const HOVER = new URLSearchParams(location.search).has('hover')
 
 /** What a small change is, behind its name. */
-function Explained({ s, children }: { s: SmallState; children: ReactNode }) {
+export function Explained({ s, children }: { s: SmallState; children: ReactNode }) {
   const mode = useContext(ReviewMode)
   const card =
     s.key === 'full' ? (
@@ -93,7 +93,7 @@ function where(s: SmallState, mode: ReviewMode): { what: ReactNode; at?: string 
   }
 }
 
-function Where({ s }: { s: SmallState }) {
+export function Where({ s }: { s: SmallState }) {
   const w = where(s, useContext(ReviewMode))
   return (
     <span className={c.where} data-tone={w.tone}>
@@ -106,7 +106,7 @@ function Where({ s }: { s: SmallState }) {
 }
 
 /** What there is to press: Merge, or Fix it and Leave it. */
-function Acts({ s }: { s: SmallState }) {
+export function Acts({ s }: { s: SmallState }) {
   const mode = useContext(ReviewMode)
   if (s.key === 'ready')
     return (
@@ -128,7 +128,7 @@ function Acts({ s }: { s: SmallState }) {
   return null
 }
 
-const canGoFull = (s: SmallState) => !merged(s) && !['merging', 'queued', 'full'].includes(s.key)
+export const canGoFull = (s: SmallState) => !merged(s) && !['merging', 'queued', 'full'].includes(s.key)
 
 /* ——— A · Today, emptied ——— */
 
