@@ -268,13 +268,14 @@ export const statusOf = (
   // Drafted by the coordinator, its plan not proposed yet: under way, nowhere on the board.
   if (phase === 'drafting') return { status: TaskStatus.Running, state: text.planning }
   // Stopped, as its card says, whatever session its lead keeps; and what stopped it, where something says, in the board's words.
-  if (phase === 'stopped' || snapshot.session === null || !snapshot.session.held) {
+  // Its lead's session still starting isn't one that is gone: the agent is on its way, as the runtime says it is under way.
+  if (phase === 'stopped' || snapshot.session === null || (!snapshot.session.held && snapshot.session.state !== 'starting')) {
     const by = snapshot.task.stopped?.by
     // Its pull request ready to merge as it is: said beside the word, as what stopped it is not all there is to say.
     const state = snapshot.task.mergeable === true ? stepText.stoppedMergeable : stepText.stopped
     return { status: TaskStatus.Stopped, state, ...(by == null ? {} : { why: stepText.stoppedBy[by] }) }
   }
-  return { status: TaskStatus.Running, state: text.idle }
+  return { status: TaskStatus.Running, state: snapshot.session?.state === 'starting' ? text.working : text.idle }
 }
 
 /** A task's clock runs while it is under way or waits on the person. */

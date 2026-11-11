@@ -75,7 +75,7 @@ import { taskFindingsOf } from './taskFindings'
 import { filesOf, outputOf, picturesOf } from './handed'
 import { answeredIn, handedOf, issueCardsWaiting, kindOf } from './kinds'
 import { repliedAt } from './replied'
-import { BETWEEN_AGENTS_MS, betweenAgents, byItself, DRAFTING_MS, isMergeable, stillDrafting } from './needsYou'
+import { BETWEEN_AGENTS_MS, betweenAgents, byItself, DRAFTING_MS, isMergeable, stillAsked, stillDrafting } from './needsYou'
 import { mergeNeedsOf, withPushed } from './mergeNeeds'
 import { documentKept, documentText, outputText } from './reading'
 import { type CodeRoot, type CodeRoots, findCode, readCode } from './code'
@@ -2298,6 +2298,23 @@ export class Queries extends Context.Service<
             task.starting > 0 ||
             Option.exists(lead, (session) => session.turnRunning) ||
             Option.exists(reviewer, (session) => session.turnRunning)
+          // What the person asked of its lead, its turn not begun yet: Fix it on a review after a merge, which says so from the
+          // moment it is answered until the turn that takes it is over (its folder coming back, its lead starting, are on the
+          // way meanwhile); or a message waiting for a lead that holds a session. Under way, as the turn is, so a merged task
+          // is never settled, nor stopped, in the moment between the asking and the turn.
+          const [askedOf] = yield* sql<{ fixSince: string | null; told: number }>`
+            SELECT
+              (SELECT r.updated_at FROM merge_reviews r WHERE r.task_id = ${taskId} AND r.state = 'fixing'
+                AND NOT EXISTS (SELECT 1 FROM turn_deliveries d WHERE d.thread_id = ${task.threadId}
+                  AND d.ended_at IS NOT NULL AND d.ended_at >= r.updated_at)
+                ORDER BY r.updated_at DESC LIMIT 1) AS fix_since,
+              EXISTS (SELECT 1 FROM user_inputs i WHERE i.thread_id = ${task.threadId} AND i.state = 'queued'
+                AND i.sender_kind IN ('window', 'paired_device')) AS told`
+          const asked =
+            !busy &&
+            task.state !== 'abandoned' &&
+            ((askedOf?.fixSince != null && stillAsked(askedOf.fixSince, yield* Clock.currentTimeMillis)) ||
+              (askedOf?.told === 1 && Option.isSome(lead)))
           // Waiting for a place among the agents at work on this machine: under way, and it starts on its own.
           const queued = task.heldFor === 'machine_busy' || task.roundWaits > 0 || task.answersWait > 0 || task.turnWaits > 0
           // Waiting so with none of its agents at work, it is up next (ADR-065): under way, it continues first; before any agent
@@ -2430,7 +2447,7 @@ export class Queries extends Context.Service<
             // A call waiting on the person, and work under way, come before anything else (ADR-034): work sent back isn't ready
             // again until its lead is done with the note, and a merged task whose lead works on it again is running.
             if (task.waiting > 0) return 'waiting'
-            if (busy || queued || resolving !== undefined || opening) return 'running'
+            if (busy || queued || resolving !== undefined || opening || asked) return 'running'
             // Drafted, its plan not yet proposed: nowhere on the board yet.
             if (drafting) return 'drafting'
             // A review has no run: drafted, it is the person's to post, as a change is to accept. Posted, and written to again, it
@@ -2630,8 +2647,10 @@ export class Queries extends Context.Service<
                         ? busy || !checksRun
                           ? 'checks'
                           : 'checks_running'
-                        : goes),
-            followUp: task.runState === 'running' && task.runPlan === null,
+                        : asked
+                          ? 'implement'
+                          : goes),
+            followUp: (task.runState === 'running' && task.runPlan === null) || asked,
             summary: latest === undefined ? null : text(parse(latest.content), 'summary') || null,
             lead: task.lead ?? (implement?.agentId || null),
             // Its session's model once one started; the plan's until then.
