@@ -1,4 +1,4 @@
-import type { TaskTime, ThreadItem, TurnTime } from '@althar/contracts'
+import type { ThreadItem, TurnTime } from '@althar/contracts'
 
 /*
  * Where a turn's time went (a task is a conversation plus parts, "Where a
@@ -65,20 +65,6 @@ export const spentOf = (turns: Iterable<string>, kept: ReadonlyMap<string, TurnT
     went: [...went].map(([name, commits]) => ({ name, commits })),
   }
 }
-
-/** A task's turns added up, as `Spent`: what its Usage says it took. */
-export const spentOfTask = (time: TaskTime | undefined): Spent | null =>
-  time === undefined || time.turns === 0
-    ? null
-    : {
-        total: time.place + time.session + time.work,
-        place: time.place,
-        session: time.session,
-        handover: false,
-        work: time.work,
-        tools: time.tools,
-        went: [],
-      }
 
 /** Where the time went, a few words each part that took a second or more, in the order the turn spent it. */
 export const spentWords = (spent: Spent): ReadonlyArray<string> => {
