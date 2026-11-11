@@ -398,3 +398,20 @@
     animation: none;
   }
 }
+/* A walk after the folders: one card at a time, centred in the side. */
+.walk {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: grid;
+  place-items: center;
+  padding: 40px 56px;
+}
+.walk > * {
+  width: 100%;
+  max-width: 440px;
+}
+.place {
+  display: grid;
+  gap: 8px;
+}

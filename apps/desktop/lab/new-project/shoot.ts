@@ -1,40 +1,61 @@
 import { mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 
-import { chromium } from '@playwright/test'
+import { chromium, type Page } from '@playwright/test'
 
 /*
  * Shoots the lab at 1×, into lab/new-project/shots, with it running (README.md):
- * each shot by direction, folder state and theme, in the order the person reads them.
+ * each shot by its address, some after a press, in the order the person reads them.
  */
 
 const out = join(import.meta.dirname, 'shots')
 mkdirSync(out, { recursive: true })
 const port = process.env.LAB_PORT ?? '6163'
-const shots: ReadonlyArray<[string, string]> = [
-  ['01-a-empty', 'd=a&s=empty'],
+const press = (name: string) => async (page: Page) => {
+  await page.getByRole('button', { name }).first().click()
+  await page.waitForTimeout(700)
+}
+const shots: ReadonlyArray<[string, string, ((page: Page) => Promise<void>)?]> = [
+  ['01-a-files', 'd=a&s=files'],
   ['02-a-unborn', 'd=a&s=unborn'],
   ['03-a-working', 'd=a&s=working'],
-  ['04-b-empty-step1', 'd=b&s=empty&step=1'],
-  ['05-b-files-step1', 'd=b&s=files&step=1&theme=dark'],
-  ['06-b-unborn-step1', 'd=b&s=unborn&step=1'],
-  ['07-b-step2-here', 'd=b&s=local&step=2&c=all'],
-  ['08-b-step2-github', 'd=b&s=local&step=2&c=all&code=github'],
-  ['09-b-step2-gitlab-dark', 'd=b&s=files&step=2&c=all&code=gitlab&theme=dark'],
-  ['10-b-step2-github-only', 'd=b&s=empty&step=2&c=github&code=github'],
-  ['11-b-step2-nothing', 'd=b&s=empty&step=2&c=none'],
-  ['12-c-step2-github', 'd=c&s=local&step=2&c=all&code=github'],
-  ['13-c-step2-here-dark', 'd=c&s=local&step=2&c=all&theme=dark'],
-  ['14-b-unreadable', 'd=b&s=unreadable&step=1'],
-  ['15-b-project-dark', 'd=b&s=project&step=1&theme=dark'],
-  ['16-b-working', 'd=b&s=working&c=all'],
-  ['17-b-remote-dark', 'd=b&s=remote&c=all&theme=dark'],
+  ['04-b-files', 'd=b&s=files&c=all'],
+  ['05-b-code', 'd=b&s=files&c=all&card=code'],
+  ['06-b-github', 'd=b&s=files&c=all&card=host'],
+  ['07-b-issues-dark', 'd=b&s=files&c=all&card=issues&theme=dark'],
+  ['08-b-team', 'd=b&s=files&c=all&card=team'],
+  ['09-b-ready', 'd=b&s=files&c=all&card=ready'],
+  [
+    '10-b-making',
+    'd=b&s=files&c=all&card=ready',
+    async (page) => {
+      await page.getByRole('button', { name: /Create Tidepool/ }).click()
+      await page.waitForTimeout(1300)
+    },
+  ],
+  [
+    '11-b-made',
+    'd=b&s=files&c=all&card=ready',
+    async (page) => {
+      await page.getByRole('button', { name: /Create Tidepool/ }).click()
+      await page.waitForTimeout(4200)
+    },
+  ],
+  ['12-c-ready-dark', 'd=c&s=local&c=all&card=ready&theme=dark'],
+  ['13-b-none-code', 'd=b&s=empty&c=none&card=code'],
+  ['14-b-none-connect', 'd=b&s=empty&c=none&card=code', press('Connect GitHub or GitLab')],
+  ['15-b-empty', 'd=b&s=empty&c=all'],
+  ['16-b-unreadable', 'd=b&s=unreadable&c=all'],
+  ['17-b-project-dark', 'd=b&s=project&c=all&theme=dark'],
+  ['18-b-settings-put', 'd=b&s=working&c=all', press('Put tidepool on GitHub…')],
+  ['19-b-remote-dark', 'd=b&s=remote&c=all&theme=dark'],
 ]
 const browser = await chromium.launch()
 const page = await browser.newPage({ viewport: { width: 1280, height: 800 }, deviceScaleFactor: 1 })
-for (const [name, query] of shots) {
+for (const [name, query, act] of shots) {
   await page.goto(`http://localhost:${port}/?${query}`)
-  await page.waitForTimeout(400)
+  await page.waitForTimeout(500)
+  if (act !== undefined) await act(page)
   await page.screenshot({ path: join(out, `${name}.png`) })
 }
 await browser.close()

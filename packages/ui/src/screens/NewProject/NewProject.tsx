@@ -3,6 +3,7 @@ import { type KeyboardEvent, type ReactNode, useEffect, useId, useRef, useState 
 import { commandDown, keys, modKey } from '../../foundations/keys'
 import { device } from '../../foundations/device'
 import type { CodeHost } from '../../foundations/codeHost'
+import type { Brand } from '../../foundations/brands/brands'
 import { Icon } from '../../foundations/Icon/Icon'
 import type { IconName } from '../../foundations/Icon/icons'
 import { BrandMark } from '../../foundations/Marks/Marks'
@@ -65,6 +66,15 @@ export type NewProjectFolder =
       /** What it is, said in place of its remote where that isn't the point: not a repository yet. */
       readonly fact?: ReactNode
     }
+
+/** Where its work goes, said on the left as it is chosen: Code, GitHub · balazs/tidepool. */
+export interface NewProjectPlace {
+  readonly id: string
+  readonly label: string
+  readonly value: string
+  readonly brand?: Brand
+  readonly icon?: IconName
+}
 
 /** A repository on this computer that could be added in one press. */
 export interface NewProjectSuggestion {
@@ -247,12 +257,10 @@ export type NewProjectProps = RootProps<
     error?: ReactNode
     /** More to ask under the folders, before what reading found. */
     extra?: ReactNode
-    /** Where it is in a walk of steps, over the side's title. */
-    track?: ReactNode
-    /** A later step's own content, in place of the folders. */
-    body?: ReactNode
-    /** Beside the main button in the foot: back to the step before. */
-    back?: ReactNode
+    /** A walk after the folders, one card at a time, in the side's place, centred, with no foot. */
+    walk?: ReactNode
+    /** Where its work goes, as it is chosen: under what it is made of, each with its mark. */
+    places?: readonly NewProjectPlace[]
     text?: Partial<NewProjectText>
   }
 >
@@ -302,9 +310,8 @@ export function NewProject({
   creating = false,
   error,
   extra,
-  track,
-  body,
-  back,
+  walk,
+  places = [],
   className,
   text,
   onKeyDown,
@@ -451,40 +458,83 @@ export function NewProject({
               </p>
             </>
           )}
+          {places.map((place) => (
+            <div key={place.id} className={s.place}>
+              <span className={cx(s.label, s.gap)}>{place.label}</span>
+              <p className={s.made}>
+                <span className={s.repo}>
+                  {place.brand !== undefined ? (
+                    <BrandMark brand={place.brand} size={12} />
+                  ) : (
+                    <Icon name={place.icon ?? 'folder'} size={12} />
+                  )}
+                  {place.value}
+                </span>
+              </p>
+            </div>
+          ))}
         </div>
       </section>
 
-      <section className={s.side} aria-labelledby={ids.folders}>
-        <div className={s.sideInner} ref={side}>
-          {track}
-          <h2 id={ids.folders} className={s.title}>
-            {t.folders}
-          </h2>
-          {body}
-          {body === undefined && over && !empty && <div className={s.empty} aria-hidden="true" />}
-          {body === undefined && folders.length > 0 && (
-            <ul className={s.folders} aria-label={t.folders}>
-              {folders.map((folder, at) => (
-                <FolderRow
-                  key={folder.id}
-                  folder={folder}
-                  t={t}
-                  onRemove={(id) => {
-                    refocus.current = { list: 'folders', at }
-                    onRemove(id)
-                  }}
-                />
-              ))}
-            </ul>
-          )}
-          {body !== undefined ? null : empty ? (
-            // Nothing added yet: where the folders will be, taking a drop, with the two ways to add one.
-            <div className={cx(s.zone, over && s.zoneOver)}>
-              <span className={s.zoneIcon} aria-hidden="true">
-                <Icon name="folder" size={18} />
-              </span>
-              <p className={s.zoneTitle}>{t.zone}</p>
-              <div className={s.zoneButtons}>
+      {walk !== undefined ? (
+        <section className={s.side} aria-label={t.label}>
+          <div className={s.walk}>{walk}</div>
+        </section>
+      ) : (
+        <section className={s.side} aria-labelledby={ids.folders}>
+          <div className={s.sideInner} ref={side}>
+            <h2 id={ids.folders} className={s.title}>
+              {t.folders}
+            </h2>
+            {over && !empty && <div className={s.empty} aria-hidden="true" />}
+            {folders.length > 0 && (
+              <ul className={s.folders} aria-label={t.folders}>
+                {folders.map((folder, at) => (
+                  <FolderRow
+                    key={folder.id}
+                    folder={folder}
+                    t={t}
+                    onRemove={(id) => {
+                      refocus.current = { list: 'folders', at }
+                      onRemove(id)
+                    }}
+                  />
+                ))}
+              </ul>
+            )}
+            {empty ? (
+              // Nothing added yet: where the folders will be, taking a drop, with the two ways to add one.
+              <div className={cx(s.zone, over && s.zoneOver)}>
+                <span className={s.zoneIcon} aria-hidden="true">
+                  <Icon name="folder" size={18} />
+                </span>
+                <p className={s.zoneTitle}>{t.zone}</p>
+                <div className={s.zoneButtons}>
+                  <Button
+                    ref={chooseButton}
+                    size="small"
+                    icon="folder"
+                    onClick={onChoose}
+                    aria-describedby={missing === 'folder' ? ids.missing : undefined}
+                  >
+                    {t.choose}
+                  </Button>
+                  {fresh && (
+                    <Button size="small" icon="plus" onClick={startFresh}>
+                      {t.fresh}
+                    </Button>
+                  )}
+                </div>
+                {missing === 'folder' ? (
+                  <p id={ids.missing} className={s.missing} role="alert">
+                    {fresh ? t.needsFolderOrFresh : t.needsFolder}
+                  </p>
+                ) : (
+                  fresh && <p className={s.note}>{t.freshNote(named === '' ? null : repositoryFolder(named))}</p>
+                )}
+              </div>
+            ) : (
+              <div className={s.chooseRow}>
                 <Button
                   ref={chooseButton}
                   size="small"
@@ -499,69 +549,44 @@ export function NewProject({
                     {t.fresh}
                   </Button>
                 )}
+                {missing === 'folder' ? (
+                  <span id={ids.missing} className={s.missing} role="alert">
+                    {fresh ? t.needsFolderOrFresh : t.needsFolder}
+                  </span>
+                ) : (
+                  <span className={s.note}>{t.chooseNote}</span>
+                )}
               </div>
-              {missing === 'folder' ? (
-                <p id={ids.missing} className={s.missing} role="alert">
-                  {fresh ? t.needsFolderOrFresh : t.needsFolder}
-                </p>
-              ) : (
-                fresh && <p className={s.note}>{t.freshNote(named === '' ? null : repositoryFolder(named))}</p>
-              )}
-            </div>
-          ) : (
-            <div className={s.chooseRow}>
-              <Button
-                ref={chooseButton}
-                size="small"
-                icon="folder"
-                onClick={onChoose}
-                aria-describedby={missing === 'folder' ? ids.missing : undefined}
-              >
-                {t.choose}
-              </Button>
-              {fresh && (
-                <Button size="small" icon="plus" onClick={startFresh}>
-                  {t.fresh}
-                </Button>
-              )}
-              {missing === 'folder' ? (
-                <span id={ids.missing} className={s.missing} role="alert">
-                  {fresh ? t.needsFolderOrFresh : t.needsFolder}
-                </span>
-              ) : (
-                <span className={s.note}>{t.chooseNote}</span>
-              )}
-            </div>
-          )}
-          {body === undefined && extra}
-          {body === undefined && (findings.length > 0 || (found !== null && found.first.length + found.more.length > 0)) && (
-            <div className={s.below}>
-              {findings.length > 0 && <Findings findings={findings} t={t} {...(onConnect === undefined ? {} : { onConnect })} />}
-              {found !== null && (
-                <Found
-                  found={found}
-                  t={t}
-                  onAdd={(id, at) => {
-                    refocus.current = { list: 'found', at }
-                    onAdd(id)
-                  }}
-                />
-              )}
-            </div>
-          )}
-        </div>
-        <footer className={s.foot}>
-          {error !== undefined && error !== null && (
-            <span className={s.error} role="alert">
-              {error}
-            </span>
-          )}
-          {back}
-          <Button kbd={t.createKbd} variant={read.length === 0 ? 'quiet' : 'default'} busy={creating || reading} onClick={create}>
-            {named === '' ? t.createUnnamed : t.create(named)}
-          </Button>
-        </footer>
-      </section>
+            )}
+            {extra}
+            {(findings.length > 0 || (found !== null && found.first.length + found.more.length > 0)) && (
+              <div className={s.below}>
+                {findings.length > 0 && <Findings findings={findings} t={t} {...(onConnect === undefined ? {} : { onConnect })} />}
+                {found !== null && (
+                  <Found
+                    found={found}
+                    t={t}
+                    onAdd={(id, at) => {
+                      refocus.current = { list: 'found', at }
+                      onAdd(id)
+                    }}
+                  />
+                )}
+              </div>
+            )}
+          </div>
+          <footer className={s.foot}>
+            {error !== undefined && error !== null && (
+              <span className={s.error} role="alert">
+                {error}
+              </span>
+            )}
+            <Button kbd={t.createKbd} variant={read.length === 0 ? 'quiet' : 'default'} busy={creating || reading} onClick={create}>
+              {named === '' ? t.createUnnamed : t.create(named)}
+            </Button>
+          </footer>
+        </section>
+      )}
     </div>
   )
 }

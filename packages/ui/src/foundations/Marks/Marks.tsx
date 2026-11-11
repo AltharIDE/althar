@@ -1,6 +1,7 @@
 import { cx } from '../../lib/cx'
 import { Brand, BRANDS } from '../brands/brands'
 import { Icon } from '../Icon/Icon'
+import type { IconName } from '../Icon/icons'
 import s from './Marks.module.css'
 
 /*
@@ -38,17 +39,19 @@ export function BrandMark({ brand, size = 14, className }: BrandMarkProps) {
 export interface BrandChipProps {
   /** Its mark; without one, a plug, as for an agent of the person's own. */
   brand?: Brand
+  /** Without a brand, this in place of the plug: what the tile stands for, as a branch for where code goes. */
+  icon?: IconName
   /** The tile's side, in pixels; the mark is half of it. */
   size?: number
   className?: string
 }
 
 /** A mark on a small paper tile, for a product named beside it: an agent, a code host. */
-export function BrandChip({ brand, size = 32, className }: BrandChipProps) {
+export function BrandChip({ brand, icon = 'plug', size = 32, className }: BrandChipProps) {
   const mark = Math.round(size / 2)
   return (
     <span className={cx(s.chip, className)} style={{ width: size, height: size, borderRadius: Math.round(size * 0.28) }} aria-hidden="true">
-      {brand === undefined ? <Icon name="plug" size={mark} /> : <BrandMark brand={brand} size={mark} />}
+      {brand === undefined ? <Icon name={icon} size={mark} /> : <BrandMark brand={brand} size={mark} />}
     </span>
   )
 }
