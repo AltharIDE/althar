@@ -7,12 +7,15 @@ import { SqlClient } from 'effect/sql'
 
 import { Busy } from '../src/Busy'
 import { Changes } from '../src/Changes'
+import { Coordinator } from '../src/Coordinator'
 import { Queries } from '../src/Queries'
+import { Questions } from '../src/Questions'
 import { Sessions } from '../src/Sessions'
 import { TASK_OF } from '../src/taskOf'
 import * as Runtime from '../src/Runtime'
 import { retitleTask } from '../src/taskTitle'
-import { callTool, HOST, hosted, until } from './support'
+import { scenarios } from '@althar/provider-adapters/testing'
+import { callTool, HOST, hosted, turns, until } from './support'
 import { ask, cards, connect, git, runtimeWith, tipOf } from './changesSupport'
 
 /*
@@ -266,6 +269,50 @@ describe('a card that moves through a kind of change the board read nothing of b
       assert.isFalse(since.some((change) => LISTED.has(change.aggregateType)))
       assert.strictEqual(listed.board.tasks.find((card) => card.taskId === taskId)?.phase, 'running')
     }).pipe(Effect.scoped, Effect.provide(runtimeWith({ github })))
+  })
+})
+
+describe("a call on the board that is no task's", () => {
+  it.live("moves the board as the coordinator asks the person, and as they answer, though no task's card does", () => {
+    const { working } = hosted()
+    return Effect.gen(function* () {
+      const queries = yield* Queries
+      const coordinator = yield* Coordinator
+      const projectId = yield* ask(working, 'hello')
+      const threadId = yield* coordinator.thread(projectId)
+      // Its first turn is its brief with what was said; the question comes in the next.
+      yield* until(turns(threadId), (rows) => rows.length >= 1 && rows.every((row) => !['pending', 'delivered'].includes(row.state)))
+      const window = yield* windowOf(projectId, NOW)
+      const from = yield* queries.cursor
+      yield* coordinator.say({
+        envelope: yield* Runtime.envelope('thread.send', { body: scenarios.question }),
+        threadId,
+        body: scenarios.question,
+        disposition: 'after_current',
+      })
+      // Asked, it waits in the board's Needs you, as its conversation shows it.
+      const [asked] = yield* until(
+        Effect.sync(() => window.board.calls),
+        (calls) => calls.length === 1,
+      )
+      assert.strictEqual(asked?.taskId, null)
+      const questions = yield* Questions
+      yield* questions.answer({
+        envelope: yield* Runtime.envelope('attention.answer_question', {}),
+        attentionId: asked?.id ?? '',
+        answers: { database: { values: ['postgres'] } },
+      })
+      // Answered, it leaves the board.
+      yield* until(
+        Effect.sync(() => window.board.calls),
+        (calls) => calls.length === 0,
+      )
+      // No task's card moved: the feed said the project's own did.
+      const since = yield* Effect.orDie(queries.changesSince(from, 500))
+      const said = since.filter((change) => change.aggregateType === 'card').map((change) => change.aggregateId)
+      assert.isAbove(said.length, 0)
+      assert.isTrue(said.every((id) => id === projectId))
+    }).pipe(Effect.scoped, Effect.provide(runtimeWith({})))
   })
 })
 

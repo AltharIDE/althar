@@ -41,7 +41,8 @@ saw came from screens starting empty, not from slow reads.
 - **A board follows its cards, as the runtime says they changed.** The
   runtime works a task's card out again as anything of the task changes,
   whatever kind of record it is, and says `card` on the feed only where it
-  came out different. Boards, the home and the coordinator's cards read
+  came out different, and of a project's own calls (its coordinator's
+  questions) as a card of the project. Boards, the home and the coordinator's cards read
   again on that, so they keep up with a task as its view does, with no list
   of kinds to keep; a task's header and its card say where it stands from
   one reading (`taskStatusOf`).

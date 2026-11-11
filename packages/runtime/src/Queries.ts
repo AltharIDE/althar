@@ -3818,17 +3818,26 @@ export class Queries extends Context.Service<
           const calls = (yield* callsIn(row.projectId)).filter((one) => one.call.taskId === taskId).map((one) => one.call)
           return JSON.stringify({ card, calls })
         })
+      // What of a project's board is no task's: the questions its coordinator asks the person, which wait in Needs you.
+      const shownCalls = new Map<string, string>()
+      const projectShown = (projectId: string) =>
+        Effect.map(callsIn(projectId), (calls) => JSON.stringify(calls.filter((one) => one.call.taskId === null).map((one) => one.call)))
       const cardsMoved = (ledger: Ledger['Service'], after: number) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
           let at = after
           // Each task a change was of, by its project: the change's own, so a task removed is still said of its board.
           const tasks = new Map<string, string>()
+          // And each project a change of no task was in, whose own calls it may have moved.
+          const projects = new Set<string>()
           for (;;) {
             const rows = yield* sql<{ cursor: number; projectId: string | null; taskId: string | null }>`
               SELECT c.cursor, c.project_id, ${sql.unsafe(taskOfChange)} AS task_id FROM change_log c
               WHERE c.cursor > ${at} ORDER BY c.cursor LIMIT ${CARD_CHANGES}`
-            for (const row of rows) if (row.taskId !== null && row.projectId !== null) tasks.set(row.taskId, row.projectId)
+            for (const row of rows)
+              if (row.projectId === null) continue
+              else if (row.taskId !== null) tasks.set(row.taskId, row.projectId)
+              else projects.add(row.projectId)
             at = rows.at(-1)?.cursor ?? at
             if (rows.length < CARD_CHANGES) break
           }
@@ -3845,6 +3854,24 @@ export class Queries extends Context.Service<
                   projectId: projectId as never,
                   aggregateType: 'card',
                   aggregateId: taskId,
+                  aggregateRevision: cardRevision,
+                })
+              }),
+            { concurrency: AT_ONCE, discard: true },
+          )
+          // A project's own calls came out different: said as its card, of the project, so its board and the home read again.
+          yield* Effect.forEach(
+            projects,
+            (projectId) =>
+              Effect.gen(function* () {
+                const shown = yield* projectShown(projectId)
+                if ((shownCalls.get(projectId) ?? '[]') === shown) return
+                shownCalls.set(projectId, shown)
+                cardRevision += 1
+                yield* ledger.notify({
+                  projectId: projectId as never,
+                  aggregateType: 'card',
+                  aggregateId: projectId,
                   aggregateRevision: cardRevision,
                 })
               }),

@@ -21,7 +21,8 @@ import { keys } from './reads'
  *   one change, `card`: the runtime works a task's card out again as
  *   anything of the task changes, whatever kind of record it is (its
  *   `TASK_OF`), and says `card` only where it came out different, its calls
- *   included. So no change a card shows is missed, and what is said in a
+ *   included; and a project's own calls, its coordinator's questions, as a
+ *   `card` of the project. So no change a card shows is missed, and what is said in a
  *   thread, most of what changes, reads one card there rather than a board
  *   here. A task's view hears the same `card` on its thread, and reads its
  *   head from the same card;
@@ -47,7 +48,8 @@ export const GATHER = 60
 /**
  * What changes what a board shows: a task's card, which the runtime works
  * out again as anything of the task changes and says changed only where it
- * came out different, its calls included; and the project itself.
+ * came out different, its calls included; the calls of no task, its
+ * coordinator's questions, said as a card of the project; and the project itself.
  */
 export const BOARD = new Set(['card', 'project'])
 
