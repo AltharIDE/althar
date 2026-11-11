@@ -1649,14 +1649,15 @@ export class Runs extends Context.Service<
           const [thread] = yield* sql<{ taskId: string }>`
             SELECT task_id AS taskId FROM threads WHERE id = ${threadId} AND kind = 'task'`
           if (thread === undefined) return
-          // A turn answers the calls that were open when the words it carries were sent, not one the lead asked after them,
-          // while it ran on: that question is still the person's to answer.
+          // A turn answers the calls that were open when the person's words it carries were sent, not one the lead asked after
+          // them, while it ran on: that question is still the person's to answer. What the coordinator or Althar sent beside
+          // their words doesn't move that point.
           const [sent] =
             turnId === undefined
               ? []
               : yield* sql<{ at: string | null }>`
                 SELECT max(u.accepted_at) AS at FROM turn_delivery_inputs d JOIN user_inputs u ON u.id = d.user_input_id
-                WHERE d.delivery_id = ${turnId}`
+                WHERE d.delivery_id = ${turnId} AND u.sender_kind IN ('window', 'paired_device')`
           const until = sent?.at ?? '9999'
           const open = yield* sql<{ id: string; projectId: ProjectId; attemptId: string | null }>`
             SELECT id, project_id AS projectId, node_attempt_id AS attemptId FROM attention_requests

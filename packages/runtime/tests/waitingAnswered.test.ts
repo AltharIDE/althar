@@ -235,6 +235,16 @@ describe('the person’s message to a lead waiting on them', () => {
       yield* callTool(lead, 'wait_for_person', { question: 'And the colour?' })
       const both = yield* until(calls(task.taskId), (rows) => rows.length === 2)
       assert.strictEqual(both[1]?.state, 'open')
+      // The coordinator passes something on after that question: its turn carries both, with the person's reply first.
+      const instance = yield* Instance
+      const passed = passedOn('Which direction did you pick?')
+      yield* (yield* Sessions).send({
+        envelope: yield* Runtime.envelope('thread.send', { threadId: task.threadId, body: passed }, undefined, instance.coordinatorId),
+        threadId: task.threadId,
+        body: passed,
+        disposition: 'after_current',
+        quiet: true,
+      })
       // The lead's turn ends, and the reply's turn starts.
       hold.open('[lead:wait]')
       yield* until(
