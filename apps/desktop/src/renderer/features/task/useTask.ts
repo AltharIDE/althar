@@ -635,7 +635,8 @@ export const useTask = (threadId: string): TaskModel => {
       setError(null)
       let taken = true
       try {
-        const session = snapshot?.session
+        // As the cache has it now, not as this render had it: a head read may have landed since.
+        const session = (cache.getQueryData<ThreadSnapshot>(keys.thread(threadId)) ?? snapshot)?.session
         // A thread the runtime no longer holds can't be moved: the choice starts the lead on it instead. While it is held, the choice changes the lead it has:
         // from what it was last picked to, else what the runtime holds for its next turn, else what it is on, so a pick back to what it is on cancels the one before.
         if (session == null || !session.held) await client.startSession(startOf(threadId, choice))
@@ -649,10 +650,14 @@ export const useTask = (threadId: string): TaskModel => {
         fail(failure)
         taken = false
       }
-      if (lastPick.current === choice) lastPick.current = null
       // The runtime has it as who leads next, or the lead as it was: read now, so the picker is told by the thread, not by the window.
-      await readHead()
-      await newest.landed('head')
+      // The pick stands as the last until that read has landed: one made before it goes from here, not from the thread as it was.
+      try {
+        await readHead()
+        await newest.landed('head')
+      } finally {
+        if (lastPick.current === choice) lastPick.current = null
+      }
       return taken
     },
     handOver: (choice, body, images) =>

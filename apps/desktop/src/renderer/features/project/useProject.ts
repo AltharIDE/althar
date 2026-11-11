@@ -480,7 +480,8 @@ export const useProject = (projectId: string): ProjectModel => {
       setError(null)
       let taken = true
       try {
-        const session = coordinator?.session
+        // As the cache has it now, not as this render had it: a head read may have landed since.
+        const session = (cache.getQueryData<CoordinatorSnapshot>(keys.coordinator(projectId)) ?? coordinator)?.session
         // A session the runtime no longer holds can't be moved; the pick is applied when the person next says something.
         if (threadId !== null && session != null && session.held) {
           // From what it was last picked to, else what the runtime holds for its next turn, else what it is on.
@@ -492,8 +493,12 @@ export const useProject = (projectId: string): ProjectModel => {
         fail(failure)
         taken = false
       }
-      if (lastPick.current === choice) lastPick.current = null
-      await readHead()
+      // The pick stands as the last until the head read has landed: one made before it goes from here, not from the thread as it was.
+      try {
+        await readHead()
+      } finally {
+        if (lastPick.current === choice) lastPick.current = null
+      }
       return taken
     },
     handOver: (choice, body, images) =>
