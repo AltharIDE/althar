@@ -168,7 +168,8 @@ const ROUND_REACH = 2_000
  * a pull request.
  */
 const ROUND_ASK = `(i.kind = 'user_message' AND coalesce(u.state, 'delivered') = 'delivered')
-  OR (i.kind = 'notice' AND json_extract(i.content, '$.source') = 'runtime' AND coalesce(json_extract(i.content, '$.role'), '') NOT IN ('aside', 'folder', 'skills'))
+  OR (i.kind = 'notice' AND json_extract(i.content, '$.source') = 'runtime' AND coalesce(json_extract(i.content, '$.role'), '') NOT IN ('aside', 'folder', 'skills')
+    AND json_extract(i.content, '$.situation') IS NULL)
   OR (i.kind = 'step_result' AND json_extract(i.content, '$.step') IN ('review', 'publish'))
   OR i.kind = 'arrival'`
 
@@ -248,15 +249,6 @@ const skillOf = (skill: unknown) => {
     ? { skill: { names: names.filter((name): name is string => typeof name === 'string'), reported: field(skill, 'reported') === true } }
     : {}
 }
-
-/** What a lead's agent could see, as `threads.ts` keeps it. */
-const skillsSeenOf = (skills: unknown) =>
-  (Array.isArray(skills) ? skills : []).flatMap((skill) => {
-    const name = text(skill, 'name')
-    return name === ''
-      ? []
-      : [{ name, path: text(skill, 'path'), from: text(skill, 'from') === 'repository' ? ('repository' as const) : ('person' as const) }]
-  })
 
 interface ItemRow {
   readonly id: string
@@ -531,7 +523,7 @@ const decodePushRequest = Schema.decodeUnknownOption(PushRequestItem.fields.cont
 const decodeTaskAsk = Schema.decodeUnknownOption(TaskAskItem.fields.content)
 const decodeSettingChange = Schema.decodeUnknownOption(SettingChangeCard)
 const decodeModelMove = Schema.decodeUnknownOption(ModelMoveItem.fields.content)
-/** The task a notice is about, which the thread links to: one its lead started (ADR-097). */
+/** The task a notice is about, which the thread links to: one its lead started (ADR-097), in one line. */
 const decodeNoticeTask = Schema.decodeUnknownOption(
   Schema.Struct({ taskId: Schema.String, slug: Schema.String, title: Schema.String, threadId: Schema.String }),
 )
@@ -646,8 +638,10 @@ export const itemOf = (row: ItemRow): ThreadItem | undefined => {
       // Older threads kept the agent's explanation of a refusal as a notice; the refused call's own row says it now.
       const title = text(content, 'title')
       if (title === 'Resumed after a rejection.') return undefined
-      // A session's line of skills that said nothing new, kept for its list only: it never reaches the window.
-      if (role === 'skills' && field(content, 'hidden') === true) return undefined
+      // What a lead's agent could see is kept for `skillsRead`, not for a chat: a line for it never reaches the window.
+      if (role === 'skills') return undefined
+      // What older threads said of another task (one that ended, or one changing the same files): news for the lead, not for the chat.
+      if (field(content, 'situation') !== undefined) return undefined
       // Likewise the coordinator's receipt of a denial, kept by older threads.
       if (title?.startsWith('Denied ') && description?.startsWith('By the coordinator:') && text(content, 'about') === 'permission')
         return undefined
@@ -659,8 +653,7 @@ export const itemOf = (row: ItemRow): ThreadItem | undefined => {
           severity: severity === 'error' || severity === 'warning' ? severity : 'info',
           title: text(content, 'title'),
           description: description === '' ? null : description,
-          ...(role === 'aside' || role === 'relayed' || role === 'folder' || role === 'skills' ? { role } : {}),
-          ...(role === 'skills' ? { skills: skillsSeenOf(field(content, 'skills')) } : {}),
+          ...(role === 'aside' || role === 'relayed' || role === 'folder' ? { role } : {}),
           ...(failure === undefined || failure === '' ? {} : { failure }),
           ...Option.match(decodeNoticeTask(field(content, 'task')), { onNone: () => ({}), onSome: (task) => ({ task }) }),
         },

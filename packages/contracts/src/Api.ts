@@ -1904,24 +1904,8 @@ export const NoticeItem = Schema.Struct({
      * work, what the coordinator relayed, or its task's folder going or coming
      * back, a line across the thread (ADR-056).
      */
-    role: Schema.optional(Schema.Literals(['aside', 'relayed', 'folder', 'skills'])),
-    /**
-     * For what Althar says of another task, drawn as its own line with the task linked (`task`): a task this task's lead
-     * started that ended without reaching it, or another open task changing the same files.
-     */
-    situation: Schema.optional(
-      Schema.Union([
-        Schema.Struct({
-          kind: Schema.Literal('ended'),
-          /** Settled without a change, failed, or stopped by the person. */
-          how: Schema.Literals(['unchanged', 'failed', 'stopped']),
-          /** Why, from its report, in a line; absent where it said nothing. */
-          why: Schema.optional(Schema.String),
-        }),
-        Schema.Struct({ kind: Schema.Literal('overlap'), files: Schema.Array(Schema.String) }),
-      ]),
-    ),
-    /** A task the line is about, which it links to: one this task's lead started (ADR-097). */
+    role: Schema.optional(Schema.Literals(['aside', 'relayed', 'folder'])),
+    /** A task the line is about, which it links to: one this task's lead started (ADR-097), once. */
     task: Schema.optional(Schema.Struct({ taskId: Schema.String, slug: Schema.String, title: Schema.String, threadId: Schema.String })),
     /**
      * A step of the work it marks, drawn as a stamped row of its own (a task is a conversation plus parts, "How it reads"): a
@@ -1949,10 +1933,6 @@ export const NoticeItem = Schema.Struct({
      * person set up twice, as a preset by that name, which its button saves.
      */
     offer: Schema.optional(Schema.Struct({ kind: Schema.Literal('preset'), name: Schema.String, parts: PresetParts })),
-    /** For what a lead's agent could see: each skill, and whether it is the person's or the repository's. */
-    skills: Schema.optional(
-      Schema.Array(Schema.Struct({ name: Schema.String, path: Schema.String, from: Schema.Literals(['person', 'repository']) })),
-    ),
     /**
      * For an agent's turn that failed: why, as the runtime classes it
      * (`auth_required`, `usage_limit`, `context_full`, `session_lost`,
