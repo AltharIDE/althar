@@ -53,6 +53,14 @@ export const Offered: Story = {
   },
 }
 
+/** The form open, its name the one offered. */
+export const Open: Story = {
+  play: async ({ canvasElement }) => {
+    await userEvent.click(within(canvasElement).getByRole('button', { name: 'Keep as a preset' }))
+    await expect(await within(canvasElement.ownerDocument.body).findByLabelText('Preset name')).toHaveValue('Local, no review')
+  },
+}
+
 /** Don't offer again, from the form. */
 export const Declined: Story = {
   play: async ({ args, canvasElement }) => {

@@ -205,31 +205,48 @@ describe('running the project, with no agent', () => {
 })
 
 describe('the project’s bar', () => {
-  it('keeps the parts the coordinator offers as a preset, by its name, with one press', async () => {
+  it('offers a task’s parts as a preset on its card: kept by the name given, or not offered again', async () => {
     const parts = {
       workspace: 'worktree' as const,
       checked: 'none' as const,
-      end: 'draft' as const,
+      end: 'none' as const,
       shelf: 'board' as const,
-      lead: 'claude-code/opus',
+      lead: 'codex/large',
       reviewer: null,
       brief: '',
     }
-    const offer = items.notice(
-      {
-        source: 'runtime',
-        title: 'You set up these parts twice. Keep them as a preset?',
-        description: 'opus change: a worktree, no review, a draft pull request, led by opus.',
-        offer: { kind: 'preset', name: 'opus change', parts },
-      },
-      null,
-    )
-    const { client } = fakeClient({ getCoordinator: vi.fn(async () => coordinatorSnapshot({ items: [offer] })) })
+    const offered = items.card(card({ presetOffer: { name: 'No review, no PR', parts } }), 'c1')
+    const { client } = fakeClient({ getCoordinator: vi.fn(async () => coordinatorSnapshot({ items: [offered] })) })
     withServices(<WithSettings />, client)
-    await screen.findByText('You set up these parts twice. Keep them as a preset?')
-    await userEvent.click(await screen.findByRole('button', { name: 'Keep it as “opus change”' }))
-    await waitFor(() => expect(client.savePreset).toHaveBeenCalledWith({ name: 'opus change', parts }))
-    expect(await screen.findByText('Kept as “opus change”: Settings has your presets.')).toBeTruthy()
+    await userEvent.click(await screen.findByRole('button', { name: 'Keep as a preset' }))
+    const name = await screen.findByLabelText('Preset name')
+    expect(name).toHaveProperty('value', 'No review, no PR')
+    await userEvent.clear(name)
+    await userEvent.type(name, 'Codex alone')
+    await userEvent.click(screen.getByRole('button', { name: 'Keep' }))
+    await waitFor(() => expect(client.savePreset).toHaveBeenCalledWith({ name: 'Codex alone', parts, taskId: 't1' }))
+
+    await userEvent.click(screen.getByRole('button', { name: 'Keep as a preset' }))
+    await userEvent.click(await screen.findByRole('button', { name: 'Don’t offer again' }))
+    await waitFor(() => expect(client.declinePresetOffer).toHaveBeenCalledWith('t1'))
+  })
+
+  it('says what a task’s card kept as a preset, and Undo removes it', async () => {
+    const kept = items.card(
+      card({
+        presetOffer: {
+          name: 'No review, no PR',
+          parts: { workspace: 'worktree', checked: 'none', end: 'none', shelf: 'board', lead: 'codex/large', reviewer: null, brief: '' },
+          kept: { id: 'pst_1', name: 'Codex alone' },
+        },
+      }),
+      'c1',
+    )
+    const { client } = fakeClient({ getCoordinator: vi.fn(async () => coordinatorSnapshot({ items: [kept] })) })
+    withServices(<WithSettings />, client)
+    expect(await screen.findByText('Kept as Codex alone')).toBeTruthy()
+    await userEvent.click(screen.getByRole('button', { name: 'Undo' }))
+    await waitFor(() => expect(client.removePreset).toHaveBeenCalledWith('pst_1'))
   })
 
   it('steps through the views by b, never while typing, and has no button to start a task', async () => {
