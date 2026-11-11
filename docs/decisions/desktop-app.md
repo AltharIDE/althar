@@ -36,7 +36,15 @@ saw came from screens starting empty, not from slow reads.
   whole read it touches, on screen or not, so the next place the person goes
   is already right. A change to a thread only marks it out of date; the
   screen showing it reads what changed, item by item, and a thread not on
-  screen is read when it next opens.
+  screen is read when it next opens. A read under way is let finish and
+  read once more, never cut short to begin again.
+- **A board follows its cards, as the runtime says they changed.** The
+  runtime works a task's card out again as anything of the task changes,
+  whatever kind of record it is, and says `card` on the feed only where it
+  came out different. Boards, the home and the coordinator's cards read
+  again on that, so they keep up with a task as its view does, with no list
+  of kinds to keep; a task's header and its card say where it stands from
+  one reading (`taskStatusOf`).
 - **A screen reads before it shows.** Each route's loader waits for its
   reads, and the screen being left stays until then, so a screen opens whole.
 - **A slow read shows the place's outline,** and only past 150 ms, kept at

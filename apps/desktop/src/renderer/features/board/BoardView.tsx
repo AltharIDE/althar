@@ -39,6 +39,7 @@ import {
 import { Fragment, type ReactNode, useEffect, useState } from 'react'
 
 import { pictureUrl } from '../../../main/pictureAddress'
+import { taskStatusOf } from '../../shared/taskStatus'
 import { busyWords, inLineWords, reconnectsWords, waitsWords } from '../../shared/agents'
 import { localText } from '../../shared/local'
 import { askOf, callKindOf, isAnswered, isSettleable, kindWords, takesDone, whereOf } from '../../shared/calls'
@@ -405,24 +406,22 @@ export const runningCardOf = (work: BoardTask, now: string, name: (id: string | 
 }
 
 const runningCard = (work: BoardTask, now: string, name: (id: string | null) => string): Card => {
-  // Waiting for a free agent, held for a usage limit, or stopped, it says so rather than that it runs.
+  // Held for a usage limit or the connection, waiting for a free agent, or stopped, it says so rather than that it runs: where it
+  // stands is its card's, as its header and the home say it (`taskStatusOf`).
+  const status = taskStatusOf(work)
   const still: Pick<Card, 'status' | 'word' | 'why'> | null =
-    work.queued !== null
-      ? { status: TaskStatus.Queued, word: text.status[TaskStatus.Queued], why: busyWords(work.queued) }
-      : work.waits !== null
-        ? {
-            status: TaskStatus.Paused,
-            word: text.status[TaskStatus.Paused],
-            why: waitsWords(name(work.waits.agentId), clock(work.waits.until), undefined, work.waits.left),
-          }
-        : work.reconnects != null
-          ? { status: TaskStatus.Paused, word: text.status[TaskStatus.Paused], why: reconnectsWords(work.reconnects, clock) }
-          : work.phase === 'stopped'
-            ? {
-                status: TaskStatus.Stopped,
-                word: text.status[TaskStatus.Stopped],
-                ...(work.stopped?.by == null ? {} : { why: text.stoppedBy[work.stopped.by] }),
-              }
+    status === TaskStatus.Paused && work.waits !== null
+      ? {
+          status,
+          word: text.status[status],
+          why: waitsWords(name(work.waits.agentId), clock(work.waits.until), undefined, work.waits.left),
+        }
+      : status === TaskStatus.Paused && work.reconnects != null
+        ? { status, word: text.status[status], why: reconnectsWords(work.reconnects, clock) }
+        : status === TaskStatus.Queued
+          ? { status, word: text.status[status], ...(work.queued === null ? {} : { why: busyWords(work.queued) }) }
+          : status === TaskStatus.Stopped
+            ? { status, word: text.status[status], ...(work.stopped?.by == null ? {} : { why: text.stoppedBy[work.stopped.by] }) }
             : // Its folder set up before its lead starts: what holds it, in place of the step its lead hasn't begun.
               work.settingUp != null
               ? { status: TaskStatus.Running, word: text.settingUp[work.settingUp] }

@@ -51,10 +51,12 @@ import {
   type ScreenshotsOnChange,
   type TaskFindings,
 } from '@althar/contracts'
-import { Clock, Context, Deferred, Duration, Effect, Layer, Option, Schema } from 'effect'
+import { Cause, Clock, Context, Deferred, Duration, Effect, Layer, Option, Schema } from 'effect'
 import { SqlClient, type SqlError } from 'effect/sql'
 
+import { Ledger } from '@althar/persistence-sqlite'
 import { Busy, type Line } from './Busy'
+import { taskOfChange } from './taskOf'
 import { markOf, openItem, viewOf } from './chatView'
 import { ModelFacts } from './ModelFacts'
 import { PlanUsage } from './PlanUsage'
@@ -118,6 +120,12 @@ const PROJECT_ALLOWS = (projectId: string) =>
 
 /** How many tasks, or cards, a screen reads at once: each may start git. */
 const AT_ONCE = 8
+
+/** How long changes are gathered before the cards they moved are worked out again: a burst works each out once. */
+const CARDS_GATHER = Duration.millis(50)
+
+/** How many changes are read at once as the cards they moved are found. */
+const CARD_CHANGES = 1000
 
 /** How many of its steps' reports a thread reads beside its page, newest first: far more than a task's rounds have. */
 const REPORTS = 200
@@ -897,6 +905,7 @@ export interface ThreadChange {
 
 type Store =
   | SqlClient.SqlClient
+  | Ledger
   | Instance
   | Agents
   | ModelFacts
@@ -3772,6 +3781,8 @@ export class Queries extends Context.Service<
                 WHEN 'workspace' THEN (SELECT t.id FROM workspaces w
                   JOIN threads t ON t.task_id = w.task_id AND t.kind = 'task' WHERE w.id = c.aggregate_id)
                 WHEN 'task' THEN (SELECT id FROM threads WHERE task_id = c.aggregate_id AND kind = 'task')
+                -- A task's card came out different: its thread's head says where it stands, as the card does.
+                WHEN 'card' THEN (SELECT id FROM threads WHERE task_id = c.aggregate_id AND kind = 'task')
                 WHEN 'external_link' THEN (SELECT t.id FROM external_links x
                   JOIN threads t ON t.task_id = x.task_id AND t.kind = 'task' WHERE x.id = c.aggregate_id)
                 WHEN 'issue_draft' THEN (SELECT thread_id FROM issue_drafts WHERE id = c.aggregate_id)
@@ -3786,6 +3797,81 @@ export class Queries extends Context.Service<
               END AS thread_id
             FROM change_log c WHERE c.cursor > ${after} ORDER BY c.cursor LIMIT ${limit}`
         })
+
+      /*
+       * The board keeps up (feed.ts): as a change of a task is recorded, whatever it changed, the task's card is worked
+       * out again as its board shows it, with the calls it waits on, and where that came out different from the last time
+       * the feed said `card` changes once. A window reads its boards, the home and the coordinator's cards again on that
+       * alone, so no kind of change a card reads can be missed, and what is said in a thread, most of what is recorded,
+       * reads one card here rather than every board there. What was kept of a settled card goes as its task changes.
+       */
+      const shownCards = new Map<string, string>()
+      let cardRevision = 0
+      const cardShown = (taskId: string) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const [row] = yield* sql<{ id: string; projectId: string; state: string; createdAt: string; settledAt: string | null }>`
+            SELECT id, project_id, state, created_at, settled_at FROM tasks WHERE id = ${taskId}`
+          if (row === undefined) return 'gone'
+          for (const key of settledCards.keys()) if (key.startsWith(`${taskId}:`)) settledCards.delete(key)
+          const card = yield* onBoard(row)
+          const calls = (yield* callsIn(row.projectId)).filter((one) => one.call.taskId === taskId).map((one) => one.call)
+          return JSON.stringify({ card, calls })
+        })
+      const cardsMoved = (ledger: Ledger['Service'], after: number) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          let at = after
+          // Each task a change was of, by its project: the change's own, so a task removed is still said of its board.
+          const tasks = new Map<string, string>()
+          for (;;) {
+            const rows = yield* sql<{ cursor: number; projectId: string | null; taskId: string | null }>`
+              SELECT c.cursor, c.project_id, ${sql.unsafe(taskOfChange)} AS task_id FROM change_log c
+              WHERE c.cursor > ${at} ORDER BY c.cursor LIMIT ${CARD_CHANGES}`
+            for (const row of rows) if (row.taskId !== null && row.projectId !== null) tasks.set(row.taskId, row.projectId)
+            at = rows.at(-1)?.cursor ?? at
+            if (rows.length < CARD_CHANGES) break
+          }
+          yield* Effect.forEach(
+            tasks,
+            ([taskId, projectId]) =>
+              Effect.gen(function* () {
+                const shown = yield* cardShown(taskId)
+                if (shownCards.get(taskId) === shown) return
+                if (shown === 'gone') shownCards.delete(taskId)
+                else shownCards.set(taskId, shown)
+                cardRevision += 1
+                yield* ledger.notify({
+                  projectId: projectId as never,
+                  aggregateType: 'card',
+                  aggregateId: taskId,
+                  aggregateRevision: cardRevision,
+                })
+              }),
+            { concurrency: AT_ONCE, discard: true },
+          )
+          return at
+        })
+      const ledger = yield* Ledger
+      yield* Effect.forkScoped(
+        Effect.gen(function* () {
+          const grown = yield* ledger.listen
+          let at = yield* Effect.orElseSucceed(run(cursor), () => 0)
+          // Changes are gathered for a moment, so a burst works each card out once.
+          const round = Effect.gen(function* () {
+            yield* grown
+            yield* Effect.sleep(CARDS_GATHER)
+            at = yield* run(cardsMoved(ledger, at))
+          })
+          yield* Effect.forever(
+            round.pipe(
+              Effect.catchCause((cause) =>
+                Cause.hasInterruptsOnly(cause) ? Effect.interrupt : Effect.logWarning('Could not work out the cards that changed', cause),
+              ),
+            ),
+          )
+        }),
+      )
 
       // The coordinator's list_tasks and read_task say how each task's pull request stands, from the same reads as the card.
       yield* (yield* Coordinator).reading((taskId) => run(pullRequestsOf(taskId)).pipe(Effect.orElseSucceed(() => undefined)))
