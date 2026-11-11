@@ -1,12 +1,11 @@
 /* The flow's directions, in the cabin's vocabulary (DesktopBody.module.css): hairline seams, plates, LEDs. */
 
-/* The console's corners, for how many modules it holds. */
-.eight > li:nth-child(n), .six > li:nth-child(n), .fourteen > li:nth-child(n) { border-radius: 0; }
-.eight > li:nth-child(1), .six > li:nth-child(1), .fourteen > li:nth-child(1) { border-top-left-radius: 15px; }
-.eight > li:nth-child(2), .six > li:nth-child(2), .fourteen > li:nth-child(2) { border-top-right-radius: 15px; }
-.eight > li:nth-child(7), .six > li:nth-child(5), .fourteen > li:nth-child(12) { border-bottom-left-radius: 15px; }
-.eight > li:nth-child(8), .six > li:nth-child(6), .fourteen > li:nth-child(14) { border-bottom-right-radius: 15px; }
-.fourteen > li { min-height: 440px; }
+/* The console's corners, for eight modules. */
+.eight > li:nth-child(n) { border-radius: 0; }
+.eight > li:nth-child(1) { border-top-left-radius: 15px; }
+.eight > li:nth-child(2) { border-top-right-radius: 15px; }
+.eight > li:nth-child(7) { border-bottom-left-radius: 15px; }
+.eight > li:nth-child(8) { border-bottom-right-radius: 15px; }
 
 /* Under the console: a smaller head, then the small ones. */
 .after { margin-top: 120px; }
@@ -47,30 +46,30 @@
 .smallTitle b { font-weight: 700; color: #fff; }
 .smallLead { margin: 8px 0 0; font-size: 14px; line-height: 1.5; color: rgba(255, 248, 240, 0.6); text-wrap: pretty; }
 /* Its piece: whole, centred, in a fixed height so the row lines up. */
-.smallPiece { display: flex; align-items: center; justify-content: center; overflow: hidden; height: 300px; margin-top: 18px; padding-bottom: 22px; }
-.smallPiece > * { width: 100%; }
+.smallPiece { margin: 20px -24px 0; }
 
-/* The compact list: three across, a hairline over each. */
-.list { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0 40px; margin: 0; padding: 0; list-style: none; }
-.list > li { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 16px; padding: 26px 0 30px; border-top: 1px solid var(--hair-2); }
-.icon { display: grid; place-items: center; width: 36px; height: 36px; border-radius: 10px; color: #fff; background: #151310; box-shadow: inset 0 0 0 1px var(--frame); }
-.listTitle { margin: 6px 0 0; font-size: 18px; font-weight: 400; letter-spacing: -0.02em; color: rgba(255, 248, 240, 0.86); }
-.listTitle b { font-weight: 650; color: #fff; }
-.listLead { margin: 8px 0 0; font-size: 14.5px; line-height: 1.5; color: rgba(255, 248, 240, 0.6); }
+/* Words alone: a row between hairlines, the features said and nothing else. */
+.words { display: grid; justify-items: center; gap: 22px; margin-top: 72px; padding: 30px 0 34px; border-top: 1px solid var(--hair); border-bottom: 1px solid var(--hair); text-align: center; }
+.wordsLabel { font: 500 11px/1 var(--mono); letter-spacing: 0.12em; text-transform: uppercase; color: var(--ink-3); }
+.wordList { display: flex; flex-wrap: wrap; justify-content: center; gap: 10px 0; max-width: 1000px; margin: 0; padding: 0; list-style: none; }
+.wordList li { font-size: 18px; letter-spacing: -0.015em; color: rgba(255, 248, 240, 0.78); white-space: nowrap; }
+.wordList li + li::before { content: ''; display: inline-block; width: 3px; height: 3px; margin: 0 16px; border-radius: 50%; vertical-align: middle; background: rgba(255, 244, 232, 0.3); }
 
 /* D: two screens side by side. */
 .pair { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 32px; margin: 80px 0 0; padding: 0; list-style: none; }
-.pairItem { display: grid; gap: 22px; }
+.pairItem { display: grid; align-content: start; gap: 10px; }
+.pairPiece { margin-top: 18px; overflow: hidden; border-radius: 14px; box-shadow: 0 0 0 1px var(--frame); }
 .pairTitle { margin: 0; font-family: 'Inter Display', var(--display); font-size: 24px; font-weight: 300; letter-spacing: -0.03em; color: rgba(255, 248, 240, 0.86); }
 .pairTitle b { font-weight: 700; color: #fff; }
 
 @media (max-width: 1099px) {
-  .panel, .list { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .panel { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .small:nth-child(n) { border-radius: 0; }
   .pair { grid-template-columns: minmax(0, 1fr); }
 }
 @media (max-width: 700px) {
   .after { margin-top: 72px; }
-  .panel, .list { grid-template-columns: minmax(0, 1fr); border-radius: 12px; }
-  .smallPiece { height: auto; min-height: 200px; }
+  .panel { grid-template-columns: minmax(0, 1fr); border-radius: 12px; }
+  .wordList li { font-size: 16px; }
+  .wordList li + li::before { margin: 0 11px; }
 }

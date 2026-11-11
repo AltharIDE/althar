@@ -1,4 +1,3 @@
-import { Icon } from '@althar/ui'
 import type { ReactNode } from 'react'
 
 import { type Tile, TILES } from '../home/bodies/desktop/Bento'
@@ -6,13 +5,13 @@ import { Console, type Scene, Station } from '../home/bodies/desktop/DesktopBody
 import { cx } from '../lib/cx'
 import type { Direction } from './direction'
 import s from './flow.module.css'
-import { BROWSER, CANVAS, type Piece, SMALL } from './pieces'
+import { ALL_WORDS, BROWSER, CANVAS, MORE, type Piece, SMALL } from './pieces'
 
 /*
- * What keeps you in flow, with the features it doesn't show yet: One home
- * for everything is gone in each; the canvas and the browser come in as big
- * ones, and voice, the merge queue, skills, MCP servers, the machine's load
- * and disk space as small ones. Each direction shows them another way.
+ * What keeps you in flow, with the features it doesn't show yet. The canvas
+ * and the browser come in as big ones; voice, merge queues, skills, MCP
+ * servers, the machine's load and disk space as small ones, drawn (flat or
+ * in 3D) or as words alone. Each direction puts them together another way.
  */
 
 export interface Flow {
@@ -22,69 +21,20 @@ export interface Flow {
   after?: ReactNode
 }
 
-const tile = (piece: Piece, span: Tile['span'], small = false): Tile => ({
+/** A big feature as a drawn tile of the console, in its dark. */
+const big = (piece: Piece): Tile => ({
   id: piece.id,
-  span,
-  small,
+  span: 3,
+  drawn: true,
+  tone: 'dark',
   title: piece.title,
   lead: piece.lead,
-  piece: () => piece.piece,
+  piece: () => piece.draw(),
 })
 
-const OLD = Object.fromEntries(TILES.filter((t) => t.id !== 'home').map((t) => [t.id, t])) as Record<string, Tile>
-const big = (...ids: string[]) => ids.map((id) => OLD[id]!)
-
-/** The console as it is, without home, the canvas and the browser in its second row. */
-const BIG: Tile[] = [
-  ...big('accounts', 'away'),
-  tile(CANVAS, 3),
-  tile(BROWSER, 3),
-  ...big('automations', 'conflicts', 'worktrees', 'workspaces'),
-]
-
-/** The small ones on a panel of their own under the console: three across, each with its piece. */
-function SmallPanel({ items = SMALL, title }: { items?: Piece[]; title: ReactNode }) {
-  return (
-    <div className={s.after}>
-      <h3 className={s.subhead}>{title}</h3>
-      <ol className={s.panel} data-light="">
-        {items.map((p, i) => (
-          <li key={p.id} className={s.small}>
-            <span className={s.plate}>
-              <b>{String(i + 1).padStart(2, '0')}</b>
-              <i className={s.led} />
-            </span>
-            <h4 className={s.smallTitle}>{p.title}</h4>
-            <p className={s.smallLead}>{p.lead}</p>
-            <div className={s.smallPiece}>{p.piece}</div>
-          </li>
-        ))}
-      </ol>
-    </div>
-  )
-}
-
-/** The small ones as a compact list: their icon, their claim and a line, no pictures. */
-function SmallList({ title }: { title: ReactNode }) {
-  return (
-    <div className={s.after}>
-      <h3 className={s.subhead}>{title}</h3>
-      <ul className={s.list}>
-        {SMALL.map((p) => (
-          <li key={p.id}>
-            <span className={s.icon}>
-              <Icon name={p.icon} size={18} />
-            </span>
-            <div>
-              <h4 className={s.listTitle}>{p.title}</h4>
-              <p className={s.listLead}>{p.lead}</p>
-            </div>
-          </li>
-        ))}
-      </ul>
-    </div>
-  )
-}
+const OLD = TILES
+/** The console as it is, the canvas and the browser in its second row. */
+const EIGHT: Tile[] = [OLD[0]!, OLD[1]!, big(CANVAS), big(BROWSER), ...OLD.slice(2)]
 
 const AND = (
   <>
@@ -92,13 +42,49 @@ const AND = (
   </>
 )
 
-/** D: the canvas and the browser, a station of their own after the flow, side by side. */
+/** The small ones on a panel of their own: three across, each drawn, flat or laid back. */
+function SmallPanel({ tilt }: { tilt?: boolean }) {
+  return (
+    <div className={s.after}>
+      <h3 className={s.subhead}>{AND}</h3>
+      <ol className={s.panel} data-light="">
+        {SMALL.map((p, i) => (
+          <li key={p.id} className={s.small}>
+            <span className={s.plate}>
+              <b>{String(i + 1).padStart(2, '0')}</b>
+              <i className={s.led} />
+            </span>
+            <h4 className={s.smallTitle}>{p.title}</h4>
+            <p className={s.smallLead}>{p.lead}</p>
+            <div className={s.smallPiece}>{p.draw(tilt)}</div>
+          </li>
+        ))}
+      </ol>
+    </div>
+  )
+}
+
+/** Features as words alone, in a row between hairlines. */
+function Words({ words, label }: { words: readonly string[]; label: string }) {
+  return (
+    <div className={s.words}>
+      <span className={s.wordsLabel}>{label}</span>
+      <ul className={s.wordList}>
+        {words.map((w) => (
+          <li key={w}>{w}</li>
+        ))}
+      </ul>
+    </div>
+  )
+}
+
+/** The canvas and the browser, a station of their own after the flow, side by side. */
 function Making() {
   return (
     <Station
       id="making"
       layout="bank"
-      stamp={{ no: '05', name: 'Canvas', km: 10 }}
+      stamp={{ no: '04b', name: 'Canvas', km: 13.5 }}
       scene={{
         title: (
           <>
@@ -107,14 +93,15 @@ function Making() {
             <b>Before it’s merged.</b>
           </>
         ),
-        lead: 'Plans and diagrams on the project’s canvas, the page it’s building in a browser beside the task. Comment on either, and the lead picks it up.',
+        lead: 'Pages and diagrams on the project’s canvas, the page it’s building in a browser beside the task. Comment on either, and the lead picks it up.',
       }}
     >
-      <ol className={cx(s.pair)} data-light="">
+      <ol className={s.pair} data-light="">
         {[CANVAS, BROWSER].map((p) => (
           <li key={p.id} className={s.pairItem}>
             <h3 className={s.pairTitle}>{p.title}</h3>
-            <div className={s.pairPiece}>{p.piece}</div>
+            <p className={s.smallLead}>{p.lead}</p>
+            <div className={cx(s.pairPiece)}>{p.draw()}</div>
           </li>
         ))}
       </ol>
@@ -125,64 +112,64 @@ function Making() {
 export const FLOW: Direction<Flow>[] = [
   {
     key: 'a',
-    name: 'The console, then a panel of small ones with their pictures',
+    name: 'Canvas and browser in the console; the small ones drawn, flat',
     value: {
       body: (
         <>
-          <Console tiles={BIG} className={s.eight} />
-          <SmallPanel title={AND} />
+          <Console tiles={EIGHT} className={s.eight} />
+          <SmallPanel />
         </>
       ),
     },
   },
   {
     key: 'b',
-    name: 'Everything in one console (crowded)',
+    name: 'Canvas and browser in the console; the small ones drawn in 3D',
     value: {
       body: (
-        <Console
-          className={s.fourteen}
-          tiles={[
-            ...big('accounts', 'away'),
-            tile(CANVAS, 3),
-            tile(BROWSER, 3),
-            tile(SMALL[0]!, 2, true),
-            tile(SMALL[1]!, 2, true),
-            tile(SMALL[4]!, 2, true),
-            ...big('automations', 'conflicts'),
-            tile(SMALL[2]!, 3),
-            tile(SMALL[3]!, 3),
-            { ...OLD.worktrees!, span: 2 },
-            { ...OLD.workspaces!, span: 2 },
-            tile(SMALL[5]!, 2, true),
-          ]}
-        />
+        <>
+          <Console tiles={EIGHT} className={s.eight} />
+          <SmallPanel tilt />
+        </>
       ),
     },
   },
   {
     key: 'c',
-    name: 'The console, then the small ones as a compact list',
+    name: 'Canvas and browser in the console; the small ones as a row of words',
     value: {
       body: (
         <>
-          <Console tiles={BIG} className={s.eight} />
-          <SmallList title={AND} />
+          <Console tiles={EIGHT} className={s.eight} />
+          <Words words={ALL_WORDS} label="And also" />
         </>
       ),
     },
   },
   {
     key: 'd',
-    name: 'Canvas and browser a station of their own; small ones on a panel',
+    name: 'Canvas and browser a station of their own; the small ones as words',
     value: {
       body: (
         <>
-          <Console tiles={big('accounts', 'away', 'automations', 'conflicts', 'worktrees', 'workspaces')} className={s.six} />
-          <SmallPanel title={AND} />
+          <Console />
+          <Words words={ALL_WORDS} label="And also" />
         </>
       ),
       after: <Making />,
+    },
+  },
+  {
+    key: 'e',
+    name: 'In 3D, and the rest as a row of words under them',
+    value: {
+      body: (
+        <>
+          <Console tiles={EIGHT} className={s.eight} />
+          <SmallPanel tilt />
+          <Words words={MORE} label="And also" />
+        </>
+      ),
     },
   },
 ]
