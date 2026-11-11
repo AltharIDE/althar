@@ -3359,6 +3359,10 @@ export class Sessions extends Context.Service<
               return { inputId, sequence }
             }),
           })
+          // The person's word, said now: what waits on it hears it as they send, not when a turn takes it up. Althar's own
+          // words, and what other tasks' leads and the coordinator pass on, are not the person's.
+          if (input.quiet !== true && (input.sender?.kind === 'window' || input.sender?.kind === 'paired_device'))
+            yield* live.publish({ _tag: 'PersonSaid', threadId: input.threadId })
           return accepted
         }).pipe((effect) => inputBatches.hold(input.threadId, effect))
 
