@@ -218,9 +218,12 @@ its settings but hold nothing back (`repositoryGuard.ts`).
 Agents use the person's own `gh`, `glab` and git sign-in where it is set
 up: their `gh` and `glab` config and tokens, git's credential helpers and
 their SSH agent are left in the agent's environment (`Config.ts`,
-`process.ts`). Inside Claude Code's sandbox `~/.config/gh` and `~/.npmrc`
-stay secret places, so there only a token in the environment carries the
-`gh` sign-in. An outside author's review runs signed out. Why: Claude Code, Orca and T3 Code all manage pull requests with the
+`process.ts`). The sandboxes of Claude Code sessions and the coordinator let
+commands read gh's, glab's and hub's own settings folders (`CLI_SIGN_INS`),
+so `gh` and `glab` start with the person's sign-in there; an agent's own
+read or a command that names one is still refused by the rules. A token kept
+in the macOS keychain isn't reached inside the sandbox: the brief tells
+agents to run such a command outside it. An outside author's review runs signed out. Why: Claude Code, Orca and T3 Code all manage pull requests with the
 person's own sign-in, and Althar shouldn't be the one place that can't.
 Althar's sealed connection secrets and provider API keys never reach agents.
 
