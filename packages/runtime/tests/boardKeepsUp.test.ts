@@ -1,4 +1,6 @@
-import { writeFileSync } from 'node:fs'
+import { mkdtempSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 
 import type { BoardSnapshot, ThreadSnapshot } from '@althar/contracts'
 import { AggregateType } from '@althar/domain'
@@ -483,6 +485,49 @@ describe("a call on the board that is no task's", () => {
       assert.isAbove(said.length, 0)
       assert.isTrue(said.every((id) => id === projectId))
     }).pipe(Effect.scoped, Effect.provide(runtimeWith({})))
+  })
+})
+
+describe("a call on the board that is no task's, kept over a restart", () => {
+  it.live('leaves the board as it is answered, before anything else moved its project since Althar started again', () => {
+    const { working } = hosted()
+    const file = join(mkdtempSync(join(tmpdir(), 'althar-board-')), 'althar.db')
+    const asked = Effect.gen(function* () {
+      const coordinator = yield* Coordinator
+      const projectId = yield* ask(working, 'hello')
+      const threadId = yield* coordinator.thread(projectId)
+      yield* until(turns(threadId), (rows) => rows.length >= 1 && rows.every((row) => !['pending', 'delivered'].includes(row.state)))
+      yield* coordinator.say({
+        envelope: yield* Runtime.envelope('thread.send', { body: scenarios.question }),
+        threadId,
+        body: scenarios.question,
+        disposition: 'after_current',
+      })
+      const queries = yield* Queries
+      const [call] = yield* until(
+        Effect.map(Effect.orDie(queries.board(projectId)), (board) => board.calls),
+        (calls) => calls.length === 1,
+      )
+      return { projectId, attentionId: call?.id ?? '' }
+    }).pipe(Effect.scoped, Effect.provide(runtimeWith({}, file)))
+    return Effect.gen(function* () {
+      const { projectId, attentionId } = yield* asked
+      yield* Effect.gen(function* () {
+        // Started again, a window reads the question still waiting, and the person answers it at once.
+        const window = yield* windowOf(projectId, NOW)
+        assert.lengthOf(window.board.calls, 1)
+        yield* (yield* Questions).answer({
+          envelope: yield* Runtime.envelope('attention.answer_question', {}),
+          attentionId,
+          answers: { database: { values: ['postgres'] } },
+        })
+        yield* until(
+          Effect.sync(() => window.board.calls),
+          (calls) => calls.length === 0,
+          'the answered question to leave the board',
+        )
+      }).pipe(Effect.scoped, Effect.provide(runtimeWith({}, file)))
+    })
   })
 })
 

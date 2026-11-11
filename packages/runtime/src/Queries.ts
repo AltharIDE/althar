@@ -3865,7 +3865,9 @@ export class Queries extends Context.Service<
             (projectId) =>
               Effect.gen(function* () {
                 const shown = yield* projectShown(projectId)
-                if ((shownCalls.get(projectId) ?? '[]') === shown) return
+                // Not yet worked out since Althar started, it is said changed: a window may hold calls read before, which a
+                // change now may have answered.
+                if (shownCalls.get(projectId) === shown) return
                 shownCalls.set(projectId, shown)
                 cardRevision += 1
                 yield* ledger.notify({
@@ -3880,10 +3882,12 @@ export class Queries extends Context.Service<
           return at
         })
       const ledger = yield* Ledger
+      // Listening, and where the record stands, as Queries is made, not as the fiber first runs: what is recorded in between
+      // (an answer given the moment Althar is up) would be past where it starts, and never looked at.
+      const grown = yield* ledger.listen
+      let at = yield* Effect.orElseSucceed(run(cursor), () => 0)
       yield* Effect.forkScoped(
         Effect.gen(function* () {
-          const grown = yield* ledger.listen
-          let at = yield* Effect.orElseSucceed(run(cursor), () => 0)
           // Changes are gathered for a moment, so a burst works each card out once.
           const round = Effect.gen(function* () {
             yield* grown
