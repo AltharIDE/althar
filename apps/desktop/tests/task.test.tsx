@@ -3251,6 +3251,58 @@ describe('a task', () => {
     expect(screen.queryByText(/still on its old model/)).toBeNull()
   })
 
+  it('shows the model picked at once, before the agent has taken it, in the picker and the header', async () => {
+    const steps = [
+      { key: 'implement' as const, agentId: 'claude-code', model: null, skipped: false },
+      { key: 'review' as const, agentId: 'codex', model: null, skipped: false },
+    ]
+    const base = thread()
+    const { client } = fakeClient({
+      getThread: vi.fn(async () => ({ ...base, task: { ...base.task, steps, step: 'review', startedAt: new Date().toISOString() } })),
+      // The runtime takes its time: nothing answers.
+      setModel: vi.fn(() => new Promise<void>(() => {})),
+    })
+    withServices(<Task />, client)
+    await userEvent.click(await screen.findByRole('button', { name: 'Lead: Claude Opus High' }))
+    await userEvent.click(screen.getByRole('button', { name: /All models/ }))
+    await userEvent.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Use Claude Sonnet' }))
+    // Asked, not answered, and already what the picker says.
+    await waitFor(() => expect(client.setModel).toHaveBeenCalledWith({ threadId: 'th1', model: 'sonnet' }))
+    expect(screen.getByRole('button', { name: /^Lead: Claude Sonnet/ })).toBeTruthy()
+    // The header says the same, of the work the lead does.
+    const standing = screen.getByText('Reviewing').parentElement
+    if (standing === null) throw new Error('Where it stands has no element of its own')
+    act(() => standing.focus())
+    expect((await screen.findByRole('tooltip')).textContent).toMatch(/Implement.*Claude Sonnet/)
+  })
+
+  it('shows what the runtime has taken for the lead’s next turn, in the picker, until the agent has it', async () => {
+    const base = thread()
+    const taken = { ...base, session: { ...base.session!, nextLead: { agentId: 'claude-code', model: 'sonnet', effort: 'low' } } }
+    const { client } = fakeClient({ getThread: vi.fn(async () => taken) })
+    withServices(<Task />, client)
+    expect(await screen.findByRole('button', { name: 'Lead: Claude Sonnet Low' })).toBeTruthy()
+  })
+
+  it('goes back to the model it was on, and says why, where the agent won’t take the pick', async () => {
+    const { client } = fakeClient({
+      getThread: vi.fn(async () => thread()),
+      setModel: vi.fn(async () =>
+        Promise.reject(
+          new ApiError({ reason: 'ModelUnchanged', message: "Claude Code is still on its old model. The agent doesn't offer sonnet." }),
+        ),
+      ),
+    })
+    withServices(<Task />, client)
+    await userEvent.click(await screen.findByRole('button', { name: 'Lead: Claude Opus High' }))
+    await userEvent.click(screen.getByRole('button', { name: /All models/ }))
+    await userEvent.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Use Claude Sonnet' }))
+    expect(await screen.findByText(/still on its old model/)).toBeTruthy()
+    // Said in a line, and the picker is on what it was.
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Lead: Claude Opus High' })).toBeTruthy())
+    expect(screen.queryByRole('button', { name: /^Lead: Claude Sonnet/ })).toBeNull()
+  })
+
   it('waits for its thread, and says when it cannot have it', async () => {
     const { client } = fakeClient({
       getThread: vi.fn(async () => Promise.reject(new ApiError({ reason: 'NotFound', message: "That task isn't there any more." }))),

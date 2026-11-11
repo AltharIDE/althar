@@ -4636,8 +4636,13 @@ export const Api = RpcGroup.make(
     },
     Schema.String,
   ),
+  /**
+   * The person's pick of the thread's model, taken at once: the thread's session shows it as who leads from its next turn
+   * (`nextLead`), and the runtime sets it on the agent in the background, once no turn runs. What the agent wouldn't take is
+   * said in the thread, and the lead stays as it was.
+   */
   command('SetModel', { threadId: Schema.String, model: Schema.String }, Schema.Void),
-  /** How hard the thread's agent thinks, from here on. */
+  /** How hard the thread's agent thinks, picked as `SetModel` is: taken at once, set on the agent in the background. */
   command('SetEffort', { threadId: Schema.String, effort: Schema.String }, Schema.Void),
   /** Every agent's models and efforts, as far as Althar knows them. */
   call('GetModels', {}, Schema.Array(AgentModels)),

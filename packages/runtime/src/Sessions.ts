@@ -441,6 +441,10 @@ interface Running {
    * between turns, as what is said to it next is delivered, never in one.
    */
   nextLead: { readonly agentId: string; readonly model?: string; readonly effort?: string } | undefined
+  /** Held while its agent is set to a model or effort, so two settings never cross: the chosen one and the one before (`chooseLead`). */
+  leadLock: Semaphore.Semaphore
+  /** Its agent is being set to a model or effort now. */
+  settingLead: boolean
   /**
    * Its folder moved under it (a task moving between a worktree and Local): what is said to it next goes to a fresh session
    * there, handed the work so far, as a handover's would, since an agent's session can't follow its folder.
@@ -800,6 +804,17 @@ export class Sessions extends Context.Service<
     setModel(input: { readonly threadId: string; readonly model: string }): Effect.Effect<void, NoSession | ModelUnchanged | Failure>
     /** How hard the running session's agent thinks, from here on. */
     setEffort(input: { readonly threadId: string; readonly effort: string }): Effect.Effect<void, NoSession | EffortUnchanged | Failure>
+    /**
+     * The person's pick of the same agent's model or effort, as the picker makes it: recorded at once as who leads from the
+     * next turn (`nextLead`, which the thread's session shows), and set on the agent in the background, once no turn runs, since
+     * an agent answers one request at a time and one asked mid-turn waits for the turn to end. What it wouldn't take is said in
+     * the thread, and the lead stays as it was. Where it merges with an earlier pick not yet set, the later of each wins.
+     */
+    chooseLead(input: {
+      readonly threadId: string
+      readonly model?: string
+      readonly effort?: string
+    }): Effect.Effect<'later' | 'same', NoSession | Failure>
     /** Delivers what waits in the thread's queue now, if an agent is on it: after a usage limit resets, say. */
     wake(threadId: string): Effect.Effect<void>
     /**
@@ -1666,24 +1681,56 @@ export class Sessions extends Context.Service<
           return waiting !== undefined
         })
 
-      /** The same agent on another model or effort, set between turns as the composer sets them. One it won't take stays as it is, said. */
+      /**
+       * The same agent on another model or effort, set between turns as the composer sets them. One it won't take stays as it is,
+       * said with why.
+       */
       const settleLead = (running: Running, next: { readonly model?: string; readonly effort?: string }) =>
+        running.leadLock.withPermits(1)(
+          Effect.gen(function* () {
+            running.settingLead = true
+            const sql = yield* SqlClient.SqlClient
+            const { threadId } = running.thread
+            const [now] = yield* sql<{ model: string | null; effort: string | null }>`
+              SELECT model, effort FROM provider_sessions WHERE id = ${running.sessionId}`
+            const refused = (what: string, why: string) =>
+              addItem({ projectId: running.thread.projectId, threadId, sessionId: running.sessionId }, 'notice', {
+                source: 'runtime',
+                severity: 'warning',
+                title: `${running.entry.definition.name} stays on ${what} as it is: ${why}`,
+              })
+            const because = (error: { readonly _tag: string; readonly summary?: string }) =>
+              error._tag === 'ModelUnchanged' || error._tag === 'EffortUnchanged'
+                ? (error.summary ?? 'it wouldn’t change.')
+                : 'it wouldn’t change.'
+            if (next.model !== undefined && next.model !== now?.model)
+              yield* setModel({ threadId, model: next.model }).pipe(Effect.catch((error) => refused('its model', because(error))))
+            if (next.effort !== undefined && next.effort !== now?.effort)
+              yield* setEffort({ threadId, effort: next.effort }).pipe(Effect.catch((error) => refused('its effort', because(error))))
+          }).pipe(
+            Effect.ensuring(
+              Effect.sync(() => {
+                running.settingLead = false
+              }),
+            ),
+          ),
+        )
+
+      /**
+       * What the person chose of the same agent's model or effort is set on the agent, where nothing runs: the lead taken up as
+       * chosen, whatever was chosen since while it was being set. A turn at work waits: it is set when the turn ends, or
+       * between turns as what is said next is delivered (`deliver`).
+       */
+      const applyLead = (running: Running): Effect.Effect<void, never, Store> =>
         Effect.gen(function* () {
-          const sql = yield* SqlClient.SqlClient
-          const { threadId } = running.thread
-          const [now] = yield* sql<{ model: string | null; effort: string | null }>`
-            SELECT model, effort FROM provider_sessions WHERE id = ${running.sessionId}`
-          const refused = (what: string) =>
-            addItem({ projectId: running.thread.projectId, threadId, sessionId: running.sessionId }, 'notice', {
-              source: 'runtime',
-              severity: 'warning',
-              title: `${running.entry.definition.name} stays on ${what} as it is: it wouldn’t change.`,
-            })
-          if (next.model !== undefined && next.model !== now?.model)
-            yield* setModel({ threadId, model: next.model }).pipe(Effect.catch(() => refused('its model')))
-          if (next.effort !== undefined && next.effort !== now?.effort)
-            yield* setEffort({ threadId, effort: next.effort }).pipe(Effect.catch(() => refused('its effort')))
-        })
+          if (running.turnRunning || running.stopping || threads.get(running.thread.threadId) !== running) return
+          const next = running.nextLead
+          if (next === undefined || next.agentId !== running.entry.definition.id) return
+          yield* settleLead(running, next)
+          // Taken up once set, or refused: until then the thread says it leads from here. Chosen again meanwhile, that one next.
+          if (running.nextLead === next) running.nextLead = undefined
+          else yield* applyLead(running)
+        }).pipe(Effect.catchCause((cause) => Effect.logWarning('Could not set the lead as chosen', cause)))
 
       /**
        * Another agent takes over a lead between turns, as it was changed: the same hand-over as the composer's, with what waits
@@ -1731,13 +1778,14 @@ export class Sessions extends Context.Service<
           // A lead changed meanwhile takes up what is said to it now, between turns: another agent takes over with it.
           if (running.nextLead !== undefined && (yield* inputWaiting(thread.threadId))) {
             const next = running.nextLead
-            running.nextLead = undefined
             if (next.agentId !== running.entry.definition.id) {
+              running.nextLead = undefined
               running.handover = 'under_way'
               yield* Effect.forkIn(run(takeOver(running, next)), sessionsScope)
               return false
             }
             yield* settleLead(running, next)
+            if (running.nextLead === next) running.nextLead = undefined
           }
           // Its folder moved: a fresh session there takes up what is said now, handed the work so far.
           if (running.moved && running.handover === 'none' && (yield* inputWaiting(thread.threadId))) {
@@ -2095,6 +2143,8 @@ export class Sessions extends Context.Service<
           running.turnRunning = false
           running.promptSent = null
           running.turnEndedAt = yield* Clock.currentTimeMillis
+          // A model or effort chosen while the turn ran is set on its agent now, rather than when something is said next.
+          if (running.nextLead?.agentId === running.entry.definition.id) yield* Effect.forkIn(run(applyLead(running)), sessionsScope)
           // A session started for a step that waited for a place counts that wait in its first turn (Runs' `startPlaced`).
           const [placed] =
             spent.starting === null
@@ -2995,6 +3045,8 @@ export class Sessions extends Context.Service<
             turnStartedAt: null,
             turnEndedAt: null,
             nextLead: undefined,
+            leadLock: Semaphore.makeUnsafe(1),
+            settingLead: false,
             moved: false,
             before: { session: opened, starting: brief.starting ?? 'start', place: 0 },
           }
@@ -4238,6 +4290,34 @@ export class Sessions extends Context.Service<
         takeBack: (input) => run(takeBack(input)),
         setModel: (input) => run(setModel(input)),
         setEffort: (input) => run(setEffort(input)),
+        chooseLead: (input) =>
+          run(
+            Effect.gen(function* () {
+              const running = threads.get(input.threadId)
+              if (running === undefined || running.stopping) return yield* new NoSession({ threadId: input.threadId })
+              const sql = yield* SqlClient.SqlClient
+              const [now] = yield* sql<{ model: string | null; effort: string | null }>`
+                SELECT model, effort FROM provider_sessions WHERE id = ${running.sessionId}`
+              const agentId = running.entry.definition.id
+              // What was chosen before and isn't set yet stands, but for what is chosen now.
+              const before = running.nextLead?.agentId === agentId ? running.nextLead : undefined
+              const model = input.model ?? before?.model
+              const effort = input.effort ?? before?.effort
+              const same = (model === undefined || model === now?.model) && (effort === undefined || effort === now?.effort)
+              // Back on what it is on, with nothing being set: nothing is left to take up. While one is being set it is kept, so it
+              // is set back after.
+              running.nextLead =
+                same && !running.settingLead
+                  ? undefined
+                  : {
+                      agentId,
+                      ...(model === undefined ? {} : { model }),
+                      ...(effort === undefined ? {} : { effort }),
+                    }
+              if (running.nextLead !== undefined) yield* Effect.forkIn(run(applyLead(running)), sessionsScope)
+              return same ? ('same' as const) : ('later' as const)
+            }),
+          ),
         wake: (threadId) =>
           Effect.suspend(() => {
             const running = threads.get(threadId)

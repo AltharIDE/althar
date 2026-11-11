@@ -88,8 +88,8 @@ export interface ProjectModel {
   readonly stopLaunch: (id: string) => Promise<void>
   readonly clearLaunch: (id: string) => Promise<void>
   /** Moves the running coordinator to another agent. */
-  /** Puts the coordinator on another model or effort, or another agent with one. */
-  readonly choose: (choice: Choice) => Promise<void>
+  /** Puts the coordinator on the model and effort chosen; whether it was taken, for the picker to go back to what it was if not. */
+  readonly choose: (choice: Choice) => Promise<boolean>
   /** Hands the conversation to another agent with what the person says, and any images: its first turn, after its brief. */
   readonly handOver: (choice: Choice, body: string, images?: Outgoing) => Promise<boolean>
   /** Answers the coordinator's question: what went wrong, in words, or null when it went through. */
@@ -474,12 +474,20 @@ export const useProject = (projectId: string): ProjectModel => {
     },
     stopLaunch: (id) => act(() => client.stopLaunch(id)),
     clearLaunch: (id) => act(() => client.clearLaunch(id)),
-    choose: (choice) =>
-      act(async () => {
+    choose: async (choice) => {
+      setError(null)
+      let taken = true
+      try {
         const session = coordinator?.session
         // A session the runtime no longer holds can't be moved; the pick is applied when the person next says something.
         if (threadId !== null && session != null && session.held) await moveTo(client, threadId, runningOn(session), choice)
-      }),
+      } catch (failure) {
+        fail(failure)
+        taken = false
+      }
+      await readHead()
+      return taken
+    },
     handOver: (choice, body, images) =>
       shown(
         body,

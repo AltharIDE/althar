@@ -117,7 +117,8 @@ export interface TaskModel {
   /** Tries its lead's last turn again, where it failed: what the person said in it goes again. */
   readonly tryAgain: () => Promise<void>
   /** Puts the lead on another model or effort, or hands the task to another agent with one. */
-  readonly choose: (choice: Choice) => Promise<void>
+  /** Puts the lead on the model and effort chosen; whether it was taken, for the picker to go back to what it was if not. */
+  readonly choose: (choice: Choice) => Promise<boolean>
   /** Hands the task to another agent with what the person says, and any images: the new lead's first turn, after its brief. */
   readonly handOver: (choice: Choice, body: string, images?: Outgoing) => Promise<boolean>
   /** Stops the task: every agent on it, until it is resumed. */
@@ -628,14 +629,25 @@ export const useTask = (threadId: string): TaskModel => {
     interrupt: () => act(() => client.interrupt(threadId)),
     compact: () => act(() => client.compact(threadId)),
     tryAgain: () => act(() => client.tryAgain(threadId)),
-    choose: (choice) =>
-      act(async () => {
+    choose: async (choice) => {
+      setError(null)
+      let taken = true
+      try {
         const session = snapshot?.session
         // A thread the runtime no longer holds can't be moved: the choice starts the lead on it instead. While it is held, the choice changes the lead it has.
         await (session == null || !session.held
           ? client.startSession(startOf(threadId, choice))
           : moveTo(client, threadId, runningOn(session), choice))
-      }),
+      } catch (failure) {
+        // Said where the thread says what went wrong; the picker goes back to what it was.
+        fail(failure)
+        taken = false
+      }
+      // The runtime has it as who leads next, or the lead as it was: read now, so the picker is told by the thread, not by the window.
+      await readHead()
+      await newest.landed('head')
+      return taken
+    },
     handOver: (choice, body, images) =>
       shown(body, 'after_current', () => client.switchAgent({ ...startOf(threadId, choice), body, ...sentWith(images) }), images, false),
     stop: () => onTask((taskId) => client.stopTask(taskId)),

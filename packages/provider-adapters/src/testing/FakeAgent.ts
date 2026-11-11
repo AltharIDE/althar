@@ -371,6 +371,13 @@ export interface FakeAgentOptions {
   readonly allowAllStays?: boolean
   /** Once it leaves its mode by itself (`leaveMode`), it refuses to be put back in one. */
   readonly leavesForGood?: boolean
+  /** Called as it is asked to set its model or effort, before it answers. */
+  readonly optionAsked?: (configId: string, value: string) => void
+  /**
+   * Whether it holds its answer to a request to set its model or effort, asked while one waits: as an agent does that answers
+   * one request at a time and is at its turn. It answers once this says no.
+   */
+  readonly holdsSets?: () => boolean
 }
 
 /** The holds a test opens, by marker, for an agent to go on from (`FakeAgentOptions.holds`). */
@@ -1658,9 +1665,13 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
       session.mode = params.modeId
       return {}
     })
-    .onRequest(acp.methods.agent.session.setConfigOption, ({ params }) => {
+    .onRequest(acp.methods.agent.session.setConfigOption, async ({ params }) => {
       const session = sessionOf(params.sessionId)
       const value = String(params.value)
+      if (params.configId === 'model' || params.configId === 'effort') {
+        options.optionAsked?.(params.configId, value)
+        while (options.holdsSets?.() === true && !session.closed) await pause(10)
+      }
       if (params.configId === 'mode' && MODES.includes(value)) session.mode = modes === 'stuck' ? session.mode : value
       else if (params.configId === 'model' && options.failsOnce?.includes(value) && !failedOnce.has(value)) {
         failedOnce.add(value)
