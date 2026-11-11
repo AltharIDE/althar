@@ -130,7 +130,7 @@ export function AcceptPeek({
   const back = useRefocus<HTMLButtonElement>(sending)
   const add = files.reduce((n, f) => n + f.add, 0)
   const del = files.reduce((n, f) => n + f.del, 0)
-  const passed = checks.every((c) => c.state === CheckState.Passed)
+  const passed = checks.every((c) => c.state === CheckState.Passed || c.state === CheckState.Skipped)
   const link = safeHref(url)
   return (
     <>
