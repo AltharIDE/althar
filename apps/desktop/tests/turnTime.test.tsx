@@ -5,7 +5,7 @@ import userEvent from '@testing-library/user-event'
 import { describe, expect, it } from 'vitest'
 
 import { blocksOf } from '../src/renderer/shared/thread'
-import { duration, lineOf, mostOf, spentOf, spentOfTask, spentWords, turnsById, wentWords } from '../src/renderer/shared/turnTime'
+import { duration, lineOf, mostOf, spentOf, spentWords, turnsById, wentWords } from '../src/renderer/shared/turnTime'
 import { items } from './fixtures'
 
 /*
@@ -83,12 +83,6 @@ describe('where a turn’s time went', () => {
     const handed = spentOf(['t3'], turnsById([turn('t3', { session: 40_000, starting: 'handover', work: 20_000 })]))
     expect(handed === null ? 'none' : mostOf(handed)).toBe('40s handing over')
     expect(duration(3_725_000)).toBe('1h 2m')
-  })
-
-  it('adds a task’s turns up for its Usage, and has nothing to say before any kept its time', () => {
-    expect(spentOfTask(undefined)).toBeNull()
-    expect(spentOfTask({ turns: 0, place: 0, session: 0, work: 0, tools: 0 })).toBeNull()
-    expect(spentOfTask({ turns: 3, place: 60_000, session: 5_000, work: 120_000, tools: 30_000 })?.total).toBe(185_000)
   })
 
   it('gives a turn over the time its items’ turns kept, and none to one at work', () => {

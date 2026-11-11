@@ -51,8 +51,6 @@ export interface UsageText {
   what: (models: ReadonlyArray<string>, tokens: number) => string
   /** Several models on one account: each with its tokens. */
   byModel: (models: ReadonlyArray<{ readonly name: string; readonly tokens: number }>) => string
-  /** How long its agents' turns took, all added up, and over how many. */
-  worked: (took: string, turns: number) => string
 }
 
 const tokensWord = (n: number) =>
@@ -69,14 +67,6 @@ export const usageText: UsageText = {
   estimateNote: 'An estimate',
   what: (models, tokens) => [...models, `${tokensWord(tokens)} tokens`].join(' · '),
   byModel: (models) => models.map((model) => `${model.name} ${tokensWord(model.tokens)}`).join(' · ') + ' tokens',
-  worked: (took, turns) => `Worked for ${took} over ${turns} ${turns === 1 ? 'turn' : 'turns'}`,
-}
-
-/** How long a task's turns took, all added up, and where that time went, a few words each part. */
-export interface UsageTime {
-  readonly took: string
-  readonly turns: number
-  readonly spent: ReadonlyArray<string>
 }
 
 /** A known figure, said as an estimate where it is one. */
@@ -158,8 +148,6 @@ function Figure({ line, t }: { line: UsageLine; t: UsageText }) {
 
 export interface UsageCardProps {
   lines: ReadonlyArray<UsageLine>
-  /** How long its turns took, and where that time went (a task is a conversation plus parts): under its lines. */
-  time?: UsageTime
   /** Whether it is open: the person's choice, kept by whoever holds it. */
   open: boolean
   onOpenChange: (open: boolean) => void
@@ -171,7 +159,7 @@ export interface UsageCardProps {
  * mark, opening to the lines, as the pull request's checks do. Whether it is
  * open is the person's, kept for every task alike.
  */
-export function UsageCard({ lines, time, open, onOpenChange, text }: UsageCardProps) {
+export function UsageCard({ lines, open, onOpenChange, text }: UsageCardProps) {
   const t = { ...usageText, ...text }
   return (
     <Disclosure className={s.card} open={open} onOpenChange={onOpenChange}>
@@ -192,12 +180,6 @@ export function UsageCard({ lines, time, open, onOpenChange, text }: UsageCardPr
       <Fold bleed={false}>
         <div className={s.body}>
           <UsageLines lines={lines} text={text} />
-          {time !== undefined && (
-            <p className={s.time}>
-              <span className={s.worked}>{t.worked(time.took, time.turns)}</span>
-              {time.spent.length > 0 && <span className={s.spent}>{time.spent.join(' · ')}</span>}
-            </p>
-          )}
         </div>
       </Fold>
     </Disclosure>
