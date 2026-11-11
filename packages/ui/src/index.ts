@@ -138,7 +138,6 @@ export { type ModelRoom, type ModelRoomText, modelRoomText, roomWords } from './
 export * from './thread/AltharLine/AltharLine'
 export * from './thread/ModelMove/ModelMove'
 export * from './thread/SmallChange/SmallChange'
-export * from './thread/SkillsSeen/SkillsSeen'
 export * from './thread/Arrived/Arrived'
 export * from './thread/FailedLogs/FailedLogs'
 export * from './thread/RunCard/RunCard'
