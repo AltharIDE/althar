@@ -1053,7 +1053,7 @@ describe('reviewing someone else’s pull request', () => {
     })
   })
 
-  it.live('leads one only on an agent its session holds to reading, a team’s too, when started and when switched to', () => {
+  it.live('leads one on any agent, Codex included, an outside author’s and a team’s, when started and when switched to', () => {
     const at = hosted()
     const github = makeFakeService({ pushUrl: () => at.bare })
     github.addRepository(['meridian', 'api'])
@@ -1062,39 +1062,33 @@ describe('reviewing someone else’s pull request', () => {
     return Effect.gen(function* () {
       const { projectId, coordinator } = yield* project(at.working)
       const sql = yield* SqlClient.SqlClient
-      // Codex runs what its read-only sandbox contains without asking: it could run the pull request's scripts.
-      assert.include(
-        yield* callTool(coordinator, 'review_pull_request', { pull_request: linkTo(outside.pull.number), lead: { agent: 'codex' } }),
-        "Fake codex can't be held to reading only: it runs commands its sandbox contains without asking, so it could run this pull request #1's code. Review it with Fake claude-code or Fake opencode.",
-      )
-      // Nor a team's: its code is no more for the reviewer to run.
-      assert.include(
+      // Codex runs what its read-only sandbox contains without asking: that is no reason to refuse it a review (11 Nov).
+      const planned = yield* callTool(coordinator, 'review_pull_request', {
+        pull_request: linkTo(outside.pull.number),
+        lead: { agent: 'codex' },
+      })
+      assert.notInclude(planned, "can't be held to reading only")
+      assert.include(planned, 'Planned')
+      assert.notInclude(
         yield* callTool(coordinator, 'review_pull_request', { pull_request: linkTo(team.pull.number), lead: { agent: 'codex' } }),
-        "Fake codex can't be held to reading only: it runs commands its sandbox contains without asking, so it could run this pull request #2's code.",
+        "can't be held to reading only",
       )
-      assert.deepStrictEqual(yield* sql`SELECT id FROM tasks`, [])
-      // Switched to on one from outside, it doesn't start, and the lead there carries on.
-      yield* callTool(coordinator, 'review_pull_request', { pull_request: linkTo(outside.pull.number), lead: { agent: 'claude-code' } })
+      assert.lengthOf(yield* sql`SELECT id FROM tasks`, 2)
+      // Switched to on one from outside, it starts there.
       const { task } = yield* reviewTask(projectId)
       const threadId = task?.threadId ?? ''
       yield* until(said(threadId), (all) => all.length > 0)
       const sessions = yield* Sessions
-      const failed = yield* Effect.flip(sessions.switchAgent({ threadId, agentId: 'codex' }))
-      assert.strictEqual(tagOf(failed), 'SessionFailed')
+      yield* sessions.switchAgent({ threadId, agentId: 'claude-code' })
+      yield* sessions.switchAgent({ threadId, agentId: 'codex' })
       const notices = (yield* items(threadId)).filter((item) => item.kind === 'notice').map((item) => item.content)
-      assert.deepInclude(notices, {
-        source: 'runtime',
-        severity: 'error',
-        title: "Fake codex couldn't start.",
-        description:
-          "Fake codex can't be held to reading only: it runs commands its sandbox contains without asking, so it could run the pull request's code. Review it with another agent, such as Claude Code.",
-      })
+      assert.notDeepInclude(notices, { source: 'runtime', severity: 'error', title: "Fake codex couldn't start." })
       assert.strictEqual(
         (yield* sessions.running(threadId)).pipe(
           Option.map((running) => running.agentId),
           Option.getOrNull,
         ),
-        'claude-code',
+        'codex',
       )
     }).pipe(Effect.provide(withQueries(github)))
   })
@@ -1759,11 +1753,11 @@ describe('a review’s plan', () => {
       const card = yield* Effect.orDie(queries.card(taskId))
       assert.strictEqual(card.phase, 'planned')
       assert.isNotNull(card.plan?.startsAt)
-      // Its one lead, with why, and no ending to pick: only the agents held to reading may take it.
+      // Its one lead, with why, and no ending to pick: any agent may take it.
       assert.deepStrictEqual(card.plan?.steps, [{ key: 'implement', agentId: 'claude-code', model: null, skipped: false }])
       assert.strictEqual(card.plan?.reason, 'Strong at reading.')
       assert.isNull(card.plan?.end)
-      assert.deepStrictEqual(card.plan?.agents, ['claude-code', 'opencode'])
+      assert.notProperty(card.plan ?? {}, 'agents')
       const sessions = yield* Sessions
       assert.isTrue(Option.isNone(yield* sessions.running(threadId)))
 
@@ -1784,7 +1778,7 @@ describe('a review’s plan', () => {
     }).pipe(Effect.provide(withQueries(github, ':memory:', Duration.minutes(5))))
   })
 
-  it.live('held, never starts by itself; and can’t be given an agent that can’t be held to reading only', () => {
+  it.live('held, never starts by itself; and can be given any agent, Codex included', () => {
     const at = hosted()
     const github = makeFakeService({ pushUrl: () => at.bare })
     github.addRepository(['meridian', 'api'])
@@ -1803,13 +1797,9 @@ describe('a review’s plan', () => {
       yield* Effect.sleep(Duration.seconds(2))
       assert.strictEqual((yield* Effect.orDie(queries.card(taskId))).phase, 'held')
       assert.isTrue(Option.isNone(yield* (yield* Sessions).running(task?.threadId ?? '')))
-      // Codex can't lead it: refused, in words the window shows, and the plan stays as it was.
-      const refused = yield* Effect.flip(
-        plans.change(planId, [{ key: 'implement', agentId: 'codex', model: null, skipped: false }], instance.personId),
-      )
-      assert.strictEqual(tagOf(refused), 'ReviewRefused')
-      assert.match(words(refused, (id) => id).message, /^Fake codex can't be held to reading only/)
-      assert.strictEqual((yield* Effect.orDie(queries.card(taskId))).plan?.steps[0]?.agentId, 'claude-code')
+      // Codex may lead it: the plan takes it.
+      yield* plans.change(planId, [{ key: 'implement', agentId: 'codex', model: null, skipped: false }], instance.personId)
+      assert.strictEqual((yield* Effect.orDie(queries.card(taskId))).plan?.steps[0]?.agentId, 'codex')
     }).pipe(Effect.provide(withQueries(github, ':memory:', Duration.seconds(1))))
   })
 })

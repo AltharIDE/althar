@@ -36,9 +36,9 @@ export type { Wanted } from './issueFields'
 
 /*
  * Changes to issues on the person's trackers (docs/architecture/06,
- * "Changing issues"): the coordinator's, on any issue; a task's lead's, on
- * the issue its task came from, the issues its task filed, and any the
- * person named to it; and Althar's own, as a task's pull request opens (In
+ * "Changing issues"): the coordinator's and a task's lead's, on any issue
+ * (a lead's own, the one its task came from, where it names none); and
+ * Althar's own, as a task's pull request opens (In
  * Review) or merges (Done, or a comment where the task did only part of its
  * issue). One card holds a change to each of one or more issues: "Move
  * DEV-67 to Done, set DEV-142 to Low".
@@ -230,9 +230,6 @@ const LeadChange = Schema.Struct({
   changes: Schema.optional(Schema.Array(Schema.Struct({ issue: Schema.String, ...AskedChange.fields }))),
   at_once: Schema.optional(Schema.Boolean),
 })
-
-/** A run of keys in what someone wrote: DEV-60..DEV-70, DEV-60..70, #10..#20. */
-const RUNS = /#?[A-Za-z][A-Za-z0-9]*-\d+\s*(?:\.\.\.?|–|—)\s*(?:[A-Za-z][A-Za-z0-9]*-)?\d+|#\d+\s*(?:\.\.\.?|–|—)\s*#?\d+/g
 
 /** How many issues one change, or one comment, goes to at most. */
 const BATCH = 50
@@ -1059,77 +1056,29 @@ export class IssueChanges extends Context.Service<
           if (own === undefined)
             return yield* new ToolRefused({
               message:
-                'This task didn’t come from an issue, so it has none of its own to change. Name one it filed, or one the person named to it, as issue; for any other, tell the person what it needs: the coordinator changes it for them.',
+                'This task didn’t come from an issue, so it has none of its own to change. Name the one you mean, by its key or link, as issue.',
             })
           if (own.connectionId === null)
             return yield* new ToolRefused({ message: `The tracker ${own.key} is on isn’t connected to Althar any more.` })
           return { linkId: own.id, key: own.key, target: { connectionId: own.connectionId, ref: own.ref } }
         })
 
-      /** Whether the person named an issue to a task: in its thread, or in what they asked the coordinator for it. */
-      const namedByThePerson = (access: ToolAccess, issue: { readonly key: string; readonly url: string }) =>
-        Effect.gen(function* () {
-          const sql = yield* SqlClient.SqlClient
-          const said = yield* sql<{ body: string }>`
-            SELECT body FROM user_inputs WHERE author_actor_id = ${instance.personId}
-              AND (thread_id = ${access.threadId}
-                OR id IN (SELECT user_input_id FROM task_request_inputs WHERE task_id = ${access.taskId ?? ''}))
-            ORDER BY accepted_at DESC LIMIT 200`
-          // DEV-67 as a word, not inside DEV-670; #12 not inside #123; or in a run of keys they named, DEV-60..DEV-70.
-          const key = new RegExp(`(^|[^\\w#-])${issue.key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![\\w-])`, 'i')
-          const inRun = (body: string) =>
-            [...body.matchAll(RUNS)].some((run) => (keyRange(run[0]) ?? []).some((one) => one.toLowerCase() === issue.key.toLowerCase()))
-          return said.some((one) => key.test(one.body) || one.body.includes(issue.url) || inRun(one.body))
-        })
-
       /**
-       * Where an issue a lead names is, and whether it is the lead's to change
-       * or comment on: the one its task came from, those its task filed, and
-       * those the person named to it. Any other it may only propose, on a
-       * card the person applies. Refused where no tracker has it.
+       * Where an issue a lead names is: any of the project's trackers' issues,
+       * whichever task it came from, as the coordinator's are (the person's
+       * note of 11 Nov: whose an issue is is no reason to hold a change to
+       * it). Refused where no tracker has it.
        */
       const leadScope = (access: ToolAccess, named: string) =>
-        Effect.gen(function* () {
-          const sql = yield* SqlClient.SqlClient
-          const read = yield* issues
+        Effect.map(
+          issues
             .read(named, access.projectId)
-            .pipe(Effect.mapError(() => new ToolRefused({ message: `Althar can’t find ${named} on a connected tracker.` })))
-          const target = { connectionId: read.connectionId, ref: read.ref }
-          const [own] = yield* sql<{ id: string }>`
-            SELECT id FROM external_links WHERE task_id = ${access.taskId ?? ''} AND kind = 'issue'
-              AND connection_id = ${read.connectionId} AND ref = ${read.ref} LIMIT 1`
-          if (own !== undefined) return { target, key: read.key, theirs: true }
-          const [filed] = yield* sql<{ id: string }>`
-            SELECT id FROM issue_drafts WHERE thread_id = ${access.threadId} AND state = 'filed'
-              AND connection_id = ${read.connectionId} AND issue_ref = ${read.ref} LIMIT 1`
-          return { target, key: read.key, theirs: filed !== undefined || (yield* namedByThePerson(access, read)) }
-        })
+            .pipe(Effect.mapError(() => new ToolRefused({ message: `Althar can’t find ${named} on a connected tracker.` }))),
+          (read) => ({ target: { connectionId: read.connectionId, ref: read.ref }, key: read.key }),
+        )
 
-      /**
-       * The issue a lead may change or comment on, by its key or link: the
-       * one its task came from, those its task filed, and those the person
-       * named to it. Without one, its task's own.
-       */
-      const leadTarget = (access: ToolAccess, named: string | undefined) =>
-        Effect.gen(function* () {
-          if (named === undefined || named.trim() === '') return (yield* ownIssue(access)).target
-          const sql = yield* SqlClient.SqlClient
-          const read = yield* issues
-            .read(named, access.projectId)
-            .pipe(Effect.mapError(() => new ToolRefused({ message: `Althar can’t find ${named} on a connected tracker.` })))
-          const target = { connectionId: read.connectionId, ref: read.ref }
-          const [own] = yield* sql<{ id: string }>`
-            SELECT id FROM external_links WHERE task_id = ${access.taskId ?? ''} AND kind = 'issue'
-              AND connection_id = ${read.connectionId} AND ref = ${read.ref} LIMIT 1`
-          if (own !== undefined) return target
-          const [filed] = yield* sql<{ id: string }>`
-            SELECT id FROM issue_drafts WHERE thread_id = ${access.threadId} AND state = 'filed'
-              AND connection_id = ${read.connectionId} AND issue_ref = ${read.ref} LIMIT 1`
-          if (filed !== undefined || (yield* namedByThePerson(access, read))) return target
-          return yield* new ToolRefused({
-            message: `${read.key} isn’t this task’s issue, one it filed, or one the person named to it, so it isn’t yours to change. Tell the person what it needs: the coordinator changes it for them.`,
-          })
-        })
+      /** The issue a lead changes or comments on where it names none: its task's own. */
+      const leadTarget = (access: ToolAccess) => Effect.map(ownIssue(access), (own) => own.target)
 
       const actorOf = (access: ToolAccess) => (access.role === 'coordinator' ? instance.coordinatorId : instance.systemId)
       const byOf = (access: ToolAccess): Proposer => (access.role === 'coordinator' ? 'coordinator' : 'lead')
@@ -1151,31 +1100,18 @@ export class IssueChanges extends Context.Service<
           }
         })
 
-      /** Why issues a lead asked to change wait on a card for the person: they aren't its own, a line for them all. */
-      const notTheirs = (keys: ReadonlyArray<string>) =>
-        `${keys.join(', ')} ${keys.length === 1 ? 'isn’t' : 'aren’t'} this task’s issue, one it filed, or one the person named to it, so ${keys.length === 1 ? 'it waits' : 'they wait'} on a card for the person, never at once.`
-
-      /** The note on a card of a lead's for issues that aren't its own. */
-      const NOT_THEIRS_NOTE = 'Not this task’s issues: its lead asks you to apply these.'
-
       /**
-       * A lead's issues by where they are: those it may change or comment on
-       * at once, as its agent says, and those that wait on a card for the
-       * person, with a line for those and for each no tracker has. The
-       * coordinator's are all its own.
+       * The issues named, by where they are, with a line for each no tracker
+       * has: a lead's, as the coordinator's, any of the project's.
        */
       const mayChange = (access: ToolAccess, named: ReadonlyArray<string>) =>
         Effect.gen(function* () {
           if (access.role === 'coordinator')
-            return { allowed: named.map((one, index) => ({ index, target: { issue: one } as Target })), others: [], said: [] }
+            return { allowed: named.map((one, index) => ({ index, target: { issue: one } as Target })), said: [] }
           const { scopes, unknown } = yield* leadScopes(access, named)
-          const others = scopes.flatMap((one, index) =>
-            one !== undefined && !one.theirs ? [{ index, target: one.target, key: one.key }] : [],
-          )
           return {
-            allowed: scopes.flatMap((one, index) => (one !== undefined && one.theirs ? [{ index, target: one.target }] : [])),
-            others,
-            said: [...unknown, ...(others.length === 0 ? [] : [notTheirs(others.map((one) => one.key))])],
+            allowed: scopes.flatMap((one, index) => (one === undefined ? [] : [{ index, target: one.target }])),
+            said: unknown,
           }
         })
 
@@ -1205,7 +1141,7 @@ export class IssueChanges extends Context.Service<
             return yield* new ToolRefused({ message: 'Say which issue, by its key or link, as issue.' })
           // The coordinator's, or the lead's task's own: posted at once, as before.
           if (!several && (access.role === 'coordinator' || asked.issue === undefined || asked.issue.trim() === '')) {
-            const target = access.role === 'coordinator' ? { issue: asked.issue ?? '' } : yield* leadTarget(access, undefined)
+            const target = access.role === 'coordinator' ? { issue: asked.issue ?? '' } : yield* leadTarget(access)
             const card = yield* comment({
               projectId: access.projectId as ProjectId,
               threadId: access.threadId,
@@ -1219,37 +1155,26 @@ export class IssueChanges extends Context.Service<
               ? `Commented on ${issue?.key ?? 'it'}. The thread shows it as a line.`
               : `The comment on ${issue?.key ?? 'it'} wasn't posted: ${issue?.error ?? card.error ?? ''}`
           }
-          // The same comment on each: at once on those the lead may comment on, on a card for the person on any other.
+          // The same comment on each, at once.
           const names = keysIn([...(asked.issue === undefined ? [] : [asked.issue]), ...(asked.issues ?? [])])
           // One named alone that no tracker has is refused, as before.
           if (names.length === 1 && access.role !== 'coordinator') yield* leadScope(access, names[0] ?? '')
-          const { allowed, others, said } = yield* mayChange(access, names)
-          const each = (targets: ReadonlyArray<Target>, direct: boolean) =>
-            targets.length === 0
-              ? Effect.succeed([] as ReadonlyArray<string>)
-              : Effect.map(
-                  commentOnEach({
+          const { allowed, said } = yield* mayChange(access, names)
+          const commented =
+            allowed.length === 0
+              ? []
+              : commentedWords(
+                  yield* commentOnEach({
                     projectId: access.projectId as ProjectId,
                     threadId: access.threadId,
-                    targets,
+                    targets: allowed.map((one) => one.target),
                     body: asked.body,
-                    direct,
+                    direct: true,
                     by: byOf(access),
                     actorId: actorOf(access),
                   }),
-                  commentedWords,
                 )
-          return [
-            ...(yield* each(
-              allowed.map((one) => one.target),
-              true,
-            )),
-            ...said,
-            ...(yield* each(
-              others.map((one) => one.target),
-              false,
-            )),
-          ].join('\n')
+          return [...commented, ...said].join('\n')
         })
 
       const changeTool = (access: ToolAccess, value: unknown) =>
@@ -1263,13 +1188,13 @@ export class IssueChanges extends Context.Service<
               yield* propose({
                 projectId: access.projectId as ProjectId,
                 threadId: access.threadId,
-                issues: [{ target: yield* leadTarget(access, undefined), change: wanted }],
+                issues: [{ target: yield* leadTarget(access), change: wanted }],
                 direct: atOnce === true,
                 by: 'lead',
                 actorId: instance.systemId,
               }),
             )
-          // The same change to each named, or each its own: those the lead may change on one card, as its agent says; any other on a card waiting on the person.
+          // The same change to each named, or each its own, on one card, as its agent says (at_once).
           const asks = [
             ...named.map((one) => ({ issue: one, change: wanted })),
             ...(yield* Effect.forEach(each ?? [], ({ issue: one, ...rest }) =>
@@ -1278,26 +1203,26 @@ export class IssueChanges extends Context.Service<
           ]
           // One named alone that no tracker has is refused, as before.
           if (asks.length === 1) yield* leadScope(access, asks[0]?.issue ?? '')
-          const { allowed, others, said } = yield* mayChange(
+          const { allowed, said } = yield* mayChange(
             access,
             asks.map((one) => one.issue),
           )
-          const onCard = (chosen: ReadonlyArray<{ readonly index: number; readonly target: Target }>, direct: boolean) =>
-            chosen.length === 0
-              ? Effect.succeed([] as ReadonlyArray<string>)
-              : Effect.map(
-                  propose({
-                    projectId: access.projectId as ProjectId,
-                    threadId: access.threadId,
-                    issues: chosen.map((one) => ({ target: one.target, change: asks[one.index]?.change ?? wanted })),
-                    ...(direct ? {} : { note: NOT_THEIRS_NOTE }),
-                    direct,
-                    by: 'lead',
-                    actorId: instance.systemId,
-                  }),
-                  (proposed) => [proposedWords(proposed)],
-                )
-          return [...(yield* onCard(allowed, atOnce === true)), ...said, ...(yield* onCard(others, false))].join('\n')
+          const proposed =
+            allowed.length === 0
+              ? []
+              : [
+                  proposedWords(
+                    yield* propose({
+                      projectId: access.projectId as ProjectId,
+                      threadId: access.threadId,
+                      issues: allowed.map((one) => ({ target: one.target, change: asks[one.index]?.change ?? wanted })),
+                      direct: atOnce === true,
+                      by: 'lead',
+                      actorId: instance.systemId,
+                    }),
+                  ),
+                ]
+          return [...proposed, ...said].join('\n')
         })
 
       const changesTool = (access: ToolAccess, value: unknown) =>
@@ -1354,7 +1279,7 @@ export class IssueChanges extends Context.Service<
       yield* toolServer.serve('lead', [
         tool(
           'comment_on_issue',
-          `Comments on an issue at once, in Markdown: what the person would want on it, such as what you found or what changed. The thread shows it as a line. The issue this task came from unless you name another, by key or link: one this task filed, or one the person named to it. The same comment on several as issues (keys, links, runs of keys), at most ${BATCH}, each said posted or not. One not this task’s, filed by it or named by the person waits on a card for the person to post, never at once.`,
+          `Comments on an issue at once, in Markdown: what the person would want on it, such as what you found or what changed. The thread shows it as a line. The issue this task came from unless you name another, by key or link: any of the project's trackers'. The same comment on several as issues (keys, links, runs of keys), at most ${BATCH}, each said posted or not.`,
           {
             type: 'object',
             properties: {
@@ -1374,7 +1299,7 @@ export class IssueChanges extends Context.Service<
         ),
         tool(
           'change_issue',
-          `Changes an issue: its status (any of its tracker’s, such as In Review), closing it, its priority, assignees, labels, project, milestone, cycle, parent, estimate, type, components, due date, title or description. As a card the person applies in this thread, unless at_once: where the project’s notes say issues are changed at once, or the person just said to. You hear what they decide. The issue this task came from unless you name another: one this task filed, or one the person named to it. Several at once: the same change to each of issues (keys, links, runs of keys such as DEV-180..DEV-195, as find_issues finds them), or a change of its own to each in changes; at most ${BATCH}. Any of them not this task’s, filed by it or named by the person (by key, link or a run of keys) goes on a card of its own for the person to apply, never at once, and is said. Althar reads each name against its tracker, changes what it can, paces a big batch to the tracker’s limits, and says for each issue what changed, what didn’t and why.\n\n${changeTable()}`,
+          `Changes an issue: its status (any of its tracker’s, such as In Review), closing it, its priority, assignees, labels, project, milestone, cycle, parent, estimate, type, components, due date, title or description. As a card the person applies in this thread, unless at_once: where the project’s notes say issues are changed at once, or the person just said to. You hear what they decide. The issue this task came from unless you name another, any of the project's trackers'. Several at once: the same change to each of issues (keys, links, runs of keys such as DEV-180..DEV-195, as find_issues finds them), or a change of its own to each in changes; at most ${BATCH}. Althar reads each name against its tracker, changes what it can, paces a big batch to the tracker’s limits, and says for each issue what changed, what didn’t and why.\n\n${changeTable()}`,
           {
             type: 'object',
             properties: {

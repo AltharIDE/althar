@@ -2388,12 +2388,6 @@ export const TaskCard = Schema.Struct({
       reason: Schema.NullOr(Schema.String),
       /** What happens when the work is done; null where nothing reaches the repository's host. */
       end: Schema.NullOr(TaskEnd),
-      /**
-       * Only these agents may take its steps, by id: a review of someone
-       * else's pull request's, those whose session can be held to reading
-       * only. Absent where any may.
-       */
-      agents: Schema.optional(Schema.Array(Schema.String)),
       /** Where it works (ADR-091); absent for a worktree, as a review's. */
       worksIn: Schema.optional(WorksIn),
       /** The preset its parts are, as the card's kicker names it first (a task is a conversation plus parts): Change, Chat. */

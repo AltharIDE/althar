@@ -455,8 +455,17 @@ see it.
   word again. One that hears nothing for a day says what it waits on.
 
 **Speaking for the person:** a post goes ahead on a pull request or issue
-that a task of Althar's opened or came from, and asks everywhere else
+that a task of Althar's opened or came from, the person's own or one by the
+repository's own people, and on an outside author's goes on the person's word
 ([what agents may do](what-agents-may-do.md#speaking-for-the-person)).
+
+**Whose pull request it is holds nothing back** (the person's note of 11
+Nov): `mark_ready`, `close_pull_request`, `reopen_pull_request`,
+`reply_on_pull_request` and `edit_pull_request` act on any of the project's
+pull requests. Unasked on Althar's own and the person's own (and a reply or
+edit on one by the repository's own people); on anyone else's at once on the
+person's word, their message in the turn that asks it. Declining on
+Bitbucket Cloud is final, so it goes only on their word, whoever opened it.
 
 **The tools,** beside pushing and reading:
 
@@ -474,7 +483,8 @@ that a task of Althar's opened or came from, and asks everywhere else
 
 A lead keeps its own `rerun_check`, `read_default_branch_checks`,
 `reply_on_pull_request`, `edit_pull_request` and `push_tag`, which act on
-its task's pull request unless told another.
+its task's pull request unless told another; named by its link or number,
+another of the project's goes as the coordinator's tools take it.
 
 **Accepting a change merges it.** The person's Accept on a card, their
 merge on the host, or `merge_pull_request` on their word all merge it, and
@@ -630,12 +640,6 @@ The decisions above are current. These parts of them aren't built on main:
 - **`post_review` and `delete_branch` for agents:** posting a review the
   person asked for, and deleting a branch on their word. A review task's
   draft is posted by the person, and so is a branch deleted on Close.
-- **Declining on Bitbucket Cloud,** where it is final: refused for agents
-  today, rather than going on the person's word.
-- **Speaking for you, as decided:** a reply or an edit on an outside
-  author's pull request is refused outright today, rather than going on the
-  person's word. Marking ready, closing and reopening are refused on pull
-  requests Althar didn't open.
 - **A lead's tag on the person's word in its thread:** a lead's `push_tag`
   still asks every time. A lead's merge goes through the same tool and line
   as the coordinator's.

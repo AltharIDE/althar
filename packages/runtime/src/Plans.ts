@@ -318,7 +318,7 @@ export class Plans extends Context.Service<
                   ...(before.reviewAfterMerge === true ? { reviewAfterMerge: true } : {}),
                 })
               }
-              // A review's lead only reads: an agent that can't be held to that can't take it, whoever picks it.
+              // Any agent Althar has may lead a review.
               if (parametersOf(yield* load(planId)).reads === true)
                 for (const step of steps) if (!step.skipped) yield* reviews.canLead(step.agentId)
               return yield* reshape(planId, changed, actorId, toward, worksIn !== undefined)
