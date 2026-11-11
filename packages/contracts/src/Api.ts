@@ -4135,8 +4135,8 @@ export type LoadPoint = typeof LoadPoint.Type
 
 /**
  * How hard this computer works, as the runtime read it a moment ago, for the
- * window's bar: read only while a window asks, at most every few seconds,
- * however many windows ask.
+ * window's bar: read when a window asks and, while the meter is on, on its
+ * own, at most every few seconds however many windows ask.
  */
 export const Load = Schema.Struct({
   /** All the CPU in use since the reading before, across every core. */
@@ -4150,7 +4150,7 @@ export const Load = Schema.Struct({
   shares: Schema.NullOr(Schema.Array(LoadShare)),
   /** Althar itself, part of Althar's work as the bar counts it; null where its processes can't be read. */
   althar: Schema.NullOr(LoadOwn),
-  /** The readings of the last two minutes, oldest first, the last of them this one's. A gap of more than a few readings starts them afresh. */
+  /** The readings of the last two minutes, oldest first, one every few seconds. A gap of more than a few readings starts them afresh, so there may be fewer; none is made up. */
   history: Schema.Array(LoadPoint),
 })
 export type Load = typeof Load.Type
