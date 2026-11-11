@@ -15,7 +15,7 @@
 <p align="center">
   <a href="https://github.com/AltharIDE/althar/releases/latest"><b>Download</b></a> ·
   <a href="https://althar.ai"><b>Website</b></a> ·
-  <a href="#bring-the-agents-you-already-pay-for"><b>Get started</b></a> ·
+  <a href="#get-althar"><b>Get started</b></a> ·
   <a href="CONTRIBUTING.md"><b>Contributing</b></a>
 </p>
 
@@ -31,9 +31,123 @@
 
 <img src="brand/export/screenshots/framed/project-home.jpg" width="100%" alt="A project's home: you ask for a fix to the VAT rate on EU invoices and the coordinator answers with a plan, Opus 5 implementing and Codex reviewing, starting in 23 seconds. Beside it, the board: two tasks up next, three running, one question that needs you." />
 
-## No new account. No new bill.
+## Calm, clean, out of your way.
 
-Althar uses the sign-ins already on your machine: your Claude plan, your ChatGPT plan, your keys. No token reselling, no proxy, nothing of ours between you and the model.
+The window opens in its own light. Every project, agent and account sits in one place. When nothing needs you, it says so and gets out of the way.
+
+<table>
+  <tr>
+    <td width="50%" valign="top">
+      <img src="brand/export/screenshots/framed/at-rest.jpg" width="100%" alt="The home when nothing needs you: the mark rising out of the launch's light, 'Nothing needs you', three things since you last looked, and every project beside it." />
+    </td>
+    <td width="50%" valign="top">
+      <img src="brand/export/screenshots/framed/project-home-dark.jpg" width="100%" alt="A project's home in the dark appearance: the coordinator's conversation beside the board." />
+    </td>
+  </tr>
+</table>
+
+## Work arrives tested and reviewed.
+
+Tasks don't stop at a first draft. Other models review the lead's work, the lead fixes what they find, and it goes round until the review is clean. Each task hands back what it ran, before and after pictures, and what it couldn't check.
+
+No more meat proxying: no more pasting one agent's answer into another.
+
+<table>
+  <tr>
+    <td width="50%" valign="top">
+      <img src="brand/export/screenshots/framed/review.jpg" width="100%" alt="A settled review: Claude Sonnet 5 and Gemini 3 Pro found three things at their lines; the lead fixed two and set one aside, with its reason." />
+    </td>
+    <td width="50%" valign="top">
+      <img src="brand/export/screenshots/framed/evidence.jpg" width="100%" alt="What a finished task hands back: what it built, before and after pictures of the refund page, the test run, and what it could not check: it wasn't tried against the live payment provider." />
+    </td>
+  </tr>
+  <tr>
+    <td valign="top">
+      <img src="brand/export/screenshots/framed/accept.jpg" width="80%" alt="A change ready to accept: its checks passed, reviewed by Claude Sonnet 5 and Gemini 3 Pro, four files touched, and one button, Accept and merge both." />
+    </td>
+    <td valign="top">
+      <p>Your rules add steps, like a security review when money is touched.</p>
+      <p>When it's ready it comes to you with its checks passed and who reviewed it. You only step in to merge.</p>
+    </td>
+  </tr>
+</table>
+
+## A project manager for every project.
+
+Say what you want done: it turns that into tasks and proposes who does each step. Leave it alone and it starts. Then keep talking to it. Every project has a coordinator that knows the project and everything running in it.
+
+<table>
+  <tr>
+    <td width="40%" valign="top">
+      <p><b>Knows the project.</b> It reads the repositories and your rules before it plans. You don't explain twice.</p>
+      <p><b>Keeps the whole picture.</b> Ask where things stand, and it answers for every task at once.</p>
+      <p><b>Runs the work.</b> It starts, holds, stops and restarts tasks, and passes your words on to their leads.</p>
+      <p><b>Builds the team.</b> A lead to implement, other models to review. Swap anyone before it starts.</p>
+    </td>
+    <td width="60%" valign="top">
+      <img src="brand/export/screenshots/framed/coordinator.jpg" width="100%" alt="The coordinator, asked where things stand: it answers for every task. Told to answer a question, add credit notes to the CSV export and hold the Stripe upgrade until the export merges, it does all three, and says which tasks it changed." />
+    </td>
+  </tr>
+</table>
+
+## It fixes its own conflicts and failing checks.
+
+<table>
+  <tr>
+    <td width="44%" valign="top">
+      <p>Main moved and your pull request conflicts? Althar spots it, and the task's lead resolves it and pushes the merge.</p>
+      <p>A check failed? The lead picks the work back up and fixes it.</p>
+      <p>If it can't, it comes to you with the reason. Both are on by default.</p>
+    </td>
+    <td width="56%" valign="top">
+      <img src="brand/export/screenshots/framed/healing.jpg" width="100%" alt="A pull request's thread: Althar notices a conflict with main and asks the lead to resolve it, the lead resolves it and the merge is pushed, a check fails, the lead fixes it, and the checks pass." />
+    </td>
+  </tr>
+</table>
+
+## What else it does.
+
+<table>
+  <tr>
+    <td width="44%" valign="top">
+      <h3>Work that starts itself.</h3>
+      <p>Ask once, for a time or for when something happens. It runs on your computer while Althar is open, and not until you turn it on.</p>
+    </td>
+    <td width="56%" valign="top">
+      <img src="brand/export/screenshots/framed/automations.jpg" width="100%" alt="Automations: Sunday end-to-end paused itself, Morning review runs next tomorrow at 9:00, Nightly bump is running, Friday changelog is paused, and Flaky sweep is off until you turn it on." />
+    </td>
+  </tr>
+  <tr>
+    <td valign="top">
+      <h3>Talk instead of typing.</h3>
+      <p>Dictate to the coordinator or any lead. It runs on your computer, after a one-time download of the speech model.</p>
+      <p>The agent knows the message was spoken, so a misheard name is read generously.</p>
+    </td>
+    <td valign="top">
+      <img src="brand/export/screenshots/framed/dictation.jpg" width="100%" alt="Dictating to Opus 5: what was said so far is in the field, the newest words arriving faint, and the voice drawn as bars at 0:05." />
+    </td>
+  </tr>
+  <tr>
+    <td valign="top">
+      <h3>Wherever you are, still in reach.</h3>
+      <p>On a Mac, Althar sits round the notch or in the menu bar; on Windows and Linux, in the tray.</p>
+      <p>Point at it to answer a permission or open a pull request, and carry on.</p>
+    </td>
+    <td valign="top">
+      <img src="brand/export/reels/island.gif" width="100%" alt="The island round the notch: two calls wait, and pointing at it drops it open to answer them." />
+    </td>
+  </tr>
+</table>
+
+- **It keeps going while you're away.** Usage limits, stalled turns, review rounds: Althar handles them and carries on, and you only hear about what needs you.
+- **One home for everything.** What needs you, across every project, in one place, answered where it is. And what happened since you looked.
+- **Ten at once. None in each other's way.** Run as many tasks as you like side by side. Each gets a worktree of its own, so no two agents ever work in the same files.
+- **Canvases.** Agents can draw a page, a diagram or a document beside the conversation. Comment on it, or on the words you select, and they draw it again.
+- **Every workspace, side by side.** Day job on Linear, a client on Jira, side projects on GitHub? Plug them all in, and every issue lands in the right project. Pull requests go out to GitHub, GitLab or Bitbucket.
+
+## Bring the agents you already pay for.
+
+Althar uses the sign-ins already on your machine: your Claude plan, your ChatGPT plan, your keys. No token reselling, no proxy, nothing of ours between you and the model. New models ship most weeks and the best one for code keeps changing, so the safe bet is not to bet on one.
 
 <table>
   <tr>
@@ -134,106 +248,13 @@ Althar uses the sign-ins already on your machine: your Claude plan, your ChatGPT
 
 Agents join through the Agent Client Protocol, so a new one takes an adapter, not a rewrite.
 
-## The best coding agent right now is…
-
-Claude Code. Codex. Gemini. An open model. Something new.
-
-Ask again next month. New models ship most weeks, the best one for code keeps changing, open models keep closing the gap, and prices and limits move with all of it. The safe bet is not to bet on one.
-
 - **Switch agents mid‑task.** Claude runs out halfway? Codex picks up the same thread, the same plan and the same branch.
-- **Every plan, all at once.** Work goes to whichever agent has room left today. No more waiting for a reset.
-- **Open source.** Nothing to get locked into. Read every line, fork it, run it. If we disappear, your setup doesn't.
+- **Every plan you have.** Sign Claude Code, Codex or OpenCode in once for each plan you pay for: personal, work, a client's. When one runs out, Althar goes on with the next, in the order you set.
+- **Open source, and local.** Read every line, fork it, run it. Your projects, threads and history live in a local database on your computer: no Althar account, no Althar cloud. If we disappear, your setup doesn't.
 
 **Subscriptions come and go. Your projects stay.**
 
-## Tell it what. It picks the team.
-
-Every project has a manager. Say what you want done; it turns that into tasks and proposes who does each step. Leave it alone and it starts.
-
-<table>
-  <tr>
-    <td width="44%" valign="top">
-      <p><b>Knows your projects.</b> It reads the repos and your rules before it plans. You don't explain twice.</p>
-      <p><b>Runs several at once.</b> Ask for three things, get three tasks going side by side.</p>
-      <p><b>Builds the team.</b> A lead to implement, other models to review and audit. Swap anyone before it starts.</p>
-    </td>
-    <td width="56%" valign="top">
-      <img src="brand/export/screenshots/framed/plan.jpg" width="100%" alt="You ask for a fix to the VAT rate on EU invoices; the coordinator answers with one task: Opus 5 implements, Codex reviews, then a draft pull request. It starts in 29 seconds unless changed or held." />
-    </td>
-  </tr>
-</table>
-
-## Implement. Review. Fix. Review again.
-
-Tasks don't stop at a first draft. Other models review the lead's work, the lead fixes what they find, and it goes round until the review is clean. Your rules add steps, like a security review when money is touched. You only step in to merge.
-
-No more meat proxying: no more pasting one agent's answer into another.
-
-<img src="brand/export/screenshots/framed/graph.jpg" width="100%" alt="The VAT fix as a graph, a lane for each agent: Opus 5 implements in 21 minutes, Codex's first review finds two things, Opus 5 settles both, the second review passes, and Althar opens draft pull request 1214." />
-
-## Fall in love with building again.
-
-Tired of juggling terminals, re-explaining your project and babysitting agents? So were we.
-
-<table>
-  <tr>
-    <td width="44%" valign="top">
-      <h3>It keeps going while you're away.</h3>
-      <p>Usage limits, stalled turns, review rounds: Althar handles them and carries on.</p>
-      <p>Every task sits on the board by lane, and you only hear about what needs you.</p>
-    </td>
-    <td width="56%" valign="top">
-      <img src="brand/export/screenshots/framed/board.jpg" width="100%" alt="A project's board: up next, running, needs you, and settled, with each running task's steps and its lead." />
-    </td>
-  </tr>
-  <tr>
-    <td valign="top">
-      <h3>One home for everything.</h3>
-      <p>What needs you, across every project, in one place, answered where it is. And what happened since you looked.</p>
-    </td>
-    <td valign="top">
-      <img src="brand/export/screenshots/framed/home.jpg" width="100%" alt="Althar's home: a release to publish in Halyard, a pull request to accept and a decision in Meridian, every project beside them, and what happened since you last looked." />
-    </td>
-  </tr>
-  <tr>
-    <td valign="top">
-      <h3>Talk instead of typing.</h3>
-      <p>Dictate to the coordinator or any lead. It runs on your computer, after a one-time download of the speech model.</p>
-      <p>The agent knows the message was spoken, so a misheard name is read generously.</p>
-    </td>
-    <td valign="top">
-      <img src="brand/export/screenshots/framed/dictation.jpg" width="100%" alt="Dictating to Opus 5: what was said so far is in the field, the newest words arriving faint, and the voice drawn as bars at 0:05." />
-    </td>
-  </tr>
-  <tr>
-    <td valign="top">
-      <h3>Wherever you are, still in reach.</h3>
-      <p>On a Mac, Althar sits round the notch or in the menu bar; on Windows and Linux, in the tray.</p>
-      <p>Point at it to answer a permission or open a pull request, and carry on.</p>
-    </td>
-    <td valign="top">
-      <img src="brand/export/reels/island.gif" width="100%" alt="The island round the notch: two calls wait, and pointing at it drops it open to answer them." />
-    </td>
-  </tr>
-  <tr>
-    <td valign="top">
-      <h3>The craft of a paid app. The freedom of open source.</h3>
-      <p>The window opens in its own light. Every agent and account sits in one place. You pick the app's icon. When nothing needs you, it says so and gets out of the way.</p>
-      <p>Your projects, threads and history live in a local database on your computer. No Althar account, no Althar cloud.</p>
-    </td>
-    <td valign="top">
-      <img src="brand/export/reels/details.gif" width="100%" alt="Details: the launch rising out of its own light, the agents and their accounts, choosing the app icon, and the home at rest." />
-    </td>
-  </tr>
-</table>
-
-- **Every plan you have. One agent.** Sign Claude Code, Codex or OpenCode in once for each plan you pay for: personal, work, a client's. When one runs out, Althar goes on with the next, in the order you set, on the same thread and branch.
-- **Work that starts itself.** Ask once, for a time or for when something happens. It runs on your computer while Althar is open, and not until you turn it on.
-- **Conflicts, settled.** Agents work fast, and merging shouldn't be what holds them up. Each lead settles its own conflicts with the default branch; only the odd one needs you.
-- **Ten at once. None in each other's way.** Run as many tasks as you like side by side. Each gets a worktree of its own, so no two agents ever work in the same files.
-- **Every workspace, side by side.** Day job on Linear, a client on Jira, side projects on GitHub? Plug them all in, and every issue lands in the right project. Pull requests go out to GitHub, GitLab or Bitbucket.
-
-## Bring the agents you already pay for.
+## Get Althar.
 
 > [!NOTE]
 > **Early.** Althar runs on macOS, Windows and Linux, and is tested most on macOS. Things will change, and some will break. [Tell us when they do](https://github.com/AltharIDE/althar/issues), or, in the app, Report a problem (in Help on a Mac, or at the foot of the quick settings), which sends what happened with the app's logs, paths and repository names hidden. Crash reports go on their own, masked the same way and never with your code, until you turn them off on the first screen or in Settings.
