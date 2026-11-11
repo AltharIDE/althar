@@ -97,3 +97,8 @@ export const AllStates: Story = {
     />
   ),
 }
+
+/** The same news twice in a row, folded into one line with the latest time. */
+export const Folded: Story = {
+  args: { from: undefined, verb: 'Checks passed on', where: 'PR #766', at: '3m ago', count: 2, children: undefined },
+}
