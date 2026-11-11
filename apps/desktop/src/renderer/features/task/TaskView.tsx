@@ -56,7 +56,7 @@ import { queuedOf, queueShown, readingNow, withQueued } from '../../shared/items
 import { ModelChoice } from '../../shared/ModelChoice'
 import { pendingText } from '../../shared/Pending'
 import { useModelNames } from '../../shared/modelNames'
-import { type Choice, runningOn } from '../../shared/models'
+import { type Choice, runningOn, upcomingOn } from '../../shared/models'
 import { issuePriority, issueStatus, productBrand, productName } from '../../shared/products'
 import { afterMergeText, readyWordOf, shipText } from '../../shared/standing'
 import { stepText, trackFor } from '../../shared/steps'
@@ -407,6 +407,8 @@ export function TaskView({
   // Whether the person has their team's reviews posted once drafted: what a review's reach says it posts.
   const postsTeamReviews = usePostTeamReviews()?.on === true
   const [pick, setPick] = useState<Choice | null>(null)
+  // A model or effort of the lead's own agent, picked and not yet taken by the runtime.
+  const [moving, setMoving] = useState<Choice | null>(null)
   // Another agent's model, picked while a lead is on the task: it takes over with what the person says next.
   const [handover, setHandover] = useState<Choice | null>(null)
   // Where its code host is connected, opened beside its outputs once its branch is pushed.
@@ -621,9 +623,13 @@ export function TaskView({
   const agentName = (id: string | null) =>
     model.agents.find((agent) => agent.id === id)?.name ?? (id === session?.agentId ? session.agentName : (id ?? ''))
   // Running or not, the task has its lead: the one on it now, else the last, else the one its plan names.
+  // Its model as just picked, or chosen for its next turn, where it is the same agent's: the header says what the picker says.
+  const next = session !== null && session.held ? (moving ?? upcomingOn(session)) : null
+  const leadModel =
+    session !== null && next !== null && next.agentId === session.agentId ? (next.model ?? session.model) : (session?.model ?? null)
   const lead =
     session !== null && session.held
-      ? named(session.agentId, session.model, session.account)
+      ? named(session.agentId, leadModel, session.account)
       : snapshot.task.lead === null
         ? noLead
         : named(snapshot.task.lead.agentId, snapshot.task.lead.model, snapshot.task.lead.account)
@@ -712,17 +718,13 @@ export function TaskView({
         ? null
         : { agentId: resume.id, model: null, effort: null })
   const waiting = session === null || !session.held || handover?.agentId === session.agentId ? null : handover
-  // Its lead changed from its next turn, by the team dialog or a tool: the picker shows who leads it then.
-  const upcoming = session?.held === true ? session.nextLead : null
-  const pending: Choice | null =
-    session === null || upcoming == null
-      ? null
-      : {
-          agentId: upcoming.agentId,
-          model: upcoming.model ?? (upcoming.agentId === session.agentId ? session.model : null),
-          effort: upcoming.effort ?? (upcoming.agentId === session.agentId ? session.effort : null),
-        }
-  const choice = session === null || !session.held ? chosen : (waiting ?? pending ?? runningOn(session))
+  // Its lead changed from its next turn, by the picker, the team dialog or a tool: the picker shows who leads it then, and so does the header.
+  const pending: Choice | null = session === null || !session.held ? null : upcomingOn(session)
+  // What the person just picked, shown until the runtime has it (or has refused it): at once, before anything is asked of the agent.
+  const choice =
+    session === null || !session.held
+      ? chosen
+      : (waiting ?? (moving !== null ? { ...moving, agentId: session.agentId } : null) ?? pending ?? runningOn(session))
 
   // The agent what the person says goes to: one picked to take over, else the lead on it, else the one it would start; and whether it takes images.
   const receiving = waiting?.agentId ?? (session?.held ? session.agentId : undefined) ?? chosen?.agentId ?? null
@@ -773,7 +775,10 @@ export function TaskView({
     if (session === null || !session.held) return setPick(next)
     if (next.agentId !== session.agentId) return setHandover(next)
     setHandover(null)
-    void model.choose(next)
+    setMoving(next)
+    // Taken or not, the thread says what the lead is on from here: the choice shown until then goes, and a refusal is said by the line above the composer.
+    // Only the last pick's end takes it away: one made after is still on its way.
+    void model.choose(next).then(() => setMoving((now) => (now === next ? null : now)))
   }
   // A queued message goes back in the composer to be changed, and out of the queue, unless the lead has it already.
   const edit = async (id: string) => {

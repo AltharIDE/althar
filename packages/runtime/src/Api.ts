@@ -1054,8 +1054,8 @@ export const handlers = Api.toLayer(
             }),
           ),
         ),
-      SetModel: ({ commandId, threadId, model }) => once(commandId, api(sessions.setModel({ threadId, model }))),
-      SetEffort: ({ commandId, threadId, effort }) => once(commandId, api(sessions.setEffort({ threadId, effort }))),
+      SetModel: ({ commandId, threadId, model }) => once(commandId, api(Effect.asVoid(sessions.chooseLead({ threadId, model })))),
+      SetEffort: ({ commandId, threadId, effort }) => once(commandId, api(Effect.asVoid(sessions.chooseLead({ threadId, effort })))),
       GetModels: () => api(models.catalog),
       SetDefaultEffort: ({ commandId, agentId, model, effort }) =>
         once(commandId, api(models.setDefaultEffort({ agentId, model, effort }))),
