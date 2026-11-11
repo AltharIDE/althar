@@ -135,9 +135,9 @@
 .talk { width: 100%; max-width: min(720px, (100svh - 140px) * 720 / 720); justify-self: end; }
 .talk [class*='AskOnce-module__frame'] { border-radius: 0; }
 
-/* The review, at its own measure. */
-.review { max-width: 1120px; }
-.review .glass { background: #17120f; }
+/* The review, the station's whole width, its drawing's ground the glass's own: no masked edge inside the frame. */
+.review { --review-mask: none; }
+.review .glass { background: #0b0a08; }
 
 /* ---- the first window: the readouts across its top, the claim, and the board standing on the planet's lit edge ---- */
 .window {
