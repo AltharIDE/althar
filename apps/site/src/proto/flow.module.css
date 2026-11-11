@@ -1,0 +1,76 @@
+/* The flow's directions, in the cabin's vocabulary (DesktopBody.module.css): hairline seams, plates, LEDs. */
+
+/* The console's corners, for how many modules it holds. */
+.eight > li:nth-child(n), .six > li:nth-child(n), .fourteen > li:nth-child(n) { border-radius: 0; }
+.eight > li:nth-child(1), .six > li:nth-child(1), .fourteen > li:nth-child(1) { border-top-left-radius: 15px; }
+.eight > li:nth-child(2), .six > li:nth-child(2), .fourteen > li:nth-child(2) { border-top-right-radius: 15px; }
+.eight > li:nth-child(7), .six > li:nth-child(5), .fourteen > li:nth-child(12) { border-bottom-left-radius: 15px; }
+.eight > li:nth-child(8), .six > li:nth-child(6), .fourteen > li:nth-child(14) { border-bottom-right-radius: 15px; }
+.fourteen > li { min-height: 440px; }
+
+/* Under the console: a smaller head, then the small ones. */
+.after { margin-top: 120px; }
+.subhead {
+  margin: 0 0 40px;
+  font-family: 'Inter Display', var(--display);
+  font-size: clamp(30px, 3.2vw, 48px);
+  font-weight: 200;
+  line-height: 1;
+  letter-spacing: -0.045em;
+  color: rgba(255, 248, 240, 0.8);
+}
+.subhead b { font-weight: 700; letter-spacing: -0.05em; color: #fff; }
+
+/* The panel: three across, seamed as the console is. */
+.panel {
+  position: relative;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1px;
+  margin: 0;
+  padding: 1px;
+  border-radius: 16px;
+  list-style: none;
+  background: var(--frame);
+  box-shadow: 0 50px 90px -50px rgba(0, 0, 0, 0.95);
+}
+.small { display: flex; flex-direction: column; min-width: 0; overflow: hidden; padding: 22px 24px 0; background: #0b0a08; }
+.small:nth-child(1) { border-top-left-radius: 15px; }
+.small:nth-child(3) { border-top-right-radius: 15px; }
+.small:nth-child(4) { border-bottom-left-radius: 15px; }
+.small:nth-child(6) { border-bottom-right-radius: 15px; }
+.plate { display: flex; align-items: center; gap: 10px; font: 500 11px/1 var(--mono); letter-spacing: 0.12em; color: var(--ink-3); }
+.plate b { font-weight: 500; color: var(--ink-2); }
+.led { width: 6px; height: 6px; border-radius: 50%; background: #2a2420; box-shadow: inset 0 0 0 1px rgba(255, 244, 232, 0.12); }
+.small:hover .led { background: var(--lit); box-shadow: 0 0 8px var(--glow); }
+.smallTitle { margin: 14px 0 0; font-family: 'Inter Display', var(--display); font-size: 22px; font-weight: 300; line-height: 1.1; letter-spacing: -0.03em; color: rgba(255, 248, 240, 0.86); text-wrap: balance; }
+.smallTitle b { font-weight: 700; color: #fff; }
+.smallLead { margin: 8px 0 0; font-size: 14px; line-height: 1.5; color: rgba(255, 248, 240, 0.6); text-wrap: pretty; }
+/* Its piece: whole, centred, in a fixed height so the row lines up. */
+.smallPiece { display: flex; align-items: center; justify-content: center; overflow: hidden; height: 300px; margin-top: 18px; padding-bottom: 22px; }
+.smallPiece > * { width: 100%; }
+
+/* The compact list: three across, a hairline over each. */
+.list { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0 40px; margin: 0; padding: 0; list-style: none; }
+.list > li { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 16px; padding: 26px 0 30px; border-top: 1px solid var(--hair-2); }
+.icon { display: grid; place-items: center; width: 36px; height: 36px; border-radius: 10px; color: #fff; background: #151310; box-shadow: inset 0 0 0 1px var(--frame); }
+.listTitle { margin: 6px 0 0; font-size: 18px; font-weight: 400; letter-spacing: -0.02em; color: rgba(255, 248, 240, 0.86); }
+.listTitle b { font-weight: 650; color: #fff; }
+.listLead { margin: 8px 0 0; font-size: 14.5px; line-height: 1.5; color: rgba(255, 248, 240, 0.6); }
+
+/* D: two screens side by side. */
+.pair { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 32px; margin: 80px 0 0; padding: 0; list-style: none; }
+.pairItem { display: grid; gap: 22px; }
+.pairTitle { margin: 0; font-family: 'Inter Display', var(--display); font-size: 24px; font-weight: 300; letter-spacing: -0.03em; color: rgba(255, 248, 240, 0.86); }
+.pairTitle b { font-weight: 700; color: #fff; }
+
+@media (max-width: 1099px) {
+  .panel, .list { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .small:nth-child(n) { border-radius: 0; }
+  .pair { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 700px) {
+  .after { margin-top: 72px; }
+  .panel, .list { grid-template-columns: minmax(0, 1fr); border-radius: 12px; }
+  .smallPiece { height: auto; min-height: 200px; }
+}

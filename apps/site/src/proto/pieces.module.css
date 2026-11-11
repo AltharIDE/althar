@@ -1,0 +1,7 @@
+/* The pieces' frames: as Bento's (a card, a window), in the pictures' dark. */
+.card { border-radius: 14px; background: var(--frost-raised, #1c1a17); box-shadow: 0 0 0 1px rgba(255, 244, 232, 0.12), 0 30px 60px -30px rgba(0, 0, 0, 0.9); overflow: hidden; }
+.panel { border-radius: 12px; background: var(--frost, #161412); box-shadow: 0 0 0 1px rgba(255, 244, 232, 0.12), 0 30px 60px -30px rgba(0, 0, 0, 0.9); overflow: hidden; }
+.pad { padding: 18px; }
+.canvas { display: grid; height: 600px; }
+.browser { display: grid; height: 600px; }
+.page { width: 100%; height: 100%; border: 0; }

@@ -1,0 +1,47 @@
+/* The prototype's bar: a dark glass strip along the foot, as the nav is along the top. */
+.bar {
+  position: fixed;
+  left: 50%;
+  bottom: 16px;
+  z-index: 90;
+  translate: -50% 0;
+  display: grid;
+  gap: 8px;
+  width: max-content;
+  max-width: calc(100vw - 24px);
+  padding: 10px 12px 12px;
+  border-radius: 16px;
+  background: rgba(22, 20, 18, 0.88);
+  backdrop-filter: blur(18px) saturate(1.4);
+  box-shadow: 0 0 0 1px rgba(255, 244, 232, 0.14), 0 20px 50px -20px rgba(0, 0, 0, 0.9);
+  color: #efebe4;
+  font: 500 12px/1 var(--mono);
+}
+.now { margin: 0 4px; overflow: hidden; color: #a8a197; white-space: nowrap; text-overflow: ellipsis; }
+.now b { font-weight: 600; color: #fff; }
+.groups { display: flex; flex-wrap: wrap; gap: 6px 14px; }
+.group { display: flex; align-items: center; gap: 6px; padding: 4px; border-radius: 10px; opacity: 0.62; transition: opacity 150ms ease; }
+.group.on { opacity: 1; background: rgba(255, 244, 232, 0.06); }
+.label { all: unset; cursor: pointer; padding: 0 6px; letter-spacing: 0.08em; text-transform: uppercase; color: #a8a197; font-size: 11px; }
+.label kbd { font: inherit; color: #b4bcff; }
+.keys { display: flex; gap: 3px; }
+.key {
+  all: unset;
+  cursor: pointer;
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 7px;
+  color: #efebe4;
+  box-shadow: inset 0 0 0 1px rgba(255, 244, 232, 0.14);
+}
+.key:hover { background: rgba(255, 244, 232, 0.08); }
+.key.picked { background: #efebe4; color: #0b0a08; box-shadow: none; }
+.key:focus-visible, .label:focus-visible { outline: 2px solid #b4bcff; outline-offset: 2px; }
+
+@media (max-width: 700px) {
+  .bar { bottom: 8px; padding: 8px; }
+  .label { padding: 0 2px; font-size: 10px; }
+  .key { width: 24px; height: 24px; }
+}

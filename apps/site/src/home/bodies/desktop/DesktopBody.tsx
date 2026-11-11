@@ -6,7 +6,7 @@ import { useGrain } from '../../../shared/grain'
 import { LightUnder } from '../../../shared/lightUnder'
 import { AskOnce } from './AskOnce'
 import { AtWork } from './AtWork'
-import { TILES } from './Bento'
+import { type Tile, TILES } from './Bento'
 import { Review } from './Review'
 import { EdgeTour } from '../kit/EdgeTour'
 import t from '../kit/type.module.css'
@@ -98,8 +98,32 @@ const dressPictures = () => {
 
 type Id = keyof typeof SCENE
 
+/** A station's claim and its lead. */
+export interface Scene {
+  title: ReactNode
+  lead: string
+}
+
+/** A station's stamp: its number, its name on the wall, and the height it stands at on the way down. */
+export interface StampSpec {
+  no: string
+  name: string
+  km: number
+}
+
+/*
+ * While a direction is being chosen (src/proto, in development only): other
+ * words for the board, another body for the flow, and stations of their own
+ * after any one. The page itself passes none. Delete with src/proto.
+ */
+export interface Trial {
+  board?: Scene
+  flow?: { scene?: Scene; body: ReactNode }
+  after?: Partial<Record<Id, ReactNode>>
+}
+
 /** Each station: its number, its name on the wall, and the height it stands at on the way down. */
-const STATIONS: Record<Id, { no: string; name: string; km: number }> = {
+const STATIONS: Record<Id, StampSpec> = {
   independent: { no: '01', name: 'Board', km: 38 },
   coordinator: { no: '02', name: 'Coordinator', km: 30 },
   review: { no: '03', name: 'Review', km: 22 },
@@ -108,8 +132,8 @@ const STATIONS: Record<Id, { no: string; name: string; km: number }> = {
 }
 
 /** A station's stamp, on the rail: its node, its number and name, a rule, and the height it stands at. */
-function Stamp({ id }: { id: Id }) {
-  const station = STATIONS[id]
+function Stamp({ id, stamp }: { id: string; stamp?: StampSpec }) {
+  const station = stamp ?? STATIONS[id as Id]
   return (
     <p className={c.stamp} aria-hidden="true">
       <span className={c.node} />
@@ -124,15 +148,28 @@ function Stamp({ id }: { id: Id }) {
 }
 
 /** A station on the wall: its stamp, then its head and its screen, laid out as `layout` says. */
-function Station({ id, layout, children }: { id: Id; layout: 'split' | 'wide' | 'bank' | 'notch'; children: ReactNode }) {
+export function Station({
+  id,
+  layout,
+  stamp,
+  scene,
+  children,
+}: {
+  id: string
+  layout: 'split' | 'wide' | 'bank' | 'notch'
+  stamp?: StampSpec
+  scene?: Scene
+  children: ReactNode
+}) {
+  const words = scene ?? SCENE[id as Id]
   return (
     <section id={id} className={cx(c.station, c[layout])} aria-labelledby={`${id}-h`} data-station="">
-      <Stamp id={id} />
+      <Stamp id={id} stamp={stamp} />
       <div className={c.head}>
         <h2 id={`${id}-h`} className={cx(t.title, c.title)}>
-          {SCENE[id].title}
+          {words.title}
         </h2>
-        <p className={cx(t.lead, c.lead)}>{SCENE[id].lead}</p>
+        <p className={cx(t.lead, c.lead)}>{words.lead}</p>
       </div>
       {children}
     </section>
@@ -171,10 +208,10 @@ function Window({ className, seed, children }: { className?: string; seed: numbe
 }
 
 /** What keeps you in flow: one console, its modules seamed into it, each with its number and its light. */
-function Console() {
+export function Console({ tiles = TILES, className }: { tiles?: Tile[]; className?: string }) {
   return (
-    <ol className={c.console} data-light="">
-      {TILES.map((tile, i) => (
+    <ol className={cx(c.console, className)} data-light="">
+      {tiles.map((tile, i) => (
         <li
           key={tile.id}
           className={cx(c.module, c[`span${tile.span}`])}
@@ -256,7 +293,8 @@ function useRail(main: RefObject<HTMLElement | null>) {
   }, [main])
 }
 
-export function DesktopBody() {
+export function DesktopBody({ trial }: { trial?: Trial }) {
+  const board = trial?.board ?? SCENE.independent
   const main = useRef<HTMLElement>(null)
   const lit = useRef<HTMLDivElement>(null)
   const grain = useRef<HTMLDivElement>(null)
@@ -282,9 +320,9 @@ export function DesktopBody() {
         <Window seed={7} className={c.opening}>
           <div className={c.head}>
             <h2 id="independent-h" className={cx(t.title, c.title)}>
-              {SCENE.independent.title}
+              {board.title}
             </h2>
-            <p className={cx(t.lead, c.lead)}>{SCENE.independent.lead}</p>
+            <p className={cx(t.lead, c.lead)}>{board.lead}</p>
           </div>
           <div className={c.board}>
             <AtWork />
@@ -292,27 +330,33 @@ export function DesktopBody() {
         </Window>
       </section>
 
+      {trial?.after?.independent}
+
       <Station id="coordinator" layout="split">
         <Screen className={c.talk}>
           <AskOnce />
         </Screen>
       </Station>
+      {trial?.after?.coordinator}
 
       <Station id="review" layout="wide">
         <Screen className={c.review}>
           <Review />
         </Screen>
       </Station>
+      {trial?.after?.review}
 
-      <Station id="flow" layout="bank">
-        <Console />
+      <Station id="flow" layout="bank" scene={trial?.flow?.scene}>
+        {trial?.flow?.body ?? <Console />}
       </Station>
+      {trial?.after?.flow}
 
       <Station id="edge" layout="notch">
         <div className={c.tour}>
           <EdgeTour />
         </div>
       </Station>
+      {trial?.after?.edge}
 
       {/* The last window: the planet's edge lower and flatter, the dawn coming up along it, and the download. */}
       <section id="end" className={c.endStation} aria-label="Download Althar">

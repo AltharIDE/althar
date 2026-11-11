@@ -1,0 +1,136 @@
+/* Everything Althar connects to, in the page's night (DesktopBody's colours, inherited). */
+
+/* A: as Runs on draws its band (RunsOn.module.css). */
+.band {
+  position: relative;
+  z-index: 2;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 14px 22px;
+  min-height: 76px;
+  padding: 14px var(--gut);
+  border-bottom: 1px solid var(--line-2);
+  background: var(--n-2);
+  font-size: 16px;
+  color: var(--t-1);
+}
+.bandLabel { margin-right: 6px; font: 500 11px var(--mono); letter-spacing: 0.1em; text-transform: uppercase; color: var(--t-3); }
+.bandItem { display: inline-flex; align-items: center; gap: 9px; font-weight: 550; letter-spacing: -0.01em; }
+.bandItem svg { width: 18px; height: 18px; }
+.bandItem .dot { margin-right: 13px; }
+.dot { width: 3px; height: 3px; border-radius: 50%; background: var(--t-4); }
+
+/* B: a console, its cells seamed by one hairline, as Flow's is. */
+.wall {
+  position: relative;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1px;
+  margin: 80px 0 0;
+  padding: 1px;
+  border-radius: 16px;
+  list-style: none;
+  background: var(--frame);
+  overflow: hidden;
+}
+.cell { display: grid; align-content: start; gap: 22px; padding: 24px 28px 30px; background: #0b0a08; }
+.wide { grid-column: 1 / -1; }
+.plate { font: 500 11px/1 var(--mono); letter-spacing: 0.12em; text-transform: uppercase; color: var(--ink-3); }
+.plate b { font-weight: 500; color: var(--lit); margin-right: 8px; }
+.marks { display: flex; flex-wrap: wrap; gap: 14px 30px; margin: 0; padding: 0; list-style: none; }
+.wide .marks { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 18px 24px; }
+.marks li { display: inline-flex; align-items: center; gap: 11px; font-size: 17px; font-weight: 550; letter-spacing: -0.012em; color: rgba(255, 248, 240, 0.86); white-space: nowrap; }
+.marks svg { color: #fff; }
+
+/* C: the first screen's system, small: two rings, Althar its sun, the services on them. */
+.orbit {
+  position: relative;
+  margin-top: 64px;
+  aspect-ratio: 16 / 8;
+  border-radius: 24px;
+  background: radial-gradient(ellipse 50% 50% at 50% 50%, rgba(43, 59, 255, 0.12), transparent 70%), #050403;
+  box-shadow: inset 0 0 0 1px var(--frame);
+  overflow: hidden;
+}
+.ring {
+  position: absolute;
+  left: calc(50% - var(--rx));
+  top: calc(50% - var(--ry));
+  width: calc(var(--rx) * 2);
+  height: calc(var(--ry) * 2);
+  border-radius: 50%;
+  box-shadow: inset 0 0 0 1px rgba(255, 244, 232, 0.12);
+}
+.sun {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  translate: -50% -50%;
+  display: grid;
+  place-items: center;
+  width: 84px;
+  height: 84px;
+  border-radius: 50%;
+  color: #fff;
+  background: radial-gradient(closest-side, rgba(180, 188, 255, 0.28), rgba(60, 76, 255, 0.12) 60%, transparent);
+}
+.body {
+  position: absolute;
+  left: var(--x);
+  top: var(--y);
+  translate: -50% -50%;
+  display: grid;
+  justify-items: center;
+  gap: 8px;
+}
+.planet {
+  display: grid;
+  place-items: center;
+  width: 46px;
+  height: 46px;
+  border-radius: 50%;
+  background: #12100e;
+  box-shadow: 0 0 0 1px rgba(255, 244, 232, 0.16), 0 0 30px -6px rgba(60, 76, 255, 0.55);
+  color: #fff;
+}
+.name { font: 500 11px/1 var(--mono); letter-spacing: 0.12em; text-transform: uppercase; color: var(--ink-2); white-space: nowrap; }
+
+/* D: a quiet row under the board, between hairlines. */
+.rowStation { position: relative; margin-top: var(--between); padding: 0 var(--r) 0 var(--l); text-align: center; }
+.rowLabel { margin: 0 0 32px; font: 500 11px/1 var(--mono); letter-spacing: 0.12em; text-transform: uppercase; color: var(--ink-3); }
+.row {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  align-items: center;
+  gap: 28px 52px;
+  margin: 0;
+  padding: 30px 0;
+  list-style: none;
+  border-top: 1px solid var(--hair);
+  color: rgba(255, 248, 240, 0.72);
+}
+.row svg { width: 30px; height: 30px; }
+.row li { display: inline-flex; align-items: center; gap: 12px; }
+.row li:hover { color: #fff; }
+.rowServices { border-bottom: 1px solid var(--hair); font-size: 19px; font-weight: 600; letter-spacing: -0.02em; }
+.rowServices svg { width: 26px; height: 26px; }
+
+@media (max-width: 1099px) {
+  .wall { grid-template-columns: minmax(0, 1fr); }
+  .wide .marks { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .orbit { aspect-ratio: 1 / 1; }
+}
+@media (max-width: 700px) {
+  .band { gap: 10px 16px; font-size: 15px; }
+  .bandLabel { flex-basis: 100%; margin: 0; text-align: center; }
+  .cell { padding: 20px; }
+  .marks li { font-size: 15px; }
+  .planet { width: 36px; height: 36px; }
+  .name { font-size: 9px; letter-spacing: 0.06em; }
+  .row { gap: 22px 30px; }
+  .row svg { width: 24px; height: 24px; }
+  .rowServices { font-size: 16px; }
+}
