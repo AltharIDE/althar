@@ -1,0 +1,187 @@
+/* B: a face beside the project's views, and the view it opens */
+.tab {
+  align-self: center;
+  margin-left: 4px;
+  padding: 5px 10px;
+  border-radius: 7px;
+  color: var(--t-2);
+  font-size: 13px;
+}
+.tab:hover {
+  color: var(--t-1);
+}
+.tab[aria-pressed='true'] {
+  background: var(--n-0);
+  color: var(--t-1);
+  box-shadow: 0 0 0 1px var(--line-2);
+}
+.count {
+  margin-left: 3px;
+  color: var(--t-4);
+  font-variant-numeric: tabular-nums;
+}
+:global([data-direction='B']:has([data-chats-view])) [class*='ProjectHeader-module__bar'] [class*='Segmented-module__group'] [data-state='checked'] {
+  color: var(--t-3);
+}
+:global([data-direction='B']:has([data-chats-view])) [class*='ProjectHeader-module__bar'] [class*='Segmented-module__group'] > span:first-child {
+  opacity: 0;
+}
+.view {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  overflow: auto;
+  background: var(--n-1);
+}
+.column {
+  max-width: 680px;
+  margin: 0 auto;
+  padding: 28px 20px 40px;
+}
+.heading {
+  margin: 26px 12px 8px;
+  font-size: 13px;
+  font-weight: 600;
+}
+.sub {
+  margin-left: 6px;
+  font-weight: 400;
+  color: var(--t-4);
+}
+
+/* C: tabs over the conversation */
+:global([data-direction='C']) [class*='Project-module__talk'] {
+  position: relative;
+  padding-top: 42px;
+}
+.strip {
+  position: absolute;
+  inset: 0 0 auto;
+  z-index: 4;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  height: 42px;
+  padding: 0 12px;
+  overflow-x: auto;
+  border-bottom: 1px solid var(--line);
+  background: var(--n-1);
+}
+.tabs {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  gap: 4px;
+  overflow-x: auto;
+  scrollbar-width: none;
+  mask-image: linear-gradient(to right, black calc(100% - 24px), transparent);
+}
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 150px;
+  flex-shrink: 0;
+  padding: 4px 10px;
+  border-radius: 999px;
+  color: var(--t-3);
+  font-size: 12.5px;
+}
+.chip:hover {
+  color: var(--t-1);
+  background: var(--n-2);
+}
+.chip[aria-selected='true'] {
+  color: var(--t-1);
+  background: var(--n-0);
+  box-shadow: 0 0 0 1px var(--line-2);
+}
+.chipTitle {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.live {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--live, #3b6cf6);
+}
+.inTalk {
+  position: absolute;
+  inset: 42px 0 0;
+  z-index: 3;
+}
+.starting {
+  display: grid;
+  align-content: end;
+  height: 100%;
+  padding: 0 16px 16px;
+  background: var(--n-1);
+}
+.lead {
+  margin: 0 4px 14px;
+  color: var(--t-3);
+  font-size: 13px;
+}
+
+/* D: a tray over any screen */
+.tray {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 20;
+  width: 420px;
+  display: flex;
+  border-left: 1px solid var(--line);
+  background: var(--n-1);
+  box-shadow: -12px 0 32px rgb(0 0 0 / 0.12);
+}
+.tray > * {
+  flex: 1;
+  min-width: 0;
+}
+.trayStart {
+  margin-bottom: 14px;
+}
+.about {
+  color: var(--t-2);
+  font-size: 12.5px;
+}
+.group {
+  margin: 16px 12px 4px;
+  color: var(--t-4);
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+/* E: chats quiet where the screen draws them */
+:global([data-direction='E']) :global([data-quiet]) {
+  opacity: 0.55;
+  transition: opacity 0.15s;
+}
+:global([data-direction='E']) :global([data-quiet='old']) {
+  opacity: 0.32;
+}
+:global([data-direction='E']) :global([data-quiet]:hover) {
+  opacity: 1;
+}
+.trayList {
+  display: grid;
+  grid-template-rows: auto 1fr;
+  min-height: 0;
+}
+.trayHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--line);
+}
+.trayBody {
+  overflow: auto;
+  padding: 14px;
+}

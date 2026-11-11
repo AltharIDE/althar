@@ -1,0 +1,59 @@
+:global(html),
+:global(body),
+:global(#root) {
+  height: 100%;
+  margin: 0;
+}
+.lab {
+  display: grid;
+  grid-template-rows: 1fr auto;
+  height: 100%;
+  background: var(--n-1);
+}
+.window {
+  display: grid;
+  grid-template-rows: auto 1fr;
+  min-height: 0;
+}
+.screen {
+  position: relative;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.screen > * {
+  flex: 1;
+  min-height: 0;
+}
+.bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 14px;
+  padding: 6px 10px;
+  border-top: 1px solid var(--line);
+  background: var(--n-2);
+  font-size: 12px;
+}
+.group {
+  display: flex;
+  gap: 2px;
+}
+.bar button {
+  padding: 4px 9px;
+  border-radius: 6px;
+  color: var(--t-2);
+}
+.bar button[aria-pressed='true'] {
+  background: var(--n-0);
+  color: var(--t-1);
+  box-shadow: 0 0 0 1px var(--line-2);
+}
+.bar kbd {
+  font-family: var(--mono);
+  color: var(--t-4);
+}
+.note {
+  color: var(--t-3);
+  margin-left: auto;
+}
