@@ -194,6 +194,39 @@ describe('what a small change’s review after its merge brings back', () => {
     }).pipe(Effect.provide(runtimeWith(github)))
   })
 
+  it.live('a review owed before the merge reads the rule as the merge is heard: Major only now keeps minor findings quiet', () => {
+    const { working, bare, github } = onGitHub()
+    return Effect.gen(function* () {
+      const instance = yield* Instance
+      const task = yield* smallChange(working, '[review:always]', 'all')
+      // Merge now owes it under Everything, and the merge waits in a queue while the person changes the rule.
+      yield* (yield* MergeReviews).owe(task.taskId, task.url, {})
+      assert.include((yield* reviewOf(task.url))?.reviewer ?? '', '"bringsBack":"all"')
+      yield* (yield* Policies).set(task.projectId, { afterMergeReview: 'major' }, instance.personId)
+      yield* mergeIt(bare, github, task.taskId)
+      // A minor and a nit: clear, as the rule says now.
+      const row = yield* until(reviewOf(task.url), (one) => one?.state === 'clear')
+      assert.include(row?.reviewer ?? '', '"bringsBack":"major"')
+      assert.lengthOf(JSON.parse(row?.findings ?? '[]') as Array<unknown>, 2)
+    }).pipe(Effect.provide(runtimeWith(github)))
+  })
+
+  it.live('a review owed before the merge is no longer owed where the rule says none by the time the merge is heard', () => {
+    const { working, bare, github } = onGitHub()
+    return Effect.gen(function* () {
+      const instance = yield* Instance
+      const task = yield* smallChange(working, '[review:always]', 'all')
+      yield* (yield* MergeReviews).owe(task.taskId, task.url, {})
+      assert.strictEqual((yield* reviewOf(task.url))?.state, 'owed')
+      yield* (yield* Policies).set(task.projectId, { afterMergeReview: 'none' }, instance.personId)
+      yield* mergeIt(bare, github, task.taskId)
+      yield* settled(task.taskId)
+      yield* (yield* FastLane).retryPendingReviews()
+      assert.isUndefined(yield* reviewOf(task.url))
+      assert.isUndefined((yield* cards(task.projectId))[0]?.afterMerge)
+    }).pipe(Effect.provide(runtimeWith(github)))
+  })
+
   it.live('one small change keeps a review where the rule has none, by its lead’s tool, and can’t change once merged', () => {
     const { working, bare, github } = onGitHub()
     return Effect.gen(function* () {

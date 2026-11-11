@@ -423,6 +423,28 @@ export class MergeReviews extends Context.Service<
             WHERE merge_reviews.state IN ('owed', 'stopped')`
         })
 
+      /**
+       * A review owed before its merge (Merge now owes it as it asks the merge, which may wait in a queue), read again by the
+       * rule as the merge is heard: a small change's whose rule or own word now says none is no longer owed, and dropped;
+       * any other keeps what the rule brings back now. Undefined where it was dropped.
+       */
+      const ruleOnMerge = (row: Row) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const plan = yield* reviewerOf(row.taskId)
+          const rule = (yield* afterMergeNow(row.taskId)).holds
+          if (rule === 'none' && plan?.afterMerge === true) {
+            yield* sql`DELETE FROM merge_reviews WHERE url = ${row.url} AND state = 'owed'`
+            yield* touchTask(row.taskId)
+            return undefined
+          }
+          const was = row.reviewer === null ? Option.none() : decodeReviewer(row.reviewer)
+          if (Option.isNone(was)) return row
+          const reviewer = JSON.stringify({ ...was.value, bringsBack: rule === 'all' ? 'all' : 'major' } satisfies Reviewer)
+          if (reviewer !== row.reviewer) yield* sql`UPDATE merge_reviews SET reviewer = ${reviewer} WHERE url = ${row.url}`
+          return { ...row, reviewer }
+        })
+
       /** The merged head, where the review owed has none yet: what its pull request's host last said, once it merged. */
       const headOf = (row: Row) =>
         Effect.gen(function* () {
@@ -437,8 +459,11 @@ export class MergeReviews extends Context.Service<
             return { row, merged: false }
           }
           if (snapshot.state !== 'merged' || typeof snapshot.headSha !== 'string') return { row, merged: false }
+          // Heard merged: what is owed, and what it brings back, is read by the rule now, not as it was owed.
+          const now = yield* ruleOnMerge(row)
+          if (now === undefined) return { row, merged: false }
           yield* sql`UPDATE merge_reviews SET head = ${snapshot.headSha} WHERE url = ${row.url}`
-          return { row: { ...row, head: snapshot.headSha }, merged: true }
+          return { row: { ...now, head: snapshot.headSha }, merged: true }
         })
 
       /** The thread its reviewer works in: the task's own for reviews after a merge, made on the first. */
