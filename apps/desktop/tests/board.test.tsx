@@ -1394,10 +1394,8 @@ describe('the board', () => {
     expect(within(dock).getByRole('button', { name: /Accept and merge/ })).toBeTruthy()
     // What merging here skips, in a line anyone can read, and as the button's own description.
     const merge = within(dock).getByRole('button', { name: 'Merge tools into main on this Mac' })
-    expect(within(dock).getByText('Merging on this Mac doesn’t push, and skips review on a pull request.')).toBeTruthy()
-    expect(merge.getAttribute('aria-describedby')).toBe(
-      within(dock).getByText('Merging on this Mac doesn’t push, and skips review on a pull request.').id,
-    )
+    expect(within(dock).getByText('Merging here doesn’t push, and skips review.')).toBeTruthy()
+    expect(merge.getAttribute('aria-describedby')).toBe(within(dock).getByText('Merging here doesn’t push, and skips review.').id)
     await userEvent.click(merge)
     await waitFor(() => expect(mergeHere).toHaveBeenCalledWith('t4', [{ repository: 'tools', head: 'abc111' }]))
   })

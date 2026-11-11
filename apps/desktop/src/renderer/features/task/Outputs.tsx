@@ -70,11 +70,6 @@ export const text = {
     remote === null
       ? 'No code host: this repository has no remote Althar can open a pull request on.'
       : `No code host: ${remote} isn’t on a host Althar can open a pull request on.`,
-  /** Beside the rest's pull request, those on no host Althar knows: by name. */
-  noHostFor: (names: ReadonlyArray<string>, remote: string | null) =>
-    remote === null
-      ? `No code host for ${andOf(names)}: no remote Althar can open a pull request on.`
-      : `No code host for ${andOf(names)}: ${remote} isn’t on a host Althar can open a pull request on.`,
   closed: (change: ChangeSummary, host: string) => `${change.short} ${change.prefix}${change.number} was closed on ${host}.`,
   accept: (n: number) => (n > 2 ? `Accept and merge all ${n}` : n === 2 ? 'Accept and merge both' : 'Accept and merge'),
   /** In a task of several, what is left of it once some merged: by name. */
@@ -108,8 +103,6 @@ export const text = {
   pushBranch: (remote: string) => `Push to ${remote}`,
   openOn: (host: string) => `Open on ${host}`,
   conflicts: (into: string, files: string) => `It conflicts with ${into} in ${fewOf(files.split(', '))}.`,
-  /** Work beside a pull request that has none of its own: which repositories, in a line over its branch. */
-  besidePullRequest: (names: ReadonlyArray<string>) => `${andOf(names)}: on its branch, no pull request`,
   /** Merged and pushed, with nothing left between it and its base: said in a line. */
   mergedAll: (merged: ReadonlyArray<TaskRepositoryMerged>) => {
     const into = [...new Set(merged.map((one) => one.branch))].join(' and ')
@@ -656,30 +649,20 @@ export function Outputs({
                     {...pressed(doing.mergeHere)}
                     onClick={onMergeHere}
                   >
-                    {mergeHereLabel(task.here, beside)}
+                    {mergeHereLabel(task.here)}
                   </Button>,
                 ]
               : []),
           ]
-          // Beside a pull request, one whose remotes name no host Althar knows: why it has none, by its name and remote.
-          const nowhere = beside ? task.here.filter((repo) => repo.host === null) : []
           return (
             <ChangeSet
               state={ChangeState.Branch}
               {...(task.branch === null ? {} : { branch: task.branch })}
-              {...(beside ? { title: text.besidePullRequest(task.here.map((repo) => repo.name)) } : {})}
               {...(connectsHere !== null
                 ? { note: text.connectFirst(connectsHere) }
-                : nowhere.length > 0
-                  ? {
-                      note: text.noHostFor(
-                        nowhere.map((repo) => repo.name),
-                        nowhere.find((repo) => repo.remote != null)?.remote?.name ?? null,
-                      ),
-                    }
-                  : hostless
-                    ? { note: text.noHost(task.here.find((repo) => repo.remote != null)?.remote?.name ?? null) }
-                    : {})}
+                : hostless && !beside
+                  ? { note: text.noHost(task.here.find((repo) => repo.remote != null)?.remote?.name ?? null) }
+                  : {})}
               prs={
                 task.here.length > 0
                   ? task.here.map((repo) => ({

@@ -89,7 +89,7 @@ export const changeSetText: ChangeSetText = {
     [ChangeState.Ready]: 'Ready to accept',
     [ChangeState.Merged]: 'Merged',
     [ChangeState.Queued]: 'In the merge queue',
-    [ChangeState.Branch]: 'On its branch, no pull request',
+    [ChangeState.Branch]: 'No pull request',
   },
   pr: (n) => `PR #${n}`,
   named: (repo, n) => `${repo.slice(repo.lastIndexOf('/') + 1)} #${n}`,

@@ -154,7 +154,7 @@ export const OnItsBranch: Story = {
         <Button>Merge into main on this Mac</Button>
       </>
     ),
-    hint: 'Merging on this Mac doesn’t push, and skips review on a pull request.',
+    hint: 'Merging here doesn’t push, and skips review.',
   },
   parameters: { width: ALONE },
 }
@@ -181,7 +181,7 @@ export const NightlyCheck: Story = {
   parameters: { width: ALONE },
   play: async ({ args, canvasElement }) => {
     const c = within(canvasElement)
-    await expect(c.getByText('On its branch, no pull request')).toBeInTheDocument()
+    await expect(c.getByText('No pull request')).toBeInTheDocument()
     await expect(c.getByText('althar/nightly-dependency-check-27-oct')).toBeInTheDocument()
     await expect(c.getByText('2 commits not pushed')).toBeInTheDocument()
     await userEvent.click(c.getByRole('button', { name: 'Push to origin' }))
@@ -261,7 +261,7 @@ export const NoCodeHost: Story = {
         <Button variant="signal">Merge into main on this Mac</Button>
       </>
     ),
-    hint: 'Merging on this Mac doesn’t push, and skips review on a pull request.',
+    hint: 'Merging here doesn’t push, and skips review.',
   },
   parameters: { width: ALONE },
 }
@@ -288,7 +288,7 @@ export const BranchPushed: Story = {
         <Button>Merge into main on this Mac</Button>
       </>
     ),
-    hint: 'Merging on this Mac doesn’t push, and skips review on a pull request.',
+    hint: 'Merging here doesn’t push, and skips review.',
   },
   play: async ({ canvasElement }) => {
     const c = within(canvasElement)
@@ -315,7 +315,7 @@ export const RefusedHere: Story = {
         <Button onClick={push}>Push to origin</Button>
       </>
     ),
-    hint: 'Merging on this Mac doesn’t push, and skips review on a pull request.',
+    hint: 'Merging here doesn’t push, and skips review.',
     error: 'Your main checkout has uncommitted changes to middleware.ts.',
   },
   play: async ({ canvasElement }) => {
@@ -513,7 +513,7 @@ const BESIDE = {
   branch: 'fnt/fix-staging-character-assets-at-the-cdn-edge',
   review: undefined,
   checks: undefined,
-  hint: 'Merging on this Mac doesn’t push, and skips review on a pull request.',
+  hint: 'Merging here doesn’t push, and skips review.',
 }
 
 /**
@@ -524,7 +524,6 @@ const BESIDE = {
 export const BesidePullRequest: Story = {
   args: {
     ...BESIDE,
-    title: 'engine and infra: on its branch, no pull request',
     prs: [
       {
         repo: 'engine',
@@ -536,23 +535,22 @@ export const BesidePullRequest: Story = {
       { repo: 'infra', files: [{ path: 'infra/staging/cdn.tf', add: 14, del: 2 }] },
     ],
     remote: { name: 'origin', pushed: false, ahead: 3 },
-    note: 'No code host for engine and infra: origin isn’t on a host Althar can open a pull request on.',
     actions: (
       <>
         <Button variant="signal" onClick={push}>
           Push to origin
         </Button>
-        <Button>Merge engine and infra into main on this Mac</Button>
+        <Button>Merge into main on this Mac</Button>
       </>
     ),
   },
   play: async ({ canvasElement }) => {
     const c = within(canvasElement)
-    await expect(c.getByText('engine and infra: on its branch, no pull request')).toBeInTheDocument()
+    await expect(c.getByText('No pull request')).toBeInTheDocument()
     // The branch whole, never cut.
     const branch = c.getByText('fnt/fix-staging-character-assets-at-the-cdn-edge')
     await expect(branch.scrollWidth).toBeLessThanOrEqual(branch.clientWidth)
-    await expect(c.getByText('Merging on this Mac doesn’t push, and skips review on a pull request.')).toBeInTheDocument()
+    await expect(c.getByText('Merging here doesn’t push, and skips review.')).toBeInTheDocument()
     await expect(within(c.getByText('engine').closest('li')!).getByText('2 files')).toBeInTheDocument()
     await expect(within(c.getByText('infra').closest('li')!).getByText('1 file')).toBeInTheDocument()
   },
@@ -575,7 +573,7 @@ export const BesidePullRequestOpens: Story = {
           Open a draft pull request
         </Button>
         <Button onClick={push}>Push to origin</Button>
-        <Button>Merge engine and infra into main on this Mac</Button>
+        <Button>Merge into main on this Mac</Button>
       </>
     ),
   },
@@ -583,9 +581,9 @@ export const BesidePullRequestOpens: Story = {
     const c = within(canvasElement)
     // Opening their pull request first, which pushes them; pushing alone and merging here after, the merge saying what it skips.
     const names = c.getAllByRole('button', { name: /^(Open a draft|Push|Merge)/ }).map((button) => button.textContent)
-    await expect(names).toEqual(['Open a draft pull request', 'Push to origin', 'Merge engine and infra into main on this Mac'])
+    await expect(names).toEqual(['Open a draft pull request', 'Push to origin', 'Merge into main on this Mac'])
     await expect(c.queryByText(/No code host/)).toBeNull()
-    await expect(c.getByText('Merging on this Mac doesn’t push, and skips review on a pull request.')).toBeInTheDocument()
+    await expect(c.getByText('Merging here doesn’t push, and skips review.')).toBeInTheDocument()
     await userEvent.click(c.getByRole('button', { name: 'Open a draft pull request' }))
     await expect(open).toHaveBeenCalled()
   },
@@ -598,15 +596,13 @@ export const BesidePullRequestOpens: Story = {
 export const BesidePullRequestOne: Story = {
   args: {
     ...BESIDE,
-    title: 'engine: on its branch, no pull request',
     prs: [{ repo: 'engine', files: [], commits: 2 }],
     remote: { name: 'origin', pushed: true, ahead: 0 },
-    note: 'No code host for engine: origin isn’t on a host Althar can open a pull request on.',
-    actions: <Button variant="signal">Merge engine into main on this Mac</Button>,
+    actions: <Button variant="signal">Merge into main on this Mac</Button>,
   },
   play: async ({ canvasElement }) => {
     const c = within(canvasElement)
-    await expect(c.getByText('engine: on its branch, no pull request')).toBeInTheDocument()
+    await expect(c.getByText('No pull request')).toBeInTheDocument()
     await expect(c.getByText('2 commits')).toBeInTheDocument()
   },
 }

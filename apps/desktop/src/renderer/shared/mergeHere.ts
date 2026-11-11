@@ -20,7 +20,7 @@ export const mergeHereLabel = (here: ReadonlyArray<TaskRepositoryHere>, beside =
 }
 
 /** What merging here does that its button can't say: it pushes nothing, and no pull request's review comes first. */
-export const mergeHereHint = `Merging on ${device.this} doesn’t push, and skips review on a pull request.`
+export const mergeHereHint = 'Merging here doesn’t push, and skips review.'
 
 /** Names in a sentence: api, web and docs. */
 const andOf = (names: ReadonlyArray<string>) =>

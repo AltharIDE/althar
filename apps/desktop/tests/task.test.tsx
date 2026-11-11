@@ -2331,7 +2331,7 @@ describe('a task', () => {
       ),
     })
     withServices(<Task />, client)
-    await userEvent.click(await screen.findByRole('button', { name: 'Merge tools and docs into main on this Mac' }))
+    await userEvent.click(await screen.findByRole('button', { name: 'Merge into main on this Mac' }))
     await waitFor(() =>
       expect(client.mergeHere).toHaveBeenCalledWith('t1', [
         { repository: 'tools', head: 'abc111' },
