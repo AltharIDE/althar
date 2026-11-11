@@ -83,6 +83,7 @@ import { reachOf, reachText, ReviewCard, reviewedUnfurl } from './ReviewCard'
 import { usePostTeamReviews } from '../settings/usePostTeamReviews'
 import { HeldLimit } from './LimitCall'
 import { StuckCall } from './StuckCall'
+import { countsDown, StartedOf, type StartedReading, startedBy, useStartedBoard } from './Started'
 import { TaskThread, workStepText } from './TaskThread'
 import { SmallChangeOf } from './SmallChangeOf'
 import { ModelMoveOf } from './ModelMoveOf'
@@ -587,9 +588,14 @@ export function TaskView({
     },
     [setFace],
   )
+  // The tasks its lead started, as the board has them: a chip where each was started, and a part of its own.
+  const board = useStartedBoard(model.snapshot?.project.id)
+  const started = startedBy(board, model.snapshot?.task.id)
   // A running turn says how long it has worked so far, a task under way how long it has run, and a run of it how long it has been up.
   const now = useNow(
     ticking(model.snapshot) ||
+      // A task it started that counts down to starting on its own.
+      started.some(countsDown) ||
       // While what the person sent is on its way, or the lead starts for it, how long they have waited.
       model.pending ||
       model.snapshot?.session?.state === 'starting' ||
@@ -882,8 +888,11 @@ export function TaskView({
     if (step.by === 'git') return { label: workStepText.dropIt, onPress: () => void model.dropChange(step.name) }
     return shipped ? undefined : { label: workStepText.keepTogether, onPress: () => void model.joinChanges(step.name) }
   }
+  const reading: StartedReading | null =
+    board === null || onOpenTask === undefined ? null : { board, now, agents: model.agents, onOpen: onOpenTask }
   // Its parts, just before the faces: what it changed is in its worktree's, which opens the changes over the window (ADR-097).
   const partsActions: PartsActions = {
+    ...(reading === null || started.length === 0 ? {} : { started: { tasks: started, reading } }),
     seeChanges: () => changes.show(),
     changesKey: text.diffKey,
     ...(snapshot.task.worktree === null || editor === undefined
@@ -1384,6 +1393,9 @@ export function TaskView({
                       {...(onSignIn === undefined || stuckOpen ? {} : { onSignIn })}
                       onPassOn={(words) => void model.send(words)}
                       {...(onOpenTask === undefined ? {} : { onOpenTask })}
+                      {...(reading === null
+                        ? {}
+                        : { started: (task) => <StartedOf threadId={task.threadId} title={task.title} reading={reading} /> })}
                       onAnswerQuestion={model.answerQuestion}
                       {...(asking == null ? {} : { focusQuestion: asking })}
                       run={(run) => (

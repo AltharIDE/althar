@@ -28,6 +28,7 @@ import {
   SettledRow,
   ScratchShelf,
   SettleWays,
+  StartedBy,
   TaskKind,
   TaskStatus,
   Thumbs,
@@ -394,6 +395,12 @@ const fromOf = (work: BoardTask): Pick<Card, 'from' | 'startedBy'> => ({
   ...(work.automation == null ? {} : { from: work.automation.name }),
   ...(work.startedBy === undefined ? {} : { startedBy: work.startedBy.title }),
 })
+
+/** Opens the task whose lead started it, from its card's foot: its title there is a link, apart from the card's own press. */
+const parentOf = (work: BoardTask, open: (threadId: string) => void): Pick<BoardCardProps, 'onOpenStartedBy'> => {
+  const parent = work.startedBy
+  return parent === undefined ? {} : { onOpenStartedBy: () => open(parent.threadId) }
+}
 
 /** A running task's card: its step and its track, or Working; its branch or pull request; and why it stands still, where it does. */
 export const runningCardOf = (work: BoardTask, now: string, name: (id: string | null) => string, actions?: CardActions): Card => {
@@ -995,6 +1002,7 @@ export function BoardView({
   const nextRow = (work: BoardTask, index: number) => {
     const startsAt = work.plan?.startsAt ?? null
     const kind = kindWordOf(work)
+    const parent = work.startedBy
     // Under way, it goes on with its step: a change's, as its card in Running would say it; a plain task or a review just goes on.
     // Not one that waits for its checkout: nothing of it has begun (ADR-091).
     const goesOn = index < continuing || (index >= continuing + free && index < continuing + free + paused && work.waitsForCheckout == null)
@@ -1026,6 +1034,7 @@ export function BoardView({
         task={work.slug}
         {...(kind === undefined ? {} : { kind })}
         {...(goesOn ? { continues: work.kind === 'change' ? stepWordOf(work) : '' } : {})}
+        {...(parent === undefined ? {} : { foot: <StartedBy task={parent.title} onOpen={() => onOpen(parent.threadId)} /> })}
         title={work.title}
         wait={index < continuing + free + paused || startsAt !== null ? Wait.Workers : Wait.You}
         reason={reason}
@@ -1162,6 +1171,7 @@ export function BoardView({
             key={work.taskId}
             data-move={work.taskId}
             {...runningCardOf(work, now, name, actions)}
+            {...parentOf(work, onOpen)}
             errands={work.errands}
             onOpen={() => onOpen(work.threadId)}
           />
@@ -1175,6 +1185,7 @@ export function BoardView({
               key={ask.waiting.task.taskId}
               data-move={ask.waiting.task.taskId}
               {...waitingCardOf(ask.waiting, name)}
+              {...parentOf(ask.waiting.task, onOpen)}
               errands={ask.waiting.task.errands}
               onOpen={() => onOpen(ask.waiting.task.threadId)}
             />
@@ -1183,13 +1194,20 @@ export function BoardView({
           ),
         )}
         {lanes.stopped.map((work) => (
-          <BoardCard key={work.taskId} {...stoppedCardOf(work, now, actions)} errands={work.errands} onOpen={() => onOpen(work.threadId)} />
+          <BoardCard
+            key={work.taskId}
+            {...stoppedCardOf(work, now, actions)}
+            {...parentOf(work, onOpen)}
+            errands={work.errands}
+            onOpen={() => onOpen(work.threadId)}
+          />
         ))}
         {lanes.ready.map((work) => (
           <BoardCard
             key={work.taskId}
             data-move={work.taskId}
             {...readyCardOf(work, actions)}
+            {...parentOf(work, onOpen)}
             errands={work.errands}
             onOpen={() => onOpen(work.threadId)}
           />

@@ -1,11 +1,12 @@
 import { useState } from 'react'
 
-import type { ChangeSummary, ThreadItem, ThreadSnapshot } from '@althar/contracts'
+import type { BoardTask, ChangeSummary, ThreadItem, ThreadSnapshot } from '@althar/contracts'
 import { Button, Field, type PartKind, PartLines, PartShots, Segmented, type TaskPartModel } from '@althar/ui'
 
 import { outcomeOf } from '../../shared/outcome'
 import { productBrand } from '../../shared/products'
 import s from './parts.module.css'
+import { startedPart, type StartedReading } from './Started'
 
 /*
  * A task's parts, as its bar shows them (ADR-097, the 6 November direction
@@ -117,6 +118,8 @@ export const partsText = {
 }
 
 export interface PartsActions {
+  /** The tasks its lead started, with how the board has them now: a part of its own, listing each as the chip its thread has. */
+  readonly started?: { readonly tasks: ReadonlyArray<BoardTask>; readonly reading: StartedReading }
   readonly seeChanges: () => void
   /** The key that shows the changes too: ⌘D. */
   readonly changesKey?: string
@@ -379,6 +382,7 @@ export const partsOf = (snapshot: ThreadSnapshot, act: PartsActions): ReadonlyAr
       ],
     })
   }
+  if (act.started !== undefined && act.started.tasks.length > 0) parts.push(startedPart(act.started.tasks, act.started.reading))
   const shots = outcomeOf(snapshot).shots
   if (shots.length > 0)
     parts.push({
