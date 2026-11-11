@@ -1,6 +1,6 @@
-/* The flow's smaller features, drawn (Drawings.tsx), in the console's drawn tiles' language: the cabin's warm dark, cards on one hairline, one cobalt light. Every size in em, from the drawing's own width. */
+/* The flow's smaller features, drawn (Drawings.tsx), in the console's drawn tiles' language: the cabin's warm dark, cards on one hairline, one cobalt light. Every size in em, from the drawing's own width. A tile wider than the rest sets --draw-wide to how much wider: its ground runs its width, the drawing stays the size of the others', in the middle. */
 
-.box { position: relative; width: 100%; aspect-ratio: 16 / 10; container-type: inline-size; }
+.box { --wide: var(--draw-wide, 1); position: relative; width: 100%; aspect-ratio: calc(1.6 * var(--wide)); container-type: inline-size; }
 .stage {
   --ink: #efebe4;
   --ink2: #a39d93;
@@ -25,9 +25,10 @@
   user-select: none;
   pointer-events: none;
 }
-.mid { font-size: 2.45cqw; }
-.small { font-size: 2.85cqw; }
-.scene { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 0.9em; padding: 5% 6%; }
+.mid { --fs: 2.45; }
+.small { --fs: 2.85; }
+.mid, .small { font-size: calc(var(--fs) * 1cqw / var(--wide)); }
+.scene { position: absolute; inset: 0; width: calc(100em / var(--fs)); margin-inline: auto; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 0.9em; padding: 5% 6%; }
 .under { position: absolute; left: 50%; top: 56%; width: 82%; height: 72%; translate: -50% -50%; background: radial-gradient(closest-side, rgba(66, 80, 255, 0.26), rgba(108, 64, 240, 0.09) 55%, transparent); }
 
 .card {
@@ -44,9 +45,8 @@
 .what small { font: 500 0.8em/1.2 var(--mono); color: var(--ink3); white-space: nowrap; }
 .kind { flex: none; padding: 0.3em 0.5em; border-radius: 0.4em; font: 500 0.76em/1 var(--mono); color: var(--ink2); box-shadow: inset 0 0 0 1px rgba(255, 244, 232, 0.12); }
 .btn { flex: none; padding: 0.35em 0.7em; border-radius: 0.45em; font-size: 0.82em; font-weight: 550; color: var(--ink); background: rgba(255, 244, 232, 0.07); box-shadow: inset 0 0 0 1px rgba(255, 244, 232, 0.1); }
-.pressed { color: #ddd1ff; background: rgba(166, 133, 247, 0.18); box-shadow: inset 0 0 0 1px rgba(166, 133, 247, 0.5); }
 
-/* ---- a window, for the canvas and the browser ---- */
+/* ---- a window, for the canvas ---- */
 .window { position: absolute; display: flex; flex-direction: column; overflow: hidden; border-radius: 0.9em; background: #1c1a17; box-shadow: 0 0 0 1px rgba(255, 244, 232, 0.12), 0 2em 4em -1.6em rgba(0, 0, 0, 0.9), 0 0 4em -1.5em rgba(86, 98, 255, 0.45); }
 .bar { display: flex; flex: none; align-items: center; gap: 0.6em; padding: 0.55em 0.8em; border-bottom: 1px solid rgba(255, 244, 232, 0.07); font-size: 0.92em; white-space: nowrap; }
 .bar b { font-weight: 600; }
@@ -87,43 +87,6 @@
 .pin > i { flex: none; width: 1.3em; height: 1.3em; border-radius: 50% 50% 50% 0; background: var(--violet); box-shadow: 0 0 0 0.25em rgba(166, 133, 247, 0.3); }
 .pin > span { padding: 0.55em 0.8em; border-radius: 0.6em; font-size: 0.8em; white-space: nowrap; color: var(--ink); background: #1f1b26; box-shadow: 0 0 0 1px rgba(166, 133, 247, 0.45), 0 0.8em 1.6em -0.6em rgba(0, 0, 0, 0.8); }
 .pin em { display: block; margin-top: 0.2em; font-size: 0.9em; font-style: normal; color: var(--green); }
-
-/* The browser: the refunds page, a comment on a row, the lead's cursor trying it. */
-.br { left: 5%; top: 7%; width: 90%; height: 88%; }
-.addr { flex: 1; min-width: 0; overflow: hidden; padding: 0.35em 0.7em; border-radius: 0.45em; font: 500 0.82em/1.2 var(--mono); color: var(--ink2); text-overflow: ellipsis; background: rgba(255, 244, 232, 0.05); box-shadow: inset 0 0 0 1px rgba(255, 244, 232, 0.08); }
-.app { position: relative; display: flex; flex: 1; flex-direction: column; gap: 0.8em; overflow: hidden; padding: 1em 1.3em; color: #141417; background: #f7f5f0; }
-.appHead { font-size: 1.35em; font-weight: 760; letter-spacing: -0.035em; }
-.rows { display: grid; gap: 0.4em; margin: 0; padding: 0; list-style: none; }
-.rows li { display: grid; grid-template-columns: 5.6em minmax(0, 1fr) 4.4em 6.6em 3.4em; align-items: center; gap: 0.6em; padding: 0.55em 0.8em; border-radius: 0.55em; font-size: 0.8em; background: #fff; box-shadow: 0 0 0 1px rgba(20, 20, 23, 0.06); }
-.rows code { font: 500 0.92em var(--mono); color: #63636b; }
-.sum { font-weight: 600; text-align: right; font-variant-numeric: tabular-nums; }
-.st { display: grid; justify-self: start; padding: 0.2em 0.6em; border-radius: 99em; font-size: 0.86em; font-weight: 600; white-space: nowrap; }
-.st > em { grid-area: 1 / 1; font-style: normal; }
-.ok { color: #2f7d45; background: #e3f2e7; }
-.wait { color: #9a5b12; background: #fbefdc; }
-.fail { color: #b42318; background: #fde4e1; animation: fixed 7s infinite; }
-.okWord { opacity: 0; animation: show 7s infinite; }
-.failWord { animation: hide 7s infinite; }
-.retry { justify-self: end; padding: 0.3em 0.7em; border-radius: 0.4em; font-size: 0.86em; font-weight: 600; box-shadow: inset 0 0 0 1px rgba(20, 20, 23, 0.18); }
-.retry:empty { visibility: hidden; }
-.pointed { box-shadow: 0 0 0 2px var(--violet), 0 0 0 6px rgba(166, 133, 247, 0.2) !important; }
-.line { display: flex; flex: none; align-items: center; gap: 0.5em; padding: 0.55em 0.9em; font-size: 0.8em; color: var(--lit); background: rgba(52, 66, 255, 0.14); border-top: 1px solid rgba(138, 147, 255, 0.25); }
-.line i { width: 0.55em; height: 0.55em; border-radius: 50%; background: var(--cobalt-l); box-shadow: 0 0 0.6em var(--cobalt-l); }
-.rows .note { display: block; justify-self: end; width: max-content; margin: -0.1em 0.4em 0.2em 0; padding: 0.5em 0.8em; border-radius: 0.1em 0.6em 0.6em 0.6em; font-size: 0.8em; color: var(--ink); background: #1f1b26; box-shadow: 0 0 0 1px rgba(166, 133, 247, 0.5), 0 0.8em 1.6em -0.6em rgba(0, 0, 0, 0.5); }
-.note b { margin-right: 0.4em; color: #ddd1ff; }
-/* The lead's cursor rides a layer the drawing's size, so where it goes is said in the drawing's own percentages: to Retry, a press, and back. */
-.track { --rx: 87.3%; --ry: 54.7%; position: absolute; inset: 0; translate: var(--rx) var(--ry); animation: drive 7s var(--ease) infinite; }
-.cursor { position: absolute; left: 0; top: 0; display: flex; align-items: flex-start; gap: 0.2em; }
-.cursor svg { width: 1.3em; height: 1.7em; fill: var(--cobalt-l); stroke: #0b0a08; stroke-width: 1; transform-origin: 0 0; filter: drop-shadow(0 0.2em 0.4em rgba(0, 0, 0, 0.6)); animation: press 7s infinite; }
-.cursor span { position: absolute; right: 0.5em; bottom: 0.4em; white-space: nowrap; padding: 0.2em 0.5em; border-radius: 0.35em; font-size: 0.72em; font-weight: 650; color: #fff; background: var(--cobalt); }
-@keyframes drive {
-  0%, 100% { translate: 40% 80%; }
-  38%, 80% { translate: var(--rx) var(--ry); }
-}
-@keyframes press { 0%, 41% { scale: 1; } 44% { scale: 0.8; } 49%, 100% { scale: 1; } }
-@keyframes fixed { 0%, 46% { color: #b42318; background: #fde4e1; } 52%, 92% { color: #2f7d45; background: #e3f2e7; } 100% { color: #b42318; background: #fde4e1; } }
-@keyframes show { 0%, 46% { opacity: 0; } 52%, 92% { opacity: 1; } 100% { opacity: 0; } }
-@keyframes hide { 0%, 46% { opacity: 1; } 52%, 92% { opacity: 0; } 100% { opacity: 1; } }
 
 /* ---- the small ones ---- */
 
@@ -222,20 +185,6 @@
 .going { animation: go 6s infinite; }
 .going + .going { animation-delay: 0.35s; }
 @keyframes go { 0%, 40% { opacity: 1; } 52%, 86% { opacity: 0.22; } 100% { opacity: 1; } }
-
-/* Drop in any file: three already in the message, one on its way. */
-.dropCard { display: grid; gap: 0.7em; width: 90%; padding: 0.85em 0.95em; }
-.dropped { display: flex; flex-wrap: wrap; gap: 0.4em; }
-.chip, .incoming { display: inline-flex; align-items: center; gap: 0.4em; padding: 0.32em 0.55em 0.32em 0.35em; border-radius: 0.45em; font: 500 0.72em/1.2 var(--mono); color: var(--ink); background: rgba(255, 244, 232, 0.06); box-shadow: inset 0 0 0 1px rgba(255, 244, 232, 0.1); white-space: nowrap; }
-.chip i, .incoming i { padding: 0.18em 0.32em; border-radius: 0.22em; font: 700 0.78em/1 Inter, system-ui, sans-serif; font-style: normal; letter-spacing: 0.02em; color: #fff; }
-.red { background: #c0392b; }
-.amber { background: #b7701f; }
-.blue { background: #3442ff; }
-.green { background: #2f8a4b; }
-.ask { margin: 0; font-size: 0.95em; }
-.zone { display: block; padding: 0.7em; border-radius: 0.55em; font: 500 0.74em/1 var(--mono); text-align: center; color: var(--lit); background: rgba(52, 66, 255, 0.08); box-shadow: inset 0 0 0 1.5px rgba(138, 147, 255, 0.45); }
-.incoming { position: absolute; right: 9%; top: 14%; rotate: 5deg; background: #24211d; box-shadow: 0 0 0 1px rgba(255, 244, 232, 0.16), 0 1em 1.6em -0.6em rgba(0, 0, 0, 0.9); animation: incoming 4.8s var(--ease) infinite; }
-@keyframes incoming { 0% { opacity: 0; translate: 1.5em -1em; } 15%, 70% { opacity: 1; translate: 0 0; } 85%, 100% { opacity: 0; translate: -2em 3.5em; } }
 
 @media (prefers-reduced-motion: reduce) {
   .stage * { animation: none !important; }

@@ -7,9 +7,9 @@ import s from './Drawings.module.css'
 /*
  * The flow's smaller features, drawn as the console's other drawn tiles are:
  * an interface lit by one light, on the cabin's warm dark, every size taken
- * from the drawing's width so each reads the same at any size. The canvas and
- * the browser carry more, so they draw a little smaller (`mid`). Pictures:
- * nothing in them can be pressed, and each reads as its label.
+ * from the drawing's width so each reads the same at any size. The canvas
+ * carries more, so it draws a little smaller (`mid`). Pictures: nothing in
+ * them can be pressed, and each reads as its label.
  */
 
 function Stage({ label, size, children }: { label: string; size: 'mid' | 'small'; children: ReactNode }) {
@@ -75,67 +75,6 @@ export function CanvasDrawing() {
           Bigger, bolder headline.
           <em>Done in v3</em>
         </span>
-      </div>
-    </Stage>
-  )
-}
-
-const ROWS = [
-  { id: 're_3Pq', who: 'Northwind', sum: '€42.00', st: 'wait', word: 'Retry at 14:32' },
-  { id: 're_3Pp', who: 'Halyard', sum: '€35.00', st: 'ok', word: 'Refunded' },
-  { id: 're_3Po', who: 'Ferrous', sum: '€28.00', st: 'fail', word: 'Failed' },
-  { id: 're_3Pn', who: 'Tessera', sum: '€21.00', st: 'ok', word: 'Refunded' },
-] as const
-
-/** The browser: the page a task is building, beside it, a comment pointed at a row, and the lead's cursor trying what it says. */
-export function BrowserDrawing() {
-  return (
-    <Stage size="mid" label="The refunds page open beside its task: a comment on a failed refund, and the lead pressing Retry to see it">
-      <div className={s.under} />
-      <div className={cx(s.window, s.br)}>
-        <div className={s.bar}>
-          <span className={s.addr}>localhost:5173/refunds</span>
-          <span className={cx(s.btn, s.pressed)}>Comment</span>
-        </div>
-        <div className={s.app}>
-          <b className={s.appHead}>Refunds</b>
-          <ol className={s.rows}>
-            {ROWS.map((r) => [
-              <li key={r.id} className={cx(r.st === 'fail' && s.pointed)}>
-                <code>{r.id}</code>
-                <span>{r.who}</span>
-                <span className={s.sum}>{r.sum}</span>
-                <span className={cx(s.st, s[r.st])}>
-                  {r.st === 'fail' ? (
-                    <>
-                      <em className={s.failWord}>Failed</em>
-                      <em className={s.okWord}>Refunded</em>
-                    </>
-                  ) : (
-                    r.word
-                  )}
-                </span>
-                <span className={s.retry}>{r.st === 'fail' ? 'Retry' : ''}</span>
-              </li>,
-              r.st === 'fail' && (
-                <li key={`${r.id}-note`} className={s.note}>
-                  <b>You</b> Retry does nothing on this one.
-                </li>
-              ),
-            ])}
-          </ol>
-        </div>
-        <div className={s.line}>
-          <i /> The lead is on this page · Opus 5.5
-        </div>
-      </div>
-      <div className={s.track}>
-        <div className={s.cursor}>
-          <svg viewBox="0 0 12 16" aria-hidden="true">
-            <path d="M1 1l9.5 9H5.6L3.2 14.6 1 1z" />
-          </svg>
-          <span>Opus 5.5</span>
-        </div>
       </div>
     </Stage>
   )
@@ -372,36 +311,6 @@ export function StorageDrawing() {
           ))}
         </ol>
       </div>
-    </Stage>
-  )
-}
-
-const DROPPED = [
-  { name: 'invoice-88210.pdf', kind: 'PDF', tone: s.red },
-  { name: 'refunds-1114.log', kind: 'LOG', tone: s.amber },
-  { name: 'partner-docs/', kind: 'DIR', tone: s.blue },
-]
-
-export function DropDrawing() {
-  return (
-    <Stage size="small" label="Files dropped into a message: a PDF, a log and a folder, with a screenshot on its way in">
-      <div className={s.under} />
-      <div className={cx(s.card, s.dropCard)}>
-        <div className={s.dropped}>
-          {DROPPED.map((f) => (
-            <span key={f.name} className={s.chip}>
-              <i className={f.tone}>{f.kind}</i>
-              {f.name}
-            </span>
-          ))}
-        </div>
-        <p className={s.ask}>Why did these three refunds fail twice?</p>
-        <span className={s.zone}>Drop any file or folder here</span>
-      </div>
-      <span className={s.incoming}>
-        <i className={s.green}>PNG</i>
-        screenshot.png
-      </span>
     </Stage>
   )
 }

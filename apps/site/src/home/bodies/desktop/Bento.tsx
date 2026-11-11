@@ -1,21 +1,8 @@
-import { SinceRow } from '@althar/ui'
 import { type ReactNode, useSyncExternalStore } from 'react'
 
 import { cx } from '../../../lib/cx'
-import { Shot } from '../kit/Shot'
-import { SINCE } from '../kit/world'
 import s from './Bento.module.css'
-import {
-  BrowserDrawing,
-  CanvasDrawing,
-  DropDrawing,
-  LoadDrawing,
-  QueueDrawing,
-  ServersDrawing,
-  SkillsDrawing,
-  StorageDrawing,
-  VoiceDrawing,
-} from './Drawings'
+import { CanvasDrawing, LoadDrawing, QueueDrawing, ServersDrawing, SkillsDrawing, StorageDrawing, VoiceDrawing } from './Drawings'
 import { Fragment } from './Fragment'
 import accounts from './styled/d-accounts.html?raw'
 import automations from './styled/d-automations.html?raw'
@@ -24,15 +11,14 @@ import workspaces from './styled/d-workspaces.html?raw'
 import worktrees from './styled/d-worktrees.html?raw'
 
 /*
- * What keeps you in flow: fifteen tiles on a six-column grid. The first six
- * each draw at least half their row. One holds a piece of the app in its
- * light (what happened while you were away); five hold a feature drawn as an
- * interface lit by one light, dark or light (Althar fed by each of your
- * accounts in turn, automations, conflicts settled, tasks side by side in
- * worktrees of their own, trackers bound to their projects). The nine after
- * them are smaller, three to a row, each drawn (Drawings.tsx): the canvas,
- * the browser, files dropped in, voice, merge queues, skills, MCP servers,
- * the machine's load and disk space.
+ * What keeps you in flow: twelve tiles on a six-column grid. The first five
+ * each hold a feature drawn as an interface lit by one light, dark or light:
+ * Althar fed by each of your accounts in turn, across the whole row, then two
+ * to a row automations, conflicts settled, tasks side by side in worktrees of
+ * their own, trackers bound to their projects. The seven after them are
+ * smaller, each drawn (Drawings.tsx): the canvas, voice and merge queues three
+ * to a row, then two to a row skills and MCP servers, the machine's load and
+ * disk space.
  * Narrower, two to a row, the canvas across its own; then one.
  */
 
@@ -49,16 +35,14 @@ export interface Tile {
   drawn?: boolean
   /** Drawn as an interface lit by one light, dark or light: its tile takes the drawing's ground. */
   tone?: Tone
-  /** A small piece: whole in the middle of its tile, not running off its foot. */
-  small?: boolean
   /** One of the smaller features after the first six: its words and its drawing a size down. */
   compact?: boolean
 }
 
-/** A smaller feature: a third of a row, drawn in the console's dark. */
-const compact = (id: string, title: ReactNode, lead: string, draw: () => ReactNode): Tile => ({
+/** A smaller feature, a third of a row or half of one, drawn in the console's dark. */
+const compact = (id: string, title: ReactNode, lead: string, draw: () => ReactNode, span: 2 | 3 = 2): Tile => ({
   id,
-  span: 2,
+  span,
   drawn: true,
   tone: 'dark',
   compact: true,
@@ -70,7 +54,7 @@ const compact = (id: string, title: ReactNode, lead: string, draw: () => ReactNo
 export const TILES: Tile[] = [
   {
     id: 'accounts',
-    span: 4,
+    span: 6,
     drawn: true,
     tone: 'dark',
     title: (
@@ -80,31 +64,6 @@ export const TILES: Tile[] = [
     ),
     lead: 'Sign Claude Code, Codex or OpenCode in once for each plan you pay for. When one runs out, Althar goes on with the next, in the order you set.',
     piece: (tone) => <Fragment key={tone} source={accounts} tone={tone} className={s.stage} />,
-  },
-  {
-    id: 'away',
-    span: 2,
-    small: true,
-    title: (
-      <>
-        It keeps going <b>while you’re away.</b>
-      </>
-    ),
-    lead: 'Usage limits, stalled turns, review rounds: it handles them and carries on. You only hear what needs you.',
-    piece: () => (
-      <Shot
-        w={400}
-        maxScale={1.2}
-        label="While you were away: a pull request opened after a second review, review moved to Codex at Claude Code’s limit, two issues found and fixed, a stalled step started afresh"
-        frame={s.card}
-      >
-        <div className={s.since}>
-          {SINCE.slice(0, 4).map(({ id, ...event }) => (
-            <SinceRow key={id} {...event} />
-          ))}
-        </div>
-      </Shot>
-    ),
   },
   {
     id: 'automations',
@@ -167,22 +126,6 @@ export const TILES: Tile[] = [
     () => <CanvasDrawing />,
   ),
   compact(
-    'browser',
-    <>
-      See it running. <b>Point at what’s off.</b>
-    </>,
-    'The page a task is building, open beside it. Point at what’s wrong, and the lead tries it.',
-    () => <BrowserDrawing />,
-  ),
-  compact(
-    'drop',
-    <>
-      Drop in <b>anything.</b>
-    </>,
-    'PDFs, logs, zips, whole folders: drop them in, and the lead reads them.',
-    () => <DropDrawing />,
-  ),
-  compact(
     'voice',
     <>
       Say it. <b>Don’t type it.</b>
@@ -205,6 +148,7 @@ export const TILES: Tile[] = [
     </>,
     'Add a skill once; Claude Code, Codex and OpenCode all get it.',
     () => <SkillsDrawing />,
+    3,
   ),
   compact(
     'servers',
@@ -213,6 +157,7 @@ export const TILES: Tile[] = [
     </>,
     'Add a server once, and it’s written into every agent’s own config.',
     () => <ServersDrawing />,
+    3,
   ),
   compact(
     'load',
@@ -221,6 +166,7 @@ export const TILES: Tile[] = [
     </>,
     'What each task takes of your CPU and memory, live.',
     () => <LoadDrawing />,
+    3,
   ),
   compact(
     'storage',
@@ -229,11 +175,13 @@ export const TILES: Tile[] = [
     </>,
     'Finished tasks’ folders go when they’re done; anything unpushed stays.',
     () => <StorageDrawing />,
+    3,
   ),
 ]
 
 /** What isn't drawn, as words alone under the console. */
 export const ALSO = [
+  'A browser built in',
   'Tasks as a graph',
   'Run any branch',
   'Work in your own checkout',
@@ -260,7 +208,7 @@ export function Bento() {
       {TILES.map((tile) => (
         <li
           key={tile.id}
-          className={cx(s.tile, SPAN[tile.span], tile.drawn && s.drawn, tile.small && s.small)}
+          className={cx(s.tile, SPAN[tile.span], tile.drawn && s.drawn)}
           data-tone={(tile.tone && (asked ?? tile.tone)) || undefined}
         >
           <div className={s.head}>

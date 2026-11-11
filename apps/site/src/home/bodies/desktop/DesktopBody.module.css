@@ -216,9 +216,8 @@
 .span4 { grid-column: span 4; }
 .span6 { grid-column: span 6; }
 /* The console's corners, rounded as its glass is. */
-.module:nth-child(1) { border-top-left-radius: 15px; }
-.module:nth-child(2) { border-top-right-radius: 15px; }
-.module:nth-last-child(3) { border-bottom-left-radius: 15px; }
+.module:first-child { border-top-left-radius: 15px; border-top-right-radius: 15px; }
+.module:nth-last-child(2) { border-bottom-left-radius: 15px; }
 .module:last-child { border-bottom-right-radius: 15px; }
 /* Its plate: the module's number, and its light. */
 .plate { display: flex; align-items: center; gap: 10px; padding: 24px 28px 0; font: 500 11px/1 var(--mono); letter-spacing: 0.12em; color: var(--ink-3); }
@@ -229,21 +228,25 @@
 .moduleTitle { margin: 0; font-family: 'Inter Display', var(--display); font-size: clamp(24px, 2.1vw, 30px); font-weight: 300; line-height: 1.06; letter-spacing: -0.035em; color: rgba(255, 248, 240, 0.86); text-wrap: balance; }
 .moduleTitle b { font-weight: 700; letter-spacing: -0.04em; color: #fff; }
 .moduleLead { max-width: 36em; margin: 0; font-size: 14.5px; line-height: 1.5; color: rgba(255, 248, 240, 0.6); text-wrap: pretty; }
-/* The piece at the module's foot, running off it as a screenshot would; a drawing whole in the middle; a small piece whole. */
+/* The piece at the module’s foot, running off it as a screenshot would; a drawing whole in the middle. */
 .piece { flex: 1; display: flex; align-items: flex-end; justify-content: center; min-height: 0; margin-top: 24px; padding: 0 28px; }
 .piece > * { width: 100%; margin-bottom: -28px; }
 .module[data-drawn] .piece { align-items: center; padding: 0 1px 1px; }
 .module[data-drawn] .piece > * { max-width: none; margin-bottom: 0; }
-.module[data-small] .piece { align-items: center; padding-bottom: 28px; }
-.module[data-small] .piece > * { margin-bottom: 0; }
-.span6 .piece > * { max-width: 1000px; }
-/* The smaller features, three to a row: their words a size down, their drawing across the module's foot. */
+/* One across the whole row: its words to the left, its drawing beside them. */
+.module.span6 { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 2fr); grid-template-rows: auto 1fr; }
+.module.span6 .plate, .module.span6 .moduleHead { grid-column: 1; }
+.module.span6 .moduleHead { align-content: start; }
+.module.span6 .piece { grid-column: 2; grid-row: 1 / span 2; margin-top: 0; }
+.module.span6 .piece > * { mask-image: linear-gradient(90deg, transparent, #000 7%); }
+/* The smaller features, three to a row, then two: their words a size down, their drawing across the module's foot, the same size in either. */
 .module[data-compact] { min-height: 0; }
 .module[data-compact] .plate { padding: 20px 22px 0; }
 .module[data-compact] .moduleHead { gap: 6px; padding: 12px 22px 0; }
 .module[data-compact] .moduleTitle { font-size: 19px; line-height: 1.12; letter-spacing: -0.03em; }
 .module[data-compact] .moduleLead { font-size: 13.5px; line-height: 1.45; }
 .module[data-compact] .piece { flex: none; margin-top: 16px; }
+.module[data-compact].span3 { --draw-wide: 1.5; }
 
 /* And also: what isn't drawn, as words alone, a row between hairlines, and the rest of it unnamed. */
 .also { display: grid; justify-items: center; gap: 20px; margin-top: 56px; padding: 30px 0 34px; border-top: 1px solid var(--hair); border-bottom: 1px solid var(--hair); text-align: center; }
@@ -329,6 +332,7 @@
   .span2, .span3, .span4 { grid-column: span 3; }
   .span6, .module:not([data-compact]) + .module[data-compact] { grid-column: span 6; }
   .module:nth-child(n) { border-radius: 0; }
+  .module[data-compact].span3 { --draw-wide: 1; }
   .opening { padding: 24px 28px 0; }
 }
 @media (max-width: 700px) {
@@ -347,10 +351,13 @@
   .alsoList li + li::before { display: none; }
   .alsoMore { font-size: 19px; }
   .module { min-height: 0; }
+  .module.span6 { display: flex; }
+  .module.span6 .piece { margin-top: 20px; }
+  .module.span6 .piece > * { mask-image: none; }
   .plate { padding: 20px 20px 0; }
   .moduleHead { padding: 14px 20px 0; }
   .piece { padding: 0 20px; margin-top: 20px; }
-  .module:not([data-drawn]):not([data-small]) .piece { padding-bottom: 28px; }
+  .module:not([data-drawn]) .piece { padding-bottom: 28px; }
   .tour > * { margin-top: 40px; }
   .endStation { padding: 0 10px; }
   .closing { padding: 56px 20px 170px; min-height: 76svh; }

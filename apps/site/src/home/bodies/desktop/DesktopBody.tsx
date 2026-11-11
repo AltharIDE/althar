@@ -189,7 +189,6 @@ function Console() {
           key={tile.id}
           className={cx(c.module, c[`span${tile.span}`])}
           data-drawn={tile.drawn ? '' : undefined}
-          data-small={tile.small ? '' : undefined}
           data-compact={tile.compact ? '' : undefined}
         >
           <span className={c.plate} aria-hidden="true">
