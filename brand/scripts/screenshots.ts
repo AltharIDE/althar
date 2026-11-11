@@ -107,7 +107,7 @@ const browser = await chromium.launch()
 try {
   for (const s of SCREENSHOTS.filter((s) => only.length === 0 || only.includes(s.file))) {
     const tab = await browser.newPage({ viewport: { width: s.width, height: s.height }, deviceScaleFactor: 2, reducedMotion: 'reduce' })
-    await tab.goto(storyUrl(`http://localhost:${server.port}`, s.story))
+    await tab.goto(storyUrl(`http://localhost:${server.port}`, s.story, s.dark))
     await tab.evaluate(() => document.fonts.ready)
     await tab.waitForSelector('#storybook-root > *', { state: 'attached' })
     await tab.waitForTimeout(1500)

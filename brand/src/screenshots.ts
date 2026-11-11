@@ -18,6 +18,8 @@ export interface Screenshot {
   crop?: boolean
   /** In the framed copy, a window bar above it, for a screen that doesn't draw the window's own. */
   bar?: boolean
+  /** Taken in the dark appearance, the way the toolbar's Dark shows a story. */
+  dark?: boolean
 }
 
 /** The wallpaper the framed copies stand on: Aurora at night, its light rising behind each window. */
@@ -97,7 +99,64 @@ export const SCREENSHOTS: readonly Screenshot[] = [
     shows: 'A review settled: what the reviewers found, and what the lead fixed or set aside',
     crop: true,
   },
+  {
+    file: 'project-home-dark',
+    story: 'screens-projecthome--busy',
+    width: 1680,
+    height: 1010,
+    dark: true,
+    shows: "A project's home in the dark appearance: the coordinator's conversation beside the board",
+  },
+  {
+    file: 'at-rest',
+    story: 'screens-home--at-rest-all-quiet',
+    width: 1440,
+    height: 900,
+    shows: 'The home with nothing waiting: "Nothing needs you", the mark rising out of the launch\'s light, and the projects beside it',
+  },
+  {
+    file: 'evidence',
+    story: 'thread-finished--shown',
+    width: 960,
+    height: 800,
+    shows: 'What a finished task hands back: what it built, before and after, the test run, and what it could not check',
+    crop: true,
+  },
+  {
+    file: 'accept',
+    story: 'outputs-changeset--ready',
+    width: 760,
+    height: 800,
+    shows: 'A change ready to accept: its checks passed, who reviewed it, the files it touched, and one button',
+    crop: true,
+  },
+  {
+    file: 'coordinator',
+    story: 'coordinator-taskcard--keeping-track',
+    width: 960,
+    height: 900,
+    shows:
+      'The coordinator keeping track: asked where things stand it answers for every task, and told what to change it does, across them',
+    crop: true,
+  },
+  {
+    file: 'healing',
+    story: 'thread-altharline--settled-without-you',
+    width: 960,
+    height: 700,
+    shows: 'A conflict with main and a failing check, both settled by the lead: Althar finds them, the lead fixes them, the checks pass',
+    crop: true,
+  },
+  {
+    file: 'automations',
+    story: 'screens-automations--a-good-morning',
+    width: 1440,
+    height: 900,
+    shows: 'Automations: work that starts on a schedule, with when it runs next and how its last run went',
+    crop: true,
+  },
 ]
 
 /** Where a story is shown, on a Storybook served at `origin`. */
-export const storyUrl = (origin: string, story: string): string => `${origin}/iframe.html?id=${story}&viewMode=story`
+export const storyUrl = (origin: string, story: string, dark = false): string =>
+  `${origin}/iframe.html?id=${story}&viewMode=story${dark ? '&globals=theme:dark' : ''}`

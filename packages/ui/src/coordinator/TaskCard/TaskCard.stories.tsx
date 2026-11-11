@@ -9,6 +9,9 @@ import { LinkButton } from '../../primitives/LinkButton/LinkButton'
 import { States, statesOn } from '../../storybook/States'
 import { threadDecorator } from '../../storybook/ThreadFrame'
 import { Thread } from '../../thread/Thread/Thread'
+import { Prose, Turn } from '../../thread/Turn/Turn'
+import { WorkedFor } from '../../thread/WorkedFor/WorkedFor'
+import { You } from '../../thread/You/You'
 import { TaskCard, TaskMark } from './TaskCard'
 
 const meta = {
@@ -278,3 +281,66 @@ export const AllStates: Story = {
 }
 
 export const ErrandWaiting: Story = { args: { errands: ['Waiting for #1187: checks at 9b50d2c.'] } }
+
+/**
+ * The coordinator as the project's manager, for the README (brand/src/screenshots.ts, coordinator): asked where
+ * things stand, it answers for every task at once; told what to change, it changes it across them, and the
+ * lines under its answer say what it did to which task.
+ */
+export const KeepingTrack: Story = {
+  render: () => (
+    <Thread label="Conversation">
+      <You at="14:02">Where are we?</You>
+      <Turn voice="Coordinator" at="14:02">
+        <WorkedFor took="9s" />
+        <Prose>
+          Three tasks are moving. The Safari login fix is in review, and Sonnet 5 is still building the CSV export. The refund limiter is
+          waiting on you: should it count per API key, or per account? The Stripe upgrade is next, once an agent is free.
+        </Prose>
+      </Turn>
+      <You at="14:03">Per account. Have the CSV lead include credit notes too, and hold the Stripe upgrade until the export merges.</You>
+      <Turn voice="Coordinator" at="14:03">
+        <WorkedFor took="6s" />
+        <Prose>
+          Passed your answer to the limiter’s lead and the credit notes to Sonnet 5. The Stripe upgrade starts when the export merges.
+        </Prose>
+      </Turn>
+      <TaskMark
+        task="431"
+        verb="answered"
+        detail="per account"
+        at="14:03"
+        steps={['Implement', 'Review']}
+        step={0}
+        now="Implement"
+        onJump={() => {}}
+      />
+      <TaskMark
+        task="429"
+        verb="got your note"
+        detail="credit notes too"
+        at="14:03"
+        steps={['Implement', 'Review']}
+        step={0}
+        now="Implement"
+        onJump={() => {}}
+      />
+      <TaskMark
+        task="433"
+        verb="held"
+        detail="starts when 429 merges"
+        at="14:03"
+        steps={['Implement', 'Review']}
+        step={0}
+        now="Up next"
+        last
+        onJump={() => {}}
+      />
+    </Thread>
+  ),
+  play: async ({ canvasElement }) => {
+    const c = within(canvasElement)
+    await expect(c.getByText('Where are we?')).toBeInTheDocument()
+    await expect(c.getByText('held')).toBeInTheDocument()
+  },
+}
