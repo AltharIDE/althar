@@ -45,7 +45,6 @@ import {
   QuestionField,
   type ThreadItem,
   ModelMoveItem,
-  type TaskTime,
   type ThreadSnapshot,
   type TurnTime,
   type ScreenshotsOnChange,
@@ -3229,30 +3228,6 @@ export class Queries extends Context.Service<
           })
         })
 
-      /** All a task's turns added up, its reviewers' too, where they kept where their time went; undefined where none did. */
-      const taskTimeOf = (taskId: string) =>
-        Effect.gen(function* () {
-          const sql = yield* SqlClient.SqlClient
-          const rows = yield* sql<{ timings: string | null }>`
-            SELECT d.timings FROM turn_deliveries d JOIN threads t ON t.id = d.thread_id
-            WHERE t.task_id = ${taskId} AND d.timings IS NOT NULL`
-          const kept = rows.flatMap((row) => {
-            const timings = timingsFrom(row.timings)
-            return timings === null ? [] : [timings]
-          })
-          if (kept.length === 0) return undefined
-          return kept.reduce<TaskTime>(
-            (sum, one) => ({
-              turns: sum.turns + 1,
-              place: sum.place + one.place,
-              session: sum.session + one.session,
-              work: sum.work + one.work,
-              tools: sum.tools + one.tools,
-            }),
-            { turns: 0, place: 0, session: 0, work: 0, tools: 0 },
-          )
-        })
-
       /**
        * A task's rounds of work as its graph had them (`graph.ts`): its newest runs, their steps and each step's tries with the
        * agent each ran on, what each began with and when a change added to it, what started each follow-up, and whether the
@@ -3501,7 +3476,6 @@ export class Queries extends Context.Service<
           )
           // What it used of each account its agents ran on: a reading that fails leaves it out, never the thread (ADR-084).
           const usage = yield* spendingOf({ taskId: head.taskId }).pipe(Effect.orElseSucceed(() => []))
-          const time = yield* taskTimeOf(head.taskId)
           // Its lead's helpers at work (ADR-087), each on its change.
           const helpersAtWork = yield* sql<{ id: string; name: string; change: string | null; agentId: string; model: string | null }>`
             SELECT h.id, h.name, w.name AS change, h.agent_id, h.model FROM helpers h LEFT JOIN workspaces w ON w.id = h.workspace_id
@@ -3544,7 +3518,6 @@ export class Queries extends Context.Service<
             threadId,
             cursor: at,
             usage,
-            ...(time === undefined ? {} : { time }),
             project: { id: head.projectId, name: head.projectName },
             host,
             task: {
