@@ -121,14 +121,19 @@
 .steps li[data-tone='bad'] {
   color: var(--danger);
 }
-/* B: Make it a full task, there while you point at the line */
+/* B: Make it a full task, there while you point at the line; it takes no room till then */
 .lineFull {
+  flex: none;
+  max-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
   font-size: 12px;
   color: var(--t-3);
   opacity: 0;
   transition: opacity var(--fast) var(--ease);
 }
 .line:hover .lineFull,
-.lineFull:focus-visible {
+.line:focus-within .lineFull {
+  max-width: 160px;
   opacity: 1;
 }

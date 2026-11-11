@@ -24,7 +24,7 @@ const shot = async (name: string, query: string) => {
   await page.waitForTimeout(700)
   await page.screenshot({ path: join(out, `${name}.png`), fullPage: true })
 }
-for (const d of (process.argv[2] ?? 'now,a,b,c,d,e,f,g,h').split(',')) {
+for (const d of (process.argv[2] ?? 'now,a,b,c').split(',').filter(Boolean)) {
   await shot(`${d}-grid-light`, `d=${d}&theme=light&only=grid`)
   await shot(`${d}-grid-dark`, `d=${d}&theme=dark&only=grid`)
   await page.setViewportSize({ width: 640, height: 900 })
@@ -33,4 +33,13 @@ for (const d of (process.argv[2] ?? 'now,a,b,c,d,e,f,g,h').split(',')) {
   await shot(`${d}-thread-hover-light`, `d=${d}&theme=light&only=thread&s=3&hover`)
   await page.setViewportSize({ width: 1240, height: 900 })
 }
+// B, the one picked, under each of the project's settings for what follows the merge.
+if (process.argv[3] === 'modes')
+  for (const r of ['major', 'all', 'off']) {
+    await shot(`b-${r}-grid-light`, `d=b&theme=light&only=grid&r=${r}`)
+    await shot(`b-${r}-grid-dark`, `d=b&theme=dark&only=grid&r=${r}`)
+    await page.setViewportSize({ width: 640, height: 900 })
+    await shot(`b-${r}-hover-light`, `d=b&theme=light&only=thread&s=3&hover&r=${r}`)
+    await page.setViewportSize({ width: 1240, height: 900 })
+  }
 await browser.close()

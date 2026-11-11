@@ -1,5 +1,5 @@
 import { AskCard, Button, HoverCard, Icon, LinkButton, Model, Spinner } from '@althar/ui'
-import type { ReactNode } from 'react'
+import { createContext, type ReactNode, useContext } from 'react'
 
 import today from '../../src/thread/SmallChange/SmallChange.module.css'
 import c from './calm.module.css'
@@ -24,20 +24,35 @@ export interface Direction {
 }
 
 const noop = () => {}
+
+/** What follows the merge, as the project's setting says: the side task builds it. */
+export type ReviewMode = 'major' | 'all' | 'off'
+export const REVIEW_MODES: Record<ReviewMode, string> = {
+  major: 'Review after merge, major only',
+  all: 'Review after merge, everything',
+  off: 'No review',
+}
+export const ReviewMode = createContext<ReviewMode>('major')
 /** ?hover opens what a small change is, for a screenshot of it. */
 const HOVER = new URLSearchParams(location.search).has('hover')
 
 /** What a small change is, behind its name. */
 function Explained({ s, children }: { s: SmallState; children: ReactNode }) {
+  const mode = useContext(ReviewMode)
   const card =
     s.key === 'full' ? (
       <p className={c.hover}>
         It was a small change. Now <Model model={SOL} short /> reviews it before it merges, as any change.
       </p>
+    ) : mode === 'off' ? (
+      <p className={c.hover}>
+        Starts at once on <Model model={SONNET} short />, with no plan and no review. To have it reviewed, make it a full task.
+      </p>
     ) : (
       <p className={c.hover}>
         Starts at once on <Model model={SONNET} short />, with no plan. You merge it, then <Model model={SOL} short /> reviews what merged;
-        anything it finds comes back here. To have it reviewed first, make it a full task.
+        {mode === 'major' ? ' only something major comes back here.' : ' anything it finds comes back here.'} To have it reviewed first,
+        make it a full task.
       </p>
     )
   return (
@@ -50,7 +65,8 @@ function Explained({ s, children }: { s: SmallState; children: ReactNode }) {
 }
 
 /** Where it stands, in a few words, and when. */
-function where(s: SmallState): { what: ReactNode; at?: string | undefined; tone?: 'bad' | 'live' } {
+function where(s: SmallState, mode: ReviewMode): { what: ReactNode; at?: string | undefined; tone?: 'bad' | 'live' } {
+  if (mode === 'off' && merged(s)) return { what: 'Merged', at: s.merged }
   switch (s.key) {
     case 'started':
       return { what: 'Started', at: s.started, tone: 'live' }
@@ -69,16 +85,16 @@ function where(s: SmallState): { what: ReactNode; at?: string | undefined; tone?
     case 'reviewing':
       return { what: 'Merged, in review', at: s.merged, tone: 'live' }
     case 'clean':
-      return { what: 'Merged, nothing found', at: s.reviewed }
+      return { what: mode === 'major' ? 'Merged, reviewed' : 'Merged, nothing found', at: s.reviewed }
     case 'findings':
-      return { what: `Merged, review found ${s.findings}`, at: s.reviewed, tone: 'bad' }
+      return { what: `Merged, ${s.findings}${mode === 'major' ? ' major' : ''} found`, at: s.reviewed, tone: 'bad' }
     case 'full':
       return { what: 'Checks running', at: s.changed, tone: 'live' }
   }
 }
 
 function Where({ s }: { s: SmallState }) {
-  const w = where(s)
+  const w = where(s, useContext(ReviewMode))
   return (
     <span className={c.where} data-tone={w.tone}>
       {w.tone === 'live' && s.key !== 'merging' && <span className={c.pulse} />}
@@ -91,13 +107,14 @@ function Where({ s }: { s: SmallState }) {
 
 /** What there is to press: Merge, or Fix it and Leave it. */
 function Acts({ s }: { s: SmallState }) {
+  const mode = useContext(ReviewMode)
   if (s.key === 'ready')
     return (
       <Button size="small" variant="signal" onClick={noop}>
         Merge
       </Button>
     )
-  if (s.key === 'findings')
+  if (s.key === 'findings' && mode !== 'off')
     return (
       <span className={c.acts}>
         <Button size="small" variant="quiet" onClick={noop}>
@@ -171,7 +188,8 @@ function Row({ state: s }: CardProps) {
     ['Merged', s.merged],
   ]
   const next = steps.findIndex(([, at]) => at === undefined)
-  const w = where(s)
+  const mode = useContext(ReviewMode)
+  const w = where(s, mode)
   return (
     <AskCard
       icon="after"
@@ -202,13 +220,19 @@ function Row({ state: s }: CardProps) {
                 </li>
               ),
             )}
-            {merged(s) && (
+            {merged(s) && mode !== 'off' && (
               <li
                 data-done={s.key !== 'reviewing' || undefined}
                 data-now={s.key === 'reviewing' || undefined}
                 data-tone={s.key === 'findings' ? 'bad' : s.key === 'reviewing' ? 'live' : undefined}
               >
-                <span>{s.key === 'findings' ? `Found ${s.findings}` : s.key === 'clean' ? 'Reviewed' : 'Review'}</span>
+                <span>
+                  {s.key === 'findings'
+                    ? `Found ${s.findings}${mode === 'major' ? ' major' : ''}`
+                    : s.key === 'clean'
+                      ? 'Reviewed'
+                      : 'Review'}
+                </span>
                 {s.reviewed && <span className={c.at}>{s.reviewed}</span>}
               </li>
             )}
