@@ -1,7 +1,11 @@
 import { afterEach, describe, expect, it } from 'vitest'
 
+import type { CanvasAnchor } from '@althar/contracts'
+
 import type { Picked } from '../src/main/browser/picked'
 import {
+  canvasCommentsOf,
+  canvasPlace,
   commentsOf,
   commentsText,
   composerComment,
@@ -13,6 +17,7 @@ import {
   type GatheredComment,
   giveBack,
   type PageSpot,
+  pageCommentsOf,
   rewrite,
   takeAll,
   withComments,
@@ -209,5 +214,56 @@ describe('a crop the main process drew', () => {
     expect(await cropOf(null, 1)).toBeNull()
     expect(await cropOf('data:image/svg+xml;base64,PHN2Zy8+', 1)).toBeNull()
     expect(await cropOf('https://example.com/x.png', 1)).toBeNull()
+  })
+})
+
+describe('a comment on a canvas', () => {
+  const onCanvas = (id: string, note: string, anchor: CanvasAnchor = { kind: 'whole' }): GatheredComment => ({
+    id,
+    note,
+    on: { kind: 'canvas', canvasId: 'cnv_1', name: 'sign-in-flow', title: 'Sign-in flow', version: 2, anchor },
+    crop: null,
+  })
+  const passage = onCanvas('b', 'Say Sign in', { kind: 'passage', text: 'Continue', heading: 'Sign in' })
+
+  it('says where it points: the whole canvas, the words it is on, an area, or the element by its label', () => {
+    expect(canvasPlace({ kind: 'whole' })).toBe('Whole canvas')
+    expect(canvasPlace({ kind: 'passage', text: 'Continue', heading: null })).toBe('“Continue”')
+    expect(canvasPlace({ kind: 'area', x: 0, y: 0, width: 0.5, height: 0.5 })).toBe('An area of it')
+    expect(canvasPlace({ kind: 'element', selector: 'main > button', label: 'button.continue', text: 'Continue' })).toBe('button.continue')
+  })
+
+  it('shows on its chip and card the canvas’s title, its name and version, and the words it is on', () => {
+    expect(composerComment(passage, 1)).toEqual({
+      id: 'b',
+      n: 1,
+      note: 'Say Sign in',
+      place: 'Sign-in flow',
+      facts: [
+        { label: 'Canvas', value: 'sign-in-flow v2', kind: 'code' },
+        { label: 'On', value: 'Continue', kind: 'quote' },
+      ],
+    })
+    expect(composerComment(onCanvas('a', 'Shorter'), 2).facts).toEqual([{ label: 'Canvas', value: 'sign-in-flow v2', kind: 'code' }])
+  })
+
+  it('is sent for the runtime to keep with the message, apart from those on pages, which a page pins', () => {
+    const page = comment('p', 'On the page')
+    const all = [onCanvas('a', 'Shorter'), page, passage]
+    expect(canvasCommentsOf(all)).toEqual([
+      { canvasId: 'cnv_1', version: 2, anchor: { kind: 'whole' }, body: 'Shorter' },
+      { canvasId: 'cnv_1', version: 2, anchor: { kind: 'passage', text: 'Continue', heading: 'Sign in' }, body: 'Say Sign in' },
+    ])
+    expect(pageCommentsOf(all).map((one) => one.id)).toEqual(['p'])
+  })
+
+  it('is read by the agent with the canvas, its version and where it points, among those on pages', () => {
+    expect(commentsText([passage], 0, true)).toBe(
+      ['A comment on a canvas:', '1. Say Sign in\n   - On canvas sign-in-flow v2: “Continue”'].join('\n\n'),
+    )
+    const said = commentsText([onCanvas('a', 'Shorter,\nplease'), comment('p', 'On the page')], 0, true)
+    expect(said.startsWith('2 comments:')).toBe(true)
+    expect(said).toContain('1. Shorter,\n   please\n   - On canvas sign-in-flow v2: Whole canvas')
+    expect(said).toContain('   - Picture 1 of those attached.')
   })
 })
