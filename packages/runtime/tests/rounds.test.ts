@@ -1471,6 +1471,31 @@ describe('changing the team of a task that has begun', () => {
     }).pipe(Effect.provide(runtimeWith(github, ':memory:', { holds: slow })))
   })
 
+  it.live('keeps an offer answered once its review is added, even where the review is taken off before it starts', () => {
+    const { working, github } = onGitHub()
+    const slow = holds()
+    return Effect.gen(function* () {
+      const task = yield* start(working, '[lead:slowly] [lead:finish] [lead:edit] [review:pass]')
+      const lead: ToolAccess = { role: 'lead', projectId: task.projectId, threadId: task.threadId, sessionId: 'none', taskId: task.taskId }
+      const offer = () => Effect.map(cards(task.projectId), (all) => all[0]?.reviewOffer)
+      yield* withoutReview(task.taskId)
+      // Offered while its lead still works, so the review added has nothing to read yet.
+      assert.match(yield* callTool(lead, 'offer_review', {}), /^Offered /)
+      const offered = yield* offer()
+      assert.strictEqual(offered?.agentId, 'codex')
+      yield* changeTeam(task.taskId, [step('implement', 'claude-code'), step('review', offered?.agentId ?? '', offered?.model ?? null)])
+      assert.strictEqual(yield* offer(), undefined)
+      // Taken off again before it ran: the offer was answered, and its line keeps no buttons.
+      yield* changeTeam(task.taskId, [step('implement', 'claude-code')])
+      assert.deepStrictEqual(
+        (yield* planOf(task.taskId)).steps.filter((one) => one.key === 'review' && !one.skipped),
+        [],
+      )
+      assert.strictEqual(yield* offer(), undefined)
+      slow.open('[lead:slowly]')
+    }).pipe(Effect.provide(runtimeWith(github, ':memory:', { holds: slow })))
+  })
+
   it.live('stops offering a review once it is added, and the review it adds reads the pushed head', () => {
     const { working, github } = onGitHub()
     const slow = holds()

@@ -67,7 +67,12 @@ pick, the strongest free model and another maker's than the lead's
 (`Limits.free`), unless the agent names one. It adds nothing by itself.
 Add goes through Change the team's command. No thanks (`DeclineReview`)
 turns it down, and it isn't offered again (`task.review_offer_declined`):
-the tool refuses after that. The line reads the task's card (`reviewOffer`,
+the tool refuses after that. A review put on while an offer stands answers
+it too (`task.review_offer_accepted`), so taking that review off again
+before it runs doesn't bring the offer's buttons back. Changing a plan's
+ending to a pull request from the plan controls, or Althar opening one,
+offers nothing by itself: the person said it there without a word to an
+agent, and Change the team has the reviewer beside it. The line reads the task's card (`reviewOffer`,
 while the offer stands) and, once answered, says who reviews it or that
 there's no review. A task with a review, one that's merged, or one whose plan
 reads no review of its own isn't offered one.

@@ -7236,6 +7236,22 @@ export class Runs extends Context.Service<
                 type: 'task_plan.changed',
                 actorId: input.actorId,
               })
+              // A review put on where one was offered answers the offer: taken off again later, it doesn't stand again.
+              if (reviewChanges && reviews && !reviewed) {
+                const [offered] = yield* sql<{ one: number }>`
+                  SELECT 1 AS one FROM record_events WHERE aggregate_type = 'task' AND aggregate_id = ${input.taskId}
+                    AND type = 'task.review_offered' LIMIT 1`
+                const [row] = yield* sql<{ revision: number }>`SELECT revision FROM tasks WHERE id = ${input.taskId}`
+                if (offered !== undefined)
+                  yield* fact({
+                    projectId: plan.projectId,
+                    aggregateType: 'task',
+                    aggregateId: input.taskId,
+                    revision: row?.revision ?? 1,
+                    type: 'task.review_offer_accepted',
+                    actorId: input.actorId,
+                  })
+              }
               // The plan's run, which the rounds after it copy, and the latest run, a round of it or the same.
               const rows = yield* sql<{
                 id: string

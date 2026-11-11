@@ -8,7 +8,8 @@ import type { PlanStep } from '@althar/contracts'
  * rule: its lead or the coordinator offers it, with `offer_review`, where what the person said makes the work a real change
  * (they asked to harden a prototype, to open a pull request for a chat), and it shows as a line of the thread, by its
  * reviewer, with Add and No thanks. It adds nothing by itself. Turned down, it isn't offered again
- * (`task.review_offer_declined`); added, it stands no more.
+ * (`task.review_offer_declined`); added, it is answered too (`task.review_offer_accepted`), so taking the review off again
+ * doesn't bring the offer back.
  */
 
 /** What an offer is read against. */
@@ -61,10 +62,15 @@ export const reviewOfferOf = (facts: OfferFacts) =>
   Effect.gen(function* () {
     if (offerable(facts) !== undefined) return undefined
     const sql = yield* SqlClient.SqlClient
-    const [offered] = yield* sql<{ payload: string }>`
-      SELECT payload FROM record_events WHERE aggregate_type = 'task' AND aggregate_id = ${facts.taskId}
+    const [offered] = yield* sql<{ payload: string; sequence: number }>`
+      SELECT payload, sequence FROM record_events WHERE aggregate_type = 'task' AND aggregate_id = ${facts.taskId}
         AND type = 'task.review_offered' ORDER BY sequence DESC LIMIT 1`
     if (offered === undefined || (yield* declinedOf(facts.taskId))) return undefined
+    // Added since it was offered, it is answered, even where the review was taken off again after.
+    const [accepted] = yield* sql<{ one: number }>`
+      SELECT 1 AS one FROM record_events WHERE aggregate_type = 'task' AND aggregate_id = ${facts.taskId}
+        AND type = 'task.review_offer_accepted' AND sequence > ${offered.sequence} LIMIT 1`
+    if (accepted !== undefined) return undefined
     const step = yield* Schema.decodeUnknownEffect(Schema.fromJsonString(Offered))(offered.payload).pipe(
       Effect.orElseSucceed(() => undefined),
     )
