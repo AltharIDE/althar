@@ -2312,7 +2312,8 @@ export class Queries extends Context.Service<
                 AND i.sender_kind IN ('window', 'paired_device')) AS told,
               (SELECT d.requested_at FROM turn_deliveries d WHERE d.thread_id = ${task.threadId} AND d.origin = 'person'
                 AND d.state IN ('pending', 'delivered') AND d.ended_at IS NULL
-                ORDER BY d.requested_at DESC LIMIT 1) AS taken_since`
+                ORDER BY d.requested_at DESC LIMIT 1) AS taken_since
+            FROM tasks t WHERE t.id = ${taskId}`
           const asked =
             !busy &&
             task.state !== 'abandoned' &&
