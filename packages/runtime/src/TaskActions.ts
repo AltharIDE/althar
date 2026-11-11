@@ -55,6 +55,17 @@ import { expected, words } from './words'
  */
 
 /**
+ * Whether the caller's own thread says what it did to another task: the coordinator's does, as its record of the board; a
+ * task lead's doesn't, as its chat shows only what is about its own task (its call is there already), and the other task's does.
+ */
+export const hearsOf = (access: { readonly role: string; readonly threadId: string }, task: { readonly threadId: string }) =>
+  access.threadId !== task.threadId && access.role !== 'lead'
+
+/** Which threads carry the line a task action leaves, for the words a tool answers with. */
+export const threadsSaying = (access: { readonly role: string; readonly threadId: string }, task: { readonly threadId: string }) =>
+  hearsOf(access, task) ? 'Both threads have a line saying so' : 'Its thread has a line saying so'
+
+/**
  * What the coordinator can do to a task: the person's own buttons, by what
  * they do. Accepting a task without a pull request merges it here
  * (`merge_here`), and pushing what merged is its own step (`push_here`); a
@@ -647,7 +658,7 @@ export class TaskActions extends Context.Service<
           const outcome = yield* perform(task, move, actorOf(access), { ...args, stands: word?.stands })
           if (!outcome.done) return `Nothing changed: ${outcome.said}`
           const as = words === undefined ? becauseOf(asked.why) : `, as you asked: ${quoted(words)}`
-          if (access.threadId !== task.threadId) yield* line(task.projectId, access.threadId, `${DID[move](`“${task.title}”`)}${as}`)
+          if (hearsOf(access, task)) yield* line(task.projectId, access.threadId, `${DID[move](`“${task.title}”`)}${as}`)
           yield* line(task.projectId, task.threadId, `${own ? 'Its lead' : yield* whoOf(access)} ${DID_HERE[move]}${as}`)
           yield* fact({
             projectId: task.projectId,
@@ -663,7 +674,7 @@ export class TaskActions extends Context.Service<
             },
             actorId: actorOf(access),
           })
-          return `${outcome.said} ${access.threadId === task.threadId ? 'Its thread has a line saying so' : 'Both threads have a line saying so'}; say it in a sentence.`
+          return `${outcome.said} ${threadsSaying(access, task)}; say it in a sentence.`
         })
 
       const answer = (itemId: string, yes: boolean, actorId: ActorId) =>
@@ -924,7 +935,7 @@ export class TaskActions extends Context.Service<
         Effect.gen(function* () {
           const own = access.role === 'lead' && task.id === access.taskId
           const as = becauseOf(whyOf(input))
-          if (access.threadId !== task.threadId) yield* line(task.projectId, access.threadId, `${what}${as}`)
+          if (hearsOf(access, task)) yield* line(task.projectId, access.threadId, `${what}${as}`)
           yield* line(task.projectId, task.threadId, `${own ? 'Its lead' : yield* whoOf(access)} ${here}${as}`)
         })
 
@@ -953,7 +964,7 @@ export class TaskActions extends Context.Service<
             return yield* new ToolRefused({ message: `head is a commit's hash, as read_task shows ${task.slug}'s branch at.` })
           const { change } = yield* plainly(changes.push(task.id, asked.head, asked.pull_request), task.slug)
           yield* did(access, input, task, `Pushed “${task.title}” to its pull request`, 'pushed its commits to its pull request')
-          return `Pushed ${task.slug}'s branch up to ${asked.head.slice(0, 7)} to ${change.url ?? 'its pull request'}: a plain push, nothing forced. Both threads have a line saying so.`
+          return `Pushed ${task.slug}'s branch up to ${asked.head.slice(0, 7)} to ${change.url ?? 'its pull request'}: a plain push, nothing forced. ${threadsSaying(access, task)}.`
         })
 
       const skipReview = (access: ToolAccess, input: unknown) =>
@@ -963,7 +974,7 @@ export class TaskActions extends Context.Service<
           const said = yield* envelope('task.skip_review', { taskId: task.id }, undefined, actorOf(access))
           yield* plainly(runs.skipReview({ envelope: said, taskId: task.id }), task.slug)
           yield* did(access, input, task, `Skipped the review of “${task.title}”`, 'skipped this task’s review')
-          return `Skipped ${task.slug}'s review: it is ready once its lead is done, with no review. Both threads have a line saying so.`
+          return `Skipped ${task.slug}'s review: it is ready once its lead is done, with no review. ${threadsSaying(access, task)}.`
         })
 
       const shipTask = (access: ToolAccess, input: unknown) =>
@@ -983,7 +994,7 @@ export class TaskActions extends Context.Service<
             task.slug,
           )
           yield* did(access, input, task, `Shipped “${task.title}”`, 'shipped this task')
-          return `${own ? 'Althar ships this task once your turn ends' : `Shipping ${task.slug}`}: where its plan has a reviewer before the work ships, the review runs first, over everything since the last one, and the lead settles what it finds; then its commits go up, to the open pull request, or a new one after the last merged or closed. read_task shows where it stands. Both threads have a line saying so.`
+          return `${own ? 'Althar ships this task once your turn ends' : `Shipping ${task.slug}`}: where its plan has a reviewer before the work ships, the review runs first, over everything since the last one, and the lead settles what it finds; then its commits go up, to the open pull request, or a new one after the last merged or closed. read_task shows where it stands. ${threadsSaying(access, task)}.`
         })
 
       /**
@@ -1251,7 +1262,7 @@ export class TaskActions extends Context.Service<
               `Left what the review after the merge found on “${task.title}”`,
               'left what the review after the merge found',
             )
-            return `Left what the review after the merge found on ${task.slug}: its findings close, and stay in its thread. Both threads have a line saying so.`
+            return `Left what the review after the merge found on ${task.slug}: its findings close, and stay in its thread. ${threadsSaying(access, task)}.`
           }
           const sent = yield* plainly(mergeReviews.fix(task.id), task.slug)
           const said = yield* envelope('task.ship', { taskId: task.id, afterMerge: true }, undefined, actorOf(access))
@@ -1267,7 +1278,7 @@ export class TaskActions extends Context.Service<
             `Fix it on what the review after the merge found on “${task.title}”`,
             'asked its lead to fix what the review after the merge found',
           )
-          return `${task.slug}'s lead has what the review after the merge found, as the person's word: once its turn is over, its fix ships as a new pull request after the merged one. Both threads have a line saying so.`
+          return `${task.slug}'s lead has what the review after the merge found, as the person's word: once its turn is over, its fix ships as a new pull request after the merged one. ${threadsSaying(access, task)}.`
         })
 
       const publishTask = (access: ToolAccess, input: unknown) =>
@@ -1276,7 +1287,7 @@ export class TaskActions extends Context.Service<
           const task = yield* named(access, asked.task)
           yield* plainly(runs.publish(task.id), task.slug)
           yield* did(access, input, task, `Opened a pull request for “${task.title}”`, 'opened a pull request for this task')
-          return `Althar opens ${task.slug}'s pull request now, as its card's button does: read_task shows it once it is up. Both threads have a line saying so.`
+          return `Althar opens ${task.slug}'s pull request now, as its card's button does: read_task shows it once it is up. ${threadsSaying(access, task)}.`
         })
 
       const pushBranch = (access: ToolAccess, input: unknown) =>
@@ -1324,7 +1335,7 @@ export class TaskActions extends Context.Service<
             )
             said.push(`${task.slug}'s lead is asked to resolve its conflict with the branch it goes into, where it has one.`)
           }
-          return `${said.join(' ')} Both threads have a line saying so.`
+          return `${said.join(' ')} ${threadsSaying(access, task)}.`
         })
 
       const moveToFront = (access: ToolAccess, input: unknown) =>

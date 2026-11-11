@@ -76,7 +76,7 @@ import { TITLE_LENGTH } from './taskTitle'
 import { Tasks } from './Tasks'
 import { setToward } from './towards'
 import { addItem, transcript } from './threads'
-import { personsWords, quoted } from './TaskActions'
+import { hearsOf, personsWords, quoted, threadsSaying } from './TaskActions'
 import { ToolRefused, ToolServer, type Tool, type ToolAccess } from './ToolServer'
 import { describe as describePreset, presetsIn } from './presets'
 import { stepOf, StepPick } from './stepPick'
@@ -1532,7 +1532,7 @@ export class Coordinator extends Context.Service<
             : access.role === 'lead'
               ? `The lead of “${(yield* ownTitle(access)) ?? 'another task'}”`
               : 'The coordinator'
-          if (access.threadId !== task.threadId)
+          if (hearsOf(access, task))
             yield* addItem({ projectId: access.projectId as ProjectId, threadId: access.threadId }, 'notice', {
               source: 'runtime',
               severity: 'info',
@@ -1651,7 +1651,7 @@ export class Coordinator extends Context.Service<
                 disposition: 'after_current',
               })
               .pipe(Effect.mapError(() => new ToolRefused({ message: `Althar couldn't pass that on to ${task.slug}'s lead.` })))
-          return `${said.join(' ')} Both threads have a line saying so.`
+          return `${said.join(' ')} ${threadsSaying(access, task)}.`
         })
 
       /** Tries a task lead's last turn again where it failed, as its Try again does: what was said in it goes again. */
@@ -1663,7 +1663,7 @@ export class Coordinator extends Context.Service<
             .pipe(Effect.mapError((error) => new ToolRefused({ message: `Althar couldn't try ${task.slug} again: ${error._tag}.` })))
           if (!again) return `Nothing changed: ${task.slug}'s lead's last turn didn't fail.`
           yield* saidOn(access, input, task, `Tried “${task.title}” again`, 'tried its lead’s last turn again')
-          return `${task.slug}'s lead's last turn goes again. Both threads have a line saying so.`
+          return `${task.slug}'s lead's last turn goes again. ${threadsSaying(access, task)}.`
         })
 
       /** Has a task's lead compact its context, as the task's Compact does: a turn of its own, after what it was told before. */
