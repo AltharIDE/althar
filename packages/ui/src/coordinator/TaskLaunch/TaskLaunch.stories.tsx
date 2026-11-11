@@ -94,7 +94,7 @@ const PRESETS = [
   { name: 'Chat', about: 'a copy, no review, ends here, the coordinator picks its lead' },
   { name: 'Change', about: 'a worktree, reviewed before it ships, a draft pull request, the coordinator picks its lead' },
   { name: 'Small change', about: 'a worktree, reviewed after it merges, a pull request ready for review, the coordinator picks its lead' },
-  { name: 'Prototype', about: 'a worktree, reviewed after it merges, ends here, led by claude-opus-5-5' },
+  { name: 'Prototype', about: 'a worktree, no review, ends here, led by Claude Opus 5.5' },
 ]
 
 /** A press on the preset lists the others, each with what it holds: picking one changes the plan's parts to match. */
