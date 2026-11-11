@@ -25,7 +25,7 @@ import { useOutputs } from '../../shared/useOutputs'
 import { useStreamed } from '../../shared/useStreamed'
 import { canPick } from '../../shared/agents'
 import { inView, isSending, mergeItems, newestReads, sending, takenBack, unsent, waiting } from '../../shared/items'
-import { type Choice, moveTo, runningOn, startOf } from '../../shared/models'
+import { type Choice, moveTo, runningOn, startOf, upcomingOn } from '../../shared/models'
 import type { Streamed } from '../../shared/thread'
 
 /*
@@ -221,6 +221,8 @@ export const useProject = (projectId: string): ProjectModel => {
     [client, threadId, newest, arrived, viewVersion, fail],
   )
 
+  // What the coordinator was last picked to, until the thread says it: a pick made before the last one was taken goes from there.
+  const lastPick = useRef<Choice | null>(null)
   /**
    * The thread's head again: the agent working, the one it would start on.
    * Its items stay as they are, but for those it may have moved on, read after
@@ -480,11 +482,17 @@ export const useProject = (projectId: string): ProjectModel => {
       try {
         const session = coordinator?.session
         // A session the runtime no longer holds can't be moved; the pick is applied when the person next says something.
-        if (threadId !== null && session != null && session.held) await moveTo(client, threadId, runningOn(session), choice)
+        if (threadId !== null && session != null && session.held) {
+          // From what it was last picked to, else what the runtime holds for its next turn, else what it is on.
+          const from = lastPick.current ?? upcomingOn(session) ?? runningOn(session)
+          lastPick.current = choice
+          await moveTo(client, threadId, from, choice)
+        }
       } catch (failure) {
         fail(failure)
         taken = false
       }
+      if (lastPick.current === choice) lastPick.current = null
       await readHead()
       return taken
     },

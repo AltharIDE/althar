@@ -776,7 +776,8 @@ export function TaskView({
     setHandover(null)
     setMoving(next)
     // Taken or not, the thread says what the lead is on from here: the choice shown until then goes, and a refusal is said by the line above the composer.
-    void model.choose(next).then(() => setMoving(null))
+    // Only the last pick's end takes it away: one made after is still on its way.
+    void model.choose(next).then(() => setMoving((now) => (now === next ? null : now)))
   }
   // A queued message goes back in the composer to be changed, and out of the queue, unless the lead has it already.
   const edit = async (id: string) => {

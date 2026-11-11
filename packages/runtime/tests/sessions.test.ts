@@ -477,6 +477,49 @@ describe('sessions', () => {
       )
     })
 
+    it.live('begins the turn on the last choice, where one was made while an earlier was being set', () => {
+      let silent = false
+      const log: Array<string> = []
+      return Effect.gen(function* () {
+        const sessions = yield* Sessions
+        const { task: created } = yield* task()
+        yield* begin(created.threadId, 'codex', 'large')
+        log.length = 0
+        silent = true
+        yield* sessions.chooseLead({ threadId: created.threadId, model: 'small' })
+        yield* until(
+          Effect.sync(() => log),
+          (calls) => calls.length > 0,
+        )
+        // The agent hasn't answered the first; a turn is said, and another choice made.
+        yield* say(created.threadId, 'Look at it')
+        yield* sessions.chooseLead({ threadId: created.threadId, effort: 'low' })
+        yield* Effect.sleep(Duration.millis(300))
+        assert.deepStrictEqual(log, ['model=small'])
+        silent = false
+        yield* until(
+          Effect.sync(() => log),
+          (calls) => calls.includes('prompt'),
+        )
+        // The model brings the effort of its own with it, set by the runtime; what the person chose of it comes last, before the turn.
+        assert.deepStrictEqual(log.slice(-2), ['effort=low', 'prompt'])
+        const row = yield* lead(created.threadId)
+        assert.deepStrictEqual([row?.model, row?.effort], ['small', 'low'])
+      }).pipe(
+        Effect.provide(
+          Queries.layer.pipe(
+            Layer.provideMerge(
+              runtime(':memory:', {
+                holdsSets: () => silent,
+                optionAsked: (id, value) => void log.push(`${id}=${value}`),
+                promptAsked: () => void log.push('prompt'),
+              }),
+            ),
+          ),
+        ),
+      )
+    })
+
     it.live('goes back to what it was on, saying why, where the agent won’t take it', () =>
       Effect.gen(function* () {
         const sessions = yield* Sessions

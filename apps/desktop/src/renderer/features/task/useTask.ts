@@ -21,7 +21,7 @@ import { keys, reads } from '../../data/reads'
 import { canPick } from '../../shared/agents'
 import { isSending, mergeItems, newestReads, sending, takenBack, unsent, waiting } from '../../shared/items'
 import { headsOf } from '../../shared/mergeHere'
-import { type Choice, moveTo, runningOn, startOf } from '../../shared/models'
+import { type Choice, moveTo, runningOn, startOf, upcomingOn } from '../../shared/models'
 import type { OutputSoFar } from '../../shared/handed'
 import { type Outgoing, sentWith } from '../../shared/useAttachments'
 import { useOutputs } from '../../shared/useOutputs'
@@ -370,6 +370,8 @@ export const useTask = (threadId: string): TaskModel => {
     [client, threadId, newest, arrived, fail],
   )
 
+  // What the lead was last picked to, until the thread says it: a pick made before the last one was taken goes from there.
+  const lastPick = useRef<Choice | null>(null)
   /**
    * The thread's head again: its task, the agent working, the calls waiting.
    * Its items stay as they are, but for those it may have moved on, read after
@@ -634,15 +636,20 @@ export const useTask = (threadId: string): TaskModel => {
       let taken = true
       try {
         const session = snapshot?.session
-        // A thread the runtime no longer holds can't be moved: the choice starts the lead on it instead. While it is held, the choice changes the lead it has.
-        await (session == null || !session.held
-          ? client.startSession(startOf(threadId, choice))
-          : moveTo(client, threadId, runningOn(session), choice))
+        // A thread the runtime no longer holds can't be moved: the choice starts the lead on it instead. While it is held, the choice changes the lead it has:
+        // from what it was last picked to, else what the runtime holds for its next turn, else what it is on, so a pick back to what it is on cancels the one before.
+        if (session == null || !session.held) await client.startSession(startOf(threadId, choice))
+        else {
+          const from = lastPick.current ?? upcomingOn(session) ?? runningOn(session)
+          lastPick.current = choice
+          await moveTo(client, threadId, from, choice)
+        }
       } catch (failure) {
         // Said where the thread says what went wrong; the picker goes back to what it was.
         fail(failure)
         taken = false
       }
+      if (lastPick.current === choice) lastPick.current = null
       // The runtime has it as who leads next, or the lead as it was: read now, so the picker is told by the thread, not by the window.
       await readHead()
       await newest.landed('head')

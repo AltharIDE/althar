@@ -239,6 +239,17 @@ describe('what the person does on a task', () => {
     expect(client.setModel).not.toHaveBeenCalled()
   })
 
+  it('sends a pick back to the model the lead is on while another is held for its next turn', async () => {
+    const base = snapshot().session!
+    const { result, client } = reading({
+      session: { ...base, model: 'opus', effort: 'high', nextLead: { agentId: base.agentId, model: 'sonnet', effort: null } },
+    })
+    await waitFor(() => expect(result.current.snapshot).not.toBeNull())
+    await act(() => result.current.choose({ agentId: base.agentId, model: 'opus', effort: 'high' }))
+    expect(client.setModel).toHaveBeenCalledWith({ threadId: 'th1', model: 'opus' })
+    expect(client.setEffort).not.toHaveBeenCalled()
+  })
+
   it('shows why Try again was refused instead of silently accepting the click', async () => {
     const { result, client } = reading()
     vi.mocked(client.tryAgain).mockRejectedValue(

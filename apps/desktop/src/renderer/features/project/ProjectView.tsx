@@ -473,7 +473,8 @@ export function ProjectView({
     if (next.agentId !== session.agentId) return setHandover(next)
     setHandover(null)
     setMoving(next)
-    void model.choose(next).then(() => setMoving(null))
+    // Only the last pick's end takes the choice shown away: one made after is still on its way.
+    void model.choose(next).then(() => setMoving((now) => (now === next ? null : now)))
   }
   // A queued message goes back in the composer to be changed, and out of the queue, unless the coordinator has it already.
   const edit = async (id: string) => {

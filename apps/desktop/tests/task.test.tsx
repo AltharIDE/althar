@@ -3276,6 +3276,35 @@ describe('a task', () => {
     expect((await screen.findByRole('tooltip')).textContent).toMatch(/Implement.*Claude Sonnet/)
   })
 
+  it('keeps the latest pick shown while an earlier one ends, and sends a pick back to the model it is on', async () => {
+    const base = thread()
+    // What the runtime holds for the lead's next turn, once it has taken the first pick.
+    let held = base.session
+    const ends: Array<() => void> = []
+    const { client } = fakeClient({
+      getThread: vi.fn(async () => ({ ...base, session: held })),
+      setModel: vi.fn(() => new Promise<void>((resolve) => ends.push(resolve))),
+    })
+    withServices(<Task />, client)
+    const pickFromDialog = async (name: string) => {
+      await userEvent.click(await screen.findByRole('button', { name: /^Lead: / }))
+      await userEvent.click(screen.getByRole('button', { name: /All models/ }))
+      await userEvent.click(within(await screen.findByRole('dialog')).getByRole('button', { name }))
+    }
+    await pickFromDialog('Use Claude Sonnet')
+    await waitFor(() => expect(client.setModel).toHaveBeenCalledTimes(1))
+    held = { ...base.session!, nextLead: { agentId: 'claude-code', model: 'sonnet', effort: null } }
+    // Back to what the lead is on, while the first is still being taken: it is sent, since the runtime holds the first.
+    await pickFromDialog('Use Claude Opus')
+    await waitFor(() => expect(client.setModel).toHaveBeenLastCalledWith({ threadId: 'th1', model: 'opus' }))
+    expect(screen.getByRole('button', { name: /^Lead: Claude Opus/ })).toBeTruthy()
+    // The first one ends, out of order: the second is still what the picker says.
+    await act(async () => ends[0]!())
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    expect(screen.getByRole('button', { name: /^Lead: Claude Opus/ })).toBeTruthy()
+    expect(screen.queryByRole('button', { name: /^Lead: Claude Sonnet/ })).toBeNull()
+  })
+
   it('shows what the runtime has taken for the lead’s next turn, in the picker, until the agent has it', async () => {
     const base = thread()
     const taken = { ...base, session: { ...base.session!, nextLead: { agentId: 'claude-code', model: 'sonnet', effort: 'low' } } }
