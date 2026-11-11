@@ -16,9 +16,12 @@ import { useProject } from '../../src/renderer/features/project/useProject'
 import { TaskView } from '../../src/renderer/features/task/TaskView'
 import { useTask } from '../../src/renderer/features/task/useTask'
 import { useSettingsOf, servicesFor } from '../../tests/render'
-import { coordinatorSnapshot, fakeClient, fakeHost, items, project, snapshot } from '../../tests/fixtures'
-import { boardOf, CHATS, type Chat, coordinatorItems } from './data'
-import { type Direction, type LabState, LabContext, useLab } from './lab'
+import type { BoardTask } from '@althar/contracts'
+
+import { card, coordinatorSnapshot, fakeClient, fakeHost, items, project, snapshot } from '../../tests/fixtures'
+import { boardOf, CHATS, type Chat, chatTask, coordinatorItems } from './data'
+import { type Direction, type LabState, LabContext, MARKS, type MarkKind, useLab } from './lab'
+import { resetAsides } from './asides'
 import { DIRECTIONS, Overlay } from './directions'
 import s from './lab.module.css'
 
@@ -38,6 +41,19 @@ const LAYOUTS = [
 
 /** What the fake runtime answers: read on each fetch, so the lab's state shows once the cache reads again. */
 const live = { direction: 'A' as Direction, cleared: new Set<string>(), promoted: new Set<string>(), started: [] as Chat[] }
+
+/** A chat made a task: planned, up next, on its countdown, under the title its agent gave it. */
+const planned = (task: BoardTask): BoardTask =>
+  task.scratch !== true
+    ? task
+    : {
+        ...task,
+        scratch: undefined,
+        kind: 'change',
+        phase: 'planned',
+        title: task.title.startsWith('Why does the retry') ? 'Retry backs off only in the client' : task.title.replace(/\?$/, ''),
+        plan: { ...card().plan!, startsAt: new Date(Date.now() + 60_000).toISOString() },
+      }
 
 const chatsNow = () => [...live.started, ...CHATS].filter((chat) => !live.cleared.has(chat.id))
 
@@ -83,7 +99,11 @@ const services = servicesFor(
           : shelf === 'none'
             ? (() => {
                 const all = boardOf('scratch', live.cleared)
-                return { ...all, tasks: all.tasks.filter((task) => task.scratch !== true || live.promoted.has(task.taskId)) }
+                const made = live.started.filter((chat) => live.promoted.has(chat.id)).map((chat) => chatTask(chat))
+                return {
+                  ...all,
+                  tasks: [...all.tasks.filter((task) => task.scratch !== true || live.promoted.has(task.taskId)), ...made].map(planned),
+                }
               })()
             : boardOf(shelf, live.cleared)
       // Chats made into tasks are on the board as work, whatever the direction.
@@ -147,9 +167,10 @@ function Window() {
 }
 
 function Lab() {
-  const [direction, setDirection] = useState<Direction>((params.get('d') as Direction | null) ?? 'A')
+  const [direction, setDirection] = useState<Direction>((params.get('d') as Direction | null) ?? 'C')
   const [room, setRoom] = useState<Room>(LAYOUTS[Number(params.get('l') ?? 0)]?.room ?? Room.Both)
   const [visit, setVisit] = useState(0)
+  const [mark, setMark] = useState<MarkKind>((params.get('m') as MarkKind | null) ?? 'althar')
   const [theme, setTheme] = useState(params.get('theme') === 'dark' ? 'dark' : 'light')
   const [open, setOpen] = useState<string | null>(null)
   const [version, setVersion] = useState(0)
@@ -167,8 +188,9 @@ function Lab() {
     url.searchParams.set('d', direction)
     url.searchParams.set('l', String(LAYOUTS.findIndex((one) => one.room === room)))
     url.searchParams.set('theme', theme)
+    url.searchParams.set('m', mark)
     history.replaceState(null, '', url)
-  }, [direction, room, theme])
+  }, [direction, room, theme, mark])
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if (event.metaKey || event.ctrlKey || event.altKey) return
@@ -187,6 +209,8 @@ function Lab() {
         setVisit((n) => n + 1)
         setOpen(null)
       }
+      const marked = MARKS[Number(event.key) - 6]
+      if (marked !== undefined) setMark(marked.kind)
       if (key === 'T') setTheme((was) => (was === 'dark' ? 'light' : 'dark'))
     }
     window.addEventListener('keydown', onKey)
@@ -196,6 +220,7 @@ function Lab() {
     () => ({
       direction: DIRECTIONS.find((one) => one.key === direction)!,
       room,
+      mark,
       visit,
       open,
       version,
@@ -221,12 +246,13 @@ function Lab() {
         live.cleared.clear()
         live.promoted.clear()
         live.started.splice(0)
+        resetAsides()
         setOpen(null)
         refresh()
       },
     }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [direction, room, visit, open, version],
+    [direction, room, mark, visit, open, version],
   )
   return (
     <LabContext.Provider value={state}>
@@ -264,6 +290,15 @@ function Lab() {
               </button>
             ))}
           </span>
+          {direction === 'C' && (
+            <span className={s.group}>
+              {MARKS.map((one, index) => (
+                <button key={one.kind} type="button" aria-pressed={mark === one.kind} onClick={() => setMark(one.kind)}>
+                  <kbd>{index + 6}</kbd> {one.label}
+                </button>
+              ))}
+            </span>
+          )}
           <span className={s.group}>
             <button type="button" onClick={() => setTheme((was) => (was === 'dark' ? 'light' : 'dark'))}>
               <kbd>T</kbd> {theme === 'dark' ? 'Dark' : 'Light'}

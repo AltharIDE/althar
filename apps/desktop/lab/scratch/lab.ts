@@ -4,6 +4,16 @@ import type { Room } from '@althar/ui'
 
 import type { Chat } from './data'
 
+/** How the coordinator is marked, beside its name. */
+export type MarkKind = 'althar' | 'project' | 'glyph' | 'word'
+
+export const MARKS: ReadonlyArray<{ readonly kind: MarkKind; readonly label: string }> = [
+  { kind: 'althar', label: 'Althar mark' },
+  { kind: 'project', label: 'Project mark' },
+  { kind: 'glyph', label: 'Glyph' },
+  { kind: 'word', label: 'Word only' },
+]
+
 export type Direction = 'A' | 'B' | 'C' | 'D' | 'E' | 'F'
 
 export interface DirectionOf {
@@ -25,6 +35,7 @@ export interface DirectionOf {
 export interface LabState {
   readonly direction: DirectionOf
   readonly room: Room
+  readonly mark: MarkKind
   readonly visit: number
   /** The task open in the window, by its thread; null for the project. */
   readonly open: string | null

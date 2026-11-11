@@ -1,0 +1,164 @@
+/* The conversation leaves room up top for its tabs */
+:global([data-direction='C']) [class*='Project-module__talk'] {
+  position: relative;
+  padding-top: 44px;
+}
+/* Its turns are signed Coordinator, not a model */
+:global([data-direction='C']) [class*='Project-module__talk'] [class*='Turn-module__agent'] {
+  display: none;
+}
+.sign {
+  order: -1;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--t-1);
+}
+.mark {
+  flex-shrink: 0;
+}
+.glyph {
+  display: inline-grid;
+  place-items: center;
+  border-radius: 5px;
+  background: var(--t-1);
+  color: var(--n-0);
+}
+
+.strip {
+  position: absolute;
+  inset: 0 0 auto;
+  z-index: 4;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  height: 44px;
+  padding: 0 12px;
+  border-bottom: 1px solid var(--line);
+  background: var(--n-1);
+}
+.tabs {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  overflow-x: auto;
+  scrollbar-width: none;
+  mask-image: linear-gradient(to right, black calc(100% - 24px), transparent);
+}
+.rule {
+  flex-shrink: 0;
+  width: 1px;
+  height: 16px;
+  margin: 0 4px;
+  background: var(--line-2);
+}
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 150px;
+  flex-shrink: 0;
+  padding: 4px 10px;
+  border-radius: 999px;
+  color: var(--t-3);
+  font-size: 12.5px;
+  transition:
+    max-width 0.38s ease,
+    opacity 0.3s ease,
+    padding 0.38s ease;
+}
+.chip:hover {
+  color: var(--t-1);
+  background: var(--n-2);
+}
+.chip[aria-selected='true'] {
+  color: var(--t-1);
+  background: var(--n-0);
+  box-shadow: 0 0 0 1px var(--line-2);
+}
+.chip[data-leaving] {
+  max-width: 0;
+  padding-inline: 0;
+  opacity: 0;
+}
+.coordinator {
+  max-width: none;
+  font-weight: 600;
+}
+.chipTitle {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.live {
+  width: 6px;
+  height: 6px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  background: var(--live, #3b6cf6);
+}
+.inTalk {
+  position: absolute;
+  inset: 44px 0 0;
+  z-index: 3;
+}
+.starting {
+  display: grid;
+  align-content: end;
+  height: 100%;
+  padding: 0 16px 16px;
+  background: var(--n-1);
+}
+.quote {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 0 0 8px;
+  padding: 8px 6px 8px 12px;
+  border-left: 2px solid var(--line-2);
+  color: var(--t-2);
+  font-size: 13px;
+}
+.quoteText {
+  flex: 1;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* Selected text: the button that starts an aside about it */
+.ask {
+  position: fixed;
+  z-index: 50;
+  transform: translate(-50%, calc(-100% - 8px));
+  border-radius: 8px;
+  box-shadow: 0 6px 20px rgb(0 0 0 / 0.18);
+}
+
+/* The task on its way to the board */
+.ghost {
+  position: fixed;
+  z-index: 60;
+  margin: 0;
+  transform-origin: top left;
+  pointer-events: none;
+  box-shadow: 0 18px 40px rgb(0 0 0 / 0.22);
+  background: var(--n-0);
+  border-radius: 12px;
+}
+:global([data-arrived]) {
+  animation: arrived 1.6s ease-out;
+}
+@keyframes arrived {
+  0% {
+    box-shadow: 0 0 0 3px var(--live, #3b6cf6);
+  }
+  100% {
+    box-shadow: 0 0 0 3px transparent;
+  }
+}

@@ -4,6 +4,7 @@ import { createPortal } from 'react-dom'
 import { ChromeButton, IconButton, Menu, MenuItem } from '@althar/ui'
 
 import { type Chat, ELSEWHERE, isOld } from './data'
+import { Asides } from './asides'
 import { ChatFace, ChatRow, OldLine, StartBox, type Words } from './kit'
 import type { DirectionOf } from './lab'
 import { useLab } from './lab'
@@ -17,7 +18,6 @@ import s from './directions.module.css'
  */
 
 const CHATS: Words = { one: 'chat', many: 'chats' }
-const ASIDES: Words = { one: 'aside', many: 'asides' }
 
 // What a direction has open, shared by its bar button and its overlay.
 let ui = { view: false, tray: false, chat: null as string | null }
@@ -115,88 +115,11 @@ function B() {
   )
 }
 
-// ——— C: Asides, beside the coordinator in the conversation ———
+// ——— C: Asides, beside the coordinator in the conversation (asides.tsx) ———
 
-function Asides() {
-  const lab = useLab()
-  const open = useUi()
-  const talk = useFound('[class*="Project-module__talk"]', [lab.open, lab.visit, lab.room])
-  if (talk === null || lab.open !== null) return null
-  const recent = lab.chats.filter((chat) => !isOld(chat))
-  const old = lab.chats.filter(isOld)
-  const current = lab.chats.find((chat) => chat.id === open.chat) ?? null
-  const starting = open.chat === 'new'
-  return createPortal(
-    <>
-      <div className={s.strip}>
-        <div className={s.tabs} role="tablist" aria-label="Asides">
-          <button
-            type="button"
-            role="tab"
-            aria-selected={current === null && !starting}
-            className={s.chip}
-            onClick={() => setUi({ chat: null })}
-          >
-            Coordinator
-          </button>
-          {recent.map((chat) => (
-            <button
-              key={chat.id}
-              type="button"
-              role="tab"
-              aria-selected={current?.id === chat.id}
-              className={s.chip}
-              onClick={() => setUi({ chat: chat.id })}
-              title={chat.said}
-            >
-              {chat.running === true && <span className={s.live} />}
-              <span className={s.chipTitle}>{chat.title}</span>
-            </button>
-          ))}
-        </div>
-        {old.length > 0 && (
-          <Menu
-            label="Older asides"
-            trigger={
-              <button type="button" className={s.chip}>
-                {old.length} older
-              </button>
-            }
-            note={`Untouched for over a week. Cleared, they still come up in ⌘K.`}
-          >
-            {old.map((chat) => (
-              <MenuItem key={chat.id} onSelect={() => setUi({ chat: chat.id })}>
-                {chat.title}
-              </MenuItem>
-            ))}
-            <MenuItem onSelect={() => lab.clear(old.map((chat) => chat.id))}>Clear these {old.length}</MenuItem>
-          </Menu>
-        )}
-        <IconButton icon="plus" size="small" label="New aside" kbd="⌘⇧N" onClick={() => setUi({ chat: 'new' })} />
-      </div>
-      {current !== null && (
-        <div className={s.inTalk}>
-          <ChatFace key={current.id} chat={current} words={ASIDES} onDone={() => setUi({ chat: null })} />
-        </div>
-      )}
-      {starting && (
-        <div className={s.inTalk}>
-          <div className={s.starting}>
-            <p className={s.lead}>
-              An aside is a quick question to an agent of its own, beside the coordinator: nothing is planned, and the board stays as it is.
-            </p>
-            <StartBox placeholder="Ask something on the side" onStarted={(chat) => setUi({ chat: chat.id })} />
-          </div>
-        </div>
-      )}
-    </>,
-    talk,
-  )
-}
-
-/** With the conversation closed, the asides have nowhere to be: the board says how many, and opens the conversation on them. */
 function C() {
-  return <Asides />
+  const lab = useLab()
+  return <Asides mark={lab.mark} />
 }
 
 // ——— D: Chats, a tray over any screen, across projects ———
@@ -331,7 +254,7 @@ export const DIRECTIONS: ReadonlyArray<DirectionOf> = [
   {
     key: 'C',
     label: 'Asides in the conversation',
-    note: 'Asides: tabs over the conversation, beside the coordinator. Needs the conversation open.',
+    note: 'Asides: tabs over the conversation, beside the coordinator. Select its words to ask aside; ask for work and it flies to the board.',
     board: 'none',
     Chrome: Nothing,
     Overlay: C,
