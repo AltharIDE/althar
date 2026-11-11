@@ -1643,15 +1643,24 @@ export class Runs extends Context.Service<
        * ending, and a step running with no turn of its own to report in is read as one that went quiet. The call doesn't
        * stay open, so `finish_step` no longer refuses once the work is done.
        */
-      const answerWaiting = (threadId: string, resume: boolean) =>
+      const answerWaiting = (threadId: string, resume: boolean, turnId?: string) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
           const [thread] = yield* sql<{ taskId: string }>`
             SELECT task_id AS taskId FROM threads WHERE id = ${threadId} AND kind = 'task'`
           if (thread === undefined) return
+          // A turn answers the calls that were open when the words it carries were sent, not one the lead asked after them,
+          // while it ran on: that question is still the person's to answer.
+          const [sent] =
+            turnId === undefined
+              ? []
+              : yield* sql<{ at: string | null }>`
+                SELECT max(u.accepted_at) AS at FROM turn_delivery_inputs d JOIN user_inputs u ON u.id = d.user_input_id
+                WHERE d.delivery_id = ${turnId}`
+          const until = sent?.at ?? '9999'
           const open = yield* sql<{ id: string; projectId: ProjectId; attemptId: string | null }>`
             SELECT id, project_id AS projectId, node_attempt_id AS attemptId FROM attention_requests
-            WHERE task_id = ${thread.taskId} AND kind = 'stuck' AND state = 'open'
+            WHERE task_id = ${thread.taskId} AND kind = 'stuck' AND state = 'open' AND created_at <= ${until}
               AND json_extract(payload, '$.why') = 'waiting_on_person'`
           for (const call of open) {
             const at = yield* timestamp
@@ -2117,7 +2126,7 @@ export class Runs extends Context.Service<
           if (event._tag !== 'TurnEnded' && event._tag !== 'SessionEnded') {
             // The person wrote in the thread: a lead waiting on their answer has its card closed as they send, and goes on with the turn that carries it.
             if (event._tag === 'PersonSaid') yield* answerWaiting(event.threadId, false)
-            if (event._tag === 'TurnStarted' && event.byPerson === true) yield* answerWaiting(event.threadId, true)
+            if (event._tag === 'TurnStarted' && event.byPerson === true) yield* answerWaiting(event.threadId, true, event.turnId)
             return
           }
           // A quick task whose lead changed the repository in the turn that ended has its work on a branch of its own now.

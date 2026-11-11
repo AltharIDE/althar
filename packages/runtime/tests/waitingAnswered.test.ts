@@ -1,5 +1,6 @@
 import type { MessageSender } from '@althar/contracts'
 import type { ProjectId } from '@althar/domain'
+import { holds } from '@althar/provider-adapters/testing'
 import { assert, describe, it } from '@effect/vitest'
 import { Effect, Layer } from 'effect'
 import { SqlClient } from 'effect/sql'
@@ -213,6 +214,44 @@ describe('the person’s message to a lead waiting on them', () => {
       assert.strictEqual(yield* attemptState(other.taskId), 'running')
     }).pipe(Effect.provide(oneAtOnce)),
   )
+
+  it.live('leaves a call the lead asks after the person sent their reply open when the reply’s turn starts', () => {
+    const hold = holds()
+    return Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const projectId = yield* opened
+      const task = yield* started(projectId, 'Still at work', 'Work on it. [lead:wait]')
+      yield* until(attemptState(task.taskId).pipe(Effect.map((state) => (state === 'running' ? [state] : []))), (rows) => rows.length === 1)
+      const lead = yield* leadOf(projectId, task.taskId, task.threadId)
+      yield* callTool(lead, 'wait_for_person', { question: 'Which one?' })
+      const first = yield* asked(task.taskId)
+      // The reply is kept behind the lead's turn, and closes the call as it is sent.
+      yield* says(task.threadId, 'B please.', { kind: 'window' })
+      yield* until(
+        Effect.map(stateOf(first), (state) => (state === 'answered' ? [state] : [])),
+        (rows) => rows.length === 1,
+      )
+      // Before the reply's turn starts, the lead asks again: a question the person hasn't answered.
+      yield* callTool(lead, 'wait_for_person', { question: 'And the colour?' })
+      const both = yield* until(calls(task.taskId), (rows) => rows.length === 2)
+      assert.strictEqual(both[1]?.state, 'open')
+      // The lead's turn ends, and the reply's turn starts.
+      hold.open('[lead:wait]')
+      yield* until(
+        Effect.gen(function* () {
+          return yield* sql<{ n: number }>`
+            SELECT count(*) AS n FROM user_inputs WHERE thread_id = ${task.threadId} AND body = 'B please.' AND state = 'delivered'`
+        }),
+        (rows) => rows[0]?.n === 1,
+      )
+      yield* Effect.sleep('1 second')
+      assert.deepStrictEqual(
+        (yield* calls(task.taskId)).map((row) => row.state),
+        ['answered', 'open'],
+      )
+      assert.strictEqual(yield* phaseOf(projectId, task.taskId), 'waiting')
+    }).pipe(Effect.provide(withQueries(':memory:', {}, { each: { 'claude-code': { holds: hold } } })))
+  })
 
   it.live('leaves a call the lead asks again in the turn that was answered open', () =>
     Effect.gen(function* () {
