@@ -21,7 +21,8 @@ import { keys } from './reads'
  *   one change, `card`: the runtime works a task's card out again as
  *   anything of the task changes, whatever kind of record it is (its
  *   `TASK_OF`), and says `card` only where it came out different, its calls
- *   included; and a project's own calls, its coordinator's questions, as a
+ *   included, or where a read since gave out a card it never saw (a commit
+ *   made by hand moves one with nothing recorded); and a project's own calls, its coordinator's questions, as a
  *   `card` of the project. So no change a card shows is missed, and what is said in a
  *   thread, most of what changes, reads one card there rather than a board
  *   here. A task's view hears the same `card` on its thread, and reads its

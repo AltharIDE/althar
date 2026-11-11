@@ -2763,8 +2763,29 @@ export class Queries extends Context.Service<
         }
       }
 
+      /*
+       * What the card watcher last worked out of each task's card (below), its card and its calls, and of its card alone. A read
+       * can give out a card the watcher never saw: from what moves with no change recorded, as a commit made in a task's
+       * worktree by hand, or the time. Where one does, the watcher's is dropped, so the task's next change is said whatever
+       * its card comes to: back to what the watcher saw, a window holding the other would otherwise never hear of it.
+       */
+      const shownCards = new Map<string, { readonly whole: string; readonly card: string }>()
+
       /** A task as the board shows it: its card, and, ready, what it changed and what of it merges here. None where it has no card. */
       const onBoard = (row: {
+        readonly id: string
+        readonly state: string
+        readonly createdAt: string
+        readonly settledAt: string | null
+      }) =>
+        Effect.tap(cardOnBoard(row), (read) =>
+          Effect.sync(() => {
+            const watched = shownCards.get(row.id)
+            if (watched !== undefined && watched.card !== JSON.stringify(read)) shownCards.delete(row.id)
+          }),
+        )
+
+      const cardOnBoard = (row: {
         readonly id: string
         readonly state: string
         readonly createdAt: string
@@ -3793,7 +3814,6 @@ export class Queries extends Context.Service<
        * alone, so no kind of change a card reads can be missed, and what is said in a thread, most of what is recorded,
        * reads one card here rather than every board there. What was kept of a settled card goes as its task changes.
        */
-      const shownCards = new Map<string, string>()
       let cardRevision = 0
       const cardShown = (taskId: string) =>
         Effect.gen(function* () {
@@ -3802,9 +3822,9 @@ export class Queries extends Context.Service<
             SELECT id, project_id, state, created_at, settled_at FROM tasks WHERE id = ${taskId}`
           if (row === undefined) return 'gone'
           for (const key of settledCards.keys()) if (key.startsWith(`${taskId}:`)) settledCards.delete(key)
-          const card = yield* onBoard(row)
+          const card = yield* cardOnBoard(row)
           const calls = (yield* callsIn(row.projectId)).filter((one) => one.call.taskId === taskId).map((one) => one.call)
-          return JSON.stringify({ card, calls })
+          return { whole: JSON.stringify({ card, calls }), card: JSON.stringify(card) }
         })
       // What of a project's board is no task's: the questions its coordinator asks the person, which wait in Needs you.
       const shownCalls = new Map<string, string>()
@@ -3834,7 +3854,7 @@ export class Queries extends Context.Service<
             ([taskId, projectId]) =>
               Effect.gen(function* () {
                 const shown = yield* cardShown(taskId)
-                if (shownCards.get(taskId) === shown) return
+                if (shown !== 'gone' && shownCards.get(taskId)?.whole === shown.whole) return
                 if (shown === 'gone') shownCards.delete(taskId)
                 else shownCards.set(taskId, shown)
                 cardRevision += 1
