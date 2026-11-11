@@ -50,8 +50,9 @@ Adding one after the work is pushed starts a review round on the task's
 current head (`reviewHead`, a Ship run that only reviews: `ships.reviewOnly`),
 once the lead's turn is over: it reads only what changed since the last
 review where one ran, else the whole change. Its findings go to the lead to
-settle as any round's, before merge or Ship. Where work still waits for Ship,
-nothing starts: Ship reviews it all, as the plan says. The fast lane's review
+settle as any round's, before merge or Ship. Work that still waits for Ship
+doesn't hold it back: the round reads the branch as it stands, that work too,
+and sends nothing up. The fast lane's review
 reads after the merge, and isn't added to.
 
 ### The review is offered once, as the work turns real

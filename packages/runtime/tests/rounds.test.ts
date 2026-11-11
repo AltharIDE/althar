@@ -1401,6 +1401,34 @@ describe('changing the team of a task that has begun', () => {
     }).pipe(Effect.provide(runtimeWith(github, ':memory:', { holds: slow })))
   })
 
+  it.live('reads the pushed head for a review added back while more is held for Ship, and leaves what is held unshipped', () => {
+    const { working, bare, github } = onGitHub()
+    const slow = holds()
+    return Effect.gen(function* () {
+      const task = yield* start(working, '[lead:slowly] [lead:finish] [lead:edit] [review:pass]')
+      yield* changeTeam(task.taskId, [step('implement', 'claude-code'), step('review', 'codex', null, true)])
+      slow.open('[lead:slowly]')
+      yield* until(cards(task.projectId), (all) => all[0]?.phase === 'ready' && all[0]?.change != null)
+      // The lead commits after the push, and the commit is held for Ship: it goes up only with it, beside the pull request.
+      const sql = yield* SqlClient.SqlClient
+      const [workspace] = yield* sql<{ path: string }>`SELECT path FROM workspaces WHERE task_id = ${task.taskId}`
+      yield* sql`UPDATE workspaces SET held_at = ${new Date().toISOString()} WHERE task_id = ${task.taskId}`
+      commitIn(workspace?.path ?? '', 'later.txt', 'Later')
+      yield* (yield* Changes).refresh(task.taskId)
+      yield* until(cards(task.projectId), (all) => all[0]?.held?.commits === 1)
+      // Adding the review back starts a round all the same: the pull request is not left unreviewed until Ship.
+      yield* changeTeam(task.taskId, [step('implement', 'claude-code'), step('review', 'codex')])
+      const reviewed = (yield* until(results(task.threadId), (all) => all.some((result) => result.step === 'review'))).find(
+        (result) => result.step === 'review',
+      )
+      assert.deepStrictEqual([reviewed?.agentId, reviewed?.verdict], ['codex', 'pass'])
+      // What was held still waits: the review sent nothing up.
+      const [after] = yield* until(cards(task.projectId), (all) => all[0]?.phase === 'ready' && all[0]?.reviewerChange === 'never')
+      assert.strictEqual(after?.held?.commits, 1)
+      assert.notInclude(git(bare, 'log', '--format=%s', 'althar/add-a-retry'), 'Later')
+    }).pipe(Effect.provide(runtimeWith(github, ':memory:', { holds: slow })))
+  })
+
   it.live('offers a review once, as the work turns into a real change, and not again once turned down', () => {
     const { working, github } = onGitHub()
     const slow = holds()

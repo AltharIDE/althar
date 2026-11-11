@@ -2943,8 +2943,8 @@ export class Runs extends Context.Service<
             const held = yield* changes.holds(taskId)
             const unpushed = (yield* changes.aheadOfOpen(taskId)).length > 0
             const after = yield* changes.unshipped(taskId)
-            // A review added after the work went up reads what is up already: where something still waits, Ship reviews it all.
-            if (reviewOnly && (held.length > 0 || unpushed || after.length > 0)) return undefined
+            // A review added after the work went up reads the branch as it stands, whatever still waits for Ship: it is never left
+            // unread for want of a push, and what waits is reviewed with the rest.
             if (!reviewOnly && held.length === 0 && !unpushed && after.length === 0)
               return yield* new ShipRefused({ taskId, why: 'nothing' })
             // Several changes: each ships on its own, with its own review, the bottom of a stack first; one named, with what waits
@@ -7116,7 +7116,8 @@ export class Runs extends Context.Service<
       /**
        * A review added after the task's work went up (a skipped review can be added back until merge): once its lead's turn is
        * over and the run that was ending is, a round of the review's own reads the task's head, from the last review or, with
-       * none, all of it. Nothing where something still waits for Ship, which reviews all of it then, or where nothing is built.
+       * none, all of it, with whatever waits for Ship on the branch too (that stays held, and goes up with Ship). Nothing where
+       * nothing is built.
        */
       const reviewHead = (taskId: string, actorId: ActorId) =>
         Effect.asVoid(
