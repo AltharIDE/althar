@@ -58,6 +58,7 @@ export const offScratch = (taskId: string) =>
       FROM tasks k, shelved WHERE k.id = ${taskId} AND k.shelf = 'scratch'`
     if (chat === undefined || (chat.branched === 0 && chat.linked === 0 && chat.drafted === 0)) return
     yield* sql`UPDATE tasks SET shelf = NULL, revision = revision + 1 WHERE id = ${taskId}`
+    yield* leftAsides(chat.projectId, taskId)
     if (chat.threadId !== null)
       yield* addItem({ projectId: chat.projectId, threadId: chat.threadId }, 'notice', {
         source: 'runtime',
@@ -70,6 +71,24 @@ export const offScratch = (taskId: string) =>
               : 'On the board now: it has a pull request.',
         role: 'aside',
       })
+  })
+
+/**
+ * A chat that left Scratch for the board, said in one line in the
+ * coordinator's conversation, where its asides sit: so the conversation keeps
+ * a record of it, as of a task it started.
+ */
+export const leftAsides = (projectId: ProjectId, taskId: string) =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient
+    const [thread] = yield* sql<{ id: string }>`SELECT id FROM threads WHERE project_id = ${projectId} AND kind = 'coordinator' LIMIT 1`
+    const [task] = yield* sql<{ title: string }>`SELECT title FROM tasks WHERE id = ${taskId}`
+    if (thread === undefined || task === undefined) return
+    yield* addItem({ projectId, threadId: thread.id }, 'notice', {
+      source: 'runtime',
+      severity: 'info',
+      title: `An aside became a task: ${task.title}`,
+    })
   })
 
 /** Tells watching clients the task's card changed, so they read it again. */

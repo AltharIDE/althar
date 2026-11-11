@@ -2,7 +2,7 @@ import type { ActorId, ProjectId } from '@althar/domain'
 import { Effect } from 'effect'
 import { SqlClient } from 'effect/sql'
 
-import { touchTask } from './cards'
+import { leftAsides, touchTask } from './cards'
 import { NotFound } from './errors'
 import { change, fact } from './records'
 
@@ -37,5 +37,7 @@ export const shelve = (taskId: string, shelf: 'scratch' | null, actorId: ActorId
         })
       }),
     )
+    // Off Scratch, the coordinator's conversation says so where its asides sat.
+    if (task.shelf === 'scratch' && shelf === null) yield* leftAsides(task.projectId, taskId)
     yield* touchTask(taskId)
   })

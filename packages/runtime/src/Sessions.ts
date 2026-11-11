@@ -3634,7 +3634,8 @@ export class Sessions extends Context.Service<
           // worktrees have no branch until its lead changes the repository (DEV-96).
           const [quick] = yield* sql<{
             quick: number
-          }>`SELECT ${sql.unsafe(quickIn('k'))} AS quick FROM tasks k WHERE k.id = ${thread.taskId}`
+            shelf: string | null
+          }>`SELECT ${sql.unsafe(quickIn('k'))} AS quick, k.shelf FROM tasks k WHERE k.id = ${thread.taskId}`
           // Whether its project's rules push what the lead commits on their own as its turn ends, or leave it to the person (ADR-072).
           const [pushing] = yield* sql<{ pushes: number | null }>`
             SELECT json_extract(rules, '$.pushCommits') AS pushes FROM policies WHERE project_id = ${thread.projectId}
@@ -3710,6 +3711,11 @@ export class Sessions extends Context.Service<
                       ? `Writing in the repository is fine: its work is on a branch of its own, ${first?.branch ?? ''}, which stays on ${thisDevice()}. Commit there as on any task.`
                       : `Writing in the repository is fine, committed or not: it has no branch yet, and Althar puts what you change there on a branch of its own, ${plainFirst.branch}, when your turn ends or when you call finish_step, and you carry on there in the same folder. That branch stays on ${thisDevice()}; commit there as on any task.`,
                     'If the person asks to make it a real change, to keep it, have it reviewed or open a pull request, call make_it_a_change: it gets a title for what it does, a reviewer and a pull request to end in.',
+                    ...(quick.shelf === 'scratch'
+                      ? [
+                          "It is an aside: a quick chat the person opened beside the coordinator's conversation, off the board, so as not to clutter that conversation. You have the coordinator's tools. Where what they ask is work rather than an answer, say so in a line and start on it: once you change the repository it moves to the board by itself, its tab leaves the asides, and the coordinator's conversation notes it.",
+                        ]
+                      : []),
                     'When it is done, it waits in their Needs you until they settle it. If they tell you it is done, to keep it for later, or to discard it, call settle_task.',
                     'Where you changed nothing in the repository, finish_step needs only your summary.',
                   ].join(' '),

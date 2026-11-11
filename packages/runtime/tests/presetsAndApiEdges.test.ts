@@ -592,6 +592,49 @@ describe('a chat on Scratch, moving to the board', () => {
   )
 })
 
+describe('an aside, started by the person', () => {
+  it.live('sits on Scratch with no card in the coordinator’s conversation, opens with their words, and is noted there once it leaves', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { client, store, project } = yield* connected
+        const words = 'Why does the retry back off twice?\n\nIt feels slow when Stripe is down.'
+        const aside = yield* client.StartTask({
+          commandId: commandId(),
+          projectId: project.id,
+          title: 'Why does the retry back off twice?',
+          description: words,
+          steps: [{ key: 'implement', agentId: 'codex', model: null, skipped: false }],
+          chat: true,
+        })
+        const thread = yield* client.GetThread({ threadId: aside.threadId })
+        assert.isTrue(thread.task.scratch)
+        assert.strictEqual(thread.task.request, words)
+        const coordinator = () => client.GetCoordinator({ projectId: project.id })
+        const cards = (yield* coordinator()).items.filter((item) => item.kind === 'task')
+        assert.isFalse(cards.some((item) => item.kind === 'task' && item.content.taskId === aside.id))
+        // Nothing of it goes outside the project when it is done: it is quick, as a chat the coordinator starts.
+        const [kind] = yield* store(
+          Effect.flatMap(
+            SqlClient.SqlClient,
+            (sql) =>
+              sql<{ plain: number; here: number | null }>`
+                SELECT (SELECT count(*) FROM workspaces w WHERE w.task_id = k.id AND w.branched_at IS NOT NULL) = 0 AS plain,
+                  (SELECT json_extract(p.parameters, '$.here') FROM task_plans p WHERE p.task_id = k.id) AS here
+                FROM tasks k WHERE k.id = ${aside.id}`,
+          ),
+        )
+        assert.deepStrictEqual(kind, { plain: 1, here: 1 })
+        // Moved to the board, by the person or by itself, the coordinator's conversation says so in a line.
+        yield* client.ShelveTask({ commandId: commandId(), taskId: aside.id, shelf: null })
+        const lines = (yield* coordinator()).items.flatMap((item) =>
+          item.kind === 'notice' && item.content.title.startsWith('An aside') ? [item.content.title] : [],
+        )
+        assert.deepStrictEqual(lines, ['An aside became a task: Why does the retry back off twice?'])
+      }),
+    ),
+  )
+})
+
 describe('a lead’s helpers, among the agents at work', () => {
   it.live(
     'hold a place each while their turns run, four of a task’s at once with the fifth waiting for one, which carries on after a crash',

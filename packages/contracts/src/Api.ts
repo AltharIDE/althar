@@ -4574,6 +4574,11 @@ export const Api = RpcGroup.make(
       end: Schema.optional(Schema.NullOr(TaskEnd)),
       /** The project's repositories it changes, by name: needed only in a project of several. */
       repositories: Schema.optional(Schema.Array(Schema.String)),
+      /**
+       * An aside: a chat of the person's own beside the coordinator's conversation (a task is a conversation plus parts, "Chats
+       * and Scratch"). It is plain, sits on Scratch, and nothing of it leaves this computer; `end` is not read.
+       */
+      chat: Schema.optional(Schema.Boolean),
     },
     TaskSummary,
   ),
