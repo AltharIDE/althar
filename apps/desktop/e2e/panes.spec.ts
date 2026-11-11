@@ -86,7 +86,7 @@ for (const appearance of ['light', 'dark'] as const) {
       expect(await placeOf(page)).toEqual(place)
       await page
         .locator('header')
-        .first()
+        .filter({ has: page.getByRole('heading', { level: 1 }) })
         .screenshot({ path: `test-results/panes-5-away-${appearance}.png`, scale: 'css' })
       await page.getByRole('group', { name: 'Panes' }).getByRole('button', { name: 'Board' }).click()
       await expectPanes(page, { conversation: true, board: true })
