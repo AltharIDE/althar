@@ -446,15 +446,21 @@ export class TaskActions extends Context.Service<
             case 'hold': {
               const [plan] = yield* sql<{ id: string; startsAt: string | null }>`
                 SELECT id, starts_at FROM task_plans WHERE task_id = ${task.id} AND state = 'proposed' ORDER BY proposed_at DESC LIMIT 1`
-              if (plan === undefined)
-                return nothing(
-                  can.includes('stop')
-                    ? `${task.slug} has started: there is no plan to hold. Stop it instead.`
-                    : `${task.slug} has no plan waiting to start.`,
-                )
-              if (plan.startsAt === null) return nothing(`${task.slug} is held already: it waits until it is started.`)
-              yield* plans.hold(plan.id, actorId)
-              return did(`Held ${task.slug}: its plan waits until it is started.`)
+              if (plan !== undefined) {
+                if (plan.startsAt === null) return nothing(`${task.slug} is held already: it waits until it is started.`)
+                yield* plans.hold(plan.id, actorId)
+                return did(`Held ${task.slug}: its plan waits until it is started.`)
+              }
+              // Started, but its first step still waits for a free agent or its checkout: it leaves the line.
+              const [started] = yield* sql<{ id: string }>`
+                SELECT id FROM task_plans WHERE task_id = ${task.id} AND state = 'accepted' ORDER BY proposed_at DESC LIMIT 1`
+              if (started !== undefined && (yield* plans.hold(started.id, actorId)))
+                return did(`Held ${task.slug}: it is out of the line, and its plan waits until it is started.`)
+              return nothing(
+                can.includes('stop')
+                  ? `${task.slug} has started: there is no plan to hold. Stop it instead.`
+                  : `${task.slug} has no plan waiting to start.`,
+              )
             }
             case 'restart': {
               if (standing.state === 'abandoned') {
@@ -1389,7 +1395,7 @@ export class TaskActions extends Context.Service<
         ),
         tool(
           'hold_task',
-          'Holds a task’s plan that is counting down to start: it waits until it is started (restart_task). For a task already at work, stop it instead. It acts at once, with a line in your thread and the task’s.',
+          'Holds a task’s plan that is counting down to start, or whose first step still waits for a free agent or its checkout: it leaves the line and waits until it is started (restart_task). For a task already at work, stop it instead. It acts at once, with a line in your thread and the task’s.',
           { type: 'object', properties: { task, why }, required: ['task'] },
           (access, input) => Effect.flatMap(read(Asked, input), (asked) => act(access, asked.task, 'hold', { why: asked.why })),
         ),

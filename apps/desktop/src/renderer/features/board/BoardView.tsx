@@ -59,7 +59,7 @@ import {
 import { afterSteps, isAutomatedStep, stepText } from '../../shared/steps'
 import { ago, clock, running } from '../../shared/time'
 import { text as stuckText } from '../task/StuckCall'
-import { teamChangeOf, TeamMenu } from '../team/Team'
+import { canHold, teamChangeOf, TeamMenu } from '../team/Team'
 import s from './Board.module.css'
 import { type Held, heldOf, holding, type Lanes, type Waiting } from './lanes'
 import type { LineActions } from './useBoard'
@@ -191,6 +191,8 @@ const HANDED_SHOWN = 3
 export interface TeamActions {
   readonly projectId: string
   readonly start: (planId: string) => Promise<void>
+  /** Holds it, out of the line, until it is started. */
+  readonly hold: (planId: string) => Promise<void>
   readonly change: (taskId: string) => void
 }
 
@@ -1063,32 +1065,35 @@ export function BoardView({
       />
     )
   }
-  // A plan that hasn't begun starts, or changes who does it, from its row; one starting offers Start no more until it has.
+  // A plan that hasn't begun starts, is held, or changes who does it, from its row; one starting or holding offers neither until it has.
   const teamOf = (work: BoardTask) => {
     const change = team === undefined ? null : teamChangeOf(work)
-    // A task that has begun changes its team from its own menu, not from its row.
-    if (team === undefined || change === null || change === 'begun' || work.plan === null) return {}
+    if (team === undefined || work.plan === null || change === null) return {}
     const planId = work.plan.id
-    const start =
-      change === 'starts' && !starting.has(planId)
-        ? () => {
-            setStarting((was) => new Set(was).add(planId))
-            void team.start(planId).finally(() =>
-              setStarting((was) => {
-                const next = new Set(was)
-                next.delete(planId)
-                return next
-              }),
-            )
-          }
-        : undefined
+    const busy = (move: (planId: string) => Promise<void>) => () => {
+      setStarting((was) => new Set(was).add(planId))
+      void move(planId).finally(() =>
+        setStarting((was) => {
+          const next = new Set(was)
+          next.delete(planId)
+          return next
+        }),
+      )
+    }
+    const free = !starting.has(planId)
+    const start = change === 'starts' && free ? busy(team.start) : undefined
+    const hold = canHold(work) && free ? busy(team.hold) : undefined
+    // A task that has begun changes its team from its own menu, not from its row; a Local task that waits for its checkout only holds.
+    if (change === 'begun') return hold === undefined ? {} : { onHold: hold }
     return {
       ...(start === undefined ? {} : { onStart: start }),
+      ...(hold === undefined ? {} : { onHold: hold }),
       menu: (
         <TeamMenu
           projectId={team.projectId}
           task={work}
           {...(start === undefined ? {} : { onStart: start })}
+          {...(hold === undefined ? {} : { onHold: hold })}
           onChange={() => team.change(work.taskId)}
         />
       ),

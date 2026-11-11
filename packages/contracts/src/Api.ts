@@ -2507,6 +2507,11 @@ export const TaskCard = Schema.Struct({
   /** Its plan's first step waits for a place, nothing of it started yet: the person can still change the plan. */
   planWaits: Schema.optional(Schema.Boolean),
   /**
+   * Its plan can still be held: nothing of it has begun, and its first step waits for a place among the agents or for its
+   * checkout. Holding takes it out of the line until the person starts it.
+   */
+  holdable: Schema.optional(Schema.Boolean),
+  /**
    * It waits for a place before any agent has worked on it, whatever its
    * kind (a plan's first step, a review's or a quick task's lead's first
    * turn): it is in its project's line, up next.

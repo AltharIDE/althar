@@ -97,7 +97,7 @@ import { conflictsOf, hasOutputs, hasOutputsToShow, latestOf, Outputs } from './
 import s from './Task.module.css'
 import { OpenFinding } from './Reports'
 import { useChanges } from './useChanges'
-import { ChangeTeam, useTeamed } from '../team/Team'
+import { canHold, ChangeTeam, useTeamed } from '../team/Team'
 import type { TaskModel } from './useTask'
 import { chooseFace, chosenFaces } from './chosenFaces'
 import { PageOpenerProvider, useOpener } from '../browser/opener'
@@ -939,6 +939,7 @@ export function TaskView({
         {...(snapshot.task.toward === undefined ? {} : { toward: snapshot.task.toward })}
         onRename={() => setRenaming(true)}
         {...(can('start') && planId !== null ? { onStartNow: () => void model.startPlan(planId) } : {})}
+        {...(teamed !== null && teamed.plan !== null && canHold(teamed) ? { onHold: () => void model.holdPlan(teamed.plan!.id) } : {})}
         {...(teamed === null ? {} : { onChangeTeam: () => setChangingTeam(true) })}
         {...(drafts.length > 0 ? { onMarkReady: () => void model.markAllReady(drafts.map((one) => one.url)) } : {})}
         // A task under way, or drafted, with a worktree, follows a pull request it didn't open, attached by its link (ADR-052); a

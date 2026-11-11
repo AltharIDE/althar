@@ -842,7 +842,12 @@ export function ProjectView({
                       folds={folds}
                       onFoldsChange={setFolds}
                       onTalk={talkToCoordinator}
-                      team={{ projectId, start: (planId) => model.startPlan(planId), change: setTeamFor }}
+                      team={{
+                        projectId,
+                        start: (planId) => model.startPlan(planId),
+                        hold: (planId) => model.holdPlan(planId),
+                        change: setTeamFor,
+                      }}
                       {...(board.moreSettled ? { onShowOlder: board.showOlder } : {})}
                     />
                     {teamFor !== null && (
