@@ -246,7 +246,7 @@ function LineOffer({ verdict, state, setState, name, setName }: OfferProps) {
         </>
       )}
       <span className={s.rule} aria-hidden="true" />
-      <Button size="small" variant="ink" onClick={() => setState('kept')}>
+      <Button size="small" variant="default" onClick={() => setState('kept')}>
         {verdict.kind === 'near' ? `Use ${verdict.preset.name}` : 'Keep'}
       </Button>
       <button type="button" className={s.cross} aria-label="Not now" onClick={() => setState('dismissed')}>
