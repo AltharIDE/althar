@@ -224,6 +224,8 @@ export interface TaskLaunchProps {
   onStart: (steps: readonly LaunchStep[], end: TaskEnd) => void
   /** Something offered about the plan, inside the card under its foot: keeping its parts as a preset. */
   aside?: ReactNode
+  /** A quiet word in the foot, after the estimate: something offered about the plan, below its Start. */
+  footNote?: ReactNode
   text?: Partial<TaskLaunchText>
 }
 
@@ -233,6 +235,7 @@ export function TaskLaunch({
   presets,
   onPresetChange,
   aside,
+  footNote,
   title,
   from,
   steps: stepsProp,
@@ -449,7 +452,10 @@ export function TaskLaunch({
       </ol>
       {queued !== undefined ? (
         <div className={s.foot}>
-          <span className={s.estimate}>{estimate}</span>
+          <span className={s.estimate}>
+            {estimate}
+            {footNote}
+          </span>
           <span className={s.when} role="status">
             {queued}
           </span>
@@ -459,6 +465,7 @@ export function TaskLaunch({
           <span className={s.estimate}>
             {estimate}
             {waiting.length > 0 && limited && <> · {t.alsoWaits(waiting.map((st) => st.label).join(', '), limited.until)}</>}
+            {footNote}
           </span>
           {!held && <CountdownRing left={share} />}
           {/* the countdown is not read out each second; that it starts on its own is said once, when it is first seen */}

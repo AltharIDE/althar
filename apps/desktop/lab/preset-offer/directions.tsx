@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react'
 
-import { Button, Field, HoverCard, Icon, LinkButton, Model, type ModelInfo, TaskEnd, TaskLaunch, WorksIn } from '@althar/ui'
+import { Button, Field, HoverCard, Icon, LinkButton, Model, type ModelInfo, Popover, TaskEnd, TaskLaunch, WorksIn } from '@althar/ui'
 
 import { MODEL_LIST } from '../../../../packages/ui/src/fixtures/models'
 import { cx } from '../../../../packages/ui/src/lib/cx'
@@ -9,11 +9,14 @@ import type { Verdict } from './rules'
 import s from './page.module.css'
 
 /*
- * The offer on the plan card it came with, four ways: a strip inside the
- * card, under its foot (TaskLaunch's `aside`), since the card already shows
- * the parts. Each says what parts and presets are behind an info mark. A
- * verdict of `near` is the same strip naming the built-in preset that fits.
- * The first round's card, line and picker are in git history (fb4fcc43c).
+ * The offer on the plan card it came with, as a secondary action: nothing in
+ * it is a filled button, Start stays the one thing that stands out. Four
+ * ways: a muted footnote row under the foot (TaskLaunch's `aside`), a link in
+ * the foot itself (`footNote`) that opens a small popover, a caption under
+ * the card, and a single icon in the foot. Each says what parts and presets
+ * are behind an info mark. A verdict of `near` names the built-in preset
+ * that fits. Earlier rounds are in git history: the card, line and picker
+ * (fb4fcc43c), the louder strips (43aad191e).
  */
 
 export type OfferState = 'offer' | 'editing' | 'kept' | 'dismissed'
@@ -53,7 +56,19 @@ function About() {
 }
 
 /** The plan card the offer came with, from the kit: its preset in the kicker, its steps, how it ends; the offer inside it. */
-export function PlanCard({ title, parts, preset, aside }: { title: string; parts: PresetParts; preset: string; aside?: ReactNode }) {
+export function PlanCard({
+  title,
+  parts,
+  preset,
+  aside,
+  footNote,
+}: {
+  title: string
+  parts: PresetParts
+  preset: string
+  aside?: ReactNode
+  footNote?: ReactNode
+}) {
   const lead = modelOf(parts.lead) ?? MODELS['claude-code/claude-opus-5-5']!
   const reviewer = modelOf(parts.reviewer) ?? MODELS['codex/gpt-6.1-sol']!
   return (
@@ -73,6 +88,7 @@ export function PlanCard({ title, parts, preset, aside }: { title: string; parts
       held
       onStart={() => {}}
       {...(aside === undefined ? {} : { aside })}
+      {...(footNote === undefined ? {} : { footNote })}
     />
   )
 }
@@ -91,7 +107,7 @@ export interface Direction {
   letter: string
   name: string
   idea: string
-  /** The plan card with the offer in it. */
+  /** The plan card with the offer on it. */
   Thread: (props: OfferProps & { title: string; planParts: PresetParts }) => ReactNode
 }
 
@@ -131,164 +147,206 @@ function NameInPlace({
 }
 
 const nearWhat = (v: Extract<Verdict, { kind: 'near' }>) => `These are ${v.preset.name}, ${v.differs}.`
-
-/** Closes the strip: Not now. */
-const Cross = ({ onClick }: { onClick: () => void }) => (
-  <button type="button" className={s.cross} aria-label="Not now" onClick={onClick}>
-    <Icon name="close" size={10} />
-  </button>
-)
-
-/** Kept, the strip says so in its place, with Undo; the card's kicker has the new name. */
-function Kept({ verdict, name, setState, tone }: Pick<OfferProps, 'verdict' | 'name' | 'setState'> & { tone?: string }) {
-  return (
-    <div className={cx(s.strip, tone, s.done)}>
-      <Icon name="check" size={11} />
-      <span>{verdict.kind === 'near' ? `Tasks like these start from ${verdict.preset.name}` : `Kept as a preset: ${name}`}</span>
-      <span className={s.grow} />
-      <LinkButton onClick={() => setState('offer')}>Undo</LinkButton>
-    </div>
-  )
-}
-
 const editingOf = (setState: OfferProps['setState']) => (editing: boolean) => setState(editing ? 'editing' : 'offer')
+const keepLabel = (verdict: Shown) => (verdict.kind === 'near' ? `Use ${verdict.preset.name}` : 'Keep')
+const keptLine = (verdict: Shown, name: string) =>
+  verdict.kind === 'near' ? `Tasks like these start from ${verdict.preset.name}` : `Kept as ${name}`
 
-/* A · Hairline: a quiet row under the foot, the name in place, Keep and a cross. */
-function Hairline({ verdict, state, setState, name, setName }: OfferProps) {
-  if (state === 'dismissed') return null
-  if (state === 'kept') return <Kept verdict={verdict} name={name} setState={setState} />
+/** Kept, a muted line in the offer's place, with Undo. */
+function Kept({ verdict, name, setState, className }: Pick<OfferProps, 'verdict' | 'name' | 'setState'> & { className?: string }) {
   return (
-    <div className={s.strip}>
+    <span className={cx(s.quiet, className)}>
+      <Icon name="check" size={10} />
+      {keptLine(verdict, name)}
+      <LinkButton onClick={() => setState('offer')}>Undo</LinkButton>
+    </span>
+  )
+}
+
+/* A · Footnote: the bottom bar, demoted: small muted words under the foot, Keep and Not now as links. */
+function Footnote({ verdict, state, setState, name, setName }: OfferProps) {
+  if (state === 'dismissed') return null
+  return (
+    <div className={s.footnote}>
+      {state === 'kept' ? (
+        <Kept verdict={verdict} name={name} setState={setState} />
+      ) : (
+        <span className={s.quiet}>
+          {verdict.kind === 'near' ? (
+            nearWhat(verdict)
+          ) : (
+            <>
+              Keep these parts as
+              <NameInPlace name={name} setName={setName} editing={state === 'editing'} setEditing={editingOf(setState)} />
+            </>
+          )}
+          <About />
+          <span className={s.grow} />
+          <LinkButton onClick={() => setState('dismissed')}>Not now</LinkButton>
+          <LinkButton className={s.strong} onClick={() => setState('kept')}>
+            {keepLabel(verdict)}
+          </LinkButton>
+        </span>
+      )}
+    </div>
+  )
+}
+
+/** The small form a foot link or icon opens: the name, what it is, Keep. */
+function KeepForm({ verdict, setState, name, setName }: Pick<OfferProps, 'verdict' | 'setState' | 'name' | 'setName'>) {
+  return (
+    <form
+      className={s.form}
+      onSubmit={(event) => {
+        event.preventDefault()
+        setState('kept')
+      }}
+    >
       {verdict.kind === 'near' ? (
-        <span className={s.text}>{nearWhat(verdict)}</span>
+        <span className={s.formText}>{nearWhat(verdict)}</span>
       ) : (
         <>
-          <span className={s.text}>Keep these parts as</span>
-          <NameInPlace name={name} setName={setName} editing={state === 'editing'} setEditing={editingOf(setState)} />
+          <label className={s.formLabel} htmlFor="preset-name">
+            Preset name
+          </label>
+          <Field id="preset-name" value={name} onChange={(event) => setName(event.target.value)} />
+          <span className={s.formText}>
+            New tasks can start from these parts: where it works, who checks it, how it ends, who leads it.
+          </span>
         </>
       )}
-      <About />
-      <span className={s.grow} />
-      <Button size="small" onClick={() => setState('kept')}>
-        {verdict.kind === 'near' ? `Use ${verdict.preset.name}` : 'Keep'}
-      </Button>
-      <Cross onClick={() => setState('dismissed')} />
-    </div>
-  )
-}
-
-/* B · Violet: the same row on the kit's ask paper, so it reads as a question with a primary answer. */
-function Violet({ verdict, state, setState, name, setName }: OfferProps) {
-  if (state === 'dismissed') return null
-  if (state === 'kept') return <Kept verdict={verdict} name={name} setState={setState} tone={s.violet} />
-  return (
-    <div className={cx(s.strip, s.violet)}>
-      {verdict.kind === 'near' ? (
-        <span className={s.text}>{nearWhat(verdict)}</span>
-      ) : (
-        <>
-          <span className={s.text}>Third time with these parts. Keep them as</span>
-          <NameInPlace name={name} setName={setName} editing={state === 'editing'} setEditing={editingOf(setState)} />
-        </>
-      )}
-      <About />
-      <span className={s.grow} />
-      <Button size="small" variant="quiet" onClick={() => setState('dismissed')}>
-        Not now
-      </Button>
-      <Button size="small" variant="signal" onClick={() => setState('kept')}>
-        {verdict.kind === 'near' ? `Use ${verdict.preset.name}` : 'Keep'}
-      </Button>
-    </div>
-  )
-}
-
-/* C · Field: the name is a field from the start, labelled as a preset's name; Save beside it. */
-function NameField(props: OfferProps) {
-  const { verdict, state, setState, name, setName } = props
-  if (verdict.kind === 'near') return <Hairline {...props} />
-  if (state === 'dismissed') return null
-  if (state === 'kept') return <Kept verdict={verdict} name={name} setState={setState} />
-  return (
-    <div className={s.strip}>
-      <label className={s.text} htmlFor="preset-name">
-        Save as a preset
-      </label>
-      <About />
-      <Field
-        id="preset-name"
-        className={s.wideField}
-        value={name}
-        onFocus={() => setState('editing')}
-        onChange={(event) => setName(event.target.value)}
-      />
-      <span className={s.grow} />
-      <Button size="small" disabled={name.trim() === ''} onClick={() => setState('kept')}>
-        Save
-      </Button>
-      <Cross onClick={() => setState('dismissed')} />
-    </div>
-  )
-}
-
-/* D · Start from: says what keeping it changes, the preset these tasks start from instead of the plan's; the kicker follows. */
-function From({ verdict, state, setState, name, setName, planPreset }: OfferProps) {
-  if (state === 'dismissed') return null
-  if (state === 'kept') return <Kept verdict={verdict} name={name} setState={setState} />
-  return (
-    <div className={s.strip}>
-      <span className={s.text}>Start tasks like this from</span>
-      {verdict.kind === 'near' ? (
-        <b className={s.named}>{verdict.preset.name}</b>
-      ) : (
-        <NameInPlace name={name} setName={setName} editing={state === 'editing'} setEditing={editingOf(setState)} />
-      )}
-      <span className={s.was}>
-        not <s>{planPreset}</s>
+      <span className={s.formFoot}>
+        <LinkButton onClick={() => setState('dismissed')}>Don’t offer again</LinkButton>
+        <span className={s.grow} />
+        <Button size="small" type="submit" disabled={verdict.kind === 'offer' && name.trim() === ''}>
+          {keepLabel(verdict)}
+        </Button>
       </span>
+    </form>
+  )
+}
+
+/* B · In the foot: a link beside the estimate, inside the card's own foot; it opens the small form. */
+function FootLink({ verdict, state, setState, name, setName }: OfferProps) {
+  if (state === 'dismissed') return null
+  if (state === 'kept') return <Kept verdict={verdict} name={name} setState={setState} className={s.inFoot} />
+  return (
+    <span className={cx(s.quiet, s.inFoot)}>
+      ·
+      <Popover
+        label="Keep as a preset"
+        placement="above"
+        align="start"
+        width={300}
+        padded={false}
+        open={state === 'editing'}
+        onOpenChange={(open) => setState(open ? 'editing' : 'offer')}
+        trigger={<LinkButton>{verdict.kind === 'near' ? `Nearly ${verdict.preset.name}` : 'Keep as a preset'}</LinkButton>}
+      >
+        <KeepForm verdict={verdict} setState={setState} name={name} setName={setName} />
+      </Popover>
       <About />
-      <span className={s.grow} />
-      <LinkButton onClick={() => setState('dismissed')}>Not now</LinkButton>
-      <Button size="small" onClick={() => setState('kept')}>
-        {verdict.kind === 'near' ? 'Use it' : 'Keep'}
-      </Button>
+    </span>
+  )
+}
+
+/* C · Caption: one muted line under the card, outside it, as a caption is. */
+function Caption({ verdict, state, setState, name, setName }: OfferProps) {
+  if (state === 'dismissed') return null
+  return (
+    <div className={s.caption}>
+      {state === 'kept' ? (
+        <Kept verdict={verdict} name={name} setState={setState} />
+      ) : (
+        <span className={s.quiet}>
+          {verdict.kind === 'near' ? (
+            nearWhat(verdict)
+          ) : (
+            <>
+              Keep these parts as
+              <NameInPlace name={name} setName={setName} editing={state === 'editing'} setEditing={editingOf(setState)} />
+            </>
+          )}
+          <About />
+          <LinkButton className={s.strong} onClick={() => setState('kept')}>
+            {keepLabel(verdict)}
+          </LinkButton>
+          <LinkButton onClick={() => setState('dismissed')}>Not now</LinkButton>
+        </span>
+      )}
     </div>
   )
 }
 
-const onCard = (Offer: (props: OfferProps) => ReactNode) =>
+/* D · Icon: a single mark in the foot, left of Start; pointing at it says what it is, pressing it opens the small form. */
+function IconOnly({ verdict, state, setState, name, setName }: OfferProps) {
+  if (state === 'dismissed') return null
+  if (state === 'kept') return <Kept verdict={verdict} name={name} setState={setState} className={s.inFoot} />
+  return (
+    <span className={s.inFoot}>
+      <Popover
+        label="Keep as a preset"
+        placement="above"
+        align="start"
+        width={300}
+        padded={false}
+        open={state === 'editing'}
+        onOpenChange={(open) => setState(open ? 'editing' : 'offer')}
+        trigger={
+          <button type="button" className={s.mark} aria-label="Keep these parts as a preset" title="Keep these parts as a preset">
+            <Icon name="pin" size={12} />
+            <i className={s.dot} aria-hidden="true" />
+          </button>
+        }
+      >
+        <KeepForm verdict={verdict} setState={setState} name={name} setName={setName} />
+      </Popover>
+    </span>
+  )
+}
+
+type Place = 'aside' | 'foot' | 'under'
+const onCard = (Offer: (props: OfferProps) => ReactNode, place: Place) =>
   function Thread({ title, planParts, ...props }: OfferProps & { title: string; planParts: PresetParts }) {
     const preset = props.state === 'kept' ? (props.verdict.kind === 'near' ? props.verdict.preset.name : props.name) : props.planPreset
-    return <PlanCard title={title} parts={planParts} preset={preset} aside={<Offer {...props} />} />
+    const offer = <Offer {...props} />
+    if (place === 'under')
+      return (
+        <div>
+          <PlanCard title={title} parts={planParts} preset={preset} />
+          {offer}
+        </div>
+      )
+    return <PlanCard title={title} parts={planParts} preset={preset} {...(place === 'aside' ? { aside: offer } : { footNote: offer })} />
   }
 
 export const DIRECTIONS: ReadonlyArray<Direction> = [
   {
-    key: 'c1',
+    key: 'q1',
     letter: 'A',
-    name: 'Hairline',
-    idea: 'A quiet row inside the card, under its foot: the name in place, an info mark, Keep and a cross.',
-    Thread: onCard(Hairline),
+    name: 'Footnote',
+    idea: 'The bottom bar, demoted: small muted words under the foot, Keep and Not now as links.',
+    Thread: onCard(Footnote, 'aside'),
   },
   {
-    key: 'c2',
+    key: 'q2',
     letter: 'B',
-    name: 'Violet',
-    idea: 'The same row on the kit’s ask paper, with Not now and a violet Keep: it reads as a question.',
-    Thread: onCard(Violet),
+    name: 'In the foot',
+    idea: 'No row of its own: a link beside the estimate, in the card’s own foot. It opens the name and Keep.',
+    Thread: onCard(FootLink, 'foot'),
   },
   {
-    key: 'c3',
+    key: 'q3',
     letter: 'C',
-    name: 'Field',
-    idea: 'The name is a field from the start, labelled Save as a preset, with Save beside it.',
-    Thread: onCard(NameField),
+    name: 'Caption',
+    idea: 'One muted line under the card, outside it, like a caption.',
+    Thread: onCard(Caption, 'under'),
   },
   {
-    key: 'c4',
+    key: 'q4',
     letter: 'D',
-    name: 'Start from',
-    idea: 'Says what keeping it changes: tasks like this start from it, not from the plan’s preset. The kicker follows.',
-    Thread: onCard(From),
+    name: 'Icon',
+    idea: 'A single mark beside the estimate, with a dot; pressing it opens the name and Keep.',
+    Thread: onCard(IconOnly, 'foot'),
   },
 ]

@@ -119,7 +119,7 @@ function Verdicts({ was, now }: { was: Verdict; now: Verdict }) {
 }
 
 function Page() {
-  const [dirKey, setDir] = useState(() => ALL.find((d) => d.key === params.get('d'))?.key ?? 'c1')
+  const [dirKey, setDir] = useState(() => ALL.find((d) => d.key === params.get('d'))?.key ?? 'q1')
   const [scene, setScene] = useState(() => Math.max(0, Math.min(SCENARIOS.length, Number(params.get('s') ?? 3)) - 1))
   const [state, setState] = useState<OfferState>(() => STATES.find((one) => one.key === params.get('st'))?.key ?? 'offer')
   const [theme, setTheme] = useState(params.get('theme') === 'dark' ? 'dark' : 'light')
@@ -135,6 +135,9 @@ function Page() {
   useEffect(() => {
     document.documentElement.dataset.theme = theme
   }, [theme])
+  useEffect(() => {
+    document.documentElement.classList.toggle('still', params.has('still'))
+  }, [])
   useEffect(() => {
     const url = new URL(location.href)
     url.searchParams.set('d', dirKey)
