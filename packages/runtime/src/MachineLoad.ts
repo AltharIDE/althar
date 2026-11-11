@@ -259,13 +259,19 @@ export class MachineLoad extends Context.Service<
         })
 
       /** Each piece of work's part, most CPU first, and Althar's own: its processes' CPU time over all the cores' time between the readings. */
-      const sharesOf = (all: ReadonlyArray<Root>, before: Reading, after: Reading) =>
+      const sharesOf = (all: ReadonlyArray<Root>, before: Reading, after: Reading, rows: boolean) =>
         Effect.gen(function* () {
-          if (after.processes === null) return { shares: null, althar: null }
+          if (after.processes === null) return { shares: null, althar: null, total: 0 }
           const { owners, named } = yield* ownership(after.processes, all)
           // Without a listing before, there is nothing to measure from: what each holds shows, and no CPU yet.
           const used = usedOf(owners, before.processes ?? after.processes, after.processes, after.reaped === true)
           const capacity = Math.max(1, (after.at - before.at) * after.cores.count)
+          const own = used.get(ALTHAR)
+          const althar: LoadOwn | null =
+            own === undefined ? null : { cpu: clamp(own.cpu / capacity), memory: own.memory, processes: own.processes }
+          // All of Althar's part, each piece clamped as its row is: the trace needs no more than this.
+          const total = [...used.values()].reduce((sum, its) => sum + clamp(its.cpu / capacity), 0)
+          if (!rows) return { shares: null, althar, total }
           const shares = new Map<string, LoadShare>()
           const share = (key: string, work: Work) => {
             const its = used.get(key)
@@ -288,14 +294,11 @@ export class MachineLoad extends Context.Service<
           }
           for (const root of all) share(workOf(root), root)
           for (const [key, work] of named) if (work !== null && !shares.has(key)) share(key, work)
-          const own = used.get(ALTHAR)
-          const althar: LoadOwn | null =
-            own === undefined ? null : { cpu: clamp(own.cpu / capacity), memory: own.memory, processes: own.processes }
-          return { shares: [...shares.values()].sort((a, b) => b.cpu - a.cpu || b.memory - a.memory), althar }
+          return { shares: [...shares.values()].sort((a, b) => b.cpu - a.cpu || b.memory - a.memory), althar, total }
         })
 
       /** A reading, and what used how much since the one before: a window's, with everything the meter shows, or the background's, lean. */
-      const take = (reader: Effect.Effect<Reading>) =>
+      const take = (reader: Effect.Effect<Reading>, rows: boolean) =>
         Effect.gen(function* () {
           const at = yield* Clock.currentTimeMillis
           let before = last !== null && at - last.at <= every * GAP ? last : null
@@ -315,8 +318,8 @@ export class MachineLoad extends Context.Service<
           const cpu = ticks > 0 ? clamp((reading.cores.busy - before.reading.cores.busy) / ticks) : 0
           // Still counted differently, the reader built in between: what each holds shows, and its CPU from the next reading.
           const from = before.reading.reaped === reading.reaped ? before.reading : reading
-          const { shares, althar } = yield* sharesOf(yield* roots, from, reading)
-          const work = Math.min(cpu, clamp((shares ?? []).reduce((sum, share) => sum + share.cpu, althar?.cpu ?? 0)))
+          const { shares, althar, total } = yield* sharesOf(yield* roots, from, reading, rows)
+          const work = Math.min(cpu, clamp(total))
           if (pointAt === null || now - pointAt >= every) {
             history = [...history, { cpu, work }].slice(-HISTORY)
             pointAt = now
@@ -327,7 +330,7 @@ export class MachineLoad extends Context.Service<
 
       const measure = Effect.gen(function* () {
         if (answer !== null && (yield* Clock.currentTimeMillis) - answer.at < every) return answer.load
-        const { now, reading, cpu, shares, althar } = yield* take(read)
+        const { now, reading, cpu, shares, althar } = yield* take(read, true)
         const load: Load = {
           cpu,
           memoryUsed: reading.memory.used,
@@ -346,7 +349,7 @@ export class MachineLoad extends Context.Service<
         Effect.gen(function* () {
           if (!metering) return
           if (last !== null && (yield* Clock.currentTimeMillis) - last.at < every) return
-          yield* take(lean)
+          yield* take(lean, false)
         }),
       )
       // Sampling must never stop the program: a reading that fails is tried again next time.
