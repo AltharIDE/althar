@@ -1,3 +1,5 @@
+import { writeFileSync } from 'node:fs'
+
 import type { BoardSnapshot, ThreadSnapshot } from '@althar/contracts'
 import { AggregateType } from '@althar/domain'
 import { makeFakeService } from '@althar/connectors/testing'
@@ -10,6 +12,9 @@ import { Changes } from '../src/Changes'
 import { Coordinator } from '../src/Coordinator'
 import { Queries } from '../src/Queries'
 import { Questions } from '../src/Questions'
+import { Plans } from '../src/Plans'
+import { Projects } from '../src/Projects'
+import { Instance } from '../src/Instance'
 import { Sessions } from '../src/Sessions'
 import { TASK_OF } from '../src/taskOf'
 import * as Runtime from '../src/Runtime'
@@ -104,7 +109,12 @@ const ofView = (view: ThreadSnapshot) => {
 const windowOf = (projectId: string, rule: ReadonlySet<string>) =>
   Effect.gen(function* () {
     const queries = yield* Queries
-    const window = { board: yield* Effect.orDie(queries.board(projectId)), reads: 1 }
+    const window = {
+      board: yield* Effect.orDie(queries.board(projectId)),
+      reads: 1,
+      // Each read, and the kinds of change of the board's project that came before it.
+      log: [] as Array<{ readonly at: number; readonly after: ReadonlyArray<string>; readonly board: BoardSnapshot }>,
+    }
     let cursor = window.board.cursor
     yield* Effect.forkScoped(
       Effect.forever(
@@ -112,10 +122,12 @@ const windowOf = (projectId: string, rule: ReadonlySet<string>) =>
           const batch = yield* Effect.orDie(queries.changesSince(cursor, 500))
           if (batch.length === 0) return yield* Effect.sleep(Duration.millis(20))
           cursor = batch.at(-1)?.cursor ?? cursor
-          if (!batch.some((change) => change.projectId === projectId && rule.has(change.aggregateType))) return
+          const ours = batch.filter((change) => change.projectId === projectId)
+          if (!ours.some((change) => rule.has(change.aggregateType))) return
           yield* Effect.sleep(GATHER)
           window.board = yield* Effect.orDie(queries.board(projectId))
           window.reads += 1
+          window.log.push({ at: Date.now(), after: [...new Set(ours.map((change) => change.aggregateType))], board: window.board })
         }),
       ),
     )
@@ -232,6 +244,164 @@ describe('the board keeps up with a task as its view does', () => {
           'merged, settled: settled',
           'settled, renamed: settled',
         ])
+      }).pipe(Effect.scoped, Effect.provide(runtimeWith({ github })))
+    },
+  )
+})
+
+describe('the board keeps up with several tasks moving at once', () => {
+  it.live(
+    'says what each task’s view says, never behind it by more than a moment, while they wait, are reviewed, held, checked and merged',
+    () => {
+      const { working, bare } = hosted()
+      const github = makeFakeService({ pushUrl: () => bare, headOf: tipOf(bare) })
+      github.addRepository(['meridian', 'api'])
+      git(working, 'config', 'user.name', 'Fake')
+      git(working, 'config', 'user.email', 'fake@althar.test')
+      return Effect.gen(function* () {
+        yield* connect('github', HOST)
+        const queries = yield* Queries
+        const sql = yield* SqlClient.SqlClient
+        const projectId = yield* ask(working, 'Hello.')
+        const plans = yield* Plans
+        const actor = (yield* Instance).personId
+        /** A task, its plan proposed: started at once, or held until the person starts it. */
+        const planned = (title: string, description: string, review: boolean) =>
+          Effect.gen(function* () {
+            const made = yield* (yield* Projects).createTask({
+              envelope: yield* Runtime.envelope('task.create', {}),
+              projectId: projectId as never,
+              title,
+              description,
+              draft: true,
+            })
+            const planId = yield* plans.propose({
+              projectId: projectId as never,
+              taskId: made.taskId,
+              steps: [
+                { key: 'implement', agentId: 'codex', model: null, skipped: false },
+                { key: 'review', agentId: 'claude-code', model: null, skipped: !review },
+              ],
+              reason: null,
+              actorId: actor,
+              end: 'draft',
+            })
+            const [row] = yield* sql<{ slug: string }>`SELECT slug FROM tasks WHERE id = ${made.taskId}`
+            return { taskId: made.taskId, threadId: made.threadId, slug: row?.slug ?? '', planId }
+          })
+        const tasks = [
+          yield* planned('Add a retry', 'Add it. [lead:wait-for-person] [lead:finish] [lead:edit] [review:pass]', true),
+          yield* planned('Cache the config', 'Cache it. [lead:finish] [lead:edit]', false),
+          // A third waits on a plan the person held, and starts when they start it.
+          yield* planned('Tidy the docs', 'Do it. [lead:wait]', false),
+        ]
+        const planOf = (slug: string) => tasks.find((one) => one.slug === slug)?.planId ?? ''
+        yield* plans.hold(planOf('tidy-the-docs'), actor)
+
+        // A window's board, and beside it a sampler: each moment every task's view, and whether its card says the same.
+        const window = yield* windowOf(projectId, NOW)
+        const apart = new Set<string>()
+        const stood = new Map<string, Array<string>>()
+        let samples = 0
+        const started = Date.now()
+        const viewFirst = new Map<string, { slug: string; taskId: string; view: ReturnType<typeof ofView>; at: number }>()
+        yield* Effect.forkScoped(
+          Effect.forever(
+            Effect.gen(function* () {
+              for (const one of tasks) {
+                const view = ofView(yield* Effect.orDie(queries.thread(one.threadId)))
+                // The window's board as it stands as the view is read, not as it stood when the pass began.
+                const card = ofCard(window.board, one.taskId)
+                const went = stood.get(one.slug) ?? []
+                const now = `${view.phase}${view.step === null ? '' : ` (${view.step})`}${view.change?.checks == null ? '' : ` checks ${view.change.checks}`}`
+                if (went.at(-1) !== now) stood.set(one.slug, [...went, now])
+                const key = `${one.slug} ${JSON.stringify(view)}`
+                if (!viewFirst.has(key)) viewFirst.set(key, { slug: one.slug, taskId: one.taskId, view, at: Date.now() })
+                if (JSON.stringify(view) === JSON.stringify(card)) apart.delete(one.slug)
+                else apart.add(one.slug)
+              }
+              samples += 1
+              yield* Effect.sleep(Duration.millis(25))
+            }),
+          ),
+        )
+        const viewOf = (slug: string) =>
+          Effect.map(Effect.orDie(queries.thread(tasks.find((one) => one.slug === slug)?.threadId ?? '')), ofView)
+        const numberOf = (slug: string) =>
+          Effect.map(Effect.orDie(queries.thread(tasks.find((one) => one.slug === slug)?.threadId ?? '')), (view) =>
+            Number(view.task.changes?.at(-1)?.url.split('/').at(-1)),
+          )
+        // Every card says what its view says, on passes of the sampler made after the views came to where they are.
+        const settledTogether = () =>
+          Effect.gen(function* () {
+            const from = samples
+            yield* until(
+              Effect.sync(() => [samples - from, apart.size]),
+              ([passes, size]) => (passes ?? 0) >= 2 && size === 0,
+              'every card to say what its view says',
+            )
+          })
+
+        yield* plans.start(planOf('add-a-retry'), actor)
+        yield* plans.start(planOf('cache-the-config'), actor)
+        // The retry waits on the person while the config's pull request opens.
+        yield* until(viewOf('add-a-retry'), (view) => view.phase === 'waiting', 'the retry waiting on the person')
+        yield* until(viewOf('cache-the-config'), (view) => view.phase === 'ready' && view.change !== null, 'the config ready')
+        const retry = tasks.find((one) => one.slug === 'add-a-retry')
+        yield* (yield* Sessions).send({
+          envelope: yield* Runtime.envelope('thread.send', { threadId: retry?.threadId ?? '' }),
+          threadId: retry?.threadId ?? '',
+          body: 'Keep the ADRs that still decide something.',
+        })
+        // The held one starts while the config's checks run, and the retry goes through its review.
+        yield* plans.start(planOf('tidy-the-docs'), actor)
+        const config = yield* numberOf('cache-the-config')
+        github.setChecks(config, [{ name: 'test', state: 'running' }])
+        yield* (yield* Changes).refresh(tasks.find((one) => one.slug === 'cache-the-config')?.taskId ?? '')
+        yield* until(viewOf('cache-the-config'), (view) => view.change?.checks === 'running', 'the config checks running')
+        yield* until(
+          viewOf('add-a-retry'),
+          (view) => view.change !== null && view.phase !== 'waiting',
+          'the retry reviewed, its pull request open',
+        )
+        yield* until(viewOf('tidy-the-docs'), (view) => view.phase === 'running', 'the docs running')
+        github.setChecks(config, [{ name: 'test', state: 'passed' }])
+        github.mergeByHand(config)
+        for (const one of tasks) yield* (yield* Changes).refresh(one.taskId)
+        yield* until(viewOf('cache-the-config'), (view) => view.phase === 'settled', 'the config merged and settled')
+        yield* settledTogether()
+
+        // For each state a task's view came to, how long after the view first said it the window's board first did: the board
+        // may say it first (negative), as the view was read in its turn. A state the board never said was over before a read.
+        const lags = [...viewFirst.values()].map(({ slug, taskId, view, at }) => {
+          const shown = window.log.find((read) => JSON.stringify(ofCard(read.board, taskId)) === JSON.stringify(view))
+          return {
+            slug,
+            state: `${view.phase}${view.step === null ? '' : ` (${view.step})`}`,
+            lagMs: shown === undefined ? null : shown.at - at,
+          }
+        })
+        const [counted] = yield* sql<{ changes: number }>`SELECT count(*) AS changes FROM change_log WHERE project_id = ${projectId}`
+        const trace = {
+          lags,
+          samples,
+          changes: counted?.changes,
+          boardReads: window.reads,
+          stood: Object.fromEntries(stood),
+          reads: window.log.map(({ at, after }) => ({ at: at - started, after })),
+          cards: (yield* Effect.orDie(queries.changesSince(0, 5000)))
+            .filter((change) => change.aggregateType === 'card')
+            .map((change) => [tasks.find((one) => one.taskId === change.aggregateId)?.slug ?? change.aggregateId, change.cursor]),
+        }
+        if (process.env.BOARD_TRACE !== undefined) writeFileSync(process.env.BOARD_TRACE, JSON.stringify(trace, null, 1))
+        // Each card caught up with its view within a moment: the runtime's gather, the window's, and a board read.
+        for (const { slug, state, lagMs } of lags)
+          assert.isBelow(lagMs ?? 0, 1000, `${slug}'s card said ${state} ${lagMs}ms after its view`)
+        assert.isBelow(window.reads, (counted?.changes ?? 0) / 4)
+        assert.includeMembers(stood.get('tidy-the-docs') ?? [], ['held', 'running (implement)'])
+        assert.include(stood.get('add-a-retry') ?? [], 'waiting')
+        assert.include(stood.get('add-a-retry') ?? [], 'running (review)')
+        assert.strictEqual(stood.get('cache-the-config')?.at(-1), 'settled checks passed')
       }).pipe(Effect.scoped, Effect.provide(runtimeWith({ github })))
     },
   )
