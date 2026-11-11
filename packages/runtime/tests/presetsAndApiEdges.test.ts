@@ -814,11 +814,8 @@ describe('a preset’s parts, on a plan', () => {
     assert.deepStrictEqual(planFromPreset(proposed({ steps: [LEAD, REVIEW] }), parts({})).steps[1], { ...REVIEW, skipped: false })
   })
 
-  it('skips a review it has where nothing checks it, and adds none where it has none', () => {
-    assert.deepStrictEqual(planFromPreset(proposed({ steps: [LEAD, REVIEW] }), parts({ checked: 'none' })).steps, [
-      LEAD,
-      { ...REVIEW, skipped: true },
-    ])
+  it('leaves no review row where nothing checks it, one it had included, and adds none where it has none', () => {
+    assert.deepStrictEqual(planFromPreset(proposed({ steps: [LEAD, REVIEW] }), parts({ checked: 'none' })).steps, [LEAD])
     assert.deepStrictEqual(planFromPreset(proposed({ steps: [LEAD], worksIn: 'checkout' }), parts({ checked: 'none' })), {
       steps: [LEAD],
       end: 'draft',

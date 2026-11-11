@@ -343,32 +343,45 @@ const pickOf = (named: string) => {
 }
 
 /**
+ * The reviewer a preset's plan takes: none where nothing checks the work; the preset's own, else the plan's where it is
+ * another maker's than the lead's, else one picked as the coordinator picks one. Null where a review is needed and nobody
+ * but the lead's own model can give it: `planFromPreset` then leaves its row skipped, and applying the preset refuses.
+ */
+export const reviewerOfPreset = (before: PresetPlan, parts: PresetParts, models?: PresetModels): ModelPick | null => {
+  const lead = before.steps.find((step) => step.key === 'implement')
+  const review = before.steps.find((step) => step.key === 'review')
+  const named = models?.named ?? ((pick: ModelPick) => pick)
+  const implement = lead === undefined ? undefined : { ...lead, ...(parts.lead === null ? {} : named(pickOf(parts.lead))) }
+  return parts.checked === 'none'
+    ? null
+    : parts.reviewer !== null
+      ? named(pickOf(parts.reviewer))
+      : implement === undefined || models === undefined
+        ? review === undefined
+          ? null
+          : { agentId: review.agentId, model: review.model }
+        : models.reviewerFor(implement, review === undefined ? undefined : { agentId: review.agentId, model: review.model })
+}
+
+/**
  * A plan with a preset's parts (a task is a conversation plus parts, "How a task starts": picking another preset on the
  * plan card changes the plan's parts to match): its lead and reviewer where the preset names them, its review kept, run
  * after the merge or skipped as Checked by says, its ending, and where it works, a copy being a quick task's place. A
  * review it needs and the preset doesn't name goes to the plan's own reviewer where that is another maker's than the lead's,
- * else to one picked as the coordinator picks one (`models`), never the lead's own model; with nobody to pick, it is skipped.
+ * else to one picked as the coordinator picks one (`models`), never the lead's own model. A preset that checks nothing leaves no review step.
  */
 export const planFromPreset = <P extends PresetPlan>(before: P, parts: PresetParts, models?: PresetModels): P => {
   const lead = before.steps.find((step) => step.key === 'implement')
   const review = before.steps.find((step) => step.key === 'review')
   const named = models?.named ?? ((pick: ModelPick) => pick)
   const implement = lead === undefined ? undefined : { ...lead, ...(parts.lead === null ? {} : named(pickOf(parts.lead))), skipped: false }
-  const reviewer: ModelPick | null =
-    parts.checked === 'none'
-      ? null
-      : parts.reviewer !== null
-        ? named(pickOf(parts.reviewer))
-        : implement === undefined || models === undefined
-          ? review === undefined
-            ? null
-            : { agentId: review.agentId, model: review.model }
-          : models.reviewerFor(implement, review === undefined ? undefined : { agentId: review.agentId, model: review.model })
+  const reviewer = reviewerOfPreset(before, parts, models)
   const reviewing =
     parts.checked === 'none'
-      ? review === undefined
-        ? undefined
-        : { ...review, skipped: true }
+      ? // Nothing checks the work, so no review row to add back; a review of a pull request keeps its own second row, skipped.
+        parts.reviews === true && review !== undefined
+        ? { ...review, skipped: true }
+        : undefined
       : reviewer === null
         ? // Nobody to review it: its row is there to add back.
           { ...(review ?? { agentId: 'claude-code', model: null }), key: 'review' as const, skipped: true }

@@ -219,6 +219,11 @@ describe('presets', () => {
       const now = yield* plan()
       assert.deepInclude(now.parameters.steps[0], { agentId: 'claude-code', model: 'claude-opus-5-5' })
       assert.strictEqual(now.parameters.end, 'none')
+      // The review Small change had is gone, not left as a skipped row to add back.
+      assert.deepStrictEqual(
+        now.parameters.steps.map((step: { key: string }) => step.key),
+        ['implement'],
+      )
       const [task] = yield* sql<{ description: string }>`SELECT description FROM tasks WHERE id = ${now.taskId}`
       assert.include(task?.description, 'A prototype: show the idea working, quickly.')
       yield* until(cards(projectId), (all) => all[0]?.plan?.preset === 'Prototype')

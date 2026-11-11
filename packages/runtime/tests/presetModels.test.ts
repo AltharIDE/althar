@@ -1,7 +1,7 @@
 import { assert, describe, it } from '@effect/vitest'
 
 import { presetModels } from '../src/presetModels'
-import { BUILT_IN, describe as describePreset, planFromPreset, type PresetPlan } from '../src/presets'
+import { BUILT_IN, describe as describePreset, planFromPreset, reviewerOfPreset, type PresetPlan } from '../src/presets'
 import type { UsableModel } from '../src/usableModels'
 
 /*
@@ -59,6 +59,17 @@ describe('the built-in Prototype preset', () => {
     assert.isUndefined(plan.reviewAfterMerge)
   })
 
+  it('drops a review a plan already had, so switching a reviewed plan to it leaves no review row', () => {
+    const REVIEW = { key: 'review' as const, agentId: 'codex', model: 'gpt-6-1-sol', skipped: false }
+    const plan = planFromPreset(
+      proposed({ steps: [LEAD, REVIEW], end: 'ready', reviewAfterMerge: true }),
+      prototype,
+      presetModels([OPUS, SOL]),
+    )
+    assert.deepStrictEqual(plan.steps, [LEAD])
+    assert.isUndefined(plan.reviewAfterMerge)
+  })
+
   it('names its lead as the agent lists the model: claude-opus-5-5 is the claude-opus-5 Claude Code offers', () => {
     const [step] = planFromPreset(
       proposed({ steps: [{ ...LEAD, agentId: 'codex', model: 'gpt-6-1-sol' }] }),
@@ -106,5 +117,13 @@ describe('a reviewer a preset needs and doesn’t name', () => {
     })
     const named = { ...change, reviewer: 'codex/gpt-6-1-terra' }
     assert.deepInclude(reviewerOf([LEAD], [OPUS, SOL, TERRA], named), { agentId: 'codex', model: 'gpt-6-1-terra' })
+  })
+})
+
+describe('a review a preset needs where nobody but the lead’s own model can give it', () => {
+  it('has no reviewer to pick, which applying the preset refuses rather than skipping its review', () => {
+    assert.isNull(reviewerOfPreset(proposed({ steps: [LEAD] }), change, presetModels([OPUS])))
+    assert.isNull(reviewerOfPreset(proposed({ steps: [LEAD] }), change, presetModels([])))
+    assert.isNull(reviewerOfPreset(proposed({ steps: [LEAD] }), prototype, presetModels([OPUS, SOL])))
   })
 })

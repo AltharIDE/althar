@@ -19,7 +19,7 @@ import { usableModels } from './usableModels'
 import { countdownNow } from './plansAndReviews'
 import { Reviews } from './Reviews'
 import { Instance } from './Instance'
-import { offerPreset, planFromPreset, presetsIn } from './presets'
+import { offerPreset, planFromPreset, presetsIn, reviewerOfPreset } from './presets'
 import { shelve } from './scratch'
 import { change, fact, timestamp } from './records'
 import { setToward } from './towards'
@@ -365,6 +365,11 @@ export class Plans extends Context.Service<
                 })
               // The models as the agents list them, for a lead and a reviewer the preset names, and a reviewer it lacks.
               const models = presetModels(yield* usableModels(plan.projectId).pipe(Effect.orElseSucceed(() => [])))
+              // Its review is what the preset promises: with no model but the lead's own to give it, nothing changes.
+              if (preset.parts.checked !== 'none' && reviewerOfPreset(before, preset.parts, models) === null)
+                return yield* new ChangeRefused({
+                  message: `${preset.name} is reviewed, and no model apart from its lead's can be used to review it right now.`,
+                })
               const steps = planFromPreset(before, preset.parts, models).steps
               if (before.reads === true) for (const step of steps) if (!step.skipped) yield* reviews.canLead(step.agentId)
               yield* reshape(

@@ -111,6 +111,25 @@ export const PicksAnotherPreset: Story = {
   },
 }
 
+/** Planned from Prototype: its lead and its ending, the branch, and no review row, skipped or not. */
+export const APrototype: Story = {
+  render: () => (
+    <Launch
+      plan={[{ id: 'implement', label: 'Implement', agents: [OPUS], fixed: 'the lead' }]}
+      preset="Prototype"
+      presets={PRESETS}
+      hideEnd
+      estimate={undefined}
+    />
+  ),
+  play: async ({ canvasElement }) => {
+    const c = within(canvasElement)
+    await expect(c.getByText('Implement')).toBeVisible()
+    await expect(c.queryByText('Review')).not.toBeInTheDocument()
+    await expect(c.queryByText('Add back')).not.toBeInTheDocument()
+  },
+}
+
 /** A review proposed with two agents can go down to one: the second's picker has Remove from this step. */
 export const OneReviewerInsteadOfTwo: Story = {
   render: () => <Launch />,
