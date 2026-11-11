@@ -356,6 +356,6 @@ describe('the project’s Artifacts view', () => {
     })
     withServices(<ArtifactsView projectId={PROJECT} threadId={THREAD} draft={DRAFT} />, client)
     expect(await screen.findByText('No such project')).toBeTruthy()
-    expect(screen.getByText('Nothing kept yet')).toBeTruthy()
+    expect(screen.getByText('No artifacts yet')).toBeTruthy()
   })
 })

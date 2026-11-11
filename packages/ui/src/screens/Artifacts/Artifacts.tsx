@@ -16,7 +16,8 @@ import s from './Artifacts.module.css'
  * by kind, where there is more than one, and a search narrow it; its columns
  * sort it, by when each was last updated unless the person says. A row
  * opens its artifact in the view's place, and its Close comes back to the
- * table. Empty, the view says what will be here and how it gets here.
+ * table. Empty, a wall of faint drawings of what agents draw stands where
+ * the table will be and fades out, with what will be here where it thins.
  */
 
 export interface ArtifactsText {
@@ -46,9 +47,8 @@ export const artifactsText: ArtifactsText = {
   columns: { title: 'Name', kind: 'Kind', versions: 'Versions', comments: 'Comments', by: 'Made by', updated: 'Updated' },
   none: 'none',
   noMatch: (words) => `Nothing matches “${words}”.`,
-  emptyTitle: 'Nothing kept yet',
-  empty:
-    'When a lead or the coordinator draws something for you to look at and iterate on (a mockup, a diagram, a chart, a page), it is kept here for the whole project.',
+  emptyTitle: 'No artifacts yet',
+  empty: 'Mockups, diagrams and charts your agents draw are kept here.',
   kinds: canvasKindWords,
 }
 
@@ -85,6 +85,65 @@ const GLYPHS: Readonly<Record<CanvasKind, IconName>> = {
   picture: 'image',
   html: 'globe',
 }
+
+/* ——— None yet: what agents draw, small and faint, a wall of them ——— */
+
+const Mockup = () => (
+  <svg viewBox="0 0 120 84">
+    <rect x="10" y="10" width="100" height="8" rx="2" className={s.ink2} />
+    <rect x="10" y="26" width="46" height="48" rx="3" className={s.ink1} />
+    <rect x="64" y="26" width="46" height="6" rx="2" className={s.ink2} />
+    <rect x="64" y="38" width="38" height="6" rx="2" className={s.ink2} />
+    <rect x="64" y="60" width="28" height="12" rx="3" className={s.ink3} />
+  </svg>
+)
+const Diagram = () => (
+  <svg viewBox="0 0 120 84">
+    <rect x="8" y="14" width="32" height="18" rx="4" className={s.ink1} />
+    <rect x="80" y="14" width="32" height="18" rx="4" className={s.ink1} />
+    <rect x="44" y="54" width="32" height="18" rx="4" className={s.ink3} />
+    <path d="M40 23 H80 M24 32 L52 54 M96 32 L68 54" className={s.stroke} />
+  </svg>
+)
+const Chart = () => (
+  <svg viewBox="0 0 120 84">
+    <path d="M12 74 H108" className={s.stroke} />
+    <rect x="18" y="46" width="12" height="28" rx="2" className={s.ink1} />
+    <rect x="38" y="34" width="12" height="40" rx="2" className={s.ink1} />
+    <rect x="58" y="50" width="12" height="24" rx="2" className={s.ink1} />
+    <rect x="78" y="22" width="12" height="52" rx="2" className={s.ink3} />
+    <rect x="96" y="30" width="12" height="44" rx="2" className={s.ink1} />
+  </svg>
+)
+const Document = () => (
+  <svg viewBox="0 0 120 84">
+    <rect x="14" y="12" width="56" height="8" rx="2" className={s.ink3} />
+    <rect x="14" y="28" width="92" height="5" rx="2" className={s.ink2} />
+    <rect x="14" y="38" width="84" height="5" rx="2" className={s.ink2} />
+    <rect x="14" y="48" width="90" height="5" rx="2" className={s.ink2} />
+    <rect x="14" y="62" width="60" height="5" rx="2" className={s.ink2} />
+  </svg>
+)
+const Picture = () => (
+  <svg viewBox="0 0 120 84">
+    <rect x="10" y="10" width="100" height="64" rx="4" className={s.ink1} />
+    <circle cx="86" cy="28" r="7" className={s.ink3} />
+    <path d="M10 74 L44 40 L66 60 L80 48 L110 74 Z" className={s.ink2} />
+  </svg>
+)
+const Sequence = () => (
+  <svg viewBox="0 0 120 84">
+    <path d="M30 12 V72 M90 12 V72" className={s.stroke} />
+    <path d="M30 26 H88 M90 44 H32 M30 60 H88" className={s.stroke} />
+    <rect x="20" y="8" width="20" height="8" rx="2" className={s.ink3} />
+    <rect x="80" y="8" width="20" height="8" rx="2" className={s.ink1} />
+  </svg>
+)
+
+const DRAWINGS = [Mockup, Diagram, Chart, Document, Picture, Sequence]
+
+/** Three rows of six, each row shifted two along, so no column repeats down the wall. */
+const WALL = Array.from({ length: 18 }, (_, i) => DRAWINGS[(i * 5 + Math.floor(i / 6) * 2) % DRAWINGS.length]!)
 
 /** The order the kinds are offered in, where the project has them. */
 const KINDS: ReadonlyArray<CanvasKind> = ['markdown', 'mermaid', 'svg', 'picture', 'html']
@@ -198,9 +257,13 @@ export function Artifacts({ canvases, onOpen, open, error, headingLevel = 1, tex
         {error !== undefined && <p className={s.error}>{error}</p>}
         {none ? (
           <div className={s.empty}>
-            <span className={s.emptyGlyph} aria-hidden="true">
-              <Icon name="canvas" size={16} />
-            </span>
+            <div className={s.wall} aria-hidden="true">
+              {WALL.map((Drawing, i) => (
+                <span key={i} className={s.tile}>
+                  <Drawing />
+                </span>
+              ))}
+            </div>
             <p className={s.emptyWords}>
               <span className={s.emptyTitle}>{t.emptyTitle}</span>
               {t.empty}
