@@ -9,49 +9,52 @@ import { createRoot } from 'react-dom/client'
 
 import {
   Brand,
+  BrandMark,
   Button,
   CanState,
   type ConnectCan,
   ChangeSet,
   ChangeState,
-  ConnectActions,
-  ConnectCard,
   ConnectChecks,
   ConnectFound,
-  ConnectText,
-  ConnectWays,
-  type ConnectWayOption,
-  Field,
   FieldArea,
+  Field,
   HostReach,
+  Icon,
+  type IconName,
   LinkButton,
   type MapHost,
   type MapRepository,
   ProjectInk,
-  ProjectMark,
   RepositoryRole,
   Segmented,
   Select,
 } from '@althar/ui'
-import { NewProject, type NewProjectFinding, type NewProjectFolder, type NewProjectPlace, ProjectRepositories } from '@althar/ui/screens'
+import {
+  NewProject,
+  type NewProjectFinding,
+  type NewProjectFolder,
+  type NewProjectPlace,
+  type NewProjectStep,
+  ProjectRepositories,
+} from '@althar/ui/screens'
 
-import { SizeMotion } from '../../../../packages/ui/src/lib/SizeMotion'
 import s from './lab.module.css'
 
 /*
  * The new-project lab (README.md): a project set up in a folder with no
  * remote, on the kit's own screens, with no runtime. Its name and folders
- * first, on the page as it is; then where its work goes, as Althar's own
- * walks into GitHub, GitLab and Linear go: one card at a time, each with
- * the service's mark and one thing to do, gliding from one to the next.
- * The bars swap the direction (A–C), the folder's state (1–8), what is
- * connected (G) and the theme (T); the line under them says what that
- * folder does in Althar today.
+ * first, on the page as it is; then where its work goes, each question in
+ * the folders' place: its heading where theirs is, its choices in the list
+ * they were in, Continue where Create is, so nothing moves but the words.
+ * What is chosen joins the project on the left. The bars swap the direction
+ * (A–C), the folder's state (1–8), what is connected (G) and the theme (T);
+ * the line under them says what that folder does in Althar today.
  */
 
 const directions = [
   { key: 'a', label: 'Today' },
-  { key: 'b', label: 'A card a question' },
+  { key: 'b', label: 'A step a question' },
   { key: 'c', label: 'Ready in one press' },
 ] as const
 type Direction = (typeof directions)[number]['key']
@@ -105,6 +108,14 @@ const FILES = [
 
 /* ---- The services, as connected ---- */
 
+interface Way {
+  id: string
+  title: string
+  line: string
+  brand?: Brand
+  icon?: IconName
+}
+
 type Host = 'github' | 'gitlab'
 type Code = Host | 'here'
 interface HostInfo {
@@ -115,7 +126,7 @@ interface HostInfo {
   issues: string
   owners: string[]
   seen: Array<{ value: string; label: string }>
-  ways: ConnectWayOption[]
+  ways: Way[]
 }
 const HOST: Record<Host, HostInfo> = {
   github: {
@@ -156,6 +167,12 @@ const HOST: Record<Host, HostInfo> = {
 }
 const hostsOf = (setup: Setup): ReadonlyArray<Host> => (setup === 'all' ? ['github', 'gitlab'] : setup === 'github' ? ['github'] : [])
 
+const TRACKERS: Way[] = [
+  { id: 'linear', title: 'Linear', line: 'Approve in your browser', brand: Brand.Linear },
+  { id: 'jira', title: 'Jira', line: 'With an API token', brand: Brand.Jira },
+  { id: 'trello', title: 'Trello', line: 'With a key and a token', brand: Brand.Trello },
+]
+
 interface Team {
   id: string
   key: string
@@ -193,110 +210,134 @@ const firstGoes = (setup: Setup, linear: boolean): Goes => {
   }
 }
 
-interface Pager {
-  steps: number
-  at: number
-}
-const pagerOf = (pager?: Pager) => (pager === undefined ? {} : { pager })
+/* ---- What the questions are made of ---- */
 
-/* ---- The walk's cards ---- */
+const WayGlyph = ({ way }: { way: Way }) => (
+  <span className={s.glyph}>
+    {way.brand !== undefined ? <BrandMark brand={way.brand} size={16} /> : <Icon name={way.icon ?? 'plug'} size={15} />}
+  </span>
+)
+const WayWords = ({ way }: { way: Way }) => (
+  <span className={s.words}>
+    <span className={s.wayTitle}>{way.title}</span>
+    <span className={s.wayLine}>{way.line}</span>
+  </span>
+)
 
-type Card = 'code' | 'connect' | 'host' | 'issues' | 'tracker' | 'team' | 'ready'
-
-/** Where its code lives: each host connected, this Mac, and a way to connect another. */
-function CodeCard({ setup, goes, pager, onPick }: { setup: Setup; goes: Goes; pager?: Pager; onPick: (id: string) => void }) {
-  const more = setup === 'none' ? 'GitHub or GitLab' : setup === 'github' ? 'GitLab' : null
-  return (
-    <ConnectCard icon="branch" title="Where its code lives" {...pagerOf(pager)}>
-      <ConnectWays
-        label="Where its code lives"
-        onChoose={onPick}
-        ways={[
-          ...hostsOf(setup).map((id) => ({
-            id,
-            title: HOST[id].name,
-            line: `New ${HOST[id].thing} · ${goes.owner}/${goes.name}`,
-            brand: HOST[id].brand,
-          })),
-          { id: 'here', title: 'Only on this Mac', line: 'Tasks merge into main here', icon: 'folder' as const },
-          ...(more === null ? [] : [{ id: 'connect', title: `Connect ${more}`, line: 'Then make it there', icon: 'plug' as const }]),
-        ]}
-      />
-    </ConnectCard>
-  )
-}
-
-/** Connecting a host from inside the walk: the same card as its walk in Settings, its ways in first. */
-function ConnectHostCard({ host, onPick, onBack }: { host: Host; onPick: () => void; onBack: () => void }) {
-  const h = HOST[host]
-  return (
-    <ConnectCard
-      brand={h.brand}
-      title={`Connect ${h.name}`}
-      line="For Tidepool’s code"
-      foot={`Kept encrypted on this Mac. Agents never get it; they reach ${h.name} through Althar.`}
-    >
-      <ConnectWays label={`Ways to connect ${h.name}`} ways={h.ways} onChoose={onPick} />
-      <ConnectActions>
-        <LinkButton onClick={onBack}>Back</LinkButton>
-      </ConnectActions>
-    </ConnectCard>
-  )
-}
-
-/** Its new repository on the host, as the host's own form asks: owner, name, who sees it. */
-function HostCard({
-  host,
-  goes,
-  pager,
-  onChange,
-  onDone,
-  onBack,
-  done,
-  back = 'Somewhere else',
-  align,
+/**
+ * One of a few, as rows in the list the folders were in. A press chooses one
+ * and goes on; arrows move the choice, and Return or Continue takes it.
+ */
+function Picks({
+  label,
+  ways,
+  value,
+  onSelect,
+  onPick,
 }: {
-  host: Host
-  goes: Goes
-  pager?: Pager
-  onChange: (next: Partial<Goes>) => void
-  onDone: () => void
-  onBack: () => void
-  done: string
-  back?: string
-  /** Set in a page, from its left edge, as Settings has it. */
-  align?: 'start'
+  label: string
+  ways: readonly Way[]
+  value: string
+  onSelect: (id: string) => void
+  onPick: (id: string) => void
 }) {
-  const h = HOST[host]
+  const rows = useRef<Array<HTMLButtonElement | null>>([])
+  const at = Math.max(
+    0,
+    ways.findIndex((way) => way.id === value),
+  )
+  const move = (by: number) => {
+    const next = (at + by + ways.length) % ways.length
+    const way = ways[next]
+    if (way === undefined) return
+    onSelect(way.id)
+    rows.current[next]?.focus()
+  }
+  return (
+    <div role="radiogroup" aria-label={label} className={s.list}>
+      {ways.map((way, i) => (
+        <button
+          key={way.id}
+          ref={(el) => {
+            rows.current[i] = el
+          }}
+          type="button"
+          role="radio"
+          aria-checked={way.id === value}
+          tabIndex={i === at ? 0 : -1}
+          className={s.row}
+          onClick={() => onPick(way.id)}
+          onKeyDown={(event) => {
+            if (event.key === 'ArrowDown' || event.key === 'ArrowRight') {
+              event.preventDefault()
+              move(1)
+            } else if (event.key === 'ArrowUp' || event.key === 'ArrowLeft') {
+              event.preventDefault()
+              move(-1)
+            }
+          }}
+        >
+          <WayGlyph way={way} />
+          <WayWords way={way} />
+          <Icon name="check" size={13} className={s.chosen} />
+        </button>
+      ))}
+    </div>
+  )
+}
+
+const nameOf = (goes: Goes) => {
   const name = goes.name.trim()
   const taken = name === 'althar' || name === 'tides'
-  const fine = name !== '' && !taken && /^[A-Za-z0-9._-]+$/.test(name)
+  return { name, taken, fine: name !== '' && !taken && /^[A-Za-z0-9._-]+$/.test(name) }
+}
+
+/** Its new repository on the host, as the host's own form asks: owner and name, and who sees it. */
+function HostForm({
+  id,
+  host,
+  goes,
+  onChange,
+  onDone,
+}: {
+  id: string
+  host: Host
+  goes: Goes
+  onChange: (next: Partial<Goes>) => void
+  onDone: () => void
+}) {
+  const h = HOST[host]
+  const { name, taken, fine } = nameOf(goes)
   return (
-    <ConnectCard brand={h.brand} title={`New ${h.thing} on ${h.name}`} {...pagerOf(pager)} {...(align === undefined ? {} : { align })}>
-      <form
-        className={s.hostForm}
-        onSubmit={(event) => {
-          event.preventDefault()
-          if (fine) onDone()
-        }}
-      >
-        <div className={s.ownerName}>
-          <Select
-            label="Owner"
-            variant="filled"
-            width={150}
-            value={goes.owner}
-            options={h.owners.map((owner) => ({ value: owner, label: owner }))}
-            onChange={(owner) => onChange({ owner })}
-          />
-          <span className={s.slash}>/</span>
-          <Field
-            aria-label={`${h.name} ${h.thing} name`}
-            value={goes.name}
-            spellCheck={false}
-            onChange={(event) => onChange({ name: event.target.value })}
-          />
-        </div>
+    <form
+      id={id}
+      className={s.hostForm}
+      onSubmit={(event) => {
+        event.preventDefault()
+        if (fine) onDone()
+      }}
+    >
+      <div className={s.ownerName}>
+        <span className={s.fieldLabel}>Owner</span>
+        <span />
+        <span className={s.fieldLabel}>Name</span>
+        <Select
+          label="Owner"
+          variant="filled"
+          width={150}
+          value={goes.owner}
+          options={h.owners.map((owner) => ({ value: owner, label: owner }))}
+          onChange={(owner) => onChange({ owner })}
+        />
+        <span className={s.slash}>/</span>
+        <Field
+          aria-label={`${h.name} ${h.thing} name`}
+          value={goes.name}
+          spellCheck={false}
+          onChange={(event) => onChange({ name: event.target.value })}
+        />
+      </div>
+      <div className={s.found}>
         {name === '' ? null : taken ? (
           <ConnectFound tone="no">
             {goes.owner}/{name} is taken.
@@ -308,77 +349,54 @@ function HostCard({
         ) : (
           <ConnectFound tone="no">Letters, numbers, - . and _ only.</ConnectFound>
         )}
-        <Segmented label="Who can see it" value={goes.seen} options={h.seen} onChange={(seen) => onChange({ seen })} />
-        <ConnectText tone="note">Althar pushes main to it, and tasks open {h.changes} there.</ConnectText>
-        <ConnectActions primary>
-          <Button type="submit" variant="signal" disabled={!fine}>
-            {done}
-          </Button>
-        </ConnectActions>
-      </form>
-      <ConnectActions>
-        <LinkButton onClick={onBack}>{back}</LinkButton>
-      </ConnectActions>
-    </ConnectCard>
+      </div>
+      <span className={s.fieldLabel}>Who can see it</span>
+      <Segmented label="Who can see it" value={goes.seen} options={h.seen} onChange={(seen) => onChange({ seen })} />
+      <p className={s.quiet}>Althar pushes main to it, and tasks open {h.changes} there.</p>
+    </form>
   )
 }
 
-/** Where its issues go: the trackers connected, the host's own issues where its code goes there, or not now. */
-function IssuesCard({ linear, goes, pager, onPick }: { linear: boolean; goes: Goes; pager?: Pager; onPick: (id: string) => void }) {
+/** Where its code goes, as a row: the repository it gets, or this Mac. */
+const codeWay = (goes: Goes): Way => {
   const host = goes.code === 'here' ? null : HOST[goes.code]
-  return (
-    <ConnectCard icon="issues" title="Where its issues go" {...pagerOf(pager)}>
-      <ConnectWays
-        label="Where its issues go"
-        onChoose={onPick}
-        ways={[
-          ...(linear ? [{ id: 'linear', title: 'Linear', line: 'Charrette · a new team, or one of 2', brand: Brand.Linear }] : []),
-          ...(host === null ? [] : [{ id: 'host', title: host.issues, line: `On ${goes.owner}/${goes.name}`, brand: host.brand }]),
-          ...(linear ? [] : [{ id: 'tracker', title: 'Connect Linear, Jira or Trello', line: 'Then choose where', icon: 'plug' as const }]),
-          { id: 'none', title: 'Not now', line: 'Its settings can link one later', icon: 'after' as const },
-        ]}
-      />
-    </ConnectCard>
-  )
+  return host === null
+    ? { id: 'code', title: 'Only on this Mac', line: 'Tasks merge into main here', icon: 'folder' }
+    : { id: 'code', title: `${goes.owner}/${goes.name}`, line: `New ${goes.seen} ${host.thing} on ${host.name}`, brand: host.brand }
+}
+/** Where its issues go, as a row. */
+const issuesWay = (goes: Goes): Way => {
+  const host = goes.code === 'here' ? null : HOST[goes.code]
+  return goes.issues === 'linear'
+    ? {
+        id: 'issues',
+        title: goes.team.fresh === true ? `Linear · new team ${goes.team.name}` : `Linear · ${goes.team.name}`,
+        line:
+          goes.team.fresh === true
+            ? `Its issues ${goes.team.key}-1, ${goes.team.key}-2…`
+            : `${goes.team.key} · ${OPEN[goes.team.id] ?? 0} open issues`,
+        brand: Brand.Linear,
+      }
+    : goes.issues === 'host' && host !== null
+      ? { id: 'issues', title: host.issues, line: `On ${goes.owner}/${goes.name}`, brand: host.brand }
+      : { id: 'issues', title: 'No tracker yet', line: 'Its settings can link one later', icon: 'issues' }
 }
 
-/** Connecting a tracker from inside the walk, as Settings does. */
-function ConnectTrackerCard({ onPick, onBack }: { onPick: () => void; onBack: () => void }) {
+/** Where its work goes, under the folders: each row a press away from its question. */
+function WorkRows({ goes, onEdit }: { goes: Goes; onEdit: (id: 'code' | 'issues') => void }) {
   return (
-    <ConnectCard icon="issues" title="Connect a tracker" line="For Tidepool’s issues">
-      <ConnectWays
-        label="Trackers to connect"
-        onChoose={onPick}
-        ways={[
-          { id: 'linear', title: 'Linear', line: 'Approve in your browser', brand: Brand.Linear },
-          { id: 'jira', title: 'Jira', line: 'With an API token', brand: Brand.Jira },
-          { id: 'trello', title: 'Trello', line: 'With a key and a token', brand: Brand.Trello },
-        ]}
-      />
-      <ConnectActions>
-        <LinkButton onClick={onBack}>Back</LinkButton>
-      </ConnectActions>
-    </ConnectCard>
-  )
-}
-
-/** Linear's teams: a new one named after the project, or one there is. */
-function TeamCard({ pager, onPick, onBack }: { pager?: Pager; onPick: (team: Team) => void; onBack: () => void }) {
-  return (
-    <ConnectCard brand={Brand.Linear} title="Choose a team" line="In Charrette" {...pagerOf(pager)}>
-      <ConnectWays
-        label="Linear teams"
-        onChoose={(id) => onPick(TEAMS.find((team) => team.id === id) ?? NEW_TEAM)}
-        ways={TEAMS.map((team) =>
-          team.fresh === true
-            ? { id: team.id, title: `New team: ${team.name}`, line: `Its issues ${team.key}-1, ${team.key}-2…`, icon: 'plus' as const }
-            : { id: team.id, title: team.name, line: `${team.key} · ${OPEN[team.id] ?? 0} open issues`, icon: 'issues' as const },
-        )}
-      />
-      <ConnectActions>
-        <LinkButton onClick={onBack}>Back</LinkButton>
-      </ConnectActions>
-    </ConnectCard>
+    <div className={s.work}>
+      <h3 className={s.sub}>Where its work goes</h3>
+      <div className={s.list}>
+        {[codeWay(goes), issuesWay(goes)].map((way) => (
+          <button key={way.id} type="button" className={s.row} onClick={() => onEdit(way.id as 'code' | 'issues')}>
+            <WayGlyph way={way} />
+            <WayWords way={way} />
+            <span className={s.change}>Change</span>
+          </button>
+        ))}
+      </div>
+    </div>
   )
 }
 
@@ -405,75 +423,6 @@ const planOf = (state: State, goes: Goes): ConnectCan[] => {
       : []),
     can('project', 'Make Tidepool'),
   ]
-}
-
-/** The last card: where it all goes, each a press away from its own card, and Create; then each line ticking as it's made. */
-function ReadyCard({
-  state,
-  ink,
-  goes,
-  pager,
-  making,
-  made,
-  onEdit,
-  onCreate,
-  onOpen,
-}: {
-  state: State
-  ink: ProjectInk
-  goes: Goes
-  pager?: Pager
-  making: number | null
-  made: boolean
-  onEdit: (id: 'code' | 'issues') => void
-  onCreate: () => void
-  onOpen: () => void
-}) {
-  const host = goes.code === 'here' ? null : HOST[goes.code]
-  const mark = <ProjectMark seed="prj_tidepool" ink={ink} size={pager === undefined ? 52 : 40} />
-  if (making !== null) {
-    const plan = planOf(state, goes).map((line, at) => ({
-      ...line,
-      state: at < making ? CanState.Can : at === making ? CanState.Checking : CanState.Waiting,
-    }))
-    return (
-      <ConnectCard picture={mark} title={made ? 'Tidepool is ready' : 'Making Tidepool'} done={made} {...pagerOf(pager)}>
-        <ConnectChecks label="Making Tidepool" items={plan} />
-        {made && (
-          <ConnectActions primary>
-            <Button variant="signal" onClick={onOpen} data-first>
-              Open Tidepool
-            </Button>
-          </ConnectActions>
-        )}
-      </ConnectCard>
-    )
-  }
-  const code: ConnectWayOption =
-    host === null
-      ? { id: 'code', title: 'Only on this Mac', line: 'Tasks merge into main here', icon: 'folder' }
-      : { id: 'code', title: `${goes.owner}/${goes.name}`, line: `New ${goes.seen} ${host.thing} on ${host.name}`, brand: host.brand }
-  const issues: ConnectWayOption =
-    goes.issues === 'linear'
-      ? {
-          id: 'issues',
-          title: goes.team.fresh === true ? `Linear · new team ${goes.team.key}` : `Linear · ${goes.team.name}`,
-          line: 'Its issues and drafts go there',
-          brand: Brand.Linear,
-        }
-      : goes.issues === 'host' && host !== null
-        ? { id: 'issues', title: host.issues, line: `On ${goes.owner}/${goes.name}`, brand: host.brand }
-        : { id: 'issues', title: 'No tracker yet', line: 'Its settings can link one later', icon: 'issues' }
-  return (
-    <ConnectCard picture={mark} title="Create Tidepool" {...pagerOf(pager)}>
-      <ConnectWays label="Where its work goes" onChoose={(id) => onEdit(id as 'code' | 'issues')} ways={[code, issues]} />
-      <ConnectActions primary>
-        <Button variant="signal" kbd="⌘↵" onClick={onCreate} data-first>
-          Create Tidepool
-        </Button>
-      </ConnectActions>
-    </ConnectCard>
-  )
 }
 
 /* ---- The first step: its name and folders, each read for what it is ---- */
@@ -553,6 +502,8 @@ const placesOf = (goes: Goes, chosen: { code: boolean; issues: boolean }): NewPr
   return [...(chosen.code ? [code] : []), ...(chosen.issues ? [issues] : [])]
 }
 
+type Card = 'code' | 'connect' | 'host' | 'issues' | 'tracker' | 'team' | 'ready'
+
 function NewProjectScene({
   state,
   direction,
@@ -577,9 +528,11 @@ function NewProjectScene({
   const [trail, setTrail] = useState<Card[]>(opening !== null && opening !== 'code' && !quick ? ['code'] : [])
   const [connecting, setConnecting] = useState<Host>(given === 'github' ? 'gitlab' : 'github')
   const [chosen, setChosen] = useState({
-    code: opening === 'issues' || opening === 'team' || opening === 'ready',
-    issues: opening === 'ready',
+    code: quick || opening === 'issues' || opening === 'team' || opening === 'ready',
+    issues: quick || opening === 'ready',
   })
+  // Where arrows have moved each question's choice, before it's taken.
+  const [selected, setSelected] = useState<Partial<Record<Card, string>>>({})
   const [making, setMaking] = useState<number | null>(null)
   const timer = useRef<number | null>(null)
   useEffect(
@@ -602,11 +555,11 @@ function NewProjectScene({
     setTrail((now) => now.slice(0, -1))
     setCard(trail.at(-1) ?? null)
   }
-  // A card a question: on to the next. Ready in one press: back to the card that says it all.
+  // A step a question: on to the next. Ready in one press: back to the folders, where it all is.
   const after = (next: Card) => {
     if (!quick) return go(next)
     setTrail([])
-    setCard('ready')
+    setCard(null)
   }
   const create = () => {
     if (making !== null) return
@@ -621,122 +574,165 @@ function NewProjectScene({
     }, 520)
   }
 
-  const pager = (at: number): { pager?: Pager } => (quick ? {} : { pager: { steps: 3, at } })
-  const walk = (() => {
+  const pickCode = (id: string) => {
+    if (id === 'connect') return go('connect')
+    if (id === 'here') {
+      change({ code: 'here', ...(goes.issues === 'host' ? { issues: linear ? 'linear' : 'none' } : {}) })
+      setChosen((now) => ({ ...now, code: true }))
+      return after('issues')
+    }
+    change({ code: id as Host })
+    go('host')
+  }
+  const pickIssues = (id: string) => {
+    if (id === 'linear') return go('team')
+    if (id === 'tracker') return go('tracker')
+    change({ issues: id as Issues })
+    setChosen((now) => ({ ...now, issues: true }))
+    after('ready')
+  }
+  const pickTeam = (id: string) => {
+    change({ issues: 'linear', team: TEAMS.find((team) => team.id === id) ?? NEW_TEAM })
+    setChosen((now) => ({ ...now, issues: true }))
+    after('ready')
+  }
+  const connected = () => {
+    setSetup((now) => (now === 'none' ? 'github' : 'all'))
+    setConnecting('gitlab')
+    change({ code: connecting })
+    go('host')
+  }
+
+  /** A question answered by a row: the rows, the one chosen, and Continue taking it. */
+  const asking = (
+    at: Card,
+    title: string,
+    ways: readonly Way[],
+    fallback: string,
+    onPick: (id: string) => void,
+    more?: ReactNode,
+  ): NewProjectStep => {
+    const value = selected[at] ?? fallback
+    return {
+      key: at,
+      title,
+      children: (
+        <>
+          <Picks label={title} ways={ways} value={value} onSelect={(id) => setSelected((now) => ({ ...now, [at]: id }))} onPick={onPick} />
+          {more}
+        </>
+      ),
+      next: { label: 'Continue', onPress: () => onPick(value) },
+      onBack: back,
+    }
+  }
+
+  const step = ((): NewProjectStep | undefined => {
+    if (!walking) return undefined
     switch (card) {
-      case 'code':
-        return (
-          <CodeCard
-            setup={setup}
-            goes={goes}
-            {...pager(0)}
-            onPick={(id) => {
-              if (id === 'here') {
-                change({ code: 'here', ...(goes.issues === 'host' ? { issues: linear ? 'linear' : 'none' } : {}) })
-                setChosen((now) => ({ ...now, code: true }))
-                return after('issues')
-              }
-              if (id === 'connect') return go('connect')
-              change({ code: id as Host })
-              go('host')
-            }}
-          />
+      case 'code': {
+        const more = setup === 'none' ? 'GitHub or GitLab' : setup === 'github' ? 'GitLab' : null
+        return asking(
+          'code',
+          'Where its code lives',
+          [
+            ...hostsOf(setup).map((id) => ({
+              id,
+              title: HOST[id].name,
+              line: `New ${HOST[id].thing} · ${goes.owner}/${goes.name}`,
+              brand: HOST[id].brand,
+            })),
+            { id: 'here', title: 'Only on this Mac', line: 'Tasks merge into main here', icon: 'folder' },
+            ...(more === null ? [] : [{ id: 'connect', title: `Connect ${more}`, line: 'Then make it there', icon: 'plug' as const }]),
+          ],
+          goes.code,
+          pickCode,
         )
-      case 'connect':
-        return (
-          <ConnectHostCard
-            host={connecting}
-            onBack={back}
-            onPick={() => {
-              setSetup((now) => (now === 'none' ? 'github' : 'all'))
-              setConnecting('gitlab')
-              change({ code: connecting })
-              go('host')
-            }}
-          />
+      }
+      case 'connect': {
+        const h = HOST[connecting]
+        return asking(
+          'connect',
+          `Connect ${h.name}`,
+          h.ways,
+          'browser',
+          connected,
+          <p className={s.quiet}>Kept encrypted on this Mac. Agents never get it; they reach {h.name} through Althar.</p>,
         )
-      case 'host':
-        return goes.code === 'here' ? null : (
-          <HostCard
-            host={goes.code}
-            goes={goes}
-            {...pager(0)}
-            onChange={change}
-            done={quick ? 'Done' : 'Continue'}
-            onBack={() => (quick ? go('code') : back())}
-            onDone={() => {
-              setChosen((now) => ({ ...now, code: true }))
-              after('issues')
-            }}
-          />
+      }
+      case 'host': {
+        if (goes.code === 'here') return undefined
+        const h = HOST[goes.code]
+        const done = () => {
+          setChosen((now) => ({ ...now, code: true }))
+          after('issues')
+        }
+        return {
+          key: 'host',
+          title: `New ${h.thing} on ${h.name}`,
+          children: <HostForm id="host-form" host={goes.code} goes={goes} onChange={change} onDone={done} />,
+          next: { label: 'Continue', onPress: done, disabled: !nameOf(goes).fine },
+          onBack: back,
+        }
+      }
+      case 'issues': {
+        const host = goes.code === 'here' ? null : HOST[goes.code]
+        return asking(
+          'issues',
+          'Where its issues go',
+          [
+            ...(linear ? [{ id: 'linear', title: 'Linear', line: 'Charrette · a new team, or one of 2', brand: Brand.Linear }] : []),
+            ...(host === null ? [] : [{ id: 'host', title: host.issues, line: `On ${goes.owner}/${goes.name}`, brand: host.brand }]),
+            ...(linear
+              ? []
+              : [{ id: 'tracker', title: 'Connect Linear, Jira or Trello', line: 'Then choose where', icon: 'plug' as const }]),
+            { id: 'none', title: 'Not now', line: 'Its settings can link one later', icon: 'after' },
+          ],
+          goes.issues === 'host' && host === null ? 'none' : goes.issues === 'linear' && !linear ? 'tracker' : goes.issues,
+          pickIssues,
         )
-      case 'issues':
-        return (
-          <IssuesCard
-            linear={linear}
-            goes={goes}
-            {...pager(1)}
-            onPick={(id) => {
-              if (id === 'linear') return go('team')
-              if (id === 'tracker') return go('tracker')
-              change({ issues: id as Issues })
-              setChosen((now) => ({ ...now, issues: true }))
-              after('ready')
-            }}
-          />
-        )
+      }
       case 'tracker':
-        return (
-          <ConnectTrackerCard
-            onBack={back}
-            onPick={() => {
-              setLinear(true)
-              go('team')
-            }}
-          />
-        )
+        return asking('tracker', 'Connect a tracker', TRACKERS, 'linear', () => {
+          setLinear(true)
+          go('team')
+        })
       case 'team':
-        return (
-          <TeamCard
-            {...pager(1)}
-            onBack={back}
-            onPick={(team) => {
-              change({ issues: 'linear', team })
-              setChosen((now) => ({ ...now, issues: true }))
-              after('ready')
-            }}
-          />
+        return asking(
+          'team',
+          'Its team in Linear',
+          TEAMS.map((team) =>
+            team.fresh === true
+              ? { id: team.id, title: `New team: ${team.name}`, line: `Its issues ${team.key}-1, ${team.key}-2…`, icon: 'plus' as const }
+              : { id: team.id, title: team.name, line: `${team.key} · ${OPEN[team.id] ?? 0} open issues`, icon: 'issues' as const },
+          ),
+          goes.team.id,
+          pickTeam,
         )
-      case 'ready':
-        return (
-          <ReadyCard
-            state={state}
-            ink={ink}
-            goes={goes}
-            {...pager(2)}
-            making={making}
-            made={made}
-            onEdit={(id) => go(id === 'code' ? (goes.code === 'here' ? 'code' : 'host') : 'issues')}
-            onCreate={create}
-            onOpen={onOpen}
-          />
-        )
+      case 'ready': {
+        const items = plan.map((line, at) => ({
+          ...line,
+          state: making === null ? CanState.Waiting : at < making ? CanState.Can : at === making ? CanState.Checking : CanState.Waiting,
+        }))
+        return {
+          key: 'ready',
+          title: made ? 'Tidepool is ready' : making !== null ? 'Making Tidepool' : 'Create Tidepool',
+          children: (
+            <div className={s.plan}>
+              <ConnectChecks label="What Create does" items={items} />
+            </div>
+          ),
+          next: made
+            ? { label: 'Open Tidepool', onPress: onOpen, last: true }
+            : // Ready in one press was pressed on the folders, as it was drawn there.
+              { label: 'Create Tidepool', onPress: create, busy: making !== null, last: !quick },
+          ...(making === null && !quick ? { onBack: back } : {}),
+        }
+      }
       default:
-        return null
+        return undefined
     }
   })()
-
-  // Focus goes to what each card asks first, so Return carries on through it.
-  const stage = useRef<HTMLDivElement>(null)
-  useEffect(() => {
-    if (!walking) return
-    const here = stage.current
-    const first =
-      here?.querySelector<HTMLElement>('[data-first]') ??
-      here?.querySelector<HTMLElement>('input') ??
-      here?.querySelector<HTMLElement>('[role="group"] button')
-    first?.focus()
-  }, [card, walking, made])
 
   const error =
     direction === 'a' && (state === 'empty' || state === 'files' || state === 'unreadable')
@@ -744,6 +740,15 @@ function NewProjectScene({
       : state === 'unreadable'
         ? 'Althar can’t read tidepool: macOS keeps it from opening the folder. Check it in Finder’s Get Info, then choose it again.'
         : undefined
+  const readable = direction !== 'a' && state !== 'unreadable' && state !== 'project'
+  const extra = (
+    <>
+      {direction !== 'a' && state === 'empty' && <DescribeRow value={describe} onChange={setDescribe} />}
+      {quick && readable && (
+        <WorkRows goes={goes} onEdit={(id) => go(id === 'code' ? (goes.code === 'here' ? 'code' : 'host') : 'issues')} />
+      )}
+    </>
+  )
   return (
     <NewProject
       seed="prj_tidepool"
@@ -760,26 +765,17 @@ function NewProjectScene({
       findings={findingsFor(state, direction, onOpen)}
       onCreate={() => {
         if (direction === 'a') return
-        if (card === null) {
-          if (quick) setChosen({ code: true, issues: true })
-          return go(quick ? 'ready' : 'code')
-        }
-        if (card === 'ready') create()
+        if (!quick) return go('code')
+        go('ready')
+        create()
       }}
       onCancel={() => (walking ? back() : undefined)}
-      places={placesOf(goes, chosen)}
+      // Ready in one press shows where its work goes under the folders; on the left, once they're out of sight.
+      places={quick && !walking ? [] : placesOf(goes, chosen)}
       {...(error === undefined ? {} : { error })}
-      {...(direction !== 'a' && state === 'empty' ? { extra: <DescribeRow value={describe} onChange={setDescribe} /> } : {})}
-      {...(walking
-        ? {
-            walk: (
-              <div ref={stage}>
-                <SizeMotion step={`${card ?? ''}${making === null ? '' : '-making'}`}>{walk}</SizeMotion>
-              </div>
-            ),
-          }
-        : {})}
-      text={direction === 'a' ? {} : { create: () => 'Continue', createUnnamed: 'Continue' }}
+      extra={extra}
+      {...(step === undefined ? {} : { step })}
+      text={direction === 'b' ? { create: () => 'Continue', createUnnamed: 'Continue' } : {}}
     />
   )
 }
@@ -871,21 +867,30 @@ function ProjectScene({ state, direction, setup }: { state: State; direction: Di
           </div>
         )}
         {direction !== 'a' && !added && putting !== null && (
-          // The same card the new project's walk shows, set in from the settings' left edge.
+          // The same form the new project asks with, set in from the settings' left edge.
           <div className={s.inSettings}>
-            <HostCard
+            <h3 className={s.sub}>
+              <BrandMark brand={HOST[putting].brand} size={14} />
+              New {HOST[putting].thing} on {HOST[putting].name}
+            </h3>
+            <HostForm
+              id="put-form"
               host={putting}
               goes={goes}
               onChange={(next) => setGoes((now) => ({ ...now, ...next }))}
-              done="Make it and push main"
-              back="Cancel"
-              align="start"
-              onBack={() => setPutting(null)}
               onDone={() => {
                 setPutting(null)
                 setAdded(true)
               }}
             />
+            <div className={s.settingsActions}>
+              <Button type="submit" form="put-form" variant="ink" disabled={!nameOf(goes).fine}>
+                Make it and push main
+              </Button>
+              <Button variant="quiet" onClick={() => setPutting(null)}>
+                Cancel
+              </Button>
+            </div>
           </div>
         )}
       </div>
@@ -922,7 +927,10 @@ function Lab() {
   useEffect(() => {
     const down = (event: KeyboardEvent) => {
       const target = event.target as HTMLElement | null
-      if (target !== null && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.closest('[role="group"]') !== null))
+      if (
+        target !== null &&
+        (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.closest('[role="group"], [role="radiogroup"]') !== null)
+      )
         return
       if (event.metaKey || event.ctrlKey || event.altKey) return
       const key = event.key.toLowerCase()
