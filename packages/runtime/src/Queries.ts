@@ -641,7 +641,7 @@ export const itemOf = (row: ItemRow): ThreadItem | undefined => {
       const title = text(content, 'title')
       if (title === 'Resumed after a rejection.') return undefined
       // The coordinator's offer of a preset, as a line of its own, from before its task's card offered it: the card says it now.
-      if (field(content, 'offer') !== undefined) return undefined
+      if (field(field(content, 'offer'), 'kind') === 'preset') return undefined
       // What a lead's agent could see is kept for `skillsRead`, not for a chat: a line for it never reaches the window.
       if (role === 'skills') return undefined
       // What older threads said of another task (one that ended, or one changing the same files): news for the lead, not for the chat.
