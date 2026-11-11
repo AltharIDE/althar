@@ -356,7 +356,7 @@ describe('the Talk room', () => {
     expect(screen.getByText('Needs you')).toBeTruthy()
     expect(screen.getByText('Implementing')).toBeTruthy()
     expect(screen.getByText('Stopped')).toBeTruthy()
-    expect(screen.getByText('Held. Starts when you say')).toBeTruthy()
+    expect(screen.getByText('Held', { exact: true })).toBeTruthy()
     expect(screen.getByText(`Claude Code is out of usage until ${clock('2026-10-03T15:40:00.000Z')}`)).toBeTruthy()
     // Held for the reset, it is paused, as on the board, not running.
     expect(screen.getByText('Paused')).toBeTruthy()
@@ -582,9 +582,10 @@ describe('the Talk room', () => {
     const { client } = fakeClient({ getCoordinator: vi.fn(async () => coordinatorSnapshot({ items: [items.card(waitingCard)] })) })
     withServices(<Project room={Room.Talk} />, client)
     expect(await screen.findByText('Waiting: 4 of 4 agents busy on this Mac')).toBeTruthy()
-    // Nothing to start or hold: it starts on its own once an agent is free.
+    // Nothing to start: it starts on its own once an agent is free. It can still be held, which takes it out of the line.
     expect(screen.queryByRole('button', { name: 'Start now' })).toBeNull()
-    expect(screen.queryByRole('button', { name: 'Hold' })).toBeNull()
+    await userEvent.click(screen.getByRole('button', { name: 'Hold' }))
+    expect(client.holdPlan).toHaveBeenCalledWith('pln1')
     await userEvent.click(screen.getByRole('button', { name: 'Skip' }))
     await waitFor(() =>
       expect(client.changePlan).toHaveBeenLastCalledWith(

@@ -220,6 +220,38 @@ describe('hold_task and restart_task', () => {
     }).pipe(Effect.provide(runtime(':memory:', {}, { countdown: Duration.minutes(10) }))),
   )
 
+  it.live('hold a task that waits for a free agent, out of the line, and start it again', () =>
+    Effect.gen(function* () {
+      const c = yield* coordinator
+      const first = yield* started(c.projectId, 'Work on the importer', 'Work on it. [lead:wait]')
+      yield* until(standing(first.taskId), (row) => row?.run === 'running')
+      const second = yield* started(c.projectId, 'Tidy the docs', 'Do it. [lead:finish]')
+      const sql = yield* SqlClient.SqlClient
+      const attemptOf = (taskId: string) =>
+        sql<{ state: string }>`
+          SELECT a.state FROM node_attempts a JOIN nodes n ON n.id = a.node_id JOIN workflow_executions e ON e.id = n.execution_id
+          JOIN runs r ON r.id = e.run_id WHERE r.task_id = ${taskId} ORDER BY a.rowid DESC LIMIT 1`
+      yield* until(attemptOf(second.taskId), (rows) => rows[0]?.state === 'held')
+
+      yield* c.turn('hold the docs one')
+      assert.match(yield* callTool(c.access, 'hold_task', { task: second.slug }), /^Held .*: it is out of the line/)
+      assert.deepInclude(yield* standing(second.taskId), { counting: 0, held: 1 })
+      assert.strictEqual((yield* attemptOf(second.taskId))[0]?.state, 'cancelled')
+      assert.include(yield* titles(second.threadId), 'The coordinator held this task’s plan')
+      // Held, it says so, and one at work has no plan to hold.
+      assert.match(yield* callTool(c.access, 'hold_task', { task: second.slug }), /is held already/)
+      assert.match(yield* callTool(c.access, 'hold_task', { task: first.slug }), /has started: there is no plan to hold/)
+
+      yield* c.turn('go ahead with the docs one')
+      assert.match(
+        yield* callTool(c.access, 'restart_task', { task: second.slug }),
+        /^Started .*: it waits for a place among the agents at work/,
+      )
+      yield* until(attemptOf(second.taskId), (rows) => rows[0]?.state === 'held')
+      assert.deepInclude(yield* standing(second.taskId), { counting: 0, held: 0 })
+    }).pipe(Effect.provide(runtime(':memory:', {}, { busy: { machine: { cores: 3, memory: 7 * 1024 ** 3 } } }))),
+  )
+
   it.live('restarts a stopped task from its step, and a discarded one on its worktree', () =>
     Effect.gen(function* () {
       const c = yield* coordinator

@@ -55,7 +55,7 @@ test('lists the tasks that wait for a free agent in Up next, in the order they s
     await planTask(page, 'Hold this plan')
     // Exactly: the plan up next on the board beside is named for it.
     await page.getByRole('button', { name: 'Hold', exact: true }).last().click()
-    await expect(page.getByRole('region', { name: 'Conversation' }).getByText('Held. Starts when you say')).toBeVisible()
+    await expect(page.getByRole('region', { name: 'Conversation' }).getByText('Held', { exact: true })).toBeVisible()
     await planTask(page, 'Plan the release')
 
     await page.getByRole('radio', { name: /^Board/ }).click()

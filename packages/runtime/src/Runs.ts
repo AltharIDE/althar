@@ -660,6 +660,25 @@ export const planWaits = (taskId: string) =>
   })
 
 /**
+ * Whether the task's run has begun nothing: its one attempt, Implement, held before any agent was on it, for a place among
+ * the agents at work here, for its checkout (ADR-091), or for a usage limit or its agent's service. Until then the person
+ * can take it back to a held plan, which waits until they start it.
+ */
+export const beforeFirstStep = (taskId: string) =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient
+    const rows = yield* sql<{ nodeKey: string; state: string; holdReason: string | null; output: string | null; session: string | null }>`
+      SELECT n.node_key, a.state, a.hold_reason, a.output, a.provider_session_id AS session FROM runs r
+      JOIN workflow_executions e ON e.run_id = r.id JOIN nodes n ON n.execution_id = e.id JOIN node_attempts a ON a.node_id = n.id
+      WHERE r.id = (SELECT id FROM runs WHERE task_id = ${taskId} ORDER BY created_at DESC LIMIT 1) AND r.state = 'running'`
+    const [only] = rows
+    if (rows.length !== 1 || only === undefined) return false
+    if (only.nodeKey !== 'implement' || only.state !== 'held' || only.session !== null) return false
+    if (only.holdReason === 'machine_busy' || only.holdReason === 'checkout') return waitingOf(only.output, '').place.how === 'start'
+    return only.holdReason === 'usage_limit' || only.holdReason === 'agent_unavailable'
+  })
+
+/**
  * Where a task's reviewer stands to change: `now`, before its review round starts or between rounds; `next_round`, in a round
  * under way, which the change waits for; `never`, once its review is done: its run over, or its review passed or went on to the
  * run's ending, though that still publishes or waits.
@@ -791,6 +810,12 @@ export class Runs extends Context.Service<
       parameters: string,
       actorId: ActorId,
     ): Effect.Effect<boolean, unknown, SqlClient.SqlClient | Ledger | Crypto.Crypto>
+    /**
+     * Takes back a run that has begun nothing (`beforeFirstStep`), as the person held its plan: its waiting step is cancelled, so
+     * it leaves the line for a place, and its run ends, which a start makes anew. False, and nothing changed, where it has begun.
+     * Inside the caller's transaction.
+     */
+    unstart(taskId: string, actorId: ActorId): Effect.Effect<boolean, unknown, SqlClient.SqlClient | Ledger | Crypto.Crypto>
     /**
      * Makes a quick task a change, as the person asked its lead to
      * (make_it_a_change), inside the caller's transaction: its plan, its
@@ -7385,6 +7410,63 @@ export class Runs extends Context.Service<
             const implement = steps.steps.find((step) => step.key === 'implement')
             if (implement !== undefined)
               yield* sql`UPDATE nodes SET config = ${JSON.stringify(implement)} WHERE execution_id = ${current.executionId} AND node_key = 'implement'`
+            return true
+          }),
+        unstart: (taskId, actorId) =>
+          Effect.gen(function* () {
+            const sql = yield* SqlClient.SqlClient
+            if (!(yield* beforeFirstStep(taskId))) return false
+            const current = yield* currentRun(taskId)
+            if (current === undefined) return false
+            const at = yield* timestamp
+            const attempts = yield* sql<{ id: string; nodeId: string; output: string | null }>`
+              SELECT a.id, a.node_id, a.output FROM node_attempts a JOIN nodes n ON n.id = a.node_id
+              WHERE n.execution_id = ${current.executionId} AND a.state IN ('ready', 'admitted', 'running', 'waiting_attention', 'verifying', 'held', 'reconciling')`
+            for (const attempt of attempts) {
+              const revision = yield* change('node_attempts', attempt.id, {
+                state: 'cancelled',
+                holdReason: null,
+                output: JSON.stringify({ ...(JSON.parse(attempt.output ?? '{}') as Readonly<Record<string, unknown>>), stopped: true }),
+                endedAt: at,
+              })
+              yield* change('nodes', attempt.nodeId, { state: 'cancelled' })
+              yield* fact({
+                projectId: current.projectId,
+                aggregateType: 'node_attempt',
+                aggregateId: attempt.id,
+                revision,
+                type: 'node_attempt.cancelled',
+                payload: { stopped: true, why: 'held' },
+                actorId,
+              })
+            }
+            // What it asked of the person, about its checkout or its step, no longer waits on them.
+            const calls = yield* sql<{ id: string }>`
+              SELECT id FROM attention_requests WHERE task_id = ${taskId} AND kind IN ('checkout', 'stuck') AND state = 'open'`
+            for (const call of calls) {
+              const withdrawn = yield* change('attention_requests', call.id, { state: 'withdrawn' })
+              yield* fact({
+                projectId: current.projectId,
+                aggregateType: 'attention_request',
+                aggregateId: call.id,
+                revision: withdrawn,
+                type: 'attention_request.withdrawn',
+                actorId,
+              })
+            }
+            yield* change('run_attempts', current.runAttemptId, { state: 'interrupted', endedAt: at })
+            yield* change('workflow_executions', current.executionId, { state: 'cancelled', endedAt: at })
+            // Detached from its plan, which waits to be started: a start makes its run anew.
+            const revision = yield* change('runs', current.runId, { state: 'cancelled', endedAt: at, planId: null })
+            yield* fact({
+              projectId: current.projectId,
+              aggregateType: 'run',
+              aggregateId: current.runId,
+              revision,
+              type: 'run.cancelled',
+              payload: { why: 'held' },
+              actorId,
+            })
             return true
           }),
         answer: (input) =>
