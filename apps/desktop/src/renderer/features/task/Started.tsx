@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query'
 
-import type { AgentStatus, BoardSnapshot, BoardTask, ThreadItem } from '@althar/contracts'
+import type { AgentStatus, BoardSnapshot, BoardTask, ThreadSnapshot } from '@althar/contracts'
 import { StartedTask, TaskStatus, type TaskPartModel } from '@althar/ui'
 
 import { useServices } from '../../data/services'
@@ -39,26 +39,17 @@ export interface StartedEntry {
 }
 
 /**
- * Every task a task's lead started, oldest first: those the board holds, and those its thread says it started that the board
- * no longer does, because it only keeps the most recently settled (those say they settled, and still open).
+ * Every task a task's lead started, oldest first: its thread's own list of them, which holds all, and the board's card for
+ * each it still holds, since the board only keeps the most recently settled (the rest say they settled, and still open).
  */
-export const startedIn = (
-  board: BoardSnapshot | null,
-  taskId: string | undefined,
-  items: ReadonlyArray<ThreadItem>,
-): ReadonlyArray<StartedEntry> => {
-  if (board === null) return []
-  const held: ReadonlyArray<StartedEntry> = startedBy(board, taskId).map((work) => ({ threadId: work.threadId, title: work.title, work }))
-  const seen = new Set(held.map((one) => one.threadId))
-  const told: Array<StartedEntry> = []
-  for (const item of items) {
-    const task = item.kind === 'notice' ? item.content.task : undefined
-    if (task === undefined || seen.has(task.threadId)) continue
-    seen.add(task.threadId)
-    told.push({ threadId: task.threadId, title: task.title, work: undefined })
-  }
-  return [...told, ...held]
-}
+export const startedIn = (board: BoardSnapshot | null, started: ThreadSnapshot['started']): ReadonlyArray<StartedEntry> =>
+  board === null
+    ? []
+    : (started ?? []).map((one) => ({
+        threadId: one.threadId,
+        title: one.title,
+        work: board.tasks.find((task) => task.taskId === one.taskId),
+      }))
 
 /** Whether a started task's chip counts down: it needs the clock to tick. */
 export const countsDown = (task: BoardTask) => task.phase === 'planned' && task.plan?.startsAt != null

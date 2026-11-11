@@ -3438,6 +3438,11 @@ export class Queries extends Context.Service<
           const { items, earlier, turns } = yield* pageOf(threadId, page, true)
           // Its steps' reports, whatever page they're on: the task's finished view is read from the lead's, its graph from all.
           const reports = (yield* itemRows(threadId, { reports: true, limit: REPORTS })).items.map(itemOf)
+          // The tasks its lead started, all of them: its thread's page may not reach the line that says so.
+          const started = yield* sql<{ taskId: string; slug: string; title: string; threadId: string }>`
+            SELECT k.id AS task_id, k.slug AS slug, k.title AS title, t.id AS thread_id
+            FROM tasks k JOIN threads t ON t.task_id = k.id AND t.kind = 'task'
+            WHERE k.parent_task_id = ${head.taskId} ORDER BY k.created_at, k.id`
           const attention = yield* sql<{
             id: string
             kind: string
@@ -3666,6 +3671,7 @@ export class Queries extends Context.Service<
             earlier,
             reports: reports.flatMap((item) => (item === undefined ? [] : [item])),
             turns,
+            started,
           } satisfies ThreadSnapshot
         })
 

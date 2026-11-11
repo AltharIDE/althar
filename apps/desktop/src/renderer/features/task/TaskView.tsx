@@ -591,7 +591,7 @@ export function TaskView({
   // The tasks its lead started, as the board has them: a chip where each was started, and a part of its own.
   const board = useStartedBoard(model.snapshot?.project.id)
   const started = startedBy(board, model.snapshot?.task.id)
-  const startedAll = startedIn(board, model.snapshot?.task.id, model.snapshot?.items ?? [])
+  const startedAll = startedIn(board, model.snapshot?.started)
   // A running turn says how long it has worked so far, a task under way how long it has run, and a run of it how long it has been up.
   const now = useNow(
     ticking(model.snapshot) ||

@@ -220,28 +220,24 @@ describe('the parent’s parts list the tasks it started', () => {
 })
 
 describe('the tasks a task started that the board no longer holds', () => {
-  const told = (threadId: string, title: string) =>
-    items.notice({ title: `Started “${title}”`, source: 'runtime', task: { taskId: threadId, slug: threadId, title, threadId } }, null)
+  const ref = (threadId: string, title: string) => ({ taskId: threadId, slug: threadId, title, threadId })
 
-  it('still lists them from the thread, after those the board holds, once the board only keeps the latest settled', () => {
-    const board: BoardSnapshot = {
-      cursor: 1,
-      calls: [],
-      settledTotal: 90,
-      tasks: [child({ taskId: 'b', threadId: 'thb', startedBy: { taskId: 'p1', slug: 'p', title: 'P', threadId: 'thp1' } })],
-    }
-    const list = startedIn(board, 'p1', [told('tho', 'Settled long ago'), told('thb', 'Held by the board')])
+  it('lists every one the thread names, oldest first, with the board’s card for those it still holds', () => {
+    const held = child({ taskId: 'b', threadId: 'thb' })
+    const board: BoardSnapshot = { cursor: 1, calls: [], settledTotal: 90, tasks: [held] }
+    const list = startedIn(board, [ref('tho', 'Settled long ago'), { ...ref('thb', 'Held by the board'), taskId: 'b' }])
     expect(list.map((one) => [one.threadId, one.work === undefined])).toEqual([
       ['tho', true],
       ['thb', false],
     ])
+    expect(startedIn(board, undefined)).toEqual([])
+    expect(startedIn(null, [ref('tho', 'x')])).toEqual([])
   })
 
   it('keeps the part, and the way into the task, when it is the only one and the board has dropped it', async () => {
     const open = vi.fn()
     const read = reading([])
-    const board = read.board
-    const entries = startedIn(board, 'p1', [told('tho', 'Settled long ago')])
+    const entries = startedIn(read.board, [ref('tho', 'Settled long ago')])
     const parts = partsOf(snapshot(), { started: { tasks: entries, reading: { ...read, onOpen: open } } } as unknown as PartsActions)
     expect(parts.find((one) => one.id === 'started')).toMatchObject({ name: 'Tasks it started', detail: 'Settled' })
     render(inServices(<PartsDrill parts={parts} kinds={[]} />))
@@ -281,7 +277,10 @@ describe('in the parent’s own window', () => {
     },
     null,
   )
-  const parent = snapshot({ items: [started] })
+  const parent = snapshot({
+    items: [started],
+    started: [{ taskId: 'c1', slug: 'review-after-merge', title: child().title, threadId: 'thc1' }],
+  })
   const parentId = parent.task.id
   const own = { startedBy: { taskId: parentId, slug: 'prototype', title: 'Prototype', threadId: parent.threadId } }
 
@@ -346,9 +345,11 @@ describe('in the parent’s own window', () => {
     expect(screen.getAllByRole('button', { name: /Review after merge/ })).toHaveLength(1)
   })
 
-  it('lists the task from the thread in its parts when the board no longer holds it', async () => {
+  it('lists the task in its parts when the board no longer holds it and its start line is on an earlier page', async () => {
+    // The first page holds none of the lines that started anything: the snapshot still names its children.
+    const first = snapshot({ ...parent, items: [], earlier: true })
     const { client } = fakeClient({
-      getThread: vi.fn(async () => parent),
+      getThread: vi.fn(async () => first),
       getBoard: vi.fn(async () => ({ cursor: 1, calls: [], settledTotal: 90, tasks: [] })),
     })
     withServices(<Task onOpenTask={vi.fn()} />, client)
