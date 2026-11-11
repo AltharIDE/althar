@@ -7,17 +7,18 @@ import s from './drawn.module.css'
 /*
  * The flow's new features, drawn as the console's other tiles are: an
  * interface lit by one light, on the cabin's warm dark, every size taken from
- * the drawing's width so each reads the same at any size. `tilt` lays a
- * drawing back in perspective, its cards lifted off it. Pictures: nothing in
- * them can be pressed, and each reads as its label.
+ * the drawing's width so each reads the same at any size. The canvas and the
+ * browser draw at `big`, or at `mid` beside the small ones, leaving out what
+ * wouldn't read there. Pictures: nothing in them can be pressed, and each
+ * reads as its label.
  */
 
-type Size = 'big' | 'small'
+type Size = 'big' | 'mid' | 'small'
 
-function Stage({ label, size, tilt, children }: { label: string; size: Size; tilt?: boolean; children: ReactNode }) {
+function Stage({ label, size, children }: { label: string; size: Size; children: ReactNode }) {
   return (
-    <div className={cx(s.box, size === 'big' ? s.bigBox : s.smallBox)} role="img" aria-label={label}>
-      <div className={cx(s.stage, s[size], tilt && s.tilt)}>
+    <div className={s.box} role="img" aria-label={label}>
+      <div className={cx(s.stage, s[size])}>
         <div className={s.scene}>{children}</div>
       </div>
     </div>
@@ -33,13 +34,13 @@ const mark = (brand: Brand) => (
 /* ---- the big ones ---- */
 
 /** The canvas: a launch page the lead drew, at its third version, the two before it behind, a comment answered on it. */
-export function CanvasDrawing({ tilt }: { tilt?: boolean }) {
+export function CanvasDrawing({ size = 'big' }: { size?: 'big' | 'mid' }) {
   return (
-    <Stage size="big" tilt={tilt} label="A launch page the lead drew on the canvas, at version 3, with a comment answered in it">
+    <Stage size={size} label="A launch page the lead drew on the canvas, at version 3, with a comment answered in it">
       <div className={s.under} />
       <div className={cx(s.ghost, s.ghost1)} />
       <div className={cx(s.ghost, s.ghost2)} />
-      <div className={cx(s.window, s.cv, s.lift)}>
+      <div className={cx(s.window, s.cv)}>
         <div className={s.bar}>
           <span className={s.glyph} />
           <b>Payouts launch page</b>
@@ -86,7 +87,7 @@ export function CanvasDrawing({ tilt }: { tilt?: boolean }) {
           </div>
         </div>
       </div>
-      <div className={cx(s.pin, s.lift2)}>
+      <div className={s.pin}>
         <i />
         <span>
           Bigger, bolder headline.
@@ -105,15 +106,11 @@ const ROWS = [
 ] as const
 
 /** The browser: the page a task is building, beside it, a comment pointed at a row, and the lead's cursor trying what it says. */
-export function BrowserDrawing({ tilt }: { tilt?: boolean }) {
+export function BrowserDrawing({ size = 'big' }: { size?: 'big' | 'mid' }) {
   return (
-    <Stage
-      size="big"
-      tilt={tilt}
-      label="The refunds page open beside its task: a comment on a failed refund, and the lead pressing Retry to see it"
-    >
+    <Stage size={size} label="The refunds page open beside its task: a comment on a failed refund, and the lead pressing Retry to see it">
       <div className={s.under} />
-      <div className={cx(s.window, s.br, s.lift)}>
+      <div className={cx(s.window, s.br)}>
         <div className={s.bar}>
           <span className={s.nav}>
             <i>‹</i>
@@ -163,11 +160,13 @@ export function BrowserDrawing({ tilt }: { tilt?: boolean }) {
           <i /> The lead is on this page · Opus 5.5
         </div>
       </div>
-      <div className={s.cursor}>
-        <svg viewBox="0 0 12 16" aria-hidden="true">
-          <path d="M1 1l9.5 9H5.6L3.2 14.6 1 1z" />
-        </svg>
-        <span>Opus 5.5</span>
+      <div className={s.track}>
+        <div className={s.cursor}>
+          <svg viewBox="0 0 12 16" aria-hidden="true">
+            <path d="M1 1l9.5 9H5.6L3.2 14.6 1 1z" />
+          </svg>
+          <span>Opus 5.5</span>
+        </div>
       </div>
     </Stage>
   )
@@ -177,12 +176,12 @@ export function BrowserDrawing({ tilt }: { tilt?: boolean }) {
 
 const WORDS = ['and', 'when', 'a', 'partner', 'sends', 'Retry-After,', 'wait', 'that', 'long']
 
-export function VoiceDrawing({ tilt }: { tilt?: boolean }) {
+export function VoiceDrawing() {
   return (
-    <Stage size="small" tilt={tilt} label="Dictating to the coordinator: the words appear as they are said, transcribed on this computer">
+    <Stage size="small" label="Dictating to the coordinator: the words appear as they are said, transcribed on this computer">
       <div className={s.under} />
       <span className={s.to}>To the coordinator · Tally</span>
-      <div className={cx(s.card, s.composer, s.lift)}>
+      <div className={cx(s.card, s.composer)}>
         <span className={s.mic}>
           <svg viewBox="0 0 24 24" aria-hidden="true">
             <rect x="9" y="3" width="6" height="11" rx="3" />
@@ -216,16 +215,16 @@ const QUEUE = [
   { no: '3', repo: 'docs', pr: '#131', title: 'The retry contract', st: 'Merges after frontend' },
 ]
 
-export function QueueDrawing({ tilt }: { tilt?: boolean }) {
+export function QueueDrawing() {
   return (
-    <Stage size="small" tilt={tilt} label="Three changes in merge order: engine in the merge queue, frontend and docs merging after it">
+    <Stage size="small" label="Three changes in merge order: engine in the merge queue, frontend and docs merging after it">
       <div className={s.under} />
       <div className={s.queue}>
         <span className={s.rail}>
           <i className={s.runner} />
         </span>
         {QUEUE.map((q) => (
-          <div key={q.no} className={cx(s.card, s.stop, q.on && s.lit, s.lift)}>
+          <div key={q.no} className={cx(s.card, s.stop, q.on && s.lit)}>
             <span className={s.no}>{q.no}</span>
             {mark(Brand.GitHub)}
             <span className={s.what}>
@@ -259,11 +258,11 @@ function Wires() {
   )
 }
 
-export function SkillsDrawing({ tilt }: { tilt?: boolean }) {
+export function SkillsDrawing() {
   return (
-    <Stage size="small" tilt={tilt} label="One skill, release-checklist, the same version in Claude Code, Codex and OpenCode">
+    <Stage size="small" label="One skill, release-checklist, the same version in Claude Code, Codex and OpenCode">
       <div className={s.under} />
-      <div className={cx(s.card, s.hub, s.lit, s.lift)}>
+      <div className={cx(s.card, s.hub, s.lit)}>
         <span className={s.book} />
         <span className={s.what}>
           <b>release-checklist</b>
@@ -273,7 +272,7 @@ export function SkillsDrawing({ tilt }: { tilt?: boolean }) {
       <Wires />
       <div className={s.trio}>
         {AGENTS3.map((a) => (
-          <div key={a.name} className={cx(s.card, s.agent, s.lift)}>
+          <div key={a.name} className={cx(s.card, s.agent)}>
             {mark(a.brand)}
             <b>{a.name}</b>
             <small className={s.okLine}>
@@ -292,11 +291,11 @@ const FILES = [
   { name: 'opencode.json', line: '"linear": { … }' },
 ]
 
-export function ServersDrawing({ tilt }: { tilt?: boolean }) {
+export function ServersDrawing() {
   return (
-    <Stage size="small" tilt={tilt} label="The Linear MCP server, added once, written into each agent's own config file">
+    <Stage size="small" label="The Linear MCP server, added once, written into each agent's own config file">
       <div className={s.under} />
-      <div className={cx(s.card, s.hub, s.lit, s.lift)}>
+      <div className={cx(s.card, s.hub, s.lit)}>
         {mark(Brand.Linear)}
         <span className={s.what}>
           <b>Linear</b>
@@ -306,7 +305,7 @@ export function ServersDrawing({ tilt }: { tilt?: boolean }) {
       <Wires />
       <div className={s.trio}>
         {FILES.map((f) => (
-          <div key={f.name} className={cx(s.card, s.file, s.lift)}>
+          <div key={f.name} className={cx(s.card, s.file)}>
             <code className={s.fname}>{f.name}</code>
             <i className={s.code} />
             <i className={cx(s.code, s.short)} />
@@ -341,11 +340,11 @@ function Meter({ name, value, of, share }: { name: string; value: string; of: st
   )
 }
 
-export function LoadDrawing({ tilt }: { tilt?: boolean }) {
+export function LoadDrawing() {
   return (
-    <Stage size="small" tilt={tilt} label="This computer's load: CPU at 63 percent and memory at 19.5 of 32 GB, and what each task takes">
+    <Stage size="small" label="This computer's load: CPU at 63 percent and memory at 19.5 of 32 GB, and what each task takes">
       <div className={s.under} />
-      <div className={cx(s.card, s.load, s.lift)}>
+      <div className={cx(s.card, s.load)}>
         <div className={s.meters}>
           <Meter name="CPU" value="63%" of="" share={0.63} />
           <Meter name="Memory" value="19.5" of="of 32 GB" share={0.61} />
@@ -371,11 +370,11 @@ const FOLDERS = [
   { name: 'Document the retry contract', why: 'not pushed · kept', size: '2.3 GB', kept: true },
 ]
 
-export function StorageDrawing({ tilt }: { tilt?: boolean }) {
+export function StorageDrawing() {
   return (
-    <Stage size="small" tilt={tilt} label="Task folders: 9.5 GB can go now, 7 GB held back because it is not pushed yet">
+    <Stage size="small" label="Task folders: 9.5 GB can go now, 7 GB held back because it is not pushed yet">
       <div className={s.under} />
-      <div className={cx(s.card, s.disk, s.lift)}>
+      <div className={cx(s.card, s.disk)}>
         <div className={s.diskHead}>
           <b>Task folders</b>
           <span className={s.kind}>Smart</span>
@@ -404,6 +403,36 @@ export function StorageDrawing({ tilt }: { tilt?: boolean }) {
           ))}
         </ol>
       </div>
+    </Stage>
+  )
+}
+
+const DROPPED = [
+  { name: 'invoice-88210.pdf', kind: 'PDF', tone: s.red },
+  { name: 'refunds-1114.log', kind: 'LOG', tone: s.amber },
+  { name: 'partner-docs/', kind: 'DIR', tone: s.blue },
+]
+
+export function DropDrawing() {
+  return (
+    <Stage size="small" label="Files dropped into a message: a PDF, a log and a folder, with a screenshot on its way in">
+      <div className={s.under} />
+      <div className={cx(s.card, s.dropCard)}>
+        <div className={s.dropped}>
+          {DROPPED.map((f) => (
+            <span key={f.name} className={s.chip}>
+              <i className={f.tone}>{f.kind}</i>
+              {f.name}
+            </span>
+          ))}
+        </div>
+        <p className={s.ask}>Why did these three refunds fail twice?</p>
+        <span className={s.zone}>Drop any file or folder here</span>
+      </div>
+      <span className={s.incoming}>
+        <i className={s.green}>PNG</i>
+        screenshot.png
+      </span>
     </Stage>
   )
 }

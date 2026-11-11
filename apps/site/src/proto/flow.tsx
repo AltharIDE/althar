@@ -1,17 +1,16 @@
 import type { ReactNode } from 'react'
 
-import { type Tile, TILES } from '../home/bodies/desktop/Bento'
-import { Console, type Scene, Station } from '../home/bodies/desktop/DesktopBody'
+import { Console, type Scene } from '../home/bodies/desktop/DesktopBody'
 import { cx } from '../lib/cx'
 import type { Direction } from './direction'
 import s from './flow.module.css'
-import { ALL_WORDS, BROWSER, CANVAS, MORE, type Piece, SMALL } from './pieces'
+import { ALSO_EIGHT, ALSO_NINE, EIGHT, NINE, type Piece } from './pieces'
 
 /*
- * What keeps you in flow, with the features it doesn't show yet. The canvas
- * and the browser come in as big ones; voice, merge queues, skills, MCP
- * servers, the machine's load and disk space as small ones, drawn (flat or
- * in 3D) or as words alone. Each direction puts them together another way.
+ * What keeps you in flow: the console as it is, then the small things under
+ * it, smaller than its modules so they read as their own part (the canvas
+ * and the browser among them), and what isn't drawn as a row of words.
+ * Each direction lays the small things out another way.
  */
 
 export interface Flow {
@@ -21,42 +20,27 @@ export interface Flow {
   after?: ReactNode
 }
 
-/** A big feature as a drawn tile of the console, in its dark. */
-const big = (piece: Piece): Tile => ({
-  id: piece.id,
-  span: 3,
-  drawn: true,
-  tone: 'dark',
-  title: piece.title,
-  lead: piece.lead,
-  piece: () => piece.draw(),
-})
+type Layout = 'three' | 'four' | 'cards' | 'rows'
 
-const OLD = TILES
-/** The console as it is, the canvas and the browser in its second row. */
-const EIGHT: Tile[] = [OLD[0]!, OLD[1]!, big(CANVAS), big(BROWSER), ...OLD.slice(2)]
-
-const AND = (
-  <>
-    And the small things, <b>done right.</b>
-  </>
-)
-
-/** The small ones on a panel of their own: three across, each drawn, flat or laid back. */
-function SmallPanel({ tilt }: { tilt?: boolean }) {
+/** The small things: a smaller head, then each feature, its words and its drawing, as `layout` lays them out. */
+function Small({ items, layout }: { items: Piece[]; layout: Layout }) {
   return (
-    <div className={s.after}>
-      <h3 className={s.subhead}>{AND}</h3>
-      <ol className={s.panel} data-light="">
-        {SMALL.map((p, i) => (
-          <li key={p.id} className={s.small}>
-            <span className={s.plate}>
-              <b>{String(i + 1).padStart(2, '0')}</b>
-              <i className={s.led} />
-            </span>
-            <h4 className={s.smallTitle}>{p.title}</h4>
-            <p className={s.smallLead}>{p.lead}</p>
-            <div className={s.smallPiece}>{p.draw(tilt)}</div>
+    <div className={s.sub}>
+      <h3 className={s.subhead}>
+        And the small things, <b>done right.</b>
+      </h3>
+      <ol className={cx(s.grid, s[layout])} data-light="">
+        {items.map((p, i) => (
+          <li key={p.id} className={s.item}>
+            <div className={s.words}>
+              <span className={s.plate}>
+                <b>{String(i + 1).padStart(2, '0')}</b>
+                <i className={s.led} />
+              </span>
+              <h4 className={s.title}>{p.title}</h4>
+              <p className={s.lead}>{p.lead}</p>
+            </div>
+            <div className={s.pic}>{p.draw()}</div>
           </li>
         ))}
       </ol>
@@ -65,11 +49,11 @@ function SmallPanel({ tilt }: { tilt?: boolean }) {
 }
 
 /** Features as words alone, in a row between hairlines. */
-function Words({ words, label }: { words: readonly string[]; label: string }) {
+function Also({ words }: { words: readonly string[] }) {
   return (
-    <div className={s.words}>
-      <span className={s.wordsLabel}>{label}</span>
-      <ul className={s.wordList}>
+    <div className={s.also}>
+      <span className={s.alsoLabel}>And also</span>
+      <ul className={s.alsoList}>
         {words.map((w) => (
           <li key={w}>{w}</li>
         ))}
@@ -78,98 +62,19 @@ function Words({ words, label }: { words: readonly string[]; label: string }) {
   )
 }
 
-/** The canvas and the browser, a station of their own after the flow, side by side. */
-function Making() {
-  return (
-    <Station
-      id="making"
-      layout="bank"
-      stamp={{ no: '04b', name: 'Canvas', km: 13.5 }}
-      scene={{
-        title: (
-          <>
-            See what it’s making.
-            <br />
-            <b>Before it’s merged.</b>
-          </>
-        ),
-        lead: 'Pages and diagrams on the project’s canvas, the page it’s building in a browser beside the task. Comment on either, and the lead picks it up.',
-      }}
-    >
-      <ol className={s.pair} data-light="">
-        {[CANVAS, BROWSER].map((p) => (
-          <li key={p.id} className={s.pairItem}>
-            <h3 className={s.pairTitle}>{p.title}</h3>
-            <p className={s.smallLead}>{p.lead}</p>
-            <div className={cx(s.pairPiece)}>{p.draw()}</div>
-          </li>
-        ))}
-      </ol>
-    </Station>
-  )
-}
+const flow = (items: Piece[], layout: Layout, also: readonly string[]): Flow => ({
+  body: (
+    <>
+      <Console />
+      <Small items={items} layout={layout} />
+      <Also words={also} />
+    </>
+  ),
+})
 
 export const FLOW: Direction<Flow>[] = [
-  {
-    key: 'a',
-    name: 'Canvas and browser in the console; the small ones drawn, flat',
-    value: {
-      body: (
-        <>
-          <Console tiles={EIGHT} className={s.eight} />
-          <SmallPanel />
-        </>
-      ),
-    },
-  },
-  {
-    key: 'b',
-    name: 'Canvas and browser in the console; the small ones drawn in 3D',
-    value: {
-      body: (
-        <>
-          <Console tiles={EIGHT} className={s.eight} />
-          <SmallPanel tilt />
-        </>
-      ),
-    },
-  },
-  {
-    key: 'c',
-    name: 'Canvas and browser in the console; the small ones as a row of words',
-    value: {
-      body: (
-        <>
-          <Console tiles={EIGHT} className={s.eight} />
-          <Words words={ALL_WORDS} label="And also" />
-        </>
-      ),
-    },
-  },
-  {
-    key: 'd',
-    name: 'Canvas and browser a station of their own; the small ones as words',
-    value: {
-      body: (
-        <>
-          <Console />
-          <Words words={ALL_WORDS} label="And also" />
-        </>
-      ),
-      after: <Making />,
-    },
-  },
-  {
-    key: 'e',
-    name: 'In 3D, and the rest as a row of words under them',
-    value: {
-      body: (
-        <>
-          <Console tiles={EIGHT} className={s.eight} />
-          <SmallPanel tilt />
-          <Words words={MORE} label="And also" />
-        </>
-      ),
-    },
-  },
+  { key: 'a', name: 'Three across, three rows (with Drop in anything drawn)', value: flow(NINE, 'three', ALSO_NINE) },
+  { key: 'b', name: 'Four across, two rows', value: flow(EIGHT, 'four', ALSO_EIGHT) },
+  { key: 'c', name: 'Four across, as cards: the picture, then its words', value: flow(EIGHT, 'cards', ALSO_EIGHT) },
+  { key: 'd', name: 'Two columns of rows: the picture beside its words', value: flow(EIGHT, 'rows', ALSO_EIGHT) },
 ]
