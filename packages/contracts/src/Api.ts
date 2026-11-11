@@ -3739,6 +3739,10 @@ export const ThreadSnapshot = Schema.Struct({
   reports: Schema.Array(ThreadItem),
   /** Where the time went of each turn its page's items came in, that kept it; absent from a runtime before it. */
   turns: Schema.optional(Schema.Array(TurnTime)),
+  /** Every task its lead started, oldest first, whatever page of its thread says so and however long ago they settled. */
+  started: Schema.optional(
+    Schema.Array(Schema.Struct({ taskId: Schema.String, slug: Schema.String, title: Schema.String, threadId: Schema.String })),
+  ),
 })
 export type ThreadSnapshot = typeof ThreadSnapshot.Type
 

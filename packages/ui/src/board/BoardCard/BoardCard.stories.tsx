@@ -710,6 +710,10 @@ export const AllStates: Story = {
         { state: 'current', node: <BoardCard {...args} current /> },
         { state: 'from an automation', node: <BoardCard {...args} from="Nightly bump" /> },
         { state: 'started by a lead', node: <BoardCard {...args} startedBy="Prototype the browser" /> },
+        {
+          state: 'started by a lead, opens it',
+          node: <BoardCard {...args} startedBy="Prototype the browser" onOpenStartedBy={() => undefined} />,
+        },
         { state: 'nothing opens it', node: <BoardCard {...args} onOpen={undefined} /> },
         { state: 'hover', node: <BoardCard {...args} /> },
         { state: 'focus', node: <BoardCard {...args} /> },
@@ -731,6 +735,16 @@ export const StartedByALead: Story = {
   },
   play: async ({ canvasElement }) => {
     await expect(within(canvasElement).getByText('Started by Prototype the browser')).toBeVisible()
+  },
+}
+
+/** Where the parent's title opens the parent, apart from the card's own press: it is a link, not part of the card's button. */
+export const StartedByALeadOpensIt: Story = {
+  args: { ...StartedByALead.args, onOpen: fn(), onOpenStartedBy: fn() },
+  play: async ({ canvasElement, args }) => {
+    await userEvent.click(within(canvasElement).getByRole('button', { name: 'Prototype the browser' }))
+    await expect(args.onOpenStartedBy).toHaveBeenCalledOnce()
+    await expect(args.onOpen).not.toHaveBeenCalled()
   },
 }
 
