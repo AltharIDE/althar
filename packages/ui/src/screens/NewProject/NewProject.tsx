@@ -247,6 +247,12 @@ export type NewProjectProps = RootProps<
     error?: ReactNode
     /** More to ask under the folders, before what reading found. */
     extra?: ReactNode
+    /** Where it is in a walk of steps, over the side's title. */
+    track?: ReactNode
+    /** A later step's own content, in place of the folders. */
+    body?: ReactNode
+    /** Beside the main button in the foot: back to the step before. */
+    back?: ReactNode
     text?: Partial<NewProjectText>
   }
 >
@@ -296,6 +302,9 @@ export function NewProject({
   creating = false,
   error,
   extra,
+  track,
+  body,
+  back,
   className,
   text,
   onKeyDown,
@@ -447,11 +456,13 @@ export function NewProject({
 
       <section className={s.side} aria-labelledby={ids.folders}>
         <div className={s.sideInner} ref={side}>
+          {track}
           <h2 id={ids.folders} className={s.title}>
             {t.folders}
           </h2>
-          {over && !empty && <div className={s.empty} aria-hidden="true" />}
-          {folders.length > 0 && (
+          {body}
+          {body === undefined && over && !empty && <div className={s.empty} aria-hidden="true" />}
+          {body === undefined && folders.length > 0 && (
             <ul className={s.folders} aria-label={t.folders}>
               {folders.map((folder, at) => (
                 <FolderRow
@@ -466,7 +477,7 @@ export function NewProject({
               ))}
             </ul>
           )}
-          {empty ? (
+          {body !== undefined ? null : empty ? (
             // Nothing added yet: where the folders will be, taking a drop, with the two ways to add one.
             <div className={cx(s.zone, over && s.zoneOver)}>
               <span className={s.zoneIcon} aria-hidden="true">
@@ -522,8 +533,8 @@ export function NewProject({
               )}
             </div>
           )}
-          {extra}
-          {(findings.length > 0 || (found !== null && found.first.length + found.more.length > 0)) && (
+          {body === undefined && extra}
+          {body === undefined && (findings.length > 0 || (found !== null && found.first.length + found.more.length > 0)) && (
             <div className={s.below}>
               {findings.length > 0 && <Findings findings={findings} t={t} {...(onConnect === undefined ? {} : { onConnect })} />}
               {found !== null && (
@@ -545,6 +556,7 @@ export function NewProject({
               {error}
             </span>
           )}
+          {back}
           <Button kbd={t.createKbd} variant={read.length === 0 ? 'quiet' : 'default'} busy={creating || reading} onClick={create}>
             {named === '' ? t.createUnnamed : t.create(named)}
           </Button>

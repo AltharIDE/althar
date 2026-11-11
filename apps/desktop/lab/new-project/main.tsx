@@ -9,10 +9,12 @@ import { createRoot } from 'react-dom/client'
 
 import {
   Brand,
+  BrandMark,
   Button,
   ChangeSet,
   ChangeState,
   Choices,
+  type ContainerChoice,
   Field,
   FieldArea,
   HostReach,
@@ -21,6 +23,15 @@ import {
   type MapRepository,
   ProjectInk,
   RepositoryRole,
+  Segmented,
+  Select,
+  SettingGroup,
+  SettingList,
+  SettingRow,
+  StepTrack,
+  TaskStatus,
+  TrackerBinding,
+  trackOf,
 } from '@althar/ui'
 import { NewProject, type NewProjectFinding, type NewProjectFolder, ProjectRepositories } from '@althar/ui/screens'
 
@@ -28,16 +39,17 @@ import s from './lab.module.css'
 
 /*
  * The new-project lab (README.md): a project set up in a folder with no
- * remote, on the kit's own screens, with no runtime. The top bar swaps the
- * direction (A–D), the next the folder's state (1–8), T the theme. The line
- * under them says what that state does in Althar today, for comparing.
+ * remote, on the kit's own screens, with no runtime. A new project is two
+ * steps: its name and folders, then where its work goes, its code and its
+ * issues. The bars swap the direction (A–C), the folder's state (1–8), what
+ * is connected (G) and the theme (T); the line under them says what that
+ * folder does in Althar today.
  */
 
 const directions = [
   { key: 'a', label: 'Today' },
-  { key: 'b', label: 'Quietly, remote later' },
-  { key: 'c', label: 'Ask, remote now or not' },
-  { key: 'd', label: 'Start from a description' },
+  { key: 'b', label: 'Two steps, as choices' },
+  { key: 'c', label: 'Two steps, as settings rows' },
 ] as const
 type Direction = (typeof directions)[number]['key']
 
@@ -53,6 +65,13 @@ const states = [
 ] as const
 type State = (typeof states)[number]['key']
 
+const setups = [
+  { key: 'all', label: 'GitHub, GitLab, Linear' },
+  { key: 'github', label: 'GitHub only' },
+  { key: 'none', label: 'Nothing yet' },
+] as const
+type Setup = (typeof setups)[number]['key']
+
 /** What each state does in Althar as it is, whichever direction is shown. */
 const today: Record<State, string> = {
   empty:
@@ -61,7 +80,7 @@ const today: Record<State, string> = {
   unborn:
     'Today: it’s added and the project is made, then the first task fails to start: git worktree add … fatal: invalid reference: main. Nothing says why.',
   local:
-    'Today: works. The row says “no remote”; a task’s outputs say “No code host: this repository has no remote Althar can open a pull request on.”',
+    'Today: works. The row says “no remote”; a task’s outputs say “No code host: this repository has no remote Althar can open a pull request on.” Issues are left to the project’s welcome card.',
   unreadable: 'Today: a folder Althar can’t read is called “There’s no git repository in tidepool.”, the wrong reason.',
   project: 'Today: it’s added again, as a second project on the same folder, with a line saying so. Nothing offers the one there is.',
   working:
@@ -75,49 +94,226 @@ const pick = <K extends string>(list: ReadonlyArray<{ key: K }>, value: string |
   list.find((one) => one.key === value)?.key ?? fallback
 
 const GITHUB: MapHost = { id: 'github', name: 'GitHub', brand: Brand.GitHub, reach: HostReach.Connected, account: 'balazs' }
-const BRAND = { name: 'GitHub', brand: Brand.GitHub }
+const GITLAB: MapHost = { id: 'gitlab', name: 'GitLab', brand: Brand.GitLab, reach: HostReach.Connected, account: 'balazs' }
 const WHERE = '~/code/tidepool'
+const TEAMS: ContainerChoice[] = [
+  { id: 'alt', label: 'ALT (Althar)' },
+  { id: 'web', label: 'WEB (Website)' },
+]
 
 const FILES = [
   { path: 'src/tides.ts', add: 84, del: 0 },
   { path: 'src/main.ts', add: 31, del: 4 },
   { path: 'README.md', add: 12, del: 2 },
 ]
-const SETUP_FILES = [
-  { path: '.gitignore', add: 6, del: 0 },
-  { path: 'package.json', add: 22, del: 0 },
-  { path: 'README.md', add: 9, del: 0 },
-  { path: 'src/main.ts', add: 18, del: 0 },
-  { path: 'tsconfig.json', add: 14, del: 0 },
-]
 
-/** The folder's row on the new project's page, as each state reads it. */
-const folderFor = (state: State, direction: Direction): ReadonlyArray<NewProjectFolder> => {
-  const row = (fact?: ReactNode): NewProjectFolder => ({
-    id: 'tidepool',
-    name: 'tidepool',
-    where: WHERE,
-    host: null,
-    remote: null,
-    ...(fact === undefined ? {} : { fact }),
-  })
-  if (direction === 'a') return state === 'unborn' || state === 'local' || state === 'project' ? [row()] : []
-  switch (state) {
-    case 'empty':
-      return [row('empty folder')]
-    case 'files':
-      return [row('not a git repository yet')]
-    case 'unborn':
-      return [row('no commits yet')]
-    case 'local':
-    case 'project':
-      return [row()]
-    default:
-      return []
-  }
+/* ---- Where its work goes: the second step's choices, the same whichever way they're laid out ---- */
+
+type Code = 'here' | 'github' | 'gitlab'
+type Issues = 'linear' | 'host' | 'none'
+interface Goes {
+  code: Code
+  owner: string
+  name: string
+  visibility: 'private' | 'public'
+  issues: Issues
+  team: ContainerChoice | null
+}
+const HOSTS: Record<Exclude<Code, 'here'>, { name: string; brand: Brand; changes: string; issues: string; owners: string[] }> = {
+  github: { name: 'GitHub', brand: Brand.GitHub, changes: 'pull requests', issues: 'GitHub Issues', owners: ['balazs', 'charrette'] },
+  gitlab: {
+    name: 'GitLab',
+    brand: Brand.GitLab,
+    changes: 'merge requests',
+    issues: 'GitLab issues',
+    owners: ['balazs', 'charrette-group'],
+  },
+}
+const codeHosts = (setup: Setup): ReadonlyArray<Exclude<Code, 'here'>> =>
+  setup === 'all' ? ['github', 'gitlab'] : setup === 'github' ? ['github'] : []
+const linear = (setup: Setup) => setup === 'all'
+
+/** What's chosen before the person chooses: this Mac for the code, and the tracker their other projects use, else none. */
+const firstGoes = (setup: Setup): Goes => ({
+  code: codeHosts(setup).find((one) => one === params.get('code')) ?? 'here',
+  owner: 'balazs',
+  name: 'tidepool',
+  visibility: 'private',
+  issues: linear(setup) ? 'linear' : 'none',
+  team: linear(setup) ? (TEAMS[0] ?? null) : null,
+})
+
+/** Where its code goes on a host: owner, name, and who can see it. */
+function HostRepo({ goes, onChange }: { goes: Goes; onChange: (next: Partial<Goes>) => void }) {
+  if (goes.code === 'here') return null
+  const host = HOSTS[goes.code]
+  return (
+    <div className={s.hostRepo}>
+      <span className={s.fieldLabel}>On {host.name}</span>
+      <Select
+        label="Owner"
+        variant="filled"
+        width={160}
+        value={goes.owner}
+        options={host.owners.map((owner) => ({ value: owner, label: owner }))}
+        onChange={(owner) => onChange({ owner })}
+      />
+      <span className={s.slash}>/</span>
+      <Field aria-label="Name" value={goes.name} spellCheck={false} onChange={(event) => onChange({ name: event.target.value })} />
+      <Segmented
+        label="Who can see it"
+        value={goes.visibility}
+        options={[
+          { value: 'private', label: 'Private' },
+          { value: 'public', label: 'Public' },
+        ]}
+        onChange={(visibility) => onChange({ visibility })}
+      />
+    </div>
+  )
 }
 
-/** What reading found, said under the folders. */
+/** B: each as a choice with a line on what it means. */
+function GoesChoices({ setup, goes, onChange }: { setup: Setup; goes: Goes; onChange: (next: Partial<Goes>) => void }) {
+  const hosts = codeHosts(setup)
+  const onHost = goes.code === 'here' ? null : HOSTS[goes.code]
+  const issues = [
+    ...(linear(setup) ? [{ value: 'linear' as const, title: 'Linear · Charrette', note: 'Drafts are filed in one of its teams.' }] : []),
+    ...(onHost === null
+      ? []
+      : [{ value: 'host' as const, title: `${onHost.issues}, on ${goes.owner}/${goes.name}`, note: 'Beside its code.' }]),
+    { value: 'none' as const, title: 'None for now', note: 'Its settings can link one later.' },
+  ]
+  return (
+    <div className={s.goes}>
+      <section className={s.goesPart}>
+        <h3 className={s.partTitle}>Code</h3>
+        <Choices
+          label="Where its code goes"
+          value={goes.code}
+          onChange={(code) => onChange({ code, ...(code === 'here' && goes.issues === 'host' ? { issues: 'none' } : {}) })}
+          options={[
+            { value: 'here', title: 'Only on this Mac', note: 'Tasks merge into main here. Its settings can put it on a host later.' },
+            ...hosts.map((id) => ({
+              value: id,
+              title: `A new repository on ${HOSTS[id].name}`,
+              note: `Made and pushed as the project is. Tasks open ${HOSTS[id].changes} there.`,
+            })),
+          ]}
+        />
+        <HostRepo goes={goes} onChange={onChange} />
+        {setup !== 'all' && (
+          <p className={s.connectLine}>
+            <LinkButton>{setup === 'none' ? 'Connect GitHub, GitLab or Bitbucket' : 'Connect GitLab or Bitbucket'}</LinkButton>
+          </p>
+        )}
+      </section>
+      <section className={s.goesPart}>
+        <h3 className={s.partTitle}>Issues</h3>
+        <Choices label="Where its issues go" value={goes.issues} onChange={(next) => onChange({ issues: next })} options={issues} />
+        {goes.issues === 'linear' && (
+          <div className={s.hostRepo}>
+            <span className={s.fieldLabel}>Linear team</span>
+            <Select
+              label="Team"
+              variant="filled"
+              width={200}
+              value={goes.team?.id ?? null}
+              options={TEAMS.map((team) => ({ value: team.id, label: team.label }))}
+              onChange={(id) => onChange({ team: TEAMS.find((team) => team.id === id) ?? null })}
+            />
+          </div>
+        )}
+        {!linear(setup) && (
+          <p className={s.connectLine}>
+            <LinkButton>Connect Linear, Jira or Trello</LinkButton>
+          </p>
+        )}
+      </section>
+    </div>
+  )
+}
+
+/** C: the same, as the project's settings will show it, row by row. */
+function GoesRows({ setup, goes, onChange }: { setup: Setup; goes: Goes; onChange: (next: Partial<Goes>) => void }) {
+  const hosts = codeHosts(setup)
+  const onHost = goes.code === 'here' ? null : HOSTS[goes.code]
+  const trackers = [
+    ...(linear(setup) ? [{ id: 'linear', label: 'Linear · Charrette', brand: Brand.Linear }] : []),
+    ...(onHost === null ? [] : [{ id: 'host', label: `${onHost.issues} · ${goes.owner}/${goes.name}`, brand: onHost.brand }]),
+  ]
+  return (
+    <div className={s.goes}>
+      <SettingGroup
+        title="Code"
+        headingLevel={3}
+        {...(setup === 'all' ? {} : { action: <LinkButton>{setup === 'none' ? 'Connect a host' : 'Connect another host'}</LinkButton> })}
+      >
+        <SettingList>
+          <SettingRow
+            title="Goes to"
+            note={onHost === null ? 'Tasks merge into main on this Mac' : `A new repository; tasks open ${onHost.changes} there`}
+            {...(onHost === null ? {} : { mark: <BrandMark brand={onHost.brand} size={18} /> })}
+            {...(onHost === null
+              ? {}
+              : {
+                  under: (
+                    <div className={s.under}>
+                      <HostRepo goes={goes} onChange={onChange} />
+                    </div>
+                  ),
+                })}
+          >
+            {() => (
+              <Select
+                label="Goes to"
+                value={goes.code}
+                options={[
+                  { value: 'here', label: 'Only this Mac' },
+                  ...hosts.map((id) => ({ value: id, label: `${HOSTS[id].name} · balazs` })),
+                ]}
+                onChange={(code) => onChange({ code, ...(code === 'here' && goes.issues === 'host' ? { issues: 'none' } : {}) })}
+              />
+            )}
+          </SettingRow>
+        </SettingList>
+      </SettingGroup>
+      <SettingGroup title="Issues" headingLevel={3} {...(linear(setup) ? {} : { action: <LinkButton>Connect a tracker</LinkButton> })}>
+        <SettingList>
+          <TrackerBinding
+            trackers={trackers}
+            value={goes.issues === 'none' ? null : goes.issues}
+            container={goes.issues === 'linear' ? goes.team : null}
+            containers={goes.issues === 'linear' ? TEAMS : []}
+            onChange={(id) => onChange({ issues: id === null ? 'none' : (id as Issues) })}
+            onContainer={(team) => onChange({ team })}
+            text={{ learned: 'None for now', note: 'Where drafts are filed and issues found' }}
+          />
+        </SettingList>
+      </SettingGroup>
+    </div>
+  )
+}
+
+/* ---- The first step: its name and folders, each read for what it is ---- */
+
+const row = (fact?: ReactNode, host?: Code): NewProjectFolder => ({
+  id: 'tidepool',
+  name: 'tidepool',
+  where: WHERE,
+  host: host === undefined || host === 'here' ? null : { name: HOSTS[host].name, brand: HOSTS[host].brand },
+  remote: null,
+  ...(fact === undefined ? {} : { fact }),
+})
+
+const FACT: Partial<Record<State, string>> = { empty: 'empty folder', files: 'not a git repository yet', unborn: 'no commits yet' }
+
+const folderFor = (state: State, direction: Direction, code: Code): ReadonlyArray<NewProjectFolder> => {
+  if (direction === 'a') return state === 'unborn' || state === 'local' || state === 'project' ? [row()] : []
+  if (state === 'unreadable') return []
+  return [row(FACT[state], code)]
+}
+
 const findingsFor = (state: State, direction: Direction, open: () => void): ReadonlyArray<NewProjectFinding> => {
   if (state === 'project')
     return direction === 'a'
@@ -132,106 +328,68 @@ const findingsFor = (state: State, direction: Direction, open: () => void): Read
           },
         ]
   if (direction === 'a') return []
-  const local: NewProjectFinding = {
-    id: 'local',
-    kind: 'note',
-    icon: 'folder',
-    words: direction === 'c' ? 'No remote yet.' : 'No remote: tasks merge into main on this Mac.',
-  }
-  // C asks about the branch and the remote in their own rows under the folders, so only what's found is said here.
-  const make = (words: string): NewProjectFinding => ({ id: 'git', kind: 'note', icon: 'branch', words })
+  const git = (words: string): NewProjectFinding => ({ id: 'git', kind: 'note', icon: 'branch', words })
   switch (state) {
     case 'empty':
-      return direction === 'd'
-        ? []
-        : [
-            make(direction === 'c' ? 'Not a git repository yet.' : 'Althar makes it a git repository on main, with an empty first commit.'),
-            local,
-          ]
+      return [git('Althar makes it a git repository on main, with an empty first commit.')]
     case 'files':
-      return [
-        make(
-          direction === 'c'
-            ? 'Not a git repository yet: 14 files in it.'
-            : 'Althar makes it a git repository on main, and commits its 14 files first.',
-        ),
-        local,
-      ]
+      return [git('Althar makes it a git repository on main, and commits its 14 files first.')]
     case 'unborn':
-      return [
-        make(direction === 'c' ? 'No commits yet: 14 files in it.' : 'Althar commits its 14 files on main first, for tasks to start from.'),
-        local,
-      ]
-    case 'local':
-      return [local]
+      return [git('Althar commits its 14 files on main first, for tasks to start from.')]
     default:
       return []
   }
 }
 
-/** C's own rows: the first branch, and whether its code goes on GitHub now. */
-function AskRows({ state, remote, onRemote }: { state: State; remote: 'here' | 'github'; onRemote: (next: 'here' | 'github') => void }) {
-  const [branch, setBranch] = useState('main')
-  const fresh = state === 'empty' || state === 'files' || state === 'unborn'
-  return (
-    <div className={s.extra}>
-      {fresh && (
-        <label className={s.branchRow}>
-          <span className={s.extraLabel}>First branch</span>
-          <Field value={branch} onChange={(event) => setBranch(event.target.value)} spellCheck={false} />
-        </label>
-      )}
-      <Choices
-        label="Where its code goes"
-        value={remote}
-        onChange={onRemote}
-        options={[
-          { value: 'here', title: 'Only on this Mac', note: 'Tasks merge into main here. GitHub can come later, in its settings.' },
-          {
-            value: 'github',
-            title: 'A new private repository on GitHub',
-            note: 'balazs/tidepool, made and pushed as the project is. Tasks open pull requests there.',
-          },
-        ]}
-      />
-    </div>
-  )
-}
-
-/** D's own row, for a folder with nothing in it: what it's for, which its first task starts from. */
+/** An empty folder's own row: what it's for, which its first task starts from. */
 function DescribeRow({ value, onChange }: { value: string; onChange: (next: string) => void }) {
   return (
     <div className={s.extra}>
       <span className={s.extraLabel}>What you’re making</span>
       <FieldArea
-        rows={4}
+        rows={3}
         value={value}
         onChange={(event) => onChange(event.target.value)}
         placeholder="A small web app that shows the next high and low tides for a stretch of coast, from public tide tables."
       />
-      <p className={s.extraNote}>Its first task sets it up: git, the code to start from, and how its tasks run.</p>
+      <p className={s.extraNote}>Its first task sets it up from this: the code to start from, and how its tasks run.</p>
     </div>
   )
 }
 
-function NewProjectScene({ state, direction, onOpen }: { state: State; direction: Direction; onOpen: () => void }) {
+const STEPS = ['Name and folders', 'Code and issues']
+
+function NewProjectScene({
+  state,
+  direction,
+  setup,
+  step,
+  onStep,
+  onOpen,
+}: {
+  state: State
+  direction: Direction
+  setup: Setup
+  step: 1 | 2
+  onStep: (step: 1 | 2) => void
+  onOpen: () => void
+}) {
   const [name, setName] = useState('Tidepool')
   const [ink, setInk] = useState<ProjectInk>(ProjectInk.Teal)
-  const [remote, setRemote] = useState<'here' | 'github'>('here')
   const [describe, setDescribe] = useState('')
-  const folders = folderFor(state, direction)
+  const [goes, setGoes] = useState<Goes>(() => firstGoes(setup))
+  useEffect(() => setGoes(firstGoes(setup)), [setup])
+  const change = (next: Partial<Goes>) => setGoes((now) => ({ ...now, ...next }))
+  const walk = direction !== 'a'
+  const second = walk && step === 2
+  const folders = folderFor(state, direction, second ? goes.code : 'here')
   const refused = direction === 'a' && (state === 'empty' || state === 'files' || state === 'unreadable')
   const error = refused
     ? 'There’s no git repository in tidepool.'
     : state === 'unreadable'
       ? 'Althar can’t read tidepool: macOS keeps it from opening the folder. Check it in Finder’s Get Info, then choose it again.'
       : undefined
-  const extra =
-    direction === 'c' && folders.length > 0 && state !== 'project' ? (
-      <AskRows state={state} remote={remote} onRemote={setRemote} />
-    ) : direction === 'd' && (state === 'empty' || state === 'files') ? (
-      <DescribeRow value={describe} onChange={setDescribe} />
-    ) : undefined
+  const host = goes.code === 'here' ? null : HOSTS[goes.code]
   return (
     <NewProject
       key={`${state}-${direction}`}
@@ -247,22 +405,53 @@ function NewProjectScene({ state, direction, onOpen }: { state: State; direction
       found={{ like: null, first: [], more: [] }}
       onAdd={() => undefined}
       findings={findingsFor(state, direction, onOpen)}
-      onCreate={() => undefined}
+      onCreate={() => (walk && step === 1 ? onStep(2) : undefined)}
       onCancel={() => undefined}
-      {...(error === undefined ? {} : { error })}
-      {...(extra === undefined ? {} : { extra })}
+      {...(error === undefined || second ? {} : { error })}
+      {...(walk && step === 1 && state === 'empty' ? { extra: <DescribeRow value={describe} onChange={setDescribe} /> } : {})}
+      {...(walk
+        ? {
+            track: (
+              <StepTrack
+                steps={trackOf(STEPS, step - 1)}
+                status={TaskStatus.Running}
+                labels
+                className={s.track}
+                text={{ label: 'Steps' }}
+              />
+            ),
+          }
+        : {})}
+      {...(second
+        ? {
+            body:
+              direction === 'b' ? (
+                <GoesChoices setup={setup} goes={goes} onChange={change} />
+              ) : (
+                <GoesRows setup={setup} goes={goes} onChange={change} />
+              ),
+            back: (
+              <Button variant="quiet" onClick={() => onStep(1)}>
+                Back
+              </Button>
+            ),
+          }
+        : {})}
       text={{
-        ...(direction === 'd' && state === 'empty' && describe.trim() !== '' ? { create: (n: string) => `Create ${n} and start` } : {}),
-        ...(direction === 'c' && remote === 'github' && folders.length > 0 ? { create: (n: string) => `Create ${n} on GitHub` } : {}),
+        ...(second ? { folders: 'Where its work goes' } : {}),
+        ...(walk && step === 1 ? { create: () => 'Continue', createUnnamed: 'Continue' } : {}),
+        ...(second && host !== null ? { create: (n: string) => `Create ${n} and its ${host.name} repository` } : {}),
       }}
     />
   )
 }
 
-/** The project once it's made: its repositories in its settings, and a task's outputs, before and after it merges. */
-function ProjectScene({ state, direction }: { state: State; direction: Direction }) {
-  const [added, setAdded] = useState(state === 'remote')
-  useEffect(() => setAdded(state === 'remote'), [state])
+/* ---- The project once it's made ---- */
+
+function ProjectScene({ state, direction, setup }: { state: State; direction: Direction; setup: Setup }) {
+  const [added, setAdded] = useState<Code>(state === 'remote' ? 'github' : 'here')
+  useEffect(() => setAdded(state === 'remote' ? 'github' : 'here'), [state])
+  const host = added === 'here' ? null : added === 'github' ? GITHUB : GITLAB
   const repo: MapRepository = {
     id: 'tidepool',
     name: 'tidepool',
@@ -270,39 +459,42 @@ function ProjectScene({ state, direction }: { state: State; direction: Direction
     branch: 'main',
     role: RepositoryRole.Frontend,
     tasks: 1,
-    ...(added ? { remote: { host: 'github', path: 'balazs/tidepool', href: 'https://github.com/balazs/tidepool' } } : {}),
+    ...(host === null ? {} : { remote: { host: host.id, path: 'balazs/tidepool', href: `https://${host.id}.com/balazs/tidepool` } }),
   }
-  const setup = direction === 'd'
-  const files = setup ? SETUP_FILES : FILES
-  const prs = [{ repo: 'tidepool', files }]
+  const prs = [{ repo: 'tidepool', files: FILES }]
   const noop = () => undefined
+  const hostName = host?.name ?? ''
   const merged = (
     <ChangeSet
       state={ChangeState.Merged}
       prs={prs}
       note={
-        added
+        host !== null
           ? direction === 'a'
             ? 'Into main on this Mac. origin doesn’t have it yet.'
-            : 'Into main on this Mac. GitHub doesn’t have it yet.'
+            : `Into main on this Mac. ${hostName} doesn’t have it yet.`
           : direction === 'a'
             ? 'Into main on this Mac. It has no remote to push to.'
             : 'Merged into main.'
       }
-      {...(added ? { actions: <Button variant="signal">{direction === 'a' ? 'Push main to origin' : 'Push main to GitHub'}</Button> } : {})}
+      {...(host !== null
+        ? { actions: <Button variant="signal">{direction === 'a' ? 'Push main to origin' : `Push main to ${hostName}`}</Button> }
+        : {})}
     />
   )
   const branch = (
     <ChangeSet
       state={ChangeState.Branch}
-      branch={setup ? 'althar/set-up-tidepool' : 'althar/tide-table'}
+      branch="althar/tide-table"
       prs={prs}
-      {...(added ? { remote: { name: 'origin', pushed: true, ahead: 0 } } : {})}
-      {...(!added && direction === 'a' ? { note: 'No code host: this repository has no remote Althar can open a pull request on.' } : {})}
+      {...(host !== null ? { remote: { name: 'origin', pushed: true, ahead: 0 } } : {})}
+      {...(host === null && direction === 'a'
+        ? { note: 'No code host: this repository has no remote Althar can open a pull request on.' }
+        : {})}
       actions={
-        added ? (
+        host !== null ? (
           <>
-            <Button variant="signal">Open a draft pull request</Button>
+            <Button variant="signal">{added === 'gitlab' ? 'Open a draft merge request' : 'Open a draft pull request'}</Button>
             <Button>Merge into main on this Mac</Button>
           </>
         ) : (
@@ -311,13 +503,14 @@ function ProjectScene({ state, direction }: { state: State; direction: Direction
       }
     />
   )
+  const offered = codeHosts(setup)
   return (
     <div className={s.project}>
       <div className={s.sheet}>
         <ProjectRepositories
           project="Tidepool"
           repositories={[repo]}
-          hosts={added ? [GITHUB] : []}
+          hosts={host === null ? [] : [host]}
           worktrees="~/Althar/tidepool"
           onRoleChange={noop}
           onTargetChange={noop}
@@ -326,23 +519,28 @@ function ProjectScene({ state, direction }: { state: State; direction: Direction
           onConnect={noop}
           onAdd={noop}
         />
-        {direction !== 'a' && !added && (
+        {direction !== 'a' && host === null && (
           <div className={s.remoteRow}>
-            <Button size="small" onClick={() => setAdded(true)}>
-              Put tidepool on GitHub…
-            </Button>
-            <LinkButton onClick={() => setAdded(true)}>Add a remote by its address</LinkButton>
+            {offered.map((id) => (
+              <Button key={id} size="small" onClick={() => setAdded(id)}>
+                Put tidepool on {HOSTS[id].name}…
+              </Button>
+            ))}
+            <LinkButton onClick={() => setAdded('github')}>Add a remote by its address</LinkButton>
           </div>
         )}
-        {direction !== 'a' && added && state === 'remote' && (
+        {direction !== 'a' && host !== null && (
           <div className={s.remoteRow}>
-            <span>balazs/tidepool on GitHub. main pushed; tasks open pull requests there from now on.</span>
+            <span>
+              balazs/tidepool on {hostName}. main is pushed; tasks open {added === 'gitlab' ? 'merge requests' : 'pull requests'} there from
+              now on.
+            </span>
           </div>
         )}
       </div>
       <div className={s.outputs}>
         <div>
-          <p className={s.where}>{setup ? 'Set up Tidepool, done' : 'A task, done'}</p>
+          <p className={s.where}>A task, done</p>
           {branch}
         </div>
         <div>
@@ -357,6 +555,8 @@ function ProjectScene({ state, direction }: { state: State; direction: Direction
 function Lab() {
   const [direction, setDirection] = useState<Direction>(pick(directions, params.get('d'), 'b'))
   const [state, setState] = useState<State>(pick(states, params.get('s'), 'empty'))
+  const [setup, setSetup] = useState<Setup>(pick(setups, params.get('c'), 'all'))
+  const [step, setStep] = useState<1 | 2>(params.get('step') === '2' ? 2 : 1)
   const [theme, setTheme] = useState(params.get('theme') === 'dark' ? 'dark' : 'light')
   useEffect(() => {
     document.documentElement.dataset.theme = theme
@@ -365,9 +565,11 @@ function Lab() {
     const url = new URL(location.href)
     url.searchParams.set('d', direction)
     url.searchParams.set('s', state)
+    url.searchParams.set('c', setup)
+    url.searchParams.set('step', String(step))
     url.searchParams.set('theme', theme)
     history.replaceState(null, '', url)
-  }, [direction, state, theme])
+  }, [direction, state, setup, step, theme])
   useEffect(() => {
     const down = (event: KeyboardEvent) => {
       const target = event.target as HTMLElement | null
@@ -379,6 +581,7 @@ function Lab() {
       const n = Number(key)
       const st = states[n - 1]
       if (Number.isInteger(n) && st !== undefined) return setState(st.key)
+      if (key === 'g') return setSetup((now) => setups[(setups.findIndex((one) => one.key === now) + 1) % setups.length]?.key ?? 'all')
       if (key === 't') setTheme((now) => (now === 'dark' ? 'light' : 'dark'))
     }
     window.addEventListener('keydown', down)
@@ -389,9 +592,16 @@ function Lab() {
     <div className={s.lab}>
       <main className={s.scene}>
         {inProject ? (
-          <ProjectScene key={`${state}-${direction}`} state={state} direction={direction} />
+          <ProjectScene key={`${state}-${direction}`} state={state} direction={direction} setup={setup} />
         ) : (
-          <NewProjectScene state={state} direction={direction} onOpen={() => setState('working')} />
+          <NewProjectScene
+            state={state}
+            direction={direction}
+            setup={setup}
+            step={direction === 'a' ? 1 : step}
+            onStep={setStep}
+            onOpen={() => setState('working')}
+          />
         )}
       </main>
       <nav className={s.bars} aria-label="Lab">
@@ -404,6 +614,15 @@ function Lab() {
             </button>
           ))}
           <span className={s.spacer} />
+          {direction !== 'a' && !inProject && (
+            <>
+              {([1, 2] as const).map((n) => (
+                <button key={n} type="button" aria-pressed={step === n} onClick={() => setStep(n)}>
+                  Step {n}
+                </button>
+              ))}
+            </>
+          )}
           <button type="button" onClick={() => setTheme((now) => (now === 'dark' ? 'light' : 'dark'))}>
             <kbd>T</kbd>
             {theme === 'dark' ? 'Dark' : 'Light'}
@@ -417,6 +636,15 @@ function Lab() {
               {one.label}
             </button>
           ))}
+        </div>
+        <div className={s.bar}>
+          <span className={s.barName}>Connected</span>
+          {setups.map((one) => (
+            <button key={one.key} type="button" aria-pressed={setup === one.key} onClick={() => setSetup(one.key)}>
+              {one.label}
+            </button>
+          ))}
+          <kbd>G</kbd>
         </div>
         <p className={s.caption}>{today[state]}</p>
       </nav>
