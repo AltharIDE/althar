@@ -446,6 +446,8 @@ export interface Client {
     readonly end?: TaskEnd | null
     /** The project's repositories it changes, by name: needed only in a project of several. */
     readonly repositories?: ReadonlyArray<string>
+    /** An aside: a chat of the person's own, on Scratch, with no card in the coordinator's thread; its words are `description`. */
+    readonly chat?: boolean
   }) => Promise<TaskSummary>
   readonly startPlan: (planId: string) => Promise<void>
   readonly holdPlan: (planId: string) => Promise<void>
