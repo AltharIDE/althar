@@ -37,7 +37,10 @@ describe('what a follow-up pull request says of itself', () => {
     assert.include(body, 'The review after #763 merged found a problem in it')
     assert.include(body, '- Task timing is summed into every snapshot. It doubles the totals. (`src/usage.ts:12`)')
     assert.include(body, '- Stop summing task timing into every snapshot: Each snapshot added the whole again.')
-    assert.include(followUpBody({ follows: '#763', findings: [], commits: [] }), 'Follows #763')
+    assert.include(followUpBody({ follows: '#763', findings: [], commits: [] }), 'Follows #763, which merged')
+    // After one closed, it says so: the earlier one didn't merge.
+    assert.include(followUpBody({ follows: '#763', state: 'closed', findings: [], commits: [] }), 'which was closed without merging')
+    assert.notInclude(followUpBody({ follows: '#763', state: 'closed', findings: [], commits: [] }), 'which merged')
   })
 
   it('reads the findings a review kept, and none from what it can’t read', () => {

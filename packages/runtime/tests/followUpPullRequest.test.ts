@@ -119,6 +119,9 @@ describe('a task whose first pull request merged and whose follow-up is open wit
       yield* changes.refresh(task.taskId)
       const [waiting] = yield* cards(task.projectId)
       assert.strictEqual(waiting?.change?.number, 2)
+      // Its own commits are its pull request's, not work after it: the card has no branch row beside it.
+      assert.deepStrictEqual(yield* changes.unshipped(task.taskId, { kept: true }), [])
+      assert.deepStrictEqual(yield* changes.unshipped(task.taskId), [])
       assert.strictEqual(waiting?.phase, 'running')
       // Twelve checks, some still running: the card shows them, of this pull request.
       github.setChecks(2, [
@@ -182,6 +185,35 @@ describe('a task whose first pull request merged and whose follow-up is open wit
       assert.include(second.body, 'Why: #1 summed timing into every snapshot.')
       assert.include(second.body, 'What stays: the card.')
       assert.notInclude(second.body, 'The review after #1 merged found')
+    }).pipe(Effect.provide(runtimeWith(github)))
+  })
+
+  it('still says why it exists where its lead gave a summary and what it built, but no description', () => {
+    const { working, bare } = hosted()
+    const github = makeFakeService({ pushUrl: () => bare })
+    github.addRepository(['meridian', 'api'])
+    git(working, 'config', 'user.name', 'Fake')
+    git(working, 'config', 'user.email', 'fake@althar.test')
+    return Effect.gen(function* () {
+      const task = yield* fixed(working, bare, github)
+      const sql = yield* SqlClient.SqlClient
+      const [thread] = yield* sql<{ projectId: string }>`SELECT project_id FROM threads WHERE id = ${task.threadId}`
+      // What the Fix it brief asks of a lead is a summary and `built`; a lead that gives no description still gets one.
+      yield* addItem({ projectId: thread?.projectId as never, threadId: task.threadId }, 'step_result', {
+        step: 'implement',
+        summary: 'Counted the timing once per snapshot.',
+        built: 'The usage card shows its time breakdown again.',
+      })
+      yield* (yield* Runs).ship({ envelope: yield* Runtime.envelope('task.ship', {}), taskId: task.taskId })
+      yield* until(
+        Effect.sync(() => github.changes),
+        (all) => all.length === 2,
+      )
+      const second = github.changes[1] ?? assert.fail('no second pull request')
+      assert.include(second.body, 'The review after #1 merged found a problem in it')
+      assert.include(second.body, 'README.md:1')
+      assert.include(second.body, `- ${FIX}: Each snapshot added the task’s whole timing again.`)
+      assert.include(second.body, 'The usage card shows its time breakdown again.')
     }).pipe(Effect.provide(runtimeWith(github)))
   })
 })

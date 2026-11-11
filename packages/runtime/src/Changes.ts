@@ -1209,7 +1209,7 @@ export class Changes extends Context.Service<
         since: string | null = null,
         review: { readonly seal: string | null; readonly details: string | null; readonly note?: string | null } | null = null,
         /** What a next pull request says where the lead wrote nothing since the last: its finding and its commits (`followUpOf`). */
-        fallback: string | null = null,
+        fallback: { readonly text: string; readonly answers: boolean } | null = null,
       ) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
@@ -1234,7 +1234,8 @@ export class Changes extends Context.Service<
           return bodyOf({
             built: built === null ? null : withoutAgentCredit(built, agentNames),
             lead: lead === undefined ? null : withoutAgentCredit(lead.summary, agentNames),
-            fallback,
+            // Its finding and commits come first where it answers one: the lead's summary of the task doesn't say why this exists.
+            ...(fallback === null ? {} : fallback.answers ? { ahead: fallback.text } : { fallback: fallback.text }),
             issue,
             template: repository.template,
             written: written === undefined || written.text === null ? null : withoutAgentCredit(written.text, agentNames),
@@ -1548,7 +1549,15 @@ export class Changes extends Context.Service<
               yield* issueKeyOf(taskId),
               TITLE_LENGTH - `After ${next.change.words.prefix}${next.change.number}: `.length,
             ),
-            body: followUpBody({ follows: `${next.change.words.prefix}${next.change.number}`, findings, commits }),
+            body: {
+              text: followUpBody({
+                follows: `${next.change.words.prefix}${next.change.number}`,
+                state: next.change.state === 'closed' ? 'closed' : 'merged',
+                findings,
+                commits,
+              }),
+              answers: findings.length > 0,
+            },
           }
         })
 

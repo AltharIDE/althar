@@ -367,10 +367,6 @@ const checksFact = (checks: ChangeSummary['checks']): ReactNode => {
 }
 
 /** A branch with nothing changed (+0 −0) says nothing, so no card shows its chip; one whose size isn't known still does. */
-/** Whether a branch of this size says nothing its pull request's row doesn't: it counts the same lines, so it is what the pull request has. */
-const sameAsPull = (change: ChangeSummary, size: { readonly add: number; readonly del: number }) =>
-  change.additions === size.add && change.deletions === size.del
-
 const empty = (size: { readonly add: number; readonly del: number } | null | undefined) => size != null && size.add === 0 && size.del === 0
 
 /** The step a change is on, in its word: its step's name on its track, or what it does once its steps are done. */
@@ -643,13 +639,7 @@ export const readyCardOf = (work: BoardTask, actions?: CardActions): Card => {
       // Commits after its last pull request merged or closed: its branch, as for work with none, until a new one opens; with
       // another of its repositories' pull requests open, that one, to accept, and the branch under it with what is in none.
       const change = work.unshipped == null || work.change?.state === 'open' ? work.change : null
-      // Its branch, after its pull request, unless it says what the pull request's row says: the same lines, said twice.
-      const after =
-        work.unshipped == null ||
-        work.branch === null ||
-        (work.changeMarks === undefined && change !== null && sameAsPull(change, work.unshipped))
-          ? null
-          : { name: work.branch, ...work.unshipped }
+      const after = work.unshipped == null || work.branch === null ? null : { name: work.branch, ...work.unshipped }
       const size = { add: work.unshipped?.add ?? work.changed?.add ?? 0, del: work.unshipped?.del ?? work.changed?.del ?? 0 }
       const branch = work.branch === null || empty(size) ? null : { name: work.branch, ...size }
       const ask = work.nothingBuilt === true ? askOf(work.summary) : null

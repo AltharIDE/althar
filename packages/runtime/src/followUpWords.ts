@@ -89,19 +89,22 @@ const flat = (text: string) => text.replace(/\s+/g, ' ').trim()
 export const followUpBody = (input: {
   /** The pull request it follows, as its host names it: `#763`. */
   readonly follows: string
+  /** How the pull request it follows ended: merged, or closed without merging. */
+  readonly state?: 'merged' | 'closed'
   readonly findings: ReadonlyArray<Answers>
   readonly commits: ReadonlyArray<FixCommit>
 }): string => {
   const parts: Array<string> = []
   const { findings, commits } = input
-  if (findings.length === 0) parts.push(`Follows ${input.follows}, which merged, with more work on the same task.`)
+  const ended = input.state === 'closed' ? 'was closed without merging' : 'merged'
+  if (findings.length === 0) parts.push(`Follows ${input.follows}, which ${ended}, with more work on the same task.`)
   else {
     const lines = findings.map((finding) => {
       const title = finding.title == null || flat(finding.title) === '' ? '' : `${flat(finding.title)}: `
       return `- ${title}${flat(finding.claim)}${where(finding)}`
     })
     parts.push(
-      `The review after ${input.follows} merged found ${findings.length === 1 ? 'a problem' : `${findings.length} problems`} in it. This answers ${findings.length === 1 ? 'it' : 'them'}:\n\n${lines.join('\n')}`,
+      `The review after ${input.follows} ${input.state === 'closed' ? 'closed' : 'merged'} found ${findings.length === 1 ? 'a problem' : `${findings.length} problems`} in it. This answers ${findings.length === 1 ? 'it' : 'them'}:\n\n${lines.join('\n')}`,
     )
   }
   if (commits.length > 0) {

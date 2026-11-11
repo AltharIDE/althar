@@ -41,8 +41,8 @@ const task = (overrides: Partial<BoardTask> = {}): BoardTask => ({
   changed: null,
   here: [],
   branch: 'althar/usage-card-drops-the-time-breakdown-2',
-  // What the branch holds is what the pull request holds: the same lines, said once.
-  unshipped: { commits: 1, add: 1, del: 42 },
+  // Its commits are its pull request's: nothing is after it, so the card says the lines once (the runtime has none unshipped).
+  unshipped: null,
   earlier: [first],
   ...overrides,
 })
@@ -85,9 +85,9 @@ describe('the card of a follow-up pull request whose checks are running', () => 
     expect(card.getByText('Accept and merge')).toBeTruthy()
   })
 
-  it('keeps a branch row that says more than its pull request does', () => {
-    const card = show(task({ change: followUp({ checks: checks(12, 0) }), unshipped: { commits: 2, add: 9, del: 0 } }))
+  it('keeps a branch row for work after it, even where it counts the same lines', () => {
+    const card = show(task({ change: followUp({ checks: checks(12, 0) }), unshipped: { commits: 1, add: 1, del: 42 } }))
     expect(card.getByText('althar/usage-card-drops-the-time-breakdown-2')).toBeTruthy()
-    expect(card.getByText('+9')).toBeTruthy()
+    expect(card.getAllByText('+1')).toHaveLength(2)
   })
 })

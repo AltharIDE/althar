@@ -214,8 +214,15 @@ export const describedOf = (input: {
   readonly fallback?: string | null
   readonly template?: string | null
   readonly written?: string | null
+  /**
+   * What a next pull request answers and changes (its finding and commits), which comes before what the task built or its lead
+   * summed up where the lead wrote no description: those say what the task did as a whole, not why this one exists.
+   */
+  readonly ahead?: string | null
 }) => {
-  const plain = said(input.built) ?? said(input.lead) ?? said(input.fallback)
+  const summed = said(input.built) ?? said(input.lead) ?? said(input.fallback)
+  const ahead = said(input.written) === null ? said(input.ahead) : null
+  const plain = ahead === null ? summed : summed === null || summed === ahead ? ahead : `${ahead}\n\n${summed}`
   const template = input.template ?? null
   const written = said(input.written)
   if (template === null) return written ?? plain ?? ''
