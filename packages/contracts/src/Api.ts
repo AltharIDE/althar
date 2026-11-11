@@ -3084,16 +3084,6 @@ export const TurnTime = Schema.Struct({
 })
 export type TurnTime = typeof TurnTime.Type
 
-/** All a task's turns added up, its reviewers' too, as `TurnTime` counts them: what Outputs' Usage says it took. */
-export const TaskTime = Schema.Struct({
-  turns: Schema.Number,
-  place: Schema.Number,
-  session: Schema.Number,
-  work: Schema.Number,
-  tools: Schema.Number,
-})
-export type TaskTime = typeof TaskTime.Type
-
 export const AccountUse = Schema.Struct({
   accountId: Schema.String,
   agentId: Schema.String,
@@ -3595,8 +3585,6 @@ export const ThreadSnapshot = Schema.Struct({
   cursor: Cursor,
   /** What the task used of each account its agents ran on, in every thread of it, its reviews' too (ADR-084). */
   usage: Schema.optional(Schema.Array(AccountUse)),
-  /** Where all its turns' time went, added up; absent where none kept it. */
-  time: Schema.optional(TaskTime),
   project: Schema.Struct({ id: Schema.String, name: Schema.String }),
   /** Where the project's repository is hosted, and whether Althar is connected there: what a pull request needs. */
   host: Schema.NullOr(Schema.Struct({ product: Product, name: Schema.String, webUrl: Schema.String, connected: Schema.Boolean })),
