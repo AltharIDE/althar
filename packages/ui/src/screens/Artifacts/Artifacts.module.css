@@ -262,41 +262,80 @@
   }
 }
 
-/* ——— None yet ——— */
+/* ——— None yet: a wall of faint drawings where the table will be, fading out, the words where it thins ——— */
 
 .empty {
   display: flex;
-  align-items: flex-start;
-  gap: 12px;
-  padding: 18px 10px;
-  border-top: 1px solid var(--line);
+  flex-direction: column;
+  align-items: center;
+  /* to the view's edges, past the column's padding, so the wall fades into them rather than stopping */
+  margin: 0 -40px;
+  overflow: hidden;
 }
 
-.emptyGlyph {
+.wall {
   display: grid;
-  place-items: center;
-  flex: none;
-  width: 32px;
-  height: 32px;
-  border-radius: 9px;
-  background: var(--n-1);
-  box-shadow: inset 0 0 0 1px var(--line);
-  color: var(--t-3);
+  grid-template-columns: repeat(6, 120px);
+  justify-content: center;
+  gap: 14px;
+  width: 100%;
+  padding-top: 8px;
+  mask-image:
+    linear-gradient(to bottom, #000 0%, rgb(0 0 0 / 0.55) 45%, transparent 92%),
+    linear-gradient(to right, transparent 0%, #000 22%, #000 78%, transparent 100%);
+  mask-composite: intersect;
+}
+
+.tile {
+  height: 84px;
+  border-radius: 10px;
+  background: var(--paper);
+  box-shadow:
+    inset 0 0 0 1px var(--line),
+    var(--shadow);
+}
+
+.tile svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.ink1 {
+  fill: var(--n-3);
+}
+
+.ink2 {
+  fill: var(--n-4);
+}
+
+.ink3 {
+  fill: color-mix(in oklab, var(--t-4) 55%, transparent);
+}
+
+.stroke {
+  fill: none;
+  stroke: var(--n-5);
+  stroke-width: 1.5;
 }
 
 .emptyWords {
-  max-width: 460px;
-  margin: 0;
+  max-width: 380px;
+  margin: -64px 0 0;
+  padding: 0 40px 40px;
+  box-sizing: content-box;
   font-size: 12.5px;
-  line-height: 1.55;
+  line-height: 1.5;
+  text-align: center;
   color: var(--t-3);
 }
 
 .emptyTitle {
   display: block;
-  margin-bottom: 2px;
-  font-size: 13px;
+  margin-bottom: 5px;
+  font-size: 14px;
   font-weight: 600;
+  line-height: 1.35;
   color: var(--t-1);
 }
 
