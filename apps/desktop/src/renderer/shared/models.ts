@@ -85,11 +85,27 @@ const SAID: Readonly<Record<string, string>> = {
   xai: 'xAI',
 }
 
-/** A model's id as people read it, where nothing else names it: `opencode-go/deepseek-v4.1-flash` is "DeepSeek V4.1 Flash". */
-const readableModelName = (id: string): string =>
-  bareModel(id)
+/**
+ * The words of a model's id, with a version an id writes with dashes read as people write it: `claude-opus-5-5` has the
+ * version 5.5, `claude-3-5-sonnet` 3.5. Only two short numbers make one; a date (`20250514`, `2025-01-31`) isn't.
+ */
+const wordsOf = (id: string): ReadonlyArray<string> => {
+  const words = bareModel(id)
     .split(/[-_\s:]+/)
     .filter((word) => word !== '')
+  const version = (word: string | undefined) => word !== undefined && /^(0|[1-9]\d?)$/.test(word)
+  return words.reduce<string[]>((read, word) => {
+    const last = read.at(-1)
+    // A number after a number that is no part of a date: its decimals.
+    if (version(word) && version(last) && !(read.length > 1 && /^\d{4}$/.test(read.at(-2) ?? ''))) read[read.length - 1] = `${last}.${word}`
+    else read.push(word)
+    return read
+  }, [])
+}
+
+/** A model's id as people read it, where nothing else names it: `opencode-go/deepseek-v4.1-flash` is "DeepSeek V4.1 Flash", `claude-opus-5-5` "Claude Opus 5.5". */
+const readableModelName = (id: string): string =>
+  wordsOf(id)
     .map((word) => SAID[word.toLowerCase()] ?? capital(word))
     .join(' ')
 

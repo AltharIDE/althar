@@ -174,7 +174,7 @@ describe('presets, through the API', () => {
           reviewer: null,
           brief: 'Retry the checkout.\nTwice at most.\nThen give up.',
         })
-        assert.strictEqual(own[2]?.about, 'Local, reviewed before it ships, a pull request ready for review, led by large')
+        assert.strictEqual(own[2]?.about, 'Local, reviewed before it ships, a pull request ready for review, led by Large')
 
         // With neither a task nor parts there is nothing to keep, and a task that went has none either: neither is saved.
         assert.strictEqual(
@@ -798,21 +798,24 @@ describe('a preset’s parts, on a plan', () => {
     )
   })
 
-  it('reviews with the lead’s agent where it needs a review it lacks, and with Claude Code where it has no lead either', () => {
-    assert.deepStrictEqual(planFromPreset(proposed({ steps: [LEAD] }), parts({})).steps[1], { ...LEAD, key: 'review' })
+  it('never reviews with the lead’s own model: it skips a review it needs and can’t name, to add back, and keeps the plan’s own', () => {
+    assert.deepStrictEqual(planFromPreset(proposed({ steps: [LEAD] }), parts({})).steps[1], {
+      key: 'review',
+      agentId: 'claude-code',
+      model: null,
+      skipped: true,
+    })
     assert.deepStrictEqual(planFromPreset(proposed({ steps: [] }), parts({ checked: 'after', workspace: 'copy' })), {
       steps: [{ key: 'review', agentId: 'claude-code', model: null, skipped: true }],
       end: 'draft',
       reviewAfterMerge: true,
       here: true,
     })
+    assert.deepStrictEqual(planFromPreset(proposed({ steps: [LEAD, REVIEW] }), parts({})).steps[1], { ...REVIEW, skipped: false })
   })
 
-  it('skips a review it has where nothing checks it, and adds none where it has none', () => {
-    assert.deepStrictEqual(planFromPreset(proposed({ steps: [LEAD, REVIEW] }), parts({ checked: 'none' })).steps, [
-      LEAD,
-      { ...REVIEW, skipped: true },
-    ])
+  it('leaves no review row where nothing checks it, one it had included, and adds none where it has none', () => {
+    assert.deepStrictEqual(planFromPreset(proposed({ steps: [LEAD, REVIEW] }), parts({ checked: 'none' })).steps, [LEAD])
     assert.deepStrictEqual(planFromPreset(proposed({ steps: [LEAD], worksIn: 'checkout' }), parts({ checked: 'none' })), {
       steps: [LEAD],
       end: 'draft',

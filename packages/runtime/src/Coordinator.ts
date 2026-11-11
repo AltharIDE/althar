@@ -32,6 +32,8 @@ import { IssueDrafts, refusedDraft } from './IssueDrafts'
 import { AskedFields, fieldSchema, wantedFields } from './issueFields'
 import { findWords, foundLine, Issues, keysOf, READ_ISSUE, READ_ISSUE_INPUT, stoppedAt } from './Issues'
 import { quickIn } from './kinds'
+import { DRAFT_THEN_PRESET, PICK_A_PRESET } from './presetBrief'
+import { presetModels } from './presetModels'
 import { Limits } from './Limits'
 import { ModelFacts } from './ModelFacts'
 import { DRAFTING_MS } from './needsYou'
@@ -2219,7 +2221,7 @@ export class Coordinator extends Context.Service<
         ...readTasksTools,
         tool(
           'draft_task',
-          `Drafts a task for a change: its title, saying what should change in a few words (at most ${TITLE_LENGTH} characters), and a description with what the lead needs: the context, where to look, constraints, and what done looks like. When it comes from an issue, pass the issue's link or key as issue, and part_of where it does only part of it. When it works on an open pull request, such as to answer its review, pass it as pull_request: the task starts on its head and follows it, and its work goes there, with no new pull request. Then propose its plan.${LEAD_STARTING}`,
+          `Drafts a task for a change: its title, saying what should change in a few words (at most ${TITLE_LENGTH} characters), and a description with what the lead needs: the context, where to look, constraints, and what done looks like. When it comes from an issue, pass the issue's link or key as issue, and part_of where it does only part of it. When it works on an open pull request, such as to answer its review, pass it as pull_request: the task starts on its head and follows it, and its work goes there, with no new pull request. ${DRAFT_THEN_PRESET}${LEAD_STARTING}`,
           {
             type: 'object',
             properties: {
@@ -2392,12 +2394,15 @@ export class Coordinator extends Context.Service<
         draftIssueTool,
         tool(
           'list_presets',
-          'The person’s presets (a named set of a task’s starting parts: where it works, Checked by and when, its ending, where it sits, its lead and reviewer, and a few lines of brief), the built-in ones first, then theirs, those kept to this project with them, each with what it holds. Plan from the one that fits what the person asked with propose_plan’s preset; its card names it, and they can pick another there.',
+          'The person’s presets (a named set of a task’s starting parts: where it works, Checked by and when, its ending, where it sits, its lead and reviewer, and a few lines of brief), the built-in ones first, then theirs, those kept to this project with them, each with what it holds. Plan from the one that fits what the person asked with propose_plan’s preset; its card names it, and they can pick another there. Prototype is for a prototype or design directions, Small change for a few lines, Chat for a question or a look, Review a PR for a review, and Change for the rest.',
           nothing,
           (access) =>
-            Effect.map(presetsIn(access.projectId), (all) =>
-              all.map((one) => `- ${one.name}${one.builtin ? '' : ' (theirs)'}: ${describePreset(one.parts)}.`).join('\n'),
-            ),
+            Effect.gen(function* () {
+              const all = yield* presetsIn(access.projectId)
+              // Its lead as list_models names it, not by the id a preset was written with.
+              const models = presetModels(yield* usableModels(access.projectId).pipe(Effect.orElseSucceed(() => [])))
+              return all.map((one) => `- ${one.name}${one.builtin ? '' : ' (theirs)'}: ${describePreset(one.parts, models)}.`).join('\n')
+            }),
         ),
         tool(
           'list_models',
@@ -2407,7 +2412,7 @@ export class Coordinator extends Context.Service<
         ),
         tool(
           'propose_plan',
-          "Proposes a drafted task's plan: the model that implements it (its lead), with why in a sentence; and the model that reviews it, which only reads, or null for something trivial. A change of a few lines is planned small: pass small_change, keep the review (it runs after the merge), and put its lead on a light, quick model (Sonnet, at low effort where that is the lowest it lists). It then has one step and no countdown: it starts at once in a place kept for small tasks, however many long ones are at work, and its card in the thread says what it skipped. Without small_change it starts on its own after 25 seconds unless the person holds or changes it. Name each model as list_models writes it, and, where it matters, one of the efforts it lists for that model. Proposing again for a task the person holds replaces the plan but keeps it held: it starts only when the person starts it. A task's lead plans only the tasks it drafted.",
+          `Proposes a drafted task's plan: the model that implements it (its lead), with why in a sentence; and the model that reviews it, which only reads, or null for something trivial. A change of a few lines is planned small: pass small_change, keep the review (it runs after the merge), and put its lead on a light, quick model (Sonnet, at low effort where that is the lowest it lists). It then has one step and no countdown: it starts at once in a place kept for small tasks, however many long ones are at work, and its card in the thread says what it skipped. Without small_change it starts on its own after 25 seconds unless the person holds or changes it. Name each model as list_models writes it, and, where it matters, one of the efforts it lists for that model. Proposing again for a task the person holds replaces the plan but keeps it held: it starts only when the person starts it. A task's lead plans only the tasks it drafted. ${PICK_A_PRESET}`,
           {
             type: 'object',
             properties: {
@@ -2448,7 +2453,7 @@ export class Coordinator extends Context.Service<
               preset: {
                 type: 'string',
                 description:
-                  'The preset its parts are, by name as list_presets writes it, where one fits what the person asked: its parts replace the plan’s (its lead and reviewer where it names them, Checked by, its ending, where it works and sits, and its brief). Left out, the plan is as you propose it.',
+                  'The preset its parts are, by name as list_presets writes it: the one that fits what the person asked (Prototype, Small change, Chat, Review a PR, Change, or one of the person’s own). Its parts replace the plan’s (its lead and reviewer where it names them, Checked by, its ending, where it works and sits, and its brief). Left out only where none fits: the plan is then as you propose it.',
               },
             },
             required: ['task', 'lead'],

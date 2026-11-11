@@ -1,5 +1,7 @@
 import { type FakeService, makeFakeService } from '@althar/connectors/testing'
 import { assert, describe, it } from '@effect/vitest'
+import { Client } from '@modelcontextprotocol/sdk/client/index.js'
+import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
 import { Duration, Effect, Layer } from 'effect'
 import { SqlClient } from 'effect/sql'
 
@@ -12,7 +14,7 @@ import { Projects } from '../src/Projects'
 import { Queries } from '../src/Queries'
 import * as Runtime from '../src/Runtime'
 import { Sessions } from '../src/Sessions'
-import type { ToolAccess } from '../src/ToolServer'
+import { ToolServer, type ToolAccess } from '../src/ToolServer'
 import { callTool, fakeConnectors, HOST, hosted, items, runtime, until } from './support'
 
 /*
@@ -217,6 +219,11 @@ describe('presets', () => {
       const now = yield* plan()
       assert.deepInclude(now.parameters.steps[0], { agentId: 'claude-code', model: 'claude-opus-5-5' })
       assert.strictEqual(now.parameters.end, 'none')
+      // The review Small change had is gone, not left as a skipped row to add back.
+      assert.deepStrictEqual(
+        now.parameters.steps.map((step: { key: string }) => step.key),
+        ['implement'],
+      )
       const [task] = yield* sql<{ description: string }>`SELECT description FROM tasks WHERE id = ${now.taskId}`
       assert.include(task?.description, 'A prototype: show the idea working, quickly.')
       yield* until(cards(projectId), (all) => all[0]?.plan?.preset === 'Prototype')
@@ -229,6 +236,101 @@ describe('presets', () => {
       // A plan of work never becomes a review.
       const refused = yield* Effect.flip((yield* Plans).applyPreset(first.id, 'Review a PR', instance.personId))
       assert.include(String((refused as { message?: string }).message), 'Review a PR starts from a pull request')
+    }).pipe(Effect.provide(runtimeWith(github)))
+  })
+})
+
+/** The descriptions of the tools a session with this access is given, by name. */
+const toolDescriptions = (access: ToolAccess) =>
+  Effect.gen(function* () {
+    const granted = yield* (yield* ToolServer).grant(access)
+    const server = granted.server
+    if (server.type !== 'http') return new Map<string, string>()
+    return yield* Effect.promise(async () => {
+      const client = new Client({ name: 'test', version: '1.0.0' })
+      const transport = new StreamableHTTPClientTransport(new URL(server.url), { requestInit: { headers: server.headers } })
+      await client.connect(transport as Parameters<typeof client.connect>[0])
+      try {
+        return new Map((await client.listTools()).tools.map((one) => [one.name, one.description ?? ''] as const))
+      } finally {
+        await client.close()
+      }
+    })
+  })
+
+describe('what the coordinator and a lead are told of presets', () => {
+  const PICKS = [
+    'list_presets',
+    'Prototype for a prototype or design directions',
+    'Small change for a few lines',
+    'Chat for a question or a look',
+    'Review a PR for a review',
+    'Change for the rest',
+  ]
+
+  it.live('is to call list_presets and plan from the one that fits, in the coordinator’s brief and in its tools’ descriptions', () => {
+    const { working, bare } = hosted()
+    const github = makeFakeService({ pushUrl: () => bare })
+    github.addRepository(['meridian', 'api'])
+    return Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const { threadId, coordinator } = yield* opened(working)
+      const turns = sql<{ prompt: string }>`SELECT prompt FROM turn_deliveries WHERE thread_id = ${threadId} ORDER BY requested_at`
+      yield* (yield* Coordinator).say({
+        envelope: yield* Runtime.envelope('thread.send', { body: 'hello' }),
+        threadId,
+        body: 'hello',
+        disposition: 'after_current',
+      })
+      const [first] = yield* until(turns, (rows) => rows.length === 1)
+      const brief = first?.prompt ?? ''
+      for (const words of PICKS) assert.include(brief, words)
+      assert.include(brief, 'The person’s own presets count too')
+      // A prototype ends with its branch; it may graduate to a change in the same task, or not, and the person decides.
+      assert.include(brief, 'A prototype ends with its branch')
+      assert.include(brief, 'the same task can go on as a change, with its pull request ending and its review added then')
+      assert.include(brief, 'never assume either way')
+
+      const tools = yield* toolDescriptions(coordinator)
+      for (const words of PICKS) assert.include(tools.get('propose_plan'), words)
+      assert.include(tools.get('draft_task'), 'list_presets')
+      assert.include(tools.get('draft_task'), 'Prototype for a prototype or design directions')
+      assert.include(tools.get('list_presets'), 'Prototype is for a prototype or design directions')
+      assert.include(tools.get('list_presets'), 'Change for the rest')
+    }).pipe(Effect.provide(runtimeWith(github)))
+  })
+
+  it.live('is the same for a lead that drafts tasks, with its own tools saying so too', () => {
+    const { working, bare } = hosted()
+    const github = makeFakeService({ pushUrl: () => bare })
+    github.addRepository(['meridian', 'api'])
+    return Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const { projectId, coordinator } = yield* opened(working)
+      yield* callTool(coordinator, 'start_task', {
+        title: 'Look at retries',
+        description: 'Look. [lead:finish]',
+        lead: { agent: 'claude-code' },
+      })
+      const [lead] = yield* until(
+        sql<{ prompt: string; threadId: string }>`
+          SELECT d.prompt, d.thread_id FROM turn_deliveries d JOIN threads t ON t.id = d.thread_id
+          WHERE t.project_id = ${projectId} AND t.kind = 'task' ORDER BY d.requested_at`,
+        (rows) => rows.length > 0,
+      )
+      const brief = lead?.prompt ?? ''
+      for (const words of PICKS) assert.include(brief, words)
+      assert.include(brief, 'A prototype ends with its branch')
+      assert.include(brief, 'never assume either way')
+      const tools = yield* toolDescriptions({
+        role: 'lead',
+        projectId: projectId as never,
+        threadId: lead?.threadId ?? '',
+        sessionId: 'none',
+        taskId: null,
+      } as ToolAccess)
+      assert.include(tools.get('draft_task'), 'list_presets')
+      assert.include(tools.get('propose_plan'), 'Prototype for a prototype or design directions')
     }).pipe(Effect.provide(runtimeWith(github)))
   })
 })

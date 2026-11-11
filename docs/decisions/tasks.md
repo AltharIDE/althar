@@ -153,7 +153,12 @@ when, its ending, where it sits, its lead and reviewer, and a few lines of
 brief (`presets`). Only a start: changing a task's parts never changes it.
 
 - **Built in:** Chat, Change, Small change, Review a PR, and Prototype, led
-  by Claude Opus 5.5 and reviewed only once it ships.
+  by Claude Opus 5.5, with no review, ending with its branch. A prototype may
+  later go on as a change in the same task, its pull request ending and its
+  review added then, or never: the person decides, so the coordinator and the
+  leads never assume either way. Today the pull request can be opened from the
+  task's card or by the coordinator, but a review can't be added once its run
+  is over, so the conversation-plus-parts work (phase 5) owns the rest.
 - **The plan card's kicker names the preset** its parts are, first: "Change
   · Task board-still". A press on it lists the others, each with what it
   holds; picking one changes the plan's parts to match (`ApplyPreset`): its
@@ -161,8 +166,15 @@ brief (`presets`). Only a start: changing a task's parts never changes it.
   ending, where it works and sits, and its brief added to the task's
   description. A review is offered only the presets that review, and work
   never becomes one. Nothing names the preset once the task starts.
-- **The coordinator plans from them:** `list_presets` lists them, and
-  `propose_plan`'s `preset` takes the one that fits what the person asked.
+- **The coordinator plans from them:** its brief says to call `list_presets`
+  and plan, with `propose_plan`'s `preset`, from the one that fits what the
+  person asked: Prototype for a prototype or design directions, Small change
+  for a few lines, Chat for a question or a look, Review a PR for a review,
+  and Change for the rest; the person's own count too. A lead that drafts tasks
+  is told the same. A preset that needs a review and names no reviewer gets
+  the plan's own where it is another maker's than the lead's, else the
+  strongest model of another maker that can be used, never the lead's own
+  model. Leads are named as the agents list their models (Claude Opus 5.5).
 - **Save as preset**, in every task's menu, keeps its parts, team and the
   start of its brief.
 - **The coordinator offers one:** once the person set up the same parts,
