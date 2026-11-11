@@ -34,7 +34,7 @@ test('a small change’s review after its merge with only minor findings ends as
 
     // A small change: it starts at once, and its pull request opens.
     await say(page, 'Add a retry. [coordinator:plan] [coordinator:plan-small] [lead:finish] [lead:edit] [review:always]')
-    await expect(page.getByText('PR #1')).toBeVisible({ timeout: 60_000 })
+    await expect(page.getByText('PR #1')).toBeVisible()
     await page.getByRole('button', { name: /Open task/ }).click()
     await page.getByRole('button', { name: 'Mark ready for review' }).click()
     await page.getByRole('button', { name: 'Accept and merge' }).click()
@@ -46,14 +46,14 @@ test('a small change’s review after its merge with only minor findings ends as
 
     // Its reviewer reads what merged and finds a minor thing and a nit: one quiet line, closed.
     // Its outputs don't say changes were asked: nothing was.
-    await expect(page.getByText('Reviewed by')).toBeVisible({ timeout: 60_000 })
+    await expect(page.getByText('Reviewed by')).toBeVisible()
     await expect(page.getByText('Changes asked by')).toHaveCount(0)
     await page
       .getByRole('radiogroup', { name: 'Face' })
       .getByRole('radio', { name: /Conversation/ })
       .click()
     const line = page.locator('[data-review]').filter({ hasText: '2 findings' }).last()
-    await expect(line).toContainText('None major', { timeout: 60_000 })
+    await expect(line).toContainText('None major')
     await expect(page.getByRole('button', { name: 'Fix it' })).toHaveCount(0)
     await expect(page.getByRole('button', { name: 'Leave it' })).toHaveCount(0)
     await line.scrollIntoViewIfNeeded()
