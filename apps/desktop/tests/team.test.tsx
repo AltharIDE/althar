@@ -44,6 +44,7 @@ const queued = task({
   phase: 'running',
   inLine: true,
   planWaits: true,
+  holdable: true,
   queued: { busy: 4, atOnce: 4 },
   plan: { ...card().plan!, id: 'plq', startsAt: null },
 })
@@ -233,10 +234,11 @@ describe('changing a plan’s team before it begins', () => {
   it('says which tasks can be held: on their countdown, or started and waiting for an agent or their checkout, nothing begun', () => {
     expect(canHold(task({ phase: 'planned' }))).toBe(true)
     expect(canHold(queued)).toBe(true)
-    expect(canHold({ ...queued, queued: null, waitsForCheckout: { why: 'taken', by: { taskId: 'x', title: 'Another' } } })).toBe(true)
+    // Waiting for its Local checkout instead of a place: nothing begun either.
+    expect(canHold({ ...queued, queued: null, holdable: true })).toBe(true)
     expect(canHold(held)).toBe(false)
     expect(canHold(running)).toBe(false)
-    expect(canHold({ ...queued, planWaits: false })).toBe(false)
+    expect(canHold({ ...queued, holdable: false })).toBe(false)
     expect(canHold({ ...held, phase: 'planned', plan: null })).toBe(false)
   })
 

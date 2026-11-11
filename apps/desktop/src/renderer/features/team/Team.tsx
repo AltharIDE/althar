@@ -55,14 +55,14 @@ export type Teamed = Pick<
   BoardTask,
   'taskId' | 'title' | 'phase' | 'plan' | 'planWaits' | 'queued' | 'reviewing' | 'kind' | 'change' | 'reviewerChange'
 > &
-  Partial<Pick<BoardTask, 'waitsForCheckout'>>
+  Partial<Pick<BoardTask, 'holdable'>>
 
 /**
  * Whether its plan can be held, as its card does: on its countdown, or started with its first step still waiting for a free
- * agent or, Local, its checkout, nothing of it begun. Holding takes it out of the line until the person starts it.
+ * agent or, Local, its checkout, nothing of it begun (`holdable`). Holding takes it out of the line until the person
+ * starts it.
  */
-export const canHold = (task: Teamed): boolean =>
-  task.plan !== null && (task.phase === 'planned' || (task.planWaits === true && (task.queued !== null || task.waitsForCheckout != null)))
+export const canHold = (task: Teamed): boolean => task.plan !== null && (task.phase === 'planned' || task.holdable === true)
 
 /**
  * What changing its team does where it stands: `starts`, a plan held or on its countdown, which can start now too; `waits`,

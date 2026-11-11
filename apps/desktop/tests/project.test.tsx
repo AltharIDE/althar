@@ -577,6 +577,23 @@ describe('the Talk room', () => {
     expect(client.changePlan).not.toHaveBeenCalled()
   })
 
+  it('lets the person hold a started Local plan that waits for its checkout, saying what it waits for', async () => {
+    const waitingCard = card({
+      phase: 'running',
+      step: 'implement',
+      queued: null,
+      planWaits: true,
+      holdable: true,
+      waitsForCheckout: { why: 'taken', by: { taskId: 'x', title: 'Dark mode' } },
+    })
+    const { client } = fakeClient({ getCoordinator: vi.fn(async () => coordinatorSnapshot({ items: [items.card(waitingCard)] })) })
+    withServices(<Project room={Room.Talk} />, client)
+    expect(await screen.findByText(/Dark mode/)).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Start now' })).toBeNull()
+    await userEvent.click(screen.getByRole('button', { name: 'Hold' }))
+    expect(client.holdPlan).toHaveBeenCalledWith('pln1')
+  })
+
   it('lets the person change a started plan while its first step waits for a free agent, saying what it waits for', async () => {
     const waitingCard = card({ phase: 'running', step: 'implement', queued: { busy: 4, atOnce: 4 }, planWaits: true })
     const { client } = fakeClient({ getCoordinator: vi.fn(async () => coordinatorSnapshot({ items: [items.card(waitingCard)] })) })

@@ -440,7 +440,7 @@ export class TaskActions extends Context.Service<
                 yield* plans.hold(plan.id, actorId)
                 return did(`Held ${task.slug}: its plan waits until it is started.`)
               }
-              // Started, but its first step still waits for a free agent, its checkout or a usage reset: it leaves the line.
+              // Started, but its first step still waits for a free agent or its checkout: it leaves the line.
               const [started] = yield* sql<{ id: string }>`
                 SELECT id FROM task_plans WHERE task_id = ${task.id} AND state = 'accepted' ORDER BY proposed_at DESC LIMIT 1`
               if (started !== undefined && (yield* plans.hold(started.id, actorId)))
@@ -1384,7 +1384,7 @@ export class TaskActions extends Context.Service<
         ),
         tool(
           'hold_task',
-          'Holds a task’s plan that is counting down to start, or whose first step still waits for a free agent, its checkout or a usage reset: it leaves the line and waits until it is started (restart_task). For a task already at work, stop it instead. It acts at once, with a line in your thread and the task’s.',
+          'Holds a task’s plan that is counting down to start, or whose first step still waits for a free agent or its checkout: it leaves the line and waits until it is started (restart_task). For a task already at work, stop it instead. It acts at once, with a line in your thread and the task’s.',
           { type: 'object', properties: { task, why }, required: ['task'] },
           (access, input) => Effect.flatMap(read(Asked, input), (asked) => act(access, asked.task, 'hold', { why: asked.why })),
         ),

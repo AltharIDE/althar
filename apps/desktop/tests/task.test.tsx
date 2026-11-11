@@ -1888,7 +1888,7 @@ describe('a task', () => {
     counting.view.unmount()
 
     // Started, waiting for a free agent: nothing to start, but it can be held.
-    const queued = await opened('running', { queued: { busy: 4, atOnce: 4 }, planWaits: true }, ['stop', 'abandon'])
+    const queued = await opened('running', { queued: { busy: 4, atOnce: 4 }, planWaits: true, holdable: true }, ['stop', 'abandon'])
     expect(await screen.findByRole('menuitem', { name: /Hold/ })).toBeTruthy()
     expect(screen.queryByRole('menuitem', { name: /Start now/ })).toBeNull()
     await userEvent.click(screen.getByRole('menuitem', { name: /Hold/ }))

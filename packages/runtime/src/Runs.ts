@@ -661,8 +661,9 @@ export const planWaits = (taskId: string) =>
 
 /**
  * Whether the task's run has begun nothing: its one attempt, Implement, held before any agent was on it, for a place among
- * the agents at work here, for its checkout (ADR-091), or for a usage limit or its agent's service. Until then the person
- * can take it back to a held plan, which waits until they start it.
+ * the agents at work here or for its checkout (ADR-091). Until then the person can take it back to a held plan, which waits
+ * until they start it. One held for a usage limit or its agent's service has its agent's session up already, and is stopped,
+ * not held.
  */
 export const beforeFirstStep = (taskId: string) =>
   Effect.gen(function* () {
@@ -674,8 +675,7 @@ export const beforeFirstStep = (taskId: string) =>
     const [only] = rows
     if (rows.length !== 1 || only === undefined) return false
     if (only.nodeKey !== 'implement' || only.state !== 'held' || only.session !== null) return false
-    if (only.holdReason === 'machine_busy' || only.holdReason === 'checkout') return waitingOf(only.output, '').place.how === 'start'
-    return only.holdReason === 'usage_limit' || only.holdReason === 'agent_unavailable'
+    return (only.holdReason === 'machine_busy' || only.holdReason === 'checkout') && waitingOf(only.output, '').place.how === 'start'
   })
 
 /**

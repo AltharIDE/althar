@@ -58,7 +58,7 @@ import { Busy, type Line } from './Busy'
 import { markOf, openItem, viewOf } from './chatView'
 import { ModelFacts } from './ModelFacts'
 import { PlanUsage } from './PlanUsage'
-import { checkoutWaitOf, PlanParameters, planWaits, reviewerChange } from './Runs'
+import { beforeFirstStep, checkoutWaitOf, PlanParameters, planWaits, reviewerChange } from './Runs'
 import { localTakenFor } from './local'
 import { towardChoicesOf } from './towards'
 import { Agents, RuntimeConfig } from './Config'
@@ -2646,7 +2646,10 @@ export class Queries extends Context.Service<
             ...(task.heldFor === 'agent_unavailable' ? { reconnects: reconnectsOf(task.held) } : {}),
             // A merged task whose lead goes back to work waits its turn too (ADR-034).
             queued: queued && task.state !== 'abandoned' ? yield* queuedNow(taskId) : null,
-            ...(queued && (yield* planWaits(taskId)) ? { planWaits: true } : {}),
+            // Its plan's first step waits for a place, or Local for its checkout, nothing of it begun: its plan can still change.
+            ...((queued || waitsForCheckout !== null) && (yield* planWaits(taskId)) ? { planWaits: true } : {}),
+            // And it can be held, out of the line, until the person starts it: nothing of it begun.
+            ...((queued || waitsForCheckout !== null) && (yield* beforeFirstStep(taskId)) ? { holdable: true } : {}),
             ...(line === null
               ? paused
                 ? { continues: true }

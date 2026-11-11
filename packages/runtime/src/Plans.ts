@@ -66,8 +66,8 @@ export class Plans extends Context.Service<
      */
     start(planId: string, actorId: ActorId): Effect.Effect<'running' | 'waiting' | null, unknown>
     /**
-     * Holds a plan until someone starts it: one counting down, or one started whose first step still waits for a place, its
-     * checkout or a usage limit, which leaves the line. Whether it was held; a plan under way isn't.
+     * Holds a plan until someone starts it: one counting down, or one started whose first step still waits for a place or its
+     * checkout, which leaves the line. Whether it was held; a plan under way isn't.
      */
     hold(planId: string, actorId: ActorId): Effect.Effect<boolean, unknown>
     /**
@@ -261,7 +261,7 @@ export class Plans extends Context.Service<
 
       /**
        * Holds a plan that hasn't begun: one counting down stops counting. One started, its first step waiting for a place among
-       * the agents at work here, for its checkout, or for a usage limit, goes back to a plan the person starts: its waiting step
+       * the agents at work here or for its checkout, goes back to a plan the person starts: its waiting step
        * leaves the line, and a start makes its run anew. Whether it was held.
        */
       const hold = (planId: string, actorId: ActorId) =>
