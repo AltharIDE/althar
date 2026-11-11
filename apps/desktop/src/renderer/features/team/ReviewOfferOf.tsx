@@ -8,8 +8,8 @@ import { useServices } from '../../data/services'
 import { useModelNames } from '../../shared/modelNames'
 
 /*
- * The review a change is offered once, as its work turned real (a skipped review can be added back until merge): on its card,
- * with the reviewer the project's rules would pick. Add puts that reviewer on, through the same ChangeTeam its dialog uses, and
+ * The review a change is offered once, as its work turned real (a skipped review can be added back until merge): in its task
+ * view, by its composer, where the person made it a change, with the reviewer the project's rules would pick. Add puts that reviewer on, through the same ChangeTeam its dialog uses, and
  * where the work is up its review starts; No thanks turns it down for good. Nothing is added unasked.
  */
 export function ReviewOfferOf({ work }: { work: Pick<BoardTask, 'taskId' | 'plan' | 'reviewOffer'> }) {

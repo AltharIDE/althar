@@ -59,7 +59,8 @@ reads after the merge, and isn't added to.
 
 When a task's work turns into a real change with no review (its lead made
 a prototype or chat a change, or opened a pull request on a task whose plan
-has none), its card says "Add a review?" quietly, with the reviewer the
+has none), its task view says "Add a review?" quietly, by the composer (not
+on the board's card), with the reviewer the
 project's rules would pick: the strongest free model, another maker's than
 the lead's (`reviewOffer`, `Limits.free`). It adds nothing by itself. Add
 goes through Change the team's command; No thanks (`DeclineReview`)

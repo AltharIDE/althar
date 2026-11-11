@@ -92,8 +92,6 @@ export type BoardCardProps = RootProps<
     object?: ReactNode
     /** One fact, at its foot. */
     foot?: ReactNode
-    /** An offer made once, quietly, above its next steps: the review a change whose work turned real is offered. */
-    offer?: ReactNode
     /**
      * What it offers to do without opening it, or where its task leads: one
      * NextStep, or two, the violet one last. Its last row, a strip its width.
@@ -163,7 +161,6 @@ export function BoardCard({
   track,
   object,
   foot,
-  offer,
   next,
   corner,
   from,
@@ -240,7 +237,6 @@ export function BoardCard({
           {t.startedBy(startedBy)}
         </p>
       )}
-      {offer !== undefined && offer !== null && offer !== false && <div className={s.offered}>{offer}</div>}
       {next !== undefined && next !== null && next !== false && <NextSteps className={b.strip}>{next}</NextSteps>}
       {corner !== undefined && corner !== null && <div className={s.corner}>{corner}</div>}
     </article>

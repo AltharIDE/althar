@@ -2,8 +2,8 @@ import { LinkButton } from '../../primitives/LinkButton/LinkButton'
 import s from './ReviewOffer.module.css'
 
 /*
- * The review a change is offered once, as its work turns real (a skipped review can be added back until merge): a quiet line on
- * its card, with the reviewer the project's rules would pick. It adds nothing by itself: Add puts that reviewer on, and where
+ * The review a change is offered once, as its work turns real (a skipped review can be added back until merge): a quiet line in
+ * its task view, by the composer, with the reviewer the project's rules would pick. It adds nothing by itself: Add puts that reviewer on, and where
  * the work is up, its review starts at once; No thanks turns it down, and it doesn't come back.
  */
 

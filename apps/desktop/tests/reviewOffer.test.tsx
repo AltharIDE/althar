@@ -2,19 +2,16 @@ import { cleanup, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import type { BoardSnapshot, BoardTask } from '@althar/contracts'
+import type { BoardTask } from '@althar/contracts'
 
-import { BoardView } from '../src/renderer/features/board/BoardView'
-import { lanesOf } from '../src/renderer/features/board/lanes'
-import { agents, card, change, fakeClient } from './fixtures'
+import { ReviewOfferOf } from '../src/renderer/features/team/ReviewOfferOf'
+import { card, change, fakeClient } from './fixtures'
 import { withServices } from './render'
 
 /*
- * The review a change is offered once, as its work turns real: a quiet line on its card, with the reviewer the rules would
+ * The review a change is offered once, as its work turns real: a quiet line in its task view, by the composer, with the reviewer the rules would
  * pick. It adds nothing by itself: Add goes through the team's own command, No thanks turns it down.
  */
-
-const NOW = '2026-10-01T10:00:00.000Z'
 
 const offered = (overrides: Partial<BoardTask> = {}): BoardTask => ({
   ...card(),
@@ -35,16 +32,14 @@ const offered = (overrides: Partial<BoardTask> = {}): BoardTask => ({
   ...overrides,
 })
 
-const board = (tasks: ReadonlyArray<BoardTask>): BoardSnapshot => ({ cursor: 1, tasks: [...tasks], calls: [], settledTotal: 0 })
-
 const shown = (task: BoardTask, client = fakeClient().client) => {
-  withServices(<BoardView lanes={lanesOf(board([task]))} agents={agents} now={NOW} onOpen={() => {}} />, client)
+  withServices(<ReviewOfferOf work={task} />, client)
 }
 
 afterEach(cleanup)
 
 describe('the review a change is offered', () => {
-  it('is a quiet line on its card, naming the reviewer, and adds nothing by itself', () => {
+  it('is a quiet line, naming the reviewer, and adds nothing by itself', () => {
     const { client } = fakeClient()
     shown(offered(), client)
     const row = within(screen.getByText('Add a review?').closest('div') as HTMLElement)
@@ -75,7 +70,7 @@ describe('the review a change is offered', () => {
     expect(await screen.findByRole('alert')).toBeTruthy()
   })
 
-  it('is not on a card that has no offer', () => {
+  it('is nothing where there is no offer', () => {
     shown(offered({ reviewOffer: undefined }))
     expect(screen.queryByText('Add a review?')).toBeNull()
   })

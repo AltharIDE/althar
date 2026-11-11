@@ -30,7 +30,6 @@ import { States, statesOn } from '../../storybook/States'
 import { cardStates, laneDecorator } from '../../storybook/lane'
 import { SettleWays } from '../SettleWays/SettleWays'
 import { BoardCard } from './BoardCard'
-import { ReviewOffer } from '../ReviewOffer/ReviewOffer'
 import { BranchChip, Fact, FactLine, PullChip } from './Chips'
 import { GITHUB } from '../../fixtures/outputs'
 import { NextStep } from '../../primitives/NextStep/NextStep'
@@ -675,19 +674,5 @@ export const StartedByALead: Story = {
   },
 }
 
-/** A change whose work turned real with no review: offered one, once, quietly, above its next step; nothing is added by itself. */
-export const ReviewOffered: Story = {
-  args: {
-    ...CHANGE_READY,
-    offer: <ReviewOffer who="GPT-6.1 Sol" onAdd={fn()} onDecline={fn()} />,
-  },
-  play: async ({ canvasElement }) => {
-    const card = within(canvasElement)
-    await expect(card.getByText('Add a review?')).toBeInTheDocument()
-    await expect(card.getByRole('button', { name: 'Add GPT-6.1 Sol' })).toBeInTheDocument()
-    await expect(card.getByRole('button', { name: 'No thanks' })).toBeInTheDocument()
-  },
-}
-export const ReviewOfferedDark: Story = { ...ReviewOffered, globals: { theme: 'dark' } }
 export const ErrandWaiting: Story = { args: { ...CHANGE_READY, errands: ['Waiting for #1187: checks at 9b50d2c.'] } }
 export const ErrandPaused: Story = { args: { ...CHANGE_READY, errands: ['Paused for #1187: changes requested.'] } }

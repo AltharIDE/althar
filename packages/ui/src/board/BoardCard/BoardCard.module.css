@@ -144,10 +144,3 @@
 .mark-ok {
   background: var(--ok);
 }
-
-/* the offer made once: quiet, a step above the card's strip, and above the card's own button, which covers the card */
-.offered {
-  position: relative;
-  z-index: 1;
-  min-width: 0;
-}

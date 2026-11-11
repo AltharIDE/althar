@@ -55,7 +55,7 @@ type Plan = NonNullable<BoardTask['plan']>
 /** A task whose team can change, as the board reads it. */
 export type Teamed = Pick<
   BoardTask,
-  'taskId' | 'title' | 'phase' | 'plan' | 'planWaits' | 'queued' | 'reviewing' | 'kind' | 'change' | 'reviewerChange'
+  'taskId' | 'title' | 'phase' | 'plan' | 'planWaits' | 'queued' | 'reviewing' | 'kind' | 'change' | 'reviewerChange' | 'reviewOffer'
 >
 
 /**
