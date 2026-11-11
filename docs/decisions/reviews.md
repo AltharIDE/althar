@@ -103,7 +103,8 @@ decision of a task is a conversation plus parts, [tasks](tasks.md#a-task-holds-a
   `answer_review_after_merge`.
 - **What it doesn't bring back** ends as the same quiet line as nothing
   found ("Review · … · 2 findings · None major"), its findings readable
-  there, and nothing waits on the person.
+  there, and nothing waits on the person; its Outputs say "Reviewed by", not
+  "Changes asked by".
 
 ### What the review after a merge brings back
 
