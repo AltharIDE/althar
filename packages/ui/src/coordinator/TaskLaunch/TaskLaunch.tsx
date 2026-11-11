@@ -222,6 +222,8 @@ export interface TaskLaunchProps {
   onCreateBranch?: (branch: string) => void
   /** Start it: now, or when the time runs out. With what it will do when done. */
   onStart: (steps: readonly LaunchStep[], end: TaskEnd) => void
+  /** Something offered about the plan, inside the card under its foot: keeping its parts as a preset. */
+  aside?: ReactNode
   text?: Partial<TaskLaunchText>
 }
 
@@ -230,6 +232,7 @@ export function TaskLaunch({
   preset,
   presets,
   onPresetChange,
+  aside,
   title,
   from,
   steps: stepsProp,
@@ -470,6 +473,7 @@ export function TaskLaunch({
           {!held && <i className={s.bar} style={cssVars({ '--left': share })} aria-hidden="true" />}
         </div>
       )}
+      {aside}
     </div>
   )
 }

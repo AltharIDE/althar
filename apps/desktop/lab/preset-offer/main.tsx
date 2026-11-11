@@ -119,7 +119,7 @@ function Verdicts({ was, now }: { was: Verdict; now: Verdict }) {
 }
 
 function Page() {
-  const [dirKey, setDir] = useState(() => ALL.find((d) => d.key === params.get('d'))?.key ?? 'a')
+  const [dirKey, setDir] = useState(() => ALL.find((d) => d.key === params.get('d'))?.key ?? 'c1')
   const [scene, setScene] = useState(() => Math.max(0, Math.min(SCENARIOS.length, Number(params.get('s') ?? 3)) - 1))
   const [state, setState] = useState<OfferState>(() => STATES.find((one) => one.key === params.get('st'))?.key ?? 'offer')
   const [theme, setTheme] = useState(params.get('theme') === 'dark' ? 'dark' : 'light')

@@ -1,32 +1,19 @@
-import { useState, type ReactNode } from 'react'
+import type { ReactNode } from 'react'
 
-import {
-  AskAnswered,
-  AskCard,
-  AskFoot,
-  AskNote,
-  Button,
-  Field,
-  Icon,
-  KeyValues,
-  LinkButton,
-  Model,
-  type ModelInfo,
-  TaskEnd,
-  TaskLaunch,
-  ThreadDivider,
-  WorksIn,
-} from '@althar/ui'
+import { Button, Field, HoverCard, Icon, LinkButton, Model, type ModelInfo, TaskEnd, TaskLaunch, WorksIn } from '@althar/ui'
 
 import { MODEL_LIST } from '../../../../packages/ui/src/fixtures/models'
+import { cx } from '../../../../packages/ui/src/lib/cx'
 import type { PresetParts } from './runtime'
-import { TIMES, type Verdict, words } from './rules'
+import type { Verdict } from './rules'
 import s from './page.module.css'
 
 /*
- * The offer, four ways, each in the coordinator's thread under the plan
- * card it came with, in each of its states. A verdict of `near` is the same
- * place saying which built-in preset fits instead.
+ * The offer on the plan card it came with, four ways: a strip inside the
+ * card, under its foot (TaskLaunch's `aside`), since the card already shows
+ * the parts. Each says what parts and presets are behind an info mark. A
+ * verdict of `near` is the same strip naming the built-in preset that fits.
+ * The first round's card, line and picker are in git history (fb4fcc43c).
  */
 
 export type OfferState = 'offer' | 'editing' | 'kept' | 'dismissed'
@@ -38,57 +25,41 @@ const MODELS: Readonly<Record<string, ModelInfo>> = {
   'claude-code/claude-sonnet-5-5': { ...base('claude-sonnet-5'), id: 'claude-sonnet-5-5', name: 'Claude Sonnet 5.5', short: 'Sonnet 5.5' },
   'codex/gpt-6.1-sol': { ...base('gpt-5.2-codex'), id: 'gpt-6.1-sol', name: 'GPT-6.1 Sol', short: 'Sol' },
 }
-export const modelOf = (lead: string | null) => (lead === null ? null : (MODELS[lead] ?? null))
+const modelOf = (lead: string | null) => (lead === null ? null : (MODELS[lead] ?? null))
 
-/** The parts as Settings › Presets and the plan card name them, keys on the left. */
-export function Parts({ parts }: { parts: PresetParts }) {
-  const lead = modelOf(parts.lead)
+/** What parts and presets are, behind the info mark. */
+function About() {
   return (
-    <KeyValues
-      keyWidth={78}
-      items={[
-        ['Works in', words.workspace[parts.workspace]],
-        ['Checked by', words.checked[parts.checked]],
-        ['Ends', words.end[parts.end]],
-        ['Led by', lead === null ? 'The coordinator’s pick' : <Model key="lead" model={lead} short />],
-      ]}
-    />
+    <HoverCard
+      width={300}
+      placement="above"
+      card={
+        <span className={s.about}>
+          <span>
+            <b>Parts</b> are how a task runs: where it works, who checks it, how it ends, and who leads it. This card shows them.
+          </span>
+          <span>
+            <b>A preset</b> is a named set of parts a new task starts from, like Change or Prototype. Changing a task’s parts later never
+            changes its preset. Yours are in Settings › Presets.
+          </span>
+        </span>
+      }
+    >
+      <button type="button" className={s.info} aria-label="What are parts and presets?">
+        <Icon name="info" size={13} />
+      </button>
+    </HoverCard>
   )
 }
 
-/** The same parts on one line, as the preset picker's descriptions read. */
-const SHORT = {
-  workspace: { copy: 'A copy', worktree: 'Worktree', local: 'Local' },
-  checked: { before: 'reviewed before shipping', after: 'reviewed after merge', none: 'no review' },
-  end: { draft: 'draft PR', ready: 'ready PR', none: 'on its branch' },
-} as const
-const partsLine = (parts: PresetParts) =>
-  [SHORT.workspace[parts.workspace], SHORT.checked[parts.checked], SHORT.end[parts.end], modelOf(parts.lead)?.short]
-    .filter(Boolean)
-    .join(' · ')
-
-/** The plan card the offer came with, from the kit: its preset in the kicker, its steps, how it ends. */
-export function PlanCard({
-  title,
-  parts,
-  preset,
-  presets,
-  onPresetChange,
-}: {
-  title: string
-  parts: PresetParts
-  preset: string
-  presets?: readonly { name: string; about: string }[]
-  onPresetChange?: (name: string) => void
-}) {
+/** The plan card the offer came with, from the kit: its preset in the kicker, its steps, how it ends; the offer inside it. */
+export function PlanCard({ title, parts, preset, aside }: { title: string; parts: PresetParts; preset: string; aside?: ReactNode }) {
   const lead = modelOf(parts.lead) ?? MODELS['claude-code/claude-opus-5-5']!
   const reviewer = modelOf(parts.reviewer) ?? MODELS['codex/gpt-6.1-sol']!
   return (
     <TaskLaunch
       task="812"
       preset={preset}
-      {...(presets === undefined ? {} : { presets })}
-      {...(onPresetChange === undefined ? {} : { onPresetChange })}
       title={title}
       project="althar"
       estimate="About 20 min"
@@ -101,6 +72,7 @@ export function PlanCard({
       worksIn={parts.workspace === 'local' ? WorksIn.Local : WorksIn.Worktree}
       held
       onStart={() => {}}
+      {...(aside === undefined ? {} : { aside })}
     />
   )
 }
@@ -111,6 +83,7 @@ export interface OfferProps {
   setState: (state: OfferState) => void
   name: string
   setName: (name: string) => void
+  planPreset: string
 }
 
 export interface Direction {
@@ -118,8 +91,8 @@ export interface Direction {
   letter: string
   name: string
   idea: string
-  /** What the direction draws under the coordinator's message: the plan card, and the offer where it goes. */
-  Thread: (props: OfferProps & { title: string; planParts: PresetParts; planPreset: string }) => ReactNode
+  /** The plan card with the offer in it. */
+  Thread: (props: OfferProps & { title: string; planParts: PresetParts }) => ReactNode
 }
 
 /** The name, editable in place: a Field while editing, its text with a pencil otherwise. */
@@ -140,6 +113,7 @@ function NameInPlace({
         aria-label="Preset name"
         className={s.nameField}
         value={name}
+        // oxlint-disable-next-line jsx-a11y/no-autofocus -- it opens from a press on the name, to type in at once
         autoFocus
         onChange={(event) => setName(event.target.value)}
         onBlur={() => setEditing(false)}
@@ -149,7 +123,7 @@ function NameInPlace({
       />
     )
   return (
-    <button type="button" className={s.name} onClick={() => setEditing(true)} title="Rename">
+    <button type="button" className={s.name} onClick={() => setEditing(true)} aria-label={`${name}, rename`}>
       {name}
       <Icon name="pencil" size={10} />
     </button>
@@ -158,236 +132,163 @@ function NameInPlace({
 
 const nearWhat = (v: Extract<Verdict, { kind: 'near' }>) => `These are ${v.preset.name}, ${v.differs}.`
 
-/* A · A card in the thread, as a setting change asks: its name in a field, its parts, Keep and Not now. */
-function CardOffer({ verdict, state, setState, name, setName }: OfferProps) {
-  if (verdict.kind === 'near') {
-    if (state === 'kept')
-      return (
-        <AskAnswered said={`${verdict.preset.name} for tasks like these`} onUndo={() => setState('offer')}>
-          <AskNote>{verdict.differs.charAt(0).toUpperCase() + verdict.differs.slice(1)}</AskNote>
-        </AskAnswered>
-      )
-    if (state === 'dismissed')
-      return (
-        <AskAnswered denied said="Not now" onUndo={() => setState('offer')}>
-          <AskNote>Not said again for these parts</AskNote>
-        </AskAnswered>
-      )
-    return (
-      <AskCard icon="list" kicker="Preset" quiet what={nearWhat(verdict)}>
-        <AskFoot>
-          <Button variant="quiet" onClick={() => setState('dismissed')}>
-            Not now
-          </Button>
-          <Button variant="signal" onClick={() => setState('kept')}>
-            Plan them as {verdict.preset.name}
-          </Button>
-        </AskFoot>
-      </AskCard>
-    )
-  }
-  if (state === 'kept')
-    return (
-      <AskAnswered said={`Kept “${name}”`} onUndo={() => setState('offer')}>
-        <AskNote>Settings › Presets</AskNote>
-      </AskAnswered>
-    )
-  if (state === 'dismissed')
-    return (
-      <AskAnswered denied said="Not now" onUndo={() => setState('offer')}>
-        <AskNote>Not offered again for these parts</AskNote>
-      </AskAnswered>
-    )
-  return (
-    <AskCard icon="list" kicker="Preset" quiet what={`You set these parts up ${TIMES} times. Keep them as a preset?`}>
-      <div className={s.cardBody}>
-        <label className={s.cardName}>
-          <span>Name</span>
-          <Field
-            value={name}
-            autoFocus={state === 'editing'}
-            onFocus={() => setState('editing')}
-            onChange={(event) => setName(event.target.value)}
-          />
-        </label>
-        <Parts parts={verdict.parts} />
-      </div>
-      <AskFoot>
-        <Button variant="quiet" onClick={() => setState('dismissed')}>
-          Not now
-        </Button>
-        <Button variant="signal" disabled={name.trim() === ''} onClick={() => setState('kept')}>
-          Keep
-        </Button>
-      </AskFoot>
-    </AskCard>
-  )
-}
+/** Closes the strip: Not now. */
+const Cross = ({ onClick }: { onClick: () => void }) => (
+  <button type="button" className={s.cross} aria-label="Not now" onClick={onClick}>
+    <Icon name="close" size={10} />
+  </button>
+)
 
-/* B · One line of Althar's across the thread: the name in place, the parts after it, Keep and a cross. */
-function LineOffer({ verdict, state, setState, name, setName }: OfferProps) {
-  if (state === 'kept')
-    return (
-      <ThreadDivider icon="list" action="Undo" onAction={() => setState('offer')}>
-        {verdict.kind === 'near' ? `${verdict.preset.name} for tasks like these` : `Kept as a preset: ${name}`}
-      </ThreadDivider>
-    )
-  if (state === 'dismissed') return null
+/** Kept, the strip says so in its place, with Undo; the card's kicker has the new name. */
+function Kept({ verdict, name, setState, tone }: Pick<OfferProps, 'verdict' | 'name' | 'setState'> & { tone?: string }) {
   return (
-    <div className={s.line}>
-      <Icon name="list" size={11} />
-      {verdict.kind === 'near' ? (
-        <span className={s.lineText}>{nearWhat(verdict)}</span>
-      ) : (
-        <>
-          <span className={s.lineText}>Keep as a preset</span>
-          <NameInPlace name={name} setName={setName} editing={state === 'editing'} setEditing={(e) => setState(e ? 'editing' : 'offer')} />
-          <span className={s.linePart}>{partsLine(verdict.parts)}</span>
-        </>
-      )}
-      <span className={s.rule} aria-hidden="true" />
-      <Button size="small" variant="default" onClick={() => setState('kept')}>
-        {verdict.kind === 'near' ? `Use ${verdict.preset.name}` : 'Keep'}
-      </Button>
-      <button type="button" className={s.cross} aria-label="Not now" onClick={() => setState('dismissed')}>
-        <Icon name="close" size={10} />
-      </button>
+    <div className={cx(s.strip, tone, s.done)}>
+      <Icon name="check" size={11} />
+      <span>{verdict.kind === 'near' ? `Tasks like these start from ${verdict.preset.name}` : `Kept as a preset: ${name}`}</span>
+      <span className={s.grow} />
+      <LinkButton onClick={() => setState('offer')}>Undo</LinkButton>
     </div>
   )
 }
 
-/* C · On the plan card itself: a foot under its steps, since the card already shows the parts. */
-function FootOffer({ verdict, state, setState, name, setName }: OfferProps) {
+const editingOf = (setState: OfferProps['setState']) => (editing: boolean) => setState(editing ? 'editing' : 'offer')
+
+/* A · Hairline: a quiet row under the foot, the name in place, Keep and a cross. */
+function Hairline({ verdict, state, setState, name, setName }: OfferProps) {
   if (state === 'dismissed') return null
-  if (state === 'kept')
-    return (
-      <div className={s.foot}>
-        <Icon name="check" size={11} />
-        <span className={s.footText}>
-          {verdict.kind === 'near' ? `Tasks like these start from ${verdict.preset.name}` : `Kept as a preset`}
-        </span>
-        <LinkButton onClick={() => setState('offer')}>Undo</LinkButton>
-      </div>
-    )
+  if (state === 'kept') return <Kept verdict={verdict} name={name} setState={setState} />
   return (
-    <div className={s.foot}>
+    <div className={s.strip}>
       {verdict.kind === 'near' ? (
-        <span className={s.footText}>{nearWhat(verdict)}</span>
+        <span className={s.text}>{nearWhat(verdict)}</span>
       ) : (
         <>
-          <span className={s.footText}>Your third plan like this. Keep it as</span>
-          <NameInPlace name={name} setName={setName} editing={state === 'editing'} setEditing={(e) => setState(e ? 'editing' : 'offer')} />
+          <span className={s.text}>Keep these parts as</span>
+          <NameInPlace name={name} setName={setName} editing={state === 'editing'} setEditing={editingOf(setState)} />
         </>
       )}
+      <About />
+      <span className={s.grow} />
+      <Button size="small" onClick={() => setState('kept')}>
+        {verdict.kind === 'near' ? `Use ${verdict.preset.name}` : 'Keep'}
+      </Button>
+      <Cross onClick={() => setState('dismissed')} />
+    </div>
+  )
+}
+
+/* B · Violet: the same row on the kit's ask paper, so it reads as a question with a primary answer. */
+function Violet({ verdict, state, setState, name, setName }: OfferProps) {
+  if (state === 'dismissed') return null
+  if (state === 'kept') return <Kept verdict={verdict} name={name} setState={setState} tone={s.violet} />
+  return (
+    <div className={cx(s.strip, s.violet)}>
+      {verdict.kind === 'near' ? (
+        <span className={s.text}>{nearWhat(verdict)}</span>
+      ) : (
+        <>
+          <span className={s.text}>Third time with these parts. Keep them as</span>
+          <NameInPlace name={name} setName={setName} editing={state === 'editing'} setEditing={editingOf(setState)} />
+        </>
+      )}
+      <About />
+      <span className={s.grow} />
+      <Button size="small" variant="quiet" onClick={() => setState('dismissed')}>
+        Not now
+      </Button>
+      <Button size="small" variant="signal" onClick={() => setState('kept')}>
+        {verdict.kind === 'near' ? `Use ${verdict.preset.name}` : 'Keep'}
+      </Button>
+    </div>
+  )
+}
+
+/* C · Field: the name is a field from the start, labelled as a preset's name; Save beside it. */
+function NameField(props: OfferProps) {
+  const { verdict, state, setState, name, setName } = props
+  if (verdict.kind === 'near') return <Hairline {...props} />
+  if (state === 'dismissed') return null
+  if (state === 'kept') return <Kept verdict={verdict} name={name} setState={setState} />
+  return (
+    <div className={s.strip}>
+      <label className={s.text} htmlFor="preset-name">
+        Save as a preset
+      </label>
+      <About />
+      <Field
+        id="preset-name"
+        className={s.wideField}
+        value={name}
+        onFocus={() => setState('editing')}
+        onChange={(event) => setName(event.target.value)}
+      />
+      <span className={s.grow} />
+      <Button size="small" disabled={name.trim() === ''} onClick={() => setState('kept')}>
+        Save
+      </Button>
+      <Cross onClick={() => setState('dismissed')} />
+    </div>
+  )
+}
+
+/* D · Start from: says what keeping it changes, the preset these tasks start from instead of the plan's; the kicker follows. */
+function From({ verdict, state, setState, name, setName, planPreset }: OfferProps) {
+  if (state === 'dismissed') return null
+  if (state === 'kept') return <Kept verdict={verdict} name={name} setState={setState} />
+  return (
+    <div className={s.strip}>
+      <span className={s.text}>Start tasks like this from</span>
+      {verdict.kind === 'near' ? (
+        <b className={s.named}>{verdict.preset.name}</b>
+      ) : (
+        <NameInPlace name={name} setName={setName} editing={state === 'editing'} setEditing={editingOf(setState)} />
+      )}
+      <span className={s.was}>
+        not <s>{planPreset}</s>
+      </span>
+      <About />
       <span className={s.grow} />
       <LinkButton onClick={() => setState('dismissed')}>Not now</LinkButton>
-      <Button size="small" variant="ink" onClick={() => setState('kept')}>
-        {verdict.kind === 'near' ? `Use ${verdict.preset.name}` : 'Keep'}
+      <Button size="small" onClick={() => setState('kept')}>
+        {verdict.kind === 'near' ? 'Use it' : 'Keep'}
       </Button>
     </div>
   )
 }
 
-const BUILT_INS = [
-  { name: 'Change', about: 'A worktree · checked before it ships · draft pull request' },
-  { name: 'Small change', about: 'A worktree · checked after it merges · ready for review' },
-  { name: 'Prototype', about: 'A worktree · checked after it merges · on its branch · Opus 5.5' },
-  { name: 'Chat', about: 'A copy · nobody checks · on Scratch' },
-]
-
-/* D · Nothing in the thread: the plan card's preset picker suggests it first; picking it keeps it. */
-function PickerThread({
-  verdict,
-  state,
-  setState,
-  name,
-  setName,
-  title,
-  planParts,
-  planPreset,
-}: OfferProps & { title: string; planParts: PresetParts; planPreset: string }) {
-  const [editing, setEditing] = useState(false)
-  const suggested =
-    verdict.kind === 'near'
-      ? []
-      : state === 'offer' || state === 'editing'
-        ? [{ name, about: `Suggested: yours ${TIMES} times. ${partsLine(verdict.parts)}` }]
-        : state === 'kept'
-          ? [{ name, about: partsLine(verdict.parts) }]
-          : []
-  const builtIns =
-    verdict.kind === 'near'
-      ? [{ name: verdict.preset.name, about: `Fits, ${verdict.differs}` }, ...BUILT_INS.filter((one) => one.name !== verdict.preset.name)]
-      : BUILT_INS
-  const presets = [...suggested, ...builtIns]
-  const preset = state === 'kept' ? (verdict.kind === 'near' ? verdict.preset.name : name) : planPreset
-  return (
-    <>
-      <PlanCard
-        title={title}
-        parts={planParts}
-        preset={preset}
-        presets={presets}
-        onPresetChange={(picked) => {
-          if (picked === name || (verdict.kind === 'near' && picked === verdict.preset.name)) setState('kept')
-          else if (state === 'offer' || state === 'editing') setState('dismissed')
-        }}
-      />
-      {state === 'kept' && verdict.kind === 'offer' && (
-        <div className={s.foot}>
-          <Icon name="check" size={11} />
-          <span className={s.footText}>Kept as</span>
-          <NameInPlace name={name} setName={setName} editing={editing} setEditing={setEditing} />
-          <span className={s.grow} />
-          <LinkButton onClick={() => setState('offer')}>Undo</LinkButton>
-        </div>
-      )}
-    </>
-  )
-}
-
-const withCard = (Offer: (props: OfferProps) => ReactNode, under = false) =>
-  function Thread(props: OfferProps & { title: string; planParts: PresetParts; planPreset: string }) {
-    const kept = props.state === 'kept'
-    const preset = under && kept ? (props.verdict.kind === 'near' ? props.verdict.preset.name : props.name) : props.planPreset
-    return (
-      <>
-        <div className={under ? s.joined : undefined}>
-          <PlanCard title={props.title} parts={props.planParts} preset={preset} />
-          {under && <Offer {...props} />}
-        </div>
-        {!under && <Offer {...props} />}
-      </>
-    )
+const onCard = (Offer: (props: OfferProps) => ReactNode) =>
+  function Thread({ title, planParts, ...props }: OfferProps & { title: string; planParts: PresetParts }) {
+    const preset = props.state === 'kept' ? (props.verdict.kind === 'near' ? props.verdict.preset.name : props.name) : props.planPreset
+    return <PlanCard title={title} parts={planParts} preset={preset} aside={<Offer {...props} />} />
   }
 
 export const DIRECTIONS: ReadonlyArray<Direction> = [
   {
-    key: 'a',
+    key: 'c1',
     letter: 'A',
-    name: 'Card',
-    idea: 'A card in the thread, as a setting change asks: the name in a field, the parts as Settings lists them, Keep and Not now.',
-    Thread: withCard(CardOffer),
+    name: 'Hairline',
+    idea: 'A quiet row inside the card, under its foot: the name in place, an info mark, Keep and a cross.',
+    Thread: onCard(Hairline),
   },
   {
-    key: 'b',
+    key: 'c2',
     letter: 'B',
-    name: 'Line',
-    idea: 'One line across the thread: the name, editable in place, the parts after it, Keep and a cross. Kept, it is a line with Undo.',
-    Thread: withCard(LineOffer),
+    name: 'Violet',
+    idea: 'The same row on the kit’s ask paper, with Not now and a violet Keep: it reads as a question.',
+    Thread: onCard(Violet),
   },
   {
-    key: 'c',
+    key: 'c3',
     letter: 'C',
-    name: 'On the plan card',
-    idea: 'A foot on the plan card it came with, which already shows the parts. Kept, the card’s kicker takes the new name.',
-    Thread: withCard(FootOffer, true),
+    name: 'Field',
+    idea: 'The name is a field from the start, labelled Save as a preset, with Save beside it.',
+    Thread: onCard(NameField),
   },
   {
-    key: 'd',
+    key: 'c4',
     letter: 'D',
-    name: 'In the picker',
-    idea: 'Nothing in the thread. The plan card’s preset menu (its kicker) lists it first; picking it keeps it. Picking another drops it.',
-    Thread: PickerThread,
+    name: 'Start from',
+    idea: 'Says what keeping it changes: tasks like this start from it, not from the plan’s preset. The kicker follows.',
+    Thread: onCard(From),
   },
 ]
