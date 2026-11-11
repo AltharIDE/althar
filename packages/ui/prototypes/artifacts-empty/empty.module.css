@@ -24,10 +24,6 @@
   color: var(--t-3);
 }
 
-.actions {
-  margin-top: 16px;
-}
-
 /* ——— The drawings ——— */
 
 .art {
@@ -66,7 +62,7 @@
   stroke-width: 1.5;
 }
 
-/* ——— D1: a row of tiles, each captioned ——— */
+/* ——— 1: a row of tiles, each captioned ——— */
 
 .tiles {
   display: flex;
@@ -86,61 +82,7 @@
   margin-bottom: 7px;
 }
 
-/* ——— D2: each tile a button ——— */
-
-.tileButton {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 8px;
-  margin: 0;
-  padding: 6px 6px 8px;
-  border: 0;
-  border-radius: 13px;
-  background: none;
-  font: inherit;
-  cursor: pointer;
-  transition: background var(--fast) var(--ease);
-}
-
-.tileButton .art {
-  transition: transform var(--fast) var(--ease);
-}
-
-.tileButton:hover {
-  background: var(--n-1);
-}
-
-.tileButton:hover .art {
-  transform: translateY(-2px);
-}
-
-.tileWord {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  font-size: 12px;
-  font-weight: 550;
-  color: var(--t-2);
-}
-
-.tileWord svg {
-  color: var(--t-4);
-  transition:
-    color var(--fast) var(--ease),
-    transform var(--fast) var(--ease);
-}
-
-.tileButton:hover .tileWord {
-  color: var(--t-1);
-}
-
-.tileButton:hover .tileWord svg {
-  color: var(--t-2);
-  transform: translateX(2px);
-}
-
-/* ——— D3: the three fanned ——— */
+/* ——— 2: the three fanned ——— */
 
 .stack {
   position: relative;
@@ -176,28 +118,117 @@
   z-index: 1;
 }
 
-/* ——— D4: at the top, where the table will be ——— */
+/* ——— 3: a wall of drawings, fading out ——— */
 
-.shelf {
+.wallView {
+  position: relative;
   display: flex;
-  flex-wrap: wrap;
+  flex-direction: column;
   align-items: center;
-  gap: 20px 28px;
-  padding: 22px 10px;
-  border-top: 1px solid var(--line);
+  margin: 0 -40px;
+  overflow: hidden;
 }
 
-.shelfTiles {
+.wall {
+  display: grid;
+  grid-template-columns: repeat(6, 120px);
+  gap: 14px;
+  justify-content: center;
+  width: 100%;
+  padding-top: 8px;
+  mask-image:
+    linear-gradient(to bottom, #000 0%, rgb(0 0 0 / 0.55) 45%, transparent 92%),
+    linear-gradient(to right, transparent 0%, #000 22%, #000 78%, transparent 100%);
+  mask-composite: intersect;
+}
+
+.wallWords {
+  margin-top: -64px;
+  padding: 0 40px 40px;
+  text-align: center;
   display: flex;
-  gap: 10px;
+  flex-direction: column;
+  align-items: center;
 }
 
-.shelfTiles .art {
+/* ——— 4: one kept canvas, its versions behind, a comment on it ——— */
+
+.kept {
+  position: relative;
+  width: 260px;
+  height: 196px;
+  margin: 10px 0 26px;
+}
+
+.sheet,
+.keptCard {
+  position: absolute;
+  inset: 0;
+  border-radius: 12px;
+  background: var(--paper);
+  box-shadow:
+    inset 0 0 0 1px var(--line),
+    var(--shadow);
+}
+
+.sheet:nth-child(1) {
+  transform: translate(20px, -18px);
+  opacity: 0.45;
+}
+
+.sheet:nth-child(2) {
+  transform: translate(10px, -9px);
+  opacity: 0.75;
+}
+
+.keptCard {
+  display: flex;
+  flex-direction: column;
+}
+
+.keptBar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 30px;
+  padding: 0 12px;
+  border-bottom: 1px solid var(--line);
+}
+
+.keptName {
   width: 96px;
-  height: 68px;
+  height: 7px;
+  border-radius: 4px;
+  background: var(--n-4);
 }
 
-.shelfWords {
+.keptVersion {
+  font: 10.5px var(--mono);
+  color: var(--t-3);
+}
+
+.keptArt {
   flex: 1;
-  min-width: 220px;
+  padding: 6px 10px 10px;
+}
+
+.keptArt svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.pin {
+  position: absolute;
+  top: 62px;
+  left: 84px;
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 10px 10px 10px 2px;
+  background: var(--t-1);
+  font-size: 10.5px;
+  font-weight: 650;
+  color: var(--n-2);
 }

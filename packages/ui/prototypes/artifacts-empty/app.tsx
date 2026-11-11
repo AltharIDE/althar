@@ -29,10 +29,10 @@ const FIRST: ArtifactRow = {
 
 const NAMES: Readonly<Record<Direction, string>> = {
   now: 'Today',
-  D1: 'D1 · Tiles',
-  D2: 'D2 · Tiles that ask',
-  D3: 'D3 · A stack',
-  D4: 'D4 · A shelf',
+  D1: '1 · Tiles',
+  D2: '2 · A stack',
+  D3: '3 · A wall',
+  D4: '4 · One canvas',
 }
 
 function Window({ rows, label }: { rows: ReadonlyArray<ArtifactRow>; label?: string }) {

@@ -1,13 +1,12 @@
-// Scrappy: the Artifacts screen's empty branch, as each variation of D draws it. The seam in vite.config.mjs hands it today's.
+// Scrappy: the Artifacts screen's empty branch, as each variation draws it. The seam in vite.config.mjs hands it today's.
+// Nothing here is pressed: the drawings only show what will be kept here.
 import type { ReactNode } from 'react'
 
-import { Icon } from '../../src/foundations/Icon/Icon'
-import { Button } from '../../src/primitives/Button/Button'
 import type { ArtifactsText } from '../../src/screens/Artifacts/Artifacts'
-import { ask, useProto } from './state'
+import { useProto } from './state'
 import s from './empty.module.css'
 
-/* ——— Three kinds, drawn small ——— */
+/* ——— What agents draw, small ——— */
 
 const Page = () => (
   <svg viewBox="0 0 120 84" aria-hidden="true">
@@ -36,113 +35,123 @@ const Chart = () => (
     <rect x="96" y="30" width="12" height="44" rx="2" className={s.ink1} />
   </svg>
 )
-
-interface Kind {
-  readonly word: string
-  readonly one: string
-  readonly draft: string
-  readonly drawing: ReactNode
-}
-
-const KINDS: ReadonlyArray<Kind> = [
-  { word: 'Mockups', one: 'A mockup', draft: 'Mock up ', drawing: <Page /> },
-  { word: 'Diagrams', one: 'A diagram', draft: 'Draw a diagram of ', drawing: <Diagram /> },
-  { word: 'Charts', one: 'A chart', draft: 'Chart ', drawing: <Chart /> },
-]
-
-const Title = () => <h2 className={s.title}>No artifacts yet</h2>
-
-const AskButton = () => (
-  <Button size="small" icon="canvas" onClick={() => ask('')}>
-    Ask the coordinator
-  </Button>
+const Doc = () => (
+  <svg viewBox="0 0 120 84" aria-hidden="true">
+    <rect x="14" y="12" width="56" height="8" rx="2" className={s.ink3} />
+    <rect x="14" y="28" width="92" height="5" rx="2" className={s.ink2} />
+    <rect x="14" y="38" width="84" height="5" rx="2" className={s.ink2} />
+    <rect x="14" y="48" width="90" height="5" rx="2" className={s.ink2} />
+    <rect x="14" y="62" width="60" height="5" rx="2" className={s.ink2} />
+  </svg>
+)
+const Picture = () => (
+  <svg viewBox="0 0 120 84" aria-hidden="true">
+    <rect x="10" y="10" width="100" height="64" rx="4" className={s.ink1} />
+    <circle cx="86" cy="28" r="7" className={s.ink3} />
+    <path d="M10 74 L44 40 L66 60 L80 48 L110 74 Z" className={s.ink2} />
+  </svg>
+)
+const Flow = () => (
+  <svg viewBox="0 0 120 84" aria-hidden="true">
+    <path d="M30 12 V72 M90 12 V72" className={s.stroke} />
+    <path d="M30 26 H88 M90 44 H32 M30 60 H88" className={s.stroke} />
+    <rect x="20" y="8" width="20" height="8" rx="2" className={s.ink3} />
+    <rect x="80" y="8" width="20" height="8" rx="2" className={s.ink1} />
+  </svg>
 )
 
-/* ——— D1 · Tiles: as shown first; three tiles over two lines and one button, in the middle ——— */
+const THREE: ReadonlyArray<{ readonly word: string; readonly drawing: ReactNode }> = [
+  { word: 'Mockups', drawing: <Page /> },
+  { word: 'Diagrams', drawing: <Diagram /> },
+  { word: 'Charts', drawing: <Chart /> },
+]
+
+const ALL = [Page, Diagram, Chart, Doc, Picture, Flow]
+
+const Words = ({ line }: { line: string }) => (
+  <>
+    <h2 className={s.title}>No artifacts yet</h2>
+    <p className={s.line}>{line}</p>
+  </>
+)
+
+/* ——— 1 · Tiles: three captioned drawings over the words, in the middle ——— */
 
 function Tiles() {
   return (
     <div className={s.middle}>
-      <div className={s.tiles}>
-        {KINDS.map((one) => (
+      <div className={s.tiles} aria-hidden="true">
+        {THREE.map((one) => (
           <figure key={one.word} className={s.tile}>
             <div className={s.art}>{one.drawing}</div>
             <figcaption>{one.word}</figcaption>
           </figure>
         ))}
       </div>
-      <Title />
-      <p className={s.line}>What your agents draw for you is kept here, for every task.</p>
-      <div className={s.actions}>
-        <AskButton />
-      </div>
+      <Words line="What your agents draw for you to look at is kept here." />
     </div>
   )
 }
 
-/* ——— D2 · Tiles that ask: each tile is the way to ask for one of its kind; no other button ——— */
-
-function Asking() {
-  return (
-    <div className={s.middle}>
-      <Title />
-      <p className={s.line}>Ask the coordinator for one.</p>
-      <div className={s.tiles} style={{ marginTop: 22, marginBottom: 0 }}>
-        {KINDS.map((one) => (
-          <button key={one.word} type="button" className={s.tileButton} onClick={() => ask(one.draft)}>
-            <span className={s.art}>{one.drawing}</span>
-            <span className={s.tileWord}>
-              {one.one}
-              <Icon name="arrow" size={12} />
-            </span>
-          </button>
-        ))}
-      </div>
-    </div>
-  )
-}
-
-/* ——— D3 · A stack: the three fanned like a hand of cards, one picture over the words ——— */
+/* ——— 2 · A stack: the three fanned like a hand of cards, one picture ——— */
 
 function Stack() {
   return (
     <div className={s.middle}>
       <div className={s.stack} aria-hidden="true">
-        {KINDS.map((one) => (
+        {THREE.map((one) => (
           <div key={one.word} className={s.card}>
             {one.drawing}
           </div>
         ))}
       </div>
-      <Title />
-      <p className={s.line}>Mockups, diagrams and charts your agents draw are kept here.</p>
-      <div className={s.actions}>
-        <AskButton />
+      <Words line="Mockups, diagrams and charts your agents draw are kept here." />
+    </div>
+  )
+}
+
+/* ——— 3 · A wall: many drawings fill the ground and fade out, the words where they thin ——— */
+
+function Wall() {
+  return (
+    <div className={s.wallView}>
+      <div className={s.wall} aria-hidden="true">
+        {Array.from({ length: 18 }, (_, i) => {
+          const Drawing = ALL[(i * 5 + Math.floor(i / 6) * 2) % ALL.length]!
+          return (
+            <div key={i} className={s.art}>
+              <Drawing />
+            </div>
+          )
+        })}
+      </div>
+      <div className={s.wallWords}>
+        <Words line="Mockups, diagrams and charts your agents draw are kept here." />
       </div>
     </div>
   )
 }
 
-/* ——— D4 · A shelf: where the table will be, at the top and left-aligned, the tiles beside the words ——— */
+/* ——— 4 · One canvas: a single one, larger, with what being kept means: its versions behind it, a comment on it ——— */
 
-function Shelf() {
+function One() {
   return (
-    <div className={s.shelf}>
-      <div className={s.shelfTiles}>
-        {KINDS.map((one) => (
-          <figure key={one.word} className={s.tile}>
-            <div className={s.art}>{one.drawing}</div>
-            <figcaption>{one.word}</figcaption>
-          </figure>
-        ))}
-      </div>
-      <div className={s.shelfWords}>
-        <Title />
-        <p className={s.line}>What a lead or the coordinator draws for you lands here.</p>
-        <div className={s.actions}>
-          <AskButton />
+    <div className={s.middle}>
+      <div className={s.kept} aria-hidden="true">
+        <div className={s.sheet} />
+        <div className={s.sheet} />
+        <div className={s.keptCard}>
+          <div className={s.keptBar}>
+            <span className={s.keptName} />
+            <span className={s.keptVersion}>v3</span>
+          </div>
+          <div className={s.keptArt}>
+            <Page />
+          </div>
+          <span className={s.pin}>1</span>
         </div>
       </div>
+      <Words line="Every version of what your agents draw is kept here." />
     </div>
   )
 }
@@ -155,10 +164,10 @@ export function Empty({ today }: { t: ArtifactsText; today: ReactNode }) {
     case 'D1':
       return <Tiles />
     case 'D2':
-      return <Asking />
-    case 'D3':
       return <Stack />
+    case 'D3':
+      return <Wall />
     case 'D4':
-      return <Shelf />
+      return <One />
   }
 }
