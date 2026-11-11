@@ -13,7 +13,8 @@
     "check": "vp check",
     "test": "vp test run",
     "fix": "vp check --fix",
-    "og": "bun scripts/og.ts"
+    "og": "bun scripts/og.ts",
+    "proto:share": "vp build --config src/proto/standalone/vite.config.ts && bun src/proto/standalone/inline.ts"
   },
   "dependencies": {
     "@althar/ui": "workspace:*",

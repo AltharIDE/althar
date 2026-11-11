@@ -39,7 +39,10 @@ export function usePicks(groups: readonly Group[]): [Picks, (group: string, key:
       const next = { ...was, [group]: key }
       const query = new URLSearchParams(window.location.search)
       for (const [id, value] of Object.entries(next)) query.set(id, value)
-      window.history.replaceState(null, '', `${window.location.pathname}?${query}`)
+      // A page shared as a link may sit in a frame that keeps its address: there, the picks live in the page alone.
+      try {
+        window.history.replaceState(null, '', `${window.location.pathname}?${query}`)
+      } catch {}
       return next
     })
   return [picks, pick]
