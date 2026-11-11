@@ -7,7 +7,7 @@ import { NotFound } from './errors'
 import { change, fact } from './records'
 
 /*
- * Chats and Scratch (a task is a conversation plus parts). A chat is a task
+ * Asides (a task is a conversation plus parts). An aside is a chat: a task
  * with a conversation and a copy of the default branch, and nothing else: no
  * plan to wait on, no countdown, no Checked by. It sits on Scratch
  * (`tasks.shelf`), off the board's lanes, listed by its latest exchange, and

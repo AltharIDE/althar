@@ -35,7 +35,7 @@ export const postCard = (projectId: ProjectId, taskId: string) =>
 
 /**
  * A chat on Scratch moves to the board as soon as it takes a worktree or an
- * output (a task is a conversation plus parts, "Chats and Scratch"), looked at
+ * output (a task is a conversation plus parts, "Asides"), looked at
  * where one can take them (its first write, a pull request, a review drafted): a branch
  * of its own, a pull request, or a review it drafted, since it was put there;
  * said in its thread. Nothing moves back to Scratch by itself, and one the

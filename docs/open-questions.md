@@ -18,10 +18,10 @@ was decided. These are what they leave open.
 
 **Tasks and the coordinator**
 
-- [x] **The Scratch shelf and presets.** Built: chats sit on Scratch, its own
-  shelf listing them by their latest exchange, and presets name a task's
-  starting parts ([tasks](decisions/tasks.md#chats-and-scratch)). Whether
-  Scratch offers to clear chats untouched for a while is still open.
+- [x] **Asides and presets.** Built: chats are asides, pills over the
+  coordinator's conversation, the latest first, and presets name a task's
+  starting parts ([tasks](decisions/tasks.md#asides)). Those untouched for a
+  week fold into one "N older" pill, which clears them together.
 - [x] **Moving a running task.** Built: it moves between a worktree and Local,
   and changes the branch it works toward, at any time
   ([workspaces and runs](decisions/workspaces-and-runs.md#moving-a-running-task)).

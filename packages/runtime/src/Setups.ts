@@ -505,7 +505,7 @@ export class Setups extends Context.Service<
           Effect.gen(function* () {
             const sql = yield* SqlClient.SqlClient
             // A chat's copy, on Scratch and on no branch of its own, waits for something to run from it (a task is a conversation
-            // plus parts, "Chats and Scratch"): a chat that only talks never pays for an install.
+            // plus parts, "Asides"): a chat that only talks never pays for an install.
             const unset = yield* sql<{ id: string }>`
               SELECT w.id FROM workspaces w JOIN repository_bindings b ON b.id = w.binding_id
               WHERE w.task_id = ${taskId} AND w.device_id = ${instance.deviceId} AND w.state = 'ready' AND (w.access = 'write' OR w.trust = 'full') AND w.kind IS NULL AND w.setup IS NULL

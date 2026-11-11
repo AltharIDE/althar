@@ -182,6 +182,7 @@ export const text = {
   returning: 'Bringing its folder back',
   /** What the composer suggests to a task that finished and isn't a change, in grey: Tab takes it, Enter sends it to its lead. */
   suggest: 'Mark this as done',
+  reply: 'Reply',
   /** Issues its lead drafted wait for the person to file. */
   issues: 'Issues to file',
   /** Changes its lead proposed to its issue wait for the person to apply. */
@@ -1033,7 +1034,7 @@ export function TaskView({
         onChange={setDraft}
         // What a task that finished and isn't a change is likely told next, for Tab to take; its lead marks it done (settle_task). A
         // review's draft is posted by the person, on it, so nothing is suggested there.
-        {...(settleable && done ? { suggestion: text.suggest } : {})}
+        {...(settleable && done && !embedded ? { suggestion: text.suggest } : {})}
         inputRef={voice.inputRef}
         dictation={voice.dictation}
         tray={voice.tray && <DictationTray {...voice.tray} />}
@@ -1116,7 +1117,8 @@ export function TaskView({
         onEditQueued={(id) => void edit(id)}
         onSendQueuedNow={(id) => void sendQueuedNow(id)}
         onUnqueue={(id) => void model.takeBack(id)}
-        placeholder={busy ? text.placeholderBusy : text.placeholder(receiver.name)}
+        // An aside's is the coordinator's, in a word: its lead is named in the picker.
+        placeholder={busy ? text.placeholderBusy : embedded ? text.reply : text.placeholder(receiver.name)}
         meter={contextMeter(session, named, model.compact, { usage: snapshot.usage, heading: text.usageHeading })}
         // Another agent's model hands the task to that agent.
         picker={
@@ -1333,22 +1335,23 @@ export function TaskView({
               composer={composer}
               // A document the lead wrote, or a file it names, opens beside the thread on its workbench; a document follows its edits.
               // An aside's, in the coordinator's narrow pane, has no room for one.
-              panel={
-                !embedded &&
-                host.workbench(
-                  host.doc && (
-                    <DocumentPanel
-                      key={host.doc.source ?? host.doc.path ?? host.doc.title}
-                      threadId={snapshot.threadId}
-                      doc={host.doc}
-                      version={versionOf(wholePath(host.doc.source ?? host.doc.path ?? '', snapshot.task.worktree))}
-                      onClose={host.closeDoc}
-                      {...(openFile === undefined || docInEditor === null ? {} : { onOpen: () => openFile(docInEditor) })}
-                    />
-                  ),
-                )
-              }
-              panelWidth={host.bench.width}
+              {...(embedded
+                ? {}
+                : {
+                    panel: host.workbench(
+                      host.doc && (
+                        <DocumentPanel
+                          key={host.doc.source ?? host.doc.path ?? host.doc.title}
+                          threadId={snapshot.threadId}
+                          doc={host.doc}
+                          version={versionOf(wholePath(host.doc.source ?? host.doc.path ?? '', snapshot.task.worktree))}
+                          onClose={host.closeDoc}
+                          {...(openFile === undefined || docInEditor === null ? {} : { onOpen: () => openFile(docInEditor) })}
+                        />
+                      ),
+                    ),
+                    panelWidth: host.bench.width,
+                  })}
             >
               <Thread label={text.thread} busy={busy}>
                 {issue !== null && !snapshot.earlier && (

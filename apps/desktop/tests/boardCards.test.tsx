@@ -293,7 +293,7 @@ describe('a ready card’s own ways', () => {
     const onOpen = vi.fn()
     const actions = ways()
     show(lanes, { onOpen, actions })
-    await userEvent.click(screen.getByRole('button', { name: 'Scratch · 2' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Asides · 2' }))
     expect(await screen.findByText('Try 52 and 64.')).toBeTruthy()
     await userEvent.click(screen.getByRole('button', { name: /^How does retry work\?/ }))
     expect(onOpen).toHaveBeenCalledWith('th9')

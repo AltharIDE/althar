@@ -55,7 +55,7 @@ export type Held = ReadonlyMap<string, { readonly group: Group; readonly at: num
 
 export interface Lanes {
   /**
-   * Chats on Scratch (a task is a conversation plus parts, "Chats and Scratch"): off the lanes, the latest first, unless a
+   * Chats on Scratch (a task is a conversation plus parts, "Asides"): off the lanes, the latest first, unless a
    * call of theirs waits on the person, which Needs you shows.
    */
   readonly scratch: ReadonlyArray<BoardTask>

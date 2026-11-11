@@ -1224,7 +1224,7 @@ export class Sessions extends Context.Service<
         })
 
       /**
-       * A chat's copy is made without setup (a task is a conversation plus parts, "Chats and Scratch"): the first command its
+       * A chat's copy is made without setup (a task is a conversation plus parts, "Asides"): the first command its
        * lead runs sets it up, once per session, beside the command, as its thread shows. Nothing for one set up already.
        */
       const heardRun = (running: Running, event: SessionEvent) => {

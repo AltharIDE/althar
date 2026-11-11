@@ -181,6 +181,8 @@ const shotNames = (report: RoundModel['report']) =>
 interface RoundProps {
   readonly block: RoundModel
   readonly model: ModelInfo
+  /** Who signs it in place of the model: the coordinator, in an aside. */
+  readonly signed?: { readonly voice: string; readonly mark: ReactNode }
   /** The names of its pictures an earlier round showed already: shown small, as retakes. */
   readonly retakes: ReadonlyArray<string>
   /** What each document it hands back was last changed by. */
@@ -200,6 +202,7 @@ interface RoundProps {
 const RoundView = memo(function RoundView({
   block,
   model,
+  signed,
   retakes,
   versions,
   threadId,
@@ -293,7 +296,13 @@ const RoundView = memo(function RoundView({
   // What it writes now, and then the same words as its result, stand in one place, so they never draw again as it ends.
   const answer = block.result ?? block.writing
   return (
-    <Round model={model} at={block.at} {...(copy === undefined ? {} : { copy })} {...(report === null ? {} : { 'data-item': report.id })}>
+    <Round
+      model={model}
+      {...(signed === undefined ? {} : { signed })}
+      at={block.at}
+      {...(copy === undefined ? {} : { copy })}
+      {...(report === null ? {} : { 'data-item': report.id })}
+    >
       {work !== null && (
         <WorkedFor
           took={work.spent === null ? work.took : duration(work.spent.total)}
@@ -467,6 +476,7 @@ export function TaskThread({ rounds, versionOf, onOpenTask, settledOf, reviewing
         key={block.id}
         block={block}
         model={modelOf(block.agentId, block.model)}
+        {...(shared.signed === undefined ? {} : { signed: shared.signed })}
         retakes={retakes}
         versions={Object.fromEntries(documentsOf(block).map((whole) => [whole, versionOf(whole)]))}
         threadId={threadId}
@@ -487,7 +497,11 @@ export function TaskThread({ rounds, versionOf, onOpenTask, settledOf, reviewing
         return round(block)
       case 'waiting':
         return (
-          <Round key={block.id} model={modelOf(session?.agentId ?? null)}>
+          <Round
+            key={block.id}
+            model={modelOf(session?.agentId ?? null)}
+            {...(shared.signed === undefined ? {} : { signed: shared.signed })}
+          >
             <Thinking {...(block.took === null ? {} : { took: block.took })} slow={block.slow} />
           </Round>
         )
