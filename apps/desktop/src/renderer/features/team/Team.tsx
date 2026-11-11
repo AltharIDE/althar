@@ -33,6 +33,7 @@ export const text = {
   more: 'The team',
   menu: 'The team',
   start: 'Start',
+  hold: 'Hold',
   change: 'Change the team…',
   /** The team in a line, at the head of a row's menu: Opus 5.5 · High, GPT-6.1 Sol reviews. */
   team: (lead: string, review: string | null) => (review === null ? lead : `${lead}, ${review}`),
@@ -56,7 +57,15 @@ type Plan = NonNullable<BoardTask['plan']>
 export type Teamed = Pick<
   BoardTask,
   'taskId' | 'title' | 'phase' | 'plan' | 'planWaits' | 'queued' | 'reviewing' | 'kind' | 'change' | 'reviewerChange'
->
+> &
+  Partial<Pick<BoardTask, 'holdable'>>
+
+/**
+ * Whether its plan can be held, as its card does: on its countdown, or started with its first step still waiting for a free
+ * agent or, Local, its checkout, nothing of it begun (`holdable`). Holding takes it out of the line until the person
+ * starts it.
+ */
+export const canHold = (task: Teamed): boolean => task.plan !== null && (task.phase === 'planned' || task.holdable === true)
 
 /**
  * What changing its team does where it stands: `starts`, a plan held or on its countdown, which can start now too; `waits`,
@@ -105,16 +114,18 @@ const useTeamLine = (plan: Plan, projectId: string) => {
   )
 }
 
-/** A row's menu, up next: who's on it, then Start where it starts now, and Change the team…. */
+/** A row's menu, up next: who's on it, then Start where it starts now, Hold where it can be held, and Change the team…. */
 export function TeamMenu({
   projectId,
   task,
   onStart,
+  onHold,
   onChange,
 }: {
   projectId: string
   task: Teamed
   onStart?: () => void
+  onHold?: () => void
   onChange: () => void
 }) {
   const line = useTeamLine(task.plan!, projectId)
@@ -129,6 +140,11 @@ export function TeamMenu({
       {onStart !== undefined && (
         <MenuItem icon="play" onSelect={onStart}>
           {text.start}
+        </MenuItem>
+      )}
+      {onHold !== undefined && (
+        <MenuItem icon="hold" onSelect={onHold}>
+          {text.hold}
         </MenuItem>
       )}
       <MenuItem icon="agents" onSelect={onChange}>

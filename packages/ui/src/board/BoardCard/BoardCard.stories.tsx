@@ -3,10 +3,13 @@ import { expect, fn, userEvent, within } from 'storybook/test'
 
 import { TaskKind, TaskStatus } from '../../foundations/vocabulary'
 import {
+  CHANGE_BRANCH_PICTURES,
   CHANGE_CONFLICT,
   CHANGE_CHECKS_RUNNING,
   CHANGE_IN_MERGE_QUEUE,
   CHANGE_PERMISSION,
+  CHANGE_PR_PICTURES,
+  CHANGE_REPLIED_PICTURES,
   CHANGE_QUESTION,
   CHANGE_QUEUED,
   CHANGE_QUEUED_MIDWAY,
@@ -173,6 +176,63 @@ const readyFoot = (
     </div>
   ),
 })
+/**
+ * The follow-up pull request a fix opened after the first merged, its checks running: the card says so, as a first pull request's does,
+ * not "Ready to accept". One row for the pull request, and none for the branch that holds the same lines.
+ */
+const followUp = (running: boolean) => ({
+  render: () => (
+    <div style={{ width: 360 }}>
+      <BoardCard
+        status={TaskStatus.Yours}
+        word={running ? 'Checks running' : 'Ready to accept'}
+        kind={TaskKind.Change}
+        at="2m"
+        title="Usage card drops the time breakdown"
+        object={<PullChip host={GITHUB} repo="althar" number={767} add={1} del={42} />}
+        foot={
+          <FactLine>
+            {running ? (
+              <Fact tone="live">Checks running, 7 of 12 passed</Fact>
+            ) : (
+              <Fact icon="check" tone="ok">
+                All 12 checks passed
+              </Fact>
+            )}
+          </FactLine>
+        }
+        next={
+          !running && (
+            <NextStep signal onPress={fn()} label="Accept and merge #767">
+              Accept and merge
+            </NextStep>
+          )
+        }
+      />
+    </div>
+  ),
+})
+export const FollowUpChecksRunning: Story = {
+  ...followUp(true),
+  play: async ({ canvasElement }) => {
+    const card = within(canvasElement)
+    await expect(card.getByText('Checks running')).toBeInTheDocument()
+    await expect(card.getByText('Checks running, 7 of 12 passed')).toBeInTheDocument()
+    await expect(card.queryByText('Ready to accept')).not.toBeInTheDocument()
+    await expect(card.queryByText('Accept and merge')).not.toBeInTheDocument()
+    await expect(card.getAllByText('+1')).toHaveLength(1)
+  },
+}
+export const FollowUpChecksRunningDark: Story = { ...FollowUpChecksRunning, globals: { theme: 'dark' } }
+export const FollowUpChecksPassed: Story = {
+  ...followUp(false),
+  play: async ({ canvasElement }) => {
+    const card = within(canvasElement)
+    await expect(card.getByText('Ready to accept')).toBeInTheDocument()
+    await expect(card.getByText('All 12 checks passed')).toBeInTheDocument()
+  },
+}
+export const FollowUpChecksPassedDark: Story = { ...FollowUpChecksPassed, globals: { theme: 'dark' } }
 /** No line of facts starts with a middot, wherever it wraps. */
 const noStrayDots = async (canvasElement: HTMLElement) => {
   for (const part of canvasElement.querySelectorAll('[class*="factLinePart"]'))
@@ -650,6 +710,10 @@ export const AllStates: Story = {
         { state: 'current', node: <BoardCard {...args} current /> },
         { state: 'from an automation', node: <BoardCard {...args} from="Nightly bump" /> },
         { state: 'started by a lead', node: <BoardCard {...args} startedBy="Prototype the browser" /> },
+        {
+          state: 'started by a lead, opens it',
+          node: <BoardCard {...args} startedBy="Prototype the browser" onOpenStartedBy={() => undefined} />,
+        },
         { state: 'nothing opens it', node: <BoardCard {...args} onOpen={undefined} /> },
         { state: 'hover', node: <BoardCard {...args} /> },
         { state: 'focus', node: <BoardCard {...args} /> },
@@ -674,5 +738,27 @@ export const StartedByALead: Story = {
   },
 }
 
+/** Where the parent's title opens the parent, apart from the card's own press: it is a link, not part of the card's button. */
+export const StartedByALeadOpensIt: Story = {
+  args: { ...StartedByALead.args, onOpen: fn(), onOpenStartedBy: fn() },
+  play: async ({ canvasElement, args }) => {
+    await userEvent.click(within(canvasElement).getByRole('button', { name: 'Prototype the browser' }))
+    await expect(args.onOpenStartedBy).toHaveBeenCalledOnce()
+    await expect(args.onOpen).not.toHaveBeenCalled()
+  },
+}
+
 export const ErrandWaiting: Story = { args: { ...CHANGE_READY, errands: ['Waiting for #1187: checks at 9b50d2c.'] } }
 export const ErrandPaused: Story = { args: { ...CHANGE_READY, errands: ['Paused for #1187: changes requested.'] } }
+
+/** A branch and no pull request: its lead's pictures above the branch chip, not instead of it. */
+export const BranchWithPictures: Story = {
+  args: CHANGE_BRANCH_PICTURES,
+  play: async ({ canvasElement }) => {
+    const card = within(canvasElement)
+    await expect(card.getByLabelText('Pictures')).toBeVisible()
+    await expect(card.getByText(/\+1126/)).toBeVisible()
+  },
+}
+export const PullRequestWithPictures: Story = { args: CHANGE_PR_PICTURES }
+export const RepliedWithPictures: Story = { args: CHANGE_REPLIED_PICTURES }

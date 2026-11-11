@@ -1904,24 +1904,8 @@ export const NoticeItem = Schema.Struct({
      * work, what the coordinator relayed, or its task's folder going or coming
      * back, a line across the thread (ADR-056).
      */
-    role: Schema.optional(Schema.Literals(['aside', 'relayed', 'folder', 'skills'])),
-    /**
-     * For what Althar says of another task, drawn as its own line with the task linked (`task`): a task this task's lead
-     * started that ended without reaching it, or another open task changing the same files.
-     */
-    situation: Schema.optional(
-      Schema.Union([
-        Schema.Struct({
-          kind: Schema.Literal('ended'),
-          /** Settled without a change, failed, or stopped by the person. */
-          how: Schema.Literals(['unchanged', 'failed', 'stopped']),
-          /** Why, from its report, in a line; absent where it said nothing. */
-          why: Schema.optional(Schema.String),
-        }),
-        Schema.Struct({ kind: Schema.Literal('overlap'), files: Schema.Array(Schema.String) }),
-      ]),
-    ),
-    /** A task the line is about, which it links to: one this task's lead started (ADR-097). */
+    role: Schema.optional(Schema.Literals(['aside', 'relayed', 'folder'])),
+    /** A task the line is about, which it links to: one this task's lead started (ADR-097), once. */
     task: Schema.optional(Schema.Struct({ taskId: Schema.String, slug: Schema.String, title: Schema.String, threadId: Schema.String })),
     /**
      * A step of the work it marks, drawn as a stamped row of its own (a task is a conversation plus parts, "How it reads"): a
@@ -1961,10 +1945,6 @@ export const NoticeItem = Schema.Struct({
           effort: Schema.optional(Schema.NullOr(Schema.String)),
         }),
       ]),
-    ),
-    /** For what a lead's agent could see: each skill, and whether it is the person's or the repository's. */
-    skills: Schema.optional(
-      Schema.Array(Schema.Struct({ name: Schema.String, path: Schema.String, from: Schema.Literals(['person', 'repository']) })),
     ),
     /**
      * For an agent's turn that failed: why, as the runtime classes it
@@ -2547,6 +2527,11 @@ export const TaskCard = Schema.Struct({
   queued: Schema.NullOr(Queued),
   /** Its plan's first step waits for a place, nothing of it started yet: the person can still change the plan. */
   planWaits: Schema.optional(Schema.Boolean),
+  /**
+   * Its plan can still be held: nothing of it has begun, and its first step waits for a place among the agents or for its
+   * checkout. Holding takes it out of the line until the person starts it.
+   */
+  holdable: Schema.optional(Schema.Boolean),
   /**
    * It waits for a place before any agent has worked on it, whatever its
    * kind (a plan's first step, a review's or a quick task's lead's first
@@ -3775,6 +3760,10 @@ export const ThreadSnapshot = Schema.Struct({
   reports: Schema.Array(ThreadItem),
   /** Where the time went of each turn its page's items came in, that kept it; absent from a runtime before it. */
   turns: Schema.optional(Schema.Array(TurnTime)),
+  /** Every task its lead started, oldest first, whatever page of its thread says so and however long ago they settled. */
+  started: Schema.optional(
+    Schema.Array(Schema.Struct({ taskId: Schema.String, slug: Schema.String, title: Schema.String, threadId: Schema.String })),
+  ),
 })
 export type ThreadSnapshot = typeof ThreadSnapshot.Type
 
@@ -4678,8 +4667,13 @@ export const Api = RpcGroup.make(
     },
     Schema.String,
   ),
+  /**
+   * The person's pick of the thread's model, taken at once: the thread's session shows it as who leads from its next turn
+   * (`nextLead`), and the runtime sets it on the agent in the background, once no turn runs. What the agent wouldn't take is
+   * said in the thread, and the lead stays as it was.
+   */
   command('SetModel', { threadId: Schema.String, model: Schema.String }, Schema.Void),
-  /** How hard the thread's agent thinks, from here on. */
+  /** How hard the thread's agent thinks, picked as `SetModel` is: taken at once, set on the agent in the background. */
   command('SetEffort', { threadId: Schema.String, effort: Schema.String }, Schema.Void),
   /** Every agent's models and efforts, as far as Althar knows them. */
   call('GetModels', {}, Schema.Array(AgentModels)),

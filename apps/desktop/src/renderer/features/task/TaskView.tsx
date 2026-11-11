@@ -56,7 +56,7 @@ import { queuedOf, queueShown, readingNow, withQueued } from '../../shared/items
 import { ModelChoice } from '../../shared/ModelChoice'
 import { pendingText } from '../../shared/Pending'
 import { useModelNames } from '../../shared/modelNames'
-import { type Choice, runningOn } from '../../shared/models'
+import { type Choice, runningOn, upcomingOn } from '../../shared/models'
 import { issuePriority, issueStatus, productBrand, productName } from '../../shared/products'
 import { afterMergeText, readyWordOf, shipText } from '../../shared/standing'
 import { stepText, trackFor } from '../../shared/steps'
@@ -83,6 +83,7 @@ import { reachOf, reachText, ReviewCard, reviewedUnfurl } from './ReviewCard'
 import { usePostTeamReviews } from '../settings/usePostTeamReviews'
 import { HeldLimit } from './LimitCall'
 import { StuckCall } from './StuckCall'
+import { countsDown, StartedOf, type StartedReading, startedBy, startedIn, useStartedBoard } from './Started'
 import { TaskThread, workStepText } from './TaskThread'
 import { SmallChangeOf } from './SmallChangeOf'
 import { ModelMoveOf } from './ModelMoveOf'
@@ -97,7 +98,7 @@ import { conflictsOf, hasOutputs, hasOutputsToShow, latestOf, Outputs } from './
 import s from './Task.module.css'
 import { OpenFinding } from './Reports'
 import { useChanges } from './useChanges'
-import { ChangeTeam, useTeamed } from '../team/Team'
+import { canHold, ChangeTeam, useTeamed } from '../team/Team'
 import type { TaskModel } from './useTask'
 import { chooseFace, chosenFaces } from './chosenFaces'
 import { PageOpenerProvider, useOpener } from '../browser/opener'
@@ -268,13 +269,14 @@ export const statusOf = (
   // Drafted by the coordinator, its plan not proposed yet: under way, nowhere on the board.
   if (phase === 'drafting') return { status: TaskStatus.Running, state: text.planning }
   // Stopped, as its card says, whatever session its lead keeps; and what stopped it, where something says, in the board's words.
-  if (phase === 'stopped' || snapshot.session === null || !snapshot.session.held) {
+  // Its lead's session still starting isn't one that is gone: the agent is on its way, as the runtime says it is under way.
+  if (phase === 'stopped' || snapshot.session === null || (!snapshot.session.held && snapshot.session.state !== 'starting')) {
     const by = snapshot.task.stopped?.by
     // Its pull request ready to merge as it is: said beside the word, as what stopped it is not all there is to say.
     const state = snapshot.task.mergeable === true ? stepText.stoppedMergeable : stepText.stopped
     return { status: TaskStatus.Stopped, state, ...(by == null ? {} : { why: stepText.stoppedBy[by] }) }
   }
-  return { status: TaskStatus.Running, state: text.idle }
+  return { status: TaskStatus.Running, state: snapshot.session?.state === 'starting' ? text.working : text.idle }
 }
 
 /** A task's clock runs while it is under way or waits on the person. */
@@ -406,6 +408,8 @@ export function TaskView({
   // Whether the person has their team's reviews posted once drafted: what a review's reach says it posts.
   const postsTeamReviews = usePostTeamReviews()?.on === true
   const [pick, setPick] = useState<Choice | null>(null)
+  // A model or effort of the lead's own agent, picked and not yet taken by the runtime.
+  const [moving, setMoving] = useState<Choice | null>(null)
   // Another agent's model, picked while a lead is on the task: it takes over with what the person says next.
   const [handover, setHandover] = useState<Choice | null>(null)
   // Where its code host is connected, opened beside its outputs once its branch is pushed.
@@ -586,9 +590,15 @@ export function TaskView({
     },
     [setFace],
   )
+  // The tasks its lead started, as the board has them: a chip where each was started, and a part of its own.
+  const board = useStartedBoard(model.snapshot?.project.id)
+  const started = startedBy(board, model.snapshot?.task.id)
+  const startedAll = startedIn(board, model.snapshot?.started)
   // A running turn says how long it has worked so far, a task under way how long it has run, and a run of it how long it has been up.
   const now = useNow(
     ticking(model.snapshot) ||
+      // A task it started that counts down to starting on its own.
+      started.some(countsDown) ||
       // While what the person sent is on its way, or the lead starts for it, how long they have waited.
       model.pending ||
       model.snapshot?.session?.state === 'starting' ||
@@ -620,9 +630,13 @@ export function TaskView({
   const agentName = (id: string | null) =>
     model.agents.find((agent) => agent.id === id)?.name ?? (id === session?.agentId ? session.agentName : (id ?? ''))
   // Running or not, the task has its lead: the one on it now, else the last, else the one its plan names.
+  // Its model as just picked, or chosen for its next turn, where it is the same agent's: the header says what the picker says.
+  const next = session !== null && session.held ? (moving ?? upcomingOn(session)) : null
+  const leadModel =
+    session !== null && next !== null && next.agentId === session.agentId ? (next.model ?? session.model) : (session?.model ?? null)
   const lead =
     session !== null && session.held
-      ? named(session.agentId, session.model, session.account)
+      ? named(session.agentId, leadModel, session.account)
       : snapshot.task.lead === null
         ? noLead
         : named(snapshot.task.lead.agentId, snapshot.task.lead.model, snapshot.task.lead.account)
@@ -711,17 +725,13 @@ export function TaskView({
         ? null
         : { agentId: resume.id, model: null, effort: null })
   const waiting = session === null || !session.held || handover?.agentId === session.agentId ? null : handover
-  // Its lead changed from its next turn, by the team dialog or a tool: the picker shows who leads it then.
-  const upcoming = session?.held === true ? session.nextLead : null
-  const pending: Choice | null =
-    session === null || upcoming == null
-      ? null
-      : {
-          agentId: upcoming.agentId,
-          model: upcoming.model ?? (upcoming.agentId === session.agentId ? session.model : null),
-          effort: upcoming.effort ?? (upcoming.agentId === session.agentId ? session.effort : null),
-        }
-  const choice = session === null || !session.held ? chosen : (waiting ?? pending ?? runningOn(session))
+  // Its lead changed from its next turn, by the picker, the team dialog or a tool: the picker shows who leads it then, and so does the header.
+  const pending: Choice | null = session === null || !session.held ? null : upcomingOn(session)
+  // What the person just picked, shown until the runtime has it (or has refused it): at once, before anything is asked of the agent.
+  const choice =
+    session === null || !session.held
+      ? chosen
+      : (waiting ?? (moving !== null ? { ...moving, agentId: session.agentId } : null) ?? pending ?? runningOn(session))
 
   // The agent what the person says goes to: one picked to take over, else the lead on it, else the one it would start; and whether it takes images.
   const receiving = waiting?.agentId ?? (session?.held ? session.agentId : undefined) ?? chosen?.agentId ?? null
@@ -772,7 +782,10 @@ export function TaskView({
     if (session === null || !session.held) return setPick(next)
     if (next.agentId !== session.agentId) return setHandover(next)
     setHandover(null)
-    void model.choose(next)
+    setMoving(next)
+    // Taken or not, the thread says what the lead is on from here: the choice shown until then goes, and a refusal is said by the line above the composer.
+    // Only the last pick's end takes it away: one made after is still on its way.
+    void model.choose(next).then(() => setMoving((now) => (now === next ? null : now)))
   }
   // A queued message goes back in the composer to be changed, and out of the queue, unless the lead has it already.
   const edit = async (id: string) => {
@@ -881,8 +894,11 @@ export function TaskView({
     if (step.by === 'git') return { label: workStepText.dropIt, onPress: () => void model.dropChange(step.name) }
     return shipped ? undefined : { label: workStepText.keepTogether, onPress: () => void model.joinChanges(step.name) }
   }
+  const reading: StartedReading | null =
+    board === null || onOpenTask === undefined ? null : { board, now, agents: model.agents, onOpen: onOpenTask }
   // Its parts, just before the faces: what it changed is in its worktree's, which opens the changes over the window (ADR-097).
   const partsActions: PartsActions = {
+    ...(reading === null || startedAll.length === 0 ? {} : { started: { tasks: startedAll, reading } }),
     seeChanges: () => changes.show(),
     changesKey: text.diffKey,
     ...(snapshot.task.worktree === null || editor === undefined
@@ -933,6 +949,7 @@ export function TaskView({
         {...(snapshot.task.toward === undefined ? {} : { toward: snapshot.task.toward })}
         onRename={() => setRenaming(true)}
         {...(can('start') && planId !== null ? { onStartNow: () => void model.startPlan(planId) } : {})}
+        {...(teamed !== null && teamed.plan !== null && canHold(teamed) ? { onHold: () => void model.holdPlan(teamed.plan!.id) } : {})}
         {...(teamed === null ? {} : { onChangeTeam: () => setChangingTeam(true) })}
         {...(drafts.length > 0 ? { onMarkReady: () => void model.markAllReady(drafts.map((one) => one.url)) } : {})}
         // A task under way, or drafted, with a worktree, follows a pull request it didn't open, attached by its link (ADR-052); a
@@ -1383,6 +1400,9 @@ export function TaskView({
                       {...(onSignIn === undefined || stuckOpen ? {} : { onSignIn })}
                       onPassOn={(words) => void model.send(words)}
                       {...(onOpenTask === undefined ? {} : { onOpenTask })}
+                      {...(reading === null
+                        ? {}
+                        : { started: (task) => <StartedOf threadId={task.threadId} title={task.title} reading={reading} /> })}
                       onAnswerQuestion={model.answerQuestion}
                       {...(asking == null ? {} : { focusQuestion: asking })}
                       run={(run) => (

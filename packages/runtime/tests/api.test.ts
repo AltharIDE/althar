@@ -2969,10 +2969,13 @@ describe('thread items', () => {
     createdAt: '2026-09-29T12:00:00.000Z',
   })
 
-  it('keeps a session’s skills line that said nothing new from the window', () => {
+  it('keeps what a lead could see, and what older threads said of other tasks, out of the window', () => {
     const line = { source: 'runtime', role: 'skills', title: 'Codex could see 2 skills', skills: [] }
+    assert.strictEqual(itemOf(row('notice', line)), undefined)
     assert.strictEqual(itemOf(row('notice', { ...line, hidden: true })), undefined)
-    assert.strictEqual(itemOf(row('notice', line))?.kind, 'notice')
+    const about = { source: 'runtime', severity: 'info', title: 'Other changes `A.ts` too. Both leads were told.' }
+    assert.strictEqual(itemOf(row('notice', { ...about, situation: { kind: 'overlap', files: ['A.ts'] } })), undefined)
+    assert.strictEqual(itemOf(row('notice', about))?.kind, 'notice')
   })
 
   it('gives each kind its own content, and leaves out kinds the window has no use for yet', () => {

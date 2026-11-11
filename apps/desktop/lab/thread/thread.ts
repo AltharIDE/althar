@@ -293,3 +293,80 @@ The one to look at first is the stuck one, since nothing moves on it until you a
 
 /** A long answer, for timing frames: the coordinator's, then the lead's plan, three times over, with its lists, code and tables. */
 export const LONG_ANSWER = [1, 2, 3].map((part) => `## Part ${part}\n\n${COORDINATOR_ANSWER}\n\n${LIVE_ANSWER}`).join('\n\n')
+
+/**
+ * The end of a busy task's chat, as the person saw it: their message, then lines that were never about this task. With
+ * `raw`, as the window got them before (what a session could see, another task changing the same files, one this lead
+ * started that ended, an empty turn of the lead's); without, as it gets them now: the runtime keeps those back
+ * (`itemOf` in Queries.ts, tested in api.test.ts), and the empty turn is left for the thread to leave out.
+ */
+export const busyTail = (raw: boolean): ReadonlyArray<ThreadItem> => [
+  placed(items.you('Can you just get me up to speed on what this is, how it looks now, what issue did we solve'), at(150)),
+  ...(raw
+    ? [
+        placed(
+          items.notice(
+            {
+              source: 'runtime',
+              role: 'skills',
+              title: 'Claude Code no longer sees anthropic-skills:deep-research, artifact-emulator, built-in-browser and 40 more',
+              skills: [],
+            } as never,
+            null,
+          ),
+          at(150, 1),
+        ),
+      ]
+    : []),
+  placed({ ...items.says('', LEAD), ...lead }, at(150, 2)),
+  placed(
+    items.notice(
+      {
+        source: 'runtime',
+        title: 'Started “Retry the checkout”',
+        task: { taskId: 't2', slug: 'retry-the-checkout', title: 'Retry the checkout', threadId: 'th2' },
+      },
+      null,
+    ),
+    at(150, 3),
+  ),
+  ...(raw
+    ? [
+        placed(
+          items.notice(
+            {
+              source: 'runtime',
+              title: 'Usage card drops the time breakdown changes `Api.ts`, `Queries.ts` too. Both leads were told.',
+              task: { taskId: 't3', slug: 'usage-card', title: 'Usage card drops the time breakdown', threadId: 'th3' },
+              situation: { kind: 'overlap', files: ['Api.ts', 'Queries.ts'] },
+            } as never,
+            null,
+          ),
+          at(150, 4),
+        ),
+        placed(
+          items.notice(
+            {
+              source: 'runtime',
+              severity: 'warning',
+              title: 'Retry the checkout stopped without a change: No switch.',
+              task: { taskId: 't2', slug: 'retry-the-checkout', title: 'Retry the checkout', threadId: 'th2' },
+              situation: { kind: 'ended', how: 'unchanged', why: 'No switch.' },
+            } as never,
+            null,
+          ),
+          at(150, 5),
+        ),
+      ]
+    : []),
+  placed(
+    {
+      ...items.says(
+        'This task made the merge line back off when GitHub rate-limits it, and the card now says when it will try again. It’s merged as #737.',
+        LEAD,
+      ),
+      ...lead,
+    },
+    at(151),
+  ),
+]

@@ -1054,8 +1054,8 @@ export const handlers = Api.toLayer(
             }),
           ),
         ),
-      SetModel: ({ commandId, threadId, model }) => once(commandId, api(sessions.setModel({ threadId, model }))),
-      SetEffort: ({ commandId, threadId, effort }) => once(commandId, api(sessions.setEffort({ threadId, effort }))),
+      SetModel: ({ commandId, threadId, model }) => once(commandId, api(Effect.asVoid(sessions.chooseLead({ threadId, model })))),
+      SetEffort: ({ commandId, threadId, effort }) => once(commandId, api(Effect.asVoid(sessions.chooseLead({ threadId, effort })))),
       GetModels: () => api(models.catalog),
       SetDefaultEffort: ({ commandId, agentId, model, effort }) =>
         once(commandId, api(models.setDefaultEffort({ agentId, model, effort }))),
@@ -1460,7 +1460,7 @@ export const handlers = Api.toLayer(
           ),
         ),
       StartPlan: ({ commandId, planId }) => once(commandId, api(Effect.asVoid(plans.start(planId, instance.personId)))),
-      HoldPlan: ({ commandId, planId }) => once(commandId, api(plans.hold(planId, instance.personId))),
+      HoldPlan: ({ commandId, planId }) => once(commandId, api(Effect.asVoid(plans.hold(planId, instance.personId)))),
       ChangePlan: ({ commandId, planId, steps, end, worksIn, toward }) =>
         once(commandId, api(plans.change(planId, steps, instance.personId, end, worksIn, toward))),
       ApplyPreset: ({ commandId, planId, preset }) => once(commandId, api(plans.applyPreset(planId, preset, instance.personId))),

@@ -28,6 +28,7 @@ import {
   SettledRow,
   ScratchShelf,
   SettleWays,
+  StartedBy,
   TaskKind,
   TaskStatus,
   Thumbs,
@@ -59,7 +60,7 @@ import {
 import { afterSteps, isAutomatedStep, stepText } from '../../shared/steps'
 import { ago, clock, running } from '../../shared/time'
 import { text as stuckText } from '../task/StuckCall'
-import { teamChangeOf, TeamMenu } from '../team/Team'
+import { canHold, teamChangeOf, TeamMenu } from '../team/Team'
 import s from './Board.module.css'
 import { type Held, heldOf, holding, type Lanes, type Waiting } from './lanes'
 import type { LineActions } from './useBoard'
@@ -191,6 +192,8 @@ const HANDED_SHOWN = 3
 export interface TeamActions {
   readonly projectId: string
   readonly start: (planId: string) => Promise<void>
+  /** Holds it, out of the line, until it is started. */
+  readonly hold: (planId: string) => Promise<void>
   readonly change: (taskId: string) => void
 }
 
@@ -388,6 +391,39 @@ const findingsOf = (reviewing: ReviewBrief) => {
 /** The card's own props, without how it opens. */
 type Card = Omit<BoardCardProps, 'onOpen' | 'current' | 'text'>
 
+/** What a task handed back, as its card shows it: a row of pictures, or else a few files; nothing where it handed back none. */
+const handedOf = (work: Pick<BoardTask, 'handed'>) => {
+  const pictures = (work.handed?.pictures ?? []).flatMap((picture, index) =>
+    picture.digest === null
+      ? []
+      : [{ id: `${index}-${picture.digest}`, src: pictureUrl(picture.digest, true), name: picture.name ?? text.picture(index + 1) }],
+  )
+  const files = work.handed?.files ?? []
+  return pictures.length > 0 ? (
+    <Thumbs pictures={pictures.slice(0, HANDED_SHOWN)} />
+  ) : files.length > 0 ? (
+    <FileChips files={files.slice(0, HANDED_SHOWN)} />
+  ) : null
+}
+
+/** A card with what its task handed back beside its branch or pull request chip, in every state and kind: never in place of it. */
+const withHanded = (work: Pick<BoardTask, 'handed'>, card: Card): Card => {
+  const handed = handedOf(work)
+  if (handed === null) return card
+  return {
+    ...card,
+    object:
+      card.object === undefined || card.object === null ? (
+        handed
+      ) : (
+        <div className={s.chips}>
+          {handed}
+          {card.object}
+        </div>
+      ),
+  }
+}
+
 /** The automation whose run a task is, as its card says it, quietly. */
 /** Where it came from, at its foot: the automation whose run it is, or the task whose lead started it (ADR-097). */
 const fromOf = (work: BoardTask): Pick<Card, 'from' | 'startedBy'> => ({
@@ -395,9 +431,15 @@ const fromOf = (work: BoardTask): Pick<Card, 'from' | 'startedBy'> => ({
   ...(work.startedBy === undefined ? {} : { startedBy: work.startedBy.title }),
 })
 
+/** Opens the task whose lead started it, from its card's foot: its title there is a link, apart from the card's own press. */
+const parentOf = (work: BoardTask, open: (threadId: string) => void): Pick<BoardCardProps, 'onOpenStartedBy'> => {
+  const parent = work.startedBy
+  return parent === undefined ? {} : { onOpenStartedBy: () => open(parent.threadId) }
+}
+
 /** A running task's card: its step and its track, or Working; its branch or pull request; and why it stands still, where it does. */
 export const runningCardOf = (work: BoardTask, now: string, name: (id: string | null) => string, actions?: CardActions): Card => {
-  const card = runningCard(work, now, name)
+  const card = withHanded(work, runningCard(work, now, name))
   // Stopped, or its lead not yet started, with a conflict not asked of it: why, in place of its foot, and Resolve now.
   if (work.conflictUnsent != null) return { ...card, ...unsentOf(work, work.conflictUnsent, actions) }
   if (work.conflictUnchecked != null) return { ...card, foot: <Fact tone="warm">{work.conflictUnchecked}</Fact> }
@@ -485,7 +527,10 @@ const runningCard = (work: BoardTask, now: string, name: (id: string | null) => 
  * branch is one line under that, not why it waits: Carry on tells the lead to merge it in first.
  */
 export const stoppedCardOf = (work: BoardTask, now: string, actions?: CardActions): Card => {
-  const card = runningCard(work, '', () => '')
+  const card = withHanded(
+    work,
+    runningCard(work, '', () => ''),
+  )
   const sendBack = actions?.sendBack
   const merges = work.mergeable === true && work.change?.state === 'open' && actions !== undefined
   const { at: _, ...rest } = card
@@ -565,7 +610,7 @@ export const waitingCardOf = ({ task, call }: Waiting, name: (id: string | null)
       : call.stuck.step === 'publish' && call.stuck.why !== 'not_connected'
         ? stuckText.publishing(call.stuck)
         : stuckText.what(call.stuck, name(call.stuck.agentId) || 'The agent')
-  return {
+  return withHanded(task, {
     ...base,
     word: callKindOf(call),
     at: ago(call.createdAt),
@@ -575,14 +620,16 @@ export const waitingCardOf = ({ task, call }: Waiting, name: (id: string | null)
       : {}),
     // A question's one step is to answer it, in its task.
     ...(call.kind === 'question' ? { next: <NextStep signal>{text.answer}</NextStep> } : {}),
-  }
+  })
 }
 
 /**
  * A ready task's card: a change to accept, with its pull request and checks; a review drafted; or a plain task that finished, with
  * what it handed back, or else its branch, where its lead wrote in the repository: on this Mac, as no pull request is coming.
  */
-export const readyCardOf = (work: BoardTask, actions?: CardActions): Card => {
+export const readyCardOf = (work: BoardTask, actions?: CardActions): Card => withHanded(work, readyCard(work, actions))
+
+const readyCard = (work: BoardTask, actions?: CardActions): Card => {
   const base = { status: TaskStatus.Yours, kind: kindOf(work), ...localOf(work), ...towardOf(work), title: work.title, ...fromOf(work) }
   // What its review after a merge found comes first: the person's Fix it or Leave it, for the change that merged.
   if (work.afterMerge?.state === 'found')
@@ -599,28 +646,18 @@ export const readyCardOf = (work: BoardTask, actions?: CardActions): Card => {
   }
   switch (work.kind) {
     case 'plain': {
-      const pictures = (work.handed?.pictures ?? []).flatMap((picture, index) =>
-        picture.digest === null
-          ? []
-          : [{ id: `${index}-${picture.digest}`, src: pictureUrl(picture.digest, true), name: picture.name ?? text.picture(index + 1) }],
-      )
-      const files = work.handed?.files ?? []
       const ways = settleWaysOf(work, actions)
       return {
         ...base,
         word: text.finished,
         ...(ways === null ? {} : { corner: ways }),
-        ...(pictures.length > 0
-          ? { object: <Thumbs pictures={pictures.slice(0, HANDED_SHOWN)} /> }
-          : files.length > 0
-            ? { object: <FileChips files={files.slice(0, HANDED_SHOWN)} /> }
-            : work.branch !== null && !empty(work.changed)
-              ? {
-                  object: (
-                    <BranchChip name={work.branch} {...(work.changed === null ? {} : { add: work.changed.add, del: work.changed.del })} />
-                  ),
-                }
-              : {}),
+        ...(work.branch !== null && !empty(work.changed)
+          ? {
+              object: (
+                <BranchChip name={work.branch} {...(work.changed === null ? {} : { add: work.changed.add, del: work.changed.del })} />
+              ),
+            }
+          : {}),
       }
     }
     case 'review': {
@@ -995,6 +1032,7 @@ export function BoardView({
   const nextRow = (work: BoardTask, index: number) => {
     const startsAt = work.plan?.startsAt ?? null
     const kind = kindWordOf(work)
+    const parent = work.startedBy
     // Under way, it goes on with its step: a change's, as its card in Running would say it; a plain task or a review just goes on.
     // Not one that waits for its checkout: nothing of it has begun (ADR-091).
     const goesOn = index < continuing || (index >= continuing + free && index < continuing + free + paused && work.waitsForCheckout == null)
@@ -1026,6 +1064,7 @@ export function BoardView({
         task={work.slug}
         {...(kind === undefined ? {} : { kind })}
         {...(goesOn ? { continues: work.kind === 'change' ? stepWordOf(work) : '' } : {})}
+        {...(parent === undefined ? {} : { foot: <StartedBy task={parent.title} onOpen={() => onOpen(parent.threadId)} /> })}
         title={work.title}
         wait={index < continuing + free + paused || startsAt !== null ? Wait.Workers : Wait.You}
         reason={reason}
@@ -1035,32 +1074,35 @@ export function BoardView({
       />
     )
   }
-  // A plan that hasn't begun starts, or changes who does it, from its row; one starting offers Start no more until it has.
+  // A plan that hasn't begun starts, is held, or changes who does it, from its row; one starting or holding offers neither until it has.
   const teamOf = (work: BoardTask) => {
     const change = team === undefined ? null : teamChangeOf(work)
-    // A task that has begun changes its team from its own menu, not from its row.
-    if (team === undefined || change === null || change === 'begun' || work.plan === null) return {}
+    if (team === undefined || work.plan === null || change === null) return {}
     const planId = work.plan.id
-    const start =
-      change === 'starts' && !starting.has(planId)
-        ? () => {
-            setStarting((was) => new Set(was).add(planId))
-            void team.start(planId).finally(() =>
-              setStarting((was) => {
-                const next = new Set(was)
-                next.delete(planId)
-                return next
-              }),
-            )
-          }
-        : undefined
+    const busy = (move: (planId: string) => Promise<void>) => () => {
+      setStarting((was) => new Set(was).add(planId))
+      void move(planId).finally(() =>
+        setStarting((was) => {
+          const next = new Set(was)
+          next.delete(planId)
+          return next
+        }),
+      )
+    }
+    const free = !starting.has(planId)
+    const start = change === 'starts' && free ? busy(team.start) : undefined
+    const hold = canHold(work) && free ? busy(team.hold) : undefined
+    // A task that has begun changes its team from its own menu, not from its row; a Local task that waits for its checkout only holds.
+    if (change === 'begun') return hold === undefined ? {} : { onHold: hold }
     return {
       ...(start === undefined ? {} : { onStart: start }),
+      ...(hold === undefined ? {} : { onHold: hold }),
       menu: (
         <TeamMenu
           projectId={team.projectId}
           task={work}
           {...(start === undefined ? {} : { onStart: start })}
+          {...(hold === undefined ? {} : { onHold: hold })}
           onChange={() => team.change(work.taskId)}
         />
       ),
@@ -1162,6 +1204,7 @@ export function BoardView({
             key={work.taskId}
             data-move={work.taskId}
             {...runningCardOf(work, now, name, actions)}
+            {...parentOf(work, onOpen)}
             errands={work.errands}
             onOpen={() => onOpen(work.threadId)}
           />
@@ -1175,6 +1218,7 @@ export function BoardView({
               key={ask.waiting.task.taskId}
               data-move={ask.waiting.task.taskId}
               {...waitingCardOf(ask.waiting, name)}
+              {...parentOf(ask.waiting.task, onOpen)}
               errands={ask.waiting.task.errands}
               onOpen={() => onOpen(ask.waiting.task.threadId)}
             />
@@ -1183,13 +1227,20 @@ export function BoardView({
           ),
         )}
         {lanes.stopped.map((work) => (
-          <BoardCard key={work.taskId} {...stoppedCardOf(work, now, actions)} errands={work.errands} onOpen={() => onOpen(work.threadId)} />
+          <BoardCard
+            key={work.taskId}
+            {...stoppedCardOf(work, now, actions)}
+            {...parentOf(work, onOpen)}
+            errands={work.errands}
+            onOpen={() => onOpen(work.threadId)}
+          />
         ))}
         {lanes.ready.map((work) => (
           <BoardCard
             key={work.taskId}
             data-move={work.taskId}
             {...readyCardOf(work, actions)}
+            {...parentOf(work, onOpen)}
             errands={work.errands}
             onOpen={() => onOpen(work.threadId)}
           />
