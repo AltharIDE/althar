@@ -10,7 +10,7 @@ mkdirSync(out, { recursive: true })
 
 const SHOTS = []
 let n = 1
-for (const d of ['now', 'A', 'B', 'C', 'D']) {
+for (const d of ['now', 'D1', 'D2', 'D3', 'D4']) {
   SHOTS.push({ id: `${String(n++).padStart(2, '0')}-${d}-wide-light`, q: `d=${d}&s=both&w=wide&t=light`, width: 2000 })
   SHOTS.push({ id: `${String(n++).padStart(2, '0')}-${d}-narrow-dark`, q: `d=${d}&s=both&w=narrow&t=dark`, width: 1180 })
 }

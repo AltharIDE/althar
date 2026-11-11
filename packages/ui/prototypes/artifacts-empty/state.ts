@@ -1,7 +1,7 @@
 // Scrappy: what the page shows, kept in the URL so a reload or a screenshot lands on the same view.
 import { useSyncExternalStore } from 'react'
 
-export const DIRECTIONS = ['now', 'A', 'B', 'C', 'D'] as const
+export const DIRECTIONS = ['now', 'D1', 'D2', 'D3', 'D4'] as const
 export type Direction = (typeof DIRECTIONS)[number]
 export type Shown = 'empty' | 'one' | 'both'
 export type Theme = 'light' | 'dark'
@@ -19,7 +19,7 @@ const read = (): Proto => {
   const q = new URLSearchParams(location.search)
   const d = q.get('d')
   return {
-    d: (DIRECTIONS as ReadonlyArray<string>).includes(d ?? '') ? (d as Direction) : 'A',
+    d: (DIRECTIONS as ReadonlyArray<string>).includes(d ?? '') ? (d as Direction) : 'D1',
     s: q.get('s') === 'one' ? 'one' : q.get('s') === 'both' ? 'both' : 'empty',
     t: q.get('t') === 'dark' ? 'dark' : 'light',
     w: q.get('w') === 'narrow' ? 'narrow' : 'wide',
@@ -48,7 +48,7 @@ export const useProto = () =>
     () => now,
   )
 
-/** Where C and D send the person: the coordinator's conversation, with what they asked for in its composer. */
+/** Where the directions send the person: the coordinator's conversation, with what they asked for in its composer. */
 let asked: string | null = null
 const askers = new Set<() => void>()
 export const ask = (words: string | null) => {

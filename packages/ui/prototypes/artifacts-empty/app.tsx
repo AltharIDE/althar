@@ -29,10 +29,10 @@ const FIRST: ArtifactRow = {
 
 const NAMES: Readonly<Record<Direction, string>> = {
   now: 'Today',
-  A: 'A · Quiet',
-  B: 'B · Waiting row',
-  C: 'C · Ask for one',
-  D: 'D · What they look like',
+  D1: 'D1 · Tiles',
+  D2: 'D2 · Tiles that ask',
+  D3: 'D3 · A stack',
+  D4: 'D4 · A shelf',
 }
 
 function Window({ rows, label }: { rows: ReadonlyArray<ArtifactRow>; label?: string }) {
@@ -109,7 +109,7 @@ function Bar() {
           { value: 'dark', label: 'Dark' },
         ]}
       />
-      <span className={s.keys}>N A B C D · E O S · W · T</span>
+      <span className={s.keys}>N 1 2 3 4 · E O S · W · T</span>
     </nav>
   )
 }
@@ -124,7 +124,7 @@ function App() {
       const at = e.target as HTMLElement | null
       if (e.metaKey || e.ctrlKey || e.altKey || at?.closest('input, textarea, [contenteditable="true"]')) return
       const k = e.key.toLowerCase()
-      const now = { n: 'now', a: 'A', b: 'B', c: 'C', d: 'D' } as const
+      const now = { n: 'now', 1: 'D1', 2: 'D2', 3: 'D3', 4: 'D4' } as const
       if (k in now) set({ d: now[k as keyof typeof now] })
       else if (k === 'e') set({ s: 'empty' })
       else if (k === 'o') set({ s: 'one' })
