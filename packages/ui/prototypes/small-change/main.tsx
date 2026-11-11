@@ -2,22 +2,11 @@ import '@fontsource-variable/inter'
 import '@fontsource-variable/jetbrains-mono'
 import '@althar/ui/styles.css'
 
-import {
-  Button,
-  ChangeSet,
-  ChangeState,
-  CheckState,
-  Model,
-  SmallChange,
-  type SmallChangeStep,
-  TaskLaunch,
-  type LaunchStep,
-} from '@althar/ui'
+import { Button, ChangeSet, ChangeState, CheckState, SmallChange, type SmallChangeStep } from '@althar/ui'
 import { StrictMode, useEffect, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 
-import { DIRECTIONS, type Direction } from './directions'
-import { EXPLAINS } from './explain'
+import { CALM, type Direction } from './calm'
 import { type SmallState, SOL, SONNET, STATES } from './states'
 import p from './page.module.css'
 
@@ -78,38 +67,17 @@ const NOW: Direction = {
   Card: Now,
 }
 
-const ALL: readonly Direction[] = [NOW, ...DIRECTIONS, ...EXPLAINS]
-/** The second round, which explains the lane: its card opens the thread. */
-const OPENS = new Set(EXPLAINS.map((d) => d.key))
+const ALL: readonly Direction[] = [NOW, ...CALM]
 const params = new URLSearchParams(location.search)
 const SHOT = params.has('shot')
 const ONLY = params.get('only')
 const STATE_KEYS = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '-', '=']
 
-/* The cards it sits among: the plan card above it, the Change card of another task below. */
-const PLAN: LaunchStep[] = [
-  { id: 'impl', label: 'Implement', agents: [SONNET], fixed: 'the lead' },
-  { id: 'review', label: 'Review', agents: [SOL], optional: true },
-]
-
+/* The card opens the thread; the Change card of another task under it, for the family. */
 function Neighbours({ dir, state }: { dir: Direction; state: SmallState }) {
   return (
     <div className={p.thread}>
-      {OPENS.has(dir.key) && <dir.Card key={dir.key + state.key} state={state} />}
-      {!OPENS.has(dir.key) && (
-        <TaskLaunch
-          task="762"
-          preset="Change"
-          title="Launch screen loses its startup status text"
-          project="althar"
-          estimate="About 25 min"
-          steps={PLAN}
-          picker={({ agent }) => <Model model={agent} short />}
-          held
-          onStart={() => {}}
-        />
-      )}
-      {!OPENS.has(dir.key) && <dir.Card key={dir.key + state.key} state={state} />}
+      <dir.Card key={dir.key + state.key} state={state} />
       <ChangeSet
         state={ChangeState.Ready}
         prs={[
@@ -141,7 +109,7 @@ function Neighbours({ dir, state }: { dir: Direction; state: SmallState }) {
 }
 
 function Page() {
-  const [dirKey, setDir] = useState(() => ALL.find((d) => d.key === params.get('d'))?.key ?? 'e')
+  const [dirKey, setDir] = useState(() => ALL.find((d) => d.key === params.get('d'))?.key ?? 'a')
   const [theme, setTheme] = useState(params.get('theme') === 'dark' ? 'dark' : 'light')
   const [live, setLive] = useState(() => Math.max(0, Number(params.get('s') ?? 5) - 1))
   const dir = ALL.find((d) => d.key === dirKey) ?? NOW

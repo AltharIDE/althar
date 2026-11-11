@@ -18,7 +18,7 @@ const { chromium } = createRequire(join(import.meta.dirname, '../../../../apps/d
 const out = join(import.meta.dirname, 'shots')
 mkdirSync(out, { recursive: true })
 const browser = await chromium.launch()
-const page = await browser.newPage({ viewport: { width: 1260, height: 900 }, deviceScaleFactor: 1 })
+const page = await browser.newPage({ viewport: { width: 1240, height: 900 }, deviceScaleFactor: 1 })
 const shot = async (name: string, query: string) => {
   await page.goto(`http://localhost:6143/?${query}&shot`)
   await page.waitForTimeout(700)
@@ -30,6 +30,7 @@ for (const d of (process.argv[2] ?? 'now,a,b,c,d,e,f,g,h').split(',')) {
   await page.setViewportSize({ width: 640, height: 900 })
   await shot(`${d}-thread-ready-light`, `d=${d}&theme=light&only=thread&s=5`)
   await shot(`${d}-thread-findings-dark`, `d=${d}&theme=dark&only=thread&s=10`)
-  await page.setViewportSize({ width: 1260, height: 900 })
+  await shot(`${d}-thread-hover-light`, `d=${d}&theme=light&only=thread&s=3&hover`)
+  await page.setViewportSize({ width: 1240, height: 900 })
 }
 await browser.close()
