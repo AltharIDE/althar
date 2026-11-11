@@ -55,6 +55,11 @@ const SHOTS: ReadonlyArray<{ name: string; d: string; l: number; theme?: string;
 
 const browser = await chromium.launch()
 const only = process.argv[2]
+if (only === 'bars') {
+  await bars()
+  await browser.close()
+  process.exit(0)
+}
 if (only === 'asides') {
   await asides()
   await browser.close()
@@ -149,6 +154,96 @@ async function asides() {
     await page.keyboard.press('Enter')
     await page.waitForTimeout(1400)
     await shoot(page, 'c4-select-3-answered')
+    await page.close()
+  }
+}
+
+/** The asides' bar, in each look, and the bar inside an open aside, in each. */
+async function bars() {
+  const open = async (query: string) => {
+    const page = await browser.newPage({ viewport: { width: 1360, height: 820 }, deviceScaleFactor: 1 })
+    page.on('pageerror', (error) => console.error('page error:', error.message))
+    await page.goto(`http://localhost:${port}/?d=C&${query}`)
+    await page.waitForTimeout(1200)
+    return page
+  }
+  const talk = async (page: Page, height = 330) => {
+    const box = await page.locator('[class*="Project-module__talk"]').first().boundingBox()
+    return { x: box!.x, y: box!.y, width: box!.width, height }
+  }
+  const shoot = async (page: Page, name: string, clip?: { x: number; y: number; width: number; height: number }) => {
+    await page.screenshot({ path: join(out, `${name}.png`), ...(clip === undefined ? {} : { clip }) })
+    process.stdout.write(`${name}\n`)
+  }
+  const aside = async (page: Page) => {
+    await page.locator('[class*="asides-module__strip"]').getByText('Why does the retry', { exact: false }).first().click()
+    await page.waitForTimeout(500)
+  }
+  const viaSwitch = async (page: Page) => {
+    await page.locator('[class*="asides-module__switch__"]').click()
+    await page.getByRole('menuitem', { name: /Why does the retry/ }).click()
+    await page.waitForTimeout(500)
+  }
+  // Each bar: on the coordinator, and with an aside open, in light; the conversation alone in dark.
+  for (const [at, bar] of ['pills', 'tabs', 'sheets', 'title', 'switch'].entries()) {
+    const page = await open(`l=0&b=${bar}&i=head&theme=light`)
+    await shoot(page, `d${at + 4}-${bar}-1-coordinator`, await talk(page, 120))
+    if (bar === 'switch') {
+      await page.locator('[class*="asides-module__switch__"]').click()
+      await page.waitForTimeout(400)
+      await shoot(page, `d${at + 4}-${bar}-2-menu`, { ...(await talk(page, 360)), width: 560 })
+      await page.keyboard.press('Escape')
+      await viaSwitch(page)
+    } else await aside(page)
+    await shoot(page, `d${at + 4}-${bar}-3-aside`, await talk(page, 150))
+    await page.close()
+    const dark = await open(`l=1&b=${bar}&i=head&theme=dark`)
+    await shoot(dark, `d${at + 4}-${bar}-4-dark-wide`, { x: 0, y: 44, width: 1360, height: 110 })
+    await dark.close()
+  }
+  // Each inner bar, under the pills (and the Switcher for In the tab, which holds the moves too).
+  for (const [inner, bar] of [
+    ['head', 'pills'],
+    ['tab', 'pills'],
+    ['tab', 'switch'],
+    ['composer', 'pills'],
+    ['context', 'pills'],
+  ] as const) {
+    const page = await open(`l=0&b=${bar}&i=${inner}&theme=light`)
+    if (bar === 'switch') await viaSwitch(page)
+    else await aside(page)
+    const clip = await talk(page, 0)
+    await shoot(page, `e-${inner}-${bar}`, { ...clip, height: 820 - clip.y - 40 })
+    if (inner === 'tab') {
+      await page.getByRole('button', { name: 'This aside' }).click()
+      await page.waitForTimeout(400)
+      await shoot(page, `e-${inner}-${bar}-menu`, { ...clip, height: 240 })
+      await page.keyboard.press('Escape')
+    }
+    await page.close()
+  }
+  // Where it came from, for an aside started from the coordinator's words.
+  {
+    const page = await open('l=0&b=pills&i=context&theme=light')
+    await page.locator('p', { hasText: 'It backs off in two places' }).first().click({ clickCount: 3 })
+    await page.waitForTimeout(300)
+    await page.getByRole('button', { name: 'Ask in an aside' }).click()
+    await page.getByRole('textbox').last().click()
+    await page.keyboard.type('Which one is safe to drop?')
+    await page.keyboard.press('Enter')
+    await page.waitForTimeout(1400)
+    await shoot(page, 'e-context-quoted', await talk(page, 150))
+    await page.close()
+  }
+  // The coordinator's line, once an aside became a task.
+  {
+    const page = await open('l=0&b=pills&i=head&theme=light')
+    await aside(page)
+    await page.getByRole('button', { name: 'Make it a task' }).click()
+    await page.waitForSelector('[data-arrived]', { state: 'attached' })
+    await page.waitForTimeout(900)
+    const clip = await talk(page, 0)
+    await shoot(page, 'f-note', { ...clip, y: clip.y + 200, height: 820 - clip.y - 240 })
     await page.close()
   }
 }

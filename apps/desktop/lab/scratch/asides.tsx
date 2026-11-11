@@ -13,6 +13,9 @@ import {
   MenuItem,
   ProjectMark,
   Thread,
+  AltharLine,
+  MenuGroup,
+  MenuSeparator,
   ThreadShellProvider,
 } from '@althar/ui'
 
@@ -23,7 +26,8 @@ import { ThreadBlocks } from '../../src/renderer/shared/ThreadBlocks'
 import { Card, type CardActions } from '../../src/renderer/features/project/Card'
 import { agents, card, items, project } from '../../tests/fixtures'
 import { type Chat, isOld } from './data'
-import { type MarkKind, useLab } from './lab'
+import { type BarKind, type InnerKind, type MarkKind, useLab } from './lab'
+import { when } from './kit'
 import k from './kit.module.css'
 import s from './asides.module.css'
 
@@ -49,6 +53,10 @@ interface AsideUi {
 let ui: AsideUi = { chat: null, starting: null, leaving: new Set() }
 const said = new Map<string, ReadonlyArray<ThreadItem>>()
 const working = new Set<string>()
+/** What an aside quoted of the coordinator, where it began with words selected. */
+const quoted = new Map<string, string>()
+/** The coordinator's own record of an aside that became a task: one line in its thread. */
+let notes: ReadonlyArray<{ readonly id: string; readonly aside: string; readonly task: string }> = []
 const listeners = new Set<() => void>()
 const emit = () => {
   for (const listen of listeners) listen()
@@ -71,6 +79,8 @@ const add = (id: string, ...more: ReadonlyArray<ThreadItem>) => {
 export const resetAsides = () => {
   said.clear()
   working.clear()
+  quoted.clear()
+  notes = []
   ui = { chat: null, starting: null, leaving: new Set() }
   emit()
 }
@@ -220,7 +230,32 @@ const cardActions: CardActions = {
   onStopBackground: nothing,
 }
 
-function AsideFace({ chat, onWork }: { chat: Chat; onWork: (chat: Chat, from: HTMLElement | null) => void }) {
+/** Where an aside's Make it a task flies from, without a card of its own: what shows it in the bar. */
+const shownAt = () => document.querySelector<HTMLElement>('[data-current]')
+
+/** An aside's own moves, Make it a task and Clear, in a menu: for the bar to hold, with no bar inside. */
+function AsideMenu({ chat, onWork }: { chat: Chat; onWork: (chat: Chat, from: HTMLElement | null) => void }) {
+  const lab = useLab()
+  return (
+    <Menu label="This aside" trigger={<IconButton icon="more" size="small" label="This aside" className={s.more} />}>
+      <MenuItem icon="work" onSelect={() => onWork(chat, shownAt())}>
+        Make it a task
+      </MenuItem>
+      <MenuItem
+        icon="close"
+        description="⌘K still finds it"
+        onSelect={() => {
+          lab.clear([chat.id])
+          setUi({ chat: null })
+        }}
+      >
+        Clear
+      </MenuItem>
+    </Menu>
+  )
+}
+
+function AsideFace({ chat, inner, onWork }: { chat: Chat; inner: InnerKind; onWork: (chat: Chat, from: HTMLElement | null) => void }) {
   const lab = useLab()
   useUi()
   const [value, setValue] = useState('')
@@ -261,28 +296,64 @@ function AsideFace({ chat, onWork }: { chat: Chat; onWork: (chat: Chat, from: HT
       } else add(chat.id, items.says('Good question. In short: yes, and it’s in payments/client.ts if you want to look.'))
     }, 900)
   }
-  return (
-    <div className={k.face} ref={face}>
-      <div className={k.head}>
+  const made = lab.promoted.has(chat.id)
+  const work = () => onWork(chat, face.current?.querySelector<HTMLElement>('[data-from]') ?? shownAt())
+  const clear = () => {
+    lab.clear([chat.id])
+    setUi({ chat: null })
+  }
+  const quote = quoted.get(chat.id)
+  const asked =
+    chat.minutes === 0
+      ? 'Just now'
+      : `Asked ${when(chat.minutes)}${when(chat.minutes).endsWith('h') || when(chat.minutes).endsWith('m') ? ' ago' : ''}`
+  const head =
+    inner === 'head' ? (
+      <div className={k.head} data-from>
         <span className={k.headTitle}>{chat.title}</span>
-        {!lab.promoted.has(chat.id) && (
+        {!made && (
           <>
-            <Button size="small" icon="work" onClick={() => onWork(chat, face.current?.querySelector<HTMLElement>(`.${k.head}`) ?? null)}>
+            <Button size="small" icon="work" onClick={work}>
               Make it a task
             </Button>
-            <LinkButton
-              title="It leaves the tabs; ⌘K still finds it"
-              onClick={() => {
-                lab.clear([chat.id])
-                setUi({ chat: null })
-              }}
-            >
+            <LinkButton title="It leaves the tabs; ⌘K still finds it" onClick={clear}>
               Clear
             </LinkButton>
           </>
         )}
       </div>
+    ) : inner === 'context' ? (
+      <div className={s.context} data-from>
+        <IconButton icon="chevronL" size="small" label="Back to the coordinator" onClick={() => setUi({ chat: null })} />
+        <div className={s.contextText}>
+          <span className={s.contextTitle}>{chat.title}</span>
+          <span className={s.contextSub}>
+            {quote === undefined ? (
+              <>
+                {asked}
+                <span aria-hidden> · </span>
+                {chat.by === 'lead' ? 'it answered last' : 'you spoke last'}
+              </>
+            ) : (
+              <>
+                <Icon name="quote" size={11} /> From the coordinator: “{quote}”
+              </>
+            )}
+          </span>
+        </div>
+        {!made && (
+          <>
+            <IconButton icon="work" size="small" label="Make it a task" onClick={work} />
+            <IconButton icon="close" size="small" label="Clear this aside: ⌘K still finds it" onClick={clear} />
+          </>
+        )}
+      </div>
+    ) : null
+  return (
+    <div className={k.face} ref={face} style={head === null ? { gridTemplateRows: '1fr auto' } : undefined}>
+      {head}
       <div className={k.thread} data-scroll>
+        {inner === 'tab' || inner === 'composer' ? <div className={s.lead} /> : null}
         <Thread label={chat.title}>
           <ThreadShellProvider value={{}}>
             <ThreadBlocks
@@ -295,6 +366,17 @@ function AsideFace({ chat, onWork }: { chat: Chat; onWork: (chat: Chat, from: HT
         </Thread>
       </div>
       <div className={k.composer}>
+        {inner === 'composer' && !made && (
+          <div className={s.under} data-from>
+            <Button size="small" variant="quiet" icon="work" onClick={work}>
+              Make it a task
+            </Button>
+            <Button size="small" variant="quiet" icon="close" title="It leaves the tabs; ⌘K still finds it" onClick={clear}>
+              Clear
+            </Button>
+            <span className={s.underNote}>{quote === undefined ? asked : 'Quoting the coordinator'}</span>
+          </div>
+        )}
         <Composer
           value={value}
           onChange={setValue}
@@ -340,6 +422,7 @@ function Starting({ quote }: { quote: string | null }) {
           if (text.trim() === '') return
           const chat = lab.start(text.trim())
           said.set(chat.id, [items.you(quote === null ? text.trim() : `“${quote}”\n\n${text.trim()}`)])
+          if (quote !== null) quoted.set(chat.id, quote)
           working.add(chat.id)
           setUi({ chat: chat.id, starting: null })
           setTimeout(() => {
@@ -423,7 +506,42 @@ const useTalk = (deps: ReadonlyArray<unknown>) => {
   return talk
 }
 
-export function Asides({ mark }: { mark: MarkKind }) {
+/** The coordinator's thread, with the line it keeps for each aside that became a task, at its end. */
+function Notes({ root }: { root: HTMLElement }) {
+  useUi()
+  const [end] = useState(() => {
+    const box = document.createElement('div')
+    box.className = s.notes!
+    return box
+  })
+  // At the thread's end, once it is drawn, and again where it is drawn anew.
+  useLayoutEffect(() => {
+    const place = () => {
+      const thread = [...root.querySelectorAll<HTMLElement>('section[class*="Thread-module__thread"]')].find(
+        (one) => one.closest('[data-aside]') === null,
+      )
+      if (thread !== undefined && thread.lastElementChild !== end) thread.append(end)
+    }
+    place()
+    const watch = new MutationObserver(place)
+    watch.observe(root, { childList: true, subtree: true })
+    return () => {
+      watch.disconnect()
+      end.remove()
+    }
+  }, [root, end])
+  if (notes.length === 0) return null
+  return createPortal(
+    notes.map((note) => (
+      <AltharLine key={note.id} text={{ name: 'Aside' }} className={s.note}>
+        “{note.aside}” became a task: <strong>{note.task}</strong>, up next.
+      </AltharLine>
+    )),
+    end,
+  )
+}
+
+export function Asides({ mark, bar, inner }: { mark: MarkKind; bar: BarKind; inner: InnerKind }) {
   const lab = useLab()
   const open = useUi()
   const talk = useTalk([lab.open, lab.visit, lab.room])
@@ -438,6 +556,7 @@ export function Asides({ mark }: { mark: MarkKind }) {
     const to = landing()
     const done = (board: boolean) => {
       lab.promote(chat.id)
+      notes = [...notes, { id: chat.id, aside: chat.title, task: titleOf(chat) }]
       setUi({ leaving: new Set([...ui.leaving, chat.id]) })
       arrive(titleOf(chat), board)
       // The aside's tab closes, and the conversation is the coordinator's again.
@@ -449,75 +568,218 @@ export function Asides({ mark }: { mark: MarkKind }) {
     if (from === null || to === null) return done(to?.board ?? false)
     fly(from, to.rect, () => done(to.board))
   }
+  const onCoordinator = current === null && open.starting === null
+  const choose = (id: string | null) => setUi({ chat: id, starting: null })
+  const startNew = () => setUi({ chat: null, starting: { quote: null } })
+  // In the tab, the aside's own moves: where the bar holds them, with no bar inside the aside.
+  const moves = (chat: Chat) =>
+    inner === 'tab' && current?.id === chat.id && !lab.promoted.has(chat.id) ? <AsideMenu chat={chat} onWork={work} /> : null
+  const live = (chat: Chat) => (chat.running === true || working.has(chat.id)) && <span className={s.live} />
   const tab = (chat: Chat): ReactNode => (
-    <button
+    <span
       key={chat.id}
-      type="button"
-      role="tab"
-      aria-selected={current?.id === chat.id}
-      className={s.chip}
+      role="presentation"
+      className={s.tab}
+      data-selected={current?.id === chat.id || undefined}
       data-leaving={open.leaving.has(chat.id) || undefined}
-      onClick={() => setUi({ chat: chat.id, starting: null })}
-      title={chat.said}
     >
-      {(chat.running === true || working.has(chat.id)) && <span className={s.live} />}
-      <span className={s.chipTitle}>{chat.title}</span>
-    </button>
+      <button
+        type="button"
+        role="tab"
+        aria-selected={current?.id === chat.id}
+        className={s.chip}
+        onClick={() => choose(chat.id)}
+        title={chat.said}
+        {...(current?.id === chat.id ? { 'data-current': '' } : {})}
+      >
+        {live(chat)}
+        <span className={s.chipTitle}>{chat.title}</span>
+      </button>
+      {moves(chat)}
+      {(bar === 'tabs' || bar === 'sheets') && moves(chat) === null && (
+        <IconButton
+          icon="close"
+          size="small"
+          label={`Clear ${chat.title}`}
+          className={s.x}
+          onClick={() => {
+            lab.clear([chat.id])
+            if (current?.id === chat.id) setUi({ chat: null })
+          }}
+        />
+      )}
+    </span>
   )
-  return createPortal(
-    <>
-      <div className={s.strip}>
-        <div className={s.tabs} role="tablist" aria-label="Conversations">
-          <button
-            type="button"
-            role="tab"
-            aria-selected={current === null && open.starting === null}
-            className={`${s.chip} ${s.coordinator}`}
-            onClick={() => setUi({ chat: null, starting: null })}
-          >
-            <CoordinatorMark kind={mark} />
-            Coordinator
-          </button>
-          {recent.length > 0 && <span className={s.rule} aria-hidden />}
-          {open.starting !== null && (
-            <button type="button" role="tab" aria-selected className={s.chip}>
-              <span className={s.chipTitle}>New aside</span>
-            </button>
-          )}
-          {recent.map(tab)}
-        </div>
-        {old.length > 0 && (
-          <Menu
-            label="Older asides"
-            trigger={
-              <button type="button" className={s.chip}>
-                {old.length} older
+  const newTab = open.starting !== null && (
+    <span role="presentation" className={s.tab} data-selected>
+      <button type="button" role="tab" aria-selected className={s.chip}>
+        <span className={s.chipTitle}>New aside</span>
+      </button>
+    </span>
+  )
+  const coordinatorTab = (
+    <span role="presentation" className={s.tab} data-selected={onCoordinator || undefined}>
+      <button type="button" role="tab" aria-selected={onCoordinator} className={`${s.chip} ${s.coordinator}`} onClick={() => choose(null)}>
+        <CoordinatorMark kind={mark} />
+        Coordinator
+      </button>
+    </span>
+  )
+  const older = old.length > 0 && (
+    <Menu
+      label="Older asides"
+      trigger={
+        <button type="button" className={s.olderChip}>
+          {old.length} older
+        </button>
+      }
+      note="Untouched for over a week. Cleared, they still come up in ⌘K."
+    >
+      {old.map((chat) => (
+        <MenuItem key={chat.id} onSelect={() => choose(chat.id)}>
+          {chat.title}
+        </MenuItem>
+      ))}
+      <MenuItem onSelect={() => lab.clear(old.map((chat) => chat.id))}>Clear these {old.length}</MenuItem>
+    </Menu>
+  )
+  const plus = <IconButton icon="plus" size="small" label="New aside" kbd="⌘⇧N" onClick={startNew} />
+  const strip =
+    bar === 'title' ? (
+      // The conversation's title, as the old bar had it, and the asides off to its side, small.
+      <div className={s.strip} data-bar={bar}>
+        <div className={s.where}>
+          {onCoordinator ? (
+            <span className={s.whereName}>
+              <CoordinatorMark kind={mark} size={15} />
+              Coordinator
+            </span>
+          ) : (
+            <>
+              <button type="button" className={s.whereBack} onClick={() => choose(null)}>
+                <CoordinatorMark kind={mark} size={15} />
+                Coordinator
               </button>
-            }
-            note="Untouched for over a week. Cleared, they still come up in ⌘K."
-          >
-            {old.map((chat) => (
-              <MenuItem key={chat.id} onSelect={() => setUi({ chat: chat.id, starting: null })}>
+              <Icon name="chevron" size={12} className={s.whereSep} />
+              <span className={s.whereName} data-current>
+                <span className={s.chipTitle}>{current?.title ?? 'New aside'}</span>
+              </span>
+              {current !== null && moves(current)}
+            </>
+          )}
+        </div>
+        <div className={s.side} role="tablist" aria-label="Asides">
+          {onCoordinator && <span className={s.sideLabel}>Asides</span>}
+          {recent.map((chat) => (
+            <button
+              key={chat.id}
+              type="button"
+              role="tab"
+              aria-selected={current?.id === chat.id}
+              className={s.mini}
+              data-leaving={open.leaving.has(chat.id) || undefined}
+              onClick={() => choose(chat.id)}
+              title={chat.title}
+            >
+              {live(chat)}
+              <span className={s.chipTitle}>{chat.title}</span>
+            </button>
+          ))}
+          {older}
+          {plus}
+        </div>
+      </div>
+    ) : bar === 'switch' ? (
+      // One switch: who you are talking to, and the asides in its menu.
+      <div className={s.strip} data-bar={bar}>
+        <Menu
+          label="Conversations"
+          width={320}
+          trigger={
+            <button type="button" className={s.switch} {...(onCoordinator ? {} : { 'data-current': '' })}>
+              {onCoordinator ? (
+                <>
+                  <CoordinatorMark kind={mark} size={15} />
+                  <span className={s.switchName}>Coordinator</span>
+                </>
+              ) : (
+                <>
+                  <span className={s.switchAside}>Aside</span>
+                  <span className={s.switchName}>{current?.title ?? 'New aside'}</span>
+                </>
+              )}
+              <Icon name="chevronD" size={12} className={s.switchCaret} />
+            </button>
+          }
+        >
+          <MenuItem lead={<CoordinatorMark kind={mark} />} onSelect={() => choose(null)}>
+            Coordinator
+          </MenuItem>
+          <MenuSeparator />
+          <MenuGroup label="Asides">
+            {recent.map((chat) => (
+              <MenuItem key={chat.id} onSelect={() => choose(chat.id)} hint={when(chat.minutes)}>
                 {chat.title}
               </MenuItem>
             ))}
-            <MenuItem onSelect={() => lab.clear(old.map((chat) => chat.id))}>Clear these {old.length}</MenuItem>
-          </Menu>
+            {old.map((chat) => (
+              <MenuItem key={chat.id} onSelect={() => choose(chat.id)} hint="over a week">
+                {chat.title}
+              </MenuItem>
+            ))}
+            <MenuItem icon="plus" kbd="⌘⇧N" onSelect={startNew}>
+              New aside
+            </MenuItem>
+          </MenuGroup>
+          {old.length > 0 && (
+            <>
+              <MenuSeparator />
+              <MenuItem onSelect={() => lab.clear(old.map((chat) => chat.id))}>Clear {old.length} untouched for a week</MenuItem>
+            </>
+          )}
+        </Menu>
+        {current !== null && moves(current)}
+        {onCoordinator && recent.length > 0 && (
+          <span className={s.count}>
+            {recent.length} aside{recent.length === 1 ? '' : 's'}
+          </span>
         )}
-        <IconButton icon="plus" size="small" label="New aside" kbd="⌘⇧N" onClick={() => setUi({ chat: null, starting: { quote: null } })} />
+        {!onCoordinator && (
+          <button type="button" className={s.backLink} onClick={() => choose(null)}>
+            Back to the coordinator
+          </button>
+        )}
+        <span className={s.grow} />
+        {plus}
       </div>
+    ) : (
+      <div className={s.strip} data-bar={bar}>
+        <div className={s.tabs} role="tablist" aria-label="Conversations">
+          {coordinatorTab}
+          {recent.length > 0 && <span className={s.rule} aria-hidden />}
+          {newTab}
+          {recent.map(tab)}
+        </div>
+        {older}
+        {plus}
+      </div>
+    )
+  return createPortal(
+    <>
+      {strip}
       {current !== null && (
-        <div className={s.inTalk} data-aside>
-          <AsideFace key={current.id} chat={current} onWork={work} />
+        <div className={s.inTalk} data-aside data-bar={bar}>
+          <AsideFace key={current.id} chat={current} inner={inner} onWork={work} />
         </div>
       )}
       {open.starting !== null && (
-        <div className={s.inTalk} data-aside>
+        <div className={s.inTalk} data-aside data-bar={bar}>
           <Starting key={open.starting.quote ?? ''} quote={open.starting.quote} />
         </div>
       )}
       <Signatures kind={mark} root={talk} />
       <AskFromSelection root={talk} />
+      <Notes root={talk} />
     </>,
     talk,
   )

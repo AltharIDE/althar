@@ -119,7 +119,7 @@ function B() {
 
 function C() {
   const lab = useLab()
-  return <Asides mark={lab.mark} />
+  return <Asides mark={lab.mark} bar={lab.bar} inner={lab.inner} />
 }
 
 // ——— D: Chats, a tray over any screen, across projects ———

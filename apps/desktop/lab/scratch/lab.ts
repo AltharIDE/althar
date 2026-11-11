@@ -14,6 +14,27 @@ export const MARKS: ReadonlyArray<{ readonly kind: MarkKind; readonly label: str
   { kind: 'word', label: 'Word only' },
 ]
 
+/** How the asides' bar over the conversation looks (keys 4–8). */
+export type BarKind = 'pills' | 'tabs' | 'sheets' | 'title' | 'switch'
+
+export const BARS: ReadonlyArray<{ readonly kind: BarKind; readonly label: string }> = [
+  { kind: 'pills', label: 'Pills' },
+  { kind: 'tabs', label: 'Tabs' },
+  { kind: 'sheets', label: 'Sheets' },
+  { kind: 'title', label: 'Title + asides' },
+  { kind: 'switch', label: 'Switcher' },
+]
+
+/** How the bar inside an open aside looks (keys G H J K). */
+export type InnerKind = 'head' | 'tab' | 'composer' | 'context'
+
+export const INNERS: ReadonlyArray<{ readonly kind: InnerKind; readonly key: string; readonly label: string }> = [
+  { kind: 'head', key: 'G', label: 'Head row' },
+  { kind: 'tab', key: 'H', label: 'In the tab' },
+  { kind: 'composer', key: 'J', label: 'By the composer' },
+  { kind: 'context', key: 'K', label: 'Where it came from' },
+]
+
 export type Direction = 'A' | 'B' | 'C' | 'D' | 'E' | 'F'
 
 export interface DirectionOf {
@@ -36,6 +57,8 @@ export interface LabState {
   readonly direction: DirectionOf
   readonly room: Room
   readonly mark: MarkKind
+  readonly bar: BarKind
+  readonly inner: InnerKind
   readonly visit: number
   /** The task open in the window, by its thread; null for the project. */
   readonly open: string | null

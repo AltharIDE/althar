@@ -20,7 +20,7 @@ import type { BoardTask } from '@althar/contracts'
 
 import { card, coordinatorSnapshot, fakeClient, fakeHost, items, project, snapshot } from '../../tests/fixtures'
 import { boardOf, CHATS, type Chat, chatTask, coordinatorItems } from './data'
-import { type Direction, type LabState, LabContext, MARKS, type MarkKind, useLab } from './lab'
+import { type BarKind, BARS, type Direction, type InnerKind, INNERS, type LabState, LabContext, type MarkKind, useLab } from './lab'
 import { resetAsides } from './asides'
 import { DIRECTIONS, Overlay } from './directions'
 import s from './lab.module.css'
@@ -170,7 +170,10 @@ function Lab() {
   const [direction, setDirection] = useState<Direction>((params.get('d') as Direction | null) ?? 'C')
   const [room, setRoom] = useState<Room>(LAYOUTS[Number(params.get('l') ?? 0)]?.room ?? Room.Both)
   const [visit, setVisit] = useState(0)
-  const [mark, setMark] = useState<MarkKind>((params.get('m') as MarkKind | null) ?? 'althar')
+  // The mark is picked: Althar's.
+  const mark: MarkKind = (params.get('m') as MarkKind | null) ?? 'althar'
+  const [bar, setBar] = useState<BarKind>((params.get('b') as BarKind | null) ?? 'pills')
+  const [inner, setInner] = useState<InnerKind>((params.get('i') as InnerKind | null) ?? 'composer')
   const [theme, setTheme] = useState(params.get('theme') === 'dark' ? 'dark' : 'light')
   const [open, setOpen] = useState<string | null>(null)
   const [version, setVersion] = useState(0)
@@ -188,9 +191,10 @@ function Lab() {
     url.searchParams.set('d', direction)
     url.searchParams.set('l', String(LAYOUTS.findIndex((one) => one.room === room)))
     url.searchParams.set('theme', theme)
-    url.searchParams.set('m', mark)
+    url.searchParams.set('b', bar)
+    url.searchParams.set('i', inner)
     history.replaceState(null, '', url)
-  }, [direction, room, theme, mark])
+  }, [direction, room, theme, bar, inner])
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if (event.metaKey || event.ctrlKey || event.altKey) return
@@ -209,8 +213,10 @@ function Lab() {
         setVisit((n) => n + 1)
         setOpen(null)
       }
-      const marked = MARKS[Number(event.key) - 6]
-      if (marked !== undefined) setMark(marked.kind)
+      const barred = BARS[Number(event.key) - 4]
+      if (barred !== undefined) setBar(barred.kind)
+      const within = INNERS.find((one) => one.key === key)
+      if (within !== undefined) setInner(within.kind)
       if (key === 'T') setTheme((was) => (was === 'dark' ? 'light' : 'dark'))
     }
     window.addEventListener('keydown', onKey)
@@ -221,6 +227,8 @@ function Lab() {
       direction: DIRECTIONS.find((one) => one.key === direction)!,
       room,
       mark,
+      bar,
+      inner,
       visit,
       open,
       version,
@@ -252,7 +260,7 @@ function Lab() {
       },
     }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [direction, room, mark, visit, open, version],
+    [direction, room, mark, bar, inner, visit, open, version],
   )
   return (
     <LabContext.Provider value={state}>
@@ -291,13 +299,22 @@ function Lab() {
             ))}
           </span>
           {direction === 'C' && (
-            <span className={s.group}>
-              {MARKS.map((one, index) => (
-                <button key={one.kind} type="button" aria-pressed={mark === one.kind} onClick={() => setMark(one.kind)}>
-                  <kbd>{index + 6}</kbd> {one.label}
-                </button>
-              ))}
-            </span>
+            <>
+              <span className={s.group} aria-label="Bar">
+                {BARS.map((one, index) => (
+                  <button key={one.kind} type="button" aria-pressed={bar === one.kind} onClick={() => setBar(one.kind)}>
+                    <kbd>{index + 4}</kbd> {one.label}
+                  </button>
+                ))}
+              </span>
+              <span className={s.group} aria-label="Inner bar">
+                {INNERS.map((one) => (
+                  <button key={one.kind} type="button" aria-pressed={inner === one.kind} onClick={() => setInner(one.kind)}>
+                    <kbd>{one.key}</kbd> {one.label}
+                  </button>
+                ))}
+              </span>
+            </>
           )}
           <span className={s.group}>
             <button type="button" onClick={() => setTheme((was) => (was === 'dark' ? 'light' : 'dark'))}>
