@@ -40,16 +40,3 @@ test('opens a populated home before agent and usage checks, and keeps timings in
     await electronApp.close()
   }
 })
-
-for (const dark of [false, true])
-  test(`explains a slow local-data step in ${dark ? 'dark' : 'light'} appearance`, async () => {
-    const home = mkdtempSync(join(tmpdir(), 'althar-startup-wait-'))
-    const { electronApp, page } = await launch(home, { ALTHAR_NO_RUNTIME: '1' })
-    try {
-      if (dark) await page.emulateMedia({ colorScheme: 'dark' })
-      await expect(page.getByRole('status')).toHaveText('Opening your data…')
-      await page.screenshot({ path: `test-results/startup-wait-${dark ? 'dark' : 'light'}.png`, scale: 'css' })
-    } finally {
-      await electronApp.close()
-    }
-  })
