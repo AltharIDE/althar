@@ -6,7 +6,7 @@ import { Button, Field, type PartKind, PartLines, PartShots, Segmented, type Tas
 import { outcomeOf } from '../../shared/outcome'
 import { productBrand } from '../../shared/products'
 import s from './parts.module.css'
-import { startedPart, type StartedReading } from './Started'
+import { startedPart, type StartedEntry, type StartedReading } from './Started'
 
 /*
  * A task's parts, as its bar shows them (ADR-097, the 6 November direction
@@ -119,7 +119,7 @@ export const partsText = {
 
 export interface PartsActions {
   /** The tasks its lead started, with how the board has them now: a part of its own, listing each as the chip its thread has. */
-  readonly started?: { readonly tasks: ReadonlyArray<BoardTask>; readonly reading: StartedReading }
+  readonly started?: { readonly tasks: ReadonlyArray<StartedEntry>; readonly reading: StartedReading }
   readonly seeChanges: () => void
   /** The key that shows the changes too: ⌘D. */
   readonly changesKey?: string

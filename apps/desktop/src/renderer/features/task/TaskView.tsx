@@ -83,7 +83,7 @@ import { reachOf, reachText, ReviewCard, reviewedUnfurl } from './ReviewCard'
 import { usePostTeamReviews } from '../settings/usePostTeamReviews'
 import { HeldLimit } from './LimitCall'
 import { StuckCall } from './StuckCall'
-import { countsDown, StartedOf, type StartedReading, startedBy, useStartedBoard } from './Started'
+import { countsDown, StartedOf, type StartedReading, startedBy, startedIn, useStartedBoard } from './Started'
 import { TaskThread, workStepText } from './TaskThread'
 import { SmallChangeOf } from './SmallChangeOf'
 import { ModelMoveOf } from './ModelMoveOf'
@@ -591,6 +591,7 @@ export function TaskView({
   // The tasks its lead started, as the board has them: a chip where each was started, and a part of its own.
   const board = useStartedBoard(model.snapshot?.project.id)
   const started = startedBy(board, model.snapshot?.task.id)
+  const startedAll = startedIn(board, model.snapshot?.task.id, model.snapshot?.items ?? [])
   // A running turn says how long it has worked so far, a task under way how long it has run, and a run of it how long it has been up.
   const now = useNow(
     ticking(model.snapshot) ||
@@ -892,7 +893,7 @@ export function TaskView({
     board === null || onOpenTask === undefined ? null : { board, now, agents: model.agents, onOpen: onOpenTask }
   // Its parts, just before the faces: what it changed is in its worktree's, which opens the changes over the window (ADR-097).
   const partsActions: PartsActions = {
-    ...(reading === null || started.length === 0 ? {} : { started: { tasks: started, reading } }),
+    ...(reading === null || startedAll.length === 0 ? {} : { started: { tasks: startedAll, reading } }),
     seeChanges: () => changes.show(),
     changesKey: text.diffKey,
     ...(snapshot.task.worktree === null || editor === undefined

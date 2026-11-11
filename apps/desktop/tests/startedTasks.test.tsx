@@ -1,4 +1,4 @@
-import { render, screen, within } from '@testing-library/react'
+import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 
@@ -11,7 +11,7 @@ import { BoardView } from '../src/renderer/features/board/BoardView'
 import { lanesOf } from '../src/renderer/features/board/lanes'
 import { standsOf } from '../src/renderer/features/board/started'
 import { partsOf, type PartsActions } from '../src/renderer/features/task/parts'
-import { StartedOf, type StartedReading, startedBy } from '../src/renderer/features/task/Started'
+import { StartedOf, type StartedReading, startedBy, startedIn } from '../src/renderer/features/task/Started'
 import { TaskThread } from '../src/renderer/features/task/TaskThread'
 import { PartsDrill } from '@althar/ui'
 import { TaskView } from '../src/renderer/features/task/TaskView'
@@ -178,7 +178,9 @@ describe('the chip in the parent’s thread', () => {
 
 describe('the parent’s parts list the tasks it started', () => {
   const act = (read: StartedReading, tasks: ReadonlyArray<BoardTask>): PartsActions =>
-    ({ started: { tasks, reading: read } }) as unknown as PartsActions
+    ({
+      started: { tasks: tasks.map((work) => ({ threadId: work.threadId, title: work.title, work })), reading: read },
+    }) as unknown as PartsActions
 
   it('lists each with the same status, and is violet while one needs the person', async () => {
     const open = vi.fn()
@@ -214,6 +216,38 @@ describe('the parent’s parts list the tasks it started', () => {
     }
     expect(startedBy(board, 'p1').map((one) => one.taskId)).toEqual(['a', 'b'])
     expect(startedBy(null, 'p1')).toEqual([])
+  })
+})
+
+describe('the tasks a task started that the board no longer holds', () => {
+  const told = (threadId: string, title: string) =>
+    items.notice({ title: `Started “${title}”`, source: 'runtime', task: { taskId: threadId, slug: threadId, title, threadId } }, null)
+
+  it('still lists them from the thread, after those the board holds, once the board only keeps the latest settled', () => {
+    const board: BoardSnapshot = {
+      cursor: 1,
+      calls: [],
+      settledTotal: 90,
+      tasks: [child({ taskId: 'b', threadId: 'thb', startedBy: { taskId: 'p1', slug: 'p', title: 'P', threadId: 'thp1' } })],
+    }
+    const list = startedIn(board, 'p1', [told('tho', 'Settled long ago'), told('thb', 'Held by the board')])
+    expect(list.map((one) => [one.threadId, one.work === undefined])).toEqual([
+      ['tho', true],
+      ['thb', false],
+    ])
+  })
+
+  it('keeps the part, and the way into the task, when it is the only one and the board has dropped it', async () => {
+    const open = vi.fn()
+    const read = reading([])
+    const board = read.board
+    const entries = startedIn(board, 'p1', [told('tho', 'Settled long ago')])
+    const parts = partsOf(snapshot(), { started: { tasks: entries, reading: { ...read, onOpen: open } } } as unknown as PartsActions)
+    expect(parts.find((one) => one.id === 'started')).toMatchObject({ name: 'Tasks it started', detail: 'Settled' })
+    render(inServices(<PartsDrill parts={parts} kinds={[]} />))
+    await userEvent.click(screen.getByRole('button', { name: /Tasks it started/ }))
+    await userEvent.click(await screen.findByRole('button', { name: /Settled long ago/ }))
+    expect(open).toHaveBeenCalledWith('tho')
   })
 })
 
@@ -290,5 +324,37 @@ describe('in the parent’s own window', () => {
     const popover = within(await screen.findByRole('dialog', { name: 'This task’s parts' }))
     await userEvent.click(popover.getByRole('button', { name: /^Tasks it started/ }))
     expect(await popover.findByRole('button', { name: /Merged.*Review after merge/ })).toBeTruthy()
+  })
+
+  it('keeps one chip as the board moves, from working to merged, where the window reads it again', async () => {
+    let tasks = [child({ ...own, phase: 'running', kind: 'plain' })]
+    const { client } = fakeClient({
+      getThread: vi.fn(async () => parent),
+      getBoard: vi.fn(async () => ({ cursor: 1, calls: [], settledTotal: 0, tasks })),
+    })
+    const services = servicesFor(client)
+    render(
+      <ServicesProvider value={services}>
+        <Task onOpenTask={vi.fn()} />
+      </ServicesProvider>,
+    )
+    const chip = await screen.findByRole('button', { name: /Working.*Review after merge/ })
+    tasks = [child({ ...own, phase: 'settled', state: 'done', change: { ...passing, state: 'merged' } })]
+    await services.cache.invalidateQueries()
+    await waitFor(() => expect(within(chip).getByText('Merged')).toBeTruthy())
+    expect(screen.getByRole('button', { name: /Merged.*Review after merge/ })).toBe(chip)
+    expect(screen.getAllByRole('button', { name: /Review after merge/ })).toHaveLength(1)
+  })
+
+  it('lists the task from the thread in its parts when the board no longer holds it', async () => {
+    const { client } = fakeClient({
+      getThread: vi.fn(async () => parent),
+      getBoard: vi.fn(async () => ({ cursor: 1, calls: [], settledTotal: 90, tasks: [] })),
+    })
+    withServices(<Task onOpenTask={vi.fn()} />, client)
+    await userEvent.click(await screen.findByRole('button', { name: /^Parts, / }))
+    const popover = within(await screen.findByRole('dialog', { name: 'This task’s parts' }))
+    await userEvent.click(popover.getByRole('button', { name: /^Tasks it started/ }))
+    expect(await popover.findByRole('button', { name: /Settled.*Review after merge/ })).toBeTruthy()
   })
 })

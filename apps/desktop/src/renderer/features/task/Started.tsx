@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query'
 
-import type { AgentStatus, BoardSnapshot, BoardTask } from '@althar/contracts'
+import type { AgentStatus, BoardSnapshot, BoardTask, ThreadItem } from '@althar/contracts'
 import { StartedTask, TaskStatus, type TaskPartModel } from '@althar/ui'
 
 import { useServices } from '../../data/services'
@@ -30,6 +30,35 @@ export const startedBy = (board: BoardSnapshot | null, taskId: string | undefine
   board === null || taskId === undefined
     ? []
     : board.tasks.filter((task) => task.startedBy?.taskId === taskId).toSorted((a, b) => a.createdAt.localeCompare(b.createdAt))
+
+/** A task its lead started: where its thread says so, and as the board has it, where the board still holds it. */
+export interface StartedEntry {
+  readonly threadId: string
+  readonly title: string
+  readonly work: BoardTask | undefined
+}
+
+/**
+ * Every task a task's lead started, oldest first: those the board holds, and those its thread says it started that the board
+ * no longer does, because it only keeps the most recently settled (those say they settled, and still open).
+ */
+export const startedIn = (
+  board: BoardSnapshot | null,
+  taskId: string | undefined,
+  items: ReadonlyArray<ThreadItem>,
+): ReadonlyArray<StartedEntry> => {
+  if (board === null) return []
+  const held: ReadonlyArray<StartedEntry> = startedBy(board, taskId).map((work) => ({ threadId: work.threadId, title: work.title, work }))
+  const seen = new Set(held.map((one) => one.threadId))
+  const told: Array<StartedEntry> = []
+  for (const item of items) {
+    const task = item.kind === 'notice' ? item.content.task : undefined
+    if (task === undefined || seen.has(task.threadId)) continue
+    seen.add(task.threadId)
+    told.push({ threadId: task.threadId, title: task.title, work: undefined })
+  }
+  return [...told, ...held]
+}
 
 /** Whether a started task's chip counts down: it needs the clock to tick. */
 export const countsDown = (task: BoardTask) => task.phase === 'planned' && task.plan?.startsAt != null
@@ -79,8 +108,10 @@ export const startedPartText = {
  * The tasks its lead started, as one of its parts: what they stand at, in a few words, and each as the chip its thread
  * has, which opens it. Waiting on the person, the part is in their colour; else live while one is at work.
  */
-export const startedPart = (tasks: ReadonlyArray<BoardTask>, reading: StartedReading): TaskPartModel => {
-  const stands = tasks.map((work) => standsIn(work, reading))
+export const startedPart = (tasks: ReadonlyArray<StartedEntry>, reading: StartedReading): TaskPartModel => {
+  const stands = tasks.map((one) =>
+    one.work === undefined ? { tone: TaskStatus.Done, word: startedText.settled } : standsIn(one.work, reading),
+  )
   return {
     id: 'started',
     icon: 'agents',
@@ -93,8 +124,8 @@ export const startedPart = (tasks: ReadonlyArray<BoardTask>, reading: StartedRea
         : {}),
     body: (
       <>
-        {tasks.map((work) => (
-          <StartedOf key={work.taskId} threadId={work.threadId} title={work.title} reading={reading} />
+        {tasks.map((one) => (
+          <StartedOf key={one.threadId} threadId={one.threadId} title={one.title} reading={reading} />
         ))}
       </>
     ),
