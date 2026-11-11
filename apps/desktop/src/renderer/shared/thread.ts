@@ -1,14 +1,4 @@
-import type {
-  PresetParts,
-  AllowedBy,
-  AttachedFile,
-  FileMention,
-  Picture,
-  ShownPicture,
-  ThreadItem,
-  TurnTime,
-  Unfurl,
-} from '@althar/contracts'
+import type { AllowedBy, AttachedFile, FileMention, Picture, ShownPicture, ThreadItem, TurnTime, Unfurl } from '@althar/contracts'
 import { Delivery, headingOf, oneLine, PlanState, ToolKind, ToolState } from '@althar/ui'
 
 import { type Handed, handedBy, type OutputSoFar, type PartHanded, type Ran, ranOf } from './handed'
@@ -105,8 +95,6 @@ export type Part =
       readonly id: string
       readonly text: string
       readonly tone: 'info' | 'warning' | 'error'
-      /** Parts the person set up twice, which the coordinator offers to keep as a preset (a task is a conversation plus parts). */
-      readonly offer?: { readonly name: string; readonly parts: PresetParts }
       /** For an agent's turn that failed: why, as the runtime classes it (`auth_required`…), and the agent's own words, apart. */
       readonly failure?: string
       readonly detail?: string
@@ -174,14 +162,6 @@ export type Block =
       readonly spent: Spent | null
     }
   | { readonly kind: 'divider'; readonly id: string; readonly text: string }
-  /** What the coordinator offers to keep, such as parts set up twice as a preset (a task is a conversation plus parts): its line and button. */
-  | {
-      readonly kind: 'offer'
-      readonly id: string
-      readonly text: string
-      readonly detail: string | null
-      readonly offer: { readonly name: string; readonly parts: PresetParts }
-    }
   | {
       readonly kind: 'step'
       readonly id: string
@@ -501,15 +481,6 @@ const partOf = (
           failure,
           ...(description === null ? {} : { detail: description }),
         }
-      if (item.content.offer !== undefined)
-        return {
-          kind: 'notice',
-          id: item.id,
-          text: title,
-          tone: severity,
-          offer: { name: item.content.offer.name, parts: item.content.offer.parts },
-          ...(description === null ? {} : { detail: description }),
-        }
       return { kind: 'notice', id: item.id, text: noticeText(item.content), tone: severity }
     }
     case 'pictures':
@@ -778,17 +749,6 @@ export const blocksOf = (
       case 'notice':
         // A restart is Althar's business, not the person's; earlier versions said so in the thread.
         if (item.content.source === 'runtime' && item.content.title === RESTARTED) continue
-        // What Althar offers to keep, such as a preset, stands on its own with its button.
-        if (item.content.offer !== undefined) {
-          blocks.push({
-            kind: 'offer',
-            id: item.id,
-            text: item.content.title,
-            detail: item.content.description,
-            offer: { name: item.content.offer.name, parts: item.content.offer.parts },
-          })
-          continue
-        }
         // What Althar itself says, such as a change of agent, is a line across the thread.
         if (item.content.source === 'runtime') {
           blocks.push({ kind: 'divider', id: item.id, text: noticeText(item.content) })

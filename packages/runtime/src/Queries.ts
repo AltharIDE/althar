@@ -89,7 +89,7 @@ import { commitOf, commitsAhead, commitsOf, git, gitOutcome, indexStamp, namedRe
 import { reachedRemote } from './sshHosts'
 import { commandIn, shortCommand } from './rules'
 import { reviewBriefOf } from './Reviews'
-import { partsOfPlan, presetOf, presetsIn } from './presets'
+import { partsOfPlan, presetOf, presetOfferOn, presetsIn } from './presets'
 import { Sessions } from './Sessions'
 import { spendingOf } from './Spending'
 import { timingsFrom } from './turnTimes'
@@ -104,6 +104,9 @@ import { actionsOf, standingOf } from './Tasks'
  * client that watches from there sees every change after, and at worst one
  * it already has.
  */
+
+/** A card's offer of a preset, as its content takes it: none where there is none. */
+const offering = <A>(presetOffer: A | undefined) => (presetOffer === undefined ? {} : { presetOffer })
 
 /** Session states in which a session is working on its thread. */
 const LIVE = ['starting', 'active', 'waiting_approval', 'cancelling']
@@ -646,6 +649,8 @@ export const itemOf = (row: ItemRow): ThreadItem | undefined => {
       // Older threads kept the agent's explanation of a refusal as a notice; the refused call's own row says it now.
       const title = text(content, 'title')
       if (title === 'Resumed after a rejection.') return undefined
+      // The coordinator's offer of a preset, as a line of its own, from before its task's card offered it: the card says it now.
+      if (field(content, 'offer') !== undefined) return undefined
       // A session's line of skills that said nothing new, kept for its list only: it never reaches the window.
       if (role === 'skills' && field(content, 'hidden') === true) return undefined
       // Likewise the coordinator's receipt of a denial, kept by older threads.
@@ -2663,6 +2668,8 @@ export class Queries extends Context.Service<
             ...(round?.state === 'unchecked' ? { conflictUnchecked: round.why } : {}),
             ...(phase === 'kept' ? { keptAt: task.keptAt } : {}),
             automation: yield* fromAutomation(taskId),
+            // Its parts, offered to keep as a preset, while they are.
+            ...offering(yield* presetOfferOn(task.projectId, taskId)),
           } satisfies Extract<ThreadItem, { kind: 'task' }>['content']
         })
 

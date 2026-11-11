@@ -1944,11 +1944,6 @@ export const NoticeItem = Schema.Struct({
         thread: Schema.optional(Schema.String),
       }),
     ),
-    /**
-     * What the line offers to keep, in the coordinator's thread (a task is a conversation plus parts, "Presets"): parts the
-     * person set up twice, as a preset by that name, which its button saves.
-     */
-    offer: Schema.optional(Schema.Struct({ kind: Schema.Literal('preset'), name: Schema.String, parts: PresetParts })),
     /** For what a lead's agent could see: each skill, and whether it is the person's or the repository's. */
     skills: Schema.optional(
       Schema.Array(Schema.Struct({ name: Schema.String, path: Schema.String, from: Schema.Literals(['person', 'repository']) })),
@@ -2555,6 +2550,20 @@ export const TaskCard = Schema.Struct({
   reordered: Schema.optional(Schema.Boolean),
   /** The automation whose run it is, where one started it; null or absent otherwise. */
   automation: Schema.optional(Schema.NullOr(FromAutomation)),
+  /**
+   * Its parts, offered to keep as a preset (a task is a conversation plus parts, "Presets"): parts the person set up
+   * themselves a few times, by a name in plain words, which Keep saves from this task. `near`: a built-in preset they
+   * are but for one thing, said instead of a new one. `kept`: the preset kept from it, which Undo removes. Absent where
+   * nothing was offered on it, or the person said not to.
+   */
+  presetOffer: Schema.optional(
+    Schema.Struct({
+      name: Schema.String,
+      parts: PresetParts,
+      near: Schema.optional(Schema.Struct({ preset: Schema.String, differs: Schema.String })),
+      kept: Schema.optional(Schema.Struct({ id: Schema.String, name: Schema.String })),
+    }),
+  ),
 })
 export type TaskCard = typeof TaskCard.Type
 
@@ -4754,6 +4763,8 @@ export const Api = RpcGroup.make(
   ),
   /** Removes one of the person's presets; a built-in one stays. */
   command('RemovePreset', { id: Schema.String }, Schema.Void),
+  /** Says not to offer a task's parts as a preset: its card stops offering them, and they aren't offered again. */
+  command('DeclinePresetOffer', { taskId: Schema.String }, Schema.Void),
   /** Edits one of the person's presets, from Settings: its name, its parts, and whether it is kept to its task's project. */
   command(
     'EditPreset',
