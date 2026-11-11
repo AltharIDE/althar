@@ -3,10 +3,13 @@ import { expect, fn, userEvent, within } from 'storybook/test'
 
 import { TaskKind, TaskStatus } from '../../foundations/vocabulary'
 import {
+  CHANGE_BRANCH_PICTURES,
   CHANGE_CONFLICT,
   CHANGE_CHECKS_RUNNING,
   CHANGE_IN_MERGE_QUEUE,
   CHANGE_PERMISSION,
+  CHANGE_PR_PICTURES,
+  CHANGE_REPLIED_PICTURES,
   CHANGE_QUESTION,
   CHANGE_QUEUED,
   CHANGE_QUEUED_MIDWAY,
@@ -676,3 +679,15 @@ export const StartedByALead: Story = {
 
 export const ErrandWaiting: Story = { args: { ...CHANGE_READY, errands: ['Waiting for #1187: checks at 9b50d2c.'] } }
 export const ErrandPaused: Story = { args: { ...CHANGE_READY, errands: ['Paused for #1187: changes requested.'] } }
+
+/** A branch and no pull request: its lead's pictures above the branch chip, not instead of it. */
+export const BranchWithPictures: Story = {
+  args: CHANGE_BRANCH_PICTURES,
+  play: async ({ canvasElement }) => {
+    const card = within(canvasElement)
+    await expect(card.getByLabelText('Pictures')).toBeVisible()
+    await expect(card.getByText(/\+1126/)).toBeVisible()
+  },
+}
+export const PullRequestWithPictures: Story = { args: CHANGE_PR_PICTURES }
+export const RepliedWithPictures: Story = { args: CHANGE_REPLIED_PICTURES }

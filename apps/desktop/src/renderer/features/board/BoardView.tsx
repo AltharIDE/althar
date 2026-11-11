@@ -388,6 +388,39 @@ const findingsOf = (reviewing: ReviewBrief) => {
 /** The card's own props, without how it opens. */
 type Card = Omit<BoardCardProps, 'onOpen' | 'current' | 'text'>
 
+/** What a task handed back, as its card shows it: a row of pictures, or else a few files; nothing where it handed back none. */
+const handedOf = (work: Pick<BoardTask, 'handed'>) => {
+  const pictures = (work.handed?.pictures ?? []).flatMap((picture, index) =>
+    picture.digest === null
+      ? []
+      : [{ id: `${index}-${picture.digest}`, src: pictureUrl(picture.digest, true), name: picture.name ?? text.picture(index + 1) }],
+  )
+  const files = work.handed?.files ?? []
+  return pictures.length > 0 ? (
+    <Thumbs pictures={pictures.slice(0, HANDED_SHOWN)} />
+  ) : files.length > 0 ? (
+    <FileChips files={files.slice(0, HANDED_SHOWN)} />
+  ) : null
+}
+
+/** A card with what its task handed back beside its branch or pull request chip, in every state and kind: never in place of it. */
+const withHanded = (work: Pick<BoardTask, 'handed'>, card: Card): Card => {
+  const handed = handedOf(work)
+  if (handed === null) return card
+  return {
+    ...card,
+    object:
+      card.object === undefined || card.object === null ? (
+        handed
+      ) : (
+        <div className={s.chips}>
+          {handed}
+          {card.object}
+        </div>
+      ),
+  }
+}
+
 /** The automation whose run a task is, as its card says it, quietly. */
 /** Where it came from, at its foot: the automation whose run it is, or the task whose lead started it (ADR-097). */
 const fromOf = (work: BoardTask): Pick<Card, 'from' | 'startedBy'> => ({
@@ -397,7 +430,7 @@ const fromOf = (work: BoardTask): Pick<Card, 'from' | 'startedBy'> => ({
 
 /** A running task's card: its step and its track, or Working; its branch or pull request; and why it stands still, where it does. */
 export const runningCardOf = (work: BoardTask, now: string, name: (id: string | null) => string, actions?: CardActions): Card => {
-  const card = runningCard(work, now, name)
+  const card = withHanded(work, runningCard(work, now, name))
   // Stopped, or its lead not yet started, with a conflict not asked of it: why, in place of its foot, and Resolve now.
   if (work.conflictUnsent != null) return { ...card, ...unsentOf(work, work.conflictUnsent, actions) }
   if (work.conflictUnchecked != null) return { ...card, foot: <Fact tone="warm">{work.conflictUnchecked}</Fact> }
@@ -485,7 +518,10 @@ const runningCard = (work: BoardTask, now: string, name: (id: string | null) => 
  * branch is one line under that, not why it waits: Carry on tells the lead to merge it in first.
  */
 export const stoppedCardOf = (work: BoardTask, now: string, actions?: CardActions): Card => {
-  const card = runningCard(work, '', () => '')
+  const card = withHanded(
+    work,
+    runningCard(work, '', () => ''),
+  )
   const sendBack = actions?.sendBack
   const merges = work.mergeable === true && work.change?.state === 'open' && actions !== undefined
   const { at: _, ...rest } = card
@@ -565,7 +601,7 @@ export const waitingCardOf = ({ task, call }: Waiting, name: (id: string | null)
       : call.stuck.step === 'publish' && call.stuck.why !== 'not_connected'
         ? stuckText.publishing(call.stuck)
         : stuckText.what(call.stuck, name(call.stuck.agentId) || 'The agent')
-  return {
+  return withHanded(task, {
     ...base,
     word: callKindOf(call),
     at: ago(call.createdAt),
@@ -575,14 +611,16 @@ export const waitingCardOf = ({ task, call }: Waiting, name: (id: string | null)
       : {}),
     // A question's one step is to answer it, in its task.
     ...(call.kind === 'question' ? { next: <NextStep signal>{text.answer}</NextStep> } : {}),
-  }
+  })
 }
 
 /**
  * A ready task's card: a change to accept, with its pull request and checks; a review drafted; or a plain task that finished, with
  * what it handed back, or else its branch, where its lead wrote in the repository: on this Mac, as no pull request is coming.
  */
-export const readyCardOf = (work: BoardTask, actions?: CardActions): Card => {
+export const readyCardOf = (work: BoardTask, actions?: CardActions): Card => withHanded(work, readyCard(work, actions))
+
+const readyCard = (work: BoardTask, actions?: CardActions): Card => {
   const base = { status: TaskStatus.Yours, kind: kindOf(work), ...localOf(work), ...towardOf(work), title: work.title, ...fromOf(work) }
   // What its review after a merge found comes first: the person's Fix it or Leave it, for the change that merged.
   if (work.afterMerge?.state === 'found')
@@ -599,28 +637,18 @@ export const readyCardOf = (work: BoardTask, actions?: CardActions): Card => {
   }
   switch (work.kind) {
     case 'plain': {
-      const pictures = (work.handed?.pictures ?? []).flatMap((picture, index) =>
-        picture.digest === null
-          ? []
-          : [{ id: `${index}-${picture.digest}`, src: pictureUrl(picture.digest, true), name: picture.name ?? text.picture(index + 1) }],
-      )
-      const files = work.handed?.files ?? []
       const ways = settleWaysOf(work, actions)
       return {
         ...base,
         word: text.finished,
         ...(ways === null ? {} : { corner: ways }),
-        ...(pictures.length > 0
-          ? { object: <Thumbs pictures={pictures.slice(0, HANDED_SHOWN)} /> }
-          : files.length > 0
-            ? { object: <FileChips files={files.slice(0, HANDED_SHOWN)} /> }
-            : work.branch !== null && !empty(work.changed)
-              ? {
-                  object: (
-                    <BranchChip name={work.branch} {...(work.changed === null ? {} : { add: work.changed.add, del: work.changed.del })} />
-                  ),
-                }
-              : {}),
+        ...(work.branch !== null && !empty(work.changed)
+          ? {
+              object: (
+                <BranchChip name={work.branch} {...(work.changed === null ? {} : { add: work.changed.add, del: work.changed.del })} />
+              ),
+            }
+          : {}),
       }
     }
     case 'review': {
