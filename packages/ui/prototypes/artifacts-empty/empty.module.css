@@ -1,0 +1,221 @@
+/* Scrappy: each direction's empty Artifacts. */
+
+/* ——— A, C, D: in the middle of the empty ground ——— */
+
+.middle {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  padding: clamp(56px, 16vh, 150px) 0 40px;
+}
+
+.round {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  margin-bottom: 16px;
+  border-radius: 50%;
+  background: var(--n-1);
+  box-shadow: inset 0 0 0 1px var(--line);
+  color: var(--t-3);
+}
+
+.title {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.35;
+  color: var(--t-1);
+}
+
+.line {
+  max-width: 380px;
+  margin: 5px 0 0;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--t-3);
+}
+
+.actions {
+  margin-top: 16px;
+}
+
+/* ——— B: the table waiting ——— */
+
+.heads {
+  display: flex;
+  padding: 0 10px 8px;
+  border-bottom: 1px solid var(--line-2);
+  font-size: 11px;
+  font-weight: 550;
+  color: var(--t-3);
+}
+
+.headsRight {
+  margin-left: auto;
+}
+
+.slot {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 52px;
+  margin: 6px 0;
+  padding: 0 10px;
+  border-radius: 10px;
+  outline: 1px dashed var(--line-3);
+  outline-offset: -1px;
+}
+
+.slotGlyph {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  background: var(--n-1);
+  box-shadow: inset 0 0 0 1px var(--line);
+  color: var(--t-3);
+}
+
+.slotWords {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.slotTitle {
+  font-size: 13px;
+  font-weight: 550;
+  color: var(--t-1);
+}
+
+.slotLine {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  color: var(--t-3);
+}
+
+.ghost {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 52px;
+  padding: 0 10px;
+  border-bottom: 1px solid var(--line);
+}
+
+.ghostGlyph {
+  flex: none;
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  background: var(--n-1);
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+
+.ghostBar,
+.ghostWhen {
+  height: 8px;
+  border-radius: 4px;
+  background: var(--n-1);
+}
+
+.ghostWhen {
+  width: 44px;
+  margin-left: auto;
+}
+
+/* ——— C: the coordinator's composer ——— */
+
+.composer {
+  width: 100%;
+  max-width: 520px;
+  margin-top: 20px;
+  text-align: left;
+}
+
+.starters {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 6px;
+  max-width: 520px;
+  margin-top: 12px;
+}
+
+.starter {
+  height: 26px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 13px;
+  background: var(--n-1);
+  box-shadow: inset 0 0 0 1px var(--line);
+  font: inherit;
+  font-size: 12px;
+  color: var(--t-2);
+  cursor: pointer;
+  transition: background var(--fast) var(--ease);
+}
+
+.starter:hover {
+  background: var(--paper);
+  color: var(--t-1);
+}
+
+/* ——— D: three kinds, drawn small ——— */
+
+.tiles {
+  display: flex;
+  justify-content: center;
+  gap: 12px;
+  margin-bottom: 22px;
+}
+
+.tile {
+  margin: 0;
+  font-size: 11px;
+  font-weight: 550;
+  color: var(--t-3);
+}
+
+.tileArt {
+  width: 120px;
+  height: 84px;
+  margin-bottom: 7px;
+  border-radius: 10px;
+  background: var(--paper);
+  box-shadow:
+    inset 0 0 0 1px var(--line),
+    var(--shadow);
+}
+
+.tileArt svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.ink1 {
+  fill: var(--n-3);
+}
+
+.ink2 {
+  fill: var(--n-4);
+}
+
+.ink3 {
+  fill: color-mix(in oklab, var(--t-4) 55%, transparent);
+}
+
+.stroke {
+  fill: none;
+  stroke: var(--n-5);
+  stroke-width: 1.5;
+}
