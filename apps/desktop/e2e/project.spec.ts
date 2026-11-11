@@ -63,10 +63,13 @@ test('renames a project, adds and leaves out a repository, and removes it, all w
     await expect(
       page.locator('header', { has: page.getByRole('heading', { name: 'Refunds v2', level: 1 }) }).locator('[data-ink]'),
     ).toHaveAttribute('data-ink', 'rose')
+    await page.screenshot({ path: 'test-results/project-settings-general.png', animations: 'disabled' })
+
     // Tasks: each switch says when it acts. Leads resolve conflicts unless the person turns it off (ADR-092).
+    await projectSettings(page, 'Tasks')
     await expect(page.getByRole('switch', { name: 'Resolve merge conflicts automatically' })).toBeChecked()
     await expect(page.getByRole('switch', { name: 'Move issues along with their tasks' })).toBeChecked()
-    await page.screenshot({ path: 'test-results/project-settings-general.png', animations: 'disabled' })
+    await page.screenshot({ path: 'test-results/project-settings-tasks.png', animations: 'disabled' })
 
     // A repository added, with its role, and where its work goes; GitHub connected from there; then left out again.
     await projectSettings(page, 'Code and issues')

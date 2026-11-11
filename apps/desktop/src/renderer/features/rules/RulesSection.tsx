@@ -1,3 +1,5 @@
+import type { ComponentProps } from 'react'
+
 import {
   type AgentStatus,
   type CommandRule,
@@ -23,7 +25,10 @@ import {
 } from '@althar/ui'
 import {
   type CommandPlace,
+  type AskKind,
+  type AskPlace,
   ProjectRules,
+  ProjectTaskRules,
   type RestMode,
   type RuleCommand,
   type SandboxList,
@@ -108,7 +113,33 @@ const KINDS = [
   RuleKind.DeleteBranch,
   RuleKind.Deploy,
   RuleKind.Outside,
+  RuleKind.Speak,
 ] as const
+
+/**
+ * The kinds of what can't be undone, as What asks lists them, by the rule
+ * kinds each stands for (ADR-097). Deleting outside the task is lost work
+ * too, but its kind is all writing outside the worktree, which goes ahead:
+ * it keeps asking, and isn't made Never with the rest.
+ */
+export const ASK_RULES: Readonly<Record<AskKind, ReadonlyArray<ProjectRulesView['never'][number]>>> = {
+  history: ['default-branch', 'force-push', 'many-branches', 'delete-branch'],
+  publish: ['deploy'],
+  speak: ['speak'],
+}
+
+/** Where a kind of what can't be undone sits: Never once every rule kind of it is never allowed. */
+export const askPlaceOf = (rules: ProjectRulesView, kind: AskKind): AskPlace =>
+  ASK_RULES[kind].every((each) => rules.never.includes(each)) ? 'never' : 'asks'
+
+/** The rule lists with a kind of what can't be undone moved: to Never, off the others; back, on to what asks. */
+export const listsWithAsk = (rules: ProjectRulesView, kind: AskKind, place: AskPlace) => {
+  const moved = new Set<string>(ASK_RULES[kind])
+  const off = (list: ProjectRulesView['never']) => list.filter((each) => !moved.has(each))
+  return place === 'never'
+    ? { never: [...off(rules.never), ...ASK_RULES[kind]], alwaysAsk: off(rules.alwaysAsk), alwaysAllow: off(rules.alwaysAllow) }
+    : { never: off(rules.never), alwaysAsk: [...off(rules.alwaysAsk), ...ASK_RULES[kind]], alwaysAllow: off(rules.alwaysAllow) }
+}
 
 /** What a tally counts, as the kit names it: one of the kinds by its own name, or the rest by theirs. */
 const tallyKindOf = (kind: TallyKind): KitTallyKind =>
@@ -320,7 +351,6 @@ export const agentAccountsOf = (agents: ReadonlyArray<AgentStatus>) =>
 export function RulesSection({ model }: { model: RulesModel }) {
   const { rules } = model
   const project = model.project ?? ''
-  const example = text.example(project)
   return (
     <>
       {model.error !== null && (
@@ -369,45 +399,6 @@ export function RulesSection({ model }: { model: RulesModel }) {
               })
               return undefined
             }}
-            end={endOf(rules.end)}
-            onEndChange={(end) => model.change({ end: endsAs(end) })}
-            branches={{
-              value: rules.branchPattern,
-              onChange: (pattern) => model.setPattern('branch', pattern),
-              error: model.patternErrors.branch,
-              exampleOf: (pattern) => fillPattern(pattern, example),
-              fallback: OWN.branch,
-              repositories: namingOf(rules, 'branch'),
-            }}
-            titles={{
-              value: rules.titlePattern,
-              onChange: (pattern) => model.setPattern('title', pattern),
-              error: model.patternErrors.title,
-              exampleOf: (pattern) => fillPattern(pattern, example),
-              fallback: OWN.title,
-              repositories: namingOf(rules, 'title'),
-            }}
-            templates={rules.conventions.map((repository) => ({
-              id: repository.repository,
-              name: repository.repository,
-              path: repository.template,
-            }))}
-            limit={limitOf(rules.usageLimit)}
-            onLimitChange={(limit) => model.change({ usageLimit: usageLimitOf(limit) })}
-            agentAccounts={agentAccountsOf(model.agents)}
-            rotate={rules.rotateAccounts}
-            onRotateChange={(rotateAccounts) => model.change({ rotateAccounts })}
-            allowed={rules.onlyAccounts ?? {}}
-            onAllowedChange={(agentId, ids) => {
-              const every = model.agents.find((agent) => agent.id === agentId)?.accounts.length ?? 0
-              model.change((now) => {
-                const { [agentId]: _, ...others } = now.onlyAccounts ?? {}
-                const only = ids.length === every ? others : { ...others, [agentId]: ids }
-                return {
-                  onlyAccounts: Object.keys(only).length === 0 ? null : only,
-                }
-              })
-            }}
             sandbox={{
               commands: rules.sandbox.commands,
               hosts: rules.sandbox.hosts,
@@ -433,9 +424,86 @@ export function RulesSection({ model }: { model: RulesModel }) {
               ...each,
               kind: tallyKindOf(each.kind),
             }))}
+            // With everything else allowed, what asks is what can't be undone, and the person's own commands (ADR-097).
+            {...(rules.allowEverything
+              ? {
+                  whatAsks: {
+                    places: {
+                      history: askPlaceOf(rules, 'history'),
+                      publish: askPlaceOf(rules, 'publish'),
+                      speak: askPlaceOf(rules, 'speak'),
+                    },
+                    onChange: (kind: AskKind, place: AskPlace) => model.change((now) => listsWithAsk(now, kind, place)),
+                    onAskMore: () => model.change({ allowEverything: false }),
+                  },
+                }
+              : {})}
           />
         </>
       )}
     </>
+  )
+}
+
+/**
+ * What a project's task does when it is finished and when an agent's usage runs out, as its rules say it: the Finished and
+ * Limits sentences, which sit in its Tasks.
+ */
+export function TaskRules({
+  model,
+  headingLevel,
+  show,
+}: {
+  model: RulesModel
+  headingLevel: ComponentProps<typeof ProjectTaskRules>['headingLevel']
+  show?: ComponentProps<typeof ProjectTaskRules>['show']
+}) {
+  const { rules } = model
+  const example = text.example(model.project ?? '')
+  if (rules === null) return null
+  return (
+    <ProjectTaskRules
+      headingLevel={headingLevel}
+      {...(show === undefined ? {} : { show })}
+      end={endOf(rules.end)}
+      onEndChange={(end) => model.change({ end: endsAs(end) })}
+      branches={{
+        value: rules.branchPattern,
+        onChange: (pattern) => model.setPattern('branch', pattern),
+        error: model.patternErrors.branch,
+        exampleOf: (pattern) => fillPattern(pattern, example),
+        fallback: OWN.branch,
+        repositories: namingOf(rules, 'branch'),
+      }}
+      titles={{
+        value: rules.titlePattern,
+        onChange: (pattern) => model.setPattern('title', pattern),
+        error: model.patternErrors.title,
+        exampleOf: (pattern) => fillPattern(pattern, example),
+        fallback: OWN.title,
+        repositories: namingOf(rules, 'title'),
+      }}
+      templates={rules.conventions.map((repository) => ({
+        id: repository.repository,
+        name: repository.repository,
+        path: repository.template,
+      }))}
+      limit={limitOf(rules.usageLimit)}
+      onLimitChange={(limit) => model.change({ usageLimit: usageLimitOf(limit) })}
+      agentAccounts={agentAccountsOf(model.agents)}
+      rotate={rules.rotateAccounts}
+      onRotateChange={(rotateAccounts) => model.change({ rotateAccounts })}
+      allowed={rules.onlyAccounts ?? {}}
+      onAllowedChange={(agentId, ids) => {
+        const every = model.agents.find((agent) => agent.id === agentId)?.accounts.length ?? 0
+        model.change((now) => {
+          const { [agentId]: _, ...others } = now.onlyAccounts ?? {}
+          const only = ids.length === every ? others : { ...others, [agentId]: ids }
+          return {
+            onlyAccounts: Object.keys(only).length === 0 ? null : only,
+          }
+        })
+      }}
+    />
   )
 }

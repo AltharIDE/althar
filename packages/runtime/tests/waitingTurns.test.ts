@@ -20,7 +20,7 @@ import { Runs } from '../src/Runs'
 import * as Runtime from '../src/Runtime'
 import { Sessions } from '../src/Sessions'
 import { Tasks } from '../src/Tasks'
-import { atReset, items, later, onTestClock, repository, runtime, until } from './support'
+import { atReset, items, later, onTestClock, repository, runtime, until, withWork } from './support'
 
 /*
  * Work waiting for a place among the agents at work (Busy.ts), where
@@ -53,7 +53,10 @@ const started = (
       envelope: yield* Runtime.envelope('task.create', { title }),
       projectId,
       title,
-      description,
+      description: withWork(
+        description,
+        steps.some((step) => step.key === 'review'),
+      ),
       draft: true,
     })
     const planId = yield* plans.propose({

@@ -30,8 +30,7 @@ jobs:
       - uses: actions/setup-node@v5
         with:
           node-version-file: .node-version
-      - run: bun install --frozen-lockfile
-        working-directory: .
+      - uses: ./.github/actions/electron
       - run: bun run package
       - name: Install, check and uninstall
         run: bash scripts/windows-smoke.sh

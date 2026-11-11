@@ -113,6 +113,10 @@ describe('what came of a run', () => {
     expect(runWords(automationRun())).toBe('Review #264')
     expect(runWords(automationRun({ subject: null }))).toBe('Review #264')
     expect(runWords(automationRun({ subject: null, task: null }))).toBe('Made something')
+    // A run that went to another plan says so after what it made, and whatever its ending.
+    expect(runWords(automationRun({ reason: 'OpenCode Go refused its sign-in, so its lead ran on Claude Code.' }))).toBe(
+      'Review #264 · OpenCode Go refused its sign-in, so its lead ran on Claude Code.',
+    )
     expect(runWords(automationRun({ subject: null, task: null, reason: 'Found 2 new pull requests; 1 more waits' }))).toBe(
       'Found 2 new pull requests; 1 more waits',
     )

@@ -6,7 +6,16 @@ import { Cause, Option } from 'effect'
 
 import { thisDevice } from './device'
 import type { AccountRefused } from './Accounts'
-import type { CantMerge, DocumentRefused, FileRefused, ImageRefused, NoChangeToOpen, ProjectRefused, TaskRefused } from './errors'
+import type {
+  CantMerge,
+  DocumentRefused,
+  FileRefused,
+  ImageRefused,
+  NoChangeToOpen,
+  ProjectRefused,
+  ShipRefused,
+  TaskRefused,
+} from './errors'
 import { NOTE_LENGTH, type NoteRefused, NOTES_KEPT } from './notes'
 import { MESSAGE_IMAGES } from './pictures'
 import { pushDetailOf, secondsOf } from './pushFailure'
@@ -130,6 +139,11 @@ export const agentSaid = (error: unknown): string | undefined => {
     // An agent that couldn't start: the sentence Althar wrote when it failed, or nothing where there was none to say.
     case 'SessionFailed':
       return text(error, 'summary')
+    // What the fast lane couldn't do, as it was written for the person.
+    case 'FastLaneRefused':
+    case 'MergeReviewRefused':
+    case 'ChangeRefused':
+      return text(error, 'message')
     default:
       return undefined
   }
@@ -162,6 +176,9 @@ const kinds: Readonly<Record<string, string>> = {
   document: 'document',
   file: 'file',
   note: 'note',
+  preset: 'preset',
+  helper: 'helper',
+  change: 'change',
 }
 
 /** What went wrong, for the window: the error's tag as its reason, and words for the person. */
@@ -337,9 +354,16 @@ export const words = (
       }
       case 'NoChangeToOpen':
         return (noChangeToOpen[text(error, 'why') as NoChangeToOpen['why']] ?? noChangeToOpen.working)(text(error, 'detail'))
+      case 'ShipRefused':
+        return shipRefused[text(error, 'why') as ShipRefused['why']] ?? shipRefused.working
       case 'LaunchRefused':
       case 'AttachRefused':
       case 'ReviewRefused':
+      case 'FastLaneRefused':
+      case 'MergeReviewRefused':
+      case 'ChangeRefused':
+      // A tool's refusal, said as the agents' tools say it: Keep them together and Drop it, from the window, are those tools'.
+      case 'ToolRefused':
       case 'ScreenshotsRefused':
         return text(error, 'message')
       case 'AutomationRefused':
@@ -380,6 +404,7 @@ export const words = (
         return fieldOf(error, 'keyring') === true && reason !== '' ? reason : "Althar's runtime couldn't do that. Its log has the details."
       }
       case 'SkillRefused':
+      case 'ServerRefused':
         return sentence(text(error, 'message'))
       case 'CliSignedOut':
         return `${text(error, 'tool')} isn't signed in to ${text(error, 'host')} on ${thisDevice()}.`
@@ -481,6 +506,7 @@ const cantMerge = {
     `Your ${into} checkout has ${files.length === 1 ? 'an untracked file' : 'untracked files'} in the way: ${fewOf(files)}.`,
   moved: ({ detail }) => `${detail} moved meanwhile. Merge again.`,
   missing: ({ detail }) => `${thisDevice().replace(/^t/, 'T')} has no ${detail} branch to merge into.`,
+  nothing: ({ into }) => `Its work is already in ${into}: there's nothing to merge.`,
 } as const satisfies Record<CantMerge['why'], (said: MergeSaid) => string>
 
 /** Why a task has no pull request to open, by reason, with the files it concerns where it says them. */
@@ -494,6 +520,13 @@ const noChangeToOpen = {
   conflicts: (files: string) =>
     `It conflicts with the default branch${files === '' ? '' : `, in ${files}`}. Ask the lead to merge the default branch in, then open the pull request again.`,
 } as const satisfies Record<NoChangeToOpen['why'], (detail: string) => string>
+
+/** Why a task can't ship as asked, by reason (a task is a conversation plus parts, "A tweak waits for Ship"). */
+const shipRefused = {
+  held: 'These commits wait for Ship, which runs the review first.',
+  working: 'The task is at work. Ship once it’s done.',
+  nothing: 'Nothing waits to ship.',
+} as const satisfies Record<ShipRefused['why'], string>
 
 /** Why a task can't be abandoned, reopened or renamed, by reason. */
 const taskRefused = {
@@ -538,7 +571,11 @@ const reviewIncomplete = {
 
 /** Errors the person caused or can put right; anything else is worth the log. */
 export const expected = new Set([
+  'ChangeRefused',
+  'MergeReviewRefused',
+  'ToolRefused',
   'SkillRefused',
+  'ServerRefused',
   'LaunchRefused',
   'AttachRefused',
   'ScreenshotsRefused',

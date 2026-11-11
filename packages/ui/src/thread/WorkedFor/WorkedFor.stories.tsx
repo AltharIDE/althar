@@ -143,6 +143,30 @@ export const SelfStarted: Story = {
   ),
 }
 
+/**
+ * A turn that spent most of its time on something other than its work names
+ * that part after how long it took, and opening it says where all of it went,
+ * before its steps (a task is a conversation plus parts).
+ */
+export const WhereItsTimeWent: Story = {
+  args: {
+    took: '4m',
+    most: '3m 10s waiting for a place',
+    spent: ['3m 10s waiting for a place', '8s starting', '30s thinking and writing', '12s running tools'],
+  },
+  play: async ({ canvasElement }) => {
+    const c = within(canvasElement)
+    const row = c.getByRole('button', { name: /Worked for 4m\s*· 3m 10s waiting for a place/ })
+    await userEvent.click(row)
+    await waitFor(() => expect(c.getByText(/8s starting · 30s thinking and writing/)).toBeVisible())
+  },
+}
+
+/** Where its time went with nothing else to open: the line opens to that alone. */
+export const OnlyWhereItsTimeWent: Story = {
+  args: { took: '1m 2s', children: undefined, spent: ['50s thinking and writing', '12s running tools'] },
+}
+
 export const AllStates: Story = {
   parameters: statesParameters,
   render: (args) => (
@@ -155,6 +179,17 @@ export const AllStates: Story = {
           node: <WorkedFor {...args} />,
         })),
         { state: 'open', node: <WorkedFor {...args} defaultOpen /> },
+        {
+          state: 'its time elsewhere',
+          node: (
+            <WorkedFor
+              {...args}
+              took="4m"
+              most="3m 10s waiting for a place"
+              spent={['3m 10s waiting for a place', '50s thinking and writing']}
+            />
+          ),
+        },
         { state: 'thinking', node: <WorkedFor {...args} live took="4s" now={<WorkNow>Thinking</WorkNow>} /> },
         {
           state: 'working',

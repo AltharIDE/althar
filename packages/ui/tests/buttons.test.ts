@@ -15,9 +15,13 @@ const PLAIN: Readonly<Record<string, string>> = {
   'dock/ListPeek/ListPeek.tsx': 'an entry of the list',
   'outputs/ArtifactCard/ArtifactCard.tsx': 'the card’s title, which opens it',
   'outputs/ChangeSet/ChangeSet.tsx': 'the line of its checks, which folds their list; a folder’s row, which folds its files',
+  'outputs/ChangeSet/MergeNeeds.tsx':
+    'the line of its checks among its needs, which folds their list; its met needs’ line, which folds them',
   'outputs/WhatItMade/WhatItMade.tsx': 'a picture, which opens full size',
   'thread/External/External.tsx': 'the row of an external call',
   'thread/FileArtifact/FileArtifact.tsx': 'the preview, which opens the file',
+  'thread/Canvas/CanvasLine.tsx': 'a canvas’s title and version in its line, which opens it beside the conversation',
+  'screens/Artifacts/Artifacts.tsx': 'an artifact’s row, the whole of which opens it',
   'chrome/ProjectSwitcher/ProjectSwitcher.tsx': 'the switcher’s trigger and its project rows',
   'home/SinceRow/SinceRow.tsx': 'what happened, stretched over its row',
   'home/NeedLine/NeedLine.tsx': 'the call’s title, which opens its task',
@@ -36,6 +40,11 @@ const PLAIN: Readonly<Record<string, string>> = {
     'the disk’s legend, the whole of which opens the list of folders; a folder’s row, which opens its task',
   'thread/Reviewer/Reviewer.tsx': 'a finding’s row, which opens it under its line in the code',
   'thread/Reviewer/FindingNote.tsx': 'a finding’s title, which opens it under its line in the code',
+  'chrome/TaskParts/TaskParts.tsx':
+    'the parts’ marks in the bar, the whole of which opens them; a part’s row or chip, which opens it in place; Add and Back, a popover’s own head',
+  'setup/ToolTiles/ToolParts.tsx':
+    'a dashed tile, the whole of which adds one; a role’s round switch with its name under it; a project’s mark and name, pressed in or out',
+  'setup/ToolTiles/AddServerDialog.tsx': 'an agent’s mark and name, pressed in or out, as a project’s are',
   /* opens and closes what is below it */
   'thread/Reasoning/Reasoning.tsx': 'the row that folds the reasoning',
   'outputs/Usage/Usage.tsx': 'the card’s head, which folds its lines',
@@ -82,6 +91,8 @@ const PLAIN: Readonly<Record<string, string>> = {
   'home/Island/Island.tsx': 'the mark and the count, on the notch’s black',
   'board/NextRow/NextRow.tsx': 'Start, in a held row’s line, in the line’s own place, words and colour while the row is pointed at',
   'board/SettleWays/SettleWays.tsx': 'Done and the pin in a task’s header, segments of the chip that says where it stands',
+  'board/ScratchShelf/ScratchShelf.tsx': 'a chat on Scratch, the whole of its row, its title, last words and when, which opens it',
+  'coordinator/TaskLaunch/TaskLaunch.tsx': 'the preset, the kicker’s first word in the kicker’s own type, which opens the others',
   /* close to a primitive, not yet moved onto one */
   'chrome/BackCrumb/BackCrumb.tsx': 'a ChromeButton that is never pressed',
 }

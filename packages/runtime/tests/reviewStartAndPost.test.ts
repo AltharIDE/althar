@@ -46,6 +46,63 @@ const pullRequest = (at: { readonly working: string; readonly bare: string }, gi
   return github.addPullRequest({ path: ['meridian', 'api'], title: 'Send back', author: 'ninemate', headSha: head })
 }
 
+/**
+ * A pull request that merged with a merge commit: its head is in main's
+ * history, after main moved on, so where it met main is not its head.
+ */
+const mergedPullRequest = (at: { readonly working: string; readonly bare: string }, github: FakeService) => {
+  git(at.working, 'checkout', '-q', '--detach', 'main')
+  const base = git(at.working, 'rev-parse', 'HEAD')
+  writeFileSync(join(at.working, 'send.ts'), 'export const sendBack = () => 1\n')
+  git(at.working, 'add', '.')
+  git(at.working, 'commit', '-q', '-m', 'Send back')
+  const head = git(at.working, 'rev-parse', 'HEAD')
+  git(at.working, 'checkout', '-q', 'main')
+  writeFileSync(join(at.working, 'README.md'), '# Meridian, later\n')
+  git(at.working, 'commit', '-q', '-am', 'Later')
+  const before = git(at.working, 'rev-parse', 'HEAD')
+  git(at.working, 'merge', '-q', '--no-ff', head, '-m', 'Merge send back')
+  const merged = git(at.working, 'rev-parse', 'HEAD')
+  git(at.working, 'push', '-q', at.bare, `${head}:refs/pull/1/head`, 'main:refs/heads/main')
+  const pull = github.addPullRequest({
+    path: ['meridian', 'api'],
+    title: 'Send back',
+    author: 'ninemate',
+    headSha: head,
+    state: 'merged',
+  })
+  return { pull, head, base, before, merged }
+}
+
+/**
+ * A pull request main only moved up to (a fast-forward), with another
+ * commit on main after it: no merge commit, so the host's base is where its
+ * change starts.
+ */
+const fastForwardedPullRequest = (at: { readonly working: string; readonly bare: string }, github: FakeService) => {
+  git(at.working, 'checkout', '-q', '--detach', 'main')
+  writeFileSync(join(at.working, 'send.ts'), 'export const sendBack = () => 1\n')
+  git(at.working, 'add', '.')
+  git(at.working, 'commit', '-q', '-m', 'Send back')
+  const head = git(at.working, 'rev-parse', 'HEAD')
+  const before = git(at.working, 'rev-parse', 'main')
+  git(at.working, 'checkout', '-q', 'main')
+  git(at.working, 'merge', '-q', '--ff-only', head)
+  writeFileSync(join(at.working, 'later.ts'), 'export const later = 1\n')
+  git(at.working, 'add', '.')
+  git(at.working, 'commit', '-q', '-m', 'Later')
+  git(at.working, 'push', '-q', at.bare, `${head}:refs/pull/1/head`, 'main:refs/heads/main')
+  const pull = github.addPullRequest({
+    path: ['meridian', 'api'],
+    title: 'Send back',
+    author: 'ninemate',
+    headSha: head,
+    baseSha: before,
+    state: 'merged',
+  })
+  return { pull, head, before }
+}
+
 /** A connected GitHub and the repository opened as a project. */
 const opened = (working: string) =>
   Effect.gen(function* () {
@@ -199,6 +256,60 @@ describe('a review, at its edges', () => {
       const [copy] = yield* sql<{ state: string; baseCommit: string | null }>`
         SELECT state, base_commit FROM workspaces WHERE task_id = ${started.taskId}`
       assert.deepStrictEqual(copy, { state: 'ready', baseCommit: main })
+    }).pipe(Effect.provide(withQueries(github)))
+  })
+
+  it.live('reads a merged change as it landed, not main’s own changes as reverted', () => {
+    const at = hosted()
+    const github = makeFakeService({ pushUrl: () => at.bare })
+    github.addRepository(['meridian', 'api'])
+    const { pull, head, base } = mergedPullRequest(at, github)
+    return Effect.gen(function* () {
+      const { projectId } = yield* opened(at.working)
+      const started = yield* (yield* Reviews).start({
+        envelope: yield* Runtime.envelope('review.start', {}),
+        projectId,
+        pullRequest: '#1',
+        lead: { agentId: 'claude-code', model: null },
+        afterMerge: true,
+      })
+      const sql = yield* SqlClient.SqlClient
+      const [reviewed] = yield* sql<{ head: string; baseCommit: string }>`
+        SELECT json_extract(snapshot, '$.head') AS head, json_extract(snapshot, '$.baseCommit') AS baseCommit
+        FROM external_links WHERE task_id = ${started.taskId} AND kind = 'review'`
+      // Its head against where it met main before the merge: main's own later work is not part of the change.
+      assert.deepStrictEqual([reviewed?.head, reviewed?.baseCommit], [head, base])
+      const [workspace] = yield* sql<{ path: string }>`SELECT path FROM workspaces WHERE task_id = ${started.taskId}`
+      assert.strictEqual(git(workspace?.path ?? '', 'rev-parse', 'HEAD'), head)
+      // Only what the pull request brought: main's own README change before the merge is not a reversion.
+      assert.deepStrictEqual(git(workspace?.path ?? '', 'diff', '--name-only', base).split('\n'), ['send.ts'])
+    }).pipe(Effect.provide(withQueries(github)))
+  })
+
+  it.live('reads a fast-forwarded change from the host’s base before the merge', () => {
+    const at = hosted()
+    const github = makeFakeService({ pushUrl: () => at.bare })
+    github.addRepository(['meridian', 'api'])
+    const { pull, head, before } = fastForwardedPullRequest(at, github)
+    return Effect.gen(function* () {
+      const { projectId } = yield* opened(at.working)
+      const started = yield* (yield* Reviews).start({
+        envelope: yield* Runtime.envelope('review.start', {}),
+        projectId,
+        pullRequest: '#1',
+        lead: { agentId: 'claude-code', model: null },
+        afterMerge: true,
+      })
+      const sql = yield* SqlClient.SqlClient
+      const [reviewed] = yield* sql<{ head: string; baseCommit: string }>`
+        SELECT json_extract(snapshot, '$.head') AS head, json_extract(snapshot, '$.baseCommit') AS baseCommit
+        FROM external_links WHERE task_id = ${started.taskId} AND kind = 'review'`
+      // No merge commit: its head is read from the host's base before the fast-forward.
+      assert.deepStrictEqual([reviewed?.head, reviewed?.baseCommit], [head, before])
+      const [workspace] = yield* sql<{ path: string }>`SELECT path FROM workspaces WHERE task_id = ${started.taskId}`
+      assert.strictEqual(git(workspace?.path ?? '', 'rev-parse', 'HEAD'), head)
+      // The commit main made after it is not part of the change.
+      assert.deepStrictEqual(git(workspace?.path ?? '', 'diff', '--name-only', before).split('\n'), ['send.ts'])
     }).pipe(Effect.provide(withQueries(github)))
   })
 })

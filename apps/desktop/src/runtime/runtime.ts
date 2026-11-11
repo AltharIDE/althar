@@ -5,6 +5,7 @@ import { join } from 'node:path'
 import type { Fetch } from '@althar/connectors'
 import { emitterPort } from '@althar/contracts'
 import type { EndpointRead } from '@althar/provider-adapters'
+import type { PageDone } from '@althar/runtime/pageBridge'
 import {
   AfterOpen,
   backupsIn,
@@ -15,6 +16,7 @@ import {
   Folders,
   Nudges,
   Secrets,
+  ToolServer,
   services,
   settledAmong,
   settling,
@@ -32,6 +34,7 @@ import { runtimeFacts, runtimeNames } from './facts'
 import { agentsLog, stdoutLogger } from './logging'
 import { type Device, deviceHere } from './onDevice'
 import { profileInUse } from './profileInUse'
+import { pagesWith } from './pages'
 import { screenshotsWith, type Taken } from './screenshots'
 import { sealingWith } from './sealing'
 import { openInBrowser, openInTerminal } from './terminal'
@@ -125,6 +128,9 @@ const secrets = Secrets.sealed(join(profile, 'secrets'), {
 /* Screenshots agents ask for, which the main process draws, with Chromium (screenshots.ts). */
 const screenshots = screenshotsWith((message) => parent.postMessage(message))
 
+/* What the lead and the coordinator ask of the page beside their conversation, which the main process answers (pages.ts). */
+const pages = pagesWith((message) => parent.postMessage(message))
+
 /** Code hosts and trackers are called over the app's own network, Chromium's (appFetch.ts). */
 const firstScreen = Deferred.makeUnsafe<void>()
 const opened = Effect.runPromise(Deferred.await(firstScreen))
@@ -164,13 +170,12 @@ const options = {
   artifactsRoot: join(profile, 'artifacts'),
   // Agents the person asked Althar to download, kept in the profile, never on their PATH.
   agentsRoot: join(profile, 'agents'),
-  // Skills a task's lead is given: the store in the profile, never in a project, seeded from the catalog the app ships.
-  ...(process.env.ALTHAR_SKILLS_CATALOG === undefined
-    ? {}
-    : { skills: { root: join(profile, 'skills'), catalog: process.env.ALTHAR_SKILLS_CATALOG } }),
+  // Skills a task's lead is given: the store in the profile, never in a project, of what the person added from GitHub. Althar ships none.
+  skills: { root: join(profile, 'skills') },
   openTerminal: openInTerminal,
   openUrl: openInBrowser,
   screenshot: screenshots.ask,
+  page: pages.ask,
   editors: {
     list: () =>
       device === undefined
@@ -187,6 +192,9 @@ const options = {
             path: device.path,
           }),
   },
+  // The person's own agents' settings, whose MCP servers and skills every role gets and sync keeps the same (ADR-097).
+  // ALTHAR_AGENT_HOME names another home for them, as a demo or a screenshot does, so the person's own aren't touched.
+  agentConfigs: { homeDir: process.env.ALTHAR_AGENT_HOME ?? homedir(), folder: join(profile, 'agent-sync') },
   appVersion: process.env.ALTHAR_APP_VERSION ?? '0.0.0',
   deviceName: hostname(),
   ...(agents === null ? {} : { agentStderr: agents.stderr }),
@@ -254,6 +262,12 @@ const program = Effect.gen(function* () {
           secrets: Secrets.memory(),
           // Nothing opens in Terminal while the tests drive the app.
           openTerminal: () => Effect.succeed(false),
+          // The person's agents' settings are a home of the profile's own, never this computer's.
+          agentConfigs: {
+            homeDir: process.env.ALTHAR_AGENT_HOME ?? join(profile, 'agent-home'),
+            folder: join(profile, 'agent-sync'),
+            env: {},
+          },
           openUrl: () => Effect.succeed(false),
           // How many agents work at once comes from the machine a test names (`cores,GB`), else a large one, never the one running them.
           busy: { machine: machineIn(process.env.ALTHAR_MACHINE) },
@@ -302,6 +316,8 @@ const program = Effect.gen(function* () {
   yield* Effect.logInfo('Startup profile').pipe(Effect.annotateLogs({ ...size, database_bytes: statSync(databaseIn(profile)).size }))
   isReady(context)
   parent.postMessage({ type: 'runtime-ready' })
+  // The ports the runtime listens on, which no canvas may reach (ADR-104).
+  parent.postMessage({ type: 'listening', ports: [Context.get(context, ToolServer).port] })
   yield* Effect.logInfo('Runtime ready').pipe(Effect.annotateLogs({ version: options.appVersion, pid: process.pid }))
   // What needs the person goes to the main process, which notifies them and keeps the Dock's count.
   yield* Effect.forkScoped(
@@ -425,6 +441,7 @@ parent.on('message', (message) => {
     answerSealed(data.requestId, data)
   }
   if (data?.type === 'screenshot-taken' && data.requestId !== undefined) screenshots.answer(data.requestId, data as Taken)
+  if (data?.type === 'page-done' && data.requestId !== undefined) pages.answer(data.requestId, data as PageDone)
   if (data?.type === 'first-screen') Effect.runSync(Deferred.succeed(firstScreen, undefined))
   if (data?.type === 'connect' && port !== undefined) accept(port)
   if (data?.type === 'allow-folder' && data.requestId !== undefined && data.path !== undefined) allowFolder(data.requestId, data.path)

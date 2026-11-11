@@ -221,7 +221,8 @@ describe('asking Codex’s app-server', () => {
       }
       expect(await readAgentUsage(agent, { home: { CODEX_HOME: '/accounts/work' }, now: () => NOW })).toEqual({
         kind: 'failed',
-        message: '||/accounts/work|string',
+        // The SSH agent is inherited (ADR-097); the provider key and the rest of the environment are not.
+        message: '|/tmp/agent.sock|/accounts/work|string',
       })
     } finally {
       delete process.env.ALTHAR_TEST_PROVIDER_KEY
@@ -372,17 +373,18 @@ describe('Claude Code’s rate-limit event', () => {
 })
 
 describe('the patch to Claude Code’s adapter', () => {
-  it('is applied: a rate-limit event is sent even before the turn’s first usage figure (claude-agent-acp #1127)', () => {
-    const adapter = join(
-      dirname(createRequire(import.meta.url).resolve('@agentclientprotocol/claude-agent-acp/package.json')),
-      'dist/acp-agent.js',
-    )
-    const code = readFileSync(adapter, 'utf8')
+  const dist = join(dirname(createRequire(import.meta.url).resolve('@agentclientprotocol/claude-agent-acp/package.json')), 'dist')
+
+  it('is applied: a refusal says why in the refused call’s own result', () => {
+    const code = readFileSync(join(dist, 'permissions', 'response.js'), 'utf8')
+    expect(code).toContain('althar/refusal')
+  })
+
+  it('needs no patch for a rate-limit event before the turn’s first usage figure: the adapter holds it for the next one (claude-agent-acp #1127)', () => {
+    const code = readFileSync(join(dist, 'v1', 'acp-agent.js'), 'utf8')
     const at = code.indexOf('case "rate_limit_event"')
     expect(at, 'the adapter handles the event').toBeGreaterThan(0)
-    const handler = code.slice(at, code.indexOf('case "conversation_reset"', at))
-    expect(handler).toContain('lastAssistantTotalUsage ?? session.contextUsedTokens ?? 0')
-    expect(handler).not.toContain('lastAssistantTotalUsage !== null')
+    expect(code.slice(at, code.indexOf('case "conversation_reset"', at))).toContain('pendingRateLimit = message.rate_limit_info')
   })
 })
 

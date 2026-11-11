@@ -379,6 +379,35 @@ describe('childEnvironment', () => {
     )
   })
 
+  it('inherits the person’s code-host sign-ins and SSH agent, while provider keys stay out', () => {
+    const signIns = {
+      GH_TOKEN: 'test-gh',
+      GITHUB_TOKEN: 'test-github',
+      GH_ENTERPRISE_TOKEN: 'test-enterprise',
+      GLAB_TOKEN: 'test-glab',
+      GITLAB_TOKEN: 'test-gitlab',
+      GH_CONFIG_DIR: '/tmp/gh',
+      GLAB_CONFIG_DIR: '/tmp/glab',
+      SSH_AUTH_SOCK: '/tmp/ssh-agent',
+      SSH_AGENT_PID: '123',
+      GIT_SSH_COMMAND: 'ssh -F /tmp/config',
+      GIT_CONFIG_GLOBAL: '/tmp/gitconfig',
+    }
+    assert.deepStrictEqual(
+      childEnvironment(
+        { command: 'agent', args: [] },
+        {
+          ...signIns,
+          ANTHROPIC_API_KEY: 'not-inherited',
+          OPENAI_API_KEY: 'not-inherited',
+          ALTHAR_DATABASE: '/private/db',
+        },
+        false,
+      ),
+      signIns,
+    )
+  })
+
   it('runs the bundled adapters on the Node the app names, else on the binary it runs on', () => {
     assert.strictEqual(
       adapterNode({ ALTHAR_NODE: '/Applications/Althar.app/Contents/Resources/node/bin/node' }),

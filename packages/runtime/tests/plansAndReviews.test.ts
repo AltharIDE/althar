@@ -141,6 +141,8 @@ describe('the rules a new project starts with', () => {
       assert.deepStrictEqual(yield* rulesOf(project.projectId), {
         source: 'mvp',
         alwaysAsk: [...(yield* rulesOf(project.projectId)).alwaysAsk],
+        // Everything is allowed but what can't be undone, from the start (ADR-097).
+        allowEverything: true,
       })
       assert.strictEqual((yield* rulesOf(project.projectId)).permissions, undefined)
     }).pipe(Effect.provide(runtime())),
@@ -151,21 +153,45 @@ describe('the rules a new project starts with', () => {
       const projects = yield* Projects
       const before = yield* projects.open({ envelope: yield* Runtime.envelope('project.open', {}), path: repository() })
       // Its rules exist from the moment it is made, whenever they are first read.
-      yield* setNewProjectDefaults({ permissions: 'coordinator', usageLimit: 'wait', rotateAccounts: true, end: 'ready' })
+      yield* setNewProjectDefaults({
+        usageLimit: 'wait',
+        rotateAccounts: true,
+        end: 'ready',
+        pushCommits: false,
+        postScreenshots: true,
+        resolveConflicts: false,
+        moveIssues: false,
+      })
       const after = yield* projects.open({ envelope: yield* Runtime.envelope('project.open', {}), path: repository() })
       const made = yield* rulesOf(after.projectId)
       assert.deepStrictEqual(
-        [made.source, made.permissions, made.usageLimit, made.accounts?.rotate, made.end],
-        ['defaults', 'coordinator', 'wait', true, 'ready'],
+        [
+          made.source,
+          made.usageLimit,
+          made.accounts?.rotate,
+          made.end,
+          made.pushCommits,
+          made.postScreenshots,
+          made.resolveConflicts,
+          made.moveIssues,
+        ],
+        ['defaults', 'wait', true, 'ready', false, true, false, false],
       )
       const earlier = yield* rulesOf(before.projectId)
       assert.deepStrictEqual(
-        [earlier.source, earlier.permissions, earlier.usageLimit, earlier.accounts, earlier.end],
-        ['mvp', undefined, undefined, undefined, undefined],
+        [earlier.source, earlier.usageLimit, earlier.accounts, earlier.end, earlier.pushCommits, earlier.postScreenshots],
+        ['mvp', undefined, undefined, undefined, undefined, undefined],
       )
       // And what the person changes in the project afterwards is the project's own, whatever the defaults say.
-      yield* setNewProjectDefaults({ permissions: 'ask' })
-      assert.strictEqual((yield* rulesOf(after.projectId)).permissions, 'coordinator')
+      yield* setNewProjectDefaults({ usageLimit: 'ask' })
+      assert.strictEqual((yield* rulesOf(after.projectId)).usageLimit, 'wait')
+      // A switch put back to what it is without one is forgotten, so a profile that chose nothing makes the same rules as always.
+      yield* setNewProjectDefaults({ pushCommits: true, postScreenshots: false, resolveConflicts: true, moveIssues: true })
+      const defaults = yield* newProjectDefaultsOf
+      assert.deepStrictEqual(
+        [defaults.pushCommits, defaults.postScreenshots, defaults.resolveConflicts, defaults.moveIssues],
+        [true, false, true, true],
+      )
     }).pipe(Effect.provide(runtime())),
   )
 })

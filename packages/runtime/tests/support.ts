@@ -1,9 +1,9 @@
 import { execFileSync } from 'node:child_process'
-import { cpSync, existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
+import { cpSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { basename, join } from 'node:path'
 
-import type { AgentDefinition, AgentId, SessionOptions } from '@althar/provider-adapters'
+import { type AgentDefinition, type AgentId, agents as registry, type SessionOptions } from '@althar/provider-adapters'
 import { codexLikeMeanings, fakeAgent, type FakeAgentOptions, fakeAgentMain } from '@althar/provider-adapters/testing'
 import { Clock, Duration, Effect, Layer } from 'effect'
 import { SqlClient } from 'effect/sql'
@@ -27,6 +27,8 @@ import {
   type StallOptions,
 } from '../src/Config'
 import type { CliUnanswered } from '../src/errors'
+import { Instance } from '../src/Instance'
+import { Policies } from '../src/Policies'
 import { Projects } from '../src/Projects'
 import * as Runtime from '../src/Runtime'
 import { ToolServer, type ToolAccess } from '../src/ToolServer'
@@ -83,7 +85,45 @@ export const launches: Array<{
   readonly cwd: string
   readonly env: Readonly<Record<string, string>>
   readonly options?: SessionOptions | undefined
+  /** For an agent given its skills by its environment, what the registry's own launch of it would carry. */
+  readonly launched?: Readonly<Record<string, string>> | undefined
 }> = []
+
+/** What each fake agent in this process was asked as a session started, as it received it: its added directories and `_meta`. */
+export const sessionsAsked: Array<{
+  readonly agentId: string
+  readonly params: Parameters<NonNullable<FakeAgentOptions['sessionAsked']>>[0]
+}> = []
+
+/** What the registry's launch reads of this machine for an agent's own config, set aside while it is made here. */
+const MACHINE_CONFIG = ['HOME', 'TMPDIR', 'XDG_CONFIG_HOME', 'OPENCODE_CONFIG', 'OPENCODE_CONFIG_DIR', 'OPENCODE_CONFIG_CONTENT'] as const
+
+/**
+ * The environment the registry's agent of this id would be launched with, from the same arguments, as `Agents.fromRegistry`
+ * composes it: for one given its skills through it, as OpenCode is, so a test sees the registry's own setting in that
+ * launch rather than a fake's. Only for a launch given skills, and in a home and a temporary folder of its own, removed
+ * after: the registry reads the agent's config from the home and makes a folder in the temporary one.
+ */
+const launchedEnv = (agentId: string, cwd: string, env: Readonly<Record<string, string>>, options: SessionOptions | undefined) => {
+  if (options?.skills === undefined || registry[agentId as AgentId]?.skills?.via.kind !== 'env') return undefined
+  const aside = mkdtempSync(join(tmpdir(), 'althar-registry-launch-'))
+  const before = MACHINE_CONFIG.map((name) => [name, process.env[name]] as const)
+  for (const name of MACHINE_CONFIG) delete process.env[name]
+  process.env.HOME = aside
+  process.env.TMPDIR = aside
+  try {
+    const made = Agents.fromRegistry()
+      .list.find((entry) => entry.definition.id === agentId)
+      ?.transport(cwd, env, options)
+    return made?._tag === 'Process' ? made.spec.env : undefined
+  } finally {
+    for (const [name, value] of before) {
+      if (value === undefined) delete process.env[name]
+      else process.env[name] = value
+    }
+    rmSync(aside, { recursive: true, force: true })
+  }
+}
 
 /** What each session of the fake agent with session options (`claude-code`) was started as: its role, and its options. */
 export const sessionMetas: Array<{ readonly role: 'lead' | 'reader' | undefined; readonly options: SessionOptions | undefined }> = []
@@ -140,29 +180,20 @@ export const definition = (
     ? {
         sessionMeta: (role?: 'lead' | 'reader', options?: SessionOptions) => {
           sessionMetas.push({ role, options })
-          return { fake: { asks: true } }
+          // Given skills, with Claude Code's own session options beside its own, so the plugin they name reaches the session.
+          return { ...(options?.skills === undefined ? {} : registry['claude-code'].sessionMeta?.(role, options)), fake: { asks: true } }
         },
         contains: () => fakeSandbox.contains,
         upFront: true as const,
       }
     : {}),
-  // Given a run's skills as the registry's agents of the same id are: in its session, as an added directory, in its environment; the rest none.
-  ...(id === 'claude-code'
-    ? { skills: { layout: 'claude-plugin' as const, capabilities: ['subagents'], via: { kind: 'meta' as const } } }
-    : id === 'codex'
-      ? { skills: { layout: 'agents' as const, capabilities: [], via: { kind: 'directory' as const } } }
-      : id === 'opencode'
-        ? {
-            skills: {
-              layout: 'plain' as const,
-              capabilities: ['subagents'],
-              via: { kind: 'env' as const, env: (folder: string) => ({ FAKE_SKILLS: folder }) },
-            },
-          }
-        : { skills: null }),
+  // Given a run's skills as the registry's agents of the same id are, by their own entries: in its session (Claude Code's
+  // options, above), as an added directory, in its environment (`launched` below); the rest none.
+  skills: registry[id as AgentId]?.skills ?? null,
   // Each may lead a review of a pull request from outside but `codex`, as the registry's Codex may not.
   reviewing: { outside: id !== 'codex' },
   knownGaps: [],
+  ownHelpers: { off: true, how: 'nothing of its own', kept: 'none' },
 })
 
 /**
@@ -186,7 +217,7 @@ export const fakeAgents = (
     (agentId: string): AgentEntry => ({
       definition: definition(agentId, signedOut, perUse, oneAccount, unsure),
       transport: (cwd, env = {}, session) => {
-        launches.push({ agentId, cwd, env, options: session })
+        launches.push({ agentId, cwd, env, options: session, launched: launchedEnv(agentId, cwd, env, session) })
         // As a real process, it carries whose work it is, as every agent does (machine.ts).
         const work = env[WORK]
         return agentId === 'process' || agentId === 'process-temp'
@@ -207,6 +238,7 @@ export const fakeAgents = (
                 _tag: 'InProcess',
                 agent: fakeAgent({
                   now: () => clock.currentTimeMillisUnsafe(),
+                  sessionAsked: (params) => void sessionsAsked.push({ agentId, params }),
                   ...options,
                   ...each[agentId],
                   ...each[`${agentId}@${env.FAKE_HOME === undefined ? 'usual' : basename(env.FAKE_HOME)}`],
@@ -328,14 +360,18 @@ export const runtime = (
     readonly idle?: IdleOptions
     /** The device outside a sandbox, as for a Flatpak. */
     readonly onDevice?: RuntimeOptions['onDevice']
-    /** The skills store and local catalog; no run has Althar-selected skills without it. */
+    /** The skills store; no run has Althar-selected skills without it. */
     readonly skills?: RuntimeOptions['skills']
+    /** The person's agents' settings, in a home of the test's own: none is read without it. */
+    readonly agentConfigs?: RuntimeOptions['agentConfigs']
     /** The machine how many agents are at work at once comes from; a large one unless a test says, so no test waits on the Mac it runs on. */
     readonly busy?: BusyOptions
     /** The keychain, kept across runtimes given the same one; else each its own. */
     readonly keychain?: Map<string, string>
     /** How a screenshot is taken, where a test takes one; without, none can be. */
     readonly screenshot?: RuntimeOptions['screenshot']
+    /** How the page beside a conversation is reached, where a test drives one; without, none can be. */
+    readonly page?: RuntimeOptions['page']
     /** The clock and zone automations are read by, and how often they are looked at. */
     readonly automations?: AutomationOptions
     /** The disk finished tasks' folders are on; a roomy one unless a test says, so no test removes them for the Mac it runs on being full. */
@@ -368,6 +404,7 @@ export const runtime = (
     checksAppear: more.checksAppear ?? Duration.zero,
     ...(more.checksStuck === undefined ? {} : { checksStuck: more.checksStuck }),
     publishAgain: more.publishAgain ?? Duration.zero,
+    ...(more.agentConfigs === undefined ? {} : { agentConfigs: more.agentConfigs }),
     betweenAgents: more.betweenAgents ?? Duration.zero,
     ...(more.stalls === undefined ? {} : { stalls: more.stalls }),
     ...(more.stopGrace === undefined ? {} : { stopGrace: more.stopGrace }),
@@ -383,6 +420,7 @@ export const runtime = (
     idle: { reports: Duration.millis(300), ...more.idle },
     ...(more.onDevice === undefined ? {} : { onDevice: more.onDevice }),
     ...(more.screenshot === undefined ? {} : { screenshot: more.screenshot }),
+    ...(more.page === undefined ? {} : { page: more.page }),
     ...(more.skills === undefined ? {} : { skills: more.skills }),
     busy: { machine: ROOMY, ...more.busy },
     ...(more.automations === undefined ? {} : { automations: more.automations }),
@@ -416,11 +454,14 @@ export const hosted = (path: ReadonlyArray<string> = ['meridian', 'api']) => {
   return { working, bare }
 }
 
-/** Opens a new repository as a project and creates a task in it. */
+/** Opens a new repository as a project, asking about more than what can't be undone, and creates a task in it. */
 export const task = (title = 'Retry checkout') =>
   Effect.gen(function* () {
     const projects = yield* Projects
     const project = yield* projects.open({ envelope: yield* Runtime.envelope('project.open', {}), path: repository() })
+    // Asking about more than what can't be undone, as these tests of asking were written for; a project allows everything else
+    // by default (ADR-097), which a test of that says itself.
+    yield* (yield* Policies).set(project.projectId, { allowEverything: false }, (yield* Instance).personId)
     const created = yield* projects.createTask({
       envelope: yield* Runtime.envelope('task.create', { title }),
       projectId: project.projectId,
@@ -556,6 +597,15 @@ export const toolsOf = (access: ToolAccess) =>
 /** The tools an agent with this access is offered, each with the description it reads. */
 export const toolDescriptions = (access: ToolAccess) =>
   Effect.map(toolsOf(access), (tools): Record<string, string> => Object.fromEntries(tools.map((tool) => [tool.name, tool.description])))
+
+/**
+ * A test task's description, with `[lead:edit]` where its plan has a review and it doesn't say otherwise: a task
+ * with nothing built runs no review, so a test about a review builds something first unless it asks for `[lead:nothing]`.
+ */
+export const withWork = (description: string, review: boolean) =>
+  review && !description.includes('[lead:edit]') && !description.includes('[lead:commit]') && !description.includes('[lead:nothing]')
+    ? `${description} [lead:edit]`
+    : description
 
 /** Calls one of Althar's tools as an agent with this access would: over MCP, with the session's token. */
 export const callTool = (access: ToolAccess, name: string, args?: Record<string, unknown>) =>

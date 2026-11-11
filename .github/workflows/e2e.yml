@@ -37,8 +37,7 @@ jobs:
       - uses: actions/setup-node@v5
         with:
           node-version-file: .node-version
-      - run: bun install --frozen-lockfile
-        working-directory: .
+      - uses: ./.github/actions/electron
       # Ubuntu 24.04 keeps unprivileged user namespaces from apps, and Chromium's sandbox needs them.
       - run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
       # The end-to-end tests run the built app, with the fake agent, on a virtual display, with a keyring:

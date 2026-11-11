@@ -1,0 +1,18 @@
+diff --git a/dist/permissions/response.js b/dist/permissions/response.js
+index 2b763db8700c12b859490858b1026373fcf84b6f..4871dc8f6657f6a3271f367a4c0ac537e701c919 100644
+--- a/dist/permissions/response.js
++++ b/dist/permissions/response.js
+@@ -12,8 +12,12 @@ export function decodeClaudePermissionResponse(response, toolName, input, toolUs
+         toolUseID,
+         durableChangeSet,
+     });
++    // Althar: a refusal says why in the refused call's own result, from the answer's _meta, rather than in a turn after the reply.
++    const refusal = response._meta?.["althar/refusal"];
+     return {
+-        permissionResult,
++        permissionResult: permissionResult.behavior === "deny" && typeof refusal === "string" && refusal !== ""
++            ? { ...permissionResult, message: refusal.slice(0, 8000) }
++            : permissionResult,
+         ...(selection.contextResetMode ? { contextResetMode: selection.contextResetMode } : {}),
+     };
+ }

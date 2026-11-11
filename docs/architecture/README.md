@@ -210,7 +210,9 @@ the concepts:
    compares relevant systems, records required architecture decisions, and
    states the evidence that would validate or invalidate the design.
 
-Decisions are recorded one per file in [`docs/decisions/`](../decisions/). The
+Decisions are recorded in [`docs/decisions/`](../decisions/README.md), one
+document per area: what is so and why. These architecture docs say how it is
+built, and link there for the rules rather than restating them. The
 words the interface uses are in [the glossary](../glossary.md), and what is
 still open is in [the open questions](../open-questions.md).
 
@@ -292,7 +294,7 @@ temporary, is in [docs/plans/mvp.md](../plans/mvp.md).
 The proof of concept is built to product standard, so it can become the
 product without a rewrite. Shortcuts are allowed in behaviour, never in
 recorded facts or data shapes
-([ADR-008](../decisions/008-shortcuts-in-behaviour-not-in-records.md)). If the
+([ADR-008](../decisions/foundations.md#recorded-facts-are-complete-behaviour-may-start-simple)). If the
 facts are recorded, smarter behaviour is a later change. If they are missing,
 the history cannot be recovered.
 
@@ -302,16 +304,16 @@ Decided:
 
 | Choice | Decision | Record |
 |---|---|---|
-| Agent protocol | ACP for every agent, behind Althar's adapter port, with native side channels and replacement adapters where ACP falls short | [ADR-002](../decisions/002-acp-for-every-agent.md) |
-| Agents in the MVP | Claude Code, Codex, and OpenCode, interchangeable | [ADR-002](../decisions/002-acp-for-every-agent.md) |
-| Shell | Electron, with the runtime in a utility process | [ADR-003](../decisions/003-electron-shell.md) |
-| Coordinator | An ordinary agent session with Althar's tools and read-only access | [ADR-004](../decisions/004-coordinator-is-an-agent-session.md) |
-| Starting context | Althar briefs every agent; switching agent hands over everything in the MVP | [ADR-005](../decisions/005-althar-briefs-every-agent.md) |
-| Workspaces | A git worktree per task, in `~/Althar/<project>/<task>/<repository>`; plain branches maybe later | [ADR-006](../decisions/006-worktree-per-task.md) |
-| Permissions | Every request reaches Althar and is answered from the project rules | [ADR-007](../decisions/007-permission-requests-reach-althar.md) |
-| Build standard | Shortcuts in behaviour, never in recorded facts or data shapes | [ADR-008](../decisions/008-shortcuts-in-behaviour-not-in-records.md) |
-| Runtime-side code | Effect 4, pinned; never in the UI kit | [ADR-009](../decisions/009-effect-on-the-runtime-side.md) |
-| Desktop app | MVVM: views, hooks as view models, an Effect data layer; feature folders; TanStack Router | [ADR-010](../decisions/010-desktop-app-mvvm.md) |
+| Agent protocol | ACP for every agent, behind Althar's adapter port, with native side channels and replacement adapters where ACP falls short | [ADR-002](../decisions/agents.md#acp-for-every-agent) |
+| Agents in the MVP | Claude Code, Codex, and OpenCode, interchangeable | [ADR-002](../decisions/agents.md#acp-for-every-agent) |
+| Shell | Electron, with the runtime in a utility process | [ADR-003](../decisions/foundations.md#the-shell-and-the-runtime) |
+| Coordinator | An ordinary agent session with Althar's tools and read-only access | [ADR-004](../decisions/coordinator.md#always-on) |
+| Starting context | Althar briefs every agent; switching agent hands over everything in the MVP | [ADR-005](../decisions/agents.md#briefs-and-switching-agent-or-model) |
+| Workspaces | A git worktree per task, in `~/Althar/<project>/<task>/<repository>`; plain branches maybe later | [ADR-006](../decisions/workspaces-and-runs.md#worktree) |
+| Permissions | Every request reaches Althar and is answered from the project rules | [ADR-007](../decisions/what-agents-may-do.md#how-a-request-reaches-althar) |
+| Build standard | Shortcuts in behaviour, never in recorded facts or data shapes | [ADR-008](../decisions/foundations.md#recorded-facts-are-complete-behaviour-may-start-simple) |
+| Runtime-side code | Effect 4, pinned; never in the UI kit | [ADR-009](../decisions/foundations.md#effect-on-the-runtime-side) |
+| Desktop app | MVVM: views, hooks as view models, an Effect data layer; feature folders; TanStack Router | [ADR-010](../decisions/foundations.md#the-desktop-apps-layers) |
 
 Still requiring sign-off. The architecture uses these recommended defaults:
 

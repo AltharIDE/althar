@@ -24,7 +24,7 @@ const electron = vi.hoisted(() => {
     breaksOnClose = false
     readonly listeners = new Map<string, Array<Listener>>()
     readonly navigationHistory = { canGoBack: () => false, canGoForward: () => false, goBack: () => {}, goForward: () => {} }
-    readonly debugger = { isAttached: () => false, attach: () => {}, detach: () => {}, sendCommand: async () => ({}) }
+    readonly debugger = { isAttached: () => false, attach: () => {}, detach: () => {}, sendCommand: async () => ({}), on: () => {} }
     readonly focus = vi.fn()
     setWindowOpenHandler() {}
     on(name: string, listener: Listener) {
@@ -67,6 +67,9 @@ const electron = vi.hoisted(() => {
       views.push(this)
     }
     setBounds() {}
+    getBounds() {
+      return { x: 0, y: 0, width: 640, height: 700 }
+    }
     setVisible(visible: boolean) {
       this.visible = visible
     }
@@ -81,6 +84,7 @@ const electron = vi.hoisted(() => {
       setPermissionRequestHandler: () => {},
       setPermissionCheckHandler: () => {},
       setDevicePermissionHandler: () => {},
+      webRequest: { onErrorOccurred: () => {}, onCompleted: () => {} },
       on: () => {},
       clearStorageData: vi.fn(async () => {}),
       clearCache: async () => {},
@@ -138,6 +142,9 @@ const started = () => {
     closed: vi.fn(),
     chrome: '130.0.0.0',
     agent: 'Mozilla/5.0 Chrome/130.0.0.0',
+    opened: vi.fn(),
+    windows: () => 1,
+    quitting: () => false,
   }
   return { pages: startPages(options), options }
 }

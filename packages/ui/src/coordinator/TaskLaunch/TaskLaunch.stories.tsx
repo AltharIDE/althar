@@ -8,6 +8,7 @@ import { CODEX, effortFor, model, OPUS, useModelPrefs } from '../../fixtures/mod
 import { ModelPick } from '../../composer/ModelPick/ModelPick'
 import { States } from '../../storybook/States'
 import { threadDecorator } from '../../storybook/ThreadFrame'
+import { Thread } from '../../thread/Thread/Thread'
 import { Turn } from '../../thread/Turn/Turn'
 import { You } from '../../thread/You/You'
 import { TaskEnd, WorksIn } from '../../foundations/vocabulary'
@@ -85,6 +86,30 @@ type Story = StoryObj<typeof meta>
 
 /** The plan, counting down once you can see it. Change an agent, skip an optional step, or pick what happens when it is done. */
 export const AboutToStart: Story = { render: () => <Launch /> }
+
+/** Its kicker names the preset its parts are first (a task is a conversation plus parts), in the kicker's own type. */
+export const NamesItsPreset: Story = { render: () => <Launch preset="Change" /> }
+
+const PRESETS = [
+  { name: 'Chat', about: 'a copy, no review, ends here, the coordinator picks its lead' },
+  { name: 'Change', about: 'a worktree, reviewed before it ships, a draft pull request, the coordinator picks its lead' },
+  { name: 'Small change', about: 'a worktree, reviewed after it merges, a pull request ready for review, the coordinator picks its lead' },
+  { name: 'Prototype', about: 'a worktree, reviewed after it merges, ends here, led by claude-opus-5-5' },
+]
+
+/** A press on the preset lists the others, each with what it holds: picking one changes the plan's parts to match. */
+export const PicksAnotherPreset: Story = {
+  render: function Render() {
+    const [preset, setPreset] = useState('Change')
+    return <Launch preset={preset} presets={PRESETS} onPresetChange={setPreset} />
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await userEvent.click(canvas.getByRole('button', { name: 'Change' }))
+    const body = within(canvasElement.ownerDocument.body)
+    await expect(await body.findByRole('menuitemradio', { name: /Prototype/ })).toBeVisible()
+  },
+}
 
 /** A review proposed with two agents can go down to one: the second's picker has Remove from this step. */
 export const OneReviewerInsteadOfTwo: Story = {
@@ -366,16 +391,18 @@ const PLAN_ASKED: LaunchStep[] = [
 /** Where a plan comes from: what you asked, the coordinator's answer, and the plan under it. */
 export const InTheConversation: Story = {
   render: () => (
-    <>
-      <You at="11:01">
-        Refunds created before PR 1184 have no idempotency key. Backfill them, and dry-run it on a copy before anything writes.
-      </You>
+    <Thread label="Conversation">
+      <You at="11:01">EU customers are seeing the wrong VAT rate on their invoice PDFs since Monday. Can you fix it?</You>
       <Turn voice="Coordinator" at="11:01">
-        One task. Opus 5 writes the backfill and its dry run, and Codex reviews it, since it writes to money records. It starts on its own
-        unless you change it.
+        One task. Opus 5 fixes the rate lookup and adds a test for each EU country, and Codex reviews it.
       </Turn>
-      <Launch plan={PLAN_ASKED} from={undefined} estimate="About 30 min · about $1 on your subscriptions" />
-    </>
+      <Launch
+        plan={PLAN_ASKED}
+        from={undefined}
+        title="Fix the VAT rate on EU invoice PDFs"
+        estimate="About 25 min · about $1 on your subscriptions"
+      />
+    </Thread>
   ),
 }
 

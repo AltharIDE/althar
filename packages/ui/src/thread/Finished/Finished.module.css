@@ -18,5 +18,5 @@
 }
 .done {
   flex: none;
-  color: var(--ok);
+  color: var(--ok-ink);
 }

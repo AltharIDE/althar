@@ -22,7 +22,7 @@
 }
 .chip[data-status='you'] {
   background: var(--signal-dim);
-  color: var(--signal);
+  color: var(--signal-ink);
 }
 .chip[data-status='running'] {
   background: var(--live-dim);
@@ -112,4 +112,10 @@
   padding-top: 8px;
   border-top: 1px solid var(--line);
   color: var(--t-3);
+}
+
+/* the task's parts, just before the faces */
+.parts {
+  display: inline-flex;
+  flex: none;
 }

@@ -1,11 +1,12 @@
 import { createContext, Fragment, useContext, useState, type ReactNode } from 'react'
 
-import type { FieldAnswer, Unfurl } from '@althar/contracts'
+import type { FieldAnswer, PresetParts, Unfurl } from '@althar/contracts'
 import {
   AltharLine,
   Arrived,
   CodeBlock,
   FailedLogs,
+  CanvasLine,
   Gallery,
   glyphOf,
   Issue,
@@ -26,6 +27,8 @@ import {
   WorkedFor,
   WorkNow,
   You,
+  McpAct,
+  McpServer,
 } from '@althar/ui'
 
 import { CommandOutput } from './CommandOutput'
@@ -36,7 +39,9 @@ import { documentVersions } from './handed'
 import { fileAttachments } from './files'
 import { sentAttachments } from './images'
 import { useModelNames } from './modelNames'
+import { useServices } from '../data/services'
 import { WayOut } from './WayOut'
+import { serverBrand } from './mcpServers'
 import { keyOf, pastedIn } from './pasted'
 import { RuleReceipt } from './RuleReceipt'
 import { SaidIn } from './code/CodeHost'
@@ -51,6 +56,8 @@ import type {
   ReviewDraftContent,
   Part,
   PushRequestContent,
+  ModelMoveContent,
+  SmallChangeContent,
   TaskAskContent,
   QuestionContent,
   RunContent,
@@ -59,6 +66,7 @@ import type {
   TaskCardContent,
 } from './thread'
 import s from './ThreadBlocks.module.css'
+import { duration, lineOf, spentWords } from './turnTime'
 
 /*
  * A thread's blocks as the kit draws them, the same in a task and in the
@@ -177,6 +185,38 @@ function SetupView({ setup }: { setup: SetupContent }) {
  * or the file it works on). One from before Althar kept output, too long for
  * its row, opens to show it whole.
  */
+/**
+ * What a round's calls to the person's MCP servers did outside, each a card
+ * under its work (ADR-097): what acted on the world stands out of what only
+ * read, which stays folded in the work.
+ */
+/** A canvas an agent drew or opened (ADR-104): its line, which opens it beside the conversation. */
+export function CanvasOf({ part }: { part: Extract<Part, { kind: 'canvas' }> }) {
+  const { canvas } = part
+  return (
+    <CanvasLine
+      data-item={part.id}
+      canvas={{ canvasId: canvas.canvasId, name: canvas.name, title: canvas.title, kind: canvas.canvasKind, version: canvas.version }}
+      action={canvas.action}
+      note={canvas.note}
+    />
+  )
+}
+
+/** The canvases a round drew or opened, each its line, in order. */
+export function CanvasLines({ drawn }: { drawn: ReadonlyArray<Extract<Part, { kind: 'canvas' }>> }) {
+  return drawn.map((part) => <CanvasOf key={part.id} part={part} />)
+}
+
+export function McpActs({ parts }: { parts: ReadonlyArray<Part> }) {
+  const acts = parts.flatMap((part) =>
+    part.kind === 'tool' && part.mcp?.acts === true && part.state === ToolState.Done ? [{ id: part.id, mcp: part.mcp }] : [],
+  )
+  return acts.map(({ id, mcp }) => (
+    <McpAct key={id} server={mcp.server} brand={serverBrand(mcp.server)} did={mcp.did} words={mcp.words} link={mcp.link} />
+  ))
+}
+
 /** Where Althar's lines under a call lead: the project's rules, an agent's sign-in. The host that can open them provides it. */
 export interface ThreadWays {
   readonly onRules?: () => void
@@ -226,6 +266,7 @@ function ToolView({ part, threadId }: { part: Extract<Part, { kind: 'tool' }>; t
       target={part.target}
       state={part.state}
       {...(part.toolKind === ToolKind.Run && part.skills !== undefined ? { meta: text.readSkill(part.skills.names) } : {})}
+      {...(part.mcp === undefined ? {} : { meta: <McpServer name={part.mcp.server} brand={serverBrand(part.mcp.server)} /> })}
       {...(part.why === undefined ? {} : { why: part.why })}
       {...(part.command === null ? {} : { copy: part.command })}
       {...(part.state === ToolState.Failed && part.exit !== null ? { exit: part.exit } : {})}
@@ -285,11 +326,35 @@ export function PartView({ part, threadId }: { part: Part; threadId: string }) {
         <>
           <p className={s[part.tone]}>{part.text}</p>
           {part.detail !== undefined && <p className={s.detail}>{part.detail}</p>}
+          {part.offer !== undefined && <PresetOffer offer={part.offer} />}
         </>
       )
     case 'pictures':
       return <Gallery shots={shotsOf(part.id, part.pictures)} />
+    case 'canvas':
+      return <CanvasOf part={part} />
   }
+}
+
+/** The coordinator's offer to keep parts the person set up twice as a preset: one press keeps it, by its name. */
+function PresetOffer({ offer }: { offer: { readonly name: string; readonly parts: PresetParts } }) {
+  const { client } = useServices()
+  const [kept, setKept] = useState<'no' | 'keeping' | 'kept'>('no')
+  if (kept === 'kept') return <p className={s.detail}>{`Kept as “${offer.name}”: Settings has your presets.`}</p>
+  return (
+    <LinkButton
+      disabled={kept === 'keeping'}
+      onClick={() => {
+        setKept('keeping')
+        client.savePreset({ name: offer.name, parts: offer.parts }).then(
+          () => setKept('kept'),
+          () => setKept('no'),
+        )
+      }}
+    >
+      {`Keep it as “${offer.name}”`}
+    </LinkButton>
+  )
 }
 
 /** What the person said, each link that unfurled read as its key where they pasted it; its card, under the words, says the rest. */
@@ -477,6 +542,8 @@ export function ThreadBlocks({
   review,
   automation,
   taskAsk,
+  smallChange,
+  modelMove,
   queued,
   retryable,
   onTryAgain,
@@ -520,6 +587,10 @@ export function ThreadBlocks({
   automation?: (automation: AutomationCardContent, itemId: string) => ReactNode
   /** Draws the coordinator's card asking to stop, hold, restart or settle a task, by its item, which answering it names. */
   taskAsk?: (ask: TaskAskContent, itemId: string) => ReactNode
+  /** Draws a small change's card, by its item, which Merge and Make it a full task name. */
+  smallChange?: (card: SmallChangeContent, itemId: string) => ReactNode
+  /** Draws Auto's line on moving the lead to a lighter model, by its item, which Keep and Undo name. */
+  modelMove?: (move: ModelMoveContent, itemId: string) => ReactNode
   /** What a message still waiting says: who reads it next. */
   queued?: string
   /** The runtime's retry eligibility, refreshed with the thread's head. */
@@ -582,6 +653,14 @@ export function ThreadBlocks({
             {block.text}
           </ThreadDivider>
         )
+      case 'offer':
+        return (
+          <div key={block.id} className={s.offer}>
+            <p className={s.info}>{block.text}</p>
+            {block.detail !== null && <p className={s.detail}>{block.detail}</p>}
+            <PresetOffer offer={block.offer} />
+          </div>
+        )
       case 'step':
         // A step's report is a task's, and its thread draws it in its rounds (TaskThread, ADR-042).
         return null
@@ -612,6 +691,10 @@ export function ThreadBlocks({
         return <Fragment key={block.id}>{automation?.(block.automation, block.id)}</Fragment>
       case 'task_ask':
         return <Fragment key={block.id}>{taskAsk?.(block.ask, block.id)}</Fragment>
+      case 'small_change':
+        return <Fragment key={block.id}>{smallChange?.(block.card, block.id)}</Fragment>
+      case 'model_move':
+        return <Fragment key={block.id}>{modelMove?.(block.move, block.id)}</Fragment>
       case 'setting':
         return <SettingChangeOf key={block.id} change={block.change} itemId={block.id} />
       case 'waiting':
@@ -636,7 +719,9 @@ export function ThreadBlocks({
           >
             {block.work.length > 0 && (
               <WorkedFor
-                took={block.took}
+                took={block.spent === null ? block.took : duration(block.spent.total)}
+                {...(block.spent === null ? {} : { spent: spentWords(block.spent) })}
+                {...(block.spent === null || lineOf(block.spent) === undefined ? {} : { most: lineOf(block.spent) })}
                 live={working}
                 {...(onTheWay.length === 0
                   ? {}

@@ -2,12 +2,124 @@
 
 Things we have not decided yet. They came up while designing the shell and the
 chat primitives. Tick one off when it is settled, and say where it was decided
-(an ADR, an architecture doc, a prototype). Newest at the top of each section.
+(the [decision document](decisions/README.md) it went into, an architecture
+doc, a prototype). Newest at the top of each section. Links to old ADRs lead
+to the decision document and section that now hold them.
 
 Leanings are only where we are now. None of them are decisions.
 
 "The kit" is `@althar/ui` (`packages/ui`). "The prototype" is the shell
 prototype in the `althar-designs` repository (`prototypes/shell`).
+
+## Left open by compacting the decisions, 8 November
+
+The [decision documents](decisions/README.md) record what's built and what
+was decided. These are what they leave open.
+
+**Tasks and the coordinator**
+
+- [x] **The Scratch shelf and presets.** Built: chats sit on Scratch, its own
+  shelf listing them by their latest exchange, and presets name a task's
+  starting parts ([tasks](decisions/tasks.md#chats-and-scratch)). Whether
+  Scratch offers to clear chats untouched for a while is still open.
+- [x] **Moving a running task.** Built: it moves between a worktree and Local,
+  and changes the branch it works toward, at any time
+  ([workspaces and runs](decisions/workspaces-and-runs.md#moving-a-running-task)).
+- [ ] **Keeping what agents hand back.** Nothing in the artifact store is
+  swept yet. How long each kind is kept, and a mark-and-sweep, are open
+  ([tasks](decisions/tasks.md#what-agents-hand-back)).
+- [ ] **The coordinator off Claude Code.** OpenCode and Windows have no
+  sandbox to hold it, so its copies and the reader rules are its boundary
+  there ([the coordinator](decisions/coordinator.md#its-copies-of-the-repositories)).
+- [x] **Helpers.** Built: handed a change or in a copy of their own, on any
+  agent, their results coming back as turns ([tasks](decisions/tasks.md#helpers)).
+  Kimi's, Qwen Code's and Junie's own background helpers stay on, as nothing
+  Althar owns switches them off.
+
+**What agents may do, and the person's setup**
+
+- [x] **"Run it" for an outside author's review.** Built: Run safely (a
+  lockfile install with scripts off, from the base branch's registries,
+  commands offline) or Trust fully ([reviews](decisions/reviews.md#run-it)).
+- [ ] **Claude Code's own memory.** ADR-097 turned it on; main still turns it
+  off, because it writes into the person's `~/.claude`
+  ([the person's setup](decisions/the-persons-setup.md#claude-codes-own-memory)).
+- [ ] **A repository's own `.mcp.json`.** It loads nowhere yet. Should it
+  load where the agent's own trust would load it?
+- [ ] **The keychain on a Mac.** Should the bundled Claude Code be patched so
+  its sandbox denies the keychain's service?
+- [ ] **An MCP broker.** Build one only if MCP calls are seen slipping past
+  the agents' own hooks.
+- [ ] **Skills per project.** There is no per-project choice of skills, and
+  Codex may drop skills over its budget without saying so.
+
+**Code hosts and trackers**
+
+- [ ] **The gated host and tracker calls.** `code_host_api` and
+  `tracker_api`, with a never list by family of paths, aren't built. Still
+  planned, or dropped? ([not built yet](decisions/code-hosts.md#not-built-yet))
+- [ ] **A red main.** Should a failing default branch start one fix task by
+  itself? Today the coordinator is only woken to read it.
+- [ ] **Posting a review and deleting a branch as tools.** `post_review` and
+  `delete_branch` on the person's word, and declining on Bitbucket Cloud.
+- [ ] **A lead's tags.** Should a lead's `push_tag` go ahead on the person's
+  word in its thread, rather than asking every time?
+- [ ] **A contributor's fork.** Attaching a fork's pull request, and pushing
+  to it where its author lets maintainers edit (DEV-170).
+- [ ] **The coordinator on the web.** Should it read the web under the
+  project's switch, as leads do?
+
+**Workspaces, runs and reviews**
+
+- [ ] **The setup line kept by hand.** A setup line kept with
+  `set_run_command` is still read after a recorded setup. Drop it, so the
+  recorded setup is the one way?
+- [ ] **Handing a running task between Local and a worktree** isn't built.
+- [ ] **Reviews of the team's own pull requests.** ADR-097 gives them a
+  worktree with setup, their code run in the sandbox, and the network. On
+  main their lead has every lead tool and the network, but still reads a
+  read-only copy and runs nothing of it; the rest waits on the
+  task-as-parts work
+  ([reviews](decisions/reviews.md#reviewing-someone-elses-pull-request)).
+- [ ] **Posting a review on the person's word in the thread.** Today it is
+  posted from its card, or by the project's setting for the team's reviews.
+
+**Foundations and agents**
+
+- [ ] **The local socket and Open at login.** Should the socket listen, and
+  Open at login be on, by default? ADR-048 leaned off; the listener isn't
+  built ([foundations](decisions/foundations.md#where-the-runtime-runs-and-who-may-reach-it)).
+- [ ] **A headless host's sign-ins** (DEV-119): share the desktop's sealed
+  sign-ins or keep its own. [ADR-103](decisions/proposed/103-projects-live-locally-or-on-a-host-and-place-work-in-pools.md)
+  holds it now.
+- [ ] **Outside reviews on more agents.** ADR-082 planned running offline
+  reviews of outside authors' pull requests on agents beyond Claude Code and
+  OpenCode. It fits keeping those reviews offline; it isn't planned now.
+
+**Scheduling and packaging**
+
+- [ ] **Agents' sign-in inside the Flatpak.** How the person's SSH agent,
+  `gh` and `glab` reach agents there; `--socket=ssh-auth` is the likely way.
+- [ ] **What starts an automation, and where it runs.** Events as triggers
+  (a review asked for, red checks on main, a label), a run that carries on
+  its open pull request, cost caps for models paid per use, and runs in the
+  cloud.
+- [ ] **Releases.** Windows signing, a beta channel, adapters that update
+  without an app release, and the window's source maps uploaded so its
+  stacks read by name.
+- [ ] **The Flatpak's status.** It stays experimental until a whole task has
+  run under GNOME and KDE; a restart with the Secret portal isn't checked
+  on either.
+
+**The desktop app**
+
+- [ ] **Agents driving the page beside the conversation** (ADR-100's
+  direction D), through the main process's page module.
+- [ ] **Comments on diff lines** (DEV-175), gathered as a page's comments are.
+- [ ] **Conflicts and fixing checks in the step graph.** The runtime would
+  have to treat them as steps first.
+- [ ] **Windows' own caption buttons** (`titleBarOverlay`), once a build is
+  checked on a real Windows machine.
 
 ## Automations, 19 October
 
@@ -36,8 +148,8 @@ page.
   and then the run only reads.
 - [x] **The limits by default.** One place; an hour apart at least; 45
   minutes of work a run, over all its steps; runs a day capped for all
-  automations together; stop on a usage limit; plan accounts only at
-  first, which leaves OpenCode out; at most five pull requests open.
+  automations together; stop on a usage limit; at most five pull requests
+  open.
 - [x] **The coordinator's reach.** Pause in words; resume and Run now on a
   small card; any other change on a card.
 - [x] **Where they live.** In Althar, the person's own, on the computer they were
@@ -58,7 +170,7 @@ page.
 
 - [x] **What one failure may take down.** Only what it belongs to; one item
   of many says so on its own, and a loop goes on (ARCHITECTURE.md;
-  [ADR-047](decisions/047-failures-kept-where-they-belong-and-reported-at-the-edge.md)).
+  [ADR-047](decisions/foundations.md#failures-stay-with-what-they-belong-to)).
 - [x] **Whether a failure the runtime catches is reported.** Yes, where it
   is kept, unless the person caused it or can put it right: as a handled
   crash report, ten a launch (ADR-047).
@@ -79,7 +191,7 @@ page.
 - [x] **Where errors and crashes go.** PostHog's error tracking, from the
   main process, masked, behind a switch of their own; no Sentry for now, and
   native minidumps stay on the computer, only their occurrence sent
-  ([ADR-046](decisions/046-crash-reports-to-posthog-from-main.md)).
+  ([ADR-046](decisions/packaging.md#crash-reports)).
 - [x] **On or off at first, and where it is asked.** On, asked once as a
   quiet line with its switch on the first screen, and in Settings beside
   Usage data (DEV-66; ADR-046).
@@ -104,7 +216,7 @@ page.
   sandbox-local `gnome_libsecret` file. This fallback can be session only and
   may prompt again after restart. The runtime still carries opaque
   sealed values and never receives the key. See
-  [ADR-028](decisions/028-linux-windows-packages-and-the-keyring.md).
+  [ADR-028](decisions/packaging.md#off-a-mac-windows-and-the-keyring).
 - [ ] **Run the real GNOME restart test.** It has not been run in this task's
   KDE-only sandbox. Follow the exact GNOME session or VM steps in ADR-028;
   verify GitHub stays connected after `flatpak kill dev.althar.app` and the
@@ -117,7 +229,7 @@ page.
 - [x] **Where usage data goes from, and what can.** The main process, with
   posthog-node: named events and properties only, never a name, a path or
   anything written; the window has no SDK
-  ([ADR-036](decisions/036-usage-data-from-the-main-process.md)).
+  ([ADR-036](decisions/packaging.md#usage-data)).
 - [x] **On or off at first.** On, with the switch in Settings only, not on
   the first screen; `DO_NOT_TRACK` keeps it off (settled with the person,
   15 October; ADR-036).
@@ -134,7 +246,7 @@ page.
 
 - [x] **What a question waits on.** The thread, not the session: it outlives
   a restart, the agent going and a switch of agent, and its answer is told
-  to the agent on the thread next ([ADR-021](decisions/021-a-question-outlives-its-session.md)).
+  to the agent on the thread next ([ADR-021](decisions/tasks.md#questions-to-the-person)).
 - [x] **Which steps may ask.** The lead and the coordinator; a reviewer is
   given no way to (ADR-021).
 - [x] **Answering from the home or the edge.** Not on its line: the home
@@ -254,7 +366,7 @@ page.
 ## Screens that don't flicker, 7 October
 
 - [x] **Where the window keeps what it read.** Settled on 7 October 2026 in
-  [ADR-014](decisions/014-window-keeps-what-it-read.md): one cache for the
+  [ADR-014](decisions/desktop-app.md#how-the-window-reads): one cache for the
   window's life (TanStack Query), ended by the change feed, with each screen
   reading before it shows and the launch covering the first reads.
 - [ ] **Keeping open tabs mounted.** React's `<Activity>` would make a tab
@@ -268,7 +380,7 @@ page.
 
 ## Project rules, 4 October
 
-Decided in [ADR-013](decisions/013-project-rules.md).
+Decided in [ADR-013](decisions/what-agents-may-do.md#the-persons-rules).
 
 - [ ] **Rules the sandbox hides from Althar.** Codex's `workspace-write`
   and Claude Code's sandboxed commands run without asking, so a project's
@@ -288,14 +400,14 @@ Decided in [ADR-013](decisions/013-project-rules.md).
 - [x] **An allowlist for "Ask me".** Asking about everything, a person will
   want some commands let through, as Cursor's and Roo's allowlists do.
   Settled on 10 October 2026 in
-  [ADR-018](decisions/018-allow-always-keeps-a-rule.md) (DEV-21): allow
+  [ADR-018](decisions/what-agents-may-do.md#the-persons-rules) (DEV-21): allow
   rules by kind, by how a command starts, or exactly, kept by Allow always
   on a call and said in the rules screen's "Go ahead" sentence, where each
   can be taken out. What always asks or is never allowed still wins, and
   an allow rule answers before the coordinator is asked to judge.
 - [x] **Who judges permission requests.** The coordinator, using its agent
   and model in a fresh read-only session, with task context and human fallback.
-  Decided in [ADR-019](decisions/019-coordinator-judges-permissions.md). It
+  Decided in [ADR-019](decisions/what-agents-may-do.md#ask-about-more-and-the-coordinator-decides). It
   judges only what no rule answers: never, what always asks and the allow
   rules all come first (ADR-018).
 - [ ] **The network.** Rules on domains, as Codex's network proxy and Claude
@@ -310,7 +422,7 @@ Decided in [ADR-013](decisions/013-project-rules.md).
 
 ## Several accounts, 3 October
 
-Decided in [ADR-012](decisions/012-several-accounts-per-agent.md).
+Decided in [ADR-012](decisions/agents.md#accounts).
 
 - [ ] **Providers' terms on moving between one person's plans.** Several
   accounts that are each the person's own (work and personal, a client's
@@ -387,8 +499,8 @@ Decided in [ADR-012](decisions/012-several-accounts-per-agent.md).
   sign-ins for them. After review, the environment is the boundary: git's
   credential helpers reset, no SSH agent, Althar's tokens sealed by the
   app, and the rules refuse reading credentials.
-  [ADR-011](decisions/011-own-connectors-for-hosts-and-trackers.md).
-  Decided again on 6 November 2026 in [ADR-097](decisions/097-agents-work-as-the-person-s-own-and-only-what-can-t-be-undone-asks.md): Althar's way
+  [ADR-011](decisions/code-hosts.md#connectors).
+  Decided again on 6 November 2026 in [ADR-097](decisions/what-agents-may-do.md#what-asks): Althar's way
   stays the preferred and recorded one, and agents may use the person's own
   sign-in and MCP servers, with what can't be undone on the person's word.
 - [x] **A lead that needs the person's git sign-in.** A project with private
@@ -420,7 +532,7 @@ Decided in [ADR-012](decisions/012-several-accounts-per-agent.md).
   its agent's sandbox is read-only where that still lets it call Althar's
   tools, and the reader rules, an allowlist of commands and flags, are the
   backstop. Plan modes stay out while they refuse MCP tools.
-  [ADR-004](decisions/004-coordinator-is-an-agent-session.md),
+  [ADR-004](decisions/coordinator.md#always-on),
   [architecture 04](architecture/04-coordinator.md).
 - [x] **What an agent's closing words are for, once a step reports.**
   Settled on 30 September 2026 in the review of #15: they fold with the work
@@ -478,22 +590,22 @@ never under running work.
 - [x] **How Althar reaches agents.** Settled: ACP for every agent, with
   Claude Code, Codex and OpenCode interchangeable in the MVP, and native side
   channels where ACP falls short.
-  [ADR-002](decisions/002-acp-for-every-agent.md).
+  [ADR-002](decisions/agents.md#acp-for-every-agent).
 - [x] **The shell.** Settled: Electron, with the runtime in a utility process.
-  [ADR-003](decisions/003-electron-shell.md).
+  [ADR-003](decisions/foundations.md#the-shell-and-the-runtime).
 - [x] **What the coordinator is.** Settled: an agent session with Althar's
   tools and read-only access; Althar keeps its conversation.
-  [ADR-004](decisions/004-coordinator-is-an-agent-session.md),
+  [ADR-004](decisions/coordinator.md#always-on),
   [architecture 04](architecture/04-coordinator.md).
 - [x] **Switching agent mid-task.** Settled for the MVP: the new agent takes
   over everything, from a brief, in the same workspace. Changing model within
   an agent keeps the session.
-  [ADR-005](decisions/005-althar-briefs-every-agent.md).
+  [ADR-005](decisions/agents.md#briefs-and-switching-agent-or-model).
 - [x] **Workspaces.** Settled: a git worktree per task, shared by its steps.
-  [ADR-006](decisions/006-worktree-per-task.md).
+  [ADR-006](decisions/workspaces-and-runs.md#worktree).
 - [x] **How much rigour the proof of concept gets.** Settled: shortcuts in
   behaviour, never in recorded facts or data shapes.
-  [ADR-008](decisions/008-shortcuts-in-behaviour-not-in-records.md).
+  [ADR-008](decisions/foundations.md#recorded-facts-are-complete-behaviour-may-start-simple).
 - [ ] **Tuning a switch.** When you switch because you don't like the work,
   should the new agent get a fresh take without the old agent's reasoning,
   start from base rather than the current code, or get a generated handoff
@@ -600,11 +712,12 @@ never under running work.
   [architecture 04](architecture/04-coordinator.md).
 - [x] **Where worktrees live.** Settled: `~/Althar/<project>/<task>/<repository>`,
   with a root that can be changed per project.
-  [ADR-006](decisions/006-worktree-per-task.md).
+  [ADR-006](decisions/workspaces-and-runs.md#worktree).
 - [x] **How the lead, Verify and Review work together.** Settled: the lead's
   session spans its nodes, Verify runs the project's checks, review and
   settling loop for at most 3 rounds, reviewers are read-only, and the default
-  reviewer is another provider's strongest model.
+  reviewer is another provider's strongest model (since overtaken by the person's
+  model preferences: [how models are picked](decisions/agents.md#how-models-are-picked)).
   [Architecture 05](architecture/05-workflow-engine.md). The demo runs them as
   one fixed graph ([MVP plan](plans/mvp.md)).
 - [x] **Setup per worktree.** Settled on 11 October 2026: each repository's
@@ -612,7 +725,7 @@ never under running work.
   `set_run_command`, else the install its lockfile names; Althar runs it in
   each new worktree before the lead starts, outside the lead's sandbox.
   Files to copy in, such as `.env`, are still undeclared.
-  [ADR-023](decisions/023-althar-runs-the-project.md). On 30 September 2026
+  [ADR-023](decisions/workspaces-and-runs.md#running-the-project). On 30 September 2026
   the user took Verify out of the plan, since it would rebuild CI; checking
   the work becomes a manual QA step later.
 - [ ] **An acceptance-criteria checker.** A step type that checks the change
@@ -672,7 +785,7 @@ never under running work.
   none) and then the form with what was chosen. Dropping folders on the window
   does the same. This departs from the two entrances in architecture doc 01;
   if it holds, the doc should change.
-- [x] **The welcome.** Settled in [ADR-083](decisions/083-a-welcome-on-first-launch.md):
+- [x] **The welcome.** Settled in [ADR-083](decisions/desktop-app.md#the-welcome):
   the first screen is one card of steps, a tour of four scenes of the real
   components first (once on a computer, and skippable), then the agents, the
   first project, its code host and a tracker; a new project's empty
@@ -695,7 +808,7 @@ never under running work.
   agent that speaks ACP by its command) has no screen since the unused
   `ConnectAgent` panel was removed. Leaning: keys and local models run
   through OpenCode, so Althar still calls no model API itself
-  ([ADR-002](decisions/002-acp-for-every-agent.md)). Open: where adding one
+  ([ADR-002](decisions/agents.md#acp-for-every-agent)). Open: where adding one
   lives in Settings, which apps and APIs are listed at launch, and how a
   connected key shows in the agent list.
 - [ ] **Choosing subpaths in a workspace.** The map offers "only these
@@ -720,7 +833,7 @@ never under running work.
 - [x] **Permissions: who answers.** The coordinator answers requests outside
   explicit always-ask and never rules when its mode is selected. Its failures
   and uncertainty reach the person; readers remain read-only. See
-  [ADR-019](decisions/019-coordinator-judges-permissions.md).
+  [ADR-019](decisions/what-agents-may-do.md#ask-about-more-and-the-coordinator-decides).
 - [ ] **Project rules: when and where they are set.** Leaning: creating a
   project asks only its name, its colour and its folders, and every rule
   starts at its default; who answers when agents need a yes is the first a
@@ -737,7 +850,7 @@ never under running work.
   refusals that hold even with everything allowed. Still open:
   - ~~**Allow rules.** Under "Ask me", nothing is pre-approved, so `bun test`
     would ask every time.~~ Settled in
-    [ADR-018](decisions/018-allow-always-keeps-a-rule.md): command rules
+    [ADR-018](decisions/what-agents-may-do.md#the-persons-rules): command rules
     carry allow beside ask and never, and kinds can be always allowed;
     Allow always on a card writes one (Althar's own, never the agent's
     `allow_always`).
@@ -806,13 +919,13 @@ never under running work.
   be left out of Allow all?
   *Prototype:* Permissions → "Many at once".
   Settled for now on 10 October 2026 (DEV-21,
-  [ADR-018](decisions/018-allow-always-keeps-a-rule.md)): Allow all allows
+  [ADR-018](decisions/what-agents-may-do.md#the-persons-rules)): Allow all allows
   every card in the stack once, the always-ask ones too, since each was kept
   for the person and they see the count. It never keeps a rule.
 - [x] **Pasted links.** Settled on 1 October 2026: issues and pull requests
   from the connected code hosts and trackers unfurl, through Althar's own
   connectors, not MCP servers
-  ([ADR-011](decisions/011-own-connectors-for-hosts-and-trackers.md)). Other
+  ([ADR-011](decisions/code-hosts.md#connectors)). Other
   sources, such as Sentry and Notion, wait for the MCP broker.
 
 ## Steps, agents and the graph
@@ -837,7 +950,7 @@ never under running work.
 ## Usage limits
 
 - [ ] **Limits on steps, not just the lead.** A limit belongs to one of an
-  agent's accounts ([ADR-012](decisions/012-several-accounts-per-agent.md)),
+  agent's accounts ([ADR-012](decisions/agents.md#accounts)),
   so it pauses every agent on that account at once: the lead, its steps, and
   their sub-agents. Leaning: a project rule moves the work to the
   next free agent, which shows as a quiet line, and the card appears only when

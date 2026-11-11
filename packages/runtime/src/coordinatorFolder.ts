@@ -2,7 +2,7 @@ import { existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, rmSync, w
 import { homedir } from 'node:os'
 import { basename, dirname, join, resolve } from 'node:path'
 
-import { removeFully } from '@althar/provider-adapters'
+import { removeFully, SECRET_PLACES } from '@althar/provider-adapters'
 import { Effect, Option } from 'effect'
 import { SqlClient } from 'effect/sql'
 
@@ -46,11 +46,8 @@ export interface CoordinatorFolder {
     readonly base: string
   }>
   /**
-   * What the coordinator's commands may read, where a sandbox holds them
-   * (ADR-058): none of `denied` (the home folder, the person's checkouts,
-   * Althar's folders for the project's tasks) but what `allowed` gives back
-   * (its folder, the mirrors, the objects its copies borrow, and the
-   * toolchains a command runs on). Real paths, as a sandbox matches them.
+   * Secret paths its sandbox and read tools deny. Ordinary files are readable
+   * anywhere (ADR-097); writes remain held to the coordinator's own folder.
    */
   readonly reads: { readonly allowed: ReadonlyArray<string>; readonly denied: ReadonlyArray<string> }
 }
@@ -95,11 +92,8 @@ const real = (path: string): string => {
 }
 
 /**
- * What the coordinator's sandboxed commands may read (ADR-058): none of the
- * home folder, the project's task folders or the person's checkouts, but its
- * folder, the mirrors, the objects its copies borrow, the toolchains there
- * are and git's config files. Git's config folder is `$XDG_CONFIG_HOME/git`
- * where that is set, and its credential store there is denied wherever it is.
+ * Secret paths denied to coordinator commands and read tools. Include git's
+ * credential store at its actual XDG location as well as the shared list.
  */
 export const readsOf = (place: {
   readonly home: string
@@ -119,7 +113,7 @@ export const readsOf = (place: {
     // Whether or not they are there: git reading one held from it fails rather than going without.
     ...GIT_CONFIG_FILES.map((file) => join(gitConfig, file)),
   ].map(real)
-  const denied = [place.home, place.projectFolder, ...place.repositories, join(gitConfig, 'credentials')].map(real)
+  const denied = [...SECRET_PLACES.map((secret) => join(place.home, secret)), join(gitConfig, 'credentials')].map(real)
   return { allowed: [...new Set(allowed)], denied: [...new Set(denied)] }
 }
 

@@ -34,6 +34,10 @@ test('changes a project’s rules from its settings, and keeps them', async () =
     await expect(page.getByRole('heading', { name: 'meridian', level: 1 })).toBeVisible()
     await openRules(page)
     await expect(page.getByRole('heading', { name: 'Rules', level: 2 })).toBeVisible()
+    // A new project allows everything but what can't be undone (ADR-097): what asks, then the sentences once asked about more.
+    await expect(page.getByRole('heading', { name: 'What asks' })).toBeVisible()
+    await page.screenshot({ path: 'test-results/rules-what-asks.png', animations: 'disabled' })
+    await page.getByRole('button', { name: 'Ask about more' }).click()
     await expect(sentence(page, 'The rest')).toContainText('Everything else: allowed. What Althar can’t read comes to you.')
     await choose(page, 'allowed', 'The coordinator decides')
     await expect(sentence(page, 'The rest')).toContainText('the coordinator decides. What it can’t settle')
@@ -50,9 +54,13 @@ test('changes a project’s rules from its settings, and keeps them', async () =
     await page.getByRole('textbox', { name: 'A command, as it starts' }).fill('terraform *')
     await page.keyboard.press('Enter')
     await expect(sentence(page, 'Ask me').getByText('terraform *', { exact: true })).toBeVisible()
+    await page.screenshot({ path: 'test-results/rules.png', animations: 'disabled', fullPage: true })
+
+    // How a task ends is the project's Tasks, not its rules: the sentence is there, with the pull request it makes.
+    await expect(sentence(page, 'Finished')).toHaveCount(0)
+    await projectSettings(page, 'Tasks')
     await choose(page, 'a draft pull request', 'Push the branch only')
     await expect(sentence(page, 'Finished')).toContainText('A finished task pushes its branch alone')
-    await page.screenshot({ path: 'test-results/rules.png', animations: 'disabled', fullPage: true })
 
     // Back to the project's work, and in again: as it was left.
     await backToWork(page)
@@ -62,6 +70,7 @@ test('changes a project’s rules from its settings, and keeps them', async () =
     await expect(sentence(page, 'Never').getByRole('button', { name: 'force push', exact: true })).toBeVisible()
     await expect(sentence(page, 'Ask me').getByRole('button', { name: 'force pushing' })).toHaveCount(0)
     await expect(sentence(page, 'Ask me').getByText('terraform *', { exact: true })).toBeVisible()
+    await projectSettings(page, 'Tasks')
     await expect(sentence(page, 'Finished')).toContainText('A finished task pushes its branch alone')
   } finally {
     await electronApp.close()
@@ -76,6 +85,8 @@ test('the coordinator answers a task permission, leaves always-ask items to the 
     // On the project first: its settings are a view of it.
     await expect(page.getByRole('heading', { name: 'meridian', level: 1 })).toBeVisible()
     await openRules(page)
+    // Asked about more than what can't be undone, the rest can go to the coordinator (ADR-097).
+    await page.getByRole('button', { name: 'Ask about more' }).click()
     await choose(page, 'allowed', 'The coordinator decides')
     await expect(sentence(page, 'The rest')).toContainText('the coordinator decides')
     await backToWork(page)

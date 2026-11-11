@@ -44,8 +44,8 @@ export interface RunningTool {
   readonly command: string | null
 }
 
-/** What Althar has done about a turn before the person is asked. */
-export type Tried = 'carried_on' | 'restarted' | 'redirected'
+/** What Althar has done about a turn before the person is asked: for a step that ended without its report, handed it to another model. */
+export type Tried = 'carried_on' | 'restarted' | 'redirected' | 'handed_on'
 
 export type StallAction =
   /** Stop the turn, and tell the agent to carry on. */

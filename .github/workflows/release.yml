@@ -118,8 +118,7 @@ jobs:
       - uses: actions/setup-node@v5
         with:
           node-version-file: .node-version
-      - run: bun install --frozen-lockfile
-        working-directory: .
+      - uses: ./.github/actions/electron
       # The App Store Connect key is a secret's text; notarytool takes a file, kept only for this job.
       - name: The notary key, as a file
         env:
@@ -243,8 +242,7 @@ jobs:
       - uses: actions/setup-node@v5
         with:
           node-version-file: .node-version
-      - run: bun install --frozen-lockfile
-        working-directory: .
+      - uses: ./.github/actions/electron
       - name: Package
         env:
           ALTHAR_POSTHOG_KEY: ${{ secrets.ALTHAR_POSTHOG_KEY }}
@@ -286,8 +284,7 @@ jobs:
       - uses: actions/setup-node@v5
         with:
           node-version-file: .node-version
-      - run: bun install --frozen-lockfile
-        working-directory: .
+      - uses: ./.github/actions/electron
       # UNSIGNED FOR NOW (DEV-78): Windows' SmartScreen warns on the installer until it is signed. To sign, fill in the
       # WINDOWS_SIGNING slot in apps/desktop/scripts/package.ts, add the secrets for one of these to the release
       # environment, pass them to "Package" below, and drop this step, which stands in for it until then (it runs, and

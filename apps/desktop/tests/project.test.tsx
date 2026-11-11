@@ -205,6 +205,33 @@ describe('running the project, with no agent', () => {
 })
 
 describe('the project’s bar', () => {
+  it('keeps the parts the coordinator offers as a preset, by its name, with one press', async () => {
+    const parts = {
+      workspace: 'worktree' as const,
+      checked: 'none' as const,
+      end: 'draft' as const,
+      shelf: 'board' as const,
+      lead: 'claude-code/opus',
+      reviewer: null,
+      brief: '',
+    }
+    const offer = items.notice(
+      {
+        source: 'runtime',
+        title: 'You set up these parts twice. Keep them as a preset?',
+        description: 'opus change: a worktree, no review, a draft pull request, led by opus.',
+        offer: { kind: 'preset', name: 'opus change', parts },
+      },
+      null,
+    )
+    const { client } = fakeClient({ getCoordinator: vi.fn(async () => coordinatorSnapshot({ items: [offer] })) })
+    withServices(<WithSettings />, client)
+    await screen.findByText('You set up these parts twice. Keep them as a preset?')
+    await userEvent.click(await screen.findByRole('button', { name: 'Keep it as “opus change”' }))
+    await waitFor(() => expect(client.savePreset).toHaveBeenCalledWith({ name: 'opus change', parts }))
+    expect(await screen.findByText('Kept as “opus change”: Settings has your presets.')).toBeTruthy()
+  })
+
   it('steps through the views by b, never while typing, and has no button to start a task', async () => {
     const { client } = fakeClient({ getCoordinator: vi.fn(async () => coordinatorSnapshot()) })
     const view = withServices(<Project />, client)
@@ -233,7 +260,7 @@ describe('the project’s bar', () => {
     expect(within(views).getByRole('radio', { checked: true }).textContent).toMatch(/^Home/)
   })
 
-  it('says which view it is on, to open on it again, and has only its views, its automations and its settings to choose from', async () => {
+  it('says which view it is on, to open on it again, and has only its views, its automations, its artifacts and its settings to choose from', async () => {
     const onRoomChange = vi.fn()
     const { client } = fakeClient({ getCoordinator: vi.fn(async () => coordinatorSnapshot()) })
     withServices(<Project room={Room.Both} onRoomChange={onRoomChange} />, client)
@@ -243,7 +270,7 @@ describe('the project’s bar', () => {
       within(views)
         .getAllByRole('radio')
         .map((radio) => radio.textContent),
-    ).toEqual(['Home', 'Conversation', 'Board', 'Automations', 'Settings'])
+    ).toEqual(['Home', 'Conversation', 'Board', 'Automations', 'Artifacts', 'Settings'])
     await userEvent.click(within(views).getByRole('radio', { name: 'Board' }))
     expect(onRoomChange).toHaveBeenLastCalledWith(Room.Board)
     // Its settings are a view too, kept like the others to open on again.

@@ -76,12 +76,13 @@ const make = (): TabsStore => {
       if (kept === null) return keep(Object.keys(pending).length === 0 ? { open, places: {} } : { open, places: {}, rooms: pending })
       const left = kept.open.filter((id) => known.has(id))
       if (left.length === kept.open.length) return
+      const { rooms: _rooms, ...rest } = kept
       const still = Object.entries(kept.rooms ?? {}).filter(([id]) => known.has(id))
       const rooms = still.length === 0 ? {} : { rooms: Object.fromEntries(still) }
       keep(
         left.length === 0
-          ? { open, places: {}, ...rooms }
-          : { open: left, places: Object.fromEntries(Object.entries(kept.places).filter(([id]) => known.has(id))), ...rooms },
+          ? { ...rest, open, places: {}, ...rooms }
+          : { ...rest, open: left, places: Object.fromEntries(Object.entries(kept.places).filter(([id]) => known.has(id))), ...rooms },
       )
     },
     change: (next) => {

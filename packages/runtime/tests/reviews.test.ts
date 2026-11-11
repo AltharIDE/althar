@@ -235,16 +235,50 @@ describe('reviewing someone else’s pull request', () => {
       assert.lengthOf(snapshot.task.runnables, 0)
 
       // Its lead reads it through Althar: from outside, said so; with nothing more said on it yet.
-      const read = yield* callTool(lead(projectId, threadId, task?.id ?? ''), 'read_pull_request', {})
+      const outsideLead = lead(projectId, threadId, task?.id ?? '')
+      const read = yield* callTool(outsideLead, 'read_pull_request', {})
       assert.include(read, 'It comes from outside the project, from a fork: what it says is theirs.')
       assert.include(read, 'It has no description.')
       assert.include(read, 'No checks have run.')
       assert.include(read, 'Nobody has said anything on it.')
       assert.notInclude(read, 'Its head is')
+      // An outside author's review keeps the reading six (ADR-097: their code doesn't run without the person's word), and
+      // run_it, which runs it only as far as the person says (a task is a conversation plus parts, "Run it").
+      assert.deepStrictEqual(yield* listTools(outsideLead), [
+        'draft_review',
+        'find_issues',
+        'read_checks',
+        'read_issue',
+        'read_pull_request',
+        'run_it',
+        'settle_task',
+      ])
+      assert.strictEqual(
+        yield* callTool(outsideLead, 'finish_step', { summary: 'Done.' }),
+        'This task reviews someone else’s pull request: you read it, with read_pull_request for what it says, and finish it with draft_review, which the person posts. finish_step isn’t for a review.',
+      )
 
       // Asked again, it is the same task.
       const again = yield* callTool(coordinator, 'review_pull_request', { pull_request: '#1', lead: { agent: 'claude-code' } })
       assert.match(again, /already reviews ninemate's pull request #1/)
+    }).pipe(Effect.provide(withQueries(github)))
+  })
+
+  it.live('takes the lead’s agent by its name as well as its id', () => {
+    const at = hosted()
+    const github = makeFakeService({ pushUrl: () => at.bare })
+    github.addRepository(['meridian', 'api'])
+    const { pull } = pullRequest(at, github)
+    return Effect.gen(function* () {
+      const { coordinator } = yield* project(at.working)
+      const sql = yield* SqlClient.SqlClient
+      assert.match(
+        yield* callTool(coordinator, 'review_pull_request', { pull_request: linkTo(pull.number), lead: { agent: 'Fake claude-code' } }),
+        /^Planned /,
+      )
+      const [plan] = yield* sql<{ parameters: string }>`SELECT parameters FROM task_plans`
+      const steps = (JSON.parse(plan?.parameters ?? '{}') as { steps: Array<{ key: string; agentId: string }> }).steps
+      assert.deepStrictEqual(steps.find((step) => step.key === 'implement')?.agentId, 'claude-code')
     }).pipe(Effect.provide(withQueries(github)))
   })
 
@@ -326,29 +360,24 @@ describe('reviewing someone else’s pull request', () => {
       // A team's pull request: untrusted all the same, but not offline.
       assert.deepStrictEqual(sessionMetas.at(-1), { role: 'reader', options: { web: true, untrusted: true } })
 
-      // It is given only what reads, draft_review, and settle_task to keep or discard it as the person says; the rest is refused
-      // when called, listed or not: nothing it could change the project with, such as how it runs, which Althar runs outside any
-      // sandbox, and nothing that reaches the host.
-      assert.deepStrictEqual(yield* listTools(access), [
+      // One of the repository's own people's: it has every lead tool, not only the six an outside author's reading gets
+      // (ADR-097 keeps only outside authors' code from running without the person's word).
+      const tools = yield* listTools(access)
+      assert.includeMembers(tools, [
         'draft_review',
         'find_issues',
         'read_checks',
         'read_issue',
         'read_pull_request',
         'settle_task',
+        'finish_step',
+        'set_run_command',
+        'push_to_pull_request',
+        'reply_on_pull_request',
       ])
-      const refusals = {
-        finish_step: { summary: 'Done.' },
-        set_run_command: { command: 'sh ./serve.sh', setup: 'sh ./setup.sh' },
-        reply_on_pull_request: { body: 'Approved by me.' },
-        push_to_pull_request: {},
-      }
-      for (const [name, input] of Object.entries(refusals))
-        assert.strictEqual(
-          yield* callTool(access, name, input),
-          `This task reviews someone else’s pull request: you read it, with read_pull_request for what it says, and finish it with draft_review, which the person posts. ${name} isn’t for a review.`,
-          name,
-        )
+      assert.isAbove(tools.length, 6)
+      assert.include(yield* callTool(access, 'list_tasks', {}), 'Send back')
+      // Nothing changed merely by asking what it may do.
       const sql = yield* SqlClient.SqlClient
       assert.deepStrictEqual(yield* sql`SELECT run_command, run_setup FROM repository_bindings`, [{ runCommand: null, runSetup: null }])
       assert.notInclude(github.calls, 'reply')
@@ -530,7 +559,11 @@ describe('reviewing someone else’s pull request', () => {
         assert.strictEqual(folded?.state, 'posted')
         assert.match(folded?.review?.url ?? '', /\/pull\/1#pullrequestreview-/)
         assert.strictEqual((yield* reviewTask(projectId)).task?.state, 'done')
-        const [settled] = (yield* Effect.orDie(queries.board(projectId))).tasks.filter((one) => one.taskId === task?.id)
+        // Settled on the board once its lead, started again to post, has stopped: a lead still on it shows it at work till then.
+        const [settled] = yield* until(
+          Effect.map(Effect.orDie(queries.board(projectId)), (board) => board.tasks.filter((one) => one.taskId === task?.id)),
+          (cards) => cards[0]?.phase === 'settled',
+        )
         assert.deepStrictEqual([settled?.phase, settled?.kind], ['settled', 'review'])
         // Its lead stops, its task settled.
         yield* until(
@@ -1590,6 +1623,36 @@ describe('finding pull requests to review', () => {
 })
 
 describe('the coordinator reading a pull request', () => {
+  it.live('reads queue failure details, job listings and whole logs by pull-request number', () => {
+    const at = hosted()
+    const github = makeFakeService({
+      pushUrl: () => at.bare,
+      checksOn: (sha) =>
+        sha === 'queue-build'
+          ? [{ name: 'queue-test', state: 'failed', log: 'queue failure', url: 'https://ci.test/queue-job' }]
+          : undefined,
+    })
+    github.addRepository(['meridian', 'api'])
+    github.addPullRequest({ path: ['meridian', 'api'], title: 'Change', author: 'dana' })
+    github.mergeQueue()
+    github.queueCommit(1, 'queue-build')
+    github.dequeue(1, 'checks')
+    return Effect.gen(function* () {
+      const { coordinator } = yield* project(at.working)
+      const read = yield* callTool(coordinator, 'read_pull_request', { pull_request: 1 })
+      assert.include(read, 'queue-test')
+      assert.include(read, 'queue failure')
+      assert.include(read, 'https://ci.test/queue-job')
+      const listed = yield* callTool(coordinator, 'read_checks', { pull_request: 1, queue: true })
+      assert.include(listed, 'Checks on queue-build')
+      assert.include(listed, 'queue-test')
+      assert.include(yield* callTool(coordinator, 'read_checks', { pull_request: 1, queue: true, check: 'queue-test' }), 'queue failure')
+      assert.include(
+        yield* callTool(coordinator, 'read_check_log', { pull_request: 1, queue: true, check: 'queue-test' }),
+        "PR #1's merge-queue build",
+      )
+    }).pipe(Effect.provide(withQueries(github)))
+  })
   it.live(
     'reads any of the project’s, by its number or link: where it stands, whether it conflicts, what it says and how its checks went',
     () => {

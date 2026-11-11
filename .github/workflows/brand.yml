@@ -26,6 +26,7 @@ on:
         'vite.config.ts',
         'packages/testing/**',
         '.github/actions/flaky/**',
+        '.github/actions/electron/**',
         '.github/workflows/brand.yml',
       ]
   pull_request:
@@ -44,6 +45,7 @@ on:
         'vite.config.ts',
         'packages/testing/**',
         '.github/actions/flaky/**',
+        '.github/actions/electron/**',
         '.github/workflows/brand.yml',
       ]
 
@@ -74,8 +76,9 @@ jobs:
       - uses: actions/setup-node@v5
         with:
           node-version-file: .node-version
-      - run: bun install --frozen-lockfile
-        working-directory: .
+      - uses: ./.github/actions/electron
+        with:
+          binary: 'false'
       - run: bun run check
       # Tests with an open flaky issue run, but don't fail this job (packages/testing).
       - uses: ./.github/actions/flaky/quarantine

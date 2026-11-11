@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { expect, type Page, test } from '@playwright/test'
 
 import { repository } from '../tests/repository'
-import { launch, openFirstProject, planTask, projectSettings, say, shown, startTask, still, toConversation } from './support'
+import { askAboutMore, launch, openFirstProject, planTask, projectSettings, say, shown, startTask, still, toConversation } from './support'
 
 /*
  * Allow everything (ADR-043), as the person meets it: a new project always
@@ -44,6 +44,8 @@ test('allows everything on a task or a project, clearing what waits, and says so
   try {
     await openFirstProject(electronApp, page, repo)
     await expect(page.getByRole('heading', { name: 'meridian', level: 1 })).toBeVisible()
+    // Asking about more than what can't be undone, as the person may: allowing everything is the default (ADR-097).
+    await askAboutMore(page)
     await startTask(page, 'Ship the fix')
     await openReady(page, 'Ship the fix')
 
@@ -95,15 +97,14 @@ test('allows everything on a task or a project, clearing what waits, and says so
     ).toBeVisible()
     await shoot(page, 'app-board-waiting.png')
 
-    // The project's switch, over the sentences it quietens; Never isn't one of them.
+    // The project's switch, asked about more since the start: turned on again, what asks takes the sentences' place (ADR-097).
     await openRules(page)
     const allowAll = page.getByRole('switch', { name: 'Allow everything' })
     await expect(allowAll).not.toBeChecked()
-    await expect(page.getByText('Off while everything is allowed.')).toHaveCount(0)
     await allowAll.click()
-    await expect(allowAll).toBeChecked()
-    await expect(page.getByText('Off while everything is allowed.')).toHaveCount(3)
-    await expect(page.getByRole('listitem', { name: 'Never' }).getByText('Off while everything is allowed.')).toHaveCount(0)
+    await expect(page.getByRole('heading', { name: 'What asks' })).toBeVisible()
+    await expect(allowAll).toHaveCount(0)
+    await expect(page.getByRole('button', { name: 'Ask about more' })).toBeVisible()
     await shoot(page, 'app-rules-allow-everything.png')
     await page.getByRole('radio', { name: /^Board/ }).click()
 

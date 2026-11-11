@@ -2,6 +2,7 @@ import type {
   AccountSignInState,
   AgentModels,
   AgentStatus,
+  AgentTools,
   AutomationCard,
   AutomationDefinition,
   AutomationRun,
@@ -1011,10 +1012,10 @@ export const githubCheck: ConnectionCheck = {
   settings: 'https://github.com/settings/personal-access-tokens',
 }
 
-/** A skill the catalog ships, and one from GitHub to review. */
+/** A skill the person has installed, and one from GitHub to review. */
 export const installedSkill: InstalledSkill = {
   id: 'brainstorming',
-  source: 'althar-default',
+  source: 'local',
   description: 'Use before building a new feature or change whose intent or design is not settled yet.',
   license: 'MIT',
   repo: null,
@@ -1022,9 +1023,8 @@ export const installedSkill: InstalledSkill = {
   ref: null,
   sha: null,
   treeHash: 'b'.repeat(64),
-  review: 'default',
+  review: 'reviewed',
   active: true,
-  needs: [],
   canRollBack: false,
 }
 
@@ -1044,6 +1044,21 @@ export const skillCard: SkillReviewCard = {
 }
 
 /** A client whose every call resolves with the fixtures, and whose watch the test drives with `emit`. */
+/** The person's MCP servers and skills, as a profile that reads none has them. */
+export const agentTools: AgentTools = {
+  enabled: true,
+  servers: [],
+  skills: [],
+  serverSync: { on: false, settle: [], since: [], targets: [], errors: [] },
+  skillSync: { on: false, settle: [], since: [], targets: [], errors: [] },
+  places: [
+    { agent: 'claude', file: '~/.claude.json', folder: '~/.claude/skills' },
+    { agent: 'codex', file: '~/.codex/config.toml', folder: '~/.agents/skills' },
+    { agent: 'opencode', file: '~/.config/opencode/opencode.json', folder: '~/.config/opencode/skills' },
+  ],
+  checkedAt: null,
+}
+
 export const fakeClient = (overrides: Partial<Client> = {}) => {
   const listeners = new Set<(event: WatchEvent) => void>()
   const watching: Array<number | undefined> = []
@@ -1074,6 +1089,11 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
       bytes: 42,
       lines: 3,
     })),
+    listCanvases: vi.fn(async () => []),
+    getCanvas: vi.fn(async () => {
+      throw new Error('No canvas')
+    }),
+    readCanvasText: vi.fn(async () => ({ path: 'README.md', text: '# Canvas', bytes: 8 })),
     getBoard: vi.fn(async () => ({ cursor: 1, tasks: [], calls: [], settledTotal: 0 })),
     getOlderSettled: vi.fn(async () => []),
     getHome: vi.fn(async () => home()),
@@ -1082,6 +1102,9 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
     settledWithOnePress: vi.fn(async () => {}),
     merge: vi.fn(async () => {}),
     push: vi.fn(async () => {}),
+    ship: vi.fn(async () => {}),
+    fixAfterMerge: vi.fn(async () => {}),
+    leaveAfterMerge: vi.fn(async () => {}),
     replacePullRequest: vi.fn(async () => {}),
     mergeNote: vi.fn(async () => 'Merge them.'),
     mergeHere: vi.fn(async () => {}),
@@ -1094,6 +1117,7 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
     getLoad: vi.fn(async () => load),
     getPlanUsage: vi.fn(async () => ({ accounts: [] })),
     getModelRooms: vi.fn(async () => []),
+    getMissedReports: vi.fn(async () => []),
     openInEditor: vi.fn(async () => true),
     openCode: vi.fn(async () => true),
     // Names no code, unless a test says what they name.
@@ -1120,6 +1144,18 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
     getModels: vi.fn(async () => models),
     setDefaultEffort: vi.fn(async () => {}),
     setModelBlocked: vi.fn(async () => {}),
+    getAgentTools: vi.fn(async () => agentTools),
+    setToolRoles: vi.fn(async () => {}),
+    setToolInProject: vi.fn(async () => {}),
+    getServerDetail: vi.fn(async (name: string) => ({ name, runs: '', files: [], tools: null, toolsWhy: null })),
+    checkServers: vi.fn(async () => {}),
+    addServer: vi.fn(async () => {}),
+    removeServer: vi.fn(async () => {}),
+    setToolSync: vi.fn(async () => {}),
+    setToolKeptOut: vi.fn(async () => {}),
+    pickToolWay: vi.fn(async () => {}),
+    undoToolSync: vi.fn(async () => {}),
+    signInToolServer: vi.fn(async () => {}),
     getSettings: vi.fn(async () => ({
       coAuthor: { on: true, line: 'Co-authored-by: Althar <337922799+AltharAi@users.noreply.github.com>' },
       reviewSeal: { on: true, style: 'ring' as const },
@@ -1128,10 +1164,30 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
       automationsPaused: false,
       folderWait: 'smart' as const,
       plansAndReviews: { countdown: 25, rounds: 3, roundsOut: 'settled' } as const,
-      newProjects: { permissions: 'rules', usageLimit: 'move', rotateAccounts: false, end: 'draft' } as const,
+      newProjects: {
+        usageLimit: 'move',
+        rotateAccounts: false,
+        end: 'draft',
+        pushCommits: true,
+        postScreenshots: false,
+        resolveConflicts: true,
+        moveIssues: true,
+      } as const,
     })),
     setCoAuthor: vi.fn(async () => {}),
     setPostTeamReviews: vi.fn(async () => {}),
+    setRunOutside: vi.fn(async () => {}),
+    shelveTask: vi.fn(async () => {}),
+    stopHelper: vi.fn(async () => {}),
+    joinChanges: vi.fn(async () => {}),
+    dropChange: vi.fn(async () => {}),
+    listPresets: vi.fn(async () => []),
+    savePreset: vi.fn(async () => ({ name: 'Preset' })),
+    removePreset: vi.fn(async () => {}),
+    runIt: vi.fn(async () => ({ kind: 'ran' as const, trust: 'safe' as const, said: '' })),
+    stopRunning: vi.fn(async () => ''),
+    applyPreset: vi.fn(async () => ''),
+    editPreset: vi.fn(async () => undefined),
     setReviewSeal: vi.fn(async () => {}),
     setReviewSealStyle: vi.fn(async () => {}),
     getAutomations: vi.fn(async () => automationsSnapshot({ automations: [] })),
@@ -1142,6 +1198,9 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
     pauseAutomation: vi.fn(async () => {}),
     runAutomationNow: vi.fn(async () => {}),
     answerTaskAsk: vi.fn(async () => {}),
+    makeItAFullTask: vi.fn(async () => {}),
+    keepTheModel: vi.fn(async () => {}),
+    undoTheModelMove: vi.fn(async () => {}),
     deleteAutomation: vi.fn(async () => {}),
     undoAutomationChange: vi.fn(async () => {}),
     answerSettingChange: vi.fn(async () => {}),
@@ -1149,13 +1208,12 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
     getSettingChanges: vi.fn(async () => []),
     setAutomationPostsReviews: vi.fn(async () => {}),
     setAutomationsPaused: vi.fn(async () => {}),
-    listSkills: vi.fn(async () => ({ enabled: true, catalogRevision: 'fixture-1', skills: [installedSkill] })),
+    listSkills: vi.fn(async () => ({ enabled: true, skills: [installedSkill] })),
     findSkills: vi.fn(async ({ source }) => ({ repo: source, ref: 'HEAD', sha: 'a'.repeat(40), paths: ['skills/release-notes'] })),
     stageSkill: vi.fn(async () => skillCard),
     approveSkill: vi.fn(async () => ({ ...installedSkill, id: skillCard.id, source: 'github' as const, repo: skillCard.source.repo })),
     checkSkillUpdates: vi.fn(async () => []),
     rollBackSkill: vi.fn(async () => installedSkill),
-    setSkillActive: vi.fn(async (_id: string, active: boolean) => ({ ...installedSkill, active })),
     uninstallSkill: vi.fn(async () => {}),
     setAgentsAtOnce: vi.fn(async () => {}),
     setFolderWait: vi.fn(async () => {}),
@@ -1207,6 +1265,9 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
     discardReviewDraft: vi.fn(async () => {}),
     answerStuck: vi.fn(async () => {}),
     answerCheckout: vi.fn(async () => {}),
+    moveTask: vi.fn(async () => ({ kind: 'moved' as const })),
+    dropMove: vi.fn(async () => {}),
+    workToward: vi.fn(async () => []),
     handOverHeld: vi.fn(async () => {}),
     listConnections: vi.fn(async () => connectionList),
     startSignIn: vi.fn(async () => ({
@@ -1351,6 +1412,7 @@ export const fakePagesHost = (overrides: Partial<PagesHost> = {}): PagesHost => 
   clearAll: vi.fn(async () => {}),
   onState: () => () => {},
   onKey: () => () => {},
+  onOpened: () => () => {},
   onClosed: () => () => {},
   ...overrides,
 })

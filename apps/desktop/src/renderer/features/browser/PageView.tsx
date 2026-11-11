@@ -61,6 +61,9 @@ export const text = {
   failed: (host: string) => `${host === '' ? 'The page' : host} didn’t answer.`,
   gone: 'The page stopped.',
   reload: 'Reload',
+  /** Who is acting on the page now, and that the person's own press in it ends that. */
+  atWorkTask: 'The lead is at work on this page. A click or key press from you stops the lead.',
+  atWorkProject: 'The coordinator is at work on this page. A click or key press from you stops the coordinator.',
 } as const
 
 const VIEWPORT_OPTIONS: ReadonlyArray<PageViewportOption<Viewport>> = VIEWPORTS.map((value) =>
@@ -126,8 +129,8 @@ export function PageView({ owner, kind, draft, where, onDock }: PageViewProps) {
   // Things above it can move it without resizing it, as a line under the bar comes and goes: looked at after each render.
   useLayoutEffect(measure)
   useEffect(() => {
-    browser?.show(owner, panel)
-  }, [browser, owner, panel])
+    browser?.show(owner, panel, where)
+  }, [browser, owner, panel, where])
   // Hidden, as another screen shows or this one is kept aside, the page goes from over the window.
   useEffect(() => () => browser?.show(owner, null), [browser, owner])
 
@@ -184,7 +187,10 @@ export function PageView({ owner, kind, draft, where, onDock }: PageViewProps) {
   useEffect(() => {
     void browser?.pins(
       owner,
-      comments.map((comment, index) => ({ n: index + 1, selector: comment.on.picked.selector, address: comment.on.address })),
+      // Numbered by their place among all the draft's comments, as their chips are; those on canvases have no pin here.
+      comments.flatMap((comment, index) =>
+        comment.on.kind === 'page' ? [{ n: index + 1, selector: comment.on.picked.selector, address: comment.on.address }] : [],
+      ),
     )
   }, [browser, owner, comments])
 
@@ -201,22 +207,23 @@ export function PageView({ owner, kind, draft, where, onDock }: PageViewProps) {
     const id = pages.takeReopen(owner)
     const index = comments.findIndex((one) => one.id === id)
     const comment = comments[index]
-    if (comment === undefined) return
+    if (comment === undefined || comment.on.kind !== 'page') return
+    const spot = comment.on
     void (async () => {
-      const found = await browser.find(owner, comment.on.picked.selector, comment.on.address)
+      const found = await browser.find(owner, spot.picked.selector, spot.address)
       if (found !== null) return setWriting({ pointed: found, comment, n: index + 1 })
       // Gone from the page: the comment opens over the page as it is, at its top, to change or remove.
       const picture = (await browser.still(owner)) ?? ''
       setWriting({
         pointed: {
-          picked: comment.on.picked,
+          picked: spot.picked,
           crop: null,
           cropSize: null,
           still: picture,
           scale: 1,
           at: { x: 16, y: 16, width: 0, height: 0 },
-          address: comment.on.address,
-          viewport: comment.on.viewport,
+          address: spot.address,
+          viewport: spot.viewport,
         },
         comment,
         n: index + 1,
@@ -292,7 +299,13 @@ export function PageView({ owner, kind, draft, where, onDock }: PageViewProps) {
         pages.forget(owner)
         void browser.close(owner)
       }}
-      line={state?.line == null ? null : <LineOf line={state.line} owner={owner} />}
+      line={
+        state?.line != null ? (
+          <LineOf line={state.line} owner={owner} />
+        ) : state?.working === true ? (
+          <PageLine icon="agents">{kind === 'task' ? text.atWorkTask : text.atWorkProject}</PageLine>
+        ) : null
+      }
       text={{
         label: text.label,
         sessionTitle: kind === 'task' ? text.taskSession : text.projectSession,

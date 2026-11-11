@@ -2,10 +2,10 @@ import { randomUUID } from 'node:crypto'
 import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { Effect, Predicate, Result, Schema, Semaphore } from 'effect'
-import { parseJson } from './catalog'
 import { SkillStoreFailed } from './errors'
-import { exists, io, lockTree, readTree, unlockTree } from './files'
+import { exists, io, lockTree, parseJson, readTree, unlockTree } from './files'
 import { type Files, treeHash } from './hash'
+import { withoutBundled } from './legacy'
 import { isSafePath } from './validate'
 
 /*
@@ -17,12 +17,12 @@ import { isSafePath } from './validate'
 
 const SHA = Schema.String.check(Schema.isPattern(/^[0-9a-f]{40}$/))
 const HASH = Schema.String.check(Schema.isPattern(/^[0-9a-f]{64}$/))
-const Source = Schema.Literals(['github', 'local', 'althar-default'])
-const Review = Schema.Literals(['not-reviewed', 'reviewed', 'default'])
+const Source = Schema.Literals(['github', 'local'])
+const Review = Schema.Literals(['not-reviewed', 'reviewed'])
 
 const Install = Schema.Struct({
   id: Schema.String.check(Schema.isMinLength(1)),
-  /** `github` can be refreshed from its repository; `local` only by re-importing; `althar-default` comes with the catalog. */
+  /** `github` can be refreshed from its repository; `local` only by re-importing. */
   source: Source,
   repo: Schema.optionalKey(Schema.String),
   sha: Schema.optionalKey(SHA),
@@ -59,8 +59,6 @@ const Install = Schema.Struct({
 
 const Installs = Schema.Struct({
   version: Schema.Literal(1),
-  /** The hash of the default catalog's catalog.json last installed, so an unchanged catalog is not installed again. */
-  catalog: Schema.optionalKey(Schema.String),
   installs: Schema.Array(Install),
 })
 
@@ -72,10 +70,7 @@ export const EMPTY_INSTALLS: Installs = { version: 1, installs: [] }
 const STRICT = { onExcessProperty: 'error' } as const
 const decodeInstalls = Schema.decodeUnknownEffect(Installs, STRICT)
 const decodeInstall = Schema.decodeUnknownResult(Install, STRICT)
-const decodeFile = Schema.decodeUnknownEffect(
-  Schema.Struct({ version: Schema.Literal(1), catalog: Schema.optionalKey(Schema.String), installs: Schema.Array(Schema.Unknown) }),
-  STRICT,
-)
+const decodeFile = Schema.decodeUnknownEffect(Schema.Struct({ version: Schema.Literal(1), installs: Schema.Array(Schema.Unknown) }), STRICT)
 
 const HASHED = /^[0-9a-f]{64}$/
 
@@ -169,7 +164,7 @@ export const readInstalls = (root: string): Effect.Effect<Installs, SkillStoreFa
   Effect.gen(function* () {
     const text = yield* installsText(root)
     if (text === null) return EMPTY_INSTALLS
-    return yield* decodeInstalls(yield* parseJson(text, 'installs.json')).pipe(Effect.mapError(damaged))
+    return yield* decodeInstalls(withoutBundled(yield* parseJson(text, 'installs.json')).value).pipe(Effect.mapError(damaged))
   })
 
 /** One install as a listing reads it: whole, or broken on its own with what can be told of it. */
@@ -185,7 +180,7 @@ export const listInstalls = (root: string): Effect.Effect<ReadonlyArray<Listed>,
   Effect.gen(function* () {
     const text = yield* installsText(root)
     if (text === null) return []
-    const file = yield* decodeFile(yield* parseJson(text, 'installs.json')).pipe(Effect.mapError(damaged))
+    const file = yield* decodeFile(withoutBundled(yield* parseJson(text, 'installs.json')).value).pipe(Effect.mapError(damaged))
     return file.installs.map((raw, at): Listed => {
       const read = decodeInstall(raw)
       if (Result.isSuccess(read)) return { ok: true, install: read.success }
@@ -208,3 +203,37 @@ export const withInstall = (installs: Installs, install: Install): Installs => (
   ...installs,
   installs: [...installs.installs.filter(({ id }) => id !== install.id), install].toSorted((a, b) => a.id.localeCompare(b.id)),
 })
+
+/**
+ * Takes out of the store the skills an older Althar shipped and installed as its own, on the first start after it
+ * stopped: they come out of installs.json, so no run is given them again, and the stored versions nothing else points
+ * at are removed. What the person installed from GitHub, or on their own, is left as it was, and a second call finds
+ * nothing to do. Says the ids it took out. A file that doesn't read is left alone, for the next read to say so.
+ */
+export const removeBundledSkills = (root: string): Effect.Effect<ReadonlyArray<string>, SkillStoreFailed> =>
+  serialized(
+    root,
+    Effect.gen(function* () {
+      const text = yield* installsText(root)
+      if (text === null) return []
+      const taken = withoutBundled(yield* parseJson(text, 'installs.json'))
+      if (!taken.changed) return []
+      yield* writeAtomically(join(root, 'installs.json'), `${JSON.stringify(taken.value, null, 2)}\n`)
+      const kept = new Set<string>()
+      const keep = (found: unknown) => {
+        if (typeof found !== 'object' || found === null) return
+        const one = found as { treeHash?: unknown; history?: unknown }
+        if (typeof one.treeHash === 'string') kept.add(one.treeHash)
+        if (Array.isArray(one.history)) one.history.forEach(keep)
+      }
+      const left = taken.value as { installs: ReadonlyArray<unknown> }
+      left.installs.forEach(keep)
+      for (const hash of new Set(taken.hashes)) {
+        if (kept.has(hash) || !isTreeHash(hash)) continue
+        const directory = join(root, 'objects', hash)
+        yield* unlockTree(directory)
+        yield* io(`removing ${hash}`, () => rm(directory, { recursive: true, force: true }))
+      }
+      return taken.removed
+    }),
+  )

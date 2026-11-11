@@ -34,6 +34,48 @@ import { changeLinesWords } from './issueChangeWords'
 import { change, timestamp } from './records'
 import { commandIn, essentials } from './rules'
 import { indexThread } from './Search'
+import { mcpActOf } from './mcpActs'
+
+/** How long the words an MCP call posted are kept on its item: what it said, at a glance. */
+const WORDS_KEPT = 600
+
+/**
+ * What a call to one of the person's MCP servers did, kept on its item
+ * (ADR-097): its server and tool, whether it acts, in a few words, the words
+ * it posted and where to see it, read from its result. Its input and result
+ * themselves aren't kept (docs/architecture/07).
+ */
+const mcpKept = (
+  event: Extract<SessionEvent, { _tag: 'ToolCall' | 'ToolCallUpdate' }>,
+  stored: Readonly<Record<string, unknown>> | undefined,
+): { readonly mcp?: Readonly<Record<string, unknown>> } => {
+  const had = typeof stored?.mcp === 'object' && stored.mcp !== null ? (stored.mcp as Readonly<Record<string, unknown>>) : undefined
+  const call =
+    event.mcp ?? (typeof had?.server === 'string' && typeof had.tool === 'string' ? { server: had.server, tool: had.tool } : undefined)
+  if (call === undefined) return {}
+  const act = event.rawInput === undefined ? undefined : mcpActOf(call, event.rawInput)
+  const link = event.rawOutput === undefined ? undefined : linkIn(event.rawOutput)
+  return {
+    mcp: {
+      ...had,
+      server: call.server,
+      tool: call.tool,
+      ...(act === undefined
+        ? had?.acts === undefined
+          ? { acts: false, did: call.tool }
+          : {}
+        : { acts: act.acts, did: act.done, ...(act.words === undefined ? {} : { words: act.words.slice(0, WORDS_KEPT) }) }),
+      ...(link === undefined ? {} : { link }),
+    },
+  }
+}
+
+/** Where to see what an MCP call did: the first web address its result names, a review's or a comment's. */
+const linkIn = (output: unknown): string | undefined => {
+  const text = typeof output === 'string' ? output : (JSON.stringify(output) ?? '')
+  const found = /https:\/\/[^\s"'<>)\\]+/.exec(text)
+  return found === null ? undefined : found[0]
+}
 
 /*
  * The thread's items: what the person reads (docs/architecture/01). An
@@ -189,27 +231,49 @@ const spelledBoth = (folders: ReadonlyArray<string> = []) =>
     }
   })
 
-/** The line the thread last said what a lead could see in: its session too, as a later session's may say the same. */
-const skillsLine = (threadId: string) =>
-  Effect.gen(function* () {
-    const sql = yield* SqlClient.SqlClient
-    const [row] = yield* sql<{ id: string; content: string; providerSessionId: string | null }>`
-      SELECT id, content, provider_session_id FROM thread_items
-      WHERE thread_id = ${threadId} AND kind = 'notice' AND json_extract(content, '$.role') = 'skills'
-      ORDER BY sequence DESC LIMIT 1`
-    if (row === undefined) return undefined
-    const content = JSON.parse(row.content) as { readonly title: string; readonly skills: ReadonlyArray<ShownSkill> }
-    return { id: row.id, sessionId: row.providerSessionId, content }
-  })
-
 interface ShownSkill extends SeenSkill {
   readonly from: 'person' | 'repository'
 }
 
+/** A line of the thread saying what a lead could see: the whole list as it stands, and what it changed from the line before. */
+interface SkillsLine {
+  readonly id: string
+  readonly sessionId: string | null
+  readonly content: {
+    readonly title: string
+    readonly lead?: string
+    readonly hidden?: boolean
+    readonly skills: ReadonlyArray<ShownSkill>
+  }
+}
+
+/** The thread's lines of what its lead could see, newest first. Each carries its whole list, which `skillsRead` reads from the latest. */
+const skillsLines = (threadId: string) =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient
+    const rows = yield* sql<{ id: string; content: string; providerSessionId: string | null }>`
+      SELECT id, content, provider_session_id FROM thread_items
+      WHERE thread_id = ${threadId} AND kind = 'notice' AND json_extract(content, '$.role') = 'skills'
+      ORDER BY sequence DESC`
+    return rows.map((row): SkillsLine => ({ id: row.id, sessionId: row.providerSessionId, content: JSON.parse(row.content) }))
+  })
+
+/** The line the marks read: the newest one the thread shows, which each session's report keeps current, not a hidden one it left behind. */
+const skillsLine = (threadId: string) => Effect.map(skillsLines(threadId), (lines) => lines.find((line) => line.content.hidden !== true))
+
+/** Whose line it is: the agent it names, which lines from before it said so have in their title. */
+const leadOfLine = (line: SkillsLine) => line.content.lead ?? line.content.title.split(' could see ')[0]
+
+const NAMES_SHOWN = 3
+const namesOf = (names: ReadonlyArray<string>) =>
+  names.length <= NAMES_SHOWN ? names.join(', ') : `${names.slice(0, NAMES_SHOWN).join(', ')} and ${names.length - NAMES_SHOWN} more`
+
 /**
- * Keeps on the session what its agent could see, as a line of the thread: one
- * a session changes as it hears more, and no new one for a session that
- * could see just what the last one could, as each restart starts another.
+ * Keeps on the session what its agent could see, as lines of the thread. The
+ * first says what its lead could see, once; a later session adds a line only
+ * where the names changed, and says which. A session that hears more updates
+ * its own line, and one that ends up where the last left it hides it again.
+ * Another lead says it afresh, as it is another agent's.
  */
 const sawSkills = (place: ItemPlace & { readonly lead: string }, skills: ReadonlyArray<SeenSkill>) =>
   Effect.gen(function* () {
@@ -220,16 +284,49 @@ const sawSkills = (place: ItemPlace & { readonly lead: string }, skills: Readonl
         from: worksIn.some((folder) => inside(skill.path, folder)) ? ('repository' as const) : ('person' as const),
       }))
       .toSorted((a, b) => a.name.localeCompare(b.name))
-    const last = yield* skillsLine(place.threadId)
+    const all = yield* skillsLines(place.threadId)
+    const [last] = all
     if (last === undefined && shown.length === 0) return
-    const title =
-      shown.length === 0
-        ? `${place.lead} could see no skills`
-        : `${place.lead} could see ${shown.length === 1 ? 'a skill' : `${shown.length} skills`}`
-    if (last !== undefined && last.content.title === title && JSON.stringify(last.content.skills) === JSON.stringify(shown)) return
-    const content = { source: 'runtime', severity: 'info', role: 'skills', title, skills: shown }
-    if (last !== undefined && last.sessionId === place.sessionId) yield* updateItem(place.projectId, last.id, content)
-    else yield* addItem(place, 'notice', content)
+    // This session's own line, if its last is: what it changed is from the line before.
+    const own = last !== undefined && last.sessionId === place.sessionId && leadOfLine(last) === place.lead ? last : undefined
+    // What the thread last said of this lead: a line it hid says nothing.
+    const before = all.find((line) => line !== own && line.content.hidden !== true && leadOfLine(line) === place.lead)
+    const baseline = before === undefined ? undefined : before.content.skills
+    const names = new Set(shown.map((skill) => skill.name))
+    const was = new Set((baseline ?? []).map((skill) => skill.name))
+    const added = shown.map((skill) => skill.name).filter((name) => !was.has(name))
+    const removed = [...was].filter((name) => !names.has(name)).toSorted()
+    const base = { source: 'runtime', severity: 'info', role: 'skills', lead: place.lead, skills: shown }
+    if (baseline === undefined) {
+      const title =
+        shown.length === 0
+          ? `${place.lead} could see no skills`
+          : `${place.lead} could see ${shown.length === 1 ? 'a skill' : `${shown.length} skills`}`
+      const content = { ...base, title }
+      if (own !== undefined) {
+        if (JSON.stringify(own.content) !== JSON.stringify(content)) yield* updateItem(place.projectId, own.id, content)
+      } else yield* addItem(place, 'notice', content)
+      return
+    }
+    if (added.length === 0 && removed.length === 0) {
+      // The same names, perhaps spelled otherwise (a path): the line the thread shows keeps what this session says, which `skillsRead` reads.
+      if (before !== undefined && JSON.stringify(before.content.skills) !== JSON.stringify(shown))
+        yield* updateItem(place.projectId, before.id, { ...before.content, skills: shown })
+      // Where the names are as the line before said, this session has nothing to add: its own line, if it made one, goes quiet.
+      if (own !== undefined && own.content.hidden !== true)
+        yield* updateItem(place.projectId, own.id, { ...base, title: own.content.title, hidden: true })
+      return
+    }
+    const title = `${place.lead} ${[
+      added.length === 0 ? null : `can now also see ${namesOf(added)}`,
+      removed.length === 0 ? null : `no longer sees ${namesOf(removed)}`,
+    ]
+      .filter((part) => part !== null)
+      .join(' and ')}`
+    const content = { ...base, title }
+    if (own !== undefined) {
+      if (JSON.stringify(own.content) !== JSON.stringify(content)) yield* updateItem(place.projectId, own.id, content)
+    } else yield* addItem(place, 'notice', content)
   })
 
 /** Commands that print a file, for a shell command that reads a skill's `SKILL.md`. */
@@ -531,6 +628,7 @@ export const recorder = (place: ItemPlace & { readonly sessionId: string }) => {
           const marked = {
             ...(cut.length === 0 ? content : { ...content, cut }),
             ...(event.skill === undefined ? {} : { skill: { names: [event.skill], reported: true } }),
+            ...mcpKept(event, existing?.content),
             ...serverDown(event),
           }
           // Only what it read of the skills its agent listed: an agent that says what it loads has said so.

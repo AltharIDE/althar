@@ -1,4 +1,4 @@
-import { type KeyboardEvent, type PointerEvent, useRef } from 'react'
+import { type KeyboardEvent, type PointerEvent, useEffect, useLayoutEffect, useRef } from 'react'
 
 import { cx } from '../../lib/cx'
 import s from './ResizeHandle.module.css'
@@ -10,6 +10,9 @@ import s from './ResizeHandle.module.css'
  * its narrowest and widest, and a double click puts it back. The width is
  * the consumer's: `onChange` follows the drag, and `onCommit` says where it
  * ended (the pointer let go, a key moved it), so it is kept once a move.
+ * `onResizing` says when the pointer starts dragging it and when it stops,
+ * so the consumer can mark the column it resizes (as `data-resizing`) and
+ * what is costly to lay out at each width in it, as a long thread, can wait.
  */
 
 export interface ResizeHandleProps {
@@ -26,6 +29,11 @@ export interface ResizeHandleProps {
   label: string
   /** Which edge of its column it is on: the end widens the column to the right. */
   edge?: 'start' | 'end'
+  /**
+   * The pointer started dragging it (true), and stopped: let go, cancelled, lost, or the handle gone mid-drag (false).
+   * A key moving it says nothing: there is no drag to wait for.
+   */
+  onResizing?: (resizing: boolean) => void
   /** How far an arrow key moves it, in px. */
   step?: number
   className?: string
@@ -40,6 +48,7 @@ export function ResizeHandle({
   onChange,
   onCommit,
   onReset,
+  onResizing,
   label,
   edge = 'end',
   step = 16,
@@ -47,12 +56,30 @@ export function ResizeHandle({
 }: ResizeHandleProps) {
   const drag = useRef<{ readonly x: number; readonly width: number; at: number } | null>(null)
   const sign = edge === 'end' ? 1 : -1
+  // The consumer's latest, so the drag ending says so to whom it would now, the handle gone mid-drag included.
+  const said = useRef(onResizing)
+  useLayoutEffect(() => {
+    said.current = onResizing
+  })
+  const resizing = (on: boolean) => said.current?.(on)
+  // Gone mid-drag, what it marked isn't left marked.
+  useEffect(
+    () => () => {
+      if (drag.current !== null) said.current?.(false)
+    },
+    [],
+  )
+  const stop = () => {
+    if (drag.current !== null) resizing(false)
+    drag.current = null
+  }
 
   const onPointerDown = (event: PointerEvent<HTMLDivElement>) => {
     if (event.button !== 0) return
     event.preventDefault()
     event.currentTarget.setPointerCapture(event.pointerId)
     drag.current = { x: event.clientX, width: value, at: value }
+    resizing(true)
   }
   const onPointerMove = (event: PointerEvent<HTMLDivElement>) => {
     const from = drag.current
@@ -62,7 +89,7 @@ export function ResizeHandle({
   }
   const end = (event: PointerEvent<HTMLDivElement>) => {
     const from = drag.current
-    drag.current = null
+    stop()
     if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId)
     if (from !== null && from.at !== from.width) onCommit?.(from.at)
   }
@@ -98,7 +125,7 @@ export function ResizeHandle({
       onPointerMove={onPointerMove}
       onPointerUp={end}
       onPointerCancel={end}
-      onLostPointerCapture={() => (drag.current = null)}
+      onLostPointerCapture={stop}
       onKeyDown={onKeyDown}
       onDoubleClick={onReset}
     />

@@ -135,7 +135,7 @@ export const ProjectRules = Schema.Struct({
 export type ProjectRules = typeof ProjectRules.Type
 
 /** The MVP's rules, a project's first revision: every kind asks, the rest is allowed. */
-const FIRST: ProjectRules = { source: 'mvp', alwaysAsk: [...RULES] }
+const FIRST: ProjectRules = { source: 'mvp', alwaysAsk: [...RULES], allowEverything: true }
 
 const isRule = (id: string): id is RuleId => (RULES as ReadonlyArray<string>).includes(id)
 
@@ -275,10 +275,13 @@ export const insertRevision = (projectId: ProjectId, revision: number, rules: Pr
  */
 export const startingRules = (defaults: NewProjectDefaults): ProjectRules => {
   const chosen: Partial<ProjectRules> = {
-    ...(defaults.permissions === NEW_PROJECT_DEFAULTS.permissions ? {} : { permissions: defaults.permissions }),
     ...(defaults.usageLimit === NEW_PROJECT_DEFAULTS.usageLimit ? {} : { usageLimit: defaults.usageLimit }),
     ...(defaults.rotateAccounts ? { accounts: { rotate: true } } : {}),
     ...(defaults.end === NEW_PROJECT_DEFAULTS.end ? {} : { end: defaults.end }),
+    ...(defaults.pushCommits === NEW_PROJECT_DEFAULTS.pushCommits ? {} : { pushCommits: defaults.pushCommits }),
+    ...(defaults.postScreenshots === NEW_PROJECT_DEFAULTS.postScreenshots ? {} : { postScreenshots: defaults.postScreenshots }),
+    ...(defaults.resolveConflicts === NEW_PROJECT_DEFAULTS.resolveConflicts ? {} : { resolveConflicts: defaults.resolveConflicts }),
+    ...(defaults.moveIssues === NEW_PROJECT_DEFAULTS.moveIssues ? {} : { moveIssues: defaults.moveIssues }),
   }
   return Object.keys(chosen).length === 0 ? FIRST : { ...FIRST, ...chosen, source: 'defaults' }
 }
@@ -349,6 +352,16 @@ export class Policies extends Context.Service<
             ([row]) => (row === undefined ? undefined : { id: row.id, revision: row.revision, rules: decode(row.rules) }),
           )
           const known = yield* latest
+          // A project from before ADR-097 that never said whether everything is allowed gets a revision with it on, once: the
+          // person's own off stays off, and their Never and Ask me rules stay as they were.
+          if (known !== undefined && known.rules.allowEverything === undefined && known.rules.permissions !== 'allow')
+            return yield* sql.withTransaction(
+              Effect.flatMap(latest, (again) =>
+                again === undefined || again.rules.allowEverything !== undefined
+                  ? Effect.succeed(again ?? known)
+                  : insertRevision(projectId, again.revision + 1, { ...again.rules, allowEverything: true }, instance.systemId),
+              ),
+            )
           if (known !== undefined) return known
           // The first revision, once: read again in the transaction, so readers at the same moment make one between them.
           return yield* sql.withTransaction(

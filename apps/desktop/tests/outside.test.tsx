@@ -1260,7 +1260,7 @@ describe('a task’s pull request', () => {
     opened.mockRestore()
   })
 
-  it('shows what it changed, file by file, from its header, its outputs, or ⌘D', async () => {
+  it('shows what it changed, file by file, from its worktree’s part, its outputs, or ⌘D', async () => {
     const file = (path: string, more: Partial<ThreadSnapshot['task']['files'][number]> = {}) => ({
       path,
       from: null,
@@ -1298,7 +1298,11 @@ describe('a task’s pull request', () => {
       ),
     })
     withServices(<Task />, client)
-    await userEvent.click(await screen.findByRole('button', { name: /^2 files/ }))
+    // From its worktree, among its parts before the faces (ADR-097).
+    await userEvent.click(await screen.findByRole('button', { name: /^Parts, / }))
+    await userEvent.click(await screen.findByRole('button', { name: 'Worktree' }))
+    expect(await screen.findByText('2 files changed')).toBeTruthy()
+    await userEvent.click(await screen.findByRole('button', { name: /^See the changes/ }))
     const view = await screen.findByRole('dialog', { name: 'Changes' })
     expect(within(view).getByText('althar/retry into main')).toBeTruthy()
     // The first file, read from the runtime when you get to it.
@@ -1718,6 +1722,37 @@ describe('a project, reaching outside', () => {
     await userEvent.click(await screen.findByRole('menuitemradio', { name: /Push the branch only/ }))
     expect(screen.queryByText('this task only')).toBeNull()
     await waitFor(() => expect(client.changePlan).toHaveBeenLastCalledWith('pln1', expect.any(Array), 'none'))
+  })
+
+  it('starts a plan from another preset, picked from its kicker, and offers a review only the presets that review', async () => {
+    const preset = (name: string, reviews = false) => ({
+      id: `builtin:${name}`,
+      name,
+      builtin: true,
+      projectId: null,
+      about: `${name}'s parts`,
+      parts: {
+        workspace: 'worktree' as const,
+        checked: 'before' as const,
+        end: 'draft' as const,
+        shelf: 'board' as const,
+        lead: null,
+        reviewer: null,
+        brief: '',
+        ...(reviews ? { reviews: true } : {}),
+      },
+    })
+    const { client } = fakeClient({
+      getCoordinator: vi.fn(async () =>
+        coordinatorSnapshot({ items: [items.card(card({ plan: { ...card().plan!, preset: 'Change' } }), 'c1')] }),
+      ),
+      listPresets: vi.fn(async () => [preset('Chat'), preset('Change'), preset('Prototype'), preset('Review a PR', true)]),
+    })
+    withServices(<Project />, client)
+    await userEvent.click(await screen.findByRole('button', { name: 'Change' }))
+    expect(screen.queryByRole('menuitemradio', { name: /Review a PR/ })).toBeNull()
+    await userEvent.click(await screen.findByRole('menuitemradio', { name: /Prototype/ }))
+    await waitFor(() => expect(client.applyPreset).toHaveBeenCalledWith('pln1', 'Prototype'))
   })
 })
 

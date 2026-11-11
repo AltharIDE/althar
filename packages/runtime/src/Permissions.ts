@@ -49,6 +49,7 @@ import {
   tallyKindOf,
   type Verdict,
 } from './rules'
+import { irreversibleOf } from './irreversible'
 import { passGuard } from './pushGuard'
 import { type Reach, withEdits, workedOutReach } from './sandboxReach'
 import { addItem } from './threads'
@@ -732,6 +733,8 @@ export class Permissions extends Context.Service<
                     paths: pathsOf(request),
                     reason: verdict.reason,
                     held: verdict.held,
+                    // What its card says, where the rules read it as what can't be undone (ADR-097).
+                    irreversible: irreversibleOf(request, ruleContext),
                     always: alwaysPayload(always),
                     // What it is counted as (ADR-071), beside the kind of tool call it is.
                     counted: kind,
@@ -822,6 +825,13 @@ export class Permissions extends Context.Service<
           return {
             commands: withEdits(reach.commands, edits?.commands),
             hosts: withEdits(reach.hosts, edits?.hosts).filter(reached),
+            // The open network does not undo a host the person explicitly put in Never.
+            deniedHosts: project.commands.flatMap((rule) => {
+              if (rule.decision !== 'never') return []
+              const pattern = rule.pattern.trim().toLowerCase()
+              if (hostOf(pattern) === pattern) return [pattern]
+              return pattern.startsWith('*.') && hostOf(pattern.slice(2)) === pattern.slice(2) ? [pattern] : []
+            }),
             writes: reach.writes,
           } satisfies Reach
         })

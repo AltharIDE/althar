@@ -461,10 +461,11 @@ describe('Althar’s settings, in the window', () => {
   })
 
   it('open again on the section they were on, after a launch, and close to the home where there is no project tab', async () => {
+    // The section the tab was on before the sections moved (Reviews, now Pull requests) is kept as where its settings went.
     window.localStorage.setItem('althar.tabs', JSON.stringify({ open: [], places: {}, settings: 'reviews' }))
     windowAt('/', [halyard])
     await userEvent.click(await waitFor(() => tab('Settings')))
-    expect(where()).toBe('/settings/reviews')
+    expect(where()).toBe('/settings/pull-requests')
     await userEvent.click(nav().getByRole('button', { name: 'Close Settings' }))
     await waitFor(() => expect(where()).toBe('/'))
   })
@@ -577,6 +578,47 @@ describe('the window’s own buttons in the strip', () => {
     windowAt('/')
     await waitFor(() => expect(tab('Home')).toBeTruthy())
     expect(screen.queryByRole('button', { name: 'Close the window' })).toBeNull()
+  })
+})
+
+describe('dismissing Home', () => {
+  it('closes Home, selects a project, persists dismissal and reopens explicitly', async () => {
+    window.localStorage.setItem('althar.tabs', JSON.stringify({ open: ['p1'], places: {} }))
+    windowAt('/')
+    await userEvent.click(await screen.findByRole('button', { name: 'Close Home' }))
+    await waitFor(() => expect(where()).toBe('/projects/p1'))
+    expect(nav().queryByRole('button', { name: 'Close Home' })).toBeNull()
+    expect(JSON.parse(window.localStorage.getItem('althar.tabs')!).home).toBe(false)
+    await userEvent.click(nav().getByRole('button', { name: /^Home/ }))
+    await waitFor(() => expect(where()).toBe('/'))
+    expect(nav().getByRole('button', { name: 'Close Home' })).toBeTruthy()
+    expect(JSON.parse(window.localStorage.getItem('althar.tabs')!).home).toBe(true)
+  })
+
+  it('keeps Home closed in a new window and starts on a kept project', async () => {
+    window.localStorage.setItem('althar.tabs', JSON.stringify({ home: false, open: ['p2'], places: {} }))
+    windowAt('/')
+    await waitFor(() => expect(where()).toBe('/projects/p2'))
+    expect(nav().queryByRole('button', { name: 'Close Home' })).toBeNull()
+    fireEvent.keyDown(window, { key: '1', metaKey: true })
+    await waitFor(() => expect(where()).toBe('/projects/p2'))
+  })
+
+  it('falls back to Home, shown again, when no project tab remains', async () => {
+    window.localStorage.setItem('althar.tabs', JSON.stringify({ home: false, open: ['p1'], places: {} }))
+    windowAt('/projects/p1')
+    await userEvent.click(await screen.findByRole('button', { name: 'Close meridian' }))
+    await waitFor(() => expect(where()).toBe('/'))
+    expect(tab('Home')).toBeTruthy()
+    expect(nav().queryByRole('button', { name: 'Close Home' })).toBeNull()
+    expect(JSON.parse(window.localStorage.getItem('althar.tabs')!).home).toBe(true)
+  })
+
+  it('validates persisted visibility and numbers only visible tabs', () => {
+    expect(keptFrom('{"open":[],"home":false}')?.home).toBe(false)
+    expect(keptFrom('{"open":[],"home":"false"}')?.home).toBeUndefined()
+    expect(byNumber(['a', 'b'], 1, false)).toBe('a')
+    expect(beside(['a', 'b'], 'b', 1, false)).toBe('a')
   })
 })
 

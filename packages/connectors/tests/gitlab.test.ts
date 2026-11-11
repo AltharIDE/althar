@@ -489,6 +489,13 @@ describe('GitLab as a code host', () => {
         described.sent.map((one) => [one.method, one.body]),
         [['PUT', { description: 'Only this' }]],
       )
+      // A stacked change goes into another branch once the one below merges.
+      const based = gitlab([['PUT', `${PROJECT}/merge_requests/12`, { json: request() }]])
+      yield* based.host.editChange(repository, change, { base: 'main' })
+      assert.deepStrictEqual(
+        based.sent.map((one) => [one.method, one.body]),
+        [['PUT', { target_branch: 'main' }]],
+      )
       // An account that may not edit it is refused, as forbidden, while its token works.
       const refusing = gitlab([
         ['PUT', `${PROJECT}/merge_requests/12`, { status: 401, json: { message: '401 Unauthorized' } }],
@@ -558,6 +565,78 @@ describe('GitLab as a code host', () => {
       const idle = gitlab([['GET', `${PROJECT}/merge_requests/12`, { json: request({ draft: false }) }]])
       yield* idle.host.leaveQueue(repository, change)
       assert.lengthOf(idle.sent, 1)
+    }),
+  )
+
+  it.effect('says where a merge request stands on its merge train: in it, taken out for failing checks, merged, or never on one', () =>
+    Effect.gen(function* () {
+      const MR = `${PROJECT}/merge_requests/12`
+      const TRAIN = `${PROJECT}/merge_trains/merge_requests/12`
+      // Without queue asked, the train isn't consulted.
+      const plain = gitlab([['GET', MR, { json: request({ draft: false }) }]])
+      assert.notProperty(yield* plain.host.change(repository, 12), 'queued')
+      assert.lengthOf(plain.sent, 2)
+      // On a train, the pipeline's commit is the build to read.
+      const inTrain = gitlab([
+        ['GET', MR, { json: request({ draft: false }) }],
+        ['GET', TRAIN, { json: { status: 'fresh', pipeline: { sha: 'train-sha', status: 'running' } } }],
+      ])
+      assert.deepInclude(yield* inTrain.host.change(repository, 12, { queue: true }), {
+        queued: true,
+        leftQueue: null,
+        queueSha: 'train-sha',
+      })
+      // Both a normal merge and an immediate merge that skipped the train must wait for REST to report it landed.
+      const merged = gitlab([
+        ['GET', MR, { json: request({ draft: false }) }],
+        ['GET', TRAIN, { json: { status: 'merged', pipeline: { sha: 'train-sha', status: 'success' } } }],
+      ])
+      assert.deepInclude(yield* merged.host.change(repository, 12, { queue: true }), { queued: false, leftQueue: 'merged' })
+      const skipped = gitlab([
+        ['GET', MR, { json: request({ draft: false }) }],
+        ['GET', TRAIN, { json: { status: 'skip_merged', pipeline: { sha: 'train-sha', status: 'success' } } }],
+      ])
+      assert.deepInclude(yield* skipped.host.change(repository, 12, { queue: true }), { queued: false, leftQueue: 'merged' })
+      // A 404 may mean a failed train was deleted: use its historical train pipeline.
+      const historical = gitlab([
+        ['GET', MR, { json: request({ draft: false }) }],
+        ['GET', TRAIN, { status: 404, json: { message: '404 Not found' } }],
+        [
+          'GET',
+          `${MR}/pipelines?per_page=100`,
+          {
+            json: [
+              { id: 9, sha: 'ordinary', ref: 'feature', status: 'failed' },
+              { id: 8, sha: 'train-sha', ref: 'refs/merge-requests/12/train', status: 'failed' },
+            ],
+          },
+        ],
+      ])
+      assert.deepInclude(yield* historical.host.change(repository, 12, { queue: true }), {
+        queued: false,
+        leftQueue: 'checks',
+        queueSha: 'train-sha',
+      })
+      const merging = gitlab([
+        ['GET', MR, { json: request({ draft: false }) }],
+        ['GET', TRAIN, { json: { status: 'merging', pipeline: { sha: 'train-sha', status: 'success' } } }],
+      ])
+      assert.isTrue((yield* merging.host.change(repository, 12, { queue: true })).queued)
+      for (const answer of [{ status: 404, json: { message: '404 Not found' } }]) {
+        const none = gitlab([
+          ['GET', MR, { json: request({ draft: false }) }],
+          ['GET', TRAIN, answer],
+          ['GET', `${MR}/pipelines?per_page=100`, { json: [] }],
+        ])
+        assert.deepInclude(yield* none.host.change(repository, 12, { queue: true }), { queued: false, leftQueue: null, queueSha: null })
+      }
+      const forbidden = gitlab([
+        ['GET', MR, { json: request({ draft: false }) }],
+        ['GET', TRAIN, { status: 403, json: { message: '403 Forbidden' } }],
+      ])
+      const unknown = yield* forbidden.host.change(repository, 12, { queue: true })
+      assert.notProperty(unknown, 'queued')
+      assert.include(unknown.queueError, '403 Forbidden')
     }),
   )
 

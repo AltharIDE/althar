@@ -1,7 +1,7 @@
 import { EarlierTurns } from '../../shared/EarlierTurns'
 import { useQuery } from '@tanstack/react-query'
 import { useNavigate } from '@tanstack/react-router'
-import { type CSSProperties, type ReactNode, useCallback, useEffect, useState } from 'react'
+import { type ReactNode, useCallback, useEffect, useRef, useState } from 'react'
 
 import type { ThreadItem } from '@althar/contracts'
 
@@ -45,7 +45,18 @@ import { useThreadHost } from '../../shared/ThreadHost'
 import { type Outgoing, outgoingOf, takesImages, useAttachments } from '../../shared/useAttachments'
 import { PageOpenerProvider, useOpener } from '../browser/opener'
 import { pages } from '../browser/pages'
-import { composerComment, cropsOf, drop, giveBack as giveCommentsBack, takeAll, useComments, withComments } from '../../shared/comments'
+import { useCanvasArrivals } from '../canvases/arrivals'
+import { ArtifactsView } from '../canvases/ArtifactsView'
+import {
+  composerComment,
+  cropsOf,
+  drop,
+  giveBack as giveCommentsBack,
+  takeAll,
+  useComments,
+  withComments,
+  canvasCommentsOf,
+} from '../../shared/comments'
 import { AutomationInThread } from '../automations/AutomationInThread'
 import { AutomationsView } from '../automations/AutomationsView'
 import { useAutomationActions, useAutomations } from '../automations/useAutomations'
@@ -74,6 +85,7 @@ import { partsOf, tasksOf, trackersOf, trackersWithBinding } from './front'
 import { nextRoom } from './rooms'
 import s from './Project.module.css'
 import type { ProjectModel } from './useProject'
+import { turnsById } from '../../shared/turnTime'
 
 /*
  * A project: its header across the top, the bar a task has, then the
@@ -123,7 +135,14 @@ export const text = {
  */
 const WIDTH = { key: 'althar.both', start: 560, min: 340, board: 480, lane: 240 } as const
 
+/*
+ * The width last kept in this window where storage wouldn't take it: the column goes with a switch of room, and back
+ * it is as the person left it all the same. Null where storage holds it.
+ */
+let held: number | null = null
+
 const storedWidth = (): number => {
+  if (held !== null) return held
   try {
     const kept = Number(window.localStorage.getItem(WIDTH.key))
     return Number.isFinite(kept) && kept >= WIDTH.min ? kept : WIDTH.start
@@ -146,11 +165,56 @@ const useBothWidth = () => {
     setWidth(next)
     try {
       window.localStorage.setItem(WIDTH.key, String(next))
+      held = null
     } catch {
-      // Not kept; it still holds for this window.
+      // Not kept across launches; it still holds for this window.
+      held = next
     }
   }
   return { width: Math.min(width, max), min: WIDTH.min, max, room, set: setWidth, keep, reset: () => keep(WIDTH.start) }
+}
+
+/**
+ * The conversation's column, and beside the board its divider and what opens over the board against it. The width is
+ * its own: a drag draws this again and nothing else, the thread and the board given as made (`children`, `over`), so a
+ * long thread and a full board stay as they are while it moves. It is set as the column's `width`, not a custom
+ * property, which every element of the thread would inherit and have its style worked out again for each move. While
+ * its divider is dragged, the column is marked `data-resizing`, so the thread in it lays out only the turns on screen.
+ * What opens over the board (`over`) is drawn again on each move, as it is placed by the width and as wide as the room
+ * it leaves: with a file open on it, that file's panel is drawn again too.
+ */
+function TalkColumn({
+  beside,
+  children,
+  over,
+}: {
+  beside: boolean
+  children: ReactNode
+  /** What opens over the board, against the conversation: by the conversation's width and the window's (`room`). */
+  over: (width: number, room: number) => ReactNode
+}) {
+  const both = useBothWidth()
+  const column = useRef<HTMLDivElement>(null)
+  return (
+    <>
+      <div ref={column} className={s.talk} style={beside ? { width: both.width } : undefined}>
+        {children}
+        {beside && (
+          <ResizeHandle
+            value={both.width}
+            min={both.min}
+            max={both.max}
+            onChange={both.set}
+            onCommit={both.keep}
+            onReset={both.reset}
+            onResizing={(on) => column.current?.toggleAttribute('data-resizing', on)}
+            label={text.width}
+          />
+        )}
+      </div>
+      {beside && over(both.width, both.room)}
+    </>
+  )
 }
 
 /** The project's settings, and where they lead out of the project. */
@@ -215,7 +279,6 @@ export function ProjectView({
     if (settings.section !== undefined) setSection(settings.section)
   }
   useEffect(() => onRoomChange?.(room), [room, onRoomChange])
-  const both = useBothWidth()
   // The lanes the person collapsed, kept for every project, apart beside the conversation.
   const [folds, setFolds] = useFolds(room === Room.Both ? 'beside' : 'alone')
   const lanes = board.board === null ? null : lanesOf(board.board, board.merging)
@@ -265,6 +328,8 @@ export function ProjectView({
           },
         },
   )
+  // A canvas the coordinator publishes or opens beside its conversation opens on the workbench as it arrives (ADR-104).
+  useCanvasArrivals(model.coordinator?.items, shown.openCanvas)
   const coordinatorThread = model.coordinator?.threadId ?? null
   const voice = useDictation(draftOf, {
     projectId: about,
@@ -319,6 +384,12 @@ export function ProjectView({
     (suggested?.available === true ? { agentId: suggested.agentId, model: suggested.model, effort: suggested.effort } : null) ??
     (first === undefined ? null : { agentId: first.id, model: null, effort: null })
   const name = model.project?.name ?? coordinator?.project.name ?? text.project
+  // The presets a plan can start from, this project's own with them: what the plan card's kicker lists.
+  const { client } = useServices()
+  const presets = useQuery({
+    queryKey: ['presets', about ?? null],
+    queryFn: () => client.listPresets(about ?? undefined),
+  }).data
 
   const actions: CardActions = {
     project: name,
@@ -334,6 +405,12 @@ export function ProjectView({
     onStopBackground: (threadId, id) => void model.stopBackground(threadId, id),
     // Every waiting card has the same holders, so only the newest says them.
     holdersOn: newestWaiting(coordinator?.items ?? []),
+    ...(presets === undefined
+      ? {}
+      : {
+          presets: presets.map((one) => ({ name: one.name, about: one.about, reviews: one.parts.reviews === true })),
+          onPreset: (planId: string, preset: string) => void model.applyPreset(planId, preset),
+        }),
   }
   const draftActions: DraftActions = {
     onFile: (draftId) => void model.fileIssueDraft(draftId),
@@ -363,7 +440,13 @@ export function ProjectView({
     const gathered = takeAll(draftOf)
     const pictures = receiver.takes !== false
     const crops = pictures ? cropsOf(gathered) : { sent: [], pictures: [] }
-    const outgoing: Outgoing = { ...own, sent: [...own.sent, ...crops.sent], pictures: [...own.pictures, ...crops.pictures] }
+    const outgoing: Outgoing = {
+      ...own,
+      sent: [...own.sent, ...crops.sent],
+      pictures: [...own.pictures, ...crops.pictures],
+      // Comments on canvases are kept with the message itself, in its command, and nowhere before (ADR-104).
+      canvasComments: canvasCommentsOf(gathered),
+    }
     const words = withComments(body, gathered, own.sent.length, pictures)
     setDraft('')
     images.clear()
@@ -609,6 +692,8 @@ export function ProjectView({
             onOpen={setAutomation}
             onTask={onTask}
           />
+        ) : room === Room.Artifacts ? (
+          <ArtifactsView projectId={projectId} threadId={coordinator?.threadId ?? null} draft={draftOf} />
         ) : room === Room.Settings ? (
           <div className={s.settings}>
             <ProjectSettingsPage
@@ -627,7 +712,16 @@ export function ProjectView({
         ) : (
           <div className={room === Room.Both ? `${s.rooms} ${s.both}` : s.rooms}>
             {talking && (
-              <div className={s.talk} style={room === Room.Both ? ({ '--talk-width': `${both.width}px` } as CSSProperties) : undefined}>
+              <TalkColumn
+                beside={room === Room.Both}
+                /*
+                 * Beside the board, a file the coordinator names opens over the board, against the conversation, dragged by its far
+                 * edge; where it would leave less of the board than a lane, as in a small window, it covers the board to the window's edge.
+                 */
+                over={(width, windowWidth) =>
+                  shown.workbench(null, { room: windowWidth - width, keep: WIDTH.lane, className: s.over, style: { left: width } })
+                }
+              >
                 {coordinator === null ? (
                   model.error === null ? (
                     <div className={s.reading}>
@@ -644,7 +738,6 @@ export function ProjectView({
                   <TaskFace
                     className={s.face}
                     composer={composer}
-                    head={clearing.head}
                     // Beside the board, the conversation has no room to share: what it opens goes over the board instead.
                     {...(room === Room.Both ? {} : { panel: shown.workbench(null), panelWidth: shown.bench.width })}
                   >
@@ -679,6 +772,7 @@ export function ProjectView({
                               worktree: null,
                               queue,
                               outputs: model.outputs,
+                              turns: turnsById(coordinator.turns),
                             },
                             model.streaming,
                             (iso) => ago(iso),
@@ -720,31 +814,8 @@ export function ProjectView({
                 )}
                 {shown.lightbox}
                 {clearing.dialog}
-                {room === Room.Both && (
-                  <ResizeHandle
-                    value={both.width}
-                    min={both.min}
-                    max={both.max}
-                    onChange={both.set}
-                    onCommit={both.keep}
-                    onReset={both.reset}
-                    label={text.width}
-                  />
-                )}
-              </div>
+              </TalkColumn>
             )}
-            {/*
-             * Beside the board, a file the coordinator names opens over the board, against the conversation, dragged by its far
-             * edge; where it would leave less of the board than a lane, as in a small window, it covers the board to the window's edge.
-             */}
-            {room === Room.Both &&
-              talking &&
-              shown.workbench(null, {
-                room: both.room - both.width,
-                keep: WIDTH.lane,
-                className: s.over,
-                style: { left: both.width },
-              })}
             {boarding && (
               <div className={s.board}>
                 {lanes !== null ? (
