@@ -21,7 +21,7 @@ import { keys, reads } from '../../data/reads'
 import { canPick } from '../../shared/agents'
 import { isSending, mergeItems, newestReads, sending, takenBack, unsent, waiting } from '../../shared/items'
 import { headsOf } from '../../shared/mergeHere'
-import { type Choice, moveTo, runningOn, startOf } from '../../shared/models'
+import { type Choice, moveTo, runningOn, startOf, upcomingOn } from '../../shared/models'
 import type { OutputSoFar } from '../../shared/handed'
 import { type Outgoing, sentWith } from '../../shared/useAttachments'
 import { useOutputs } from '../../shared/useOutputs'
@@ -117,7 +117,8 @@ export interface TaskModel {
   /** Tries its lead's last turn again, where it failed: what the person said in it goes again. */
   readonly tryAgain: () => Promise<void>
   /** Puts the lead on another model or effort, or hands the task to another agent with one. */
-  readonly choose: (choice: Choice) => Promise<void>
+  /** Puts the lead on the model and effort chosen; whether it was taken, for the picker to go back to what it was if not. */
+  readonly choose: (choice: Choice) => Promise<boolean>
   /** Hands the task to another agent with what the person says, and any images: the new lead's first turn, after its brief. */
   readonly handOver: (choice: Choice, body: string, images?: Outgoing) => Promise<boolean>
   /** Stops the task: every agent on it, until it is resumed. */
@@ -369,6 +370,8 @@ export const useTask = (threadId: string): TaskModel => {
     [client, threadId, newest, arrived, fail],
   )
 
+  // What the lead was last picked to, until the thread says it: a pick made before the last one was taken goes from there.
+  const lastPick = useRef<Choice | null>(null)
   /**
    * The thread's head again: its task, the agent working, the calls waiting.
    * Its items stay as they are, but for those it may have moved on, read after
@@ -628,14 +631,35 @@ export const useTask = (threadId: string): TaskModel => {
     interrupt: () => act(() => client.interrupt(threadId)),
     compact: () => act(() => client.compact(threadId)),
     tryAgain: () => act(() => client.tryAgain(threadId)),
-    choose: (choice) =>
-      act(async () => {
-        const session = snapshot?.session
-        // A thread the runtime no longer holds can't be moved: the choice starts the lead on it instead. While it is held, the choice changes the lead it has.
-        await (session == null || !session.held
-          ? client.startSession(startOf(threadId, choice))
-          : moveTo(client, threadId, runningOn(session), choice))
-      }),
+    choose: async (choice) => {
+      setError(null)
+      let taken = true
+      try {
+        // As the cache has it now, not as this render had it: a head read may have landed since.
+        const session = (cache.getQueryData<ThreadSnapshot>(keys.thread(threadId)) ?? snapshot)?.session
+        // A thread the runtime no longer holds can't be moved: the choice starts the lead on it instead. While it is held, the choice changes the lead it has:
+        // from what it was last picked to, else what the runtime holds for its next turn, else what it is on, so a pick back to what it is on cancels the one before.
+        if (session == null || !session.held) await client.startSession(startOf(threadId, choice))
+        else {
+          const from = lastPick.current ?? upcomingOn(session) ?? runningOn(session)
+          lastPick.current = choice
+          await moveTo(client, threadId, from, choice)
+        }
+      } catch (failure) {
+        // Said where the thread says what went wrong; the picker goes back to what it was.
+        fail(failure)
+        taken = false
+      }
+      // The runtime has it as who leads next, or the lead as it was: read now, so the picker is told by the thread, not by the window.
+      // The pick stands as the last until that read has landed: one made before it goes from here, not from the thread as it was.
+      try {
+        await readHead()
+        await newest.landed('head')
+      } finally {
+        if (lastPick.current === choice) lastPick.current = null
+      }
+      return taken
+    },
     handOver: (choice, body, images) =>
       shown(body, 'after_current', () => client.switchAgent({ ...startOf(threadId, choice), body, ...sentWith(images) }), images, false),
     stop: () => onTask((taskId) => client.stopTask(taskId)),

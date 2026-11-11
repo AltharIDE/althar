@@ -109,7 +109,7 @@ describe('a task’s buttons, as tools', () => {
       // Its own lead names no task: it is its own, and its line says its lead did it.
       assert.match(
         yield* callTool(lead, 'resolve_conflicts', { automatically: false, why: 'the person resolves them' }),
-        /^add-a-retry resolves conflicts only when asked now\. Both threads/,
+        /^add-a-retry resolves conflicts only when asked now\. Its thread has a line/,
       )
       assert.include(yield* titles(task.threadId), 'Its lead set this task to resolve conflicts only when asked: the person resolves them')
       assert.match(yield* callTool(lead, 'move_to_front', {}), /^Nothing changed: add-a-retry isn't waiting/)

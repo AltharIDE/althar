@@ -342,15 +342,10 @@ export interface AgentDefinition {
    * (docs/architecture/06), beyond its reader mode and `sessionMeta`.
    * `env`, what its environment adds over `withoutOwnTools`' (which it is
    * given) so that nothing of the repository's own config, hooks or plugins
-   * loads. `outside`, whether that holds it to only reading a pull request
-   * from outside the project: every command it runs asks first and meets
-   * Althar's reader rules, none running because its sandbox would contain
-   * it, and nothing of its own reaches the network. Without `outside`, no
-   * review of someone else's pull request is started on it, a team's
-   * included: it could run the pull request's code.
+   * loads. Any agent leads a review (the person's note of 11 Nov): one whose
+   * sandbox runs commands without asking runs them there.
    */
   readonly reviewing?: {
-    readonly outside: boolean
     readonly env?: (own: Readonly<Record<string, string>>) => Readonly<Record<string, string>>
   }
   /**
@@ -729,9 +724,9 @@ const openCodeSkills = (folder: string, own: Readonly<Record<string, string>>): 
  * reading: codex-acp 2.1.1 starts every turn with its mode's approval policy
  * (`on-request` for `read-only`), and no session option changes it, so
  * Codex runs a command its read-only sandbox contains without asking, and
- * Althar's reader rules never see it. It could run the pull request's
- * scripts there, with no network and no writes. So it reviews a team's pull
- * request held this far, and none from outside.
+ * Althar's reader rules never see it. It may run the pull request's
+ * scripts there, with no network and no writes: any agent leads a review
+ * (the person's note of 11 Nov), and its OS sandbox holds what it runs.
  */
 const codexReviewing = (own: Readonly<Record<string, string>>): Readonly<Record<string, string>> => ({
   CODEX_CONFIG: JSON.stringify({
@@ -1087,12 +1082,9 @@ export const agents: Readonly<Record<AgentId, AgentDefinition>> = {
     holds: claudeHolds,
     // Each entry of its transcript names the folder its shell is in.
     shellFolder: claudeShellFolder,
-    /*
-     * As a review's lead it is held by its session's settings alone (claudeReads, untrusted): every command asks and meets
-     * Althar's reader rules, no settings file or hook of the repository's or the person's loads, and offline its web tools are
-     * denied. So it may read a pull request from outside.
-     */
-    reviewing: { outside: true },
+    // As a review's lead it is held by its session's settings alone (claudeReads, untrusted): no settings file or hook of the
+    // repository's or the person's loads, and offline its web tools are denied.
+    reviewing: {},
     permissionJudge: { sessionMeta: claudeJudges },
     knownGaps: [
       'Starts in whatever mode the user set in Claude Code, which may be bypassPermissions, so Althar always sets the mode.',
@@ -1137,7 +1129,8 @@ export const agents: Readonly<Record<AgentId, AgentDefinition>> = {
      * ask meets Althar's rules, which refuse it. But in that mode it asks
      * only to go beyond the sandbox: a command the sandbox contains runs
      * without asking (codexReviewing says why no session option changes
-     * that), so it never leads a review of a pull request from outside.
+     * that): as a review's lead it may run the pull request's code there,
+     * offline and writing nothing, which the person's note of 11 Nov allows.
      */
     modes: { ask: 'workspace-write', readOnly: 'read-only', reader: 'read-only' },
     options: { mode: 'mode', model: 'model', effort: 'reasoning_effort' },
@@ -1164,7 +1157,7 @@ export const agents: Readonly<Record<AgentId, AgentDefinition>> = {
     },
     version: () => ({ command: 'codex', args: ['--version'] }),
     withoutOwnTools: codexWithoutOwnTools,
-    reviewing: { outside: false, env: codexReviewing },
+    reviewing: { env: codexReviewing },
     sessionEnv: (own, options) => ({
       // Every command Codex doesn't read as safe reaches Althar, so the irreversible list holds inside its sandbox too
       // (ADR-097); everything else is answered at once. The adapter's patch puts it on the turn's approval policy.
@@ -1340,7 +1333,7 @@ export const agents: Readonly<Record<AgentId, AgentDefinition>> = {
         ]),
       ]
     },
-    reviewing: { outside: true, env: openCodeReviewing },
+    reviewing: { env: openCodeReviewing },
     /* Its config's `skills.paths`, each searched for every `SKILL.md` below it (OpenCode 1.19.0), beside its own config; its task tool runs subagents. */
     skills: {
       layout: 'plain',

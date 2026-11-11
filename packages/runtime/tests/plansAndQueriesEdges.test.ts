@@ -281,7 +281,7 @@ describe('a plan from a preset', () => {
     }).pipe(Effect.provide(runtimeWith(github)))
   })
 
-  it.live('keeps a review a review, led by an agent that can be held to reading', () => {
+  it.live('keeps a review a review, led by any agent, Codex included', () => {
     const { working, bare, github } = onGitHub()
     return Effect.gen(function* () {
       const { coordinator, person } = yield* aProject(working)
@@ -298,13 +298,10 @@ describe('a plan from a preset', () => {
       const { id } = yield* planOf('review-1-back-off')
       const refused = yield* Effect.flip(plans.applyPreset(id, 'Small change', person))
       assert.strictEqual((refused as { message?: string }).message, 'A review stays a review.')
-      // Codex can't be held to reading: it leads no review, though one with it skipped is fine.
+      // Codex may lead it as any agent may.
       const lead = { key: 'implement' as const, agentId: 'claude-code', model: 'large', skipped: false }
-      const codex = yield* Effect.flip(plans.change(id, [{ ...lead, agentId: 'codex' }], person))
-      assert.strictEqual(
-        (codex as { message?: string }).message,
-        "Fake codex can't be held to reading only: it runs commands its sandbox contains without asking, so it could run this pull request's code. Review it with Fake claude-code or Fake opencode.",
-      )
+      yield* plans.change(id, [{ ...lead, agentId: 'codex', model: null }], person)
+      assert.deepInclude((yield* planOf('review-1-back-off')).parameters, { steps: [{ ...lead, agentId: 'codex', model: null }] })
       const steps = [lead, { key: 'review' as const, agentId: 'codex', model: null, skipped: true }]
       yield* plans.change(id, steps, person)
       assert.deepStrictEqual((yield* planOf('review-1-back-off')).parameters.steps, steps)
@@ -447,15 +444,13 @@ describe('a task’s thread', () => {
     return Effect.gen(function* () {
       const { ran } = yield* ranTask(working)
       const queries = yield* Queries
-      // Its lead's turn, and where its time went.
+      // Its lead's turn, and its timings.
       const before = yield* queries.thread(ran.threadId)
-      assert.isAbove(before.time?.turns ?? 0, 0)
       assert.isNotEmpty(before.turns ?? [])
       // Kept in a shape this version can't read, as by another one: left out, its turn's items still there.
       const sql = yield* SqlClient.SqlClient
       yield* sql`UPDATE turn_deliveries SET timings = '42' WHERE thread_id = ${ran.threadId}`
       const after = yield* queries.thread(ran.threadId)
-      assert.isUndefined(after.time)
       assert.deepStrictEqual(after.turns, [])
       assert.strictEqual(after.task.id, ran.taskId)
       assert.isNotEmpty(after.items)

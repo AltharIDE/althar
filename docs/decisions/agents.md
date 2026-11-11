@@ -20,7 +20,7 @@ How sessions, processes and sign-in work is in [architecture 03](../architecture
 An agent joins where Althar sees every command before it runs and can stop it. That is what keeps the irreversible list asking and the person's Never rules holding ([what-agents-may-do.md](what-agents-may-do.md)). In practice that means:
 
 1. **It asks before it runs a command.** A mode or a session's `_meta` that Althar sets and checks keeps it asking. Edits inside the workspace may go unasked, as Codex's do in its sandbox.
-2. **It can be held to reading,** for a review of an outside author's pull request. Either a mode keeps Althar's tools and takes the agent's edits away, or its edits ask, so the rules refuse them ([reviews.md](reviews.md)).
+2. **It has a reading mode,** for a review: a mode keeps Althar's tools and takes the agent's edits away, or its edits ask, so the rules refuse them. One whose sandbox runs commands without asking, as Codex's does, still leads reviews: what it runs stays in its OS sandbox ([reviews.md](reviews.md)).
 3. **It was read at the version the ACP registry lists,** with permission options of known kinds.
 4. **Its vendor lets a third-party app use its sign-in,** or publishes it for any ACP client. Where the two disagree, the person is told before they sign in.
 

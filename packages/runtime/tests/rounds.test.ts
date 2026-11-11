@@ -1360,7 +1360,7 @@ describe('changing the team of a task that has begun', () => {
     }).pipe(Effect.provide(runtimeWith(github, ':memory:', { holds: slow })))
   })
 
-  it.live('refuses an agent that cannot be held to reading only on a review’s team, whoever asks, and changes nothing', () => {
+  it.live('takes any agent on a review’s team, Codex included, whoever asks', () => {
     const { working, github } = onGitHub()
     const slow = holds()
     return Effect.gen(function* () {
@@ -1373,11 +1373,12 @@ describe('changing the team of a task that has begun', () => {
       }>`SELECT id, parameters FROM task_plans WHERE task_id = ${task.taskId}`)
         yield* sql`UPDATE task_plans SET parameters = ${JSON.stringify({ ...JSON.parse(row.parameters), reads: true })} WHERE id = ${row.id}`
       const before = yield* planOf(task.taskId)
-      const refused = yield* Effect.flip(changeTeam(task.taskId, [step('implement', 'codex'), step('review', 'claude-code')]))
+      // An agent Althar doesn't have is still refused, and nothing changes.
+      const refused = yield* Effect.flip(changeTeam(task.taskId, [step('implement', 'nobody'), step('review', 'claude-code')]))
       assert.strictEqual((refused as { _tag?: string })._tag, 'ReviewRefused')
-      assert.match((refused as { message?: string }).message ?? '', /^Fake codex can't be held to reading only/)
+      assert.strictEqual((refused as { message?: string }).message, 'Althar has no such agent.')
       assert.deepStrictEqual(yield* planOf(task.taskId), before)
-      // The coordinator's tool goes through the same path.
+      // The coordinator's tool goes through the same path, and gives a review to Codex.
       const [row] = yield* sql<{ slug: string }>`SELECT slug FROM tasks WHERE id = ${task.taskId}`
       const coordinatorThread = yield* (yield* Coordinator).thread(task.projectId)
       const access: ToolAccess = {
@@ -1387,11 +1388,10 @@ describe('changing the team of a task that has begun', () => {
         sessionId: 'none',
         taskId: null,
       }
-      assert.match(
+      assert.notMatch(
         yield* callTool(access, 'change_lead', { task: row?.slug ?? '', lead: { agent: 'codex' } }),
         /can't be held to reading only/,
       )
-      assert.deepStrictEqual(yield* planOf(task.taskId), before)
       slow.open('[lead:slowly]')
     }).pipe(Effect.provide(runtimeWith(github, ':memory:', { holds: slow })))
   })

@@ -72,6 +72,7 @@ import {
   whereLine,
 } from './conflicts'
 import { coAuthorOn, creditBranch, type Memory, recallMade, rememberMade, withoutAgentCredit } from './credit'
+import { editPullRequest, personsWordOf, replyOnPullRequest } from './coordinatorPullRequests'
 import { envelope } from './envelope'
 import { evidencePaths, taskShown } from './evidence'
 import {
@@ -8452,6 +8453,9 @@ export class Changes extends Context.Service<
       }
 
       /** A lead's tool: refusals reach it in words; anything else says to try again, and goes to the log. */
+      /** Whether a pull request a lead names is named as any of the project's are, by its link or number, not as one of its task's (web#3). */
+      const elsewhere = (name: string) => /^https?:\/\//i.test(name) || /^#?\d+$/.test(name)
+
       const leadTool = (
         name: string,
         description: string,
@@ -8563,10 +8567,18 @@ export class Changes extends Context.Service<
         ),
         leadTool(
           'reply_on_pull_request',
-          "Replies on the task's pull request: in a line comment's thread, by its thread id, or in its conversation without one. In a task of several repositories, pull_request names the one to reply on, by its repository and number, as read_pull_request names it: web#3. For answering what people said; a change to the code is a commit, which push_to_pull_request pushes or asks the person to.",
+          "Replies on the task's pull request: in a line comment's thread, by its thread id, or in its conversation without one. In a task of several repositories, pull_request names the one to reply on, by its repository and number, as read_pull_request names it: web#3. Any other of the project's pull requests too, by its link or number: at once on one Althar opened, the person's own or one by the repository's own people; an outside author's on the person's word, their message in this turn that asks it (message, from read_turn). For answering what people said; a change to the code is a commit, which push_to_pull_request pushes or asks the person to.",
           {
             type: 'object',
-            properties: { body: { type: 'string' }, thread_id: { type: 'string' }, pull_request: { type: 'string' } },
+            properties: {
+              body: { type: 'string' },
+              thread_id: { type: 'string' },
+              pull_request: { type: 'string' },
+              message: {
+                type: 'string',
+                description: "The person's message in this turn that asks it, from read_turn: for an outside author's.",
+              },
+            },
             required: ['body'],
           },
           (taskId, input, access) =>
@@ -8587,6 +8599,9 @@ export class Changes extends Context.Service<
               const asked = replied.pull_request == null ? null : String(replied.pull_request).trim().toLowerCase()
               const matching = seen.filter((candidate) => asked !== null && isNamed(candidate, asked))
               const [named] = matching
+              // One not the task's, by its link or number: any of the project's, as the coordinator replies on it.
+              if (asked !== null && matching.length === 0 && elsewhere(asked))
+                return yield* replyOnPullRequest(access.projectId, input, by, personsWordOf(errands, access))
               if (seen.length > 1 && (named === undefined || matching.length > 1))
                 return yield* new ToolRefused({
                   message: `This task has several pull requests: ${seen.map(shortNameOf).join(', ')}. Say which with pull_request, as one of those.`,
@@ -8611,9 +8626,13 @@ export class Changes extends Context.Service<
               title: { type: 'string', maxLength: TITLE_LENGTH },
               description: { type: 'string' },
               pull_request: { type: 'string' },
+              message: {
+                type: 'string',
+                description: "The person's message in this turn that asks it, from read_turn: for an outside author's.",
+              },
             },
           },
-          (taskId, input) =>
+          (taskId, input, access) =>
             Effect.gen(function* () {
               const asked = yield* Schema.decodeUnknownEffect(EditAsked)(input).pipe(
                 Effect.mapError((error) => new ToolRefused({ message: `Althar couldn't read that: ${error.message}` })),
@@ -8622,13 +8641,22 @@ export class Changes extends Context.Service<
               const named = asked.pull_request == null ? null : String(asked.pull_request).trim().toLowerCase()
               const matching = seen.filter((candidate) => named !== null && isNamed(candidate, named))
               const [one] = matching
-              // A name given must be one of the task's, with one pull request as with several: another's is never edited.
+              // One not the task's, by its link or number: any of the project's, as the coordinator edits it (11 Nov).
+              if (named !== null && matching.length === 0 && elsewhere(named))
+                return yield* editPullRequest(
+                  access.projectId,
+                  input,
+                  (other, change) => edit(other, change, instance.systemId),
+                  agents.list.map((entry) => entry.definition.name),
+                  personsWordOf(errands, access),
+                )
+              // A name of the task's kind (web#3) must be one of its own, with one pull request as with several.
               if ((named !== null || seen.length > 1) && (one === undefined || matching.length > 1))
                 return yield* new ToolRefused({
                   message:
                     seen.length > 1
-                      ? `This task has several pull requests: ${seen.map(shortNameOf).join(', ')}. Say which with pull_request, as one of those.`
-                      : `This task's pull request is ${seen.map(nameOf).join('')}, and it edits only its own. Leave pull_request out, or name it so.`,
+                      ? `This task has several pull requests: ${seen.map(shortNameOf).join(', ')}. Say which with pull_request, as one of those, or another of the project's by its link or number.`
+                      : `This task's pull request is ${seen.map(nameOf).join('')}. Leave pull_request out for it, or name another of the project's by its link or number.`,
                 })
               return yield* locked(taskId)(
                 edit(

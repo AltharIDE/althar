@@ -9,7 +9,6 @@ import { Live, type LiveEvent } from './Live'
 import { changeOf, sharedPaths, type TaskChange } from './otherTasks'
 import { fact } from './records'
 import { Sessions } from './Sessions'
-import { addItem } from './threads'
 
 /*
  * A heads-up for leads whose work meets (docs/architecture/04, "What a lead
@@ -19,7 +18,8 @@ import { addItem } from './threads'
  * files, so it can read that task's work before it builds a conflict; and
  * tells the other lead the same of it. Once for each pair of tasks, for as
  * long as the tasks last: kept in the record (`task.overlap_noticed`), so
- * neither more edits nor a relaunch say it again.
+ * neither more edits nor a relaunch say it again. The lead hears it as a quiet
+ * message; neither task's chat gets a line for it, as it is about another task.
  *
  * It looks as a lead's call that may change files ends, an edit or a
  * command, while the lead is still in its turn; as a turn ends, for the
@@ -42,17 +42,6 @@ export const overlapWords = (other: { readonly slug: string; readonly title: str
   const named = files.slice(0, 8)
   const more = files.length - named.length
   return `Heads-up: another running task, ${other.title} (${other.slug}), is changing ${files.length === 1 ? 'a file' : 'files'} you are changing too: ${named.join(', ')}${more > 0 ? ` and ${more} more` : ''}. Before you go further there, read its work with read_task_diff and read_task (read_thread for what it was asked), so yours doesn't conflict with it. You can't message its lead; where you need it to change course, say so in your report. Althar won't say it again for that task.`
-}
-
-/** The file's name, without the folders it is in. */
-const nameOf = (path: string) => path.slice(path.lastIndexOf('/') + 1)
-
-/** The line in a thread when another task changes its files too, as plain text: `Other changes `TaskView.tsx` too. Both leads were told.` */
-export const overlapLine = (title: string, files: ReadonlyArray<string>) => {
-  const names = [...new Set(files.map(nameOf))]
-  const named = names.slice(0, 2).map((name) => `\`${name}\``)
-  const more = names.length - named.length
-  return `${title} changes ${named.join(', ')}${more > 0 ? ` and ${more} more` : ''} too. Both leads were told.`
 }
 
 export class Overlaps extends Context.Service<
@@ -109,15 +98,7 @@ export class Overlaps extends Context.Service<
             payload: { other: about.id, files },
             actorId: instance.systemId,
           })
-          // The person's thread says it too, where it happens: nothing on the board.
-          yield* addItem({ projectId: to.projectId as ProjectId, threadId: to.threadId }, 'notice', {
-            source: 'runtime',
-            severity: 'info',
-            title: overlapLine(about.title, files),
-            description: null,
-            task: { taskId: about.id, slug: about.slug, title: about.title, threadId: about.threadId },
-            situation: { kind: 'overlap', files },
-          })
+          // Only the lead hears of it, quietly: a task's chat shows what is about that task, and another task's files aren't.
           const body = overlapWords(about, files)
           yield* sessions.send({
             envelope: yield* envelope('thread.send', { threadId: to.threadId, body }, undefined, instance.systemId),

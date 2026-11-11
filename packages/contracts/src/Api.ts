@@ -1904,24 +1904,8 @@ export const NoticeItem = Schema.Struct({
      * work, what the coordinator relayed, or its task's folder going or coming
      * back, a line across the thread (ADR-056).
      */
-    role: Schema.optional(Schema.Literals(['aside', 'relayed', 'folder', 'skills'])),
-    /**
-     * For what Althar says of another task, drawn as its own line with the task linked (`task`): a task this task's lead
-     * started that ended without reaching it, or another open task changing the same files.
-     */
-    situation: Schema.optional(
-      Schema.Union([
-        Schema.Struct({
-          kind: Schema.Literal('ended'),
-          /** Settled without a change, failed, or stopped by the person. */
-          how: Schema.Literals(['unchanged', 'failed', 'stopped']),
-          /** Why, from its report, in a line; absent where it said nothing. */
-          why: Schema.optional(Schema.String),
-        }),
-        Schema.Struct({ kind: Schema.Literal('overlap'), files: Schema.Array(Schema.String) }),
-      ]),
-    ),
-    /** A task the line is about, which it links to: one this task's lead started (ADR-097). */
+    role: Schema.optional(Schema.Literals(['aside', 'relayed', 'folder'])),
+    /** A task the line is about, which it links to: one this task's lead started (ADR-097), once. */
     task: Schema.optional(Schema.Struct({ taskId: Schema.String, slug: Schema.String, title: Schema.String, threadId: Schema.String })),
     /**
      * A step of the work it marks, drawn as a stamped row of its own (a task is a conversation plus parts, "How it reads"): a
@@ -1949,10 +1933,6 @@ export const NoticeItem = Schema.Struct({
      * person set up twice, as a preset by that name, which its button saves.
      */
     offer: Schema.optional(Schema.Struct({ kind: Schema.Literal('preset'), name: Schema.String, parts: PresetParts })),
-    /** For what a lead's agent could see: each skill, and whether it is the person's or the repository's. */
-    skills: Schema.optional(
-      Schema.Array(Schema.Struct({ name: Schema.String, path: Schema.String, from: Schema.Literals(['person', 'repository']) })),
-    ),
     /**
      * For an agent's turn that failed: why, as the runtime classes it
      * (`auth_required`, `usage_limit`, `context_full`, `session_lost`,
@@ -2388,12 +2368,6 @@ export const TaskCard = Schema.Struct({
       reason: Schema.NullOr(Schema.String),
       /** What happens when the work is done; null where nothing reaches the repository's host. */
       end: Schema.NullOr(TaskEnd),
-      /**
-       * Only these agents may take its steps, by id: a review of someone
-       * else's pull request's, those whose session can be held to reading
-       * only. Absent where any may.
-       */
-      agents: Schema.optional(Schema.Array(Schema.String)),
       /** Where it works (ADR-091); absent for a worktree, as a review's. */
       worksIn: Schema.optional(WorksIn),
       /** The preset its parts are, as the card's kicker names it first (a task is a conversation plus parts): Change, Chat. */
@@ -3084,16 +3058,6 @@ export const TurnTime = Schema.Struct({
 })
 export type TurnTime = typeof TurnTime.Type
 
-/** All a task's turns added up, its reviewers' too, as `TurnTime` counts them: what Outputs' Usage says it took. */
-export const TaskTime = Schema.Struct({
-  turns: Schema.Number,
-  place: Schema.Number,
-  session: Schema.Number,
-  work: Schema.Number,
-  tools: Schema.Number,
-})
-export type TaskTime = typeof TaskTime.Type
-
 export const AccountUse = Schema.Struct({
   accountId: Schema.String,
   agentId: Schema.String,
@@ -3595,8 +3559,6 @@ export const ThreadSnapshot = Schema.Struct({
   cursor: Cursor,
   /** What the task used of each account its agents ran on, in every thread of it, its reviews' too (ADR-084). */
   usage: Schema.optional(Schema.Array(AccountUse)),
-  /** Where all its turns' time went, added up; absent where none kept it. */
-  time: Schema.optional(TaskTime),
   project: Schema.Struct({ id: Schema.String, name: Schema.String }),
   /** Where the project's repository is hosted, and whether Althar is connected there: what a pull request needs. */
   host: Schema.NullOr(Schema.Struct({ product: Product, name: Schema.String, webUrl: Schema.String, connected: Schema.Boolean })),
@@ -4674,8 +4636,13 @@ export const Api = RpcGroup.make(
     },
     Schema.String,
   ),
+  /**
+   * The person's pick of the thread's model, taken at once: the thread's session shows it as who leads from its next turn
+   * (`nextLead`), and the runtime sets it on the agent in the background, once no turn runs. What the agent wouldn't take is
+   * said in the thread, and the lead stays as it was.
+   */
   command('SetModel', { threadId: Schema.String, model: Schema.String }, Schema.Void),
-  /** How hard the thread's agent thinks, from here on. */
+  /** How hard the thread's agent thinks, picked as `SetModel` is: taken at once, set on the agent in the background. */
   command('SetEffort', { threadId: Schema.String, effort: Schema.String }, Schema.Void),
   /** Every agent's models and efforts, as far as Althar knows them. */
   call('GetModels', {}, Schema.Array(AgentModels)),
