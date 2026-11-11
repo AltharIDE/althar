@@ -1,0 +1,217 @@
+.lab {
+  display: grid;
+  grid-template-rows: 1fr auto;
+  height: 100vh;
+  background: var(--n-3, var(--n-2));
+}
+.stage {
+  display: flex;
+  justify-content: center;
+  min-height: 0;
+}
+/* The app's window: the whole stage, or as narrow as a small window. */
+.window {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  border-inline: 1px solid var(--line);
+}
+.window[style] {
+  flex: none;
+}
+
+/* A, its close buttons: in the pane's top corner, over what is there. */
+.pane {
+  position: relative;
+}
+.close {
+  position: absolute;
+  top: 6px;
+  right: 8px;
+  z-index: 3;
+}
+.boardPane {
+  --lane-min: 186px;
+  position: relative;
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+}
+/* A, the conversation closed: a strip on its edge to bring it back. */
+.edge {
+  display: flex;
+  flex: none;
+  justify-content: center;
+  width: 44px;
+  padding-top: 8px;
+  background: var(--n-1);
+  border-right: 1px solid var(--line);
+}
+/* A, the board closed: its lanes folded to their rails, each pressed opening it again. */
+.rails {
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  --lane-min: 220px;
+  width: 400px;
+  min-height: 0;
+  border-left: 1px solid var(--line);
+}
+.rails > * {
+  padding-left: 8px !important;
+}
+
+/* B and C, a toggle on in the header. */
+.on {
+  background: var(--n-0);
+  color: var(--t-1);
+  box-shadow: 0 0 0 1px var(--line-2);
+}
+.divider {
+  width: 1px;
+  height: 16px;
+  margin-inline: 4px;
+  background: var(--line-2);
+}
+/* B, swapped: the conversation on the right. */
+.swapped {
+  flex-direction: row-reverse;
+}
+.swapped > :first-child {
+  border-right: 0 !important;
+  border-left: 1px solid var(--line);
+}
+.boardWithComposer {
+  position: relative;
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+/* B, the conversation closed: its composer under the board. */
+.docked {
+  flex: none;
+  width: min(720px, 100% - 32px);
+  margin: 0 auto 12px;
+}
+
+/* C, the board beside the conversation, where a page or file opens. */
+.beside {
+  --face-surface: var(--n-1);
+  --lane-min: 186px;
+  position: relative;
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  min-width: 0;
+  background: var(--n-2);
+  border-left: 1px solid var(--line);
+}
+.besideBar {
+  display: flex;
+  flex: none;
+  gap: 4px;
+  align-items: center;
+  height: 36px;
+  padding: 0 8px 0 16px;
+  border-bottom: 1px solid var(--line);
+}
+.besideTitle {
+  flex: 1;
+  margin: 0;
+  color: var(--t-2);
+  font-size: 12.5px;
+  font-weight: 550;
+}
+/* Narrow, what opens beside covers the window. */
+.sheet {
+  position: absolute;
+  inset: 0;
+  z-index: var(--z-float, 20);
+  width: auto !important;
+  border-left: 0;
+}
+
+/* D, the board's composer floating at its foot. */
+.drawerRoom {
+  position: relative;
+}
+.floating {
+  position: absolute;
+  bottom: 14px;
+  left: 50%;
+  z-index: 4;
+  width: min(680px, 100% - 48px);
+  border-radius: 16px;
+  box-shadow: 0 12px 40px -8px var(--shadow);
+  transform: translateX(-50%);
+}
+/* D, the conversation sliding in over the board from the right. */
+.drawer {
+  --face-surface: var(--n-1);
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  z-index: var(--z-float, 20);
+  display: flex;
+  flex-direction: column;
+  background: var(--n-1);
+  border-left: 1px solid var(--line-2);
+  box-shadow: -16px 0 40px -12px var(--shadow);
+  animation: in 160ms var(--ease, ease-out);
+}
+/* Pinned, it takes its own room beside the board. */
+.pinned {
+  position: relative;
+  flex: none;
+  box-shadow: none;
+  animation: none;
+}
+.drawerFace {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+}
+@keyframes in {
+  from {
+    transform: translateX(24px);
+    opacity: 0;
+  }
+}
+
+.bar {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+  padding: 6px 10px;
+  border-top: 1px solid var(--line);
+  background: var(--n-2);
+  font-size: 12px;
+}
+.bar button {
+  padding: 4px 10px;
+  border-radius: 6px;
+  color: var(--t-2);
+}
+.bar button[aria-pressed='true'] {
+  background: var(--n-0);
+  color: var(--t-1);
+}
+.bar kbd {
+  font-family: var(--mono);
+  color: var(--t-4);
+}
+.gap {
+  flex: 1;
+}
+.hint {
+  padding: 0 8px;
+  color: var(--t-3);
+}
+.bar[hidden] {
+  display: none;
+}

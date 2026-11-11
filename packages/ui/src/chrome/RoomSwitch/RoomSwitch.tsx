@@ -56,6 +56,8 @@ export interface RoomSwitchProps {
 }
 
 export interface RoomOptionsOf {
+  /** Which views it offers, in their order; all six without. */
+  rooms?: ReadonlyArray<Room>
   news?: boolean
   needsYou?: boolean
   automationsNeedYou?: boolean
@@ -63,12 +65,12 @@ export interface RoomOptionsOf {
 }
 
 /** The views as a switch's options, each with its dot: the switch's own, and a project's header's faces (ProjectHeader). */
-export function roomOptions({ news, needsYou, automationsNeedYou, text }: RoomOptionsOf = {}): SegmentedOption<Room>[] {
+export function roomOptions({ rooms = ROOMS, news, needsYou, automationsNeedYou, text }: RoomOptionsOf = {}): SegmentedOption<Room>[] {
   const t = { ...roomSwitchText, ...text }
   const yours = (room: Room) => (room === Room.Settings && needsYou === true) || (room === Room.Automations && automationsNeedYou === true)
   const dotOf = (room: Room): Pick<SegmentedOption<Room>, 'dot' | 'dotLabel'> =>
     room === Room.Talk && news === true ? { dot: 'new', dotLabel: t.news } : yours(room) ? { dot: 'yours', dotLabel: t.yours } : {}
-  return ROOMS.map((room, i) => {
+  return rooms.map((room, i) => {
     const key = t.key(i + 1)
     return {
       value: room,

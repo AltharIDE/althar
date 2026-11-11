@@ -18,6 +18,8 @@ import {
   ThreadShellProvider,
   ThreadSkeleton,
   ProjectHeader,
+  type BoardFolds,
+  type WorkNeed,
   keys,
   modKey,
 } from '@althar/ui'
@@ -226,6 +228,25 @@ export interface ProjectSettingsActions {
   readonly onConnections: () => void
 }
 
+/**
+ * The parts of a project's home, for a prototype to lay out as it likes (lab/home): the real header, conversation,
+ * composer and board, and what the board says at a glance. Without `arrange`, the home is today's split.
+ */
+export interface HomeParts {
+  readonly header: (extra?: { rooms?: ReadonlyArray<Room>; actions?: ReactNode }) => ReactNode
+  readonly room: Room
+  readonly setRoom: (room: Room) => void
+  /** The thread; `beside`, what it opens goes elsewhere; without `composer`, the thread alone. */
+  readonly conversation: (beside: boolean, composer: boolean) => ReactNode
+  readonly composer: ReactNode
+  readonly board: (opts: { folds: BoardFolds; onFoldsChange: (folds: BoardFolds) => void; onTalk: () => void }) => ReactNode
+  /** What opens beside the conversation (a page, a file, a canvas), placed by the arrangement; null while nothing is open. */
+  readonly workbench: (place?: Parameters<ReturnType<typeof useThreadHost>['workbench']>[1]) => ReactNode
+  readonly benchWidth: number
+  readonly glance: { readonly yours: number; readonly atWork: number; readonly upNext: number; readonly needs: ReadonlyArray<WorkNeed> }
+  readonly focusComposer: () => void
+}
+
 /** The thread of the newest task card waiting for a free agent, if any. */
 const newestWaiting = (items: ReadonlyArray<ThreadItem>): string | null => {
   const waiting = items.filter((item) => item.kind === 'task' && item.content.queued !== null)
@@ -245,7 +266,10 @@ export function ProjectView({
   onAutomationChange,
   visit,
   ways,
+  arrange,
 }: {
+  /** A prototype's own layout of the home (lab/home). */
+  arrange?: (parts: HomeParts) => ReactNode
   model: ProjectModel
   board: BoardModel
   connections: ConnectionsModel
@@ -287,6 +311,7 @@ export function ProjectView({
   const closing = useClosePullRequests()
   // b steps through the views, when nothing is being typed; ⌘ and a number belongs to the window's tabs.
   useEffect(() => {
+    if (arrange !== undefined) return
     const onKey = (event: KeyboardEvent) => {
       if (event.key !== 'b' || event.metaKey || event.ctrlKey || event.altKey || event.defaultPrevented) return
       const target = event.target
@@ -300,7 +325,7 @@ export function ProjectView({
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [])
+  }, [arrange])
   // What the person writes to the coordinator, kept by the project while they are elsewhere, as are its images and what they dictate.
   const about = model.project?.id ?? model.coordinator?.project.id ?? null
   const draftOf = draftKey.coordinator(about ?? '')
@@ -630,8 +655,9 @@ export function ProjectView({
     setAutomation(id)
     setRoom(Room.Automations)
   }
-  const header = (
+  const headerOf = (extra: { rooms?: ReadonlyArray<Room>; actions?: ReactNode } = {}) => (
     <ProjectHeader
+      {...(extra.rooms === undefined ? {} : { rooms: extra.rooms })}
       name={kept.name ?? name}
       seed={projectId}
       ink={kitInk(kept.ink ?? model.project?.ink ?? 'clay')}
@@ -651,38 +677,204 @@ export function ProjectView({
       })}
       // What the project runs, with no agent, where it is picked to (ADR-090).
       {...(coordinator === null
-        ? {}
+        ? extra.actions === undefined
+          ? {}
+          : { run: extra.actions }
         : {
             run: (
-              <Runs
-                projectId={projectId}
-                project={kept.name ?? name}
-                taskId={null}
-                // Its tasks run in their worktrees: those under way with a branch, not a review, which runs nothing of what it reads.
-                tasks={
-                  board.board?.tasks
-                    .filter((task) => task.settledAt === null && task.branch !== null && task.reviewing == null)
-                    .map((task) => ({ id: task.taskId, title: task.title })) ?? null
-                }
-                {...(ways === undefined ? {} : { onConnect: ways.connections })}
-                runnables={coordinator.runnables}
-                launches={coordinator.launches}
-                now={now}
-                onRun={(id, taskId) => void model.runProject(taskId, id)}
-                onStop={(id) => void model.stopLaunch(id)}
-                onClear={(id) => void model.clearLaunch(id)}
-                onRunRef={model.runRef}
-              />
+              <>
+                {extra.actions}
+                <Runs
+                  projectId={projectId}
+                  project={kept.name ?? name}
+                  taskId={null}
+                  // Its tasks run in their worktrees: those under way with a branch, not a review, which runs nothing of what it reads.
+                  tasks={
+                    board.board?.tasks
+                      .filter((task) => task.settledAt === null && task.branch !== null && task.reviewing == null)
+                      .map((task) => ({ id: task.taskId, title: task.title })) ?? null
+                  }
+                  {...(ways === undefined ? {} : { onConnect: ways.connections })}
+                  runnables={coordinator.runnables}
+                  launches={coordinator.launches}
+                  now={now}
+                  onRun={(id, taskId) => void model.runProject(taskId, id)}
+                  onStop={(id) => void model.stopLaunch(id)}
+                  onClear={(id) => void model.clearLaunch(id)}
+                  onRunRef={model.runRef}
+                />
+              </>
             ),
           })}
     />
+  )
+  const header = headerOf()
+
+  /** The conversation with the coordinator: beside the board, what it opens goes over the board; without the composer, the thread alone. */
+  const conversationOf = (beside: boolean, withComposer: boolean) => (
+    <>
+      {coordinator === null ? (
+        model.error === null ? (
+          <div className={s.reading}>
+            <ThreadMeasure>
+              <ThreadSkeleton label={pendingText.thread} />
+            </ThreadMeasure>
+          </div>
+        ) : (
+          <div className={s.loading}>
+            <p role="alert">{model.error}</p>
+          </div>
+        )
+      ) : (
+        <TaskFace
+          className={s.face}
+          composer={withComposer ? composer : null}
+          // Beside the board, the conversation has no room to share: what it opens goes over the board instead.
+          {...(beside ? {} : { panel: shown.workbench(null), panelWidth: shown.bench.width })}
+        >
+          <Thread label={text.conversation} busy={busy}>
+            {/* A new project's first word: what its tasks will need later, while its conversation hasn't begun. */}
+            {coordinator.items.length === 0 && !coordinator.earlier && !coordinator.view.cleared && (
+              <FirstConnectionsView
+                projectId={projectId}
+                project={model.project?.name ?? coordinator.project.name}
+                model={connections}
+                className={s.firstConnections}
+              />
+            )}
+            <EarlierTurns
+              key={coordinator.threadId}
+              earlier={coordinator.earlier}
+              load={model.loadEarlier}
+              version={coordinator.items}
+              loading={model.loadingEarlier}
+            />
+            {clearing.line}
+            {/* The coordinator only reads: what it hands back is pictures, which open in the lightbox; it writes no documents. */}
+            <ThreadShellProvider value={shown.shell}>
+              <ThreadBlocks
+                blocks={blocksOf(
+                  {
+                    items: coordinator.items,
+                    turnRunning: busy,
+                    turnStarted: session?.turnStartedAt ?? null,
+                    reading: readingNow(session, model.pending),
+                    turnEnded: session?.turnEndedAt ?? null,
+                    worktree: null,
+                    queue,
+                    outputs: model.outputs,
+                    turns: turnsById(coordinator.turns),
+                  },
+                  model.streaming,
+                  (iso) => ago(iso),
+                  now,
+                )}
+                threadId={coordinator.threadId}
+                session={session}
+                retryable={coordinator.retryable}
+                {...(busy ? {} : { onTryAgain: () => void model.tryAgain(), onCompact: () => void model.compact() })}
+                {...(ways === undefined ? {} : { onSignIn: ways.signIn })}
+                card={(card) => <Card card={card} actions={actions} />}
+                draft={(draft) => <DraftCard draft={draft} actions={draftActions} />}
+                automation={(card, itemId) => (
+                  <AutomationInThread
+                    card={card}
+                    itemId={itemId}
+                    project={kept.name ?? name}
+                    agents={model.agents}
+                    actions={automationActions}
+                    onOpen={openAutomation}
+                  />
+                )}
+                taskAsk={(ask, itemId) => <TaskAskOf ask={ask} itemId={itemId} onOpen={onTask} />}
+                changes={(changes) => <ChangesCard changes={changes} actions={changesActions} />}
+                run={(run) => (
+                  <RunOf
+                    run={run}
+                    now={now}
+                    onStop={(id) => void model.stopLaunch(id)}
+                    onRunAgain={(taskId, runnableId, ref) => void model.runProject(taskId, runnableId, ref)}
+                  />
+                )}
+                queued={text.queued}
+                onAnswerQuestion={model.answerQuestion}
+              />
+            </ThreadShellProvider>
+          </Thread>
+        </TaskFace>
+      )}
+      {shown.lightbox}
+      {clearing.dialog}
+    </>
+  )
+
+  /** The board of its work, its lanes folded as asked. */
+  const boardOf = (opts: { folds: BoardFolds; onFoldsChange: (folds: BoardFolds) => void; onTalk: () => void }) => (
+    <div className={s.board}>
+      {lanes !== null ? (
+        <>
+          {board.olderError !== null && (
+            <p className={s.failure} role="alert">
+              {text.olderFailed} {board.olderError}
+            </p>
+          )}
+          <BoardView
+            lanes={lanes}
+            agents={model.agents}
+            now={now}
+            onOpen={onTask}
+            closing={closing}
+            actions={board}
+            line={board.line}
+            folds={opts.folds}
+            onFoldsChange={opts.onFoldsChange}
+            onTalk={opts.onTalk}
+            team={{ projectId, start: (planId) => model.startPlan(planId), change: setTeamFor }}
+            {...(board.moreSettled ? { onShowOlder: board.showOlder } : {})}
+          />
+          {teamFor !== null && (
+            <ChangeTeam
+              key={teamFor}
+              projectId={projectId}
+              task={teamTask !== null && teamChangeOf(teamTask) !== null ? teamTask : null}
+              agents={model.agents}
+              onClose={() => setTeamFor(null)}
+            />
+          )}
+        </>
+      ) : board.error === null ? (
+        <PartPending label={text.boardReading} />
+      ) : (
+        <p className={s.failure} role="alert">
+          {text.boardFailed} {board.error}
+        </p>
+      )}
+    </div>
   )
 
   return (
     <PageOpenerProvider value={opener}>
       <div className={s.window}>
-        {header}
-        {room === Room.Automations ? (
+        {arrange === undefined || (room !== Room.Both && room !== Room.Talk && room !== Room.Board) ? header : null}
+        {arrange !== undefined && (room === Room.Both || room === Room.Talk || room === Room.Board) ? (
+          arrange({
+            header: headerOf,
+            room,
+            setRoom,
+            conversation: conversationOf,
+            composer,
+            board: boardOf,
+            workbench: (place) => shown.workbench(null, place),
+            benchWidth: shown.bench.width,
+            glance: {
+              yours,
+              atWork: lanes?.atWork ?? 0,
+              upNext: lanes?.next.length ?? 0,
+              needs: lanes === null ? [] : needsOf(lanes, agentName, onTask),
+            },
+            focusComposer: () => requestAnimationFrame(() => voice.inputRef.current?.focus()),
+          })
+        ) : room === Room.Automations ? (
           <AutomationsView
             projectId={projectId}
             project={kept.name ?? name}
@@ -722,142 +914,10 @@ export function ProjectView({
                   shown.workbench(null, { room: windowWidth - width, keep: WIDTH.lane, className: s.over, style: { left: width } })
                 }
               >
-                {coordinator === null ? (
-                  model.error === null ? (
-                    <div className={s.reading}>
-                      <ThreadMeasure>
-                        <ThreadSkeleton label={pendingText.thread} />
-                      </ThreadMeasure>
-                    </div>
-                  ) : (
-                    <div className={s.loading}>
-                      <p role="alert">{model.error}</p>
-                    </div>
-                  )
-                ) : (
-                  <TaskFace
-                    className={s.face}
-                    composer={composer}
-                    // Beside the board, the conversation has no room to share: what it opens goes over the board instead.
-                    {...(room === Room.Both ? {} : { panel: shown.workbench(null), panelWidth: shown.bench.width })}
-                  >
-                    <Thread label={text.conversation} busy={busy}>
-                      {/* A new project's first word: what its tasks will need later, while its conversation hasn't begun. */}
-                      {coordinator.items.length === 0 && !coordinator.earlier && !coordinator.view.cleared && (
-                        <FirstConnectionsView
-                          projectId={projectId}
-                          project={model.project?.name ?? coordinator.project.name}
-                          model={connections}
-                          className={s.firstConnections}
-                        />
-                      )}
-                      <EarlierTurns
-                        key={coordinator.threadId}
-                        earlier={coordinator.earlier}
-                        load={model.loadEarlier}
-                        version={coordinator.items}
-                        loading={model.loadingEarlier}
-                      />
-                      {clearing.line}
-                      {/* The coordinator only reads: what it hands back is pictures, which open in the lightbox; it writes no documents. */}
-                      <ThreadShellProvider value={shown.shell}>
-                        <ThreadBlocks
-                          blocks={blocksOf(
-                            {
-                              items: coordinator.items,
-                              turnRunning: busy,
-                              turnStarted: session?.turnStartedAt ?? null,
-                              reading: readingNow(session, model.pending),
-                              turnEnded: session?.turnEndedAt ?? null,
-                              worktree: null,
-                              queue,
-                              outputs: model.outputs,
-                              turns: turnsById(coordinator.turns),
-                            },
-                            model.streaming,
-                            (iso) => ago(iso),
-                            now,
-                          )}
-                          threadId={coordinator.threadId}
-                          session={session}
-                          retryable={coordinator.retryable}
-                          {...(busy ? {} : { onTryAgain: () => void model.tryAgain(), onCompact: () => void model.compact() })}
-                          {...(ways === undefined ? {} : { onSignIn: ways.signIn })}
-                          card={(card) => <Card card={card} actions={actions} />}
-                          draft={(draft) => <DraftCard draft={draft} actions={draftActions} />}
-                          automation={(card, itemId) => (
-                            <AutomationInThread
-                              card={card}
-                              itemId={itemId}
-                              project={kept.name ?? name}
-                              agents={model.agents}
-                              actions={automationActions}
-                              onOpen={openAutomation}
-                            />
-                          )}
-                          taskAsk={(ask, itemId) => <TaskAskOf ask={ask} itemId={itemId} onOpen={onTask} />}
-                          changes={(changes) => <ChangesCard changes={changes} actions={changesActions} />}
-                          run={(run) => (
-                            <RunOf
-                              run={run}
-                              now={now}
-                              onStop={(id) => void model.stopLaunch(id)}
-                              onRunAgain={(taskId, runnableId, ref) => void model.runProject(taskId, runnableId, ref)}
-                            />
-                          )}
-                          queued={text.queued}
-                          onAnswerQuestion={model.answerQuestion}
-                        />
-                      </ThreadShellProvider>
-                    </Thread>
-                  </TaskFace>
-                )}
-                {shown.lightbox}
-                {clearing.dialog}
+                {conversationOf(room === Room.Both, true)}
               </TalkColumn>
             )}
-            {boarding && (
-              <div className={s.board}>
-                {lanes !== null ? (
-                  <>
-                    {board.olderError !== null && (
-                      <p className={s.failure} role="alert">
-                        {text.olderFailed} {board.olderError}
-                      </p>
-                    )}
-                    <BoardView
-                      lanes={lanes}
-                      agents={model.agents}
-                      now={now}
-                      onOpen={onTask}
-                      closing={closing}
-                      actions={board}
-                      line={board.line}
-                      folds={folds}
-                      onFoldsChange={setFolds}
-                      onTalk={talkToCoordinator}
-                      team={{ projectId, start: (planId) => model.startPlan(planId), change: setTeamFor }}
-                      {...(board.moreSettled ? { onShowOlder: board.showOlder } : {})}
-                    />
-                    {teamFor !== null && (
-                      <ChangeTeam
-                        key={teamFor}
-                        projectId={projectId}
-                        task={teamTask !== null && teamChangeOf(teamTask) !== null ? teamTask : null}
-                        agents={model.agents}
-                        onClose={() => setTeamFor(null)}
-                      />
-                    )}
-                  </>
-                ) : board.error === null ? (
-                  <PartPending label={text.boardReading} />
-                ) : (
-                  <p className={s.failure} role="alert">
-                    {text.boardFailed} {board.error}
-                  </p>
-                )}
-              </div>
-            )}
+            {boarding && boardOf({ folds, onFoldsChange: setFolds, onTalk: talkToCoordinator })}
           </div>
         )}
       </div>

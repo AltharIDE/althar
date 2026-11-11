@@ -77,6 +77,8 @@ export interface ProjectHeaderProps {
   onYours?: () => void
   /** How many tasks are at work. */
   inProgress?: number
+  /** Which views its faces offer, in their order; all six without. */
+  rooms?: ReadonlyArray<Room>
   /** The view it is on. */
   room: Room
   onRoom: (room: Room) => void
@@ -105,6 +107,7 @@ export function ProjectHeader({
   needs,
   onYours,
   inProgress,
+  rooms,
   room,
   onRoom,
   news,
@@ -129,6 +132,7 @@ export function ProjectHeader({
           status={status}
           {...(state === null ? {} : { state })}
           faces={roomOptions({
+            ...(rooms === undefined ? {} : { rooms }),
             ...(news === undefined ? {} : { news }),
             ...(settingsNeedYou === undefined ? {} : { needsYou: settingsNeedYou }),
             ...(automationsNeedYou === undefined ? {} : { automationsNeedYou }),
