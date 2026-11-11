@@ -45,6 +45,7 @@ import {
   QuestionField,
   type ThreadItem,
   ModelMoveItem,
+  NoticeItem,
   type ThreadSnapshot,
   type TurnTime,
   type ScreenshotsOnChange,
@@ -73,7 +74,6 @@ import { graphOf, type RunRows, type StepRow } from './graph'
 import { taskFindingsOf } from './taskFindings'
 import { filesOf, outputOf, picturesOf } from './handed'
 import { answeredIn, handedOf, issueCardsWaiting, kindOf } from './kinds'
-import { Limits } from './Limits'
 import { reviewOfferOf } from './reviewOffer'
 import { repliedAt } from './replied'
 import { BETWEEN_AGENTS_MS, betweenAgents, byItself, DRAFTING_MS, isMergeable, stillDrafting } from './needsYou'
@@ -536,6 +536,8 @@ const decodeModelMove = Schema.decodeUnknownOption(ModelMoveItem.fields.content)
 const decodeNoticeTask = Schema.decodeUnknownOption(
   Schema.Struct({ taskId: Schema.String, slug: Schema.String, title: Schema.String, threadId: Schema.String }),
 )
+/** What a notice offers: parts kept as a preset, or a review a lead or the coordinator offered a task, which its buttons answer. */
+const decodeNoticeOffer = Schema.decodeUnknownOption(NoticeItem.fields.content.fields.offer)
 const decodeChecks = Schema.decodeUnknownOption(ChecksSummary.fields.list)
 const decodeRules = Schema.decodeUnknownOption(MergeRules)
 
@@ -664,6 +666,10 @@ export const itemOf = (row: ItemRow): ThreadItem | undefined => {
           ...(role === 'skills' ? { skills: skillsSeenOf(field(content, 'skills')) } : {}),
           ...(failure === undefined || failure === '' ? {} : { failure }),
           ...Option.match(decodeNoticeTask(field(content, 'task')), { onNone: () => ({}), onSome: (task) => ({ task }) }),
+          ...Option.match(decodeNoticeOffer(field(content, 'offer')), {
+            onNone: () => ({}),
+            onSome: (offer) => (offer === undefined ? {} : { offer }),
+          }),
         },
       }
     }
@@ -910,7 +916,6 @@ type Store =
   | Artifacts
   | Launches
   | Busy
-  | Limits
 
 /** The lines of what waits one read has read, by project: a board of queued cards reads its line once, not once a card. */
 const LinesRead = Context.Reference<Map<string, Deferred.Deferred<Line>> | null>('@althar/runtime/Queries/LinesRead', {
@@ -2551,18 +2556,15 @@ export class Queries extends Context.Service<
             reviewing,
             // Once its plan has begun, when a change of its reviewer would take effect: the person's dialog reads it.
             ...(task.planState === 'accepted' && task.state === 'open' ? { reviewerChange: yield* reviewerChange(taskId) } : {}),
-            // A change whose work turned real with no review is offered one, once.
+            // The review its lead or the coordinator offered it, while the offer stands: its line in the thread reads it.
             ...(yield* Effect.map(
               reviewOfferOf({
                 taskId,
-                projectId: task.projectId,
                 open: task.planState === 'accepted' && task.state === 'open',
-                kind,
                 steps: planned,
                 reviewsAfterMerge: field(parameters, 'reviewAfterMerge') === true,
                 reads: field(parameters, 'reads') === true,
                 pulls: changes,
-                agents: Array.isArray(field(parameters, 'agents')) ? (field(parameters, 'agents') as Array<string>) : undefined,
               }),
               (offer) => (offer === undefined ? {} : { reviewOffer: offer }),
             )),

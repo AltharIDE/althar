@@ -1,27 +1,21 @@
-import { Effect } from 'effect'
+import { Effect, Schema } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import type { PlanStep } from '@althar/contracts'
 
-import { Agents } from './Config'
-import { Limits } from './Limits'
-
 /*
- * The review a change is offered, once, as its work turns real (a skipped review can be added back until merge): a prototype
- * or chat its lead made a change, or a pull request opened on a task whose plan has no review. A quiet "Add a review?" on its
- * card, with the reviewer the project's rules would pick: the strongest free model, another maker's than the lead's. It adds
- * nothing by itself. The person adds it or turns it down, and once turned down, or once they took a review off, it doesn't
- * come back (`task.review_offer_declined`). Read from what the task has, never stored but for that.
+ * The review a task is offered as its work turns real with none (a skipped review can be added back until merge). Never by a
+ * rule: its lead or the coordinator offers it, with `offer_review`, where what the person said makes the work a real change
+ * (they asked to harden a prototype, to open a pull request for a chat), and it shows as a line of the thread, by its
+ * reviewer, with Add and No thanks. It adds nothing by itself. Turned down, it isn't offered again
+ * (`task.review_offer_declined`); added, it stands no more.
  */
 
-/** What the offer is read from. */
+/** What an offer is read against. */
 export interface OfferFacts {
   readonly taskId: string
-  readonly projectId: string
   /** Its plan has begun and the task is open. */
   readonly open: boolean
-  /** What it makes: a change, as its card says. */
-  readonly kind: string
   /** Its plan's steps. */
   readonly steps: ReadonlyArray<PlanStep>
   /** Its plan reads nothing of a review's own: the fast lane's reads after the merge, and a review of another's pull request. */
@@ -29,36 +23,57 @@ export interface OfferFacts {
   readonly reads: boolean
   /** Its pull requests, open, merged or closed. */
   readonly pulls: ReadonlyArray<{ readonly state: string }>
-  /** The agents its plan allows, where it names them. */
-  readonly agents: ReadonlyArray<string> | undefined
 }
 
-/** The review a task is offered, or undefined: it has one, is merged, turned the offer down, or its work isn't a real change yet. */
+/** Why a task can't be offered a review: it has one, it is merged or not open, its plan reads none of a review's own. */
+export type NotOffered = 'reviewed' | 'merged' | 'closed' | 'no_review_of_its_own'
+
+/** Whether a task could have a review offered at all, or why not. */
+export const offerable = (facts: OfferFacts): NotOffered | undefined => {
+  if (!facts.open) return 'closed'
+  if (facts.reviewsAfterMerge || facts.reads) return 'no_review_of_its_own'
+  if (facts.steps.some((step) => step.key === 'review' && !step.skipped)) return 'reviewed'
+  // Its change in: the one it shows is the open one, else its latest.
+  const shown = facts.pulls.find((one) => one.state === 'open') ?? facts.pulls.at(-1)
+  if (shown?.state === 'merged') return 'merged'
+  if (!facts.steps.some((step) => step.key === 'implement')) return 'closed'
+  return undefined
+}
+
+const Offered = Schema.Struct({
+  agentId: Schema.String,
+  model: Schema.NullOr(Schema.String),
+  effort: Schema.optional(Schema.NullOr(Schema.String)),
+})
+
+/** Whether the person turned a review offered to this task down, ever: then it isn't offered again. */
+export const declinedOf = (taskId: string) =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient
+    const [declined] = yield* sql<{ one: number }>`
+      SELECT 1 AS one FROM record_events WHERE aggregate_type = 'task' AND aggregate_id = ${taskId}
+        AND type = 'task.review_offer_declined' LIMIT 1`
+    return declined !== undefined
+  })
+
+/** The review offered this task, while the offer stands: one was offered, it could still be added, and nobody turned it down. */
 export const reviewOfferOf = (facts: OfferFacts) =>
   Effect.gen(function* () {
-    if (!facts.open || facts.kind !== 'change' || facts.reviewsAfterMerge || facts.reads) return undefined
-    const lead = facts.steps.find((step) => step.key === 'implement')
-    if (lead === undefined || facts.steps.some((step) => step.key === 'review' && !step.skipped)) return undefined
-    // Its change in: the one it shows is the open one, else its latest.
-    const shown = facts.pulls.find((one) => one.state === 'open') ?? facts.pulls.at(-1)
-    if (shown?.state === 'merged') return undefined
+    if (offerable(facts) !== undefined) return undefined
     const sql = yield* SqlClient.SqlClient
-    // Real: a pull request opened on it, or its lead made it a change with no review.
-    const [made] = yield* sql<{ none: number }>`
-      SELECT json_extract(payload, '$.review') IS NULL AS none FROM record_events
-      WHERE aggregate_type = 'task' AND aggregate_id = ${facts.taskId} AND type = 'task.made_change' ORDER BY sequence DESC LIMIT 1`
-    if (shown === undefined && made?.none !== 1) return undefined
-    const [declined] = yield* sql<{ one: number }>`
-      SELECT 1 AS one FROM record_events WHERE aggregate_type = 'task' AND aggregate_id = ${facts.taskId}
-        AND type = 'task.review_offer_declined' LIMIT 1`
-    if (declined !== undefined) return undefined
-    const agents = yield* Agents
-    const limits = yield* Limits
-    const besides =
-      facts.agents === undefined ? [] : agents.list.map((entry) => entry.definition.id).filter((id) => !facts.agents?.includes(id))
-    const picked = yield* limits
-      .free({ besides, projectId: facts.projectId, other: { agentId: lead.agentId, model: lead.model } })
-      .pipe(Effect.orElseSucceed(() => undefined))
-    if (picked === undefined) return undefined
-    return { key: 'review' as const, agentId: picked.agentId, model: picked.model, skipped: false }
+    const [offered] = yield* sql<{ payload: string }>`
+      SELECT payload FROM record_events WHERE aggregate_type = 'task' AND aggregate_id = ${facts.taskId}
+        AND type = 'task.review_offered' ORDER BY sequence DESC LIMIT 1`
+    if (offered === undefined || (yield* declinedOf(facts.taskId))) return undefined
+    const step = yield* Schema.decodeUnknownEffect(Schema.fromJsonString(Offered))(offered.payload).pipe(
+      Effect.orElseSucceed(() => undefined),
+    )
+    if (step === undefined) return undefined
+    return {
+      key: 'review' as const,
+      agentId: step.agentId,
+      model: step.model,
+      ...(step.effort == null ? {} : { effort: step.effort }),
+      skipped: false,
+    }
   })

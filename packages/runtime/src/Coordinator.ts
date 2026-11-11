@@ -69,6 +69,7 @@ import { notesSection, projectOverview } from './handover'
 import { dropNote, keepNote, NOTE_LENGTH, NoteRefused, NOTES_KEPT, notesOf, sayNotes } from './notes'
 import { envelope } from './envelope'
 import { fact } from './records'
+import { declinedOf, offerable, reviewOfferOf } from './reviewOffer'
 import { PlanParameters, type PlanStep, Runs, type StuckInfo } from './Runs'
 import { smallChangeSteps } from './smallChange'
 import { type Disposition, passedOn, Sessions } from './Sessions'
@@ -315,6 +316,8 @@ const Relead = Schema.Struct({
   message: Schema.optional(Schema.String),
 })
 const OnTask = Schema.Struct({ task: Schema.String })
+/* A review offered: on the lead's own task where it leaves task out; by the rules' reviewer where it leaves review out. */
+const ReviewOffered = Schema.Struct({ task: Schema.optional(Schema.String), review: Schema.optional(StepPick) })
 const PartOf = Schema.Struct({ task: Schema.String, part_of: Schema.Boolean })
 
 /** What propose_plan takes, said when its input can't be read: lead and review are objects, never a name alone. */
@@ -1661,6 +1664,102 @@ export class Coordinator extends Context.Service<
           return `${said.join(' ')} Both threads have a line saying so.`
         })
 
+      /**
+       * Offers a task whose work turned real with no review one, as a line of the thread it is called from, with Add and No
+       * thanks (a skipped review can be added back until merge): never by a rule, but where what the person said makes the work
+       * a real change, as asking a prototype's lead to harden it does. It adds nothing by itself. Turned down, it isn't offered
+       * again; one that stands isn't offered twice.
+       */
+      const offerReview = (access: ToolAccess, input: unknown) =>
+        Effect.gen(function* () {
+          const asked = yield* read(ReviewOffered, input)
+          const reference = asked.task ?? (access.role === 'lead' ? access.taskId : null)
+          if (reference === null) return yield* new ToolRefused({ message: 'Name the task: its slug, as list_tasks shows it.' })
+          const task = yield* taskOf(access, reference)
+          const sql = yield* SqlClient.SqlClient
+          const [plan] = yield* sql<{ state: string; parameters: string }>`
+            SELECT state, parameters FROM task_plans WHERE task_id = ${task.id} AND state IN ('proposed', 'accepted')
+            ORDER BY proposed_at DESC LIMIT 1`
+          if (plan === undefined || plan.state === 'proposed')
+            return yield* new ToolRefused({ message: `${task.slug} hasn't started: give its plan a review with propose_plan.` })
+          const parameters = yield* Schema.decodeUnknownEffect(Schema.fromJsonString(PlanParameters))(plan.parameters)
+          const facts = {
+            taskId: task.id,
+            open: task.state === 'open',
+            steps: parameters.steps,
+            reviewsAfterMerge: parameters.reviewAfterMerge === true,
+            reads: parameters.reads === true,
+            pulls: ((yield* pullRequests(task.id)) ?? { changes: [] }).changes.map((seen) => ({ state: seen.change.state })),
+          }
+          const named = yield* modelNamer
+          const not = offerable(facts)
+          if (not !== undefined) {
+            const review = parameters.steps.find((step) => step.key === 'review' && !step.skipped)
+            return yield* new ToolRefused({
+              message:
+                not === 'reviewed' && review !== undefined
+                  ? `${task.slug} has a review already, by ${named(review)}: change_lead changes its reviewer.`
+                  : not === 'merged'
+                    ? `${task.slug} is merged: a review now is one after the merge.`
+                    : not === 'no_review_of_its_own'
+                      ? `${task.slug}'s plan reads no review of its own.`
+                      : `${task.slug} isn't open.`,
+            })
+          }
+          if (yield* declinedOf(task.id))
+            return yield* new ToolRefused({
+              message: `The person turned down a review of ${task.slug}: it isn't offered again. Where they ask for one now, add it with change_lead.`,
+            })
+          const standing = yield* reviewOfferOf(facts)
+          if (standing !== undefined) return `A review of ${task.slug} by ${named(standing)} is offered already: it waits on the person.`
+          const lead = parameters.steps.find((step) => step.key === 'implement')
+          const reviewer =
+            asked.review !== undefined
+              ? yield* stepOf(access.projectId, asked.review, 'the review')
+              : yield* (yield* Limits)
+                  .free({
+                    besides: [],
+                    projectId: access.projectId,
+                    ...(lead === undefined ? {} : { other: { agentId: lead.agentId, model: lead.model } }),
+                  })
+                  .pipe(Effect.orElseSucceed(() => undefined))
+          if (reviewer === undefined)
+            return yield* new ToolRefused({ message: 'No agent can review it now: each is out of usage or signed out.' })
+          const step = {
+            key: 'review' as const,
+            agentId: reviewer.agentId,
+            model: reviewer.model,
+            ...('effort' in reviewer && reviewer.effort != null ? { effort: reviewer.effort } : {}),
+            skipped: false,
+          }
+          const [row] = yield* sql<{ revision: number }>`SELECT revision FROM tasks WHERE id = ${task.id}`
+          yield* fact({
+            projectId: access.projectId as ProjectId,
+            aggregateType: 'task',
+            aggregateId: task.id,
+            revision: row?.revision ?? 1,
+            type: 'task.review_offered',
+            payload: { agentId: step.agentId, model: step.model, ...(step.effort === undefined ? {} : { effort: step.effort }) },
+            actorId: instance.coordinatorId,
+          })
+          // The line stands where the person is talking: the task's own thread from its lead, the coordinator's from it.
+          yield* addItem({ projectId: access.projectId as ProjectId, threadId: access.threadId }, 'notice', {
+            source: 'runtime',
+            severity: 'info',
+            title: access.threadId === task.threadId ? 'Add a review?' : `Add a review of “${task.title}”?`,
+            offer: {
+              kind: 'review',
+              projectId: access.projectId,
+              taskId: task.id,
+              agentId: step.agentId,
+              model: step.model,
+              ...(step.effort === undefined ? {} : { effort: step.effort }),
+            },
+          })
+          yield* touchCard(task.id)
+          return `Offered ${task.slug} a review by ${named(step)}: a line in your thread with Add and No thanks. Nothing is added until the person adds it.`
+        })
+
       /** Tries a task lead's last turn again where it failed, as its Try again does: what was said in it goes again. */
       const tryAgain = (access: ToolAccess, input: unknown) =>
         Effect.gen(function* () {
@@ -2703,6 +2802,23 @@ export class Coordinator extends Context.Service<
             required: ['task'],
           },
           changeLead,
+        ),
+        tool(
+          'offer_review',
+          "Offers a task a review, as a line of your thread the person answers with Add or No thanks: where what they said makes work with no review a real change, such as asking a prototype's lead to harden it, or a chat's to open a pull request for it. It adds nothing by itself. Added, the reviewer goes on as change_lead would put it, and where the work is pushed a review round starts on its head. Its reviewer is the one the project's rules pick, another maker's than the lead's, unless you name one. A lead leaves task out for its own. Offer it once: turned down, it isn't offered again; where they plainly asked for a review, add it with change_lead instead.",
+          {
+            type: 'object',
+            properties: {
+              task: { type: 'string', description: "The task's slug; a lead leaves it out for its own." },
+              review: {
+                type: 'object',
+                description: "Its reviewer's model, where you pick one. Left out, the project's rules pick it.",
+                properties: { model: { type: 'string', description: 'As list_models writes it.' }, effort },
+                required: ['model'],
+              },
+            },
+          },
+          offerReview,
         ),
         tool(
           'try_again',

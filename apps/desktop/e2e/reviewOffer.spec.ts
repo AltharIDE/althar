@@ -9,9 +9,10 @@ import { repository } from '../tests/repository'
 import { connectGitHub, launch, openFirstProject, still, toConversation } from './support'
 
 /*
- * A change whose plan has no review, once its pull request is up, offers one, quietly, in its task view by the composer: the person adds it
- * and a review round runs on the pushed head, or turns it down and it doesn't come back. In a real window, with the fake
- * agent and the fake GitHub. Its shots are test-results/review-offer-*.png.
+ * A review is offered only where an agent offers it: a change whose plan has no review, its pull request up, shows nothing by
+ * itself; the person asks its lead to harden it, and the lead offers a review (`offer_review`), a line of the thread with Add
+ * and No thanks. Added, a review round runs on the pushed head; turned down, it isn't offered again. In a real window, with the
+ * fake agent and the fake GitHub. Its shots are test-results/review-offer-*.png.
  */
 
 const setup = async () => {
@@ -37,58 +38,62 @@ const toTask = async (page: Page) => {
   await toConversation(page)
 }
 
-test('offers a review in the task view of a change with a pull request and no review, and adds it on the pushed head', async () => {
+/** What the person tells the task's lead, from its composer. */
+const tell = async (page: Page, words: string) => {
+  const box = page.getByRole('textbox', { name: /^(Tell .* something|Add to the queue)/ })
+  await box.fill(words)
+  await box.press('Enter')
+}
+
+const offerLine = (page: Page) => page.locator('p').filter({ hasText: /^Add a review\?/ })
+
+test('offers a review only once the lead offers it, as a line of the thread, and Add reviews the pushed head', async () => {
   const { electronApp, page } = await setup()
   try {
     await toTask(page)
-    const offer = page.getByText('Add a review?')
-    await expect(offer).toBeVisible()
-    // Quiet, by the composer: not on the board's card.
+    // Nothing by a rule: a change with no review and its pull request up offers nothing by itself.
+    await expect(page.locator('[data-review]')).toHaveCount(0)
+    await expect(offerLine(page)).toHaveCount(0)
+    await tell(page, 'Harden it into a real change. [lead:offer-review]')
+    const line = offerLine(page)
+    await expect(line).toBeVisible()
     await page.mouse.move(1190, 300)
     await still(page)
+    await line.scrollIntoViewIfNeeded()
+    const box = await line.boundingBox()
     await page.screenshot({
-      path: 'test-results/review-offer-task.png',
+      path: 'test-results/review-offer-line.png',
       scale: 'css',
       animations: 'disabled',
-      clip: { x: 300, y: 560, width: 680, height: 240 },
+      clip: { x: Math.max(0, (box?.x ?? 300) - 40), y: Math.max(0, (box?.y ?? 400) - 160), width: 720, height: 220 },
     })
 
-    // Adding it starts a round on the head: the offer goes, and the thread has the review.
-    await page.getByRole('button', { name: 'Add Small' }).click()
-    await expect(offer).toHaveCount(0)
-    // The reviewer read the head: a review that passed, as a line of the conversation.
+    // Add starts a round on the head: the reviewer read it and it passed, and the line says who reviews it.
+    await line.getByRole('button', { name: /^Add / }).click()
     await expect(page.locator('[data-review]').filter({ hasText: 'Passed' })).toBeVisible()
+    await expect(line).toContainText('reviews it.')
+    await expect(line.getByRole('button')).toHaveCount(0)
     await still(page)
     await page.screenshot({ path: 'test-results/review-offer-added.png', scale: 'css', animations: 'disabled' })
-
-    // Nor on the board.
-    await page.getByRole('button', { name: /^Back to / }).click()
-    await page.getByRole('radio', { name: 'Home' }).click()
-    await expect(page.getByRole('region', { name: 'The project’s work' }).getByRole('article')).toBeVisible()
-    await expect(page.getByText('Add a review?')).toHaveCount(0)
   } finally {
     await electronApp.close()
   }
 })
 
-test('keeps the offer off the board, turns it down in the task view, and it does not come back', async () => {
+test('turns the offered review down, and the lead cannot offer it again', async () => {
   const { electronApp, page } = await setup()
   try {
-    await page.getByRole('radio', { name: 'Home' }).click()
-    const work = page.getByRole('region', { name: 'The project’s work' })
-    const card = work.getByRole('article').filter({ hasText: 'Rate-limit refunds' })
-    await expect(card).toBeVisible()
-    await expect(work.getByText('Add a review?')).toHaveCount(0)
-    await card.click()
-    await toConversation(page)
-    await page.getByRole('button', { name: 'No thanks' }).click()
-    await expect(page.getByText('Add a review?')).toHaveCount(0)
-    await page.getByRole('button', { name: /^Back to / }).click()
-    await page.getByRole('radio', { name: 'Home' }).click()
-    await card.click()
-    await toConversation(page)
-    await expect(page.getByRole('textbox', { name: /^Tell / })).toBeVisible()
-    await expect(page.getByText('Add a review?')).toHaveCount(0)
+    await toTask(page)
+    await tell(page, 'Harden it. [lead:offer-review]')
+    const line = offerLine(page)
+    await line.getByRole('button', { name: 'No thanks' }).click()
+    await expect(line).toContainText('No review.')
+    await expect(line.getByRole('button')).toHaveCount(0)
+    // Asked again, the lead is told it was turned down, and no new offer stands.
+    await tell(page, 'Make it real after all. [lead:offer-review]')
+    await expect(page.getByText(/isn't offered again/).first()).toBeVisible()
+    await expect(offerLine(page)).toHaveCount(1)
+    await expect(page.getByRole('button', { name: 'No thanks' })).toHaveCount(0)
   } finally {
     await electronApp.close()
   }

@@ -1945,10 +1945,23 @@ export const NoticeItem = Schema.Struct({
       }),
     ),
     /**
-     * What the line offers to keep, in the coordinator's thread (a task is a conversation plus parts, "Presets"): parts the
-     * person set up twice, as a preset by that name, which its button saves.
+     * What the line offers: in the coordinator's thread, parts the person set up twice, kept as a preset by that name, which
+     * its button saves (a task is a conversation plus parts, "Presets"); or a review a lead or the coordinator offered a task
+     * whose work turned real with none (`offer_review`), by its reviewer, which Add puts on and No thanks turns down for good.
      */
-    offer: Schema.optional(Schema.Struct({ kind: Schema.Literal('preset'), name: Schema.String, parts: PresetParts })),
+    offer: Schema.optional(
+      Schema.Union([
+        Schema.Struct({ kind: Schema.Literal('preset'), name: Schema.String, parts: PresetParts }),
+        Schema.Struct({
+          kind: Schema.Literal('review'),
+          projectId: Schema.String,
+          taskId: Schema.String,
+          agentId: Schema.String,
+          model: Schema.NullOr(Schema.String),
+          effort: Schema.optional(Schema.NullOr(Schema.String)),
+        }),
+      ]),
+    ),
     /** For what a lead's agent could see: each skill, and whether it is the person's or the repository's. */
     skills: Schema.optional(
       Schema.Array(Schema.Struct({ name: Schema.String, path: Schema.String, from: Schema.Literals(['person', 'repository']) })),
@@ -2473,9 +2486,10 @@ export const TaskCard = Schema.Struct({
    */
   reviewerChange: Schema.optional(Schema.Literals(['now', 'next_round', 'never'])),
   /**
-   * A change whose work turned real with no review (a prototype or chat asked to harden it, a pull request opened on it) is
-   * offered one, once: the reviewer the project's rules would pick, another maker's than the lead's. The person adds it
-   * (ChangeTeam with this step) or turns it down (DeclineReview), and it doesn't come back. Absent otherwise.
+   * The review its lead or the coordinator offered it, as its work turned real with none (`offer_review`, after the person
+   * asked to harden a prototype, say), while it stands: no review on yet, not turned down, not merged. The offer's line in
+   * the thread reads it: Add puts this step on (ChangeTeam), No thanks turns it down (DeclineReview), and it isn't offered
+   * again. Absent otherwise.
    */
   reviewOffer: Schema.optional(PlanStep),
   /** The step it is on, by key, while it runs. */

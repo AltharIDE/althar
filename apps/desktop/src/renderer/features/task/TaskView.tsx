@@ -97,7 +97,6 @@ import { conflictsOf, hasOutputs, hasOutputsToShow, latestOf, Outputs } from './
 import s from './Task.module.css'
 import { OpenFinding } from './Reports'
 import { useChanges } from './useChanges'
-import { ReviewOfferOf } from '../team/ReviewOfferOf'
 import { ChangeTeam, useTeamed } from '../team/Team'
 import type { TaskModel } from './useTask'
 import { chooseFace, chosenFaces } from './chosenFaces'
@@ -1031,7 +1030,7 @@ export function TaskView({
         carried={<CarriedOver here={kept} />}
         // The lines about who answers go on the composer's edge, under the chip, so neither covers the other.
         notice={
-          model.error !== null || conflict !== null || line !== null || teamed?.reviewOffer !== undefined ? (
+          model.error !== null || conflict !== null || line !== null ? (
             <>
               {model.error !== null && (
                 <div className={s.failure} role="alert">
@@ -1048,8 +1047,6 @@ export function TaskView({
                 </div>
               )}
               {line !== null && <div>{line}</div>}
-              {/* A change it was made, or whose pull request is up, with no review: offered one, once. */}
-              {teamed?.reviewOffer !== undefined && <ReviewOfferOf work={teamed} />}
             </>
           ) : null
         }

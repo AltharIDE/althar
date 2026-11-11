@@ -1429,45 +1429,83 @@ describe('changing the team of a task that has begun', () => {
     }).pipe(Effect.provide(runtimeWith(github, ':memory:', { holds: slow })))
   })
 
-  it.live('offers a review once, as the work turns into a real change, and not again once turned down', () => {
+  it.live('offers a review only where a lead offers one, as a line of its thread, once, and not again once turned down', () => {
     const { working, github } = onGitHub()
     const slow = holds()
     return Effect.gen(function* () {
       const instance = yield* Instance
       const task = yield* start(working, '[lead:slowly] [lead:finish] [lead:edit] [review:pass]')
       const offer = () => Effect.map(cards(task.projectId), (all) => all[0]?.reviewOffer)
-      // Planned with a reviewer: nothing to offer.
-      assert.strictEqual(yield* offer(), undefined)
-      // A plan made with no review, as a prototype's: its person never turned one down.
+      const lead: ToolAccess = { role: 'lead', projectId: task.projectId, threadId: task.threadId, sessionId: 'none', taskId: task.taskId }
+      // Planned with a reviewer: nothing to offer, and the lead is told who reviews it.
+      assert.match(yield* callTool(lead, 'offer_review', {}), /has a review already, by .*change_lead changes its reviewer/)
+      // A plan made with no review, as a prototype's: its pull request opens, and still nothing is offered by itself.
       yield* withoutReview(task.taskId)
       slow.open('[lead:slowly]')
       yield* until(cards(task.projectId), (all) => all[0]?.phase === 'ready' && all[0]?.change != null)
-      // Its pull request is open and it has no review: the one the rules would pick, another maker's than the lead's.
+      assert.strictEqual(yield* offer(), undefined)
+      // Its lead offers it, as the person asked to harden it: the one the rules would pick, another maker's than the lead's.
+      assert.match(yield* callTool(lead, 'offer_review', {}), /^Offered .* a review by .*Nothing is added until the person adds it\.$/)
       const offered = yield* offer()
       assert.deepStrictEqual([offered?.key, offered?.agentId, offered?.skipped], ['review', 'codex', false])
-      // Nothing was added by itself.
+      // A line of its thread, with the reviewer its buttons put on.
+      const line = (yield* notices(task.threadId)).find((one) => one['offer'] !== undefined) as Record<string, unknown> | undefined
+      assert.deepStrictEqual(
+        [line?.['title'], (line?.['offer'] as Record<string, unknown> | undefined)?.['kind']],
+        ['Add a review?', 'review'],
+      )
+      assert.strictEqual((line?.['offer'] as Record<string, unknown> | undefined)?.['agentId'], 'codex')
+      // Nothing was added by itself, and one that stands isn't offered twice.
       assert.deepStrictEqual(
         (yield* planOf(task.taskId)).steps.map((one) => [one.key, one.skipped]),
         [['implement', false]],
       )
+      assert.match(yield* callTool(lead, 'offer_review', {}), /is offered already: it waits on the person\./)
+      assert.strictEqual((yield* notices(task.threadId)).filter((one) => one['offer'] !== undefined).length, 1)
       // Turned down, it doesn't come back, however often it is asked again, and the review can still be added by hand.
       yield* (yield* Runs).declineReview(task.taskId, instance.personId)
       yield* (yield* Runs).declineReview(task.taskId, instance.personId)
       assert.strictEqual(yield* offer(), undefined)
+      assert.match(yield* callTool(lead, 'offer_review', {}), /turned down a review of .*: it isn't offered again/)
       assert.strictEqual((yield* cards(task.projectId))[0]?.reviewerChange, 'now')
     }).pipe(Effect.provide(runtimeWith(github, ':memory:', { holds: slow })))
   })
 
-  it.live('offers no review to a change whose review the person took off', () => {
+  it.live('stops offering a review once it is added, and the review it adds reads the pushed head', () => {
     const { working, github } = onGitHub()
     const slow = holds()
     return Effect.gen(function* () {
       const task = yield* start(working, '[lead:slowly] [lead:finish] [lead:edit] [review:pass]')
-      yield* changeTeam(task.taskId, [step('implement', 'claude-code'), step('review', 'codex', null, true)])
+      const lead: ToolAccess = { role: 'lead', projectId: task.projectId, threadId: task.threadId, sessionId: 'none', taskId: task.taskId }
+      yield* withoutReview(task.taskId)
       slow.open('[lead:slowly]')
       yield* until(cards(task.projectId), (all) => all[0]?.phase === 'ready' && all[0]?.change != null)
-      // Taken off before: the person turned it down.
+      // The coordinator offers it, as the person asked it there: the line stands in its own thread, and names the task.
+      const coordinatorThread = yield* (yield* Coordinator).thread(task.projectId)
+      const coordinator: ToolAccess = {
+        role: 'coordinator',
+        projectId: task.projectId,
+        threadId: coordinatorThread,
+        sessionId: 'none',
+        taskId: null,
+      }
+      assert.match(yield* callTool(coordinator, 'offer_review', {}), /Name the task/)
+      assert.match(yield* callTool(coordinator, 'offer_review', { task: task.taskId }), /^Offered /)
+      const line = (yield* notices(coordinatorThread)).find((one) => one['offer'] !== undefined)
+      assert.match(line?.['title'] ?? '', /^Add a review of “.+”\?$/)
+      assert.isUndefined((yield* notices(task.threadId)).find((one) => one['offer'] !== undefined))
+      const offered = (yield* cards(task.projectId))[0]?.reviewOffer
+      // Add, as its line's button does: the offer's step, through the dialog's own command.
+      assert.strictEqual(offered?.agentId, 'codex')
+      yield* changeTeam(task.taskId, [step('implement', 'claude-code'), step('review', offered?.agentId ?? '', offered?.model ?? null)])
       assert.strictEqual((yield* cards(task.projectId))[0]?.reviewOffer, undefined)
+      const reviewed = (yield* until(results(task.threadId), (all) => all.some((result) => result.step === 'review'))).find(
+        (result) => result.step === 'review',
+      )
+      assert.deepStrictEqual([reviewed?.agentId, reviewed?.verdict], ['codex', 'pass'])
+      // Reviewed: a review that ran can't be offered again.
+      yield* until(cards(task.projectId), (all) => all[0]?.reviewerChange === 'never')
+      assert.match(yield* callTool(lead, 'offer_review', {}), /has a review already/)
     }).pipe(Effect.provide(runtimeWith(github, ':memory:', { holds: slow })))
   })
 

@@ -7111,7 +7111,7 @@ export class Runs extends Context.Service<
           return underWay
         })
 
-      /** Turns down the review a task's change was offered: kept once, so it isn't offered again, whoever turned it down. */
+      /** Turns down the review a lead or the coordinator offered a task (`offer_review`): kept once, so it isn't offered again. */
       const declineReview = (taskId: string, actorId: ActorId) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
@@ -7295,8 +7295,6 @@ export class Runs extends Context.Service<
                 : ('now' as const)
               : ('now' as const)
           yield* touchCard(input.taskId)
-          // A review the person took off is one they turned down: it isn't offered again.
-          if (reviewChanges && reviewed && !reviews) yield* declineReview(input.taskId, input.actorId)
           // A review added where its run is over, or at its ending, has no round to come in it: it reads the head now.
           if (reviewChanges && reviews && !reviewed && reviewWhen === 'now') {
             const [last] = yield* sql<{ state: string; late: number }>`

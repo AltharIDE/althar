@@ -55,17 +55,22 @@ doesn't hold it back: the round reads the branch as it stands, that work too,
 and sends nothing up. The fast lane's review
 reads after the merge, and isn't added to.
 
-### The review is offered once, as the work turns real
+### An agent offers the review, as the work turns real
 
-When a task's work turns into a real change with no review (its lead made
-a prototype or chat a change, or opened a pull request on a task whose plan
-has none), its task view says "Add a review?" quietly, by the composer (not
-on the board's card), with the reviewer the
-project's rules would pick: the strongest free model, another maker's than
-the lead's (`reviewOffer`, `Limits.free`). It adds nothing by itself. Add
-goes through Change the team's command; No thanks (`DeclineReview`)
-turns it down, and so does taking a review off: it isn't offered again
-(`task.review_offer_declined`).
+No rule offers a review. A lead or the coordinator does, with
+`offer_review`, when what the person says turns work with no review into a
+real change: they ask a prototype's lead to harden it, or ask for a pull
+request of a chat's work. The offer is a quiet line in the thread where they
+said it ("Add a review?", or "Add a review of “…”?" in the coordinator's),
+with Add and No thanks. Its reviewer is the one the project's rules would
+pick, the strongest free model and another maker's than the lead's
+(`Limits.free`), unless the agent names one. It adds nothing by itself.
+Add goes through Change the team's command. No thanks (`DeclineReview`)
+turns it down, and it isn't offered again (`task.review_offer_declined`):
+the tool refuses after that. The line reads the task's card (`reviewOffer`,
+while the offer stands) and, once answered, says who reviews it or that
+there's no review. A task with a review, one that's merged, or one whose plan
+reads no review of its own isn't offered one.
 
 ## How a review round runs
 

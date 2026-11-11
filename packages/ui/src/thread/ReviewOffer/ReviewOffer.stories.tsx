@@ -4,10 +4,10 @@ import { expect, fn, within } from 'storybook/test'
 import { ReviewOffer } from './ReviewOffer'
 
 const meta = {
-  title: 'Board/ReviewOffer',
+  title: 'Thread/ReviewOffer',
   component: ReviewOffer,
   args: { who: 'GPT-6.1 Sol', onAdd: fn(), onDecline: fn() },
-  // By a task's composer, where the person made it a change: a quiet line on the task view's ground.
+  // A line of the thread, where a lead offered it as the person asked to harden a prototype.
   decorators: [
     (Story) => (
       <div style={{ width: 560, padding: '10px 14px' }}>
@@ -29,5 +29,18 @@ export const Offered: Story = {
   },
 }
 export const OfferedDark: Story = { ...Offered, globals: { theme: 'dark' } }
+/** Offered from the coordinator's thread: it names the task. */
+export const NamesTheTask: Story = { args: { ask: 'Add a review of “Context ring card”?' } }
+/** Added: who reviews it. */
+export const Added: Story = {
+  args: { answered: 'GPT-6.1 Sol' },
+  play: async ({ canvasElement }) => {
+    const offer = within(canvasElement)
+    await expect(offer.getByText('GPT-6.1 Sol reviews it.')).toBeInTheDocument()
+    await expect(offer.queryByRole('button')).toBeNull()
+  },
+}
+/** Turned down: it isn't offered again. */
+export const Declined: Story = { args: { answered: null } }
 export const Busy: Story = { args: { busy: true } }
 export const Failed: Story = { args: { error: 'Althar couldn’t add the review: its agent isn’t signed in.' } }
