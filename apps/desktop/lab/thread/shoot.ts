@@ -16,7 +16,8 @@ import { chromium, type Page } from '@playwright/test'
  *     the live turn at each moment: thinking, at work on a thought, saying what it will do (the task's lead), its steps,
  *     answering, and over
  *
- * With the lab running (Thread lab, on port 6131).
+ * With the lab running (Thread lab, on port 6131). LAB_RAW=1 draws the busy scene's thread as the window got it before the
+ * lines about other tasks and skills were kept out of it.
  */
 
 const [mode = 'shots', name = 'shot', ...rest] = process.argv.slice(2)
@@ -24,7 +25,8 @@ const out = join(import.meta.dirname, 'shots')
 mkdirSync(out, { recursive: true })
 const say = (line: string) => process.stdout.write(`${line}\n`)
 const port = process.env.LAB_PORT ?? '6131'
-const url = (scene: string, theme = 'light') => `http://localhost:${port}/?scene=${scene}&theme=${theme}`
+const url = (scene: string, theme = 'light') =>
+  `http://localhost:${port}/?scene=${scene}&theme=${theme}${process.env.LAB_RAW === '1' ? '&raw=1' : ''}`
 
 const browser = await chromium.launch()
 const open = async (scene: string, theme: string, width: number, height: number): Promise<Page> => {

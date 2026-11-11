@@ -1,3 +1,4 @@
+import { hearsOf, threadsSaying } from '../src/TaskActions'
 import { existsSync } from 'node:fs'
 
 import { Ids, newId, type ProjectId } from '@althar/domain'
@@ -112,6 +113,18 @@ const asks = (threadId: string) =>
 
 const titles = (threadId: string) => Effect.map(notices(threadId), (rows) => rows.map((row) => row['title'] ?? ''))
 
+describe('which thread says what a call did to a task', () => {
+  const task = { threadId: 'th-task' }
+  it('is the coordinator’s and the task’s, but a lead’s own chat says nothing of another task', () => {
+    assert.isTrue(hearsOf({ role: 'coordinator', threadId: 'th-coordinator' }, task))
+    assert.isFalse(hearsOf({ role: 'lead', threadId: 'th-other' }, task))
+    // Its own task: the one thread, the task's.
+    assert.isFalse(hearsOf({ role: 'lead', threadId: 'th-task' }, task))
+    assert.strictEqual(threadsSaying({ role: 'coordinator', threadId: 'th-coordinator' }, task), 'Both threads have a line saying so')
+    assert.strictEqual(threadsSaying({ role: 'lead', threadId: 'th-other' }, task), 'Its thread has a line saying so')
+  })
+})
+
 describe('stop_task', () => {
   it.live('stops a running task at once on the person’s word, with a line in both threads', () =>
     Effect.gen(function* () {
@@ -158,10 +171,11 @@ describe('stop_task', () => {
       const other = yield* started(c.projectId, 'Prototype the browser', 'Work on it. [lead:wait]')
       yield* until(standing(task.taskId), (row) => row?.run === 'running')
       const lead: ToolAccess = { ...c.access, role: 'lead', threadId: other.threadId, taskId: other.taskId, sessionId: 'none' }
-      assert.match(yield* callTool(lead, 'stop_task', { task: task.slug }), /^Stopped .*Both threads have a line saying so/)
+      assert.match(yield* callTool(lead, 'stop_task', { task: task.slug }), /^Stopped .*Its thread has a line saying so/)
       assert.strictEqual((yield* standing(task.taskId))?.run, 'suspended')
       assert.include(yield* titles(task.threadId), 'The lead of “Prototype the browser” stopped this task')
-      assert.include(yield* titles(other.threadId), 'Stopped “Review the importer”')
+      // The lead's own chat is about its own task: its call is there, and no line about the one it stopped.
+      assert.notInclude(yield* titles(other.threadId), 'Stopped “Review the importer”')
       // Its own task it doesn't stop from inside.
       assert.match(yield* callTool(lead, 'stop_task', { task: other.slug }), /is your own task/)
     }).pipe(Effect.provide(runtime())),

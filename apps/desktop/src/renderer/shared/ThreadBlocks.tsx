@@ -442,7 +442,17 @@ export const logLines = (log: string) => {
  * wasn't passed to the lead, as anyone can comment on a public one; the
  * person reads it, and can pass it on.
  */
-function ArrivalView({ arrival, at, onPassOn }: { arrival: ArrivalContent; at: string; onPassOn?: (words: string) => void }) {
+function ArrivalView({
+  arrival,
+  at,
+  count,
+  onPassOn,
+}: {
+  arrival: ArrivalContent
+  at: string
+  count: number
+  onPassOn?: (words: string) => void
+}) {
   const where =
     arrival.path === null ? arrival.where : `${arrival.where} · ${arrival.path}${arrival.line === null ? '' : `:${arrival.line}`}`
   const verb = heardVerb(arrival)
@@ -462,6 +472,7 @@ function ArrivalView({ arrival, at, onPassOn }: { arrival: ArrivalContent; at: s
       verb={verb}
       where={where}
       at={at}
+      count={count}
       mark={productBrand(arrival.source)}
       {...(foot === false ? {} : { foot })}
     >
@@ -646,7 +657,15 @@ export function ThreadBlocks({
           </You>
         )
       case 'arrival':
-        return <ArrivalView key={block.id} arrival={block.arrival} at={block.at} {...(onPassOn === undefined ? {} : { onPassOn })} />
+        return (
+          <ArrivalView
+            key={block.id}
+            arrival={block.arrival}
+            at={block.at}
+            count={block.count}
+            {...(onPassOn === undefined ? {} : { onPassOn })}
+          />
+        )
       case 'divider':
         return (
           <ThreadDivider key={block.id} icon="agents">

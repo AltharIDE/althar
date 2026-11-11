@@ -1637,21 +1637,33 @@ export class Runs extends Context.Service<
         })
 
       /**
-       * The person wrote in the task's thread: a lead waiting on them has its
-       * call answered, and its step runs again on that turn. The call doesn't
+       * The person wrote in the task's thread: a lead waiting on them has its call answered. It is answered as they send,
+       * whichever way the message is delivered (`PersonSaid`), so the card closes then and not only when a turn starts.
+       * The step runs again on the turn their words start (`resume`), not before: the lead's own turn may still be
+       * ending, and a step running with no turn of its own to report in is read as one that went quiet. The call doesn't
        * stay open, so `finish_step` no longer refuses once the work is done.
        */
-      const answerWaiting = (threadId: string) =>
+      const answerWaiting = (threadId: string, resume: boolean, turnId?: string) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
           const [thread] = yield* sql<{ taskId: string }>`
             SELECT task_id AS taskId FROM threads WHERE id = ${threadId} AND kind = 'task'`
           if (thread === undefined) return
-          const calls = yield* sql<{ id: string; projectId: ProjectId; attemptId: string | null }>`
+          // A turn answers the calls that were open when the person's words it carries were sent, not one the lead asked after
+          // them, while it ran on: that question is still the person's to answer. What the coordinator or Althar sent beside
+          // their words doesn't move that point.
+          const [sent] =
+            turnId === undefined
+              ? []
+              : yield* sql<{ at: string | null }>`
+                SELECT max(u.accepted_at) AS at FROM turn_delivery_inputs d JOIN user_inputs u ON u.id = d.user_input_id
+                WHERE d.delivery_id = ${turnId} AND u.sender_kind IN ('window', 'paired_device')`
+          const until = sent?.at ?? '9999'
+          const open = yield* sql<{ id: string; projectId: ProjectId; attemptId: string | null }>`
             SELECT id, project_id AS projectId, node_attempt_id AS attemptId FROM attention_requests
-            WHERE task_id = ${thread.taskId} AND kind = 'stuck' AND state = 'open'
+            WHERE task_id = ${thread.taskId} AND kind = 'stuck' AND state = 'open' AND created_at <= ${until}
               AND json_extract(payload, '$.why') = 'waiting_on_person'`
-          for (const call of calls) {
+          for (const call of open) {
             const at = yield* timestamp
             const revision = yield* change('attention_requests', call.id, { state: 'answered', answeredAt: at })
             yield* fact({
@@ -1663,12 +1675,18 @@ export class Runs extends Context.Service<
               payload: { kind: 'tell' },
               actorId: instance.personId,
             })
-            if (call.attemptId === null) continue
-            const [attempt] = yield* sql<{ state: string }>`SELECT state FROM node_attempts WHERE id = ${call.attemptId}`
-            if (attempt?.state !== 'waiting_attention') continue
-            yield* change('node_attempts', call.attemptId, { state: 'running' })
           }
-          if (calls.length > 0) yield* touchCard(thread.taskId)
+          // The step of each call the person answered goes on with the turn their words start, which may come after the call closed.
+          const waiting = resume
+            ? yield* sql<{ attemptId: string }>`
+                SELECT DISTINCT q.node_attempt_id AS attemptId FROM attention_requests q
+                JOIN node_attempts a ON a.id = q.node_attempt_id AND a.state = 'waiting_attention'
+                WHERE q.task_id = ${thread.taskId} AND q.kind = 'stuck' AND q.state = 'answered'
+                  AND json_extract(q.payload, '$.why') = 'waiting_on_person'
+                  AND NOT EXISTS (SELECT 1 FROM attention_requests o WHERE o.node_attempt_id = a.id AND o.state = 'open')`
+            : []
+          for (const { attemptId } of waiting) yield* change('node_attempts', attemptId, { state: 'running' })
+          if (open.length > 0 || waiting.length > 0) yield* touchCard(thread.taskId)
         }).pipe(Effect.catchCause((cause) => Effect.logWarning('Could not answer a lead waiting on the person', cause)))
 
       /** The answers kept on the task's threads while there was no place to tell them, oldest first. */
@@ -2107,8 +2125,9 @@ export class Runs extends Context.Service<
           )
             return yield* reconnecting(event.threadId, event.event.classified.message)
           if (event._tag !== 'TurnEnded' && event._tag !== 'SessionEnded') {
-            // The person wrote in the thread: a lead waiting on their answer goes on with that turn.
-            if (event._tag === 'TurnStarted' && event.byPerson === true) yield* answerWaiting(event.threadId)
+            // The person wrote in the thread: a lead waiting on their answer has its card closed as they send, and goes on with the turn that carries it.
+            if (event._tag === 'PersonSaid') yield* answerWaiting(event.threadId, false)
+            if (event._tag === 'TurnStarted' && event.byPerson === true) yield* answerWaiting(event.threadId, true, event.turnId)
             return
           }
           // A quick task whose lead changed the repository in the turn that ended has its work on a branch of its own now.
@@ -7073,21 +7092,11 @@ export class Runs extends Context.Service<
           const wantedReview = input.steps.find((step) => step.key === 'review')
           const alike = (a: PlanStep, b: PlanStep) =>
             a.agentId === b.agentId && (a.model ?? null) === (b.model ?? null) && (a.effort ?? null) === (b.effort ?? null)
-          // A review's lead only reads: an agent that can't be held to that can't take either step, whoever asks (Reviews.canLead).
+          // Any agent Althar has may take a review's steps (Reviews.canLead).
           if (before.reads === true)
             for (const step of input.steps) {
-              if (step.skipped) continue
-              const held = agentsHere.list.find((entry) => entry.definition.id === step.agentId)
-              if (held?.definition.reviewing?.outside === true) continue
-              const names = agentsHere.list
-                .filter((entry) => entry.definition.reviewing?.outside === true)
-                .map((entry) => entry.definition.name)
-              return yield* new ReviewRefused({
-                message:
-                  held === undefined
-                    ? 'Althar has no such agent.'
-                    : `${held.definition.name} can't be held to reading only: it runs commands its sandbox contains without asking, so it could run this pull request's code. Review it with ${names.join(' or ')}.`,
-              })
+              if (step.skipped || agentsHere.list.some((entry) => entry.definition.id === step.agentId)) continue
+              return yield* new ReviewRefused({ message: 'Althar has no such agent.' })
             }
           const leadChanges = wantedLead !== undefined && !alike(lead, wantedLead)
           const reviewed = review !== undefined && !review.skipped

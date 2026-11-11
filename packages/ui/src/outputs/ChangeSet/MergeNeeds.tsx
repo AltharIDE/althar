@@ -3,7 +3,7 @@ import type { ComponentPropsWithRef, ReactNode } from 'react'
 import { Icon } from '../../foundations/Icon/Icon'
 import { CheckState } from '../../foundations/vocabulary'
 import { cx } from '../../lib/cx'
-import { Checks, type ChangeCheck } from '../../primitives/Checks/Checks'
+import { Checks, skippedLast, type ChangeCheck } from '../../primitives/Checks/Checks'
 import { Caret, Disclosure, DisclosureTrigger, Fold } from '../../primitives/Fold/Fold'
 import { LiveDot } from '../../primitives/LiveDot/LiveDot'
 import { VisuallyHidden } from '../../primitives/VisuallyHidden/VisuallyHidden'
@@ -367,11 +367,11 @@ function ChecksNeed({
         </DisclosureTrigger>
         <Fold bleed={false}>
           <div className={s.list}>
-            {counted.length + missing.length > 0 && <Checks checks={[...counted, ...missing]} />}
+            {counted.length + missing.length > 0 && <Checks checks={skippedLast([...counted, ...missing])} />}
             {optional.length > 0 && (
               <>
                 <p className={m.heading}>{t.optional}</p>
-                <Checks checks={optional} />
+                <Checks checks={skippedLast(optional)} />
               </>
             )}
           </div>

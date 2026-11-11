@@ -3300,6 +3300,16 @@ describe('a task', () => {
     )
     expect(statusOf(running())).toEqual({ status: TaskStatus.Running, state: 'Working' })
     expect(statusOf({ ...base, session: null })).toEqual({ status: TaskStatus.Stopped, state: 'Stopped' })
+    // Its lead's session starting, as it does for a merged task given something to fix: the agent is on its way, not gone.
+    expect(statusOf({ ...base, session: { ...base.session!, state: 'starting', held: false, turnRunning: false } })).toEqual({
+      status: TaskStatus.Running,
+      state: 'Working',
+    })
+    // Asked, before its lead is back: under way, following up, whether its folder or its session is away.
+    expect(statusOf({ ...base, session: null, task: { ...base.task, phase: 'running', step: 'implement', followUp: true } })).toEqual({
+      status: TaskStatus.Running,
+      state: 'Following up',
+    })
     // Stopped as its card is, its lead's session kept or not: never idle, and what stopped it where something says, as the board does.
     expect(statusOf({ ...base, task: { ...base.task, phase: 'stopped' } })).toEqual({ status: TaskStatus.Stopped, state: 'Stopped' })
     expect(

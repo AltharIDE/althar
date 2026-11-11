@@ -6,7 +6,7 @@ import { join } from 'node:path'
 import { type FakeService, makeFakeService } from '@althar/connectors/testing'
 import { type FakeAgentOptions, holds } from '@althar/provider-adapters/testing'
 import { assert, describe, it } from '@effect/vitest'
-import { Duration, Effect, Layer, Option } from 'effect'
+import { Duration, Effect, Fiber, Layer, Option } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { Changes } from '../src/Changes'
@@ -194,6 +194,62 @@ const tasksOwed = (taskId: string) =>
     return row?.n ?? 0
   })
 
+/** A merged task whose review found one thing, waiting on the person. */
+const found = (working: string, bare: string, github: FakeService) =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient
+    const task = yield* opened(working, '[review:wait]')
+    yield* mergeIt(bare, github, task.taskId)
+    yield* until(reviewOf(task.url), (row) => row?.state === 'running')
+    const reviewer = yield* reviewerThread(task.taskId)
+    yield* reviewing(reviewer)
+    const [session] = yield* sql<{ id: string }>`
+      SELECT id FROM provider_sessions WHERE thread_id = ${reviewer} ORDER BY started_at DESC LIMIT 1`
+    const access: ToolAccess = {
+      role: 'reviewer',
+      projectId: task.projectId,
+      threadId: reviewer,
+      sessionId: session?.id ?? '',
+      taskId: task.taskId,
+    }
+    yield* callTool(access, 'report_review', {
+      verdict: 'changes_requested',
+      summary: 'One thing to tidy.',
+      findings: [{ severity: 'minor', title: 'Name the retry', claim: 'Name it for what it retries.' }],
+    })
+    yield* until(cards(task.projectId), (all) => all[0]?.afterMerge?.state === 'found')
+    return task
+  })
+
+/** What the task's view says of where it stands, as its header and its card both read it. */
+const standingOf = (threadId: string) =>
+  Effect.gen(function* () {
+    const snapshot = yield* Effect.orDie((yield* Queries).thread(threadId))
+    return {
+      phase: snapshot.task.phase,
+      step: snapshot.task.step,
+      followUp: snapshot.task.followUp,
+      afterMerge: snapshot.task.afterMerge?.state,
+      held: snapshot.session?.held,
+    }
+  })
+
+/** Reads the task's phase over and over, as a window that watches would, until stopped: each phase it was in, in order. */
+const watching = (threadId: string) =>
+  Effect.gen(function* () {
+    const phases: Array<string> = []
+    const reading = yield* Effect.forkChild(
+      Effect.forever(
+        Effect.gen(function* () {
+          const { phase } = yield* standingOf(threadId)
+          if (phase !== null && phases.at(-1) !== phase) phases.push(phase)
+          yield* Effect.sleep(Duration.millis(1))
+        }),
+      ),
+    )
+    return { stop: Effect.as(Fiber.interrupt(reading), phases) }
+  })
+
 describe('the review after a merge, at its edges', () => {
   it.live('keeps a finding as its reviewer wrote it, refuses a second report, and Fix it numbers each for the lead still there', () => {
     const { working, bare, github } = onGitHub()
@@ -269,6 +325,119 @@ describe('the review after a merge, at its edges', () => {
       place.open('[review:wait]')
     }).pipe(Effect.provide(runtimeWith(github, { holds: place })))
   })
+
+  it.live('is under way from Fix it to the end of its lead’s turn: never Done, nor Stopped, in between', () => {
+    const { working, bare, github } = onGitHub()
+    const place = holds()
+    return Effect.gen(function* () {
+      const task = yield* found(working, bare, github)
+      const mergeReviews = yield* MergeReviews
+      // Found, its lead gone as a merged task's is: the person's, Fix it and Leave it beside it.
+      yield* gone(task.threadId)
+      assert.deepInclude(yield* standingOf(task.threadId), { phase: 'ready', afterMerge: 'found' })
+
+      const watched = yield* watching(task.threadId)
+      const sent = yield* mergeReviews.fix(task.taskId, task.url)
+      // The instant it is answered: its lead held, the turn begun or not: under way, not Done, not Stopped.
+      assert.strictEqual((yield* standingOf(task.threadId)).phase, 'running')
+      yield* mergeReviews.afterTurnOf(sent.threadId, sent.inputId)
+      const phases = yield* watched.stop
+      assert.notInclude(phases, 'settled', `Done showed while Fix it was taken: ${phases.join(' > ')}`)
+      assert.notInclude(phases, 'stopped', `Stopped showed while Fix it was taken: ${phases.join(' > ')}`)
+      assert.include(phases, 'running')
+      // Its lead answered the person since they last had the task open: that is theirs, as a reply is.
+      assert.strictEqual((yield* until(standingOf(task.threadId), (now) => now.phase !== 'running')).phase, 'ready')
+      place.open('[review:wait]')
+    }).pipe(Effect.provide(runtimeWith(github, { holds: place })))
+  })
+
+  it.live('is under way in the moment Fix it is answered, before its lead is back, and not for ever where it never is', () => {
+    const { working, bare, github } = onGitHub()
+    const place = holds()
+    return Effect.gen(function* () {
+      const task = yield* found(working, bare, github)
+      const sql = yield* SqlClient.SqlClient
+      yield* gone(task.threadId)
+      assert.strictEqual((yield* standingOf(task.threadId)).phase, 'ready')
+      // Answered, the review says so and nothing else yet: no session, nothing delivered, its folder perhaps still away.
+      yield* sql`UPDATE merge_reviews SET state = 'fixing', updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE url = ${task.url}`
+      const asked = yield* standingOf(task.threadId)
+      assert.deepInclude(asked, { phase: 'running', step: 'implement', followUp: true, held: undefined, afterMerge: undefined })
+      // A lead that never starts doesn't leave the task under way for ever.
+      yield* sql`UPDATE merge_reviews SET updated_at = '2000-01-01T00:00:00.000Z' WHERE url = ${task.url}`
+      assert.notStrictEqual((yield* standingOf(task.threadId)).phase, 'running')
+      place.open('[review:wait]')
+    }).pipe(Effect.provide(runtimeWith(github, { holds: place })))
+  })
+
+  it.live('is under way as the person writes to a merged task’s lead, its turn not begun', () => {
+    const { working, bare, github } = onGitHub()
+    const place = holds()
+    return Effect.gen(function* () {
+      const sessions = yield* Sessions
+      const task = yield* found(working, bare, github)
+      yield* (yield* MergeReviews).leave(task.taskId, task.url)
+      // Merged and left as it is, the task is settled; the person writes to its lead, which the window has back by then.
+      yield* gone(task.threadId)
+      assert.strictEqual((yield* standingOf(task.threadId)).phase, 'settled')
+      yield* sessions.startLast(task.threadId)
+      yield* until(sessions.running(task.threadId), (live) => Option.isSome(live))
+      const watched = yield* watching(task.threadId)
+      yield* sessions.send({
+        envelope: yield* Runtime.envelope('thread.send', { threadId: task.threadId }),
+        threadId: task.threadId,
+        body: 'One more thing: rename it.',
+        sender: { kind: 'window' },
+      })
+      assert.strictEqual((yield* standingOf(task.threadId)).phase, 'running')
+      yield* until(standingOf(task.threadId), (now) => now.phase !== 'running')
+      const phases = yield* watched.stop
+      assert.notInclude(
+        phases.slice(0, phases.indexOf('running') + 1),
+        'settled',
+        `Done showed as it was written to: ${phases.join(' > ')}`,
+      )
+      assert.notInclude(phases, 'stopped', `Stopped showed as it was written to: ${phases.join(' > ')}`)
+      place.open('[review:wait]')
+    }).pipe(Effect.provide(runtimeWith(github, { holds: place })))
+  })
+
+  it.live(
+    'is under way across the turn’s claim and its delivery, before its lead is busy: its input no longer queued, its turn not yet running',
+    () => {
+      const { working, bare, github } = onGitHub()
+      const place = holds()
+      return Effect.gen(function* () {
+        const sessions = yield* Sessions
+        const sql = yield* SqlClient.SqlClient
+        const task = yield* found(working, bare, github)
+        yield* (yield* MergeReviews).leave(task.taskId, task.url)
+        yield* gone(task.threadId)
+        yield* until(standingOf(task.threadId), (now) => now.phase === 'settled')
+        yield* sessions.startLast(task.threadId)
+        const live = yield* until(sessions.running(task.threadId), (now) => Option.isSome(now))
+        const sessionId = Option.getOrThrow(live).sessionId
+        // The moment a controlled pause stands for: the turn recorded as delivered with its input, the session not yet marked busy.
+        const turn = `turn_${'a'.repeat(32)}`
+        const at = new Date().toISOString()
+        yield* sql`INSERT INTO turn_deliveries (id, project_id, thread_id, provider_session_id, controller_generation, state, requested_at, delivered_at, origin)
+        VALUES (${turn}, ${task.projectId}, ${task.threadId}, ${sessionId}, 1, 'pending', ${at}, NULL, 'person')`
+        const claimed = yield* standingOf(task.threadId)
+        assert.strictEqual(
+          claimed.phase,
+          'running',
+          `claimed: ${JSON.stringify([claimed, Option.isSome(yield* sessions.running(task.threadId))])}`,
+        )
+        yield* sql`UPDATE turn_deliveries SET state = 'delivered', delivered_at = ${at} WHERE id = ${turn}`
+        assert.strictEqual(Option.getOrThrow(yield* sessions.running(task.threadId)).turnRunning, false)
+        assert.deepInclude(yield* standingOf(task.threadId), { phase: 'running', step: 'implement', followUp: true })
+        // Its turn over, the person's: not under way any more.
+        yield* sql`UPDATE turn_deliveries SET state = 'completed', ended_at = ${at} WHERE id = ${turn}`
+        assert.notStrictEqual((yield* standingOf(task.threadId)).phase, 'running')
+        place.open('[review:wait]')
+      }).pipe(Effect.provide(runtimeWith(github, { holds: place })))
+    },
+  )
 
   it.live('names the pull request by its link where its number isn’t known, and its reviewer reads it as the pull request', () => {
     const { working, bare, github } = onGitHub()
