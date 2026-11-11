@@ -193,7 +193,7 @@ export function ChangeTeam({
           ...plan.steps,
           {
             key: 'review',
-            agentId: (plan.agents ?? agents.map((one) => one.id)).find((id) => id !== lead.agentId) ?? lead.agentId,
+            agentId: agents.map((one) => one.id).find((id) => id !== lead.agentId) ?? lead.agentId,
             model: null,
             skipped: true,
           },
@@ -201,9 +201,6 @@ export function ChangeTeam({
       : plan.steps
   const steps = withEdits(given, edits)
   const ending = end === undefined ? plan.end : end
-  // Only the agents the plan allows: a review's lead only reads, so an agent that can't be held to that isn't offered.
-  const allowed = plan.agents
-  const offered = allowed === undefined ? agents : agents.filter((agent) => allowed.includes(agent.id))
   const put = (key: PlanStep['key'], patch: Partial<PlanStep>) => setEdits((was) => ({ ...was, [key]: { ...was[key], ...patch } }))
   const save = async (andStart: boolean) => {
     setBusy(true)
@@ -239,7 +236,7 @@ export function ChangeTeam({
             picker: (
               <ModelChoice
                 owner={label(step.key)}
-                agents={offered}
+                agents={agents}
                 projectId={projectId}
                 value={choiceOf(step)}
                 onChange={(choice) => put(step.key, { ...choice, skipped: false })}

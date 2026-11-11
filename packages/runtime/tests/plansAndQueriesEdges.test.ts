@@ -281,7 +281,7 @@ describe('a plan from a preset', () => {
     }).pipe(Effect.provide(runtimeWith(github)))
   })
 
-  it.live('keeps a review a review, led by an agent that can be held to reading', () => {
+  it.live('keeps a review a review, led by any agent, Codex included', () => {
     const { working, bare, github } = onGitHub()
     return Effect.gen(function* () {
       const { coordinator, person } = yield* aProject(working)
@@ -298,13 +298,10 @@ describe('a plan from a preset', () => {
       const { id } = yield* planOf('review-1-back-off')
       const refused = yield* Effect.flip(plans.applyPreset(id, 'Small change', person))
       assert.strictEqual((refused as { message?: string }).message, 'A review stays a review.')
-      // Codex can't be held to reading: it leads no review, though one with it skipped is fine.
+      // Codex may lead it as any agent may.
       const lead = { key: 'implement' as const, agentId: 'claude-code', model: 'large', skipped: false }
-      const codex = yield* Effect.flip(plans.change(id, [{ ...lead, agentId: 'codex' }], person))
-      assert.strictEqual(
-        (codex as { message?: string }).message,
-        "Fake codex can't be held to reading only: it runs commands its sandbox contains without asking, so it could run this pull request's code. Review it with Fake claude-code or Fake opencode.",
-      )
+      yield* plans.change(id, [{ ...lead, agentId: 'codex', model: null }], person)
+      assert.deepInclude((yield* planOf('review-1-back-off')).parameters, { steps: [{ ...lead, agentId: 'codex', model: null }] })
       const steps = [lead, { key: 'review' as const, agentId: 'codex', model: null, skipped: true }]
       yield* plans.change(id, steps, person)
       assert.deepStrictEqual((yield* planOf('review-1-back-off')).parameters.steps, steps)

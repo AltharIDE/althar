@@ -2576,13 +2576,9 @@ export class Queries extends Context.Service<
                         '',
                       ),
                     ),
-                    // A review's lead only reads: only an agent its session holds to that may take it (Reviews.canLead).
+                    // Any agent may lead a review: the card offers them all.
                     ...(field(parameters, 'reads') === true
-                      ? {
-                          agents: (yield* Agents).list
-                            .filter((entry) => entry.definition.reviewing?.outside === true)
-                            .map((entry) => entry.definition.id),
-                        }
+                      ? {}
                       : {
                           // Where it works (ADR-091), why where the coordinator said, and who works Local now, while it can change.
                           worksIn: text(parameters, 'worksIn') === 'checkout' ? ('checkout' as const) : ('worktree' as const),

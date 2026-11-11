@@ -33,6 +33,9 @@ import { Projects } from '../src/Projects'
 import * as Runtime from '../src/Runtime'
 import { ToolServer, type ToolAccess } from '../src/ToolServer'
 import { Secrets } from '../src/Secrets'
+import { Sessions } from '../src/Sessions'
+import { timestamp } from '../src/records'
+import { Ids, newId } from '@althar/domain'
 import type { LoadOptions } from '../src/MachineLoad'
 import { WORK } from '../src/machine'
 import type { PlanUsageOptions } from '../src/PlanUsage'
@@ -190,8 +193,8 @@ export const definition = (
   // Given a run's skills as the registry's agents of the same id are, by their own entries: in its session (Claude Code's
   // options, above), as an added directory, in its environment (`launched` below); the rest none.
   skills: registry[id as AgentId]?.skills ?? null,
-  // Each may lead a review of a pull request from outside but `codex`, as the registry's Codex may not.
-  reviewing: { outside: id !== 'codex' },
+  // Each may lead a review of a pull request, as the registry's agents may.
+  reviewing: {},
   knownGaps: [],
   ownHelpers: { off: true, how: 'nothing of its own', kept: 'none' },
 })
@@ -608,6 +611,38 @@ export const withWork = (description: string, review: boolean) =>
     : description
 
 /** Calls one of Althar's tools as an agent with this access would: over MCP, with the session's token. */
+/**
+ * A session for a thread's tool calls, as the store keeps one, and a way to
+ * start its turns: each a live turn with one message in it, the person's from
+ * the window (`person`) or news's, which gives that message's id, as read_turn
+ * would. Every earlier turn of the thread ends first.
+ */
+export const turnsFor = (access: ToolAccess) =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient
+    // The thread's live session where it has one: a thread has one at a time.
+    const [live] = yield* sql<{ id: string }>`SELECT id FROM provider_sessions WHERE thread_id = ${access.threadId} AND state = 'active'`
+    const sessionId = live?.id ?? (yield* newId(Ids.providerSession))
+    if (live === undefined)
+      yield* sql`INSERT INTO provider_sessions ${sql.insert({ id: sessionId, projectId: access.projectId, threadId: access.threadId, agentId: 'codex', state: 'active', startedAt: yield* timestamp })}`
+    const turn = (body: string, origin: 'person' | 'news' = 'person') =>
+      Effect.gen(function* () {
+        yield* sql`UPDATE turn_deliveries SET state = 'completed', ended_at = ${yield* timestamp} WHERE thread_id = ${access.threadId} AND state = 'delivered'`
+        const accepted = yield* (yield* Sessions).send({
+          envelope: yield* Runtime.envelope('thread.send', {}),
+          threadId: access.threadId,
+          body,
+          sender: origin === 'person' ? { kind: 'window' } : { kind: 'internal' },
+          origin: origin === 'person' ? 'system' : 'news',
+        })
+        const turnId = yield* newId(Ids.turnDelivery)
+        yield* sql`INSERT INTO turn_deliveries ${sql.insert({ id: turnId, projectId: access.projectId, threadId: access.threadId, providerSessionId: sessionId, controllerGeneration: 1, state: 'delivered', origin, requestedAt: yield* timestamp, deliveredAt: yield* timestamp })}`
+        yield* sql`INSERT INTO turn_delivery_inputs ${sql.insert({ projectId: access.projectId, deliveryId: turnId, userInputId: accepted.inputId, position: 1 })}`
+        return accepted.inputId
+      })
+    return { access: { ...access, sessionId } satisfies ToolAccess, turn }
+  })
+
 export const callTool = (access: ToolAccess, name: string, args?: Record<string, unknown>) =>
   Effect.map(callToolAtOnce(access, name, [args]), (said) => said[0] ?? '')
 

@@ -11,6 +11,7 @@ import { SqlClient } from 'effect/sql'
 import { thisDevice } from './device'
 import { Busy } from './Busy'
 import { Connections } from './Connections'
+import { Errands } from './Errands'
 import { touchCard } from './cards'
 import { Changes } from './Changes'
 import { endWords, modelNamer, teamOf, withEffort } from './coordinatorNews'
@@ -45,6 +46,7 @@ import {
   closePullRequest,
   editPullRequest,
   markReady,
+  personsWordOf,
   readDefaultBranchChecks,
   replyOnPullRequest,
   reopenPullRequest,
@@ -120,6 +122,7 @@ export interface Suggested {
 type Store =
   | SqlClient.SqlClient
   | Instance
+  | Errands
   | Live
   | Agents
   | SignIns
@@ -377,6 +380,7 @@ export class Coordinator extends Context.Service<
       )
       const agents = yield* Agents
       const sessions = yield* Sessions
+      const errands = yield* Errands
       const live = yield* Live
       const projects = yield* Projects
       const plans = yield* Plans
@@ -393,6 +397,7 @@ export class Coordinator extends Context.Service<
         Effect.succeed({ changes: [], merged: [], unmerged: 0 })
       const provide = <A, E>(effect: Effect.Effect<A, E, Store>) => Effect.provideContext(effect, context)
       const nameOf = (agentId: string) => agents.list.find((entry) => entry.definition.id === agentId)?.definition.name ?? agentId
+      const wordOf = (access: ToolAccess) => personsWordOf(errands, access)
 
       const thread = (projectId: string) =>
         Effect.gen(function* () {
@@ -1853,7 +1858,7 @@ export class Coordinator extends Context.Service<
           ...(step.effort === undefined ? {} : { effort: step.effort }),
         }))
 
-      /** What each run does, from what it ends in and its reviewer. A review is led only by an agent held to reading. */
+      /** What each run does, from what it ends in and its reviewer. Any agent may lead a review. */
       const workOf = (
         projectId: string,
         endsIn: typeof EndsIn.Type,
@@ -1861,16 +1866,7 @@ export class Coordinator extends Context.Service<
         review: typeof StepPick.Type | null,
       ) =>
         Effect.gen(function* () {
-          if (endsIn === 'reviews') {
-            const leading = agents.list.find((entry) => entry.definition.id === lead.agentId)
-            if (leading?.definition.reviewing?.outside !== true) {
-              const held = agents.list.filter((entry) => entry.definition.reviewing?.outside === true).map((entry) => entry.definition.name)
-              return yield* new ToolRefused({
-                message: `${nameOf(lead.agentId)} can't be held to reading only, so it can't lead a review. Name a model on ${held.join(' or ')}.`,
-              })
-            }
-            return { kind: 'review' } as const
-          }
+          if (endsIn === 'reviews') return { kind: 'review' } as const
           return {
             kind: 'task',
             review: review === null ? null : yield* keptStep(projectId, review, 'its reviewer'),
@@ -2334,21 +2330,51 @@ export class Coordinator extends Context.Service<
         ),
         tool(
           'mark_ready',
-          'Marks a draft pull request that Althar opened ready for review, by its link or number. It can go back to a draft on the host, so you may do it unasked when its task is done. Not for one a person opened.',
-          { type: 'object', properties: { pull_request: { type: 'string' } }, required: ['pull_request'] },
-          (access, input) => markReady(access.projectId, input),
+          "Marks a draft pull request ready for review, by its link or number: any of the project's, whoever opened it. It can go back to a draft on the host, so you may do it unasked on Althar's own or the person's own, such as when its task is done. Anyone else's goes on the person's word: their message in this turn that asks it (message, from read_turn).",
+          {
+            type: 'object',
+            properties: {
+              pull_request: { type: 'string' },
+              message: {
+                type: 'string',
+                description: "The person's message in this turn that asks it, from read_turn: needed for someone else's.",
+              },
+            },
+            required: ['pull_request'],
+          },
+          (access, input) => markReady(access.projectId, input, wordOf(access)),
         ),
         tool(
           'close_pull_request',
-          "Closes, without merging, a pull request that Althar opened, by its link or number. reopen_pull_request undoes it, so you may close one that is plainly dead (superseded, abandoned) unasked and say so. On Bitbucket Cloud declining is final: there it waits for the person's word and is refused here. Not for one a person opened.",
-          { type: 'object', properties: { pull_request: { type: 'string' } }, required: ['pull_request'] },
-          (access, input) => closePullRequest(access.projectId, input),
+          "Closes, without merging, any of the project's pull requests, whoever opened it, by its link or number. reopen_pull_request undoes it, so you may close one of Althar's own or the person's own that is plainly dead (superseded, abandoned) unasked and say so. Anyone else's, and any on Bitbucket Cloud, where declining is final, goes on the person's word: their message in this turn that asks it (message, from read_turn). Asked to close several, call it once for each.",
+          {
+            type: 'object',
+            properties: {
+              pull_request: { type: 'string' },
+              message: {
+                type: 'string',
+                description: "The person's message in this turn that asks it, from read_turn: needed for someone else's.",
+              },
+            },
+            required: ['pull_request'],
+          },
+          (access, input) => closePullRequest(access.projectId, input, wordOf(access)),
         ),
         tool(
           'reopen_pull_request',
-          "Opens a closed pull request that Althar opened again, by its link or number: on GitHub, GitLab and Bitbucket Data Center. Bitbucket Cloud can't open a declined one: it says so in Bitbucket's words. A merged one can't be opened.",
-          { type: 'object', properties: { pull_request: { type: 'string' } }, required: ['pull_request'] },
-          (access, input) => reopenPullRequest(access.projectId, input),
+          "Opens a closed pull request again, by its link or number, whoever opened it: on GitHub, GitLab and Bitbucket Data Center. Unasked on Althar's own or the person's own; anyone else's on the person's word (message, from read_turn). Bitbucket Cloud can't open a declined one: it says so in Bitbucket's words. A merged one can't be opened.",
+          {
+            type: 'object',
+            properties: {
+              pull_request: { type: 'string' },
+              message: {
+                type: 'string',
+                description: "The person's message in this turn that asks it, from read_turn: needed for someone else's.",
+              },
+            },
+            required: ['pull_request'],
+          },
+          (access, input) => reopenPullRequest(access.projectId, input, wordOf(access)),
         ),
         tool(
           'update_branch',
@@ -2358,27 +2384,44 @@ export class Coordinator extends Context.Service<
         ),
         tool(
           'reply_on_pull_request',
-          "Replies on a pull request, by its link or number: in a line comment's thread (thread_id, as read_pull_request gives it) or in its conversation. Signed as from Althar, under the person's account. For a pull request Althar opened, or one by the person or by one of the repository's own people; a reply to an outside author notifies them for good, so it waits for the person's word and is refused here. A change to the code is a task, not a reply.",
+          "Replies on a pull request, by its link or number: in a line comment's thread (thread_id, as read_pull_request gives it) or in its conversation. Signed as from Althar, under the person's account. Any of the project's pull requests: unasked on one Althar opened, or one by the person or by one of the repository's own people; a reply to an outside author notifies them for good, so it goes on the person's word: their message in this turn that asks it (message, from read_turn). A change to the code is a task, not a reply.",
           {
             type: 'object',
-            properties: { pull_request: { type: 'string' }, body: { type: 'string' }, thread_id: { type: 'string' } },
+            properties: {
+              pull_request: { type: 'string' },
+              body: { type: 'string' },
+              thread_id: { type: 'string' },
+              message: {
+                type: 'string',
+                description: "The person's message in this turn that asks it, from read_turn: needed for someone else's.",
+              },
+            },
             required: ['pull_request', 'body'],
           },
           (access, input) =>
             Effect.gen(function* () {
               const running = yield* sessions.running(access.threadId)
-              return yield* replyOnPullRequest(access.projectId, input, Option.isNone(running) ? null : nameOf(running.value.agentId))
+              return yield* replyOnPullRequest(
+                access.projectId,
+                input,
+                Option.isNone(running) ? null : nameOf(running.value.agentId),
+                wordOf(access),
+              )
             }),
         ),
         tool(
           'edit_pull_request',
-          `Gives a pull request another title, description, or both, by its link or number, on its host. On one a task follows (it opened it, or follows it), title is the words alone, at most ${TITLE_LENGTH} characters: the project's naming puts the issue's key and the like around them, and the task's card takes the same words. description replaces what it says of the change; on one Althar opened, the review, the issue's link and Althar's line stay where they are. For a pull request Althar opened, or one by the person or by one of the repository's own people; an outside author's waits for the person's word and is refused here. It can be set back in a step, so do it unasked when a title or description no longer says what the change does, such as when the person asks a task's pull request to be retitled, and say what you changed in a line. Where the host refuses, as on a repository the account can't change, you get its words: pass them on.`,
+          `Gives a pull request another title, description, or both, by its link or number, on its host. On one a task follows (it opened it, or follows it), title is the words alone, at most ${TITLE_LENGTH} characters: the project's naming puts the issue's key and the like around them, and the task's card takes the same words. description replaces what it says of the change; on one Althar opened, the review, the issue's link and Althar's line stay where they are. Any of the project's pull requests: unasked on one Althar opened, or one by the person or by one of the repository's own people; an outside author's on the person's word: their message in this turn that asks it (message, from read_turn). It can be set back in a step, so do it unasked when a title or description no longer says what the change does, such as when the person asks a task's pull request to be retitled, and say what you changed in a line. Where the host refuses, as on a repository the account can't change, you get its words: pass them on.`,
           {
             type: 'object',
             properties: {
               pull_request: { type: 'string', description: 'Its link, or its number: #123.' },
               title: { type: 'string' },
               description: { type: 'string' },
+              message: {
+                type: 'string',
+                description: "The person's message in this turn that asks it, from read_turn: needed for someone else's.",
+              },
             },
             required: ['pull_request'],
           },
@@ -2388,6 +2431,7 @@ export class Coordinator extends Context.Service<
               input,
               (taskId, edit) => changes.edit(taskId, edit, instance.coordinatorId),
               agents.list.map((entry) => entry.definition.name),
+              wordOf(access),
             ),
         ),
         ...releaseTools(provide, tool),
@@ -2500,7 +2544,7 @@ export class Coordinator extends Context.Service<
         ),
         tool(
           'review_pull_request',
-          "Plans a review of a pull request, when the person asks for one or pastes a pull request's link and asks: by its link, or its number in the project's repository (#123). Its lead, the model you pick as list_models writes it (a strong one), with why in a sentence, reads a read-only copy of the pull request's code, runs nothing of it, and drafts a review the person posts from its card. Only a model whose agent can be held to reading only leads one: not Codex. Nothing reaches the code host until they post it. It starts on its own after 25 seconds unless the person holds or changes it. Don't review it yourself. Asked to review someone's pull requests without numbers, find them with find_pull_requests first, then plan one review each. One a task's lead plans is started by its task, and counts among those it may start.",
+          "Plans a review of a pull request, when the person asks for one or pastes a pull request's link and asks: by its link, or its number in the project's repository (#123). Its lead, any model you pick as list_models writes it (a strong one), with why in a sentence, reads a read-only copy of the pull request's code and drafts a review the person posts from its card. Nothing reaches the code host until they post it. It starts on its own after 25 seconds unless the person holds or changes it. Don't review it yourself. Asked to review someone's pull requests without numbers, find them with find_pull_requests first, then plan one review each. One a task's lead plans is started by its task, and counts among those it may start.",
           {
             type: 'object',
             properties: {

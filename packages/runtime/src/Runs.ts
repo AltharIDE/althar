@@ -7073,21 +7073,11 @@ export class Runs extends Context.Service<
           const wantedReview = input.steps.find((step) => step.key === 'review')
           const alike = (a: PlanStep, b: PlanStep) =>
             a.agentId === b.agentId && (a.model ?? null) === (b.model ?? null) && (a.effort ?? null) === (b.effort ?? null)
-          // A review's lead only reads: an agent that can't be held to that can't take either step, whoever asks (Reviews.canLead).
+          // Any agent Althar has may take a review's steps (Reviews.canLead).
           if (before.reads === true)
             for (const step of input.steps) {
-              if (step.skipped) continue
-              const held = agentsHere.list.find((entry) => entry.definition.id === step.agentId)
-              if (held?.definition.reviewing?.outside === true) continue
-              const names = agentsHere.list
-                .filter((entry) => entry.definition.reviewing?.outside === true)
-                .map((entry) => entry.definition.name)
-              return yield* new ReviewRefused({
-                message:
-                  held === undefined
-                    ? 'Althar has no such agent.'
-                    : `${held.definition.name} can't be held to reading only: it runs commands its sandbox contains without asking, so it could run this pull request's code. Review it with ${names.join(' or ')}.`,
-              })
+              if (step.skipped || agentsHere.list.some((entry) => entry.definition.id === step.agentId)) continue
+              return yield* new ReviewRefused({ message: 'Althar has no such agent.' })
             }
           const leadChanges = wantedLead !== undefined && !alike(lead, wantedLead)
           const reviewed = review !== undefined && !review.skipped

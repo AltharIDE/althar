@@ -180,6 +180,9 @@ describe("the coordinator's copies", () => {
       for (const ordinary of [join(home, 'Documents'), place.projectFolder, join(home, 'Projects', 'meridian')])
         assert.isFalse(within(ordinary, denied), 'ordinary files are readable')
       assert.isTrue(within(join(home, '.ssh', 'id_ed25519'), denied), 'secret files remain blocked')
+      // gh and glab start in its commands with the person's sign-in, as its brief says.
+      for (const tool of ['gh', 'glab-cli'])
+        assert.isFalse(within(join(home, '.config', tool, 'config.yml'), denied), `${tool} is held from it`)
     }
     holds(join(home, '.config', 'git'))
     // Where XDG_CONFIG_HOME is set, outside the home folder, as git reads it.
