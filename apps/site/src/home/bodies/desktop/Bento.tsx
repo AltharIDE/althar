@@ -5,6 +5,17 @@ import { cx } from '../../../lib/cx'
 import { Shot } from '../kit/Shot'
 import { SINCE } from '../kit/world'
 import s from './Bento.module.css'
+import {
+  BrowserDrawing,
+  CanvasDrawing,
+  DropDrawing,
+  LoadDrawing,
+  QueueDrawing,
+  ServersDrawing,
+  SkillsDrawing,
+  StorageDrawing,
+  VoiceDrawing,
+} from './Drawings'
 import { Fragment } from './Fragment'
 import accounts from './styled/d-accounts.html?raw'
 import automations from './styled/d-automations.html?raw'
@@ -13,13 +24,16 @@ import workspaces from './styled/d-workspaces.html?raw'
 import worktrees from './styled/d-worktrees.html?raw'
 
 /*
- * What keeps you in flow: six tiles on a six-column grid, each drawing at
- * least half its row. One holds a piece of the app in its light (what
- * happened while you were away); five hold a feature drawn as an interface
- * lit by one light, dark or light (Althar fed by each of your accounts in
- * turn, automations, conflicts settled, tasks side by side in worktrees of
- * their own, trackers bound to their projects).
- * Narrower, two columns, then one.
+ * What keeps you in flow: fifteen tiles on a six-column grid. The first six
+ * each draw at least half their row. One holds a piece of the app in its
+ * light (what happened while you were away); five hold a feature drawn as an
+ * interface lit by one light, dark or light (Althar fed by each of your
+ * accounts in turn, automations, conflicts settled, tasks side by side in
+ * worktrees of their own, trackers bound to their projects). The nine after
+ * them are smaller, three to a row, each drawn (Drawings.tsx): the canvas,
+ * the browser, files dropped in, voice, merge queues, skills, MCP servers,
+ * the machine's load and disk space.
+ * Narrower, two to a row, the canvas across its own; then one.
  */
 
 const none = () => {}
@@ -37,7 +51,21 @@ export interface Tile {
   tone?: Tone
   /** A small piece: whole in the middle of its tile, not running off its foot. */
   small?: boolean
+  /** One of the smaller features after the first six: its words and its drawing a size down. */
+  compact?: boolean
 }
+
+/** A smaller feature: a third of a row, drawn in the console's dark. */
+const compact = (id: string, title: ReactNode, lead: string, draw: () => ReactNode): Tile => ({
+  id,
+  span: 2,
+  drawn: true,
+  tone: 'dark',
+  compact: true,
+  title,
+  lead,
+  piece: draw,
+})
 
 export const TILES: Tile[] = [
   {
@@ -130,7 +158,90 @@ export const TILES: Tile[] = [
     lead: 'Day job on Linear, a client on Jira, side projects on GitHub? Plug them all in, and every issue lands in the right project.',
     piece: (tone) => <Fragment key={tone} source={workspaces} tone={tone} className={s.stage} />,
   },
+  compact(
+    'canvas',
+    <>
+      It draws it out. <b>You mark it up.</b>
+    </>,
+    'Leads draw pages and diagrams on the canvas; comment, and the next version answers.',
+    () => <CanvasDrawing />,
+  ),
+  compact(
+    'browser',
+    <>
+      See it running. <b>Point at what’s off.</b>
+    </>,
+    'The page a task is building, open beside it. Point at what’s wrong, and the lead tries it.',
+    () => <BrowserDrawing />,
+  ),
+  compact(
+    'drop',
+    <>
+      Drop in <b>anything.</b>
+    </>,
+    'PDFs, logs, zips, whole folders: drop them in, and the lead reads them.',
+    () => <DropDrawing />,
+  ),
+  compact(
+    'voice',
+    <>
+      Say it. <b>Don’t type it.</b>
+    </>,
+    'Dictate to the coordinator or any task, transcribed on your computer.',
+    () => <VoiceDrawing />,
+  ),
+  compact(
+    'queue',
+    <>
+      Merge queues, <b>in order.</b>
+    </>,
+    'Stacked changes merge bottom-up, through your host’s merge queue.',
+    () => <QueueDrawing />,
+  ),
+  compact(
+    'skills',
+    <>
+      One set of skills. <b>Every agent.</b>
+    </>,
+    'Add a skill once; Claude Code, Codex and OpenCode all get it.',
+    () => <SkillsDrawing />,
+  ),
+  compact(
+    'servers',
+    <>
+      MCP servers, <b>set up once.</b>
+    </>,
+    'Add a server once, and it’s written into every agent’s own config.',
+    () => <ServersDrawing />,
+  ),
+  compact(
+    'load',
+    <>
+      Your machine, <b>at a glance.</b>
+    </>,
+    'What each task takes of your CPU and memory, live.',
+    () => <LoadDrawing />,
+  ),
+  compact(
+    'storage',
+    <>
+      Disk space, <b>looked after.</b>
+    </>,
+    'Finished tasks’ folders go when they’re done; anything unpushed stays.',
+    () => <StorageDrawing />,
+  ),
 ]
+
+/** What isn't drawn, as words alone under the console. */
+export const ALSO = [
+  'Tasks as a graph',
+  'Run any branch',
+  'Work in your own checkout',
+  'Leads update your issues',
+  'Diagrams in threads',
+  'Usage per task',
+  'Warm dark mode',
+] as const
 
 const SPAN = { 2: s.span2, 3: s.span3, 4: s.span4, 6: s.span6 } as const
 

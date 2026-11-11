@@ -1,21 +1,18 @@
 import { Brand, BrandMark } from '@althar/ui'
 import type { CSSProperties, ReactNode } from 'react'
 
-import { cx } from '../lib/cx'
-import s from './drawn.module.css'
+import { cx } from '../../../lib/cx'
+import s from './Drawings.module.css'
 
 /*
- * The flow's new features, drawn as the console's other tiles are: an
- * interface lit by one light, on the cabin's warm dark, every size taken from
- * the drawing's width so each reads the same at any size. The canvas and the
- * browser draw at `big`, or at `mid` beside the small ones, leaving out what
- * wouldn't read there. Pictures: nothing in them can be pressed, and each
- * reads as its label.
+ * The flow's smaller features, drawn as the console's other drawn tiles are:
+ * an interface lit by one light, on the cabin's warm dark, every size taken
+ * from the drawing's width so each reads the same at any size. The canvas and
+ * the browser carry more, so they draw a little smaller (`mid`). Pictures:
+ * nothing in them can be pressed, and each reads as its label.
  */
 
-type Size = 'big' | 'mid' | 'small'
-
-function Stage({ label, size, children }: { label: string; size: Size; children: ReactNode }) {
+function Stage({ label, size, children }: { label: string; size: 'mid' | 'small'; children: ReactNode }) {
   return (
     <div className={s.box} role="img" aria-label={label}>
       <div className={cx(s.stage, s[size])}>
@@ -31,25 +28,17 @@ const mark = (brand: Brand) => (
   </span>
 )
 
-/* ---- the big ones ---- */
-
-/** The canvas: a launch page the lead drew, at its third version, the two before it behind, a comment answered on it. */
-export function CanvasDrawing({ size = 'big' }: { size?: 'big' | 'mid' }) {
+/** The canvas: a launch page the lead drew, at its third version, the one before it behind, a comment answered on it. */
+export function CanvasDrawing() {
   return (
-    <Stage size={size} label="A launch page the lead drew on the canvas, at version 3, with a comment answered in it">
+    <Stage size="mid" label="A launch page the lead drew on the canvas, at version 3, with a comment answered in it">
       <div className={s.under} />
-      <div className={cx(s.ghost, s.ghost1)} />
-      <div className={cx(s.ghost, s.ghost2)} />
+      <div className={s.ghost} />
       <div className={cx(s.window, s.cv)}>
         <div className={s.bar}>
           <span className={s.glyph} />
           <b>Payouts launch page</b>
-          <span className={s.kind}>Page</span>
-          <span className={s.vers}>
-            <i>v1</i>
-            <i>v2</i>
-            <i className={s.on}>v3</i>
-          </span>
+          <span className={s.ver}>v3</span>
           <span className={s.btn}>Comment</span>
         </div>
         <div className={s.page}>
@@ -59,9 +48,6 @@ export function CanvasDrawing({ size = 'big' }: { size?: 'big' | 'mid' }) {
               <i />
               tally
             </b>
-            <span>Payouts</span>
-            <span>Pricing</span>
-            <span>Docs</span>
             <em>Start</em>
           </div>
           <div className={s.hero}>
@@ -70,7 +56,6 @@ export function CanvasDrawing({ size = 'big' }: { size?: 'big' | 'mid' }) {
               <br />
               forty seconds.
             </h4>
-            <p>Money out to 40 countries, every refund explained.</p>
             <span className={s.cta}>Get started</span>
           </div>
           <div className={s.payout}>
@@ -81,9 +66,6 @@ export function CanvasDrawing({ size = 'big' }: { size?: 'big' | 'mid' }) {
                 <i key={i} style={{ '--h': `${h}%` } as CSSProperties} />
               ))}
             </div>
-            <small>
-              <i /> 312 payouts · 0 failed
-            </small>
           </div>
         </div>
       </div>
@@ -106,30 +88,17 @@ const ROWS = [
 ] as const
 
 /** The browser: the page a task is building, beside it, a comment pointed at a row, and the lead's cursor trying what it says. */
-export function BrowserDrawing({ size = 'big' }: { size?: 'big' | 'mid' }) {
+export function BrowserDrawing() {
   return (
-    <Stage size={size} label="The refunds page open beside its task: a comment on a failed refund, and the lead pressing Retry to see it">
+    <Stage size="mid" label="The refunds page open beside its task: a comment on a failed refund, and the lead pressing Retry to see it">
       <div className={s.under} />
       <div className={cx(s.window, s.br)}>
         <div className={s.bar}>
-          <span className={s.nav}>
-            <i>‹</i>
-            <i>›</i>
-            <i>↻</i>
-          </span>
           <span className={s.addr}>localhost:5173/refunds</span>
-          <span className={s.kind}>Desktop</span>
           <span className={cx(s.btn, s.pressed)}>Comment</span>
         </div>
         <div className={s.app}>
-          <div className={s.appHead}>
-            <b>Refunds</b>
-            <span className={s.tabs}>
-              <i className={s.on}>All</i>
-              <i>Waiting</i>
-              <i>Failed</i>
-            </span>
-          </div>
+          <b className={s.appHead}>Refunds</b>
           <ol className={s.rows}>
             {ROWS.map((r) => [
               <li key={r.id} className={cx(r.st === 'fail' && s.pointed)}>

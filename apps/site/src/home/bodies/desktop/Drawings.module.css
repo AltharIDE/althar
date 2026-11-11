@@ -1,4 +1,4 @@
-/* The flow's drawings (drawn.tsx), in the console's drawn tiles' language: the cabin's warm dark, cards on one hairline, one cobalt light. Every size in em, from the drawing's own width. */
+/* The flow's smaller features, drawn (Drawings.tsx), in the console's drawn tiles' language: the cabin's warm dark, cards on one hairline, one cobalt light. Every size in em, from the drawing's own width. */
 
 .box { position: relative; width: 100%; aspect-ratio: 16 / 10; container-type: inline-size; }
 .stage {
@@ -25,17 +25,8 @@
   user-select: none;
   pointer-events: none;
 }
-.big { font-size: 1.95cqw; }
 .mid { font-size: 2.45cqw; }
 .small { font-size: 2.85cqw; }
-/* Beside the small ones, the canvas and the browser leave out what wouldn't read. */
-.mid .pgNav span, .mid .hero p, .mid .payout small, .mid .tabs, .mid .nav, .mid .kind, .mid .ghost1 { display: none; }
-.mid .vers i:not(.on) { display: none; }
-.mid .cv, .mid .ghost { width: 84%; height: 80%; }
-.mid .cv { left: 8%; top: 12%; }
-.mid .br { left: 5%; top: 7%; width: 90%; height: 88%; }
-.mid .rows li { grid-template-columns: 5.6em minmax(0, 1fr) 4.4em 6.6em 3.4em; }
-.mid .pin { left: 46%; top: 24%; }
 .scene { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 0.9em; padding: 5% 6%; }
 .under { position: absolute; left: 50%; top: 56%; width: 82%; height: 72%; translate: -50% -50%; background: radial-gradient(closest-side, rgba(66, 80, 255, 0.26), rgba(108, 64, 240, 0.09) 55%, transparent); }
 
@@ -55,20 +46,16 @@
 .btn { flex: none; padding: 0.35em 0.7em; border-radius: 0.45em; font-size: 0.82em; font-weight: 550; color: var(--ink); background: rgba(255, 244, 232, 0.07); box-shadow: inset 0 0 0 1px rgba(255, 244, 232, 0.1); }
 .pressed { color: #ddd1ff; background: rgba(166, 133, 247, 0.18); box-shadow: inset 0 0 0 1px rgba(166, 133, 247, 0.5); }
 
-/* ---- a window, for the big ones ---- */
+/* ---- a window, for the canvas and the browser ---- */
 .window { position: absolute; display: flex; flex-direction: column; overflow: hidden; border-radius: 0.9em; background: #1c1a17; box-shadow: 0 0 0 1px rgba(255, 244, 232, 0.12), 0 2em 4em -1.6em rgba(0, 0, 0, 0.9), 0 0 4em -1.5em rgba(86, 98, 255, 0.45); }
 .bar { display: flex; flex: none; align-items: center; gap: 0.6em; padding: 0.55em 0.8em; border-bottom: 1px solid rgba(255, 244, 232, 0.07); font-size: 0.92em; white-space: nowrap; }
 .bar b { font-weight: 600; }
 
-/* The canvas: the third version in front, the two before it behind, a comment pinned to the page. */
-.cv { left: 10%; top: 13%; width: 80%; height: 78%; }
-.ghost { position: absolute; width: 80%; height: 78%; border-radius: 0.9em; background: #1c1a17; box-shadow: 0 0 0 1px rgba(255, 244, 232, 0.08); }
-.ghost1 { left: 6%; top: 5%; opacity: 0.3; }
-.ghost2 { left: 8%; top: 9%; opacity: 0.55; }
+/* The canvas: the third version in front, the one before it behind, a comment pinned to the page. */
+.cv { left: 8%; top: 12%; width: 84%; height: 80%; }
+.ghost { position: absolute; left: 6%; top: 8%; width: 84%; height: 80%; border-radius: 0.9em; opacity: 0.55; background: #1c1a17; box-shadow: 0 0 0 1px rgba(255, 244, 232, 0.08); }
 .glyph { flex: none; width: 1em; height: 1em; border-radius: 0.28em; box-shadow: inset 0 0 0 1.5px var(--cobalt-l); }
-.vers { display: flex; gap: 0.15em; margin-left: auto; }
-.vers i { padding: 0.25em 0.45em; border-radius: 0.3em; font: 500 0.78em/1 var(--mono); font-style: normal; color: var(--ink3); }
-.vers .on { color: #fff; background: rgba(86, 98, 255, 0.3); }
+.ver { margin-left: auto; padding: 0.25em 0.45em; border-radius: 0.3em; font: 500 0.78em/1 var(--mono); color: #fff; background: rgba(86, 98, 255, 0.3); }
 .page { position: relative; flex: 1; overflow: hidden; background: #f6f3ec; color: #141417; }
 .mesh {
   position: absolute;
@@ -90,33 +77,24 @@
 .pgNav em { margin-left: auto; padding: 0.4em 0.9em; border-radius: 99em; font-style: normal; font-weight: 600; color: #fff; background: #141417; }
 .hero { position: relative; max-width: 60%; padding: 0.5em 1.4em 0; }
 .hero h4 { margin: 0; font-size: 3em; font-weight: 820; line-height: 0.94; letter-spacing: -0.06em; }
-.hero p { max-width: 19em; margin: 0.8em 0 0; font-size: 0.8em; line-height: 1.4; color: #4a4a52; }
 .cta { display: inline-block; margin-top: 1.1em; padding: 0.55em 1.05em; border-radius: 99em; font-size: 0.78em; font-weight: 650; color: #fff; background: #141417; }
 .payout { position: absolute; right: 6%; bottom: 9%; width: 36%; padding: 0.9em 1em; border-radius: 0.9em; color: #141417; background: rgba(255, 255, 255, 0.74); backdrop-filter: blur(8px); box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.6), 0 1.2em 2.4em -1em rgba(60, 30, 80, 0.4); }
 .payout > span { font-size: 0.7em; color: #63636b; }
 .payout > b { display: block; margin-top: 0.1em; font-size: 1.5em; font-weight: 760; letter-spacing: -0.035em; }
 .bars { display: flex; align-items: flex-end; gap: 0.25em; height: 3.2em; margin-top: 0.6em; }
 .bars i { flex: 1; height: var(--h); border-radius: 0.2em 0.2em 0 0; background: linear-gradient(180deg, #7a5cff, #ff6a8a); }
-.payout small { display: flex; align-items: center; gap: 0.4em; margin-top: 0.6em; font-size: 0.66em; color: #63636b; }
-.payout small i { width: 0.55em; height: 0.55em; border-radius: 50%; background: #2f8a4b; }
-.pin { position: absolute; left: 45%; top: 27%; display: flex; align-items: flex-start; gap: 0.45em; }
+.pin { position: absolute; left: 46%; top: 24%; display: flex; align-items: flex-start; gap: 0.45em; }
 .pin > i { flex: none; width: 1.3em; height: 1.3em; border-radius: 50% 50% 50% 0; background: var(--violet); box-shadow: 0 0 0 0.25em rgba(166, 133, 247, 0.3); }
 .pin > span { padding: 0.55em 0.8em; border-radius: 0.6em; font-size: 0.8em; white-space: nowrap; color: var(--ink); background: #1f1b26; box-shadow: 0 0 0 1px rgba(166, 133, 247, 0.45), 0 0.8em 1.6em -0.6em rgba(0, 0, 0, 0.8); }
 .pin em { display: block; margin-top: 0.2em; font-size: 0.9em; font-style: normal; color: var(--green); }
 
 /* The browser: the refunds page, a comment on a row, the lead's cursor trying it. */
-.br { left: 7%; top: 9%; width: 86%; height: 84%; }
-.nav { display: flex; gap: 0.55em; color: var(--ink3); }
-.nav i { font-style: normal; }
+.br { left: 5%; top: 7%; width: 90%; height: 88%; }
 .addr { flex: 1; min-width: 0; overflow: hidden; padding: 0.35em 0.7em; border-radius: 0.45em; font: 500 0.82em/1.2 var(--mono); color: var(--ink2); text-overflow: ellipsis; background: rgba(255, 244, 232, 0.05); box-shadow: inset 0 0 0 1px rgba(255, 244, 232, 0.08); }
 .app { position: relative; display: flex; flex: 1; flex-direction: column; gap: 0.8em; overflow: hidden; padding: 1em 1.3em; color: #141417; background: #f7f5f0; }
-.appHead { display: flex; align-items: center; justify-content: space-between; }
-.appHead b { font-size: 1.35em; font-weight: 760; letter-spacing: -0.035em; }
-.tabs { display: flex; gap: 0.2em; padding: 0.2em; border-radius: 0.5em; background: #ebe7df; }
-.tabs i { padding: 0.3em 0.7em; border-radius: 0.4em; font-size: 0.75em; font-style: normal; color: #63636b; }
-.tabs .on { color: #141417; background: #fff; box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08); }
+.appHead { font-size: 1.35em; font-weight: 760; letter-spacing: -0.035em; }
 .rows { display: grid; gap: 0.4em; margin: 0; padding: 0; list-style: none; }
-.rows li { display: grid; grid-template-columns: 6.4em minmax(0, 1fr) 4.6em 7.6em 3.6em; align-items: center; gap: 0.6em; padding: 0.55em 0.8em; border-radius: 0.55em; font-size: 0.8em; background: #fff; box-shadow: 0 0 0 1px rgba(20, 20, 23, 0.06); }
+.rows li { display: grid; grid-template-columns: 5.6em minmax(0, 1fr) 4.4em 6.6em 3.4em; align-items: center; gap: 0.6em; padding: 0.55em 0.8em; border-radius: 0.55em; font-size: 0.8em; background: #fff; box-shadow: 0 0 0 1px rgba(20, 20, 23, 0.06); }
 .rows code { font: 500 0.92em var(--mono); color: #63636b; }
 .sum { font-weight: 600; text-align: right; font-variant-numeric: tabular-nums; }
 .st { display: grid; justify-self: start; padding: 0.2em 0.6em; border-radius: 99em; font-size: 0.86em; font-weight: 600; white-space: nowrap; }
@@ -134,8 +112,7 @@
 .rows .note { display: block; justify-self: end; width: max-content; margin: -0.1em 0.4em 0.2em 0; padding: 0.5em 0.8em; border-radius: 0.1em 0.6em 0.6em 0.6em; font-size: 0.8em; color: var(--ink); background: #1f1b26; box-shadow: 0 0 0 1px rgba(166, 133, 247, 0.5), 0 0.8em 1.6em -0.6em rgba(0, 0, 0, 0.5); }
 .note b { margin-right: 0.4em; color: #ddd1ff; }
 /* The lead's cursor rides a layer the drawing's size, so where it goes is said in the drawing's own percentages: to Retry, a press, and back. */
-.track { --rx: 84.5%; --ry: 45.6%; position: absolute; inset: 0; translate: var(--rx) var(--ry); animation: drive 7s var(--ease) infinite; }
-.mid .track { --rx: 87.3%; --ry: 54.7%; }
+.track { --rx: 87.3%; --ry: 54.7%; position: absolute; inset: 0; translate: var(--rx) var(--ry); animation: drive 7s var(--ease) infinite; }
 .cursor { position: absolute; left: 0; top: 0; display: flex; align-items: flex-start; gap: 0.2em; }
 .cursor svg { width: 1.3em; height: 1.7em; fill: var(--cobalt-l); stroke: #0b0a08; stroke-width: 1; transform-origin: 0 0; filter: drop-shadow(0 0.2em 0.4em rgba(0, 0, 0, 0.6)); animation: press 7s infinite; }
 .cursor span { position: absolute; right: 0.5em; bottom: 0.4em; white-space: nowrap; padding: 0.2em 0.5em; border-radius: 0.35em; font-size: 0.72em; font-weight: 650; color: #fff; background: var(--cobalt); }

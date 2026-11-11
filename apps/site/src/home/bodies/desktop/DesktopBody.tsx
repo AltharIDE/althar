@@ -7,7 +7,7 @@ import { LightUnder } from '../../../shared/lightUnder'
 import { AskOnce } from './AskOnce'
 import { AtWork } from './AtWork'
 import { Connections } from './Connections'
-import { type Tile, TILES } from './Bento'
+import { ALSO, TILES } from './Bento'
 import { Review } from './Review'
 import { EdgeTour } from '../kit/EdgeTour'
 import t from '../kit/type.module.css'
@@ -107,30 +107,8 @@ const dressPictures = () => {
 
 type Id = keyof typeof SCENE
 
-/** A station's claim and its lead. */
-export interface Scene {
-  title: ReactNode
-  lead: string
-}
-
-/** A station's stamp: its number, its name on the wall, and the height it stands at on the way down. */
-export interface StampSpec {
-  no: string
-  name: string
-  km: number
-}
-
-/*
- * While a direction is being chosen (src/proto, in development only):
- * another body for the flow, and stations of their own after any one. The page itself passes none. Delete with src/proto.
- */
-export interface Trial {
-  flow?: { scene?: Scene; body: ReactNode }
-  after?: Partial<Record<Id, ReactNode>>
-}
-
 /** Each station: its number, its name on the wall, and the height it stands at on the way down. */
-const STATIONS: Record<Id, StampSpec> = {
+const STATIONS: Record<Id, { no: string; name: string; km: number }> = {
   independent: { no: '01', name: 'Board', km: 38 },
   coordinator: { no: '02', name: 'Coordinator', km: 31 },
   review: { no: '03', name: 'Review', km: 24 },
@@ -140,8 +118,8 @@ const STATIONS: Record<Id, StampSpec> = {
 }
 
 /** A station's stamp, on the rail: its node, its number and name, a rule, and the height it stands at. */
-function Stamp({ id, stamp }: { id: string; stamp?: StampSpec }) {
-  const station = stamp ?? STATIONS[id as Id]
+function Stamp({ id }: { id: Id }) {
+  const station = STATIONS[id]
   return (
     <p className={c.stamp} aria-hidden="true">
       <span className={c.node} />
@@ -156,28 +134,15 @@ function Stamp({ id, stamp }: { id: string; stamp?: StampSpec }) {
 }
 
 /** A station on the wall: its stamp, then its head and its screen, laid out as `layout` says. */
-export function Station({
-  id,
-  layout,
-  stamp,
-  scene,
-  children,
-}: {
-  id: string
-  layout: 'split' | 'wide' | 'bank' | 'notch'
-  stamp?: StampSpec
-  scene?: Scene
-  children: ReactNode
-}) {
-  const words = scene ?? SCENE[id as Id]
+function Station({ id, layout, children }: { id: Id; layout: 'split' | 'wide' | 'bank' | 'notch'; children: ReactNode }) {
   return (
     <section id={id} className={cx(c.station, c[layout])} aria-labelledby={`${id}-h`} data-station="">
-      <Stamp id={id} stamp={stamp} />
+      <Stamp id={id} />
       <div className={c.head}>
         <h2 id={`${id}-h`} className={cx(t.title, c.title)}>
-          {words.title}
+          {SCENE[id].title}
         </h2>
-        <p className={cx(t.lead, c.lead)}>{words.lead}</p>
+        <p className={cx(t.lead, c.lead)}>{SCENE[id].lead}</p>
       </div>
       {children}
     </section>
@@ -215,16 +180,17 @@ function Window({ className, seed, children }: { className?: string; seed: numbe
   )
 }
 
-/** What keeps you in flow: one console, its modules seamed into it, each with its number and its light. */
-export function Console({ tiles = TILES, className }: { tiles?: Tile[]; className?: string }) {
+/** What keeps you in flow: one console, its modules seamed into it, each with its number and its light; the smaller ones a size down. */
+function Console() {
   return (
-    <ol className={cx(c.console, className)} data-light="">
-      {tiles.map((tile, i) => (
+    <ol className={c.console} data-light="">
+      {TILES.map((tile, i) => (
         <li
           key={tile.id}
           className={cx(c.module, c[`span${tile.span}`])}
           data-drawn={tile.drawn ? '' : undefined}
           data-small={tile.small ? '' : undefined}
+          data-compact={tile.compact ? '' : undefined}
         >
           <span className={c.plate} aria-hidden="true">
             <b>{String(i + 1).padStart(2, '0')}</b>
@@ -238,6 +204,21 @@ export function Console({ tiles = TILES, className }: { tiles?: Tile[]; classNam
         </li>
       ))}
     </ol>
+  )
+}
+
+/** What isn't drawn, as words alone under the console, and then the rest of it, unnamed. */
+function Also() {
+  return (
+    <div className={c.also}>
+      <h3 className={c.alsoLabel}>And also</h3>
+      <ul className={c.alsoList}>
+        {ALSO.map((word) => (
+          <li key={word}>{word}</li>
+        ))}
+      </ul>
+      <p className={c.alsoMore}>And so, so much more.</p>
+    </div>
   )
 }
 
@@ -301,7 +282,7 @@ function useRail(main: RefObject<HTMLElement | null>) {
   }, [main])
 }
 
-export function DesktopBody({ trial }: { trial?: Trial }) {
+export function DesktopBody() {
   const main = useRef<HTMLElement>(null)
   const lit = useRef<HTMLDivElement>(null)
   const grain = useRef<HTMLDivElement>(null)
@@ -337,38 +318,32 @@ export function DesktopBody({ trial }: { trial?: Trial }) {
         </Window>
       </section>
 
-      {trial?.after?.independent}
-
       <Station id="coordinator" layout="split">
         <Screen className={c.talk}>
           <AskOnce />
         </Screen>
       </Station>
-      {trial?.after?.coordinator}
 
       <Station id="review" layout="wide">
         <Screen className={c.review}>
           <Review />
         </Screen>
       </Station>
-      {trial?.after?.review}
 
-      <Station id="flow" layout="bank" scene={trial?.flow?.scene}>
-        {trial?.flow?.body ?? <Console />}
+      <Station id="flow" layout="bank">
+        <Console />
+        <Also />
       </Station>
-      {trial?.after?.flow}
 
       <Station id="connections" layout="bank">
         <Connections />
       </Station>
-      {trial?.after?.connections}
 
       <Station id="edge" layout="notch">
         <div className={c.tour}>
           <EdgeTour />
         </div>
       </Station>
-      {trial?.after?.edge}
 
       {/* The last window: the planet's edge lower and flatter, the dawn coming up along it, and the download. */}
       <section id="end" className={c.endStation} aria-label="Download Althar">
