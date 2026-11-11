@@ -156,17 +156,12 @@ describe('issues in bulk', () => {
       // One no tracker has says so among the others.
       assert.include(yield* callTool(lead, 'read_issue', { issues: ['MER-1', 'MER-999'] }), 'Althar can’t read MER-999')
 
-      // Fifteen the person named, as a run of keys, moved at once; one they didn't waits on a card for them, and is said.
+      // Fifteen the person named, as a run of keys, and one they didn't, moved at once alike.
       yield* say(projectId, task.threadId, 'Move MER-1..MER-15 to In Review.')
       const moved = yield* callTool(lead, 'change_issue', { issues: ['MER-1..MER-15', 'MER-16'], status: 'In Review', at_once: true })
       assert.match(moved, /^Done: MER-1: status to In Review; MER-2: status to In Review;/)
-      assert.include(
-        moved,
-        'MER-16 isn’t this task’s issue, one it filed, or one the person named to it, so it waits on a card for the person',
-      )
-      assert.include(moved, 'Proposed MER-16: status to In Review.')
-      for (let number = 1; number <= 15; number += 1) assert.strictEqual((yield* tracker.issue(`MER-${number}`)).status.name, 'In Review')
-      assert.strictEqual((yield* tracker.issue('MER-16')).status.name, 'Todo')
+      assert.include(moved, 'MER-16: status to In Review')
+      for (let number = 1; number <= 16; number += 1) assert.strictEqual((yield* tracker.issue(`MER-${number}`)).status.name, 'In Review')
       // Without at_once, one card for all of them waits on the person.
       assert.match(
         yield* callTool(lead, 'change_issue', { issues: ['MER-1..MER-3'], priority: 'low' }),
@@ -186,15 +181,13 @@ describe('issues in bulk', () => {
 
       // The same comment on several, each said.
       const commented = yield* callTool(lead, 'comment_on_issue', { issues: ['MER-6', 'MER-7', 'MER-17'], body: 'Seen in triage.' })
-      assert.include(commented, 'Commented on MER-6, MER-7.')
-      assert.include(commented, 'MER-17 isn’t this task’s issue')
-      assert.include(commented, 'The comment on MER-17 waits on its card in this thread until the person posts it')
+      assert.include(commented, 'Commented on MER-6, MER-7, MER-17.')
       assert.deepStrictEqual(tracker.issueComments('MER-6'), ['Seen in triage.'])
-      assert.deepStrictEqual(tracker.issueComments('MER-17'), [])
+      assert.deepStrictEqual(tracker.issueComments('MER-17'), ['Seen in triage.'])
     }).pipe(Effect.provide(withQueries({ linear: tracker })))
   })
 
-  it.live('a lead moves the issues it found, none named to it, on one card the person applies, never at once', () => {
+  it.live('a lead moves the issues it found, none named to it, at once where it is asked to, as the coordinator would', () => {
     const tracker = backlog()
     return Effect.gen(function* () {
       yield* connect('linear')
@@ -205,19 +198,22 @@ describe('issues in bulk', () => {
       yield* say(projectId, task.threadId, 'Find the open bugs in Q4 launch and move them to In Review.')
       const bugs = listed(yield* callTool(lead, 'find_issues', { labels: ['bug'], project: 'Q4 launch', limit: 100 })).keys
       assert.lengthOf(bugs, 10)
-      // Asked at once, and none of them the lead's: all on one card for the person, nothing changed yet.
-      const moved = yield* callTool(lead, 'change_issue', { issues: bugs, status: 'In Review', at_once: true })
-      assert.match(moved, /^MER-\d+, .+ aren’t this task’s issue, one it filed, or one the person named to it, so they wait on a card/)
-      assert.include(moved, 'Nothing changes until the person applies it')
-      for (const key of bugs) assert.strictEqual((yield* tracker.issue(key)).status.name, 'Todo')
+      // Without at_once, they go on one card for the person, as the lead's own would; nothing changed yet.
+      assert.include(
+        yield* callTool(lead, 'change_issue', { issues: bugs, priority: 'low' }),
+        'Nothing changes until the person applies it',
+      )
       const cards = yield* sql<{ id: string; direct: number; state: string; note: string | null }>`
         SELECT id, direct, state, note FROM issue_changes WHERE thread_id = ${task.threadId}`
       assert.lengthOf(cards, 1)
-      assert.deepStrictEqual([cards[0]?.direct, cards[0]?.note], [0, 'Not this task’s issues: its lead asks you to apply these.'])
+      assert.deepStrictEqual([cards[0]?.direct, cards[0]?.note], [0, null])
       // The person applies it: every one moves, each said.
       const applied = yield* (yield* IssueChanges).apply(cards[0]?.id ?? '', instance.personId)
       assert.strictEqual(applied.state, 'applied')
       assert.lengthOf(applied.issues, 10)
+      // Asked at once, none of them the lead's: all move, as the coordinator's would.
+      const moved = yield* callTool(lead, 'change_issue', { issues: bugs, status: 'In Review', at_once: true })
+      assert.match(moved, /^Done: MER-\d+: status to In Review;/)
       for (const key of bugs) assert.strictEqual((yield* tracker.issue(key)).status.name, 'In Review')
     }).pipe(Effect.provide(withQueries({ linear: tracker })))
   })

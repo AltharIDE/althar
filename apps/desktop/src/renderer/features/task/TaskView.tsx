@@ -149,7 +149,7 @@ export const text = {
   lead: 'Lead',
   placeholderBusy: 'Add to the queue, or interrupt the lead',
   /** Whose usage the composer's ring says, under the context. */
-  usageHeading: 'This task so far',
+  usageHeading: 'This task',
   placeholder: (lead: string) => (lead === '' ? 'Tell the lead something' : `Tell ${lead} something`),
   needsAgent: 'No agent is signed in. Sign one in from Settings.',
   /** Another agent's model, picked: nothing happens until the person says something. */

@@ -94,7 +94,7 @@ const PRESETS = [
   { name: 'Chat', about: 'a copy, no review, ends here, the coordinator picks its lead' },
   { name: 'Change', about: 'a worktree, reviewed before it ships, a draft pull request, the coordinator picks its lead' },
   { name: 'Small change', about: 'a worktree, reviewed after it merges, a pull request ready for review, the coordinator picks its lead' },
-  { name: 'Prototype', about: 'a worktree, reviewed after it merges, ends here, led by claude-opus-5-5' },
+  { name: 'Prototype', about: 'a worktree, no review, ends here, led by Claude Opus 5.5' },
 ]
 
 /** A press on the preset lists the others, each with what it holds: picking one changes the plan's parts to match. */
@@ -108,6 +108,25 @@ export const PicksAnotherPreset: Story = {
     await userEvent.click(canvas.getByRole('button', { name: 'Change' }))
     const body = within(canvasElement.ownerDocument.body)
     await expect(await body.findByRole('menuitemradio', { name: /Prototype/ })).toBeVisible()
+  },
+}
+
+/** Planned from Prototype: its lead and its ending, the branch, and no review row, skipped or not. */
+export const APrototype: Story = {
+  render: () => (
+    <Launch
+      plan={[{ id: 'implement', label: 'Implement', agents: [OPUS], fixed: 'the lead' }]}
+      preset="Prototype"
+      presets={PRESETS}
+      hideEnd
+      estimate={undefined}
+    />
+  ),
+  play: async ({ canvasElement }) => {
+    const c = within(canvasElement)
+    await expect(c.getByText('Implement')).toBeVisible()
+    await expect(c.queryByText('Review')).not.toBeInTheDocument()
+    await expect(c.queryByText('Add back')).not.toBeInTheDocument()
   },
 }
 

@@ -45,7 +45,6 @@ import {
   QuestionField,
   type ThreadItem,
   ModelMoveItem,
-  type TaskTime,
   type ThreadSnapshot,
   type TurnTime,
   type ScreenshotsOnChange,
@@ -176,7 +175,8 @@ const ROUND_REACH = 2_000
  * a pull request.
  */
 const ROUND_ASK = `(i.kind = 'user_message' AND coalesce(u.state, 'delivered') = 'delivered')
-  OR (i.kind = 'notice' AND json_extract(i.content, '$.source') = 'runtime' AND coalesce(json_extract(i.content, '$.role'), '') NOT IN ('aside', 'folder', 'skills'))
+  OR (i.kind = 'notice' AND json_extract(i.content, '$.source') = 'runtime' AND coalesce(json_extract(i.content, '$.role'), '') NOT IN ('aside', 'folder', 'skills')
+    AND json_extract(i.content, '$.situation') IS NULL)
   OR (i.kind = 'step_result' AND json_extract(i.content, '$.step') IN ('review', 'publish'))
   OR i.kind = 'arrival'`
 
@@ -256,15 +256,6 @@ const skillOf = (skill: unknown) => {
     ? { skill: { names: names.filter((name): name is string => typeof name === 'string'), reported: field(skill, 'reported') === true } }
     : {}
 }
-
-/** What a lead's agent could see, as `threads.ts` keeps it. */
-const skillsSeenOf = (skills: unknown) =>
-  (Array.isArray(skills) ? skills : []).flatMap((skill) => {
-    const name = text(skill, 'name')
-    return name === ''
-      ? []
-      : [{ name, path: text(skill, 'path'), from: text(skill, 'from') === 'repository' ? ('repository' as const) : ('person' as const) }]
-  })
 
 interface ItemRow {
   readonly id: string
@@ -539,7 +530,7 @@ const decodePushRequest = Schema.decodeUnknownOption(PushRequestItem.fields.cont
 const decodeTaskAsk = Schema.decodeUnknownOption(TaskAskItem.fields.content)
 const decodeSettingChange = Schema.decodeUnknownOption(SettingChangeCard)
 const decodeModelMove = Schema.decodeUnknownOption(ModelMoveItem.fields.content)
-/** The task a notice is about, which the thread links to: one its lead started (ADR-097). */
+/** The task a notice is about, which the thread links to: one its lead started (ADR-097), in one line. */
 const decodeNoticeTask = Schema.decodeUnknownOption(
   Schema.Struct({ taskId: Schema.String, slug: Schema.String, title: Schema.String, threadId: Schema.String }),
 )
@@ -654,8 +645,10 @@ export const itemOf = (row: ItemRow): ThreadItem | undefined => {
       // Older threads kept the agent's explanation of a refusal as a notice; the refused call's own row says it now.
       const title = text(content, 'title')
       if (title === 'Resumed after a rejection.') return undefined
-      // A session's line of skills that said nothing new, kept for its list only: it never reaches the window.
-      if (role === 'skills' && field(content, 'hidden') === true) return undefined
+      // What a lead's agent could see is kept for `skillsRead`, not for a chat: a line for it never reaches the window.
+      if (role === 'skills') return undefined
+      // What older threads said of another task (one that ended, or one changing the same files): news for the lead, not for the chat.
+      if (field(content, 'situation') !== undefined) return undefined
       // Likewise the coordinator's receipt of a denial, kept by older threads.
       if (title?.startsWith('Denied ') && description?.startsWith('By the coordinator:') && text(content, 'about') === 'permission')
         return undefined
@@ -667,8 +660,7 @@ export const itemOf = (row: ItemRow): ThreadItem | undefined => {
           severity: severity === 'error' || severity === 'warning' ? severity : 'info',
           title: text(content, 'title'),
           description: description === '' ? null : description,
-          ...(role === 'aside' || role === 'relayed' || role === 'folder' || role === 'skills' ? { role } : {}),
-          ...(role === 'skills' ? { skills: skillsSeenOf(field(content, 'skills')) } : {}),
+          ...(role === 'aside' || role === 'relayed' || role === 'folder' ? { role } : {}),
           ...(failure === undefined || failure === '' ? {} : { failure }),
           ...Option.match(decodeNoticeTask(field(content, 'task')), { onNone: () => ({}), onSome: (task) => ({ task }) }),
         },
@@ -2586,13 +2578,9 @@ export class Queries extends Context.Service<
                         '',
                       ),
                     ),
-                    // A review's lead only reads: only an agent its session holds to that may take it (Reviews.canLead).
+                    // Any agent may lead a review: the card offers them all.
                     ...(field(parameters, 'reads') === true
-                      ? {
-                          agents: (yield* Agents).list
-                            .filter((entry) => entry.definition.reviewing?.outside === true)
-                            .map((entry) => entry.definition.id),
-                        }
+                      ? {}
                       : {
                           // Where it works (ADR-091), why where the coordinator said, and who works Local now, while it can change.
                           worksIn: text(parameters, 'worksIn') === 'checkout' ? ('checkout' as const) : ('worktree' as const),
@@ -3238,30 +3226,6 @@ export class Queries extends Context.Service<
           })
         })
 
-      /** All a task's turns added up, its reviewers' too, where they kept where their time went; undefined where none did. */
-      const taskTimeOf = (taskId: string) =>
-        Effect.gen(function* () {
-          const sql = yield* SqlClient.SqlClient
-          const rows = yield* sql<{ timings: string | null }>`
-            SELECT d.timings FROM turn_deliveries d JOIN threads t ON t.id = d.thread_id
-            WHERE t.task_id = ${taskId} AND d.timings IS NOT NULL`
-          const kept = rows.flatMap((row) => {
-            const timings = timingsFrom(row.timings)
-            return timings === null ? [] : [timings]
-          })
-          if (kept.length === 0) return undefined
-          return kept.reduce<TaskTime>(
-            (sum, one) => ({
-              turns: sum.turns + 1,
-              place: sum.place + one.place,
-              session: sum.session + one.session,
-              work: sum.work + one.work,
-              tools: sum.tools + one.tools,
-            }),
-            { turns: 0, place: 0, session: 0, work: 0, tools: 0 },
-          )
-        })
-
       /**
        * A task's rounds of work as its graph had them (`graph.ts`): its newest runs, their steps and each step's tries with the
        * agent each ran on, what each began with and when a change added to it, what started each follow-up, and whether the
@@ -3510,7 +3474,6 @@ export class Queries extends Context.Service<
           )
           // What it used of each account its agents ran on: a reading that fails leaves it out, never the thread (ADR-084).
           const usage = yield* spendingOf({ taskId: head.taskId }).pipe(Effect.orElseSucceed(() => []))
-          const time = yield* taskTimeOf(head.taskId)
           // Its lead's helpers at work (ADR-087), each on its change.
           const helpersAtWork = yield* sql<{ id: string; name: string; change: string | null; agentId: string; model: string | null }>`
             SELECT h.id, h.name, w.name AS change, h.agent_id, h.model FROM helpers h LEFT JOIN workspaces w ON w.id = h.workspace_id
@@ -3553,7 +3516,6 @@ export class Queries extends Context.Service<
             threadId,
             cursor: at,
             usage,
-            ...(time === undefined ? {} : { time }),
             project: { id: head.projectId, name: head.projectName },
             host,
             task: {

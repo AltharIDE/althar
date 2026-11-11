@@ -51,8 +51,6 @@ export interface UsageText {
   what: (models: ReadonlyArray<string>, tokens: number) => string
   /** Several models on one account: each with its tokens. */
   byModel: (models: ReadonlyArray<{ readonly name: string; readonly tokens: number }>) => string
-  /** How long its agents' turns took, all added up, and over how many. */
-  worked: (took: string, turns: number) => string
 }
 
 const tokensWord = (n: number) =>
@@ -69,22 +67,30 @@ export const usageText: UsageText = {
   estimateNote: 'An estimate',
   what: (models, tokens) => [...models, `${tokensWord(tokens)} tokens`].join(' · '),
   byModel: (models) => models.map((model) => `${model.name} ${tokensWord(model.tokens)}`).join(' · ') + ' tokens',
-  worked: (took, turns) => `Worked for ${took} over ${turns} ${turns === 1 ? 'turn' : 'turns'}`,
 }
 
-/** How long a task's turns took, all added up, and where that time went, a few words each part. */
-export interface UsageTime {
-  readonly took: string
-  readonly turns: number
-  readonly spent: ReadonlyArray<string>
-}
+/** Under a tenth of a point, the figure is a bound already ("< 0.1%"), so it takes no "~" as well. */
+const bounded = (line: UsageLine) => line.took !== undefined && line.took !== null && line.took < 0.1
 
-/** A known figure, said as an estimate where it is one. */
+/** A known figure, said as an estimate where it is one: one qualifier at most. */
 const said = (line: UsageLine, figure: string, t: UsageText) =>
-  figure !== t.unknown && line.estimated === true ? t.estimate(figure) : figure
+  figure !== t.unknown && line.estimated === true && !bounded(line) ? t.estimate(figure) : figure
 
 /** A line's figure, said whole: ~8% of week, or $21.59. */
 const figureOf = (line: UsageLine, t: UsageText) => said(line, wholeOf(line, t), t)
+
+/** A line's figure, said whole, for a consumer that lays its lines out itself (the composer's context ring). */
+export const usageFigure = (line: UsageLine, text?: Partial<UsageText>) => figureOf(line, { ...usageText, ...text })
+
+/** What ran on a line, and its tokens, as its second line says it; the models in `known` left out, as already said nearby. */
+export const usageWhat = (line: UsageLine, known: ReadonlyArray<string> = [], text?: Partial<UsageText>) => {
+  const t = { ...usageText, ...text }
+  if (line.byModel !== undefined && line.byModel.length > 1) return t.byModel(line.byModel)
+  return t.what(
+    line.models.filter((model) => !known.includes(model)),
+    line.tokens,
+  )
+}
 
 const wholeOf = (line: UsageLine, t: UsageText) =>
   line.took !== undefined
@@ -128,7 +134,7 @@ export function UsageLines({ lines, heading, text }: UsageLinesProps) {
               <span>{line.name}</span>
             </span>
             <span className={s.what} data-marked={line.mark !== undefined || undefined}>
-              {line.byModel !== undefined && line.byModel.length > 1 ? t.byModel(line.byModel) : t.what(line.models, line.tokens)}
+              {usageWhat(line, [], text)}
             </span>
             <Figure line={line} t={t} />
           </li>
@@ -158,8 +164,6 @@ function Figure({ line, t }: { line: UsageLine; t: UsageText }) {
 
 export interface UsageCardProps {
   lines: ReadonlyArray<UsageLine>
-  /** How long its turns took, and where that time went (a task is a conversation plus parts): under its lines. */
-  time?: UsageTime
   /** Whether it is open: the person's choice, kept by whoever holds it. */
   open: boolean
   onOpenChange: (open: boolean) => void
@@ -171,7 +175,7 @@ export interface UsageCardProps {
  * mark, opening to the lines, as the pull request's checks do. Whether it is
  * open is the person's, kept for every task alike.
  */
-export function UsageCard({ lines, time, open, onOpenChange, text }: UsageCardProps) {
+export function UsageCard({ lines, open, onOpenChange, text }: UsageCardProps) {
   const t = { ...usageText, ...text }
   return (
     <Disclosure className={s.card} open={open} onOpenChange={onOpenChange}>
@@ -192,12 +196,6 @@ export function UsageCard({ lines, time, open, onOpenChange, text }: UsageCardPr
       <Fold bleed={false}>
         <div className={s.body}>
           <UsageLines lines={lines} text={text} />
-          {time !== undefined && (
-            <p className={s.time}>
-              <span className={s.worked}>{t.worked(time.took, time.turns)}</span>
-              {time.spent.length > 0 && <span className={s.spent}>{time.spent.join(' · ')}</span>}
-            </p>
-          )}
         </div>
       </Fold>
     </Disclosure>

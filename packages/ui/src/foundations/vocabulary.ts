@@ -535,6 +535,8 @@ export enum CheckState {
   Held = 'held',
   Queued = 'queued',
   Failed = 'failed',
+  /** Never ran; the host counts it as met. */
+  Skipped = 'skipped',
 }
 
 /** The project window's views of its work. */

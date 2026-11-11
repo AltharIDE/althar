@@ -6,11 +6,20 @@ import { SqlClient } from 'effect/sql'
 import { postCard, touchCard } from './cards'
 import { ChangeRefused, NotFound } from './errors'
 import { backoff, keptGoing } from './Failures'
-import { RuntimeConfig } from './Config'
+import { Accounts } from './Accounts'
+import { Agents, RuntimeConfig } from './Config'
+import { Installs } from './Installs'
+import { Limits } from './Limits'
+import { ModelFacts } from './ModelFacts'
+import { Models } from './Models'
+import { PlanUsage } from './PlanUsage'
+import { presetModels } from './presetModels'
+import { SignIns } from './SignIns'
+import { usableModels } from './usableModels'
 import { countdownNow } from './plansAndReviews'
 import { Reviews } from './Reviews'
 import { Instance } from './Instance'
-import { offerPreset, planFromPreset, presetsIn } from './presets'
+import { offerPreset, planFromPreset, presetsIn, reviewerOfPreset } from './presets'
 import { shelve } from './scratch'
 import { change, fact, timestamp } from './records'
 import { setToward } from './towards'
@@ -29,7 +38,23 @@ import { type PlanStep, Runs, type TaskEnd } from './Runs'
  * its lead is only ever one its session holds to reading.
  */
 
-type Store = SqlClient.SqlClient | Instance | Runs | Reviews | Ledger | Crypto.Crypto | RuntimeConfig
+type Store =
+  | SqlClient.SqlClient
+  | Instance
+  | Runs
+  | Reviews
+  | Ledger
+  | Crypto.Crypto
+  | RuntimeConfig
+  // The models in use now, for the lead and the reviewer a preset names or lacks (presetModels.ts).
+  | Agents
+  | Models
+  | ModelFacts
+  | SignIns
+  | Installs
+  | Limits
+  | Accounts
+  | PlanUsage
 
 export class Plans extends Context.Service<
   Plans,
@@ -318,7 +343,7 @@ export class Plans extends Context.Service<
                   ...(before.reviewAfterMerge === true ? { reviewAfterMerge: true } : {}),
                 })
               }
-              // A review's lead only reads: an agent that can't be held to that can't take it, whoever picks it.
+              // Any agent Althar has may lead a review.
               if (parametersOf(yield* load(planId)).reads === true)
                 for (const step of steps) if (!step.skipped) yield* reviews.canLead(step.agentId)
               return yield* reshape(planId, changed, actorId, toward, worksIn !== undefined)
@@ -338,9 +363,22 @@ export class Plans extends Context.Service<
                 return yield* new ChangeRefused({
                   message: before.reads === true ? 'A review stays a review.' : 'Review a PR starts from a pull request.',
                 })
-              const steps = planFromPreset(before, preset.parts).steps
+              // The models as the agents list them, for a lead and a reviewer the preset names, and a reviewer it lacks.
+              const models = presetModels(yield* usableModels(plan.projectId).pipe(Effect.orElseSucceed(() => [])))
+              // Its review is what the preset promises: with no model but the lead's own to give it, nothing changes.
+              if (preset.parts.checked !== 'none' && reviewerOfPreset(before, preset.parts, models) === null)
+                return yield* new ChangeRefused({
+                  message: `${preset.name} is reviewed, and no model apart from its lead's can be used to review it right now.`,
+                })
+              const steps = planFromPreset(before, preset.parts, models).steps
               if (before.reads === true) for (const step of steps) if (!step.skipped) yield* reviews.canLead(step.agentId)
-              yield* reshape(planId, (now) => JSON.stringify(planFromPreset(parametersOf(now), preset.parts)), actorId, undefined, true)
+              yield* reshape(
+                planId,
+                (now) => JSON.stringify(planFromPreset(parametersOf(now), preset.parts, models)),
+                actorId,
+                undefined,
+                true,
+              )
               // Where it sits, and a few lines for its lead, as the preset has them.
               yield* shelve(plan.taskId, preset.parts.shelf === 'scratch' ? 'scratch' : null, actorId)
               const brief = preset.parts.brief.trim()

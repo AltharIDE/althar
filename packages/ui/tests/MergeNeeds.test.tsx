@@ -78,4 +78,27 @@ describe('what merging needs', () => {
     fireEvent.click(line)
     expect(screen.getByText('Optional')).toBeInTheDocument()
   })
+
+  it('lists skipped checks last in each group, keeping the host’s order otherwise', () => {
+    render(
+      <ChangeSet
+        state={ChangeState.Ready}
+        host={GITHUB}
+        prs={[{ repo: 'acme/api', number: 7, files: [] }]}
+        checks={[
+          { id: '1', name: 'build', state: CheckState.Passed },
+          { id: '2', name: 'ui', state: CheckState.Skipped },
+          { id: '3', name: 'lint', state: CheckState.Passed },
+          { id: '4', name: 'site', state: CheckState.Skipped },
+          { id: '5', name: 'verify', state: CheckState.Passed },
+        ]}
+        needs={[{ kind: 'checks', state: 'met', have: 1, need: 1, required: ['build'] }]}
+      />,
+    )
+    fireEvent.click(screen.getByRole('button', { name: /The required check passed/ }))
+    const names = screen.getAllByRole('listitem').map((li) => li.textContent ?? '')
+    const order = ['lint', 'verify', 'ui', 'site'].map((n) => names.findIndex((x) => x.startsWith(n)))
+    expect(order).toEqual([...order].sort((a, b) => a - b))
+    expect(order.every((i) => i >= 0)).toBe(true)
+  })
 })
