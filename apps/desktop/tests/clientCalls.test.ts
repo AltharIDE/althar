@@ -62,7 +62,7 @@ const standIn = async (): Promise<{ client: Client; heard: Array<Heard> }> => {
   // Every handler the stand-in has needs nothing, whatever the contract allows them.
   const server = RpcServer.layer(Api).pipe(
     Layer.provide(Layer.succeed(ClientAuthority, (effect) => effect)),
-    Layer.provide(Api.toLayer(Effect.succeed(Api.of(handlers as Parameters<typeof Api.of>[0])))),
+    Layer.provide(Api.toLayer(Effect.succeed(Api.of(handlers as never)))),
     Layer.provide(serverProtocol(emitterPort(channel.port1 as never, (data) => data))),
   ) as Layer.Layer<never>
   await Effect.runPromise(Effect.forkIn(Layer.launch(server), scope))
@@ -118,6 +118,12 @@ describe('what the client sends', () => {
     const { client, heard } = await standIn()
     const steps: ReadonlyArray<PlanStep> = [{ key: 'implement', agentId: 'codex', model: null, skipped: false }]
     expect((await sent(heard, client.changeTeam('task_1', steps))).payload).toEqual({ taskId: 'task_1', steps })
+  })
+
+  it('says whether one small change is reviewed after it merges, or goes back to the project’s rule', async () => {
+    const { client, heard } = await standIn()
+    expect((await sent(heard, client.setReviewAfterMerge('task_1', 'none'))).payload).toEqual({ taskId: 'task_1', review: 'none' })
+    expect((await sent(heard, client.setReviewAfterMerge('task_1', null))).payload).toEqual({ taskId: 'task_1', review: null })
   })
 
   it('removes an account, anyway only where the person said so', async () => {

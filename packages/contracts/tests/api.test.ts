@@ -702,6 +702,7 @@ describe('the API', () => {
               SignInAccount: () => Effect.succeed({ line: 'codex login', opened: false }),
               OpenChange: () => Effect.void,
               SkipReview: () => Effect.void,
+              SetReviewAfterMerge: () => Effect.void,
               Ship: () => Effect.void,
               FixAfterMerge: () => Effect.die('unused'),
               LeaveAfterMerge: () => Effect.die('unused'),

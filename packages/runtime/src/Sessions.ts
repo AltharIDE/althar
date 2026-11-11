@@ -258,8 +258,11 @@ interface CoordinatorThread {
  */
 interface ReviewThread {
   readonly role: 'reviewer'
-  /** A review after a merge (MergeReviews.ts): the pull request that merged, as its host names it. */
-  readonly merged?: { readonly words: string } | undefined
+  /**
+   * A review after a merge (MergeReviews.ts): the pull request that merged, as its host names it, and what of its findings
+   * come back to the person: only blocking and major ones (`major`), or any (`all`).
+   */
+  readonly merged?: { readonly words: string; readonly bringsBack: 'major' | 'all' } | undefined
   readonly threadId: string
   readonly projectId: ProjectId
   readonly taskId: string
@@ -1428,8 +1431,9 @@ export class Sessions extends Context.Service<
       const mergedReviewOf = (threadId: string) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
-          const [review] = yield* sql<{ number: number | null; base: string | null; url: string }>`
-            SELECT r.number, r.base, r.url FROM threads t JOIN merge_reviews r ON r.task_id = t.task_id
+          const [review] = yield* sql<{ number: number | null; base: string | null; url: string; bringsBack: string | null }>`
+            SELECT r.number, r.base, r.url, json_extract(r.reviewer, '$.bringsBack') AS brings_back
+            FROM threads t JOIN merge_reviews r ON r.task_id = t.task_id
             WHERE t.id = ${threadId} AND t.kind = 'step' AND t.node_key = ${MERGE_REVIEW} AND r.state IN ('running', 'owed')
             ORDER BY r.state = 'running' DESC, r.updated_at DESC LIMIT 1`
           if (review === undefined) return undefined
@@ -1450,7 +1454,10 @@ export class Sessions extends Context.Service<
           const copies = [{ ...first, worktree: mergeCopyOf(first.worktree, review.number), baseCommit: review.base ?? first.baseCommit }]
           return {
             role: 'reviewer',
-            merged: { words: review.number === null ? 'the pull request' : `#${review.number}` },
+            merged: {
+              words: review.number === null ? 'the pull request' : `#${review.number}`,
+              bringsBack: review.bringsBack === 'all' ? 'all' : 'major',
+            },
             threadId,
             ...task,
             repositories: copies,
@@ -3519,6 +3526,11 @@ export class Sessions extends Context.Service<
               ...askedFor(thread),
               `What merged is in ${copy?.worktree ?? thread.cwd}: a copy at the merged head, which Althar throws away after. See what merged that no review read before with \`git diff ${copy?.baseCommit ?? 'HEAD~1'}\` there.`,
               ...(summary === '' ? [] : [`The lead says:\n${summary}`]),
+              ...(thread.merged.bringsBack === 'major'
+                ? [
+                    "Only blocking and major findings come back to the person: those put the task in front of them, to have its lead fix them or leave them. Minor findings and nits stay in the task's thread, where they can read them, and ask for nothing. So report what really matters, rate each honestly, and don't pad the review with small things to make it look thorough.",
+                  ]
+                : []),
               "Look for what would make the change wrong or unsafe: bugs, missed cases, broken behaviour, security, tests that don't test it. Not style the project doesn't ask for. Then call Althar's report_review tool once: a verdict (pass, or changes_requested), a summary of a few lines, and your findings, each with its severity (blocking, major, minor or nit), a title saying what is wrong in one short line, where it is (the file and line), and what is wrong in full. With no findings worth fixing, the verdict is pass.",
               LAST_MESSAGE_REVIEWER,
               ...(yield* threadSoFar(thread.threadId)),

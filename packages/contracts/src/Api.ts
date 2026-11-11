@@ -464,6 +464,14 @@ export type PlansAndReviewsChange = { readonly [Key in keyof PlansAndReviews]?: 
 export const PLANS_AND_REVIEWS: PlansAndReviews = { countdown: 25, rounds: 3, roundsOut: 'settled' }
 
 /**
+ * What a small change's review after it merges brings back (docs/decisions/reviews.md): `major`, only blocking and major findings
+ * come back to the person, the rest stay in the thread; `all`, any finding does; `none`, no review is owed after the merge.
+ */
+export const AFTER_MERGE_REVIEWS = ['major', 'all', 'none'] as const
+export const AfterMergeRule = Schema.Literals(AFTER_MERGE_REVIEWS)
+export type AfterMergeRule = typeof AfterMergeRule.Type
+
+/**
  * What a project's rules start from when it is made. A project made earlier keeps its own rules, and each is changed in a
  * project afterwards on its rules screen.
  */
@@ -482,6 +490,8 @@ export const NewProjectDefaults = Schema.Struct({
   resolveConflicts: Schema.Boolean,
   /** Whether a task's issue moves along with it. */
   moveIssues: Schema.Boolean,
+  /** What a small change's review after it merges brings back. */
+  afterMergeReview: AfterMergeRule,
 })
 export type NewProjectDefaults = typeof NewProjectDefaults.Type
 
@@ -497,6 +507,7 @@ export const NEW_PROJECT_DEFAULTS: NewProjectDefaults = {
   postScreenshots: false,
   resolveConflicts: true,
   moveIssues: true,
+  afterMergeReview: 'major',
 }
 
 /** How the review seal on a pull request looks: a round engraved stamp, a pressed wax seal, or a printer's colophon. */
@@ -1119,6 +1130,8 @@ export const ProjectRulesView = Schema.Struct({
   titlePattern: Schema.NullOr(Schema.String),
   /** Whether a task's issue is moved along with it: to its tracker's In Progress as it starts, In Review and Done with its pull request. */
   moveIssues: Schema.Boolean,
+  /** What a small change's review after it merges brings back to the person: only major findings, any, or no review at all. */
+  afterMergeReview: AfterMergeRule,
   /** Whether skill and OpenSpec files may be written to, committed in, or pushed from the project's repositories; each off unless turned on. */
   repositoryFiles: RepositoryFilesSetting,
   /** What each of the project's repositories says, in the project's order. */
@@ -2007,8 +2020,12 @@ export const StepResultItem = Schema.Struct({
     unverified: Schema.NullOr(Schema.Array(Schema.String)),
     /** For the lead's steps: its pull request's description, by the slug of the repository each is for, where it gave one. */
     descriptions: Schema.optional(Schema.Record(Schema.String, Schema.String)),
-    /** For a review after a merge: the pull request that merged, which it read, as its host names it. Absent for any other. */
-    afterMerge: Schema.optional(Schema.Struct({ url: Schema.String, words: Schema.String })),
+    /**
+     * For a review after a merge: the pull request that merged, which it read, as its host names it; and `kept` where what it
+     * found stays in the thread, nothing in it being what the project's rule brings back to the person (only blocking and
+     * major findings, under Major only). Absent for any other.
+     */
+    afterMerge: Schema.optional(Schema.Struct({ url: Schema.String, words: Schema.String, kept: Schema.optional(Schema.Boolean) })),
     /** Who reported it, for a review. */
     agentId: Schema.NullOr(Schema.String),
     /**
@@ -2968,6 +2985,18 @@ export const SmallChangeItem = Schema.Struct({
     /** The person made it a full task, reviewed before it merges: the card folds to the line saying what was made. */
     fullTask: Schema.optional(
       Schema.NullOr(Schema.Struct({ taskId: Schema.String, slug: Schema.String, threadId: Schema.String, title: Schema.String })),
+    ),
+    /**
+     * What its review after the merge brings back: the project's rule (`afterMergeReview`), the task's own word over it (null
+     * where it has none; SetReviewAfterMerge changes it until it merges), and what holds of the two. `none` holds: no review
+     * after its merge. Absent from a runtime before it.
+     */
+    afterMerge: Schema.optional(
+      Schema.Struct({
+        project: AfterMergeRule,
+        task: Schema.NullOr(Schema.Literals(['review', 'none'])),
+        holds: AfterMergeRule,
+      }),
     ),
   }),
 })
@@ -4824,6 +4853,7 @@ export const Api = RpcGroup.make(
       postScreenshots: Schema.optional(NewProjectDefaults.fields.postScreenshots),
       resolveConflicts: Schema.optional(NewProjectDefaults.fields.resolveConflicts),
       moveIssues: Schema.optional(NewProjectDefaults.fields.moveIssues),
+      afterMergeReview: Schema.optional(NewProjectDefaults.fields.afterMergeReview),
     },
     Schema.Void,
   ),
@@ -5157,6 +5187,7 @@ export const Api = RpcGroup.make(
       branchPattern: Schema.optional(Schema.NullOr(Schema.String)),
       titlePattern: Schema.optional(Schema.NullOr(Schema.String)),
       moveIssues: Schema.optional(Schema.Boolean),
+      afterMergeReview: Schema.optional(AfterMergeRule),
       repositoryFiles: Schema.optional(RepositoryFilesSetting),
       /** What the person changed of what leads' sandboxes let through, each list whole. */
       sandbox: Schema.optional(Schema.Struct({ commands: Schema.optional(SandboxEdits), hosts: Schema.optional(SandboxEdits) })),
@@ -5185,6 +5216,12 @@ export const Api = RpcGroup.make(
   command('OpenChange', { taskId: Schema.String }, Schema.Void),
   /** Skips the review of the task's run under way: a review under way stops, and work whose lead is done is ready (ADR-034). */
   command('SkipReview', { taskId: Schema.String }, Schema.Void),
+  /**
+   * One small change's own word on its review after the merge, over its project's rule (`afterMergeReview`), until it merges:
+   * `review`, reviewed after it merges though the rule says none; `none`, not reviewed after it; null, as the rule says. Its
+   * card reads what holds (`SmallChangeContent.afterMerge`).
+   */
+  command('SetReviewAfterMerge', { taskId: Schema.String, review: Schema.NullOr(Schema.Literals(['review', 'none'])) }, Schema.Void),
   /**
    * Ships what waits on the task's branch, as the person said (a task is a
    * conversation plus parts, "A tweak waits for Ship"): its review first,

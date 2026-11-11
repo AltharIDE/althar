@@ -89,6 +89,7 @@ import {
   postsScreenshots,
   ruleSetOf,
   usageLimitOf,
+  afterMergeReviewOf,
 } from './Policies'
 import { Models } from './Models'
 import { Installs } from './Installs'
@@ -557,6 +558,7 @@ export const handlers = Api.toLayer(
         branchPattern: rules.branchPattern ?? null,
         titlePattern: rules.titlePattern ?? null,
         moveIssues: movesIssues(rules),
+        afterMergeReview: afterMergeReviewOf(rules),
         repositoryFiles: repositoryFilesOf(rules),
       }
     }
@@ -1937,6 +1939,8 @@ export const handlers = Api.toLayer(
       SetUsageLimit: ({ commandId, projectId, policy }) =>
         once(commandId, api(policies.setUsageLimit(projectId, policy, instance.personId))),
       OpenChange: ({ commandId, taskId }) => once(commandId, api(runs.publish(taskId))),
+      SetReviewAfterMerge: ({ commandId, taskId, review }) =>
+        once(commandId, api(Effect.asVoid(mergeReviews.choose(taskId, review, instance.personId)))),
       SkipReview: ({ commandId, taskId }) =>
         once(
           commandId,

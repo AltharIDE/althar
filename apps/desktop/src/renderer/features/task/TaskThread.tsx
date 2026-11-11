@@ -35,7 +35,7 @@ import { RuleReceipt } from '../../shared/RuleReceipt'
 import { SaidIn } from '../../shared/code/CodeHost'
 import { CanvasLines, McpActs, PartView, ThreadBlocks } from '../../shared/ThreadBlocks'
 import { WayOut } from '../../shared/WayOut'
-import { PublishedReport, ReviewReport } from './Reports'
+import { PublishedReport, reportText, ReviewReport } from './Reports'
 import { HelperWork } from './HelperWork'
 import s from './TaskThread.module.css'
 import { duration, lineOf, spentWords } from '../../shared/turnTime'
@@ -500,7 +500,8 @@ export function TaskThread({ rounds, versionOf, onOpenTask, settledOf, reviewing
       }
       case 'verdict': {
         // One line: who reviewed, what it found, what became of it; opened, its findings and words, and the lead settling them.
-        const settled = settledOf?.(block.id)
+        // A review after a merge whose findings the project's rule doesn't bring back: they stay here, and nothing waits.
+        const settled = settledOf?.(block.id) ?? (block.result.afterMerge?.kept === true ? reportText.kept : undefined)
         return (
           <ReviewLine
             key={block.id}

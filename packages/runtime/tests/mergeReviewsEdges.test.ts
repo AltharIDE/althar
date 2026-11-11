@@ -15,6 +15,7 @@ import { Coordinator } from '../src/Coordinator'
 import { FastLane } from '../src/fastLane'
 import { Instance } from '../src/Instance'
 import { MergeReviews } from '../src/MergeReviews'
+import { Policies } from '../src/Policies'
 import { Projects } from '../src/Projects'
 import { Queries } from '../src/Queries'
 import { Runs } from '../src/Runs'
@@ -215,7 +216,7 @@ const found = (working: string, bare: string, github: FakeService) =>
     yield* callTool(access, 'report_review', {
       verdict: 'changes_requested',
       summary: 'One thing to tidy.',
-      findings: [{ severity: 'minor', title: 'Name the retry', claim: 'Name it for what it retries.' }],
+      findings: [{ severity: 'major', title: 'Name the retry', claim: 'Name it for what it retries.' }],
     })
     yield* until(cards(task.projectId), (all) => all[0]?.afterMerge?.state === 'found')
     return task
@@ -259,6 +260,8 @@ describe('the review after a merge, at its edges', () => {
       const sessions = yield* Sessions
       const mergeReviews = yield* MergeReviews
       const task = yield* opened(working, '[review:wait]')
+      // The project brings every finding back, so a minor and a nit wait on the person as a major one would.
+      yield* (yield* Policies).set(task.projectId, { afterMergeReview: 'all' }, (yield* Instance).personId)
       yield* mergeIt(bare, github, task.taskId)
       yield* until(reviewOf(task.url), (row) => row?.state === 'running')
       const reviewer = yield* reviewerThread(task.taskId)

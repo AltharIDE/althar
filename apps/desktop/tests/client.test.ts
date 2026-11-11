@@ -417,6 +417,7 @@ describe('the client', () => {
           SignInAccount: () => Effect.die('unused'),
           OpenChange: () => Effect.die('unused'),
           SkipReview: () => Effect.die('unused'),
+          SetReviewAfterMerge: () => Effect.die('unused'),
           Ship: () => Effect.die('unused'),
           FixAfterMerge: () => Effect.die('unused'),
           LeaveAfterMerge: () => Effect.die('unused'),

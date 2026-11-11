@@ -118,7 +118,8 @@ export const AllStates: Story = {
       cells={[
         { state: 'starting values', node: <NewProjectDefaults value={newProjectDefault} onChange={fn()} /> },
         {
-          state: 'branch only, nothing pushed, screenshots posted, no conflicts or issues, wait for the reset, other accounts first',
+          state:
+            'branch only, nothing pushed, screenshots posted, no conflicts or issues, no review after a merge, wait for the reset, other accounts first',
           node: (
             <NewProjectDefaults
               value={{
@@ -129,14 +130,20 @@ export const AllStates: Story = {
                 moveIssues: false,
                 usageLimit: 'wait',
                 rotateAccounts: true,
+                afterMergeReview: 'none',
               }}
               onChange={fn()}
             />
           ),
         },
         {
-          state: 'ready for review, ask me',
-          node: <NewProjectDefaults value={{ ...newProjectDefault, end: 'ready', usageLimit: 'ask' }} onChange={fn()} />,
+          state: 'ready for review, every finding back after a merge, ask me',
+          node: (
+            <NewProjectDefaults
+              value={{ ...newProjectDefault, end: 'ready', usageLimit: 'ask', afterMergeReview: 'all' }}
+              onChange={fn()}
+            />
+          ),
         },
       ]}
     />
