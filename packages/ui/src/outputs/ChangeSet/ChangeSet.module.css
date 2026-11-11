@@ -237,7 +237,7 @@ span.you {
   margin: 0;
   font-size: 12px;
   line-height: 1.5;
-  color: var(--t-2);
+  color: var(--t-3);
   text-wrap: pretty;
 }
 /* narrow, one button as wide as the card, two side by side where it is a choice */

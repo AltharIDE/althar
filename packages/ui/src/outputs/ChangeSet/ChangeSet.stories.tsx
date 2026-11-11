@@ -517,8 +517,8 @@ const BESIDE = {
 }
 
 /**
- * Two repositories of a task whose other has a pull request, on no host Althar opens one on: what they are in a line, the branch
- * whole, and what changed in each. The rest goes through review, so pushing them, for review where they're hosted, comes before
+ * Two repositories of a task whose other has a pull request, on no host Althar opens one on: what it is with what isn't pushed in
+ * a line, the branch whole, and what changed in each, by its files under the card. The rest goes through review, so pushing them, for review where they're hosted, comes before
  * merging them here, which says what it skips.
  */
 export const BesidePullRequest: Story = {
@@ -551,8 +551,10 @@ export const BesidePullRequest: Story = {
     const branch = c.getByText('fnt/fix-staging-character-assets-at-the-cdn-edge')
     await expect(branch.scrollWidth).toBeLessThanOrEqual(branch.clientWidth)
     await expect(c.getByText('Merging here doesn’t push, and skips review.')).toBeInTheDocument()
-    await expect(within(c.getByText('engine').closest('li')!).getByText('2 files')).toBeInTheDocument()
-    await expect(within(c.getByText('infra').closest('li')!).getByText('1 file')).toBeInTheDocument()
+    // Said once: each repository by its files under the card, and what isn't pushed beside what it is.
+    await expect(c.queryByText('2 files')).toBeNull()
+    await expect(c.getByText('infra/staging/')).toBeInTheDocument()
+    await expect(c.getByText('3 commits not pushed').closest('p')).toBe(c.getByText('No pull request').closest('p'))
   },
 }
 

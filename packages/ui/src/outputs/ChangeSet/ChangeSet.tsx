@@ -289,6 +289,11 @@ function Head({
     <div className={s.head}>
       <p className={s.pr}>
         <span className={s.prName}>{onBranch ? (title ?? t.state[state]) : t.state[state]}</span>
+        {ahead > 0 ? (
+          <span className={s.state}>{t.unpushed(ahead)}</span>
+        ) : (
+          lone !== null && <span className={s.state}>{t.commits(lone)}</span>
+        )}
       </p>
       {onBranch && branch !== undefined && (
         <p className={s.branch}>
@@ -296,8 +301,7 @@ function Head({
           <span className={s.branchName}>{branch}</span>
         </p>
       )}
-      {lone !== null && <p className={s.standing}>{t.commits(lone)}</p>}
-      {ahead > 0 && <p className={s.standing}>{t.unpushed(ahead)}</p>}
+      {lone !== null && ahead > 0 && <p className={s.standing}>{t.commits(lone)}</p>}
       {onBranch && uncommitted > 0 && <p className={s.standing}>{t.uncommitted(uncommitted)}</p>}
       {!several && page !== undefined && (
         <p className={s.standing}>
@@ -307,7 +311,8 @@ function Head({
           </a>
         </p>
       )}
-      {several && (
+      {/* Each repository's files are listed under the card, by its name: a row each only where one has none, or for its host's page. */}
+      {several && (prs.some((pr) => pr.files.length === 0) || pages.length > 0) && (
         <ul className={s.repos}>
           {prs.map((pr) => {
             const its = pages.find((one) => one.repo === pr.repo)
