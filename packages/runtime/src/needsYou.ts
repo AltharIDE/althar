@@ -62,6 +62,17 @@ export const betweenAgents = (since: string | null, now: number, within: number 
  */
 export const DRAFTING_MS = 5 * 60_000
 
+/**
+ * How long what the person asked of a merged task's lead (Fix it, or a message) is taken to be on its way, its turn not
+ * begun: its folder coming back, its lead starting. The turn that takes it is the better sign; this is the fallback, for a
+ * lead that never starts, so the task isn't under way for ever.
+ */
+export const ASKED_MS = 10 * 60_000
+
+/** Whether what was asked of a task's lead at `since` is still on its way at `now`, for `within` ms. */
+export const stillAsked = (since: string | null, now: number, within: number = ASKED_MS): boolean =>
+  since !== null && now - Date.parse(since) < within
+
 /** Whether a task made at `createdAt` is still within `within` ms of being drafted, at `now`. */
 export const stillDrafting = (createdAt: string | null, now: number, within: number = DRAFTING_MS): boolean =>
   createdAt !== null && now - Date.parse(createdAt) < within
