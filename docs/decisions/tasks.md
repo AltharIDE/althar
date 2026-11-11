@@ -418,8 +418,12 @@ few lines is the exception to the usual course of a change:
   reviewer then reads what merged, in a thread of the task's, and reports in
   the task's thread ([reviews.md](reviews.md#a-small-change-is-reviewed-after-it-merges)).
   Nothing is posted on the merged pull request, and no second task is made.
-  Nothing blocks the merge. A plan that named no reviewer gets no review
-  after merge, and neither does a pull request that was closed unmerged.
+  Nothing blocks the merge. By the project's rule, only blocking and major
+  findings bring the task back (the default), every finding does, or there
+  is no review after the merge; one small change may keep or drop its own
+  ([reviews.md](reviews.md#what-the-review-after-a-merge-brings-back)). A
+  plan that named no reviewer gets no review after merge, and neither does a
+  pull request that was closed unmerged.
 - **One card in its thread says what it skipped.** It lists each step with
   its time (Started, Changed a line in …, Checks pass, Merged). It offers
   Merge, which still asks, and **Make it a full task**, which starts the
@@ -467,6 +471,9 @@ made:
 - **Whether work tries an agent's next account first.**
 - **How a task ends:** a draft pull request (the default), one ready for
   review, or nothing.
+- **What a small change's review after it merges brings back:** only major
+  findings (the default), every finding, or no review
+  ([reviews.md](reviews.md#what-the-review-after-a-merge-brings-back)).
 
 Only what differs from the built-in defaults is written. A project made
 earlier keeps its own rules, and its rules screen is where they change. The
