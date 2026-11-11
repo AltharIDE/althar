@@ -23,7 +23,7 @@
     "release": "node scripts/release.ts"
   },
   "dependencies": {
-    "@agentclientprotocol/claude-agent-acp": "0.101.0",
+    "@agentclientprotocol/claude-agent-acp": "0.106.0",
     "@agentclientprotocol/codex-acp": "2.6.0",
     "@althar/connectors": "workspace:*",
     "@althar/contracts": "workspace:*",

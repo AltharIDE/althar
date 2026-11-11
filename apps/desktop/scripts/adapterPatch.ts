@@ -4,17 +4,17 @@ import { dirname, join } from 'node:path'
 
 /*
  * The workspace patches Claude Code's adapter (the repository's `patches/`,
- * applied by bun), so a rate-limit event is sent even before a turn's first
- * usage figure (claude-agent-acp #1127). The packaged app's adapters are
+ * applied by bun), so a refusal of a permission says why in the refused
+ * call's own result. The packaged app's adapters are
  * npm's, which knows nothing of bun's patches, so packaging applies the same
  * patch to its copy, and checks that it took.
  */
 
 /** A line the patch adds, by which a copy of the adapter is known to be patched. */
-export const ADAPTER_PATCH_MARKER = 'Althar: the event is sent'
+export const ADAPTER_PATCH_MARKER = 'Althar: a refusal says why'
 
 /** The file of the adapter the patch changes, from the adapter's folder. */
-export const PATCHED_FILE = join('dist', 'acp-agent.js')
+export const PATCHED_FILE = join('dist', 'permissions', 'response.js')
 
 /** The repository's patch for the adapter at this version. */
 export const adapterPatchFor = (repository: string, version: string | undefined) => {
