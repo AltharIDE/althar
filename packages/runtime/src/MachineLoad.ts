@@ -9,10 +9,20 @@ import { ALTHAR, type Listed, marksOf, ownersOf, type Reading, readMachine, same
 
 /*
  * How hard this computer works, and Althar's part of it, for the window's
- * bar (`GetLoad`). Read only while a window asks, and at most once every
- * `every` however many ask: each asking within it hears the reading before.
- * What used how much is worked out between that reading and the one before
- * it, so the first, or one after a gap, waits a moment for a second.
+ * bar (`GetLoad`). A window asks every few seconds while it is in view, and
+ * the runtime reads at most once every `every` however many ask: each asking
+ * within it hears the reading before. What used how much is worked out
+ * between that reading and the one before it, so the first, or one after a
+ * gap, waits a moment for a second.
+ *
+ * While the app says the meter is on (`meter`), the runtime also reads on
+ * its own, every few seconds, whenever no window has just asked: a window
+ * hidden, or behind another app, asks for nothing, and the trace the peek
+ * shows would be empty when it came back. Such a sample is lean: the cores'
+ * time and the processes, which is all the whole computer's CPU and Althar's
+ * work's part need, without the memory and its pressure, nor the part of each
+ * piece of work, which only a window's reading builds. The meter off, nothing
+ * is read until a window asks.
  *
  * Althar's part is its work and itself. Its work is each agent process this
  * launch started, as the store records it, and each run of the project still
@@ -25,12 +35,16 @@ import { ALTHAR, type Listed, marksOf, ownersOf, type Reading, readMachine, same
  * knows that work. Each process's environment is read once, for one no tree
  * reaches. Althar itself is the app, its windows and the runtime: the app's
  * process (`app`) and what it started that is no work's. The last two
- * minutes of readings are kept in memory, and a gap starts them afresh.
+ * minutes of readings are kept in memory, one at most every `every`, and a
+ * gap, the Mac asleep or the meter off for a while, starts them afresh: the
+ * trace begins where the readings do, and is never padded.
  */
 
 export interface LoadOptions {
   /** How this computer is read: as it is, unless a test says. */
   readonly read?: Effect.Effect<Reading>
+  /** How it is read in the background, without memory: `read`, where a test says that, else the lean reading of this computer. */
+  readonly lean?: Effect.Effect<Reading>
   /** Whose work each of some processes carries in its environment, by pid: as this computer says, unless a test says; none where it reads a computer of its own. */
   readonly marks?: (pids: ReadonlyArray<number>) => Effect.Effect<ReadonlyMap<number, string>>
   /** The app's own process, which Althar itself is with what it started: the runtime's, unless the app says. */
@@ -39,9 +53,11 @@ export interface LoadOptions {
   readonly every?: Duration.Duration
   /** How long a first reading waits for the second, to measure between them: half a second. */
   readonly settle?: Duration.Duration
+  /** How often it reads in the background while the meter is on, where no window has just asked: three seconds. */
+  readonly sample?: Duration.Duration
 }
 
-/** How many readings the history keeps: two minutes of a window asking every three seconds. */
+/** How many readings the history keeps: two minutes of one every three seconds. */
 export const HISTORY = 40
 /** A reading older than this many of `every` is too old to measure from: the readings start afresh. */
 const GAP = 4
@@ -72,6 +88,8 @@ export class MachineLoad extends Context.Service<
   {
     /** How hard this computer works now: read afresh, or the reading of a moment ago. */
     readonly now: Effect.Effect<Load, unknown>
+    /** The app says whether the meter is on: only then does the runtime read in the background. Off until it says. */
+    readonly meter: (on: boolean) => Effect.Effect<void>
   }
 >()('@althar/runtime/MachineLoad') {
   static readonly layer: Layer.Layer<MachineLoad, never, SqlClient.SqlClient | Instance | Launches | Agents | RuntimeConfig> = Layer.effect(
@@ -83,17 +101,23 @@ export class MachineLoad extends Context.Service<
       const agents = yield* Agents
       const options = (yield* RuntimeConfig).load ?? {}
       const read = options.read ?? readMachine()
+      const lean = options.lean ?? options.read ?? readMachine(process.platform, true)
       // A computer a test stands in for has no environments to read but those it says.
       const marksIn = options.marks ?? (options.read === undefined ? marksOf() : () => Effect.succeed(new Map<number, string>()))
       const app = options.app ?? process.pid
       const every = Duration.toMillis(options.every ?? Duration.millis(2_500))
       const settle = options.settle ?? Duration.millis(500)
+      const sample = Duration.toMillis(options.sample ?? Duration.seconds(3))
       const one = Semaphore.makeUnsafe(1)
 
       /* The last reading, and when by the clock: how old it is decides whether to measure from it. */
       let last: { readonly at: number; readonly reading: Reading } | null = null
       let answer: { readonly at: number; readonly load: Load } | null = null
       let history: ReadonlyArray<LoadPoint> = []
+      /* When the history's last point was read, by the clock: a reading less than `every` after it adds none. */
+      let pointAt: number | null = null
+      /* Whether the app says the meter is on. */
+      let metering = false
       /* Whose work each process no tree reached carries in its environment, as read once: by pid, with the process it was. */
       const marked = new Map<number, { readonly process: Listed; readonly work: string | null }>()
 
@@ -270,28 +294,40 @@ export class MachineLoad extends Context.Service<
           return { shares: [...shares.values()].sort((a, b) => b.cpu - a.cpu || b.memory - a.memory), althar }
         })
 
+      /** A reading, and what used how much since the one before: a window's, with everything the meter shows, or the background's, lean. */
+      const take = (reader: Effect.Effect<Reading>) =>
+        Effect.gen(function* () {
+          const at = yield* Clock.currentTimeMillis
+          let before = last !== null && at - last.at <= every * GAP ? last : null
+          let now = at
+          let reading = yield* reader
+          // A first reading, one after a gap, or one whose times count differently from the one before, as once the Mac's
+          // reader is built: a moment's start to measure from, and the readings begin afresh.
+          if (before === null || before.reading.reaped !== reading.reaped) {
+            before = { at: now, reading }
+            history = []
+            pointAt = null
+            yield* Effect.sleep(settle)
+            now = yield* Clock.currentTimeMillis
+            reading = yield* reader
+          }
+          const ticks = reading.cores.total - before.reading.cores.total
+          const cpu = ticks > 0 ? clamp((reading.cores.busy - before.reading.cores.busy) / ticks) : 0
+          // Still counted differently, the reader built in between: what each holds shows, and its CPU from the next reading.
+          const from = before.reading.reaped === reading.reaped ? before.reading : reading
+          const { shares, althar } = yield* sharesOf(yield* roots, from, reading)
+          const work = Math.min(cpu, clamp((shares ?? []).reduce((sum, share) => sum + share.cpu, althar?.cpu ?? 0)))
+          if (pointAt === null || now - pointAt >= every) {
+            history = [...history, { cpu, work }].slice(-HISTORY)
+            pointAt = now
+          }
+          last = { at: now, reading }
+          return { now, reading, cpu, shares, althar }
+        })
+
       const measure = Effect.gen(function* () {
-        const at = yield* Clock.currentTimeMillis
-        if (answer !== null && at - answer.at < every) return answer.load
-        let before = last !== null && at - last.at <= every * GAP ? last : null
-        let now = at
-        let reading = yield* read
-        // A first reading, one after a gap, or one whose times count differently from the one before, as once the Mac's
-        // reader is built: a moment's start to measure from, and the readings begin afresh.
-        if (before === null || before.reading.reaped !== reading.reaped) {
-          before = { at: now, reading }
-          history = []
-          yield* Effect.sleep(settle)
-          now = yield* Clock.currentTimeMillis
-          reading = yield* read
-        }
-        const ticks = reading.cores.total - before.reading.cores.total
-        const cpu = ticks > 0 ? clamp((reading.cores.busy - before.reading.cores.busy) / ticks) : 0
-        // Still counted differently, the reader built in between: what each holds shows, and its CPU from the next reading.
-        const from = before.reading.reaped === reading.reaped ? before.reading : reading
-        const { shares, althar } = yield* sharesOf(yield* roots, from, reading)
-        const work = Math.min(cpu, clamp((shares ?? []).reduce((sum, share) => sum + share.cpu, althar?.cpu ?? 0)))
-        history = [...history, { cpu, work }].slice(-HISTORY)
+        if (answer !== null && (yield* Clock.currentTimeMillis) - answer.at < every) return answer.load
+        const { now, reading, cpu, shares, althar } = yield* take(read)
         const load: Load = {
           cpu,
           memoryUsed: reading.memory.used,
@@ -301,12 +337,28 @@ export class MachineLoad extends Context.Service<
           althar,
           history,
         }
-        last = { at: now, reading }
         answer = { at: now, load }
         return load
       })
 
-      return MachineLoad.of({ now: one.withPermits(1)(measure) })
+      /** A lean reading, where the meter is on and no reading, a window's or the last sample's, is as new as `every`. */
+      const background = one.withPermits(1)(
+        Effect.gen(function* () {
+          if (!metering) return
+          if (last !== null && (yield* Clock.currentTimeMillis) - last.at < every) return
+          yield* take(lean)
+        }),
+      )
+      // Sampling must never stop the program: a reading that fails is tried again next time.
+      yield* Effect.forkScoped(Effect.forever(Effect.sleep(sample).pipe(Effect.andThen(Effect.ignore(background)))))
+
+      return MachineLoad.of({
+        now: one.withPermits(1)(measure),
+        meter: (on) =>
+          Effect.sync(() => {
+            metering = on
+          }),
+      })
     }),
   )
 }
