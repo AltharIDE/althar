@@ -176,6 +176,63 @@ const readyFoot = (
     </div>
   ),
 })
+/**
+ * The follow-up pull request a fix opened after the first merged, its checks running: the card says so, as a first pull request's does,
+ * not "Ready to accept". One row for the pull request, and none for the branch that holds the same lines.
+ */
+const followUp = (running: boolean) => ({
+  render: () => (
+    <div style={{ width: 360 }}>
+      <BoardCard
+        status={TaskStatus.Yours}
+        word={running ? 'Checks running' : 'Ready to accept'}
+        kind={TaskKind.Change}
+        at="2m"
+        title="Usage card drops the time breakdown"
+        object={<PullChip host={GITHUB} repo="althar" number={767} add={1} del={42} />}
+        foot={
+          <FactLine>
+            {running ? (
+              <Fact tone="live">Checks running, 7 of 12 passed</Fact>
+            ) : (
+              <Fact icon="check" tone="ok">
+                All 12 checks passed
+              </Fact>
+            )}
+          </FactLine>
+        }
+        next={
+          !running && (
+            <NextStep signal onPress={fn()} label="Accept and merge #767">
+              Accept and merge
+            </NextStep>
+          )
+        }
+      />
+    </div>
+  ),
+})
+export const FollowUpChecksRunning: Story = {
+  ...followUp(true),
+  play: async ({ canvasElement }) => {
+    const card = within(canvasElement)
+    await expect(card.getByText('Checks running')).toBeInTheDocument()
+    await expect(card.getByText('Checks running, 7 of 12 passed')).toBeInTheDocument()
+    await expect(card.queryByText('Ready to accept')).not.toBeInTheDocument()
+    await expect(card.queryByText('Accept and merge')).not.toBeInTheDocument()
+    await expect(card.getAllByText('+1')).toHaveLength(1)
+  },
+}
+export const FollowUpChecksRunningDark: Story = { ...FollowUpChecksRunning, globals: { theme: 'dark' } }
+export const FollowUpChecksPassed: Story = {
+  ...followUp(false),
+  play: async ({ canvasElement }) => {
+    const card = within(canvasElement)
+    await expect(card.getByText('Ready to accept')).toBeInTheDocument()
+    await expect(card.getByText('All 12 checks passed')).toBeInTheDocument()
+  },
+}
+export const FollowUpChecksPassedDark: Story = { ...FollowUpChecksPassed, globals: { theme: 'dark' } }
 /** No line of facts starts with a middot, wherever it wraps. */
 const noStrayDots = async (canvasElement: HTMLElement) => {
   for (const part of canvasElement.querySelectorAll('[class*="factLinePart"]'))
