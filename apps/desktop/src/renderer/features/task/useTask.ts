@@ -812,7 +812,7 @@ export const useTask = (threadId: string): TaskModel => {
           } catch (failure) {
             // Commits on it the branch doesn't have are the lead's to bring in: the card says so, and offers to ask it, in place of an error.
             if (failure instanceof ApiError && failure.reason === 'PushRefused' && failure.why === 'behind') {
-              setRefused(url ?? snapshot.task.changes[0]?.url ?? '')
+              setRefused(url ?? (snapshot.task.changes.find((one) => one.state === 'open') ?? snapshot.task.changes.at(-1))?.url ?? '')
               return
             }
             throw failure

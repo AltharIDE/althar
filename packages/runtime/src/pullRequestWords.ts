@@ -169,6 +169,8 @@ export const bodyOf = (input: {
   readonly built?: string | null
   /** The lead's last step summary, where it never said what the task built. */
   readonly lead: string | null
+  /** What to say where the lead said nothing at all, as a next pull request's finding and commits do: never an empty description. */
+  readonly fallback?: string | null
   /** The issue it came from; `partOf` where it does only part of it, said in the words trackers read as not closing it. */
   readonly issue: { readonly key: string; readonly url: string; readonly sameHost: boolean; readonly partOf?: boolean } | null
   /** The repository's template, if it has one. */
@@ -209,10 +211,11 @@ export const bodyOf = (input: {
 export const describedOf = (input: {
   readonly built?: string | null
   readonly lead: string | null
+  readonly fallback?: string | null
   readonly template?: string | null
   readonly written?: string | null
 }) => {
-  const plain = said(input.built) ?? said(input.lead)
+  const plain = said(input.built) ?? said(input.lead) ?? said(input.fallback)
   const template = input.template ?? null
   const written = said(input.written)
   if (template === null) return written ?? plain ?? ''

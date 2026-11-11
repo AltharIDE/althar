@@ -288,6 +288,8 @@ const Finished = Schema.Struct({
   summary: Schema.String,
   /** What the task built, as it stands now: the task's own summary, which the person reads at its end. */
   built: Schema.optional(Schema.String),
+  /** What a pull request that follows one merged or closed does, in a few words: its title, after `After #12:`. */
+  title: Schema.optional(Schema.String),
   /** The pull request's description, for its reviewer, in the repository's template where it has one: by repository, which a task of one needn't name. */
   descriptions: Schema.optional(Schema.Array(Schema.Struct({ repository: Schema.optional(Schema.String), text: Schema.String }))),
   /** What shows the change does what it should; and what couldn't be shown. */
@@ -4870,6 +4872,7 @@ export class Runs extends Context.Service<
             summary,
             findings: settled = [],
             descriptions: given = [],
+            title: titled,
             evidence: handed = [],
             unverified,
             kept_views: keptViews,
@@ -4877,7 +4880,8 @@ export class Runs extends Context.Service<
             answered: answering = false,
           } = yield* read(Finished, input)
           const built = builtIn(said)
-          const builds = built === null ? {} : { built }
+          const words = titled === undefined || titled.trim() === '' ? null : titled.trim()
+          const builds = { ...(built === null ? {} : { built }), ...(words === null ? {} : { title: words }) }
           const worktrees = access.taskId === null ? [] : yield* worktreesOf(access.taskId)
           // What it shows of its work: its pictures read now, and kept once the step is taken.
           const evidence = yield* readEvidence(
@@ -5368,6 +5372,11 @@ export class Runs extends Context.Service<
                 description:
                   'What you changed but couldn\'t show working, each in a line, and why: "Not tried with a real microphone: none in the sandbox". A claim with no evidence belongs here. Settling a review, an empty list says what you couldn\'t show before, you have now.',
                 items: { type: 'string' },
+              },
+              title: {
+                type: 'string',
+                description:
+                  'Only where your work goes in a pull request that follows one merged or closed already, as a fix after a merge does: what that pull request does, in a few words and the way a title reads ("Stop summing task timing into every snapshot"). Althar puts "After #12:" in front. Not the task\'s own title, which says what the first one did.',
               },
               descriptions: {
                 type: 'array',
