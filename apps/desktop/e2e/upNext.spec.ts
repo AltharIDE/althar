@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { expect, test } from '@playwright/test'
 
 import { repository } from '../tests/repository'
-import { launch, openFirstProject, planTask, startTask, still } from './support'
+import { launch, openFirstProject, planTask, shown, startTask, still } from './support'
 
 /*
  * Tasks started while every place is taken wait in the board's Up next, in the
@@ -53,7 +53,9 @@ test('lists the tasks that wait for a free agent in Up next, in the order they s
     await expect(page.getByText(/^Waiting: 1 of 1 agents busy/)).toHaveCount(3)
     // A plan the person holds, and one counting down, are not started either.
     await planTask(page, 'Hold this plan')
-    // Exactly: the plan up next on the board beside is named for it.
+    // Its card is the last in the conversation, once it is there: the waiting tasks' cards have a Hold of their own. Exactly: the
+    // plan up next on the board beside is named for it.
+    await expect(shown(page, 'Hold this plan', { exact: true }).last()).toBeVisible()
     await page.getByRole('button', { name: 'Hold', exact: true }).last().click()
     await expect(page.getByRole('region', { name: 'Conversation' }).getByText('Held', { exact: true })).toBeVisible()
     await planTask(page, 'Plan the release')
