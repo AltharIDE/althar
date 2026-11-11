@@ -218,8 +218,8 @@
 /* The console's corners, rounded as its glass is. */
 .module:nth-child(1) { border-top-left-radius: 15px; }
 .module:nth-child(2) { border-top-right-radius: 15px; }
-.module:nth-child(6) { border-bottom-left-radius: 15px; }
-.module:nth-child(7) { border-bottom-right-radius: 15px; }
+.module:nth-last-child(2) { border-bottom-left-radius: 15px; }
+.module:last-child { border-bottom-right-radius: 15px; }
 /* Its plate: the module's number, and its light. */
 .plate { display: flex; align-items: center; gap: 10px; padding: 24px 28px 0; font: 500 11px/1 var(--mono); letter-spacing: 0.12em; color: var(--ink-3); }
 .plate b { font-weight: 500; color: var(--ink-2); }

@@ -6,6 +6,7 @@ import { useGrain } from '../../../shared/grain'
 import { LightUnder } from '../../../shared/lightUnder'
 import { AskOnce } from './AskOnce'
 import { AtWork } from './AtWork'
+import { Connections } from './Connections'
 import { type Tile, TILES } from './Bento'
 import { Review } from './Review'
 import { EdgeTour } from '../kit/EdgeTour'
@@ -34,14 +35,12 @@ export const SCENE = {
   independent: {
     title: (
       <>
-        Usage gets cut.
+        Every agent’s work.
         <br />
-        Models get pulled.
-        <br />
-        <b>Althar stays.</b>
+        <b>One board.</b>
       </>
     ),
-    lead: 'Open source, local-first, your data on your computer, any agent you have. None of the industry’s bullshit touches it.',
+    lead: 'Up next, running, needs you, settled: every task across Claude Code, Codex, Gemini and Qwen, in one place. When one agent runs out, another takes over.',
   },
   coordinator: {
     title: (
@@ -70,6 +69,16 @@ export const SCENE = {
       </>
     ),
     lead: 'Tired of juggling terminals, re-explaining your project and babysitting agents? So were we.',
+  },
+  connections: {
+    title: (
+      <>
+        Works with
+        <br />
+        <b>what you already use.</b>
+      </>
+    ),
+    lead: 'Code on GitHub, GitLab or Bitbucket. Issues in Linear, Jira or Trello. Anything else through an MCP server. Connect each once, and every agent can use it.',
   },
   edge: {
     title: (
@@ -112,12 +121,10 @@ export interface StampSpec {
 }
 
 /*
- * While a direction is being chosen (src/proto, in development only): other
- * words for the board, another body for the flow, and stations of their own
- * after any one. The page itself passes none. Delete with src/proto.
+ * While a direction is being chosen (src/proto, in development only):
+ * another body for the flow, and stations of their own after any one. The page itself passes none. Delete with src/proto.
  */
 export interface Trial {
-  board?: Scene
   flow?: { scene?: Scene; body: ReactNode }
   after?: Partial<Record<Id, ReactNode>>
 }
@@ -125,10 +132,11 @@ export interface Trial {
 /** Each station: its number, its name on the wall, and the height it stands at on the way down. */
 const STATIONS: Record<Id, StampSpec> = {
   independent: { no: '01', name: 'Board', km: 38 },
-  coordinator: { no: '02', name: 'Coordinator', km: 30 },
-  review: { no: '03', name: 'Review', km: 22 },
-  flow: { no: '04', name: 'Flow', km: 14 },
-  edge: { no: '05', name: 'Notch', km: 6 },
+  coordinator: { no: '02', name: 'Coordinator', km: 31 },
+  review: { no: '03', name: 'Review', km: 24 },
+  flow: { no: '04', name: 'Flow', km: 17 },
+  connections: { no: '05', name: 'Connections', km: 10 },
+  edge: { no: '06', name: 'Notch', km: 3 },
 }
 
 /** A station's stamp, on the rail: its node, its number and name, a rule, and the height it stands at. */
@@ -294,7 +302,6 @@ function useRail(main: RefObject<HTMLElement | null>) {
 }
 
 export function DesktopBody({ trial }: { trial?: Trial }) {
-  const board = trial?.board ?? SCENE.independent
   const main = useRef<HTMLElement>(null)
   const lit = useRef<HTMLDivElement>(null)
   const grain = useRef<HTMLDivElement>(null)
@@ -320,9 +327,9 @@ export function DesktopBody({ trial }: { trial?: Trial }) {
         <Window seed={7} className={c.opening}>
           <div className={c.head}>
             <h2 id="independent-h" className={cx(t.title, c.title)}>
-              {board.title}
+              {SCENE.independent.title}
             </h2>
-            <p className={cx(t.lead, c.lead)}>{board.lead}</p>
+            <p className={cx(t.lead, c.lead)}>{SCENE.independent.lead}</p>
           </div>
           <div className={c.board}>
             <AtWork />
@@ -350,6 +357,11 @@ export function DesktopBody({ trial }: { trial?: Trial }) {
         {trial?.flow?.body ?? <Console />}
       </Station>
       {trial?.after?.flow}
+
+      <Station id="connections" layout="bank">
+        <Connections />
+      </Station>
+      {trial?.after?.connections}
 
       <Station id="edge" layout="notch">
         <div className={c.tour}>

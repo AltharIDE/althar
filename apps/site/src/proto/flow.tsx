@@ -4,7 +4,7 @@ import type { ReactNode } from 'react'
 import { type Tile, TILES } from '../home/bodies/desktop/Bento'
 import { Console, type Scene, Station } from '../home/bodies/desktop/DesktopBody'
 import { cx } from '../lib/cx'
-import type { Direction } from './board'
+import type { Direction } from './direction'
 import s from './flow.module.css'
 import { BROWSER, CANVAS, type Piece, SMALL } from './pieces'
 

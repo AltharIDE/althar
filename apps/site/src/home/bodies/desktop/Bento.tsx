@@ -1,10 +1,9 @@
-import { Button, NeedLine, SinceRow } from '@althar/ui'
-import { Home } from '@althar/ui/screens'
+import { SinceRow } from '@althar/ui'
 import { type ReactNode, useSyncExternalStore } from 'react'
 
 import { cx } from '../../../lib/cx'
 import { Shot } from '../kit/Shot'
-import { DECISION, PROJECT_LIST, PUBLISH, READY, RUNNING, SINCE } from '../kit/world'
+import { SINCE } from '../kit/world'
 import s from './Bento.module.css'
 import { Fragment } from './Fragment'
 import accounts from './styled/d-accounts.html?raw'
@@ -14,68 +13,16 @@ import workspaces from './styled/d-workspaces.html?raw'
 import worktrees from './styled/d-worktrees.html?raw'
 
 /*
- * What keeps you in flow: seven tiles on a six-column grid, each drawing at
- * least half its row. Two hold a piece of the app in its light (what
- * happened while you were away, and home across a whole row); five hold a feature drawn
- * as an interface lit by one light, dark or light (Althar fed by each of
- * your accounts in turn, automations, conflicts settled, tasks side by side
- * in worktrees of their own, trackers bound to their projects).
+ * What keeps you in flow: six tiles on a six-column grid, each drawing at
+ * least half its row. One holds a piece of the app in its light (what
+ * happened while you were away); five hold a feature drawn as an interface
+ * lit by one light, dark or light (Althar fed by each of your accounts in
+ * turn, automations, conflicts settled, tasks side by side in worktrees of
+ * their own, trackers bound to their projects).
  * Narrower, two columns, then one.
  */
 
 const none = () => {}
-
-const NEEDS = [
-  {
-    key: 'publish',
-    project: PUBLISH.project,
-    line: (
-      <NeedLine
-        kind={PUBLISH.kind}
-        project={PUBLISH.project}
-        task={PUBLISH.task}
-        title={PUBLISH.title}
-        command={PUBLISH.command}
-        actions={
-          <>
-            <Button size="small">Deny</Button>
-            <Button size="small" variant="signal">
-              Allow once
-            </Button>
-          </>
-        }
-      />
-    ),
-  },
-  {
-    key: 'accept',
-    project: READY.project,
-    line: (
-      <NeedLine
-        kind={READY.kind}
-        project={READY.project}
-        task={READY.task}
-        title={READY.title}
-        brief={`${READY.change.repo} #${READY.change.number} · checks passed · +${READY.change.add} −${READY.change.del}`}
-        actions={<Button size="small">Review</Button>}
-      />
-    ),
-  },
-  {
-    key: 'decision',
-    project: DECISION.project,
-    line: (
-      <NeedLine
-        kind={DECISION.kind}
-        project={DECISION.project}
-        task={DECISION.task}
-        title={DECISION.title}
-        brief={DECISION.options.map((option) => option.label).join(' or ')}
-        actions={<Button size="small">Decide</Button>}
-      />
-    ),
-  },
-]
 
 export interface Tile {
   id: string
@@ -156,40 +103,6 @@ export const TILES: Tile[] = [
     ),
     lead: 'Agents work fast, and merging shouldn’t be what holds them up. Each lead settles its own conflicts; only the odd one needs you.',
     piece: (tone) => <Fragment key={tone} source={conflicts} tone={tone} className={s.stage} />,
-  },
-  {
-    id: 'home',
-    span: 6,
-    title: (
-      <>
-        One home <b>for everything.</b>
-      </>
-    ),
-    lead: 'What needs you, across every project, in one place, answered where it is. And what happened since you looked.',
-    piece: () => (
-      <Shot
-        w={980}
-        h={600}
-        maxScale={1}
-        label="Althar’s home: three things that need you, across Halyard and Tally, and every project beside them"
-        frame={s.window}
-      >
-        <div className={s.home}>
-          <Home
-            waiting={3}
-            needs={NEEDS}
-            running={RUNNING}
-            since={SINCE}
-            looked="3 h ago"
-            projects={PROJECT_LIST}
-            onOpenEvent={none}
-            onOpenProject={none}
-            onTalk={none}
-            onNewProject={none}
-          />
-        </div>
-      </Shot>
-    ),
   },
   {
     id: 'worktrees',
