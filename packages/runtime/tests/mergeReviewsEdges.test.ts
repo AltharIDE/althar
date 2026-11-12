@@ -14,6 +14,7 @@ import { Connections } from '../src/Connections'
 import { Coordinator } from '../src/Coordinator'
 import { FastLane } from '../src/fastLane'
 import { Instance } from '../src/Instance'
+import { Live } from '../src/Live'
 import { MergeReviews } from '../src/MergeReviews'
 import { Policies } from '../src/Policies'
 import { Projects } from '../src/Projects'
@@ -690,7 +691,7 @@ describe('the review after a merge, at its edges', () => {
   })
 
   it.live(
-    'waits longer after each try that couldn’t start, and stops a review whose model its agent doesn’t offer, trying it no more',
+    'waits longer after each try that couldn’t start, and keeps a review whose model its agent doesn’t offer owed, without starting it',
     () => {
       const { working, bare, github } = onGitHub()
       return Effect.gen(function* () {
@@ -709,19 +710,51 @@ describe('the review after a merge, at its edges', () => {
         yield* aged(task.url)
         yield* (yield* FastLane).retryPendingReviews()
         assert.strictEqual((yield* reviewOf(task.url))?.attempts, (first?.attempts ?? 0) + 1)
-        // A model its agent doesn't offer can't start however often it is tried: stopped, saying so, not tried again.
+        // A model its agent doesn't offer (as far as what it last said goes) starts no session: owed, saying so, and looked at again
+        // after its wait, not stopped, as the agent may offer it once asked again.
+        const sessionsOf = () => sql<{ n: number }>`SELECT count(*) AS n FROM provider_sessions`
+        const before = (yield* sessionsOf())[0]?.n
         yield* sql`UPDATE merge_reviews SET reviewer = ${JSON.stringify({ agentId: 'claude-code', model: 'no-such-model-9', effort: null })} WHERE url = ${task.url}`
         yield* aged(task.url)
         yield* (yield* FastLane).retryPendingReviews()
-        const stopped = yield* reviewOf(task.url)
-        assert.strictEqual(stopped?.state, 'stopped')
-        assert.include(stopped?.message ?? '', 'no-such-model-9')
+        const owed = yield* reviewOf(task.url)
+        assert.strictEqual(owed?.state, 'owed')
+        assert.include(owed?.message ?? '', 'no-such-model-9')
+        assert.strictEqual((yield* sessionsOf())[0]?.n, before)
+        yield* (yield* FastLane).retryPendingReviews()
+        assert.strictEqual((yield* reviewOf(task.url))?.attempts, owed?.attempts)
+        // The agent offers it now (here, a model it does offer): the next try starts it.
+        rmSync(blocker, { force: true })
+        yield* sql`UPDATE merge_reviews SET reviewer = ${JSON.stringify({ agentId: 'claude-code', model: 'Large', effort: null })} WHERE url = ${task.url}`
         yield* aged(task.url)
         yield* (yield* FastLane).retryPendingReviews()
-        assert.deepInclude(yield* reviewOf(task.url), { state: 'stopped', attempts: stopped?.attempts ?? 0 })
+        yield* until(reviewOf(task.url), (row) => row?.state === 'clear')
       }).pipe(Effect.provide(runtimeWith(github)))
     },
   )
+
+  it.live('waits longer after each turn of its reviewer that failed, as it does after a start that failed', () => {
+    const { working, bare, github } = onGitHub()
+    return Effect.gen(function* () {
+      const task = yield* opened(working, '[review:wait]')
+      yield* mergeIt(bare, github, task.taskId)
+      yield* until(reviewOf(task.url), (row) => row?.state === 'running')
+      const reviewer = yield* reviewerThread(task.taskId)
+      yield* reviewing(reviewer)
+      // Its first turn fails, out of reach: owed, once, with a wait before the next try.
+      yield* (yield* Live).publish({ _tag: 'TurnEnded', threadId: reviewer, turnId: 'turn', state: 'failed', errorClass: 'unreachable' })
+      const failed = yield* until(reviewOf(task.url), (row) => row?.state === 'owed')
+      assert.strictEqual(failed?.attempts, 1)
+      // Listened to again at once, it isn't started again, whatever the number of listening turns.
+      yield* (yield* FastLane).retryPendingReviews()
+      yield* (yield* FastLane).retryPendingReviews()
+      assert.deepInclude(yield* reviewOf(task.url), { state: 'owed', attempts: 1 })
+      // Its wait over, it is.
+      yield* aged(task.url)
+      yield* (yield* FastLane).retryPendingReviews()
+      assert.strictEqual((yield* reviewOf(task.url))?.state, 'running')
+    }).pipe(Effect.provide(runtimeWith(github)))
+  })
 
   it.live('keeps the latest reason it can’t start, says it once, and stops a review whose reviewer isn’t known', () => {
     const { working, bare, github } = onGitHub()
@@ -858,8 +891,9 @@ describe('the review after a merge, at its edges', () => {
         (rows) => rows.some((row) => row.state === 'failed'),
       )
       yield* until(reviewOf(task.url), (row) => row?.state === 'owed')
-      // Its service answers again: tried again, it reads.
+      // Its service answers again: tried again once its wait is over, it reads.
       down = false
+      yield* aged(task.url)
       yield* (yield* FastLane).retryPendingReviews()
       yield* until(reviewOf(task.url), (row) => row?.state === 'clear')
     }).pipe(Effect.provide(runtimeWith(github, {}, { codex: { connection: () => (down ? 'server' : undefined) } })))
