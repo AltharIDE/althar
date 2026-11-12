@@ -119,11 +119,9 @@ describe('a conflict its pull request’s host reports, and a lead waiting on it
     return Effect.gen(function* () {
       const { taskId, threadId } = yield* opened(working, '[lead:resolve-tests-url]')
       moveHostMainOn(working, bare)
-      // Its turn over and the tests still running, well past the report window: the round is still open.
-      yield* until(
-        Effect.map(inTurn(threadId), (turn) => [turn]),
-        ([turn]) => turn === false,
-      )
+      // Its turn over and the tests still running, well past the report window: the round is still open. Its turn is the one
+      // it was asked in: before the host's conflict is seen, the lead is out of a turn too.
+      yield* until(Effect.all([asked(threadId), inTurn(threadId)]), ([asks, turn]) => asks.length > 0 && turn === false)
       yield* Effect.sleep(Duration.millis(1200))
       const [during] = yield* rounds(taskId)
       assert.deepStrictEqual([during?.state, during?.attempt], ['resolving', 1])
