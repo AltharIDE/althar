@@ -912,7 +912,7 @@ describe('the board', () => {
 
     // One more settles: 36 in all, the older ones still there.
     getBoard.mockImplementation(async () => board({ tasks: [settledTask(35), ...latest.slice(1)], calls: [], settledTotal: 36 }))
-    emit(changed('task', 's35'))
+    emit(changed('card', 's35'))
     expect(await within(column).findByText('36')).toBeTruthy()
     // Every card stays, the one that aged out of the snapshot (5) among them.
     expect(within(column).getAllByRole('listitem')).toHaveLength(36)
@@ -1102,7 +1102,7 @@ describe('the board', () => {
       expect(lane('Running').getByText('Rate-limit refunds')).toBeTruthy()
       expect(lane('Needs you').queryByText('Rate-limit refunds')).toBeNull()
       // The runtime says it settled: read once, and it is in Settled.
-      emit(changed('task', 't4'))
+      emit(changed('card', 't4'))
       expect(await lane('Settled').findByText('Rate-limit refunds')).toBeTruthy()
       expect(lane('Running').queryByText('Rate-limit refunds')).toBeNull()
       expect(getBoard).toHaveBeenCalledTimes(reads + 1)
@@ -1122,7 +1122,7 @@ describe('the board', () => {
       expect(lane('Needs you').queryByText('Rate-limit refunds')).toBeNull()
       // The queue took it out: it is the person's to merge again.
       getBoard.mockImplementation(async () => board())
-      emit(changed('task', 't4'))
+      emit(changed('card', 't4'))
       expect(await lane('Needs you').findByText('Rate-limit refunds')).toBeTruthy()
       expect(lane('Running').queryByText('In the merge queue')).toBeNull()
     })
@@ -1147,7 +1147,7 @@ describe('the board', () => {
       )
       await userEvent.click(screen.getByRole('button', { name: 'Merge there' }))
       await waitFor(() => expect(merge).toHaveBeenCalled())
-      emit(changed('task', 't4'))
+      emit(changed('card', 't4'))
       expect(await lane('Needs you').findByText('Rate-limit refunds')).toBeTruthy()
       expect(lane('Running').queryByText('Merging')).toBeNull()
     })
@@ -1408,7 +1408,7 @@ describe('the board', () => {
     await waitFor(() => expect(mergeHere).toHaveBeenCalledWith('t4', [{ repository: 'tools', head: 'abc111' }]))
   })
 
-  it('is read again when something it shows changes, not for what is said in a thread', async () => {
+  it('is read again when a card of its comes out different, not for every change of its tasks', async () => {
     const getBoard = vi.fn(async () => board())
     const { client, emit } = fakeClient({ getBoard })
     withServices(<Project />, client)
@@ -1418,14 +1418,16 @@ describe('the board', () => {
     await act(async () => {
       emit(changed('thread_item', 'i9', 'th2'))
       emit(changed('user_input', 'u1', 'th2'))
-      // Another project's task isn't this board's.
-      emit(changed('task', 't9', null, 'p2'))
+      // A change of a task that left its card as it was: the runtime says which moved one.
+      emit(changed('turn_delivery', 'd1', 'th2'))
+      emit(changed('external_link', 'x1', null))
+      // Another project's card isn't this board's.
+      emit(changed('card', 't9', null, 'p2'))
       await new Promise((resolve) => setTimeout(resolve, 120))
     })
     expect(getBoard.mock.calls.length).toBe(reads)
     await act(async () => {
-      emit(changed('turn_delivery', 'd1', 'th2'))
-      emit(changed('external_link', 'x1', null))
+      emit(changed('card', 't2', 'th2'))
     })
     await waitFor(() => expect(getBoard.mock.calls.length).toBe(reads + 1))
   })
@@ -2200,7 +2202,7 @@ describe('a ready card’s next step, done from the card', () => {
             ? ready('s5', 'Commits to push', { localHead: 'def456', head: 'def456', unpushed: 0, additions: 20, deletions: 5 })
             : one,
         )
-        emit(changed('task', 's5'))
+        emit(changed('card', 's5'))
       }),
       getBoard: getBoard(),
     })

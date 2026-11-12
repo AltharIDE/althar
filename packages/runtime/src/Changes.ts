@@ -72,6 +72,7 @@ import {
   whereLine,
 } from './conflicts'
 import { coAuthorOn, creditBranch, type Memory, recallMade, rememberMade, withoutAgentCredit } from './credit'
+import { editPullRequest, personsWordOf, replyOnPullRequest } from './coordinatorPullRequests'
 import { envelope } from './envelope'
 import { evidencePaths, taskShown } from './evidence'
 import {
@@ -149,6 +150,7 @@ import {
 } from './pullRequestWords'
 import { change, fact, timestamp } from './records'
 import { retitleTask, TITLE_LENGTH } from './taskTitle'
+import { type Answers, answersOf, followUpBody, followUpWords } from './followUpWords'
 import { indexTask } from './Search'
 import { IssueChanges } from './IssueChanges'
 import { FastLane } from './fastLane'
@@ -264,6 +266,33 @@ const samePath = (a: ReadonlyArray<string>, b: ReadonlyArray<string>) => a.join(
 
 /** The branch a pull request's commits go to on its host: its own, as last seen, else the task's, as one Althar opened has. */
 const sourceOf = (snapshot: Snapshot, branch: string) => snapshot.source ?? branch
+
+/**
+ * A host's no to one repository of a task's several, on one line: which
+ * repository, what the host said, and the pull requests the others have open
+ * already, so none is opened twice and none is taken for missing.
+ */
+const severalFailed = (
+  repository: string,
+  error: ConnectorFailed,
+  done: ReadonlyArray<{ readonly kind: string; readonly change?: Snapshot }>,
+) => {
+  const open = done.flatMap((one) =>
+    one.kind === 'opened' && one.change !== undefined
+      ? [`${one.change.repository.join('/')} ${one.change.words.prefix}${one.change.number}`]
+      : [],
+  )
+  const others = open.length === 0 ? '' : `; ${open.join(', ')} ${open.length === 1 ? 'is' : 'are'} open`
+  return new ConnectorFailed({
+    product: error.product,
+    reason: error.reason,
+    message: `in ${repository}: ${error.message}${others}`,
+    ...(error.status === undefined ? {} : { status: error.status }),
+    ...(error.retryAt === undefined ? {} : { retryAt: error.retryAt }),
+    ...(error.scope === undefined ? {} : { scope: error.scope }),
+    ...(error.sizeLimit === undefined ? {} : { sizeLimit: error.sizeLimit }),
+  })
+}
 
 /** A task's change, as the card, the header and the accept view show it. */
 export interface ChangeSummary extends Snapshot {
@@ -1207,6 +1236,8 @@ export class Changes extends Context.Service<
         repository: { readonly slug: string; readonly template: string | null },
         since: string | null = null,
         review: { readonly seal: string | null; readonly details: string | null; readonly note?: string | null } | null = null,
+        /** What a next pull request says where the lead wrote nothing since the last: its finding and its commits (`followUpOf`). */
+        fallback: { readonly text: string; readonly answers: boolean } | null = null,
       ) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
@@ -1231,6 +1262,8 @@ export class Changes extends Context.Service<
           return bodyOf({
             built: built === null ? null : withoutAgentCredit(built, agentNames),
             lead: lead === undefined ? null : withoutAgentCredit(lead.summary, agentNames),
+            // Its finding and commits come first where it answers one: the lead's summary of the task doesn't say why this exists.
+            ...(fallback === null ? {} : fallback.answers ? { ahead: fallback.text } : { fallback: fallback.text }),
             issue,
             template: repository.template,
             written: written === undefined || written.text === null ? null : withoutAgentCredit(written.text, agentNames),
@@ -1357,6 +1390,9 @@ export class Changes extends Context.Service<
             else {
               const error = Cause.findErrorOption(one.cause)
               if (Option.isSome(error) && error.value instanceof NotConnected) unconnected ??= error.value
+              // A host's no to one of several, after others opened theirs: which repository it was, and where the rest are.
+              else if (Option.isSome(error) && error.value instanceof ConnectorFailed && tasks.length > 1)
+                return yield* severalFailed(task.name, error.value, done)
               else return yield* Effect.failCause(one.cause)
             }
           }
@@ -1493,6 +1529,67 @@ export class Changes extends Context.Service<
             }),
           )
           return { ...task, branch: fresh, baseCommit: base }
+        })
+
+      /**
+       * What a next pull request says of itself, after the one it follows (ADR-034): the words of its title (the lead's, given with its
+       * fix; for a fix of what a review found, else its first commit's subject, else the finding it answers; none for other work, which
+       * keeps the task's own title), and a description for where the lead wrote none: the
+       * finding a review after the merge made, and the commits since. The finding is the one the person had the lead fix, if it was
+       * asked for one; none otherwise.
+       */
+      const followUpOf = (
+        taskId: string,
+        threadId: string,
+        path: string,
+        next: Unshipped & { readonly change: NonNullable<Unshipped['change']> },
+      ) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const [review] = yield* sql<{ findings: string | null }>`
+            SELECT json_extract(content, '$.fixing.findings') AS findings FROM thread_items
+            WHERE thread_id = ${threadId} AND kind = 'notice' AND json_extract(content, '$.fixing.url') = ${next.change.url}
+              AND (${next.openedAt} IS NULL OR created_at > ${next.openedAt})
+            ORDER BY sequence DESC LIMIT 1`
+          const findings: ReadonlyArray<Answers> = answersOf(review?.findings)
+          const [titled] = yield* sql<{ text: string | null }>`
+            SELECT json_extract(content, '$.title') AS text FROM thread_items WHERE thread_id = ${threadId} AND kind = 'step_result'
+              AND json_extract(content, '$.title') IS NOT NULL AND (${next.openedAt} IS NULL OR created_at > ${next.openedAt})
+            ORDER BY sequence DESC LIMIT 1`
+          const listed =
+            next.commits.length === 0
+              ? ''
+              : yield* git(path, 'log', '--no-walk=unsorted', '--format=%s%x1f%b%x1e', ...next.commits).pipe(Effect.orElseSucceed(() => ''))
+          const commits = listed
+            .split('\x1e')
+            .map((entry) => entry.trim())
+            .filter((entry) => entry !== '')
+            .map((entry) => {
+              const at = entry.indexOf('\x1f')
+              return { subject: at === -1 ? entry : entry.slice(0, at), body: at === -1 ? '' : entry.slice(at + 1) }
+            })
+          return {
+            words: followUpWords(
+              {
+                written: titled?.text === undefined ? null : withoutAgentCredit(titled.text ?? '', agentNames),
+                // A fix of what a review found is named for its commit or its finding; other work after a merge keeps the task's own title.
+                commits: findings.length === 0 ? [] : commits,
+                findings,
+              },
+              agentNames,
+              yield* issueKeyOf(taskId),
+              TITLE_LENGTH - `After ${next.change.words.prefix}${next.change.number}: `.length,
+            ),
+            body: {
+              text: followUpBody({
+                follows: `${next.change.words.prefix}${next.change.number}`,
+                state: next.change.state === 'closed' ? 'closed' : 'merged',
+                findings,
+                commits,
+              }),
+              answers: findings.length > 0,
+            },
+          }
         })
 
       /**
@@ -1636,9 +1733,15 @@ export class Changes extends Context.Service<
           // The team's conventions, as the task's worktree has them now, under the person's own rule for titles.
           const conventions = yield* conventionsAt(task.path, 'HEAD')
           const rule = ruleOf('title', (yield* (yield* Policies).current(input.projectId)).rules.titlePattern)
-          // A task's next pull request, after its last merged or closed, says which it follows (ADR-034).
+          // A task's next pull request, after its last merged or closed, says which it follows (ADR-034), and then what it does:
+          // its own words, not the task's, which say what the first one did.
+          const following =
+            next?.change == null ? null : yield* followUpOf(input.taskId, task.threadId, task.path, { ...next, change: next.change })
           const title = titleFor(rule ?? conventions.title?.pattern ?? null, {
-            title: next?.change == null ? task.title : `After ${next.change.words.prefix}${next.change.number}: ${task.title}`,
+            title:
+              next?.change == null
+                ? task.title
+                : `After ${next.change.words.prefix}${next.change.number}: ${following?.words ?? task.title}`,
             issue: issueLink === undefined ? null : { key: issueLink.key, sameHost },
           })
           const body = yield* bodyFor(
@@ -1647,6 +1750,7 @@ export class Changes extends Context.Service<
             { slug: task.slug, template: conventions.template?.text ?? null },
             next?.openedAt ?? null,
             yield* reviewFor({ runId: input.runId, workspaceId: task.workspaceId, cwd: task.path, end, github: host.product === 'github' }),
+            following?.body ?? null,
           )
           const opened = yield* outward({
             projectId: input.projectId,
@@ -1779,7 +1883,8 @@ export class Changes extends Context.Service<
           yield* touchCard(input.taskId)
           yield* news(input.taskId)
           wakeNow(input.taskId)
-          const [row] = yield* linksOf(input.taskId)
+          // This pull request's own link: the task's first is an earlier one's, merged or closed, where this is a next.
+          const row = (yield* linksOf(input.taskId)).find((one) => one.id === linkId)
           return {
             kind: 'opened',
             change: { ...snapshot, linkId, product: host.product, listening: row?.listening === 1 },
@@ -4530,8 +4635,10 @@ export class Changes extends Context.Service<
                 AND o.observed_at >= max(r.ended_at, coalesce((SELECT max(p.observed_at) FROM observations p
                   WHERE p.subject_type = 'external_link' AND p.subject_id = l.id AND p.kind = 'checks'
                   AND json_extract(p.payload, '$.outcome') = 'passed'), ''))) AS failed
-            FROM tasks k JOIN runs r ON r.id = (SELECT id FROM runs WHERE task_id = k.id AND plan_id IS NOT NULL ORDER BY created_at DESC LIMIT 1)
-            JOIN external_links l ON l.task_id = k.id AND l.kind = 'change'
+            FROM tasks k JOIN external_links l ON l.task_id = k.id AND l.kind = 'change'
+            -- The run whose end it came back from: its plan's, or, for a next pull request, the Ship that opened it (created before it).
+            JOIN runs r ON r.id = (SELECT id FROM runs WHERE task_id = k.id AND (plan_id IS NOT NULL OR created_at <= l.created_at)
+              ORDER BY created_at DESC, rowid DESC LIMIT 1)
             WHERE k.id = ${taskId} AND k.state = 'open' AND r.state = 'succeeded'
               AND r.ended_at IS NOT NULL AND (k.seen_at IS NULL OR k.seen_at < r.ended_at)
               AND json_extract(l.snapshot, '$.state') = 'open' AND l.listening = 1
@@ -4578,7 +4685,8 @@ export class Changes extends Context.Service<
             spokenAt: string | null
           }>`
             SELECT l.id, l.snapshot,
-              (SELECT ended_at FROM runs WHERE task_id = k.id AND plan_id IS NOT NULL ORDER BY created_at DESC LIMIT 1) AS ended_at,
+              (SELECT ended_at FROM runs WHERE task_id = k.id AND (plan_id IS NOT NULL OR created_at <= l.created_at)
+                ORDER BY created_at DESC, rowid DESC LIMIT 1) AS ended_at,
               (SELECT max(p.observed_at) FROM observations p WHERE p.subject_type = 'external_link' AND p.subject_id = l.id
                 AND p.kind = 'pushed') AS pushed_at,
               EXISTS (SELECT 1 FROM external_links e JOIN observations c ON c.subject_type = 'external_link' AND c.subject_id = e.id
@@ -8452,6 +8560,9 @@ export class Changes extends Context.Service<
       }
 
       /** A lead's tool: refusals reach it in words; anything else says to try again, and goes to the log. */
+      /** Whether a pull request a lead names is named as any of the project's are, by its link or number, not as one of its task's (web#3). */
+      const elsewhere = (name: string) => /^https?:\/\//i.test(name) || /^#?\d+$/.test(name)
+
       const leadTool = (
         name: string,
         description: string,
@@ -8563,10 +8674,18 @@ export class Changes extends Context.Service<
         ),
         leadTool(
           'reply_on_pull_request',
-          "Replies on the task's pull request: in a line comment's thread, by its thread id, or in its conversation without one. In a task of several repositories, pull_request names the one to reply on, by its repository and number, as read_pull_request names it: web#3. For answering what people said; a change to the code is a commit, which push_to_pull_request pushes or asks the person to.",
+          "Replies on the task's pull request: in a line comment's thread, by its thread id, or in its conversation without one. In a task of several repositories, pull_request names the one to reply on, by its repository and number, as read_pull_request names it: web#3. Any other of the project's pull requests too, by its link or number: at once on one Althar opened, the person's own or one by the repository's own people; an outside author's on the person's word, their message in this turn that asks it (message, from read_turn). For answering what people said; a change to the code is a commit, which push_to_pull_request pushes or asks the person to.",
           {
             type: 'object',
-            properties: { body: { type: 'string' }, thread_id: { type: 'string' }, pull_request: { type: 'string' } },
+            properties: {
+              body: { type: 'string' },
+              thread_id: { type: 'string' },
+              pull_request: { type: 'string' },
+              message: {
+                type: 'string',
+                description: "The person's message in this turn that asks it, from read_turn: for an outside author's.",
+              },
+            },
             required: ['body'],
           },
           (taskId, input, access) =>
@@ -8587,6 +8706,9 @@ export class Changes extends Context.Service<
               const asked = replied.pull_request == null ? null : String(replied.pull_request).trim().toLowerCase()
               const matching = seen.filter((candidate) => asked !== null && isNamed(candidate, asked))
               const [named] = matching
+              // One not the task's, by its link or number: any of the project's, as the coordinator replies on it.
+              if (asked !== null && matching.length === 0 && elsewhere(asked))
+                return yield* replyOnPullRequest(access.projectId, input, by, personsWordOf(errands, access))
               if (seen.length > 1 && (named === undefined || matching.length > 1))
                 return yield* new ToolRefused({
                   message: `This task has several pull requests: ${seen.map(shortNameOf).join(', ')}. Say which with pull_request, as one of those.`,
@@ -8611,9 +8733,13 @@ export class Changes extends Context.Service<
               title: { type: 'string', maxLength: TITLE_LENGTH },
               description: { type: 'string' },
               pull_request: { type: 'string' },
+              message: {
+                type: 'string',
+                description: "The person's message in this turn that asks it, from read_turn: for an outside author's.",
+              },
             },
           },
-          (taskId, input) =>
+          (taskId, input, access) =>
             Effect.gen(function* () {
               const asked = yield* Schema.decodeUnknownEffect(EditAsked)(input).pipe(
                 Effect.mapError((error) => new ToolRefused({ message: `Althar couldn't read that: ${error.message}` })),
@@ -8622,13 +8748,22 @@ export class Changes extends Context.Service<
               const named = asked.pull_request == null ? null : String(asked.pull_request).trim().toLowerCase()
               const matching = seen.filter((candidate) => named !== null && isNamed(candidate, named))
               const [one] = matching
-              // A name given must be one of the task's, with one pull request as with several: another's is never edited.
+              // One not the task's, by its link or number: any of the project's, as the coordinator edits it (11 Nov).
+              if (named !== null && matching.length === 0 && elsewhere(named))
+                return yield* editPullRequest(
+                  access.projectId,
+                  input,
+                  (other, change) => edit(other, change, instance.systemId),
+                  agents.list.map((entry) => entry.definition.name),
+                  personsWordOf(errands, access),
+                )
+              // A name of the task's kind (web#3) must be one of its own, with one pull request as with several.
               if ((named !== null || seen.length > 1) && (one === undefined || matching.length > 1))
                 return yield* new ToolRefused({
                   message:
                     seen.length > 1
-                      ? `This task has several pull requests: ${seen.map(shortNameOf).join(', ')}. Say which with pull_request, as one of those.`
-                      : `This task's pull request is ${seen.map(nameOf).join('')}, and it edits only its own. Leave pull_request out, or name it so.`,
+                      ? `This task has several pull requests: ${seen.map(shortNameOf).join(', ')}. Say which with pull_request, as one of those, or another of the project's by its link or number.`
+                      : `This task's pull request is ${seen.map(nameOf).join('')}. Leave pull_request out for it, or name another of the project's by its link or number.`,
                 })
               return yield* locked(taskId)(
                 edit(

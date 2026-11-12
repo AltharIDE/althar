@@ -282,6 +282,9 @@ export const makeStallWatch = (limits: StallLimits) => {
         // What it asked waits on the person no longer through it: a question outlives its session (ADR-021), but the next one's turns aren't waiting.
         watch.asking.clear()
         return []
+      // What the person said is heard; the turn it reaches is what the watch follows.
+      case 'PersonSaid':
+        return []
       case 'AttentionNeeded':
         watch.asking.add(event.attentionId)
         watch.lifeAt = now

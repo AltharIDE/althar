@@ -421,7 +421,7 @@ export class Reviews extends Context.Service<
       lead: { readonly agentId: string; readonly model: string | null; readonly effort?: string | null | undefined },
       actorId: ActorId,
     ): Effect.Effect<boolean, unknown>
-    /** Refuses, in words for the person, an agent its session can't hold to reading only: it can't lead a review. */
+    /** Refuses an agent Althar doesn't have: any it has may lead a review (the person's note of 11 Nov). */
     canLead(agentId: string): Effect.Effect<void, ReviewRefused>
     /** Changes a draft before it is posted: its verdict, summary, and which comments are kept or what they say. */
     change(
@@ -575,7 +575,7 @@ export class Reviews extends Context.Service<
             const posts = !outside && (automated === undefined ? yield* postTeamReviews : automated.postsReviews === 1)
             const words = { title: pull.title, author, outside, name, posts }
             if (already !== undefined) return { ...already, ...words, already: true, leading: false } satisfies Started
-            yield* canLead(input.lead.agentId, name)
+            yield* canLead(input.lead.agentId)
 
             // Its head and its target, fetched as a push is signed in, into refs of Althar's own: nothing is a branch here.
             const ref = `refs/althar/reviews/${place.path.join('/')}/${pull.number}`
@@ -758,18 +758,11 @@ export class Reviews extends Context.Service<
         )
 
       /**
-       * Only an agent its session holds to reading leads a review (the registry's `reviewing`; Sessions.ts refuses any other
-       * there too): one that runs what its sandbox contains without asking could run the pull request's code, a team's too.
+       * Any agent Althar has leads a review, whatever its sandbox holds it to (the person's note of 11 Nov): what it
+       * publishes stays a draft the person posts, and its commands run in its OS sandbox.
        */
-      const canLead = (agentId: string, name = 'pull request') =>
-        Effect.gen(function* () {
-          const leading = yield* agents.get(agentId).pipe(Effect.mapError(() => refused('Althar has no such agent.')))
-          if (leading.definition.reviewing?.outside === true) return
-          const held = agents.list.filter((entry) => entry.definition.reviewing?.outside === true).map((entry) => entry.definition.name)
-          return yield* refused(
-            `${leading.definition.name} can't be held to reading only: it runs commands its sandbox contains without asking, so it could run this ${name}'s code. Review it with ${held.join(' or ')}.`,
-          )
-        })
+      const canLead = (agentId: string) =>
+        Effect.asVoid(agents.get(agentId).pipe(Effect.mapError(() => refused('Althar has no such agent.'))))
 
       /** Its lead, told to start: its brief says the rest. */
       const leadOn = (
@@ -809,7 +802,7 @@ export class Reviews extends Context.Service<
             const reviewed = yield* reviewOf(taskId)
             if (thread === undefined || reviewed === null) return yield* new NotFound({ kind: 'task', id: taskId })
             const name = `${reviewed.words.noun} ${reviewed.words.prefix}${reviewed.number}`
-            yield* canLead(chosen.agentId, name)
+            yield* canLead(chosen.agentId)
             return yield* leadOn(thread.id, reviewed.url, name, chosen, actorId)
           }),
         )

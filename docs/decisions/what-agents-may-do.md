@@ -144,8 +144,9 @@ only on the person's word. A lead's `push_tag` also asks every time. See
 ## Speaking for the person
 
 A post (a review, a comment or a reply) goes ahead on a pull request or issue
-that a task of Althar's opened or came from. Anywhere else it is speaking for
-the person and asks. A reply to an outside author always asks. So does a
+that a task of Althar's opened or came from, the person's own, or one by the
+repository's own people. A reply to an outside author goes on the person's
+word, their message in the turn that asks it. So does a
 message through another service, such as an MCP server's Slack message or
 email. Merely following a pull request doesn't make it Althar's: Althar
 follows every open one.
@@ -155,8 +156,6 @@ follows every open one.
 - Every post through an MCP server asks, the task's own pull request
   included. Althar can't yet tell from a server's call whose pull request it
   is. Althar's own tools follow the rule above.
-- A reply to an outside author through Althar's tools is refused rather than
-  asked (`coordinatorPullRequests.ts`).
 
 ## The sandbox is the boundary
 

@@ -34,7 +34,7 @@ import { queuedOf, queueShown, readingNow, withQueued } from '../../shared/items
 import { ModelChoice } from '../../shared/ModelChoice'
 import { useModelNames } from '../../shared/modelNames'
 import { PartPending, pendingText } from '../../shared/Pending'
-import { type Choice, runningOn } from '../../shared/models'
+import { type Choice, runningOn, upcomingOn } from '../../shared/models'
 import { usualLead } from '../automations/lead'
 import { RunOf } from '../../shared/RunOf'
 import { Runs } from '../runs/Runs'
@@ -369,6 +369,8 @@ export function ProjectView({
   const images = useAttachments(draftOf, useServices().host)
   const models = useModels()
   const [pick, setPick] = useState<Choice | null>(null)
+  // A model or effort of the coordinator's own agent, picked and not yet taken by the runtime.
+  const [moving, setMoving] = useState<Choice | null>(null)
   // Another agent's model, picked while the coordinator runs: it takes over with what the person says next.
   const [handover, setHandover] = useState<Choice | null>(null)
   const coordinator = model.coordinator
@@ -399,7 +401,9 @@ export function ProjectView({
   const waiting = session === null || !session.held || handover?.agentId === session.agentId ? null : handover
   const chosen: Choice | null =
     waiting ??
-    (session === null || !session.held ? null : runningOn(session)) ??
+    (session === null || !session.held
+      ? null
+      : ((moving === null ? null : { ...moving, agentId: session.agentId }) ?? upcomingOn(session) ?? runningOn(session))) ??
     pick ??
     (suggested?.available === true ? { agentId: suggested.agentId, model: suggested.model, effort: suggested.effort } : null) ??
     (first === undefined ? null : { agentId: first.id, model: null, effort: null })
@@ -511,7 +515,9 @@ export function ProjectView({
     if (session === null || !session.held) return setPick(next)
     if (next.agentId !== session.agentId) return setHandover(next)
     setHandover(null)
-    void model.choose(next)
+    setMoving(next)
+    // Only the last pick's end takes the choice shown away: one made after is still on its way.
+    void model.choose(next).then(() => setMoving((now) => (now === next ? null : now)))
   }
   // A queued message goes back in the composer to be changed, and out of the queue, unless the coordinator has it already.
   const edit = async (id: string) => {
@@ -544,7 +550,7 @@ export function ProjectView({
       </>
     ) : (session === null || !session.held) && model.agentsKnown && model.agents.length === 0 ? (
       <>
-        {text.needsAgent} {ways !== undefined && <LinkButton onClick={ways.agents}>{text.signOneIn}</LinkButton>}
+        {text.needsAgent} {ways !== undefined && <LinkButton onClick={() => ways.agents()}>{text.signOneIn}</LinkButton>}
       </>
     ) : (session === null || !session.held) && model.agentsKnown && suggested !== null && !suggested.available && chosen !== null ? (
       <>
@@ -927,7 +933,12 @@ export function ProjectView({
                       folds={folds}
                       onFoldsChange={setFolds}
                       onTalk={talkToCoordinator}
-                      team={{ projectId, start: (planId) => model.startPlan(planId), change: setTeamFor }}
+                      team={{
+                        projectId,
+                        start: (planId) => model.startPlan(planId),
+                        hold: (planId) => model.holdPlan(planId),
+                        change: setTeamFor,
+                      }}
                       {...(board.moreSettled ? { onShowOlder: board.showOlder } : {})}
                     />
                     {teamFor !== null && (

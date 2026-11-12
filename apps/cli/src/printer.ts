@@ -38,6 +38,8 @@ export const printer = (threadId: string): Printer => {
       case 'SessionEnded':
         return line(`● The session ended: ${event.state}.`)
       case 'TurnStarted':
+      // What the person said is theirs already, on their own screen.
+      case 'PersonSaid':
       // The agent's own events already stream the message here; a command's output is the window's to show.
       case 'Streaming':
       case 'Output':

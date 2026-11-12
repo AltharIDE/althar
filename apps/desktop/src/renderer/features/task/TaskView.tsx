@@ -56,9 +56,10 @@ import { queuedOf, queueShown, readingNow, withQueued } from '../../shared/items
 import { ModelChoice } from '../../shared/ModelChoice'
 import { pendingText } from '../../shared/Pending'
 import { useModelNames } from '../../shared/modelNames'
-import { type Choice, runningOn } from '../../shared/models'
+import { type Choice, runningOn, upcomingOn } from '../../shared/models'
 import { issuePriority, issueStatus, productBrand, productName } from '../../shared/products'
 import { afterMergeText, readyWordOf, shipText } from '../../shared/standing'
+import { taskStatusOf } from '../../shared/taskStatus'
 import { stepText, trackFor } from '../../shared/steps'
 import { inMergeQueue, MERGE_QUEUE_STEP } from '../../data/merges'
 import { ago, clock, running, useNow } from '../../shared/time'
@@ -84,6 +85,7 @@ import { usePostTeamReviews } from '../settings/usePostTeamReviews'
 import { HeldLimit } from './LimitCall'
 import { StuckCall } from './StuckCall'
 import { coordinatorSigned } from '../../shared/signed'
+import { countsDown, StartedOf, type StartedReading, startedBy, startedIn, useStartedBoard } from './Started'
 import { TaskThread, workStepText } from './TaskThread'
 import { SmallChangeOf } from './SmallChangeOf'
 import { ModelMoveOf } from './ModelMoveOf'
@@ -98,7 +100,7 @@ import { conflictsOf, hasOutputs, hasOutputsToShow, latestOf, Outputs } from './
 import s from './Task.module.css'
 import { OpenFinding } from './Reports'
 import { useChanges } from './useChanges'
-import { ChangeTeam, useTeamed } from '../team/Team'
+import { canHold, ChangeTeam, useTeamed } from '../team/Team'
 import type { TaskModel } from './useTask'
 import { chooseFace, chosenFaces } from './chosenFaces'
 import { PageOpenerProvider, useOpener } from '../browser/opener'
@@ -211,72 +213,78 @@ export const statusOf = (
   snapshot: ThreadSnapshot,
   agentName: (id: string) => string = (id) => id,
 ): { readonly status: TaskStatus; readonly state: string; readonly why?: string } => {
-  if (snapshot.attention.length > 0) return { status: TaskStatus.Yours, state: text.needsYou }
-  // No call waits, yet the task does: issues its lead drafted wait to be filed, or changes it proposed to its issue to be applied.
-  if (snapshot.task.phase === 'waiting')
-    return {
-      status: TaskStatus.Yours,
-      state: snapshot.items.some(
-        (item) => item.kind === 'issue_draft' && item.content.state !== 'filed' && item.content.state !== 'discarded',
-      )
-        ? text.issues
-        : text.issueChanges,
-    }
   const { waits, queued, phase, step } = snapshot.task
-  if (waits !== null)
-    return { status: TaskStatus.Paused, state: waitsWords(agentName(waits.agentId), clock(waits.until), step, waits.left) }
-  // Held for the connection, it carries on by itself once it is back (ADR-060).
-  if (snapshot.task.reconnects != null) return { status: TaskStatus.Paused, state: reconnectsWords(snapshot.task.reconnects, clock) }
-  if (queued !== null) return { status: TaskStatus.Queued, state: queuedWords(queued) }
-  // Started Local, it waits for its checkout: another task's there, or the person's changes aren't committed (ADR-096).
-  if (snapshot.task.waitsForCheckout != null)
-    return { status: TaskStatus.Queued, state: localText.word, why: localText.waits(snapshot.task.waitsForCheckout) }
-  // Its folder coming back from its branch, set up again, before anything it was asked goes on (ADR-056).
-  if (snapshot.task.folder === 'returning') return { status: TaskStatus.Running, state: text.returning }
+  const queuedToMerge = phase === 'ready' && inMergeQueue(snapshot.task.changes)
+  // Where it stands is its card's, as the board and the home say it (`taskStatusOf`); only the words are the header's own.
+  const status = taskStatusOf({ ...snapshot.task, inMergeQueue: queuedToMerge, calls: snapshot.attention.length })
   // A round of work after its plan is its lead following up, as the person asked (ADR-034).
   const doing =
     step === null ? undefined : step === 'implement' && snapshot.task.followUp === true ? stepText.followingUp : stepText.now[step]
-  if (snapshot.session?.turnRunning === true) return { status: TaskStatus.Running, state: doing ?? text.working }
-  // A review drafted is the person's to post (DEV-96).
-  if (phase === 'ready' && snapshot.task.review != null && !isAnswered(snapshot.task.review))
-    return { status: TaskStatus.Yours, state: text.drafted }
-  // What its review after a merge found: the person's Fix it or Leave it, beside it.
-  if (phase === 'ready' && snapshot.task.afterMerge?.state === 'found')
-    return {
-      status: TaskStatus.Yours,
-      state: afterMergeText.sentence(snapshot.task.afterMerge.findings, snapshot.task.afterMerge.words),
+  switch (status) {
+    case TaskStatus.Yours: {
+      if (snapshot.attention.length > 0) return { status, state: text.needsYou }
+      // No call waits, yet the task does: issues its lead drafted wait to be filed, or changes it proposed to its issue to be applied.
+      if (phase === 'waiting')
+        return {
+          status,
+          state: snapshot.items.some(
+            (item) => item.kind === 'issue_draft' && item.content.state !== 'filed' && item.content.state !== 'discarded',
+          )
+            ? text.issues
+            : text.issueChanges,
+        }
+      // A review drafted is the person's to post (DEV-96).
+      if (snapshot.task.review != null && !isAnswered(snapshot.task.review)) return { status, state: text.drafted }
+      // What its review after a merge found: the person's Fix it or Leave it, beside it.
+      if (snapshot.task.afterMerge?.state === 'found')
+        return { status, state: afterMergeText.sentence(snapshot.task.afterMerge.findings, snapshot.task.afterMerge.words) }
+      // Held for Ship: what waits on its branch, and Ship beside it, whatever kind of task it is.
+      if (snapshot.task.held !== undefined) return { status, state: shipText.commits(snapshot.task.held.commits) }
+      // A task that isn't a change, finished: settling it, or keeping it for later, is the person's.
+      if (snapshot.task.kind === 'plain' || snapshot.task.kind === 'review') return { status, state: text.finished }
+      // Said as its card on the board says it: a conflict its lead couldn't resolve, commits for a new pull request, a pull request
+      // with something in its way. A run that passed review is ready, whatever its lead is doing now: accepting it is the person's.
+      return { status, state: readyWordOf(snapshot.task, latestOf(snapshot.task.changes).latest[0] ?? null) }
     }
-  // Held for Ship: what waits on its branch, and Ship beside it, whatever kind of task it is.
-  if (phase === 'ready' && snapshot.task.held !== undefined)
-    return { status: TaskStatus.Yours, state: shipText.commits(snapshot.task.held.commits) }
-  // A task that isn't a change, finished: settling it, or keeping it for later, is the person's.
-  if (phase === 'ready' && (snapshot.task.kind === 'plain' || snapshot.task.kind === 'review'))
-    return { status: TaskStatus.Yours, state: text.finished }
-  if (phase === 'ready') {
-    // Said as its card on the board says it: a conflict its lead couldn't resolve, commits for a new pull request, a pull request
-    // with something in its way.
-    const ready = readyWordOf(snapshot.task, latestOf(snapshot.task.changes).latest[0] ?? null)
-    // Accepted, and in its branch's merge queue: its host merges it once the queue's checks pass, so it isn't the person's meanwhile.
-    if (inMergeQueue(snapshot.task.changes)) return { status: TaskStatus.Running, state: stepText.now[MERGE_QUEUE_STEP] ?? ready }
-    // A run that passed review is ready, whatever its lead is doing now: accepting it is the person's.
-    return { status: TaskStatus.Yours, state: ready }
+    case TaskStatus.Paused:
+      if (waits !== null) return { status, state: waitsWords(agentName(waits.agentId), clock(waits.until), step, waits.left) }
+      // Held for the connection, it carries on by itself once it is back (ADR-060).
+      if (snapshot.task.reconnects != null) return { status, state: reconnectsWords(snapshot.task.reconnects, clock) }
+      // Kept for later: out of Needs you as it is, until the person writes to it or settles it.
+      return { status, state: text.kept }
+    case TaskStatus.Queued:
+      if (queued !== null) return { status, state: queuedWords(queued) }
+      // Started Local, it waits for its checkout: another task's there, or the person's changes aren't committed (ADR-096).
+      return {
+        status,
+        state: localText.word,
+        ...(snapshot.task.waitsForCheckout == null ? {} : { why: localText.waits(snapshot.task.waitsForCheckout) }),
+      }
+    case TaskStatus.Done:
+      // Abandoned, it says so in place of where it stood, as stopped does.
+      return { status, state: snapshot.task.state === 'abandoned' ? text.abandoned : text.done }
+    case TaskStatus.Stopped: {
+      const by = snapshot.task.stopped?.by
+      // Its pull request ready to merge as it is: said beside the word, as what stopped it is not all there is to say.
+      const state = snapshot.task.mergeable === true ? stepText.stoppedMergeable : stepText.stopped
+      return { status, state, ...(by == null ? {} : { why: stepText.stoppedBy[by] }) }
+    }
+    case TaskStatus.Running:
+      // Accepted, and in its branch's merge queue: its host merges it once the queue's checks pass, so it isn't the person's meanwhile.
+      if (queuedToMerge)
+        return {
+          status,
+          state: stepText.now[MERGE_QUEUE_STEP] ?? readyWordOf(snapshot.task, latestOf(snapshot.task.changes).latest[0] ?? null),
+        }
+      // Its folder coming back from its branch, set up again, before anything it was asked goes on (ADR-056).
+      if (snapshot.task.folder === 'returning') return { status, state: text.returning }
+      // On a step: what it does there, a review while its lead waits included.
+      if (doing !== undefined) return { status, state: doing }
+      // Drafted by the coordinator, or its plan counting down or held: being planned.
+      if (phase === 'drafting' || phase === 'planned' || phase === 'held') return { status, state: text.planning }
+      // Its lead's session kept, with no turn running: idle; else at work, between agents, or on its way, as the board says.
+      return { status, state: snapshot.session?.held === true && snapshot.session.turnRunning !== true ? text.idle : text.working }
   }
-  // Kept for later: out of Needs you as it is, until the person writes to it or settles it.
-  if (phase === 'kept') return { status: TaskStatus.Paused, state: text.kept }
-  // Abandoned, it says so in place of where it stood, as stopped does.
-  if (phase === 'settled') return { status: TaskStatus.Done, state: snapshot.task.state === 'abandoned' ? text.abandoned : text.done }
-  // On a step another agent takes, a review, while its lead waits.
-  if (phase === 'running' && doing !== undefined) return { status: TaskStatus.Running, state: doing }
-  // Drafted by the coordinator, its plan not proposed yet: under way, nowhere on the board.
-  if (phase === 'drafting') return { status: TaskStatus.Running, state: text.planning }
-  // Stopped, as its card says, whatever session its lead keeps; and what stopped it, where something says, in the board's words.
-  if (phase === 'stopped' || snapshot.session === null || !snapshot.session.held) {
-    const by = snapshot.task.stopped?.by
-    // Its pull request ready to merge as it is: said beside the word, as what stopped it is not all there is to say.
-    const state = snapshot.task.mergeable === true ? stepText.stoppedMergeable : stepText.stopped
-    return { status: TaskStatus.Stopped, state, ...(by == null ? {} : { why: stepText.stoppedBy[by] }) }
-  }
-  return { status: TaskStatus.Running, state: text.idle }
 }
 
 /** A task's clock runs while it is under way or waits on the person. */
@@ -368,6 +376,7 @@ export function TaskView({
   onBack,
   onRules,
   onSignIn,
+  onInstall,
   onConnections,
   onOpenTask,
   aside,
@@ -379,6 +388,8 @@ export function TaskView({
   onRules?: () => void
   /** Opens Settings at an agent's sign-in, started, for a lead that is signed out. */
   onSignIn?: (agentId: string) => void
+  /** Opens the agent's tab in Settings, where it is installed, for a step whose agent isn't. */
+  onInstall?: (agentId: string) => void
   /** Opens the code hosts and trackers in Settings, for one to connect or sign in to again. */
   onConnections?: () => void
   /** Opens another task, by its thread: one this task's lead started, from its thread's line. */
@@ -414,6 +425,8 @@ export function TaskView({
   // Whether the person has their team's reviews posted once drafted: what a review's reach says it posts.
   const postsTeamReviews = usePostTeamReviews()?.on === true
   const [pick, setPick] = useState<Choice | null>(null)
+  // A model or effort of the lead's own agent, picked and not yet taken by the runtime.
+  const [moving, setMoving] = useState<Choice | null>(null)
   // Another agent's model, picked while a lead is on the task: it takes over with what the person says next.
   const [handover, setHandover] = useState<Choice | null>(null)
   // Where its code host is connected, opened beside its outputs once its branch is pushed.
@@ -597,9 +610,15 @@ export function TaskView({
     },
     [setFace],
   )
+  // The tasks its lead started, as the board has them: a chip where each was started, and a part of its own.
+  const board = useStartedBoard(model.snapshot?.project.id)
+  const started = startedBy(board, model.snapshot?.task.id)
+  const startedAll = startedIn(board, model.snapshot?.started)
   // A running turn says how long it has worked so far, a task under way how long it has run, and a run of it how long it has been up.
   const now = useNow(
     ticking(model.snapshot) ||
+      // A task it started that counts down to starting on its own.
+      started.some(countsDown) ||
       // While what the person sent is on its way, or the lead starts for it, how long they have waited.
       model.pending ||
       model.snapshot?.session?.state === 'starting' ||
@@ -631,9 +650,13 @@ export function TaskView({
   const agentName = (id: string | null) =>
     model.agents.find((agent) => agent.id === id)?.name ?? (id === session?.agentId ? session.agentName : (id ?? ''))
   // Running or not, the task has its lead: the one on it now, else the last, else the one its plan names.
+  // Its model as just picked, or chosen for its next turn, where it is the same agent's: the header says what the picker says.
+  const next = session !== null && session.held ? (moving ?? upcomingOn(session)) : null
+  const leadModel =
+    session !== null && next !== null && next.agentId === session.agentId ? (next.model ?? session.model) : (session?.model ?? null)
   const lead =
     session !== null && session.held
-      ? named(session.agentId, session.model, session.account)
+      ? named(session.agentId, leadModel, session.account)
       : snapshot.task.lead === null
         ? noLead
         : named(snapshot.task.lead.agentId, snapshot.task.lead.model, snapshot.task.lead.account)
@@ -722,17 +745,13 @@ export function TaskView({
         ? null
         : { agentId: resume.id, model: null, effort: null })
   const waiting = session === null || !session.held || handover?.agentId === session.agentId ? null : handover
-  // Its lead changed from its next turn, by the team dialog or a tool: the picker shows who leads it then.
-  const upcoming = session?.held === true ? session.nextLead : null
-  const pending: Choice | null =
-    session === null || upcoming == null
-      ? null
-      : {
-          agentId: upcoming.agentId,
-          model: upcoming.model ?? (upcoming.agentId === session.agentId ? session.model : null),
-          effort: upcoming.effort ?? (upcoming.agentId === session.agentId ? session.effort : null),
-        }
-  const choice = session === null || !session.held ? chosen : (waiting ?? pending ?? runningOn(session))
+  // Its lead changed from its next turn, by the picker, the team dialog or a tool: the picker shows who leads it then, and so does the header.
+  const pending: Choice | null = session === null || !session.held ? null : upcomingOn(session)
+  // What the person just picked, shown until the runtime has it (or has refused it): at once, before anything is asked of the agent.
+  const choice =
+    session === null || !session.held
+      ? chosen
+      : (waiting ?? (moving !== null ? { ...moving, agentId: session.agentId } : null) ?? pending ?? runningOn(session))
 
   // The agent what the person says goes to: one picked to take over, else the lead on it, else the one it would start; and whether it takes images.
   const receiving = waiting?.agentId ?? (session?.held ? session.agentId : undefined) ?? chosen?.agentId ?? null
@@ -783,7 +802,10 @@ export function TaskView({
     if (session === null || !session.held) return setPick(next)
     if (next.agentId !== session.agentId) return setHandover(next)
     setHandover(null)
-    void model.choose(next)
+    setMoving(next)
+    // Taken or not, the thread says what the lead is on from here: the choice shown until then goes, and a refusal is said by the line above the composer.
+    // Only the last pick's end takes it away: one made after is still on its way.
+    void model.choose(next).then(() => setMoving((now) => (now === next ? null : now)))
   }
   // A queued message goes back in the composer to be changed, and out of the queue, unless the lead has it already.
   const edit = async (id: string) => {
@@ -892,8 +914,11 @@ export function TaskView({
     if (step.by === 'git') return { label: workStepText.dropIt, onPress: () => void model.dropChange(step.name) }
     return shipped ? undefined : { label: workStepText.keepTogether, onPress: () => void model.joinChanges(step.name) }
   }
+  const reading: StartedReading | null =
+    board === null || onOpenTask === undefined ? null : { board, now, agents: model.agents, onOpen: onOpenTask }
   // Its parts, just before the faces: what it changed is in its worktree's, which opens the changes over the window (ADR-097).
   const partsActions: PartsActions = {
+    ...(reading === null || startedAll.length === 0 ? {} : { started: { tasks: startedAll, reading } }),
     seeChanges: () => changes.show(),
     changesKey: text.diffKey,
     ...(snapshot.task.worktree === null || editor === undefined
@@ -944,6 +969,7 @@ export function TaskView({
         {...(snapshot.task.toward === undefined ? {} : { toward: snapshot.task.toward })}
         onRename={() => setRenaming(true)}
         {...(can('start') && planId !== null ? { onStartNow: () => void model.startPlan(planId) } : {})}
+        {...(teamed !== null && teamed.plan !== null && canHold(teamed) ? { onHold: () => void model.holdPlan(teamed.plan!.id) } : {})}
         {...(teamed === null ? {} : { onChangeTeam: () => setChangingTeam(true) })}
         {...(drafts.length > 0 ? { onMarkReady: () => void model.markAllReady(drafts.map((one) => one.url)) } : {})}
         // A task under way, or drafted, with a worktree, follows a pull request it didn't open, attached by its link (ADR-052); a
@@ -1152,6 +1178,7 @@ export function TaskView({
         agentName={agentName}
         onAnswer={model.answerStuck}
         {...(onSignIn === undefined ? {} : { onSignIn })}
+        {...(onInstall === undefined ? {} : { onInstall })}
         {...(onConnections === undefined ? {} : { onConnect: onConnections })}
         {...(reportProblem === undefined
           ? {}
@@ -1407,6 +1434,9 @@ export function TaskView({
                       {...(onSignIn === undefined || stuckOpen ? {} : { onSignIn })}
                       onPassOn={(words) => void model.send(words)}
                       {...(onOpenTask === undefined ? {} : { onOpenTask })}
+                      {...(reading === null
+                        ? {}
+                        : { started: (task) => <StartedOf threadId={task.threadId} title={task.title} reading={reading} /> })}
                       onAnswerQuestion={model.answerQuestion}
                       {...(asking == null ? {} : { focusQuestion: asking })}
                       run={(run) => (

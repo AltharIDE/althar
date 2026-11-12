@@ -333,18 +333,13 @@ describe('a heads-up of another task changing the same files', () => {
       assert.lengthOf(yield* told(first.threadId), 1)
       assert.lengthOf(yield* told(second.threadId), 1)
       assert.lengthOf(yield* told(idle.threadId), 0)
-      // Each thread says it too, as Althar's line naming the other task: once, and nothing on the idle one.
+      // Neither chat says it: it is about another task, so only the leads hear of it (above), quietly.
       const lines = (threadId: string) =>
-        sql<{ title: string; situation: string }>`
-          SELECT json_extract(content, '$.title') AS title, json_extract(content, '$.situation.kind') AS situation
-          FROM thread_items WHERE thread_id = ${threadId} AND kind = 'notice' AND json_extract(content, '$.situation') IS NOT NULL`
-      assert.deepStrictEqual(yield* lines(first.threadId), [
-        { title: 'Go service for payments changes `README.md` too. Both leads were told.', situation: 'overlap' },
-      ])
-      assert.deepStrictEqual(yield* lines(second.threadId), [
-        { title: 'Retry the checkout changes `README.md` too. Both leads were told.', situation: 'overlap' },
-      ])
-      assert.deepStrictEqual(yield* lines(idle.threadId), [])
+        sql<{ title: string }>`
+          SELECT json_extract(content, '$.title') AS title
+          FROM thread_items WHERE thread_id = ${threadId} AND kind = 'notice'
+            AND (json_extract(content, '$.situation') IS NOT NULL OR json_extract(content, '$.task') IS NOT NULL)`
+      for (const threadId of [first.threadId, second.threadId, idle.threadId]) assert.deepStrictEqual(yield* lines(threadId), [])
       const kept = yield* sql<{ taskId: string }>`
         SELECT aggregate_id AS task_id FROM record_events WHERE type = 'task.overlap_noticed' ORDER BY sequence`
       assert.sameMembers(

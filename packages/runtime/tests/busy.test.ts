@@ -1302,6 +1302,60 @@ describe('Agents at once, across a restart', () => {
     }),
   )
 
+  it.live('hold a task that waits for a place: it leaves the line, waits until it is started, and takes a place again then', () =>
+    Effect.gen(function* () {
+      const plans = yield* Plans
+      const sql = yield* SqlClient.SqlClient
+      const { projectId } = yield* opened
+      const first = yield* started(projectId, 'First', 'Work on it. [lead:wait]')
+      yield* working(first.taskId)
+      const second = yield* started(projectId, 'Second', 'Do it. [lead:finish]')
+      const third = yield* started(projectId, 'Third', 'Do it. [lead:finish]')
+      yield* waiting(second.taskId)
+      yield* waiting(third.taskId)
+      const queries = yield* Queries
+      const lineOf = () =>
+        Effect.map(Effect.orDie(queries.board(projectId)), (board) =>
+          board.tasks.filter((task) => task.inLine === true).map((task) => task.taskId),
+        )
+      assert.deepStrictEqual(yield* lineOf(), [second.taskId, third.taskId])
+
+      // Held while it waits, it is out of the line: the one behind it moves up, and it waits for the person, not a place.
+      assert.isTrue(yield* plans.hold(second.planId, yield* person))
+      assert.deepStrictEqual(yield* lineOf(), [third.taskId])
+      const held = yield* cardOf(projectId, second.taskId)
+      assert.strictEqual(held?.phase, 'held')
+      assert.isNull(held?.queued)
+      assert.isUndefined(held?.planWaits)
+      assert.deepStrictEqual(
+        (yield* sql<{ state: string; startsAt: string | null }>`SELECT state, starts_at FROM task_plans WHERE id = ${second.planId}`)[0],
+        { state: 'proposed', startsAt: null },
+      )
+      assert.deepStrictEqual(
+        (yield* attempts(second.taskId)).map((row) => row.state),
+        ['cancelled'],
+      )
+      // Held already, holding again changes nothing; and one at work isn't held.
+      assert.isFalse(yield* plans.hold(second.planId, yield* person))
+      assert.isFalse(yield* plans.hold(first.planId, yield* person))
+      assert.strictEqual((yield* cardOf(projectId, first.taskId))?.phase, 'running')
+
+      // A place frees: the one behind goes on, and the held one stays put.
+      const tasks = yield* Tasks
+      yield* tasks.stop({ envelope: yield* Runtime.envelope('task.stop', {}), taskId: first.taskId })
+      yield* until(attempts(third.taskId), (rows) => rows.some((row) => row.state === 'succeeded'))
+      assert.deepStrictEqual(
+        (yield* attempts(second.taskId)).map((row) => row.state),
+        ['cancelled'],
+      )
+
+      // Started again, it takes a place as a new task does, in line behind none, and runs once it has one.
+      assert.isNotNull(yield* plans.start(second.planId, yield* person))
+      yield* until(attempts(second.taskId), (rows) => rows.some((row) => row.state === 'succeeded'))
+      assert.strictEqual((yield* sql<{ n: number }>`SELECT count(*) AS n FROM runs WHERE task_id = ${second.taskId}`)[0]?.n, 2)
+    }).pipe(Effect.provide(machine(1))),
+  )
+
   it.live('keep what waits, and carry on what was working first, then what waited, oldest first', () =>
     Effect.gen(function* () {
       const file = store()

@@ -65,6 +65,7 @@ import type {
   StepResult,
   TaskCardContent,
 } from './thread'
+import { ReviewOfferOf } from '../features/team/ReviewOfferOf'
 import s from './ThreadBlocks.module.css'
 import { duration, lineOf, spentWords } from './turnTime'
 
@@ -322,11 +323,13 @@ export function PartView({ part, threadId }: { part: Part; threadId: string }) {
     case 'plan':
       return <Plan steps={part.steps} />
     case 'notice':
+      // A review a lead offered: its line asks, with its buttons, and says what came of it once answered.
+      if (part.offer?.kind === 'review') return <ReviewOfferOf offer={part.offer} ask={part.text} />
       return (
         <>
           <p className={s[part.tone]}>{part.text}</p>
           {part.detail !== undefined && <p className={s.detail}>{part.detail}</p>}
-          {part.offer !== undefined && <PresetOffer offer={part.offer} />}
+          {part.offer?.kind === 'preset' && <PresetOffer offer={part.offer} />}
         </>
       )
     case 'pictures':
@@ -442,7 +445,17 @@ export const logLines = (log: string) => {
  * wasn't passed to the lead, as anyone can comment on a public one; the
  * person reads it, and can pass it on.
  */
-function ArrivalView({ arrival, at, onPassOn }: { arrival: ArrivalContent; at: string; onPassOn?: (words: string) => void }) {
+function ArrivalView({
+  arrival,
+  at,
+  count,
+  onPassOn,
+}: {
+  arrival: ArrivalContent
+  at: string
+  count: number
+  onPassOn?: (words: string) => void
+}) {
   const where =
     arrival.path === null ? arrival.where : `${arrival.where} · ${arrival.path}${arrival.line === null ? '' : `:${arrival.line}`}`
   const verb = heardVerb(arrival)
@@ -462,6 +475,7 @@ function ArrivalView({ arrival, at, onPassOn }: { arrival: ArrivalContent; at: s
       verb={verb}
       where={where}
       at={at}
+      count={count}
       mark={productBrand(arrival.source)}
       {...(foot === false ? {} : { foot })}
     >
@@ -652,7 +666,15 @@ export function ThreadBlocks({
           </You>
         )
       case 'arrival':
-        return <ArrivalView key={block.id} arrival={block.arrival} at={block.at} {...(onPassOn === undefined ? {} : { onPassOn })} />
+        return (
+          <ArrivalView
+            key={block.id}
+            arrival={block.arrival}
+            at={block.at}
+            count={block.count}
+            {...(onPassOn === undefined ? {} : { onPassOn })}
+          />
+        )
       case 'divider':
         return (
           <ThreadDivider key={block.id} icon="agents">
@@ -660,6 +682,12 @@ export function ThreadBlocks({
           </ThreadDivider>
         )
       case 'offer':
+        if (block.offer.kind === 'review')
+          return (
+            <div key={block.id} className={s.offer}>
+              <ReviewOfferOf offer={block.offer} ask={block.text} />
+            </div>
+          )
         return (
           <div key={block.id} className={s.offer}>
             <p className={s.info}>{block.text}</p>

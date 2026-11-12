@@ -92,8 +92,11 @@ export class Plans extends Context.Service<
      * made, as when Althar stopped in between, runs now.
      */
     start(planId: string, actorId: ActorId): Effect.Effect<'running' | 'waiting' | null, unknown>
-    /** Holds a proposed plan until someone starts it. */
-    hold(planId: string, actorId: ActorId): Effect.Effect<void, unknown>
+    /**
+     * Holds a plan until someone starts it: one counting down, or one started whose first step still waits for a place or its
+     * checkout, which leaves the line. Whether it was held; a plan under way isn't.
+     */
+    hold(planId: string, actorId: ActorId): Effect.Effect<boolean, unknown>
     /**
      * Changes a proposed plan's steps (who does them, or which are skipped),
      * and what happens when the work is done; or a started one's, while its
@@ -283,6 +286,37 @@ export class Plans extends Context.Service<
           return !due && plan.state === 'accepted' ? yield* runs.run(planId) : null
         })
 
+      /**
+       * Holds a plan that hasn't begun: one counting down stops counting. One started, its first step waiting for a place among
+       * the agents at work here or for its checkout, goes back to a plan the person starts: its waiting step
+       * leaves the line, and a start makes its run anew. Whether it was held.
+       */
+      const hold = (planId: string, actorId: ActorId) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          if (yield* transition(planId, counting, () => ({ startsAt: null }), 'task_plan.held', actorId)) return true
+          const taken = yield* sql.withTransaction(
+            Effect.gen(function* () {
+              const plan = yield* load(planId)
+              if (plan.state !== 'accepted' || !(yield* runs.unstart(plan.taskId, actorId))) return undefined
+              const revision = yield* change('task_plans', planId, { state: 'proposed', startsAt: null, decidedAt: null })
+              yield* fact({
+                projectId: plan.projectId,
+                aggregateType: 'task_plan',
+                aggregateId: planId,
+                revision,
+                type: 'task_plan.held',
+                actorId,
+              })
+              return plan
+            }),
+          )
+          if (taken === undefined) return false
+          yield* touchCard(taken.taskId)
+          yield* Queue.offer(wake, undefined)
+          return true
+        })
+
       /** Plans that couldn't start when their time came, each waiting a while before it is tried again. */
       const tries = backoff()
 
@@ -323,8 +357,7 @@ export class Plans extends Context.Service<
       return Plans.of({
         propose,
         start: (planId, actorId) => provide(start(planId, actorId)),
-        hold: (planId, actorId) =>
-          provide(Effect.asVoid(transition(planId, counting, () => ({ startsAt: null }), 'task_plan.held', actorId))),
+        hold: (planId, actorId) => provide(hold(planId, actorId)),
         change: (planId, steps, actorId, end, worksIn, toward) =>
           provide(
             Effect.gen(function* () {
@@ -345,7 +378,7 @@ export class Plans extends Context.Service<
                   ...(before.reviewAfterMerge === true ? { reviewAfterMerge: true } : {}),
                 })
               }
-              // A review's lead only reads: an agent that can't be held to that can't take it, whoever picks it.
+              // Any agent Althar has may lead a review.
               if (parametersOf(yield* load(planId)).reads === true)
                 for (const step of steps) if (!step.skipped) yield* reviews.canLead(step.agentId)
               return yield* reshape(planId, changed, actorId, toward, worksIn !== undefined)
