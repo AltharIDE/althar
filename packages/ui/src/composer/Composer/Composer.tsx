@@ -1,4 +1,16 @@
-import { useId, useLayoutEffect, useRef, type FormEvent, type UIEvent, type WheelEvent, type ReactNode, type RefObject } from 'react'
+import {
+  useEffect,
+  useEffectEvent,
+  useId,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type FormEvent,
+  type UIEvent,
+  type WheelEvent,
+  type ReactNode,
+  type RefObject,
+} from 'react'
 
 import { commandDown, keys, modKey } from '../../foundations/keys'
 import { Icon } from '../../foundations/Icon/Icon'
@@ -35,6 +47,11 @@ export interface Dictation {
   busy?: boolean
   /** What was said was written down while you were away from this composer: a quiet line over the field says so. */
   arrived?: boolean
+  /**
+   * What was said and couldn't be written down, kept to try again: any value while there is one, a new one each time another fails. Sending while it
+   * listens or writes waits for it to end, and sends nothing if it ended in a new failure.
+   */
+  failed?: unknown
   /** The speech model coming down, from 0 to 1: a ring fills round the microphone. */
   progress?: number
   /** The microphone's tray (`tray`) is open. */
@@ -114,6 +131,10 @@ export interface ComposerText {
   dictate: string
   /** The microphone while what was said is written down, or the speech model is made ready. */
   dictateBusy: string
+  /** The send button while it waits for what was said to be written down, to send it with the rest. */
+  finishing: string
+  /** Over the field, when sending waited for what was said and it couldn't be written down: nothing went. */
+  notSent: string
   /** The microphone while the speech model downloads. */
   dictateProgress: (percent: number) => string
   stopDictating: (elapsed: string) => string
@@ -158,6 +179,8 @@ export const composerText: ComposerText = {
   newlineNote: 'Shift+Enter for a new line',
   dictate: 'Dictate',
   dictateBusy: 'Writing down what you said',
+  finishing: 'Finishing the transcription',
+  notSent: 'Not sent: what you said couldn’t be written down. Try it again, or type it.',
   dictateProgress: (percent) => `Dictate, downloading ${percent}%`,
   stopDictating: (elapsed) => `Stop dictating, ${elapsed}`,
   chooseInput: 'Choose the microphone',
@@ -382,16 +405,40 @@ export function Composer({
     lastScroll.current = 0
   }, [interim, ref])
 
-  const submit = (e?: FormEvent) => {
+  /* Sent while dictating: it ends the recording and waits for what was said to be written into the field, to go with the rest. */
+  const [finishing, setFinishing] = useState<{ now: boolean; failed: unknown } | null>(null)
+  const [notSent, setNotSent] = useState(false)
+  const deliver = (now: boolean) => {
+    const out = value.trim()
+    if (!out && attached === 0) return
+    if (now) onSendNow?.(out)
+    else onSubmit(out)
+  }
+  const submit = (e?: FormEvent, now = false) => {
     e?.preventDefault()
-    const out = value.trim()
-    if (out || attached > 0) onSubmit(out)
+    if (finishing !== null) return
+    setNotSent(false)
+    if (!dictating) return deliver(now)
+    setFinishing({ now, failed: dictation?.failed })
+    if (elapsed !== null) dictation?.onStop()
   }
+  /* Once it is written down, what was said is in the field: it goes with what was attached. A new failure keeps it all, and says why. */
+  const settle = useEffectEvent(() => {
+    if (finishing === null) return
+    setFinishing(null)
+    if (dictation?.failed !== finishing.failed) setNotSent(true)
+    else deliver(finishing.now)
+  })
+  const finished = finishing !== null && !dictating
+  useEffect(() => {
+    if (finished) settle()
+  }, [finished])
+  /* The line goes once what couldn't be written is tried again or thrown away. */
+  const failedNow = dictation?.failed != null
+  useEffect(() => {
+    if (!failedNow) setNotSent(false)
+  }, [failedNow])
   const canSendNow = busy && drafted && onSendNow !== undefined
-  const sendNow = () => {
-    const out = value.trim()
-    if (out || attached > 0) onSendNow?.(out)
-  }
 
   /* A suggestion to take, while nothing is written or arriving and the agent is free. */
   const suggested = suggestion !== undefined && suggestion !== '' && !busy && !drafted && !dictating ? suggestion : null
@@ -410,6 +457,7 @@ export function Composer({
   /* What the last button is. While the agent works, an empty composer offers
      to stop it; text you send waits until it is done with what it is doing, rather than cutting in. */
   const action = (() => {
+    if (finishing !== null) return <IconButton icon="up" label={t.finishing} tone="fill" type="submit" busy />
     if (drafted) return <IconButton icon="up" label={busy ? t.queue : t.send} tone="fill" type="submit" kbd={t.sendKey} />
     if (busy && onStopAgent) return <IconButton icon="square" label={t.stop} tone="fill" onClick={onStopAgent} kbd={t.stopKey} />
     if (suggested !== null) return <Kbd className={s.kbd}>{t.takeKey}</Kbd>
@@ -469,6 +517,11 @@ export function Composer({
           <output className={s.imageNote}>{fileNote}</output>
         )}
         {dictation?.arrived && <p className={s.imageNote}>{t.dictatedAway}</p>}
+        {notSent && (
+          <p className={s.imageNote} role="alert">
+            {t.notSent}
+          </p>
+        )}
         {/* what is attached grows in, and fades once taken off */}
         <ListMotion within={form} enter="grow">
           {attached > 0 && (
@@ -589,18 +642,8 @@ export function Composer({
                 return
               }
               if (e.key !== 'Enter' || e.shiftKey || e.nativeEvent.isComposing) return
-              /* Enter while dictating wraps up what was said and leaves it in the field, unsent; while it is written down, it waits. */
-              if (dictating) {
-                e.preventDefault()
-                if (dictation?.busy !== true) dictation?.onStop()
-                return
-              }
-              if (commandDown(e) && canSendNow) {
-                e.preventDefault()
-                sendNow()
-                return
-              }
-              submit(e)
+              /* Enter while dictating ends it and waits for what was said, then sends it with the rest (submit). */
+              submit(e, commandDown(e) && canSendNow)
             }}
           />
         </div>
@@ -614,7 +657,7 @@ export function Composer({
             )}
             {canSendNow && (
               <Tooltip label={t.sendNowNote}>
-                <ActionButton className={s.sendNow} onClick={sendNow} kbd={t.sendNowKey} aria-label={t.sendNow}>
+                <ActionButton className={s.sendNow} onClick={() => submit(undefined, true)} kbd={t.sendNowKey} aria-label={t.sendNow}>
                   <span className={s.sendNowLabel}>{t.sendNow}</span>
                 </ActionButton>
               </Tooltip>

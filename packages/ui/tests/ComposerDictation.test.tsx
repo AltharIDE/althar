@@ -1,7 +1,7 @@
 import { fireEvent, render } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { Composer, type DictationInput } from '../src/composer/Composer/Composer'
+import { Composer, type ComposerProps, type DictationInput } from '../src/composer/Composer/Composer'
 
 /*
  * A long dictation past the composer's max height. jsdom lays nothing out, so
@@ -136,5 +136,74 @@ describe('interrupt shortcut', () => {
     rerender(<Composer {...props} busy={false} />)
     press()
     expect(stop).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('sending while dictating', () => {
+  const props = (dictation: Partial<NonNullable<ComposerProps['dictation']>>, value = '') => ({
+    placeholder: 'Tell the lead',
+    value,
+    onChange: vi.fn(),
+    onSubmit: vi.fn(),
+    images: [{ id: 'i1', name: 'shot.png' }],
+    dictation: { elapsed: null, onStart: vi.fn(), onStop: vi.fn(), ...dictation },
+  })
+  const enter = (c: HTMLElement) => fireEvent.keyDown(c, { key: 'Enter' })
+
+  it('stops the recording, and sends once what was said is in the field', () => {
+    const p = props({ elapsed: '0:05' })
+    const { getByRole, queryByRole, rerender } = render(<Composer {...p} />)
+    enter(getByRole('textbox'))
+    expect(p.dictation.onStop).toHaveBeenCalledTimes(1)
+    expect(p.onSubmit).not.toHaveBeenCalled()
+    // Being written down: it waits, and the button says so.
+    rerender(<Composer {...p} dictation={{ ...p.dictation, elapsed: null, busy: true }} />)
+    expect(getByRole('button', { name: 'Finishing the transcription' })).toBeTruthy()
+    expect(p.onSubmit).not.toHaveBeenCalled()
+    rerender(<Composer {...p} value="Check the retry path." dictation={{ ...p.dictation, elapsed: null, busy: false }} />)
+    expect(p.onSubmit).toHaveBeenCalledTimes(1)
+    expect(p.onSubmit).toHaveBeenCalledWith('Check the retry path.')
+    expect(queryByRole('button', { name: 'Finishing the transcription' })).toBeNull()
+  })
+
+  it('does not stop what is already being written down, and waits for it', () => {
+    const p = props({ busy: true }, 'Typed.')
+    const { getByRole, rerender } = render(<Composer {...p} />)
+    fireEvent.click(getByRole('button', { name: 'Send' }))
+    expect(p.dictation.onStop).not.toHaveBeenCalled()
+    expect(p.onSubmit).not.toHaveBeenCalled()
+    rerender(<Composer {...p} value="Typed. And said." dictation={{ ...p.dictation, busy: false }} />)
+    expect(p.onSubmit).toHaveBeenCalledWith('Typed. And said.')
+  })
+
+  it('sends nothing when it ended in a new failure, and says why until it is dealt with', () => {
+    const kept = {}
+    const p = props({ elapsed: '0:05', failed: kept }, 'Typed.')
+    const { getByRole, queryByRole, rerender } = render(<Composer {...p} />)
+    enter(getByRole('textbox'))
+    rerender(<Composer {...p} dictation={{ ...p.dictation, elapsed: null, busy: true, failed: kept }} />)
+    // A second one failed: the kept one and it, as a new one.
+    rerender(<Composer {...p} dictation={{ ...p.dictation, elapsed: null, busy: false, failed: {} }} />)
+    expect(p.onSubmit).not.toHaveBeenCalled()
+    expect(getByRole('alert').textContent).toContain('Not sent')
+    rerender(<Composer {...p} dictation={{ ...p.dictation, elapsed: null, failed: undefined }} />)
+    expect(queryByRole('alert')).toBeNull()
+  })
+
+  it('goes on with what is there when it ended with an earlier failure still kept', () => {
+    const kept = {}
+    const p = props({ elapsed: '0:05', failed: kept }, 'Typed.')
+    const { getByRole, rerender } = render(<Composer {...p} />)
+    enter(getByRole('textbox'))
+    rerender(<Composer {...p} value="Typed. Said." dictation={{ ...p.dictation, elapsed: null, failed: kept }} />)
+    expect(p.onSubmit).toHaveBeenCalledWith('Typed. Said.')
+  })
+
+  it('sends at once when nothing dictates', () => {
+    const p = props({}, 'Typed.')
+    const { getByRole } = render(<Composer {...p} />)
+    enter(getByRole('textbox'))
+    expect(p.onSubmit).toHaveBeenCalledWith('Typed.')
+    expect(p.dictation.onStop).not.toHaveBeenCalled()
   })
 })
