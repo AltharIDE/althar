@@ -1,7 +1,7 @@
 import { execFileSync } from 'node:child_process'
-import { mkdtempSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 
 import { type FakeService, makeFakeService } from '@althar/connectors/testing'
 import { assert, describe, it } from '@effect/vitest'
@@ -17,7 +17,7 @@ import { Runs } from '../../src/Runs'
 import * as Runtime from '../../src/Runtime'
 import { Sessions } from '../../src/Sessions'
 import { fakeConnectors, HOST, hosted, runtime, until } from '../support'
-import { lag, type Priority, profiled, spans, spawns, stress, summary } from './load'
+import { lag, type Priority, profiled, spans, spawns, stalledOn, stalls, stress, summary } from './load'
 
 /*
  * How quickly the runtime answers the window while the computer is busy, run
@@ -32,14 +32,25 @@ import { lag, type Priority, profiled, spans, spawns, stress, summary } from './
  * What it finds goes to stdout and to `ALTHAR_RESPONSIVENESS_OUT`, as JSON.
  */
 
-const PHASES = (process.env.ALTHAR_PHASES ?? 'idle,load').split(',') as ReadonlyArray<'idle' | 'load' | 'load-bg'>
-const REPEATS = Number(process.env.ALTHAR_REPEATS ?? 6)
-const SHIPS = Number(process.env.ALTHAR_SHIPS ?? 3)
-const SETTLED = Number(process.env.ALTHAR_SETTLED ?? 380)
-const ITEMS = Number(process.env.ALTHAR_ITEMS ?? 5000)
-const TURNS = Number(process.env.ALTHAR_TURNS ?? 500)
+/*
+ * What it runs, from the environment, else from `test-results/responsiveness-run.json`, so it can be run on a line of its
+ * own, outside an agent's sandbox, where processes' priorities can be set.
+ */
+const file = join(import.meta.dirname, '../../test-results/responsiveness-run.json')
+const kept: Readonly<Record<string, string>> = existsSync(file) ? (JSON.parse(readFileSync(file, 'utf8')) as Record<string, string>) : {}
+const setting = (name: string, otherwise: string) => process.env[name] ?? kept[name] ?? otherwise
+
+const PHASES = setting('ALTHAR_PHASES', 'idle,load').split(',') as ReadonlyArray<'idle' | 'load' | 'load-bg'>
+const REPEATS = Number(setting('ALTHAR_REPEATS', '6'))
+const SHIPS = Number(setting('ALTHAR_SHIPS', '3'))
+const SETTLED = Number(setting('ALTHAR_SETTLED', '380'))
+const ITEMS = Number(setting('ALTHAR_ITEMS', '5000'))
+const TURNS = Number(setting('ALTHAR_TURNS', '500'))
+const CHANGES = Number(setting('ALTHAR_CHANGES', '1000000'))
+const PROFILE = setting('ALTHAR_PROFILE_CPU', '0') === '1'
+const OUT = setting('ALTHAR_RESPONSIVENESS_OUT', join(import.meta.dirname, '../../test-results/responsiveness.json'))
 /** How far away the host is: each of its API's calls waits this long, as GitHub's took on average in the person's log. */
-const HOST_MS = Number(process.env.ALTHAR_HOST_MS ?? 400)
+const HOST_MS = Number(setting('ALTHAR_HOST_MS', '400'))
 
 /** A line of what it found, on stdout, where the run's output is read. */
 const say = (...what: ReadonlyArray<unknown>) =>
@@ -142,16 +153,42 @@ const lengthen = (threadId: string, items: number, turns: number) =>
     )
   })
 
-/** Tasks long finished, as most of the person's are: made, then marked done and settled. */
-const settled = (projectId: string, count: number) =>
+/**
+ * Tasks long finished, as most of the person's are: copies of one of the project's tasks and its thread, done and
+ * settled, written straight into the store, as making each through `createTask` makes its worktree too.
+ */
+const settled = (from: { readonly taskId: string }, count: number) =>
   Effect.gen(function* () {
-    const projects = yield* Projects
     const sql = yield* SqlClient.SqlClient
-    for (let index = 0; index < count; index += 1) {
-      const title = `Old task ${index + 1}`
-      const made = yield* projects.createTask({ envelope: yield* Runtime.envelope('task.create', { title }), projectId, title })
-      yield* sql`UPDATE tasks SET state = 'done', settled_at = '2026-10-01T09:00:00.000Z' WHERE id = ${made.taskId}`
-    }
+    const columns = (table: string) =>
+      Effect.map(sql<{ name: string }>`SELECT name FROM pragma_table_info(${table})`, (rows) => rows.map((row) => row.name))
+    const tasks = yield* columns('tasks')
+    const threads = yield* columns('threads')
+    const set = (all: ReadonlyArray<string>, own: Readonly<Record<string, string>>) => all.map((name) => own[name] ?? name).join(', ')
+    yield* sql.withTransaction(
+      Effect.gen(function* () {
+        for (let index = 0; index < count; index += 1) {
+          const taskId = `task_${(index + 1).toString(16).padStart(32, '0')}`
+          const threadId = `thr_${(index + 1).toString(16).padStart(32, '0')}`
+          const given: Readonly<Record<string, string>> = { id: taskId, slug: `old-task-${index + 1}`, title: `Old task ${index + 1}` }
+          yield* sql.unsafe(
+            `INSERT INTO tasks (${tasks.join(', ')}) SELECT ${set(tasks, {
+              id: '?',
+              slug: '?',
+              title: '?',
+              state: "'done'",
+              settled_at: "'2026-10-01T09:00:00.000Z'",
+              parent_task_id: 'NULL',
+            })} FROM tasks WHERE id = ?`,
+            [...tasks.flatMap((name) => (given[name] === undefined ? [] : [given[name]])), from.taskId],
+          )
+          yield* sql.unsafe(
+            `INSERT INTO threads (${threads.join(', ')}) SELECT ${set(threads, { id: '?', task_id: '?' })} FROM threads WHERE task_id = ? AND kind = 'task'`,
+            [...threads.flatMap((name) => (name === 'id' ? [threadId] : name === 'task_id' ? [taskId] : [])), from.taskId],
+          )
+        }
+      }),
+    )
   })
 
 /** Rows the change feed has carried, as many as the person's store has had. */
@@ -222,7 +259,7 @@ const timed = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
     return performance.now() - began
   })
 
-describe('the runtime under load', () => {
+describe.runIf(setting('ALTHAR_RUN', 'responsiveness') === 'responsiveness')('the runtime under load', () => {
   it.live(
     'answers the window as quickly busy as idle',
     () => {
@@ -243,9 +280,9 @@ describe('the runtime under load', () => {
         traced.clear()
         started.clear()
         const making = performance.now()
-        yield* settled(projectId, SETTLED)
+        yield* settled(long, SETTLED)
         say(JSON.stringify({ createTaskEach: Math.round((performance.now() - making) / Math.max(1, SETTLED)), long: traced.long() }))
-        yield* history(Number(process.env.ALTHAR_CHANGES ?? 1_000_000))
+        yield* history(CHANGES)
         say(`seeded in ${Math.round((performance.now() - seeding) / 1000)} s`)
 
         const results: Record<string, unknown> = {}
@@ -276,7 +313,8 @@ describe('the runtime under load', () => {
           const watching = yield* Effect.forkChild(window(projectId, reads))
           const busy = yield* Effect.forkChild(working(others.map((one) => one.threadId)))
           const loop = lag()
-          const profile = process.env.ALTHAR_PROFILE_CPU === '1' ? yield* Effect.promise(profiled) : undefined
+          const still = stalls()
+          const profile = PROFILE ? yield* Effect.promise(profiled) : undefined
           const open: Array<number> = []
           const board: Array<number> = []
           const home: Array<number> = []
@@ -326,6 +364,7 @@ describe('the runtime under load', () => {
             yield* idle(shipped.threadId)
           }
           const delay = loop.read()
+          still.stop()
           const cpu = profile === undefined ? undefined : yield* Effect.promise(() => profile.stop())
           yield* Fiber.interrupt(watching)
           yield* Fiber.interrupt(busy)
@@ -343,13 +382,14 @@ describe('the runtime under load', () => {
             spans: traced.top(30),
             spawned: started.top(30),
             longTransactions: traced.long(),
-            ...(cpu === undefined ? {} : { cpu: cpu.top }),
+            stalls: still.windows(),
+            ...(cpu === undefined ? {} : { cpu: cpu.top, stalledOn: stalledOn(cpu.profile, still.windows()) }),
           }
           say(JSON.stringify({ phase, ...(results[phase] as object) }, null, 1))
           yield* Effect.sleep(Duration.seconds(2))
         }
-        const out = process.env.ALTHAR_RESPONSIVENESS_OUT
-        if (out !== undefined) writeFileSync(out, JSON.stringify(results, null, 2))
+        mkdirSync(dirname(OUT), { recursive: true })
+        writeFileSync(OUT, JSON.stringify(results, null, 2))
       }).pipe(Effect.provide(runtimeWith(github)))
     },
     60 * 60_000,

@@ -25,7 +25,7 @@ import {
   transition,
 } from '@althar/domain'
 import type { Ledger } from '@althar/persistence-sqlite'
-import { Cause, Clock, Context, type Crypto, Duration, Effect, Layer, Option, Queue, Schema, Stream } from 'effect'
+import { Cause, Clock, Context, type Crypto, Deferred, Duration, Effect, Exit, Layer, Option, Queue, Schema, Stream } from 'effect'
 import { SqlClient, type SqlError } from 'effect/sql'
 
 import { thisDevice } from './device'
@@ -2928,9 +2928,18 @@ export class Runs extends Context.Service<
        * reviewer, or one after the merge, it goes up at once. Refused while
        * the task is at work, which ships once that's done, and where nothing
        * waits. The run: once its review has started, or, with none, once what
-       * waited is up or couldn't go, as the press waits on the host.
+       * waited is up or couldn't go. Given `admitted`, it says so there as soon
+       * as its run is admitted and its card shows it, for the person's press,
+       * which waits on nothing after: neither the reviewer starting nor the host.
        */
-      const ship = (taskId: string, actorId: ActorId, merges = false, change?: string, queued?: ReadonlyArray<string>) =>
+      const ship = (
+        taskId: string,
+        actorId: ActorId,
+        merges = false,
+        change?: string,
+        queued?: ReadonlyArray<string>,
+        admitted?: Deferred.Deferred<void, unknown>,
+      ) =>
         oneRound(
           taskId,
           Effect.gen(function* () {
@@ -3059,6 +3068,8 @@ export class Runs extends Context.Service<
             const current = yield* currentRun(taskId)
             if (current === undefined) return undefined
             yield* touchCard(taskId)
+            // The press has its answer: what follows shows on the task as it goes.
+            if (admitted !== undefined) yield* Deferred.succeed(admitted, undefined)
             const { review: reviewer } = yield* stepsOf(current)
             // Nothing to read, or no one to read it before it ships: it goes up at once.
             if (reviewer === undefined || (yield* changes.nothingBuilt(taskId).pipe(Effect.orElseSucceed(() => false))))
@@ -7333,6 +7344,36 @@ export class Runs extends Context.Service<
           yield* touchCard(input.taskId)
         })
 
+      /**
+       * The person's Ship: answered once its run is admitted and its card says so, or with why it can't ship. Its review's
+       * start, or its push, goes on apart, in the round's lock as before, and says what became of it on the task: a press
+       * waits on neither the reviewer's agent starting nor the host, which under load took seconds.
+       */
+      const shipPressed = (taskId: string, actorId: ActorId, change?: string) =>
+        Effect.gen(function* () {
+          const admitted = yield* Deferred.make<void, unknown>()
+          yield* Effect.forkIn(
+            provide(
+              ship(taskId, actorId, false, change, undefined, admitted).pipe(
+                // Refused, or over before it was admitted: that is the press's answer, as it always was.
+                Effect.onExit((exit) =>
+                  Exit.isSuccess(exit) ? Deferred.succeed(admitted, undefined) : Deferred.failCause(admitted, exit.cause),
+                ),
+                Effect.catchCause((cause) =>
+                  Effect.flatMap(Effect.exit(Deferred.await(admitted)), (pressed) =>
+                    // What fails once it is admitted goes on the task, as a plan's ending does; anything else is kept.
+                    Exit.isSuccess(pressed) && !Cause.hasInterruptsOnly(cause)
+                      ? Effect.logWarning('Could not ship once its run was admitted', cause)
+                      : Effect.void,
+                  ),
+                ),
+              ),
+            ),
+            scope,
+          )
+          yield* Deferred.await(admitted)
+        })
+
       return Runs.of({
         run: (planId) => provide(run(planId)),
         skipReview: (input) => provide(skipReview(input)),
@@ -7358,7 +7399,7 @@ export class Runs extends Context.Service<
                     scope,
                   ),
                 )
-              : Effect.asVoid(ship(input.taskId, input.envelope.actorId, false, input.change)),
+              : shipPressed(input.taskId, input.envelope.actorId, input.change),
           ),
         workflowVersion: provide(workflowVersion),
         publish: (taskId) => provide(publish(taskId)),
