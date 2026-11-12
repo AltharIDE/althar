@@ -6,6 +6,7 @@ import type { BoardSnapshot, BoardTask } from '@althar/contracts'
 import { type Client, messageOf } from '../../data/client'
 import { reads } from '../../data/reads'
 import { useServices } from '../../data/services'
+import { markArrived } from './arrived'
 import { type WorkActions, useWorkActions } from './useWorkActions'
 
 /*
@@ -101,6 +102,8 @@ export const useBoard = (projectId: string): BoardModel => {
         loading.current = false
         if (kept.current.projectId !== projectId) return
         for (const task of page) kept.current.tasks.set(task.taskId, task)
+        // Older work shown, not work settling now: nothing moves into Settled for it.
+        markArrived(page.map((task) => task.taskId))
         setLoaded((n) => n + 1)
       },
       (error: unknown) => {

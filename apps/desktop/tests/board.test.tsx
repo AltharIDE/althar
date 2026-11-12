@@ -1,4 +1,4 @@
-import { act, cleanup, screen, waitFor, within } from '@testing-library/react'
+import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { Activity, useState } from 'react'
@@ -21,7 +21,9 @@ import { makeQueryClient } from '../src/renderer/data/reads'
 import { useMerge } from '../src/renderer/data/merges'
 import { useProject } from '../src/renderer/features/project/useProject'
 import { agents, card, change, changed, fakeClient, snapshot } from './fixtures'
-import { useSettingsOf, withServices } from './render'
+import { ServicesProvider } from '../src/renderer/data/services'
+import { forgetArrived } from '../src/renderer/features/board/arrived'
+import { servicesFor, useSettingsOf, withServices } from './render'
 
 function Project({ onTask = vi.fn() }: { onTask?: (threadId: string) => void }) {
   return (
@@ -2672,5 +2674,35 @@ describe('the moves a row put in Up next asks of the runtime', () => {
       ['p', 1],
       ['q', 2],
     ])
+  })
+})
+
+describe('A settled card moves into Settled once', () => {
+  const NOW = '2026-10-01T10:00:00.000Z'
+  const settledRow = (title: string) => screen.getByRole('button', { name: title }).closest('article') as HTMLElement
+  const moves = (title: string) => settledRow(title).closest('[data-move]') ?? settledRow(title)
+
+  it('is drawn in Settled without arriving again once it has been there: after a lane change, a new snapshot, or a restart', () => {
+    const services = servicesFor(fakeClient().client)
+    const shown = (tasks: BoardSnapshot['tasks']) => (
+      <ServicesProvider value={services}>
+        <BoardView lanes={lanesOf(board({ tasks, calls: [] }))} agents={agents} now={NOW} onOpen={vi.fn()} />
+      </ServicesProvider>
+    )
+    const all = board().tasks
+    const old = all.find((one) => one.taskId === 't6')!
+    const { rerender, unmount } = render(shown(all))
+    // The first time it is drawn there, it may move in.
+    expect(moves('Old work').hasAttribute('data-move-seen')).toBe(false)
+    // Its lead works on it again, and it settles again at the same time: it is in Settled as before.
+    rerender(shown(all.map((one) => (one.taskId === 't6' ? { ...old, phase: 'running' as const } : one))))
+    rerender(shown(all))
+    expect(moves('Old work').hasAttribute('data-move-seen')).toBe(true)
+    expect(moves('Given up').hasAttribute('data-move-seen')).toBe(true)
+    // A window reloaded or restarted remembers what moved there.
+    unmount()
+    forgetArrived()
+    render(shown(all))
+    expect(moves('Old work').hasAttribute('data-move-seen')).toBe(true)
   })
 })

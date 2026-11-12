@@ -63,6 +63,7 @@ import { afterSteps, isAutomatedStep, stepText } from '../../shared/steps'
 import { ago, clock, running } from '../../shared/time'
 import { text as stuckText } from '../task/StuckCall'
 import { canHold, teamChangeOf, TeamMenu } from '../team/Team'
+import { hasArrived, markArrived } from './arrived'
 import s from './Board.module.css'
 import { type Held, heldOf, holding, type Lanes, movesInLine, type Waiting } from './lanes'
 import type { LineActions } from './useBoard'
@@ -1009,6 +1010,11 @@ export function BoardView({
   const clear = actions?.markDone
   // Which of Settled's tabs shows, while something is kept for later.
   const [shelf, setShelf] = useState<'settled' | 'kept'>('settled')
+  // What Settled draws has moved into it: once drawn, it arrives there no more, whatever the board does next.
+  const settledShown = shelf === 'settled' || lanes.kept.length === 0
+  useEffect(() => {
+    if (settledShown) markArrived(lanes.settled.map((work) => work.taskId))
+  })
   // Each needs-you card in when its call came: tasks waiting on a call and calls no task waits on together.
   const asks = [
     ...lanes.waiting.map((waiting) => ({ at: waiting.call.createdAt, waiting, call: null })),
@@ -1301,6 +1307,8 @@ export function BoardView({
                   <SettledRow
                     key={work.taskId}
                     data-move={work.taskId}
+                    // Moved into Settled before: it is drawn there again without moving or coming in.
+                    {...(hasArrived(work.taskId) ? { 'data-move-seen': '' } : {})}
                     outcome={outcome}
                     task={work.slug}
                     {...(kind === undefined ? {} : { kind })}
