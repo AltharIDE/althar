@@ -45,6 +45,7 @@ import {
   TaskAskItem,
   QuestionField,
   type ThreadItem,
+  MergeLineItem,
   ModelMoveItem,
   NoticeItem,
   type ThreadSnapshot,
@@ -535,6 +536,7 @@ const decodePushRequest = Schema.decodeUnknownOption(PushRequestItem.fields.cont
 const decodeTaskAsk = Schema.decodeUnknownOption(TaskAskItem.fields.content)
 const decodeSettingChange = Schema.decodeUnknownOption(SettingChangeCard)
 const decodeModelMove = Schema.decodeUnknownOption(ModelMoveItem.fields.content)
+const decodeMergeLine = Schema.decodeUnknownOption(MergeLineItem.fields.content)
 /** The task a notice is about, which the thread links to: one its lead started (ADR-097), in one line. */
 const decodeNoticeTask = Schema.decodeUnknownOption(
   Schema.Struct({ taskId: Schema.String, slug: Schema.String, title: Schema.String, threadId: Schema.String }),
@@ -867,6 +869,12 @@ export const itemOf = (row: ItemRow): ThreadItem | undefined => {
       return Option.match(decodeModelMove(content), {
         onNone: () => undefined,
         onSome: (move): ThreadItem => ({ ...base, kind: 'model_move', content: move }),
+      })
+    // The merge line for a branch (MergeLine.ts), kept current in place.
+    case 'merge_line':
+      return Option.match(decodeMergeLine(content), {
+        onNone: () => undefined,
+        onSome: (card): ThreadItem => ({ ...base, kind: 'merge_line', content: card }),
       })
     case 'setup': {
       const ended = field(content, 'ended')
