@@ -5,7 +5,7 @@ import { dirname, join, posix, resolve } from 'node:path'
 
 import type { ChangeTarget } from '@althar/domain'
 import { cleanUp } from '@althar/provider-adapters'
-import { Context, Deferred, Duration, Effect } from 'effect'
+import { Cause, Context, Deferred, Duration, Effect } from 'effect'
 
 import { afterOpen, startup } from './startup'
 import { GitFailed } from './errors'
@@ -521,21 +521,25 @@ export const commitsOf = (cwd: string, revisions: ReadonlyArray<string>): Effect
         return commit !== undefined && /^[0-9a-f]{40,64}$/.test(commit) ? commit : null
       })
     }),
+  )
+  // Where git couldn't answer (it timed out, or couldn't start), no commits this once: nothing is kept, and the next read asks
+  // again. What git did answer is kept, a name it said is missing too, until the refs move.
+  return keptByStamp(`${cwd}\0${revisions.join('\0')}`, () => refStamp(cwd, named), ask).pipe(
     Effect.orElseSucceed(() => revisions.map(() => null)),
   )
-  return keptByStamp(`${cwd}\0${revisions.join('\0')}`, () => refStamp(cwd, named), ask)
 }
 
 /** Answers `commitsOf` gave, by what they stood on (refStamps.ts), the newest 2,000: most reads find their refs unmoved. */
 const commitsKept = new Map<string, { readonly stamp: string; readonly value: ReadonlyArray<string | null> }>()
 /** Those being answered now, by their stamp: the board and the home asking for the same at once start git once. */
-const commitsGoing = new Map<string, Deferred.Deferred<ReadonlyArray<string | null>>>()
+const commitsGoing = new Map<string, Deferred.Deferred<ReadonlyArray<string | null>, GitFailed>>()
 
+/** What `ask` answers, kept under the stamp it stood on; a failure is never kept. */
 const keptByStamp = (
   key: string,
   stampOf: () => Promise<string | undefined>,
-  ask: Effect.Effect<ReadonlyArray<string | null>>,
-): Effect.Effect<ReadonlyArray<string | null>> =>
+  ask: Effect.Effect<ReadonlyArray<string | null>, GitFailed>,
+): Effect.Effect<ReadonlyArray<string | null>, GitFailed> =>
   Effect.gen(function* () {
     const stamp = yield* Effect.promise(stampOf)
     if (stamp === undefined) return yield* ask
@@ -543,9 +547,12 @@ const keptByStamp = (
     if (was !== undefined && was.stamp === stamp) return was.value
     const asking = `${key}\n${stamp}`
     const under = commitsGoing.get(asking)
-    // Asked again while it is being answered: that answer, or, where it never came, its own.
-    if (under !== undefined) return yield* Deferred.await(under).pipe(Effect.catchCause(() => ask))
-    const answer = Deferred.makeUnsafe<ReadonlyArray<string | null>>()
+    // Asked again while it is being answered: that answer, or its failure; where it was stopped before either, its own.
+    if (under !== undefined)
+      return yield* Deferred.await(under).pipe(
+        Effect.catchCause((cause) => (Cause.hasInterruptsOnly(cause) ? ask : Effect.failCause(cause))),
+      )
+    const answer = Deferred.makeUnsafe<ReadonlyArray<string | null>, GitFailed>()
     commitsGoing.set(asking, answer)
     return yield* ask.pipe(
       Effect.tap((value) =>

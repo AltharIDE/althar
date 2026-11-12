@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process'
-import { mkdtempSync, realpathSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, readFileSync, realpathSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -95,6 +95,22 @@ describe('the commits a worktree names', () => {
       assert.deepStrictEqual(yield* commitsOf(cwd, ['HEAD', 'main', 'nope']), [next, next, null])
       git(cwd, 'reset', '-q', '--hard', start)
       assert.deepStrictEqual(yield* commitsOf(cwd, ['HEAD', 'main', 'nope']), [start, start, null])
+    }),
+  )
+
+  it.live('are asked of git again after it failed, though the refs never moved', () =>
+    Effect.gen(function* () {
+      const cwd = repository()
+      const head = git(cwd, 'rev-parse', 'HEAD')
+      const config = join(cwd, '.git', 'config')
+      const kept = readFileSync(config, 'utf8')
+      const before = yield* stamp(cwd, ['HEAD', 'main'])
+      // Git can't read the repository for now, as for one that timed out or couldn't start: it fails, and says nothing of the refs.
+      writeFileSync(config, '[core\n')
+      assert.deepStrictEqual(yield* commitsOf(cwd, ['HEAD', 'main']), [null, null])
+      writeFileSync(config, kept)
+      assert.strictEqual(yield* stamp(cwd, ['HEAD', 'main']), before)
+      assert.deepStrictEqual(yield* commitsOf(cwd, ['HEAD', 'main']), [head, head])
     }),
   )
 })
