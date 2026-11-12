@@ -344,6 +344,14 @@
   font-size: 13px;
   font-weight: 520;
 }
+/* the repositories on connected hosts: each by its host's mark */
+.hostedMark {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 16px;
+  color: var(--t-2);
+}
 .in {
   color: var(--t-3);
   font-size: 12px;

@@ -103,6 +103,121 @@
   gap: 6px;
 }
 
+/* Clone…: the field that finds one or takes its URL, the repositories on the hosts it's connected to, and where clones go. */
+.clone {
+  display: grid;
+}
+.cloneFind {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 40px;
+  padding: 0 12px;
+  border-bottom: 1px solid var(--line);
+  color: var(--t-3);
+  cursor: text;
+}
+.cloneFind input {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  font-size: 13px;
+  color: var(--t-1);
+}
+.cloneFind input::placeholder {
+  color: var(--t-3);
+}
+.cloneFind input::-webkit-search-cancel-button {
+  display: none;
+}
+.cloneList {
+  display: grid;
+  max-height: 280px;
+  overflow-y: auto;
+  margin: 0;
+  padding: 5px;
+  list-style: none;
+}
+.cloneRow {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  height: 34px;
+  padding: 0 9px;
+  border-radius: 6px;
+  color: var(--t-1);
+  font-size: 12.5px;
+  text-align: left;
+}
+.cloneRow:hover {
+  background: var(--hover-paper);
+}
+.cloneRow:focus-visible {
+  outline: none;
+  box-shadow: inset 0 0 0 1.5px var(--signal);
+}
+.cloneRow:active {
+  background: var(--pressed-paper);
+}
+.cloneName {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 540;
+}
+.cloneOwner {
+  color: var(--t-3);
+  font-weight: 450;
+}
+.cloneFacts {
+  color: var(--t-3);
+  font-size: 11.5px;
+  white-space: nowrap;
+}
+.cloneQuiet {
+  margin: 0;
+  padding: 14px 14px;
+  color: var(--t-3);
+  font-size: 12.5px;
+}
+.cloneConnect {
+  display: grid;
+  gap: 10px;
+  padding: 14px;
+}
+.cloneConnect p {
+  margin: 0;
+  color: var(--t-2);
+  font-size: 12.5px;
+  line-height: 1.45;
+}
+.cloneConnectButtons {
+  display: flex;
+  gap: 6px;
+}
+.cloneFoot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 12px;
+  border-top: 1px solid var(--line);
+  background: var(--n-2);
+  color: var(--t-3);
+  font-size: 12px;
+}
+.mono {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--t-2);
+}
+
 /* The lab's own bar: what's shown, and what happens today. */
 .bars {
   border-top: 1px solid var(--line);

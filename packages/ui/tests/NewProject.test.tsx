@@ -150,3 +150,34 @@ describe('starting from nothing', () => {
     expect(screen.getByRole('alert').textContent).toBe('Add a folder first.')
   })
 })
+
+describe('cloning', () => {
+  const HOSTED = { like: 'Northwind', repos: [{ id: 'web', host: GITHUB, remote: 'northwind-co/web', facts: 'Private' }] }
+
+  it('clones one named like the project in one press, and says where a clone is going while it comes in', () => {
+    const { again } = tab({ folders: [], hosted: HOSTED, onClone: vi.fn() })
+    expect(screen.getByRole('heading', { name: 'On GitHub, named like Northwind' })).toBeInTheDocument()
+    const onClone = vi.fn()
+    again({ folders: [], hosted: HOSTED, onClone })
+    fireEvent.click(screen.getByRole('button', { name: 'Clone northwind-co/web' }))
+    expect(onClone).toHaveBeenCalledWith('web')
+    again({
+      folders: [{ id: 'web', reading: true, name: 'web', cloning: { host: GITHUB, remote: 'northwind-co/web', where: '~/Althar/web' } }],
+      hosted: { ...HOSTED, repos: [] },
+      onClone,
+    })
+    expect(screen.getByText('~/Althar/web')).toBeInTheDocument()
+    expect(screen.getByText('cloning from GitHub…')).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: /named like Northwind/ })).not.toBeInTheDocument()
+  })
+
+  it('offers none without a way to clone them', () => {
+    tab({ folders: [], hosted: HOSTED })
+    expect(screen.queryByRole('button', { name: 'Clone northwind-co/web' })).not.toBeInTheDocument()
+  })
+
+  it('sets the consumer’s Clone beside Choose a folder', () => {
+    tab({ folders: [], clone: <button type="button">Clone…</button> })
+    expect(screen.getByRole('button', { name: 'Clone…' })).toBeInTheDocument()
+  })
+})

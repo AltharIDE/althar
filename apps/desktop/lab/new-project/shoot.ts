@@ -24,6 +24,18 @@ const all =
   async (page) => {
     for (const act of acts) await act(page)
   }
+const type =
+  (text: string, wait = 300): Act =>
+  async (page) => {
+    await page.keyboard.type(text)
+    await page.waitForTimeout(wait)
+  }
+const key =
+  (name: string, wait = 300): Act =>
+  async (page) => {
+    await page.keyboard.press(name)
+    await page.waitForTimeout(wait)
+  }
 const gitUp = all(press('Set up', 400), press('Set up git', 2200))
 const shots: ReadonlyArray<[string, string, Act?]> = [
   ['01-new-project', 'd=a&s=files'],
@@ -63,6 +75,17 @@ const shots: ReadonlyArray<[string, string, Act?]> = [
   ['17-new-unreadable', 'd=a&s=unreadable'],
   ['18-new-project-dark', 'd=a&s=project&theme=dark'],
   ['19-a-nothing-connected', 'p=1&d=a&s=local&c=none'],
+  ['20-clone-new-project', 'd=a&s=clone'],
+  ['21-clone-picker', 'd=a&s=clone', press('Clone…', 500)],
+  ['22-clone-picker-found-dark', 'd=a&s=clone&theme=dark', all(press('Clone…', 400), type('tide'))],
+  ['23-clone-cloning', 'd=a&s=clone', press('Clone balazs/tidepool', 700)],
+  ['24-clone-cloned', 'd=a&s=clone', press('Clone balazs/tidepool', 2600)],
+  ['25-clone-sso', 'd=a&s=clone', all(press('Clone…', 400), type('infra'), key('Enter', 2200))],
+  ['26-clone-nothing-connected', 'd=a&s=clone&c=none', press('Clone…', 500)],
+  ['27-a-cloned', 'd=a&s=clone', all(press('Clone balazs/tidepool', 2600), press(/^Create Tidepool/, 900))],
+  ['28-b-cloned', 'p=1&d=b&s=clone'],
+  ['29-c-cloned-dark', 'p=1&d=c&s=clone&theme=dark'],
+  ['30-d-cloned', 'p=1&d=d&s=clone'],
 ]
 const browser = await chromium.launch()
 const page = await browser.newPage({ viewport: { width: 1280, height: 800 }, deviceScaleFactor: 1 })

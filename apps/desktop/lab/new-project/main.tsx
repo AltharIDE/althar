@@ -3,7 +3,7 @@ import '@fontsource-variable/jetbrains-mono'
 import '@althar/ui/styles.css'
 import '../../src/renderer/app.css'
 
-import { Fragment, type ReactNode, StrictMode, useEffect, useRef, useState } from 'react'
+import { Fragment, type KeyboardEvent as KeyEvent, type ReactNode, StrictMode, useEffect, useRef, useState } from 'react'
 
 import { createRoot } from 'react-dom/client'
 
@@ -38,6 +38,7 @@ import {
   MenuItem,
   ProjectHeader,
   ProjectInk,
+  Popover,
   type ProjectPart,
   ProjectTabs,
   Prose,
@@ -52,7 +53,7 @@ import {
   You,
 } from '@althar/ui'
 import { device } from '@althar/ui/device'
-import { NewProject } from '@althar/ui/screens'
+import { NewProject, type NewProjectFolder, repositoryFolder } from '@althar/ui/screens'
 
 import { SizeMotion } from '../../../../packages/ui/src/lib/SizeMotion'
 import s from './lab.module.css'
@@ -63,8 +64,9 @@ import s from './lab.module.css'
  * folder; then, in the project's first conversation, what it still needs:
  * git where it has none, where its code lives (GitHub, GitLab or only this
  * computer) and where its issues go, each a walk like the integrations' own.
- * A–D are how the conversation offers them; 1–7 the folder; G what is
- * connected; T the theme; R starts again.
+ * Or not on this computer at all: cloned from a host it's connected to, and
+ * then only its issues are asked. A–D are how the conversation offers them;
+ * 1–8 the folder; G what is connected; T the theme; R starts again.
  */
 
 const directions = [
@@ -80,6 +82,7 @@ const states = [
   { key: 'files', label: 'Files, no git' },
   { key: 'unborn', label: 'Git, no commits' },
   { key: 'local', label: 'Git, no remote' },
+  { key: 'clone', label: 'On a host, not here' },
   { key: 'unreadable', label: 'Can’t be read' },
   { key: 'project', label: 'Already a project' },
   { key: 'later', label: 'Later: a task is done' },
@@ -100,6 +103,7 @@ const today: Record<State, string> = {
   unborn: 'Today: the project is made, then its first task fails: git worktree add … fatal: invalid reference: main. Nothing says why.',
   local:
     'Today: works. With GitHub connected, its first conversation offers nothing; a task’s card says “No code host”, as if something were broken.',
+  clone: 'Today: Althar can’t clone. It takes git clone in a terminal, then Choose a folder… on what it made.',
   unreadable: 'Today: called “There’s no git repository in tidepool.”, the wrong reason, with no way to fix it.',
   project: 'Today: it’s added again, as a second project on the same folder.',
   later: 'Today: the card says “No code host”, and once merged “It has no remote to push to.” Nothing in Althar adds one.',
@@ -128,17 +132,32 @@ const hostsOf = (setup: Setup): Host[] => (setup === 'all' ? ['github', 'gitlab'
 const linearOf = (setup: Setup) => setup === 'all'
 const isHost = (code: Made['code']): code is Host => code === 'github' || code === 'gitlab'
 
+/** A project cloned from its host: from where, into where, and the issues open there. */
+interface Cloned {
+  readonly host: Host
+  readonly remote: string
+  readonly where: string
+  readonly issues: number
+}
+const CLONED: Cloned = { host: 'github', remote: 'balazs/tidepool', where: '~/Althar/tidepool', issues: 12 }
+
 /** What has been set up so far. */
 interface Made {
   git: 'needed' | 'done' | 'later' | 'fine'
   code: 'unasked' | 'here' | Host
   issues: 'unasked' | 'linear' | 'host' | 'none'
+  /** Its repository on its host, once it has one. */
+  remote: string
+  cloned: Cloned | null
 }
-const firstMade = (state: State): Made => ({
+const firstMade = (state: State, cloned: Cloned | null = null): Made => ({
   git: gitNeed(state) === null ? 'fine' : 'needed',
-  code: 'unasked',
+  code: cloned?.host ?? 'unasked',
   issues: 'unasked',
+  remote: cloned?.remote ?? 'balazs/tidepool',
+  cloned,
 })
+const changesOf = (host: Host) => (host === 'gitlab' ? 'merge requests' : 'pull requests')
 
 const gitFacts = (need: GitNeed): string[] =>
   need === 'empty'
@@ -222,12 +241,12 @@ function CodeCard({ setup, onChoose, ...walk }: Walk & { setup: Setup; onChoose:
   )
 }
 
-function HostCard({ host, onDone, onBack, ...walk }: Walk & { host: Host; onDone: () => void; onBack: () => void }) {
+function HostCard({ host, onDone, onBack, ...walk }: Walk & { host: Host; onDone: (remote: string) => void; onBack: () => void }) {
   const h = HOST[host]
   const [owner, setOwner] = useState('balazs')
   const [name, setName] = useState('tidepool')
   const [seen, setSeen] = useState<'private' | 'public'>('private')
-  const ticking = useTicking([`Create ${owner}/${name}`, 'Push main to it', 'Make it tidepool’s remote'], onDone)
+  const ticking = useTicking([`Create ${owner}/${name}`, 'Push main to it', 'Make it tidepool’s remote'], () => onDone(`${owner}/${name}`))
   return (
     <ConnectCard brand={h.brand} title={`New ${h.thing} on ${h.name}`} {...walkProps(walk)}>
       {ticking.busy ? (
@@ -276,17 +295,24 @@ function HostCard({ host, onDone, onBack, ...walk }: Walk & { host: Host; onDone
   )
 }
 
-function IssuesCard({
-  setup,
-  code,
-  onChoose,
-  ...walk
-}: Walk & { setup: Setup; code: Made['code']; onChoose: (to: Made['issues']) => void }) {
+function IssuesCard({ setup, made, onChoose, ...walk }: Walk & { setup: Setup; made: Made; onChoose: (to: Made['issues']) => void }) {
+  const linear: ConnectWayOption = linearOf(setup)
+    ? { id: 'linear', title: 'Linear', line: 'A new team for it, or one you have', brand: Brand.Linear }
+    : { id: 'linear', title: 'Connect Linear', line: 'Or Jira or Trello', brand: Brand.Linear }
+  const code = made.code
+  const host: ConnectWayOption[] = isHost(code)
+    ? [
+        {
+          id: 'host',
+          title: HOST[code].issues,
+          line: made.cloned === null ? `On ${made.remote}` : `${made.cloned.issues} open on ${made.remote}`,
+          brand: HOST[code].brand,
+        },
+      ]
+    : []
+  // Cloned, its issues are where it came from already: those first.
   const ways: ConnectWayOption[] = [
-    linearOf(setup)
-      ? { id: 'linear', title: 'Linear', line: 'A new team for it, or one you have', brand: Brand.Linear }
-      : { id: 'linear', title: 'Connect Linear', line: 'Or Jira or Trello', brand: Brand.Linear },
-    ...(isHost(code) ? [{ id: 'host', title: HOST[code].issues, line: 'On balazs/tidepool', brand: HOST[code].brand }] : []),
+    ...(made.cloned === null ? [linear, ...host] : [...host, linear]),
     { id: 'none', title: 'Not now', line: 'Link a tracker later, in its settings', icon: 'close' },
   ]
   return (
@@ -390,16 +416,32 @@ function Talk({ placeholder = 'Tell the coordinator something', onSay }: { place
 }
 
 /** The one line a remote earns, once the code has somewhere to live. */
-const codeLine = (code: Made['code']) =>
-  isHost(code)
-    ? `tidepool is on ${HOST[code].name} at balazs/tidepool, private, with main pushed. Tasks open ${code === 'gitlab' ? 'merge' : 'pull'} requests there.`
+const codeLine = (made: Made) =>
+  made.cloned === null && isHost(made.code)
+    ? `tidepool is on ${HOST[made.code].name} at ${made.remote}, private, with main pushed. Tasks open ${changesOf(made.code)} there.`
     : null
+
+/** The first line of a cloned project's conversation: what came with it. */
+const ClonedLine = ({ made }: { made: Made }) =>
+  made.cloned === null ? null : (
+    <AltharLine>
+      Cloned {made.cloned.remote} from {HOST[made.cloned.host].name} into {made.cloned.where}, on main. Tasks open{' '}
+      {changesOf(made.cloned.host)} there.
+    </AltharLine>
+  )
+
+/** What each direction is shown: the folder, what's connected, and what was cloned for it. */
+interface Scene {
+  state: State
+  setup: Setup
+  cloned: Cloned | null
+}
 
 /* ---- A: today's first-conversation card, with git, and code and issues each a row ---- */
 
-function CardScene({ state, setup }: { state: State; setup: Setup }) {
+function CardScene({ state, setup, cloned }: Scene) {
   const need = gitNeed(state)
-  const [made, setMade] = useState<Made>(() => firstMade(state))
+  const [made, setMade] = useState<Made>(() => firstMade(state, cloned))
   const [open, setOpen] = useState<'git' | Host | 'team' | null>(null)
   const [gone, setGone] = useState(false)
   const hosts = hostsOf(setup)
@@ -427,7 +469,7 @@ function CardScene({ state, setup }: { state: State; setup: Setup }) {
           </Button>
         ),
     })
-  if (hosts.length > 0)
+  if (hosts.length > 0 && made.cloned === null)
     rows.push({
       id: 'code',
       mark: isHost(made.code) ? <BrandMark brand={HOST[made.code].brand} size={16} /> : <Icon name="folder" size={15} />,
@@ -440,7 +482,7 @@ function CardScene({ state, setup }: { state: State; setup: Setup }) {
           label="Put it on"
           align="end"
           trigger={
-            <Button size="small" trailingIcon="down">
+            <Button size="small" trailingIcon="chevronD">
               Put it on
             </Button>
           }
@@ -453,19 +495,58 @@ function CardScene({ state, setup }: { state: State; setup: Setup }) {
         </Menu>
       ),
     })
-  if (linearOf(setup))
+  // Its issues: Linear's, or its host's once its code is there; cloned, its host's first, with what's open there.
+  const code = made.code
+  const linear = linearOf(setup) ? [{ id: 'linear' as const, name: 'Linear', press: 'Link Linear', brand: Brand.Linear }] : []
+  const own = isHost(code)
+    ? [{ id: 'host' as const, name: HOST[code].issues, press: `Use ${HOST[code].issues}`, brand: HOST[code].brand }]
+    : []
+  const issueWays = made.cloned === null ? [...linear, ...own] : [...own, ...linear]
+  const linkIssues = (id: 'linear' | 'host') => (id === 'linear' ? setOpen('team') : setMade((m) => ({ ...m, issues: 'host' })))
+  const first = issueWays[0]
+  if (first !== undefined)
     rows.push({
       id: 'issues',
-      mark: <BrandMark brand={Brand.Linear} size={16} />,
-      name: 'Issues',
-      note: made.issues === 'linear' ? 'Linear, Tidepool team' : 'Not linked',
-      end:
+      mark:
         made.issues === 'linear' ? (
-          tick
+          <BrandMark brand={Brand.Linear} size={16} />
+        ) : made.issues === 'host' && isHost(code) ? (
+          <BrandMark brand={HOST[code].brand} size={16} />
         ) : (
-          <Button size="small" onClick={() => setOpen('team')}>
-            Link Linear
+          <Icon name="issues" size={15} />
+        ),
+      name: 'Issues',
+      note:
+        made.issues === 'linear'
+          ? 'Linear, Tidepool team'
+          : made.issues === 'host' && isHost(code)
+            ? `${HOST[code].issues}, ${made.cloned?.issues ?? 0} open`
+            : made.cloned !== null && isHost(code)
+              ? `${made.cloned.issues} open on ${HOST[code].name}`
+              : 'Not linked',
+      end:
+        made.issues === 'linear' || made.issues === 'host' ? (
+          tick
+        ) : issueWays.length === 1 ? (
+          <Button size="small" onClick={() => linkIssues(first.id)}>
+            {first.press}
           </Button>
+        ) : (
+          <Menu
+            label="Link its issues"
+            align="end"
+            trigger={
+              <Button size="small" trailingIcon="chevronD">
+                Link
+              </Button>
+            }
+          >
+            {issueWays.map((way) => (
+              <MenuItem key={way.id} lead={<BrandMark brand={way.brand} size={14} />} onSelect={() => linkIssues(way.id)}>
+                {way.name}
+              </MenuItem>
+            ))}
+          </Menu>
         ),
     })
   const close = (next: Partial<Made>) => {
@@ -476,21 +557,22 @@ function CardScene({ state, setup }: { state: State; setup: Setup }) {
     open === 'git' ? (
       <GitCard need={need} onDone={() => close({ git: 'done' })} onLater={() => setOpen(null)} />
     ) : open === 'github' || open === 'gitlab' ? (
-      <HostCard host={open} onDone={() => close({ code: open })} onBack={() => setOpen(null)} />
+      <HostCard host={open} onDone={(remote) => close({ code: open, remote })} onBack={() => setOpen(null)} />
     ) : open === 'team' ? (
       <TeamCard onDone={() => close({ issues: 'linear' })} />
     ) : undefined
-  const line = codeLine(made.code)
+  const line = codeLine(made)
   return (
     <Window
       made={made}
       composer={<Talk />}
       talk={
         <Thread label="Conversation">
+          <ClonedLine made={made} />
           {!gone && (
             <FirstConnections
               rows={rows}
-              {...(hosts.length === 0
+              {...(hosts.length === 0 && !isHost(made.code)
                 ? { hosts: (['github', 'gitlab'] as const).map((id) => ({ id, name: HOST[id].name, brand: HOST[id].brand })) }
                 : {})}
               {...(linearOf(setup)
@@ -536,7 +618,9 @@ const summaryOf = (made: Made, need: GitNeed): ConnectCan[] => [
       ]),
   {
     id: 'code',
-    text: isHost(made.code) ? `Code: ${HOST[made.code].name}, balazs/tidepool` : `Code: only on ${here}`,
+    text: isHost(made.code)
+      ? `Code: ${made.cloned === null ? '' : 'cloned from '}${HOST[made.code].name}, ${made.remote}`
+      : `Code: only on ${here}`,
     state: CanState.Can,
   },
   {
@@ -551,37 +635,40 @@ const summaryOf = (made: Made, need: GitNeed): ConnectCan[] => [
   },
 ]
 
-function WalkScene({ state, setup }: { state: State; setup: Setup }) {
+function WalkScene({ state, setup, cloned }: Scene) {
   const need = gitNeed(state)
-  const [made, setMade] = useState<Made>(() => firstMade(state))
-  const [stop, setStop] = useState<Stop>(need === null ? 'code' : 'git')
-  const steps = need === null ? 2 : 3
-  const pager = (which: 'git' | 'code' | 'issues') => ({
-    steps,
-    at: need === null ? (which === 'code' ? 0 : 1) : which === 'git' ? 0 : which === 'code' ? 1 : 2,
-  })
+  const [made, setMade] = useState<Made>(() => firstMade(state, cloned))
+  // Its questions: git where it has none, where its code lives unless it came from there, then its issues.
+  const order: Array<'git' | 'code' | 'issues'> = [
+    ...(need === null ? [] : ['git' as const]),
+    ...(cloned === null ? ['code' as const] : []),
+    'issues',
+  ]
+  const [stop, setStop] = useState<Stop>(order[0] ?? 'issues')
+  const steps = order.length
+  const pager = (which: 'git' | 'code' | 'issues') => (steps > 1 ? { pager: { steps, at: order.indexOf(which) } } : {})
   const go = (next: Stop, change: Partial<Made> = {}) => {
     setMade((m) => ({ ...m, ...change }))
     setStop(next)
   }
   const card =
     stop === 'git' ? (
-      <GitCard need={need} pager={pager('git')} onDone={() => go('code', { git: 'done' })} onLater={() => go('code', { git: 'later' })} />
+      <GitCard need={need} {...pager('git')} onDone={() => go('code', { git: 'done' })} onLater={() => go('code', { git: 'later' })} />
     ) : stop === 'code' ? (
-      <CodeCard setup={setup} pager={pager('code')} onChoose={(code) => (code === 'here' ? go('issues', { code: 'here' }) : go(code))} />
+      <CodeCard setup={setup} {...pager('code')} onChoose={(code) => (code === 'here' ? go('issues', { code: 'here' }) : go(code))} />
     ) : stop === 'github' || stop === 'gitlab' ? (
-      <HostCard host={stop} pager={pager('code')} onDone={() => go('issues', { code: stop })} onBack={() => go('code')} />
+      <HostCard host={stop} {...pager('code')} onDone={(remote) => go('issues', { code: stop, remote })} onBack={() => go('code')} />
     ) : stop === 'issues' ? (
       <IssuesCard
         setup={setup}
-        code={made.code}
-        pager={pager('issues')}
+        made={made}
+        {...pager('issues')}
         onChoose={(to) => (to === 'linear' ? go('team') : go('done', { issues: to }))}
       />
     ) : stop === 'team' ? (
-      <TeamCard pager={pager('issues')} onDone={() => go('done', { issues: 'linear' })} />
+      <TeamCard {...pager('issues')} onDone={() => go('done', { issues: 'linear' })} />
     ) : (
-      <ConnectCard icon="check" title="Tidepool is set up" align="start" pager={{ steps, at: steps }} done>
+      <ConnectCard icon="check" title="Tidepool is set up" align="start" {...(steps > 1 ? { pager: { steps, at: steps } } : {})} done>
         <ConnectChecks label="Set up" items={summaryOf(made, need)} />
       </ConnectCard>
     )
@@ -591,6 +678,7 @@ function WalkScene({ state, setup }: { state: State; setup: Setup }) {
       composer={<Talk />}
       talk={
         <Thread label="Conversation">
+          <ClonedLine made={made} />
           <div className={s.walkCard}>
             <SizeMotion step={stop}>{card}</SizeMotion>
           </div>
@@ -615,9 +703,11 @@ interface Asked {
   after: (id: string) => { line?: string; prose?: string; made: Partial<Made> }
 }
 
-function asksOf(state: State, setup: Setup): Asked[] {
+function asksOf(state: State, setup: Setup, made: Made): Asked[] {
   const need = gitNeed(state)
   const hosts = hostsOf(setup)
+  const code = made.code
+  const cloned = made.cloned
   const git: Asked[] =
     need === null
       ? []
@@ -640,6 +730,45 @@ function asksOf(state: State, setup: Setup): Asked[] {
                 : { prose: 'Tasks wait for it. Say when.', made: { git: 'later' } },
           },
         ]
+  const issues: Asked =
+    cloned !== null && isHost(code)
+      ? {
+          id: 'issues',
+          prose: `tidepool came with ${cloned.issues} open issues on ${HOST[code].name}. Shall I work from those${linearOf(setup) ? ', or from a Linear team' : ''}?`,
+          options: [
+            { id: 'host', label: HOST[code].issues, brand: HOST[code].brand },
+            ...(linearOf(setup) ? [{ id: 'linear', label: 'A new Linear team', brand: Brand.Linear }] : []),
+            { id: 'none', label: 'Not now' },
+          ],
+          after: (id) =>
+            id === 'host'
+              ? { prose: `I’ll work from ${made.remote}’s issues. Hand me one, or ask me what’s open.`, made: { issues: 'host' } }
+              : id === 'linear'
+                ? {
+                    prose: 'Made a Linear team, Tidepool (TID), and linked it. Hand me an issue and its task links back to it.',
+                    made: { issues: 'linear' },
+                  }
+                : { prose: 'Fine. Link them any time in its settings, or ask me.', made: { issues: 'none' } },
+        }
+      : {
+          id: 'issues',
+          prose: linearOf(setup) ? 'And its issues? You have Linear connected.' : 'And its issues? Nothing is connected for them yet.',
+          options: [
+            { id: 'linear', label: linearOf(setup) ? 'A new Linear team' : 'Connect Linear', brand: Brand.Linear },
+            ...(isHost(code) ? [{ id: 'host', label: HOST[code].issues, brand: HOST[code].brand }] : []),
+            { id: 'none', label: 'Not now' },
+          ],
+          after: (id) =>
+            id === 'linear'
+              ? {
+                  prose: 'Made a Linear team, Tidepool (TID), and linked it. Hand me an issue and its task links back to it.',
+                  made: { issues: 'linear' },
+                }
+              : id === 'host' && isHost(code)
+                ? { prose: `Its issues are ${HOST[code].name}’s, on ${made.remote}.`, made: { issues: 'host' } }
+                : { prose: 'Fine. Link one any time in its settings, or ask me.', made: { issues: 'none' } },
+        }
+  if (cloned !== null) return [issues]
   return [
     ...git,
     {
@@ -667,30 +796,13 @@ function asksOf(state: State, setup: Setup): Asked[] {
               made: { code: id as Host },
             },
     },
-    {
-      id: 'issues',
-      prose: linearOf(setup) ? 'And its issues? You have Linear connected.' : 'And its issues? Nothing is connected for them yet.',
-      options: [
-        { id: 'linear', label: linearOf(setup) ? 'A new Linear team' : 'Connect Linear', brand: Brand.Linear },
-        ...(setup === 'none' ? [] : [{ id: 'host', label: 'GitHub Issues', brand: Brand.GitHub }]),
-        { id: 'none', label: 'Not now' },
-      ],
-      after: (id) =>
-        id === 'linear'
-          ? {
-              prose: 'Made a Linear team, Tidepool (TID), and linked it. Hand me an issue and its task links back to it.',
-              made: { issues: 'linear' },
-            }
-          : id === 'host'
-            ? { prose: 'Its issues are GitHub’s, on balazs/tidepool.', made: { issues: 'host' } }
-            : { prose: 'Fine. Link one any time in its settings, or ask me.', made: { issues: 'none' } },
-    },
+    issues,
   ]
 }
 
-function AskScene({ state, setup }: { state: State; setup: Setup }) {
-  const asks = asksOf(state, setup)
-  const [made, setMade] = useState<Made>(() => firstMade(state))
+function AskScene({ state, setup, cloned }: Scene) {
+  const [made, setMade] = useState<Made>(() => firstMade(state, cloned))
+  const asks = asksOf(state, setup, made)
   const [answers, setAnswers] = useState<string[]>([])
   const [thinking, setThinking] = useState(false)
   const answer = (ask: Asked, id: string) => {
@@ -717,6 +829,7 @@ function AskScene({ state, setup }: { state: State; setup: Setup }) {
       composer={<Talk placeholder="Answer, or tell the coordinator something" onSay={say} />}
       talk={
         <Thread label="Conversation">
+          <ClonedLine made={made} />
           {asks.slice(0, shown).map((ask, i) => {
             const chosen = answers[i]
             const after = chosen === undefined || (thinking && i === answers.length - 1) ? null : ask.after(chosen)
@@ -766,15 +879,15 @@ const FILES = [
   { path: 'src/main.ts', add: 22, del: 4 },
 ]
 
-function BlockScene({ state, setup }: { state: State; setup: Setup }) {
+function BlockScene({ state, setup, cloned }: Scene) {
   const need = gitNeed(state)
   const later = state === 'later'
-  const [made, setMade] = useState<Made>(() => (later ? { git: 'fine', code: 'unasked', issues: 'unasked' } : firstMade(state)))
+  const [made, setMade] = useState<Made>(() => (later ? { ...firstMade(state), git: 'fine' } : firstMade(state, cloned)))
   const [putting, setPutting] = useState<Host | null>(null)
   const [merged, setMerged] = useState(false)
   const [linking, setLinking] = useState(false)
   const hosts = hostsOf(setup)
-  const line = codeLine(made.code)
+  const line = codeLine(made)
   const actions = isHost(made.code) ? (
     <>
       <Button variant="signal">Open a draft pull request</Button>
@@ -786,7 +899,7 @@ function BlockScene({ state, setup }: { state: State; setup: Setup }) {
         Merge into main
       </Button>
       {hosts.length > 0 && (
-        <Menu label="Put it on" trigger={<Button trailingIcon="down">Put it on a host first</Button>}>
+        <Menu label="Put it on" trigger={<Button trailingIcon="chevronD">Put it on a host first</Button>}>
           {hosts.map((id) => (
             <MenuItem key={id} lead={<BrandMark brand={HOST[id].brand} size={14} />} onSelect={() => setPutting(id)}>
               {HOST[id].name}
@@ -805,8 +918,8 @@ function BlockScene({ state, setup }: { state: State; setup: Setup }) {
           {putting !== null ? (
             <HostCard
               host={putting}
-              onDone={() => {
-                setMade((m) => ({ ...m, code: putting }))
+              onDone={(remote) => {
+                setMade((m) => ({ ...m, code: putting, remote }))
                 setPutting(null)
               }}
               onBack={() => setPutting(null)}
@@ -825,6 +938,7 @@ function BlockScene({ state, setup }: { state: State; setup: Setup }) {
     </Thread>
   ) : (
     <Thread label="Conversation">
+      <ClonedLine made={made} />
       {made.git === 'needed' ? (
         <div className={s.walkCard}>
           <GitCard need={need} onDone={() => setMade((m) => ({ ...m, git: 'done' }))} />
@@ -834,17 +948,36 @@ function BlockScene({ state, setup }: { state: State; setup: Setup }) {
       ) : null}
     </Thread>
   )
-  // Issues come in from where issues would show: the board's empty Up next.
+  // Issues come in from where issues would show: the board's empty Up next. Cloned, from its host in one press.
+  const code = made.code
+  const fromHost = made.cloned !== null && isHost(code)
+  const linked =
+    made.issues === 'linear'
+      ? 'Its issues are in Linear’s Tidepool team.'
+      : made.issues === 'host' && isHost(code)
+        ? `Its issues are on ${HOST[code].name}, ${made.cloned?.issues ?? 0} open.`
+        : null
   const upNext = linking ? (
     <div className={s.inLane}>
-      <TeamCard onDone={() => setLinking(false)} />
+      <TeamCard
+        onDone={() => {
+          setMade((m) => ({ ...m, issues: 'linear' }))
+          setLinking(false)
+        }}
+      />
     </div>
+  ) : linked !== null ? (
+    <BoardEmpty title="Nothing queued">{linked} Hand the coordinator one, and its task lines up here.</BoardEmpty>
   ) : (
     <BoardEmpty
       title="Nothing queued"
       action={
-        <LinkButton onClick={() => setLinking(true)}>
-          {linearOf(setup) ? 'Bring in its issues from Linear' : 'Connect Linear, Jira or Trello'}
+        <LinkButton onClick={() => (fromHost ? setMade((m) => ({ ...m, issues: 'host' })) : setLinking(true))}>
+          {fromHost && isHost(code)
+            ? `Bring in its ${made.cloned?.issues ?? 0} issues from ${HOST[code].name}`
+            : linearOf(setup)
+              ? 'Bring in its issues from Linear'
+              : 'Connect Linear, Jira or Trello'}
         </LinkButton>
       }
     >
@@ -854,12 +987,216 @@ function BlockScene({ state, setup }: { state: State; setup: Setup }) {
   return <Window made={made} composer={<Talk />} talk={talk} upNext={upNext} />
 }
 
-/* ---- Step one: the New project page as it is, taking any folder ---- */
+/* ---- Step one: the New project page as it is, taking any folder, or cloning one ---- */
 
-function NewProjectStage({ state, onCreate }: { state: State; onCreate: () => void }) {
+/** A repository on a host it's connected to, as the clone picker lists it. */
+interface HostedRepo {
+  readonly id: string
+  readonly host: Host
+  readonly remote: string
+  readonly facts: string
+  readonly issues?: number
+  /** Where it is on this computer already: added, not cloned. */
+  readonly here?: string
+  /** Its organisation's single sign-on, which cloning waits for. */
+  readonly sso?: string
+}
+
+/* Most recently pushed first, as the hosts list them. */
+const REPOS: readonly HostedRepo[] = [
+  { id: 'gh-althar', host: 'github', remote: 'charrette/althar', facts: 'Private · pushed 2 hours ago', issues: 212 },
+  { id: 'gh-tidepool', host: 'github', remote: 'balazs/tidepool', facts: 'Private · pushed yesterday', issues: 12 },
+  { id: 'gl-infra', host: 'gitlab', remote: 'charrette/infra', facts: 'Private · pushed yesterday', issues: 4, sso: 'charrette' },
+  { id: 'gh-meridian', host: 'github', remote: 'charrette/meridian', facts: 'Private', here: '~/code/meridian' },
+  { id: 'gh-site', host: 'github', remote: 'charrette/site', facts: 'Public · pushed 3 days ago', issues: 3 },
+  { id: 'gl-tidepool-ios', host: 'gitlab', remote: 'charrette/tidepool-ios', facts: 'Private · pushed last week', issues: 7 },
+  { id: 'gh-dotfiles', host: 'github', remote: 'balazs/dotfiles', facts: 'Public · pushed in March' },
+]
+const CLONES_INTO = '~/Althar'
+const nameOf = (remote: string) => remote.split('/').at(-1) ?? remote
+const codeHost = (host: Host) => ({ name: HOST[host].name, brand: HOST[host].brand })
+
+/** A repository's URL, pasted: one of the listed, or any other on GitHub or GitLab. */
+const repoOfUrl = (typed: string): HostedRepo | null => {
+  const found = /^(?:https?:\/\/|git@)?(github\.com|gitlab\.com)[/:]([\w.-]+\/[\w.-]+?)(?:\.git)?\/?$/i.exec(typed.trim())
+  if (found === null) return null
+  const host: Host = found[1]?.toLowerCase() === 'gitlab.com' ? 'gitlab' : 'github'
+  const remote = found[2] ?? ''
+  return REPOS.find((r) => r.host === host && r.remote === remote) ?? { id: `url-${remote}`, host, remote, facts: 'From its URL' }
+}
+
+/** Clone…: a field that finds a repository on the hosts it's connected to, or takes a URL; each row clones it. */
+function ClonePick({ hosts, onPick, onConnect }: { hosts: Host[]; onPick: (repo: HostedRepo) => void; onConnect: (host: Host) => void }) {
+  const [open, setOpen] = useState(false)
+  const [typed, setTyped] = useState('')
+  const field = useRef<HTMLInputElement>(null)
+  const list = useRef<HTMLUListElement>(null)
+  const pasted = repoOfUrl(typed)
+  const words = typed.toLowerCase().split(/\s+/).filter(Boolean)
+  const shown =
+    pasted === null
+      ? REPOS.filter((r) => hosts.includes(r.host) && words.every((w) => `${r.remote} ${HOST[r.host].name}`.toLowerCase().includes(w)))
+      : [pasted]
+  const names = hosts.map((h) => HOST[h].name).join(' or ')
+  const choose = (repo: HostedRepo) => {
+    setOpen(false)
+    setTyped('')
+    onPick(repo)
+  }
+  const rows = () => Array.from(list.current?.querySelectorAll<HTMLButtonElement>('button') ?? [])
+  const onField = (event: KeyEvent<HTMLInputElement>) => {
+    if (event.key === 'ArrowDown') {
+      event.preventDefault()
+      rows()[0]?.focus()
+    } else if (event.key === 'Enter' && shown[0] !== undefined) {
+      event.preventDefault()
+      choose(shown[0])
+    }
+  }
+  const onRow = (event: KeyEvent<HTMLButtonElement>) => {
+    const all = rows()
+    const at = all.indexOf(event.currentTarget)
+    if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+      event.preventDefault()
+      ;(event.key === 'ArrowDown' ? all[at + 1] : at === 0 ? field.current : all[at - 1])?.focus()
+    } else if (event.key.length === 1 && event.key !== ' ' && !event.metaKey && !event.ctrlKey) field.current?.focus()
+  }
+  return (
+    <Popover
+      open={open}
+      onOpenChange={setOpen}
+      label="Clone a repository"
+      width={432}
+      padded={false}
+      onEscapeKeyDown={(event) => {
+        if (typed === '') return
+        event.preventDefault()
+        setTyped('')
+      }}
+      trigger={
+        <Button size="small" icon="download">
+          Clone…
+        </Button>
+      }
+    >
+      <div className={s.clone}>
+        <label className={s.cloneFind}>
+          <Icon name="search" size={14} />
+          <input
+            ref={field}
+            type="search"
+            value={typed}
+            onChange={(event) => setTyped(event.target.value)}
+            onKeyDown={onField}
+            aria-label="Find a repository, or paste its URL"
+            placeholder={hosts.length === 0 ? 'Paste a repository’s URL' : `Find one on ${names}, or paste its URL`}
+            spellCheck={false}
+            autoComplete="off"
+          />
+        </label>
+        {hosts.length === 0 && pasted === null ? (
+          <div className={s.cloneConnect}>
+            <p>Connect GitHub or GitLab to clone from what you have there.</p>
+            <div className={s.cloneConnectButtons}>
+              {(['github', 'gitlab'] as const).map((id) => (
+                <Button key={id} size="small" onClick={() => onConnect(id)}>
+                  <span className={s.reply}>
+                    <BrandMark brand={HOST[id].brand} size={13} />
+                    Connect {HOST[id].name}
+                  </span>
+                </Button>
+              ))}
+            </div>
+          </div>
+        ) : shown.length === 0 ? (
+          <p className={s.cloneQuiet}>None match “{typed}”.</p>
+        ) : (
+          <ul ref={list} className={s.cloneList} aria-label="Repositories">
+            {shown.map((repo) => {
+              const [owner, name] = repo.remote.split('/')
+              return (
+                <li key={repo.id}>
+                  <button type="button" className={s.cloneRow} onClick={() => choose(repo)} onKeyDown={onRow}>
+                    <BrandMark brand={HOST[repo.host].brand} size={14} />
+                    <span className={s.cloneName}>
+                      <span className={s.cloneOwner}>{owner}/</span>
+                      {name}
+                    </span>
+                    <span className={s.cloneFacts}>{repo.here === undefined ? repo.facts : `On ${here}`}</span>
+                  </button>
+                </li>
+              )
+            })}
+          </ul>
+        )}
+        <div className={s.cloneFoot}>
+          <span>
+            Clones into <span className={s.mono}>{CLONES_INTO}</span>
+          </span>
+          <LinkButton>Change…</LinkButton>
+        </div>
+      </div>
+    </Popover>
+  )
+}
+
+function NewProjectStage({
+  state,
+  setup,
+  onCreate,
+  onConnect,
+}: {
+  state: State
+  setup: Setup
+  onCreate: (cloned: Cloned | null) => void
+  onConnect: (host: Host) => void
+}) {
   const [name, setName] = useState('Tidepool')
   const [ink, setInk] = useState(INK)
   const where = state === 'unreadable' ? '~/Documents/tidepool' : '~/code/tidepool'
+  const [folders, setFolders] = useState<NewProjectFolder[]>(() =>
+    state === 'clone' ? [] : [{ id: 'tidepool', name: 'tidepool', where, host: null, remote: null }],
+  )
+  const [cloned, setCloned] = useState<Cloned | null>(null)
+  const [failed, setFailed] = useState<ReactNode>(null)
+  const hosts = hostsOf(setup)
+  const slug = repositoryFolder(name)
+  // Named like the project, on a host it's connected to, and not here yet: one press each.
+  const like =
+    state === 'clone' && slug !== ''
+      ? REPOS.filter(
+          (r) => hosts.includes(r.host) && r.here === undefined && nameOf(r.remote).includes(slug) && !folders.some((f) => f.id === r.id),
+        )
+      : []
+  const clone = (repo: HostedRepo) => {
+    if (folders.some((f) => f.id === repo.id)) return
+    setFailed(null)
+    const host = codeHost(repo.host)
+    const named = nameOf(repo.remote)
+    if (repo.here !== undefined) {
+      setFolders((now) => [...now, { id: repo.id, name: named, where: repo.here ?? '', host, remote: repo.remote }])
+      return
+    }
+    const into = `${CLONES_INTO}/${named}`
+    setFolders((now) => [...now, { id: repo.id, reading: true, name: named, cloning: { host, remote: repo.remote, where: into } }])
+    setTimeout(
+      () => {
+        if (repo.sso !== undefined) {
+          setFolders((now) => now.filter((f) => f.id !== repo.id))
+          setFailed(
+            <>
+              {HOST[repo.host].name} wants you signed in to {repo.sso} before {repo.remote} can be cloned.{' '}
+              <LinkButton>Sign in to {repo.sso}</LinkButton>
+            </>,
+          )
+          return
+        }
+        setFolders((now) => now.map((f) => (f.id === repo.id ? { id: repo.id, name: named, where: into, host, remote: repo.remote } : f)))
+        setCloned({ host: repo.host, remote: repo.remote, where: into, issues: repo.issues ?? 0 })
+      },
+      repo.sso === undefined ? 1900 : 1300,
+    )
+  }
   const error =
     state === 'unreadable' ? (
       <>
@@ -869,7 +1206,9 @@ function NewProjectStage({ state, onCreate }: { state: State; onCreate: () => vo
       <>
         tidepool is Tidepool already. <LinkButton>Open Tidepool</LinkButton>
       </>
-    ) : null
+    ) : (
+      failed
+    )
   return (
     <NewProject
       seed={SEED}
@@ -877,16 +1216,26 @@ function NewProjectStage({ state, onCreate }: { state: State; onCreate: () => vo
       onNameChange={setName}
       ink={ink}
       onInkChange={setInk}
-      folders={[{ id: 'tidepool', name: 'tidepool', where, host: null, remote: null }]}
-      onRemove={noop}
+      folders={folders}
+      onRemove={(id) => setFolders((now) => now.filter((f) => f.id !== id))}
       onChoose={noop}
+      clone={<ClonePick hosts={hosts} onPick={clone} onConnect={onConnect} />}
+      hosted={{
+        like: name.trim(),
+        repos: like.map((r) => ({ id: r.id, host: codeHost(r.host), remote: r.remote, facts: r.facts })),
+      }}
+      onClone={(id) => {
+        const repo = REPOS.find((r) => r.id === id)
+        if (repo !== undefined) clone(repo)
+      }}
       found={{ like: null, first: [], more: [] }}
       onAdd={noop}
       onCreate={() => {
-        if (error === null) onCreate()
+        if (state !== 'unreadable' && state !== 'project') onCreate(cloned)
       }}
       onCancel={noop}
       error={error}
+      text={{ needsFolder: 'Choose a folder, or clone one.' }}
     />
   )
 }
@@ -899,6 +1248,7 @@ function Lab() {
   const [setup, setSetup] = useState<Setup>(pick(setups, params.get('c'), 'all'))
   const [theme, setTheme] = useState(params.get('theme') === 'dark' ? 'dark' : 'light')
   const [inProject, setInProject] = useState(params.get('p') === '1')
+  const [cloned, setCloned] = useState<Cloned | null>(null)
   const [round, setRound] = useState(0)
   useEffect(() => {
     document.documentElement.dataset.theme = theme
@@ -936,21 +1286,31 @@ function Lab() {
   }, [])
   const scene = `${direction}-${state}-${setup}-${round}`
   const project = inProject || state === 'later'
+  const shown: Scene = { state, setup, cloned: state === 'clone' ? (cloned ?? CLONED) : null }
   return (
     <div className={s.lab}>
       <main className={s.scene}>
         {!project ? (
           <div className={s.page}>
-            <NewProjectStage key={scene} state={state} onCreate={() => setInProject(true)} />
+            <NewProjectStage
+              key={scene}
+              state={state}
+              setup={setup}
+              onCreate={(made) => {
+                setCloned(made)
+                setInProject(true)
+              }}
+              onConnect={(host) => setSetup(host === 'github' ? 'github' : 'all')}
+            />
           </div>
         ) : state === 'later' || direction === 'd' ? (
-          <BlockScene key={scene} state={state} setup={setup} />
+          <BlockScene key={scene} {...shown} />
         ) : direction === 'a' ? (
-          <CardScene key={scene} state={state} setup={setup} />
+          <CardScene key={scene} {...shown} />
         ) : direction === 'b' ? (
-          <WalkScene key={scene} state={state} setup={setup} />
+          <WalkScene key={scene} {...shown} />
         ) : (
-          <AskScene key={scene} state={state} setup={setup} />
+          <AskScene key={scene} {...shown} />
         )}
       </main>
       <nav className={s.bars} aria-label="Lab">
