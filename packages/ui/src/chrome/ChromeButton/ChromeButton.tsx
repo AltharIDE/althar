@@ -1,4 +1,4 @@
-import { type ComponentProps, type ReactNode, useId } from 'react'
+import { type ComponentProps, useId } from 'react'
 
 import { Icon, type IconName } from '../../foundations/Icon/Icon'
 import { cx } from '../../lib/cx'
@@ -17,9 +17,7 @@ import s from './ChromeButton.module.css'
  */
 
 export interface ChromeButtonProps extends Omit<ComponentProps<'button'>, 'children' | 'title'> {
-  icon?: IconName
-  /** A glyph drawn for it, in place of an icon: one that says a state, such as which panes show. */
-  glyph?: ReactNode
+  icon: IconName
   label: string
   /** What it opened is open. A menu or popover it triggers sets this itself. */
   expanded?: boolean
@@ -41,7 +39,6 @@ export interface ChromeButtonProps extends Omit<ComponentProps<'button'>, 'child
 
 export function ChromeButton({
   icon,
-  glyph,
   label,
   expanded,
   pressed,
@@ -64,7 +61,7 @@ export function ChromeButton({
       aria-describedby={mark === undefined ? undefined : markId}
       {...rest}
     >
-      {glyph ?? (icon !== undefined && <Icon name={icon} size={13} />)}
+      <Icon name={icon} size={13} />
       {!compact && <span>{label}</span>}
       {count !== undefined && count > 0 && (
         <span className={s.count} aria-hidden="true">

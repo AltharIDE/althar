@@ -20,8 +20,8 @@ import s from './lab.module.css'
 
 /*
  * The home lab (README.md): a project's real home, its header, conversation,
- * composer and board, on made-up data, its panes' toggles drawn five ways.
- * 1–5, or the bar along the bottom, swap the design (A–E) in place; c and b
+ * composer and board, on made-up data, its panes' toggles drawn as the layout
+ * map five ways. 1–5, or the bar along the bottom, swap the look in place; c and b
  * are the app's own keys for the panes; w switches between a wide window and
  * the app's narrowest, t between light and dark.
  */
@@ -63,7 +63,7 @@ function Home() {
 
 function Lab() {
   const asked = paneTogglesDesigns.find((one) => one.key === params.get('d'))?.key
-  const [design, setDesign] = useState<PaneTogglesDesign>(asked ?? 'a')
+  const [design, setDesign] = useState<PaneTogglesDesign>(asked ?? 'tiles')
   const [narrow, setNarrow] = useState(params.get('narrow') === '1')
   const [theme, setTheme] = useState(params.get('theme') === 'dark' ? 'dark' : 'light')
   useEffect(() => {
@@ -101,7 +101,7 @@ function Lab() {
       <nav className={s.bar} aria-label="Designs" hidden={params.get('shot') === '1'}>
         {paneTogglesDesigns.map((one, index) => (
           <button key={one.key} type="button" aria-pressed={design === one.key} onClick={() => setDesign(one.key)}>
-            <kbd>{index + 1}</kbd> {one.key.toUpperCase()} · {one.label}
+            <kbd>{index + 1}</kbd> {one.label}
           </button>
         ))}
         <span className={s.gap} />

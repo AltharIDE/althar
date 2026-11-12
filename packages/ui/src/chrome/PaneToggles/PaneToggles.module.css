@@ -1,4 +1,4 @@
-/* Three glyphs side by side, as wide whatever they say. */
+/* The toggles side by side, as wide whatever they say. */
 .toggles {
   display: inline-flex;
   flex: none;
@@ -10,98 +10,22 @@
   border: 0;
 }
 
-/* B and E: the drawing says what shows, so no wash while on; the pointer still gets one. */
-.drawn button[aria-pressed='true']:not(:hover),
-.drawnButton[aria-expanded='false']:not(:hover) {
-  background: none;
-}
-.drawn button svg,
-.drawnButton svg {
-  color: var(--t-2);
-}
-.drawn button[aria-pressed='true'] svg {
-  color: var(--t-1);
-}
-.window {
-  display: block;
-}
-
-/* C: the panes' names on a segmented control's track, each raised by itself while it shows. */
-.track {
-  display: inline-flex;
-  flex: none;
-  align-items: center;
-  gap: 1px;
-  min-inline-size: 0;
-  margin: 0;
-  padding: 2px;
-  border: 0;
-  border-radius: 8px;
-  background: var(--segment-track);
-}
-.word {
-  height: 22px;
-  padding: 0 9px;
-  border-radius: 6px;
-  font-size: 11.5px;
-  font-weight: 500;
-  color: var(--t-3);
-  white-space: nowrap;
-  transition:
-    background var(--fast) var(--ease),
-    color var(--fast) var(--ease),
-    box-shadow var(--fast) var(--ease);
-}
-.word:hover {
-  color: var(--t-1);
-}
-.word[aria-pressed='true'] {
-  background: var(--segment-on);
-  box-shadow: var(--lift);
-  color: var(--t-1);
-}
-.word[aria-disabled='true'] {
-  cursor: default;
-}
-/* swap, between the two it swaps */
-.between {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 18px;
-  height: 22px;
-  border-radius: 5px;
-  color: var(--t-3);
-}
-.between:hover:not([aria-disabled='true']) {
-  color: var(--t-1);
-  background: var(--line);
-}
-.between[aria-disabled='true'] {
-  color: var(--t-4);
-  cursor: default;
-}
-
-/* D: the window drawn small, two halves in a frame, the conversation the narrower; a half fills while its pane shows. */
+/* The layout map: the window drawn small, its two halves the toggles, the conversation the narrower. */
 .map {
   display: inline-flex;
-  gap: 2px;
   width: 58px;
   height: 26px;
-  padding: 2px;
-  border: 1.25px solid var(--line-3);
-  border-radius: 6px;
 }
 .half {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   min-width: 0;
-  border-radius: 3px;
   color: var(--t-4);
   transition:
     background var(--fast) var(--ease),
-    color var(--fast) var(--ease);
+    color var(--fast) var(--ease),
+    box-shadow var(--fast) var(--ease);
 }
 .talkHalf {
   flex: 0 0 38%;
@@ -109,21 +33,119 @@
 .boardHalf {
   flex: 1 1 auto;
 }
-.half:hover:not([aria-disabled='true']) {
-  background: var(--line);
-  color: var(--t-2);
-}
 .half[aria-pressed='true'] {
-  background: var(--line-3);
+  color: var(--t-1);
+}
+.half:hover:not([aria-disabled='true']) {
   color: var(--t-1);
 }
 .half[aria-disabled='true'] {
   cursor: default;
 }
 
+/* tiles, the first: a grey tile on each half that shows, in a frame */
+.tiles {
+  gap: 2px;
+  padding: 2px;
+  border: 1.25px solid var(--line-3);
+  border-radius: 6px;
+}
+.tiles .half {
+  border-radius: 3px;
+}
+.tiles .half:hover:not([aria-disabled='true']) {
+  background: var(--line);
+}
+.tiles .half[aria-pressed='true'] {
+  background: var(--line-3);
+}
+
+/* raised: a segmented control's track, as the views beside it; a half that shows is raised paper */
+.raised {
+  gap: 2px;
+  padding: 2px;
+  border-radius: 8px;
+  background: var(--segment-track);
+}
+.raised .half {
+  border-radius: 6px;
+}
+.raised .half[aria-pressed='true'] {
+  background: var(--segment-on);
+  box-shadow: var(--lift);
+}
+.raised .half:active:not([aria-disabled='true']) {
+  background: var(--pressed-paper);
+}
+
+/* window: one framed window, split by a hairline; a half that shows is paper, one hidden empty */
+.window {
+  overflow: hidden;
+  border: 1px solid var(--line-3);
+  border-radius: 6px;
+}
+.window .half + .half {
+  border-inline-start: 1px solid var(--line-3);
+}
+.window .half[aria-pressed='true'] {
+  background: var(--segment-on);
+}
+.window .half:hover:not([aria-disabled='true'], [aria-pressed='true']) {
+  background: var(--line);
+}
+
+/* ink: drawn in lines like an icon, nothing filled; what shows is ink, what is hidden faint */
+.ink {
+  border: 1.25px solid var(--t-3);
+  border-radius: 6px;
+}
+.ink .half + .half {
+  border-inline-start: 1.25px solid var(--t-3);
+}
+.ink .half:hover:not([aria-disabled='true']) {
+  background: var(--line);
+}
+.ink .half:first-child {
+  border-radius: 4.5px 0 0 4.5px;
+}
+.ink .half:last-child {
+  border-radius: 0 4.5px 4.5px 0;
+}
+
+/* mini: what each pane holds, drawn small in a framed window while it shows; hidden, an empty pane */
+.mini {
+  overflow: hidden;
+  border: 1px solid var(--line-3);
+  border-radius: 6px;
+  background: var(--segment-on);
+}
+.mini .half + .half {
+  border-inline-start: 1px solid var(--line-3);
+}
+.mini .half {
+  color: var(--t-3);
+}
+.mini .half:hover:not([aria-disabled='true']) {
+  background: var(--line);
+  color: var(--t-2);
+}
+.miniature {
+  display: block;
+  transition: opacity var(--fast) var(--ease);
+}
+.mini .half[aria-pressed='false'] .miniature {
+  opacity: 0;
+}
+.mini .half[aria-pressed='false'] {
+  background: var(--line);
+}
+.mini .half[aria-pressed='false']:hover .miniature {
+  opacity: 0.35;
+}
+
 @media (prefers-reduced-motion: reduce) {
-  .word,
-  .half {
+  .half,
+  .miniature {
     transition: none;
   }
 }
