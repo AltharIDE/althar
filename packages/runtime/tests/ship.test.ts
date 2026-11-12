@@ -344,6 +344,38 @@ describe('talking to a lead once its plan is done', () => {
     }).pipe(Effect.provide(runtimeWith(github)))
   })
 
+  it.live('sends nothing where its task becomes a chat while its Ship’s review runs: what waited waits for the next Ship', () => {
+    const { working, bare, github } = onGitHub()
+    return Effect.gen(function* () {
+      const runs = yield* Runs
+      const sql = yield* SqlClient.SqlClient
+      const task = yield* opened(working, '[review:pass] [review:wait-later]')
+      const pushed = git(bare, 'rev-parse', BRANCH)
+      yield* say(task.threadId, 'Make it retry twice. tidy pls [lead:commit]')
+      yield* answered(task.threadId, task.turns + 1)
+      yield* until(heldAt(task.taskId), (at) => at !== null)
+      yield* runs.ship({ envelope: yield* Runtime.envelope('task.ship', { taskId: task.taskId }), taskId: task.taskId })
+      yield* until(
+        sql<{ state: string }>`
+          SELECT a.state FROM node_attempts a JOIN nodes n ON n.id = a.node_id JOIN workflow_executions e ON e.id = n.execution_id
+          JOIN runs r ON r.id = e.run_id WHERE r.task_id = ${task.taskId} AND r.plan_id IS NULL AND n.node_key = 'review'`,
+        (rows) => rows[0]?.state === 'running',
+      )
+      // "Make it a chat", on the person's word to its lead: its review stops, and the Ship it was in ends as a chat does.
+      const said = yield* callTool(yield* leadOf(task), 'change_part', { part: 'preset', preset: 'Chat', why: 'the person asked' })
+      assert.match(said, /made it a Chat: no review, nothing going up until it ships, PR #1 closed, its branch staying/)
+      yield* until(runsOf(task.taskId), (all) => all.every((run) => run.state !== 'running'))
+      // Nothing went up: not the commit that waited, nor a pull request; the one it had is closed, and what waited still waits.
+      assert.strictEqual(git(bare, 'rev-parse', BRANCH), pushed)
+      assert.deepStrictEqual(
+        github.changes.map((one) => one.state),
+        ['closed'],
+      )
+      assert.isNotNull(yield* heldAt(task.taskId))
+      assert.strictEqual((yield* results(task.threadId)).at(-1)?.summary, 'Kept here: nothing went up.')
+    }).pipe(Effect.provide(runtimeWith(github)))
+  })
+
   it.live('holds nothing where the turn only answered', () => {
     const { working, github } = onGitHub()
     return Effect.gen(function* () {

@@ -1218,11 +1218,12 @@ export class TaskActions extends Context.Service<
       /**
        * How it ends, as asked, and what that does to a pull request it has open: marked ready where it ends ready, closed where
        * it ends with its branch or here (its branch stays, and reopen_pull_request opens it again). One ready already stays
-       * so where it ends as a draft: no host Althar knows turns one back. What changed, in a few words each.
+       * so where it ends as a draft: no host Althar knows turns one back. `chosen`: the person's own ending rather than the
+       * project's, which a preset saved from the task keeps. What changed, in a few words each.
        */
-      const endTo = (actorId: ActorId, task: Task, end: TaskEnding) =>
+      const endTo = (actorId: ActorId, task: Task, end: TaskEnding, chosen: boolean) =>
         Effect.gen(function* () {
-          const { was } = yield* plainly(runs.reshape({ taskId: task.id, end, actorId: actorId }), task.slug)
+          const { was } = yield* plainly(runs.reshape({ taskId: task.id, end, chosen, actorId: actorId }), task.slug)
           const said: Array<string> = was === end ? [] : [endingWords(end)]
           const open = (yield* changes.ofTask(task.id).pipe(Effect.orElseSucceed(() => []))).filter((one) => one.state === 'open')
           for (const one of open) {
@@ -1289,6 +1290,13 @@ export class TaskActions extends Context.Service<
               )
             }
           }
+          // A copy's work stays here; a built-in preset's pull request is as the project says, where it says one. The preset's
+          // own ending is chosen, so a preset saved from the task keeps it; the project's is followed. Set before its review
+          // changes: a review stopped ends its run, which sends the work up as the task ends then, and never as it did.
+          const own = preset.parts.end as TaskEnd | undefined
+          const project = own === undefined || (preset.builtin && own !== 'none') ? yield* changes.endFor(task.projectId, task.id) : null
+          const end: TaskEnding = preset.parts.workspace === 'copy' && (own ?? 'none') === 'none' ? 'here' : (project ?? own ?? 'none')
+          const ends = yield* endTo(actorId, task, end, project === null)
           const reviewer = preset.parts.reviewer === null ? undefined : presetPick(preset.parts.reviewer)
           said.push(
             ...(preset.parts.checked === 'none'
@@ -1296,12 +1304,8 @@ export class TaskActions extends Context.Service<
               : preset.parts.checked === 'after'
                 ? yield* reviewAfterMergeTo(actorId, task, reviewer)
                 : yield* reviewTo(actorId, task, reviewer)),
+            ...ends,
           )
-          // A copy's work stays here; a built-in preset's pull request is as the project says, where it says one.
-          const own = preset.parts.end as TaskEnd | undefined
-          const project = own === undefined || (preset.builtin && own !== 'none') ? yield* changes.endFor(task.projectId, task.id) : null
-          const end: TaskEnding = preset.parts.workspace === 'copy' && (own ?? 'none') === 'none' ? 'here' : (project ?? own ?? 'none')
-          said.push(...(yield* endTo(actorId, task, end)))
           const shelf = preset.parts.shelf === 'scratch' ? 'scratch' : null
           const [sits] = yield* (yield* SqlClient.SqlClient)<{ shelf: string | null }>`SELECT shelf FROM tasks WHERE id = ${task.id}`
           if ((sits?.shelf ?? null) !== shelf) {
@@ -1365,15 +1369,11 @@ export class TaskActions extends Context.Service<
                 'changed its parts',
                 yield* reviewTo(actorOf(access), task, removing ? null : asked.review),
               )
-            case 'ending':
-              return yield* shapeSaid(
-                access,
-                input,
-                task,
-                asked,
-                'changed its parts',
-                yield* endTo(actorOf(access), task, removing ? 'none' : yield* endingAsked(asked, task.slug)),
-              )
+            case 'ending': {
+              const end = removing ? 'none' : yield* endingAsked(asked, task.slug)
+              // The person asked for it: their choice, as an ending changed on the plan card is, which a preset saved keeps.
+              return yield* shapeSaid(access, input, task, asked, 'changed its parts', yield* endTo(actorOf(access), task, end, true))
+            }
             default: {
               if (asked.preset === undefined || asked.preset.trim() === '')
                 return yield* new ToolRefused({ message: 'Name the preset (preset), as list_presets names it.' })

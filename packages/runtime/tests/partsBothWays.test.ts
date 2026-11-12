@@ -11,6 +11,7 @@ import { Coordinator } from '../src/Coordinator'
 import { Instance } from '../src/Instance'
 import { Projects } from '../src/Projects'
 import { Queries } from '../src/Queries'
+import { partsOfTask, savePreset } from '../src/presets'
 import { offerable } from '../src/reviewOffer'
 import { PlanParameters, Runs } from '../src/Runs'
 import * as Runtime from '../src/Runtime'
@@ -54,21 +55,35 @@ const planOf = (taskId: string) =>
     return yield* Schema.decodeUnknownEffect(Schema.fromJsonString(PlanParameters))(row?.parameters ?? '')
   })
 
-/** A task the coordinator planned, run to its ending: with its review, or, `prototype`, with none and ending with its branch. */
-const finished = (working: string, prototype: boolean) =>
+/** The state of the task's latest review, of any run of it. */
+const reviewOf = (taskId: string) =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient
+    const [row] = yield* sql<{ state: string }>`
+      SELECT a.state FROM node_attempts a JOIN nodes n ON n.id = a.node_id JOIN workflow_executions e ON e.id = n.execution_id
+      JOIN runs r ON r.id = e.run_id WHERE r.task_id = ${taskId} AND n.node_key = 'review' ORDER BY a.rowid DESC LIMIT 1`
+    return row?.state
+  })
+
+/**
+ * A task the coordinator planned, run to its ending: with its review, or, `prototype`, with none and ending with its branch;
+ * or, `reviewing`, a change whose review is under way, held there until something stops it.
+ */
+const finished = (working: string, prototype: boolean, reviewing = false) =>
   Effect.gen(function* () {
     const instance = yield* Instance
     yield* (yield* Connections).connectToken({ product: 'github', token: 't', actorId: instance.personId, webUrl: HOST })
     const project = yield* (yield* Projects).open({ envelope: yield* Runtime.envelope('project.open', {}), path: working })
     const coordinator = yield* Coordinator
     const threadId = yield* coordinator.thread(project.projectId)
-    const body = `Add a retry. ${prototype ? '[coordinator:plan-no-review] ' : ''}[coordinator:plan] [lead:finish] [lead:edit] [review:pass]`
+    const body = `Add a retry. ${prototype ? '[coordinator:plan-no-review] ' : ''}[coordinator:plan] [lead:finish] [lead:edit] ${reviewing ? '[review:wait]' : '[review:pass]'}`
     yield* coordinator.say({ envelope: yield* Runtime.envelope('thread.send', { body }), threadId, body, disposition: 'after_current' })
     const [card] = yield* until(cards(project.projectId), (all) => all[0] !== undefined && all[0].plan !== null)
     const task = card ?? assert.fail('no card')
     // A prototype's shape: no review, ending with its branch, as the Prototype preset plans it.
     if (prototype) yield* (yield* Runs).reshape({ taskId: task.taskId, end: 'none', actorId: instance.personId })
-    yield* until(cards(project.projectId), (all) => all[0]?.phase === 'ready')
+    if (reviewing) yield* until(reviewOf(task.taskId), (state) => state === 'running')
+    else yield* until(cards(project.projectId), (all) => all[0]?.phase === 'ready')
     const sql = yield* SqlClient.SqlClient
     const [session] = yield* sql<{ id: string }>`
       SELECT id FROM provider_sessions WHERE thread_id = ${task.threadId} ORDER BY started_at DESC LIMIT 1`
@@ -177,6 +192,63 @@ describe('a task’s parts, both ways, on its lead’s word', () => {
         yield* callTool(task.lead, 'change_part', { part: 'preset', preset: 'Change', why: 'the person asked' }),
         /made it a Change: reviewed by .+, ending in a draft pull request, on the board/,
       )
+    }).pipe(Effect.provide(runtimeWith(github)))
+  })
+
+  it.live('makes a change a chat while its review runs: the review stops, and nothing of it goes up', () => {
+    const { working, bare, github } = onGitHub()
+    return Effect.gen(function* () {
+      const task = yield* finished(working, false, true)
+      assert.notInclude(git(bare, 'branch', '--list'), 'althar/add-a-retry')
+      const said = yield* callTool(task.lead, 'change_part', { part: 'preset', preset: 'Chat', why: 'the person asked' })
+      assert.match(said, /made it a Chat: no review, nothing going up until it ships, on Scratch/)
+      yield* until(cards(task.projectId), (all) => all[0]?.phase === 'ready')
+      assert.strictEqual(yield* reviewOf(task.taskId), 'cancelled')
+      // Its run ended as a chat ends, here: no branch pushed, no pull request opened (and closed again) on the way.
+      assert.notInclude(git(bare, 'branch', '--list'), 'althar/add-a-retry')
+      assert.lengthOf(github.changes, 0)
+    }).pipe(Effect.provide(runtimeWith(github)))
+  })
+
+  it.live('makes a change a prototype while its review runs: its branch goes up, and no pull request opens', () => {
+    const { working, bare, github } = onGitHub()
+    return Effect.gen(function* () {
+      const task = yield* finished(working, false, true)
+      const said = yield* callTool(task.lead, 'change_part', { part: 'preset', preset: 'Prototype', why: 'the person asked' })
+      assert.match(said, /made it a Prototype: no review, ending with its branch/)
+      yield* until(cards(task.projectId), (all) => all[0]?.phase === 'ready')
+      assert.strictEqual(yield* reviewOf(task.taskId), 'cancelled')
+      assert.include(git(bare, 'branch', '--list'), 'althar/add-a-retry')
+      assert.lengthOf(github.changes, 0)
+    }).pipe(Effect.provide(runtimeWith(github)))
+  })
+
+  it.live('keeps the ending the person asked for in a preset saved from the task, and follows the project again on its word', () => {
+    const { working, github } = onGitHub()
+    return Effect.gen(function* () {
+      const instance = yield* Instance
+      const task = yield* finished(working, false)
+      // Taken from the project: a preset saved from it follows the project.
+      assert.isUndefined((yield* partsOfTask(task.taskId)).parts.end)
+      // Asked for, even the project's own: the person's, which a preset saved from it keeps.
+      yield* callTool(task.lead, 'change_part', { part: 'ending', end: 'draft', why: 'the person asked' })
+      assert.strictEqual((yield* partsOfTask(task.taskId)).parts.end, 'draft')
+      // A preset whose ending is the project's follows the project again, though the ending is the same.
+      yield* callTool(task.lead, 'change_part', { part: 'preset', preset: 'Change', why: 'the person asked' })
+      assert.isUndefined((yield* partsOfTask(task.taskId)).parts.end)
+      // Ready, saved as a preset, and that preset applied after another ending: ready again, and still the person's.
+      yield* callTool(task.lead, 'change_part', { part: 'ending', end: 'ready', why: 'the person asked' })
+      const saved = yield* partsOfTask(task.taskId)
+      assert.strictEqual(saved.parts.end, 'ready')
+      yield* savePreset({ name: 'Ready change', parts: saved.parts, projectId: null, fromTaskId: null, actorId: instance.personId })
+      yield* callTool(task.lead, 'change_part', { part: 'ending', end: 'branch', why: 'the person asked' })
+      assert.strictEqual((yield* planOf(task.taskId)).end, 'none')
+      assert.match(
+        yield* callTool(task.lead, 'change_part', { part: 'preset', preset: 'Ready change', why: 'the person asked' }),
+        /made it a Ready change: .*ending in a pull request ready for review/,
+      )
+      const plan = yield* planOf(task.taskId)
+      assert.deepStrictEqual([plan.end, plan.endChosen], ['ready', true])
     }).pipe(Effect.provide(runtimeWith(github)))
   })
 

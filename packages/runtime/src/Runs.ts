@@ -263,6 +263,11 @@ export const PlanParameters = Schema.Struct({
        * are up already.
        */
       reviewOnly: Schema.optional(Schema.Boolean),
+      /**
+       * Its task came to stay here while it shipped (its ending changed to here, as a change made a chat): nothing goes up,
+       * nothing merges, and what waited still waits for the next Ship. Absent from every other Ship.
+       */
+      stays: Schema.optional(Schema.Boolean),
     }),
   ),
   /**
@@ -905,12 +910,15 @@ export class Runs extends Context.Service<
      * `end`, `here` (nothing of it leaving this computer until the person ships it), `none` (its branch pushed) or a pull
      * request, a draft or ready for review; `afterMerge`, a reviewer that reads it only once it merged (the fast lane's), or
      * null for its review before it ships again. Its plan, the run of it and its latest run take them, so its next ending and
-     * its next Ship go by them. How it ended before, for its caller to say. Refused only for an abandoned task, or one with no
-     * plan.
+     * its next Ship go by them; a Ship under way as it comes to end here sends nothing. `chosen`, with `end`: whether that
+     * ending is the person's own rather than the project's, so a preset saved from it keeps it, or follows the project;
+     * left out, it stays as it was. How it ended before, for its caller to say. Refused only for an abandoned task, or one
+     * with no plan.
      */
     reshape(input: {
       readonly taskId: string
       readonly end?: TaskEnding
+      readonly chosen?: boolean
       readonly afterMerge?: PlanStep | null
       readonly actorId: ActorId
     }): Effect.Effect<{ readonly was: TaskEnding | null }, unknown>
@@ -3236,9 +3244,11 @@ export class Runs extends Context.Service<
           const only = (yield* stepsOf(run)).ships?.only
           // A review added after the work went up has nothing to send: it is over once settled.
           const reviewOnly = (yield* stepsOf(run)).ships?.reviewOnly === true
+          // Nor one whose task came to stay here as it shipped: what waited waits for the next Ship.
+          const stays = (yield* stepsOf(run)).ships?.stays === true
           const shipped = yield* Effect.exit(
             Effect.gen(function* () {
-              if (reviewOnly) return { went: [] as Effect.Success<ReturnType<typeof changes.shipToOpen>>, published: undefined }
+              if (reviewOnly || stays) return { went: [] as Effect.Success<ReturnType<typeof changes.shipToOpen>>, published: undefined }
               const went = yield* changes.shipToOpen(run.taskId, only)
               const after = (yield* changes.unshipped(run.taskId)).filter((one) => only === undefined || only.includes(one.workspaceId))
               // A change of several with no pull request yet opens its first; one whose last merged or closed, its next.
@@ -3285,7 +3295,7 @@ export class Runs extends Context.Service<
             )
           }
           const { went, published } = shipped.value
-          if (!reviewOnly) yield* changes.releaseHolds(run.taskId, 'shipped', only)
+          if (!reviewOnly && !stays) yield* changes.releaseHolds(run.taskId, 'shipped', only)
           // Each change of several that shipped, a stamped row of the thread's: its name, and the pull request it went to.
           // With one change, the thread's line on its pull request says it.
           const [thread] = yield* sql<{ id: string }>`SELECT id FROM threads WHERE task_id = ${run.taskId} AND kind = 'task'`
@@ -3318,7 +3328,7 @@ export class Runs extends Context.Service<
               })
             }
           // Review and merge: what went up merges now, unless the lead set a finding aside, which is the person's to read first.
-          const merging = (yield* stepsOf(run)).ships?.merges === true
+          const merging = (yield* stepsOf(run)).ships?.merges === true && !stays
           if (merging) yield* mergeShipped(run)
           const sent = went.map((one) => `${one.count === 1 ? '1 commit' : `${one.count} commits`} to ${one.where}`)
           const opened = published === undefined ? undefined : publishedSummary(published, end === 'none' || end === null ? 'draft' : end)
@@ -3330,7 +3340,7 @@ export class Runs extends Context.Service<
               const said = {
                 step: 'publish',
                 round: 0,
-                summary: summary === '' ? (reviewOnly ? 'Reviewed.' : 'Shipped.') : summary,
+                summary: summary === '' ? (stays ? 'Kept here: nothing went up.' : reviewOnly ? 'Reviewed.' : 'Shipped.') : summary,
                 ...(published === undefined ? {} : openedOf(published)),
               }
               const [still] = yield* sql<{ state: string }>`SELECT state FROM node_attempts WHERE id = ${attemptId}`
@@ -7288,18 +7298,34 @@ export class Runs extends Context.Service<
             SELECT id, project_id, parameters FROM task_plans WHERE task_id = ${input.taskId} AND state IN ('proposed', 'accepted')
             ORDER BY proposed_at DESC LIMIT 1`
           if (plan === undefined) return yield* new TaskRefused({ taskId: input.taskId, why: 'no_lead' })
-          const was = endingOf(yield* Schema.decodeUnknownEffect(Schema.fromJsonString(PlanParameters))(plan.parameters))
+          const planned = yield* Schema.decodeUnknownEffect(Schema.fromJsonString(PlanParameters))(plan.parameters)
+          const was = endingOf(planned)
           // Here: nothing goes up until it ships; else its ending, with nothing more of staying here. Read after the merge: its
           // reviewer's row skipped, so nothing waits on it before; read before it ships again: the fast lane's mark gone.
           const reshaped = (parameters: string) => {
-            const before = JSON.parse(parameters) as Record<string, unknown> & { steps?: ReadonlyArray<PlanStep> }
-            const { here, end, reviewAfterMerge, ...rest } = before
-            const ending =
-              input.end === undefined
+            const before = JSON.parse(parameters) as Record<string, unknown> & {
+              steps?: ReadonlyArray<PlanStep>
+              ships?: Record<string, unknown>
+            }
+            const { here, end, endChosen, reviewAfterMerge, ships, ...rest } = before
+            const chosen = input.end === undefined || input.chosen === undefined ? endChosen === true : input.chosen
+            const ending = {
+              ...(input.end === undefined
                 ? { ...(here === undefined ? {} : { here }), ...(end === undefined ? {} : { end }) }
                 : input.end === 'here'
                   ? { end: null, here: true }
-                  : { end: input.end }
+                  : { end: input.end }),
+              ...(chosen ? { endChosen: true } : {}),
+            }
+            // A Ship under way as its task comes to stay here sends nothing; one that goes back to ending elsewhere sends again.
+            const { stays: _stays, ...shipping } = ships ?? {}
+            const shipped =
+              ships === undefined
+                ? {}
+                : {
+                    ships:
+                      input.end === 'here' || (input.end === undefined && ships.stays === true) ? { ...shipping, stays: true } : shipping,
+                  }
             const after =
               input.afterMerge === undefined
                 ? reviewAfterMerge === undefined
@@ -7314,9 +7340,10 @@ export class Runs extends Context.Service<
                         { ...input.afterMerge, key: 'review' as const, skipped: true },
                       ],
                     }
-            return JSON.stringify({ ...rest, ...ending, ...after })
+            return JSON.stringify({ ...rest, ...ending, ...shipped, ...after })
           }
-          if ((input.end === undefined || was === input.end) && input.afterMerge === undefined) return { was }
+          const sameChoice = input.chosen === undefined || input.chosen === (planned.endChosen === true)
+          if ((input.end === undefined || (was === input.end && sameChoice)) && input.afterMerge === undefined) return { was }
           yield* sql.withTransaction(
             Effect.gen(function* () {
               const revision = yield* change('task_plans', plan.id, { parameters: reshaped(plan.parameters) })
