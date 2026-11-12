@@ -18,6 +18,14 @@ export interface ErrandRecord {
   readonly tool: string
   readonly target: string
   readonly paused: boolean
+  /** Why it is paused, in Althar's or the person's words: an objection, a hold. */
+  readonly reason?: string | null | undefined
+  /**
+   * Where a merge stands as the merge line last read it (MergeLine's `standsOf`): its next move (merge, auto, enqueue,
+   * update, red, conflict, stuck, settle), behind others in line, ahead (waiting only on a merge in flight), or waiting:
+   * queued, checks, automerge, merging, empty, wait. Absent until the line has read it.
+   */
+  readonly stands?: string | null | undefined
   readonly waits: ReadonlyArray<{ readonly kind: string; readonly target: string }>
 }
 
@@ -27,6 +35,7 @@ export interface CardChange {
   readonly short: string
   readonly state: 'open' | 'merged' | 'closed'
   readonly queued?: boolean | undefined
+  readonly conflicts?: boolean | null | undefined
   readonly checks: { readonly outcome: 'none' | 'running' | 'passed' | 'failed' } | null
 }
 
@@ -120,21 +129,68 @@ const toolWords = (tool: string): string => {
 
 const sameUrl = (a: string, b: string) => a.replace(/\/+$/, '').toLowerCase() === b.replace(/\/+$/, '').toLowerCase()
 
-/** A merge the person asked for, as its pull request stands. */
+/**
+ * Why a merge is held, in a few words: its first clause, the tool that held it and the record's "the person" said as "you",
+ * its own pull request as "it". Empty where nothing plain is left.
+ */
+const holdWords = (reason: string, own: string | undefined): string => {
+  const clause = (reason.split(/:\s/)[0] ?? '')
+    .replace(/\s+with\s+[a-z]+(?:_[a-z]+)+/g, '')
+    .replace(/\bthe person[’']s\b/g, 'your')
+    .replace(/\bthe person\b/g, 'you')
+  const plain = plainText(clause, Number.MAX_SAFE_INTEGER).replace(/\.$/, '')
+  const it = own === undefined ? plain : plain.replaceAll(new RegExp(`(?<![\\w#!])${own.replace(/[#!]/, '[#!]')}\\b`, 'g'), 'it')
+  return it === '' ? '' : `${it.charAt(0).toLowerCase()}${it.slice(1)}`
+}
+
+/** A merge the person asked for, from where the merge line last read it stands, else from its pull request as the card shows it. */
 const mergeLine = (errand: ErrandRecord, change: CardChange | undefined, named: string, queueShown: boolean): string | null => {
   const way = errand.waits.find((wait) => QUEUES.has(wait.kind))?.kind
   const of = named === '' ? '' : ` ${named}`
-  if (errand.paused) return `Merge${of} on hold`
+  const queue = way === 'merge_train' ? 'merge train' : 'merge queue'
+  const queued = () => (queueShown ? null : `In the ${queue}${of === '' ? '' : `:${of}`}`)
+  if (errand.paused) {
+    const why = errand.reason == null ? '' : holdWords(errand.reason, change?.short)
+    return oneLine(why === '' ? `Merge${of} on hold` : `On hold: ${why}`)
+  }
   if (change !== undefined && change.state !== 'open') return null
-  if (change?.queued === true && queueShown) return null
-  if (change?.queued === true)
-    return way === 'merge_train' ? `In the merge train${of === '' ? '' : `:${of}`}` : `In the merge queue${of === '' ? '' : `:${of}`}`
-  if (way === 'merge_in_flight') return `Merges${of} after the merge ahead`
+  switch (errand.stands ?? undefined) {
+    case 'settle':
+      return null
+    case 'queued':
+      return queued()
+    case 'conflict':
+      return `Merges${of} once its conflict is settled`
+    case 'stuck':
+      return `Can’t bring${of === '' ? ' its' : `${of}’s`} branch up to date`
+    case 'update':
+      return `Bringing${of === '' ? ' its' : `${of}’s`} branch up to date`
+    case 'behind':
+      return `Waiting its turn to merge${of}`
+    case 'ahead':
+      return `Merges${of} after the merge ahead`
+    case 'automerge':
+      return `Auto-merges${of} once checks pass`
+    case 'merge':
+    case 'auto':
+    case 'merging':
+      return `Merging${of}`
+    case 'enqueue':
+      return `Going into the ${queue}${of === '' ? '' : `:${of}`}`
+    case 'empty':
+      return `No commits to merge${of}`
+    case 'checks':
+    case 'red':
+      return `Merges${of} once checks pass`
+    default:
+      break
+  }
+  // Not read by the line yet: from the pull request as the card shows it.
+  if (change?.queued === true) return queued()
+  if (change?.conflicts === true) return `Merges${of} once its conflict is settled`
   const outcome = change?.checks?.outcome
   if (outcome === 'passed' || outcome === 'none')
-    return way === 'merge_line' || way === undefined
-      ? `Waiting its turn to merge${of}`
-      : `Going into the ${way === 'merge_train' ? 'merge train' : 'merge queue'}${of === '' ? '' : `:${of}`}`
+    return way === 'merge_queue' || way === 'merge_train' ? `Going into the ${queue}${of === '' ? '' : `:${of}`}` : `Merges${of} next`
   return `Merges${of} once checks pass`
 }
 

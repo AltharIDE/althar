@@ -137,19 +137,27 @@ export const errandLines = (projectId: string, taskId?: string) =>
     )
   })
 
-/** Open and paused errands' waiting steps for one task, as records, for its card to say in its own words (`errandCardLines`). */
-export const errandRecords = (projectId: string, taskId: string) =>
+/**
+ * Open and paused errands' waiting steps for one task, as records, for its card to say in its own words (`errandCardLines`):
+ * with why one is paused, and where a merge stands as the merge line last read it (its `stands` note).
+ */
+export const errandRecords = (projectId: string, of: { readonly taskId: string } | { readonly errandId: string }) =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient
-    const rows = yield* sql<{ state: string; tool: string; target: string; waits: string }>`
-    SELECT e.state, s.tool, s.target, s.waits FROM errands e
+    const rows = yield* sql<{ state: string; reason: string | null; tool: string; target: string; waits: string; stands: string | null }>`
+    SELECT e.state, e.reason, s.tool, s.target, s.waits,
+      (SELECT json_extract(o.payload, '$.state') FROM observations o WHERE o.subject_type = 'merge_line'
+        AND o.subject_id = e.id || '/' || s.step_key AND o.kind = 'stands' ORDER BY o.rowid DESC LIMIT 1) AS stands
+    FROM errands e
     JOIN errand_steps s ON s.errand_id = e.id WHERE e.project_id = ${projectId} AND e.state IN ('open', 'paused')
-      AND s.state = 'waiting' AND s.task_id = ${taskId}
+      AND s.state = 'waiting' AND ${'taskId' in of ? sql`s.task_id = ${of.taskId}` : sql`e.id = ${of.errandId}`}
     ORDER BY e.created_at, e.rowid, s.position`
     return rows.map((r): ErrandRecord => ({
       tool: r.tool,
       target: r.target,
       paused: r.state === 'paused',
+      reason: r.reason,
+      stands: r.stands,
       waits: (JSON.parse(r.waits) as Array<{ kind: string; target: string }>).map((w) => ({ kind: w.kind, target: w.target })),
     }))
   })

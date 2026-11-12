@@ -12,6 +12,8 @@ import { SqlClient } from 'effect/sql'
 import { Connections } from '../src/Connections'
 import { Coordinator } from '../src/Coordinator'
 import { Instance } from '../src/Instance'
+import { errandRecords } from '../src/Errands'
+import { errandCardLines } from '../src/errandWords'
 import { MergeLine } from '../src/MergeLine'
 import { Projects } from '../src/Projects'
 import { timestamp } from '../src/records'
@@ -86,6 +88,10 @@ const errandsOf = (access: ToolAccess) =>
       WHERE e.project_id = ${access.projectId} AND s.tool = 'merge_pull_request' ORDER BY e.created_at, e.rowid`
     return new Map(rows.map((row) => [row.number, row]))
   })
+
+/** What a task's card says of a merge errand, as its records and the line's last read of it stand. */
+const cardSays = (access: ToolAccess, errandId: string) =>
+  Effect.map(errandRecords(access.projectId, { errandId }), (records) => errandCardLines(records, null))
 
 /** What Althar's news woke the coordinator with, and the lines in its chat. */
 const news = (access: ToolAccess) =>
@@ -169,6 +175,10 @@ describe('the coordinator’s merge line', () => {
         [first],
       )
       assert.deepStrictEqual(service.updated, [])
+      // Its card says where each stands as the line read it: the first merging, the second behind it.
+      const waiting = yield* errandsOf(access)
+      assert.deepStrictEqual(yield* cardSays(access, waiting.get(first)?.id ?? ''), ['Merging #1'])
+      assert.deepStrictEqual(yield* cardSays(access, waiting.get(second)?.id ?? ''), ['Waiting its turn to merge #2'])
 
       service.mergeByHand(first)
       yield* sweep(access)
@@ -182,6 +192,8 @@ describe('the coordinator’s merge line', () => {
       // Now first in line, the second is brought up to date with main's new head, by a merge, and merged at the head that went green.
       yield* sweep(access)
       assert.deepStrictEqual(service.updated, [second])
+      // First in line now, its card no longer says it waits behind another.
+      assert.notDeepEqual(yield* cardSays(access, b), ['Waiting its turn to merge #2'])
       yield* sweep(access)
       assert.include((yield* news(access)).at(-1), `errand "${b}"`)
       assert.match(yield* takeStep(access, b), /lands it later/)

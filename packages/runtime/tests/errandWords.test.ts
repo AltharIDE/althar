@@ -44,13 +44,42 @@ describe('the card says an errand from what Althar knows', () => {
         { kind: 'checks', target: 'abc1234' },
       ],
     })
-    assert.deepStrictEqual(errandCardLines([line], change({ checks: { outcome: 'passed' } })), ['Waiting its turn to merge'])
-    const now = merge({ waits: [{ kind: 'merge_in_flight', target: 'o/r main' }] })
-    assert.deepStrictEqual(errandCardLines([now], change()), ['Merges after the merge ahead'])
+    assert.deepStrictEqual(errandCardLines([line], change({ checks: { outcome: 'passed' } })), ['Merges next'])
+    assert.deepStrictEqual(errandCardLines([{ ...line, stands: 'behind' }], change({ checks: { outcome: 'passed' } })), [
+      'Waiting its turn to merge',
+    ])
   })
 
-  it('a held merge says it is on hold', () => {
+  it('a merge now says what it waits on as the line last read it, not the wait it was kept with', () => {
+    const now = merge({ waits: [{ kind: 'merge_in_flight', target: 'o/r main' }] })
+    // Kept, and not read yet: nothing says another merge is ahead of it.
+    assert.deepStrictEqual(errandCardLines([now], change()), ['Merges once checks pass'])
+    assert.deepStrictEqual(errandCardLines([{ ...now, stands: 'ahead' }], change()), ['Merges after the merge ahead'])
+    // The merge ahead landed; its own checks run now.
+    assert.deepStrictEqual(errandCardLines([{ ...now, stands: 'checks' }], change()), ['Merges once checks pass'])
+    assert.deepStrictEqual(errandCardLines([{ ...now, stands: 'merging' }], change({ checks: { outcome: 'passed' } })), ['Merging'])
+    assert.deepStrictEqual(errandCardLines([{ ...now, stands: 'settle' }], change()), [])
+  })
+
+  it('a conflicting merge says it waits on the conflict, not on checks', () => {
+    assert.deepStrictEqual(errandCardLines([merge({ stands: 'conflict' })], change({ checks: { outcome: 'passed' } })), [
+      'Merges once its conflict is settled',
+    ])
+    // Not read by the line yet, the pull request's own conflict says it.
+    assert.deepStrictEqual(errandCardLines([merge()], change({ conflicts: true })), ['Merges once its conflict is settled'])
+    assert.deepStrictEqual(errandCardLines([merge({ stands: 'stuck' })], change()), ['Can’t bring its branch up to date'])
+  })
+
+  it('a held merge says why, in a few plain words', () => {
     assert.deepStrictEqual(errandCardLines([merge({ paused: true })], change()), ['Merge on hold'])
+    const objection = merge({ paused: true, reason: 'octocat asked for changes on #773 after the person asked.' })
+    assert.deepStrictEqual(errandCardLines([objection], change()), ['On hold: octocat asked for changes on it after…'])
+    const draft = merge({ paused: true, reason: '#773 went back to a draft after the person asked.' })
+    assert.deepStrictEqual(errandCardLines([draft], change()), ['On hold: it went back to a draft after you asked'])
+    const left = merge({ paused: true, reason: 'Taken out of the merge line with leave_queue: it goes back in on the person’s word.' })
+    assert.deepStrictEqual(errandCardLines([left], change()), ['On hold: taken out of the merge line'])
+    const url = merge({ paused: true, reason: `Wait for ${URL} to be reviewed` })
+    assert.deepStrictEqual(errandCardLines([url], change()), ['On hold: wait for it to be reviewed'])
   })
 
   it('says nothing for a pull request that merged or closed, where the chip says it all', () => {

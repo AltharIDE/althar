@@ -130,6 +130,31 @@ const updateRefused = (host: CodeHost, failed: ConnectorFailed): readonly [strin
   }
 }
 
+/**
+ * Where a step stands, in one word a task's card says (errandWords' `MergeStands`): its look's next move, and for one that
+ * waits, on what. Kept as the step's `stands` note.
+ */
+const standsOf = (seen: Pick<Look, 'next' | 'why'>, entry: { readonly request: { readonly now: boolean } }): string => {
+  switch (seen.next) {
+    case 'behind':
+      return entry.request.now ? 'ahead' : 'behind'
+    case 'wait':
+      return seen.why.startsWith('in the ')
+        ? 'queued'
+        : seen.why === 'checks running'
+          ? 'checks'
+          : seen.why === 'auto-merge on'
+            ? 'automerge'
+            : seen.why === 'merging'
+              ? 'merging'
+              : seen.why === 'no commits'
+                ? 'empty'
+                : 'wait'
+    default:
+      return seen.next
+  }
+}
+
 const short = (sha: string | null | undefined) => (sha == null ? 'no commit' : sha.slice(0, 12))
 const lineOf = (entry: Pick<Entry, 'request' | 'branch'>) => `${entry.request.repository} ${entry.branch}`
 const stepOf = (entry: Pick<Entry, 'errandId'>) => `${entry.errandId}/${STEP}`
@@ -1046,7 +1071,12 @@ export class MergeLine extends Context.Service<
                     states.set(entry.errandId, 'paused')
                     continue
                   }
-                  if (held) continue
+                  if (held) {
+                    // Not read while one ahead of it holds the slot: it waits its turn, which its card says.
+                    if ((yield* latest(stepOf(entry), 'stands'))?.state !== 'behind')
+                      yield* note(projectId, stepOf(entry), 'stands', `stands:behind:${yield* timestamp}`, { state: 'behind' })
+                    continue
+                  }
                   const seen = yield* look(projectId, entry, entries).pipe(
                     Effect.catch((error) =>
                       Effect.as(Effect.logWarning(`Could not read #${entry.request.number} for its merge`, error), undefined),
@@ -1065,6 +1095,10 @@ export class MergeLine extends Context.Service<
                     yield* note(projectId, stepOf(entry), 'standing', `${standing}:${seen.change.headSha}:${yield* timestamp}`, {
                       state: standing,
                     })
+                  // Where it stands, as a word its task's card says plainly (errandWords): noted as it changes, so the card reads it.
+                  const stands = standsOf(seen, entry)
+                  if ((yield* latest(stepOf(entry), 'stands'))?.state !== stands)
+                    yield* note(projectId, stepOf(entry), 'stands', `stands:${stands}:${yield* timestamp}`, { state: stands })
                   switch (seen.next) {
                     case 'settle':
                       yield* take(entry, `${seen.fresh.answer ?? seen.fresh.reason ?? seen.why}`)

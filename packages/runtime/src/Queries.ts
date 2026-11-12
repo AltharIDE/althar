@@ -2548,7 +2548,7 @@ export class Queries extends Context.Service<
             taskId,
             // In plain words from what Althar knows, and nothing the card's word, chip or checks say already: a ready task's queued
             // pull request is "In the merge queue" by its word.
-            errands: errandCardLines(yield* errandRecords(task.projectId, taskId), shown, { queueShown: phase === 'ready' }),
+            errands: errandCardLines(yield* errandRecords(task.projectId, { taskId }), shown, { queueShown: phase === 'ready' }),
             threadId: task.threadId,
             title: task.title,
             slug: task.slug,
