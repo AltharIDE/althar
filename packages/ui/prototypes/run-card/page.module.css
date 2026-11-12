@@ -1,0 +1,154 @@
+.page {
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+  height: 100vh;
+  background: var(--n-2);
+  color: var(--t-1);
+}
+.page[data-shot] {
+  height: auto;
+  min-height: 100vh;
+}
+.head {
+  display: flex;
+  align-items: baseline;
+  gap: 14px;
+  padding: 18px 28px 0;
+}
+.head h1 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.head p {
+  margin: 0;
+  font-size: 12.5px;
+  color: var(--t-3);
+}
+.main {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 600px;
+  min-height: 0;
+  overflow: auto;
+}
+.main[data-only] {
+  grid-template-columns: minmax(0, 1fr);
+}
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, 440px);
+  align-content: start;
+  gap: 24px 22px;
+  padding: 18px 28px 28px;
+}
+.cell {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+}
+.cell figcaption button {
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  font-size: 12px;
+  color: var(--t-3);
+  cursor: pointer;
+}
+.cell figcaption span {
+  font-family: var(--mono);
+  color: var(--t-4);
+}
+.cell[data-live] figcaption button {
+  color: var(--t-1);
+}
+/* today's card keeps a margin of its own in a thread; in a cell it sits where the others do */
+.cell .now {
+  margin: 0;
+}
+.side {
+  padding: 18px 28px 28px;
+  border-left: 1px solid var(--line);
+  background: var(--n-2);
+}
+.main[data-only] .side {
+  max-width: 660px;
+  border-left: 0;
+}
+.sideHead {
+  margin: 0 0 16px;
+  font-size: 12px;
+  color: var(--t-3);
+}
+.sideHead strong {
+  font-weight: 550;
+  color: var(--t-1);
+}
+.thread {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.opened {
+  margin: 14px 0 0;
+  font-size: 12px;
+  color: var(--t-3);
+}
+.opened code {
+  font-family: var(--mono);
+  color: var(--t-1);
+}
+.opened button {
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  color: var(--t-2);
+  text-decoration: underline;
+  cursor: pointer;
+}
+.bar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 12px;
+  border-top: 1px solid var(--line);
+  background: var(--n-1);
+  font-size: 12px;
+}
+.bar button {
+  padding: 4px 10px;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  font: inherit;
+  color: var(--t-2);
+  cursor: pointer;
+}
+.bar button:hover {
+  background: var(--hover-paper);
+}
+.bar button[aria-pressed='true'] {
+  background: var(--n-4);
+  color: var(--t-1);
+}
+.bar kbd {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--t-4);
+}
+.sep {
+  width: 1px;
+  height: 16px;
+  margin: 0 6px;
+  background: var(--line-2);
+}
+.liveState {
+  padding: 0 6px;
+  color: var(--t-2);
+}
+:global(body) {
+  margin: 0;
+}
