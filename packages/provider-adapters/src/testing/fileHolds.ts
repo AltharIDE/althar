@@ -3,7 +3,9 @@ import { existsSync, rmSync, writeFileSync } from 'node:fs'
 import type { Holds } from './FakeAgent'
 
 /** Holds shared with a fake agent in another process, for the named markers only. */
-export const fileHolds = (files: Readonly<Record<string, string>>): Holds & {
+export const fileHolds = (
+  files: Readonly<Record<string, string>>,
+): Holds & {
   readonly close: (marker: string) => void
   readonly waiting: (marker: string) => boolean
 } => {
