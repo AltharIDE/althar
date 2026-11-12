@@ -33,7 +33,11 @@ describe('a small change', () => {
       { key: 'implement', agentId: 'claude-code', model: 'claude-sonnet-5', effort: 'low', skipped: false },
       { key: 'review', agentId: 'codex', model: 'gpt-6-sol', skipped: true },
     ])
-    assert.deepStrictEqual(smallChangeSkips(steps[1] ?? null), ['no plan', 'reviewed after it merges'])
+    // As the project's rule says: Major only by default, Everything, or no review after the merge.
+    assert.deepStrictEqual(smallChangeSkips(steps[1] ?? null), ['no plan', 'reviewed after it merges, major findings only'])
+    assert.deepStrictEqual(smallChangeSkips(steps[1] ?? null, 'all'), ['no plan', 'reviewed after it merges'])
+    assert.deepStrictEqual(smallChangeSkips(steps[1] ?? null, 'none'), ['no plan', 'no review'])
+    assert.deepStrictEqual(smallChangeSkips(null, 'major'), ['no plan'])
   })
 
   it('reads a small change from its plan, and nothing else as one', () => {
@@ -95,7 +99,7 @@ describe('a small change', () => {
       assert.isDefined(card)
       if (card?.kind !== 'small_change') return
       assert.strictEqual(card.content.title, 'The Run menu says Strat')
-      assert.deepStrictEqual(card.content.skips, ['no plan', 'reviewed after it merges'])
+      assert.deepStrictEqual(card.content.skips, ['no plan', 'reviewed after it merges, major findings only'])
       assert.deepStrictEqual(card.content.lead, { agentId: 'claude-code', model: 'claude-sonnet-5', effort: 'low' })
       assert.deepStrictEqual(
         card.content.steps.map((step) => [step.key, step.done]),
@@ -295,6 +299,8 @@ describe('Auto’s lighter model', () => {
   })
 
   it.live('moves a lead whose session is still running when its plan crosses the mark, and says why once', () => {
+    // A day from now, whenever it runs: a reset already past is a plan with its week back, and nothing moves.
+    const resetsAt = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString()
     const cache = join(mkdtempSync(join(tmpdir(), 'althar-facts-')), 'models.json')
     writeFileSync(
       cache,
@@ -351,7 +357,7 @@ describe('Auto’s lighter model', () => {
       assert.deepInclude(moved?.content, {
         from: { agentId: 'claude-code', model: 'large' },
         to: { agentId: 'claude-code', model: 'small' },
-        why: { percent: 92, plan: 'Claude', window: 'the week', resetsAt: '2026-11-12T09:00:00.000Z' },
+        why: { percent: 92, plan: 'Claude', window: 'the week', resetsAt },
         kept: false,
       })
       const [now] = yield* sql<{ model: string | null }>`
@@ -397,7 +403,7 @@ describe('Auto’s lighter model', () => {
                           kind: 'usage',
                           stale: false,
                           usage: {
-                            windows: [{ kind: 'weekly', usedPercent: 92, resetsAt: '2026-11-12T09:00:00.000Z' }],
+                            windows: [{ kind: 'weekly', usedPercent: 92, resetsAt }],
                             source: 'endpoint',
                             observedAt: new Date().toISOString(),
                           },

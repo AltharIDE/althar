@@ -20,6 +20,7 @@ const PLAIN: Readonly<Record<string, string>> = {
   'outputs/WhatItMade/WhatItMade.tsx': 'a picture, which opens full size',
   'thread/External/External.tsx': 'the row of an external call',
   'thread/FileArtifact/FileArtifact.tsx': 'the preview, which opens the file',
+  'thread/StartedTask/StartedTask.tsx': 'a started task’s chip, the whole of which opens that task',
   'thread/Canvas/CanvasLine.tsx': 'a canvas’s title and version in its line, which opens it beside the conversation',
   'screens/Artifacts/Artifacts.tsx': 'an artifact’s row, the whole of which opens it',
   'chrome/ProjectSwitcher/ProjectSwitcher.tsx': 'the switcher’s trigger and its project rows',
@@ -91,6 +92,8 @@ const PLAIN: Readonly<Record<string, string>> = {
   'board/NextRow/NextRow.tsx': 'Start, in a held row’s line, in the line’s own place, words and colour while the row is pointed at',
   'board/SettleWays/SettleWays.tsx': 'Done and the pin in a task’s header, segments of the chip that says where it stands',
   'board/ScratchShelf/ScratchShelf.tsx': 'a chat on Scratch, the whole of its row, its title, last words and when, which opens it',
+  'thread/Asides/Asides.tsx':
+    'a pill over the coordinator’s conversation, a tab with its mark or a live dot, and the older ones’ pill, which opens their menu',
   'coordinator/TaskLaunch/TaskLaunch.tsx': 'the preset, the kicker’s first word in the kicker’s own type, which opens the others',
   /* close to a primitive, not yet moved onto one */
   'chrome/BackCrumb/BackCrumb.tsx': 'a ChromeButton that is never pressed',

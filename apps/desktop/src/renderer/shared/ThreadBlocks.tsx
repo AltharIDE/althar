@@ -13,6 +13,7 @@ import {
   IssueRef,
   LinkButton,
   Markdown,
+  MergeLine,
   Plan,
   Question,
   type QuestionAnswer,
@@ -65,6 +66,7 @@ import type {
   StepResult,
   TaskCardContent,
 } from './thread'
+import { ReviewOfferOf } from '../features/team/ReviewOfferOf'
 import s from './ThreadBlocks.module.css'
 import { duration, lineOf, spentWords } from './turnTime'
 
@@ -322,6 +324,8 @@ export function PartView({ part, threadId }: { part: Part; threadId: string }) {
     case 'plan':
       return <Plan steps={part.steps} />
     case 'notice':
+      // A review a lead offered: its line asks, with its buttons, and says what came of it once answered.
+      if (part.offer?.kind === 'review') return <ReviewOfferOf offer={part.offer} ask={part.text} />
       return (
         <>
           <p className={s[part.tone]}>{part.text}</p>
@@ -542,6 +546,7 @@ export function ThreadBlocks({
   onAnswerQuestion,
   focusQuestion,
   project,
+  signed,
 }: {
   blocks: ReadonlyArray<Block>
   /** The thread they are of: what a command printed and the documents an agent wrote are read by it. */
@@ -554,6 +559,8 @@ export function ThreadBlocks({
   project?: string
   /** The thread's session, whose model and account name its turns. */
   session?: { readonly agentId: string; readonly model: string | null; readonly account: string | null } | null
+  /** Who signs its turns in place of their model, with its mark: the coordinator, in its conversation and in its asides. */
+  signed?: { readonly voice: string; readonly mark: ReactNode }
   /** Sends what someone outside said to the lead, in the person's name. */
   onPassOn?: (words: string) => void
   /** Answers an agent's question; what went wrong, in words, or null. Without it, a question can't be answered here. */
@@ -605,6 +612,9 @@ export function ThreadBlocks({
       : session != null && agentId === session.agentId
         ? named(agentId, session.model, session.account)
         : named(agentId)
+  // Signed, the turns say who speaks rather than which model.
+  const speaker = (agentId: string | null, model: string | null = null) =>
+    signed === undefined ? { model: turnModel(agentId, model) } : { voice: signed.voice, mark: signed.mark }
   // The thread's last turn, where an error ended it: it can be tried again. What the person said in it may wait after it.
   const last = blocks.findLast((block) => block.kind === 'turn' || block.kind === 'waiting')
   const ending = last?.kind === 'turn' && !last.live ? last.said.at(-1) : undefined
@@ -650,6 +660,12 @@ export function ThreadBlocks({
             {block.text}
           </ThreadDivider>
         )
+      case 'offer':
+        return (
+          <div key={block.id} className={s.offer}>
+            <ReviewOfferOf offer={block.offer} ask={block.text} />
+          </div>
+        )
       case 'step':
         // A step's report is a task's, and its thread draws it in its rounds (TaskThread, ADR-042).
         return null
@@ -684,11 +700,13 @@ export function ThreadBlocks({
         return <Fragment key={block.id}>{smallChange?.(block.card, block.id)}</Fragment>
       case 'model_move':
         return <Fragment key={block.id}>{modelMove?.(block.move, block.id)}</Fragment>
+      case 'merge_line':
+        return <MergeLine key={block.id} rows={block.line.rows} branch={block.line.branch} />
       case 'setting':
         return <SettingChangeOf key={block.id} change={block.change} itemId={block.id} />
       case 'waiting':
         return (
-          <Turn key={block.id} model={turnModel(session?.agentId ?? null)}>
+          <Turn key={block.id} {...speaker(session?.agentId ?? null)}>
             <Thinking {...(block.took === null ? {} : { took: block.took })} slow={block.slow} />
           </Turn>
         )
@@ -702,7 +720,7 @@ export function ThreadBlocks({
         return (
           <Turn
             key={block.id}
-            model={turnModel(block.agentId, block.model)}
+            {...speaker(block.agentId, block.model)}
             at={block.at}
             {...(said === '' || block.live ? {} : { copy: said })}
           >

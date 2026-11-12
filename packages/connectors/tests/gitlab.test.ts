@@ -1,5 +1,6 @@
 import { assert, describe, it } from '@effect/vitest'
-import { Effect } from 'effect'
+import { Effect, Fiber } from 'effect'
+import { TestClock } from 'effect/testing'
 
 import { issueParamsOf, issueStatesOf, jobState, makeGitLab, mergesOf, readyTitle, verdictOf } from '../src/gitlab'
 import type { ChangeRequest, Issue, IssueQuery, Repository, StatusCategory } from '../src/model'
@@ -283,6 +284,39 @@ describe('GitLab as a code host', () => {
       assert.strictEqual((sent[0]?.body as { target_project_id: number } | undefined)?.target_project_id, 34675721)
       assert.strictEqual((yield* host.findChange(repository, 'althar/mer-231', fork))?.number, 12)
       assert.strictEqual((yield* host.findChange(repository, 'althar/mer-231'))?.number, 11)
+    }),
+  )
+
+  it.effect('asks again while GitLab hasn’t yet taken in a branch pushed a moment ago, and opens it once it has', () =>
+    Effect.gen(function* () {
+      // GitLab's answer for a branch it doesn't know (yet), as it gave it for fnt/wiki's.
+      const answers = [
+        { status: 400, json: { message: { source_branch: ['does not exist'] } } },
+        { status: 400, json: { message: { source_branch: ['does not exist'] } } },
+        { status: 201, json: request() },
+      ]
+      const { host, sent } = gitlab([['POST', `${PROJECT}/merge_requests`, () => answers.shift() ?? { status: 500, json: {} }]])
+      const fiber = yield* Effect.forkChild(
+        host.openChange(repository, { title: 't', body: '', source: 'althar/mer-231', target: 'main', draft: false }),
+      )
+      yield* TestClock.adjust('10 seconds')
+      assert.strictEqual((yield* Fiber.join(fiber)).number, 12)
+      assert.lengthOf(sent, 3)
+    }),
+  )
+
+  it.effect('says which project hasn’t the branch, once asking again didn’t help', () =>
+    Effect.gen(function* () {
+      const { host, sent } = gitlab([
+        ['POST', `${PROJECT}/merge_requests`, { status: 400, json: { message: { source_branch: ['does not exist'] } } }],
+      ])
+      const fiber = yield* Effect.forkChild(
+        Effect.flip(host.openChange(repository, { title: 't', body: '', source: 'althar/mer-231', target: 'main', draft: false })),
+      )
+      yield* TestClock.adjust('1 minute')
+      const error = yield* Fiber.join(fiber)
+      assert.deepInclude(error, { reason: 'rejected', status: 400, message: 'meridian/payments/api has no branch althar/mer-231' })
+      assert.lengthOf(sent, 6)
     }),
   )
 

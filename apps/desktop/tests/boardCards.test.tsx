@@ -1,14 +1,14 @@
-import { act, renderHook, screen, waitFor, within } from '@testing-library/react'
+import { act, render, renderHook, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import type { ReactNode } from 'react'
 import { describe, expect, it, vi } from 'vitest'
 
 import { ApiError, type BoardCall, type BoardSnapshot, type BoardTask, type ChangeSummary, type ReviewBrief } from '@althar/contracts'
-import { TaskStatus } from '@althar/ui'
+import { BoardCard, TaskStatus } from '@althar/ui'
 
 import type { Client } from '../src/renderer/data/client'
 import { ServicesProvider } from '../src/renderer/data/services'
-import { BoardView, runningCardOf, severalSaid } from '../src/renderer/features/board/BoardView'
+import { BoardView, readyCardOf, runningCardOf, severalSaid } from '../src/renderer/features/board/BoardView'
 import { DockView } from '../src/renderer/features/board/DockView'
 import { lanesOf } from '../src/renderer/features/board/lanes'
 import { needsOf } from '../src/renderer/features/board/needs'
@@ -293,7 +293,7 @@ describe('a ready card’s own ways', () => {
     const onOpen = vi.fn()
     const actions = ways()
     show(lanes, { onOpen, actions })
-    await userEvent.click(screen.getByRole('button', { name: 'Scratch · 2' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Asides · 2' }))
     expect(await screen.findByText('Try 52 and 64.')).toBeTruthy()
     await userEvent.click(screen.getByRole('button', { name: /^How does retry work\?/ }))
     expect(onOpen).toHaveBeenCalledWith('th9')
@@ -497,7 +497,7 @@ describe('up next', () => {
   })
 
   it('says why moving the line failed, and gives a plain task no kind’s word', () => {
-    const line = { move: vi.fn(async () => {}), oldestFirst: vi.fn(), failed: 'The runtime is restarting.' }
+    const line = { move: vi.fn(async () => {}), oldestFirst: vi.fn(), cancelTurn: vi.fn(), failed: 'The runtime is restarting.' }
     show(
       lanesOf(
         board([
@@ -680,5 +680,55 @@ describe('the board’s model', () => {
     await waitFor(() => expect(result.current.board?.tasks).toEqual([]))
     await act(async () => page([settled('old', '2026-09-01T08:00:00.000Z')]))
     expect(result.current.board?.tasks).toEqual([])
+  })
+})
+
+describe('a card of a task that handed back pictures', () => {
+  const handed: BoardTask['handed'] = {
+    pictures: [
+      { digest: 'a'.repeat(64), mediaType: 'image/png', bytes: 9, width: 4, height: 3, name: 'one.png', unkept: null },
+      { digest: 'b'.repeat(64), mediaType: 'image/png', bytes: 9, width: 4, height: 3, name: 'two.png', unkept: null },
+    ],
+    files: [{ path: 'notes.md', add: null }],
+  }
+  const shown = (work: BoardTask) => {
+    render(<BoardCard {...readyCardOf(work)} />)
+    return screen
+  }
+
+  it('shows them above its branch where it has a branch and no pull request', () => {
+    const view = shown(task({ phase: 'ready', branch: 'althar/prototype-a-few-designs', changed: { files: 3, add: 1126, del: 0 }, handed }))
+    expect(within(view.getByLabelText('Pictures')).getAllByRole('img')).toHaveLength(2)
+    expect(view.getByText('althar/prototype-a-few-designs')).toBeTruthy()
+    // Pictures are what it shows of what was handed back, not its files too.
+    expect(view.queryByText('notes.md')).toBeNull()
+  })
+
+  it('shows them with its pull request chip', () => {
+    const view = shown(task({ phase: 'ready', change: change({ draft: false, checks: null }), handed }))
+    expect(within(view.getByLabelText('Pictures')).getAllByRole('img')).toHaveLength(2)
+    expect(view.getByText(/Add a retry/)).toBeTruthy()
+  })
+
+  it('shows them on a Replied card', () => {
+    const view = shown(
+      task({ phase: 'ready', replied: 'th1', branch: 'althar/prototype-a-few-designs', changed: { files: 3, add: 1126, del: 0 }, handed }),
+    )
+    expect(view.getByText('Replied')).toBeTruthy()
+    expect(within(view.getByLabelText('Pictures')).getAllByRole('img')).toHaveLength(2)
+    expect(view.getByText('althar/prototype-a-few-designs')).toBeTruthy()
+  })
+
+  it('shows its files with its branch where it handed back no pictures', () => {
+    const view = shown(
+      task({
+        phase: 'ready',
+        branch: 'althar/notes',
+        changed: { files: 1, add: 4, del: 0 },
+        handed: { pictures: [], files: [{ path: 'docs/notes.md', add: 4 }] },
+      }),
+    )
+    expect(view.getByText(/notes\.md/)).toBeTruthy()
+    expect(view.getByText('althar/notes')).toBeTruthy()
   })
 })

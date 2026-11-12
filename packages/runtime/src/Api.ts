@@ -89,6 +89,7 @@ import {
   postsScreenshots,
   ruleSetOf,
   usageLimitOf,
+  afterMergeReviewOf,
 } from './Policies'
 import { Models } from './Models'
 import { Installs } from './Installs'
@@ -101,6 +102,8 @@ import { projectTracker } from './projectTracker'
 import { applyRules } from './rulesChange'
 import { UsageData } from './UsageData'
 import { Queries } from './Queries'
+import { lagLogged, slowCall } from './lag'
+import { Foreground } from './spawner'
 import { Busy } from './Busy'
 import { clearView, showEarlier, undoClearView } from './chatView'
 import { timestamp } from './records'
@@ -131,6 +134,7 @@ import { makeRepository, placeRepository } from './newRepository'
 import { type InputFile, keepFiles } from './sentFiles'
 import { type InputImage, keepSent } from './sentImages'
 import { anyOf, SignIns } from './SignIns'
+import { endingOf } from './signInEnding'
 import { describe, listSkills, type SkillsConfig } from './Skills'
 import { expected, words } from './words'
 import { makeBranch } from './newBranch'
@@ -140,6 +144,7 @@ import { checkHealth } from './mcpHealth'
 import { Canvases } from './Canvases'
 import * as mcpSync from './mcpSync'
 import * as skillSync from './skillSync'
+import { cancelWaitingTurn, upNextMove } from './upNextMoves'
 
 /** Runs one of sync's steps against the person's agents' settings, where this runtime reads them; refused where it doesn't. */
 const withSync = (step: (io: mcpSync.SyncIo & skillSync.SkillIo) => Promise<unknown>) =>
@@ -333,8 +338,13 @@ export const handlers = Api.toLayer(
      * A call's failure as the window gets it: in words; and, when it isn't
      * the person's to put right, in the log and reported, by the call's name.
      */
+    // A window's call is the person's: its git commands start before the background's (spawner.ts). One that takes long
+    // says so in a development build's log (lag.ts).
+    const timedCall = lagLogged()
+      ? <A, E, R>(effect: Effect.Effect<A, E, R>) => slowCall(callName, effect)
+      : <A, E, R>(effect: Effect.Effect<A, E, R>) => effect
     const api = <A, E, R>(effect: Effect.Effect<A, E, R>): Effect.Effect<A, ApiError, R> =>
-      Effect.catchCause(effect, (cause) => {
+      Effect.catchCause(timedCall(Effect.provideService(effect, Foreground, true)), (cause) => {
         if (Cause.hasInterruptsOnly(cause)) return Effect.interrupt
         const error = Cause.findErrorOption(cause)
         // Refused by the call itself, in the window's own words already: as it is, and nothing went wrong.
@@ -557,6 +567,7 @@ export const handlers = Api.toLayer(
         branchPattern: rules.branchPattern ?? null,
         titlePattern: rules.titlePattern ?? null,
         moveIssues: movesIssues(rules),
+        afterMergeReview: afterMergeReviewOf(rules),
         repositoryFiles: repositoryFilesOf(rules),
       }
     }
@@ -567,6 +578,7 @@ export const handlers = Api.toLayer(
         const check = yield* signIns.account(account, recheck)
         const out = yield* limits.outAccount(account.id)
         const providers = yield* signIns.providers(account, check)
+        const ending = endingOf(check.endsAt, yield* Clock.currentTimeMillis)
         return {
           id: account.id,
           name: account.name,
@@ -575,6 +587,7 @@ export const handlers = Api.toLayer(
           paidBy: check.paidBy,
           outUntil: Option.getOrNull(Option.map(out, (each) => each.until)),
           adoptedFrom: account.adoptedFrom,
+          ...(check.endsAt === undefined ? {} : { endsAt: check.endsAt, endsSoon: ending !== undefined && ending !== 'later' }),
           ...(providers === undefined ? {} : { providers }),
         } satisfies AccountStatus
       }).pipe(
@@ -1054,8 +1067,8 @@ export const handlers = Api.toLayer(
             }),
           ),
         ),
-      SetModel: ({ commandId, threadId, model }) => once(commandId, api(sessions.setModel({ threadId, model }))),
-      SetEffort: ({ commandId, threadId, effort }) => once(commandId, api(sessions.setEffort({ threadId, effort }))),
+      SetModel: ({ commandId, threadId, model }) => once(commandId, api(Effect.asVoid(sessions.chooseLead({ threadId, model })))),
+      SetEffort: ({ commandId, threadId, effort }) => once(commandId, api(Effect.asVoid(sessions.chooseLead({ threadId, effort })))),
       GetModels: () => api(models.catalog),
       SetDefaultEffort: ({ commandId, agentId, model, effort }) =>
         once(commandId, api(models.setDefaultEffort({ agentId, model, effort }))),
@@ -1182,7 +1195,9 @@ export const handlers = Api.toLayer(
       GetTaskFolders: () => api(cleanup.list),
       CleanUpFolders: ({ commandId }) => once(commandId, api(cleanup.cleanUp(instance.personId))),
       RemoveTaskFolder: ({ commandId, taskId, seen }) => once(commandId, api(cleanup.remove(taskId, seen, instance.personId))),
-      MoveInLine: ({ commandId, taskId, to }) => once(commandId, api(Effect.asVoid(busy.move(taskId, to)))),
+      // One that no longer waits up next, started or held meanwhile, moves nowhere: the board shows the line as it is.
+      MoveInLine: ({ commandId, taskId, to }) =>
+        once(commandId, api(Effect.asVoid(upNextMove(busy, plans, sql)(taskId, to, instance.personId)))),
       LineOldestFirst: ({ commandId, projectId }) => once(commandId, api(busy.oldestFirst(projectId))),
       SetPostTeamReviews: ({ commandId, on }) =>
         once(commandId, api(setPostTeamReviews(on)).pipe(Effect.provideService(SqlClient.SqlClient, sql))),
@@ -1233,8 +1248,22 @@ export const handlers = Api.toLayer(
         once(commandId, api(automations.setPostsReviews(automationId, on, instance.personId))),
       SetAutomationsPaused: ({ commandId, paused }) => once(commandId, api(automations.setAllPaused(paused))),
       // Interrupted by the person, a conflict its lead was resolving is theirs (ADR-030): handed over first, so the turn's end doesn't ask the lead again.
+      // A lead between turns, a turn Althar asked of it waiting for a place up next: that turn is let go (stop_task with turn).
       Interrupt: ({ commandId, threadId }) =>
-        once(commandId, api(Effect.andThen(pullRequests.leadStopped({ threadId }, 'interrupted'), sessions.interrupt(threadId)))),
+        once(
+          commandId,
+          api(
+            Effect.gen(function* () {
+              const live = yield* sessions.running(threadId)
+              if (Option.isNone(live) || !live.value.turnRunning) {
+                const [task] = yield* sql<{ taskId: string | null }>`SELECT task_id FROM threads WHERE id = ${threadId}`
+                if (task?.taskId != null && (yield* cancelWaitingTurn(busy, sessions, sql)(task.taskId)) > 0) return
+              }
+              yield* pullRequests.leadStopped({ threadId }, 'interrupted')
+              yield* sessions.interrupt(threadId)
+            }),
+          ),
+        ),
       TryAgain: ({ commandId, threadId }) =>
         once(
           commandId,
@@ -1427,7 +1456,7 @@ export const handlers = Api.toLayer(
         ),
       GetCoordinator: ({ projectId, before, limit }) =>
         api(queries.coordinator(projectId, { ...(before === undefined ? {} : { before }), ...(limit === undefined ? {} : { limit }) })),
-      StartTask: ({ commandId, projectId, title, description, steps, issue, end, repositories }) =>
+      StartTask: ({ commandId, projectId, title, description, steps, issue, end, repositories, chat }) =>
         once(
           commandId,
           api(
@@ -1441,9 +1470,12 @@ export const handlers = Api.toLayer(
                 draft: true,
                 ...(from === undefined ? {} : { issueKey: from.key }),
                 ...(repositories === undefined ? {} : { repositories }),
-                ...requestOf(title, description, issue),
+                // An aside's words are the person's, whole: its thread opens with them.
+                ...(chat === true ? { plain: true, request: description ?? title } : requestOf(title, description, issue)),
               })
               if (issue !== undefined) yield* issues.attach({ projectId: projectId as ProjectId, taskId: created.taskId, issue })
+              // An aside sits on Scratch from the start, beside the coordinator's conversation rather than on the board.
+              if (chat === true) yield* Effect.provideContext(shelve(created.taskId, 'scratch', instance.personId), folderStore)
               // A task you start yourself is planned like any other, and starts at once; its card shows in the coordinator's thread.
               const planId = yield* plans.propose({
                 projectId: projectId as ProjectId,
@@ -1452,7 +1484,10 @@ export const handlers = Api.toLayer(
                 reason: null,
                 actorId: instance.personId,
                 startsIn: Duration.zero,
-                end: end === undefined ? yield* pullRequests.endFor(projectId, created.taskId) : end,
+                // An aside, as a chat the coordinator starts: nothing of it goes outside the project when it is done.
+                ...(chat === true
+                  ? { end: null, here: true, card: false as const }
+                  : { end: end === undefined ? yield* pullRequests.endFor(projectId, created.taskId) : end }),
               })
               yield* plans.start(planId, instance.personId)
               return yield* queries.task(created.taskId)
@@ -1460,7 +1495,7 @@ export const handlers = Api.toLayer(
           ),
         ),
       StartPlan: ({ commandId, planId }) => once(commandId, api(Effect.asVoid(plans.start(planId, instance.personId)))),
-      HoldPlan: ({ commandId, planId }) => once(commandId, api(plans.hold(planId, instance.personId))),
+      HoldPlan: ({ commandId, planId }) => once(commandId, api(Effect.asVoid(plans.hold(planId, instance.personId)))),
       ChangePlan: ({ commandId, planId, steps, end, worksIn, toward }) =>
         once(commandId, api(plans.change(planId, steps, instance.personId, end, worksIn, toward))),
       ApplyPreset: ({ commandId, planId, preset }) => once(commandId, api(plans.applyPreset(planId, preset, instance.personId))),
@@ -1939,11 +1974,14 @@ export const handlers = Api.toLayer(
       SetUsageLimit: ({ commandId, projectId, policy }) =>
         once(commandId, api(policies.setUsageLimit(projectId, policy, instance.personId))),
       OpenChange: ({ commandId, taskId }) => once(commandId, api(runs.publish(taskId))),
+      SetReviewAfterMerge: ({ commandId, taskId, review }) =>
+        once(commandId, api(Effect.asVoid(mergeReviews.choose(taskId, review, instance.personId)))),
       SkipReview: ({ commandId, taskId }) =>
         once(
           commandId,
           api(Effect.flatMap(envelope('task.skip_review', { taskId }, commandId), (said) => runs.skipReview({ envelope: said, taskId }))),
         ),
+      DeclineReview: ({ commandId, taskId }) => once(commandId, api(runs.declineReview(taskId, instance.personId))),
       Ship: ({ commandId, taskId, change }) =>
         once(
           commandId,
@@ -1994,6 +2032,7 @@ export const handlers = Api.toLayer(
       ListEditors: () => Effect.succeed(config.editors?.list() ?? []),
       GetLoad: () => api(machine.now),
       GetPlanUsage: ({ refresh }) => api(planUsage.now(refresh === true)),
+      DismissSignInEnding: ({ commandId, accountId, endsAt, stage }) => once(commandId, api(planUsage.dismiss(accountId, endsAt, stage))),
       GetModelRooms: ({ projectId }) =>
         api(
           modelRooms(projectId).pipe(

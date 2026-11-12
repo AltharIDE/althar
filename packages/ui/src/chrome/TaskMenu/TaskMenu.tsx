@@ -40,6 +40,8 @@ export interface TaskMenuText {
   open: (editor: string) => string
   rename: string
   startNow: string
+  /** Takes its plan out of the line, or stops its countdown, until it is started. */
+  hold: string
   changeTeam: string
   markReady: string
   attach: string
@@ -77,6 +79,7 @@ export const taskMenuText: TaskMenuText = {
   open: (editor) => `Open in ${editor}`,
   rename: 'Rename',
   startNow: 'Start now',
+  hold: 'Hold',
   changeTeam: 'Change the team…',
   markReady: 'Mark ready for review',
   attach: 'Attach a pull request…',
@@ -112,6 +115,8 @@ export interface TaskMenuProps {
   editor?: string
   /** Starts its plan now, while it waits to start. */
   onStartNow?: () => void
+  /** Holds its plan until it is started, while it counts down or waits for a free agent: it leaves the line. */
+  onHold?: () => void
   /** Changes who does its plan's steps, while nothing of it has begun: the consumer opens the team. */
   onChangeTeam?: () => void
   /** Marks its draft pull request ready for review. */
@@ -161,6 +166,7 @@ export function TaskMenu({
   onOpen,
   editor,
   onStartNow,
+  onHold,
   onChangeTeam,
   onMarkReady,
   onAttach,
@@ -197,6 +203,11 @@ export function TaskMenu({
     onStartNow && (
       <MenuItem key="start" icon="play" onSelect={onStartNow}>
         {t.startNow}
+      </MenuItem>
+    ),
+    onHold && (
+      <MenuItem key="hold" icon="hold" onSelect={onHold}>
+        {t.hold}
       </MenuItem>
     ),
     onChangeTeam && (

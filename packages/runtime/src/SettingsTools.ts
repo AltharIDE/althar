@@ -2,6 +2,7 @@ import {
   AtOnceCount,
   CommandRule,
   FolderWait,
+  AfterMergeRule,
   NewProjectDefaults,
   PlansAndReviews,
   PROJECT_SETTINGS_SECTIONS,
@@ -51,6 +52,7 @@ import {
   resolvesConflicts,
   ruleSetOf,
   usageLimitOf,
+  afterMergeReviewOf,
   worksInOf,
 } from './Policies'
 import { Projects } from './Projects'
@@ -302,6 +304,7 @@ export class SettingsTools extends Context.Service<
               pushCommits: pushesCommits(rules),
               postScreenshots: postsScreenshots(rules),
               moveIssues: movesIssues(rules),
+              afterMergeReview: afterMergeReviewOf(rules),
               branchPattern: rules.branchPattern ?? null,
               titlePattern: rules.titlePattern ?? null,
             } as Values,
@@ -325,6 +328,7 @@ export class SettingsTools extends Context.Service<
         'pushCommits',
         'postScreenshots',
         'moveIssues',
+        'afterMergeReview',
         'branchPattern',
         'titlePattern',
       ])
@@ -480,6 +484,11 @@ export class SettingsTools extends Context.Service<
             postScreenshots: field('Post screenshots automatically', SWITCH, Schema.Boolean),
             resolveConflicts: field('Resolve conflicts automatically', SWITCH, Schema.Boolean),
             moveIssues: field('Move issues automatically', SWITCH, Schema.Boolean),
+            afterMergeReview: field(
+              'After a small change merges',
+              'major (reviewed; only blocking and major findings come back to the person), all (any finding comes back), or none (no review after the merge)',
+              AfterMergeRule,
+            ),
             repositoryFiles: field(
               'Skill and OpenSpec files',
               '{ "writeSkills", "writeOpenSpec", "pushProtected" }, each true or false',
@@ -511,6 +520,7 @@ export class SettingsTools extends Context.Service<
                   'postScreenshots',
                   'resolveConflicts',
                   'moveIssues',
+                  'afterMergeReview',
                   'repositoryFiles',
                 ]),
                 workToward: Object.fromEntries(repositories.map((one) => [one.name, one.workToward])),
@@ -545,6 +555,7 @@ export class SettingsTools extends Context.Service<
                 'postScreenshots',
                 'resolveConflicts',
                 'moveIssues',
+                'afterMergeReview',
                 'repositoryFiles',
               ])
               const given = Object.fromEntries(Object.entries(rules).filter(([, value]) => value !== undefined))
@@ -811,6 +822,11 @@ export class SettingsTools extends Context.Service<
               NewProjectDefaults.fields.resolveConflicts,
             ),
             moveIssues: field('New projects: move issues along with their tasks', SWITCH, NewProjectDefaults.fields.moveIssues),
+            afterMergeReview: field(
+              'New projects: after a small change merges',
+              'major (only blocking and major findings come back), all, or none (no review after the merge)',
+              NewProjectDefaults.fields.afterMergeReview,
+            ),
             usageLimit: field('New projects: at an agent’s usage limit', 'move, wait or ask', NewProjectDefaults.fields.usageLimit),
             rotateAccounts: field('New projects: try an agent’s other accounts first', SWITCH, NewProjectDefaults.fields.rotateAccounts),
           },

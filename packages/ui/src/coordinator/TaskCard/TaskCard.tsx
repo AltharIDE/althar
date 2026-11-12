@@ -125,7 +125,7 @@ export function TaskCard({
         {title}
       </p>
       {errands?.map((line) => (
-        <p className={s.errand} key={line}>
+        <p className={s.errand} key={line} title={line}>
           {line}
         </p>
       ))}

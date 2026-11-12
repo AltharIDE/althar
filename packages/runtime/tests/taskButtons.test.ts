@@ -83,7 +83,7 @@ describe('a task’s buttons, as tools', () => {
         yield* callTool(coordinator, 'push_task_branch', { task: task.slug }),
         /^Nothing changed for add-a-retry: Its repositories have no remote to push to/,
       )
-      assert.match(yield* callTool(coordinator, 'move_to_front', { task: task.slug }), /^Nothing changed: .* isn't waiting for a place/)
+      assert.match(yield* callTool(coordinator, 'move_to_front', { task: task.slug }), /^Nothing changed: .* isn't in Up next/)
       // Heads named, as read_task shows them: the same, as its branch's work is in its pull request.
       assert.match(
         yield* callTool(coordinator, 'push_task_branch', { task: task.slug, heads: [{ repository: 'api', head: 'abc1234' }] }),
@@ -112,7 +112,7 @@ describe('a task’s buttons, as tools', () => {
         /^add-a-retry resolves conflicts only when asked now\. Its thread has a line/,
       )
       assert.include(yield* titles(task.threadId), 'Its lead set this task to resolve conflicts only when asked: the person resolves them')
-      assert.match(yield* callTool(lead, 'move_to_front', {}), /^Nothing changed: add-a-retry isn't waiting/)
+      assert.match(yield* callTool(lead, 'move_to_front', {}), /^Nothing changed: add-a-retry isn't in Up next/)
 
       const both = yield* callTool(coordinator, 'resolve_conflicts', { task: task.slug, automatically: null, now: true })
       assert.include(both, 'resolves conflicts as its project says now.')

@@ -33,6 +33,7 @@ import { actionsOf, standingOf, Tasks } from './Tasks'
 import { addItem, updateItem } from './threads'
 import { touchTask } from './cards'
 import { POOL, ToolRefused, ToolServer, type Tool, type ToolAccess } from './ToolServer'
+import { cancelWaitingTurn, upNextMove } from './upNextMoves'
 import { expected, words } from './words'
 
 /*
@@ -437,8 +438,14 @@ export class TaskActions extends Context.Service<
               return did(`Stopped ${task.slug}: its step is cut short and its agents stopped. Restarting carries it on.`)
             case 'stop_turn': {
               const lead = yield* sessions.running(task.threadId)
-              if (Option.isNone(lead) || !lead.value.turnRunning)
-                return nothing(`${task.slug}’s lead isn’t in a turn: there is nothing to stop.`)
+              if (Option.isNone(lead) || !lead.value.turnRunning) {
+                // A turn Althar asked of it waits for a place, up next: let go, its words read with the lead's next turn.
+                if ((yield* cancelWaitingTurn(busy, sessions, sql)(task.id)) > 0)
+                  return did(
+                    `Cancelled the turn ${task.slug}’s lead waited to take: it is out of Up next, and reads what it would have been told with its next turn.`,
+                  )
+                return nothing(`${task.slug}’s lead isn’t in a turn, nor waiting to take one: there is nothing to stop.`)
+              }
               yield* changes.leadStopped({ threadId: task.threadId }, 'interrupted')
               yield* sessions.interrupt(task.threadId)
               return did(`Stopped the lead’s turn on ${task.slug}: it waits for the next message.`)
@@ -446,15 +453,21 @@ export class TaskActions extends Context.Service<
             case 'hold': {
               const [plan] = yield* sql<{ id: string; startsAt: string | null }>`
                 SELECT id, starts_at FROM task_plans WHERE task_id = ${task.id} AND state = 'proposed' ORDER BY proposed_at DESC LIMIT 1`
-              if (plan === undefined)
-                return nothing(
-                  can.includes('stop')
-                    ? `${task.slug} has started: there is no plan to hold. Stop it instead.`
-                    : `${task.slug} has no plan waiting to start.`,
-                )
-              if (plan.startsAt === null) return nothing(`${task.slug} is held already: it waits until it is started.`)
-              yield* plans.hold(plan.id, actorId)
-              return did(`Held ${task.slug}: its plan waits until it is started.`)
+              if (plan !== undefined) {
+                if (plan.startsAt === null) return nothing(`${task.slug} is held already: it waits until it is started.`)
+                yield* plans.hold(plan.id, actorId)
+                return did(`Held ${task.slug}: its plan waits until it is started.`)
+              }
+              // Started, but its first step still waits for a free agent or its checkout: it leaves the line.
+              const [started] = yield* sql<{ id: string }>`
+                SELECT id FROM task_plans WHERE task_id = ${task.id} AND state = 'accepted' ORDER BY proposed_at DESC LIMIT 1`
+              if (started !== undefined && (yield* plans.hold(started.id, actorId)))
+                return did(`Held ${task.slug}: it is out of the line, and its plan waits until it is started.`)
+              return nothing(
+                can.includes('stop')
+                  ? `${task.slug} has started: there is no plan to hold. Stop it instead.`
+                  : `${task.slug} has no plan waiting to start.`,
+              )
             }
             case 'restart': {
               if (standing.state === 'abandoned') {
@@ -977,6 +990,39 @@ export class TaskActions extends Context.Service<
           return `Skipped ${task.slug}'s review: it is ready once its lead is done, with no review. ${threadsSaying(access, task)}.`
         })
 
+      const ReviewAfterMerge = Schema.Struct({
+        task: Schema.optional(Schema.String),
+        review: Schema.Literals(['review', 'none', 'project']),
+        why: Schema.optional(Schema.String),
+      })
+      /** One small change's own word on its review after the merge, as its card will offer it: on the person's word. */
+      const reviewAfterMerge = (access: ToolAccess, input: unknown) =>
+        Effect.gen(function* () {
+          const asked = yield* read(ReviewAfterMerge, input)
+          const task = yield* named(access, asked.task)
+          const review = asked.review === 'project' ? null : asked.review
+          const now = yield* plainly(mergeReviews.choose(task.id, review, actorOf(access)), task.slug)
+          const rule = { major: 'only blocking and major findings come back', all: 'any finding comes back', none: '' }
+          const holds =
+            now.holds === 'none' ? 'it isn’t reviewed after it merges' : `it is reviewed after it merges, and ${rule[now.holds]}`
+          yield* did(
+            access,
+            input,
+            task,
+            review === 'none'
+              ? `No review after “${task.title}” merges`
+              : review === 'review'
+                ? `A review after “${task.title}” merges`
+                : `“${task.title}”’s review after its merge goes by the project’s rule`,
+            review === 'none'
+              ? 'dropped its review after the merge'
+              : review === 'review'
+                ? 'kept a review after the merge'
+                : 'left its review after the merge to the project’s rule',
+          )
+          return `${task.slug}: ${holds}${review === null ? ', as the project’s rule says' : ''}. ${threadsSaying(access, task)}.`
+        })
+
       const shipTask = (access: ToolAccess, input: unknown) =>
         Effect.gen(function* () {
           const asked = yield* read(ShipAsked, input)
@@ -1342,9 +1388,14 @@ export class TaskActions extends Context.Service<
         Effect.gen(function* () {
           const asked = yield* read(Named, input)
           const task = yield* named(access, asked.task)
-          if (!(yield* busy.move(task.id, 0))) return `Nothing changed: ${task.slug} isn't waiting for a place among the agents at work.`
+          const sql = yield* SqlClient.SqlClient
+          const moved = yield* upNextMove(busy, plans, sql)(task.id, 0, actorOf(access))
+          if (moved === 'none')
+            return `Nothing changed: ${task.slug} isn't in Up next, waiting for a place among the agents at work or with a plan waiting to start.`
           yield* did(access, input, task, `Moved “${task.title}” to the front of the line`, 'moved this task to the front of the line')
-          return `${task.slug} is first in line now: it starts when the next agent's place frees.`
+          return moved === 'started'
+            ? `${task.slug}'s plan started, first in line: it goes on as soon as an agent's place frees, or now where one is free.`
+            : `${task.slug} is first in line now: it goes on when the next agent's place frees.`
         })
 
       const stopFollowing = (access: ToolAccess, input: unknown) =>
@@ -1380,7 +1431,7 @@ export class TaskActions extends Context.Service<
       yield* (yield* ToolServer).serve(POOL, [
         tool(
           'stop_task',
-          'Stops a task, as its Stop does: its step is cut short and its agents stop, its work kept. With turn, only its lead’s current turn ends, and it waits for the next message. restart_task carries a stopped task on. It acts at once, with a line in your thread and the task’s; do it when the person asks, or when a task is plainly going wrong and say why. A lead can’t stop its own task: it ends its turn.',
+          'Stops a task, as its Stop does: its step is cut short and its agents stop, its work kept. With turn, only its lead’s current turn ends, and it waits for the next message; or, where a turn Althar asked of its lead or reviewer waits for a place up next, that turn is cancelled, and what it would have said is read with the agent’s next turn. restart_task carries a stopped task on. It acts at once, with a line in your thread and the task’s; do it when the person asks, or when a task is plainly going wrong and say why. A lead can’t stop its own task: it ends its turn.',
           { type: 'object', properties: { task, turn: { type: 'boolean' }, why }, required: ['task'] },
           (access, input) =>
             Effect.flatMap(read(Stopping, input), (asked) =>
@@ -1389,7 +1440,7 @@ export class TaskActions extends Context.Service<
         ),
         tool(
           'hold_task',
-          'Holds a task’s plan that is counting down to start: it waits until it is started (restart_task). For a task already at work, stop it instead. It acts at once, with a line in your thread and the task’s.',
+          'Holds a task’s plan that is counting down to start, or whose first step still waits for a free agent or its checkout: it leaves the line and waits until it is started (restart_task). For a task already at work, stop it instead. It acts at once, with a line in your thread and the task’s.',
           { type: 'object', properties: { task, why }, required: ['task'] },
           (access, input) => Effect.flatMap(read(Asked, input), (asked) => act(access, asked.task, 'hold', { why: asked.why })),
         ),
@@ -1428,6 +1479,20 @@ export class TaskActions extends Context.Service<
           'Skips the review of a task’s work under way, as its menu’s Skip the review does: it is ready once its lead is done, with no review. For a task the person wants without its review; a stuck review is answered with answer_stuck_step. It acts at once, with a line in your thread and the task’s.',
           { type: 'object', properties: { task: optionalTask, why } },
           skipReview,
+        ),
+        tool(
+          'review_after_merge',
+          "Says whether one small change is reviewed after it merges, over its project's rule (read_settings project/tasks, afterMergeReview), on the person's word: review keeps a review after its merge where the rule has none (only blocking and major findings come back to the person, unless the rule says all); none drops it; project goes back to the rule. Only a small change, before it merges. To review it before it merges, make it a full task instead. It acts at once, with a line in your thread and the task's.",
+          {
+            type: 'object',
+            properties: {
+              task: optionalTask,
+              review: { type: 'string', enum: ['review', 'none', 'project'] },
+              why,
+            },
+            required: ['review'],
+          },
+          reviewAfterMerge,
         ),
         tool(
           'push_task',
