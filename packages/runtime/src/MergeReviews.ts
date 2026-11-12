@@ -1,11 +1,13 @@
 import { existsSync } from 'node:fs'
 
-import type { AfterMergeRule } from '@althar/contracts'
+import { type AfterMergeRule, isAgentDefault, knownModelName } from '@althar/contracts'
 import { type ActorId, Ids, newId, type ProjectId } from '@althar/domain'
 import type { Ledger } from '@althar/persistence-sqlite'
-import { Cause, Context, type Crypto, Duration, Effect, Layer, Option, Schema, Scope, Stream } from 'effect'
+import { Cause, Clock, Context, type Crypto, Duration, Effect, Layer, Option, Schema, Scope, Stream } from 'effect'
 import { SqlClient } from 'effect/sql'
 
+import { Agents } from './Config'
+import { Models } from './Models'
 import { afterMergeNow, bringsBack, TASK_AFTER_MERGE_SET, type TaskAfterMerge } from './afterMergeReview'
 import { touchTask } from './cards'
 import { envelope } from './envelope'
@@ -140,7 +142,7 @@ export const fixBrief = (merged: string, findings: string) =>
 
 const countOf = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`
 
-type Store = SqlClient.SqlClient | Instance | Sessions | Live | Ledger | Crypto.Crypto
+type Store = SqlClient.SqlClient | Instance | Sessions | Live | Ledger | Crypto.Crypto | Agents | Models
 
 export class MergeReviews extends Context.Service<
   MergeReviews,
@@ -522,6 +524,34 @@ export class MergeReviews extends Context.Service<
           return copy
         })
 
+      /**
+       * The model its agent offers for the reviewer's, as the plan names it (`claude-opus-5-5`, as list_models writes it, is the
+       * `claude-opus-5` Claude Code offers): by id, else by name. Itself (or none, where none is asked for) where the agent's models
+       * aren't known. Missing where they are and none is it: that is what the catalog says now, which may be the last session's list
+       * while the agent is asked again (`probing`), so it is not final.
+       */
+      const offeredAs = (agentId: string, model: string | null) =>
+        Effect.gen(function* () {
+          if (model === null) return { found: true as const, model }
+          const offered = (yield* (yield* Models).catalog).find((one) => one.agentId === agentId)
+          if (offered === undefined || offered.models.length === 0) return { found: true as const, model }
+          const agent = (yield* Agents).list.find((one) => one.definition.id === agentId)
+          const squash = (words: string) => words.toLowerCase().replace(/[^a-z0-9]+/g, '')
+          const wanted = squash(model.slice(model.lastIndexOf('/') + 1))
+          const one =
+            offered.models.find((candidate) => candidate.id === model) ??
+            offered.models.find(
+              (candidate) =>
+                !isAgentDefault(candidate) &&
+                (squash(candidate.id) === wanted ||
+                  squash(knownModelName({ id: agentId, name: agent?.definition.name ?? agentId }, candidate)) === wanted),
+            )
+          return one === undefined ? { found: false as const, probing: offered.probing } : { found: true as const, model: one.id }
+        }).pipe(Effect.orElseSucceed(() => ({ found: true as const, model })))
+
+      /** How long a review that couldn't start waits before it is tried again: half a minute, doubling, up to ten minutes. */
+      const backoff = (attempts: number) => Math.min(10 * 60_000, 30_000 * 2 ** Math.min(attempts, 10))
+
       /** Starts a review owed, or one a restart cut short, where no other of the task's runs: one at a time, in its thread. */
       const start = (url: string) =>
         Effect.gen(function* () {
@@ -536,6 +566,19 @@ export class MergeReviews extends Context.Service<
           if (other !== undefined) return
           const reviewer = row.reviewer === null ? Option.none() : decodeReviewer(row.reviewer)
           if (Option.isNone(reviewer)) return yield* setState(url, { state: 'stopped', message: 'Its plan names no reviewer.' })
+          // The model as its agent offers it. One it doesn't offer starts no session: it waits, owed, with why, and is looked at
+          // again after a longer wait each time, as the agent may offer it once asked again.
+          const offered = yield* offeredAs(reviewer.value.agentId, reviewer.value.model)
+          if (!offered.found) {
+            // Being asked this moment: nothing to say yet, the next listening turn reads what it said.
+            if (offered.probing) return
+            const message = `${reviewer.value.agentId} doesn’t offer ${reviewer.value.model ?? 'its model'}, so its review can’t start yet.`
+            yield* sql`
+              UPDATE merge_reviews SET state = 'owed', attempts = attempts + 1, message = ${message}, updated_at = ${yield* timestamp}
+              WHERE url = ${url}`
+            return yield* touchTask(row.taskId)
+          }
+          const model = offered.model
           const begun = yield* Effect.exit(
             Effect.gen(function* () {
               yield* copyFor(row)
@@ -546,7 +589,7 @@ export class MergeReviews extends Context.Service<
               yield* sessions.start({
                 threadId,
                 agentId: reviewer.value.agentId,
-                ...(reviewer.value.model === null ? {} : { model: reviewer.value.model }),
+                ...(model === null ? {} : { model }),
                 ...(reviewer.value.effort == null ? {} : { effort: reviewer.value.effort }),
               })
             }),
@@ -581,6 +624,11 @@ export class MergeReviews extends Context.Service<
               SELECT id FROM threads WHERE task_id = ${row.taskId} AND kind = 'step' AND node_key = ${MERGE_REVIEW} LIMIT 1`
             if (thread !== undefined && Option.isSome(yield* sessions.running(thread.id))) continue
             yield* setState(row.url, { state: 'owed' })
+          }
+          // One that couldn't start waits longer each time, not a try for every listening turn: each try is a session starting on the task.
+          if (row?.state === 'owed' && row.attempts > 0) {
+            const [last] = yield* sql<{ at: string }>`SELECT updated_at AS at FROM merge_reviews WHERE url = ${one.url}`
+            if (last !== undefined && Date.parse(last.at) + backoff(row.attempts) > (yield* Clock.currentTimeMillis)) continue
           }
           yield* start(one.url)
         }
@@ -818,8 +866,15 @@ export class MergeReviews extends Context.Service<
           if (row === undefined) return
           const key = `${row.url}`
           if (event.state !== 'completed' || event.errorClass !== undefined) {
-            // A turn that failed (out of usage, out of reach) is tried again by the retry, from the start.
-            if (event.errorClass !== undefined && event.errorClass !== 'turn_in_progress') yield* setState(row.url, { state: 'owed' })
+            // A turn that failed (out of usage, out of reach) is tried again by the retry, from the start: after a longer wait each
+            // time, as each try is a session starting on the task.
+            if (event.errorClass !== undefined && event.errorClass !== 'turn_in_progress') {
+              const sql = yield* SqlClient.SqlClient
+              yield* sql`
+                UPDATE merge_reviews SET state = 'owed', attempts = attempts + 1, message = ${`Its reviewer’s turn failed (${event.errorClass}).`},
+                  updated_at = ${yield* timestamp}
+                WHERE url = ${row.url}`
+            }
             return
           }
           if (!reminded.has(key)) {

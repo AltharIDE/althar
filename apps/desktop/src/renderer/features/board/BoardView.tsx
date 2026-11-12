@@ -53,6 +53,7 @@ import {
   factsOf,
   labelWords,
   nextWords,
+  ranChecks,
   readyWordOf,
   afterMergeText,
   shipText,
@@ -63,6 +64,7 @@ import { afterSteps, isAutomatedStep, stepText } from '../../shared/steps'
 import { ago, clock, running } from '../../shared/time'
 import { text as stuckText } from '../task/StuckCall'
 import { canHold, teamChangeOf, TeamMenu } from '../team/Team'
+import { arrivesQuietly, markArrived, watch } from './arrived'
 import s from './Board.module.css'
 import { type Held, heldOf, holding, type Lanes, movesInLine, type Waiting } from './lanes'
 import type { LineActions } from './useBoard'
@@ -356,20 +358,21 @@ const theirs = (reviewing: ReviewBrief) => (
 
 /** How a running change's checks stand, in one fact: all passed, some failed, or how many so far. None where it has none to say. */
 const checksFact = (checks: ChangeSummary['checks']): ReactNode => {
-  if (checks === null || checks.total === 0) return null
+  const ran = checks === null ? null : ranChecks(checks)
+  if (checks === null || ran === null || ran.total === 0) return null
   if (checks.failed > 0)
     return (
       <Fact icon="close" tone="danger">
         {text.checks.failed(checks.failed)}
       </Fact>
     )
-  if (checks.passed === checks.total)
+  if (ran.passed === ran.total)
     return (
       <Fact icon="check" tone="ok">
-        {text.checks.passed(checks.passed)}
+        {text.checks.passed(ran.passed)}
       </Fact>
     )
-  return <Fact>{text.checks.soFar(checks.passed, checks.total)}</Fact>
+  return <Fact>{text.checks.soFar(ran.passed, ran.total)}</Fact>
 }
 
 /** A branch with nothing changed (+0 −0) says nothing, so no card shows its chip; one whose size isn't known still does. */
@@ -1009,6 +1012,23 @@ export function BoardView({
   const clear = actions?.markDone
   // Which of Settled's tabs shows, while something is kept for later.
   const [shelf, setShelf] = useState<'settled' | 'kept'>('settled')
+  // What Settled draws has moved into it: once drawn, it arrives there no more, whatever the board does next. What is drawn
+  // outside it is watched: only a task that settles while watched moves in.
+  const settledShown = shelf === 'settled' || lanes.kept.length === 0
+  useEffect(() => {
+    if (settledShown) markArrived(lanes.settled.map((work) => work.taskId))
+    watch(
+      [
+        ...lanes.scratch,
+        ...lanes.next,
+        ...lanes.running,
+        ...lanes.waiting.map(({ task }) => task),
+        ...lanes.stopped,
+        ...lanes.ready,
+        ...lanes.kept,
+      ].map((work) => work.taskId),
+    )
+  })
   // Each needs-you card in when its call came: tasks waiting on a call and calls no task waits on together.
   const asks = [
     ...lanes.waiting.map((waiting) => ({ at: waiting.call.createdAt, waiting, call: null })),
@@ -1301,6 +1321,8 @@ export function BoardView({
                   <SettledRow
                     key={work.taskId}
                     data-move={work.taskId}
+                    // Moved into Settled before, or settled before this window looked: drawn there without moving or coming in.
+                    {...(arrivesQuietly(work.taskId) ? { 'data-move-seen': '' } : {})}
                     outcome={outcome}
                     task={work.slug}
                     {...(kind === undefined ? {} : { kind })}

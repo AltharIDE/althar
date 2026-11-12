@@ -49,6 +49,12 @@ export interface Standing {
   readonly next: Next | null
 }
 
+/** A head's checks without the skipped ones: they never ran, so they are neither passed nor missing from the total. */
+export const ranChecks = (checks: NonNullable<ChangeSummary['checks']>): { readonly passed: number; readonly total: number } => ({
+  passed: checks.passed,
+  total: checks.total - checks.list.filter((check) => check.state === 'skipped').length,
+})
+
 export const standingText = {
   commits: (n: number) => (n === 1 ? '1 commit' : `${n} commits`),
   parted: (short: string) => `Branch and ${short} have parted`,
@@ -117,8 +123,7 @@ export const standingOf = (change: ChangeSummary): Standing => {
   const cancelled = checks === null ? [] : checks.list.filter((check) => check.state === 'cancelled').map((check) => check.name)
   if (checks !== null && checks.failed > 0) blockers.push({ kind: 'failed', failing: checks.failing, failed: checks.failed })
   // Run again by Althar, a cancelled check is running before its host shows it so.
-  else if (checks !== null && (checks.running > 0 || checks.outcome === 'running'))
-    blockers.push({ kind: 'running', passed: checks.passed, total: checks.total })
+  else if (checks !== null && (checks.running > 0 || checks.outcome === 'running')) blockers.push({ kind: 'running', ...ranChecks(checks) })
   else if (cancelled.length > 0) blockers.push({ kind: 'cancelled', cancelled })
   return { blockers, next: nextOf(blockers[0]) }
 }
@@ -172,10 +177,11 @@ export const saidOf = (blocker: Blocker, change: Pick<ChangeSummary, 'short'>): 
 /** Nothing in the way: how its checks went, green only where every one passed, or that none ran. */
 export const clearOf = (change: Pick<ChangeSummary, 'checks'>): Said => {
   const checks = change.checks
-  if (checks === null || checks.total === 0) return { words: standingText.none, tone: 'quiet' }
-  return checks.passed === checks.total
-    ? { words: standingText.passed(checks.total), icon: 'check', tone: 'ok' }
-    : { words: standingText.soFar(checks.passed, checks.total), tone: 'quiet' }
+  const ran = checks === null ? null : ranChecks(checks)
+  if (ran === null || ran.total === 0) return { words: standingText.none, tone: 'quiet' }
+  return ran.passed === ran.total
+    ? { words: standingText.passed(ran.total), icon: 'check', tone: 'ok' }
+    : { words: standingText.soFar(ran.passed, ran.total), tone: 'quiet' }
 }
 
 /**
