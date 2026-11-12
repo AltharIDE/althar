@@ -34,7 +34,7 @@ export const releaseUrl = (version: string) => `${REPO}/releases/tag/v${version}
 export const RELEASES: readonly Release[] = [
   {
     version: '0.8.0',
-    date: '2026-11-12',
+    date: '2026-11-13',
     title: 'Your app, beside the conversation',
     changes: [
       { kind: 'new', text: 'A browser beside the conversation: a task’s app, and links in a thread, open beside it.' },
