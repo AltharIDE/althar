@@ -84,6 +84,9 @@ person can change a task's team at any time.
   and an ending at once. On any other task (a prototype, a chat planned as
   one) it gives the same review and ending in place, as `change_part` with
   preset Change does, and Ship then reviews it and opens its pull request.
+  Where no repository of it is on a code host Althar knows, both leave it on
+  its branch with nothing going up (the plan's ending null), as a plan made
+  there from Change ends, never pushing a branch with nowhere to go.
 - **The task menu's Make it a change** does that in one press for a task
   that ends with no pull request: a prototype, a chat, a quick task
   (`ShapeTask`).

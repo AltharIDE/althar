@@ -907,8 +907,9 @@ export class Runs extends Context.Service<
     madeRound(taskId: string, sessionId: string): Effect.Effect<boolean, unknown>
     /**
      * Changes how a task ends, and when its review reads it, at any time and either way (a task is a conversation plus parts):
-     * `end`, `here` (nothing of it leaving this computer until the person ships it), `none` (its branch pushed) or a pull
-     * request, a draft or ready for review; `afterMerge`, a reviewer that reads it only once it merged (the fast lane's), or
+     * `end`, `here` (nothing of it leaving this computer until the person ships it), `none` (its branch pushed), a pull
+     * request, a draft or ready for review, or null (ready on its branch, nothing going to a host: a project on none Althar
+     * knows); `afterMerge`, a reviewer that reads it only once it merged (the fast lane's), or
      * null for its review before it ships again. Its plan, the run of it and its latest run take them, so its next ending and
      * its next Ship go by them; a Ship under way as it comes to end here sends nothing. `chosen`, with `end`: whether that
      * ending is the person's own rather than the project's, so a preset saved from it keeps it, or follows the project;
@@ -917,7 +918,7 @@ export class Runs extends Context.Service<
      */
     reshape(input: {
       readonly taskId: string
-      readonly end?: TaskEnding
+      readonly end?: TaskEnding | null
       readonly chosen?: boolean
       readonly afterMerge?: PlanStep | null
       readonly actorId: ActorId

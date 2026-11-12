@@ -154,6 +154,12 @@ describe('a task’s parts, both ways, on its lead’s word', () => {
         /ending in a pull request ready for review, PR #1 marked ready for review/,
       )
       assert.isFalse(github.changes[0]?.draft)
+      // Back to a draft: no host turns one back, so it stays ready, and the next opens as a draft.
+      assert.match(
+        yield* callTool(task.lead, 'change_part', { part: 'ending', end: 'draft', why: 'the person asked' }),
+        /ending in a draft pull request, PR #1 stays ready for review, and the next opens as a draft/,
+      )
+      assert.isFalse(github.changes[0]?.draft)
       assert.match(
         yield* callTool(task.lead, 'change_part', { part: 'checked_by', review: { agent: 'claude-code' }, why: 'the person asked' }),
         /reviewed by .+, reading what ships next/,

@@ -1134,14 +1134,16 @@ export class TaskActions extends Context.Service<
       }
 
       /** What a part became, in a few words: "reviewed by GPT-6.1 Terra", "ending with its branch". */
-      const endingWords = (end: TaskEnding) =>
-        end === 'here'
-          ? 'nothing going up until it ships'
-          : end === 'none'
-            ? 'ending with its branch'
-            : end === 'ready'
-              ? 'ending in a pull request ready for review'
-              : 'ending in a draft pull request'
+      const endingWords = (end: TaskEnding | null) =>
+        end === null
+          ? 'ending on its branch, its repository on no code host Althar knows'
+          : end === 'here'
+            ? 'nothing going up until it ships'
+            : end === 'none'
+              ? 'ending with its branch'
+              : end === 'ready'
+                ? 'ending in a pull request ready for review'
+                : 'ending in a draft pull request'
 
       /**
        * Its review before it ships, as asked: put on, by the model named or as `reviewerFor` picks it, or taken off (null),
@@ -1218,10 +1220,11 @@ export class TaskActions extends Context.Service<
       /**
        * How it ends, as asked, and what that does to a pull request it has open: marked ready where it ends ready, closed where
        * it ends with its branch or here (its branch stays, and reopen_pull_request opens it again). One ready already stays
-       * so where it ends as a draft: no host Althar knows turns one back. `chosen`: the person's own ending rather than the
-       * project's, which a preset saved from the task keeps. What changed, in a few words each.
+       * so where it ends as a draft: no host Althar knows turns one back. Null: on its branch, as a project on no host Althar
+       * knows ends. `chosen`: the person's own ending rather than the project's, which a preset saved from the task keeps.
+       * What changed, in a few words each.
        */
-      const endTo = (actorId: ActorId, task: Task, end: TaskEnding, chosen: boolean) =>
+      const endTo = (actorId: ActorId, task: Task, end: TaskEnding | null, chosen: boolean) =>
         Effect.gen(function* () {
           const { was } = yield* plainly(runs.reshape({ taskId: task.id, end, chosen, actorId: actorId }), task.slug)
           const said: Array<string> = was === end ? [] : [endingWords(end)]
@@ -1290,13 +1293,19 @@ export class TaskActions extends Context.Service<
               )
             }
           }
-          // A copy's work stays here; a built-in preset's pull request is as the project says, where it says one. The preset's
-          // own ending is chosen, so a preset saved from the task keeps it; the project's is followed. Set before its review
-          // changes: a review stopped ends its run, which sends the work up as the task ends then, and never as it did.
+          // A copy's work stays here; a built-in preset's pull request is as the project says, as a plan made from it ends: on
+          // its branch, with nothing going up, where no host Althar knows has it. The preset's own ending is chosen, so a preset
+          // saved from the task keeps it; the project's is followed. Set before its review changes: a review stopped ends its
+          // run, which sends the work up as the task ends then, and never as it did.
           const own = preset.parts.end as TaskEnd | undefined
-          const project = own === undefined || (preset.builtin && own !== 'none') ? yield* changes.endFor(task.projectId, task.id) : null
-          const end: TaskEnding = preset.parts.workspace === 'copy' && (own ?? 'none') === 'none' ? 'here' : (project ?? own ?? 'none')
-          const ends = yield* endTo(actorId, task, end, project === null)
+          const follows = own === undefined || (preset.builtin && own !== 'none')
+          const end: TaskEnding | null =
+            preset.parts.workspace === 'copy' && (own ?? 'none') === 'none'
+              ? 'here'
+              : follows
+                ? yield* changes.endFor(task.projectId, task.id)
+                : own
+          const ends = yield* endTo(actorId, task, end, !follows)
           const reviewer = preset.parts.reviewer === null ? undefined : presetPick(preset.parts.reviewer)
           said.push(
             ...(preset.parts.checked === 'none'
@@ -1343,11 +1352,21 @@ export class TaskActions extends Context.Service<
         Effect.gen(function* () {
           const own = access.role === 'lead' && task.id === access.taskId
           const next = asked.ship === true ? '' : yield* nextOf(task, own)
-          const shipping = asked.ship === true ? ` ${yield* shipped(access, task, asked.why)}` : ''
+          // Its parts changed already: a Ship refused says why, beside what changed, rather than as if nothing had.
+          const shipping =
+            asked.ship === true
+              ? ` ${yield* shipped(access, task, asked.why).pipe(
+                  Effect.catch((error) =>
+                    Effect.succeed(
+                      `It didn’t ship: ${error instanceof ToolRefused ? error.message : words(error, (agentId) => agentId).message}`,
+                    ),
+                  ),
+                )}`
+              : ''
           if (said.length === 0) return `Nothing changed: ${task.slug} has those parts already.${next}${shipping}`
-          const words = `${did_}: ${said.join(', ')}`
-          yield* did(access, input, task, `${words.charAt(0).toUpperCase()}${words.slice(1)} on “${task.title}”`, words)
-          return `${task.slug}: ${words}. ${threadsSaying(access, task)}.${next}${shipping}`
+          const changed = `${did_}: ${said.join(', ')}`
+          yield* did(access, input, task, `${changed.charAt(0).toUpperCase()}${changed.slice(1)} on “${task.title}”`, changed)
+          return `${task.slug}: ${changed}. ${threadsSaying(access, task)}.${next}${shipping}`
         })
 
       /** The ending a part's change asks for, as a plan keeps it. */

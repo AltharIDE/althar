@@ -1351,8 +1351,10 @@ export class Coordinator extends Context.Service<
           const own = before.steps.find((step) => step.key === 'review')
           const review: PlanStep | null =
             asked.review === null ? null : { key: 'review', ...(yield* stepOf(access.projectId, asked.review, REVIEWER)), skipped: false }
+          // A pull request where its repositories are on a host Althar knows; else on its branch, nothing going up, as the quick
+          // task's way and a plan made there end.
           const hosts = yield* changes.hostsFor(access.projectId, task.id)
-          const end = hosts.some((host) => host !== null) ? asked.output : 'none'
+          const end = hosts.some((host) => host !== null) ? asked.output : null
           yield* changes.exclusive(task.id, branchOnFirstWrite(task.id, [], true))
           if (title !== task.title)
             yield* (yield* Tasks).rename({
@@ -1370,8 +1372,8 @@ export class Coordinator extends Context.Service<
           const named = yield* modelNamer
           const who = review === null ? 'with no review' : `reviewed by ${named(review)}`
           const ends =
-            end === 'none'
-              ? 'ending on its branch'
+            end === null
+              ? 'ending on its branch: its repository isn’t on a code host Althar knows'
               : `ending in ${end === 'ready' ? 'a pull request ready for review' : 'a draft pull request'}`
           yield* addItem({ projectId: task.projectId, threadId: task.threadId }, 'notice', {
             source: 'runtime',
@@ -1380,7 +1382,9 @@ export class Coordinator extends Context.Service<
             role: 'aside',
           })
           yield* touchCard(task.id)
-          return `The task is a change now, called “${title}”, ${who}, ${ends}. Commit your work: Ship ${review === null ? 'opens' : 'runs its review, then opens'} its pull request, where the person asked for it to go up now with ship_task (it ships once your turn ends), else with their Ship. Don't push or open it yourself.`
+          return end === null
+            ? `The task is a change now, called “${title}”, ${who}, ${ends}. Commit your work: ${review === null ? 'it stays' : 'its review reads it, and it stays'} on its branch here, with no pull request to open.`
+            : `The task is a change now, called “${title}”, ${who}, ${ends}. Commit your work: Ship ${review === null ? 'opens' : 'runs its review, then opens'} its pull request, where the person asked for it to go up now with ship_task (it ships once your turn ends), else with their Ship. Don't push or open it yourself.`
         })
 
       /**
