@@ -232,6 +232,42 @@ describe('the project’s bar', () => {
     expect(await screen.findByText('Kept as “opus change”: Settings has your presets.')).toBeTruthy()
   })
 
+  it('draws a review the coordinator offered as its line, naming the task, and Add puts its reviewer on', async () => {
+    const offer = items.notice(
+      {
+        source: 'runtime',
+        title: 'Add a review of “Harden the prototype”?',
+        offer: { kind: 'review', projectId: 'p1', taskId: 'r', agentId: 'codex', model: null },
+      },
+      null,
+    )
+    const task = {
+      ...card(),
+      state: 'open' as const,
+      createdAt: '2026-10-01T09:00:00.000Z',
+      settledAt: null,
+      changed: null,
+      here: [],
+      taskId: 'r',
+      title: 'Harden the prototype',
+      reviewOffer: { key: 'review' as const, agentId: 'codex', model: null, skipped: false },
+      plan: { ...card().plan!, steps: card().plan!.steps.filter((step) => step.key !== 'review') },
+    }
+    const { client } = fakeClient({
+      getCoordinator: vi.fn(async () => coordinatorSnapshot({ items: [offer] })),
+      getBoard: vi.fn(async () => ({ cursor: 1, tasks: [task], calls: [], settledTotal: 0 })),
+    })
+    withServices(<WithSettings />, client)
+    await screen.findByText('Add a review of “Harden the prototype”?')
+    await userEvent.click(await screen.findByRole('button', { name: 'Add gpt-5.2-codex' }))
+    await waitFor(() =>
+      expect(client.changeTeam).toHaveBeenCalledWith('r', [
+        ...task.plan.steps,
+        { key: 'review', agentId: 'codex', model: null, skipped: false },
+      ]),
+    )
+  })
+
   it('steps through the views by b, never while typing, and has no button to start a task', async () => {
     const { client } = fakeClient({ getCoordinator: vi.fn(async () => coordinatorSnapshot()) })
     const view = withServices(<Project />, client)
@@ -356,7 +392,7 @@ describe('the Talk room', () => {
     expect(screen.getByText('Needs you')).toBeTruthy()
     expect(screen.getByText('Implementing')).toBeTruthy()
     expect(screen.getByText('Stopped')).toBeTruthy()
-    expect(screen.getByText('Held. Starts when you say')).toBeTruthy()
+    expect(screen.getByText('Held', { exact: true })).toBeTruthy()
     expect(screen.getByText(`Claude Code is out of usage until ${clock('2026-10-03T15:40:00.000Z')}`)).toBeTruthy()
     // Held for the reset, it is paused, as on the board, not running.
     expect(screen.getByText('Paused')).toBeTruthy()
@@ -482,7 +518,7 @@ describe('the Talk room', () => {
     expect(client.startPlan).toHaveBeenCalledWith('pln1')
   })
 
-  it('plans a review of someone else’s pull request with its one lead, offering only agents held to reading', async () => {
+  it('plans a review of someone else’s pull request with its one lead, offering every agent', async () => {
     const review = card({
       slug: 'review-1199-send-back',
       title: 'Review #1199: Send back won’t restart a dead lead session',
@@ -506,7 +542,6 @@ describe('the Talk room', () => {
         ...card().plan!,
         steps: [{ key: 'implement', agentId: 'claude-code', model: null, skipped: false }],
         reason: 'Strong at reading.',
-        agents: ['claude-code'],
       },
     })
     const { client } = fakeClient({ getCoordinator: vi.fn(async () => coordinatorSnapshot({ items: [items.card(review)] })) })
@@ -517,10 +552,10 @@ describe('the Talk room', () => {
     expect(screen.queryByText('Strong at reading.')).toBeNull()
     expect(screen.queryByRole('button', { name: 'Skip' })).toBeNull()
     expect(screen.queryByText('When the work is done')).toBeNull()
-    // Codex can't be held to reading only, so it isn't offered.
+    // Any agent may lead it: Codex is offered too.
     await userEvent.click(lead)
     expect(await screen.findByRole('radio', { name: /Claude Code default/ })).toBeTruthy()
-    expect(screen.queryByRole('radio', { name: /gpt-5\.2-codex/ })).toBeNull()
+    expect(screen.getByRole('radio', { name: /gpt-5\.2-codex/ })).toBeTruthy()
     await userEvent.click(screen.getByRole('radio', { name: 'High' }))
     await waitFor(() =>
       expect(client.changePlan).toHaveBeenLastCalledWith(
@@ -577,14 +612,32 @@ describe('the Talk room', () => {
     expect(client.changePlan).not.toHaveBeenCalled()
   })
 
+  it('lets the person hold a started Local plan that waits for its checkout, saying what it waits for', async () => {
+    const waitingCard = card({
+      phase: 'running',
+      step: 'implement',
+      queued: null,
+      planWaits: true,
+      holdable: true,
+      waitsForCheckout: { why: 'taken', by: { taskId: 'x', title: 'Dark mode' } },
+    })
+    const { client } = fakeClient({ getCoordinator: vi.fn(async () => coordinatorSnapshot({ items: [items.card(waitingCard)] })) })
+    withServices(<Project room={Room.Talk} />, client)
+    expect(await screen.findByText(/Dark mode/)).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Start now' })).toBeNull()
+    await userEvent.click(screen.getByRole('button', { name: 'Hold' }))
+    expect(client.holdPlan).toHaveBeenCalledWith('pln1')
+  })
+
   it('lets the person change a started plan while its first step waits for a free agent, saying what it waits for', async () => {
     const waitingCard = card({ phase: 'running', step: 'implement', queued: { busy: 4, atOnce: 4 }, planWaits: true })
     const { client } = fakeClient({ getCoordinator: vi.fn(async () => coordinatorSnapshot({ items: [items.card(waitingCard)] })) })
     withServices(<Project room={Room.Talk} />, client)
     expect(await screen.findByText('Waiting: 4 of 4 agents busy on this Mac')).toBeTruthy()
-    // Nothing to start or hold: it starts on its own once an agent is free.
+    // Nothing to start: it starts on its own once an agent is free. It can still be held, which takes it out of the line.
     expect(screen.queryByRole('button', { name: 'Start now' })).toBeNull()
-    expect(screen.queryByRole('button', { name: 'Hold' })).toBeNull()
+    await userEvent.click(screen.getByRole('button', { name: 'Hold' }))
+    expect(client.holdPlan).toHaveBeenCalledWith('pln1')
     await userEvent.click(screen.getByRole('button', { name: 'Skip' }))
     await waitFor(() =>
       expect(client.changePlan).toHaveBeenLastCalledWith(

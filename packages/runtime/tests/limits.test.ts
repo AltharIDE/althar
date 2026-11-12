@@ -844,7 +844,8 @@ describe('a held step handed over while every place is taken, across a restart',
             WHERE task_id = ${task.taskId} AND kind = 'stuck' AND state = 'open'`,
           (rows) => rows.length === 1,
         )
-        assert.strictEqual(call?.why, 'failed_to_start')
+        // An agent that is no longer there stops for that: installing it is the way on.
+        assert.strictEqual(call?.why, 'not_installed')
         const states = yield* sql<{ state: string }>`
           SELECT a.state FROM node_attempts a JOIN nodes n ON n.id = a.node_id JOIN workflow_executions e ON e.id = n.execution_id
           JOIN runs r ON r.id = e.run_id WHERE r.task_id = ${task.taskId} AND n.node_key = 'implement' ORDER BY a.rowid DESC LIMIT 1`

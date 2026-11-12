@@ -11,6 +11,7 @@ import { SqlClient } from 'effect/sql'
 import { thisDevice } from './device'
 import { Busy } from './Busy'
 import { Connections } from './Connections'
+import { Errands } from './Errands'
 import { touchCard } from './cards'
 import { Changes } from './Changes'
 import { endWords, modelNamer, teamOf, withEffort } from './coordinatorNews'
@@ -32,6 +33,8 @@ import { IssueDrafts, refusedDraft } from './IssueDrafts'
 import { AskedFields, fieldSchema, wantedFields } from './issueFields'
 import { findWords, foundLine, Issues, keysOf, READ_ISSUE, READ_ISSUE_INPUT, stoppedAt } from './Issues'
 import { quickIn } from './kinds'
+import { DRAFT_THEN_PRESET, PICK_A_PRESET } from './presetBrief'
+import { presetModels } from './presetModels'
 import { Limits } from './Limits'
 import { ModelFacts } from './ModelFacts'
 import { DRAFTING_MS } from './needsYou'
@@ -43,6 +46,7 @@ import {
   closePullRequest,
   editPullRequest,
   markReady,
+  personsWordOf,
   readDefaultBranchChecks,
   replyOnPullRequest,
   reopenPullRequest,
@@ -65,8 +69,10 @@ import { notesSection, projectOverview } from './handover'
 import { dropNote, keepNote, NOTE_LENGTH, NoteRefused, NOTES_KEPT, notesOf, sayNotes } from './notes'
 import { envelope } from './envelope'
 import { fact } from './records'
+import { declinedOf, offerable, reviewOfferOf } from './reviewOffer'
 import { PlanParameters, type PlanStep, Runs, type StuckInfo } from './Runs'
 import { smallChangeSteps } from './smallChange'
+import { afterMergeNow } from './afterMergeReview'
 import { type Disposition, passedOn, Sessions } from './Sessions'
 import type { InputFile } from './sentFiles'
 import type { InputImage } from './sentImages'
@@ -76,7 +82,7 @@ import { TITLE_LENGTH } from './taskTitle'
 import { Tasks } from './Tasks'
 import { setToward } from './towards'
 import { addItem, transcript } from './threads'
-import { personsWords, quoted } from './TaskActions'
+import { hearsOf, personsWords, quoted, threadsSaying } from './TaskActions'
 import { ToolRefused, ToolServer, type Tool, type ToolAccess } from './ToolServer'
 import { describe as describePreset, presetsIn } from './presets'
 import { stepOf, StepPick } from './stepPick'
@@ -118,6 +124,7 @@ export interface Suggested {
 type Store =
   | SqlClient.SqlClient
   | Instance
+  | Errands
   | Live
   | Agents
   | SignIns
@@ -310,6 +317,8 @@ const Relead = Schema.Struct({
   message: Schema.optional(Schema.String),
 })
 const OnTask = Schema.Struct({ task: Schema.String })
+/* A review offered: on the lead's own task where it leaves task out; by the rules' reviewer where it leaves review out. */
+const ReviewOffered = Schema.Struct({ task: Schema.optional(Schema.String), review: Schema.optional(StepPick) })
 const PartOf = Schema.Struct({ task: Schema.String, part_of: Schema.Boolean })
 
 /** What propose_plan takes, said when its input can't be read: lead and review are objects, never a name alone. */
@@ -375,6 +384,7 @@ export class Coordinator extends Context.Service<
       )
       const agents = yield* Agents
       const sessions = yield* Sessions
+      const errands = yield* Errands
       const live = yield* Live
       const projects = yield* Projects
       const plans = yield* Plans
@@ -391,6 +401,7 @@ export class Coordinator extends Context.Service<
         Effect.succeed({ changes: [], merged: [], unmerged: 0 })
       const provide = <A, E>(effect: Effect.Effect<A, E, Store>) => Effect.provideContext(effect, context)
       const nameOf = (agentId: string) => agents.list.find((entry) => entry.definition.id === agentId)?.definition.name ?? agentId
+      const wordOf = (access: ToolAccess) => personsWordOf(errands, access)
 
       const thread = (projectId: string) =>
         Effect.gen(function* () {
@@ -1145,7 +1156,7 @@ export class Coordinator extends Context.Service<
           if (byLead)
             return `Planned ${created.slug}, started from this task: its lead starts in 25 seconds unless the person holds it, with no review, and nothing goes outside the project when it is done. The person sees it as a card, started by this task; say in a sentence what it does.`
           // A chat: it sits on Scratch, off the board's lanes, until it takes a worktree or an output (a task is a conversation plus
-          // parts, "Chats and Scratch").
+          // parts, "Asides").
           yield* shelve(created.taskId, 'scratch', instance.coordinatorId)
           const started = yield* plans.start(planId, instance.coordinatorId)
           if (started === 'waiting' && worksIn === 'checkout') {
@@ -1505,8 +1516,16 @@ export class Coordinator extends Context.Service<
           const where = `${preset === undefined ? '' : ` As ${preset}.`}${yield* localLine(access.projectId, task.id, worksIn)}`
           if (held !== undefined)
             return `Changed ${task.slug}'s plan.${where} It stays held until the person starts it; they see it as a card, so there's no need to describe the plan again.`
-          if (small)
-            return `Planned ${task.slug} as a small change: ${where} It starts at once, on ${smallSteps?.[0]?.model ?? 'its lightest model'}, with no plan to read and one step. It is reviewed after it merges; the card in its thread says what it skipped, so there's no need to repeat it.`
+          if (small) {
+            const after = (yield* afterMergeNow(task.id)).holds
+            const reviewed =
+              after === 'none'
+                ? "The project's rule has no review after it merges (review_after_merge keeps one for it, on the person's word)"
+                : after === 'all'
+                  ? 'It is reviewed after it merges, and any finding comes back to the person'
+                  : 'It is reviewed after it merges, and only blocking and major findings come back to the person'
+            return `Planned ${task.slug} as a small change: ${where} It starts at once, on ${smallSteps?.[0]?.model ?? 'its lightest model'}, with no plan to read and one step. ${reviewed}; the card in its thread says what it skipped, so there's no need to repeat it.`
+          }
           return `Planned ${task.slug}.${where} It starts in 25 seconds unless the person holds or changes it; they see it as a card, so there's no need to describe the plan again.`
         })
 
@@ -1532,7 +1551,7 @@ export class Coordinator extends Context.Service<
             : access.role === 'lead'
               ? `The lead of “${(yield* ownTitle(access)) ?? 'another task'}”`
               : 'The coordinator'
-          if (access.threadId !== task.threadId)
+          if (hearsOf(access, task))
             yield* addItem({ projectId: access.projectId as ProjectId, threadId: access.threadId }, 'notice', {
               source: 'runtime',
               severity: 'info',
@@ -1651,7 +1670,103 @@ export class Coordinator extends Context.Service<
                 disposition: 'after_current',
               })
               .pipe(Effect.mapError(() => new ToolRefused({ message: `Althar couldn't pass that on to ${task.slug}'s lead.` })))
-          return `${said.join(' ')} Both threads have a line saying so.`
+          return `${said.join(' ')} ${threadsSaying(access, task)}.`
+        })
+
+      /**
+       * Offers a task whose work turned real with no review one, as a line of the thread it is called from, with Add and No
+       * thanks (a skipped review can be added back until merge): never by a rule, but where what the person said makes the work
+       * a real change, as asking a prototype's lead to harden it does. It adds nothing by itself. Turned down, it isn't offered
+       * again; one that stands isn't offered twice.
+       */
+      const offerReview = (access: ToolAccess, input: unknown) =>
+        Effect.gen(function* () {
+          const asked = yield* read(ReviewOffered, input)
+          const reference = asked.task ?? (access.role === 'lead' ? access.taskId : null)
+          if (reference === null) return yield* new ToolRefused({ message: 'Name the task: its slug, as list_tasks shows it.' })
+          const task = yield* taskOf(access, reference)
+          const sql = yield* SqlClient.SqlClient
+          const [plan] = yield* sql<{ state: string; parameters: string }>`
+            SELECT state, parameters FROM task_plans WHERE task_id = ${task.id} AND state IN ('proposed', 'accepted')
+            ORDER BY proposed_at DESC LIMIT 1`
+          if (plan === undefined || plan.state === 'proposed')
+            return yield* new ToolRefused({ message: `${task.slug} hasn't started: give its plan a review with propose_plan.` })
+          const parameters = yield* Schema.decodeUnknownEffect(Schema.fromJsonString(PlanParameters))(plan.parameters)
+          const facts = {
+            taskId: task.id,
+            open: task.state === 'open',
+            steps: parameters.steps,
+            reviewsAfterMerge: parameters.reviewAfterMerge === true,
+            reads: parameters.reads === true,
+            pulls: ((yield* pullRequests(task.id)) ?? { changes: [] }).changes.map((seen) => ({ state: seen.change.state })),
+          }
+          const named = yield* modelNamer
+          const not = offerable(facts)
+          if (not !== undefined) {
+            const review = parameters.steps.find((step) => step.key === 'review' && !step.skipped)
+            return yield* new ToolRefused({
+              message:
+                not === 'reviewed' && review !== undefined
+                  ? `${task.slug} has a review already, by ${named(review)}: change_lead changes its reviewer.`
+                  : not === 'merged'
+                    ? `${task.slug} is merged: a review now is one after the merge.`
+                    : not === 'no_review_of_its_own'
+                      ? `${task.slug}'s plan reads no review of its own.`
+                      : `${task.slug} isn't open.`,
+            })
+          }
+          if (yield* declinedOf(task.id))
+            return yield* new ToolRefused({
+              message: `The person turned down a review of ${task.slug}: it isn't offered again. Where they ask for one now, add it with change_lead.`,
+            })
+          const standing = yield* reviewOfferOf(facts)
+          if (standing !== undefined) return `A review of ${task.slug} by ${named(standing)} is offered already: it waits on the person.`
+          const lead = parameters.steps.find((step) => step.key === 'implement')
+          const reviewer =
+            asked.review !== undefined
+              ? yield* stepOf(access.projectId, asked.review, 'the review')
+              : yield* (yield* Limits)
+                  .free({
+                    besides: [],
+                    projectId: access.projectId,
+                    ...(lead === undefined ? {} : { other: { agentId: lead.agentId, model: lead.model } }),
+                  })
+                  .pipe(Effect.orElseSucceed(() => undefined))
+          if (reviewer === undefined)
+            return yield* new ToolRefused({ message: 'No agent can review it now: each is out of usage or signed out.' })
+          const step = {
+            key: 'review' as const,
+            agentId: reviewer.agentId,
+            model: reviewer.model,
+            ...('effort' in reviewer && reviewer.effort != null ? { effort: reviewer.effort } : {}),
+            skipped: false,
+          }
+          const [row] = yield* sql<{ revision: number }>`SELECT revision FROM tasks WHERE id = ${task.id}`
+          yield* fact({
+            projectId: access.projectId as ProjectId,
+            aggregateType: 'task',
+            aggregateId: task.id,
+            revision: row?.revision ?? 1,
+            type: 'task.review_offered',
+            payload: { agentId: step.agentId, model: step.model, ...(step.effort === undefined ? {} : { effort: step.effort }) },
+            actorId: instance.coordinatorId,
+          })
+          // The line stands where the person is talking: the task's own thread from its lead, the coordinator's from it.
+          yield* addItem({ projectId: access.projectId as ProjectId, threadId: access.threadId }, 'notice', {
+            source: 'runtime',
+            severity: 'info',
+            title: access.threadId === task.threadId ? 'Add a review?' : `Add a review of “${task.title}”?`,
+            offer: {
+              kind: 'review',
+              projectId: access.projectId,
+              taskId: task.id,
+              agentId: step.agentId,
+              model: step.model,
+              ...(step.effort === undefined ? {} : { effort: step.effort }),
+            },
+          })
+          yield* touchCard(task.id)
+          return `Offered ${task.slug} a review by ${named(step)}: a line in your thread with Add and No thanks. Nothing is added until the person adds it.`
         })
 
       /** Tries a task lead's last turn again where it failed, as its Try again does: what was said in it goes again. */
@@ -1663,7 +1778,7 @@ export class Coordinator extends Context.Service<
             .pipe(Effect.mapError((error) => new ToolRefused({ message: `Althar couldn't try ${task.slug} again: ${error._tag}.` })))
           if (!again) return `Nothing changed: ${task.slug}'s lead's last turn didn't fail.`
           yield* saidOn(access, input, task, `Tried “${task.title}” again`, 'tried its lead’s last turn again')
-          return `${task.slug}'s lead's last turn goes again. Both threads have a line saying so.`
+          return `${task.slug}'s lead's last turn goes again. ${threadsSaying(access, task)}.`
         })
 
       /** Has a task's lead compact its context, as the task's Compact does: a turn of its own, after what it was told before. */
@@ -1851,7 +1966,7 @@ export class Coordinator extends Context.Service<
           ...(step.effort === undefined ? {} : { effort: step.effort }),
         }))
 
-      /** What each run does, from what it ends in and its reviewer. A review is led only by an agent held to reading. */
+      /** What each run does, from what it ends in and its reviewer. Any agent may lead a review. */
       const workOf = (
         projectId: string,
         endsIn: typeof EndsIn.Type,
@@ -1859,16 +1974,7 @@ export class Coordinator extends Context.Service<
         review: typeof StepPick.Type | null,
       ) =>
         Effect.gen(function* () {
-          if (endsIn === 'reviews') {
-            const leading = agents.list.find((entry) => entry.definition.id === lead.agentId)
-            if (leading?.definition.reviewing?.outside !== true) {
-              const held = agents.list.filter((entry) => entry.definition.reviewing?.outside === true).map((entry) => entry.definition.name)
-              return yield* new ToolRefused({
-                message: `${nameOf(lead.agentId)} can't be held to reading only, so it can't lead a review. Name a model on ${held.join(' or ')}.`,
-              })
-            }
-            return { kind: 'review' } as const
-          }
+          if (endsIn === 'reviews') return { kind: 'review' } as const
           return {
             kind: 'task',
             review: review === null ? null : yield* keptStep(projectId, review, 'its reviewer'),
@@ -2219,7 +2325,7 @@ export class Coordinator extends Context.Service<
         ...readTasksTools,
         tool(
           'draft_task',
-          `Drafts a task for a change: its title, saying what should change in a few words (at most ${TITLE_LENGTH} characters), and a description with what the lead needs: the context, where to look, constraints, and what done looks like. When it comes from an issue, pass the issue's link or key as issue, and part_of where it does only part of it. When it works on an open pull request, such as to answer its review, pass it as pull_request: the task starts on its head and follows it, and its work goes there, with no new pull request. Then propose its plan.${LEAD_STARTING}`,
+          `Drafts a task for a change: its title, saying what should change in a few words (at most ${TITLE_LENGTH} characters), and a description with what the lead needs: the context, where to look, constraints, and what done looks like. When it comes from an issue, pass the issue's link or key as issue, and part_of where it does only part of it. When it works on an open pull request, such as to answer its review, pass it as pull_request: the task starts on its head and follows it, and its work goes there, with no new pull request. ${DRAFT_THEN_PRESET}${LEAD_STARTING}`,
           {
             type: 'object',
             properties: {
@@ -2332,21 +2438,51 @@ export class Coordinator extends Context.Service<
         ),
         tool(
           'mark_ready',
-          'Marks a draft pull request that Althar opened ready for review, by its link or number. It can go back to a draft on the host, so you may do it unasked when its task is done. Not for one a person opened.',
-          { type: 'object', properties: { pull_request: { type: 'string' } }, required: ['pull_request'] },
-          (access, input) => markReady(access.projectId, input),
+          "Marks a draft pull request ready for review, by its link or number: any of the project's, whoever opened it. It can go back to a draft on the host, so you may do it unasked on Althar's own or the person's own, such as when its task is done. Anyone else's goes on the person's word: their message in this turn that asks it (message, from read_turn).",
+          {
+            type: 'object',
+            properties: {
+              pull_request: { type: 'string' },
+              message: {
+                type: 'string',
+                description: "The person's message in this turn that asks it, from read_turn: needed for someone else's.",
+              },
+            },
+            required: ['pull_request'],
+          },
+          (access, input) => markReady(access.projectId, input, wordOf(access)),
         ),
         tool(
           'close_pull_request',
-          "Closes, without merging, a pull request that Althar opened, by its link or number. reopen_pull_request undoes it, so you may close one that is plainly dead (superseded, abandoned) unasked and say so. On Bitbucket Cloud declining is final: there it waits for the person's word and is refused here. Not for one a person opened.",
-          { type: 'object', properties: { pull_request: { type: 'string' } }, required: ['pull_request'] },
-          (access, input) => closePullRequest(access.projectId, input),
+          "Closes, without merging, any of the project's pull requests, whoever opened it, by its link or number. reopen_pull_request undoes it, so you may close one of Althar's own or the person's own that is plainly dead (superseded, abandoned) unasked and say so. Anyone else's, and any on Bitbucket Cloud, where declining is final, goes on the person's word: their message in this turn that asks it (message, from read_turn). Asked to close several, call it once for each.",
+          {
+            type: 'object',
+            properties: {
+              pull_request: { type: 'string' },
+              message: {
+                type: 'string',
+                description: "The person's message in this turn that asks it, from read_turn: needed for someone else's.",
+              },
+            },
+            required: ['pull_request'],
+          },
+          (access, input) => closePullRequest(access.projectId, input, wordOf(access)),
         ),
         tool(
           'reopen_pull_request',
-          "Opens a closed pull request that Althar opened again, by its link or number: on GitHub, GitLab and Bitbucket Data Center. Bitbucket Cloud can't open a declined one: it says so in Bitbucket's words. A merged one can't be opened.",
-          { type: 'object', properties: { pull_request: { type: 'string' } }, required: ['pull_request'] },
-          (access, input) => reopenPullRequest(access.projectId, input),
+          "Opens a closed pull request again, by its link or number, whoever opened it: on GitHub, GitLab and Bitbucket Data Center. Unasked on Althar's own or the person's own; anyone else's on the person's word (message, from read_turn). Bitbucket Cloud can't open a declined one: it says so in Bitbucket's words. A merged one can't be opened.",
+          {
+            type: 'object',
+            properties: {
+              pull_request: { type: 'string' },
+              message: {
+                type: 'string',
+                description: "The person's message in this turn that asks it, from read_turn: needed for someone else's.",
+              },
+            },
+            required: ['pull_request'],
+          },
+          (access, input) => reopenPullRequest(access.projectId, input, wordOf(access)),
         ),
         tool(
           'update_branch',
@@ -2356,27 +2492,44 @@ export class Coordinator extends Context.Service<
         ),
         tool(
           'reply_on_pull_request',
-          "Replies on a pull request, by its link or number: in a line comment's thread (thread_id, as read_pull_request gives it) or in its conversation. Signed as from Althar, under the person's account. For a pull request Althar opened, or one by the person or by one of the repository's own people; a reply to an outside author notifies them for good, so it waits for the person's word and is refused here. A change to the code is a task, not a reply.",
+          "Replies on a pull request, by its link or number: in a line comment's thread (thread_id, as read_pull_request gives it) or in its conversation. Signed as from Althar, under the person's account. Any of the project's pull requests: unasked on one Althar opened, or one by the person or by one of the repository's own people; a reply to an outside author notifies them for good, so it goes on the person's word: their message in this turn that asks it (message, from read_turn). A change to the code is a task, not a reply.",
           {
             type: 'object',
-            properties: { pull_request: { type: 'string' }, body: { type: 'string' }, thread_id: { type: 'string' } },
+            properties: {
+              pull_request: { type: 'string' },
+              body: { type: 'string' },
+              thread_id: { type: 'string' },
+              message: {
+                type: 'string',
+                description: "The person's message in this turn that asks it, from read_turn: needed for someone else's.",
+              },
+            },
             required: ['pull_request', 'body'],
           },
           (access, input) =>
             Effect.gen(function* () {
               const running = yield* sessions.running(access.threadId)
-              return yield* replyOnPullRequest(access.projectId, input, Option.isNone(running) ? null : nameOf(running.value.agentId))
+              return yield* replyOnPullRequest(
+                access.projectId,
+                input,
+                Option.isNone(running) ? null : nameOf(running.value.agentId),
+                wordOf(access),
+              )
             }),
         ),
         tool(
           'edit_pull_request',
-          `Gives a pull request another title, description, or both, by its link or number, on its host. On one a task follows (it opened it, or follows it), title is the words alone, at most ${TITLE_LENGTH} characters: the project's naming puts the issue's key and the like around them, and the task's card takes the same words. description replaces what it says of the change; on one Althar opened, the review, the issue's link and Althar's line stay where they are. For a pull request Althar opened, or one by the person or by one of the repository's own people; an outside author's waits for the person's word and is refused here. It can be set back in a step, so do it unasked when a title or description no longer says what the change does, such as when the person asks a task's pull request to be retitled, and say what you changed in a line. Where the host refuses, as on a repository the account can't change, you get its words: pass them on.`,
+          `Gives a pull request another title, description, or both, by its link or number, on its host. On one a task follows (it opened it, or follows it), title is the words alone, at most ${TITLE_LENGTH} characters: the project's naming puts the issue's key and the like around them, and the task's card takes the same words. description replaces what it says of the change; on one Althar opened, the review, the issue's link and Althar's line stay where they are. Any of the project's pull requests: unasked on one Althar opened, or one by the person or by one of the repository's own people; an outside author's on the person's word: their message in this turn that asks it (message, from read_turn). It can be set back in a step, so do it unasked when a title or description no longer says what the change does, such as when the person asks a task's pull request to be retitled, and say what you changed in a line. Where the host refuses, as on a repository the account can't change, you get its words: pass them on.`,
           {
             type: 'object',
             properties: {
               pull_request: { type: 'string', description: 'Its link, or its number: #123.' },
               title: { type: 'string' },
               description: { type: 'string' },
+              message: {
+                type: 'string',
+                description: "The person's message in this turn that asks it, from read_turn: needed for someone else's.",
+              },
             },
             required: ['pull_request'],
           },
@@ -2386,18 +2539,22 @@ export class Coordinator extends Context.Service<
               input,
               (taskId, edit) => changes.edit(taskId, edit, instance.coordinatorId),
               agents.list.map((entry) => entry.definition.name),
+              wordOf(access),
             ),
         ),
         ...releaseTools(provide, tool),
         draftIssueTool,
         tool(
           'list_presets',
-          'The person’s presets (a named set of a task’s starting parts: where it works, Checked by and when, its ending, where it sits, its lead and reviewer, and a few lines of brief), the built-in ones first, then theirs, those kept to this project with them, each with what it holds. Plan from the one that fits what the person asked with propose_plan’s preset; its card names it, and they can pick another there.',
+          'The person’s presets (a named set of a task’s starting parts: where it works, Checked by and when, its ending, where it sits, its lead and reviewer, and a few lines of brief), the built-in ones first, then theirs, those kept to this project with them, each with what it holds. Plan from the one that fits what the person asked with propose_plan’s preset; its card names it, and they can pick another there. Prototype is for a prototype or design directions, Small change for a few lines, Chat for a question or a look, Review a PR for a review, and Change for the rest.',
           nothing,
           (access) =>
-            Effect.map(presetsIn(access.projectId), (all) =>
-              all.map((one) => `- ${one.name}${one.builtin ? '' : ' (theirs)'}: ${describePreset(one.parts)}.`).join('\n'),
-            ),
+            Effect.gen(function* () {
+              const all = yield* presetsIn(access.projectId)
+              // Its lead as list_models names it, not by the id a preset was written with.
+              const models = presetModels(yield* usableModels(access.projectId).pipe(Effect.orElseSucceed(() => [])))
+              return all.map((one) => `- ${one.name}${one.builtin ? '' : ' (theirs)'}: ${describePreset(one.parts, models)}.`).join('\n')
+            }),
         ),
         tool(
           'list_models',
@@ -2407,7 +2564,7 @@ export class Coordinator extends Context.Service<
         ),
         tool(
           'propose_plan',
-          "Proposes a drafted task's plan: the model that implements it (its lead), with why in a sentence; and the model that reviews it, which only reads, or null for something trivial. A change of a few lines is planned small: pass small_change, keep the review (it runs after the merge), and put its lead on a light, quick model (Sonnet, at low effort where that is the lowest it lists). It then has one step and no countdown: it starts at once in a place kept for small tasks, however many long ones are at work, and its card in the thread says what it skipped. Without small_change it starts on its own after 25 seconds unless the person holds or changes it. Name each model as list_models writes it, and, where it matters, one of the efforts it lists for that model. Proposing again for a task the person holds replaces the plan but keeps it held: it starts only when the person starts it. A task's lead plans only the tasks it drafted.",
+          `Proposes a drafted task's plan: the model that implements it (its lead), with why in a sentence; and the model that reviews it, which only reads, or null for something trivial. A change of a few lines is planned small: pass small_change, keep the review (it runs after the merge, as the project's afterMergeReview rule says: only major findings come back, any, or none at all), and put its lead on a light, quick model (Sonnet, at low effort where that is the lowest it lists). It then has one step and no countdown: it starts at once in a place kept for small tasks, however many long ones are at work, and its card in the thread says what it skipped. Without small_change it starts on its own after 25 seconds unless the person holds or changes it. Name each model as list_models writes it, and, where it matters, one of the efforts it lists for that model. Proposing again for a task the person holds replaces the plan but keeps it held: it starts only when the person starts it. A task's lead plans only the tasks it drafted. ${PICK_A_PRESET}`,
           {
             type: 'object',
             properties: {
@@ -2420,7 +2577,7 @@ export class Coordinator extends Context.Service<
               small_change: {
                 type: 'boolean',
                 description:
-                  'For a change of a few lines, such as a one-line fix: one step, no countdown, and a review after it merges instead of before. Its review names who reads it once it merged. Say what it skips in a sentence.',
+                  "For a change of a few lines, such as a one-line fix: one step, no countdown, and a review after it merges instead of before, where the project's rule has one. Its review names who reads it once it merged. Say what it skips in a sentence.",
               },
               review: {
                 type: ['object', 'null'],
@@ -2448,7 +2605,7 @@ export class Coordinator extends Context.Service<
               preset: {
                 type: 'string',
                 description:
-                  'The preset its parts are, by name as list_presets writes it, where one fits what the person asked: its parts replace the plan’s (its lead and reviewer where it names them, Checked by, its ending, where it works and sits, and its brief). Left out, the plan is as you propose it.',
+                  'The preset its parts are, by name as list_presets writes it: the one that fits what the person asked (Prototype, Small change, Chat, Review a PR, Change, or one of the person’s own). Its parts replace the plan’s (its lead and reviewer where it names them, Checked by, its ending, where it works and sits, and its brief). Left out only where none fits: the plan is then as you propose it.',
               },
             },
             required: ['task', 'lead'],
@@ -2495,7 +2652,7 @@ export class Coordinator extends Context.Service<
         ),
         tool(
           'review_pull_request',
-          "Plans a review of a pull request, when the person asks for one or pastes a pull request's link and asks: by its link, or its number in the project's repository (#123). Its lead, the model you pick as list_models writes it (a strong one), with why in a sentence, reads a read-only copy of the pull request's code, runs nothing of it, and drafts a review the person posts from its card. Only a model whose agent can be held to reading only leads one: not Codex. Nothing reaches the code host until they post it. It starts on its own after 25 seconds unless the person holds or changes it. Don't review it yourself. Asked to review someone's pull requests without numbers, find them with find_pull_requests first, then plan one review each. One a task's lead plans is started by its task, and counts among those it may start.",
+          "Plans a review of a pull request, when the person asks for one or pastes a pull request's link and asks: by its link, or its number in the project's repository (#123). Its lead, any model you pick as list_models writes it (a strong one), with why in a sentence, reads a read-only copy of the pull request's code and drafts a review the person posts from its card. Nothing reaches the code host until they post it. It starts on its own after 25 seconds unless the person holds or changes it. Don't review it yourself. Asked to review someone's pull requests without numbers, find them with find_pull_requests first, then plan one review each. One a task's lead plans is started by its task, and counts among those it may start.",
           {
             type: 'object',
             properties: {
@@ -2629,7 +2786,7 @@ export class Coordinator extends Context.Service<
         ),
         tool(
           'change_lead',
-          "Changes who leads or reviews a task, as its Change the team dialog does, at any time before it merges. The lead changes from its next turn, never in the one it is in: another model, effort or agent takes over as the task's model picker and Hand over do, briefed with the thread so far, and message, where you give one, is said to it first. The reviewer changes until its review round starts, and from the next round during one; null for review removes it, and it can't change once the review is done. Name models as list_models writes them. The lead's own step, held for an agent's usage limit, goes to the lead named at once, as the held card's Hand over does. It acts at once, with a line in your thread and the task's.",
+          "Changes who leads or reviews a task, as its Change the team dialog does, at any time before it merges. The lead changes from its next turn, never in the one it is in: another model, effort or agent takes over as the task's model picker and Hand over do, briefed with the thread so far, and message, where you give one, is said to it first. The reviewer changes until its review round starts, and from the next round during one; null for review removes it, and it can't change once a review of it ran to its end. A review that was skipped, or never planned, isn't a done one: until the task merges it can be added back here, and where the work is pushed already that starts a review round on its head, reading what changed since the last review, or all of it where none ran; its findings go to the lead to settle. Name models as list_models writes them. The lead's own step, held for an agent's usage limit, goes to the lead named at once, as the held card's Hand over does. It acts at once, with a line in your thread and the task's.",
           {
             type: 'object',
             properties: {
@@ -2654,6 +2811,23 @@ export class Coordinator extends Context.Service<
             required: ['task'],
           },
           changeLead,
+        ),
+        tool(
+          'offer_review',
+          "Offers a task a review, as a line of your thread the person answers with Add or No thanks: where what they said makes work with no review a real change, such as asking a prototype's lead to harden it, or a chat's to open a pull request for it. It adds nothing by itself. Added, the reviewer goes on as change_lead would put it, and where the work is pushed a review round starts on its head. Its reviewer is the one the project's rules pick, another maker's than the lead's, unless you name one. A lead leaves task out for its own. Offer it once: turned down, it isn't offered again; where they plainly asked for a review, add it with change_lead instead.",
+          {
+            type: 'object',
+            properties: {
+              task: { type: 'string', description: "The task's slug; a lead leaves it out for its own." },
+              review: {
+                type: 'object',
+                description: "Its reviewer's model, where you pick one. Left out, the project's rules pick it.",
+                properties: { model: { type: 'string', description: 'As list_models writes it.' }, effort },
+                required: ['model'],
+              },
+            },
+          },
+          offerReview,
         ),
         tool(
           'try_again',

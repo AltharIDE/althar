@@ -172,3 +172,12 @@
     grid-row: 1 / span 2;
   }
 }
+/* when its sign-in ends, before its one word: given only within its last days, in the signal's colour */
+.endsWith {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 12px;
+}
+.ends {
+  color: var(--signal);
+}

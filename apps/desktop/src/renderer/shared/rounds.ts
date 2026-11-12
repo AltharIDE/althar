@@ -107,17 +107,13 @@ export type RoundBlock =
       readonly id: string
       readonly text: string
       readonly tone: 'info' | 'warning'
-      /** A task the line is about, which it links to: one this task's lead started (ADR-097). */
+      /** A task the line is about, which it links to: one this task's lead started (ADR-097), in one line. */
       readonly task?: { readonly threadId: string; readonly title: string }
-      /** What the line is about another task, drawn as its own words: one that ended without reaching this, or one changing the same files. */
-      readonly situation?: NoticeContent['situation']
     }
   /** Its folder went, or came back: a line across the thread, a change of scene (ADR-056). */
   | { readonly kind: 'folder'; readonly id: string; readonly text: string }
   /** A step of the work: a change started, a stamped row of its own (a task is a conversation plus parts). */
   | { readonly kind: 'work_step'; readonly id: string; readonly step: NonNullable<NoticeContent['step']> }
-  /** What a lead's agent could see of the person's skills and the repository's. */
-  | { readonly kind: 'skills'; readonly id: string; readonly title: string; readonly skills: NonNullable<NoticeContent['skills']> }
   /**
    * A reviewer's verdict and findings, in its own voice, on the model its review ran; with the lead's round settling them,
    * where a later round of the lead's handed the work over since.
@@ -290,7 +286,6 @@ export const roundsOf = (
   // The round its lead's turn runs in now, by its id: it stays open for what follows the turn, as the report it hands in
   // before its answer.
   let liveId: string | null = null
-  let lastSkillsSaid = ''
   // What Althar did between rounds goes in the next one's work.
   let pending: Array<WorkStep> = []
   const close = () => {
@@ -300,6 +295,11 @@ export const roundsOf = (
   blocks.forEach((block, index) => {
     switch (block.kind) {
       case 'turn': {
+        // A turn that said and did nothing a person could see (an empty message, a blank thought) opens no round and draws no
+        // fold: the reply that follows, as a turn of its own, is the round, on its own model and from its own time. The turn
+        // at work now stays, as it may be about to say something.
+        const parts = block.parts.filter((part) => !isEmpty(part))
+        if (parts.length === 0 && !(running && index === lastTurn)) return
         if (open === null || open.agentId !== block.agentId) {
           close()
           open = {
@@ -313,7 +313,7 @@ export const roundsOf = (
           }
           pending = []
         }
-        open.steps.push(...block.parts)
+        open.steps.push(...parts)
         if (running && index === lastTurn) liveId = open.id
         return
       }
@@ -370,15 +370,6 @@ export const roundsOf = (
       }
       case 'divider': {
         const content = noticeOf(block)
-        // Before the round it may arrive during, which it doesn't end: a session says what it could see once it has started.
-        if (content.role === 'skills') {
-          // Older threads kept a line for every session: one that says what the line before did is not said again.
-          const said = `${content.title}\n${(content.skills ?? []).map((skill) => skill.name).join('\n')}`
-          if (said === lastSkillsSaid) return
-          lastSkillsSaid = said
-          out.push({ kind: 'skills', id: block.id, title: content.title, skills: content.skills ?? [] })
-          return
-        }
         // A step of the work is a row of its own, between rounds.
         if (content.step !== undefined) {
           close()
@@ -410,7 +401,6 @@ export const roundsOf = (
           text: shorter(block.text),
           tone: content.severity === 'info' ? 'info' : 'warning',
           ...(content.task === undefined ? {} : { task: { threadId: content.task.threadId, title: content.task.title } }),
-          ...(content.situation === undefined ? {} : { situation: content.situation }),
         })
         return
       }
@@ -436,6 +426,11 @@ export const roundsOf = (
   return withSettled(out)
 }
 
+/** A message or a thought with nothing in it: no words, no pictures, no files. */
+const isEmpty = (part: Part): boolean =>
+  (part.kind === 'message' && part.text.trim() === '' && part.pictures.length === 0 && part.files.length === 0) ||
+  (part.kind === 'thought' && part.text.trim() === '')
+
 /** Whether a block is a round its lead reported in, on its work or on settling a review: a handoff. */
 const handsOver = (block: RoundBlock | undefined): block is Round =>
   block?.kind === 'round' && (block.report?.result.step === 'implement' || block.report?.result.step === 'settle')
@@ -443,7 +438,6 @@ const handsOver = (block: RoundBlock | undefined): block is Round =>
 /**
  * Each review with the round its lead settled it in, right after it, where a
  * later round handed the work over again: the latest handoff stands open.
- * What a session that started between them could see stays on its line, after the review's.
  */
 const withSettled = (blocks: ReadonlyArray<RoundBlock>): ReadonlyArray<RoundBlock> => {
   const latest = blocks.findLastIndex(handsOver)
@@ -451,11 +445,10 @@ const withSettled = (blocks: ReadonlyArray<RoundBlock>): ReadonlyArray<RoundBloc
   for (let at = 0; at < blocks.length; at++) {
     const block = blocks[at]
     if (block === undefined) continue
-    let ahead = at + 1
-    while (blocks[ahead]?.kind === 'skills') ahead += 1
+    const ahead = at + 1
     const next = blocks[ahead]
     if (block.kind === 'verdict' && handsOver(next) && next.report?.result.step === 'settle' && !next.live && ahead < latest) {
-      out.push({ ...block, settle: next }, ...blocks.slice(at + 1, ahead))
+      out.push({ ...block, settle: next })
       at = ahead
     } else out.push(block)
   }

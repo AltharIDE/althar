@@ -6,11 +6,20 @@ import { SqlClient } from 'effect/sql'
 import { postCard, touchCard } from './cards'
 import { ChangeRefused, NotFound } from './errors'
 import { backoff, keptGoing } from './Failures'
-import { RuntimeConfig } from './Config'
+import { Accounts } from './Accounts'
+import { Agents, RuntimeConfig } from './Config'
+import { Installs } from './Installs'
+import { Limits } from './Limits'
+import { ModelFacts } from './ModelFacts'
+import { Models } from './Models'
+import { PlanUsage } from './PlanUsage'
+import { presetModels } from './presetModels'
+import { SignIns } from './SignIns'
+import { usableModels } from './usableModels'
 import { countdownNow } from './plansAndReviews'
 import { Reviews } from './Reviews'
 import { Instance } from './Instance'
-import { offerPreset, planFromPreset, presetsIn } from './presets'
+import { offerPreset, planFromPreset, presetsIn, reviewerOfPreset } from './presets'
 import { shelve } from './scratch'
 import { change, fact, timestamp } from './records'
 import { setToward } from './towards'
@@ -29,7 +38,23 @@ import { type PlanStep, Runs, type TaskEnd } from './Runs'
  * its lead is only ever one its session holds to reading.
  */
 
-type Store = SqlClient.SqlClient | Instance | Runs | Reviews | Ledger | Crypto.Crypto | RuntimeConfig
+type Store =
+  | SqlClient.SqlClient
+  | Instance
+  | Runs
+  | Reviews
+  | Ledger
+  | Crypto.Crypto
+  | RuntimeConfig
+  // The models in use now, for the lead and the reviewer a preset names or lacks (presetModels.ts).
+  | Agents
+  | Models
+  | ModelFacts
+  | SignIns
+  | Installs
+  | Limits
+  | Accounts
+  | PlanUsage
 
 export class Plans extends Context.Service<
   Plans,
@@ -50,6 +75,8 @@ export class Plans extends Context.Service<
       readonly here?: boolean
       /** A review of someone else's pull request, its one step its lead (`PlanParameters.reads`). */
       readonly reads?: boolean
+      /** No card in the coordinator's conversation: an aside's, which has a tab of its own there instead. */
+      readonly card?: false
       /** The fast lane: reviewed after it merges, not before (`PlanParameters.reviewAfterMerge`). */
       readonly reviewAfterMerge?: boolean
       /** Where it works (ADR-091), and why, where that isn't the project's default (`PlanParameters.worksIn`). */
@@ -65,8 +92,11 @@ export class Plans extends Context.Service<
      * made, as when Althar stopped in between, runs now.
      */
     start(planId: string, actorId: ActorId): Effect.Effect<'running' | 'waiting' | null, unknown>
-    /** Holds a proposed plan until someone starts it. */
-    hold(planId: string, actorId: ActorId): Effect.Effect<void, unknown>
+    /**
+     * Holds a plan until someone starts it: one counting down, or one started whose first step still waits for a place or its
+     * checkout, which leaves the line. Whether it was held; a plan under way isn't.
+     */
+    hold(planId: string, actorId: ActorId): Effect.Effect<boolean, unknown>
     /**
      * Changes a proposed plan's steps (who does them, or which are skipped),
      * and what happens when the work is done; or a started one's, while its
@@ -220,7 +250,7 @@ export class Plans extends Context.Service<
                 })
               }),
             )
-            yield* postCard(input.projectId, input.taskId)
+            if (input.card !== false) yield* postCard(input.projectId, input.taskId)
             yield* Queue.offer(wake, undefined)
             return planId
           }),
@@ -254,6 +284,37 @@ export class Plans extends Context.Service<
           if (accepted) return yield* runs.run(planId)
           // Accepted, but Althar stopped before its run was made: it runs now, once.
           return !due && plan.state === 'accepted' ? yield* runs.run(planId) : null
+        })
+
+      /**
+       * Holds a plan that hasn't begun: one counting down stops counting. One started, its first step waiting for a place among
+       * the agents at work here or for its checkout, goes back to a plan the person starts: its waiting step
+       * leaves the line, and a start makes its run anew. Whether it was held.
+       */
+      const hold = (planId: string, actorId: ActorId) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          if (yield* transition(planId, counting, () => ({ startsAt: null }), 'task_plan.held', actorId)) return true
+          const taken = yield* sql.withTransaction(
+            Effect.gen(function* () {
+              const plan = yield* load(planId)
+              if (plan.state !== 'accepted' || !(yield* runs.unstart(plan.taskId, actorId))) return undefined
+              const revision = yield* change('task_plans', planId, { state: 'proposed', startsAt: null, decidedAt: null })
+              yield* fact({
+                projectId: plan.projectId,
+                aggregateType: 'task_plan',
+                aggregateId: planId,
+                revision,
+                type: 'task_plan.held',
+                actorId,
+              })
+              return plan
+            }),
+          )
+          if (taken === undefined) return false
+          yield* touchCard(taken.taskId)
+          yield* Queue.offer(wake, undefined)
+          return true
         })
 
       /** Plans that couldn't start when their time came, each waiting a while before it is tried again. */
@@ -296,8 +357,7 @@ export class Plans extends Context.Service<
       return Plans.of({
         propose,
         start: (planId, actorId) => provide(start(planId, actorId)),
-        hold: (planId, actorId) =>
-          provide(Effect.asVoid(transition(planId, counting, () => ({ startsAt: null }), 'task_plan.held', actorId))),
+        hold: (planId, actorId) => provide(hold(planId, actorId)),
         change: (planId, steps, actorId, end, worksIn, toward) =>
           provide(
             Effect.gen(function* () {
@@ -318,7 +378,7 @@ export class Plans extends Context.Service<
                   ...(before.reviewAfterMerge === true ? { reviewAfterMerge: true } : {}),
                 })
               }
-              // A review's lead only reads: an agent that can't be held to that can't take it, whoever picks it.
+              // Any agent Althar has may lead a review.
               if (parametersOf(yield* load(planId)).reads === true)
                 for (const step of steps) if (!step.skipped) yield* reviews.canLead(step.agentId)
               return yield* reshape(planId, changed, actorId, toward, worksIn !== undefined)
@@ -338,9 +398,22 @@ export class Plans extends Context.Service<
                 return yield* new ChangeRefused({
                   message: before.reads === true ? 'A review stays a review.' : 'Review a PR starts from a pull request.',
                 })
-              const steps = planFromPreset(before, preset.parts).steps
+              // The models as the agents list them, for a lead and a reviewer the preset names, and a reviewer it lacks.
+              const models = presetModels(yield* usableModels(plan.projectId).pipe(Effect.orElseSucceed(() => [])))
+              // Its review is what the preset promises: with no model but the lead's own to give it, nothing changes.
+              if (preset.parts.checked !== 'none' && reviewerOfPreset(before, preset.parts, models) === null)
+                return yield* new ChangeRefused({
+                  message: `${preset.name} is reviewed, and no model apart from its lead's can be used to review it right now.`,
+                })
+              const steps = planFromPreset(before, preset.parts, models).steps
               if (before.reads === true) for (const step of steps) if (!step.skipped) yield* reviews.canLead(step.agentId)
-              yield* reshape(planId, (now) => JSON.stringify(planFromPreset(parametersOf(now), preset.parts)), actorId, undefined, true)
+              yield* reshape(
+                planId,
+                (now) => JSON.stringify(planFromPreset(parametersOf(now), preset.parts, models)),
+                actorId,
+                undefined,
+                true,
+              )
               // Where it sits, and a few lines for its lead, as the preset has them.
               yield* shelve(plan.taskId, preset.parts.shelf === 'scratch' ? 'scratch' : null, actorId)
               const brief = preset.parts.brief.trim()

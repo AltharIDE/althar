@@ -1,14 +1,4 @@
-import type {
-  PresetParts,
-  AllowedBy,
-  AttachedFile,
-  FileMention,
-  Picture,
-  ShownPicture,
-  ThreadItem,
-  TurnTime,
-  Unfurl,
-} from '@althar/contracts'
+import type { AllowedBy, AttachedFile, FileMention, Picture, ShownPicture, ThreadItem, TurnTime, Unfurl } from '@althar/contracts'
 import { Delivery, headingOf, oneLine, PlanState, ToolKind, ToolState } from '@althar/ui'
 
 import { type Handed, handedBy, type OutputSoFar, type PartHanded, type Ran, ranOf } from './handed'
@@ -105,8 +95,8 @@ export type Part =
       readonly id: string
       readonly text: string
       readonly tone: 'info' | 'warning' | 'error'
-      /** Parts the person set up twice, which the coordinator offers to keep as a preset (a task is a conversation plus parts). */
-      readonly offer?: { readonly name: string; readonly parts: PresetParts }
+      /** What the line offers: parts set up twice, kept as a preset, or a review a lead or the coordinator offered a task. */
+      readonly offer?: Offer
       /** For an agent's turn that failed: why, as the runtime classes it (`auth_required`…), and the agent's own words, apart. */
       readonly failure?: string
       readonly detail?: string
@@ -116,6 +106,8 @@ export type Part =
   /** A version of one of the project's canvases the agent published or opened (ADR-104): open under its work, a line that opens it. */
   | { readonly kind: 'canvas'; readonly id: string; readonly canvas: CanvasContent }
 
+/** What a notice offers: parts set up twice, as a preset; or a review a lead or the coordinator offered a task (`offer_review`). */
+export type Offer = NonNullable<Extract<ThreadItem, { kind: 'notice' }>['content']['offer']>
 export type StepResult = Extract<ThreadItem, { kind: 'step_result' }>['content']
 export type TaskCardContent = Extract<ThreadItem, { kind: 'task' }>['content']
 export type ArrivalContent = Extract<ThreadItem, { kind: 'arrival' }>['content']
@@ -132,6 +124,7 @@ export type TaskAskContent = Extract<ThreadItem, { kind: 'task_ask' }>['content'
 export type SettingChangeContent = Extract<ThreadItem, { kind: 'setting' }>['content']
 export type SmallChangeContent = Extract<ThreadItem, { kind: 'small_change' }>['content']
 export type ModelMoveContent = Extract<ThreadItem, { kind: 'model_move' }>['content']
+export type MergeLineContent = Extract<ThreadItem, { kind: 'merge_line' }>['content']
 
 export type Block =
   | {
@@ -180,7 +173,7 @@ export type Block =
       readonly id: string
       readonly text: string
       readonly detail: string | null
-      readonly offer: { readonly name: string; readonly parts: PresetParts }
+      readonly offer: Offer
     }
   | {
       readonly kind: 'step'
@@ -192,7 +185,7 @@ export type Block =
     }
   | { readonly kind: 'card'; readonly id: string; readonly card: TaskCardContent }
   /** Something heard from outside: a comment on the task's pull request, its checks, its merge. */
-  | { readonly kind: 'arrival'; readonly id: string; readonly at: string; readonly arrival: ArrivalContent }
+  | { readonly kind: 'arrival'; readonly id: string; readonly at: string; readonly arrival: ArrivalContent; readonly count: number }
   /** A question an agent asked the person, standing on its own, as the turn waited on it: answered where it is. */
   | { readonly kind: 'question'; readonly id: string; readonly at: string; readonly question: QuestionContent }
   /** A run of the project Althar started, where it was asked for (ADR-023). */
@@ -217,6 +210,8 @@ export type Block =
   | { readonly kind: 'small_change'; readonly id: string; readonly card: SmallChangeContent }
   /** Auto's line on moving the lead to a lighter model, with the way back (README section 7). */
   | { readonly kind: 'model_move'; readonly id: string; readonly move: ModelMoveContent }
+  /** The merge line for a branch: one card, kept current in place. */
+  | { readonly kind: 'merge_line'; readonly id: string; readonly line: MergeLineContent }
   /**
    * The agent's turn runs on what it was last asked, and it hasn't said
    * anything yet: where its reply will start, held for it, with how long it
@@ -507,7 +502,7 @@ const partOf = (
           id: item.id,
           text: title,
           tone: severity,
-          offer: { name: item.content.offer.name, parts: item.content.offer.parts },
+          offer: item.content.offer,
           ...(description === null ? {} : { detail: description }),
         }
       return { kind: 'notice', id: item.id, text: noticeText(item.content), tone: severity }
@@ -639,6 +634,30 @@ const ANSWER_BLOCK = /^ {0,3}(?:[-*+] |\d{1,3}[.)] |#{1,6} |```|~~~|\|)/m
 export const answers = (message: { readonly text: string; readonly answer?: boolean }): boolean =>
   message.answer ?? (message.text.trim().length > NOTE_LENGTH || ANSWER_BLOCK.test(message.text))
 
+/** Whether news is only that: it says the same again, with no words of someone's to lose. */
+const FOLDS = new Set(['checks', 'merged', 'closed', 'ready'])
+
+/**
+ * Where the news repeats the line just before it (same kind, outcome, pull
+ * request by its address and sender, and the same failures, nothing between), one line with the latest time and a
+ * count. The records keep both.
+ */
+export const foldArrival = (last: Block | undefined, next: Extract<Block, { kind: 'arrival' }>): Block => {
+  if (last?.kind !== 'arrival') return next
+  const a = last.arrival
+  const b = next.arrival
+  const same =
+    FOLDS.has(b.kind) &&
+    a.kind === b.kind &&
+    a.where === b.where &&
+    a.url === b.url &&
+    a.from === b.from &&
+    ((a.failed ?? 0) === 0) === ((b.failed ?? 0) === 0) &&
+    // A failure is read by its details, so only runs that show the same ones fold.
+    JSON.stringify([a.failing, a.logs]) === JSON.stringify([b.failing, b.logs])
+  return same ? { ...next, id: last.id, count: last.count + 1 } : next
+}
+
 export const text = { thinking: 'Thinking' }
 
 /** The blocks of a thread, oldest first, with what is still being written but not yet read at the end. */
@@ -726,7 +745,15 @@ export const blocksOf = (
         continue
       }
       case 'arrival':
-        blocks.push({ kind: 'arrival', id: item.id, at: ago(item.createdAt), arrival: item.content })
+        const folded = foldArrival(blocks.at(-1), {
+          kind: 'arrival',
+          id: item.id,
+          at: ago(item.createdAt),
+          arrival: item.content,
+          count: 1,
+        })
+        if (folded.kind === 'arrival' && folded.count > 1) blocks[blocks.length - 1] = folded
+        else blocks.push(folded)
         continue
       case 'step_result': {
         // The step ended with this: the turn that did the work ran until now.
@@ -775,6 +802,9 @@ export const blocksOf = (
       case 'model_move':
         blocks.push({ kind: 'model_move', id: item.id, move: item.content })
         continue
+      case 'merge_line':
+        blocks.push({ kind: 'merge_line', id: item.id, line: item.content })
+        continue
       case 'notice':
         // A restart is Althar's business, not the person's; earlier versions said so in the thread.
         if (item.content.source === 'runtime' && item.content.title === RESTARTED) continue
@@ -785,7 +815,7 @@ export const blocksOf = (
             id: item.id,
             text: item.content.title,
             detail: item.content.description,
-            offer: { name: item.content.offer.name, parts: item.content.offer.parts },
+            offer: item.content.offer,
           })
           continue
         }

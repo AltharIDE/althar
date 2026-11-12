@@ -7,7 +7,7 @@ import { Popover } from '../../primitives/Popover/Popover'
 import s from './ScratchShelf.module.css'
 
 /*
- * Scratch (a task is a conversation plus parts, "Chats and Scratch"): the
+ * Scratch (a task is a conversation plus parts, "Asides"): the
  * chats the coordinator started, off the board's lanes, behind one chip at
  * the head of Up next. Opened in place, never a sidebar, it lists them by
  * their latest exchange, the latest first: each by its title, what was said

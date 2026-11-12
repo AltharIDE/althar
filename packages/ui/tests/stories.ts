@@ -40,6 +40,7 @@ const BROWSER_ONLY = new Set<string>([
   'board/NextLine/NextLine.stories.tsx#Dragging',
   'board/NextLine/NextLine.stories.tsx#DifferentHeights',
   'board/NextLine/NextLine.stories.tsx#Scrolling',
+  'board/NextLine/NextLine.stories.tsx#DraggedAcrossGroups',
 ])
 
 /**

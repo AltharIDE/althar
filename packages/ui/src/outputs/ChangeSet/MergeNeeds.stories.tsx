@@ -16,7 +16,9 @@ const CHECKS: ChangeCheck[] = [
   { id: 'test', name: 'test', state: CheckState.Failed, detail: '2 of 38 failed' },
   { id: 'build', name: 'build', state: CheckState.Running, detail: 'running · 4m' },
   { id: 'lint', name: 'lint', state: CheckState.Failed, detail: 'Prettier found 3 files' },
+  { id: 'ui', name: 'ui', state: CheckState.Skipped },
   { id: 'docs', name: 'docs', state: CheckState.Passed },
+  { id: 'site', name: 'site', state: CheckState.Skipped },
 ]
 const PASSED: ChangeCheck[] = [
   { id: 'test', name: 'test', state: CheckState.Passed, detail: '38 passed' },

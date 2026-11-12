@@ -85,9 +85,11 @@ export interface TaskLaunchText {
   worksIn: string
   local: string
   worktree: string
-  /** What each gives up, said under the choice; Local, while another task works there, what it waits for. */
-  localNote: (taken: string | null) => string
-  worktreeNote: string
+  /** What each gives up, in its option's tooltip, not as a line under the choice. */
+  localTip: string
+  worktreeTip: string
+  /** Under the choice, where it says something the switch doesn't: Local, while another task works there, what it waits for. */
+  localNote: (taken: string) => string
   /** Planned in a worktree while another task works Local: why, where the coordinator didn't say. */
   localTaken: (taken: string) => string
   /** The branch its work goes into (ADR-093): the picker's name, the word before it after how the work ends, and a line under its list. */
@@ -113,7 +115,7 @@ export const taskLaunchText: TaskLaunchText = {
   endLabel: 'When the work is done',
   ruleNote: (project, note) => `${project}’s rule. ${note}`,
   alsoWaits: (steps, until) => `${steps} waits until ${until}`,
-  held: 'Held. Starts when you say',
+  held: 'Held',
   startsIn: (n) => `Starts in ${n}s`,
   starting: 'Starting…',
   startsAfterSeen: (n) => `Starts ${n}s after you’ve seen it`,
@@ -124,8 +126,9 @@ export const taskLaunchText: TaskLaunchText = {
   worksIn: 'Works in',
   local: 'Local',
   worktree: 'Worktree',
-  localNote: (taken) => (taken === null ? 'One task at a time; your own edits share it.' : `Waits for ${taken}.`),
-  worktreeNote: 'Side by side with other tasks. Builds from cold.',
+  localTip: 'One task at a time; your own edits share it.',
+  worktreeTip: 'Side by side with other tasks. Builds from cold.',
+  localNote: (taken) => `Waits for ${taken}.`,
   localTaken: (taken) => `Local is taken by ${taken}.`,
   toward: 'Works toward',
   into: (end) => (end === TaskEnd.PushOnly ? 'toward' : 'into'),
@@ -147,11 +150,12 @@ function Why({ step, limited, t }: { step: LaunchStep; limited?: { name: string;
   return null
 }
 
-/** Under the choice of where it works: why, where the coordinator said or Local is taken, then what the choice gives up. */
+/** Under the choice of where it works, only what the switch doesn't say: why, where the coordinator said or Local is taken, and what Local waits for. Null for nothing. */
 const whereLine = (worksIn: WorksIn, why: string | undefined, taken: string | null, t: TaskLaunchText) => {
   const reason = why ?? (worksIn === WorksIn.Worktree && taken !== null ? t.localTaken(taken) : null)
-  const note = worksIn === WorksIn.Local ? t.localNote(taken) : t.worktreeNote
-  return reason === null ? note : `${reason.replace(/\.?$/, '.')} ${note}`
+  const waits = worksIn === WorksIn.Local && taken !== null ? t.localNote(taken) : null
+  const lines = [reason === null ? null : reason.replace(/\.?$/, '.'), waits].filter((line) => line !== null)
+  return lines.length === 0 ? null : lines.join(' ')
 }
 
 export interface TaskLaunchProps {
@@ -187,8 +191,8 @@ export interface TaskLaunchProps {
   held?: boolean
   /**
    * Started, it waits for a free agent (ADR-032): what it waits for, said
-   * where the clock was. Its steps can still be changed; there is nothing to
-   * start or hold.
+   * where the clock was. Its steps can still be changed, and it can be held,
+   * which takes it out of the line until it is started.
    */
   queued?: string
   defaultHeld?: boolean
@@ -329,16 +333,17 @@ export function TaskLaunch({
   )
   const set = (id: string, patch: Partial<LaunchStep>) => setSteps(steps.map((st) => (st.id === id ? { ...st, ...patch } : st)))
   const waiting = steps.filter((st) => st.waits && !st.skipped)
+  const where = worksIn === undefined ? null : whereLine(worksIn, worksInWhy, localTaken ?? null, t)
 
   return (
     <div className={cx(s.launch, held && s.held)} ref={ref} data-rhythm={Rhythm.Card}>
       <div className={s.head}>
-        <span className={s.kicker}>
-          {preset !== undefined &&
-            (presets === undefined || presets.length < 2 || onPresetChange === undefined ? (
-              `${preset} · `
-            ) : (
-              <>
+        {(preset !== undefined || from !== undefined) && (
+          <span className={s.kicker}>
+            {preset !== undefined &&
+              (presets === undefined || presets.length < 2 || onPresetChange === undefined ? (
+                preset
+              ) : (
                 <Menu
                   label={t.presets}
                   width={320}
@@ -357,18 +362,19 @@ export function TaskLaunch({
                     ))}
                   </MenuRadioGroup>
                 </Menu>
-                {' · '}
+              ))}
+            {from && (
+              <>
+                {preset !== undefined && ' · '}
+                {t.from} <IssueRef {...from} />
               </>
-            ))}
-          {t.task(task)}
-          {from && (
-            <>
-              {' '}
-              · {t.from} <IssueRef {...from} />
-            </>
-          )}
-        </span>
-        <p className={s.title}>{title}</p>
+            )}
+          </span>
+        )}
+        {/* its slug is for whoever looks for it, not a line of its own */}
+        <p className={s.title} title={t.task(task)}>
+          {title}
+        </p>
         {worksIn !== undefined && (
           <div className={s.where}>
             <Segmented<WorksIn>
@@ -376,13 +382,13 @@ export function TaskLaunch({
               value={worksIn}
               onChange={(next) => onWorksInChange?.(next)}
               options={[
-                { value: WorksIn.Local, label: t.local },
-                { value: WorksIn.Worktree, label: t.worktree },
+                { value: WorksIn.Local, label: t.local, tooltip: { label: t.localTip } },
+                { value: WorksIn.Worktree, label: t.worktree, tooltip: { label: t.worktreeTip } },
               ]}
             />
           </div>
         )}
-        {worksIn !== undefined && <p className={s.whereLine}>{whereLine(worksIn, worksInWhy, localTaken ?? null, t)}</p>}
+        {where !== null && <p className={s.whereLine}>{where}</p>}
       </div>
       <ol className={s.steps}>
         {steps.map((st, i) => (
@@ -444,12 +450,15 @@ export function TaskLaunch({
           </li>
         )}
       </ol>
-      {queued !== undefined ? (
+      {queued !== undefined && !held ? (
         <div className={s.foot}>
           <span className={s.estimate}>{estimate}</span>
           <span className={s.when} role="status">
             {queued}
           </span>
+          <Button variant="quiet" onClick={() => setHeld(true)}>
+            {t.hold}
+          </Button>
         </div>
       ) : (
         <div className={s.foot}>

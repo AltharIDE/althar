@@ -6,6 +6,7 @@ import { Accounts } from './Accounts'
 import { Agents, RuntimeConfig } from './Config'
 import type { NotFound, UnknownAgent } from './errors'
 import { SignIns } from './SignIns'
+import { PlanUsage } from './PlanUsage'
 
 /*
  * Signing an agent's account in inside Althar (ADR-012), rather than in a
@@ -58,12 +59,13 @@ export class AccountSignIns extends Context.Service<
     cancel(flowId: string): Effect.Effect<void>
   }
 >()('@althar/runtime/AccountSignIns') {
-  static readonly layer: Layer.Layer<AccountSignIns, never, Agents | Accounts | SignIns | RuntimeConfig> = Layer.effect(
+  static readonly layer: Layer.Layer<AccountSignIns, never, Agents | Accounts | SignIns | PlanUsage | RuntimeConfig> = Layer.effect(
     AccountSignIns,
     Effect.gen(function* () {
       const agents = yield* Agents
       const accounts = yield* Accounts
       const signIns = yield* SignIns
+      const planUsage = yield* PlanUsage
       const config = yield* RuntimeConfig
       const flows = new Map<string, Flow>()
       let made = 0
@@ -118,11 +120,15 @@ export class AccountSignIns extends Context.Service<
                     flow.state = { state: 'failed', message: event.message }
                     return
                   case 'done':
-                    // Signed in: checked again, so every screen shows it, before the window hears it.
+                    // Signed in: checked again, so every screen shows it, before the window hears it; plan usage told again
+                    // with it, so a warning that the old sign-in was ending goes from the bar at once (DEV-196).
                     Effect.runFork(
                       signIns
                         .account(account, true)
-                        .pipe(Effect.ensuring(Effect.sync(() => (flow.state = { state: 'done', who: event.who, plan: event.plan })))),
+                        .pipe(
+                          Effect.andThen(planUsage.retell),
+                          Effect.ensuring(Effect.sync(() => (flow.state = { state: 'done', who: event.who, plan: event.plan }))),
+                        ),
                     )
                     return
                 }

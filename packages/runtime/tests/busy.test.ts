@@ -532,11 +532,11 @@ describe('Agents at once', () => {
       yield* tell(first.threadId, 'The checks failed.')
       yield* queuedOn(projectId, first.taskId)
       assert.deepStrictEqual(countsOf((yield* cardOf(projectId, first.taskId))?.queued), { busy: 1, atOnce: 1 })
-      // Its lead has worked on it: it continues up next, first, ahead of any line, and the person can't move it (ADR-065).
+      // Its lead has worked on it: it continues up next, first, ahead of any line (ADR-065), and the person can move it there.
       assert.isUndefined((yield* cardOf(projectId, first.taskId))?.inLine)
       assert.isTrue((yield* cardOf(projectId, first.taskId))?.continues)
       assert.strictEqual((yield* cardOf(projectId, first.taskId))?.place, 1)
-      assert.isFalse(yield* (yield* Busy).move(first.taskId, 0))
+      assert.isTrue(yield* (yield* Busy).move(first.taskId, 0))
       yield* Effect.sleep('300 millis')
       assert.lengthOf(yield* turnsOn(first.threadId), turns)
       // Once the second stops, it is delivered.
@@ -1302,6 +1302,60 @@ describe('Agents at once, across a restart', () => {
     }),
   )
 
+  it.live('hold a task that waits for a place: it leaves the line, waits until it is started, and takes a place again then', () =>
+    Effect.gen(function* () {
+      const plans = yield* Plans
+      const sql = yield* SqlClient.SqlClient
+      const { projectId } = yield* opened
+      const first = yield* started(projectId, 'First', 'Work on it. [lead:wait]')
+      yield* working(first.taskId)
+      const second = yield* started(projectId, 'Second', 'Do it. [lead:finish]')
+      const third = yield* started(projectId, 'Third', 'Do it. [lead:finish]')
+      yield* waiting(second.taskId)
+      yield* waiting(third.taskId)
+      const queries = yield* Queries
+      const lineOf = () =>
+        Effect.map(Effect.orDie(queries.board(projectId)), (board) =>
+          board.tasks.filter((task) => task.inLine === true).map((task) => task.taskId),
+        )
+      assert.deepStrictEqual(yield* lineOf(), [second.taskId, third.taskId])
+
+      // Held while it waits, it is out of the line: the one behind it moves up, and it waits for the person, not a place.
+      assert.isTrue(yield* plans.hold(second.planId, yield* person))
+      assert.deepStrictEqual(yield* lineOf(), [third.taskId])
+      const held = yield* cardOf(projectId, second.taskId)
+      assert.strictEqual(held?.phase, 'held')
+      assert.isNull(held?.queued)
+      assert.isUndefined(held?.planWaits)
+      assert.deepStrictEqual(
+        (yield* sql<{ state: string; startsAt: string | null }>`SELECT state, starts_at FROM task_plans WHERE id = ${second.planId}`)[0],
+        { state: 'proposed', startsAt: null },
+      )
+      assert.deepStrictEqual(
+        (yield* attempts(second.taskId)).map((row) => row.state),
+        ['cancelled'],
+      )
+      // Held already, holding again changes nothing; and one at work isn't held.
+      assert.isFalse(yield* plans.hold(second.planId, yield* person))
+      assert.isFalse(yield* plans.hold(first.planId, yield* person))
+      assert.strictEqual((yield* cardOf(projectId, first.taskId))?.phase, 'running')
+
+      // A place frees: the one behind goes on, and the held one stays put.
+      const tasks = yield* Tasks
+      yield* tasks.stop({ envelope: yield* Runtime.envelope('task.stop', {}), taskId: first.taskId })
+      yield* until(attempts(third.taskId), (rows) => rows.some((row) => row.state === 'succeeded'))
+      assert.deepStrictEqual(
+        (yield* attempts(second.taskId)).map((row) => row.state),
+        ['cancelled'],
+      )
+
+      // Started again, it takes a place as a new task does, in line behind none, and runs once it has one.
+      assert.isNotNull(yield* plans.start(second.planId, yield* person))
+      yield* until(attempts(second.taskId), (rows) => rows.some((row) => row.state === 'succeeded'))
+      assert.strictEqual((yield* sql<{ n: number }>`SELECT count(*) AS n FROM runs WHERE task_id = ${second.taskId}`)[0]?.n, 2)
+    }).pipe(Effect.provide(machine(1))),
+  )
+
   it.live('keep what waits, and carry on what was working first, then what waited, oldest first', () =>
     Effect.gen(function* () {
       const file = store()
@@ -1421,6 +1475,144 @@ describe('The line', () => {
         assert.deepStrictEqual(yield* lineOn(projectId), ['Second', 'Fourth', 'Fifth'])
       }).pipe(Effect.provide(machine(1, file)))
     }),
+  )
+})
+
+/** The project's Up next as its cards say it, in the order places are given: each task's title, marked when it continues. */
+const upNextOn = (projectId: string) =>
+  Effect.gen(function* () {
+    const queries = yield* Queries
+    const board = yield* Effect.orDie(queries.board(projectId))
+    return board.tasks
+      .filter((task) => task.queued != null && (task.inLine === true || task.continues === true))
+      .toSorted((a, b) => (a.place ?? 0) - (b.place ?? 0))
+      .map((task) => `${task.title}${task.continues === true ? ' (continues)' : ''}`)
+  })
+
+/** The coordinator, using a tool as the window's buttons do. */
+const coordinatorOf = ({ projectId, threadId }: { projectId: string; threadId: string }): ToolAccess => ({
+  role: 'coordinator',
+  projectId,
+  threadId,
+  sessionId: 'none',
+  taskId: null,
+})
+
+describe('Up next, one order', () => {
+  it.live('puts what continues anywhere in the line, and gives places in that order', () =>
+    Effect.gen(function* () {
+      const coordinator = yield* opened
+      const { projectId } = coordinator
+      const tasks = yield* Tasks
+      const first = yield* started(projectId, 'First', 'Do it. [lead:finish]')
+      yield* until(attempts(first.taskId), (rows) => rows[0]?.state === 'succeeded')
+      yield* idle(first.threadId)
+      const holder = yield* started(projectId, 'Holder', 'Work on it. [lead:wait]')
+      yield* working(holder.taskId)
+      // Althar tells the first's idle lead something it must act on: its turn waits, and continues ahead of the line.
+      yield* tell(first.threadId, 'The checks failed.')
+      yield* queuedOn(projectId, first.taskId)
+      const later = yield* started(projectId, 'Later', 'Work on it. [lead:wait]')
+      yield* waiting(later.taskId)
+      assert.deepStrictEqual(yield* upNextOn(projectId), ['First (continues)', 'Later'])
+      const turns = (yield* turnsOn(first.threadId)).length
+      // The person puts the line's task first, ahead of what continues: a move the coordinator makes as the board does.
+      const said = yield* callTool(coordinatorOf(coordinator), 'move_to_front', { task: 'later' })
+      assert.include(said, 'is first in line now')
+      assert.deepStrictEqual(yield* upNextOn(projectId), ['Later', 'First (continues)'])
+      assert.isTrue((yield* cardOf(projectId, later.taskId))?.reordered)
+      // A place frees: the one put first has it, and what continues still waits.
+      yield* tasks.stop({ envelope: yield* Runtime.envelope('task.stop', {}), taskId: holder.taskId })
+      yield* working(later.taskId)
+      assert.lengthOf(yield* turnsOn(first.threadId), turns)
+      assert.deepStrictEqual(yield* upNextOn(projectId), ['First (continues)'])
+      // And back the other way: what continues can go behind the line, and ahead of it again.
+      const last = yield* started(projectId, 'Last', 'Work on it. [lead:wait]')
+      yield* waiting(last.taskId)
+      assert.isTrue(yield* (yield* Busy).move(first.taskId, 1))
+      assert.deepStrictEqual(yield* upNextOn(projectId), ['Last', 'First (continues)'])
+      yield* (yield* Busy).oldestFirst(projectId)
+      assert.deepStrictEqual(yield* upNextOn(projectId), ['First (continues)', 'Last'])
+    }).pipe(Effect.provide(machine(1))),
+  )
+
+  it.live('starts a plan moved to the front of Up next, first in line, held or come due', () =>
+    Effect.gen(function* () {
+      const coordinator = yield* opened
+      const { projectId } = coordinator
+      const plans = yield* Plans
+      const projects = yield* Projects
+      const tasks = yield* Tasks
+      const holder = yield* started(projectId, 'Holder', 'Work on it. [lead:wait]')
+      yield* working(holder.taskId)
+      const waits = yield* started(projectId, 'Waits', 'Work on it. [lead:wait]')
+      yield* waiting(waits.taskId)
+      // A plan held for the person, which no agent's place is ordered for yet.
+      const created = yield* projects.createTask({
+        envelope: yield* Runtime.envelope('task.create', { title: 'Planned' }),
+        projectId,
+        title: 'Planned',
+        description: 'Work on it. [lead:wait]',
+        draft: true,
+      })
+      yield* plans.propose({
+        projectId,
+        taskId: created.taskId,
+        steps: [{ key: 'implement', agentId: 'codex', model: null, skipped: false }],
+        reason: null,
+        actorId: yield* person,
+        end: null,
+        held: true,
+      })
+      assert.strictEqual((yield* cardOf(projectId, created.taskId))?.phase, 'held')
+      const said = yield* callTool(coordinatorOf(coordinator), 'move_to_front', { task: 'planned' })
+      assert.include(said, 'plan started, first in line')
+      yield* waiting(created.taskId)
+      assert.deepStrictEqual(yield* upNextOn(projectId), ['Planned', 'Waits'])
+      // The place that frees is its.
+      yield* tasks.stop({ envelope: yield* Runtime.envelope('task.stop', {}), taskId: holder.taskId })
+      yield* working(created.taskId)
+      assert.deepStrictEqual(yield* upNextOn(projectId), ['Waits'])
+      // Once at work, it no longer stands where it was put.
+      const sql = yield* SqlClient.SqlClient
+      assert.isNull((yield* sql<{ lineAt: string | null }>`SELECT line_at FROM tasks WHERE id = ${created.taskId}`)[0]?.lineAt)
+    }).pipe(Effect.provide(machine(1))),
+  )
+
+  it.live('cancels a turn Althar asked of an idle lead that waits for a place; its lead reads it with its next turn', () =>
+    Effect.gen(function* () {
+      const coordinator = yield* opened
+      const { projectId } = coordinator
+      const tasks = yield* Tasks
+      const sql = yield* SqlClient.SqlClient
+      const first = yield* started(projectId, 'First', 'Do it. [lead:finish]')
+      yield* until(attempts(first.taskId), (rows) => rows[0]?.state === 'succeeded')
+      yield* idle(first.threadId)
+      const holder = yield* started(projectId, 'Holder', 'Work on it. [lead:wait]')
+      yield* working(holder.taskId)
+      yield* tell(first.threadId, 'The checks failed.')
+      yield* queuedOn(projectId, first.taskId)
+      assert.isTrue((yield* cardOf(projectId, first.taskId))?.turnWaits)
+      const turns = (yield* turnsOn(first.threadId)).length
+      // Its lead isn't in a turn: stopping its turn lets go of the one that waits.
+      const said = yield* callTool(coordinatorOf(coordinator), 'stop_task', { task: 'first', turn: true })
+      assert.include(said, 'Cancelled the turn')
+      assert.isNull(yield* waitsOn(first.threadId))
+      assert.isNull((yield* cardOf(projectId, first.taskId))?.queued ?? null)
+      assert.deepStrictEqual(yield* upNextOn(projectId), [])
+      const inputs = sql<{
+        state: string
+      }>`SELECT state FROM user_inputs WHERE thread_id = ${first.threadId} AND body = 'The checks failed.'`
+      assert.deepStrictEqual(yield* inputs, [{ state: 'noted' }])
+      // A place frees: nothing starts for it.
+      yield* tasks.stop({ envelope: yield* Runtime.envelope('task.stop', {}), taskId: holder.taskId })
+      yield* Effect.sleep('300 millis')
+      assert.lengthOf(yield* turnsOn(first.threadId), turns)
+      // The person's next word is its next turn, and it reads what it was told with it.
+      yield* say(first.threadId, 'Go on.', 'after_current')
+      yield* until(inputs, (rows) => rows[0]?.state === 'delivered')
+      assert.lengthOf(yield* turnsOn(first.threadId), turns + 1)
+    }).pipe(Effect.provide(machine(1))),
   )
 })
 

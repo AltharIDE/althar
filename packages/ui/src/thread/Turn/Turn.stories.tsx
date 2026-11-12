@@ -4,6 +4,7 @@ import { fn } from 'storybook/test'
 
 import { OPUS, UNKNOWN_MODEL } from '../../fixtures/models'
 import { threadDecorator } from '../../storybook/ThreadFrame'
+import { HalftoneMark } from '../../foundations/HalftoneMark/HalftoneMark'
 import { Cite, FileRef } from '../Inline/Inline'
 import { Prose, Turn } from './Turn'
 import { States } from '../../storybook/States'
@@ -29,6 +30,15 @@ export const Coordinator: Story = {
     model: undefined,
     voice: 'Coordinator',
     children: <Prose>Task 432, from MER-231. This is the plan; change anything before it starts.</Prose>,
+  },
+}
+/** The coordinator signed with Althar's mark: in its conversation, and in an aside beside it. */
+export const CoordinatorMarked: Story = {
+  args: {
+    model: undefined,
+    voice: 'Coordinator',
+    mark: <HalftoneMark size={15} rise={false} />,
+    children: <Prose>It backs off in two places: the client waits, and so does the queue.</Prose>,
   },
 }
 /** Copy and Quote, which wait for hover or focus; shown here as when hovered. */

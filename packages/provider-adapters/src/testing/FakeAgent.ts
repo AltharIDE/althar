@@ -371,6 +371,15 @@ export interface FakeAgentOptions {
   readonly allowAllStays?: boolean
   /** Once it leaves its mode by itself (`leaveMode`), it refuses to be put back in one. */
   readonly leavesForGood?: boolean
+  /** Called as it is asked to set its model or effort, before it answers. */
+  readonly optionAsked?: (configId: string, value: string) => void
+  /** Called as it is given a prompt, before it answers. */
+  readonly promptAsked?: () => void
+  /**
+   * Whether it holds its answer to a request to set its model or effort, asked while one waits: as an agent does that answers
+   * one request at a time and is at its turn. It answers once this says no.
+   */
+  readonly holdsSets?: () => boolean
 }
 
 /** The holds a test opens, by marker, for an agent to go on from (`FakeAgentOptions.holds`). */
@@ -703,7 +712,8 @@ const playStall = async (
  * `[lead:fix-late]` leaves the full tests running and commits it once they
  * end, and `[lead:fix-hold]` works on after it until it is interrupted. Asked to "push pls" once its pull request is open,
  * `[lead:push]` commits what it has and asks the person to push it; asked to "tidy pls", `[lead:commit]` commits and ends its
- * turn, asking no one to push it. Told its checks failed, `[lead:fix-push]` commits a fix and calls push_to_pull_request itself, and out of tries, brings them to the person with hand_checks_to_person; `[lead:checks-main]` reads the default branch's checks and, where one fails there, brings it to the person instead; `[lead:fix-gone]` goes on its own instead, as an agent that crashes does, each time it is told. Asked to bring its branch up to date, `[lead:resolve]`
+ * turn, asking no one to push it; asked to "bring main in pls", `[lead:merge-main]` merges origin/main, keeping both sides of
+ * a conflict, and commits the merge ("and tidy" commits other work after it). Sent back by the merge queue and told to, `[lead:update-branch]` calls update_branch. Told its checks failed, `[lead:fix-push]` commits a fix and calls push_to_pull_request itself, and out of tries, brings them to the person with hand_checks_to_person; `[lead:checks-main]` reads the default branch's checks and, where one fails there, brings it to the person instead; `[lead:fix-gone]` goes on its own instead, as an agent that crashes does, each time it is told. Asked to bring its branch up to date, `[lead:resolve]`
  * merges what it was told to, keeps both sides of each conflict and commits
  * the merge; `[lead:resolve-more]` does too, then commits other work on top
  * of it in two commits; `[lead:resolve-fix]` commits one fix on top of the
@@ -1039,6 +1049,11 @@ const playRole = async (
         })
         if (!text.includes('[lead:finish]')) return made
       }
+      // Asked in these words to make work with no review real, it offers its task a review, as a line the person answers.
+      if (text.includes('[lead:offer-review]') && available.has('offer_review')) {
+        const offered = await call('offer_review', {})
+        if (!text.includes('[lead:finish]')) return offered
+      }
       // Told in these words to move its task on (`[lead:task-done]`, `[lead:task-keep]`, `[lead:task-discard]`), it does, and says what it was told.
       const moved = /\[lead:task-(done|keep|discard)\]/.exec(text)?.[1]
       if (moved !== undefined && available.has('settle_task')) return await call('settle_task', { how: moved })
@@ -1269,6 +1284,16 @@ const playRole = async (
         await commitIn(session.cwd, 'pushed.txt', 'Tidy up before pushing')
         return await call('push_to_pull_request', {})
       }
+      // Asked to bring main in, it merges origin/main as it stands here, keeping both sides of a conflict, and commits the merge.
+      if (session.markers.has('[lead:merge-main]') && /\bbring main in pls\b/i.test(text)) {
+        await resolveIn(session.cwd, 'origin/main')
+        if (/\band tidy\b/i.test(text)) await commitIn(session.cwd, 'tidied.txt', 'Tidy up')
+        return 'Merged main in, and committed the merge.'
+      }
+      // Sent back by the merge queue and told an update from main is update_branch's, it calls that, and nothing of its plan again.
+      const sentBack = /The merge queue took (PR #\d+) out/.exec(text)?.[1]
+      if (session.markers.has('[lead:update-branch]') && sentBack !== undefined && text.includes('call update_branch'))
+        return await call('update_branch', { pull_request: sentBack.slice(3) })
       // Asked to tidy up, it commits and ends its turn: what goes up, and when, isn't its to say.
       if (session.markers.has('[lead:commit]') && /\btidy pls\b/i.test(text)) {
         // Within its turn, as a lead commits before it answers: what the turn's end looks at has it.
@@ -1658,9 +1683,13 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
       session.mode = params.modeId
       return {}
     })
-    .onRequest(acp.methods.agent.session.setConfigOption, ({ params }) => {
+    .onRequest(acp.methods.agent.session.setConfigOption, async ({ params }) => {
       const session = sessionOf(params.sessionId)
       const value = String(params.value)
+      if (params.configId === 'model' || params.configId === 'effort') {
+        options.optionAsked?.(params.configId, value)
+        while (options.holdsSets?.() === true && !session.closed) await pause(10)
+      }
       if (params.configId === 'mode' && MODES.includes(value)) session.mode = modes === 'stuck' ? session.mode : value
       else if (params.configId === 'model' && options.failsOnce?.includes(value) && !failedOnce.has(value)) {
         failedOnce.add(value)
@@ -1726,6 +1755,7 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
       // What it was given in the prompts it did nothing with, it reads with this one, as its transcript keeps them.
       const prompted = `${session.unread}${params.prompt.map((block) => (block.type === 'text' ? block.text : '')).join('')}`
       session.prompts += 1
+      options.promptAsked?.()
       const blank = options.blank ?? 0
       if (
         typeof blank === 'number'

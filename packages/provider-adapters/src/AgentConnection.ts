@@ -682,6 +682,8 @@ export const connect = (options: ConnectOptions): Effect.Effect<AgentConnection,
       owned = yield* spawnOwned(options.transport.spec, options.transport.cwd, {
         ...(capture === undefined ? {} : { capture }),
         ...(stderr === undefined ? {} : { stderr }),
+        // An agent and all it starts, its builds and tests, run in the background: Althar's window, and the person's other apps, first.
+        background: true,
       })
       connection = app.connect(takingBackground(acp.ndJsonStream(owned.stdin, owned.stdout), heardBackground))
     } else {
