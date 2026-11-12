@@ -207,6 +207,12 @@ export const PlanParameters = Schema.Struct({
    */
   here: Schema.optional(Schema.Boolean),
   /**
+   * An aside the person started (`StartTask` with `chat`, docs/decisions/tasks.md, "Asides"): its first step ends with its
+   * lead's turn, its reply the answer, as a turn after a plan does, and the coordinator hears nothing of it. Not once it is
+   * work: its lead changed the repository and it left Scratch for the board.
+   */
+  aside: Schema.optional(Schema.Boolean),
+  /**
    * A round of work's run only: it ends as its plan's run does, publishing
    * as its ending says, where a round never publishes by itself (ADR-034).
    * The round under way as its quick task was made a change
@@ -2353,6 +2359,8 @@ export class Runs extends Context.Service<
                 Effect.catchCause((cause) => stuck(on.run, { id: on.attemptId }, info('no_report', summarize(cause) || null))),
               )
           }
+          // An aside answered in its turn: no report is asked of it, nor any reminder to give one.
+          if (event.state === 'completed' && event.errorClass === undefined && (yield* asideAnswered(on, event.turnId))) return
           // Reminded already, it ended again without its report: the step goes to another model, or needs the person.
           if (output.reminded === true) return yield* noReport(on, event.turnId, output, info, event.errorClass ?? null)
           yield* change('node_attempts', on.attemptId, { output: JSON.stringify({ ...output, reminded: true }) })
@@ -3467,6 +3475,37 @@ export class Runs extends Context.Service<
           // A pull request that merged while it ran settles the task now.
           yield* Effect.ignore(changes.settleIfMerged(run.taskId))
           yield* touchCard(run.taskId)
+          return true
+        })
+
+      /**
+       * An aside's first step, its lead's turn ended with its answer and nothing changed in the repository (`aside`): the step
+       * ends there, with no report, and the task is ready, as finish_step with nothing built would leave it. What the person says
+       * next is a round, as after any plan. Not one that asks the person something, or that became work and left Scratch.
+       */
+      const asideAnswered = (
+        on: { readonly run: RunRow; readonly attemptId: string; readonly nodeId: string; readonly step: string },
+        turnId: string,
+      ) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          if (on.step !== 'implement' || on.run.planId === null) return false
+          const parameters = yield* Schema.decodeUnknownEffect(Schema.fromJsonString(PlanParameters))(on.run.parameters).pipe(Effect.option)
+          if (Option.isNone(parameters) || parameters.value.aside !== true) return false
+          const [task] = yield* sql<{ shelf: string | null }>`SELECT shelf FROM tasks WHERE id = ${on.run.taskId}`
+          if (task?.shelf !== 'scratch' || (yield* asking(on.run.threadId)) || !(yield* unbranched(on.run.taskId))) return false
+          const closed = yield* sql.withTransaction(
+            Effect.gen(function* () {
+              if (yield* pastTurn(on.run.threadId, turnId, on.attemptId)) return false
+              if (!(yield* keeps(on.run, on.attemptId, { step: 'implement', aside: true }))) return false
+              yield* ended(on.run, { id: on.attemptId, nodeId: on.nodeId }, 'succeeded', { quiet: true, aside: true })
+              yield* unstuck(on.run)
+              return true
+            }),
+          )
+          if (!closed) return false
+          yield* conclude(on.run)
+          yield* touchCard(on.run.taskId)
           return true
         })
 
@@ -5025,7 +5064,10 @@ export class Runs extends Context.Service<
               : `${said} You changed the repository, so Althar put the task's work on a branch of its own, ${branched.join(', ')}, which stays on ${thisDevice()}: commit there.`
           const itemId = yield* newId(Ids.threadItem)
           const shows = Effect.gen(function* () {
-            const kept = yield* keepEvidence({ projectId: access.projectId as ProjectId, itemId, folders: [] }, evidence)
+            // With nothing changed in the repository, a note can only say there was nothing to check: nothing to show, so none is
+            // kept, and its step draws no "What it checked". A run, a response or a picture still shows something.
+            const shown = plain ? evidence.filter((piece) => piece.given.kind !== 'note') : evidence
+            const kept = yield* keepEvidence({ projectId: access.projectId as ProjectId, itemId, folders: [] }, shown)
             // A list given is kept even empty: what an earlier step couldn't show, this one may have.
             return {
               ...(kept.length === 0 ? {} : { evidence: kept }),
@@ -5444,7 +5486,7 @@ export class Runs extends Context.Service<
               evidence: {
                 type: 'array',
                 description:
-                  "What shows the change does what it should, in the form that fits the task, each with a caption saying what it shows. A screenshot or recording is a PNG, JPEG, GIF or WebP file in the worktree, by its path (it needn't be committed); a command or test run is what you ran, its exit code and the end of its output, all three; a response, log or note is text. Where nothing fits (a typo, a version bump), one note saying so.",
+                  "What shows the change does what it should, in the form that fits the task, each with a caption saying what it shows. A screenshot or recording is a PNG, JPEG, GIF or WebP file in the worktree, by its path (it needn't be committed); a command or test run is what you ran, its exit code and the end of its output, all three; a response, log or note is text. Where nothing fits (a typo, a version bump, a question answered), none.",
                 items: {
                   type: 'object',
                   properties: {

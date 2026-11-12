@@ -75,8 +75,11 @@ export class Plans extends Context.Service<
       readonly here?: boolean
       /** A review of someone else's pull request, its one step its lead (`PlanParameters.reads`). */
       readonly reads?: boolean
-      /** No card in the coordinator's conversation: an aside's, which has a tab of its own there instead. */
-      readonly card?: false
+      /**
+       * An aside the person started (`PlanParameters.aside`): no card in the coordinator's conversation, where it has a pill of
+       * its own instead, and its first step ends with its lead's turn.
+       */
+      readonly aside?: boolean
       /** The fast lane: reviewed after it merges, not before (`PlanParameters.reviewAfterMerge`). */
       readonly reviewAfterMerge?: boolean
       /** Where it works (ADR-091), and why, where that isn't the project's default (`PlanParameters.worksIn`). */
@@ -179,6 +182,7 @@ export class Plans extends Context.Service<
           reason?: string | null
           end?: TaskEnd | null
           here?: boolean
+          aside?: boolean
           reads?: boolean
           worksIn?: WorksIn
           worksInWhy?: string | null
@@ -228,6 +232,7 @@ export class Plans extends Context.Service<
                     reason: input.reason,
                     end: input.end ?? null,
                     ...(input.here === true ? { here: true } : {}),
+                    ...(input.aside === true ? { aside: true } : {}),
                     ...(input.reads === true ? { reads: true } : {}),
                     ...(input.reviewAfterMerge === true ? { reviewAfterMerge: true } : {}),
                     ...(input.worksIn === undefined ? {} : { worksIn: input.worksIn }),
@@ -250,7 +255,7 @@ export class Plans extends Context.Service<
                 })
               }),
             )
-            if (input.card !== false) yield* postCard(input.projectId, input.taskId)
+            if (input.aside !== true) yield* postCard(input.projectId, input.taskId)
             yield* Queue.offer(wake, undefined)
             return planId
           }),
@@ -371,6 +376,7 @@ export class Plans extends Context.Service<
                   reason: before.reason ?? null,
                   end: end === undefined ? (before.end ?? null) : end,
                   ...(before.here === true ? { here: true } : {}),
+                  ...(before.aside === true ? { aside: true } : {}),
                   ...(before.reads === true ? { reads: true } : {}),
                   ...(where === undefined ? {} : { worksIn: where }),
                   ...(why == null ? {} : { worksInWhy: why }),

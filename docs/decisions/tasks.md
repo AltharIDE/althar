@@ -137,12 +137,27 @@ has the coordinator's tools, and its turns are signed Coordinator too, as
 the coordinator's are: an aside is a quick word with the coordinator that
 leaves its conversation as it was.
 
-- **Started** with + over the conversation, which turns the coordinator's
-  composer to a new aside (`StartTask` with `chat`): the person's words open
-  its thread, on the model the composer has picked, with no card in the
-  coordinator's conversation. Words the coordinator said, selected, start one
-  about them, quoted over the composer and above the person's words. The
-  coordinator still starts one at once with `start_task`.
+- **Started** as + over the conversation is pressed (`StartTask` with
+  `chat`), on the model the composer has picked, by an id the window makes:
+  made on Scratch, never on the board even for a moment, with no card in the
+  coordinator's conversation and nothing of it in the coordinator's news. Its
+  one pill is keyed by that id from the first frame, and says New aside
+  until the person's first words, which the coordinator's composer sends to
+  its thread, name it. Its copy (made from the default branch as last
+  fetched, with no wait on the network) and its lead get ready while the
+  person writes; the lead's brief waits for those words and goes out with
+  them, as the coordinator's does. One left unsaid takes no pill, and the
+  next + opens it again rather than another. Words the coordinator said,
+  selected, start one about them, quoted over the composer and above the
+  person's words. The coordinator still starts one at once with
+  `start_task`.
+- **Answered** in its lead's reply: an aside's brief is light (who it is,
+  where it reads, its tools, the person's decisions), with no step to report,
+  no finish_step and no evidence, and the turn that answers ends its first
+  step, with no reminder. Once it becomes work and leaves Scratch, its lead
+  is told a task lead's whole brief with its next turn. A plain "hi" took 16
+  to 26 seconds through a lead's whole brief, its finish_step and the copy's
+  fetch, and takes 4 to 7 now (12 Nov 2026).
 - **Open,** it takes the coordinator's place in the pane: its conversation,
   and the composer every task has, with its own runs over it and its own
   moves, Make it a task and Clear (`AsideMoves`).
@@ -610,4 +625,5 @@ optionally a model, an agent, an effort and the change.
 - 10 Nov 2026: a task is a conversation plus parts, built (#739) and folded in from its proposal: the five parts and changing them, several changes in a task and stacks, chats on Scratch, presets, and helpers handed a change (ADR-087's tasks 1 to 5); what it decided and didn't build is under Not built yet.
 - 10 Nov 2026: the rest of it built (#739): each change shipped in a Ship of its own with its own review, the card's sentence and marks across changes, the header's row for each, stamped Shipped and Merged rows, where a turn's commits went; Keep them together, Drop it, a change that waits for another, removing a running task's workspace; Stop running it; picking another preset on the plan card, the coordinator planning from presets, editing them in Settings; Scratch's own shelf and a chat's copy made without setup. ADR-087 folded in whole and removed from `proposed/`: helpers in copies of their own, writing ones' commits, places, limits, retries, the hour, restarts, agents' own helpers switched off, and the thread, Graph face and usage by model.
 - 11 Nov 2026: chats are asides, pills over the coordinator's conversation with a composer and moves of their own, started there or from the coordinator's words; one made a task flies to the board and the coordinator's conversation notes it; the coordinator's turns are signed with Althar's mark ([Asides](#asides)).
+- 12 Nov 2026: an aside starts as + is pressed, one pill from then, its lead ready while the person writes; its brief is light, its reply ends its step, and the coordinator hears nothing of it ([Asides](#asides)).
 - 12 Nov 2026: commits that only bring the base branch in, as a clean merge of main, are never the task's work: no hold for Ship, no review, no round; they go up to the open pull request (#773's merge of main had started a second Review and Pull request).

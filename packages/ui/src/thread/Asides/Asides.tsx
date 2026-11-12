@@ -19,6 +19,7 @@ import s from './Asides.module.css'
 
 export interface Aside {
   id: string
+  /** Its title; empty for one just started, whose pill says it is new until its first words name it. */
   title: string
   /** What was said last, its first line: the pill's hover. */
   said?: string
@@ -55,10 +56,11 @@ export type AsideTabsProps = RootProps<
     asides: readonly Aside[]
     /** Those left untouched for a week, folded into one pill. */
     older?: readonly Aside[]
-    /** The one open, by its id; null for the coordinator's conversation. */
+    /**
+     * The one open, by its id; null for the coordinator's conversation. A new one is among `asides` from the moment it is
+     * started, by the id it keeps, so its pill is the one pill it has as its title fills in.
+     */
     current: string | null
-    /** A new aside being started: its pill, open, first among the asides. */
-    starting?: boolean
     onPick: (id: string | null) => void
     onNew: () => void
     /** Settles the older ones together. Without it, they can only be opened. */
@@ -74,7 +76,6 @@ export function AsideTabs({
   asides,
   older = [],
   current,
-  starting = false,
   onPick,
   onNew,
   onClearOlder,
@@ -84,7 +85,7 @@ export function AsideTabs({
   ...rest
 }: AsideTabsProps) {
   const t = { ...asideTabsText, ...text }
-  const onCoordinator = current === null && !starting
+  const onCoordinator = current === null
   return (
     <div className={cx(s.strip, className)} {...rest}>
       <div className={s.tabs} role="tablist" aria-label={t.label}>
@@ -92,25 +93,20 @@ export function AsideTabs({
           {mark}
           {t.coordinator}
         </button>
-        {(asides.length > 0 || starting) && <span className={s.rule} aria-hidden />}
-        {starting && (
-          <button type="button" role="tab" aria-selected className={s.pill}>
-            <span className={s.title}>{t.newAside}</span>
-          </button>
-        )}
+        {asides.length > 0 && <span className={s.rule} aria-hidden />}
         {[...asides, ...older.filter((one) => one.id === current)].map((aside) => (
           <button
             key={aside.id}
             type="button"
             role="tab"
-            aria-selected={!starting && current === aside.id}
+            aria-selected={current === aside.id}
             className={s.pill}
             data-aside={aside.id}
-            title={aside.said ?? aside.title}
+            title={aside.said ?? (aside.title || t.newAside)}
             onClick={() => onPick(aside.id)}
           >
             {aside.running === true && <LiveDot pulse />}
-            <span className={s.title}>{aside.title}</span>
+            <span className={s.title}>{aside.title || t.newAside}</span>
           </button>
         ))}
       </div>

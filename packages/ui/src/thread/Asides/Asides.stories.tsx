@@ -45,8 +45,15 @@ export const OnTheCoordinator: Story = {
 /** An aside open. */
 export const AsideOpen: Story = { args: { current: 'a1' } }
 
-/** A new aside being started: its pill first among them. */
-export const Starting: Story = { args: { starting: true } }
+/** A new aside, just started: its one pill, open and first, says it is new until its first words name it. */
+export const Starting: Story = {
+  args: { asides: [{ id: 'a0', title: '' }, ...ASIDES], current: 'a0' },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await expect(canvas.getAllByRole('tab', { name: 'New aside' })).toHaveLength(1)
+    await expect(canvas.getByRole('tab', { name: 'New aside' })).toHaveAttribute('aria-selected', 'true')
+  },
+}
 
 /** Those a week old fold into one pill, which clears them together. */
 export const Older: Story = {

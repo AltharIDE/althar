@@ -31,6 +31,26 @@ const shoot = async (page: Page, pills: Locator, name: string) => {
   })
 }
 
+/**
+ * Watches the pills over the conversation from now on, every frame the window draws of them: the most asides it showed at
+ * once, and how many elements were ever an aside's pill. One pill all along is one at most, and one element.
+ */
+const watchPills = (page: Page) =>
+  page.evaluate(() => {
+    const seen = { most: 0, pills: new Set<Element>() }
+    const look = () => {
+      for (const bar of document.querySelectorAll<HTMLElement>('[role="tablist"][aria-label="Conversations"]')) {
+        if (bar.offsetParent === null) continue
+        const asides = [...bar.querySelectorAll('[role="tab"]')].filter((tab) => tab.textContent?.trim() !== 'Coordinator')
+        seen.most = Math.max(seen.most, asides.length)
+        for (const pill of asides) seen.pills.add(pill)
+      }
+    }
+    new MutationObserver(look).observe(document.body, { childList: true, subtree: true, characterData: true, attributes: true })
+    look()
+    Object.assign(window, { pillsSeen: () => ({ most: seen.most, elements: seen.pills.size }) })
+  })
+
 /** Starts an aside from the coordinator's composer, as the person does with +. */
 const startAside = async (page: Page, words: string) => {
   await page.getByRole('button', { name: 'New aside' }).click()
@@ -89,6 +109,44 @@ test('asides: started beside the coordinator, opened in its place with a compose
     await expect(page.getByRole('button', { name: 'Drop the quote' })).toBeVisible()
     await expect(pills.getByRole('tab', { name: 'New aside' })).toHaveAttribute('aria-selected', 'true')
     await shoot(page, pills, 'quote')
+  } finally {
+    await electronApp.close()
+  }
+})
+
+test('a new aside is one pill from + on, named by its first words, and a plain reply to them shows no error and no Checked block', async () => {
+  const home = mkdtempSync(join(tmpdir(), 'althar-e2e-'))
+  const projects = join(home, 'Projects')
+  mkdirSync(projects)
+  const { electronApp, page } = await launch(home)
+  try {
+    await openFirstProject(electronApp, page, repository(projects))
+    const pills = page.getByRole('tablist', { name: 'Conversations' }).filter({ visible: true })
+    await expect(pills.getByRole('tab', { name: 'Coordinator', exact: true })).toHaveAttribute('aria-selected', 'true')
+    await watchPills(page)
+
+    // + starts it at once: its one pill, open, says it is new while the person writes.
+    await page.getByRole('button', { name: 'New aside' }).click()
+    await expect(pills.getByRole('tab', { name: 'New aside' })).toHaveAttribute('aria-selected', 'true')
+    const box = page.getByRole('textbox', { name: /^Ask on the side/ })
+    await box.click()
+    await box.fill('Hi')
+    await box.press('Enter')
+
+    // Its first words name the same pill, and its lead's answer comes in its own conversation, the turn over.
+    await expect(pills.getByRole('tab', { name: 'Hi', exact: true })).toHaveAttribute('aria-selected', 'true')
+    const answer = page.getByRole('article', { name: 'Coordinator' }).filter({ visible: true }).filter({ hasText: 'echo:' })
+    await expect(answer).toBeVisible()
+    await expect(page.getByRole('button', { name: /^Interrupt/ }).filter({ visible: true })).toHaveCount(0)
+    await expect(page.getByRole('button', { name: 'Make it a task' })).toBeEnabled()
+    await shoot(page, pills, 'hi')
+
+    // One pill, one element, from + to the answer: never a second beside it, nor one that took its place.
+    expect(await page.evaluate(() => (window as unknown as { pillsSeen: () => unknown }).pillsSeen())).toEqual({ most: 1, elements: 1 })
+    // Nothing the person did wrong, so no error over the composer; and a reply that checked nothing draws no Checked block.
+    await expect(page.getByText(/isn.t there any more/)).toHaveCount(0)
+    await expect(page.getByRole('alert').filter({ visible: true })).toHaveCount(0)
+    await expect(page.getByText('What it checked')).toHaveCount(0)
   } finally {
     await electronApp.close()
   }
