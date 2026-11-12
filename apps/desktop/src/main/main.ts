@@ -582,6 +582,9 @@ if (__ALTHAR_TEST_HOOKS__)
   (globalThis as unknown as { takeScreenshot: (shot: Shot) => Promise<unknown> }).takeScreenshot = (shot) =>
     takeScreenshot(shot, pageWindow)
 
+/** Tells the runtime whether the meter is on (`showLoad`), so it reads the computer in the background for its trace only then. */
+const meterLoad = (child: UtilityProcess | undefined) => child?.postMessage({ type: 'load', on: preferences.showLoad })
+
 const startRuntime = () => {
   const { profile, worktrees } = locations()
   startupMark('runtime-start')
@@ -598,7 +601,8 @@ const startRuntime = () => {
       // The Node the agent adapters run on (ADR-033): the packaged app's own, as its binary doesn't run as Node; in dev, Electron's.
       ...(app.isPackaged
         ? { ALTHAR_NODE: join(process.resourcesPath, 'node', 'bin', process.platform === 'win32' ? 'node.exe' : 'node') }
-        : {}),
+        : // A development build's runtime says in its log when its thread ran late, and which calls took long (lag.ts).
+          { ALTHAR_LAG_LOG: '1' }),
     },
   })
   logs.keepOutput(child)
@@ -698,6 +702,8 @@ const startRuntime = () => {
     void sendersStopped().finally(() => app.quit())
   })
   runtime = child
+  // Whether to read the computer for the meter's trace while no window asks, once the preferences are known.
+  void preferencesRead.then(() => (runtime === child ? meterLoad(child) : undefined))
   if (firstScreenDrawn) child.postMessage({ type: 'first-screen' })
 }
 
@@ -1014,6 +1020,7 @@ ipcMain.handle('althar:set-preference', async (_event, key: unknown, value: unkn
   if (key === 'openAtLogin') startAtLogin(preferences.openAtLogin)
   awake.wants(preferences)
   if (key === 'appearance') applyAppearance()
+  if (key === 'showLoad') meterLoad(runtime)
   app.setBadgeCount(dockCount(waiting, preferences))
   return preferences
 })

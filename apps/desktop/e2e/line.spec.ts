@@ -155,7 +155,7 @@ test('lists reviews and a quick task waiting for an agent in Up next, and starts
     await expect(rows.nth(3)).toContainText('4th in line')
 
     // Up again, let go outside the lane, above it at the window's edge: it goes where the row showed it, the front.
-    const above = await next.getByText('Starts when an agent is free').boundingBox()
+    const above = await next.getByText('In your order').boundingBox()
     if (above === null) throw new Error('The line has no divider')
     const up = await grab(JUMP)
     await glide(up, { x: 4, y: above.y - 30 })

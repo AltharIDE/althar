@@ -247,7 +247,7 @@ describe('the window’s tabs', () => {
     const asked = [project, { ...halyard, waiting: 3 }]
     vi.mocked(client.listProjects).mockResolvedValue({ cursor: 4, projects: asked })
     vi.mocked(client.getHome).mockResolvedValue(homeOf(asked))
-    emit(changed('attention_request', 'a1'))
+    emit(changed('card', 't9'))
     await waitFor(() => expect(tab('halyard, 3 calls wait on you')).toBeTruthy())
     // What changes elsewhere doesn't read them again.
     emit(changed('thread_item', 'i1'))

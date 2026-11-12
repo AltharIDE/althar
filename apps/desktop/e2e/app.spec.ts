@@ -188,7 +188,7 @@ test('asks the coordinator, which plans a task that is implemented, reviewed, se
     await expect(page.getByText('It knows the code.')).toHaveCount(0)
     await page.screenshot({ path: 'test-results/plan.png' })
     await page.getByRole('button', { name: 'Hold' }).click()
-    await expect(conversation.getByText('Held. Starts when you say')).toBeVisible()
+    await expect(conversation.getByText('Held', { exact: true })).toBeVisible()
     await page.getByRole('button', { name: 'Start', exact: true }).click()
 
     // Implement, a review with a finding, settling it, and a review that passes: the card says it is ready.

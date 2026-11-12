@@ -148,7 +148,7 @@ export const Held: Story = {
   play: async ({ canvasElement }) => {
     const c = within(canvasElement)
     await userEvent.click(c.getByRole('button', { name: 'Hold' }))
-    await expect(c.getByText('Held. Starts when you say')).toBeInTheDocument()
+    await expect(c.getByText('Held')).toBeInTheDocument()
     const [skip] = c.getAllByRole('button', { name: 'Skip' })
     if (!skip) throw new Error('no Skip')
     await userEvent.click(skip)
@@ -248,20 +248,49 @@ export const HeldByTheRuntime: Story = {
     const c = within(canvasElement)
     await userEvent.click(c.getByRole('button', { name: 'Hold' }))
     await expect(heldChanged).toHaveBeenCalledWith(true)
-    await expect(c.getByText('Held. Starts when you say')).toBeInTheDocument()
+    await expect(c.getByText('Held')).toBeInTheDocument()
     await userEvent.click(c.getByRole('button', { name: 'Start' }))
     await expect(startedHeld).toHaveBeenCalled()
   },
 }
 
-/** Started, it waits for a free agent: it says so where the clock was, with nothing to start or hold, and its steps can still change. */
+/** Started, it waits for a free agent: it says so where the clock was, its steps can still change, and Hold takes it out of the line until you start it. */
 export const WaitingForAFreeAgent: Story = {
   render: () => <Launch queued="Waiting: 4 of 4 agents busy on this Mac" />,
   play: async ({ canvasElement }) => {
     const c = within(canvasElement)
     await expect(c.getByRole('status')).toHaveTextContent('Waiting: 4 of 4 agents busy on this Mac')
     await expect(c.queryByRole('button', { name: /Start/ })).toBeNull()
-    await expect(c.queryByRole('button', { name: 'Hold' })).toBeNull()
+    await expect(c.getByRole('button', { name: 'Hold' })).toBeInTheDocument()
+  },
+}
+
+const heldQueued = fn()
+
+/** A queued plan held where the plan is kept: Hold says so, and the card shows held, with Start. */
+function HeldWhileQueued() {
+  const [held, setHeld] = useState(false)
+  return (
+    <Launch
+      {...(held ? {} : { queued: 'Waiting: 4 of 4 agents busy on this Mac' })}
+      held={held}
+      onHeldChange={(next) => {
+        heldQueued(next)
+        setHeld(next)
+      }}
+    />
+  )
+}
+
+export const HeldWhileWaitingForAFreeAgent: Story = {
+  render: () => <HeldWhileQueued />,
+  play: async ({ canvasElement }) => {
+    const c = within(canvasElement)
+    await userEvent.click(c.getByRole('button', { name: 'Hold' }))
+    await expect(heldQueued).toHaveBeenCalledWith(true)
+    await expect(c.getByText('Held')).toBeInTheDocument()
+    await expect(c.getByRole('button', { name: 'Start' })).toBeInTheDocument()
+    await expect(c.queryByRole('status')).toBeNull()
   },
 }
 
@@ -271,15 +300,15 @@ function Placed({ worksIn: start = WorksIn.Local, ...rest }: Partial<Parameters<
   return <Launch worksIn={worksIn} onWorksInChange={setWorksIn} {...rest} />
 }
 
-/** Planned Local, the project's default: one line on what it gives up. */
+/** Planned Local, the project's default: the switch says where it works, and what each gives up is in its tooltip, not a line under it. */
 export const Local: Story = {
   render: () => <Placed />,
   play: async ({ canvasElement }) => {
     const c = within(canvasElement)
     await expect(c.getByRole('radio', { name: 'Local' })).toBeChecked()
-    await expect(c.getByText('One task at a time; your own edits share it.')).toBeVisible()
+    await expect(c.queryByText('One task at a time; your own edits share it.')).toBeNull()
     await userEvent.click(c.getByRole('radio', { name: 'Worktree' }))
-    await expect(c.getByText('Side by side with other tasks. Builds from cold.')).toBeVisible()
+    await expect(c.queryByText('Side by side with other tasks. Builds from cold.')).toBeNull()
     await userEvent.click(c.getByRole('radio', { name: 'Local' }))
   },
 }
@@ -289,7 +318,7 @@ export const LocalTaken: Story = {
   render: () => <Placed worksIn={WorksIn.Worktree} localTaken="Dark mode for Settings" />,
   play: async ({ canvasElement }) => {
     const c = within(canvasElement)
-    await expect(c.getByText('Local is taken by Dark mode for Settings. Side by side with other tasks. Builds from cold.')).toBeVisible()
+    await expect(c.getByText('Local is taken by Dark mode for Settings.')).toBeVisible()
     await userEvent.click(c.getByRole('radio', { name: 'Local' }))
     await expect(c.getByText('Waits for Dark mode for Settings.')).toBeVisible()
     await userEvent.click(c.getByRole('radio', { name: 'Worktree' }))

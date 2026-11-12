@@ -33,7 +33,7 @@ const startWhileOut = async (out: string, { asks = false, waits = false }: { rea
     await expect(planning.page.getByRole('heading', { name: 'meridian', level: 1 })).toBeVisible()
     await planTask(planning.page, 'Add a retry to the checkout call')
     await planning.page.getByRole('button', { name: 'Hold' }).click()
-    await expect(planning.page.getByRole('region', { name: 'Conversation' }).getByText('Held. Starts when you say')).toBeVisible()
+    await expect(planning.page.getByRole('region', { name: 'Conversation' }).getByText('Held', { exact: true })).toBeVisible()
   } finally {
     await planning.electronApp.close()
   }
