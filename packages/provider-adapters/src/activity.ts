@@ -66,8 +66,13 @@ export const pageOf = (url: string): string | undefined => {
  * a fetch's title names the address it reads, whose query or fragment can
  * carry a token.
  */
-export const pagesIn = (words: string): string =>
-  words.replace(/https?:\/\/[^\s"'<>]+/g, (url) => pageOf(url) ?? url.replace(/[?#].*$/, ''))
+export const pagesIn = (words: string): string => words.replace(/https?:\/\/[^\s"'<>]+/g, (url) => pageOf(url) ?? beforeQuery(url))
+
+/** An address up to its query or fragment: found in one pass, as a pattern from each `?` or `#` on would be slow. */
+const beforeQuery = (url: string): string => {
+  const cut = url.search(/[?#]/)
+  return cut === -1 ? url : url.slice(0, cut)
+}
 
 const search = (query: string | undefined): WebCall | undefined =>
   query === undefined ? undefined : { action: 'search', query: line(query) }

@@ -86,6 +86,11 @@ describe('pagesIn', () => {
     assert.strictEqual(pagesIn('Fetch https://example.com/doc?token=secret#private'), 'Fetch https://example.com/doc')
     assert.strictEqual(pagesIn('Read http://a.test/x#y and https://b.test/?q=1 too'), 'Read http://a.test/x and https://b.test too')
     assert.strictEqual(pagesIn('Fetch the docs'), 'Fetch the docs')
+    // An address that won't parse is cut at its query, quickly however many it has.
+    const many = `https://[${'#'.repeat(50_000)}`
+    const started = performance.now()
+    assert.strictEqual(pagesIn(many), 'https://[')
+    assert.isBelow(performance.now() - started, 200)
   })
 })
 
