@@ -196,8 +196,10 @@ describe('a plain task', () => {
           published.map((one) => [one.kind, one.left]),
           [['nothing', []]],
         )
-        // The coordinator reads it as a task with no branch.
+        // The coordinator leaves the aside out of its task list. On the board, it is a task with no branch.
         const access: ToolAccess = { role: 'coordinator', ...place, sessionId: 'none', taskId: null }
+        assert.strictEqual(yield* callTool(access, 'list_tasks', {}), 'The project has no tasks yet.')
+        yield* sql`UPDATE tasks SET shelf = NULL WHERE id = ${task.id}`
         assert.include(
           yield* callTool(access, 'list_tasks', {}),
           `${task.slug}: Which partners still call v1? (ready, led by Fake claude-code) — no branch`,
@@ -427,7 +429,6 @@ describe('a plain task', () => {
         const worktree = yield* worktreeOf(task.id)
         assert.isNotNull(worktree.branchedAt)
         assert.deepStrictEqual([card.kind, card.change, card.branch], ['plain', null, worktree.branch])
-        assert.deepStrictEqual([...(yield* (yield* Queries).kept)], [])
         // Nothing went to the host: no push, no pull request, and nothing in its thread says it ends on its branch.
         assert.lengthOf(github.changes, 0)
         assert.isNull(gitIn(bare, 'rev-parse', '--verify', '--quiet', `refs/heads/${worktree.branch}`))

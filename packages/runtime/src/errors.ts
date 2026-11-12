@@ -316,11 +316,12 @@ export class ImageRefused extends Schema.TaggedError<ImageRefused>()('ImageRefus
  * than a message's files may be, a folder of more files than that, more files
  * than a message carries or more bytes all together, one Althar can't read, one kept before that isn't
  * there any more, or one with nowhere to be copied to, as for a task whose
- * folder isn't ready or isn't on this computer. `name` is its own, where
- * Althar knows it.
+ * folder isn't ready or isn't on this computer, or can't come back: its
+ * branch is gone, or something else is in its place. `name` is its own,
+ * where Althar knows it.
  */
 export class FileRefused extends Schema.TaggedError<FileRefused>()('FileRefused', {
-  reason: Schema.Literals(['too_large', 'too_many_files', 'too_many', 'too_much', 'unreadable', 'missing', 'nowhere']),
+  reason: Schema.Literals(['too_large', 'too_many_files', 'too_many', 'too_much', 'unreadable', 'missing', 'nowhere', 'gone', 'in_way']),
   name: Schema.NullOr(Schema.String),
 }) {}
 

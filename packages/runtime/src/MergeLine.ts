@@ -6,6 +6,7 @@ import { Ledger } from '@althar/persistence-sqlite'
 import { Clock, Context, Crypto, Duration, Effect, Layer, Option, Queue, Schema } from 'effect'
 import { SqlClient } from 'effect/sql'
 
+import { keepUpdate } from './branchUpdates'
 import { touchTask } from './cards'
 import { Changes } from './Changes'
 import { hostName } from './checkLogs'
@@ -1052,6 +1053,8 @@ export class MergeLine extends Context.Service<
                   : (yield* viaHost(seen.host.madeFrom(seen.repository, { ...seen.change, headSha: done.head }, from)))
                     ? done.head
                     : null
+              // What it made is Althar's own, not someone else's push: a task's lead's commits on top of it still go up by themselves.
+              yield* keepUpdate(projectId, seen.change.url, { from, base: seen.base ?? null, head: done.head })
               return yield* updated(made)
             }
             case 'conflict':

@@ -829,12 +829,10 @@ export const ProjectSummary = Schema.Struct({
   tasks: Schema.Number,
   /** Sessions working now. */
   running: Schema.Number,
-  /** Questions waiting on the person. */
-  waiting: Schema.Number,
+  /** What waits on the person there, each thing once, as its board's Needs you counts it (`waitingOn`). */
+  yours: Schema.Number,
   /** Tasks under way: a step running, or held until an agent's usage limit resets. */
   working: Schema.Number,
-  /** Tasks ready for the person: their run passed, and nothing of theirs waits or starts. */
-  ready: Schema.Number,
   /** When an agent reaches its usage limit: its work moves on to the next free agent, waits for the reset, or asks the person. */
   usageLimit: UsageLimit,
   /** Whether work moves on to an agent's next account here when one runs out (ADR-012): off unless the person turned it on. */
@@ -1476,8 +1474,8 @@ export type ScreenshotsOnChange = typeof ScreenshotsOnChange.Type
  * - `up_to_date`: has what its target has, `have` commits behind where not;
  * - `conflicts`, `draft`: no conflict with its target; not a draft;
  * - `pushed`: nothing of its lead's left to push, `have` commits where there
- *   is, waiting where they go up on their own; unmet too where its branch and
- *   it have parted;
+ *   is, waiting where they go up on their own, `said` where they wait for
+ *   Ship; unmet too where its branch and it have parted;
  * - `signatures`: every commit signed, `have` not;
  * - `linear_history`: merged as a squash or rebase;
  * - `merge_queue`: merges through its branch's queue, waiting once in it;
@@ -1567,8 +1565,11 @@ export const ChangeSummary = Schema.Struct({
    * nothing for the person to push; else why they wait for the person's push,
    * in a few words. Absent where every push is the person's, as for
    * commits made outside its lead's turn, which nothing pushes (DEV-173).
+   * `ship` where they wait on a branch held for Ship, whatever the rules
+   * say: Ship sends them up, after its review, and nothing else pushes
+   * them, the person's Push included (a task is a conversation plus parts).
    */
-  pushing: Schema.optional(Schema.Struct({ held: Schema.NullOr(Schema.String) })),
+  pushing: Schema.optional(Schema.Struct({ held: Schema.NullOr(Schema.String), ship: Schema.optional(Schema.Boolean) })),
   /**
    * Where the task's branch here no longer simply adds to it, so a plain
    * push would be refused; null while it does. `rewritten`: commits Althar
@@ -2491,6 +2492,11 @@ export const TaskCard = Schema.Struct({
    * exchange, unless something of it waits on the person. Absent for a task on the board.
    */
   scratch: Schema.optional(Schema.Boolean),
+  /**
+   * What its lead left for the person to do on a tracker, where something waits: issues it drafted, to file, and changes it
+   * proposed to its issue, to apply. Absent where none waits.
+   */
+  issues: Schema.optional(Schema.Struct({ drafts: Schema.Int, changes: Schema.Int })),
   /**
    * A chat's latest exchange, as Scratch lists it (a task is a conversation plus parts, "Chats and Scratch"): when, who said
    * it, and its first line. Absent for a task on the board, and for a chat with nothing said yet.

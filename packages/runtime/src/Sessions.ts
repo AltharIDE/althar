@@ -1,5 +1,6 @@
 import { errandLines } from './Errands'
-import type { MessageSender, SentCanvasComment } from '@althar/contracts'
+import { isAgentDefault, knownModelName, type MessageSender, type SentCanvasComment, standsFor } from '@althar/contracts'
+import { existsSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
 
@@ -70,7 +71,7 @@ import { Instance } from './Instance'
 import { Limits } from './Limits'
 import { PlanUsage } from './PlanUsage'
 import { Live } from './Live'
-import type { Models } from './Models'
+import { type Models, modelsOf } from './Models'
 import { Policies, worksInOf } from './Policies'
 import { moveSession, Permissions, type RequestContext } from './Permissions'
 import { Questions } from './Questions'
@@ -93,7 +94,7 @@ import { alsoPlanned, siblingsOf } from './siblings'
 import { evidenceForReview } from './evidence'
 import { scratchOf } from './firstWrite'
 import { quickIn } from './kinds'
-import { defaultEffortOf } from './preferences'
+import { blockedModelsOf, defaultEffortOf } from './preferences'
 import { makeKeyedLock } from './keyedLock'
 import { makeInputBatches } from './inputBatches'
 import { type Starting, toolClock } from './turnTimes'
@@ -120,9 +121,10 @@ import { LEAD_PLANS_FROM_PRESETS, PARTS_CHANGE, PLAN_FROM_PRESETS } from './pres
 import { stopProcesses, treeOfCommand } from './stopping'
 import { outputText } from './reading'
 import { ToolServer } from './ToolServer'
-import { agentSaid, lostWords, startedAfreshWords, summarize } from './words'
+import { agentSaid, folderGoneWords, lostWords, startedAfreshWords, summarize } from './words'
 import { heldSkillsFor, serversFor, syncIo } from './agentTools'
 import { noteServerStatus } from './mcpHealth'
+import { COMPACT } from './compact'
 
 /*
  * Agent sessions on a task's thread (docs/architecture/03). The runtime
@@ -143,6 +145,16 @@ export type Disposition = 'after_current' | 'interrupt_and_continue'
  * also cuts off an agent that works but is slow: connecting, `session/new`, and setting the model and effort.
  */
 const SESSION_START_TIMEOUT = Duration.minutes(2)
+
+/** No model named, the agent would start on one the person switched off, and offers no other they left on. */
+export class ModelSwitchedOff extends Schema.TaggedError<ModelSwitchedOff>()('ModelSwitchedOff', {
+  agentName: Schema.String,
+  model: Schema.String,
+}) {
+  override get message(): string {
+    return `${this.model} is switched off for ${this.agentName}, and it has no other model on. Switch one on in Settings, or pick another agent.`
+  }
+}
 
 /** Starting the agent took longer than its bound: it hung, or was too slow, as opposed to refusing or crashing. */
 export class StartTimedOut extends Schema.TaggedError<StartTimedOut>()('StartTimedOut', {
@@ -578,6 +590,36 @@ const settleEffort = (definition: AgentDefinition, agent: AgentSession, asked: s
     }
   })
 
+/**
+ * Moves a session started on its agent's own default, no model named, off it where that default is a model the person
+ * switched off (ADR-015): onto the one of the agent's other models a takeover would pick (`best`), or, where that names
+ * none of them, as before Althar has read the agent's models, the first it lists. With none left on, it doesn't start, and
+ * says why. Where what the person switched off can't be read, it starts where it is, as nothing says it is off.
+ */
+const offSwitchedOff = (definition: AgentDefinition, agent: AgentSession, best: Effect.Effect<string | null>) =>
+  Effect.gen(function* () {
+    const offered = modelsOf(definition, yield* agent.options)
+    if (offered.model === null) return
+    const blocked = yield* blockedModelsOf(definition.id).pipe(
+      Effect.catchCause((cause) =>
+        Effect.as(Effect.logWarning('Could not read the models the person switched off', cause), [] as ReadonlyArray<string>),
+      ),
+    )
+    const on = standsFor(offered.models, offered.model) ?? offered.model
+    if (!blocked.includes(offered.model) && !blocked.includes(on)) return
+    const left = offered.models.filter((one) => !isAgentDefault(one) && !blocked.includes(one.id))
+    const strongest = yield* best
+    const instead = left.find((one) => one.id === strongest) ?? left[0]
+    if (instead === undefined) {
+      const named = offered.models.find((one) => one.id === on)
+      return yield* new ModelSwitchedOff({
+        agentName: definition.name,
+        model: named === undefined ? on : knownModelName(definition, named),
+      })
+    }
+    yield* agent.setOption(definition.options.model, instead.id)
+  })
+
 /** What an agent is told of a message the person dictated, after its words (the standing instructions of a coordinator and a lead explain it). */
 export const DICTATED = "(Dictated by voice: words may be misheard. Read names generously; 'Alpha'/'Alter' likely means Althar.)"
 
@@ -585,8 +627,7 @@ export const DICTATED = "(Dictated by voice: words may be misheard. Read names g
 const STANDING_DICTATED =
   'The person sometimes dictates by voice, and a message that was ends with a note saying so. Read it past transcription mistakes: misheard names (Althar, the project, its files), homophones.'
 
-/** What the person asks an agent's context be compacted with: the agent's own command, sent bare as a turn of its own. */
-export const COMPACT = '/compact'
+export { COMPACT }
 
 /**
  * What a lead given skills is told of them. Its agent lists them, but a list alone goes unread beside a brief that
@@ -2981,6 +3022,12 @@ export class Sessions extends Context.Service<
                   : { meta: definition.sessionMeta(reads ? 'reader' : 'lead', sessionOptions) }),
               })
               if (model !== undefined) yield* agent.setOption(definition.options.model, model)
+              else
+                yield* offSwitchedOff(
+                  definition,
+                  agent,
+                  limits.modelFor({ agentId: definition.id, projectId: thread.projectId }).pipe(Effect.orElseSucceed(() => null)),
+                )
               // An effort the model doesn't offer is no reason not to start.
               yield* settleEffort(definition, agent, effort ?? null)
               return { connection, agent }
@@ -3004,7 +3051,10 @@ export class Sessions extends Context.Service<
               Effect.annotateLogs({ agent: definition.id, session: sessionId, thread: thread.threadId }),
             )
             const reason = Cause.pretty(started.cause)
-            const summary = summarize(started.cause)
+            // A folder gone from under it fails its start as a missing command would (ENOENT): said as the folder, never
+            // that an agent that is there isn't installed.
+            const folder = cwdOf(thread)
+            const summary = existsSync(folder) ? summarize(started.cause) : folderGoneWords(folder)
             yield* sql.withTransaction(
               Effect.gen(function* () {
                 if (processId !== undefined) yield* change('processes', processId, { state: 'unknown', endedAt: yield* timestamp })
@@ -3656,9 +3706,9 @@ export class Sessions extends Context.Service<
           return { aside, unsaid: aside && row?.unsaid === 1 }
         })
 
-      /** The thread so far, for a brief, oldest first, within the prompt's budget. */
+      /** The thread so far, for a brief, oldest first, within the prompt's budget: what waits in its queue the turn says itself. */
       const threadSoFar = (threadId: string) =>
-        Effect.map(transcript(threadId, PROMPT_BUDGET), (record) =>
+        Effect.map(transcript(threadId, PROMPT_BUDGET, { waiting: false }), (record) =>
           record.text === ''
             ? []
             : [
