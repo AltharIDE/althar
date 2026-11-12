@@ -759,6 +759,40 @@ describe('a merge of main into the task’s branch after its pull request opened
     }).pipe(Effect.provide(runtimeWith(github)))
   })
 
+  it.live('sent back by the merge queue for its checks, its lead brings main in with update_branch: no new steps, no round', () => {
+    const { working, bare, github } = onGitHub()
+    return Effect.gen(function* () {
+      const changes = yield* Changes
+      github.mergeQueue()
+      const task = yield* opened(working, '[review:pass] [lead:update-branch]')
+      const pushed = git(bare, 'rev-parse', BRANCH)
+      const [card] = yield* cards(task.projectId)
+      yield* changes.merge(task.taskId, card?.change?.head ?? '')
+      yield* changes.refresh(task.taskId)
+      // As #773 was: behind main, and out of the queue for its checks, not for a conflict.
+      github.fallBehind(1)
+      github.dequeue(1, 'checks')
+      yield* changes.refresh(task.taskId)
+      yield* until(
+        Effect.sync(() => github.branchesUpdated.length),
+        (count) => count === 1,
+      )
+      yield* answered(task.threadId, task.turns + 1)
+      // The host merged main into the pull request's branch; the lead redid nothing, and Althar started nothing.
+      assert.deepStrictEqual(
+        github.branchesUpdated.map((one) => one.number),
+        [1],
+      )
+      assert.strictEqual(git(task.path, 'rev-parse', 'HEAD'), pushed)
+      assert.isNull(yield* heldAt(task.taskId))
+      assert.deepStrictEqual(
+        (yield* runsOf(task.taskId)).map((run) => [run.state, run.planId === null]),
+        [['succeeded', false]],
+      )
+      assert.deepStrictEqual(yield* stepsSaid(task.threadId), ['implement', 'review', 'publish'])
+    }).pipe(Effect.provide(runtimeWith(github)))
+  })
+
   it.live('held for Ship before, as #773 was, Ship sends it up with no review and no round', () => {
     const { working, bare, github } = onGitHub()
     return Effect.gen(function* () {

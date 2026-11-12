@@ -25,20 +25,21 @@ const tipsOf = (path: string, refs: ReadonlyArray<string>) =>
   })
 
 /**
- * The task's change against its base at `head`, as `diff -U0` gives it with
- * no line numbers or blob names: where it sits in the file moves as the base
- * grows around it, what it changes doesn't. Undefined where git can't say.
+ * Whether `head` is exactly `from` with the base brought in, as of `tip`:
+ * its tree is git's clean merge of `from` and the base commit the branch now
+ * forks from. The task's change against its base is then what it was,
+ * carried over by git and nothing more. Trees, not diffs: a changed binary,
+ * or an edit moved between two like lines, makes another tree. False where
+ * the merge wouldn't be clean or git can't say.
  */
-const changeAt = (path: string, tip: string, head: string) =>
+const carriedOver = (path: string, from: string, head: string, tip: string) =>
   Effect.gen(function* () {
     const fork = yield* gitOutcome(path, 'merge-base', tip, head)
-    if (fork.code !== 0 || fork.stdout === '') return undefined
-    const diff = yield* gitOutcome(path, 'diff', '--no-color', '--no-ext-diff', '--no-textconv', '--no-renames', '-U0', fork.stdout, head)
-    if (diff.code !== 0) return undefined
-    return diff.stdout
-      .split('\n')
-      .filter((line) => !line.startsWith('@@') && !line.startsWith('index '))
-      .join('\n')
+    if (fork.code !== 0 || fork.stdout === '') return false
+    const made = yield* gitOutcome(path, 'merge-tree', '--write-tree', '--no-messages', from, fork.stdout)
+    if (made.code !== 0) return false
+    const tree = yield* gitOutcome(path, 'rev-parse', '--verify', '-q', `${head}^{tree}`)
+    return tree.code === 0 && made.stdout.split('\n')[0] === tree.stdout
   })
 
 /** Whether a merge commit is git's own clean merge of its two parents: it settled no conflict and added nothing. */
@@ -78,9 +79,9 @@ export const ownCommits = (path: string, from: string, head: string, refs: Reado
 
 /**
  * Whether the commits from `from` to `head` only bring the base branch in
- * (`refs`), with nothing of the task's own: its change against its base is
- * the same as it was at `from` by any of the base's refs, or none of the
- * commits is its own (`ownCommits`). False where nothing says so, as where
+ * (`refs`), with nothing of the task's own: `head` is git's clean merge of
+ * `from` and the base it now forks from, by any of the base's refs
+ * (`carriedOver`), or none of the commits is its own (`ownCommits`). False where nothing says so, as where
  * git knows none of the refs.
  */
 export const onlyBase = (path: string, from: string, head: string, refs: ReadonlyArray<string>) =>
@@ -88,10 +89,6 @@ export const onlyBase = (path: string, from: string, head: string, refs: Readonl
     if (from === head) return false
     const tips = yield* tipsOf(path, refs)
     if (tips.length === 0) return false
-    for (const tip of tips) {
-      const before = yield* changeAt(path, tip, from)
-      const now = yield* changeAt(path, tip, head)
-      if (before !== undefined && now !== undefined && before === now) return true
-    }
+    for (const tip of tips) if (yield* carriedOver(path, from, head, tip)) return true
     return (yield* ownCommits(path, from, head, tips)).length === 0
   })

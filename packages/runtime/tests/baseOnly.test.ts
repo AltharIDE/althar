@@ -106,6 +106,44 @@ describe('commits that only bring the base branch in', () => {
     }),
   )
 
+  it.effect('a task commit that changes a binary its pull request changed already is its work, though the diffs read alike', () =>
+    Effect.gen(function* () {
+      const cwd = mkdtempSync(join(tmpdir(), 'althar-base-only-'))
+      git(cwd, 'init', '-q', '-b', 'main')
+      const png = (version: number) => Buffer.from([0x89, 0x50, 0x4e, 0x47, 0, 0, 0, version, 0, 1, 2, 3])
+      writeFileSync(join(cwd, 'image.png'), png(1))
+      commit(cwd, 'notes.md', 'start\n', 'Start')
+      git(cwd, 'switch', '-q', '-c', 'task')
+      writeFileSync(join(cwd, 'image.png'), png(2))
+      const opened = commit(cwd, 'notes.md', 'start\n', 'Image B')
+      writeFileSync(join(cwd, 'image.png'), png(3))
+      const tweak = commit(cwd, 'notes.md', 'start\n', 'Image C')
+      assert.isFalse(yield* onlyBase(cwd, opened, tweak, ['main']))
+      assert.deepStrictEqual(yield* ownCommits(cwd, opened, tweak, ['main']), [tweak])
+      // After a merge of main too.
+      mainMovesOn(cwd)
+      const merged = mergeMain(cwd)
+      writeFileSync(join(cwd, 'image.png'), png(4))
+      const after = commit(cwd, 'notes.md', 'start\n', 'Image D')
+      assert.isTrue(yield* onlyBase(cwd, tweak, merged, ['main']))
+      assert.isFalse(yield* onlyBase(cwd, merged, after, ['main']))
+    }),
+  )
+
+  it.effect('a task commit that moves its edit between two like lines is its work, though the lines it changes read alike', () =>
+    Effect.gen(function* () {
+      const cwd = mkdtempSync(join(tmpdir(), 'althar-base-only-'))
+      git(cwd, 'init', '-q', '-b', 'main')
+      const same = (at: number) => `${Array.from({ length: 8 }, (_, index) => (index + 1 === at ? 'retry' : 'wait')).join('\n')}\n`
+      commit(cwd, 'steps.txt', same(0), 'Start')
+      git(cwd, 'switch', '-q', '-c', 'task')
+      const opened = commit(cwd, 'steps.txt', same(2), 'Retry second')
+      const moved = commit(cwd, 'steps.txt', same(6), 'Retry sixth')
+      assert.isFalse(yield* onlyBase(cwd, opened, moved, ['main']))
+      assert.deepStrictEqual(yield* ownCommits(cwd, opened, moved, ['main']), [moved])
+    }),
+  )
+
   it.effect('with no ref of the base git knows, nothing says it is the base’s: it is the task’s work', () =>
     Effect.gen(function* () {
       const { cwd, opened } = repository()
