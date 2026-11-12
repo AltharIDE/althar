@@ -1,4 +1,13 @@
-import type { AgentStatus, BoardCall, BoardTask, ChangeSummary, HeldForShip, PlanStep, ReviewBrief } from '@althar/contracts'
+import {
+  type AgentStatus,
+  type BoardCall,
+  type BoardTask,
+  type ChangeSummary,
+  type HeldForShip,
+  issuesWordOf,
+  type PlanStep,
+  type ReviewBrief,
+} from '@althar/contracts'
 import {
   Board,
   BoardCard,
@@ -66,7 +75,7 @@ import { text as stuckText } from '../task/StuckCall'
 import { canHold, teamChangeOf, TeamMenu } from '../team/Team'
 import { arrivesQuietly, markArrived, watch } from './arrived'
 import s from './Board.module.css'
-import { type Held, heldOf, holding, type Lanes, movesInLine, type Waiting } from './lanes'
+import { type Held, heldOf, holding, type Lanes, movesInLine, type Waiting, yoursOf } from './lanes'
 import type { LineActions } from './useBoard'
 import type { WorkActions } from './useWorkActions'
 
@@ -627,6 +636,17 @@ export const waitingCardOf = ({ task, call }: Waiting, name: (id: string | null)
   })
 }
 
+/** A task that waits on issues its lead drafted, or changes it proposed to its issue: what to do, in its task, where they are. */
+export const issuesCardOf = (work: BoardTask): Card => ({
+  status: TaskStatus.Yours,
+  kind: kindOf(work),
+  ...localOf(work),
+  ...towardOf(work),
+  title: work.title,
+  ...fromOf(work),
+  word: issuesWordOf(work.issues),
+})
+
 /**
  * A ready task's card: a change to accept, with its pull request and checks; a review drafted; or a plain task that finished, with
  * what it handed back, or else its branch, where its lead wrote in the repository: on this Mac, as no pull request is coming.
@@ -700,7 +720,7 @@ const readyCard = (work: BoardTask, actions?: CardActions): Card => {
       return {
         ...base,
         // Handed back (a conflict its lead couldn't resolve) says so first; else commits in no pull request yet; as its header says.
-        word: readyWordOf(work, work.change),
+        word: readyWordOf(work),
         ...(object === null ? {} : { object }),
         // Nothing built: no accept to press; what its lead leaves to the person, and Done, which settles it where it is, in its corner.
         ...(work.nothingBuilt === true ? { ...(ask === null ? {} : { why: ask }), corner: settleWaysOf(work, actions) } : {}),
@@ -1247,7 +1267,7 @@ export function BoardView({
         ))}
       </BoardColumn>
 
-      <BoardColumn lane={BoardLane.Yours} count={asks.length + lanes.stopped.length + lanes.ready.length}>
+      <BoardColumn lane={BoardLane.Yours} count={yoursOf(lanes)}>
         {asks.map((ask) =>
           ask.waiting !== null ? (
             <BoardCard
@@ -1262,6 +1282,16 @@ export function BoardView({
             <CallCard key={ask.call.id} data-move={ask.call.id} {...callCardOf(ask.call, name)} onOpen={() => onOpen(ask.call.threadId)} />
           ),
         )}
+        {lanes.issues.map((work) => (
+          <BoardCard
+            key={work.taskId}
+            data-move={work.taskId}
+            {...issuesCardOf(work)}
+            {...parentOf(work, onOpen)}
+            errands={work.errands}
+            onOpen={() => onOpen(work.threadId)}
+          />
+        ))}
         {lanes.stopped.map((work) => (
           <BoardCard
             key={work.taskId}

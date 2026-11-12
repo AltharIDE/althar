@@ -48,7 +48,9 @@ import { SqlClient } from 'effect/sql'
 import { Busy } from './Busy'
 import { offScratch, touchCard, touchTask } from './cards'
 import { ChecksAsked, inspectChecks } from './readChecks'
-import { hostName, logForLead, logPage, queueDetailOf, readLog } from './checkLogs'
+import { hostName, logForLead, logPage, LOGS_TO_LEAD, queueDetailOf, readLog } from './checkLogs'
+import { leftByAlthar } from './branchUpdates'
+import { withFolder } from './bringBack'
 import { Agents, RuntimeConfig } from './Config'
 import { Models } from './Models'
 import { detailsOf, reviewRecordOf, reviewSeal, sealOf, unreviewedNote, unreviewedOf, type SessionNamer } from './pullRequestReview'
@@ -152,6 +154,7 @@ import {
   titleWords,
   unsettledLine,
   withDescribed,
+  commitsWord,
 } from './pullRequestWords'
 import { change, fact, timestamp } from './records'
 import { retitleTask, TITLE_LENGTH } from './taskTitle'
@@ -418,7 +421,11 @@ export interface Unshipped {
   readonly slug: string
   /** Its last pull request, as last seen; null where it has had none. */
   readonly change: ChangeSummary | null
-  /** When that pull request opened: its next is described from what came after. */
+  /**
+   * When the last of what went in that pull request went up to it, else when
+   * it opened: its next is titled and described from what came after, never
+   * from words given for work that went in it.
+   */
   readonly openedAt: string | null
   /**
    * Where its commits are counted from: that pull request's head, as the
@@ -499,9 +506,6 @@ export const listenDue = (input: {
   return input.now - input.polledAt >= (quiet ? every * QUIET_SLOWER : every) - every / 2
 }
 
-/** How many failing checks' logs the lead gets, and how many comments a reading of the pull request shows. */
-const LOGS_TO_LEAD = 2
-
 /** How many times a change's lead may try to fix its failing checks alone; the next failure makes the change the person's (ADR-040). */
 export const FIX_ROUNDS = 3
 
@@ -553,9 +557,6 @@ const COMMITS_SHOWN = 20
 /** A push the lead asked the person for, as its item in the task's thread keeps it. */
 type Asked = typeof PushRequestItem.fields.content.Type
 const decodeAsked = Schema.decodeUnknownOption(Schema.fromJsonString(PushRequestItem.fields.content))
-
-/** Commits, counted, as the lead and the person read them. */
-const commitsWord = (n: number) => (n === 1 ? '1 commit' : `${n} commits`)
 
 /** Checks that failed: by name where one did, or how many. */
 const checksFailed = (failing: ReadonlyArray<string>) => (failing.length === 1 ? `${failing[0]} failed` : `${failing.length} checks failed`)
@@ -854,7 +855,9 @@ export class Changes extends Context.Service<
     /**
      * Merges the task's pull request at the head the person saw, because
      * they said to, marking a draft ready first; one that moved on since
-     * isn't merged. Agents never merge.
+     * isn't merged. Agents never merge. Refused (ShipRefused) while commits
+     * on its branch wait for Ship: the person's word for them is Ship,
+     * Review and merge, or Merge now, never a plain merge without them.
      */
     merge(taskId: string, head: string, url?: string): Effect.Effect<void, unknown>
     /**
@@ -1045,10 +1048,11 @@ export class Changes extends Context.Service<
      * Where the project's rules push its leads' commits on their own
      * (ADR-072), how each of the task's pull requests stands, by its address:
      * `held` null while what its lead committed goes up as its turn ends, else
-     * why it waits for the person's push. Null where every push is the
-     * person's, or the task is settled.
+     * why it waits for the person's push. `ship` where it waits on a branch
+     * held for Ship, whatever the rules: Ship alone sends it up. Null where
+     * every push is the person's, or the task is settled.
      */
-    pushing(taskId: string): Effect.Effect<ReadonlyMap<string, { readonly held: string | null }> | null>
+    pushing(taskId: string): Effect.Effect<ReadonlyMap<string, { readonly held: string | null; readonly ship?: boolean }> | null>
     /**
      * Pushes what each open task's lead committed and left waiting, of one
      * project, or of all, where their rules push it on its own (ADR-072): as
@@ -2542,17 +2546,23 @@ export class Changes extends Context.Service<
             return yield* new ToolRefused({
               message: `${changeWords(from)}'s commits conflict with ${changeWords(into)} in ${filesWord(conflicted)}: both stay as they were.`,
             })
-          if (from.path !== into.path) {
-            const root = (yield* git(from.path, 'rev-parse', '--git-common-dir').pipe(Effect.orElseSucceed(() => ''))).replace(
-              /\/\.git$/,
-              '',
-            )
-            yield* git(root === '' ? into.path : root, 'worktree', 'remove', from.path).pipe(
-              Effect.catch(() => git(into.path, 'worktree', 'remove', '--force', from.path)),
-              Effect.ignore,
-            )
-          }
-          yield* goneRow(from, 'workspace.joined', { into: into.id, commits: own.length }, actorId)
+          // Its folder goes and its row says so with nothing bringing the folder back between (`withFolder`).
+          yield* withFolder(
+            taskId,
+            Effect.gen(function* () {
+              if (from.path !== into.path) {
+                const root = (yield* git(from.path, 'rev-parse', '--git-common-dir').pipe(Effect.orElseSucceed(() => ''))).replace(
+                  /\/\.git$/,
+                  '',
+                )
+                yield* git(root === '' ? into.path : root, 'worktree', 'remove', from.path).pipe(
+                  Effect.catch(() => git(into.path, 'worktree', 'remove', '--force', from.path)),
+                  Effect.ignore,
+                )
+              }
+              yield* goneRow(from, 'workspace.joined', { into: into.id, commits: own.length }, actorId)
+            }),
+          )
           const named = from.name ?? from.branch
           yield* lineIn(
             from,
@@ -2591,36 +2601,43 @@ export class Changes extends Context.Service<
               message: `${changeWords(row)} is the task's only change: its lead needs a folder. Remove the task's worktree instead, which keeps its branch.`,
             })
           const committed = yield* commitLeftIn(row.path, 'Work in progress, as its change was dropped')
-          if (left !== undefined) {
-            yield* git(row.path, 'switch', '--quiet', left.branch)
-            const sql = yield* SqlClient.SqlClient
-            yield* sql.withTransaction(
-              Effect.gen(function* () {
-                const revision = yield* change('workspaces', left.id, { state: 'ready' })
-                yield* fact({
-                  projectId: left.projectId,
-                  aggregateType: 'workspace',
-                  aggregateId: left.id,
-                  revision,
-                  type: 'workspace.back',
-                  payload: { from: row.id },
-                  actorId,
-                })
-              }),
-            )
-          } else {
-            const root = (yield* git(row.path, 'rev-parse', '--git-common-dir').pipe(Effect.orElseSucceed(() => ''))).replace(
-              /\/\.git$/,
-              '',
-            )
-            yield* git(root, 'worktree', 'remove', row.path).pipe(
-              Effect.catch(() => git(root, 'worktree', 'remove', '--force', row.path)),
-              Effect.ignore,
-            )
-          }
+          // Its folder goes, or back to the change that left it, and its row says so with nothing bringing the folder back
+          // between (`withFolder`).
+          yield* withFolder(
+            taskId,
+            Effect.gen(function* () {
+              if (left !== undefined) {
+                yield* git(row.path, 'switch', '--quiet', left.branch)
+                const sql = yield* SqlClient.SqlClient
+                yield* sql.withTransaction(
+                  Effect.gen(function* () {
+                    const revision = yield* change('workspaces', left.id, { state: 'ready' })
+                    yield* fact({
+                      projectId: left.projectId,
+                      aggregateType: 'workspace',
+                      aggregateId: left.id,
+                      revision,
+                      type: 'workspace.back',
+                      payload: { from: row.id },
+                      actorId,
+                    })
+                  }),
+                )
+              } else {
+                const root = (yield* git(row.path, 'rev-parse', '--git-common-dir').pipe(Effect.orElseSucceed(() => ''))).replace(
+                  /\/\.git$/,
+                  '',
+                )
+                yield* git(root, 'worktree', 'remove', row.path).pipe(
+                  Effect.catch(() => git(root, 'worktree', 'remove', '--force', row.path)),
+                  Effect.ignore,
+                )
+              }
+              yield* goneRow(row, 'workspace.dropped', { committed }, actorId)
+            }),
+          )
           for (const pulled of yield* pulledOf(row.id))
             if (pulled.state === 'open') yield* stopListening(taskId, pulled.url).pipe(Effect.ignore)
-          yield* goneRow(row, 'workspace.dropped', { committed }, actorId)
           const named = row.name ?? row.branch
           yield* lineIn(row, `Dropped ${named}: its folder went, ${row.branch} stays.`, {
             kind: 'dropped',
@@ -5636,7 +5653,9 @@ export class Changes extends Context.Service<
           const repositories = yield* sql<ShippingRow>`
             SELECT w.id AS workspace_id, w.path, w.branch, w.base_commit, w.base_ref, b.display_name AS name, b.slug,
               b.remote_fingerprints AS remotes, coalesce(w.toward, b.default_base_ref) AS default_base, c.head_commit AS sent, c.branch AS change_branch, l.id AS link_id, l.product,
-              l.snapshot, l.listening, l.created_at AS opened_at
+              l.snapshot, l.listening,
+              coalesce((SELECT max(o.observed_at) FROM observations o WHERE o.subject_type = 'external_link' AND o.subject_id = l.id
+                AND o.kind = 'pushed'), l.created_at) AS opened_at
             FROM workspaces w JOIN repository_bindings b ON b.id = w.binding_id
             LEFT JOIN repository_changes c ON c.id = (SELECT id FROM repository_changes WHERE workspace_id = w.id
               AND pull_request_url IS NOT NULL ORDER BY created_at DESC, rowid DESC LIMIT 1)
@@ -7162,7 +7181,8 @@ export class Changes extends Context.Service<
        * task's pull requests, though the project's rules push it on its own
        * (ADR-072), in a few words for its card; null where it can go up. Never
        * over commits someone else pushed: the pull request's branch anywhere
-       * but where Althar last pushed it, they are on it, and the person sees
+       * but where Althar last pushed it or its own update of it left it
+       * (`leftByAlthar`), they are on it, and the person sees
        * the lead's go on top of them. Never where it would need forcing, nor
        * onto the default branch. Nor once the person stopped or interrupted
        * the lead, until anything goes up or the lead is spoken to again.
@@ -7186,7 +7206,9 @@ export class Changes extends Context.Service<
           const tip = yield* remoteTip(path, yield* pushTargetOf(taskId, host, repository, path, { ...snapshot, source: onto }), onto)
           const sent = yield* sentTo(link.projectId, snapshot.url)
           const there = tip ?? snapshot.headSha
-          if (there === null || there !== sent) return `Someone else pushed to ${name}`
+          const ours =
+            there !== null && (yield* leftByAlthar({ link, host, repository, read: host.change(repository, snapshot.number), there, sent }))
+          if (!ours) return `Someone else pushed to ${name}`
           const sql = yield* SqlClient.SqlClient
           const [stopped] = yield* sql<{ how: string }>`
             SELECT json_extract(o.payload, '$.how') AS how FROM observations o
@@ -7936,6 +7958,23 @@ export class Changes extends Context.Service<
         })
 
       /**
+       * Whether what is on an open pull request's branch here waits for Ship
+       * (a task is a conversation plus parts, "A tweak waits for Ship"): its
+       * worktree is held for it, and the branch has commits the pull request
+       * doesn't, or Althar can't tell. Ship alone sends them up, after its
+       * review, and nothing merges the pull request without them unseen:
+       * Review and merge, or Merge now, take them.
+       */
+      const waitsForShip = (taskId: string, link: LinkRow, snapshot: Snapshot) =>
+        Effect.gen(function* () {
+          if (snapshot.state !== 'open') return false
+          const workspace = yield* worktreeOf(taskId, snapshot.url)
+          if (workspace?.heldAt == null || !existsSync(workspace.path)) return false
+          const here = yield* aheadOf(workspace.path, null, [yield* sentTo(link.projectId, snapshot.url), snapshot.headSha])
+          return here.kind !== 'ahead' || here.count > 0
+        })
+
+      /**
        * How each of a task's pull requests stands for its lead's commits
        * (ADR-072), read from the record: going up as its turn ends while its
        * lead is in one, else held where Althar kept why since anything last
@@ -7943,10 +7982,18 @@ export class Changes extends Context.Service<
        * none for one held for no reason a moment after its lead's last turn
        * ended, as commits made outside a turn, which nothing pushes, the
        * person's to push as where the rules leave it to them (DEV-173).
+       * Held for Ship, whatever the rules say and whether its lead is at work
+       * or not, Ship alone sends it up, after its review (`pushLeftOn`).
        */
       const pushingOf = (taskId: string) =>
         Effect.gen(function* () {
-          if (!(yield* pushesFor(taskId))) return null
+          const forShip = new Map<string, { readonly held: string; readonly ship: true }>()
+          if ((yield* holdsOf(taskId)).length > 0)
+            for (const link of yield* linksOf(taskId)) {
+              const snapshot = yield* decodeSnapshot(link.snapshot)
+              if (yield* waitsForShip(taskId, link, snapshot)) forShip.set(snapshot.url, { held: 'Held for Ship', ship: true })
+            }
+          if (!(yield* pushesFor(taskId))) return forShip.size === 0 ? null : forShip
           const sql = yield* SqlClient.SqlClient
           const [thread] = yield* sql<{ id: string }>`SELECT id FROM threads WHERE task_id = ${taskId} AND kind = 'task'`
           const lead = thread === undefined ? Option.none() : yield* sessions.running(thread.id)
@@ -7956,9 +8003,10 @@ export class Changes extends Context.Service<
               ? []
               : yield* sql<{ ended: string | null }>`SELECT max(ended_at) AS ended FROM turn_deliveries WHERE thread_id = ${thread.id}`
           const going = atWork || betweenAgents(turn?.ended ?? null, yield* Clock.currentTimeMillis, goingFor)
-          const shown = new Map<string, { readonly held: string | null }>()
+          const shown = new Map<string, { readonly held: string | null; readonly ship?: boolean }>(forShip)
           for (const link of yield* linksOf(taskId)) {
             const snapshot = yield* decodeSnapshot(link.snapshot)
+            if (forShip.has(snapshot.url)) continue
             const [held] = atWork
               ? []
               : yield* sql<{ why: string }>`
@@ -9083,7 +9131,18 @@ export class Changes extends Context.Service<
         readSettled,
         close: (taskId, url, options) => provide(locked(taskId)(close(taskId, url, options.deleteBranch))),
         exclusive: (taskId, effect) => locked(taskId)(effect),
-        merge: (taskId, head, url) => provide(locked(taskId)(merge(taskId, head, url))),
+        merge: (taskId, head, url) =>
+          provide(
+            locked(taskId)(
+              Effect.gen(function* () {
+                const { link, snapshot } = yield* current(taskId, url)
+                // Merged as it stands, the pull request would leave out what waits for Ship, unreviewed: Ship, Review and merge, or
+                // Merge now, each the person's word for them, take it.
+                if (yield* waitsForShip(taskId, link, snapshot)) return yield* new ShipRefused({ taskId, why: 'held' })
+                yield* merge(taskId, head, url)
+              }),
+            ),
+          ),
         retarget: (taskId, toward, change) => provide(locked(taskId)(retarget(taskId, toward, change ?? null))),
         joinChanges: (taskId, change, into, actorId) => provide(locked(taskId)(joinChanges(taskId, change, into, actorId))),
         dropChange: (taskId, change, actorId) => provide(locked(taskId)(dropChange(taskId, change, actorId))),

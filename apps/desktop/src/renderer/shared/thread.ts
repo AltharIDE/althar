@@ -137,6 +137,20 @@ export type SmallChangeContent = Extract<ThreadItem, { kind: 'small_change' }>['
 export type ModelMoveContent = Extract<ThreadItem, { kind: 'model_move' }>['content']
 export type MergeLineContent = Extract<ThreadItem, { kind: 'merge_line' }>['content']
 
+/**
+ * How a setup stands: under way; stopped as Althar quit; gone through; or
+ * failed, as its command did, or as it couldn't copy a file a recorded setup
+ * names (ADR-080), though its command exited 0. The one rule the thread's
+ * line for it and its round's fold both read.
+ */
+export const setupStanding = (setup: SetupContent): 'running' | 'stopped' | 'done' | 'failed' | 'missing' => {
+  const { ended } = setup
+  if (ended === null) return 'running'
+  if (ended.stopped) return 'stopped'
+  if (ended.code !== 0) return 'failed'
+  return (ended.missing?.length ?? 0) > 0 ? 'missing' : 'done'
+}
+
 export type Block =
   | {
       readonly kind: 'you'

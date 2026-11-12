@@ -14,6 +14,7 @@ import { partsOfTask, presetsIn, savePreset } from '../src/presets'
 import { Projects } from '../src/Projects'
 import { Queries } from '../src/Queries'
 import * as Runtime from '../src/Runtime'
+import { shelve } from '../src/scratch'
 import { Sessions } from '../src/Sessions'
 import { ToolServer, type ToolAccess } from '../src/ToolServer'
 import { callTool, fakeConnectors, HOST, hosted, items, runtime, until } from './support'
@@ -102,7 +103,7 @@ describe('a chat on Scratch', () => {
 })
 
 describe('a chat’s copy', () => {
-  it.live('is made without setup, which replays the first time its lead runs something', () => {
+  it.live('is never set up while it is an aside, whatever its lead runs: made a task, it is, before its next turn', () => {
     const { working, bare } = hosted()
     const github = makeFakeService({ pushUrl: () => bare })
     github.addRepository(['meridian', 'api'])
@@ -115,15 +116,28 @@ describe('a chat’s copy', () => {
         lead: { agent: 'claude-code' },
       })
       const [chat] = yield* until(cards(projectId), (all) => all[0]?.phase === 'ready')
+      // Started by the coordinator, it was made on Scratch: its setup, begun as it was made, never ran.
+      assert.isTrue(chat?.scratch === true)
       const setupOf = sql<{ setup: string | null }>`SELECT setup FROM workspaces WHERE task_id = ${chat?.taskId ?? ''}`
-      // Only talking, nothing was set up.
       assert.isNull((yield* setupOf)[0]?.setup ?? null)
-      // Its lead runs something: its setup replays then.
-      yield* (yield* Sessions).send({
-        envelope: yield* Runtime.envelope('thread.send', { threadId: chat?.threadId ?? '' }),
-        threadId: chat?.threadId ?? '',
-        body: 'Run it. [lead:serve] [lead:finish]',
-      })
+      // Its lead runs something, and its turn ends: still nothing set up, then or before the turn after.
+      const sessions = yield* Sessions
+      const say = (body: string) =>
+        Effect.gen(function* () {
+          yield* sessions.send({
+            envelope: yield* Runtime.envelope('thread.send', { threadId: chat?.threadId ?? '' }),
+            threadId: chat?.threadId ?? '',
+            body,
+          })
+          yield* until(sessions.busy(chat?.threadId ?? ''), (busy) => !busy)
+        })
+      yield* say('Run it. [lead:serve] [lead:finish]')
+      yield* say('And now? [lead:finish]')
+      assert.isNull((yield* setupOf)[0]?.setup ?? null)
+      assert.isFalse((yield* items(chat?.threadId ?? '')).some((item) => item.kind === 'setup'))
+      // Made a task, it is work: its copy is set up before its next turn.
+      yield* shelve(chat?.taskId ?? '', null, (yield* Instance).personId)
+      yield* say('Build it. [lead:finish]')
       yield* until(setupOf, (rows) => rows[0]?.setup != null)
     }).pipe(Effect.provide(runtimeWith(github)))
   })
@@ -375,7 +389,7 @@ describe('what the coordinator and a lead are told of presets', () => {
       assert.include(brief, 'The person’s own presets count too')
       // A prototype ends with its branch; it may graduate to a change in the same task, or not, and the person decides.
       assert.include(brief, 'A prototype ends with its branch')
-      assert.include(brief, 'the same task can go on as a change, with its pull request ending and its review added then')
+      assert.include(brief, 'the same task goes on as a change, rather than a new task by default: change_part with preset Change')
       assert.include(brief, 'never assume either way')
 
       const tools = yield* toolDescriptions(coordinator)
