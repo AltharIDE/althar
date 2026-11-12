@@ -175,6 +175,12 @@ leaves its conversation as it was.
   said, selected, start one about them, quoted over the composer and above
   the person's words. The coordinator still starts one at once with
   `start_task`, made on Scratch as + makes one.
+  An aside's lead never waits for a task slot and takes none: its start and
+  every turn go at once, even with a full task queue. A saved aside held for
+  a place by an older build starts on reopening too. Once made a task, it
+  counts among the task agents again. Its first words and title show as
+  Enter is pressed, and its thread is read while the person writes, so
+  opening the conversation flashes no loading skeleton.
 - **Answered** in its lead's reply: an aside's brief is light (who it is,
   where it reads, its tools, the person's decisions), with no step to report,
   no finish_step and no evidence, and the turn that answers ends its first
