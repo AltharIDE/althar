@@ -601,7 +601,8 @@ const startRuntime = () => {
       // The Node the agent adapters run on (ADR-033): the packaged app's own, as its binary doesn't run as Node; in dev, Electron's.
       ...(app.isPackaged
         ? { ALTHAR_NODE: join(process.resourcesPath, 'node', 'bin', process.platform === 'win32' ? 'node.exe' : 'node') }
-        : {}),
+        : // A development build's runtime says in its log when its thread ran late, and which calls took long (lag.ts).
+          { ALTHAR_LAG_LOG: '1' }),
     },
   })
   logs.keepOutput(child)

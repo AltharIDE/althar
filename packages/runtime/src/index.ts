@@ -54,3 +54,4 @@ export { backupsIn, databaseIn, defaultProfile, defaultWorktrees } from './locat
 export { InstallFailed, Installs, type OnDevice } from './Installs'
 
 export { AfterOpen, startup } from './startup'
+export { lagLogged, watchLag } from './lag'

@@ -2717,7 +2717,7 @@ export class Sessions extends Context.Service<
           // A lead's git runs Althar's guard, which stops at git itself what can't be undone from the task (pushGuard.ts, ADR-071).
           const guarded =
             thread.role === 'task' && !reads && guardHolds
-              ? guardEnv({
+              ? yield* guardEnv({
                   sessionId,
                   taskBranch: thread.branch,
                   defaultBranches: [thread.defaultBranch, ...thread.repositories.map((repository) => repository.defaultBranch)],

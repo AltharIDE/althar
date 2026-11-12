@@ -1133,7 +1133,11 @@ describe('changing the team of a task that has begun', () => {
       yield* say(task.threadId, 'Add the slider as well. [lead:finish]')
       yield* until(leadsOn(task.threadId), (agents) => agents.length === 2)
       assert.deepStrictEqual(yield* leadsOn(task.threadId), ['claude-code', 'codex'])
-      const [taken] = (yield* notices(task.threadId)).filter((notice) => notice.title?.startsWith('Switched from') === true)
+      // Its session is kept before the agent connects; the notice once it has.
+      const [taken] = yield* until(
+        Effect.map(notices(task.threadId), (all) => all.filter((notice) => notice.title?.startsWith('Switched from') === true)),
+        (switched) => switched.length > 0,
+      )
       assert.include(taken?.title, 'to Fake codex')
       const prompts = (yield* until(turns(task.threadId), (rows) => rows.length >= 2 && rows.at(-1)?.prompt != null)).map(
         (row) => row.prompt ?? '',

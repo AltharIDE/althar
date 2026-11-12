@@ -78,6 +78,10 @@ const beforeMigrations = (filename: string) =>
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
       if (filename !== ':memory:') {
+        // A commit waits for nothing but the write: the WAL is synced at its checkpoints (SQLite's own advice for WAL), not on
+        // every commit, which on a disk agents' builds keep busy took up to a second each, with the runtime's one thread
+        // waiting. The store stays whole after any crash; one of the computer itself may lose the last moment's commits.
+        yield* sql`PRAGMA synchronous = NORMAL`
         yield* sql`PRAGMA locking_mode = EXCLUSIVE`
         yield* sql`BEGIN IMMEDIATE`.pipe(
           Effect.andThen(sql`COMMIT`),

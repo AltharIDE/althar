@@ -114,6 +114,7 @@ import { Instance } from './Instance'
 import { Live, type LiveEvent } from './Live'
 import { hasBranch, startCommitOf, startOf, towardIn } from './Projects'
 import { applyMerges, conflictsOf, planMerge } from './localMerge'
+import { onlyBase, ownCommits } from './baseOnly'
 import { outward, reconcileOutward } from './outward'
 import {
   answerHint,
@@ -137,6 +138,7 @@ import {
   leftQueueUnclaimed,
   queueOwnFailures,
   leftQueueNote,
+  sendBackHint,
   nameOf,
   outsidersLine,
   queuedNote,
@@ -805,6 +807,20 @@ export class Changes extends Context.Service<
     ): Effect.Effect<ReadonlyArray<{ readonly id: string; readonly name: string | null }>, unknown>
     /** What Ship would send to the task's open pull requests now, by pull request, sending nothing. */
     aheadOfOpen(taskId: string): Effect.Effect<ReadonlyArray<{ readonly where: string; readonly count: number }>, unknown>
+    /**
+     * Whether what waits for the task's open pull requests only brings their
+     * base branch in, as a merge of main that settled no conflict does: none of
+     * it is the task's work (`onlyBase`), and something waits. False where any
+     * of it is the task's own, or a hold waits on a worktree with no open pull
+     * request to measure it against.
+     */
+    onlyBaseWaits(taskId: string): Effect.Effect<boolean, unknown>
+    /**
+     * Sends what only brings the base branch in up to the task's open pull
+     * requests, with no review, past the hold, and says so in the task's
+     * thread: the task stays where it was. What went where.
+     */
+    sendBaseOnly(taskId: string): Effect.Effect<ReadonlyArray<{ readonly where: string; readonly count: number }>, unknown>
     /** Lets go of the task's holds for Ship: what waited went up (`shipped`), or the person left it on the branch (`left`). */
     releaseHolds(taskId: string, why: 'shipped' | 'left', only?: ReadonlyArray<string>): Effect.Effect<void, unknown>
     /**
@@ -5302,7 +5318,9 @@ export class Changes extends Context.Service<
             if (own || now.leftQueue === 'removed') yield* sayOn(link, head, detail)
             else yield* sayOn(link, head, [leftQueueUnclaimed(name, now.leftQueue, queued), detail].filter(Boolean).join('\n\n'))
             if (own) {
-              forLead.push(queued === null ? head : said)
+              // Not a conflict: an update from its target is update_branch or the queue, not a new round.
+              const hint = now.leftQueue === 'conflict' ? [] : [sendBackHint(now.target ?? 'the target branch')]
+              forLead.push([queued === null ? head : said, ...hint].join('\n\n'))
               addressed = true
             } else forNote.push(now.leftQueue === 'removed' ? head : leftQueueNoteForLead(name, now.leftQueue, queued))
           }
@@ -5388,6 +5406,25 @@ export class Changes extends Context.Service<
           repository.defaultBase === null ? null : `refs/heads/${repository.defaultBase}`,
         ].filter((ref): ref is string => ref !== null && ref !== '')
       }
+
+      /**
+       * A worktree's base branch's refs (`defaultsOf`), by its workspace, and each remote's branch of its name, as a lead
+       * fetches and merges `origin/main`: what a merge of its base brings in is read against them.
+       */
+      const baseRefsOf = (workspaceId: string) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const [row] = yield* sql<{ path: string; baseRef: string | null; defaultBase: string | null }>`
+            SELECT w.path, w.base_ref, coalesce(w.toward, b.default_base_ref) AS default_base
+            FROM workspaces w JOIN repository_bindings b ON b.id = w.binding_id WHERE w.id = ${workspaceId}`
+          if (row === undefined) return []
+          const refs = defaultsOf(row)
+          const target = (row.baseRef ?? '').replace(/^origin\//, '') || row.defaultBase
+          if (target === null || target === '') return refs
+          const remotes = yield* gitOutcome(row.path, 'for-each-ref', '--format=%(refname)', 'refs/remotes/')
+          const named = remotes.stdout.split('\n').filter((ref) => ref.split('/').slice(3).join('/') === target && !refs.includes(ref))
+          return [...refs, ...named]
+        })
 
       /**
        * Of commits on a worktree's branch after `head`, those its default
@@ -7357,6 +7394,8 @@ export class Changes extends Context.Service<
             if (before === undefined || !existsSync(row.path)) continue
             const now = yield* commitOf(row.path, 'HEAD').pipe(Effect.orElseSucceed(() => null))
             if (now === null || now === before) continue
+            // A merge of its base that settled no conflict is none of the task's work: it goes up as it is, with no Ship to wait for.
+            if (yield* onlyBase(row.path, before, now, yield* baseRefsOf(row.id))) continue
             yield* sql.withTransaction(
               Effect.gen(function* () {
                 const revision = yield* change('workspaces', row.id, { heldAt: yield* timestamp })
@@ -7433,6 +7472,48 @@ export class Changes extends Context.Service<
             went.push({ where: nameOf(seen), count: here.count, url: seen.url, change: named?.name ?? null })
           }
           return went
+        })
+
+      /** `onlyBaseWaits`: each open pull request's waiting commits bring its base in alone, and a hold has nothing else. */
+      const onlyBaseWaitsOf = (taskId: string) =>
+        Effect.gen(function* () {
+          const measured = new Set<string>()
+          let waits = false
+          for (const link of yield* linksOf(taskId)) {
+            if (link.listening !== 1) continue
+            const seen = yield* decodeSnapshot(link.snapshot)
+            if (seen.state !== 'open') continue
+            const workspace = yield* worktreeOf(taskId, seen.url)
+            if (workspace === undefined || !existsSync(workspace.path)) continue
+            const here = yield* aheadOf(workspace.path, null, [yield* sentTo(link.projectId, seen.url), seen.headSha])
+            if (here.kind !== 'ahead') return false
+            measured.add(workspace.id)
+            if (here.count === 0) continue
+            if (!(yield* onlyBase(workspace.path, here.from, here.head, yield* baseRefsOf(workspace.id)))) return false
+            waits = true
+          }
+          // A hold on a worktree with no open pull request waits for a new one: that is the task's, as it always was.
+          if ((yield* holdsOf(taskId)).some((held) => !measured.has(held.workspaceId))) return false
+          return waits
+        })
+
+      const sendBaseOnly = (taskId: string) =>
+        Effect.gen(function* () {
+          const went = yield* shipToOpen(taskId)
+          yield* releaseHolds(taskId, 'shipped')
+          const links = yield* linksOf(taskId)
+          for (const one of went) {
+            for (const link of links) {
+              const seen = yield* decodeSnapshot(link.snapshot)
+              if (seen.url !== one.url) continue
+              yield* sayOn(
+                link,
+                `Pushed ${commitsWord(one.count)} to ${one.where}. They only bring its base branch in, so they start no review.`,
+              )
+              break
+            }
+          }
+          return went.map(({ where, count }) => ({ where, count }))
         })
 
       const waitingChanges = (taskId: string, asked?: string) =>
@@ -7615,7 +7696,12 @@ export class Changes extends Context.Service<
             if (tip === seen.headSha || tip === sent) continue
             const here = yield* aheadOf(row.path, null, [sent, seen.headSha])
             if (here.kind !== 'ahead' || here.count === 0) continue
-            const written = yield* git(row.path, 'log', '--format=%H %at', `${here.from}..${here.head}`).pipe(
+            // Only the task's own commits can be the person's: what a merge of its base brought was written elsewhere, by others.
+            const refs = yield* baseRefsOf(row.id)
+            if (yield* onlyBase(row.path, here.from, here.head, refs)) continue
+            const own = yield* ownCommits(row.path, here.from, here.head, refs)
+            if (own.length === 0) continue
+            const written = yield* git(row.path, 'log', '--no-walk=unsorted', '--format=%H %at', ...own).pipe(
               Effect.orElseSucceed(() => ''),
             )
             const byHand = written
@@ -8987,6 +9073,8 @@ export class Changes extends Context.Service<
         shipToOpen: (taskId, only) => provide(locked(taskId)(shipToOpen(taskId, true, only))),
         waitingChanges: (taskId, change) => provide(waitingChanges(taskId, change)),
         aheadOfOpen: (taskId) => provide(shipToOpen(taskId, false)),
+        onlyBaseWaits: (taskId) => provide(onlyBaseWaitsOf(taskId)),
+        sendBaseOnly: (taskId) => provide(locked(taskId)(sendBaseOnly(taskId))),
         releaseHolds: (taskId, why, only) => provide(releaseHolds(taskId, why, only)),
         replace: (taskId, head, replaces, url) =>
           provide(locked(taskId)(Effect.andThen(taken(taskId, 'pushed'), replace(taskId, head, replaces, url)))),

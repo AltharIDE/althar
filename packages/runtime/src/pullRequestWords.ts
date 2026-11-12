@@ -62,6 +62,14 @@ export const leftQueueNote = (name: string, why: ChangeRequest['leftQueue']) => 
   }
 }
 
+/**
+ * Told the lead with a sendback that isn't a conflict or a person's: bringing
+ * the target in is the host's update or the person's queue, never a redo of
+ * the plan, and a merge of it that settles nothing is none of the task's work.
+ */
+export const sendBackHint = (target: string) =>
+  `Where it only needs ${target} brought in, call update_branch for it, or leave putting it back in the queue to the person: don't redo the plan's steps. A merge of ${target} that settles no conflict goes up to the pull request as it is and starts no review.`
+
 /** One job the queue's build failed, as the sendback reports it: its page, its log's end, or why its log couldn't be read. */
 export interface QueueJob {
   readonly name: string

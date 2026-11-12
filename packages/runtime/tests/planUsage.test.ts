@@ -7,7 +7,7 @@ import type { PlanUsage as PlanUsageView } from '@althar/contracts'
 import { Ids, newId } from '@althar/domain'
 import type { CredentialsRead, EndpointRead, UsageAccount, UsageRead, UsageWindow } from '@althar/provider-adapters'
 import { agents as registry } from '@althar/provider-adapters'
-import { Duration, Effect, Fiber, Layer, Option, Stream } from 'effect'
+import { Clock, Duration, Effect, Fiber, Layer, Option, Stream } from 'effect'
 import { TestClock } from 'effect/testing'
 import { SqlClient } from 'effect/sql'
 
@@ -1092,7 +1092,19 @@ describe('a sign-in that ends soon (DEV-196)', () => {
       yield* ending(at(24 * 5))
       const usage = yield* PlanUsage
       const [account] = yield* (yield* Accounts).of('claude-code')
-      const raised = (yield* usage.now(true)).endings ?? []
+      // Days pass for what the test asks, not for the runtime's own clock: moved on by days, every loop it runs on a timer
+      // wakes at each of its steps on the way, some hundred thousand times, which took this test past its minute.
+      let later = 0
+      const base = yield* Clock.Clock
+      const moved: Clock.Clock = Object.create(base, {
+        currentTimeMillisUnsafe: { value: () => base.currentTimeMillisUnsafe() + later },
+        currentTimeMillis: { value: Effect.sync(() => base.currentTimeMillisUnsafe() + later) },
+        currentTimeNanosUnsafe: { value: () => base.currentTimeNanosUnsafe() + BigInt(later) * 1_000_000n },
+        currentTimeNanos: { value: Effect.sync(() => base.currentTimeNanosUnsafe() + BigInt(later) * 1_000_000n) },
+      })
+      const then = <A, E, R>(effect: Effect.Effect<A, E, R>) => Effect.provideService(effect, Clock.Clock, moved)
+      const pass = (duration: Duration.Duration) => Effect.sync(() => (later += Duration.toMillis(duration)))
+      const raised = (yield* then(usage.now(true))).endings ?? []
       assert.deepStrictEqual(raised, [
         {
           agentId: 'claude-code',
@@ -1104,28 +1116,29 @@ describe('a sign-in that ends soon (DEV-196)', () => {
           stage: 'soon',
         },
       ])
-      const stage = () => usage.now(true).pipe(Effect.map((view) => view.endings?.[0]?.stage))
+      const stage = () => then(usage.now(true)).pipe(Effect.map((view) => view.endings?.[0]?.stage))
+      const dismiss = (stage: 'soon' | 'last' | 'ended') => then(usage.dismiss(account!.id, at(24 * 5), stage))
       // Put aside five days out, meaning later: it stays aside while it is only soon.
-      yield* usage.dismiss(account!.id, at(24 * 5), 'soon')
+      yield* dismiss('soon')
       assert.isUndefined(yield* stage())
-      yield* TestClock.adjust(Duration.hours(24))
+      yield* pass(Duration.hours(24))
       assert.isUndefined(yield* stage())
       // Past the earliest it can end, it is raised once more; put aside then, it stays aside until the end.
-      yield* TestClock.adjust(Duration.hours(24 + 1))
+      yield* pass(Duration.hours(24 + 1))
       assert.strictEqual(yield* stage(), 'last')
-      yield* usage.dismiss(account!.id, at(24 * 5), 'last')
+      yield* dismiss('last')
       assert.isUndefined(yield* stage())
       // Ended: raised one last time, and put aside, gone for this sign-in.
-      yield* TestClock.adjust(Duration.hours(24 * 3))
+      yield* pass(Duration.hours(24 * 3))
       assert.strictEqual(yield* stage(), 'ended')
-      yield* usage.dismiss(account!.id, at(24 * 5), 'ended')
+      yield* dismiss('ended')
       assert.isUndefined(yield* stage())
       // Signed in again, with an end of its own: its last days raise it once more.
       const next = at(24 * 5 + 1 + 24 * 5)
       fakeSignInEnds.set('claude-code', next)
       // Read again once its last check is older than a minute, as the five-minute reading does.
-      yield* TestClock.adjust(Duration.minutes(2))
-      assert.strictEqual((yield* usage.now(true)).endings?.[0]?.endsAt, next)
+      yield* pass(Duration.minutes(2))
+      assert.strictEqual((yield* then(usage.now(true))).endings?.[0]?.endsAt, next)
     }).pipe(Effect.scoped, Effect.provide(Layer.fresh(withUsage({})))),
   )
 

@@ -1,4 +1,5 @@
-import { errandLines } from './Errands'
+import { errandRecords } from './Errands'
+import { errandCardLines } from './errandWords'
 import { HOSTED, MergeRules, newPullRequestLink } from '@althar/connectors'
 import { existsSync, readFileSync, realpathSync, statSync } from 'node:fs'
 import { isAbsolute, join, resolve, sep } from 'node:path'
@@ -2563,7 +2564,9 @@ export class Queries extends Context.Service<
           for (const oldest of settledKinds.keys()) if (settledKinds.size > SETTLED_KEPT) settledKinds.delete(oldest)
           return {
             taskId,
-            errands: yield* errandLines(task.projectId, taskId),
+            // In plain words from what Althar knows, and nothing the card's word, chip or checks say already: a ready task's queued
+            // pull request is "In the merge queue" by its word.
+            errands: errandCardLines(yield* errandRecords(task.projectId, { taskId }), shown, { queueShown: phase === 'ready' }),
             threadId: task.threadId,
             title: task.title,
             slug: task.slug,
