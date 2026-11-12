@@ -27,7 +27,7 @@ import { usageLines, useUsageOpen } from '../../shared/usage'
 import { checkOf } from '../../shared/checks'
 import { hasOutcome, outcomeOf } from '../../shared/outcome'
 import { mergeHereLabel } from '../../shared/mergeHere'
-import { inMergeQueue } from '../../data/merges'
+import { shownQueued } from '../../data/merges'
 import { productBrand, productName } from '../../shared/products'
 import { personPushes } from '../../shared/standing'
 import s from './Task.module.css'
@@ -285,8 +285,9 @@ export function Outputs({
   const closed = latest.filter((change) => change.state === 'closed')
   // Commits after its last pull request, in none yet: a new one opens for them, as the person says.
   const shipping = ready && task.unshipped != null && task.unshipped.commits > 0 && snapshot.host?.connected === true
-  // Held for Ship: Ship sends what waits, after its review, in place of Push and of opening a new pull request.
-  const held = ready ? task.held : undefined
+  // Held for Ship: Ship sends what waits, after its review, in place of Push and of opening a new pull request. Offered once
+  // the task is ready; while Ship's review reads them, or the lead is at work again, they still wait for it, so no Push either.
+  const held = task.held
   // Its repositories: those with a pull request, those still to merge here, and those merged here already.
   const several = open.length + task.here.length + task.merged.length > 1
   const [first] = open
@@ -324,7 +325,7 @@ export function Outputs({
     </Button>
   )
   const shipNow =
-    held === undefined || onShip === undefined ? null : (
+    held === undefined || !ready || onShip === undefined ? null : (
       <Button key="ship" variant="signal" {...pressed(doing.ship)} onClick={onShip}>
         {text.ship(held.commits)}
       </Button>
@@ -339,7 +340,7 @@ export function Outputs({
             ? ChangeState.Merged
             : open.some((one) => one.state === 'open' && one.draft)
               ? ChangeState.Draft
-              : inMergeQueue(open)
+              : shownQueued(task.changes)
                 ? ChangeState.Queued
                 : ChangeState.Ready
           const brand = productBrand(first.product)

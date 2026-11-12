@@ -867,7 +867,7 @@ describe('a round of work and a restart', () => {
           sql<{ heldAt: string | null }>`SELECT held_at FROM workspaces WHERE task_id = ${started.taskId}`,
           (rows) => rows[0]?.heldAt != null,
         )
-        const [card] = yield* until(cards(started.projectId), (all) => all[0]?.held !== undefined)
+        const [card] = yield* until(cards(started.projectId), (all) => all[0]?.held !== undefined && all[0].phase === 'ready')
         assert.deepStrictEqual([card?.phase, card?.held?.commits], ['ready', 1])
         assert.strictEqual(git(bare, 'rev-parse', 'althar/add-a-retry'), started.pushed)
         assert.lengthOf(yield* runsOf(started.taskId), 1)
@@ -1204,10 +1204,11 @@ describe('changing the team of a task that has begun', () => {
       yield* until(cards(task.projectId), (all) => all[0]?.phase === 'ready')
       const reviewed = (yield* results(task.threadId)).find((result) => result.step === 'review')
       assert.deepStrictEqual([reviewed?.agentId, reviewed?.verdict], ['claude-code', 'pass'])
-      // Its review is done: the reviewer can't change any more, though the lead can.
-      assert.strictEqual(yield* standing(), 'never')
-      const refused = yield* Effect.flip(changeTeam(task.taskId, [step('implement', 'claude-code'), step('review', 'codex')]))
-      assert.strictEqual((refused as { why?: string }).why, 'review_done')
+      // Its review is done: the reviewer still changes, for what ships next, and so does the lead.
+      assert.strictEqual(yield* standing(), 'next_ship')
+      const next = yield* changeTeam(task.taskId, [step('implement', 'claude-code'), step('review', 'codex')])
+      assert.deepStrictEqual([next.review?.step?.agentId, next.review?.when], ['codex', 'next_ship'])
+      yield* changeTeam(task.taskId, [step('implement', 'claude-code'), step('review', 'claude-code', 'large')])
       assert.deepStrictEqual(
         (yield* changeTeam(task.taskId, [step('implement', 'codex'), step('review', 'claude-code', 'large')])).lead?.step.agentId,
         'codex',
@@ -1295,10 +1296,10 @@ describe('changing the team of a task that has begun', () => {
       )
       // Its round reads the work that is up, and once it ran, the review is done.
       yield* until(results(task.threadId), (all) => all.some((result) => result.step === 'review'))
-      yield* until(cards(task.projectId), (all) => all[0]?.phase === 'ready' && all[0]?.reviewerChange === 'never')
+      yield* until(cards(task.projectId), (all) => all[0]?.phase === 'ready' && all[0]?.reviewerChange === 'next_ship')
       assert.match(
         yield* callTool(access, 'change_lead', { task: slug, review: { agent: 'claude-code' } }),
-        /Its review is done, so its reviewer can’t change/,
+        /changed the review to .+\. It reads what ships next\./,
       )
     }).pipe(Effect.provide(runtimeWith(github, ':memory:', { holds: slow })))
   })
@@ -1363,11 +1364,9 @@ describe('changing the team of a task that has begun', () => {
         INSERT INTO node_attempts (id, project_id, node_id, attempt_number, run_attempt_id, controller_generation, state, output, admitted_at)
         SELECT 'natt_' || lower(hex(randomblob(16))), project_id, id, 1, ${attempt?.runAttemptId ?? ''}, 1, 'succeeded',
           '{"verdict":"pass"}', ${attempt?.at ?? ''} FROM nodes WHERE node_key = 'review'`
-      assert.strictEqual((yield* cards(task.projectId))[0]?.reviewerChange, 'never')
-      const refused = yield* Effect.flip(
-        changeTeam(task.taskId, [step('implement', 'claude-code'), step('review', 'claude-code', 'large')]),
-      )
-      assert.strictEqual((refused as { why?: string }).why, 'review_done')
+      assert.strictEqual((yield* cards(task.projectId))[0]?.reviewerChange, 'next_ship')
+      const next = yield* changeTeam(task.taskId, [step('implement', 'claude-code'), step('review', 'claude-code', 'large')])
+      assert.deepStrictEqual([next.review?.step?.model, next.review?.when], ['large', 'next_ship'])
       assert.strictEqual(
         (yield* changeTeam(task.taskId, [step('implement', 'codex'), step('review', 'codex')])).lead?.step.agentId,
         'codex',
@@ -1398,10 +1397,14 @@ describe('changing the team of a task that has begun', () => {
         (result) => result.step === 'review',
       )
       assert.deepStrictEqual([reviewed?.agentId, reviewed?.verdict], ['claude-code', 'pass'])
-      yield* until(cards(task.projectId), (all) => all[0]?.phase === 'ready' && all[0]?.reviewerChange === 'never')
-      // A review that ran keeps today's rule: done stays done.
-      const refused = yield* Effect.flip(changeTeam(task.taskId, [step('implement', 'claude-code'), step('review', 'codex')]))
-      assert.strictEqual((refused as { why?: string }).why, 'review_done')
+      yield* until(cards(task.projectId), (all) => all[0]?.phase === 'ready' && all[0]?.reviewerChange === 'next_ship')
+      // A review that ran: another reviewer reads what ships next, and no round starts now.
+      const next = yield* changeTeam(task.taskId, [step('implement', 'claude-code'), step('review', 'codex')])
+      assert.deepStrictEqual([next.review?.step?.agentId, next.review?.when], ['codex', 'next_ship'])
+      assert.lengthOf(
+        (yield* results(task.threadId)).filter((result) => result.step === 'review'),
+        1,
+      )
     }).pipe(Effect.provide(runtimeWith(github, ':memory:', { holds: slow })))
   })
 
@@ -1427,7 +1430,7 @@ describe('changing the team of a task that has begun', () => {
       )
       assert.deepStrictEqual([reviewed?.agentId, reviewed?.verdict], ['codex', 'pass'])
       // What was held still waits: the review sent nothing up.
-      const [after] = yield* until(cards(task.projectId), (all) => all[0]?.phase === 'ready' && all[0]?.reviewerChange === 'never')
+      const [after] = yield* until(cards(task.projectId), (all) => all[0]?.phase === 'ready' && all[0]?.reviewerChange === 'next_ship')
       assert.strictEqual(after?.held?.commits, 1)
       assert.notInclude(git(bare, 'log', '--format=%s', 'althar/add-a-retry'), 'Later')
     }).pipe(Effect.provide(runtimeWith(github, ':memory:', { holds: slow })))
@@ -1533,7 +1536,7 @@ describe('changing the team of a task that has begun', () => {
       )
       assert.deepStrictEqual([reviewed?.agentId, reviewed?.verdict], ['codex', 'pass'])
       // Reviewed: a review that ran can't be offered again.
-      yield* until(cards(task.projectId), (all) => all[0]?.reviewerChange === 'never')
+      yield* until(cards(task.projectId), (all) => all[0]?.reviewerChange === 'next_ship')
       assert.match(yield* callTool(lead, 'offer_review', {}), /has a review already/)
     }).pipe(Effect.provide(runtimeWith(github, ':memory:', { holds: slow })))
   })
@@ -1594,13 +1597,13 @@ describe('changing the team of a task that has begun', () => {
     }).pipe(Effect.provide(runtimeWith(github, ':memory:', { holds: slow })))
   })
 
-  it.live('refuses a merged task, with the reason, and a removed review that was never to come', () => {
+  it.live('changes a merged task’s team too: its lead from its next turn, and its reviewer for what ships next', () => {
     const { working, bare, github } = onGitHub()
     return Effect.gen(function* () {
       const task = yield* merged(working, bare, github)
-      const refused = yield* Effect.flip(changeTeam(task.taskId, [step('implement', 'codex'), step('review', 'codex')]))
-      assert.strictEqual((refused as { _tag?: string; why?: string })._tag, 'TaskRefused')
-      assert.strictEqual((refused as { why?: string }).why, 'merged')
+      const changed = yield* changeTeam(task.taskId, [step('implement', 'codex'), step('review', 'claude-code', 'large')])
+      assert.strictEqual(changed.lead?.step.agentId, 'codex')
+      assert.deepStrictEqual([changed.review?.step?.model, changed.review?.when], ['large', 'next_ship'])
     }).pipe(Effect.provide(runtimeWith(github)))
   })
 })

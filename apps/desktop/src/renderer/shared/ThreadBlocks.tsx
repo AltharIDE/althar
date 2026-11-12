@@ -66,6 +66,7 @@ import type {
   StepResult,
   TaskCardContent,
 } from './thread'
+import { setupStanding } from './thread'
 import { ReviewOfferOf } from '../features/team/ReviewOfferOf'
 import s from './ThreadBlocks.module.css'
 import { duration, lineOf, spentWords } from './turnTime'
@@ -152,22 +153,12 @@ export const text = {
  */
 function SetupView({ setup }: { setup: SetupContent }) {
   const { ended } = setup
-  const missing = ended?.missing ?? []
-  const failed = ended !== null && !ended.stopped && (ended.code !== 0 || missing.length > 0)
-  const line =
-    ended === null
-      ? text.setup.running(setup)
-      : ended.stopped
-        ? text.setup.stopped(setup)
-        : ended.code === 0 && missing.length > 0
-          ? text.setup.missing(setup, missing)
-          : failed
-            ? text.setup.failed(setup)
-            : text.setup.done(setup)
+  const standing = setupStanding(setup)
+  const line = standing === 'missing' ? text.setup.missing(setup, ended?.missing ?? []) : text.setup[standing](setup)
   return (
     <>
       <ThreadDivider icon="terminal">{line}</ThreadDivider>
-      {failed && (
+      {ended !== null && (standing === 'failed' || standing === 'missing') && (
         <Terminal
           command={setup.command}
           lines={ended.last?.split('\n') ?? []}

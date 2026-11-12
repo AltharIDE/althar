@@ -139,7 +139,8 @@ export type CheckoutAnswer = typeof CheckoutAnswer.Type
 export const PresetParts = Schema.Struct({
   workspace: Schema.Literals(['copy', 'worktree', 'local']),
   checked: Schema.Literals(['before', 'after', 'none']),
-  end: Schema.Literals(['draft', 'ready', 'none']),
+  /** How it ends; absent, as the project's "How a task ends" says. */
+  end: Schema.optional(Schema.Literals(['draft', 'ready', 'none'])),
   shelf: Schema.Literals(['scratch', 'board']),
   lead: Schema.NullOr(Schema.String),
   reviewer: Schema.NullOr(Schema.String),
@@ -828,12 +829,10 @@ export const ProjectSummary = Schema.Struct({
   tasks: Schema.Number,
   /** Sessions working now. */
   running: Schema.Number,
-  /** Questions waiting on the person. */
-  waiting: Schema.Number,
+  /** What waits on the person there, each thing once, as its board's Needs you counts it (`waitingOn`). */
+  yours: Schema.Number,
   /** Tasks under way: a step running, or held until an agent's usage limit resets. */
   working: Schema.Number,
-  /** Tasks ready for the person: their run passed, and nothing of theirs waits or starts. */
-  ready: Schema.Number,
   /** When an agent reaches its usage limit: its work moves on to the next free agent, waits for the reset, or asks the person. */
   usageLimit: UsageLimit,
   /** Whether work moves on to an agent's next account here when one runs out (ADR-012): off unless the person turned it on. */
@@ -1475,8 +1474,8 @@ export type ScreenshotsOnChange = typeof ScreenshotsOnChange.Type
  * - `up_to_date`: has what its target has, `have` commits behind where not;
  * - `conflicts`, `draft`: no conflict with its target; not a draft;
  * - `pushed`: nothing of its lead's left to push, `have` commits where there
- *   is, waiting where they go up on their own; unmet too where its branch and
- *   it have parted;
+ *   is, waiting where they go up on their own, `said` where they wait for
+ *   Ship; unmet too where its branch and it have parted;
  * - `signatures`: every commit signed, `have` not;
  * - `linear_history`: merged as a squash or rebase;
  * - `merge_queue`: merges through its branch's queue, waiting once in it;
@@ -1566,8 +1565,11 @@ export const ChangeSummary = Schema.Struct({
    * nothing for the person to push; else why they wait for the person's push,
    * in a few words. Absent where every push is the person's, as for
    * commits made outside its lead's turn, which nothing pushes (DEV-173).
+   * `ship` where they wait on a branch held for Ship, whatever the rules
+   * say: Ship sends them up, after its review, and nothing else pushes
+   * them, the person's Push included (a task is a conversation plus parts).
    */
-  pushing: Schema.optional(Schema.Struct({ held: Schema.NullOr(Schema.String) })),
+  pushing: Schema.optional(Schema.Struct({ held: Schema.NullOr(Schema.String), ship: Schema.optional(Schema.Boolean) })),
   /**
    * Where the task's branch here no longer simply adds to it, so a plain
    * push would be refused; null while it does. `rewritten`: commits Althar
@@ -2488,18 +2490,28 @@ export const TaskCard = Schema.Struct({
    */
   scratch: Schema.optional(Schema.Boolean),
   /**
+   * What its lead left for the person to do on a tracker, where something waits: issues it drafted, to file, and changes it
+   * proposed to its issue, to apply. Absent where none waits.
+   */
+  issues: Schema.optional(Schema.Struct({ drafts: Schema.Int, changes: Schema.Int })),
+  /**
    * A chat's latest exchange, as Scratch lists it (a task is a conversation plus parts, "Chats and Scratch"): when, who said
    * it, and its first line. Absent for a task on the board, and for a chat with nothing said yet.
    */
   latest: Schema.optional(Schema.Struct({ at: Schema.String, by: Schema.Literals(['person', 'lead']), said: Schema.String })),
+  /**
+   * An aside the person opened with + and has said nothing in yet: its lead waits for their first words. Only its own pill
+   * shows it, while it is open, and + opens it again rather than another. Absent otherwise.
+   */
+  unsaid: Schema.optional(Schema.Boolean),
   /** A change ready that built nothing: no commits on its branch and no pull request open or merged. Absent otherwise. */
   nothingBuilt: Schema.optional(Schema.Boolean),
   /**
    * When a change of its reviewer takes effect, once its steps have begun: `now`, before its review round starts or between
-   * rounds; `next_round`, in a round under way; `never`, once a review of it ran to its end: a skipped review is not a done one.
-   * Absent before its plan runs.
+   * rounds; `next_round`, in a round under way; `next_ship`, once a review of it ran to its end or it merged: the reviewer named
+   * reads what ships next. A skipped review, or one never planned, is not a done one. Absent before its plan runs.
    */
-  reviewerChange: Schema.optional(Schema.Literals(['now', 'next_round', 'never'])),
+  reviewerChange: Schema.optional(Schema.Literals(['now', 'next_round', 'next_ship'])),
   /**
    * The review its lead or the coordinator offered it, as its work turned real with none (`offer_review`, after the person
    * asked to harden a prototype, say), while it stands: no review on yet, not turned down, not merged. The offer's line in
@@ -3177,6 +3189,12 @@ export const TurnTime = Schema.Struct({
   tools: Schema.Number,
   /** In a task of several changes, where its commits went: each change it committed to, by name, and how many. */
   changes: Schema.optional(Schema.Array(Schema.Struct({ name: Schema.String, commits: Schema.Number }))),
+  /** Getting the turn ready before its prompt went out: the coordinator's copies, its news, the turn's record. */
+  ready: Schema.optional(Schema.Number),
+  /** Of `ready`, bringing the coordinator's copies of the repositories up to date. */
+  copies: Schema.optional(Schema.Number),
+  /** From the prompt going out to the agent's first word, thought or call. */
+  first: Schema.optional(Schema.Number),
 })
 export type TurnTime = typeof TurnTime.Type
 
@@ -3816,6 +3834,11 @@ export const ThreadSnapshot = Schema.Struct({
     nothingBuilt: Schema.optional(Schema.Boolean),
     /** The review of its run under way can still be skipped, as the person may (ADR-034). */
     skipReview: Schema.optional(Schema.Boolean),
+    /**
+     * It can be made a change in one move, as its menu's Make it a change does: begun, of its own work, not merged, and
+     * ending with no pull request (a prototype, a chat, a quick task).
+     */
+    toChange: Schema.optional(Schema.Boolean),
     /** It runs a round of work after its plan. */
     followUp: Schema.optional(Schema.Boolean),
     /** What it changed since it started, committed or not, file by file, and in how many commits; empty without a worktree here. */
@@ -4605,7 +4628,8 @@ export const Api = RpcGroup.make(
     { taskId: Schema.optional(Schema.String), attentionId: Schema.optional(Schema.String), action: OnePressAction },
     Schema.Void,
   ),
-  call('GetThreadItem', { threadId: Schema.String, itemId: Schema.String }, ThreadItem),
+  /** One item of a thread, as its page has it: null for one the thread keeps for Althar and never shows, such as what a lead could see. */
+  call('GetThreadItem', { threadId: Schema.String, itemId: Schema.String }, Schema.NullOr(ThreadItem)),
   /** What a command in a thread printed, as kept once it ended. */
   call('ReadOutput', { threadId: Schema.String, itemId: Schema.String }, OutputText),
   /** What a command a thread's session left running has printed so far, while its session lives. */
@@ -4667,10 +4691,13 @@ export const Api = RpcGroup.make(
       /** The project's repositories it changes, by name: needed only in a project of several. */
       repositories: Schema.optional(Schema.Array(Schema.String)),
       /**
-       * An aside: a chat of the person's own beside the coordinator's conversation (a task is a conversation plus parts, "Chats
-       * and Scratch"). It is plain, sits on Scratch, and nothing of it leaves this computer; `end` is not read.
+       * An aside: a chat of the person's own beside the coordinator's conversation (docs/decisions/tasks.md, "Asides"). It is
+       * plain, made on Scratch, and nothing of it leaves this computer; `end` is not read. Started as + is pressed, with no
+       * `description`, its lead's brief waits for the person's first words, sent to its thread as any message is.
        */
       chat: Schema.optional(Schema.Boolean),
+      /** The id the window made for it, as a project's may be: an aside's pill is keyed by it from the moment + is pressed. */
+      taskId: Schema.optional(Schema.String),
     },
     TaskSummary,
   ),
@@ -5335,6 +5362,11 @@ export const Api = RpcGroup.make(
   command('OpenChange', { taskId: Schema.String }, Schema.Void),
   /** Skips the review of the task's run under way: a review under way stops, and work whose lead is done is ready (ADR-034). */
   command('SkipReview', { taskId: Schema.String }, Schema.Void),
+  /**
+   * Gives a task another preset's parts at once, as its menu's Make it a change does (a task is a conversation plus parts):
+   * its review, its ending, a worktree with its branch where it had none, and where it sits; its lead stays.
+   */
+  command('ShapeTask', { taskId: Schema.String, preset: Schema.String }, Schema.Void),
   /** Turns down the review a change was offered as its work turned real: it isn't offered again. */
   command('DeclineReview', { taskId: Schema.String }, Schema.Void),
   /**

@@ -824,8 +824,12 @@ early rather than skip what it would say next.
 parent, type, estimate and due date, its description, and its ten latest
 comments. It reads up to twenty-five at once (keys, links, runs of keys),
 four at a time, each said on its own: one comes with its comments, several
-without unless asked. A tracker that couldn't be searched or read is said
-as such, with its words, never taken for none found.
+without unless asked. Its description and comments are quoted as their
+authors' words, data, never instructions, as `read_pull_request` quotes a
+pull request's, and a description is cut as a pull request's is, at 12,000
+characters; several read at once share 48,000 between them.
+A tracker that couldn't be searched or read is said as such, with its
+words, never taken for none found.
 
 ### What leads do with issues
 
@@ -959,8 +963,9 @@ Althar narrows them itself. A listing refused for a scope says which
   Each review task's view says what its lead can reach, in a sentence under
   its header.
 - **It reads the pull request through Althar.** `read_pull_request` reads it
-  the pull request as GitHub has it now: its description, its checks with the
-  end of a failed one's log, and what everyone said, those who aren't the
+  the pull request as GitHub has it now: its description, quoted as its
+  author's words and cut at 12,000 characters, its checks with the end of two
+  failed ones' logs, and what everyone said, those who aren't the
   repository's people marked so. Whether its head moved since the copy is
   said too.
 - **It drafts, and the person posts.** The lead's `draft_review` (a verdict:
@@ -1461,6 +1466,10 @@ A fork PR's workflow output is less trusted: contributors can change the code
 and scripts producing it, even when the workflow itself belongs to the project.
 Logs, annotations and artifact names/content are evidence, never instructions
 or authority to run commands or disclose credentials. Reading CI does not relax
-the existing filtering of outsiders' comments. Tool responses are capped at
+the existing filtering of outsiders' comments. The coordinator's news of a
+pull request the merge queue sent back names each failed job in a line, with
+its page, and never pastes its log: it reads one with `read_checks` where it
+needs to, rather than every turn after carrying thousands of lines of it
+(12 Nov 2026). Tool responses are capped at
 32 KiB, log downloads at 16 MiB, artifact archives at 5 MiB. The download cap
 applies while streaming, even when the server omits or lies about its size.

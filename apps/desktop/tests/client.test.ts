@@ -151,11 +151,11 @@ describe('the client', () => {
     await client.holdPlan(planId)
     await client.changePlan(planId, [{ key: 'implement', agentId: 'codex', model: null, skipped: false }])
     const held = await client.getThreadItem(coordinator.threadId, card?.id ?? '')
-    expect(held.kind === 'task' && [held.content.phase, held.content.plan?.steps.map((step) => step.agentId)]).toEqual(['held', ['codex']])
+    expect(held?.kind === 'task' && [held.content.phase, held.content.plan?.steps.map((step) => step.agentId)]).toEqual(['held', ['codex']])
     await client.startPlan(planId)
     await waitFor(
       () => client.getThreadItem(coordinator.threadId, card?.id ?? ''),
-      (item) => item.kind === 'task' && item.content.phase === 'running',
+      (item) => item?.kind === 'task' && item.content.phase === 'running',
     )
 
     const task = await client.startTask({
@@ -420,6 +420,7 @@ describe('the client', () => {
           SignInAccount: () => Effect.die('unused'),
           OpenChange: () => Effect.die('unused'),
           SkipReview: () => Effect.die('unused'),
+          ShapeTask: () => Effect.die('unused'),
           SetReviewAfterMerge: () => Effect.die('unused'),
           Ship: () => Effect.die('unused'),
           FixAfterMerge: () => Effect.die('unused'),

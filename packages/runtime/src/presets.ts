@@ -24,7 +24,11 @@ export const PresetParts = Schema.Struct({
   workspace: Schema.Literals(['copy', 'worktree', 'local']),
   /** When its own work is reviewed: before it ships, after it merges, or not at all. */
   checked: Schema.Literals(['before', 'after', 'none']),
-  end: Schema.Literals(['draft', 'ready', 'none']),
+  /**
+   * How it ends: a draft pull request, one ready for review, or its branch alone, only where the person set it. Absent, the
+   * task ends as the project's "How a task ends" says; the built-in Change and Small change leave it so.
+   */
+  end: Schema.optional(Schema.Literals(['draft', 'ready', 'none'])),
   shelf: Schema.Literals(['scratch', 'board']),
   /** Its lead and reviewer as `agent/model`, or null where the coordinator picks. */
   lead: Schema.NullOr(Schema.String),
@@ -60,14 +64,14 @@ export const BUILT_IN: ReadonlyArray<Preset> = [
     name: 'Change',
     builtin: true,
     projectId: null,
-    parts: { workspace: 'worktree', checked: 'before', end: 'draft', shelf: 'board', lead: null, reviewer: null, brief: '' },
+    parts: { workspace: 'worktree', checked: 'before', shelf: 'board', lead: null, reviewer: null, brief: '' },
   },
   {
     id: 'builtin:small-change',
     name: 'Small change',
     builtin: true,
     projectId: null,
-    parts: { workspace: 'worktree', checked: 'after', end: 'ready', shelf: 'board', lead: null, reviewer: null, brief: '' },
+    parts: { workspace: 'worktree', checked: 'after', shelf: 'board', lead: null, reviewer: null, brief: '' },
   },
   {
     id: 'builtin:review',
@@ -152,7 +156,10 @@ export const editPreset = (input: {
       WHERE id = ${input.id}`
   })
 
-/** The parts of a plan, as a preset holds them. */
+/**
+ * The parts of a plan, as a preset holds them. Its ending goes in only where the person chose it (`endChosen`); a plan that
+ * took the project's leaves the preset's unset, so it follows the project later.
+ */
 export const partsOfPlan = (
   parameters: {
     readonly steps: ReadonlyArray<{
@@ -162,6 +169,7 @@ export const partsOfPlan = (
       readonly skipped: boolean
     }>
     readonly end?: string | null | undefined
+    readonly endChosen?: boolean | undefined
     readonly here?: boolean | undefined
     readonly reads?: boolean | undefined
     readonly reviewAfterMerge?: boolean | undefined
@@ -181,7 +189,9 @@ export const partsOfPlan = (
         : parameters.reviewAfterMerge === true
           ? 'after'
           : 'before',
-    end: parameters.end === 'draft' || parameters.end === 'ready' ? parameters.end : 'none',
+    ...(parameters.endChosen === true
+      ? { end: parameters.end === 'draft' || parameters.end === 'ready' ? parameters.end : ('none' as const) }
+      : {}),
     shelf: shelf === 'scratch' ? 'scratch' : 'board',
     lead: named(lead),
     reviewer: review === undefined ? null : named(review),
@@ -194,7 +204,7 @@ export const partsOfPlan = (
 const alike = (a: PresetParts, b: PresetParts) =>
   a.workspace === b.workspace &&
   a.checked === b.checked &&
-  a.end === b.end &&
+  (a.end === undefined || b.end === undefined || a.end === b.end) &&
   a.shelf === b.shelf &&
   (a.reviews ?? false) === (b.reviews ?? false) &&
   (a.lead === null || b.lead === null || a.lead === b.lead) &&
@@ -297,7 +307,8 @@ const nearly = (preset: Preset, parts: PresetParts) => {
         : parts.checked === 'after'
           ? 'reviewed after merge'
           : 'reviewed before it ships',
-    q.end === parts.end
+    // An ending left to the project's setting differs from none.
+    q.end === undefined || parts.end === undefined || q.end === parts.end
       ? null
       : parts.end === 'none'
         ? 'ending on its branch'
@@ -432,7 +443,13 @@ export const describe = (parts: PresetParts, models?: Omit<PresetModels, 'named'
   [
     parts.workspace === 'copy' ? 'a copy' : parts.workspace === 'local' ? 'Local' : 'a worktree',
     parts.checked === 'none' ? 'no review' : parts.checked === 'after' ? 'reviewed after it merges' : 'reviewed before it ships',
-    parts.end === 'none' ? 'ends here' : parts.end === 'ready' ? 'a pull request ready for review' : 'a draft pull request',
+    parts.end === undefined
+      ? 'ends as the project says'
+      : parts.end === 'none'
+        ? 'ends here'
+        : parts.end === 'ready'
+          ? 'a pull request ready for review'
+          : 'a draft pull request',
     parts.lead === null
       ? 'the coordinator picks its lead'
       : `led by ${models?.nameOf(pickOf(parts.lead)) ?? parts.lead.split('/').at(-1) ?? parts.lead}`,
@@ -448,6 +465,7 @@ export interface PresetPlan {
     readonly skipped: boolean
   }>
   readonly end?: 'draft' | 'ready' | 'none' | null | undefined
+  readonly endChosen?: boolean | undefined
   readonly here?: boolean | undefined
   readonly reads?: boolean | undefined
   readonly reviewAfterMerge?: boolean | undefined
@@ -486,11 +504,16 @@ export const reviewerOfPreset = (before: PresetPlan, parts: PresetParts, models?
 /**
  * A plan with a preset's parts (a task is a conversation plus parts, "How a task starts": picking another preset on the
  * plan card changes the plan's parts to match): its lead and reviewer where the preset names them, its review kept, run
- * after the merge or skipped as Checked by says, its ending, and where it works, a copy being a quick task's place. A
+ * after the merge or skipped as Checked by says, its ending (the preset's own where it has one, else `projectEnd`, the project's), and where it works, a copy being a quick task's place. A
  * review it needs and the preset doesn't name goes to the plan's own reviewer where that is another maker's than the lead's,
  * else to one picked as the coordinator picks one (`models`), never the lead's own model. A preset that checks nothing leaves no review step.
  */
-export const planFromPreset = <P extends PresetPlan>(before: P, parts: PresetParts, models?: PresetModels): P => {
+export const planFromPreset = <P extends PresetPlan>(
+  before: P,
+  parts: PresetParts,
+  models?: PresetModels,
+  projectEnd?: PresetPlan['end'],
+): P => {
   const lead = before.steps.find((step) => step.key === 'implement')
   const review = before.steps.find((step) => step.key === 'review')
   const named = models?.named ?? ((pick: ModelPick) => pick)
@@ -513,11 +536,14 @@ export const planFromPreset = <P extends PresetPlan>(before: P, parts: PresetPar
             // After the merge, nothing waits on it before: skipped in the run, read once the work merged.
             skipped: parts.checked === 'after',
           }
-  const { reviewAfterMerge: _after, here: _here, worksIn: _worksIn, ...rest } = before
+  const { reviewAfterMerge: _after, here: _here, worksIn: _worksIn, endChosen: _chosen, ...rest } = before
   return {
     ...rest,
     steps: [...(implement === undefined ? [] : [implement]), ...(reviewing === undefined ? [] : [reviewing])],
-    end: parts.end,
+    // An ending the preset has is the person's own; without one, the project's, else the plan's as it was.
+    end: parts.end ?? (projectEnd === undefined ? before.end : projectEnd),
+    // Only a preset's own ending is chosen; one taken from the project follows it again when saved.
+    ...(parts.end === undefined ? {} : { endChosen: true }),
     ...(parts.checked === 'after' ? { reviewAfterMerge: true } : {}),
     ...(parts.workspace === 'copy' ? { here: true } : { worksIn: parts.workspace === 'local' ? 'checkout' : 'worktree' }),
   } as unknown as P

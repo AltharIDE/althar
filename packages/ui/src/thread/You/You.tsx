@@ -86,6 +86,7 @@ export function You({ children, at, attach, onOpenAttachment, delivery = Deliver
   return (
     <article
       data-rhythm={Rhythm.You}
+      data-thread-prompt={queued ? undefined : ''}
       className={cx(s.you, queued && s.queued, className)}
       aria-label={queued ? t.youQueued : t.you}
       {...rest}
@@ -100,7 +101,11 @@ export function You({ children, at, attach, onOpenAttachment, delivery = Deliver
       {/* images sent with nothing written have no bubble of words */}
       {(said || unfurl) && (
         <div className={s.body}>
-          {said && <p className={s.said}>{children}</p>}
+          {said && (
+            <p className={s.said} data-thread-preview="">
+              {children}
+            </p>
+          )}
           {unfurl && <div className={s.unfurl}>{unfurl}</div>}
         </div>
       )}

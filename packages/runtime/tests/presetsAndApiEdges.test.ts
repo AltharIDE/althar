@@ -139,7 +139,7 @@ describe('presets, through the API', () => {
         )
         assert.strictEqual(
           builtIn.find((one) => one.name === 'Change')?.about,
-          'a worktree, reviewed before it ships, a draft pull request, the coordinator picks its lead',
+          'a worktree, reviewed before it ships, ends as the project says, the coordinator picks its lead',
         )
         assert.isTrue(builtIn.every((one) => one.builtin && one.keptTo === undefined && one.from === undefined))
 
@@ -168,7 +168,6 @@ describe('presets, through the API', () => {
         assert.deepStrictEqual(own[0]?.parts, {
           workspace: 'worktree',
           checked: 'none',
-          end: 'none',
           shelf: 'board',
           lead: null,
           reviewer: null,
@@ -311,6 +310,8 @@ describe('a preset a task’s card offers', () => {
               actorId: proposer,
               held: true,
               end,
+              // An ending the person set is theirs; none set, the project's.
+              ...(end === null ? {} : { endChosen: true }),
             })
             // Started, without running it: the offer looks at started plans.
             const sql = yield* SqlClient.SqlClient
@@ -343,8 +344,10 @@ describe('a preset a task’s card offers', () => {
         assert.isUndefined(yield* offerOn(made, mine[1] ?? ''))
         const [third] = yield* started(made, made.personId, CODEX_ALONE, ['Fix c'])
         const offer = yield* offerOn(made, third ?? '')
-        assert.deepInclude(offer, { name: 'No review, no PR' })
-        assert.deepInclude(offer?.parts, { workspace: 'worktree', checked: 'none', end: 'none', lead: 'codex/large' })
+        assert.deepInclude(offer, { name: 'No review' })
+        assert.deepInclude(offer?.parts, { workspace: 'worktree', checked: 'none', lead: 'codex/large' })
+        // Its ending was the project's, so the preset follows the project's.
+        assert.isUndefined(offer?.parts.end)
 
         // Kept from it, by the name the person gave: the card says so, and Undo offers it again.
         yield* made.client.SavePreset({ commandId: commandId(), name: 'Codex alone', parts: offer?.parts, taskId: third })
@@ -882,6 +885,7 @@ describe('a preset’s parts, on a plan', () => {
           { key: 'review', agentId: 'opencode', model: null, skipped: false },
         ],
         end: 'draft',
+        endChosen: true,
         worksIn: 'checkout',
       },
     )
@@ -897,6 +901,7 @@ describe('a preset’s parts, on a plan', () => {
     assert.deepStrictEqual(planFromPreset(proposed({ steps: [] }), parts({ checked: 'after', workspace: 'copy' })), {
       steps: [{ key: 'review', agentId: 'claude-code', model: null, skipped: true }],
       end: 'draft',
+      endChosen: true,
       reviewAfterMerge: true,
       here: true,
     })
@@ -908,6 +913,7 @@ describe('a preset’s parts, on a plan', () => {
     assert.deepStrictEqual(planFromPreset(proposed({ steps: [LEAD], worksIn: 'checkout' }), parts({ checked: 'none' })), {
       steps: [LEAD],
       end: 'draft',
+      endChosen: true,
       worksIn: 'worktree',
     })
   })
