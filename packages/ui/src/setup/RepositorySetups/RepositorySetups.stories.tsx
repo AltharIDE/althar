@@ -181,8 +181,8 @@ export const Editing: Story = {
 export const ClearAsked: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
-    await userEvent.click(canvas.getByRole('button', { name: 'Clear, so an agent sets it again' }))
-    await expect(canvas.getByRole('button', { name: 'Yes, clear it' })).toBeInTheDocument()
+    await userEvent.click(canvas.getByRole('button', { name: 'Clear' }))
+    await expect(canvas.getByRole('button', { name: 'Cancel' })).toBeInTheDocument()
   },
 }
 
@@ -190,12 +190,12 @@ export const ClearAsked: Story = {
 export const Cleared: Story = {
   play: async ({ args, canvasElement }) => {
     const canvas = within(canvasElement)
-    await userEvent.click(canvas.getByRole('button', { name: 'Clear, so an agent sets it again' }))
+    await userEvent.click(canvas.getByRole('button', { name: 'Clear' }))
     // Asked once more; keeping it changes nothing.
-    await userEvent.click(canvas.getByRole('button', { name: 'Keep it' }))
+    await userEvent.click(canvas.getByRole('button', { name: 'Cancel' }))
     await expect(args.onClear).not.toHaveBeenCalled()
-    await userEvent.click(canvas.getByRole('button', { name: 'Clear, so an agent sets it again' }))
-    await userEvent.click(canvas.getByRole('button', { name: 'Yes, clear it' }))
+    await userEvent.click(canvas.getByRole('button', { name: 'Clear' }))
+    await userEvent.click(canvas.getByRole('button', { name: 'Clear' }))
     await expect(args.onClear).toHaveBeenCalledWith('r1')
     await expect(canvas.getByRole('textbox', { name: 'althar: commands' })).toHaveAttribute(
       'placeholder',

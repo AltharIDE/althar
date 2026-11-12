@@ -195,8 +195,8 @@ describe('a project’s settings', () => {
       }),
     )
     // Clearing hands it back: the call is made and the lines say nothing is kept.
-    await userEvent.click(screen.getByRole('button', { name: 'Clear, so an agent sets it again' }))
-    await userEvent.click(screen.getByRole('button', { name: 'Yes, clear it' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Clear' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Clear' }))
     await waitFor(() =>
       expect(client.setRepository).toHaveBeenCalledWith({ projectId: 'p1', repositoryId: repositories[0]?.id, setup: null }),
     )
