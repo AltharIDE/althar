@@ -327,6 +327,41 @@ describe('a lead waiting for an external condition', () => {
     )
   })
 
+  it.effect('a removed connection asks for action without treating the target as satisfied', () => {
+    const gate = holds()
+    const { working, bare } = hosted()
+    const github = makeFakeService({ pushUrl: () => bare })
+    github.addRepository(['meridian', 'api'])
+    github.addPullRequest({ path: ['meridian', 'api'], title: 'A change', author: 'ada' })
+    return onTestClock(
+      Effect.gen(function* () {
+        const connections = yield* Connections
+        const person = (yield* Instance).personId
+        const connection = yield* connections.connectToken({ product: 'github', token: 't', actorId: person, webUrl: HOST })
+        const task = yield* planned(working)
+        yield* callTool(task.access, 'wait_for', {
+          reason: 'Merge PR #1',
+          conditions: [{ kind: 'pull_request', repository: 'meridian/api', number: 1, until: 'merged' }],
+        })
+        gate.open('[lead:slowly]')
+        yield* idle(task.threadId)
+        yield* connections.remove(connection.id, person)
+        yield* TestClock.adjust(Duration.seconds(2))
+        const queries = yield* Queries
+        const card = yield* until(
+          Effect.map(queries.board(task.projectId), (board) => board.tasks.find((one) => one.taskId === task.taskId)),
+          (one) => one?.phase === 'waiting',
+        )
+        assert.strictEqual(card?.phase, 'waiting')
+        assert.lengthOf(yield* turns(task.threadId), 1)
+      }).pipe(
+        Effect.provide(
+          withQueries(':memory:', { holds: gate }, { connectors: fakeConnectors({ github }), listenEvery: Duration.hours(1) }),
+        ),
+      ),
+    )
+  })
+
   it.effect('retains a review change in all mode while a second condition is still pending', () => {
     const gate = holds()
     const { working, bare } = hosted()

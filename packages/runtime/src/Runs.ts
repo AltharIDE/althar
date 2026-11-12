@@ -7071,16 +7071,27 @@ export class Runs extends Context.Service<
           const observations = yield* Effect.forEach(wait.conditions, (one) =>
             (timeReached && one.target.kind !== 'time' ? Effect.succeed<Observation>({ met: false }) : observeExternal(one)).pipe(
               Effect.map((observed): Observation => observed),
-              Effect.catch((error) =>
-                Effect.succeed<Observation>({
+              Effect.catch((error) => {
+                const message =
+                  error instanceof ConnectorFailed || error instanceof ToolRefused
+                    ? error.message
+                    : error instanceof NotFound || error instanceof NotConnected
+                      ? 'The saved connection is no longer available.'
+                      : 'The code host could not be read.'
+                const blocked =
+                  error instanceof ToolRefused ||
+                  error instanceof NotFound ||
+                  error instanceof NotConnected ||
+                  (error instanceof ConnectorFailed && ['unauthorized', 'forbidden', 'not_found'].includes(error.reason))
+                return Effect.succeed<Observation>({
                   met: false,
-                  error: error instanceof ConnectorFailed ? error.message : 'The code host could not be read.',
-                  ...(error instanceof ConnectorFailed && ['unauthorized', 'forbidden', 'not_found'].includes(error.reason)
-                    ? { blocked: `The wait cannot read its target: ${error.message}. Restore access or tell the lead what to do instead.` }
+                  error: message,
+                  ...(blocked
+                    ? { blocked: `The wait cannot read its target: ${message}. Restore access or tell the lead what to do instead.` }
                     : {}),
                   ...(error instanceof ConnectorFailed && error.retryAt !== undefined ? { retryAt: error.retryAt } : {}),
-                }),
-              ),
+                })
+              }),
             ),
           )
           const outcome = waitOutcome(wait.mode, observations)
