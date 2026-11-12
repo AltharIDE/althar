@@ -1,5 +1,6 @@
+import { removeTreeSync } from '@althar/testing'
 import { execFileSync } from 'node:child_process'
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -950,7 +951,7 @@ describe('sessions', () => {
             Effect.ensuring(
               Effect.sync(() => {
                 process.env.PATH = path
-                rmSync(dir, { recursive: true, force: true })
+                removeTreeSync(dir)
               }),
             ),
           )

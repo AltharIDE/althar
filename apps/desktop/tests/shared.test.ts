@@ -1,3 +1,4 @@
+import { isoAfter } from '@althar/testing'
 import { act, renderHook } from '@testing-library/react'
 import { Brand } from '@althar/ui'
 import { describe, expect, it, vi } from 'vitest'
@@ -168,7 +169,7 @@ describe('a clock', () => {
     expect(clock(monday.toISOString(), now)).toBe(
       `${monday.toLocaleDateString(undefined, { weekday: 'short' })} ${monday.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })}`,
     )
-    const november = new Date('2026-11-20T09:00:00')
+    const november = new Date(isoAfter(48 * 86_400_000 - 3 * 3_600_000, +now))
     expect(clock(november.toISOString(), now)).toContain(november.toLocaleDateString(undefined, { day: 'numeric', month: 'short' }))
   })
 })

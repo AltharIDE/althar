@@ -1,3 +1,4 @@
+import { isoAfter } from '@althar/testing'
 import type {
   AccountSignInState,
   AgentModels,
@@ -1024,7 +1025,7 @@ export const githubCheck: ConnectionCheck = {
     { need: 'checks', state: 'ok', fact: null, count: null, reason: null },
     { need: 'issues', state: 'ok', fact: null, count: null, reason: null },
   ],
-  expiresAt: '2027-01-08T00:00:00.000Z',
+  expiresAt: isoAfter(30 * 86_400_000),
   renews: false,
   settings: 'https://github.com/settings/personal-access-tokens',
 }

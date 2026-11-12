@@ -1,5 +1,6 @@
+import { removeTreeSync } from '@althar/testing'
 import { execFileSync } from 'node:child_process'
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -474,7 +475,7 @@ describe('a plain task', () => {
         )
         const worktree = yield* worktreeOf(task.id)
         // Again a moment later where Windows won't yet, while its lead's process, which worked in it, is still going.
-        rmSync(worktree.path, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 })
+        removeTreeSync(worktree.path)
         yield* tasks.reopen({ envelope: yield* Runtime.envelope('task.reopen', { task }), taskId: task.id })
       }
       const plain = yield* worktreeOf(quiet.id)

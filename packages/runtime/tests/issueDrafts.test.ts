@@ -100,7 +100,7 @@ describe('issue drafts', () => {
         cycle: 'current',
         assignee: 'sam',
         estimate: 3,
-        due: '2026-11-30',
+        due: '2025-11-30',
         type: 'Bug',
       })
       assert.strictEqual(
@@ -115,7 +115,7 @@ describe('issue drafts', () => {
         { field: 'milestone', to: 'Beta' },
         { field: 'cycle', to: 'Cycle 12' },
         { field: 'estimate', to: '3' },
-        { field: 'due', to: '2026-11-30' },
+        { field: 'due', to: '2025-11-30' },
       ])
       // Linear takes them all as it files one: nothing is left for after.
       yield* (yield* IssueDrafts).file(card?.draftId ?? '', instance.personId)
@@ -129,7 +129,7 @@ describe('issue drafts', () => {
           estimate: filed.estimate,
           due: filed.due,
         },
-        { project: 'Q4 launch', milestone: 'Beta', cycle: 'Cycle 12', assignees: ['sam'], estimate: 3, due: '2026-11-30' },
+        { project: 'Q4 launch', milestone: 'Beta', cycle: 'Cycle 12', assignees: ['sam'], estimate: 3, due: '2025-11-30' },
       )
       assert.lengthOf(linear.issueChanges, 0)
     }).pipe(Effect.provide(withQueries({ linear })))

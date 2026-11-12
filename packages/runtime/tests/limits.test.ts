@@ -1,3 +1,4 @@
+import { isoAfter } from '@althar/testing'
 import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -962,7 +963,7 @@ describe('limits', () => {
     const time = new Intl.DateTimeFormat(undefined, { hour: 'numeric', minute: '2-digit' }).format(later)
     assert.strictEqual(whenWords(later.toISOString(), now), time)
     assert.match(whenWords(new Date('2026-10-05T09:00:00').toISOString(), now), /, /)
-    assert.match(whenWords(new Date('2026-11-20T09:00:00').toISOString(), now), /20/)
+    assert.match(whenWords(new Date(isoAfter(48 * 86_400_000 - 3 * 3_600_000, +now)).toISOString(), now), /20/)
     assert.strictEqual(outWords({ from: 'Codex', resetsAt: null, now }), 'Codex ran out of usage.')
     assert.strictEqual(
       outWords({ from: 'Codex', resetsAt: null, now, step: 'review', waits: 'step' }),

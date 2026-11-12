@@ -53,7 +53,7 @@ export interface Plan {
   readonly windowsE2e: boolean
 }
 
-export type Workflow = 'harness' | 'desktop' | 'ui'
+export type Workflow = 'harness' | 'desktop' | 'ui' | 'windows'
 
 /** A job's packages, and whether its tests are split by file into machines of their own. */
 interface Group {
@@ -84,6 +84,27 @@ const LAYOUT: Record<Workflow, { readonly jobs: ReadonlyArray<Group>; readonly e
   },
   desktop: { jobs: [{ name: 'apps/desktop', dirs: ['apps/desktop'] }], e2e: true },
   ui: { jobs: [{ name: 'packages/ui', dirs: ['packages/ui'] }], e2e: false },
+  windows: {
+    jobs: [
+      { name: 'desktop', dirs: ['apps/desktop'] },
+      { name: 'packages/runtime', dirs: ['packages/runtime'], sharded: true },
+      {
+        name: 'packages',
+        dirs: [
+          'packages/connectors',
+          'packages/contracts',
+          'packages/domain',
+          'packages/persistence-sqlite',
+          'packages/provider-adapters',
+          'packages/skills',
+          'packages/testing',
+          'packages/ui',
+          'apps/cli',
+        ],
+      },
+    ],
+    e2e: false,
+  },
 }
 
 /** About a quarter of the runtime's tests: a machine's worth, a few minutes. More take more machines, up to four. */
@@ -111,7 +132,8 @@ const SMOKE = 'apps/desktop/e2e/smoke.spec.ts'
  * What behaves differently by OS (paths, processes, files, the keyring): the runtime and the packages it runs, and the
  * desktop app but its renderer.
  */
-const BY_OS = /^(?:packages\/(?:runtime|provider-adapters|persistence-sqlite|connectors)\/|apps\/desktop\/(?!src\/renderer\/))/
+const BY_OS =
+  /^(?:packages\/(?:runtime|provider-adapters|persistence-sqlite|connectors|skills)\/|apps\/cli\/|apps\/desktop\/(?!src\/renderer\/))/
 
 const MODULE = /\.(?:[cm]?[jt]sx?|css)$/
 const SCRIPT = /\.[cm]?jsx?$/
@@ -369,6 +391,8 @@ export const plan = (changed: ReadonlyArray<string>, repo: Repository, workflow:
   const testsOf = (dir: string) => tests.filter((file) => file.startsWith(`${dir}/`))
   const why: Array<string> = []
   const everything = changed.find((file) => EVERYTHING.test(file))
+  if (workflow === 'windows' && everything === undefined && !changed.some((file) => BY_OS.test(file) && !INERT.test(file)))
+    return { why: [], jobs: [], e2e: false, windowsE2e: false }
   if (everything !== undefined)
     why.push(everything === '*' ? 'What changed is unknown: everything runs.' : `${everything} changed: everything runs.`)
 
@@ -411,7 +435,7 @@ export const plan = (changed: ReadonlyArray<string>, repo: Repository, workflow:
         .map((dir): Part => {
           const all = testsOf(dir)
           const some = everything === undefined ? all.filter((file) => reached.has(file)) : all
-          const check = everything !== undefined || checked.has(dir)
+          const check = workflow !== 'windows' && (everything !== undefined || checked.has(dir))
           return {
             dir,
             check,
@@ -481,7 +505,7 @@ const [mode, workflow, list] = process.argv.slice(2)
 const output = process.env.GITHUB_OUTPUT
 if (
   mode === 'plan' &&
-  (workflow === 'harness' || workflow === 'desktop' || workflow === 'ui') &&
+  (workflow === 'harness' || workflow === 'desktop' || workflow === 'ui' || workflow === 'windows') &&
   list !== undefined &&
   output !== undefined
 ) {

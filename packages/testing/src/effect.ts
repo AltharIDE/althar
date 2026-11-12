@@ -1,7 +1,30 @@
-import { Effect } from 'effect'
+import { Clock, Duration, Effect } from 'effect'
 
 import { deadline } from './deadline'
 import { calledFrom, timedOut } from './seen'
+
+/**
+ * Moves the time read by the effects passed to `run`, leaving the runtime's timers on their original clock.
+ * Use TestClock.adjust instead when the test means to fire timers. Make this after providing the runtime so its
+ * background fibers retain their own clock.
+ */
+export const readClock = Effect.gen(function* () {
+  const base = yield* Clock.Clock
+  let offset = 0
+  const moved: Clock.Clock = Object.create(base, {
+    currentTimeMillisUnsafe: { value: () => base.currentTimeMillisUnsafe() + offset },
+    currentTimeMillis: { value: Effect.sync(() => base.currentTimeMillisUnsafe() + offset) },
+    currentTimeNanosUnsafe: { value: () => base.currentTimeNanosUnsafe() + BigInt(offset) * 1_000_000n },
+    currentTimeNanos: { value: Effect.sync(() => base.currentTimeNanosUnsafe() + BigInt(offset) * 1_000_000n) },
+  })
+  return {
+    run: <A, E, R>(effect: Effect.Effect<A, E, R>) => Effect.provideService(effect, Clock.Clock, moved),
+    advance: (duration: Duration.Input) =>
+      Effect.sync(() => {
+        offset += Duration.toMillis(Duration.fromInputUnsafe(duration))
+      }),
+  }
+})
 
 /**
  * Reads until what it reads passes the check, every 20 ms, and gives back what passed. It gives up only near its

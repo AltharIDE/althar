@@ -1,3 +1,4 @@
+import { isoAfter } from '@althar/testing'
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { Activity } from 'react'
@@ -2935,7 +2936,7 @@ describe('a task', () => {
             ...agent,
             accounts: [
               usual('acc_claude', 'signed_in'),
-              { ...usual('acc_work', 'signed_in'), name: 'work', outUntil: '2099-01-01T10:00:00.000Z' },
+              { ...usual('acc_work', 'signed_in'), name: 'work', outUntil: isoAfter(20 * 3_600_000) },
             ],
           }
         : agent.id === 'codex'
@@ -2992,7 +2993,7 @@ describe('a task', () => {
   })
 
   it('offers the models that could carry on a step held for a usage limit, with why it waits, without asking', async () => {
-    const back = '2099-01-01T14:00:00.000Z'
+    const back = isoAfter(24 * 3_600_000)
     const held = (step: 'implement' | 'review', why: 'nothing_free' | 'waits') =>
       thread({
         task: {
