@@ -11,17 +11,20 @@ import { calledFrom, timedOut } from './seen'
 export const readClock = Effect.gen(function* () {
   const base = yield* Clock.Clock
   let offset = 0
+  let nanos = 0n
   const moved: Clock.Clock = Object.create(base, {
     currentTimeMillisUnsafe: { value: () => base.currentTimeMillisUnsafe() + offset },
     currentTimeMillis: { value: Effect.sync(() => base.currentTimeMillisUnsafe() + offset) },
-    currentTimeNanosUnsafe: { value: () => base.currentTimeNanosUnsafe() + BigInt(offset) * 1_000_000n },
-    currentTimeNanos: { value: Effect.sync(() => base.currentTimeNanosUnsafe() + BigInt(offset) * 1_000_000n) },
+    currentTimeNanosUnsafe: { value: () => base.currentTimeNanosUnsafe() + nanos },
+    currentTimeNanos: { value: Effect.sync(() => base.currentTimeNanosUnsafe() + nanos) },
   })
   return {
     run: <A, E, R>(effect: Effect.Effect<A, E, R>) => Effect.provideService(effect, Clock.Clock, moved),
     advance: (duration: Duration.Input) =>
       Effect.sync(() => {
-        offset += Duration.toMillis(Duration.fromInputUnsafe(duration))
+        const moved = Duration.toNanosUnsafe(duration)
+        nanos += moved
+        offset += Number(moved) / 1_000_000
       }),
   }
 })

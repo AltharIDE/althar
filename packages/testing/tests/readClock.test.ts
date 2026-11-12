@@ -1,4 +1,4 @@
-import { Clock, Effect } from 'effect'
+import { Clock, Duration, Effect } from 'effect'
 import { TestClock } from 'effect/testing'
 import { expect, test } from 'vite-plus/test'
 
@@ -30,6 +30,9 @@ test('moves reads by days without waking the runtime timer, which still fires on
       yield* TestClock.adjust('1 second')
       expect(fired).toBe(true)
       expect(yield* clock.run(Clock.currentTimeMillis)).toBe(5 * 86_400_000 + 1000)
+      yield* clock.advance(Duration.nanos(500_000n))
+      expect(yield* clock.run(Clock.currentTimeNanos)).toBe(BigInt(5 * 86_400_000 + 1000) * 1_000_000n + 500_000n)
+      expect(yield* clock.run(Clock.currentTimeMillis)).toBe(5 * 86_400_000 + 1000.5)
     }).pipe(Effect.provide(TestClock.layer())),
   )
 })
