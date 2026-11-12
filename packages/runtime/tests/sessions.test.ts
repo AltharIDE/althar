@@ -1182,6 +1182,9 @@ describe('sessions', () => {
               },
             },
           },
+          // The test moves its clock three minutes at once, past when a lead's turn is followed: none of that here, so the
+          // last notice is the one the start left.
+          idle: { reports: Duration.hours(1) },
         },
       ).pipe(Layer.provideMerge(observedClock))
       return Effect.gen(function* () {
