@@ -5605,6 +5605,8 @@ export class Changes extends Context.Service<
        * always has a HEAD.
        */
       const unshippedKept = new Map<string, { readonly key: string; readonly value: Unshipped | undefined }>()
+      /** Those being answered now, by their worktree: the board and a window asking at once start git once. */
+      const unshippedGoing = new Map<string, { readonly key: string; readonly answer: Deferred.Deferred<Unshipped | undefined, unknown> }>()
       const keptIn = (repository: ShippingRow) =>
         Effect.gen(function* () {
           const host = repository.snapshot === null ? (yield* hostOfRemotes(remotesOf(repository))) !== null : null
@@ -5612,11 +5614,28 @@ export class Changes extends Context.Service<
           const key = JSON.stringify([repository, host, commits])
           const found = unshippedKept.get(repository.workspaceId)
           if (found?.key === key) return found.value
+          const under = unshippedGoing.get(repository.workspaceId)
+          // Asked again while it is being answered: that answer; a read of another key, as its refs moved, is its own.
+          if (under !== undefined && under.key === key) return yield* Deferred.await(under.answer)
+          const answer = Deferred.makeUnsafe<Unshipped | undefined, unknown>()
+          unshippedGoing.set(repository.workspaceId, { key, answer })
           const answered = { sure: true }
-          const value = yield* unshippedIn(repository, answered)
-          if (answered.sure && commits[0] !== null) unshippedKept.set(repository.workspaceId, { key, value })
-          else unshippedKept.delete(repository.workspaceId)
-          return value
+          return yield* unshippedIn(repository, answered).pipe(
+            Effect.tap((value) =>
+              Effect.sync(() => {
+                if (answered.sure && commits[0] !== null) unshippedKept.set(repository.workspaceId, { key, value })
+                else unshippedKept.delete(repository.workspaceId)
+              }),
+            ),
+            Effect.onExit((exit) =>
+              Effect.andThen(
+                Effect.sync(() => {
+                  if (unshippedGoing.get(repository.workspaceId)?.answer === answer) unshippedGoing.delete(repository.workspaceId)
+                }),
+                Deferred.done(answer, exit),
+              ),
+            ),
+          )
         })
 
       /**
