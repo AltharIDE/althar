@@ -36,6 +36,47 @@ The person can change who reviews at any time before the task merges, as
 Change the team does; a review under way finishes with the reviewer it
 started with, and the next round takes the new one.
 
+### A skipped review is not a done review
+
+A reviewer can't change once a review of the task **ran to its end** (it
+passed, or went on to the run's ending). A review that was **skipped**,
+taken off or never planned (a prototype's plan has none) is not that: until
+the task merges, the person adds a reviewer from Change the team, and picks
+its model; the coordinator's `change_lead` does the same, as one path
+(`Runs.changeTeam`, `reviewerChange`). A review that really ran keeps its
+rule: it can't change, though Review again stays.
+
+Adding one after the work is pushed starts a review round on the task's
+current head (`reviewHead`, a Ship run that only reviews: `ships.reviewOnly`),
+once the lead's turn is over: it reads only what changed since the last
+review where one ran, else the whole change. Its findings go to the lead to
+settle as any round's, before merge or Ship. Work that still waits for Ship
+doesn't hold it back: the round reads the branch as it stands, that work too,
+and sends nothing up. The fast lane's review
+reads after the merge, and isn't added to.
+
+### An agent offers the review, as the work turns real
+
+No rule offers a review. A lead or the coordinator does, with
+`offer_review`, when what the person says turns work with no review into a
+real change: they ask a prototype's lead to harden it, or ask for a pull
+request of a chat's work. The offer is a quiet line in the thread where they
+said it ("Add a review?", or "Add a review of “…”?" in the coordinator's),
+with Add and No thanks. Its reviewer is the one the project's rules would
+pick, the strongest free model and another maker's than the lead's
+(`Limits.free`), unless the agent names one. It adds nothing by itself.
+Add goes through Change the team's command. No thanks (`DeclineReview`)
+turns it down, and it isn't offered again (`task.review_offer_declined`):
+the tool refuses after that. A review put on while an offer stands answers
+it too (`task.review_offer_accepted`), so taking that review off again
+before it runs doesn't bring the offer's buttons back. Changing a plan's
+ending to a pull request from the plan controls, or Althar opening one,
+offers nothing by itself: the person said it there without a word to an
+agent, and Change the team has the reviewer beside it. The line reads the task's card (`reviewOffer`,
+while the offer stands) and, once answered, says who reviews it or that
+there's no review. A task with a review, one that's merged, or one whose plan
+reads no review of its own isn't offered one.
+
 ## How a review round runs
 
 - **The reviewer reads a copy, not the lead's worktree:** a throwaway copy of
@@ -69,7 +110,8 @@ started with, and the next round takes the new one.
   read by nothing.
 - **The person can skip a round's review** from the task's menu: a review
   under way stops, and a round whose lead is done concludes. The next round
-  has its review again.
+  has its review again, and a skipped review can be added back until the
+  task merges ([above](#a-skipped-review-is-not-a-done-review)).
 - **Ship is reviewed as the plan says,** where it has a reviewer before the
   work ships: one pass over what came after the commit the last review read,
   found by its tree, as pushing may have credited it since. What the person's

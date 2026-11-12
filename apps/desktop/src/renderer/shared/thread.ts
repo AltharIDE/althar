@@ -1,14 +1,4 @@
-import type {
-  PresetParts,
-  AllowedBy,
-  AttachedFile,
-  FileMention,
-  Picture,
-  ShownPicture,
-  ThreadItem,
-  TurnTime,
-  Unfurl,
-} from '@althar/contracts'
+import type { AllowedBy, AttachedFile, FileMention, Picture, ShownPicture, ThreadItem, TurnTime, Unfurl } from '@althar/contracts'
 import { Delivery, headingOf, oneLine, PlanState, ToolKind, ToolState } from '@althar/ui'
 
 import { type Handed, handedBy, type OutputSoFar, type PartHanded, type Ran, ranOf } from './handed'
@@ -105,8 +95,8 @@ export type Part =
       readonly id: string
       readonly text: string
       readonly tone: 'info' | 'warning' | 'error'
-      /** Parts the person set up twice, which the coordinator offers to keep as a preset (a task is a conversation plus parts). */
-      readonly offer?: { readonly name: string; readonly parts: PresetParts }
+      /** What the line offers: parts set up twice, kept as a preset, or a review a lead or the coordinator offered a task. */
+      readonly offer?: Offer
       /** For an agent's turn that failed: why, as the runtime classes it (`auth_required`…), and the agent's own words, apart. */
       readonly failure?: string
       readonly detail?: string
@@ -116,6 +106,8 @@ export type Part =
   /** A version of one of the project's canvases the agent published or opened (ADR-104): open under its work, a line that opens it. */
   | { readonly kind: 'canvas'; readonly id: string; readonly canvas: CanvasContent }
 
+/** What a notice offers: parts set up twice, as a preset; or a review a lead or the coordinator offered a task (`offer_review`). */
+export type Offer = NonNullable<Extract<ThreadItem, { kind: 'notice' }>['content']['offer']>
 export type StepResult = Extract<ThreadItem, { kind: 'step_result' }>['content']
 export type TaskCardContent = Extract<ThreadItem, { kind: 'task' }>['content']
 export type ArrivalContent = Extract<ThreadItem, { kind: 'arrival' }>['content']
@@ -181,7 +173,7 @@ export type Block =
       readonly id: string
       readonly text: string
       readonly detail: string | null
-      readonly offer: { readonly name: string; readonly parts: PresetParts }
+      readonly offer: Offer
     }
   | {
       readonly kind: 'step'
@@ -510,7 +502,7 @@ const partOf = (
           id: item.id,
           text: title,
           tone: severity,
-          offer: { name: item.content.offer.name, parts: item.content.offer.parts },
+          offer: item.content.offer,
           ...(description === null ? {} : { detail: description }),
         }
       return { kind: 'notice', id: item.id, text: noticeText(item.content), tone: severity }
@@ -823,7 +815,7 @@ export const blocksOf = (
             id: item.id,
             text: item.content.title,
             detail: item.content.description,
-            offer: { name: item.content.offer.name, parts: item.content.offer.parts },
+            offer: item.content.offer,
           })
           continue
         }

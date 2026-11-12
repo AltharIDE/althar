@@ -14,10 +14,14 @@ name: queue
 # request in its group. A change that reaches the runtime runs its coverage gate here too (harness.yml). Windows' unit
 # tests, the other packages' coverage and the packages run after merge, in post-merge.yml.
 #
-# Main's rules require one check, `merge queue`. On a pull request it passes at once, the pull request's own checks
-# being the ones that say how it stands; in the queue, it passes once every check that ran there did.
+# Main's rules require one check, `merge queue`. On a pull request it passes once the pull request's own stress run
+# has (or it has none), and the Windows smoke test hasn't failed: waited for here, on the pull request, a stress run
+# no longer holds the queue, where every entry behind a waiting one waited too. In the
+# queue, it passes once every check that ran there did, and the stress run it reads again has long finished.
 on:
   pull_request:
+    # And when a draft is ready for review, which is when its stress run starts (stress.yml).
+    types: [opened, synchronize, reopened, ready_for_review]
   merge_group:
 
 permissions:
@@ -123,7 +127,6 @@ jobs:
       # keeps it out: this entry's, and those ahead of it, which merge with it if this build passes. Not run is fine; a
       # stress run still going is waited for, read again every 30 s, as its failure would come after the group merged.
       - uses: actions/checkout@v5
-        if: github.event_name == 'merge_group'
       - if: github.event_name == 'merge_group'
         env:
           GH_TOKEN: ${{ github.token }}
@@ -132,3 +135,10 @@ jobs:
         run: |
           python3 -m unittest discover -s .github/scripts -p 'test_*.py'
           python3 .github/scripts/queue-stress.py
+      # On the pull request, its own stress run is waited for here, so auto-merge queues it only once that has passed.
+      - if: github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+        run: python3 .github/scripts/queue-stress.py "$PR"

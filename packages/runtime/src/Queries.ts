@@ -1,4 +1,5 @@
-import { errandLines } from './Errands'
+import { errandRecords } from './Errands'
+import { errandCardLines } from './errandWords'
 import { HOSTED, MergeRules, newPullRequestLink } from '@althar/connectors'
 import { existsSync, readFileSync, realpathSync, statSync } from 'node:fs'
 import { isAbsolute, join, resolve, sep } from 'node:path'
@@ -46,6 +47,7 @@ import {
   type ThreadItem,
   MergeLineItem,
   ModelMoveItem,
+  NoticeItem,
   type ThreadSnapshot,
   type TurnTime,
   type ScreenshotsOnChange,
@@ -76,6 +78,7 @@ import { graphOf, type RunRows, type StepRow } from './graph'
 import { taskFindingsOf } from './taskFindings'
 import { filesOf, outputOf, picturesOf } from './handed'
 import { answeredIn, handedOf, issueCardsWaiting, kindOf } from './kinds'
+import { reviewOfferOf } from './reviewOffer'
 import { repliedAt } from './replied'
 import { BETWEEN_AGENTS_MS, betweenAgents, byItself, DRAFTING_MS, isMergeable, stillAsked, stillDrafting } from './needsYou'
 import { mergeNeedsOf, withPushed } from './mergeNeeds'
@@ -361,6 +364,8 @@ export const stuckOf = (payload: unknown): StuckStep => {
       why === 'refused' ||
       why === 'transient' ||
       why === 'signed_out' ||
+      why === 'sign_in_ended' ||
+      why === 'not_installed' ||
       why === 'waiting_on_person'
         ? why
         : 'failed_to_start',
@@ -536,6 +541,8 @@ const decodeMergeLine = Schema.decodeUnknownOption(MergeLineItem.fields.content)
 const decodeNoticeTask = Schema.decodeUnknownOption(
   Schema.Struct({ taskId: Schema.String, slug: Schema.String, title: Schema.String, threadId: Schema.String }),
 )
+/** What a notice offers: parts kept as a preset, or a review a lead or the coordinator offered a task, which its buttons answer. */
+const decodeNoticeOffer = Schema.decodeUnknownOption(NoticeItem.fields.content.fields.offer)
 const decodeChecks = Schema.decodeUnknownOption(ChecksSummary.fields.list)
 const decodeRules = Schema.decodeUnknownOption(MergeRules)
 
@@ -665,6 +672,10 @@ export const itemOf = (row: ItemRow): ThreadItem | undefined => {
           ...(role === 'aside' || role === 'relayed' || role === 'folder' ? { role } : {}),
           ...(failure === undefined || failure === '' ? {} : { failure }),
           ...Option.match(decodeNoticeTask(field(content, 'task')), { onNone: () => ({}), onSome: (task) => ({ task }) }),
+          ...Option.match(decodeNoticeOffer(field(content, 'offer')), {
+            onNone: () => ({}),
+            onSome: (offer) => (offer === undefined ? {} : { offer }),
+          }),
         },
       }
     }
@@ -2562,7 +2573,9 @@ export class Queries extends Context.Service<
           for (const oldest of settledKinds.keys()) if (settledKinds.size > SETTLED_KEPT) settledKinds.delete(oldest)
           return {
             taskId,
-            errands: yield* errandLines(task.projectId, taskId),
+            // In plain words from what Althar knows, and nothing the card's word, chip or checks say already: a ready task's queued
+            // pull request is "In the merge queue" by its word.
+            errands: errandCardLines(yield* errandRecords(task.projectId, { taskId }), shown, { queueShown: phase === 'ready' }),
             threadId: task.threadId,
             title: task.title,
             slug: task.slug,
@@ -2582,6 +2595,18 @@ export class Queries extends Context.Service<
             reviewing,
             // Once its plan has begun, when a change of its reviewer would take effect: the person's dialog reads it.
             ...(task.planState === 'accepted' && task.state === 'open' ? { reviewerChange: yield* reviewerChange(taskId) } : {}),
+            // The review its lead or the coordinator offered it, while the offer stands: its line in the thread reads it.
+            ...(yield* Effect.map(
+              reviewOfferOf({
+                taskId,
+                open: task.planState === 'accepted' && task.state === 'open',
+                steps: planned,
+                reviewsAfterMerge: field(parameters, 'reviewAfterMerge') === true,
+                reads: field(parameters, 'reads') === true,
+                pulls: changes,
+              }),
+              (offer) => (offer === undefined ? {} : { reviewOffer: offer }),
+            )),
             plan:
               task.planId === null
                 ? null

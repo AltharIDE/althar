@@ -232,6 +232,42 @@ describe('the project’s bar', () => {
     expect(await screen.findByText('Kept as “opus change”: Settings has your presets.')).toBeTruthy()
   })
 
+  it('draws a review the coordinator offered as its line, naming the task, and Add puts its reviewer on', async () => {
+    const offer = items.notice(
+      {
+        source: 'runtime',
+        title: 'Add a review of “Harden the prototype”?',
+        offer: { kind: 'review', projectId: 'p1', taskId: 'r', agentId: 'codex', model: null },
+      },
+      null,
+    )
+    const task = {
+      ...card(),
+      state: 'open' as const,
+      createdAt: '2026-10-01T09:00:00.000Z',
+      settledAt: null,
+      changed: null,
+      here: [],
+      taskId: 'r',
+      title: 'Harden the prototype',
+      reviewOffer: { key: 'review' as const, agentId: 'codex', model: null, skipped: false },
+      plan: { ...card().plan!, steps: card().plan!.steps.filter((step) => step.key !== 'review') },
+    }
+    const { client } = fakeClient({
+      getCoordinator: vi.fn(async () => coordinatorSnapshot({ items: [offer] })),
+      getBoard: vi.fn(async () => ({ cursor: 1, tasks: [task], calls: [], settledTotal: 0 })),
+    })
+    withServices(<WithSettings />, client)
+    await screen.findByText('Add a review of “Harden the prototype”?')
+    await userEvent.click(await screen.findByRole('button', { name: 'Add gpt-5.2-codex' }))
+    await waitFor(() =>
+      expect(client.changeTeam).toHaveBeenCalledWith('r', [
+        ...task.plan.steps,
+        { key: 'review', agentId: 'codex', model: null, skipped: false },
+      ]),
+    )
+  })
+
   it('steps through the views by b, never while typing, and has no button to start a task', async () => {
     const { client } = fakeClient({ getCoordinator: vi.fn(async () => coordinatorSnapshot()) })
     const view = withServices(<Project />, client)

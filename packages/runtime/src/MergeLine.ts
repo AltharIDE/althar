@@ -6,6 +6,7 @@ import { Ledger } from '@althar/persistence-sqlite'
 import { Clock, Context, Crypto, Duration, Effect, Layer, Option, Queue, Schema } from 'effect'
 import { SqlClient } from 'effect/sql'
 
+import { touchTask } from './cards'
 import { Changes } from './Changes'
 import { hostName } from './checkLogs'
 import { RuntimeConfig } from './Config'
@@ -129,6 +130,31 @@ const updateRefused = (host: CodeHost, failed: ConnectorFailed): readonly [strin
       return [`${hostName(host)} refused Althar’s sign-in`, true]
     default:
       return [`${hostName(host)} didn’t answer${said}`, true]
+  }
+}
+
+/**
+ * Where a step stands, in one word a task's card says (errandWords' `MergeStands`): its look's next move, and for one that
+ * waits, on what. Kept as the step's `stands` note.
+ */
+const standsOf = (seen: Pick<Look, 'next' | 'why'>, entry: { readonly request: { readonly now: boolean } }): string => {
+  switch (seen.next) {
+    case 'behind':
+      return entry.request.now ? 'ahead' : 'behind'
+    case 'wait':
+      return seen.why.startsWith('in the ')
+        ? 'queued'
+        : seen.why === 'checks running'
+          ? 'checks'
+          : seen.why === 'auto-merge on'
+            ? 'automerge'
+            : seen.why === 'merging'
+              ? 'merging'
+              : seen.why === 'no commits'
+                ? 'empty'
+                : 'wait'
+    default:
+      return seen.next
   }
 }
 
@@ -265,6 +291,17 @@ const note = (projectId: string, subject: string, kind: string, id: string, payl
     })}`
     const [inserted] = yield* sql<{ n: number }>`SELECT changes() AS n`
     return (inserted?.n ?? 0) > 0
+  })
+
+/**
+ * Notes where a step stands, as it changes, and tells its task's card to read it again: the card's words come from it
+ * (errandWords), and nothing else need change on the task when only this does.
+ */
+const standAt = (projectId: string, entry: Pick<Entry, 'errandId' | 'taskId'>, state: string) =>
+  Effect.gen(function* () {
+    if ((yield* latest(stepOf(entry), 'stands'))?.state === state) return
+    yield* note(projectId, stepOf(entry), 'stands', `stands:${state}:${yield* timestamp}`, { state })
+    if (entry.taskId !== null) yield* touchTask(entry.taskId)
   })
 
 /** A note as kept: what it said, and when. */
@@ -1183,7 +1220,11 @@ export class MergeLine extends Context.Service<
                     states.set(entry.errandId, { state: 'sent_back', reason: 'On hold. It goes back in when you say.' })
                     continue
                   }
-                  if (held) continue
+                  if (held) {
+                    // Not read while one ahead of it holds the slot: it waits its turn, which its card says.
+                    yield* standAt(projectId, entry, 'behind')
+                    continue
+                  }
                   const seen = yield* look(projectId, entry, entries).pipe(
                     Effect.catch((error) =>
                       Effect.as(Effect.logWarning(`Could not read #${entry.request.number} for its merge`, error), undefined),
@@ -1202,6 +1243,8 @@ export class MergeLine extends Context.Service<
                     yield* note(projectId, stepOf(entry), 'standing', `${standing}:${seen.change.headSha}:${yield* timestamp}`, {
                       state: standing,
                     })
+                  // Where it stands, as a word its task's card says plainly (errandWords): noted as it changes, so the card reads it.
+                  yield* standAt(projectId, entry, standsOf(seen, entry))
                   switch (seen.next) {
                     case 'settle':
                       yield* take(entry, `${seen.fresh.answer ?? seen.fresh.reason ?? seen.why}`)
