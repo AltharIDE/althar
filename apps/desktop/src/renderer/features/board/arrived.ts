@@ -5,13 +5,20 @@
  * a reload, a restart, another tab of the shelf) it is just there. By task,
  * not by when it settled: a task its lead works on again and that settles
  * again has already arrived.
+ *
+ * It moves in only where this window watched it settle: it was drawn outside
+ * Settled (`watch`) and has now come in. A task that first shows up settled,
+ * in a snapshot that comes later, an older page, or from before this was
+ * kept, settled before this window looked, so it is drawn there as it is.
+ * Every task drawn in Settled is kept, none forgotten: an id is a few bytes,
+ * and one forgotten would move in again.
  */
 
 const STORED = 'althar.arrived'
-/** The most it remembers: the latest arrivals, as older ones are far down the shelf. */
-const KEEP = 2000
 
 let arrived: Set<string> | null = null
+/** Tasks drawn outside Settled in this window, so far. */
+let watched = new Set<string>()
 
 const load = (): Set<string> => {
   if (arrived !== null) return arrived
@@ -34,11 +41,6 @@ export const markArrived = (taskIds: ReadonlyArray<string>) => {
   const fresh = taskIds.filter((id) => !known.has(id))
   if (fresh.length === 0) return
   for (const id of fresh) known.add(id)
-  // Oldest first in a Set: what goes over the limit is the oldest.
-  for (const id of known) {
-    if (known.size <= KEEP) break
-    known.delete(id)
-  }
   try {
     window.localStorage.setItem(STORED, JSON.stringify([...known]))
   } catch {
@@ -46,7 +48,16 @@ export const markArrived = (taskIds: ReadonlyArray<string>) => {
   }
 }
 
+/** Records tasks drawn outside Settled: if one settles now, this window watched it do so. */
+export const watch = (taskIds: ReadonlyArray<string>) => {
+  for (const id of taskIds) watched.add(id)
+}
+
+/** Whether a task drawn in Settled is just there: it arrived before, or this window never saw it outside Settled. */
+export const arrivesQuietly = (taskId: string): boolean => hasArrived(taskId) || !watched.has(taskId)
+
 /** Forgets what this window kept, as each test starts. */
 export const forgetArrived = () => {
   arrived = null
+  watched = new Set()
 }
