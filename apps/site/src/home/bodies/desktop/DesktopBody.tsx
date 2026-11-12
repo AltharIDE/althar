@@ -6,7 +6,8 @@ import { useGrain } from '../../../shared/grain'
 import { LightUnder } from '../../../shared/lightUnder'
 import { AskOnce } from './AskOnce'
 import { AtWork } from './AtWork'
-import { TILES } from './Bento'
+import { Connections } from './Connections'
+import { ALSO, TILES } from './Bento'
 import { Review } from './Review'
 import { EdgeTour } from '../kit/EdgeTour'
 import t from '../kit/type.module.css'
@@ -34,14 +35,12 @@ export const SCENE = {
   independent: {
     title: (
       <>
-        Usage gets cut.
+        Every agent’s work.
         <br />
-        Models get pulled.
-        <br />
-        <b>Althar stays.</b>
+        <b>One board.</b>
       </>
     ),
-    lead: 'Open source, local-first, your data on your computer, any agent you have. None of the industry’s bullshit touches it.',
+    lead: 'Up next, running, needs you, settled: every task across Claude Code, Codex, Gemini and Qwen, in one place. When one agent runs out, another takes over.',
   },
   coordinator: {
     title: (
@@ -70,6 +69,16 @@ export const SCENE = {
       </>
     ),
     lead: 'Tired of juggling terminals, re-explaining your project and babysitting agents? So were we.',
+  },
+  connections: {
+    title: (
+      <>
+        Works with
+        <br />
+        <b>what you already use.</b>
+      </>
+    ),
+    lead: 'Code on GitHub, GitLab or Bitbucket. Issues in Linear, Jira or Trello. Anything else through an MCP server. Connect each once, and every agent can use it.',
   },
   edge: {
     title: (
@@ -101,10 +110,11 @@ type Id = keyof typeof SCENE
 /** Each station: its number, its name on the wall, and the height it stands at on the way down. */
 const STATIONS: Record<Id, { no: string; name: string; km: number }> = {
   independent: { no: '01', name: 'Board', km: 38 },
-  coordinator: { no: '02', name: 'Coordinator', km: 30 },
-  review: { no: '03', name: 'Review', km: 22 },
-  flow: { no: '04', name: 'Flow', km: 14 },
-  edge: { no: '05', name: 'Notch', km: 6 },
+  coordinator: { no: '02', name: 'Coordinator', km: 31 },
+  review: { no: '03', name: 'Review', km: 24 },
+  flow: { no: '04', name: 'Flow', km: 17 },
+  connections: { no: '05', name: 'Connections', km: 10 },
+  edge: { no: '06', name: 'Notch', km: 3 },
 }
 
 /** A station's stamp, on the rail: its node, its number and name, a rule, and the height it stands at. */
@@ -170,7 +180,7 @@ function Window({ className, seed, children }: { className?: string; seed: numbe
   )
 }
 
-/** What keeps you in flow: one console, its modules seamed into it, each with its number and its light. */
+/** What keeps you in flow: one console, its modules seamed into it, each with its number and its light; the smaller ones a size down. */
 function Console() {
   return (
     <ol className={c.console} data-light="">
@@ -179,7 +189,7 @@ function Console() {
           key={tile.id}
           className={cx(c.module, c[`span${tile.span}`])}
           data-drawn={tile.drawn ? '' : undefined}
-          data-small={tile.small ? '' : undefined}
+          data-compact={tile.compact ? '' : undefined}
         >
           <span className={c.plate} aria-hidden="true">
             <b>{String(i + 1).padStart(2, '0')}</b>
@@ -193,6 +203,21 @@ function Console() {
         </li>
       ))}
     </ol>
+  )
+}
+
+/** What isn't drawn, as words alone under the console, and then the rest of it, unnamed. */
+function Also() {
+  return (
+    <div className={c.also}>
+      <h3 className={c.alsoLabel}>And also</h3>
+      <ul className={c.alsoList}>
+        {ALSO.map((word) => (
+          <li key={word}>{word}</li>
+        ))}
+      </ul>
+      <p className={c.alsoMore}>And so, so much more.</p>
+    </div>
   )
 }
 
@@ -306,6 +331,11 @@ export function DesktopBody() {
 
       <Station id="flow" layout="bank">
         <Console />
+        <Also />
+      </Station>
+
+      <Station id="connections" layout="bank">
+        <Connections />
       </Station>
 
       <Station id="edge" layout="notch">

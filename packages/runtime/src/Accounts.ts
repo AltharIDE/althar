@@ -12,6 +12,7 @@ import { Agents, RuntimeConfig } from './Config'
 import { NotFound, UnknownAgent } from './errors'
 import { Instance } from './Instance'
 import { change, fact, timestamp } from './records'
+import { warnedKey } from './signInEnding'
 
 /*
  * Several accounts per agent (ADR-012, docs/architecture/03): each one sign-in
@@ -375,6 +376,8 @@ export class Accounts extends Context.Service<
                 Effect.gen(function* () {
                   const revision = yield* change('agent_accounts', account.id, { removedAt: yield* timestamp })
                   yield* record(account, 'agent_account.removed', revision, { signedOutAndDeleted: made !== undefined })
+                  // What was kept of its sign-in's warning goes with it (DEV-196).
+                  yield* sql`DELETE FROM settings WHERE key = ${warnedKey(account.id)}`
                 }),
               )
             }),

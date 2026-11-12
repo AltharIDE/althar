@@ -270,6 +270,33 @@ const samePath = (a: ReadonlyArray<string>, b: ReadonlyArray<string>) => a.join(
 /** The branch a pull request's commits go to on its host: its own, as last seen, else the task's, as one Althar opened has. */
 const sourceOf = (snapshot: Snapshot, branch: string) => snapshot.source ?? branch
 
+/**
+ * A host's no to one repository of a task's several, on one line: which
+ * repository, what the host said, and the pull requests the others have open
+ * already, so none is opened twice and none is taken for missing.
+ */
+const severalFailed = (
+  repository: string,
+  error: ConnectorFailed,
+  done: ReadonlyArray<{ readonly kind: string; readonly change?: Snapshot }>,
+) => {
+  const open = done.flatMap((one) =>
+    one.kind === 'opened' && one.change !== undefined
+      ? [`${one.change.repository.join('/')} ${one.change.words.prefix}${one.change.number}`]
+      : [],
+  )
+  const others = open.length === 0 ? '' : `; ${open.join(', ')} ${open.length === 1 ? 'is' : 'are'} open`
+  return new ConnectorFailed({
+    product: error.product,
+    reason: error.reason,
+    message: `in ${repository}: ${error.message}${others}`,
+    ...(error.status === undefined ? {} : { status: error.status }),
+    ...(error.retryAt === undefined ? {} : { retryAt: error.retryAt }),
+    ...(error.scope === undefined ? {} : { scope: error.scope }),
+    ...(error.sizeLimit === undefined ? {} : { sizeLimit: error.sizeLimit }),
+  })
+}
+
 /** A task's change, as the card, the header and the accept view show it. */
 export interface ChangeSummary extends Snapshot {
   readonly linkId: string
@@ -1366,6 +1393,9 @@ export class Changes extends Context.Service<
             else {
               const error = Cause.findErrorOption(one.cause)
               if (Option.isSome(error) && error.value instanceof NotConnected) unconnected ??= error.value
+              // A host's no to one of several, after others opened theirs: which repository it was, and where the rest are.
+              else if (Option.isSome(error) && error.value instanceof ConnectorFailed && tasks.length > 1)
+                return yield* severalFailed(task.name, error.value, done)
               else return yield* Effect.failCause(one.cause)
             }
           }
