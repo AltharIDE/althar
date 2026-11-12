@@ -7,15 +7,14 @@
 }
 
 /* ---- the project ---- */
-/* From the top, not centred: what it is made of and where its work goes join it under its mark, which stays put. */
 .who {
   position: relative;
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: center;
   min-height: 0;
   overflow-y: auto;
-  padding: clamp(40px, 12vh, 112px) 40px 40px;
+  padding: 40px;
   /* the ink's wash; on dark lifted toward the words and fainter (dark.css) */
   --glow: color-mix(in oklab, var(--ink), var(--t-1) var(--glow-lift, 0%));
   background:
@@ -33,6 +32,7 @@
   gap: 8px;
   width: 100%;
   max-width: 380px;
+  margin-top: -60px;
 }
 .mark,
 .blank {
@@ -377,6 +377,9 @@
     grid-template-rows: auto minmax(0, 1fr);
     overflow-y: auto;
   }
+  .whoInner {
+    margin-top: 0;
+  }
   .side {
     border-left: 0;
     border-top: 1px solid var(--line);
@@ -394,21 +397,4 @@
   .mark {
     animation: none;
   }
-}
-/* A question after the folders, in their place: the same heading, the same edge, the same foot. */
-.stepLine {
-  margin: 0;
-  color: var(--t-3);
-  font-size: 12.5px;
-  line-height: 1.5;
-}
-.stepBody {
-  margin-top: 12px;
-}
-.back {
-  margin-right: auto;
-}
-.place {
-  display: grid;
-  gap: 8px;
 }

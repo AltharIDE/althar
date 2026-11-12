@@ -1,9 +1,3 @@
-:global(html),
-:global(body),
-:global(#root) {
-  height: 100%;
-  margin: 0;
-}
 .lab {
   display: grid;
   grid-template-rows: 1fr auto;
@@ -12,65 +6,183 @@
   color: var(--t-1);
 }
 .scene {
+  position: relative;
   min-height: 0;
-  overflow: auto;
+}
+
+/* The project's window, as the desktop draws it (Project.module.css): tabs, header, the conversation beside the board. */
+.window {
+  position: absolute;
+  inset: 0;
   display: flex;
-}
-.scene > * {
-  flex: 1;
-  min-width: 0;
-}
-/* A project's settings sheet and a task's outputs, as the app lays them. */
-.project {
-  padding: 24px 48px 48px;
+  flex-direction: column;
   background: var(--n-2);
-  display: grid;
-  gap: 16px;
-  align-content: start;
 }
-.sheet {
-  max-width: 980px;
-  padding: 18px 22px;
-  border-radius: 12px;
+.rooms {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+.talk {
+  --face-surface: var(--n-1);
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  width: clamp(560px, 42vw, 660px);
+  min-width: 0;
   background: var(--n-1);
+  border-right: 1px solid var(--line);
 }
-.remoteRow {
+.face {
+  flex: 1;
+  min-height: 0;
+}
+.board {
+  --lane-min: 186px;
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+  overflow: clip;
+  padding: 0 0 0 16px;
+}
+.arrive {
+  display: block;
+}
+
+/* A: where the conversation will be, the folder's place. */
+.invite {
+  display: grid;
+  place-items: center;
+  min-height: calc(100vh - 300px);
+  padding: 40px 32px;
+}
+.drop {
+  display: grid;
+  justify-items: center;
+  gap: 6px;
+  width: min(100%, 440px);
+  padding: 44px 28px 32px;
+  border: 1px dashed var(--line-2);
+  border-radius: var(--r-lg);
+  text-align: center;
+  transition:
+    background var(--fast) var(--ease),
+    border-color var(--fast) var(--ease),
+    transform var(--enter) var(--ease-slide);
+}
+.drop[data-over='true'] {
+  border-color: var(--t-3);
+  background: var(--sunk);
+  transform: scale(1.015);
+}
+.dropGlyph {
+  display: grid;
+  place-items: center;
+  width: 48px;
+  height: 48px;
+  margin-bottom: 10px;
+  border-radius: 50%;
+  background: var(--sunk);
+  color: var(--t-2);
+  transition: transform var(--enter) var(--ease-slide);
+}
+.drop[data-over='true'] .dropGlyph {
+  transform: translateY(-3px);
+}
+.dropTitle {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+.dropLine {
+  margin: 0;
+  color: var(--t-3);
+  font-size: 13px;
+}
+.dropActions {
+  display: flex;
+  gap: 8px;
+  margin-top: 18px;
+}
+
+/* B: the project's name and what it is, where its conversation will start. */
+.begin {
+  display: grid;
+  align-items: center;
+  min-height: calc(100vh - 300px);
+  padding: 40px 32px 64px;
+}
+.beginInner {
+  display: grid;
+  gap: 14px;
+  width: min(100%, 540px);
+  margin: 0 auto;
+}
+.nameRow {
   display: flex;
   align-items: center;
-  gap: 10px;
-  margin-top: 12px;
-  padding-top: 12px;
-  border-top: 1px solid var(--line);
-  font-size: 13px;
-  color: var(--t-3);
+  gap: 14px;
+  margin-bottom: 6px;
 }
-.outputs {
-  max-width: 980px;
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 16px;
-  align-items: start;
+.markSwap {
+  display: inline-flex;
+  animation: swap var(--enter) var(--ease);
+}
+@keyframes swap {
+  from {
+    opacity: 0.35;
+    transform: scale(0.94);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .markSwap {
+    animation-name: fade;
+  }
+  @keyframes fade {
+    from {
+      opacity: 0.35;
+    }
+  }
+}
+.bigName {
+  flex: 1;
+  min-width: 0;
+  padding: 2px 0;
+  border: 0;
+  background: none;
+  color: var(--t-1);
+  font: inherit;
+  font-size: 24px;
+  font-weight: 640;
+  letter-spacing: -0.015em;
+  outline: none;
+}
+.bigName::placeholder {
+  color: var(--t-4);
+}
+.whereRow {
+  min-height: 24px;
 }
 .where {
-  font-size: 12px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  padding: 0 4px;
   color: var(--t-3);
-  margin: 0 0 6px;
+  font-size: 12.5px;
 }
-.extra {
-  margin-top: 18px;
-  display: grid;
-  gap: 10px;
-}
-.extraLabel {
+.where code {
+  font-family: var(--mono);
   font-size: 12px;
-  font-weight: 550;
   color: var(--t-2);
 }
-.extraNote {
-  font-size: 12px;
-  color: var(--t-3);
-  margin: 0;
+.where > :last-child {
+  margin-left: 4px;
 }
+
 /* The lab's own bar: what's shown, and what happens today. */
 .bars {
   border-top: 1px solid var(--line);
@@ -110,158 +222,9 @@
   flex: 1;
 }
 .caption {
+  margin: 0;
   padding: 6px 10px 8px 84px;
   color: var(--t-2);
   line-height: 1.45;
   max-width: 1100px;
-}
-/*
- * A question's rows, in the list the folders were in, as they are drawn
- * (NewProject's .folders and .folder): a press takes one, the one chosen
- * carries a tick.
- */
-.list {
-  display: grid;
-  overflow: hidden;
-  border: 1px solid var(--line-2);
-  border-radius: var(--r-lg);
-  background: var(--paper);
-}
-.row {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  width: 100%;
-  min-height: 52px;
-  padding: 8px 14px;
-  text-align: left;
-  transition: background var(--fast) var(--ease);
-}
-.row + .row {
-  border-top: 1px solid var(--line);
-}
-.row:hover {
-  background: var(--sunk);
-}
-.row:active {
-  background: var(--pressed-paper);
-}
-.row:focus-visible {
-  outline-offset: -3px;
-  border-radius: var(--r-lg);
-}
-.glyph {
-  flex: none;
-  display: grid;
-  place-items: center;
-  width: 16px;
-  color: var(--t-2);
-}
-.words {
-  flex: 1;
-  min-width: 0;
-  display: grid;
-  gap: 2px;
-}
-.wayTitle {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  color: var(--t-1);
-  font-size: 13.5px;
-  font-weight: 560;
-}
-.wayLine {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  color: var(--t-3);
-  font-size: 12px;
-}
-.chosen {
-  flex: none;
-  color: var(--t-1);
-  opacity: 0;
-  transition: opacity var(--fast) var(--ease);
-}
-.row[aria-checked='true'] .chosen {
-  opacity: 1;
-}
-.change {
-  flex: none;
-  color: var(--t-3);
-  font-size: 12px;
-}
-.row:hover .change {
-  color: var(--t-1);
-}
-/* Where its work goes, under the folders, as NewProject's own sections are headed. */
-.work {
-  margin-top: 28px;
-}
-.sub {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  margin: 0 0 8px;
-  color: var(--t-2);
-  font-size: 12px;
-  font-weight: 560;
-}
-/* What Create does, in the same list, ticking. */
-.plan {
-  padding: 4px 14px;
-  border: 1px solid var(--line-2);
-  border-radius: var(--r-lg);
-  background: var(--paper);
-}
-.quiet {
-  margin: 12px 0 0;
-  color: var(--t-3);
-  font-size: 12px;
-  line-height: 1.5;
-}
-/* The host's own form: owner / name, then who can see it. */
-.hostForm {
-  display: grid;
-  justify-items: start;
-  gap: 8px;
-  max-width: 460px;
-}
-.ownerName {
-  display: grid;
-  grid-template-columns: 150px auto minmax(0, 1fr);
-  align-items: center;
-  gap: 6px 8px;
-  width: 100%;
-}
-.fieldLabel {
-  color: var(--t-2);
-  font-size: 12px;
-  font-weight: 550;
-}
-.found {
-  min-height: 18px;
-  margin-bottom: 10px;
-}
-.found > * {
-  margin: 0;
-}
-.hostForm .quiet {
-  margin-top: 6px;
-}
-.slash {
-  color: var(--t-4);
-}
-.inSettings {
-  max-width: 460px;
-  margin-top: 12px;
-  padding-top: 14px;
-  border-top: 1px solid var(--line);
-}
-.settingsActions {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-top: 16px;
 }

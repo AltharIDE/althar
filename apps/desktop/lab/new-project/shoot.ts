@@ -5,46 +5,55 @@ import { chromium, type Page } from '@playwright/test'
 
 /*
  * Shoots the lab at 1×, into lab/new-project/shots, with it running (README.md):
- * each shot by its address, some after a press, in the order the person reads them.
+ * each shot by its address, some after a press or a sentence, in the order the person reads them.
  */
 
 const out = join(import.meta.dirname, 'shots')
 mkdirSync(out, { recursive: true })
 const port = process.env.LAB_PORT ?? '6163'
 const press =
-  (role: 'button' | 'radio', name: string | RegExp, wait = 700) =>
+  (name: string | RegExp, wait = 700) =>
   async (page: Page) => {
-    await page.getByRole(role, { name }).first().click()
+    await page.getByRole('button', { name }).first().click()
     await page.waitForTimeout(wait)
   }
+const say =
+  (text: string, wait = 2200) =>
+  async (page: Page) => {
+    await page.keyboard.type(text)
+    await page.keyboard.press('Enter')
+    await page.waitForTimeout(wait)
+  }
+const choose = press('Choose a folder…', 2600)
 const shots: ReadonlyArray<[string, string, ((page: Page) => Promise<void>)?]> = [
-  ['01-a-files', 'd=a&s=files'],
-  ['02-a-unborn', 'd=a&s=unborn'],
-  ['03-a-working', 'd=a&s=working'],
-  ['04-b-files', 'd=b&s=files&c=all'],
-  ['05-b-code', 'd=b&s=files&c=all', press('button', /^Continue/)],
-  ['06-b-github', 'd=b&s=files&c=all&card=host'],
-  ['07-b-issues-dark', 'd=b&s=files&c=all&card=issues&theme=dark'],
-  ['08-b-team', 'd=b&s=files&c=all&card=team'],
-  ['09-b-ready', 'd=b&s=files&c=all&card=ready'],
-  ['10-b-making', 'd=b&s=files&c=all&card=ready', press('button', /Create Tidepool/, 1300)],
-  ['11-b-made', 'd=b&s=files&c=all&card=ready', press('button', /Create Tidepool/, 4200)],
-  ['12-c-files', 'd=c&s=files&c=all'],
-  ['13-c-change-dark', 'd=c&s=files&c=all&theme=dark', press('button', /Change/)],
-  ['14-c-making', 'd=c&s=local&c=all', press('button', /Create Tidepool/, 1300)],
-  ['15-b-none-code', 'd=b&s=empty&c=none&card=code'],
-  ['16-b-none-connect', 'd=b&s=empty&c=none&card=code', press('radio', /Connect GitHub or GitLab/)],
-  ['17-b-empty', 'd=b&s=empty&c=all'],
-  ['18-b-unreadable', 'd=b&s=unreadable&c=all'],
-  ['19-b-project-dark', 'd=b&s=project&c=all&theme=dark'],
-  ['20-b-settings-put', 'd=b&s=working&c=all', press('button', 'Put tidepool on GitHub…')],
-  ['21-b-remote-dark', 'd=b&s=remote&c=all&theme=dark'],
+  ['01-a-waiting', 'd=a&s=files'],
+  ['02-a-reading', 'd=a&s=files', press('Choose a folder…', 350)],
+  ['03-a-files', 'd=a&s=files', choose],
+  ['04-a-unborn-dark', 'd=a&s=unborn&theme=dark', choose],
+  ['05-a-empty', 'd=a&s=empty', choose],
+  [
+    '06-a-empty-said',
+    'd=a&s=empty',
+    async (page) => {
+      await choose(page)
+      await say('A tide table for the Pacific coast, in the browser.')(page)
+    },
+  ],
+  ['07-a-unreadable', 'd=a&s=unreadable', press('Choose a folder…', 500)],
+  ['08-a-project-dark', 'd=a&s=project&theme=dark', press('Choose a folder…', 500)],
+  ['09-b-files', 'd=b&s=files'],
+  ['10-b-empty-dark', 'd=b&s=empty&theme=dark'],
+  ['11-b-started', 'd=b&s=files', press(/^Start Tidepool/, 2600)],
+  ['12-b-unreadable', 'd=b&s=unreadable'],
+  ['13-later-working', 'd=a&s=working'],
+  ['14-later-on-github', 'd=a&s=working', press(/^Send/, 2200)],
+  ['15-later-on-github-dark', 'd=a&s=remote&theme=dark'],
 ]
 const browser = await chromium.launch()
 const page = await browser.newPage({ viewport: { width: 1280, height: 800 }, deviceScaleFactor: 1 })
 for (const [name, query, act] of shots) {
   await page.goto(`http://localhost:${port}/?${query}`)
-  await page.waitForTimeout(500)
+  await page.waitForTimeout(600)
   if (act !== undefined) await act(page)
   await page.screenshot({ path: join(out, `${name}.png`) })
 }

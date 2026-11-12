@@ -3,59 +3,68 @@ import '@fontsource-variable/jetbrains-mono'
 import '@althar/ui/styles.css'
 import '../../src/renderer/app.css'
 
-import { type ReactNode, StrictMode, useEffect, useRef, useState } from 'react'
+import { type ReactNode, StrictMode, useEffect, useLayoutEffect, useRef, useState } from 'react'
 
 import { createRoot } from 'react-dom/client'
 
 import {
+  AltharLine,
+  Board,
+  BoardCard,
+  BoardColumn,
+  BoardEmpty,
+  type BoardFolds,
+  BoardLane,
+  BranchChip,
   Brand,
-  BrandMark,
   Button,
-  CanState,
-  type ConnectCan,
-  ChangeSet,
-  ChangeState,
-  ConnectChecks,
-  ConnectFound,
-  FieldArea,
-  Field,
-  HostReach,
+  Composer,
+  type ComposerFile,
+  EmptyState,
+  Fact,
   Icon,
-  type IconName,
+  IconButton,
+  type LaunchPick,
+  type LaunchStep,
   LinkButton,
-  type MapHost,
-  type MapRepository,
+  ModelPick,
+  ProjectHeader,
   ProjectInk,
-  RepositoryRole,
-  Segmented,
-  Select,
+  ProjectMark,
+  type ProjectPart,
+  ProjectTabs,
+  Prose,
+  Room,
+  TaskFace,
+  TaskKind,
+  TaskLaunch,
+  TaskMark,
+  TaskStatus,
+  Thread,
+  ThreadSkeleton,
+  trackOf,
+  Turn,
+  WorkedFor,
+  You,
 } from '@althar/ui'
-import {
-  NewProject,
-  type NewProjectFinding,
-  type NewProjectFolder,
-  type NewProjectPlace,
-  type NewProjectStep,
-  ProjectRepositories,
-} from '@althar/ui/screens'
+import { device } from '@althar/ui/device'
 
+import { OPUS, SONNET, effortFor, useModelPrefs } from '../../../../packages/ui/src/fixtures/models'
 import s from './lab.module.css'
 
 /*
- * The new-project lab (README.md): a project set up in a folder with no
- * remote, on the kit's own screens, with no runtime. Its name and folders
- * first, on the page as it is; then where its work goes, each question in
- * the folders' place: its heading where theirs is, its choices in the list
- * they were in, Continue where Create is, so nothing moves but the words.
- * What is chosen joins the project on the left. The bars swap the direction
- * (A–C), the folder's state (1–8), what is connected (G) and the theme (T);
- * the line under them says what that folder does in Althar today.
+ * The new-project lab (README.md): setting up a project in a folder with no
+ * remote, in the project's own window, on the kit's real pieces, with no
+ * runtime. A: the new tab is the project already, waiting for its folder;
+ * dropped, it is named, read and opened, and its first task is planned. B:
+ * you name it and say what you're making, and it opens with that under way.
+ * Neither asks where its code goes: with no remote, work merges into main on
+ * this computer, and a remote is one sentence to the coordinator, later.
  */
 
 const directions = [
-  { key: 'a', label: 'Today' },
-  { key: 'b', label: 'A step a question' },
-  { key: 'c', label: 'Ready in one press' },
+  { key: 'a', label: 'Drop it in' },
+  { key: 'b', label: 'Say what you’re making' },
 ] as const
 type Direction = (typeof directions)[number]['key']
 
@@ -66,872 +75,679 @@ const states = [
   { key: 'local', label: 'Git, no remote' },
   { key: 'unreadable', label: 'Can’t be read' },
   { key: 'project', label: 'Already a project' },
-  { key: 'working', label: 'In the project' },
-  { key: 'remote', label: 'Remote added' },
+  { key: 'working', label: 'Later: at work' },
+  { key: 'remote', label: 'Later: on GitHub' },
 ] as const
 type State = (typeof states)[number]['key']
 
-const setups = [
-  { key: 'all', label: 'GitHub, GitLab, Linear' },
-  { key: 'github', label: 'GitHub only' },
-  { key: 'none', label: 'Nothing yet' },
-] as const
-type Setup = (typeof setups)[number]['key']
-
-/** What each state does in Althar as it is, whichever direction is shown. */
+/** What each state does in Althar as it is. */
 const today: Record<State, string> = {
   empty:
-    'Today: choosing it is refused, “There’s no git repository in tidepool.” New repository… would make ~/code/tidepool/tidepool inside it, a folder deeper than meant.',
+    'Today: refused, “There’s no git repository in tidepool.” New repository… would make ~/code/tidepool/tidepool, a folder deeper than meant.',
   files: 'Today: refused the same way. The only way in is git init in a terminal, then choosing it again.',
-  unborn:
-    'Today: it’s added and the project is made, then the first task fails to start: git worktree add … fatal: invalid reference: main. Nothing says why.',
-  local:
-    'Today: works. The row says “no remote”; a task’s outputs say “No code host”. A host and a tracker are asked later, on a card in the project’s first conversation.',
-  unreadable: 'Today: a folder Althar can’t read is called “There’s no git repository in tidepool.”, the wrong reason.',
-  project: 'Today: it’s added again, as a second project on the same folder, with a line saying so. Nothing offers the one there is.',
-  working:
-    'Today: tasks end on their branch and merge into main on this Mac; the card calls it “No code host”, and once merged “It has no remote to push to.” Settings show “No remote” with no way to add one.',
-  remote:
-    'Today: a remote added with git remote add is read on the next look; tasks start pushing their branch, and merged work offers a push. Nothing in Althar adds one.',
+  unborn: 'Today: the project is made, then its first task fails: git worktree add … fatal: invalid reference: main. Nothing says why.',
+  local: 'Today: works. The row says “no remote”, and a task’s outputs say “No code host”, as if something were missing.',
+  unreadable: 'Today: called “There’s no git repository in tidepool.”, the wrong reason, with no way to fix it.',
+  project: 'Today: it’s added again, as a second project on the same folder, with a line saying so.',
+  working: 'Today: tasks merge into main on this Mac; their card says “No code host”, and once merged “It has no remote to push to.”',
+  remote: 'Today: nothing in Althar adds a remote. One added with git remote add is read on the next look.',
 }
 
 const params = new URLSearchParams(location.search)
 const pick = <K extends string>(list: ReadonlyArray<{ key: K }>, value: string | null, fallback: K) =>
   list.find((one) => one.key === value)?.key ?? fallback
 
-const WHERE = '~/code/tidepool'
-const FILES = [
-  { path: 'src/tides.ts', add: 84, del: 0 },
-  { path: 'src/main.ts', add: 31, del: 4 },
-  { path: 'README.md', add: 12, del: 2 },
-]
+const here = device.this
+const README = 'A tide table for the Pacific coast, in the browser.'
+const SEED = 'prj_tidepool'
+const INK = ProjectInk.Teal
 
-/* ---- The services, as connected ---- */
+interface Folder {
+  readonly name: string
+  readonly where: string
+  /** What the composer's chip says under its name. */
+  readonly meta: string
+}
+const FOLDER: Record<State, Folder> = {
+  empty: { name: 'tidepool', where: '~/code/tidepool', meta: 'Empty' },
+  files: { name: 'tidepool', where: '~/code/tidepool', meta: '14 files' },
+  unborn: { name: 'tidepool', where: '~/code/tidepool', meta: '14 files' },
+  local: { name: 'tidepool', where: '~/code/tidepool', meta: '14 files' },
+  unreadable: { name: 'tidepool', where: '~/Documents/tidepool', meta: '' },
+  project: { name: 'tidepool', where: '~/code/tidepool', meta: '14 files' },
+  working: { name: 'tidepool', where: '~/code/tidepool', meta: '' },
+  remote: { name: 'tidepool', where: '~/code/tidepool', meta: '' },
+}
+/** The id a project's mark is drawn from: Tidepool's own, or what its name would give. */
+const seedOf = (name: string) => (name.trim().toLowerCase() === 'tidepool' ? SEED : `prj_${name.trim().toLowerCase()}`)
+const titled = (folder: string) => folder.replace(/[-_]+/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
 
-interface Way {
-  id: string
-  title: string
-  line: string
-  brand?: Brand
-  icon?: IconName
+/** What Althar did to the folder so tasks can start: said once, as the project's first line. */
+const gitLine: Partial<Record<State, string>> = {
+  empty: 'Started git in tidepool, on main.',
+  files: 'Started git in tidepool, on main, with its 14 files as the first commit.',
+  unborn: 'Made tidepool’s first commit on main, with its 14 files.',
 }
 
-type Host = 'github' | 'gitlab'
-type Code = Host | 'here'
-interface HostInfo {
-  name: string
-  brand: Brand
-  thing: string
-  changes: string
-  issues: string
-  owners: string[]
-  seen: Array<{ value: string; label: string }>
-  ways: Way[]
-}
-const HOST: Record<Host, HostInfo> = {
-  github: {
-    name: 'GitHub',
-    brand: Brand.GitHub,
-    thing: 'repository',
-    changes: 'pull requests',
-    issues: 'GitHub Issues',
-    owners: ['balazs', 'charrette'],
-    seen: [
-      { value: 'private', label: 'Private' },
-      { value: 'public', label: 'Public' },
-    ],
-    ways: [
-      { id: 'browser', title: 'Continue with GitHub', line: 'Approve in your browser', brand: Brand.GitHub },
-      { id: 'gh', title: 'Use gh’s sign-in', line: 'Signed in as balazs on this Mac', icon: 'terminal' },
-      { id: 'token', title: 'Make a token', line: 'On GitHub’s token page, opened filled in', icon: 'lock' },
-    ],
-  },
-  gitlab: {
-    name: 'GitLab',
-    brand: Brand.GitLab,
-    thing: 'project',
-    changes: 'merge requests',
-    issues: 'GitLab issues',
-    owners: ['balazs', 'charrette-group'],
-    seen: [
-      { value: 'private', label: 'Private' },
-      { value: 'internal', label: 'Internal' },
-      { value: 'public', label: 'Public' },
-    ],
-    ways: [
-      { id: 'browser', title: 'Continue with GitLab', line: 'Approve in your browser', brand: Brand.GitLab },
-      { id: 'glab', title: 'Use glab’s sign-in', line: 'Signed in as balazs on this Mac', icon: 'terminal' },
-      { id: 'server', title: 'A company’s own server', line: 'By its address', icon: 'globe' },
-    ],
-  },
-}
-const hostsOf = (setup: Setup): ReadonlyArray<Host> => (setup === 'all' ? ['github', 'gitlab'] : setup === 'github' ? ['github'] : [])
+/* ---- The pieces every scene shares ---- */
 
-const TRACKERS: Way[] = [
-  { id: 'linear', title: 'Linear', line: 'Approve in your browser', brand: Brand.Linear },
-  { id: 'jira', title: 'Jira', line: 'With an API token', brand: Brand.Jira },
-  { id: 'trello', title: 'Trello', line: 'With a key and a token', brand: Brand.Trello },
-]
-
-interface Team {
-  id: string
-  key: string
-  name: string
-  fresh?: boolean
-}
-const TEAMS: Team[] = [
-  { id: 'new', key: 'TID', name: 'Tidepool', fresh: true },
-  { id: 'alt', key: 'ALT', name: 'Althar' },
-  { id: 'web', key: 'WEB', name: 'Website' },
-]
-const NEW_TEAM = TEAMS[0] as Team
-const OPEN: Record<string, number> = { alt: 212, web: 38 }
-
-type Issues = 'linear' | 'host' | 'none'
-interface Goes {
-  code: Code
-  owner: string
-  name: string
-  seen: string
-  issues: Issues
-  team: Team
+/** Arrives once: fades in where it will stay, after a beat, as streamed words do. */
+function Arrive({ children, after = 0 }: { children: ReactNode; after?: number }) {
+  const el = useRef<HTMLDivElement>(null)
+  useLayoutEffect(() => {
+    const node = el.current
+    if (node === null || typeof node.animate !== 'function') return
+    if (matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      node.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 200, delay: after, fill: 'backwards' })
+      return
+    }
+    node.animate(
+      [
+        { opacity: 0, transform: 'translateY(4px)' },
+        { opacity: 1, transform: 'none' },
+      ],
+      {
+        duration: 260,
+        delay: after,
+        easing: 'cubic-bezier(0.22, 1, 0.36, 1)',
+        fill: 'backwards',
+      },
+    )
+  }, [after])
+  return (
+    <div ref={el} className={s.arrive}>
+      {children}
+    </div>
+  )
 }
 
-/** What's chosen before anyone chooses: where the person's last project went, so one press can take it all. */
-const firstGoes = (setup: Setup, linear: boolean): Goes => {
-  const host = hostsOf(setup)[0]
-  return {
-    code: host ?? 'here',
-    owner: 'balazs',
-    name: 'tidepool',
-    seen: 'private',
-    issues: linear ? 'linear' : host !== undefined ? 'host' : 'none',
-    team: NEW_TEAM,
-  }
+function usePicker() {
+  const prefs = useModelPrefs()
+  return ({ agent, owner }: LaunchPick) => (
+    <ModelPick
+      variant="field"
+      placement="below"
+      owner={owner}
+      model={agent}
+      pinned={prefs.pinned}
+      effort={effortFor(agent, prefs.efforts)}
+      defaultEffort={effortFor(agent, prefs.efforts)}
+      onChange={() => {}}
+      onEffort={() => {}}
+    />
+  )
 }
 
-/* ---- What the questions are made of ---- */
-
-const WayGlyph = ({ way }: { way: Way }) => (
-  <span className={s.glyph}>
-    {way.brand !== undefined ? <BrandMark brand={way.brand} size={16} /> : <Icon name={way.icon ?? 'plug'} size={15} />}
-  </span>
-)
-const WayWords = ({ way }: { way: Way }) => (
-  <span className={s.words}>
-    <span className={s.wayTitle}>{way.title}</span>
-    <span className={s.wayLine}>{way.line}</span>
-  </span>
-)
+const FOLDS: BoardFolds = { collapsed: [], opened: [] }
+const noop = () => undefined
 
 /**
- * One of a few, as rows in the list the folders were in. A press chooses one
- * and goes on; arrows move the choice, and Return or Continue takes it.
+ * The project's window, as the desktop draws it: its tabs, its header once
+ * it has a name, then the conversation beside the board. `named` is null
+ * while the tab is still a new project.
  */
-function Picks({
-  label,
-  ways,
-  value,
-  onSelect,
-  onPick,
+function Window({
+  named,
+  pop,
+  parts = [],
+  running = 0,
+  talk,
+  composer,
+  board,
 }: {
-  label: string
-  ways: readonly Way[]
-  value: string
-  onSelect: (id: string) => void
-  onPick: (id: string) => void
+  named: string | null
+  /** The name and mark just landed: the mark grows in from the drop. */
+  pop?: boolean
+  parts?: ProjectPart[]
+  running?: number
+  talk: ReactNode
+  composer?: ReactNode
+  board: ReactNode
 }) {
-  const rows = useRef<Array<HTMLButtonElement | null>>([])
-  const at = Math.max(
-    0,
-    ways.findIndex((way) => way.id === value),
-  )
-  const move = (by: number) => {
-    const next = (at + by + ways.length) % ways.length
-    const way = ways[next]
-    if (way === undefined) return
-    onSelect(way.id)
-    rows.current[next]?.focus()
-  }
+  const head = useRef<HTMLDivElement>(null)
+  useLayoutEffect(() => {
+    if (pop !== true || head.current === null) return
+    if (matchMedia('(prefers-reduced-motion: reduce)').matches) return
+    const marks = head.current.querySelectorAll<HTMLElement>('[aria-hidden="true"]:has(> svg)')
+    marks.forEach((mark) =>
+      mark.animate(
+        [
+          { transform: 'scale(0.6)', opacity: 0 },
+          { transform: 'none', opacity: 1 },
+        ],
+        {
+          duration: 420,
+          easing: 'cubic-bezier(0.34, 1.4, 0.64, 1)',
+        },
+      ),
+    )
+  }, [pop, named])
   return (
-    <div role="radiogroup" aria-label={label} className={s.list}>
-      {ways.map((way, i) => (
-        <button
-          key={way.id}
-          ref={(el) => {
-            rows.current[i] = el
-          }}
-          type="button"
-          role="radio"
-          aria-checked={way.id === value}
-          tabIndex={i === at ? 0 : -1}
-          className={s.row}
-          onClick={() => onPick(way.id)}
-          onKeyDown={(event) => {
-            if (event.key === 'ArrowDown' || event.key === 'ArrowRight') {
-              event.preventDefault()
-              move(1)
-            } else if (event.key === 'ArrowUp' || event.key === 'ArrowLeft') {
-              event.preventDefault()
-              move(-1)
-            }
-          }}
-        >
-          <WayGlyph way={way} />
-          <WayWords way={way} />
-          <Icon name="check" size={13} className={s.chosen} />
-        </button>
-      ))}
-    </div>
-  )
-}
-
-const nameOf = (goes: Goes) => {
-  const name = goes.name.trim()
-  const taken = name === 'althar' || name === 'tides'
-  return { name, taken, fine: name !== '' && !taken && /^[A-Za-z0-9._-]+$/.test(name) }
-}
-
-/** Its new repository on the host, as the host's own form asks: owner and name, and who sees it. */
-function HostForm({
-  id,
-  host,
-  goes,
-  onChange,
-  onDone,
-}: {
-  id: string
-  host: Host
-  goes: Goes
-  onChange: (next: Partial<Goes>) => void
-  onDone: () => void
-}) {
-  const h = HOST[host]
-  const { name, taken, fine } = nameOf(goes)
-  return (
-    <form
-      id={id}
-      className={s.hostForm}
-      onSubmit={(event) => {
-        event.preventDefault()
-        if (fine) onDone()
-      }}
-    >
-      <div className={s.ownerName}>
-        <span className={s.fieldLabel}>Owner</span>
-        <span />
-        <span className={s.fieldLabel}>Name</span>
-        <Select
-          label="Owner"
-          variant="filled"
-          width={150}
-          value={goes.owner}
-          options={h.owners.map((owner) => ({ value: owner, label: owner }))}
-          onChange={(owner) => onChange({ owner })}
+    <div className={s.window}>
+      <div ref={head}>
+        <ProjectTabs
+          lights="drawn"
+          tabs={[
+            { id: 'meridian', name: 'Meridian', seed: 'meridian', ink: ProjectInk.Clay, running: true, yours: 0 },
+            {
+              id: 'new',
+              name: named ?? 'New project',
+              seed: named === null ? 'new' : seedOf(named),
+              ink: named === null ? ProjectInk.Sand : INK,
+              running: running > 0,
+              yours: 0,
+            },
+          ]}
+          current="new"
+          yours={0}
+          onSelect={noop}
+          onClose={noop}
+          end={<IconButton icon="gear" label="Settings" kbd="⌘," size="small" />}
         />
-        <span className={s.slash}>/</span>
-        <Field
-          aria-label={`${h.name} ${h.thing} name`}
-          value={goes.name}
-          spellCheck={false}
-          onChange={(event) => onChange({ name: event.target.value })}
-        />
+        {
+          <ProjectHeader
+            name={named ?? 'New project'}
+            seed={named === null ? 'new' : seedOf(named)}
+            ink={named === null ? ProjectInk.Sand : INK}
+            yours={0}
+            inProgress={running}
+            onYours={noop}
+            room={Room.Both}
+            onRoom={noop}
+            parts={parts}
+          />
+        }
       </div>
-      <div className={s.found}>
-        {name === '' ? null : taken ? (
-          <ConnectFound tone="no">
-            {goes.owner}/{name} is taken.
-          </ConnectFound>
-        ) : fine ? (
-          <ConnectFound>
-            {goes.owner}/{name} is free.
-          </ConnectFound>
-        ) : (
-          <ConnectFound tone="no">Letters, numbers, - . and _ only.</ConnectFound>
-        )}
-      </div>
-      <span className={s.fieldLabel}>Who can see it</span>
-      <Segmented label="Who can see it" value={goes.seen} options={h.seen} onChange={(seen) => onChange({ seen })} />
-      <p className={s.quiet}>Althar pushes main to it, and tasks open {h.changes} there.</p>
-    </form>
-  )
-}
-
-/** Where its code goes, as a row: the repository it gets, or this Mac. */
-const codeWay = (goes: Goes): Way => {
-  const host = goes.code === 'here' ? null : HOST[goes.code]
-  return host === null
-    ? { id: 'code', title: 'Only on this Mac', line: 'Tasks merge into main here', icon: 'folder' }
-    : { id: 'code', title: `${goes.owner}/${goes.name}`, line: `New ${goes.seen} ${host.thing} on ${host.name}`, brand: host.brand }
-}
-/** Where its issues go, as a row. */
-const issuesWay = (goes: Goes): Way => {
-  const host = goes.code === 'here' ? null : HOST[goes.code]
-  return goes.issues === 'linear'
-    ? {
-        id: 'issues',
-        title: goes.team.fresh === true ? `Linear · new team ${goes.team.name}` : `Linear · ${goes.team.name}`,
-        line:
-          goes.team.fresh === true
-            ? `Its issues ${goes.team.key}-1, ${goes.team.key}-2…`
-            : `${goes.team.key} · ${OPEN[goes.team.id] ?? 0} open issues`,
-        brand: Brand.Linear,
-      }
-    : goes.issues === 'host' && host !== null
-      ? { id: 'issues', title: host.issues, line: `On ${goes.owner}/${goes.name}`, brand: host.brand }
-      : { id: 'issues', title: 'No tracker yet', line: 'Its settings can link one later', icon: 'issues' }
-}
-
-/** Where its work goes, under the folders: each row a press away from its question. */
-function WorkRows({ goes, onEdit }: { goes: Goes; onEdit: (id: 'code' | 'issues') => void }) {
-  return (
-    <div className={s.work}>
-      <h3 className={s.sub}>Where its work goes</h3>
-      <div className={s.list}>
-        {[codeWay(goes), issuesWay(goes)].map((way) => (
-          <button key={way.id} type="button" className={s.row} onClick={() => onEdit(way.id as 'code' | 'issues')}>
-            <WayGlyph way={way} />
-            <WayWords way={way} />
-            <span className={s.change}>Change</span>
-          </button>
-        ))}
+      <div className={s.rooms}>
+        <div className={s.talk}>
+          <TaskFace className={s.face} composer={composer}>
+            {talk}
+          </TaskFace>
+        </div>
+        <div className={s.board}>{board}</div>
       </div>
     </div>
   )
 }
 
-/** What making it does, each line ticked as it's done. */
-const planOf = (state: State, goes: Goes): ConnectCan[] => {
-  const host = goes.code === 'here' ? null : HOST[goes.code]
-  const can = (id: string, text: string, fact?: ReactNode): ConnectCan => ({
-    id,
-    text,
-    state: CanState.Waiting,
-    ...(fact === undefined ? {} : { fact }),
-  })
-  return [
-    ...(state === 'empty' || state === 'files' ? [can('init', 'Make tidepool a git repository', 'main')] : []),
-    ...(state === 'files' || state === 'unborn' ? [can('commit', 'Commit its 14 files')] : []),
-    ...(state === 'empty' ? [can('commit', 'Make its first commit')] : []),
-    ...(host === null ? [] : [can('host', `Make ${goes.owner}/${goes.name} on ${host.name}`, goes.seen), can('push', 'Push main')]),
-    ...(goes.issues === 'linear'
-      ? [
-          goes.team.fresh === true
-            ? can('team', 'Make the Linear team Tidepool', goes.team.key)
-            : can('team', `Link Linear’s ${goes.team.name}`, goes.team.key),
-        ]
-      : []),
-    can('project', 'Make Tidepool'),
-  ]
-}
-
-/* ---- The first step: its name and folders, each read for what it is ---- */
-
-const FACT: Partial<Record<State, string>> = { empty: 'empty folder', files: 'not a git repository yet', unborn: 'no commits yet' }
-
-const folderFor = (state: State, direction: Direction): ReadonlyArray<NewProjectFolder> => {
-  const row = (fact?: string): NewProjectFolder => ({
-    id: 'tidepool',
-    name: 'tidepool',
-    where: WHERE,
-    host: null,
-    remote: null,
-    ...(fact === undefined ? {} : { fact }),
-  })
-  if (direction === 'a') return state === 'unborn' || state === 'local' || state === 'project' ? [row()] : []
-  if (state === 'unreadable') return []
-  return [row(FACT[state])]
-}
-
-const findingsFor = (state: State, direction: Direction, open: () => void): ReadonlyArray<NewProjectFinding> => {
-  if (state === 'project')
-    return direction === 'a'
-      ? [{ id: 'shared', kind: 'shared', name: 'tidepool', project: 'Tidepool' }]
-      : [
-          {
-            id: 'shared',
-            kind: 'note',
-            icon: 'folder',
-            words: 'tidepool is Tidepool’s already.',
-            action: <LinkButton onClick={open}>Open Tidepool</LinkButton>,
-          },
-        ]
-  if (direction === 'a') return []
-  const git = (words: string): NewProjectFinding => ({ id: 'git', kind: 'note', icon: 'branch', words })
-  switch (state) {
-    case 'empty':
-      return [git('Althar makes it a git repository on main.')]
-    case 'files':
-      return [git('Althar makes it a git repository on main, and commits its 14 files.')]
-    case 'unborn':
-      return [git('Althar commits its 14 files on main first.')]
-    default:
-      return []
-  }
-}
-
-/** An empty folder's own row: what it's for, which its first task starts from. */
-function DescribeRow({ value, onChange }: { value: string; onChange: (next: string) => void }) {
+function EmptyBoard({ name }: { name: string }) {
   return (
-    <div className={s.extra}>
-      <span className={s.extraLabel}>What you’re making</span>
-      <FieldArea
-        rows={3}
-        value={value}
-        onChange={(event) => onChange(event.target.value)}
-        placeholder="A small web app that shows the next high and low tides for a stretch of coast, from public tide tables."
+    <Board label={`${name}’s work`} defaultFolds={FOLDS}>
+      <BoardColumn
+        lane={BoardLane.Next}
+        count={0}
+        empty={<BoardEmpty title="Nothing queued">Tell the coordinator what you want done. The tasks it plans line up here.</BoardEmpty>}
       />
-      <p className={s.extraNote}>Its first task sets it up from this.</p>
-    </div>
+      <BoardColumn lane={BoardLane.Running} count={0} />
+      <BoardColumn lane={BoardLane.Yours} count={0} />
+      <BoardColumn lane={BoardLane.Settled} count={0} />
+    </Board>
   )
 }
 
-/** Where its work goes, on the left, as it's chosen. */
-const placesOf = (goes: Goes, chosen: { code: boolean; issues: boolean }): NewProjectPlace[] => {
-  const host = goes.code === 'here' ? null : HOST[goes.code]
-  const code: NewProjectPlace =
-    host === null
-      ? { id: 'code', label: 'Code', value: 'This Mac', icon: 'folder' }
-      : { id: 'code', label: 'Code', value: `${goes.owner}/${goes.name}`, brand: host.brand }
-  const issues: NewProjectPlace =
-    goes.issues === 'linear'
-      ? { id: 'issues', label: 'Issues', value: `Linear · ${goes.team.key}`, brand: Brand.Linear }
-      : goes.issues === 'host' && host !== null
-        ? { id: 'issues', label: 'Issues', value: host.issues, brand: host.brand }
-        : { id: 'issues', label: 'Issues', value: 'None yet', icon: 'issues' }
-  return [...(chosen.code ? [code] : []), ...(chosen.issues ? [issues] : [])]
+const LOCAL_PART: ProjectPart = { id: 'tidepool', name: 'tidepool', openLabel: 'Show in Finder', onOpen: noop }
+const GITHUB_PART: ProjectPart = {
+  id: 'tidepool',
+  name: 'tidepool',
+  brand: Brand.GitHub,
+  openLabel: 'Open on GitHub',
+  onOpen: noop,
 }
 
-type Card = 'code' | 'connect' | 'host' | 'issues' | 'tracker' | 'team' | 'ready'
+/* ---- The project, opened: its first word and its first task ---- */
 
-function NewProjectScene({
-  state,
-  direction,
-  setup: given,
-  onOpen,
-}: {
-  state: State
-  direction: Direction
-  setup: Setup
-  onOpen: () => void
-}) {
-  const quick = direction === 'c'
-  const [name, setName] = useState('Tidepool')
-  const [ink, setInk] = useState<ProjectInk>(ProjectInk.Teal)
-  const [describe, setDescribe] = useState('')
-  // What is connected along the way joins what was connected before.
-  const [setup, setSetup] = useState<Setup>(given)
-  const [linear, setLinear] = useState(given === 'all')
-  const [goes, setGoes] = useState<Goes>(() => firstGoes(given, given === 'all'))
-  const opening = direction === 'a' ? null : ((params.get('card') as Card | null) ?? null)
-  const [card, setCard] = useState<Card | null>(opening)
-  const [trail, setTrail] = useState<Card[]>(opening !== null && opening !== 'code' && !quick ? ['code'] : [])
-  const [connecting, setConnecting] = useState<Host>(given === 'github' ? 'gitlab' : 'github')
-  const [chosen, setChosen] = useState({
-    code: quick || opening === 'issues' || opening === 'team' || opening === 'ready',
-    issues: quick || opening === 'ready',
-  })
-  // Where arrows have moved each question's choice, before it's taken.
-  const [selected, setSelected] = useState<Partial<Record<Card, string>>>({})
-  const [making, setMaking] = useState<number | null>(null)
-  const timer = useRef<number | null>(null)
-  useEffect(
-    () => () => {
-      if (timer.current !== null) clearInterval(timer.current)
-    },
-    [],
-  )
+const SETUP: LaunchStep[] = [{ id: 'impl', label: 'Implement', agents: [OPUS], fixed: 'the lead' }]
 
-  const walking = direction !== 'a' && card !== null
-  const plan = planOf(state, goes)
-  const made = making !== null && making >= plan.length
-  const change = (next: Partial<Goes>) => setGoes((now) => ({ ...now, ...next }))
-  const go = (next: Card) => {
-    setTrail((now) => (card === null ? now : [...now, card]))
-    setCard(next)
-  }
-  const back = () => {
-    if (making !== null) return
-    setTrail((now) => now.slice(0, -1))
-    setCard(trail.at(-1) ?? null)
-  }
-  // A step a question: on to the next. Ready in one press: back to the folders, where it all is.
-  const after = (next: Card) => {
-    if (!quick) return go(next)
-    setTrail([])
-    setCard(null)
-  }
-  const create = () => {
-    if (making !== null) return
-    setMaking(0)
-    const steps = plan.length
-    timer.current = window.setInterval(() => {
-      setMaking((now) => {
-        const next = (now ?? 0) + 1
-        if (next >= steps && timer.current !== null) clearInterval(timer.current)
-        return next
-      })
-    }, 520)
-  }
-
-  const pickCode = (id: string) => {
-    if (id === 'connect') return go('connect')
-    if (id === 'here') {
-      change({ code: 'here', ...(goes.issues === 'host' ? { issues: linear ? 'linear' : 'none' } : {}) })
-      setChosen((now) => ({ ...now, code: true }))
-      return after('issues')
-    }
-    change({ code: id as Host })
-    go('host')
-  }
-  const pickIssues = (id: string) => {
-    if (id === 'linear') return go('team')
-    if (id === 'tracker') return go('tracker')
-    change({ issues: id as Issues })
-    setChosen((now) => ({ ...now, issues: true }))
-    after('ready')
-  }
-  const pickTeam = (id: string) => {
-    change({ issues: 'linear', team: TEAMS.find((team) => team.id === id) ?? NEW_TEAM })
-    setChosen((now) => ({ ...now, issues: true }))
-    after('ready')
-  }
-  const connected = () => {
-    setSetup((now) => (now === 'none' ? 'github' : 'all'))
-    setConnecting('gitlab')
-    change({ code: connecting })
-    go('host')
-  }
-
-  /** A question answered by a row: the rows, the one chosen, and Continue taking it. */
-  const asking = (
-    at: Card,
-    title: string,
-    ways: readonly Way[],
-    fallback: string,
-    onPick: (id: string) => void,
-    more?: ReactNode,
-  ): NewProjectStep => {
-    const value = selected[at] ?? fallback
+/** What the coordinator says first, having read the folder: what it is, and what happens with no remote. */
+function firstWord(state: State, said: string | null): { prose: ReactNode; task: string } {
+  if (state === 'empty')
     return {
-      key: at,
-      title,
-      children: (
+      prose: (
         <>
-          <Picks label={title} ways={ways} value={value} onSelect={(id) => setSelected((now) => ({ ...now, [at]: id }))} onPick={onPick} />
-          {more}
+          <p>
+            A first task sets Tidepool up from that: Vite and TypeScript, a page with today’s tides, and how it runs, kept for the tasks
+            after.
+          </p>
+          <p>With no remote, finished work merges into main here, on {here}.</p>
         </>
       ),
-      next: { label: 'Continue', onPress: () => onPick(value) },
-      onBack: back,
+      task: 'Set up Tidepool',
     }
+  return {
+    prose: (
+      <>
+        <p>
+          Tidepool is a tide table in TypeScript and Vite, reading NOAA’s predictions for one station.
+          {said !== null && said !== README
+            ? ' A first task learns how it runs, then it’s ready for that.'
+            : ' A first task learns how it runs and keeps that for the tasks after.'}
+        </p>
+        <p>With no remote, finished work merges into main here, on {here}.</p>
+      </>
+    ),
+    task: 'Learn how Tidepool runs',
   }
+}
 
-  const step = ((): NewProjectStep | undefined => {
-    if (!walking) return undefined
-    switch (card) {
-      case 'code': {
-        const more = setup === 'none' ? 'GitHub or GitLab' : setup === 'github' ? 'GitLab' : null
-        return asking(
-          'code',
-          'Where its code lives',
-          [
-            ...hostsOf(setup).map((id) => ({
-              id,
-              title: HOST[id].name,
-              line: `New ${HOST[id].thing} · ${goes.owner}/${goes.name}`,
-              brand: HOST[id].brand,
-            })),
-            { id: 'here', title: 'Only on this Mac', line: 'Tasks merge into main here', icon: 'folder' },
-            ...(more === null ? [] : [{ id: 'connect', title: `Connect ${more}`, line: 'Then make it there', icon: 'plug' as const }]),
-          ],
-          goes.code,
-          pickCode,
-        )
-      }
-      case 'connect': {
-        const h = HOST[connecting]
-        return asking(
-          'connect',
-          `Connect ${h.name}`,
-          h.ways,
-          'browser',
-          connected,
-          <p className={s.quiet}>Kept encrypted on this Mac. Agents never get it; they reach {h.name} through Althar.</p>,
-        )
-      }
-      case 'host': {
-        if (goes.code === 'here') return undefined
-        const h = HOST[goes.code]
-        const done = () => {
-          setChosen((now) => ({ ...now, code: true }))
-          after('issues')
-        }
-        return {
-          key: 'host',
-          title: `New ${h.thing} on ${h.name}`,
-          children: <HostForm id="host-form" host={goes.code} goes={goes} onChange={change} onDone={done} />,
-          next: { label: 'Continue', onPress: done, disabled: !nameOf(goes).fine },
-          onBack: back,
-        }
-      }
-      case 'issues': {
-        const host = goes.code === 'here' ? null : HOST[goes.code]
-        return asking(
-          'issues',
-          'Where its issues go',
-          [
-            ...(linear ? [{ id: 'linear', title: 'Linear', line: 'Charrette · a new team, or one of 2', brand: Brand.Linear }] : []),
-            ...(host === null ? [] : [{ id: 'host', title: host.issues, line: `On ${goes.owner}/${goes.name}`, brand: host.brand }]),
-            ...(linear
-              ? []
-              : [{ id: 'tracker', title: 'Connect Linear, Jira or Trello', line: 'Then choose where', icon: 'plug' as const }]),
-            { id: 'none', title: 'Not now', line: 'Its settings can link one later', icon: 'after' },
-          ],
-          goes.issues === 'host' && host === null ? 'none' : goes.issues === 'linear' && !linear ? 'tracker' : goes.issues,
-          pickIssues,
-        )
-      }
-      case 'tracker':
-        return asking('tracker', 'Connect a tracker', TRACKERS, 'linear', () => {
-          setLinear(true)
-          go('team')
-        })
-      case 'team':
-        return asking(
-          'team',
-          'Its team in Linear',
-          TEAMS.map((team) =>
-            team.fresh === true
-              ? { id: team.id, title: `New team: ${team.name}`, line: `Its issues ${team.key}-1, ${team.key}-2…`, icon: 'plus' as const }
-              : { id: team.id, title: team.name, line: `${team.key} · ${OPEN[team.id] ?? 0} open issues`, icon: 'issues' as const },
-          ),
-          goes.team.id,
-          pickTeam,
-        )
-      case 'ready': {
-        const items = plan.map((line, at) => ({
-          ...line,
-          state: making === null ? CanState.Waiting : at < making ? CanState.Can : at === making ? CanState.Checking : CanState.Waiting,
-        }))
-        return {
-          key: 'ready',
-          title: made ? 'Tidepool is ready' : making !== null ? 'Making Tidepool' : 'Create Tidepool',
-          children: (
-            <div className={s.plan}>
-              <ConnectChecks label="What Create does" items={items} />
-            </div>
-          ),
-          next: made
-            ? { label: 'Open Tidepool', onPress: onOpen, last: true }
-            : // Ready in one press was pressed on the folders, as it was drawn there.
-              { label: 'Create Tidepool', onPress: create, busy: making !== null, last: !quick },
-          ...(making === null && !quick ? { onBack: back } : {}),
-        }
-      }
-      default:
-        return undefined
-    }
-  })()
-
-  const error =
-    direction === 'a' && (state === 'empty' || state === 'files' || state === 'unreadable')
-      ? 'There’s no git repository in tidepool.'
-      : state === 'unreadable'
-        ? 'Althar can’t read tidepool: macOS keeps it from opening the folder. Check it in Finder’s Get Info, then choose it again.'
-        : undefined
-  const readable = direction !== 'a' && state !== 'unreadable' && state !== 'project'
-  const extra = (
-    <>
-      {direction !== 'a' && state === 'empty' && <DescribeRow value={describe} onChange={setDescribe} />}
-      {quick && readable && (
-        <WorkRows goes={goes} onEdit={(id) => go(id === 'code' ? (goes.code === 'here' ? 'code' : 'host') : 'issues')} />
+function Opened({
+  state,
+  said,
+  pop,
+  reading,
+}: {
+  state: State
+  /** What the person said they're making, in B; in A with an empty folder, once they say it. */
+  said: string | null
+  pop: boolean
+  reading: boolean
+}) {
+  const picker = usePicker()
+  const [draft, setDraft] = useState('')
+  const [asked, setAsked] = useState<string | null>(said)
+  const [started, setStarted] = useState(false)
+  const input = useRef<HTMLTextAreaElement>(null)
+  const waiting = state === 'empty' && asked === null
+  useEffect(() => {
+    if (!reading && waiting) input.current?.focus()
+  }, [reading, waiting])
+  const word = firstWord(state, asked)
+  const line = gitLine[state]
+  const talk = (
+    <Thread label="Conversation">
+      {reading ? (
+        <ThreadSkeleton label="Reading tidepool" />
+      ) : (
+        <>
+          {line !== undefined && (
+            <Arrive>
+              <AltharLine>{line}</AltharLine>
+            </Arrive>
+          )}
+          {state === 'empty' && said === null && (
+            <Arrive after={280}>
+              <Turn voice="Coordinator" at="now">
+                <Prose>What are you making?</Prose>
+              </Turn>
+            </Arrive>
+          )}
+          {!waiting && (
+            <>
+              {asked !== null && (
+                <Arrive after={said === null ? 0 : 200}>
+                  <You at="now">{asked}</You>
+                </Arrive>
+              )}
+              <Arrive after={said === null && asked !== null ? 500 : 380}>
+                <Turn voice="Coordinator" at="now">
+                  <WorkedFor took={state === 'empty' ? '4s' : '9s'} />
+                  <Prose>{word.prose}</Prose>
+                </Turn>
+              </Arrive>
+              <Arrive after={said === null && asked !== null ? 1000 : 900}>
+                <TaskLaunch
+                  task="1"
+                  preset="Change"
+                  title={word.task}
+                  project="Tidepool"
+                  estimate="About 6 min"
+                  defaultSteps={SETUP}
+                  picker={picker}
+                  hideEnd
+                  wait={20}
+                  onStart={() => setStarted(true)}
+                />
+              </Arrive>
+            </>
+          )}
+        </>
       )}
-    </>
+    </Thread>
   )
-  return (
-    <NewProject
-      seed="prj_tidepool"
-      name={name}
-      onNameChange={setName}
-      ink={ink}
-      onInkChange={setInk}
-      folders={folderFor(state, direction)}
-      onRemove={() => undefined}
-      onChoose={() => undefined}
-      onStartFresh={() => undefined}
-      found={{ like: null, first: [], more: [] }}
-      onAdd={() => undefined}
-      findings={findingsFor(state, direction, onOpen)}
-      onCreate={() => {
-        if (direction === 'a') return
-        if (!quick) return go('code')
-        go('ready')
-        create()
+  const composer = (
+    <Composer
+      value={draft}
+      onChange={setDraft}
+      onSubmit={(text) => {
+        if (text.trim() === '') return
+        if (waiting) setAsked(text.trim())
+        setDraft('')
       }}
-      onCancel={() => (walking ? back() : undefined)}
-      // Ready in one press shows where its work goes under the folders; on the left, once they're out of sight.
-      places={quick && !walking ? [] : placesOf(goes, chosen)}
-      {...(error === undefined ? {} : { error })}
-      extra={extra}
-      {...(step === undefined ? {} : { step })}
-      text={direction === 'b' ? { create: () => 'Continue', createUnnamed: 'Continue' } : {}}
+      inputRef={input}
+      placeholder={waiting ? README : 'Tell the coordinator something'}
+    />
+  )
+  const board = started ? (
+    <Board label="Tidepool’s work" defaultFolds={FOLDS}>
+      <BoardColumn lane={BoardLane.Next} count={0} />
+      <BoardColumn lane={BoardLane.Running} count={1}>
+        <BoardCard
+          status={TaskStatus.Running}
+          word="Implement"
+          kind={TaskKind.Change}
+          at="now"
+          title={word.task}
+          track={trackOf(['Implement'], 0)}
+          object={<BranchChip name="tidepool/learn-how-it-runs" add={0} del={0} />}
+          foot={<Fact>{OPUS.short} leads</Fact>}
+          onOpen={noop}
+        />
+      </BoardColumn>
+      <BoardColumn lane={BoardLane.Yours} count={0} />
+      <BoardColumn lane={BoardLane.Settled} count={0} />
+    </Board>
+  ) : (
+    <EmptyBoard name="Tidepool" />
+  )
+  return <Window named="Tidepool" pop={pop} parts={[LOCAL_PART]} running={started ? 1 : 0} talk={talk} composer={composer} board={board} />
+}
+
+/* ---- What can't go on: said where the folder would have gone, with the way out ---- */
+
+function Refused({ state, onAnother }: { state: State; onAnother: () => void }) {
+  if (state === 'project')
+    return (
+      <EmptyState
+        mark={<ProjectMark seed={SEED} ink={INK} size={28} />}
+        title="tidepool is Tidepool already"
+        line="Made on 3 Nov, with 4 tasks settled."
+        actions={
+          <>
+            <Button variant="signal">Open Tidepool</Button>
+            <LinkButton onClick={onAnother}>Choose another folder</LinkButton>
+          </>
+        }
+      />
+    )
+  return (
+    <EmptyState
+      icon="lock"
+      title="Althar can’t open tidepool"
+      line={`${here === 'this Mac' ? 'macOS' : 'The system'} keeps Documents closed to Althar until you allow it.`}
+      actions={
+        <>
+          <Button variant="signal">Allow in System Settings</Button>
+          <LinkButton onClick={onAnother}>Choose another folder</LinkButton>
+        </>
+      }
     />
   )
 }
 
-/* ---- The project once it's made ---- */
+/* ---- A: the new tab is the project, waiting for its folder ---- */
 
-const GITHUB: MapHost = { id: 'github', name: 'GitHub', brand: Brand.GitHub, reach: HostReach.Connected, account: 'balazs' }
-
-function ProjectScene({ state, direction, setup }: { state: State; direction: Direction; setup: Setup }) {
-  const [added, setAdded] = useState(state === 'remote')
-  const [putting, setPutting] = useState<Host | null>(null)
-  const [goes, setGoes] = useState<Goes>(() => firstGoes(setup, false))
-  const host = added ? GITHUB : null
-  const repo: MapRepository = {
-    id: 'tidepool',
-    name: 'tidepool',
-    where: WHERE,
-    branch: 'main',
-    role: RepositoryRole.Frontend,
-    tasks: 1,
-    ...(host === null
-      ? {}
-      : { remote: { host: 'github', path: `${goes.owner}/${goes.name}`, href: 'https://github.com/balazs/tidepool' } }),
+function DropScene({ state }: { state: State }) {
+  const [phase, setPhase] = useState<'waiting' | 'reading' | 'open' | 'refused'>('waiting')
+  const [over, setOver] = useState(false)
+  const take = () => {
+    setOver(false)
+    if (state === 'unreadable' || state === 'project') return setPhase('refused')
+    setPhase('reading')
+    setTimeout(() => setPhase('open'), 1100)
   }
-  const prs = [{ repo: 'tidepool', files: FILES }]
-  const noop = () => undefined
-  const merged = (
-    <ChangeSet
-      state={ChangeState.Merged}
-      prs={prs}
-      note={
-        host !== null
-          ? direction === 'a'
-            ? 'Into main on this Mac. origin doesn’t have it yet.'
-            : 'Into main on this Mac. GitHub doesn’t have it yet.'
-          : direction === 'a'
-            ? 'Into main on this Mac. It has no remote to push to.'
-            : 'Merged into main.'
-      }
-      {...(host !== null
-        ? { actions: <Button variant="signal">{direction === 'a' ? 'Push main to origin' : 'Push main to GitHub'}</Button> }
-        : {})}
-    />
-  )
-  const branch = (
-    <ChangeSet
-      state={ChangeState.Branch}
-      branch="althar/tide-table"
-      prs={prs}
-      {...(host !== null ? { remote: { name: 'origin', pushed: true, ahead: 0 } } : {})}
-      {...(host === null && direction === 'a'
-        ? { note: 'No code host: this repository has no remote Althar can open a pull request on.' }
-        : {})}
-      actions={
-        host !== null ? (
-          <>
-            <Button variant="signal">Open a draft pull request</Button>
-            <Button>Merge into main on this Mac</Button>
-          </>
-        ) : (
-          <Button variant="signal">{direction === 'a' ? 'Merge into main on this Mac' : 'Merge into main'}</Button>
-        )
-      }
-    />
-  )
+  // A folder dropped anywhere on the window, as the app takes one.
+  useEffect(() => {
+    if (phase === 'open' || phase === 'reading') return
+    const enter = (event: DragEvent) => {
+      event.preventDefault()
+      setOver(true)
+    }
+    const leave = (event: DragEvent) => {
+      if (event.relatedTarget === null) setOver(false)
+    }
+    const drop = (event: DragEvent) => {
+      event.preventDefault()
+      take()
+    }
+    window.addEventListener('dragover', enter)
+    window.addEventListener('dragleave', leave)
+    window.addEventListener('drop', drop)
+    return () => {
+      window.removeEventListener('dragover', enter)
+      window.removeEventListener('dragleave', leave)
+      window.removeEventListener('drop', drop)
+    }
+  })
+  if (phase === 'reading' || phase === 'open')
+    return <Opened state={state} said={null} pop={phase === 'reading'} reading={phase === 'reading'} />
   return (
-    <div className={s.project}>
-      <div className={s.sheet}>
-        <ProjectRepositories
-          project="Tidepool"
-          repositories={[repo]}
-          hosts={host === null ? [] : [host]}
-          worktrees="~/Althar/tidepool"
-          onRoleChange={noop}
-          onTargetChange={noop}
-          onLeaveOut={noop}
-          onOpen={noop}
-          onConnect={noop}
-          onAdd={noop}
-        />
-        {direction !== 'a' && !added && putting === null && (
-          <div className={s.remoteRow}>
-            {hostsOf(setup).map((id) => (
-              <Button key={id} size="small" onClick={() => setPutting(id)}>
-                Put tidepool on {HOST[id].name}…
-              </Button>
-            ))}
-            <LinkButton>Add a remote by its address</LinkButton>
-          </div>
-        )}
-        {direction !== 'a' && !added && putting !== null && (
-          // The same form the new project asks with, set in from the settings' left edge.
-          <div className={s.inSettings}>
-            <h3 className={s.sub}>
-              <BrandMark brand={HOST[putting].brand} size={14} />
-              New {HOST[putting].thing} on {HOST[putting].name}
-            </h3>
-            <HostForm
-              id="put-form"
-              host={putting}
-              goes={goes}
-              onChange={(next) => setGoes((now) => ({ ...now, ...next }))}
-              onDone={() => {
-                setPutting(null)
-                setAdded(true)
-              }}
+    <Window
+      named={null}
+      talk={
+        <div className={s.invite}>
+          {phase === 'refused' ? (
+            <Arrive>
+              <Refused state={state} onAnother={() => setPhase('waiting')} />
+            </Arrive>
+          ) : (
+            <div className={s.drop} data-over={over}>
+              <span className={s.dropGlyph} aria-hidden="true">
+                <Icon name="folder" size={22} />
+              </span>
+              <h2 className={s.dropTitle}>Drop its folder here</h2>
+              <p className={s.dropLine}>Empty, a few files or a whole repository.</p>
+              <div className={s.dropActions}>
+                <Button onClick={take} data-first>
+                  Choose a folder…
+                </Button>
+                <Button variant="quiet" onClick={take}>
+                  Start in a new folder
+                </Button>
+              </div>
+            </div>
+          )}
+        </div>
+      }
+      board={<EmptyBoard name="The project" />}
+    />
+  )
+}
+
+/* ---- B: name it, say what you're making ---- */
+
+function SayScene({ state }: { state: State }) {
+  const folder = FOLDER[state]
+  const known = state === 'files' || state === 'unborn' || state === 'local' || state === 'project'
+  const [name, setName] = useState(titled(folder.name))
+  const [said, setSaid] = useState(known ? README : '')
+  const [phase, setPhase] = useState<'naming' | 'reading' | 'open'>('naming')
+  const [chip, setChip] = useState(true)
+  const nameField = useRef<HTMLInputElement>(null)
+  const sayField = useRef<HTMLTextAreaElement>(null)
+  useEffect(() => {
+    const field = sayField.current
+    if (field === null) return
+    field.focus()
+    field.select()
+  }, [])
+  const seed = name.trim() === '' ? 'new' : seedOf(name)
+  const bad = chip && (state === 'unreadable' || state === 'project')
+  const start = (text: string) => {
+    if (bad || name.trim() === '') return
+    setSaid(text.trim())
+    setPhase('reading')
+    setTimeout(() => setPhase('open'), 700)
+  }
+  if (phase !== 'naming') return <Opened state={state} said={said === '' ? null : said} pop={false} reading={phase === 'reading'} />
+  const files: ComposerFile[] = chip
+    ? [{ id: 'folder', name: folder.name, folder: true, meta: folder.meta === '' ? folder.where : `${folder.where} · ${folder.meta}` }]
+    : []
+  return (
+    <Window
+      named={name.trim() === '' ? null : name.trim()}
+      talk={
+        <div className={s.begin}>
+          <div className={s.beginInner}>
+            <label className={s.nameRow}>
+              <span key={seed} className={s.markSwap}>
+                <ProjectMark seed={seed} ink={seed === 'new' ? ProjectInk.Sand : INK} size={40} />
+              </span>
+              <input
+                ref={nameField}
+                className={s.bigName}
+                value={name}
+                placeholder="Name it"
+                aria-label="Name"
+                onChange={(event) => setName(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter') {
+                    event.preventDefault()
+                    sayField.current?.focus()
+                  }
+                }}
+              />
+            </label>
+            <Composer
+              value={said}
+              onChange={setSaid}
+              onSubmit={start}
+              inputRef={sayField}
+              placeholder="What are you making?"
+              files={files}
+              onRemoveFile={() => setChip(false)}
+              onAddFiles={() => setChip(true)}
+              text={{ send: `Start ${name.trim() === '' ? 'it' : name.trim()}` }}
             />
-            <div className={s.settingsActions}>
-              <Button type="submit" form="put-form" variant="ink" disabled={!nameOf(goes).fine}>
-                Make it and push main
-              </Button>
-              <Button variant="quiet" onClick={() => setPutting(null)}>
-                Cancel
-              </Button>
+            <div className={s.whereRow}>
+              {bad ? (
+                <Arrive>
+                  <Refused state={state} onAnother={() => setChip(false)} />
+                </Arrive>
+              ) : chip ? null : (
+                // With no folder of its own, a new one named after it.
+                <p className={s.where}>
+                  <Icon name="folder" size={13} />
+                  <span>New folder</span>
+                  <code>~/code/{name.trim().toLowerCase().replace(/\s+/g, '-') || 'new-project'}</code>
+                  <LinkButton onClick={() => setChip(true)}>Choose a folder…</LinkButton>
+                </p>
+              )}
             </div>
           </div>
-        )}
-      </div>
-      <div className={s.outputs}>
-        <div>
-          <p className={s.where}>A task, done</p>
-          {branch}
         </div>
-        <div>
-          <p className={s.where}>A task, accepted</p>
-          {merged}
-        </div>
-      </div>
-    </div>
+      }
+      board={<EmptyBoard name="The project" />}
+    />
   )
 }
+
+/* ---- Later: at work with no remote, and the sentence that makes one ---- */
+
+function LaterScene({ state }: { state: State }) {
+  const [onHost, setOnHost] = useState(state === 'remote')
+  const [draft, setDraft] = useState(state === 'working' ? 'Put it on GitHub' : '')
+  const [asking, setAsking] = useState(false)
+  const talk = (
+    <Thread label="Conversation">
+      <TaskMark task="1" verb="merged" detail="into main" at="10:04" steps={['Implement']} step={0} now="Settled" onJump={noop} />
+      <You at="10:12">Add a station picker, with the five nearest stations first.</You>
+      <Turn voice="Coordinator" at="10:12">
+        <Prose>One task: Sonnet builds the picker, using the run steps the first task kept.</Prose>
+      </Turn>
+      <TaskMark
+        task="2"
+        verb="started"
+        detail={`${SONNET.short} leads`}
+        at="10:12"
+        steps={['Implement']}
+        step={0}
+        now="Implement"
+        last
+        onJump={noop}
+      />
+      {(asking || onHost) && (
+        <>
+          <You at="10:31">Put it on GitHub</You>
+          {asking && !onHost ? (
+            <ThreadSkeleton label="Making balazs/tidepool" />
+          ) : (
+            <Arrive>
+              <Turn voice="Coordinator" at="10:31">
+                <WorkedFor took="8s" />
+                <Prose>
+                  <p>
+                    It’s on GitHub, private, at{' '}
+                    <a href="https://github.com/balazs/tidepool" onClick={(event) => event.preventDefault()}>
+                      balazs/tidepool
+                    </a>
+                    , with main pushed. Tasks open pull requests there from now on; the station picker will too.
+                  </p>
+                </Prose>
+              </Turn>
+            </Arrive>
+          )}
+        </>
+      )}
+    </Thread>
+  )
+  const composer = (
+    <Composer
+      value={draft}
+      onChange={setDraft}
+      onSubmit={(text) => {
+        if (!/github/i.test(text)) return setDraft('')
+        setDraft('')
+        setAsking(true)
+        setTimeout(() => setOnHost(true), 1400)
+      }}
+      placeholder="Tell the coordinator something"
+    />
+  )
+  const board = (
+    <Board label="Tidepool’s work" defaultFolds={FOLDS}>
+      <BoardColumn lane={BoardLane.Next} count={0} />
+      <BoardColumn lane={BoardLane.Running} count={1}>
+        <BoardCard
+          status={TaskStatus.Running}
+          word="Implement"
+          kind={TaskKind.Change}
+          at="19m"
+          title="Add a station picker"
+          track={trackOf(['Implement'], 0)}
+          object={<BranchChip name="tidepool/station-picker" add={142} del={9} />}
+          foot={<Fact>{SONNET.short} leads</Fact>}
+          onOpen={noop}
+        />
+      </BoardColumn>
+      <BoardColumn lane={BoardLane.Yours} count={0} />
+      <BoardColumn lane={BoardLane.Settled} count={1}>
+        <BoardCard
+          status={TaskStatus.Done}
+          word="Merged"
+          kind={TaskKind.Change}
+          at="27m"
+          title="Learn how Tidepool runs"
+          object={<BranchChip name="main" add={38} del={0} />}
+          foot={<Fact>Merged into main</Fact>}
+          onOpen={noop}
+        />
+      </BoardColumn>
+    </Board>
+  )
+  return <Window named="Tidepool" parts={[onHost ? GITHUB_PART : LOCAL_PART]} running={1} talk={talk} composer={composer} board={board} />
+}
+
+/* ---- The lab ---- */
 
 function Lab() {
-  const [direction, setDirection] = useState<Direction>(pick(directions, params.get('d'), 'b'))
+  const [direction, setDirection] = useState<Direction>(pick(directions, params.get('d'), 'a'))
   const [state, setState] = useState<State>(pick(states, params.get('s'), 'files'))
-  const [setup, setSetup] = useState<Setup>(pick(setups, params.get('c'), 'all'))
   const [theme, setTheme] = useState(params.get('theme') === 'dark' ? 'dark' : 'light')
+  const [round, setRound] = useState(0)
   useEffect(() => {
     document.documentElement.dataset.theme = theme
   }, [theme])
   useEffect(() => {
     const url = new URL(location.href)
+    url.search = ''
     url.searchParams.set('d', direction)
     url.searchParams.set('s', state)
-    url.searchParams.set('c', setup)
     url.searchParams.set('theme', theme)
     history.replaceState(null, '', url)
-  }, [direction, state, setup, theme])
+  }, [direction, state, theme])
   useEffect(() => {
     const down = (event: KeyboardEvent) => {
       const target = event.target as HTMLElement | null
-      if (
-        target !== null &&
-        (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.closest('[role="group"], [role="radiogroup"]') !== null)
-      )
-        return
+      if (target !== null && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) return
       if (event.metaKey || event.ctrlKey || event.altKey) return
       const key = event.key.toLowerCase()
       const d = directions.find((one) => one.key === key)
@@ -939,26 +755,23 @@ function Lab() {
       const n = Number(key)
       const st = states[n - 1]
       if (Number.isInteger(n) && st !== undefined) return setState(st.key)
-      if (key === 'g') return setSetup((now) => setups[(setups.findIndex((one) => one.key === now) + 1) % setups.length]?.key ?? 'all')
+      if (key === 'r') return setRound((now) => now + 1)
       if (key === 't') setTheme((now) => (now === 'dark' ? 'light' : 'dark'))
     }
     window.addEventListener('keydown', down)
     return () => window.removeEventListener('keydown', down)
   }, [])
-  const inProject = state === 'working' || state === 'remote'
+  const later = state === 'working' || state === 'remote'
+  const scene = `${direction}-${state}-${round}`
   return (
     <div className={s.lab}>
       <main className={s.scene}>
-        {inProject ? (
-          <ProjectScene key={`${state}-${direction}-${setup}`} state={state} direction={direction} setup={setup} />
+        {later ? (
+          <LaterScene key={scene} state={state} />
+        ) : direction === 'a' ? (
+          <DropScene key={scene} state={state} />
         ) : (
-          <NewProjectScene
-            key={`${state}-${direction}-${setup}`}
-            state={state}
-            direction={direction}
-            setup={setup}
-            onOpen={() => setState('working')}
-          />
+          <SayScene key={scene} state={state} />
         )}
       </main>
       <nav className={s.bars} aria-label="Lab">
@@ -971,6 +784,10 @@ function Lab() {
             </button>
           ))}
           <span className={s.spacer} />
+          <button type="button" onClick={() => setRound((now) => now + 1)}>
+            <kbd>R</kbd>
+            Again
+          </button>
           <button type="button" onClick={() => setTheme((now) => (now === 'dark' ? 'light' : 'dark'))}>
             <kbd>T</kbd>
             {theme === 'dark' ? 'Dark' : 'Light'}
@@ -984,15 +801,6 @@ function Lab() {
               {one.label}
             </button>
           ))}
-        </div>
-        <div className={s.bar}>
-          <span className={s.barName}>Connected</span>
-          {setups.map((one) => (
-            <button key={one.key} type="button" aria-pressed={setup === one.key} onClick={() => setSetup(one.key)}>
-              {one.label}
-            </button>
-          ))}
-          <kbd>G</kbd>
         </div>
         <p className={s.caption}>{today[state]}</p>
       </nav>

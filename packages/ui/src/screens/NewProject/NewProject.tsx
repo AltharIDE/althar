@@ -1,11 +1,9 @@
-import { type KeyboardEvent, type ReactNode, useEffect, useId, useLayoutEffect, useRef, useState } from 'react'
+import { type KeyboardEvent, type ReactNode, useEffect, useId, useRef, useState } from 'react'
 
 import { commandDown, keys, modKey } from '../../foundations/keys'
 import { device } from '../../foundations/device'
 import type { CodeHost } from '../../foundations/codeHost'
-import type { Brand } from '../../foundations/brands/brands'
 import { Icon } from '../../foundations/Icon/Icon'
-import type { IconName } from '../../foundations/Icon/icons'
 import { BrandMark } from '../../foundations/Marks/Marks'
 import type { ProjectInk } from '../../foundations/ProjectMark/drawing'
 import { ProjectMark } from '../../foundations/ProjectMark/ProjectMark'
@@ -13,7 +11,6 @@ import { unreachable } from '../../foundations/vocabulary'
 import { cssVars } from '../../lib/cssVars'
 import { cx } from '../../lib/cx'
 import { useDragOver } from '../../lib/dragOver'
-import { MOTION, reducedMotion } from '../../lib/motion'
 import type { RootProps } from '../../lib/props'
 import { Button } from '../../primitives/Button/Button'
 import { IconButton } from '../../primitives/IconButton/IconButton'
@@ -64,18 +61,7 @@ export type NewProjectFolder =
       readonly host: CodeHost | null
       /** Its remote, as its host names it: northwind-co/app; null without one. */
       readonly remote: string | null
-      /** What it is, said in place of its remote where that isn't the point: not a repository yet. */
-      readonly fact?: ReactNode
     }
-
-/** Where its work goes, said on the left as it is chosen: Code, GitHub · balazs/tidepool. */
-export interface NewProjectPlace {
-  readonly id: string
-  readonly label: string
-  readonly value: string
-  readonly brand?: Brand
-  readonly icon?: IconName
-}
 
 /** A repository on this computer that could be added in one press. */
 export interface NewProjectSuggestion {
@@ -116,45 +102,11 @@ export type NewProjectFinding =
     }
   | {
       readonly id: string
-      /** Anything else reading found, in its own words, with what puts it right beside them. */
-      readonly kind: 'note'
-      readonly icon: IconName
-      readonly words: ReactNode
-      readonly action?: ReactNode
-    }
-  | {
-      readonly id: string
       /** One is in another project already. */
       readonly kind: 'shared'
       readonly name: string
       readonly project: string
     }
-
-/**
- * A question after the folders, asked in their place: its heading where
- * theirs is, what it asks where they are, and its press where Create is, so
- * nothing on the page moves from one to the next but the words.
- */
-export interface NewProjectStep {
-  /** Which question it is: a new one fades in where the one before was. */
-  key: string
-  title: string
-  /** A line under the heading. */
-  line?: ReactNode
-  /** What it asks. Focus goes to `[data-first]`, else its first field, else the choice chosen. */
-  children: ReactNode
-  /** The foot's press, which ⌘↵ presses too. */
-  next: {
-    readonly label: string
-    readonly onPress: () => void
-    readonly disabled?: boolean
-    readonly busy?: boolean
-    /** The last press, which makes it: in ink, as the one press the page asks for. */
-    readonly last?: boolean
-  }
-  /** Back to the question before, at the foot's left. */
-  onBack?: () => void
-}
 
 export interface NewProjectText {
   label: string
@@ -190,8 +142,6 @@ export interface NewProjectText {
   create: (name: string) => string
   createUnnamed: string
   createKbd: string
-  /** In the foot of a step after the folders: back to the one before. */
-  back: string
   /** Said when Create is pressed without a name, or without a folder. */
   needsName: string
   needsFolder: string
@@ -242,7 +192,6 @@ export const newProjectText: NewProjectText = {
   create: (name) => `Create ${name}`,
   createUnnamed: 'Create project',
   createKbd: modKey(keys.enter),
-  back: 'Back',
   needsName: 'Name the project first.',
   needsFolder: 'Add a folder first.',
   needsFolderOrFresh: 'Add a folder, or start a new repository.',
@@ -285,12 +234,6 @@ export type NewProjectProps = RootProps<
     creating?: boolean
     /** Why the last try didn't go through, said in the foot. */
     error?: ReactNode
-    /** More to ask under the folders, before what reading found. */
-    extra?: ReactNode
-    /** A question after the folders, asked in their place. */
-    step?: NewProjectStep
-    /** Where its work goes, as it is chosen: under what it is made of, each with its mark. */
-    places?: readonly NewProjectPlace[]
     text?: Partial<NewProjectText>
   }
 >
@@ -339,9 +282,6 @@ export function NewProject({
   onCancel,
   creating = false,
   error,
-  extra,
-  step,
-  places = [],
   className,
   text,
   onKeyDown,
@@ -354,7 +294,6 @@ export function NewProject({
   const [missing, setMissing] = useState<Missing>(null)
   const refocus = useRef<Refocus | null>(null)
   const side = useRef<HTMLDivElement>(null)
-  const press = useRef<HTMLButtonElement>(null)
   const { over, handlers } = useDragOver(onDrop)
   const named = name.trim()
   const read = folders.flatMap((folder) => (folder.reading === true ? [] : [folder]))
@@ -410,28 +349,6 @@ export function NewProject({
     if (document.activeElement === null || document.activeElement === document.body) chooseButton.current?.focus()
   }, [empty])
 
-  // A step replaced what was asked before: it fades in where that was, from the top, before it is first drawn,
-  // and focus goes to what it asks first, so Return carries on through it; back on the folders, to the press.
-  const asked = step?.key ?? ''
-  const stepped = step !== undefined
-  const shown = useRef(asked)
-  useLayoutEffect(() => {
-    if (shown.current === asked) return
-    shown.current = asked
-    const el = side.current
-    if (el === null) return
-    el.scrollTop = 0
-    const first = stepped
-      ? (el.querySelector<HTMLElement>('[data-first]') ??
-        el.querySelector<HTMLElement>('input:not([type="hidden"]), textarea') ??
-        el.querySelector<HTMLElement>('[role="radio"][aria-checked="true"]') ??
-        el.querySelector<HTMLElement>('[role="radio"]'))
-      : null
-    ;(first ?? press.current)?.focus()
-    if (reducedMotion() || typeof el.animate !== 'function') return
-    el.animate([{ opacity: 0 }, { opacity: 1 }], MOTION.enter)
-  }, [asked, stepped])
-
   // Escape makes nothing, and ⌘↵ makes it, from anywhere on the page; what is open over it, a tooltip too, hears Escape first.
   const keys = (event: KeyboardEvent<HTMLDivElement>) => {
     onKeyDown?.(event)
@@ -443,8 +360,7 @@ export function NewProject({
       onCancel()
     } else if (event.key === 'Enter' && commandDown(event)) {
       event.preventDefault()
-      if (step === undefined) create()
-      else if (step.next.disabled !== true && step.next.busy !== true) step.next.onPress()
+      create()
     }
   }
 
@@ -512,163 +428,111 @@ export function NewProject({
               </p>
             </>
           )}
-          {places.map((place) => (
-            <div key={place.id} className={s.place}>
-              <span className={cx(s.label, s.gap)}>{place.label}</span>
-              <p className={s.made}>
-                <span className={s.repo}>
-                  {place.brand !== undefined ? (
-                    <BrandMark brand={place.brand} size={12} />
-                  ) : (
-                    <Icon name={place.icon ?? 'folder'} size={12} />
-                  )}
-                  {place.value}
-                </span>
-              </p>
-            </div>
-          ))}
         </div>
       </section>
 
       <section className={s.side} aria-labelledby={ids.folders}>
         <div className={s.sideInner} ref={side}>
-          {step !== undefined ? (
-            <div>
-              <h2 id={ids.folders} className={s.title}>
-                {step.title}
-              </h2>
-              {step.line !== undefined && <p className={s.stepLine}>{step.line}</p>}
-              <div className={s.stepBody}>{step.children}</div>
+          <h2 id={ids.folders} className={s.title}>
+            {t.folders}
+          </h2>
+          {over && !empty && <div className={s.empty} aria-hidden="true" />}
+          {folders.length > 0 && (
+            <ul className={s.folders} aria-label={t.folders}>
+              {folders.map((folder, at) => (
+                <FolderRow
+                  key={folder.id}
+                  folder={folder}
+                  t={t}
+                  onRemove={(id) => {
+                    refocus.current = { list: 'folders', at }
+                    onRemove(id)
+                  }}
+                />
+              ))}
+            </ul>
+          )}
+          {empty ? (
+            // Nothing added yet: where the folders will be, taking a drop, with the two ways to add one.
+            <div className={cx(s.zone, over && s.zoneOver)}>
+              <span className={s.zoneIcon} aria-hidden="true">
+                <Icon name="folder" size={18} />
+              </span>
+              <p className={s.zoneTitle}>{t.zone}</p>
+              <div className={s.zoneButtons}>
+                <Button
+                  ref={chooseButton}
+                  size="small"
+                  icon="folder"
+                  onClick={onChoose}
+                  aria-describedby={missing === 'folder' ? ids.missing : undefined}
+                >
+                  {t.choose}
+                </Button>
+                {fresh && (
+                  <Button size="small" icon="plus" onClick={startFresh}>
+                    {t.fresh}
+                  </Button>
+                )}
+              </div>
+              {missing === 'folder' ? (
+                <p id={ids.missing} className={s.missing} role="alert">
+                  {fresh ? t.needsFolderOrFresh : t.needsFolder}
+                </p>
+              ) : (
+                fresh && <p className={s.note}>{t.freshNote(named === '' ? null : repositoryFolder(named))}</p>
+              )}
             </div>
           ) : (
-            <>
-              <h2 id={ids.folders} className={s.title}>
-                {t.folders}
-              </h2>
-              {over && !empty && <div className={s.empty} aria-hidden="true" />}
-              {folders.length > 0 && (
-                <ul className={s.folders} aria-label={t.folders}>
-                  {folders.map((folder, at) => (
-                    <FolderRow
-                      key={folder.id}
-                      folder={folder}
-                      t={t}
-                      onRemove={(id) => {
-                        refocus.current = { list: 'folders', at }
-                        onRemove(id)
-                      }}
-                    />
-                  ))}
-                </ul>
+            <div className={s.chooseRow}>
+              <Button
+                ref={chooseButton}
+                size="small"
+                icon="folder"
+                onClick={onChoose}
+                aria-describedby={missing === 'folder' ? ids.missing : undefined}
+              >
+                {t.choose}
+              </Button>
+              {fresh && (
+                <Button size="small" icon="plus" onClick={startFresh}>
+                  {t.fresh}
+                </Button>
               )}
-              {empty ? (
-                // Nothing added yet: where the folders will be, taking a drop, with the two ways to add one.
-                <div className={cx(s.zone, over && s.zoneOver)}>
-                  <span className={s.zoneIcon} aria-hidden="true">
-                    <Icon name="folder" size={18} />
-                  </span>
-                  <p className={s.zoneTitle}>{t.zone}</p>
-                  <div className={s.zoneButtons}>
-                    <Button
-                      ref={chooseButton}
-                      size="small"
-                      icon="folder"
-                      onClick={onChoose}
-                      aria-describedby={missing === 'folder' ? ids.missing : undefined}
-                    >
-                      {t.choose}
-                    </Button>
-                    {fresh && (
-                      <Button size="small" icon="plus" onClick={startFresh}>
-                        {t.fresh}
-                      </Button>
-                    )}
-                  </div>
-                  {missing === 'folder' ? (
-                    <p id={ids.missing} className={s.missing} role="alert">
-                      {fresh ? t.needsFolderOrFresh : t.needsFolder}
-                    </p>
-                  ) : (
-                    fresh && <p className={s.note}>{t.freshNote(named === '' ? null : repositoryFolder(named))}</p>
-                  )}
-                </div>
+              {missing === 'folder' ? (
+                <span id={ids.missing} className={s.missing} role="alert">
+                  {fresh ? t.needsFolderOrFresh : t.needsFolder}
+                </span>
               ) : (
-                <div className={s.chooseRow}>
-                  <Button
-                    ref={chooseButton}
-                    size="small"
-                    icon="folder"
-                    onClick={onChoose}
-                    aria-describedby={missing === 'folder' ? ids.missing : undefined}
-                  >
-                    {t.choose}
-                  </Button>
-                  {fresh && (
-                    <Button size="small" icon="plus" onClick={startFresh}>
-                      {t.fresh}
-                    </Button>
-                  )}
-                  {missing === 'folder' ? (
-                    <span id={ids.missing} className={s.missing} role="alert">
-                      {fresh ? t.needsFolderOrFresh : t.needsFolder}
-                    </span>
-                  ) : (
-                    <span className={s.note}>{t.chooseNote}</span>
-                  )}
-                </div>
+                <span className={s.note}>{t.chooseNote}</span>
               )}
-              {extra}
-              {(findings.length > 0 || (found !== null && found.first.length + found.more.length > 0)) && (
-                <div className={s.below}>
-                  {findings.length > 0 && <Findings findings={findings} t={t} {...(onConnect === undefined ? {} : { onConnect })} />}
-                  {found !== null && (
-                    <Found
-                      found={found}
-                      t={t}
-                      onAdd={(id, at) => {
-                        refocus.current = { list: 'found', at }
-                        onAdd(id)
-                      }}
-                    />
-                  )}
-                </div>
+            </div>
+          )}
+          {(findings.length > 0 || (found !== null && found.first.length + found.more.length > 0)) && (
+            <div className={s.below}>
+              {findings.length > 0 && <Findings findings={findings} t={t} {...(onConnect === undefined ? {} : { onConnect })} />}
+              {found !== null && (
+                <Found
+                  found={found}
+                  t={t}
+                  onAdd={(id, at) => {
+                    refocus.current = { list: 'found', at }
+                    onAdd(id)
+                  }}
+                />
               )}
-            </>
+            </div>
           )}
         </div>
         <footer className={s.foot}>
-          {step?.onBack !== undefined && (
-            <Button variant="quiet" className={s.back} onClick={step.onBack}>
-              {t.back}
-            </Button>
-          )}
-          {step === undefined && error !== undefined && error !== null && (
+          {error !== undefined && error !== null && (
             <span className={s.error} role="alert">
               {error}
             </span>
           )}
-          {step !== undefined ? (
-            <Button
-              ref={press}
-              kbd={t.createKbd}
-              variant={step.next.last === true ? 'ink' : 'default'}
-              disabled={step.next.disabled === true}
-              busy={step.next.busy === true}
-              onClick={step.next.onPress}
-            >
-              {step.next.label}
-            </Button>
-          ) : (
-            <Button
-              ref={press}
-              kbd={t.createKbd}
-              variant={read.length === 0 ? 'quiet' : 'default'}
-              busy={creating || reading}
-              onClick={create}
-            >
-              {named === '' ? t.createUnnamed : t.create(named)}
-            </Button>
-          )}
+          <Button kbd={t.createKbd} variant={read.length === 0 ? 'quiet' : 'default'} busy={creating || reading} onClick={create}>
+            {named === '' ? t.createUnnamed : t.create(named)}
+          </Button>
         </footer>
       </section>
     </div>
@@ -717,9 +581,7 @@ function FolderRow({ folder, t, onRemove }: { folder: NewProjectFolder; t: NewPr
         <span className={s.folderName}>{folder.name}</span>
         <span className={s.facts}>
           <span className={s.mono}>{folder.where}</span>
-          {folder.fact !== undefined ? (
-            <span className={s.fact}>{folder.fact}</span>
-          ) : folder.host !== null && folder.remote !== null ? (
+          {folder.host !== null && folder.remote !== null ? (
             <span className={s.fact}>
               {folder.host.name} · <span className={s.mono}>{folder.remote}</span>
             </span>
@@ -754,7 +616,6 @@ function Findings({
           <li key={finding.id} className={s.finding}>
             <FindingMark finding={finding} />
             <span>{findingWords(finding, t)}</span>
-            {finding.kind === 'note' && finding.action}
             {finding.kind === 'unconnected' && onConnect !== undefined && (
               <LinkButton onClick={() => onConnect(finding.id)}>{t.connect(finding.host.name)}</LinkButton>
             )}
@@ -772,8 +633,6 @@ function FindingMark({ finding }: { finding: NewProjectFinding }) {
       return finding.host.brand === undefined ? <Icon name="globe" size={13} /> : <BrandMark brand={finding.host.brand} size={13} />
     case 'shared':
       return <Icon name="folder" size={13} />
-    case 'note':
-      return <Icon name={finding.icon} size={13} />
     default:
       return unreachable(finding)
   }
@@ -796,8 +655,6 @@ const findingWords = (finding: NewProjectFinding, t: NewProjectText): ReactNode 
       return t.unconnected(<code className={s.code}>{finding.remote}</code>, finding.host.name, finding.changes)
     case 'shared':
       return t.shared(finding.name, finding.project)
-    case 'note':
-      return finding.words
     default:
       return unreachable(finding)
   }
