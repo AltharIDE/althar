@@ -60,8 +60,12 @@ person can change a task's team at any time.
   a review under way stopping); the ending (`ending`: here, its branch, a
   draft or a ready pull request; an open draft is marked ready, and one open
   where it goes back to its branch is closed, its branch staying; no host
-  turns a ready one back into a draft, so the next opens as one); another
-  preset's parts at once (`preset`), its lead staying; a review dropped; a
+  turns a ready one back into a draft, so the next opens as one; an ending
+  asked for is the person's own, `endChosen`, which a preset saved from the
+  task keeps); another preset's parts at once (`preset`), its lead staying,
+  its ending set before its review changes, so a review it stops never sends
+  the work up as the task ended before, and a Ship under way as it comes to
+  stay here sends nothing (`ships.stays`); a review dropped; a
   pull request no longer followed. `change_lead` changes its lead's model
   and effort, and its reviewer, on a lead's own task too. Each says what it
   did in a line of the task's thread.
