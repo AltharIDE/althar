@@ -459,9 +459,11 @@ in two layers:
    Today (`usageSources.ts` declares each pair's sources, or why it has none):
    - Claude Code: live, `claude-agent-acp` forwards the Agent SDK's
      `rate_limit_event` in `usage_update` `_meta["_claude/rateLimit"]`, and
-     drops it if it arrives before a turn's first usage figure
+     dropped an event that arrived before a turn's first usage figure
+     until 0.106.0
      ([#1127](https://github.com/agentclientprotocol/claude-agent-acp/issues/1127)),
-     so Althar carries a patch for that (`patches/`, on the pinned version).
+     where upstream sends it with the next update; Althar's patch (`patches/`)
+     no longer carries that.
      The event's own window has a use only near its limit; each window the
      CLI tracks is in its `unifiedWindows`, sent whenever one's rounded
      percentage moves. Where no session has said for a quarter of an hour, as

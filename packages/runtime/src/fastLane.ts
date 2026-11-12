@@ -5,18 +5,19 @@ import { SqlClient } from 'effect/sql'
 
 import { envelope } from './envelope'
 import { Instance } from './Instance'
+import { MergeReviews } from './MergeReviews'
 import { ReviewRefused, Reviews } from './Reviews'
 import { Sessions } from './Sessions'
 import { timestamp } from './records'
 import { smallChangeOf } from './smallChange'
-import { addItem, updateItem } from './threads'
-import { summarize } from './words'
+import { updateItem } from './threads'
 
 /*
  * The fast lane's doings (README sections 6 and 7): Make it a full task,
  * which starts the review of an open change instead of waiting for its merge;
- * the review a small change's merge starts; and the person's keep of the
- * heavier model after Auto moved the lead to a lighter one.
+ * the review a small change's merge starts, in the task itself
+ * (MergeReviews.ts); and the person's keep of the heavier model after Auto
+ * moved the lead to a lighter one.
  *
  * A small change's card is read from the task as it stands (Queries), so
  * nothing here writes a card: starting its review is enough for the card to
@@ -26,7 +27,7 @@ import { summarize } from './words'
 /** Why the fast lane couldn't do what the person pressed, in words for the window. */
 export class FastLaneRefused extends Schema.TaggedError<FastLaneRefused>()('FastLaneRefused', { message: Schema.String }) {}
 
-type Store = SqlClient.SqlClient | Instance | Reviews | Sessions | Ledger | Crypto.Crypto
+type Store = SqlClient.SqlClient | Instance | Reviews | Sessions | MergeReviews | Ledger | Crypto.Crypto
 
 /** The item a card is, as the store keeps it. */
 interface Card {
@@ -52,16 +53,12 @@ export class FastLane extends Context.Service<
     /** Puts the move Auto made again: the task's lead may move to the lighter model at its next step. */
     undoTheModelMove(itemId: string): Effect.Effect<void, unknown>
     /**
-     * Keeps that a small change merged and its review is owed, before it is
-     * tried: a launch that stops before it starts is tried again after.
+     * A pull request of the task merged: its review after the merge starts,
+     * in the task itself, where it is owed (MergeReviews.ts): a small
+     * change's, or what Merge now merged. Where it can't start, its reason
+     * is a line in the task's thread and it is tried again.
      */
-    markReviewPending(taskId: string, projectId: ProjectId): Effect.Effect<void, unknown>
-    /**
-     * A small change merged: its review starts, reading the merged change,
-     * unless a review of it is already under way or over. Where it can't
-     * start, its reason is a line in the task's thread and it is tried again.
-     */
-    reviewMerged(taskId: string): Effect.Effect<void, unknown>
+    reviewMerged(taskId: string, url: string): Effect.Effect<void>
     /** Tries again every review after a merge that didn't start, until one does. */
     retryPendingReviews(): Effect.Effect<void, unknown>
   }
@@ -73,6 +70,7 @@ export class FastLane extends Context.Service<
       const instance = yield* Instance
       const reviews = yield* Reviews
       const sessions = yield* Sessions
+      const mergeReviews = yield* MergeReviews
       const context = yield* Effect.context<Store>()
       const provide = <A, E>(effect: Effect.Effect<A, E, Store>) => Effect.provideContext(effect, context)
 
@@ -171,38 +169,6 @@ export class FastLane extends Context.Service<
           return row?.threadId
         })
 
-      /** The line that says a review after a merge hasn't started, where the task has one. */
-      const pendingOf = (threadId: string) =>
-        Effect.gen(function* () {
-          const [row] = yield* sql<{ id: string; content: string }>`
-            SELECT id, content FROM thread_items WHERE thread_id = ${threadId} AND kind = 'notice'
-              AND json_extract(content, '$.reviewAfterMerge') = 1 ORDER BY sequence DESC LIMIT 1`
-          return row
-        })
-
-      /** Says in the task's thread why the review after the merge hasn't started, once: its line stays until it does. */
-      const pendingNote = (threadId: string, projectId: ProjectId, message: string) =>
-        Effect.gen(function* () {
-          const had = yield* pendingOf(threadId)
-          const before = had === undefined ? 0 : ((JSON.parse(had.content) as { attempts?: number }).attempts ?? 0)
-          const content = {
-            source: 'runtime',
-            severity: 'warning',
-            title: `The review after the merge didn’t start: ${message} Althar tries again.`,
-            description: null,
-            reviewAfterMerge: true,
-            attempts: before + 1,
-          }
-          if (had === undefined) yield* addItem({ projectId, threadId }, 'notice', content)
-          else yield* updateItem(projectId, had.id, content)
-        })
-
-      /** The line goes once the review starts, or once there is no reviewer to start it. */
-      const clearPending = (threadId: string) =>
-        sql`
-          DELETE FROM thread_items WHERE thread_id = ${threadId} AND kind = 'notice'
-            AND json_extract(content, '$.reviewAfterMerge') = 1`.pipe(Effect.asVoid)
-
       const makeFullTask = (taskId: string) =>
         Effect.gen(function* () {
           const change = yield* changeOf(taskId)
@@ -243,115 +209,32 @@ export class FastLane extends Context.Service<
           yield* updateItem(found.projectId, itemId, { ...found.content, kept: false })
         })
 
-      /** Keeps that the review is owed, before it is tried: a stop before it starts loses nothing. */
-      const markReviewPending = (taskId: string, projectId: ProjectId) =>
-        Effect.gen(function* () {
-          const plan = yield* planOf(taskId)
-          if (plan === undefined || plan.review === null) return
-          const now = yield* timestamp
-          yield* sql`
-            INSERT INTO reviews_after_merge ${sql.insert({
-              taskId,
-              projectId,
-              attempts: 0,
-              message: null,
-              createdAt: now,
-              updatedAt: now,
-            })}
-            ON CONFLICT (task_id) DO NOTHING`
-        })
-
       /**
-       * Starts the review a small change's merge promised. A failure is kept
-       * as a line in the task's thread, and `retryPendingReviews` tries it
-       * again: a host that is down for a moment, or a stop just after the
-       * merge, loses no review.
-       */
-      const reviewMerged = (taskId: string) =>
-        Effect.gen(function* () {
-          const threadId = yield* threadOf(taskId)
-          const plan = yield* planOf(taskId)
-          // No plan, or no reviewer in it: nothing will start one, so no line and nothing to retry.
-          if (plan === undefined || plan.review === null) {
-            yield* clearReview(taskId, threadId)
-            return
-          }
-          const change = yield* changeOf(taskId)
-          if (change === undefined) {
-            yield* clearReview(taskId, threadId)
-            return
-          }
-          if (yield* reviewed(change.url)) {
-            yield* clearReview(taskId, threadId)
-            return
-          }
-          const projectId = (yield* projectOf(taskId)) as ProjectId
-          // Called on its own, as from a retry, it is still one owed: keep it until it starts.
-          yield* markReviewPending(taskId, projectId)
-          const outcome = yield* Effect.exit(
-            startReview(taskId, {
-              afterMerge: true,
-              request:
-                'Review this change, which merged already: it went in on the fast lane, with its review after the merge. Say what you find, for the person.',
-            }),
-          )
-          if (outcome._tag === 'Success') {
-            yield* clearReview(taskId, threadId)
-            return
-          }
-          const message = summarize(outcome.cause) || 'It couldn’t start.'
-          yield* sql`
-            UPDATE reviews_after_merge SET attempts = attempts + 1, message = ${message}, updated_at = ${yield* timestamp}
-            WHERE task_id = ${taskId}`
-          if (threadId !== undefined) yield* pendingNote(threadId, projectId, message)
-        })
-
-      /** The review exists, or none will: nothing is owed, and its line goes. */
-      const clearReview = (taskId: string, threadId: string | undefined) =>
-        Effect.andThen(
-          sql`DELETE FROM reviews_after_merge WHERE task_id = ${taskId}`,
-          threadId === undefined ? Effect.void : clearPending(threadId),
-        ).pipe(Effect.asVoid)
-
-      /**
-       * Every task whose review after a merge is still owed: its line stays
-       * until it starts. Also every merged small change with no review and
-       * no row, which a stop between the merge's snapshot and its row leaves:
-       * the merge is read again and the review is owed from there.
+       * Every review after a merge still owed, and one a restart cut short (MergeReviews.ts); and every merged small change with
+       * no review owed and none made, which a stop between the merge's snapshot and its owing leaves: the merge is read again
+       * and the review is owed from there.
        */
       const retryPending = Effect.gen(function* () {
-        const waiting = yield* sql<{ taskId: string }>`
-          SELECT DISTINCT waiting.taskId FROM (
-            SELECT r.task_id AS taskId FROM reviews_after_merge r
-            JOIN tasks k ON k.id = r.task_id
-            WHERE k.state <> 'abandoned' AND k.project_id IN (SELECT id FROM projects WHERE archived_at IS NULL)
-            UNION
-            SELECT x.task_id AS taskId FROM external_links x
-            JOIN tasks k ON k.id = x.task_id
-            WHERE x.kind = 'change' AND json_extract(x.snapshot, '$.state') = 'merged'
-              AND k.state <> 'abandoned' AND k.project_id IN (SELECT id FROM projects WHERE archived_at IS NULL)
-              AND EXISTS (
-                SELECT 1 FROM task_plans p WHERE p.task_id = x.task_id
-                  AND json_extract(p.parameters, '$.reviewAfterMerge') = 1
-              )
-              AND NOT EXISTS (SELECT 1 FROM external_links rv WHERE rv.kind = 'review' AND rv.url = x.url)
-          ) waiting`
-        for (const one of waiting)
-          yield* reviewMerged(one.taskId).pipe(
-            Effect.catchCause((cause) => Effect.logWarning('Could not try a review after a merge again', cause)),
-          )
+        const missed = yield* sql<{ taskId: string; url: string }>`
+          SELECT x.task_id AS taskId, x.url FROM external_links x
+          JOIN tasks k ON k.id = x.task_id
+          WHERE x.kind = 'change' AND json_extract(x.snapshot, '$.state') = 'merged'
+            AND k.state <> 'abandoned' AND k.project_id IN (SELECT id FROM projects WHERE archived_at IS NULL)
+            AND EXISTS (
+              SELECT 1 FROM task_plans p WHERE p.task_id = x.task_id
+                AND json_extract(p.parameters, '$.reviewAfterMerge') = 1
+            )
+            AND NOT EXISTS (SELECT 1 FROM merge_reviews m WHERE m.url = x.url)
+            AND NOT EXISTS (SELECT 1 FROM external_links rv WHERE rv.kind = 'review' AND rv.url = x.url)`
+        for (const one of missed) yield* mergeReviews.merged(one.taskId, one.url)
+        yield* mergeReviews.retry()
       }).pipe(Effect.asVoid)
 
       return FastLane.of({
         makeFullTask: (taskId) => provide(makeFullTask(taskId)).pipe(Effect.asVoid),
-        markReviewPending: (taskId, projectId) => provide(markReviewPending(taskId, projectId)).pipe(Effect.asVoid),
         keepTheModel: (itemId) => provide(keepTheModel(itemId)).pipe(Effect.asVoid),
         undoTheModelMove: (itemId) => provide(undoTheModelMove(itemId)).pipe(Effect.asVoid),
-        reviewMerged: (taskId) =>
-          provide(reviewMerged(taskId)).pipe(
-            Effect.catchCause((cause) => Effect.logWarning('Could not start the review after a merge', cause)),
-            Effect.asVoid,
-          ),
+        reviewMerged: (taskId, url) => mergeReviews.merged(taskId, url),
         retryPendingReviews: () => provide(retryPending).pipe(Effect.asVoid),
       })
     }),

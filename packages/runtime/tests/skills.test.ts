@@ -835,23 +835,26 @@ describe('the skills Althar used to ship', () => {
     }),
   )
 
-  it.live('are left out of the list even where the store could not be changed, and the start still goes on', () =>
-    Effect.gen(function* () {
-      const { root } = yield* Effect.promise(olderStore)
-      // Unwritable: the folder holding installs.json is read-only, so the first start cannot rewrite it.
-      const { chmodSync } = yield* Effect.promise(() => import('node:fs'))
-      chmodSync(root, 0o555)
-      yield* Effect.gen(function* () {
-        const list = yield* listSkills({ root }).pipe(Effect.provide(failuresLayer))
-        assert.deepStrictEqual(
-          list.skills.map((one) => one.id),
-          ['mine'],
+  // Windows has no read-only folder by mode, and root ignores it.
+  it.live.skipIf(process.platform === 'win32')(
+    'are left out of the list even where the store could not be changed, and the start still goes on',
+    () =>
+      Effect.gen(function* () {
+        const { root } = yield* Effect.promise(olderStore)
+        // Unwritable: the folder holding installs.json is read-only, so the first start cannot rewrite it.
+        const { chmodSync } = yield* Effect.promise(() => import('node:fs'))
+        chmodSync(root, 0o555)
+        yield* Effect.gen(function* () {
+          const list = yield* listSkills({ root }).pipe(Effect.provide(failuresLayer))
+          assert.deepStrictEqual(
+            list.skills.map((one) => one.id),
+            ['mine'],
+          )
+          assert.include(readFileSync(join(root, 'installs.json'), 'utf8'), 'althar-default')
+        }).pipe(
+          Effect.provide(runtime(':memory:', {}, { skills: { root } }).pipe(Layer.provideMerge(failuresLayer))),
+          Effect.ensuring(Effect.sync(() => chmodSync(root, 0o755))),
         )
-        assert.include(readFileSync(join(root, 'installs.json'), 'utf8'), 'althar-default')
-      }).pipe(
-        Effect.provide(runtime(':memory:', {}, { skills: { root } }).pipe(Layer.provideMerge(failuresLayer))),
-        Effect.ensuring(Effect.sync(() => chmodSync(root, 0o755))),
-      )
-    }),
+      }),
   )
 })

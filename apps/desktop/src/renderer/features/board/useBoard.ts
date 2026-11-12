@@ -6,6 +6,7 @@ import type { BoardSnapshot, BoardTask } from '@althar/contracts'
 import { type Client, messageOf } from '../../data/client'
 import { reads } from '../../data/reads'
 import { useServices } from '../../data/services'
+import { markArrived } from './arrived'
 import { type WorkActions, useWorkActions } from './useWorkActions'
 
 /*
@@ -49,11 +50,13 @@ export interface BoardModel extends WorkActions {
   readonly line: LineActions
 }
 
-/** What the person does to the line of tasks waiting for a free agent, and why the last of it failed. */
+/** What the person does to Up next's line of what waits for a free agent, and why the last of it failed. */
 export interface LineActions {
   /** Puts a task at a place in the line, from 0: it fails where the runtime refused it. */
   readonly move: (taskId: string, to: number) => Promise<void>
   readonly oldestFirst: () => void
+  /** Lets go of the turn Althar asked of a task's agent that waits for a place, by its thread: it leaves Up next. */
+  readonly cancelTurn: (threadId: string) => void
   readonly failed: string | null
 }
 
@@ -99,6 +102,8 @@ export const useBoard = (projectId: string): BoardModel => {
         loading.current = false
         if (kept.current.projectId !== projectId) return
         for (const task of page) kept.current.tasks.set(task.taskId, task)
+        // Older work shown, not work settling now: nothing moves into Settled for it.
+        markArrived(page.map((task) => task.taskId))
         setLoaded((n) => n + 1)
       },
       (error: unknown) => {
@@ -117,6 +122,8 @@ export const useBoard = (projectId: string): BoardModel => {
     line: {
       move: (taskId, to) => lined(() => client.moveInLine(taskId, to)),
       oldestFirst: () => void lined(() => client.lineOldestFirst(projectId)).catch(() => undefined),
+      // Stopping its lead's turn between turns lets go of the one that waits (`Interrupt`).
+      cancelTurn: (threadId) => void lined(() => client.interrupt(threadId)).catch(() => undefined),
       failed: lineFailed,
     },
     error: actions.error ?? (read.error === null ? null : messageOf(read.error)),

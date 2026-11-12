@@ -11,13 +11,15 @@ import { Ids, newId } from '@althar/domain'
 
 import { Accounts } from '../src/Accounts'
 import { Agents } from '../src/Config'
+import { Coordinator } from '../src/Coordinator'
 import { Instance } from '../src/Instance'
 import { Policies } from '../src/Policies'
 import { Plans } from '../src/Plans'
 import { Projects } from '../src/Projects'
 import * as Runtime from '../src/Runtime'
 import { Sessions } from '../src/Sessions'
-import { fakeAgents, notices, repository, runtime, until } from './support'
+import type { ToolAccess } from '../src/ToolServer'
+import { callTool, fakeAgents, notices, repository, runtime, until } from './support'
 
 /*
  * A step running when Althar stopped carries on by itself at the next
@@ -339,7 +341,7 @@ describe('A step a restart stopped', () => {
     }),
   )
 
-  it.live('carries a later round of review on with what the lead settled before it', () =>
+  it.live('carries a check of the fixes on with what the lead settled before it', () =>
     Effect.gen(function* () {
       const file = store()
       const task = yield* reviewing(file, undefined, true)
@@ -350,7 +352,8 @@ describe('A step a restart stopped', () => {
         const sql = yield* SqlClient.SqlClient
         const told = yield* until(
           sql<{ body: string }>`
-            SELECT body FROM user_inputs WHERE thread_id = ${yield* reviewThread(task.taskId)} AND body LIKE 'Round 2.%' ORDER BY sequence`,
+            SELECT body FROM user_inputs WHERE thread_id = ${yield* reviewThread(task.taskId)} AND body LIKE 'A check of the fixes%'
+            ORDER BY sequence`,
           (found) => found.length === 2,
         )
         assert.include(told[1]?.body ?? '', 'Fixed the heading.')
@@ -423,7 +426,8 @@ describe('A step a restart stopped', () => {
       ).pipe(Layer.provide(fakeAgents()))
       yield* Effect.gen(function* () {
         const [call] = yield* until(callsOf(task.taskId), (rows) => rows.length === 1)
-        assert.deepStrictEqual(call, { kind: 'stuck', state: 'open', why: 'failed_to_start' })
+        // An agent that isn't there stops for that: installing it is the way on.
+        assert.deepStrictEqual(call, { kind: 'stuck', state: 'open', why: 'not_installed' })
         const [attempt] = yield* implement
         assert.strictEqual(attempt?.state, 'waiting_attention')
       }).pipe(Effect.provide(runtime(file, {}, { agents: broken })))
@@ -444,7 +448,8 @@ describe('A step a restart stopped', () => {
       ).pipe(Layer.provide(fakeAgents()))
       yield* Effect.gen(function* () {
         const [call] = yield* until(callsOf(task.taskId), (rows) => rows.length === 1)
-        assert.deepStrictEqual(call, { kind: 'stuck', state: 'open', why: 'failed_to_start' })
+        // An agent that isn't there stops for that: installing it is the way on.
+        assert.deepStrictEqual(call, { kind: 'stuck', state: 'open', why: 'not_installed' })
         const [attempt] = yield* implement
         assert.strictEqual(attempt?.state, 'waiting_attention')
       }).pipe(Effect.provide(runtime(file, {}, { agents: gone })))
@@ -551,6 +556,50 @@ describe('A step a restart stopped', () => {
         const [attempt] = yield* until(implement, (rows) => rows[0]?.state === 'running')
         assert.strictEqual(attempt?.state, 'running')
         assert.strictEqual((yield* notices(task.threadId)).filter((notice) => notice.title === CARRIED).length, 2)
+      }).pipe(Effect.provide(runtime(file)))
+    }),
+  )
+  it.live('ends a round whose lead’s last turn was over as Althar stopped where it made nothing new, carrying nothing on', () =>
+    Effect.gen(function* () {
+      const file = store()
+      // A quick task its lead made a change once it was done, in its own course: the round is open, its lead idle.
+      const task = yield* Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient
+        const projects = yield* Projects
+        const coordinator = yield* Coordinator
+        const project = yield* projects.open({ envelope: yield* Runtime.envelope('project.open', {}), path: repository() })
+        const place = { projectId: project.projectId, threadId: yield* coordinator.thread(project.projectId) }
+        const asked: ToolAccess = { role: 'coordinator', ...place, sessionId: 'none', taskId: null }
+        const description = 'Look. [lead:finish] [lead:terse]'
+        assert.match(
+          yield* callTool(asked, 'start_task', { title: 'Look around', description, lead: { agent: 'claude-code' } }),
+          /^Started /,
+        )
+        const [started] = yield* sql<{ id: string; threadId: string }>`
+          SELECT k.id, t.id AS thread_id FROM tasks k JOIN threads t ON t.task_id = k.id AND t.kind = 'task' WHERE k.title = 'Look around'`
+        const taskId = started?.id ?? ''
+        const threadId = started?.threadId ?? ''
+        yield* until(sql<{ state: string }>`SELECT state FROM runs WHERE task_id = ${taskId}`, (rows) => rows[0]?.state === 'succeeded')
+        const [session] = yield* sql<{ id: string }>`SELECT id FROM provider_sessions WHERE thread_id = ${threadId}`
+        const lead: ToolAccess = { role: 'lead', ...place, threadId, sessionId: session?.id ?? '', taskId }
+        assert.match(
+          yield* callTool(lead, 'make_it_a_change', { title: 'Keep the notes', review: null, output: 'draft' }),
+          /^The task is a change now/,
+        )
+        return { taskId, threadId }
+      }).pipe(Effect.provide(runtime(file)))
+      // Opened again, the round ends as its lead's turn ending would have: it made nothing new, and nothing is carried on.
+      yield* Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient
+        yield* until(
+          sql<{ state: string }>`SELECT state FROM runs WHERE task_id = ${task.taskId} AND plan_id IS NULL`,
+          (rows) => rows[0]?.state === 'succeeded',
+        )
+        assert.deepStrictEqual(yield* callsOf(task.taskId), [])
+        assert.lengthOf(
+          (yield* notices(task.threadId)).filter((notice) => notice.title === CARRIED),
+          0,
+        )
       }).pipe(Effect.provide(runtime(file)))
     }),
   )

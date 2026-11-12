@@ -1,4 +1,4 @@
-import { type ComponentProps, Fragment, memo, type ReactNode, useCallback, useLayoutEffect, useRef } from 'react'
+import { type ComponentProps, Fragment, memo, type ReactNode, useCallback, useLayoutEffect, useRef, useState } from 'react'
 
 import {
   AltharLine,
@@ -11,11 +11,11 @@ import {
   ReviewLine,
   Round,
   shotName,
-  SkillsSeen,
   glyphOf,
   Thinking,
   ThreadDivider,
   WorkedFor,
+  WorkStep as StepRow,
   WorkLine,
   WorkNote,
   WorkNow,
@@ -33,11 +33,56 @@ import { type Round as RoundModel, type RoundBlock, type Said, type Shown, type 
 import type { Block, StepResult } from '../../shared/thread'
 import { RuleReceipt } from '../../shared/RuleReceipt'
 import { SaidIn } from '../../shared/code/CodeHost'
-import { McpActs, PartView, ThreadBlocks } from '../../shared/ThreadBlocks'
+import { CanvasLines, McpActs, PartView, ThreadBlocks } from '../../shared/ThreadBlocks'
 import { WayOut } from '../../shared/WayOut'
-import { PublishedReport, ReviewReport } from './Reports'
+import { PublishedReport, reportText, ReviewReport } from './Reports'
+import { HelperWork } from './HelperWork'
 import s from './TaskThread.module.css'
+import { duration, lineOf, spentWords } from '../../shared/turnTime'
 
+/** A helper's row in its lead's thread: who and where, opening in place to what it does (HelperWork). */
+function HelperRow({
+  id,
+  step,
+}: {
+  id: string
+  step: { readonly name: string; readonly branch: string; readonly thread?: string | undefined }
+}) {
+  const [open, setOpen] = useState(false)
+  const thread = step.thread
+  return (
+    <>
+      <StepRow
+        data-item={id}
+        stamp={workStepText.helper}
+        title={`${workStepText.helper} · ${step.name}, ${step.branch}`}
+        {...(thread === undefined
+          ? {}
+          : { action: { label: open ? workStepText.hideWork : workStepText.seeWork, onPress: () => setOpen(!open) } })}
+      >
+        <strong>{step.name}</strong>, {step.branch}
+      </StepRow>
+      {open && thread !== undefined && <HelperWork threadId={thread} />}
+    </>
+  )
+}
+
+/** A step of the work's row (a task is a conversation plus parts): its stamp, and the whole of it on hover. */
+export const workStepText = {
+  newChange: 'New change',
+  shipped: 'Shipped',
+  merged: 'Merged',
+  joined: 'Kept together',
+  dropped: 'Dropped',
+  helper: 'Helper',
+  seeWork: 'See its work',
+  hideWork: 'Hide its work',
+  keepTogether: 'Keep them together',
+  dropIt: 'Drop it',
+  whole: (name: string, branch: string, toward: string | null) =>
+    `New change · ${name}, on ${branch}${toward === null ? '' : `, into ${toward}`}`,
+  waits: (name: string) => `, waits for ${name} to merge`,
+}
 /*
  * A task's thread in rounds (shared/rounds.ts, ADR-042), as the kit draws
  * them: each ask, then its lead's acknowledgement, the line of its work and
@@ -74,10 +119,19 @@ export interface TaskThreadProps extends Shared {
   readonly versionOf: (whole: string) => string
   /** Opens another task, by its thread: one this task's lead started, from the line that says so. */
   readonly onOpenTask?: (threadId: string) => void
+  /**
+   * Where this task's lead started another, in place of a line: a chip that stays current as the task moves, so what became
+   * of it shows where it was started (ADR-097). Without it, a line with the task's title, which opens it.
+   */
+  readonly started?: (task: { readonly threadId: string; readonly title: string }) => ReactNode
   /** What became of a review's findings, in words ("2 fixed, 1 declined"), by its report; undefined while none is settled. */
   readonly settledOf?: (review: string) => string | undefined
   /** A review running now, by who and for how long: a line at the thread's end. */
   readonly reviewing?: { readonly model: ModelInfo; readonly took: string } | null
+  /** A step of the work's one way on, where it has one: Keep them together on a change its lead split, Drop it on one its git made. */
+  readonly stepAction?: (
+    step: Extract<RoundBlock, { kind: 'work_step' }>['step'],
+  ) => { readonly label: string; readonly onPress: () => void } | undefined
 }
 
 /** One step of a round's work, as its header opens to it. */
@@ -131,6 +185,8 @@ const shotNames = (report: RoundModel['report']) =>
 interface RoundProps {
   readonly block: RoundModel
   readonly model: ModelInfo
+  /** Who signs it in place of the model: the coordinator, in an aside. */
+  readonly signed?: { readonly voice: string; readonly mark: ReactNode }
   /** The names of its pictures an earlier round showed already: shown small, as retakes. */
   readonly retakes: ReadonlyArray<string>
   /** What each document it hands back was last changed by. */
@@ -150,6 +206,7 @@ interface RoundProps {
 const RoundView = memo(function RoundView({
   block,
   model,
+  signed,
   retakes,
   versions,
   threadId,
@@ -193,12 +250,17 @@ const RoundView = memo(function RoundView({
   )
     return (
       <>
-        <WorkLine who={model} took={work.took} summary={work.counts}>
+        <WorkLine
+          who={model}
+          took={work.spent === null ? work.took : duration(work.spent.total)}
+          summary={[work.counts, ...(work.spent === null ? [] : [lineOf(work.spent) ?? ''])].filter((words) => words !== '').join(' · ')}
+        >
           {work.steps.map((step) => (
             <StepView key={step.id} step={step} threadId={threadId} worktree={worktree} />
           ))}
         </WorkLine>
         <McpActs parts={block.parts} />
+        <CanvasLines drawn={block.drawn} />
       </>
     )
   const report = block.report
@@ -238,10 +300,18 @@ const RoundView = memo(function RoundView({
   // What it writes now, and then the same words as its result, stand in one place, so they never draw again as it ends.
   const answer = block.result ?? block.writing
   return (
-    <Round model={model} at={block.at} {...(copy === undefined ? {} : { copy })} {...(report === null ? {} : { 'data-item': report.id })}>
+    <Round
+      model={model}
+      {...(signed === undefined ? {} : { signed })}
+      at={block.at}
+      {...(copy === undefined ? {} : { copy })}
+      {...(report === null ? {} : { 'data-item': report.id })}
+    >
       {work !== null && (
         <WorkedFor
-          took={work.took}
+          took={work.spent === null ? work.took : duration(work.spent.total)}
+          {...(work.spent === null ? {} : { spent: spentWords(work.spent) })}
+          {...(work.spent === null || lineOf(work.spent) === undefined ? {} : { most: lineOf(work.spent) })}
           live={work.live && !block.answered}
           {...(onTheWay.length === 0
             ? {}
@@ -282,6 +352,7 @@ const RoundView = memo(function RoundView({
         </>
       )}
       {pictures(block.shown.after)}
+      <CanvasLines drawn={block.drawn} />
       {block.failed !== null && (
         <>
           <AltharLine tone="warning">{block.failed.text}</AltharLine>
@@ -311,58 +382,16 @@ const YouView = memo(
 /** What the thread says of a task this task's lead started, before its title, which opens it. */
 const STARTED = 'Started'
 
-const situationText = {
-  unchanged: 'stopped without a change',
-  failed: 'failed',
-  stopped: 'stopped by you',
-  report: 'Its report',
-  overlap: (names: ReadonlyArray<string>, more: number) =>
-    ` changes ${names.map((name) => `\u0000${name}\u0000`).join(', ')}${more > 0 ? ` and ${more} more` : ''} too. Both leads were told.`,
-}
-
-const fileName = (path: string) => path.slice(path.lastIndexOf('/') + 1)
-
-/** Another task's end, or its changing the same files, as Althar says it with the task linked (ADR-097, "Situations"). */
-function Situation({
-  situation,
-  task,
+export function TaskThread({
+  rounds,
+  versionOf,
   onOpenTask,
-}: {
-  situation: NonNullable<Extract<RoundBlock, { kind: 'althar' }>['situation']>
-  task: { readonly threadId: string; readonly title: string }
-  onOpenTask?: (threadId: string) => void
-}) {
-  const link = (
-    <LinkButton onClick={() => onOpenTask?.(task.threadId)} disabled={onOpenTask === undefined}>
-      {task.title}
-    </LinkButton>
-  )
-  if (situation.kind === 'overlap') {
-    const names = [...new Set(situation.files.map(fileName))]
-    const shown = names.slice(0, 2)
-    return (
-      <>
-        {link}
-        {situationText
-          .overlap(shown, names.length - shown.length)
-          .split('\u0000')
-          .map((piece, at) => (at % 2 === 1 ? <code key={at}>{piece}</code> : <Fragment key={at}>{piece}</Fragment>))}
-      </>
-    )
-  }
-  const why = situation.how === 'stopped' || situation.why === undefined ? '' : `: ${situation.why.replace(/\.$/, '')}.`
-  return (
-    <>
-      {link} {situationText[situation.how]}
-      {situation.how === 'stopped' ? '.' : why}{' '}
-      <LinkButton onClick={() => onOpenTask?.(task.threadId)} disabled={onOpenTask === undefined}>
-        {situationText.report}
-      </LinkButton>
-    </>
-  )
-}
-
-export function TaskThread({ rounds, versionOf, onOpenTask, settledOf, reviewing = null, ...shared }: TaskThreadProps) {
+  started,
+  settledOf,
+  reviewing = null,
+  stepAction,
+  ...shared
+}: TaskThreadProps) {
   const { threadId, worktree = null, openFile, session, project, onTryAgain, onCompact, onSignIn } = shared
   const named = useModelNames()
   // A round on the model its own turn ran, as the runtime recorded it; an older one without, on the thread's current
@@ -409,6 +438,7 @@ export function TaskThread({ rounds, versionOf, onOpenTask, settledOf, reviewing
         key={block.id}
         block={block}
         model={modelOf(block.agentId, block.model)}
+        {...(shared.signed === undefined ? {} : { signed: shared.signed })}
         retakes={retakes}
         versions={Object.fromEntries(documentsOf(block).map((whole) => [whole, versionOf(whole)]))}
         threadId={threadId}
@@ -429,18 +459,21 @@ export function TaskThread({ rounds, versionOf, onOpenTask, settledOf, reviewing
         return round(block)
       case 'waiting':
         return (
-          <Round key={block.id} model={modelOf(session?.agentId ?? null)}>
+          <Round
+            key={block.id}
+            model={modelOf(session?.agentId ?? null)}
+            {...(shared.signed === undefined ? {} : { signed: shared.signed })}
+          >
             <Thinking {...(block.took === null ? {} : { took: block.took })} slow={block.slow} />
           </Round>
         )
       case 'relayed':
         return <Relayed key={block.id} title={block.title} body={block.body} data-item={block.id} />
       case 'althar':
+        if (block.task !== undefined && started !== undefined) return <Fragment key={block.id}>{started(block.task)}</Fragment>
         return (
           <AltharLine key={block.id} tone={block.tone}>
-            {block.situation !== undefined && block.task !== undefined ? (
-              <Situation situation={block.situation} task={block.task} {...(onOpenTask === undefined ? {} : { onOpenTask })} />
-            ) : block.task !== undefined && onOpenTask !== undefined ? (
+            {block.task !== undefined && onOpenTask !== undefined ? (
               <>
                 {STARTED} <LinkButton onClick={() => onOpenTask(block.task?.threadId ?? '')}>{block.task.title}</LinkButton>
               </>
@@ -455,11 +488,49 @@ export function TaskThread({ rounds, versionOf, onOpenTask, settledOf, reviewing
             {block.text}
           </ThreadDivider>
         )
-      case 'skills':
-        return <SkillsSeen key={block.id} title={block.title} skills={block.skills} data-item={block.id} />
+      case 'work_step': {
+        // A step of the work: a change started, its name in ink, its branch as code, and what it works toward where that isn't
+        // the task's; shipped or merged, with its pull request; kept together with another, or dropped.
+        const { step } = block
+        const action = stepAction?.(step)
+        // A helper its lead started: its row opens in place to its work (ADR-087).
+        if (step.kind === 'helper') return <HelperRow key={block.id} id={block.id} step={step} />
+        if (step.kind !== 'new_change')
+          return (
+            <StepRow
+              key={block.id}
+              data-item={block.id}
+              stamp={workStepText[step.kind]}
+              tone={step.kind === 'shipped' || step.kind === 'merged' ? 'done' : 'new'}
+              title={`${workStepText[step.kind]} · ${step.name}, ${step.branch}`}
+            >
+              <strong>{step.name}</strong>
+              {step.kind === 'joined' ? ', onto ' : step.kind === 'dropped' ? ', its branch stays: ' : ', '}
+              <code>{step.branch}</code>
+            </StepRow>
+          )
+        return (
+          <StepRow
+            key={block.id}
+            data-item={block.id}
+            stamp={workStepText.newChange}
+            title={`${workStepText.whole(step.name, step.branch, step.toward)}${step.waits === undefined ? '' : workStepText.waits(step.waits)}`}
+            {...(action === undefined ? {} : { action })}
+          >
+            <strong>{step.name}</strong>, on <code>{step.branch}</code>
+            {step.toward === null ? null : (
+              <>
+                , into <code>{step.toward}</code>
+              </>
+            )}
+            {step.waits === undefined ? null : workStepText.waits(step.waits)}
+          </StepRow>
+        )
+      }
       case 'verdict': {
         // One line: who reviewed, what it found, what became of it; opened, its findings and words, and the lead settling them.
-        const settled = settledOf?.(block.id)
+        // A review after a merge whose findings the project's rule doesn't bring back: they stay here, and nothing waits.
+        const settled = settledOf?.(block.id) ?? (block.result.afterMerge?.kept === true ? reportText.kept : undefined)
         return (
           <ReviewLine
             key={block.id}

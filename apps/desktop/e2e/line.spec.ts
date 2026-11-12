@@ -6,13 +6,13 @@ import { join } from 'node:path'
 import { expect, test } from '@playwright/test'
 
 import { author, repository } from '../tests/repository'
-import { connectGitHub, launch, openFirstProject, say, startTask, still } from './support'
+import { connectGitHub, launch, openFirstProject, say, startTask, still, toBoard } from './support'
 
 /*
  * The line up next, in a real window with the fake agent and the fake
  * GitHub: with one agent at a time, held by a server a finished task left
  * running, three reviews of someone else's pull requests, each started from
- * its plan, and a quick task with none, wait in Up next, not Running. The
+ * its plan, and a quick task with none, moved off Scratch to the board, wait in Up next, not Running. The
  * person drags the quick task to the front, to the back, and to the front
  * again let go outside the lane, starts a drag they cancel with Escape, and
  * moves the review last in line to the front from its own view; when the server stops, the line starts
@@ -76,6 +76,8 @@ test('lists reviews and a quick task waiting for an agent in Up next, and starts
 
     await page.getByRole('radio', { name: /^Board/ }).click()
     const work = page.getByRole('region', { name: 'The project’s work' })
+    // A chat starts on Scratch, off the lanes: the person moves it to the board, where it waits in line with the reviews.
+    await toBoard(page, 'Try the double jump')
     const next = work.getByRole('region', { name: 'Up next' })
     const running = work.getByRole('region', { name: 'Running' })
     const rows = next.getByRole('listitem')
@@ -153,7 +155,7 @@ test('lists reviews and a quick task waiting for an agent in Up next, and starts
     await expect(rows.nth(3)).toContainText('4th in line')
 
     // Up again, let go outside the lane, above it at the window's edge: it goes where the row showed it, the front.
-    const above = await next.getByText('Starts when an agent is free').boundingBox()
+    const above = await next.getByText('In your order').boundingBox()
     if (above === null) throw new Error('The line has no divider')
     const up = await grab(JUMP)
     await glide(up, { x: 4, y: above.y - 30 })

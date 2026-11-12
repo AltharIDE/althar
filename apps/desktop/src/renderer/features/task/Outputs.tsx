@@ -86,6 +86,13 @@ export const text = {
   /** Opening a pull request from here opens a draft: its lead's work may not be done. */
   openChange: 'Open a draft pull request',
   openNewChange: 'Open a new draft pull request',
+  /** What waits on its branch for Ship goes up, its review first where its plan has one (a task is a conversation plus parts). */
+  ship: (n: number) => (n === 1 ? 'Ship 1 commit' : `Ship ${n} commits`),
+  /** Merge, with commits not shipped: one review of what waits, then it goes up and merges. */
+  reviewAndMerge: 'Review and merge',
+  /** Or up and merged at once, reviewed after the merge. */
+  mergeNow: 'Merge now',
+  mergeWays: 'Other ways to merge',
   /** One of the task's earlier pull requests, before its latest: merged or closed. In a task of several repositories, by its own. */
   earlier: (change: ChangeSummary, host: string, repository: string | undefined) =>
     `Before this: ${repository === undefined ? '' : `${repository} `}${change.short} ${change.prefix}${change.number}, ${change.state === 'open' ? 'open' : change.state} on ${host}.`,
@@ -180,7 +187,8 @@ const reviewOf = (snapshot: ThreadSnapshot, named: NameModel): ChangeReview | un
   if (last === undefined) return undefined
   const by = [...new Set(reviews.flatMap((item) => (item.content.agentId === null ? [] : [item.content.agentId])))]
   return {
-    state: last.content.verdict === 'changes_requested' ? CheckState.Failed : CheckState.Passed,
+    // A review after a merge whose findings the project's rule keeps in the thread (none major) asked for nothing.
+    state: last.content.verdict === 'changes_requested' && last.content.afterMerge?.kept !== true ? CheckState.Failed : CheckState.Passed,
     by: by.map((id) => named(id, reviewModelOf(snapshot, id))),
   }
 }
@@ -195,6 +203,8 @@ export function Outputs({
   onMergeHere,
   onOpenChange,
   onPush,
+  onShip,
+  onMergeWaiting,
   onMarkReady,
   onMarkAllReady,
   merging = null,
@@ -239,6 +249,10 @@ export function Outputs({
   onMergeHere: () => void
   onOpenChange: () => void
   onPush: (head: string, url: string) => void
+  /** Ships what waits on its branch for Ship; without it, nothing is offered for it here. */
+  onShip?: () => void
+  /** Merge, with commits not shipped: Review and merge, or Merge now (a task is a conversation plus parts). */
+  onMergeWaiting?: (how: 'review' | 'now') => void
   /** The pull request a push was refused by for commits on it that aren't here, by its address. */
   refused?: string | null
   /** Replaces a pull request's commits with the branch, up to the head shown, while it is still at `replaces`: confirmed on the card. */
@@ -271,6 +285,8 @@ export function Outputs({
   const closed = latest.filter((change) => change.state === 'closed')
   // Commits after its last pull request, in none yet: a new one opens for them, as the person says.
   const shipping = ready && task.unshipped != null && task.unshipped.commits > 0 && snapshot.host?.connected === true
+  // Held for Ship: Ship sends what waits, after its review, in place of Push and of opening a new pull request.
+  const held = ready ? task.held : undefined
   // Its repositories: those with a pull request, those still to merge here, and those merged here already.
   const several = open.length + task.here.length + task.merged.length > 1
   const [first] = open
@@ -302,11 +318,17 @@ export function Outputs({
     (one) => one.state === 'open' && one.unpushed > 0 && one.localHead !== null && !parted.some((p) => p.change.url === one.url),
   )
   const drafts = open.filter((one) => one.state === 'open' && one.draft)
-  const openNew = shipping && (
+  const openNew = held === undefined && shipping && (
     <Button key="new" variant="signal" {...pressed(doing.openChange)} onClick={onOpenChange}>
       {text.openNewChange}
     </Button>
   )
+  const shipNow =
+    held === undefined || onShip === undefined ? null : (
+      <Button key="ship" variant="signal" {...pressed(doing.ship)} onClick={onShip}>
+        {text.ship(held.commits)}
+      </Button>
+    )
 
   // Its pull requests, as one change: merged once all are, a draft while any is, else ready to accept.
   const change =
@@ -332,18 +354,46 @@ export function Outputs({
           // What the lead committed since goes up first: accepting merges what the pull request has.
           const accepting = (ready || task.mergeable === true) && state === ChangeState.Ready && pushes.length === 0
           if (open.length > 1) return track(accepting)
+          // Merge, with commits not shipped: Review and merge, or Merge now, beside Ship.
+          const mergingWaiting =
+            held !== undefined &&
+            onMergeWaiting !== undefined &&
+            ready &&
+            state === ChangeState.Ready &&
+            first.state === 'open' &&
+            !first.draft
+              ? [
+                  <SplitButton
+                    key="merge-waiting"
+                    moreLabel={text.mergeWays}
+                    {...pressed(doing.mergeWaiting)}
+                    onClick={() => onMergeWaiting('review')}
+                    menu={(trigger) => (
+                      <Menu trigger={trigger} label={text.mergeWays} align="end">
+                        <MenuItem onSelect={() => onMergeWaiting('now')}>{text.mergeNow}</MenuItem>
+                      </Menu>
+                    )}
+                  >
+                    {text.reviewAndMerge}
+                  </SplitButton>,
+                ]
+              : []
           const actions: ReactNode[] = [
-            // Only those Althar held, where the project's rules push the lead's commits on their own (ADR-072).
-            ...pushes.filter(personPushes).map((one) => (
-              <Button
-                key={`push-${one.url}`}
-                variant="signal"
-                {...pressed(doing.push(one.url))}
-                onClick={() => onPush(one.localHead ?? '', one.url)}
-              >
-                {several ? text.pushTo(one.unpushed, nameOf(one.repository)) : text.push(one.unpushed)}
-              </Button>
-            )),
+            ...(shipNow === null ? [] : [shipNow]),
+            ...mergingWaiting,
+            // Only those Althar held, where the project's rules push the lead's commits on their own (ADR-072); held for Ship, none.
+            ...pushes
+              .filter((one) => held === undefined && personPushes(one))
+              .map((one) => (
+                <Button
+                  key={`push-${one.url}`}
+                  variant="signal"
+                  {...pressed(doing.push(one.url))}
+                  onClick={() => onPush(one.localHead ?? '', one.url)}
+                >
+                  {several ? text.pushTo(one.unpushed, nameOf(one.repository)) : text.push(one.unpushed)}
+                </Button>
+              )),
             ...(accepting
               ? [
                   <Button
@@ -370,6 +420,9 @@ export function Outputs({
               host={{ name: productName(first.product), ...(brand === undefined ? {} : { brand }) }}
               prs={prs}
               {...(checked ? { checks: open.flatMap((one) => (one.checks?.list ?? []).map(checkOf)) } : {})}
+              {...(first.state === 'open' && first.needs !== undefined && first.needs.length > 0
+                ? { needs: first.needs, ...(first.target === undefined || first.target === null ? {} : { target: first.target }) }
+                : {})}
               {...(review === undefined ? {} : { review })}
               {...(actions.length === 0 ? {} : { actions })}
               {...files}
@@ -410,9 +463,9 @@ export function Outputs({
     const stops = open.map((one, i): TrackStop => {
       const brand = productBrand(one.product)
       // Its files are under its repository's folder here, which needn't be named as the host names it.
-      const folder = one.slug ?? nameOf(one.repository)
+      const folder = one.slug ?? labelOf(one)
       return {
-        name: nameOf(one.repository),
+        name: labelOf(one),
         number: `${one.prefix}${one.number}`,
         url: one.url,
         host: { name: productName(one.product), ...(brand === undefined ? {} : { brand }) },
@@ -432,7 +485,7 @@ export function Outputs({
       accepting && next !== undefined && next.queued !== true ? (
         left.length === 1 ? (
           <Button key="accept" variant="signal" {...pressed(doing.accept)} onClick={() => merge(left)}>
-            {left.length === open.length ? text.accept(1) : text.acceptLeft([nameOf(next.repository)])}
+            {left.length === open.length ? text.accept(1) : text.acceptLeft([labelOf(next)])}
           </Button>
         ) : (
           <SplitButton
@@ -444,11 +497,11 @@ export function Outputs({
             onClick={() => merge(left)}
             menu={(trigger) => (
               <Menu trigger={trigger} label={text.eachAlone} align="end">
-                <MenuItem onSelect={() => merge([next])}>{text.mergeOnly(nameOf(next.repository))}</MenuItem>
+                <MenuItem onSelect={() => merge([next])}>{text.mergeOnly(labelOf(next))}</MenuItem>
               </Menu>
             )}
           >
-            {left.length === open.length ? text.accept(left.length) : text.acceptLeft(left.map((one) => nameOf(one.repository)))}
+            {left.length === open.length ? text.accept(left.length) : text.acceptLeft(left.map((one) => labelOf(one)))}
           </SplitButton>
         )
       ) : null
@@ -468,7 +521,7 @@ export function Outputs({
             <Menu trigger={trigger} label={text.eachAlone} align="end">
               {drafts.map((one) => (
                 <MenuItem key={one.url} onSelect={() => onMarkReady(one.url)}>
-                  {text.markReadyIn(nameOf(one.repository))}
+                  {text.markReadyIn(labelOf(one))}
                 </MenuItem>
               ))}
             </Menu>
@@ -478,17 +531,20 @@ export function Outputs({
         </SplitButton>
       )
     const actions: ReactNode[] = [
-      // Only those Althar held, where the project's rules push the lead's commits on their own (ADR-072).
-      ...pushes.filter(personPushes).map((one) => (
-        <Button
-          key={`push-${one.url}`}
-          variant="signal"
-          {...pressed(doing.push(one.url))}
-          onClick={() => onPush(one.localHead ?? '', one.url)}
-        >
-          {text.pushTo(one.unpushed, nameOf(one.repository))}
-        </Button>
-      )),
+      ...(shipNow === null ? [] : [shipNow]),
+      // Only those Althar held, where the project's rules push the lead's commits on their own (ADR-072); held for Ship, none.
+      ...pushes
+        .filter((one) => held === undefined && personPushes(one))
+        .map((one) => (
+          <Button
+            key={`push-${one.url}`}
+            variant="signal"
+            {...pressed(doing.push(one.url))}
+            onClick={() => onPush(one.localHead ?? '', one.url)}
+          >
+            {text.pushTo(one.unpushed, labelOf(one))}
+          </Button>
+        )),
       ...(accept === null ? [] : [accept]),
       ...(markReady === null ? [] : [markReady]),
       ...(openNew === false ? [] : [openNew]),
@@ -575,19 +631,21 @@ export function Outputs({
       ? (() => {
           const merging = ready && task.here.length > 0
           const actions: ReactNode[] = [
-            ...(opens
-              ? [
-                  <Button key="open" variant="signal" {...pressed(doing.openChange)} onClick={onOpenChange}>
-                    {closed.length > 0 ? text.openNewChange : text.openChange}
-                  </Button>,
-                ]
-              : connects !== null
+            ...(shipNow !== null
+              ? [shipNow]
+              : opens
                 ? [
-                    <Button key="connect" variant="signal" onClick={onConnect}>
-                      {text.connect(connects)}
+                    <Button key="open" variant="signal" {...pressed(doing.openChange)} onClick={onOpenChange}>
+                      {closed.length > 0 ? text.openNewChange : text.openChange}
                     </Button>,
                   ]
-                : []),
+                : connects !== null
+                  ? [
+                      <Button key="connect" variant="signal" onClick={onConnect}>
+                        {text.connect(connects)}
+                      </Button>,
+                    ]
+                  : []),
             ...(merging
               ? [
                   <Button
@@ -697,7 +755,7 @@ export function Outputs({
         </p>
       )}
       {/* With no pull request still open to hold it, nor its branch's card, a new one is pressed from here. */}
-      {first === undefined && here === null && openNew}
+      {first === undefined && here === null && (shipNow ?? openNew)}
       {usage.length > 0 && <UsageCard lines={usage} open={usageOpen} onOpenChange={setUsageOpen} />}
     </>
   )
@@ -751,9 +809,10 @@ const PAGE_HOSTS: ReadonlyArray<readonly [RegExp, string]> = [
  * ones of its rounds of work before it, newest first.
  */
 export const latestOf = (changes: ReadonlyArray<ChangeSummary>) => {
+  // By the change each belongs to, where the task has several in a repository; else by repository, as before.
   const byRepository = new Map<string, Array<ChangeSummary>>()
   for (const change of changes) {
-    const where = change.slug ?? change.repository
+    const where = change.change?.id ?? change.slug ?? change.repository
     byRepository.set(where, [...(byRepository.get(where) ?? []), change])
   }
   const latest = [...byRepository.values()].flatMap((all) => {
@@ -762,6 +821,9 @@ export const latestOf = (changes: ReadonlyArray<ChangeSummary>) => {
   })
   return { latest, earlier: changes.filter((change) => !latest.includes(change)).toReversed() }
 }
+
+/** A pull request as its change's line names it: the change's name, where the task has several, else its repository. */
+const labelOf = (change: ChangeSummary) => change.change?.name ?? nameOf(change.repository)
 
 /** Whether a task has outputs to show: a pull request, or anything changed or committed on its branch. */
 export const hasOutputs = ({ task }: ThreadSnapshot) =>

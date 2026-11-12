@@ -43,6 +43,7 @@ import {
   NavArrowUp,
   OpenNewWindow,
   Page,
+  Palette,
   PageMinus,
   PagePlus,
   PageRight,
@@ -191,6 +192,8 @@ export const ICONS = {
   beside: SidebarExpand,
   /** What sites keep: cookies and storage. */
   cookie: Cookie,
+  /** One of the project's canvases: what its agents drew for the person to look at and iterate on (ADR-104). */
+  canvas: Palette,
 } satisfies Record<string, ComponentType<SVGProps<SVGSVGElement> & { strokeWidth?: number | string }>>
 
 export type IconName = keyof typeof ICONS

@@ -1,7 +1,7 @@
 import { spawn } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { mkdtempSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { setPriority, tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Readable, Writable } from 'node:stream'
 
@@ -122,6 +122,29 @@ export interface SpawnOptions {
   readonly stderr?: (chunk: string, pid: number) => void
   /** How its tree is reached: the platform's, unless a test says otherwise. */
   readonly trees?: ProcessTrees
+  /**
+   * Agents' work, run in the background (`BACKGROUND`): below what the person waits on, so Althar's window, and every
+   * other app, answers while agents build and test. What the process starts takes its priority from it.
+   */
+  readonly background?: boolean
+  /** How a process's priority is set: the system's, unless a test says. */
+  readonly prioritize?: (pid: number, priority: number) => void
+}
+
+/**
+ * How agents' work runs (`SpawnOptions.background`): niceness 10 on macOS and Linux, Below normal on Windows, which is
+ * what Node makes of 10 there. The scheduler gives the rest of the computer the cores first while it is busy, and
+ * agents all of them while it isn't: a build on an idle computer takes as long as before.
+ */
+export const BACKGROUND = 10
+
+/** Sets a process's priority, or leaves it as it is where the system won't, as inside a sandbox that forbids it. */
+const setPriorityOf = (pid: number, priority: number) => {
+  try {
+    setPriority(pid, priority)
+  } catch {
+    // Left at the priority it started with: it runs as it always did.
+  }
 }
 
 const STDERR_KEPT = 8_192
@@ -204,6 +227,8 @@ export const spawnOwned = (
           ),
         )
       })
+      // Lowered as soon as it is there, before it has started much of its own: what it starts inherits it.
+      if (options.background === true) (options.prioritize ?? setPriorityOf)(pid, BACKGROUND)
       const osStartedAt = yield* osStartTime(pid, trees)
       return {
         pid,

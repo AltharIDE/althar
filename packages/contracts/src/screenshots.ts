@@ -85,15 +85,30 @@ export const screenshotsNow = (
     const kept = (report.keptViews ?? []).map((view) => view.trim())
     if (shots.length === 0 && kept.length === 0) continue
     // Only views taken again: a follow-up that leaves the others as they were.
-    const retaken = shots.length > 0 && shots.every((shot) => shown.has(shot.key))
-    if (!retaken) for (const key of shown.keys()) if (!kept.includes(key)) shown.delete(key)
+    // A view counts by its name, so a before added to a view, or a view's own picture, is a retake too.
+    const known = new Set([...shown.keys()].map(viewOfKey))
+    const retaken = shots.length > 0 && shots.every((shot) => known.has(viewOfKey(shot.key)))
+    // A view kept by name keeps both its picture and its before.
+    if (!retaken) for (const key of shown.keys()) if (!kept.includes(viewOfKey(key))) shown.delete(key)
     for (const shot of shots) shown.set(shot.key, shot)
   }
   return [...shown.values()]
 }
 
-/** A picture's view where it has a name: the one its lead gave, else its caption's. */
+/** What follows a view's name in the key of its before: `A1` is the view, `A1:before` the picture of it before the change. */
+export const BEFORE_SUFFIX = ':before'
+
+/** A view's name from a key, whether it is of the view's picture or of its before. */
+export const viewOfKey = (key: string): string => (key.endsWith(BEFORE_SUFFIX) ? key.slice(0, -BEFORE_SUFFIX.length) : key)
+
+/**
+ * A picture's view where it has a name: the one its lead gave, else its
+ * caption's. A before, which its lead says is of that view, is kept apart
+ * from the view's own picture; one with no name to say which view it is the
+ * before of is only a picture.
+ */
 const keyOf = (piece: Evidence): string | null => {
   const given = piece.view?.trim()
-  return given !== undefined && given !== '' ? given : viewOf(piece.caption)
+  const named = given !== undefined && given !== '' ? given : viewOf(piece.caption)
+  return named !== null && piece.before === true ? `${named}${BEFORE_SUFFIX}` : named
 }

@@ -13,6 +13,7 @@ export const LOG_CAP = 16 * 1024 * 1024
 export const ARTIFACT_CAP = 5 * 1024 * 1024
 export const ChecksAsked = Schema.Struct({
   pull_request: Schema.optional(Schema.NullOr(Schema.Union([Schema.String, Schema.Number]))),
+  queue: Schema.optional(Schema.Boolean),
   ref: Schema.optional(Schema.String),
   check: Schema.optional(Schema.String),
   tail: Schema.optional(Schema.Number),
@@ -102,7 +103,7 @@ export const inspectChecks = (
   asked: typeof ChecksAsked.Type,
 ) =>
   Effect.gen(function* () {
-    const all = yield* host.checks(repository, ref)
+    const all = yield* host.checks(repository, ref, { strict: asked.queue === true })
     if (asked.check === undefined)
       return bounded(
         `Checks on ${ref} (up to the host's listing limit):\n${all.map((check) => `${check.id} | ${check.name} | workflow: ${check.workflow ?? 'not reported'} | ${check.state} | duration: ${check.startedAt && check.completedAt ? `${Math.max(0, (Date.parse(check.completedAt) - Date.parse(check.startedAt)) / 1000)}s` : 'not reported'} | ${check.url ?? 'no URL'}`).join('\n') || 'No checks.'}`,
