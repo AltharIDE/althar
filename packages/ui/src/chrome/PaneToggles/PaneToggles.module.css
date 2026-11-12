@@ -57,8 +57,15 @@
 }
 
 /* soft: the first, its frame a hairline, a pane that shows tinted in ink */
+/* as tall as the views' switch beside it: its 30px track, 8px corners, and halves rounded as its options */
 .soft {
+  width: 66px;
+  height: 30px;
   border: 1px solid var(--line-2);
+  border-radius: 8px;
+}
+.soft .half {
+  border-radius: 5px;
 }
 .soft .half:hover:not([aria-disabled='true']) {
   background: var(--line);
