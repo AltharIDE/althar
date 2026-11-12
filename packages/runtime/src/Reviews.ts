@@ -1333,7 +1333,7 @@ export class Reviews extends Context.Service<
           name: 'draft_review',
           inReview: true,
           description:
-            "Drafts your review of the pull request this task reviews, once you have read it: your verdict (approve, changes, or comment), a summary of a few lines in Markdown, and comments, each on a line of the change as it now reads (a file's path from the repository's root, and its line number in the new file), with its severity: blocking, major, minor or nit. It posts nothing: the person sees it as a card, keeps or drops each comment, chooses the verdict (yours is a suggestion) and posts it. Called again, it replaces the draft that waits.",
+            "Drafts your review of the pull request this task reviews, once you have read it: your verdict (approve, changes, or comment), a summary of a few lines in Markdown, and comments, each on a line of the change as it now reads (a file's path from the repository's root, and its line number in the new file), with its severity: blocking, major, minor or nit. It posts nothing: the person sees it as a card, keeps or drops each comment, chooses the verdict (yours is a suggestion) and posts it. Called again, it replaces the draft that waits. When the person explicitly asks you to post that card, post_review with their message ID from read_turn posts your latest draft and settles the review task.",
           input: {
             type: 'object',
             properties: {

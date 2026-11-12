@@ -7,9 +7,10 @@ import { Connections } from './Connections'
 import { Errands, type FreshAction } from './Errands'
 import type { Instance } from './Instance'
 import { Issues } from './Issues'
+import type { Reviews } from './Reviews'
 import { ActionNotPerformed, type ToolAccess, ToolRefused } from './ToolServer'
 
-export type Needs = Connections | Issues | Errands | SqlClient.SqlClient | Instance | RuntimeConfig
+export type Needs = Connections | Issues | Reviews | Errands | SqlClient.SqlClient | Instance | RuntimeConfig
 export const refused = (message: string) => new ToolRefused({ message })
 export const Record = Schema.Record(Schema.String, Schema.Unknown)
 export const Word = {

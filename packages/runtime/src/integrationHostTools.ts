@@ -3,6 +3,9 @@ import { Effect, Schema } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { Connections } from './Connections'
+import { Instance } from './Instance'
+import { Reviews } from './Reviews'
+import { signed } from './pullRequestWords'
 import { placeOf } from './coordinatorPullRequests'
 import type { FreshAction } from './Errands'
 import {
@@ -17,7 +20,7 @@ import {
   Word,
   write,
 } from './integrationSupport'
-import type { Tool, ToolAccess } from './ToolServer'
+import { ActionNotPerformed, type Tool, type ToolAccess } from './ToolServer'
 
 export type IntegrationTool = (
   name: string,
@@ -35,10 +38,11 @@ const PullAsked = Schema.Struct({
   ...Word,
 })
 const ReviewAsked = Schema.Struct({
-  pull_request: Schema.Union([Schema.String, Schema.Number]),
-  verdict: Schema.Literals(['approve', 'request_changes', 'comment']),
-  body: Schema.String,
-  commit: Schema.String,
+  pull_request: Schema.optional(Schema.Union([Schema.String, Schema.Number])),
+  draft: Schema.optional(Schema.String),
+  verdict: Schema.optional(Schema.Literals(['approve', 'request_changes', 'comment'])),
+  body: Schema.optional(Schema.String),
+  commit: Schema.optional(Schema.String),
   comments: Schema.optional(Schema.Array(Schema.Struct({ path: Schema.String, line: Schema.Number, body: Schema.String }))),
   ...Word,
 })
@@ -271,9 +275,10 @@ export const hostIntegrationTools = (tool: IntegrationTool): ReadonlyArray<Tool>
   ),
   tool(
     'post_review',
-    'Posts a review the person asked for directly. Give pull_request, verdict (approve/request_changes/comment), Markdown body and the exact commit SHA reviewed; optional comments address new-side paths and lines. The current head must match. An agent cannot approve its own work or a PR Althar opened. Requires the person’s message or errand and leaves a receipt.',
+    'Posts a review the person asked for directly. To post an existing card, give draft (its ID), or omit it on a review task for its latest draft; optional verdict overrides its chosen or suggested verdict. The card is updated and the review task settles. For a new review without a card, give pull_request, verdict (approve/request_changes/comment), Markdown body and the exact commit SHA reviewed; optional comments address new-side paths and lines. The current head must match. An agent cannot approve its own work or a PR Althar opened. Requires the person’s message or errand and leaves a receipt.',
     {
       pull_request: { type: ['string', 'number'] },
+      draft: { type: 'string' },
       verdict: { type: 'string', enum: ['approve', 'request_changes', 'comment'] },
       body: { type: 'string' },
       commit: { type: 'string' },
@@ -287,13 +292,70 @@ export const hostIntegrationTools = (tool: IntegrationTool): ReadonlyArray<Tool>
       },
       ...wordInput,
     },
-    ['pull_request', 'verdict', 'body', 'commit'],
+    [],
     (input, access) =>
       Effect.gen(function* () {
         const asked = yield* decode(ReviewAsked, input)
+        const sql = yield* SqlClient.SqlClient
+        if (asked.draft !== undefined || (asked.pull_request === undefined && access.taskId !== null)) {
+          if (asked.body !== undefined || asked.commit !== undefined || asked.comments !== undefined)
+            return yield* refused(
+              'Posting a draft uses the saved card. Change it with draft_review first; only verdict can be chosen here.',
+            )
+          const [draft] = yield* sql<{
+            id: string
+            url: string
+            headCommit: string
+            suggested: 'approve' | 'changes' | 'comment'
+            verdict: 'approve' | 'changes' | 'comment' | null
+            summary: string
+            comments: string
+          }>`
+            SELECT id, url, head_commit, suggested, verdict, summary, comments FROM review_drafts
+            WHERE project_id = ${access.projectId} AND (${asked.draft ?? null} IS NULL OR id = ${asked.draft ?? null})
+              AND (${asked.draft ?? null} IS NOT NULL OR task_id = ${access.taskId}) ORDER BY created_at DESC, rowid DESC LIMIT 1`
+          if (draft === undefined) return yield* refused('No review draft was found in this project.')
+          const found = yield* pullAt(access.projectId, draft.url)
+          const verdict = asked.verdict === 'request_changes' ? 'changes' : (asked.verdict ?? draft.verdict ?? draft.suggested)
+          const own = yield* sql<{
+            id: string
+          }>`SELECT id FROM external_links WHERE kind = 'change' AND lower(url) = ${draft.url.toLowerCase()} LIMIT 1`
+          const account = yield* found.host.account
+          if (verdict === 'approve' && (own.length > 0 || found.change.author?.id === account.id))
+            return yield* refused('An agent cannot approve its own work or a pull request Althar opened.')
+          const reviews = yield* Reviews
+          const actor = (yield* Instance).personId
+          const act = Effect.gen(function* () {
+            yield* reviews.change(draft.id, { verdict }, actor)
+            const card = yield* reviews.post(draft.id, actor)
+            if (card.state === 'failed') return yield* new ActionNotPerformed({ message: card.error ?? 'The host refused the review.' })
+            if (card.state !== 'posted') return yield* refused(card.error ?? 'The review was not confirmed posted.')
+            return JSON.stringify(card)
+          })
+          const read = found.host
+            .change(found.repository, found.change.number)
+            .pipe(
+              Effect.flatMap((now) =>
+                now.headSha !== draft.headCommit
+                  ? Effect.fail(refused('The head moved. Review the current commit and draft again before posting.'))
+                  : Effect.succeed({ state: 'ready' as const, head: draft.headCommit }),
+              ),
+            )
+          return yield* write(
+            'post_review',
+            access,
+            asked,
+            draft.url,
+            { draft: draft.id, verdict, commit: draft.headCommit, summary: draft.summary, comments: draft.comments },
+            act,
+            read,
+          )
+        }
+        if (asked.pull_request === undefined || asked.verdict === undefined || asked.body === undefined || asked.commit === undefined)
+          return yield* refused('Give a draft ID, or pull_request, verdict, body and commit for a new review.')
+        const { verdict, body, commit } = asked
         const found = yield* pullAt(access.projectId, asked.pull_request)
         if (!found.host.capabilities.reviews) return yield* refused('This host does not yet support posting reviews through its adapter.')
-        const sql = yield* SqlClient.SqlClient
         const owned = yield* sql<{
           id: string
         }>`SELECT id FROM external_links WHERE kind = 'change' AND lower(url) = ${found.change.url.toLowerCase()} LIMIT 1`
@@ -302,11 +364,18 @@ export const hostIntegrationTools = (tool: IntegrationTool): ReadonlyArray<Tool>
           return yield* refused('An agent cannot approve its own work or a pull request Althar opened.')
         if ((asked.comments ?? []).some((one) => !Number.isSafeInteger(one.line) || one.line < 1))
           return yield* refused('Review comment lines must be positive integers.')
+        const pending = yield* sql<{
+          id: string
+        }>`SELECT id FROM review_drafts WHERE project_id = ${access.projectId} AND lower(url) = ${found.change.url.toLowerCase()} AND state IN ('pending', 'posting', 'uncertain') ORDER BY created_at DESC, rowid DESC LIMIT 1`
+        if (pending[0] !== undefined)
+          return yield* refused(
+            `This pull request has review draft ${pending[0].id}; post_review with draft posts that card without leaving another review waiting.`,
+          )
         const read = found.host
           .change(found.repository, found.change.number)
           .pipe(
             Effect.flatMap((now) =>
-              now.headSha !== asked.commit
+              now.headSha !== commit
                 ? Effect.fail(refused('The head moved. Review the current commit before posting.'))
                 : Effect.succeed({ state: 'ready' as const, head: now.headSha ?? undefined }),
             ),
@@ -316,12 +385,12 @@ export const hostIntegrationTools = (tool: IntegrationTool): ReadonlyArray<Tool>
           access,
           asked,
           found.change.url,
-          { verdict: asked.verdict, body: asked.body, commit: asked.commit, comments: asked.comments ?? [] },
+          { verdict, body, commit, comments: asked.comments ?? [] },
           found.host
             .postReview(found.repository, found.change.number, {
-              event: asked.verdict,
-              body: asked.body,
-              commit: asked.commit,
+              event: verdict,
+              body: signed(body, null),
+              commit,
               comments: asked.comments ?? [],
             })
             .pipe(Effect.map(JSON.stringify)),

@@ -868,7 +868,10 @@ returning credentials; ambiguous workspace names are refused.
   `mark_pull_request_draft` expose the host's review controls where it has
   them. `post_review` posts a requested review through the host's adapter,
   bound to the commit actually read; an agent cannot approve its own work
-  or a pull request Althar opened. `draft_review` remains a draft card.
+  or a pull request Althar opened. With an existing draft, it uses the same
+  posting path as the card, updates that card and settles the review task;
+  another direct review cannot leave that draft waiting to be posted twice.
+  `draft_review` remains a draft card until the person asks to post it.
 
 The additional writes take the person's message ID or an errand through
 `Errands.execute`, with its authorization, durable intent, receipt and
@@ -999,8 +1002,10 @@ Althar narrows them itself. A listing refused for a scope says which
   language servers; Codex with its hooks off. Git takes no bare repository
   the pull request carries for its own unless named (`safe.bareRepository`).
 - **Only a review's tools.** Its lead is given `read_pull_request`,
-  `read_checks`, `read_issue`, `find_issues`, `draft_review` and
-  `settle_task`; every other lead tool is refused to it
+  `read_checks`, `read_issue`, `read_issue_comments`, `find_issues`,
+  `draft_review`, `post_review`, `read_turn`, `run_it` and `settle_task`.
+  Posting still needs the person's actual message in that turn; every
+  other lead tool is refused to it
   when called, listed or not, nothing that could change the project
   (keeping how it runs, which Althar later runs outside any sandbox) or reach
   the host (a reply, a push).

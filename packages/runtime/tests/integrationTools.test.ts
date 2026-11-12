@@ -3,6 +3,7 @@ import { join } from 'node:path'
 
 import type { Fetch } from '@althar/connectors'
 import { makeFakeService } from '@althar/connectors/testing'
+import { Ids, newId } from '@althar/domain'
 import { assert, describe, it } from '@effect/vitest'
 import { Effect, Schema } from 'effect'
 import { SqlClient } from 'effect/sql'
@@ -12,6 +13,7 @@ import { Coordinator } from '../src/Coordinator'
 import { Instance } from '../src/Instance'
 import { Projects } from '../src/Projects'
 import * as Runtime from '../src/Runtime'
+import { timestamp } from '../src/records'
 import { agentFolderOf } from '../src/sentFiles'
 import type { ToolAccess } from '../src/ToolServer'
 import { callTool, fakeConnectors, repository, runtime, turnsFor } from './support'
@@ -58,6 +60,35 @@ const coordinator = Effect.gen(function* () {
 })
 
 describe('the lead and coordinator’s integrations over MCP', () => {
+  it.live('posts an existing review card once and settles its task without leaving a duplicate card to post', () => {
+    const h = harness()
+    return Effect.gen(function* () {
+      const { access, turn } = yield* coordinator
+      const projects = yield* Projects
+      const task = yield* projects.createTask({
+        envelope: yield* Runtime.envelope('task.create', {}),
+        projectId: access.projectId,
+        title: 'Review retries',
+        draft: true,
+      })
+      const sql = yield* SqlClient.SqlClient
+      const instance = yield* Instance
+      yield* sql`UPDATE tasks SET state = 'open' WHERE id = ${task.taskId}`
+      yield* sql`UPDATE workspaces SET access = 'read' WHERE task_id = ${task.taskId}`
+      const connections = yield* (yield* Connections).list
+      const connection = connections.find((one) => one.product === 'github')
+      assert.isDefined(connection)
+      const draft = yield* newId(Ids.reviewDraft)
+      const at = yield* timestamp
+      yield* sql`INSERT INTO review_drafts ${sql.insert({ id: draft, projectId: access.projectId, taskId: task.taskId, threadId: task.threadId, connectionId: connection?.id ?? '', product: 'github', repository: 'meridian/api', number: h.pull.number, url: h.pull.url, title: h.pull.title, author: 'colleague', outside: 0, headCommit: h.pull.headSha, drafter: null, account: null, suggested: 'approve', verdict: null, summary: 'Reviewed retries', comments: '[]', state: 'pending', draftedByActorId: instance.systemId, createdAt: at, updatedAt: at })}`
+      const message = yield* turn('Post the review card')
+      assert.include(yield* callTool(access, 'post_review', { draft, message }), '"state":"posted"')
+      assert.include(yield* callTool(access, 'post_review', { draft, message }), '"state":"posted"')
+      assert.lengthOf(h.github.reviewsPosted, 1)
+      assert.strictEqual((yield* sql<{ state: string }>`SELECT state FROM tasks WHERE id = ${task.taskId}`)[0]?.state, 'done')
+      assert.strictEqual((yield* sql<{ state: string }>`SELECT state FROM review_drafts WHERE id = ${draft}`)[0]?.state, 'posted')
+    }).pipe(Effect.provide(h.layer))
+  })
   it.live('reads through the connection without leaking its credential and refuses unasked writes', () => {
     const h = harness((call) => (call.url.endsWith('/user') ? { id: 'me' } : { items: [{ text: 'Read this' }] }))
     return Effect.gen(function* () {
