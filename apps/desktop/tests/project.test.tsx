@@ -224,7 +224,7 @@ describe('the project’s bar', () => {
     await userEvent.clear(name)
     await userEvent.type(name, 'Codex alone')
     await userEvent.click(screen.getByRole('button', { name: 'Keep' }))
-    await waitFor(() => expect(client.savePreset).toHaveBeenCalledWith({ name: 'Codex alone', parts, taskId: 't1' }))
+    await waitFor(() => expect(client.savePreset).toHaveBeenCalledWith({ name: 'Codex alone', parts, taskId: 't1', asNew: true }))
 
     await userEvent.click(screen.getByRole('button', { name: 'Keep as a preset' }))
     await userEvent.click(await screen.findByRole('button', { name: 'Don’t offer again' }))

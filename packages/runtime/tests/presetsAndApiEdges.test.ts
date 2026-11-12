@@ -365,6 +365,66 @@ describe('a preset a task’s card offers', () => {
     ),
   )
 
+  it.live(
+    'through the API: none for the coordinator’s plans the person corrected, one on the third they start, and Keep never replaces a preset',
+    () =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          const made = yield* connected
+          const { client, project } = made
+          const offered = (taskId: string) =>
+            Effect.map(client.GetCoordinator({ projectId: project.id }), (coordinator) => {
+              const card = coordinator.items.find((item) => item.kind === 'task' && item.content.taskId === taskId)
+              return card?.kind === 'task' ? card.content.presetOffer : undefined
+            })
+          const reviewed = [...CODEX_ALONE, { key: 'review', agentId: 'claude-code', model: 'claude-opus-5-5', skipped: false }] as const
+
+          // The coordinator planned each with a review, and the person took it off and started it: three alike, none offered.
+          for (const title of ['Bump a', 'Bump b', 'Bump c']) {
+            const one = yield* client.CreateTask({ commandId: commandId(), projectId: project.id, title })
+            const planId = yield* made.store(
+              Effect.flatMap(Plans, (plans) =>
+                plans.propose({
+                  projectId: project.id as ProjectId,
+                  taskId: one.id,
+                  steps: reviewed,
+                  reason: null,
+                  actorId: made.coordinatorId,
+                  held: true,
+                }),
+              ),
+            )
+            yield* client.ChangeTeam({ commandId: commandId(), taskId: one.id, steps: CODEX_ALONE })
+            yield* client.StartPlan({ commandId: commandId(), planId })
+            assert.isUndefined(yield* offered(one.id))
+          }
+
+          // Started by the person themselves, alike: the third one's card offers them.
+          const mine: Array<string> = []
+          for (const title of ['Fix a', 'Fix b', 'Fix c']) {
+            const one = yield* client.StartTask({ commandId: commandId(), projectId: project.id, title, steps: CODEX_ALONE })
+            mine.push(one.id)
+          }
+          assert.isUndefined(yield* offered(mine[1] ?? ''))
+          const offer = yield* offered(mine[2] ?? '')
+          assert.deepInclude(offer, { name: 'No review' })
+
+          // Kept under a name another preset has: refused, and that preset stays as it was.
+          const other = { workspace: 'local', checked: 'before', shelf: 'board', lead: null, reviewer: null, brief: '' } as const
+          yield* client.SavePreset({ commandId: commandId(), name: 'Mine', parts: other })
+          const taken = { commandId: commandId(), name: 'mine', parts: offer?.parts, taskId: mine[2], asNew: true }
+          assert.strictEqual(yield* refused(client.SavePreset(taken)), 'Another preset is called mine.')
+          const listed = yield* client.ListPresets({})
+          assert.deepInclude(listed.find((one) => one.name === 'Mine')?.parts, { workspace: 'local', checked: 'before' })
+          assert.isUndefined((yield* offered(mine[2] ?? ''))?.kept)
+
+          // Kept by a name of its own: its card says so.
+          yield* client.SavePreset({ commandId: commandId(), name: 'Codex alone', parts: offer?.parts, taskId: mine[2], asNew: true })
+          assert.strictEqual((yield* offered(mine[2] ?? ''))?.kept?.name, 'Codex alone')
+        }),
+      ),
+  )
+
   it.live('names the built-in preset parts nearly are, and offers none for parts a preset has', () =>
     Effect.scoped(
       Effect.gen(function* () {

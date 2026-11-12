@@ -61,6 +61,18 @@ export const Open: Story = {
   },
 }
 
+/** A name another preset has: the form stays open and says so, and a new name clears it. */
+export const NameTaken: Story = {
+  args: { onKeep: fn(async (name: string) => Promise.reject(new Error(`Another preset is called ${name}.`))) },
+  play: async ({ canvasElement }) => {
+    const page = within(canvasElement.ownerDocument.body)
+    await userEvent.click(within(canvasElement).getByRole('button', { name: 'Keep as a preset' }))
+    await userEvent.click(await page.findByRole('button', { name: 'Keep' }))
+    await expect(await page.findByRole('alert')).toHaveTextContent('Another preset is called Local, no review.')
+    await expect(page.getByLabelText('Preset name')).toHaveAttribute('aria-invalid', 'true')
+  },
+}
+
 /** Don't offer again, from the form. */
 export const Declined: Story = {
   play: async ({ args, canvasElement }) => {

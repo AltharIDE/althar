@@ -111,7 +111,8 @@ const launchSteps = (plan: Plan, named: NameModel, reviews: boolean): ReadonlyAr
 
 /**
  * Its parts, offered to keep as a preset, quiet in its card's foot: Keep
- * saves them from the task by the name given, Undo removes what was kept, and
+ * saves them from the task as a new preset by the name given (a name another
+ * preset has is refused, and the form says so), Undo removes what was kept, and
  * the person can say not to offer them again. The card says what came of it
  * once the runtime reads it again.
  */
@@ -129,7 +130,7 @@ function Offer({ card }: { card: TaskCardContent }) {
       {...(offer.kept === undefined
         ? {}
         : { kept: offer.kept.name, onUndo: () => void client.removePreset(offer.kept?.id ?? '').then(listed) })}
-      onKeep={(name) => void client.savePreset({ name, parts: offer.parts, taskId: card.taskId }).then(listed)}
+      onKeep={(name) => client.savePreset({ name, parts: offer.parts, taskId: card.taskId, asNew: true }).then(listed)}
       onDecline={() => void client.declinePresetOffer(card.taskId)}
     />
   )

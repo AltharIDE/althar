@@ -301,6 +301,8 @@ export interface Client {
     readonly taskId?: string
     readonly parts?: PresetParts
     readonly projectOnly?: boolean
+    /** Only as a new preset: a name another preset has is refused rather than replaced. */
+    readonly asNew?: boolean
   }) => Promise<{ readonly name: string }>
   /** Removes one of the person's presets. */
   readonly removePreset: (id: string) => Promise<void>

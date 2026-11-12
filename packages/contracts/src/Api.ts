@@ -4879,6 +4879,8 @@ export const Api = RpcGroup.make(
       taskId: Schema.optional(Schema.String),
       parts: Schema.optional(PresetParts),
       projectOnly: Schema.optional(Schema.Boolean),
+      /** Only as a new preset, as a card's offer keeps one: a name another preset has is refused rather than replaced. */
+      asNew: Schema.optional(Schema.Boolean),
     },
     Schema.Struct({ name: Schema.String }),
   ),

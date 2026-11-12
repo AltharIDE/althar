@@ -2,7 +2,7 @@ import { useId, useState } from 'react'
 
 import { Icon } from '../../foundations/Icon/Icon'
 import { Button } from '../../primitives/Button/Button'
-import { Field } from '../../primitives/Field/Field'
+import { Field, FieldError } from '../../primitives/Field/Field'
 import { HoverCard } from '../../primitives/HoverCard/HoverCard'
 import { LinkButton } from '../../primitives/LinkButton/LinkButton'
 import { Popover } from '../../primitives/Popover/Popover'
@@ -23,6 +23,8 @@ export interface PresetOfferText {
   decline: string
   kept: (name: string) => string
   undo: string
+  /** Where Keep failed and said nothing of why. */
+  failed: string
   /** Behind the info mark: what parts and presets are. */
   aboutLabel: string
   parts: string
@@ -41,6 +43,7 @@ export const presetOfferText: PresetOfferText = {
   decline: 'Don’t offer again',
   kept: (name) => `Kept as ${name}`,
   undo: 'Undo',
+  failed: 'It wasn’t kept. Try again.',
   aboutLabel: 'What are parts and presets?',
   parts: 'are how a task runs: where it works, who checks it, how it ends, and who leads it. This card shows them.',
   presets:
@@ -54,12 +57,19 @@ export interface PresetOfferProps {
   near?: { readonly preset: string; readonly differs: string }
   /** The name it was kept as: said, with Undo. */
   kept?: string
-  onKeep: (name: string) => void
+  /** Keeps it by that name: where it fails, the form stays open and says why, to try another. */
+  onKeep: (name: string) => void | Promise<unknown>
   /** Not to be offered again. */
   onDecline: () => void
   onUndo?: () => void
   text?: Partial<PresetOfferText>
 }
+
+/** What a failure says, where it says anything. */
+const messageOf = (error: unknown) =>
+  typeof error === 'object' && error !== null && 'message' in error && typeof error.message === 'string' && error.message !== ''
+    ? error.message
+    : undefined
 
 /**
  * The offer to keep a task's parts as a preset, on the task's card: a quiet
@@ -71,6 +81,8 @@ export function PresetOffer({ name, near, kept, onKeep, onDecline, onUndo, text 
   const t = { ...presetOfferText, ...text }
   const [open, setOpen] = useState(false)
   const [typed, setTyped] = useState(name)
+  // Why the last Keep failed, such as a name another preset has.
+  const [refused, setRefused] = useState<string | null>(null)
   const field = useId()
   if (kept !== undefined)
     return (
@@ -90,7 +102,10 @@ export function PresetOffer({ name, near, kept, onKeep, onDecline, onUndo, text 
         padded={false}
         open={open}
         onOpenChange={(next) => {
-          if (next) setTyped(name)
+          if (next) {
+            setTyped(name)
+            setRefused(null)
+          }
           setOpen(next)
         }}
         trigger={<LinkButton>{near === undefined ? t.keep : t.nearly(near.preset)}</LinkButton>}
@@ -99,9 +114,17 @@ export function PresetOffer({ name, near, kept, onKeep, onDecline, onUndo, text 
           className={s.form}
           onSubmit={(event) => {
             event.preventDefault()
-            setOpen(false)
-            if (near === undefined) onKeep(typed.trim())
-            else onDecline()
+            if (near !== undefined) {
+              setOpen(false)
+              onDecline()
+              return
+            }
+            const kept = onKeep(typed.trim())
+            if (kept === undefined) return setOpen(false)
+            kept.then(
+              () => setOpen(false),
+              (error: unknown) => setRefused(messageOf(error) ?? t.failed),
+            )
           }}
         >
           {near === undefined ? (
@@ -109,8 +132,18 @@ export function PresetOffer({ name, near, kept, onKeep, onDecline, onUndo, text 
               <label className={s.label} htmlFor={field}>
                 {t.name}
               </label>
-              <Field id={field} value={typed} maxLength={40} onChange={(event) => setTyped(event.target.value)} />
-              <span className={s.text}>{t.what}</span>
+              <Field
+                id={field}
+                value={typed}
+                maxLength={40}
+                invalid={refused !== null}
+                {...(refused === null ? {} : { 'aria-describedby': `${field}-refused` })}
+                onChange={(event) => {
+                  setTyped(event.target.value)
+                  setRefused(null)
+                }}
+              />
+              {refused === null ? <span className={s.text}>{t.what}</span> : <FieldError id={`${field}-refused`}>{refused}</FieldError>}
             </>
           ) : (
             <span className={s.text}>{t.near(near.preset, near.differs)}</span>

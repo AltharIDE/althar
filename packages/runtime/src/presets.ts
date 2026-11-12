@@ -222,11 +222,18 @@ export const savePreset = (input: {
   readonly projectId: string | null
   readonly fromTaskId: string | null
   readonly actorId: ActorId
+  /** Only as a new preset, as a card's offer keeps one: a name another preset has is refused rather than replaced. */
+  readonly asNew?: boolean | undefined
 }) =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient
     const given = input.name.trim().slice(0, 40)
     const name = given === '' ? 'Preset' : given
+    if (input.asNew === true) {
+      const [taken] = yield* sql<{ id: string }>`
+        SELECT id FROM presets WHERE coalesce(project_id, '') = ${input.projectId ?? ''} AND lower(name) = lower(${name})`
+      if (taken !== undefined) return yield* new ChangeRefused({ message: `Another preset is called ${name}.` })
+    }
     const id = yield* newId(Ids.artifact)
     const at = yield* timestamp
     yield* sql`

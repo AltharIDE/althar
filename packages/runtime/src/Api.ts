@@ -1702,7 +1702,7 @@ export const handlers = Api.toLayer(
             ),
           ),
         ),
-      SavePreset: ({ commandId, name, taskId, parts, projectOnly }) =>
+      SavePreset: ({ commandId, name, taskId, parts, projectOnly, asNew }) =>
         once(
           commandId,
           api(
@@ -1718,6 +1718,7 @@ export const handlers = Api.toLayer(
                   projectId: projectOnly === true ? (from?.projectId ?? null) : null,
                   fromTaskId: taskId ?? null,
                   actorId: instance.personId,
+                  asNew,
                 })
               }),
               folderStore,
