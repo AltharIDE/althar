@@ -125,11 +125,6 @@ jobs:
       - uses: actions/setup-node@v5
         with:
           node-version-file: .node-version
-      - uses: actions/cache@v4
-        with:
-          path: ~/.bun/install/cache
-          key: windows-bun-${{ hashFiles('bun.lock') }}
-          restore-keys: windows-bun-
       - uses: ./.github/actions/electron
       # Tests with an open flaky issue run, but don't fail this job (packages/testing).
       - uses: ./.github/actions/flaky/quarantine

@@ -9,7 +9,7 @@ description: >-
   that installs the workspace. With `binary: false`, where the job never runs Electron, it only installs without downloading the binary.
 inputs:
   binary:
-    description: Whether to fetch Electron's binary after installing. Caches are always restored before install.
+    description: Whether to restore Electron's caches and fetch its binary after installing.
     default: 'true'
     required: false
 runs:
@@ -17,6 +17,30 @@ runs:
   steps:
     - shell: bash
       run: echo "TEST_TIMINGS=$GITHUB_WORKSPACE/test-results/timings.jsonl" >> "$GITHUB_ENV"
+    # A fresh directory with an exact key avoids carrying old lockfiles' packages
+    # forward forever. Post-merge's manual input can compare it with off/legacy.
+    - shell: bash
+      if: runner.os == 'Windows'
+      env:
+        MODE: ${{ env.BUN_CACHE_MODE || 'isolated' }}
+      run: |
+        case "$MODE" in
+          isolated|off) echo "BUN_INSTALL_CACHE_DIR=$RUNNER_TEMP/althar-bun-cache" >> "$GITHUB_ENV" ;;
+          legacy) ;;
+          *) echo "::error::Unknown Bun cache mode: $MODE"; exit 1 ;;
+        esac
+        echo "BUN_CACHE_MODE=$MODE" >> "$GITHUB_ENV"
+    - uses: actions/cache@v4
+      if: runner.os == 'Windows' && env.BUN_CACHE_MODE == 'isolated'
+      with:
+        path: ${{ runner.temp }}/althar-bun-cache
+        key: bun-v2-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('.bun-version', 'bun.lock') }}
+    - uses: actions/cache@v4
+      if: runner.os == 'Windows' && env.BUN_CACHE_MODE == 'legacy'
+      with:
+        path: ~/.bun/install/cache
+        key: windows-bun-${{ hashFiles('bun.lock') }}
+        restore-keys: windows-bun-
     - shell: bash
       working-directory: ${{ github.workspace }}
       run: |
@@ -29,21 +53,21 @@ runs:
         echo "ELECTRON_VERSION=$ELECTRON_VERSION" >> "$GITHUB_ENV"
         echo "BUILDER_VERSION=$BUILDER_VERSION" >> "$GITHUB_ENV"
     - uses: actions/cache@v4
-      if: runner.os == 'Linux'
+      if: runner.os == 'Linux' && inputs.binary == 'true'
       with:
         path: |
           ~/.cache/electron
           ~/.cache/electron-builder
         key: electron-${{ runner.os }}-${{ runner.arch }}-${{ env.ELECTRON_VERSION }}-builder-${{ env.BUILDER_VERSION }}
     - uses: actions/cache@v4
-      if: runner.os == 'macOS'
+      if: runner.os == 'macOS' && inputs.binary == 'true'
       with:
         path: |
           ~/Library/Caches/electron
           ~/Library/Caches/electron-builder
         key: electron-${{ runner.os }}-${{ runner.arch }}-${{ env.ELECTRON_VERSION }}-builder-${{ env.BUILDER_VERSION }}
     - uses: actions/cache@v4
-      if: runner.os == 'Windows'
+      if: runner.os == 'Windows' && inputs.binary == 'true'
       with:
         path: |
           ~/AppData/Local/electron/Cache
@@ -53,7 +77,11 @@ runs:
       working-directory: ${{ github.workspace }}
       env:
         ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
-      run: bun install --frozen-lockfile
+      run: |
+        install_started=$(date +%s)
+        bun install --frozen-lockfile
+        install_elapsed=$(( $(date +%s) - install_started ))
+        echo "Bun install: ${install_elapsed}s; cache mode: ${BUN_CACHE_MODE:-none} (${RUNNER_OS})." >> "$GITHUB_STEP_SUMMARY"
     - shell: bash
       if: ${{ inputs.binary == 'true' }}
       working-directory: ${{ github.workspace }}
