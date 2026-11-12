@@ -114,9 +114,10 @@ export const write = (
     })
   })
 
-export const readyAccount = (api: ServiceApi, product: Product) =>
-  api
-    .request(
+export const readyAccount = (api: ServiceApi, product: Product, account?: Effect.Effect<unknown, ConnectorFailed>) =>
+  (
+    account ??
+    api.request(
       product === 'linear'
         ? { query: 'query { viewer { id } }' }
         : product === 'github'
@@ -127,4 +128,4 @@ export const readyAccount = (api: ServiceApi, product: Product) =>
               ? { path: '/members/me' }
               : { path: product.startsWith('jira') ? '/myself' : '/user' },
     )
-    .pipe(Effect.as({ state: 'ready' as const }))
+  ).pipe(Effect.as({ state: 'ready' as const }))

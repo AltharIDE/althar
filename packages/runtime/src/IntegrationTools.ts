@@ -160,7 +160,7 @@ export class IntegrationTools extends Context.Service<IntegrationTools, { readon
                   `${found.connection.id}:${plan.path}`,
                   { connection: found.connection.id, ...request },
                   found.api.request(request).pipe(Effect.flatMap(ensureSuccess)),
-                  readyAccount(found.api, found.connection.product),
+                  readyAccount(found.api, found.connection.product, found.host?.account ?? found.tracker?.account),
                 )
               }),
           ),
@@ -293,12 +293,12 @@ export class IntegrationTools extends Context.Service<IntegrationTools, { readon
                   )
                   if (parsed.comment.issue?.id !== found.issue.id) return yield* refused('That comment belongs to another issue.')
                 } else if (found.connection.product === 'github') {
-                  const [repository = ''] = found.issue.ref.split('#')
+                  const [repository = '', number = ''] = found.issue.ref.split('#')
                   const target = yield* found.api.request({
                     path: `/repos/${repository}/issues/comments/${encodeURIComponent(asked.comment)}`,
                   })
                   const parsed = yield* decode(Schema.Struct({ issue_url: Schema.String }), target.body)
-                  if (new URL(parsed.issue_url).pathname.toLowerCase() !== new URL(found.issue.url).pathname.toLowerCase())
+                  if (!new URL(parsed.issue_url).pathname.toLowerCase().endsWith(`/repos/${repository}/issues/${number}`.toLowerCase()))
                     return yield* refused('That comment belongs to another issue.')
                 }
                 const request = yield* issueCommentRequest(

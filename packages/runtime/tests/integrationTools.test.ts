@@ -60,6 +60,26 @@ const coordinator = Effect.gen(function* () {
 })
 
 describe('the lead and coordinator’s integrations over MCP', () => {
+  it.live('edits a GitHub comment after matching its API issue URL to the browser issue reference', () => {
+    const h = harness((call) =>
+      call.method === 'GET' && call.url.includes('/issues/comments/')
+        ? { id: 42, issue_url: 'https://api.github.com/repos/meridian/api/issues/12' }
+        : { id: 42, body: 'Corrected' },
+    )
+    const issue = h.github.addIssue({ ref: 'meridian/api#12', title: 'Retry once' })
+    return Effect.gen(function* () {
+      const { access, turn } = yield* coordinator
+      const message = yield* turn('Correct that GitHub issue comment')
+      assert.include(
+        yield* callTool(access, 'edit_issue_comment', { issue: issue.url, comment: '42', body: 'Corrected', message }),
+        'Corrected',
+      )
+      assert.lengthOf(
+        h.sent.filter((one) => one.method === 'PATCH'),
+        1,
+      )
+    }).pipe(Effect.provide(h.layer))
+  })
   it.live('posts an existing review card once and settles its task without leaving a duplicate card to post', () => {
     const h = harness()
     return Effect.gen(function* () {
