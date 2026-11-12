@@ -712,7 +712,8 @@ const playStall = async (
  * `[lead:fix-late]` leaves the full tests running and commits it once they
  * end, and `[lead:fix-hold]` works on after it until it is interrupted. Asked to "push pls" once its pull request is open,
  * `[lead:push]` commits what it has and asks the person to push it; asked to "tidy pls", `[lead:commit]` commits and ends its
- * turn, asking no one to push it. Told its checks failed, `[lead:fix-push]` commits a fix and calls push_to_pull_request itself, and out of tries, brings them to the person with hand_checks_to_person; `[lead:checks-main]` reads the default branch's checks and, where one fails there, brings it to the person instead; `[lead:fix-gone]` goes on its own instead, as an agent that crashes does, each time it is told. Asked to bring its branch up to date, `[lead:resolve]`
+ * turn, asking no one to push it; asked to "bring main in pls", `[lead:merge-main]` merges origin/main, keeping both sides of
+ * a conflict, and commits the merge ("and tidy" commits other work after it). Told its checks failed, `[lead:fix-push]` commits a fix and calls push_to_pull_request itself, and out of tries, brings them to the person with hand_checks_to_person; `[lead:checks-main]` reads the default branch's checks and, where one fails there, brings it to the person instead; `[lead:fix-gone]` goes on its own instead, as an agent that crashes does, each time it is told. Asked to bring its branch up to date, `[lead:resolve]`
  * merges what it was told to, keeps both sides of each conflict and commits
  * the merge; `[lead:resolve-more]` does too, then commits other work on top
  * of it in two commits; `[lead:resolve-fix]` commits one fix on top of the
@@ -1277,6 +1278,12 @@ const playRole = async (
       if (available.has('push_to_pull_request') && session.markers.has('[lead:push]') && /\bpush pls\b/i.test(text)) {
         await commitIn(session.cwd, 'pushed.txt', 'Tidy up before pushing')
         return await call('push_to_pull_request', {})
+      }
+      // Asked to bring main in, it merges origin/main as it stands here, keeping both sides of a conflict, and commits the merge.
+      if (session.markers.has('[lead:merge-main]') && /\bbring main in pls\b/i.test(text)) {
+        await resolveIn(session.cwd, 'origin/main')
+        if (/\band tidy\b/i.test(text)) await commitIn(session.cwd, 'tidied.txt', 'Tidy up')
+        return 'Merged main in, and committed the merge.'
       }
       // Asked to tidy up, it commits and ends its turn: what goes up, and when, isn't its to say.
       if (session.markers.has('[lead:commit]') && /\btidy pls\b/i.test(text)) {

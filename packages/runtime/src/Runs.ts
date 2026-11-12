@@ -2511,19 +2511,31 @@ export class Runs extends Context.Service<
             Effect.gen(function* () {
               const head = from[worktree.path] ?? worktree.base ?? ''
               if (head === '') return undefined
-              const listed = yield* git(worktree.path, 'log', '--reverse', '--format=- %s', `${head}..HEAD`).pipe(
+              // The task's own commits: what a merge of its base brought along is listed as the merge, not as its work.
+              const listed = yield* git(worktree.path, 'log', '--reverse', '--first-parent', '--format=- %s', `${head}..HEAD`).pipe(
                 Effect.orElseSucceed(() => ''),
               )
               const lines = listed.split('\n').filter((line) => line !== '')
+              const merges = yield* git(worktree.path, 'rev-list', '--merges', '--first-parent', `${head}..HEAD`).pipe(
+                Effect.orElseSucceed(() => ''),
+              )
+              const merged = merges.split('\n').filter((line) => line !== '')
               // Among several changes, each is named, and read on its own: a stacked one from the one below's head.
               return {
                 name: worktree.change === null ? worktree.name : `${worktree.change} (${worktree.branch})`,
                 head: head.slice(0, 12),
                 lines,
+                merged,
               }
             }),
           )
           const shown = parts.filter((part) => part !== undefined)
+          // A merge of the base branch since: what it brought is the base's, already reviewed there; only how it settled is new.
+          const mergedIn = shown.flatMap((one) => one.merged.map((sha) => sha.slice(0, 12)))
+          const mergedWords =
+            mergedIn.length === 0
+              ? ''
+              : ` It merged its base branch in since: what that brought isn't the task's work, and \`git diff\` from the last review shows it too. Read how ${mergedIn.length === 1 ? 'the merge' : 'each merge'} settled its conflicts with ${mergedIn.map((sha) => `\`git show --remerge-diff ${sha}\``).join(', ')}.`
           const how =
             shown.length === 1
               ? `with \`git diff ${shown[0]?.head ?? ''}\` in your copy`
@@ -2532,7 +2544,7 @@ export class Runs extends Context.Service<
           const several = worktrees.length > 1 && worktrees.some((one) => one.change !== null)
           // One change of several, named: the others ship apart, each after its own review.
           const one = only !== undefined && shown.length === 1 ? shown[0]?.name : undefined
-          return `More to review. The person ships ${one === undefined ? 'what they and the lead did since the last review' : `${one}, one of the task’s changes: what they and the lead did on it since its last review`}${listed.length === 0 ? '' : `:\n\n${listed.join('\n')}`}\n\nReview what changed since, ${how}. Look at the earlier work only where the new work touches it.${several ? ' Each change ships as its own pull request: review each on its own, and say which change each finding is in.' : ''}`
+          return `More to review. The person ships ${one === undefined ? 'what they and the lead did since the last review' : `${one}, one of the task’s changes: what they and the lead did on it since its last review`}${listed.length === 0 ? '' : `:\n\n${listed.join('\n')}`}\n\nReview what changed since, ${how}. Look at the earlier work only where the new work touches it.${mergedWords}${several ? ' Each change ships as its own pull request: review each on its own, and say which change each finding is in.' : ''}`
         })
 
       /**
@@ -2927,6 +2939,14 @@ export class Runs extends Context.Service<
             const unpushed = (yield* changes.aheadOfOpen(taskId)).length > 0
             const after = yield* changes.unshipped(taskId)
             if (held.length === 0 && !unpushed && after.length === 0) return yield* new ShipRefused({ taskId, why: 'nothing' })
+            // What waits only brings the base branch in, as a merge of main that settled no conflict: none of it is the task's
+            // work, so it goes up as it is, with no review and no round, and the task stays where it was.
+            if (after.length === 0 && change === undefined && queued === undefined && (yield* changes.onlyBaseWaits(taskId))) {
+              yield* changes.sendBaseOnly(taskId)
+              if (merges)
+                for (const one of yield* changes.ofTask(taskId)) if (one.state === 'open') yield* changes.mergeAsItStands(taskId, one.url)
+              return undefined
+            }
             // Several changes: each ships on its own, with its own review, the bottom of a stack first; one named, with what waits
             // beneath it. One change ships whole, as it always did.
             // A change is its workspaces of one name, one in each repository it changes: counted and shipped as one.
