@@ -139,7 +139,8 @@ export type CheckoutAnswer = typeof CheckoutAnswer.Type
 export const PresetParts = Schema.Struct({
   workspace: Schema.Literals(['copy', 'worktree', 'local']),
   checked: Schema.Literals(['before', 'after', 'none']),
-  end: Schema.Literals(['draft', 'ready', 'none']),
+  /** How it ends; absent, as the project's "How a task ends" says. */
+  end: Schema.optional(Schema.Literals(['draft', 'ready', 'none'])),
   shelf: Schema.Literals(['scratch', 'board']),
   lead: Schema.NullOr(Schema.String),
   reviewer: Schema.NullOr(Schema.String),

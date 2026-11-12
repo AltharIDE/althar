@@ -10,7 +10,7 @@ import {
   type ProviderSessionState,
   transition,
 } from '@althar/domain'
-import { hostOf } from '@althar/contracts'
+import { hostOf, plainTitle } from '@althar/contracts'
 import { Commands, Ledger } from '@althar/persistence-sqlite'
 import { answerFor, type PermissionDecision, type PermissionMeanings, type PermissionRequest } from '@althar/provider-adapters'
 import { Cause, Context, Crypto, Deferred, Effect, Fiber, Layer, Schema } from 'effect'
@@ -580,7 +580,7 @@ export class Permissions extends Context.Service<
                     severity: 'info',
                     about: 'permission',
                     requestId,
-                    title: `Allowed ${receiptLine(request.title, 120)}`,
+                    title: `Allowed ${receiptLine(plainTitle(request.title), 120)}`,
                     description: receiptLine(`By the coordinator: ${judgment.reason}`),
                   })
                 return { decision }
@@ -727,7 +727,7 @@ export class Permissions extends Context.Service<
                   kind: 'permission',
                   addresseeActorId: instance.personId,
                   payload: JSON.stringify({
-                    title: request.title,
+                    title: plainTitle(request.title),
                     kind: request.kind,
                     command: commandOf(request),
                     paths: pathsOf(request),
@@ -780,7 +780,7 @@ export class Permissions extends Context.Service<
                 _tag: 'AttentionNeeded',
                 threadId: requestContext.threadId,
                 attentionId,
-                title: request.title,
+                title: plainTitle(request.title),
                 reason: verdict.reason,
               })
             return yield* Deferred.await(waiter.deferred).pipe(
@@ -971,7 +971,7 @@ export class Permissions extends Context.Service<
                 threadId: waiter.context.threadId,
                 attentionId,
                 outcome: 'answered',
-                ...(wasAside ? { setAside: { title: waiter.request.title, decision } } : {}),
+                ...(wasAside ? { setAside: { title: plainTitle(waiter.request.title), decision } } : {}),
               })
               // A rule kept answers every other request it now covers, or refuses.
               if (keep !== undefined) yield* reconsider(waiter.context.projectId)
@@ -1018,7 +1018,7 @@ export class Permissions extends Context.Service<
                   _tag: 'AttentionNeeded',
                   threadId: waiter.context.threadId,
                   attentionId,
-                  title: waiter.request.title,
+                  title: plainTitle(waiter.request.title),
                   reason: '',
                 })
             }).pipe(

@@ -93,7 +93,7 @@ export const NamesItsPreset: Story = { render: () => <Launch preset="Change" /> 
 const PRESETS = [
   { name: 'Chat', about: 'a copy, no review, ends here, the coordinator picks its lead' },
   { name: 'Change', about: 'a worktree, reviewed before it ships, a draft pull request, the coordinator picks its lead' },
-  { name: 'Small change', about: 'a worktree, reviewed after it merges, a pull request ready for review, the coordinator picks its lead' },
+  { name: 'Small change', about: 'a worktree, reviewed after it merges, ends as the project says, the coordinator picks its lead' },
   { name: 'Prototype', about: 'a worktree, no review, ends here, led by Claude Opus 5.5' },
 ]
 

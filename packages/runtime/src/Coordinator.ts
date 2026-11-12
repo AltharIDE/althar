@@ -1567,18 +1567,20 @@ export class Coordinator extends Context.Service<
           const preset =
             proposed.preset === undefined || proposed.preset.trim() === ''
               ? undefined
-              : yield* plans.applyPreset(planId, proposed.preset, instance.coordinatorId).pipe(
-                  Effect.catch((error) =>
-                    Effect.fail(
-                      new ToolRefused({
-                        message:
-                          error instanceof ChangeRefused
-                            ? `The plan is proposed as you gave it, but not as ${proposed.preset}: ${error.message}`
-                            : `The plan is proposed as you gave it: there's no preset “${proposed.preset}”. list_presets names them.`,
-                      }),
+              : yield* plans
+                  .applyPreset(planId, proposed.preset, instance.coordinatorId, yield* changes.endFor(access.projectId, task.id))
+                  .pipe(
+                    Effect.catch((error) =>
+                      Effect.fail(
+                        new ToolRefused({
+                          message:
+                            error instanceof ChangeRefused
+                              ? `The plan is proposed as you gave it, but not as ${proposed.preset}: ${error.message}`
+                              : `The plan is proposed as you gave it: there's no preset “${proposed.preset}”. list_presets names them.`,
+                        }),
+                      ),
                     ),
-                  ),
-                )
+                  )
           const where = `${preset === undefined ? '' : ` As ${preset}.`}${yield* localLine(access.projectId, task.id, worksIn)}`
           if (held !== undefined)
             return `Changed ${task.slug}'s plan.${where} It stays held until the person starts it; they see it as a card, so there's no need to describe the plan again.`

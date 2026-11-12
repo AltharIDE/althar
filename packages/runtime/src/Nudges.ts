@@ -1,4 +1,5 @@
 import type { StuckStep } from '@althar/contracts'
+import { plainTitle } from '@althar/contracts'
 import { Ledger } from '@althar/persistence-sqlite'
 import { Cause, Context, Duration, Effect, Layer, Option, PubSub, Ref, Stream } from 'effect'
 import { SqlClient } from 'effect/sql'
@@ -140,7 +141,7 @@ export class Nudges extends Context.Service<
             _tag: 'Nudge',
             kind: call.kind === 'stuck' ? 'stopped' : 'call',
             key: `call:${call.id}`,
-            title: call.title,
+            title: call.title === null ? call.title : plainTitle(call.title),
             body: callWords({ kind: call.kind, payload: parse(call.payload) }, agents.list),
             threadId: call.threadId,
           })
