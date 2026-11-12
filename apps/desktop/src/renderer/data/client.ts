@@ -1,7 +1,15 @@
 import {
+  type CanvasDetail,
+  type CanvasSummary,
+  type CanvasText,
+  type SentCanvasComment,
   type CheckoutAnswer,
+  type MoveOutcome,
+  type Preset,
+  type PresetParts,
   type WorksIn,
   type AccountSignInState,
+  type SignInEnding,
   type InstalledSkill,
   type SkillList,
   type SkillReviewCard,
@@ -172,6 +180,12 @@ export interface Client {
   readonly readBackgroundOutput: (threadId: string, id: string) => Promise<OutputText>
   /** A markdown document an agent in a thread wrote, as it is now in the task's worktree. */
   readonly readDocument: (threadId: string, path: string) => Promise<DocumentText>
+  /** A project's canvases (ADR-104), newest first; archived ones too where asked. */
+  readonly listCanvases: (projectId: string, archived?: boolean) => Promise<ReadonlyArray<CanvasSummary>>
+  /** One of a project's canvases whole: its versions and the comments sent on it. */
+  readonly getCanvas: (canvasId: string) => Promise<CanvasDetail>
+  /** A version's entry, as the window draws a document, a diagram or an SVG. */
+  readonly readCanvasText: (canvasId: string, version: number) => Promise<CanvasText>
   /** One file a task changed, as a diff from its base to its worktree; with `untouched`, one it left as it was, every line unchanged. */
   readonly getFileDiff: (taskId: string, path: string, untouched?: boolean) => Promise<FileDiff>
   /** What the reviews of a task's run found, each where it is in the change now: the run of the review reported in `review`, else the latest. */
@@ -263,6 +277,43 @@ export interface Client {
   readonly lineOldestFirst: (projectId: string) => Promise<void>
   /** Whether a review of the person's team's pull request posts itself once drafted; an outside one always waits. */
   readonly setPostTeamReviews: (on: boolean) => Promise<void>
+  /** What "Run it" on code from outside the team does without asking. */
+  readonly setRunOutside: (to: 'ask' | 'safe' | 'full') => Promise<void>
+  /** Puts a task on Scratch, or on the board with null. */
+  readonly shelveTask: (taskId: string, shelf: 'scratch' | null) => Promise<void>
+  /** Stops a helper the task's lead started. */
+  readonly stopHelper: (taskId: string, helper: string) => Promise<void>
+  /** Keep them together: one change's commits onto another of the task's, before either ships. */
+  readonly joinChanges: (taskId: string, change: string, into?: string) => Promise<void>
+  /** Drop it: a change's folder goes, its branch stays. */
+  readonly dropChange: (taskId: string, change: string) => Promise<void>
+  /** The presets the person has, in a project where one is named. */
+  readonly listPresets: (projectId?: string) => Promise<ReadonlyArray<Preset>>
+  /** Edits one of the person's presets: its name, its parts, and whether it is kept to its task's project. */
+  readonly editPreset: (input: {
+    readonly id: string
+    readonly name: string
+    readonly parts: Preset['parts']
+    readonly projectOnly?: boolean
+  }) => Promise<void>
+  /** Picks another preset for a plan before it starts: its parts change to match. The preset's name. */
+  readonly applyPreset: (planId: string, preset: string) => Promise<string>
+  /** Saves a preset from a task, or the parts the coordinator offered. */
+  readonly savePreset: (input: {
+    readonly name: string
+    readonly taskId?: string
+    readonly parts?: PresetParts
+    readonly projectOnly?: boolean
+  }) => Promise<{ readonly name: string }>
+  /** Removes one of the person's presets. */
+  readonly removePreset: (id: string) => Promise<void>
+  /** "Run it" on the pull request a review task reviews, as far as `how` trusts it; `asks` where nothing says how far. */
+  readonly runIt: (
+    taskId: string,
+    how?: 'safe' | 'full',
+  ) => Promise<{ readonly kind: 'ran'; readonly trust: 'safe' | 'full'; readonly said: string } | { readonly kind: 'asks' }>
+  /** Stop running it: its copy read only again, and its lead a reader. What it did, in words. */
+  readonly stopRunning: (taskId: string) => Promise<string>
   /** Whether a pull request Althar opens says how its change was reviewed: the seal and the folded review. */
   readonly setReviewSeal: (on: boolean) => Promise<void>
   /** How the review seal looks. */
@@ -370,6 +421,8 @@ export interface Client {
     readonly files?: ReadonlyArray<SentFile>
     /** Any of its words came from dictation, even if edited after. */
     readonly dictated?: boolean
+    /** The person's comments on canvases, kept with it (ADR-104). */
+    readonly canvasComments?: ReadonlyArray<SentCanvasComment>
   }) => Promise<void>
   /** Takes back a message still waiting its turn, by its item. */
   readonly takeBack: (itemId: string) => Promise<void>
@@ -398,6 +451,8 @@ export interface Client {
     readonly end?: TaskEnd | null
     /** The project's repositories it changes, by name: needed only in a project of several. */
     readonly repositories?: ReadonlyArray<string>
+    /** An aside: a chat of the person's own, on Scratch, with no card in the coordinator's thread; its words are `description`. */
+    readonly chat?: boolean
   }) => Promise<TaskSummary>
   readonly startPlan: (planId: string) => Promise<void>
   readonly holdPlan: (planId: string) => Promise<void>
@@ -410,8 +465,10 @@ export interface Client {
     /** The branch it works toward (ADR-093), until it starts; null for the default branch. */
     toward?: string | null,
   ) => Promise<void>
-  /** Changes who leads and who reviews a task that has begun: its lead from its next turn, its reviewer until its review is done. */
+  /** Changes who leads and who reviews a task that has begun: its lead from its next turn, its reviewer until a review of it ran to its end. */
   readonly changeTeam: (taskId: string, steps: ReadonlyArray<PlanStep>) => Promise<void>
+  /** Turns down the review a change was offered as its work turned real: it isn't offered again. */
+  readonly declineReview: (taskId: string) => Promise<void>
   /** Changes what an issue the coordinator drafted says, before it is filed. */
   readonly changeIssueDraft: (
     draftId: string,
@@ -538,8 +595,13 @@ export interface Client {
   readonly openChange: (taskId: string) => Promise<void>
   /** Skips the review of the task's work under way. */
   readonly skipReview: (taskId: string) => Promise<void>
+  /**
+   * One small change's own word on its review after the merge, over its project's rule, until it merges: `review`, `none`,
+   * or null for the rule. Its card reads what holds (`afterMerge` on the small change's card).
+   */
+  readonly setReviewAfterMerge: (taskId: string, review: 'review' | 'none' | null) => Promise<void>
   /** Merges the task's pull request at the head the person saw, as they said to; a draft is marked ready first. */
-  readonly merge: (taskId: string, head: string, url?: string) => Promise<void>
+  readonly merge: (taskId: string, head: string, url?: string, how?: 'review' | 'now') => Promise<void>
   /** Merges a task without a pull request into its repositories' default branches on this Mac, up to the commit the person saw in each. */
   readonly mergeHere: (taskId: string, heads: ReadonlyArray<{ readonly repository: string; readonly head: string }>) => Promise<void>
   /** Pushes the default branches the task merged into here to their remotes, with the person's own git sign-in. */
@@ -552,6 +614,8 @@ export interface Client {
   readonly getLoad: () => Promise<Load>
   /** Every account's plan usage; with `refresh`, each account is read again first rather than as kept. */
   readonly getPlanUsage: (options?: { readonly refresh?: boolean }) => Promise<PlanUsage>
+  /** Puts aside the warning that an account's sign-in ends at `endsAt`, for that sign-in. */
+  readonly dismissSignInEnding: (accountId: string, endsAt: string, stage: SignInEnding['stage']) => Promise<void>
   /** Each model's room where work on it would start, in a project (its rule for moving work through accounts) or anywhere. */
   readonly getModelRooms: (projectId: string | null) => Promise<ReadonlyArray<ModelRoom>>
   /** Each model that ended steps without its report in the last week, once reminded, with how often. */
@@ -575,7 +639,12 @@ export interface Client {
   /** Pushes the task's branch to its pull request, up to the commit the person saw; in a task of several repositories, the one at `url`. */
   readonly push: (taskId: string, head: string, url?: string) => Promise<void>
   /** Ships what waits on the task's branch for Ship: its review first, where its plan has one before the work ships, then the commits go up. */
-  readonly ship: (taskId: string) => Promise<void>
+  /** Ships what waits; with a change named, only it, and what waits beneath it in its stack. */
+  readonly ship: (taskId: string, change?: string) => Promise<void>
+  /** Fix it, on what the task's review after a merge found: the lead takes the findings, and its fix ships after the merged pull request. */
+  readonly fixAfterMerge: (taskId: string, url?: string) => Promise<void>
+  /** Leave it, on what the task's review after a merge found: the findings close, and stay in the thread. */
+  readonly leaveAfterMerge: (taskId: string, url?: string) => Promise<void>
   /** Replaces the commits on the task's pull request with its branch, up to the commit the person saw, only while it is still at `replaces`: a force push they confirmed. */
   readonly replacePullRequest: (taskId: string, head: string, replaces: string, url?: string) => Promise<void>
   /** What to tell the lead so its branch takes the pull request's commits in by merging; they are fetched to its worktree first. */
@@ -627,6 +696,16 @@ export interface Client {
   readonly answerStuck: (input: { readonly attentionId: string; readonly answer: StuckAnswer }) => Promise<void>
   /** The person's answer to what Althar asked before a Local task takes their checkout (ADR-091). */
   readonly answerCheckout: (input: { readonly attentionId: string; readonly answer: CheckoutAnswer }) => Promise<void>
+  /** Moves a running task between a worktree and Local; `consent` answers what it asked about a checkout on a branch of the person's own. */
+  readonly moveTask: (input: {
+    readonly taskId: string
+    readonly to: 'worktree' | 'checkout'
+    readonly consent?: { readonly branch: string | null; readonly head: string }
+  }) => Promise<MoveOutcome>
+  /** Calls off a move that waits. */
+  readonly dropMove: (taskId: string) => Promise<void>
+  /** Points a running task at another branch to work toward, or its default with null: what it did, in words. */
+  readonly workToward: (taskId: string, toward: string | null) => Promise<ReadonlyArray<string>>
   /** Hands the task's step held for a usage limit to an agent, on the account and model picked, rather than waiting for the reset. */
   readonly handOverHeld: (input: {
     readonly taskId: string
@@ -747,6 +826,9 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
     readOutput: (threadId, itemId) => settle(api.ReadOutput({ threadId, itemId })),
     readBackgroundOutput: (threadId, id) => settle(api.ReadBackgroundOutput({ threadId, id })),
     readDocument: (threadId, path) => settle(api.ReadDocument({ threadId, path })),
+    listCanvases: (projectId, archived) => settle(api.ListCanvases({ projectId, ...(archived === true ? { archived } : {}) })),
+    getCanvas: (canvasId) => settle(api.GetCanvas({ canvasId })),
+    readCanvasText: (canvasId, version) => settle(api.ReadCanvasText({ canvasId, version })),
     getFileDiff: (taskId, path, untouched) => settle(api.GetFileDiff({ taskId, path, ...(untouched === true ? { untouched } : {}) })),
     getTaskFindings: (taskId, review) => settle(api.GetTaskFindings({ taskId, ...(review === undefined ? {} : { review }) })),
     findCode: (threadId, messages) => settle(api.FindCode({ threadId, messages })),
@@ -790,6 +872,19 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
     signInToolServer: (agent, name) => command((commandId) => api.SignInToolServer({ commandId, agent, name })),
     setCoAuthor: (on) => command((commandId) => api.SetCoAuthor({ commandId, on })),
     setPostTeamReviews: (on) => command((commandId) => api.SetPostTeamReviews({ commandId, on })),
+    setRunOutside: (to) => command((commandId) => api.SetRunOutside({ commandId, to })),
+    shelveTask: (taskId, shelf) => command((commandId) => api.ShelveTask({ commandId, taskId, shelf })),
+    stopHelper: (taskId, helper) => command((commandId) => api.StopHelper({ commandId, taskId, helper })),
+    joinChanges: (taskId, change, into) =>
+      command((commandId) => api.JoinChanges({ commandId, taskId, change, ...(into === undefined ? {} : { into }) })),
+    dropChange: (taskId, change) => command((commandId) => api.DropChange({ commandId, taskId, change })),
+    listPresets: (projectId) => settle(api.ListPresets(projectId === undefined ? {} : { projectId })),
+    applyPreset: (planId, preset) => command((commandId) => api.ApplyPreset({ commandId, planId, preset })),
+    editPreset: (input) => command((commandId) => api.EditPreset({ commandId, ...input })),
+    savePreset: (input) => command((commandId) => api.SavePreset({ commandId, ...input })),
+    removePreset: (id) => command((commandId) => api.RemovePreset({ commandId, id })),
+    runIt: (taskId, how) => command((commandId) => api.RunIt({ commandId, taskId, ...(how === undefined ? {} : { how }) })),
+    stopRunning: (taskId) => command((commandId) => api.StopRunning({ commandId, taskId })),
     setReviewSeal: (on) => command((commandId) => api.SetReviewSeal({ commandId, on })),
     setReviewSealStyle: (style) => command((commandId) => api.SetReviewSealStyle({ commandId, style })),
     getAutomations: (projectId) => settle(api.GetAutomations({ projectId })),
@@ -874,6 +969,7 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
         }),
       ),
     changeTeam: (taskId, steps) => command((commandId) => api.ChangeTeam({ commandId, taskId, steps })),
+    declineReview: (taskId) => command((commandId) => api.DeclineReview({ commandId, taskId })),
     changeIssueDraft: (draftId, edit) => command((commandId) => api.ChangeIssueDraft({ commandId, draftId, ...edit })),
     fileIssueDraft: (draftId) => command((commandId) => api.FileIssueDraft({ commandId, draftId })),
     discardIssueDraft: (draftId) => command((commandId) => api.DiscardIssueDraft({ commandId, draftId })),
@@ -937,20 +1033,29 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
     postScreenshots: (input) => command((commandId) => api.PostScreenshots({ commandId, ...input })),
     openChange: (taskId) => command((commandId) => api.OpenChange({ commandId, taskId })),
     skipReview: (taskId) => command((commandId) => api.SkipReview({ commandId, taskId })),
-    merge: (taskId, head, url) => command((commandId) => api.Merge({ commandId, taskId, head, ...(url === undefined ? {} : { url }) })),
+    setReviewAfterMerge: (taskId, review) => command((commandId) => api.SetReviewAfterMerge({ commandId, taskId, review })),
+    merge: (taskId, head, url, how) =>
+      command((commandId) =>
+        api.Merge({ commandId, taskId, head, ...(url === undefined ? {} : { url }), ...(how === undefined ? {} : { how }) }),
+      ),
     mergeHere: (taskId, heads) => command((commandId) => api.MergeHere({ commandId, taskId, heads })),
     pushHere: (taskId) => command((commandId) => api.PushHere({ commandId, taskId })),
     pushBranch: (taskId, heads) => command((commandId) => api.PushBranch({ commandId, taskId, heads })),
     listEditors: () => settle(api.ListEditors({})),
     getLoad: () => settle(api.GetLoad({})),
     getPlanUsage: (options = {}) => settle(api.GetPlanUsage(options.refresh === undefined ? {} : { refresh: options.refresh })),
+    dismissSignInEnding: (accountId, endsAt, stage) =>
+      command((commandId) => api.DismissSignInEnding({ commandId, accountId, endsAt, stage })),
     getModelRooms: (projectId) => settle(api.GetModelRooms(projectId === null ? {} : { projectId })),
     getMissedReports: () => settle(api.GetMissedReports({})),
     openInEditor: (input) => command((commandId) => api.OpenInEditor({ commandId, ...input })),
     openCode: (input) => command((commandId) => api.OpenCode({ commandId, ...input })),
     installAgent: (agentId) => command((commandId) => api.InstallAgent({ commandId, agentId })),
     push: (taskId, head, url) => command((commandId) => api.Push({ commandId, taskId, head, ...(url === undefined ? {} : { url }) })),
-    ship: (taskId) => command((commandId) => api.Ship({ commandId, taskId })),
+    ship: (taskId, change) => command((commandId) => api.Ship({ commandId, taskId, ...(change === undefined ? {} : { change }) })),
+    fixAfterMerge: (taskId, url) => command((commandId) => api.FixAfterMerge({ commandId, taskId, ...(url === undefined ? {} : { url }) })),
+    leaveAfterMerge: (taskId, url) =>
+      command((commandId) => api.LeaveAfterMerge({ commandId, taskId, ...(url === undefined ? {} : { url }) })),
     replacePullRequest: (taskId, head, replaces, url) =>
       command((commandId) => api.ReplacePullRequest({ commandId, taskId, head, replaces, ...(url === undefined ? {} : { url }) })),
     mergeNote: (taskId, url) =>
@@ -975,6 +1080,9 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
     clearLaunch: (id) => command((commandId) => api.ClearLaunch({ commandId, id })),
     answerStuck: (input) => command((commandId) => api.AnswerStuck({ commandId, ...input })),
     answerCheckout: (input) => command((commandId) => api.AnswerCheckout({ commandId, ...input })),
+    moveTask: (input) => command((commandId) => api.MoveTask({ commandId, ...input })),
+    dropMove: (taskId) => command((commandId) => api.DropMove({ commandId, taskId })),
+    workToward: (taskId, toward) => command((commandId) => api.WorkToward({ commandId, taskId, toward })),
     handOverHeld: (input) => command((commandId) => api.HandOverHeld({ commandId, ...input })),
     watch: (listener, since, onWatching) => {
       let cursor = since

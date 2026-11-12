@@ -1,13 +1,15 @@
-import type { ProjectRepository, ProjectRulesView, WorksIn } from '@althar/contracts'
+import type { AfterMergeRule, ProjectRepository, ProjectRulesView, WorksIn } from '@althar/contracts'
 import type { ReactNode } from 'react'
 import {
   BranchSelect,
   LinkButton,
+  newProjectDefaultsText,
   PullRequestPreview,
   PULL_REQUEST_PREVIEW_SAMPLE,
   RepositoryFiles,
   repositoryFilesWords,
   Segmented,
+  Select,
   SettingGroup,
   SettingList,
   SettingPreviews,
@@ -28,7 +30,8 @@ import type { ProjectSettingsModel, RuleSwitch } from './useProjectSettings'
 /*
  * How a project's tasks start, go and end (ADR-091, ADR-093): where new tasks
  * start and the branch they work toward in each repository; what happens when
- * an agent's account runs out; then what a finished task makes, drawn as GitHub
+ * an agent's account runs out, and what a small change's review after it
+ * merges brings back; then what a finished task makes, drawn as GitHub
  * shows it and following this project's own values: its pull request, how its
  * branch and title are named, and the switches every task follows (what it
  * pushes, posts, resolves and moves along), each with one line on when it acts.
@@ -221,6 +224,32 @@ function ReviewBots({ model, rules }: { model: ProjectSettingsModel; rules: Proj
   )
 }
 
+/** What a small change's review after it merges brings back, as Settings › Tasks words it for new projects. */
+function AfterMerge({ model, rule }: { model: ProjectSettingsModel; rule: AfterMergeRule }) {
+  const words = newProjectDefaultsText.afterMergeReview
+  return (
+    <SettingRow
+      title={words.title}
+      note={
+        <SwitchNote
+          line={words.options[rule].note}
+          failed={model.ruleFailed?.rule === 'afterMergeReview' ? model.ruleFailed.message : null}
+        />
+      }
+    >
+      {() => (
+        <Select<AfterMergeRule>
+          label={words.title}
+          value={rule}
+          onChange={model.setAfterMergeReview}
+          options={(['major', 'all', 'none'] as const).map((option) => ({ value: option, label: words.options[option].label }))}
+          width={250}
+        />
+      )}
+    </SettingRow>
+  )
+}
+
 /** The pull request a finished task opens, as GitHub shows it, following this project's values. */
 function PullRequest({
   rules,
@@ -308,6 +337,9 @@ export function TasksSection({
       </SettingGroup>
       <SettingGroup title={text.go} headingLevel={HEADING.part}>
         <TaskRules model={rulesModel} headingLevel={4} show="limits" />
+        <SettingList>
+          <AfterMerge model={model} rule={rules.afterMergeReview} />
+        </SettingList>
       </SettingGroup>
       <SettingGroup title={text.pullRequests} headingLevel={HEADING.part}>
         <PullRequest rules={rules} repositories={repositories} onCode={onCode} />

@@ -54,6 +54,12 @@
   border-radius: 2px;
   background: var(--bot);
 }
+.marked {
+  gap: 6px;
+}
+.marked::before {
+  display: none;
+}
 .agent {
   gap: 6px;
 }

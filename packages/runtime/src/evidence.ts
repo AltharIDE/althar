@@ -42,6 +42,7 @@ export const EvidenceGiven = Schema.Struct({
   text: Schema.optional(Schema.String),
   view: Schema.optional(Schema.String),
   option: Schema.optional(Schema.Boolean),
+  before: Schema.optional(Schema.Boolean),
 })
 export type EvidenceGiven = typeof EvidenceGiven.Type
 
@@ -62,6 +63,8 @@ export interface KeptEvidence {
   readonly view?: string
   /** For a picture: an option the person chose between, or an exploration, kept out of Outputs and the pull request. */
   readonly option?: true
+  /** For a picture: the before of the view it names. */
+  readonly before?: true
 }
 
 /** A picture evidence names, found and read, before it is kept. */
@@ -295,6 +298,7 @@ export const keepEvidence = (place: HandedPlace, read: ReadonlyArray<{ readonly 
         dropped: kept?.dropped ?? 0,
         ...(found !== null && given.view?.trim() ? { view: given.view.trim() } : {}),
         ...(found !== null && given.option === true ? { option: true as const } : {}),
+        ...(found !== null && given.before === true ? { before: true as const } : {}),
       } satisfies KeptEvidence
     }),
   )
@@ -327,6 +331,7 @@ export const evidenceOf = (value: unknown): ReadonlyArray<Evidence> =>
         dropped: typeof piece.dropped === 'number' ? piece.dropped : 0,
         ...(stringOrNull(piece.view) === null ? {} : { view: stringOrNull(piece.view) ?? '' }),
         ...(piece.option === true ? { option: true } : {}),
+        ...(piece.before === true ? { before: true } : {}),
       },
     ]
   })

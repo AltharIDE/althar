@@ -582,3 +582,37 @@ describe('a step held before its agent ran out', () => {
     expect(waitsWords('Codex', '14:00')).toBe('Codex is out of usage until 14:00')
   })
 })
+
+describe('a sign-in that ends soon, in the bar (DEV-196)', () => {
+  const ENDS = '2026-10-18T09:00:00.000Z'
+  const ending = {
+    agentId: 'claude-code',
+    agentName: 'Claude Code',
+    accountId: 'acc_claude',
+    accountName: 'personal',
+    several: false,
+    endsAt: ENDS,
+    stage: 'soon' as const,
+  }
+
+  it('says nothing while all is well', async () => {
+    windowAt('/', planUsage([claude]))
+    await gauge()
+    expect(screen.queryByText(/sign-in ends/)).toBeNull()
+  })
+
+  it('says whose and by when, naming the account where the agent has several, and goes at once when put aside', async () => {
+    const fake = windowAt('/', { ...planUsage([claude]), endings: [{ ...ending, several: true }] })
+    const said = await screen.findByText(`Claude Code (personal)’s sign-in ends by ${clock(ENDS, NOW)}`)
+    expect(said).toBeTruthy()
+    await userEvent.click(screen.getByRole('button', { name: 'Dismiss' }))
+    expect(fake.client.dismissSignInEnding).toHaveBeenCalledWith('acc_claude', ENDS, 'soon')
+    expect(screen.queryByText(/sign-in ends/)).toBeNull()
+  })
+
+  it('says it has ended where the runtime says so, its date passed or its check signed out before it', async () => {
+    // Its date is days off: the check already said signed out, and the bar says what the row does.
+    windowAt('/', { ...planUsage([claude]), endings: [{ ...ending, stage: 'ended' as const }] })
+    expect(await screen.findByText('Claude Code’s sign-in has ended')).toBeTruthy()
+  })
+})

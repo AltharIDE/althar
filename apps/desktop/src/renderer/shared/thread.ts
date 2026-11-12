@@ -1,9 +1,11 @@
-import type { AllowedBy, AttachedFile, FileMention, Picture, ShownPicture, ThreadItem, Unfurl } from '@althar/contracts'
+import { plainTitle, toolWordsOf } from '@althar/contracts'
+import type { AllowedBy, AttachedFile, FileMention, Picture, ShownPicture, ThreadItem, TurnTime, Unfurl } from '@althar/contracts'
 import { Delivery, headingOf, oneLine, PlanState, ToolKind, ToolState } from '@althar/ui'
 
 import { type Handed, handedBy, type OutputSoFar, type PartHanded, type Ran, ranOf } from './handed'
 import { isSending } from './items'
 import { took } from './time'
+import { type Spent, spentOf, turnOfItems } from './turnTime'
 
 /*
  * A thread's items as the blocks the kit draws, in order: what the person
@@ -94,18 +96,25 @@ export type Part =
       readonly id: string
       readonly text: string
       readonly tone: 'info' | 'warning' | 'error'
+      /** What the line offers: parts set up twice, kept as a preset, or a review a lead or the coordinator offered a task. */
+      readonly offer?: Offer
       /** For an agent's turn that failed: why, as the runtime classes it (`auth_required`…), and the agent's own words, apart. */
       readonly failure?: string
       readonly detail?: string
     }
   /** Pictures the agent showed the person, in order, each with its caption: open under its work, where it showed them. */
   | { readonly kind: 'pictures'; readonly id: string; readonly pictures: ReadonlyArray<ShownPicture> }
+  /** A version of one of the project's canvases the agent published or opened (ADR-104): open under its work, a line that opens it. */
+  | { readonly kind: 'canvas'; readonly id: string; readonly canvas: CanvasContent }
 
+/** What a notice offers: parts set up twice, as a preset; or a review a lead or the coordinator offered a task (`offer_review`). */
+export type Offer = NonNullable<Extract<ThreadItem, { kind: 'notice' }>['content']['offer']>
 export type StepResult = Extract<ThreadItem, { kind: 'step_result' }>['content']
 export type TaskCardContent = Extract<ThreadItem, { kind: 'task' }>['content']
 export type ArrivalContent = Extract<ThreadItem, { kind: 'arrival' }>['content']
 export type QuestionContent = Extract<ThreadItem, { kind: 'question' }>['content']
 export type RunContent = Extract<ThreadItem, { kind: 'run' }>['content']
+export type CanvasContent = Extract<ThreadItem, { kind: 'canvas' }>['content']
 export type IssueDraftContent = Extract<ThreadItem, { kind: 'issue_draft' }>['content']
 export type IssueChangesContent = Extract<ThreadItem, { kind: 'issue_changes' }>['content']
 export type SetupContent = Extract<ThreadItem, { kind: 'setup' }>['content']
@@ -116,6 +125,7 @@ export type TaskAskContent = Extract<ThreadItem, { kind: 'task_ask' }>['content'
 export type SettingChangeContent = Extract<ThreadItem, { kind: 'setting' }>['content']
 export type SmallChangeContent = Extract<ThreadItem, { kind: 'small_change' }>['content']
 export type ModelMoveContent = Extract<ThreadItem, { kind: 'model_move' }>['content']
+export type MergeLineContent = Extract<ThreadItem, { kind: 'merge_line' }>['content']
 
 export type Block =
   | {
@@ -154,8 +164,18 @@ export type Block =
       readonly doing: Doing | null
       /** What it handed back beside its words: pictures, documents, files. */
       readonly handed: Handed
+      /** Once it is over, where its time went, as the runtime kept it for its turns; null where none of them did. */
+      readonly spent: Spent | null
     }
   | { readonly kind: 'divider'; readonly id: string; readonly text: string }
+  /** What the coordinator offers to keep, such as parts set up twice as a preset (a task is a conversation plus parts): its line and button. */
+  | {
+      readonly kind: 'offer'
+      readonly id: string
+      readonly text: string
+      readonly detail: string | null
+      readonly offer: Offer
+    }
   | {
       readonly kind: 'step'
       readonly id: string
@@ -166,7 +186,7 @@ export type Block =
     }
   | { readonly kind: 'card'; readonly id: string; readonly card: TaskCardContent }
   /** Something heard from outside: a comment on the task's pull request, its checks, its merge. */
-  | { readonly kind: 'arrival'; readonly id: string; readonly at: string; readonly arrival: ArrivalContent }
+  | { readonly kind: 'arrival'; readonly id: string; readonly at: string; readonly arrival: ArrivalContent; readonly count: number }
   /** A question an agent asked the person, standing on its own, as the turn waited on it: answered where it is. */
   | { readonly kind: 'question'; readonly id: string; readonly at: string; readonly question: QuestionContent }
   /** A run of the project Althar started, where it was asked for (ADR-023). */
@@ -191,6 +211,8 @@ export type Block =
   | { readonly kind: 'small_change'; readonly id: string; readonly card: SmallChangeContent }
   /** Auto's line on moving the lead to a lighter model, with the way back (README section 7). */
   | { readonly kind: 'model_move'; readonly id: string; readonly move: ModelMoveContent }
+  /** The merge line for a branch: one card, kept current in place. */
+  | { readonly kind: 'merge_line'; readonly id: string; readonly line: MergeLineContent }
   /**
    * The agent's turn runs on what it was last asked, and it hasn't said
    * anything yet: where its reply will start, held for it, with how long it
@@ -356,7 +378,7 @@ export const targetOf = (content: ToolContent, worktree: string | null): string 
   if (content.command !== null) return content.label ?? content.command
   const space = content.title.indexOf(' ')
   const first = space > 0 ? content.title.slice(0, space).toLowerCase() : ''
-  return TITLE_VERBS.has(first) ? content.title.slice(space + 1) : content.title
+  return TITLE_VERBS.has(first) ? content.title.slice(space + 1) : plainTitle(content.title)
 }
 
 /** Text an agent is still writing, by the item it will be. */
@@ -373,7 +395,7 @@ export interface Streamed {
 const noticeText = (content: NoticeContent) => (content.description === null ? content.title : `${content.title} ${content.description}`)
 
 const partOf = (
-  item: Extract<ThreadItem, { kind: 'agent_message' | 'agent_thought' | 'tool_call' | 'plan' | 'notice' | 'pictures' }>,
+  item: Extract<ThreadItem, { kind: 'agent_message' | 'agent_thought' | 'tool_call' | 'plan' | 'notice' | 'pictures' | 'canvas' }>,
   streaming: ReadonlyMap<string, Streamed>,
   turnRunning: boolean,
   worktree: string | null,
@@ -432,12 +454,32 @@ const partOf = (
       const state = toolStateOf(item.content.status, turnRunning, item.content.declined)
       const refused = ruleRefusal(item.content)
       const why = refused === undefined ? declinedWords(item.content.declinedBy, item.content.declinedWhy) : undefined
+      // An MCP tool's raw name never shows: it reads as what it does, in the tense of how far it is.
+      const own =
+        toolKind === ToolKind.Other
+          ? toolWordsOf(item.content.title, state === ToolState.Running ? 'running' : state === ToolState.Done ? 'done' : 'plain')
+          : undefined
+      const ownSpace = own === undefined ? -1 : own.indexOf(' ')
       return {
         kind: 'tool',
         id: item.id,
         toolKind,
-        verb: toolKind === ToolKind.Skill && skill?.reported === false ? 'Read skill' : verbFor(toolKind, state),
-        target: toolKind === ToolKind.Skill && skill !== undefined ? skill.names.join(', ') : targetOf(item.content, worktree),
+        verb:
+          own !== undefined
+            ? ownSpace > 0
+              ? own.slice(0, ownSpace)
+              : own
+            : toolKind === ToolKind.Skill && skill?.reported === false
+              ? 'Read skill'
+              : verbFor(toolKind, state),
+        target:
+          own !== undefined
+            ? ownSpace > 0
+              ? own.slice(ownSpace + 1)
+              : ''
+            : toolKind === ToolKind.Skill && skill !== undefined
+              ? skill.names.join(', ')
+              : targetOf(item.content, worktree),
         ...(skill === undefined ? {} : { skills: skill }),
         state,
         command: item.content.command,
@@ -475,10 +517,21 @@ const partOf = (
           failure,
           ...(description === null ? {} : { detail: description }),
         }
+      if (item.content.offer !== undefined)
+        return {
+          kind: 'notice',
+          id: item.id,
+          text: title,
+          tone: severity,
+          offer: item.content.offer,
+          ...(description === null ? {} : { detail: description }),
+        }
       return { kind: 'notice', id: item.id, text: noticeText(item.content), tone: severity }
     }
     case 'pictures':
       return { kind: 'pictures', id: item.id, pictures: item.content.pictures }
+    case 'canvas':
+      return { kind: 'canvas', id: item.id, canvas: item.content }
   }
 }
 
@@ -505,6 +558,8 @@ export interface ThreadSource {
   readonly turnEnded?: string | null
   /** When the newest of what comes before these items was written, where they are the last stretch of a longer thread. */
   readonly earlierAt?: string
+  /** Where each turn's time went, by its id, as the snapshot carries them (`turnsById`). */
+  readonly turns?: ReadonlyMap<string, TurnTime>
 }
 
 /** What a part handed back, for the turn to gather. */
@@ -534,7 +589,7 @@ const splitOf = (parts: ReadonlyArray<Part>, beforeStep: boolean, running: boole
     : beforeStep
       ? -1
       : parts.findLastIndex((part) => part.kind === 'message')
-  const open = (part: Part, index: number) => index === last || index === failed || part.kind === 'pictures'
+  const open = (part: Part, index: number) => index === last || index === failed || part.kind === 'pictures' || part.kind === 'canvas'
   return {
     work: parts.filter((part, index) => !open(part, index)),
     said: parts.filter(open),
@@ -600,6 +655,30 @@ const ANSWER_BLOCK = /^ {0,3}(?:[-*+] |\d{1,3}[.)] |#{1,6} |```|~~~|\|)/m
 export const answers = (message: { readonly text: string; readonly answer?: boolean }): boolean =>
   message.answer ?? (message.text.trim().length > NOTE_LENGTH || ANSWER_BLOCK.test(message.text))
 
+/** Whether news is only that: it says the same again, with no words of someone's to lose. */
+const FOLDS = new Set(['checks', 'merged', 'closed', 'ready'])
+
+/**
+ * Where the news repeats the line just before it (same kind, outcome, pull
+ * request by its address and sender, and the same failures, nothing between), one line with the latest time and a
+ * count. The records keep both.
+ */
+export const foldArrival = (last: Block | undefined, next: Extract<Block, { kind: 'arrival' }>): Block => {
+  if (last?.kind !== 'arrival') return next
+  const a = last.arrival
+  const b = next.arrival
+  const same =
+    FOLDS.has(b.kind) &&
+    a.kind === b.kind &&
+    a.where === b.where &&
+    a.url === b.url &&
+    a.from === b.from &&
+    ((a.failed ?? 0) === 0) === ((b.failed ?? 0) === 0) &&
+    // A failure is read by its details, so only runs that show the same ones fold.
+    JSON.stringify([a.failing, a.logs]) === JSON.stringify([b.failing, b.logs])
+  return same ? { ...next, id: last.id, count: last.count + 1 } : next
+}
+
 export const text = { thinking: 'Thinking' }
 
 /** The blocks of a thread, oldest first, with what is still being written but not yet read at the end. */
@@ -649,6 +728,7 @@ export const blocksOf = (
       took: '',
       doing: null,
       handed: handedBy([], null),
+      spent: null,
     })
     spans.set(part.id, { from: at, to: at })
   }
@@ -686,7 +766,15 @@ export const blocksOf = (
         continue
       }
       case 'arrival':
-        blocks.push({ kind: 'arrival', id: item.id, at: ago(item.createdAt), arrival: item.content })
+        const folded = foldArrival(blocks.at(-1), {
+          kind: 'arrival',
+          id: item.id,
+          at: ago(item.createdAt),
+          arrival: item.content,
+          count: 1,
+        })
+        if (folded.kind === 'arrival' && folded.count > 1) blocks[blocks.length - 1] = folded
+        else blocks.push(folded)
         continue
       case 'step_result': {
         // The step ended with this: the turn that did the work ran until now.
@@ -735,9 +823,23 @@ export const blocksOf = (
       case 'model_move':
         blocks.push({ kind: 'model_move', id: item.id, move: item.content })
         continue
+      case 'merge_line':
+        blocks.push({ kind: 'merge_line', id: item.id, line: item.content })
+        continue
       case 'notice':
         // A restart is Althar's business, not the person's; earlier versions said so in the thread.
         if (item.content.source === 'runtime' && item.content.title === RESTARTED) continue
+        // What Althar offers to keep, such as a preset, stands on its own with its button.
+        if (item.content.offer !== undefined) {
+          blocks.push({
+            kind: 'offer',
+            id: item.id,
+            text: item.content.title,
+            detail: item.content.description,
+            offer: item.content.offer,
+          })
+          continue
+        }
         // What Althar itself says, such as a change of agent, is a line across the thread.
         if (item.content.source === 'runtime') {
           blocks.push({ kind: 'divider', id: item.id, text: noticeText(item.content) })
@@ -805,6 +907,8 @@ export const blocksOf = (
     const since = merged.slice(index + 1).every((block) => block.kind === 'step')
     return since && (askedWhen == null || Date.parse(askedWhen) <= Date.parse(span.to)) ? ended : span.to
   }
+  // Each item's turn, by which a block over is told where its time went.
+  const turnOf = turnOfItems(source.items)
   const drawn = merged.map((block, index): Block => {
     if (block.kind !== 'turn') return block
     const known = spans.get(block.id)
@@ -826,6 +930,13 @@ export const blocksOf = (
       took: span === undefined || until === undefined ? '' : took(span.from, until),
       doing: running ? doingOf(work, writing?.kind === 'message') : null,
       handed: handedBy(block.parts.map(partHanded), worktree),
+      spent:
+        running || source.turns === undefined
+          ? null
+          : spentOf(
+              block.parts.flatMap((part) => turnOf.get(part.id) ?? []),
+              source.turns,
+            ),
     }
   })
   if (!waiting || askedWhen == null) return drawn

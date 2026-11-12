@@ -8,7 +8,7 @@ import { SettingList, SettingRow, SettingSwitch } from '../Preferences/Preferenc
 /*
  * What the rules of a project start with when it is made, as rows of the
  * Settings tab: how a task ends, what it pushes, posts, resolves and moves
- * along, what an account running out does and whether work tries an agent's
+ * along, what a small change's review after it merges brings back, what an account running out does and whether work tries an agent's
  * next account first. Only a project made from now on starts with them; every
  * project changes its own in its Tasks, and one made earlier keeps what it
  * has. Allowing everything is the default of every project, so no request is
@@ -20,6 +20,8 @@ import { SettingList, SettingRow, SettingSwitch } from '../Preferences/Preferenc
 export type NewUsageLimit = 'move' | 'wait' | 'ask'
 /** How a task ends when its plan doesn't say. */
 export type NewTaskEnd = 'draft' | 'ready' | 'none'
+/** What a small change's review after it merges brings back: only major findings, every one, or no review. */
+export type AfterMergeReview = 'major' | 'all' | 'none'
 
 export interface NewProjectDefaultsValue {
   end: NewTaskEnd
@@ -29,6 +31,7 @@ export interface NewProjectDefaultsValue {
   moveIssues: boolean
   usageLimit: NewUsageLimit
   rotateAccounts: boolean
+  afterMergeReview: AfterMergeReview
 }
 
 /** What a project starts with where nothing was chosen, which a row goes back to. */
@@ -40,6 +43,7 @@ export const newProjectDefault: NewProjectDefaultsValue = {
   moveIssues: true,
   usageLimit: 'move',
   rotateAccounts: false,
+  afterMergeReview: 'major',
 }
 
 interface Worded {
@@ -55,6 +59,7 @@ export interface NewProjectDefaultsText {
   moveIssues: { title: string; note: string }
   usageLimit: { title: string; options: Record<NewUsageLimit, Worded> }
   rotate: { title: string; note: string }
+  afterMergeReview: { title: string; options: Record<AfterMergeReview, Worded> }
   /** Goes back to what a project starts with, named. */
   reset: (label: string) => string
 }
@@ -81,6 +86,14 @@ export const newProjectDefaultsText: NewProjectDefaultsText = {
     },
   },
   rotate: { title: 'Try an agent’s other accounts first', note: '' },
+  afterMergeReview: {
+    title: 'Review after a small change merges',
+    options: {
+      major: { label: 'Bring back major findings', note: 'Minor findings and nits stay in the task’s thread.' },
+      all: { label: 'Bring back every finding', note: 'Any finding puts the task back in Needs you.' },
+      none: { label: 'Don’t review it', note: 'Make it a full task to have it reviewed before it merges.' },
+    },
+  },
   reset: (label) => `Use ${label}`,
 }
 
@@ -93,6 +106,7 @@ const GLYPHS: Readonly<Record<keyof NewProjectDefaultsValue, IconName>> = {
   moveIssues: 'issues',
   usageLimit: 'load',
   rotateAccounts: 'reload',
+  afterMergeReview: 'after',
 }
 
 export interface NewProjectDefaultsProps {
@@ -120,7 +134,7 @@ export function NewProjectDefaults({ value, onChange, differs = {}, text }: NewP
     )
   }
   /** A row with a choice of words at the end. */
-  const row = <V extends string>(key: 'end' | 'usageLimit', title: string, options: Record<V, Worded>) => {
+  const row = <V extends string>(key: 'end' | 'usageLimit' | 'afterMergeReview', title: string, options: Record<V, Worded>) => {
     const chosen = value[key] as string as V
     const start = newProjectDefault[key] as string as V
     return (
@@ -171,6 +185,7 @@ export function NewProjectDefaults({ value, onChange, differs = {}, text }: NewP
       {toggle('postScreenshots', t.postScreenshots)}
       {toggle('resolveConflicts', t.resolveConflicts)}
       {toggle('moveIssues', t.moveIssues)}
+      {row('afterMergeReview', t.afterMergeReview.title, t.afterMergeReview.options)}
       {row('usageLimit', t.usageLimit.title, t.usageLimit.options)}
       {toggle('rotateAccounts', t.rotate)}
     </SettingList>

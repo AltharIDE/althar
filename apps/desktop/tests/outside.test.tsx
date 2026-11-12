@@ -1751,6 +1751,37 @@ describe('a project, reaching outside', () => {
     expect(screen.queryByText('this task only')).toBeNull()
     await waitFor(() => expect(client.changePlan).toHaveBeenLastCalledWith('pln1', expect.any(Array), 'none'))
   })
+
+  it('starts a plan from another preset, picked from its kicker, and offers a review only the presets that review', async () => {
+    const preset = (name: string, reviews = false) => ({
+      id: `builtin:${name}`,
+      name,
+      builtin: true,
+      projectId: null,
+      about: `${name}'s parts`,
+      parts: {
+        workspace: 'worktree' as const,
+        checked: 'before' as const,
+        end: 'draft' as const,
+        shelf: 'board' as const,
+        lead: null,
+        reviewer: null,
+        brief: '',
+        ...(reviews ? { reviews: true } : {}),
+      },
+    })
+    const { client } = fakeClient({
+      getCoordinator: vi.fn(async () =>
+        coordinatorSnapshot({ items: [items.card(card({ plan: { ...card().plan!, preset: 'Change' } }), 'c1')] }),
+      ),
+      listPresets: vi.fn(async () => [preset('Chat'), preset('Change'), preset('Prototype'), preset('Review a PR', true)]),
+    })
+    withServices(<Project />, client)
+    await userEvent.click(await screen.findByRole('button', { name: 'Change' }))
+    expect(screen.queryByRole('menuitemradio', { name: /Review a PR/ })).toBeNull()
+    await userEvent.click(await screen.findByRole('menuitemradio', { name: /Prototype/ }))
+    await waitFor(() => expect(client.applyPreset).toHaveBeenCalledWith('pln1', 'Prototype'))
+  })
 })
 
 describe('what reaching outside says, in every case', () => {

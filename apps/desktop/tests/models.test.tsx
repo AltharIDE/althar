@@ -173,6 +173,21 @@ describe('the models every agent offers', () => {
     expect(defaultPins(unknown)).toEqual(['claude-code:', 'codex:'])
   })
 
+  it('name a model the agent doesn’t list from its id, a version it writes with dashes as people write it: Claude Opus 5.5, never Opus 5 5', () => {
+    const named = (model: string) => infoOf(catalog, { agentId: 'claude-code', model }).name
+    expect(named('claude-opus-5-5')).toBe('Claude Opus 5.5')
+    expect(named('claude-sonnet-5-5')).toBe('Claude Sonnet 5.5')
+    expect(named('claude-3-5-sonnet')).toBe('Claude 3.5 Sonnet')
+    expect(named('gemini-2-5-pro')).toBe('Gemini 2.5 Pro')
+    expect(named('opencode-go/glm-5-3')).toBe('GLM 5.3')
+    // A version already dotted, a lone number, and a date stay as they are.
+    expect(named('opencode-go/deepseek-v4.1-flash')).toBe('DeepSeek V4.1 Flash')
+    expect(named('gpt-6-sol')).toBe('GPT 6 Sol')
+    expect(named('claude-sonnet-4-20250514')).toBe('Claude Sonnet 4 20250514')
+    expect(named('o3-mini-2025-01-31')).toBe('O3 Mini 2025 01 31')
+    expect(modelName(catalog, 'claude-code', 'claude-opus-5-5')).toBe('Claude Opus 5.5')
+  })
+
   it('show a choice as its model, what its agent is on, or as it was set', () => {
     expect(infoOf(catalog, { agentId: 'claude-code', model: 'sonnet' }).name).toBe('Claude Sonnet')
     expect(infoOf(catalog, { agentId: 'codex', model: null }).id).toBe('codex:gpt-5.2-codex')

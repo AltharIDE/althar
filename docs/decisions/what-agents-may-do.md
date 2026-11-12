@@ -144,8 +144,9 @@ only on the person's word. A lead's `push_tag` also asks every time. See
 ## Speaking for the person
 
 A post (a review, a comment or a reply) goes ahead on a pull request or issue
-that a task of Althar's opened or came from. Anywhere else it is speaking for
-the person and asks. A reply to an outside author always asks. So does a
+that a task of Althar's opened or came from, the person's own, or one by the
+repository's own people. A reply to an outside author goes on the person's
+word, their message in the turn that asks it. So does a
 message through another service, such as an MCP server's Slack message or
 email. Merely following a pull request doesn't make it Althar's: Althar
 follows every open one.
@@ -155,8 +156,6 @@ follows every open one.
 - Every post through an MCP server asks, the task's own pull request
   included. Althar can't yet tell from a server's call whose pull request it
   is. Althar's own tools follow the rule above.
-- A reply to an outside author through Althar's tools is refused rather than
-  asked (`coordinatorPullRequests.ts`).
 
 ## The sandbox is the boundary
 
@@ -384,8 +383,9 @@ lead's. Why: the stranger's words could steer the agent into sending private
 code out, and a host list wouldn't stop that, since a leak can ride on an
 allowed host.
 
-**Not built yet:** "Run it", the person's word that makes an outside
-author's review the team's kind, running its code in the sandbox.
+"Run it", the person's word, runs an outside author's code as far as they
+say, safely or trusted fully, and Stop running it takes that back
+([reviews § Run it](reviews.md#run-it)).
 
 ## Settings agents change
 
@@ -439,3 +439,5 @@ Anything else that blocks, refuses or asks is a bug.
 
 - 8 Nov 2026: written from the ADRs under Replaces.
 - 8 Nov 2026: the limits sweep (#696) built: every command reaches the rules inside the sandbox too, the network is open to every role, `gh` and `glab` are read as git is, an unreadable command runs beside a Never, and screenshots draw any http or https page.
+- 10 Nov 2026: an outside author's code runs only as far as the person says with Run it, safely (install scripts off, offline) or trusted fully, and a setting can answer how far, never whether ([reviews](reviews.md#run-it)).
+- 10 Nov 2026: Run it built, and Stop running it ([reviews § Run it](reviews.md#run-it)).

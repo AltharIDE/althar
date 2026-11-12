@@ -129,6 +129,16 @@ export const reachText = {
   readsMeans: 'A copy of the pull request’s head, which the agent can’t change.',
   runs: 'runs nothing of it',
   runsMeans: 'No install, build, tests or scripts. Commands that only look are allowed.',
+  runsSafely: 'runs it safely, offline',
+  runsSafelyMeans:
+    'Its packages installed from the lockfile with install scripts off, from the registries its base branch names. Its tests and app run in the sandbox, with no network.',
+  runsTrusted: 'runs it as your team’s code',
+  runsTrustedMeans: 'Set up with the repository’s setup and files, install scripts and the network.',
+  /** Run it, the person's word: how far to trust the pull request's code. */
+  runSafely: 'Run safely',
+  trustFully: 'Trust fully',
+  runIt: 'Run it',
+  stopRunning: 'Stop running it',
   offline: 'no network',
   offlineMeans: (source: string) =>
     `From outside the team. The agent sees its code, and its description, checks and comments on ${source}.`,
@@ -143,8 +153,12 @@ export const reachOf = (review: ReviewBrief, postsItself: boolean, text = reachT
   const source = productName(review.product)
   return [
     { id: 'reads', words: text.reads(review.author), means: text.readsMeans },
-    { id: 'runs', words: text.runs, means: text.runsMeans },
-    ...(review.outside ? [{ id: 'network', words: text.offline, means: text.offlineMeans(source) }] : []),
+    review.trust === 'full'
+      ? { id: 'runs', words: text.runsTrusted, means: text.runsTrustedMeans }
+      : review.trust === 'safe'
+        ? { id: 'runs', words: text.runsSafely, means: text.runsSafelyMeans }
+        : { id: 'runs', words: text.runs, means: text.runsMeans },
+    ...(review.outside && review.trust !== 'full' ? [{ id: 'network', words: text.offline, means: text.offlineMeans(source) }] : []),
     postsItself && !review.outside
       ? { id: 'posts', words: text.postsItself, means: text.postsItselfMeans(source) }
       : { id: 'posts', words: text.posts, means: text.postsMeans(source) },

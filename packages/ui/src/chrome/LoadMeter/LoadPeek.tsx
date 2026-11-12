@@ -11,8 +11,8 @@ import s from './LoadPeek.module.css'
 
 /*
  * What the load meter opens to: how hard this computer works, at more
- * length. The last two minutes of CPU as a line, with Althar's work's part
- * under it; CPU and memory as figures, each with Althar's part; what macOS
+ * length. Up to the last two minutes of CPU as a line, with Althar's work's
+ * part under it, beginning where the readings do; CPU and memory as figures, each with Althar's part; what macOS
  * says of memory; each piece of Althar's work, most first, across every
  * project, and what the rest of the computer's apps use; and a switch that
  * takes the meter out of the bar. Cobalt is always Althar's work, as it is
@@ -70,7 +70,10 @@ function SplitBar({ total, ours }: { total: number; ours: number }) {
   )
 }
 
-/** The CPU over the last readings, right to left from now: all of it as a line, Althar's part as cobalt under it. */
+/**
+ * The CPU over the last readings, right to left from now: all of it as a line, Althar's part as cobalt under it.
+ * Fewer readings than there is room for begin part way along, at a dot, the room before them left empty.
+ */
 function Trace({ points, slots, width, height }: { points: readonly LoadPoint[]; slots: number; width: number; height: number }) {
   const pad = 1.5
   // The readings fill the room from the right, at now; fewer than it has room for start part way.
@@ -87,6 +90,8 @@ function Trace({ points, slots, width, height }: { points: readonly LoadPoint[];
           <path d={line} className={s.sparkLine} />
         </>
       )}
+      {/* Where the trace begins, when it has fewer readings than room: nothing is drawn before it, not a line at nothing. */}
+      {points.length > 0 && from > 0 && <circle cx={x(0)} cy={y(points[0]?.cpu ?? 0)} r={2} className={s.sparkStart} />}
     </svg>
   )
 }

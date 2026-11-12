@@ -1,7 +1,7 @@
 # Several pull requests from one conversation: how others do it
 
 Research for
-[a task is a conversation plus parts](../decisions/proposed/a-task-is-a-conversation-plus-parts.md#a-task-holds-as-many-changes-as-it-needs).
+[a task is a conversation plus parts](../decisions/tasks.md#changing-parts).
 Its question: can one conversation with an agent hold several branches and
 pull requests, in one repository or several, one after another or at the
 same time? A task in Althar held one worktree, one branch and one open pull
@@ -258,7 +258,7 @@ From [its docs](https://code.claude.com/docs/en/) and
 
 ## What Althar takes
 
-In [a task holds as many changes as it needs](../decisions/proposed/a-task-is-a-conversation-plus-parts.md#a-task-holds-as-many-changes-as-it-needs),
+In [a task holds as many changes as it needs](../decisions/tasks.md#changing-parts),
 one rule for each of the four places their bugs come from:
 
 - **Everything hangs on the change, never on a folder.** A folder is where

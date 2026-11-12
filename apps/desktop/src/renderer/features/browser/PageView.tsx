@@ -187,7 +187,10 @@ export function PageView({ owner, kind, draft, where, onDock }: PageViewProps) {
   useEffect(() => {
     void browser?.pins(
       owner,
-      comments.map((comment, index) => ({ n: index + 1, selector: comment.on.picked.selector, address: comment.on.address })),
+      // Numbered by their place among all the draft's comments, as their chips are; those on canvases have no pin here.
+      comments.flatMap((comment, index) =>
+        comment.on.kind === 'page' ? [{ n: index + 1, selector: comment.on.picked.selector, address: comment.on.address }] : [],
+      ),
     )
   }, [browser, owner, comments])
 
@@ -204,22 +207,23 @@ export function PageView({ owner, kind, draft, where, onDock }: PageViewProps) {
     const id = pages.takeReopen(owner)
     const index = comments.findIndex((one) => one.id === id)
     const comment = comments[index]
-    if (comment === undefined) return
+    if (comment === undefined || comment.on.kind !== 'page') return
+    const spot = comment.on
     void (async () => {
-      const found = await browser.find(owner, comment.on.picked.selector, comment.on.address)
+      const found = await browser.find(owner, spot.picked.selector, spot.address)
       if (found !== null) return setWriting({ pointed: found, comment, n: index + 1 })
       // Gone from the page: the comment opens over the page as it is, at its top, to change or remove.
       const picture = (await browser.still(owner)) ?? ''
       setWriting({
         pointed: {
-          picked: comment.on.picked,
+          picked: spot.picked,
           crop: null,
           cropSize: null,
           still: picture,
           scale: 1,
           at: { x: 16, y: 16, width: 0, height: 0 },
-          address: comment.on.address,
-          viewport: comment.on.viewport,
+          address: spot.address,
+          viewport: spot.viewport,
         },
         comment,
         n: index + 1,

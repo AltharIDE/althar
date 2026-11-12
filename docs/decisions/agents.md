@@ -20,7 +20,7 @@ How sessions, processes and sign-in work is in [architecture 03](../architecture
 An agent joins where Althar sees every command before it runs and can stop it. That is what keeps the irreversible list asking and the person's Never rules holding ([what-agents-may-do.md](what-agents-may-do.md)). In practice that means:
 
 1. **It asks before it runs a command.** A mode or a session's `_meta` that Althar sets and checks keeps it asking. Edits inside the workspace may go unasked, as Codex's do in its sandbox.
-2. **It can be held to reading,** for a review of an outside author's pull request. Either a mode keeps Althar's tools and takes the agent's edits away, or its edits ask, so the rules refuse them ([reviews.md](reviews.md)).
+2. **It has a reading mode,** for a review: a mode keeps Althar's tools and takes the agent's edits away, or its edits ask, so the rules refuse them. One whose sandbox runs commands without asking, as Codex's does, still leads reviews: what it runs stays in its OS sandbox ([reviews.md](reviews.md)).
 3. **It was read at the version the ACP registry lists,** with permission options of known kinds.
 4. **Its vendor lets a third-party app use its sign-in,** or publishes it for any ACP client. Where the two disagree, the person is told before they sign in.
 
@@ -33,6 +33,7 @@ Ten agents join: Claude Code, Codex, OpenCode, GitHub Copilot, Junie, Grok Build
   - `home.accounts: 'one'` keeps an agent whose sign-in every folder shares to its usual account.
   - `permissions.questions` marks tool calls on which a permission request is the model asking the person.
   - `cli.download` pins a download from its maker.
+  - `ownHelpers` says how its launch switches off its own helpers that would work in the background, and what it keeps within a turn, or why they stay on ([tasks § Helpers](tasks.md#helpers)).
 - **Four agents wait,** each for a reason that can change:
   - Cursor: its current build hasn't been probed signed in.
   - Devin: no mode asks before an edit.
@@ -135,7 +136,7 @@ Althar shows how much of each plan's windows is left, and steers new work away f
 
 People asked what a task cost. What they want to know is how much of each subscription it took and how much of each top-up it spent, so Althar shows that and no total. Adding a share of a week to dollars means nothing.
 
-- **One line per account the task's agents ran on,** named as the plan gauge names it, with the models and their tokens under it, and its figure at the end. On a plan the figure is its share of the week ("~8% of week"). Paid per use, it is dollars. Nothing is shown per step or per round.
+- **One line per account the task's agents ran on,** named as the plan gauge names it, with the models and their tokens under it (each model's own tokens where several ran, as a lead's helpers do), and its figure at the end. On a plan the figure is its share of the week ("~8% of week"). Paid per use, it is dollars. Nothing is shown per step or per round.
 - **An agent that reaches several providers has a line for each** (OpenCode Zen, OpenCode Go), since each is paid its own way. ChatGPT through OpenCode shares Codex's week and is never counted twice.
 - **A dash says why on hover** where a figure can't be known.
 - **A task's line covers every thread of the task,** its reviews included, across handovers. The coordinator's covers its conversation since this computer's midnight.
@@ -146,4 +147,6 @@ People asked what a task cost. What they want to know is how much of each subscr
 ## Changes
 
 - 8 Nov 2026: written from the ADRs under Replaces.
-- 9 Nov 2026: a lead starts afresh only once its context is full, never at a break ([a task is a conversation plus parts](proposed/a-task-is-a-conversation-plus-parts.md#a-leads-session-lasts-until-its-full)).
+- 9 Nov 2026: a lead starts afresh only once its context is full, never at a break (a task is a conversation plus parts, [tasks](tasks.md#changing-parts)).
+- 10 Nov 2026: a lead's helpers, on any model it picks with `list_models`, each handed one of its task's changes ([tasks](tasks.md#helpers)).
+- 10 Nov 2026: each agent's own helpers that would work in the background are switched off at its launch, and a task's usage says each model's tokens (ADR-087, [tasks § Helpers](tasks.md#helpers)).

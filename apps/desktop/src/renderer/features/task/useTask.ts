@@ -21,7 +21,7 @@ import { keys, reads } from '../../data/reads'
 import { canPick } from '../../shared/agents'
 import { isSending, mergeItems, newestReads, sending, takenBack, unsent, waiting } from '../../shared/items'
 import { headsOf } from '../../shared/mergeHere'
-import { type Choice, moveTo, runningOn, startOf } from '../../shared/models'
+import { type Choice, moveTo, runningOn, startOf, upcomingOn } from '../../shared/models'
 import type { OutputSoFar } from '../../shared/handed'
 import { type Outgoing, sentWith } from '../../shared/useAttachments'
 import { useOutputs } from '../../shared/useOutputs'
@@ -117,7 +117,8 @@ export interface TaskModel {
   /** Tries its lead's last turn again, where it failed: what the person said in it goes again. */
   readonly tryAgain: () => Promise<void>
   /** Puts the lead on another model or effort, or hands the task to another agent with one. */
-  readonly choose: (choice: Choice) => Promise<void>
+  /** Puts the lead on the model and effort chosen; whether it was taken, for the picker to go back to what it was if not. */
+  readonly choose: (choice: Choice) => Promise<boolean>
   /** Hands the task to another agent with what the person says, and any images: the new lead's first turn, after its brief. */
   readonly handOver: (choice: Choice, body: string, images?: Outgoing) => Promise<boolean>
   /** Stops the task: every agent on it, until it is resumed. */
@@ -155,6 +156,8 @@ export interface TaskModel {
   readonly attach: (pullRequest: string, start: boolean) => Promise<Attachment | null>
   /** Starts its plan now, while it waits to start. */
   readonly startPlan: (planId: string) => Promise<void>
+  /** Holds its plan until it is started, while it counts down or waits for a free agent. */
+  readonly holdPlan: (planId: string) => Promise<void>
   /** Answers a call; with `always`, the answer is kept in the project's rules by that scope. */
   readonly answer: (attentionId: string, decision: 'allow' | 'reject', reason?: string, always?: AlwaysScope) => Promise<boolean>
   /** Answers a step that needs the person. */
@@ -162,6 +165,26 @@ export interface TaskModel {
   readonly answerStuck: (attentionId: string, answer: StuckAnswer) => Promise<boolean>
   /** The person's answer to what Althar asked before a Local task takes their checkout (ADR-091). */
   readonly answerCheckout: (attentionId: string, answer: CheckoutAnswer) => Promise<void>
+  /** Moves the running task between a worktree and Local; with what it asked about the person's checkout, as they saw it, Switch it. */
+  readonly move: (to: 'worktree' | 'checkout', consent?: { readonly branch: string | null; readonly head: string }) => Promise<void>
+  /** Calls off a move that waits: the task stays where it works. */
+  readonly dropMove: () => Promise<void>
+  /** Points the running task at another branch to work toward, or its default with null. */
+  readonly workToward: (toward: string | null) => Promise<void>
+  /** Run it, on the pull request a review task reviews: as far as `how` trusts it, the team's own fully. */
+  readonly runIt: (how?: 'safe' | 'full') => Promise<void>
+  /** Stop running it: the pull request's copy read only again, and its lead a reader. */
+  readonly stopRunning: () => Promise<void>
+  /** Puts the task on Scratch, or on the board with null (a task is a conversation plus parts). */
+  readonly shelve: (shelf: 'scratch' | null) => Promise<void>
+  /** Saves the task's parts, team and the start of its brief as a preset, by name. */
+  readonly savePreset: (name: string) => Promise<void>
+  /** Stops a helper its lead started, by its id. */
+  readonly stopHelper: (helper: string) => Promise<void>
+  /** Keep them together: a change its lead split carried onto the task's first. */
+  readonly joinChanges: (change: string) => Promise<void>
+  /** Drop it: a change's folder goes, its branch stays. */
+  readonly dropChange: (change: string) => Promise<void>
   /** Hands its step held for a usage limit to another agent, on the account and model picked, rather than waiting for the reset. */
   readonly handOverHeld: (to: { readonly agentId: string; readonly accountId?: string; readonly model?: string }) => Promise<void>
   /** Answers an agent's question: what went wrong, in words, or null when it went through. */
@@ -180,6 +203,12 @@ export interface TaskModel {
   readonly openChange: () => Promise<void>
   /** Ships what waits on its branch for Ship: its review first, where its plan has one before the work ships, then the commits go up. */
   readonly ship: () => Promise<void>
+  /** Ships one of its several changes, in a Ship of its own, with what waits beneath it in its stack: its row's Ship. */
+  readonly shipChange: (change: string) => Promise<void>
+  /** Fix it, on what its review after a merge found: the lead takes the findings, and its fix ships after the merged pull request. */
+  readonly fixAfterMerge: () => Promise<void>
+  /** Leave it, on what its review after a merge found: the findings close, and stay in the thread. */
+  readonly leaveAfterMerge: () => Promise<void>
   /** Merges the task into its repositories' default branches here, up to the heads it showed; it has no pull request. */
   readonly mergeHere: () => Promise<void>
   /** Pushes what it merged here to the remotes its default branches follow. */
@@ -192,6 +221,11 @@ export interface TaskModel {
    * wait; pending throughout.
    */
   readonly accept: (changes: ReadonlyArray<{ readonly head: string; readonly url: string }>) => Promise<void>
+  /**
+   * Merge, with commits not shipped (a task is a conversation plus parts): `review`, Review and merge, one review of what
+   * waits, then it goes up and merges; `now`, Merge now, up and merged at once, reviewed after the merge.
+   */
+  readonly mergeWaiting: (how: 'review' | 'now') => Promise<void>
   /** Pushes the task's branch to its pull request, up to the commit the person saw: the one at `url`, in a task of several. */
   readonly push: (head: string, url?: string) => Promise<void>
   /**
@@ -338,6 +372,8 @@ export const useTask = (threadId: string): TaskModel => {
     [client, threadId, newest, arrived, fail],
   )
 
+  // What the lead was last picked to, until the thread says it: a pick made before the last one was taken goes from there.
+  const lastPick = useRef<Choice | null>(null)
   /**
    * The thread's head again: its task, the agent working, the calls waiting.
    * Its items stay as they are, but for those it may have moved on, read after
@@ -597,14 +633,35 @@ export const useTask = (threadId: string): TaskModel => {
     interrupt: () => act(() => client.interrupt(threadId)),
     compact: () => act(() => client.compact(threadId)),
     tryAgain: () => act(() => client.tryAgain(threadId)),
-    choose: (choice) =>
-      act(async () => {
-        const session = snapshot?.session
-        // A thread the runtime no longer holds can't be moved: the choice starts the lead on it instead. While it is held, the choice changes the lead it has.
-        await (session == null || !session.held
-          ? client.startSession(startOf(threadId, choice))
-          : moveTo(client, threadId, runningOn(session), choice))
-      }),
+    choose: async (choice) => {
+      setError(null)
+      let taken = true
+      try {
+        // As the cache has it now, not as this render had it: a head read may have landed since.
+        const session = (cache.getQueryData<ThreadSnapshot>(keys.thread(threadId)) ?? snapshot)?.session
+        // A thread the runtime no longer holds can't be moved: the choice starts the lead on it instead. While it is held, the choice changes the lead it has:
+        // from what it was last picked to, else what the runtime holds for its next turn, else what it is on, so a pick back to what it is on cancels the one before.
+        if (session == null || !session.held) await client.startSession(startOf(threadId, choice))
+        else {
+          const from = lastPick.current ?? upcomingOn(session) ?? runningOn(session)
+          lastPick.current = choice
+          await moveTo(client, threadId, from, choice)
+        }
+      } catch (failure) {
+        // Said where the thread says what went wrong; the picker goes back to what it was.
+        fail(failure)
+        taken = false
+      }
+      // The runtime has it as who leads next, or the lead as it was: read now, so the picker is told by the thread, not by the window.
+      // The pick stands as the last until that read has landed: one made before it goes from here, not from the thread as it was.
+      try {
+        await readHead()
+        await newest.landed('head')
+      } finally {
+        if (lastPick.current === choice) lastPick.current = null
+      }
+      return taken
+    },
     handOver: (choice, body, images) =>
       shown(body, 'after_current', () => client.switchAgent({ ...startOf(threadId, choice), body, ...sentWith(images) }), images, false),
     stop: () => onTask((taskId) => client.stopTask(taskId)),
@@ -646,6 +703,7 @@ export const useTask = (threadId: string): TaskModel => {
       return done
     },
     startPlan: (planId) => act(() => client.startPlan(planId)),
+    holdPlan: (planId) => act(() => client.holdPlan(planId)),
     answer: async (attentionId, decision, reason, always) => {
       // Whether it went through: a call whose answer didn't is answerable again.
       let through = true
@@ -675,6 +733,16 @@ export const useTask = (threadId: string): TaskModel => {
       return through
     },
     answerCheckout: (attentionId, answer) => act(() => client.answerCheckout({ attentionId, answer })),
+    move: (to, consent) => onTask((taskId) => client.moveTask({ taskId, to, ...(consent === undefined ? {} : { consent }) })),
+    dropMove: () => onTask((taskId) => client.dropMove(taskId)),
+    workToward: (toward) => onTask((taskId) => client.workToward(taskId, toward)),
+    runIt: (how) => onTask((taskId) => client.runIt(taskId, how)),
+    stopRunning: () => onTask((taskId) => client.stopRunning(taskId)),
+    shelve: (shelf) => onTask((taskId) => client.shelveTask(taskId, shelf)),
+    savePreset: (name) => onTask((taskId) => client.savePreset({ name, taskId })),
+    stopHelper: (helper) => onTask((taskId) => client.stopHelper(taskId, helper)),
+    joinChanges: (change) => onTask((taskId) => client.joinChanges(taskId, change)),
+    dropChange: (change) => onTask((taskId) => client.dropChange(taskId, change)),
     handOverHeld: (to) => onTask((taskId) => client.handOverHeld({ taskId, ...to })),
     answerQuestion: (attentionId, answers) =>
       client.answerQuestion({ attentionId, answers }).then(
@@ -697,6 +765,17 @@ export const useTask = (threadId: string): TaskModel => {
       }, doing.markAllReady),
     openChange: () => act(async () => (snapshot === null ? undefined : client.openChange(snapshot.task.id)), doing.openChange),
     ship: () => act(async () => (snapshot === null ? undefined : client.ship(snapshot.task.id)), doing.ship),
+    shipChange: (change) => act(async () => (snapshot === null ? undefined : client.ship(snapshot.task.id, change)), doing.ship),
+    fixAfterMerge: () =>
+      act(
+        async () => (snapshot === null ? undefined : client.fixAfterMerge(snapshot.task.id, snapshot.task.afterMerge?.url)),
+        doing.fixAfterMerge,
+      ),
+    leaveAfterMerge: () =>
+      act(
+        async () => (snapshot === null ? undefined : client.leaveAfterMerge(snapshot.task.id, snapshot.task.afterMerge?.url)),
+        doing.leaveAfterMerge,
+      ),
     markDone: () => act(async () => (snapshot === null ? undefined : client.markTaskDone(snapshot.task.id)), doing.markDone),
     keep: () => act(async () => (snapshot === null ? undefined : client.keepTaskForLater(snapshot.task.id)), doing.keep),
     mergeHere: () =>
@@ -722,6 +801,13 @@ export const useTask = (threadId: string): TaskModel => {
         )
         await client.pushBranch(snapshot.task.id, heads)
       }, doing.pushBranch),
+    mergeWaiting: (how) =>
+      act(async () => {
+        if (snapshot === null) return
+        const open = snapshot.task.changes.find((one) => one.state === 'open')
+        if (open === undefined) return
+        await client.merge(snapshot.task.id, open.head ?? '', open.url, how)
+      }, doing.mergeWaiting),
     accept: (changes) =>
       act(async () => {
         setMergeFailed(null)
@@ -753,7 +839,7 @@ export const useTask = (threadId: string): TaskModel => {
           } catch (failure) {
             // Commits on it the branch doesn't have are the lead's to bring in: the card says so, and offers to ask it, in place of an error.
             if (failure instanceof ApiError && failure.reason === 'PushRefused' && failure.why === 'behind') {
-              setRefused(url ?? snapshot.task.changes[0]?.url ?? '')
+              setRefused(url ?? (snapshot.task.changes.find((one) => one.state === 'open') ?? snapshot.task.changes.at(-1))?.url ?? '')
               return
             }
             throw failure
