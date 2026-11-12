@@ -199,6 +199,8 @@ export const PlanParameters = Schema.Struct({
   steps: Schema.Array(PlanStep),
   reason: Schema.NullOr(Schema.String),
   end: Schema.optional(Schema.NullOr(TaskEnd)),
+  /** Its ending was the person's choice (or a preset of theirs with one), not the project's setting taken as it stood. */
+  endChosen: Schema.optional(Schema.Boolean),
   /**
    * Nothing of it leaves this Mac when it is done, whatever the project's
    * host: a task the coordinator starts at once (`start_task`), which it told

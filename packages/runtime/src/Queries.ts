@@ -53,6 +53,8 @@ import {
   type TurnTime,
   type ScreenshotsOnChange,
   type TaskFindings,
+  plainTitle,
+  toolPhrase,
 } from '@althar/contracts'
 import { Cause, Clock, Context, Deferred, Duration, Effect, Layer, Option, Schema } from 'effect'
 import { SqlClient, type SqlError } from 'effect/sql'
@@ -249,7 +251,8 @@ const mcpOf = (kept: unknown) => {
       server,
       tool,
       acts: field(kept, 'acts') === true,
-      did: text(kept, 'did') || tool,
+      // What it did, in words: a read kept only the tool's own name, which reads as a phrase here.
+      did: text(kept, 'did') !== tool && text(kept, 'did') !== '' ? text(kept, 'did') : toolPhrase(server, tool),
       ...(words === '' ? {} : { words }),
       ...(link.startsWith('https://') ? { link } : {}),
     },
@@ -443,7 +446,7 @@ const callOf = (request: {
         ? questionTitle(questionOf(payload))
         : request.kind === 'checkout'
           ? checkoutTitle(payload)
-          : text(payload, 'title'),
+          : plainTitle(text(payload, 'title')),
     reason: text(payload, 'reason'),
     command,
     ...(command === null ? {} : { label: shortCommand(command) }),

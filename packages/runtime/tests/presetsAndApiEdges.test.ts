@@ -139,7 +139,7 @@ describe('presets, through the API', () => {
         )
         assert.strictEqual(
           builtIn.find((one) => one.name === 'Change')?.about,
-          'a worktree, reviewed before it ships, a draft pull request, the coordinator picks its lead',
+          'a worktree, reviewed before it ships, ends as the project says, the coordinator picks its lead',
         )
         assert.isTrue(builtIn.every((one) => one.builtin && one.keptTo === undefined && one.from === undefined))
 
@@ -168,7 +168,6 @@ describe('presets, through the API', () => {
         assert.deepStrictEqual(own[0]?.parts, {
           workspace: 'worktree',
           checked: 'none',
-          end: 'none',
           shelf: 'board',
           lead: null,
           reviewer: null,
@@ -337,7 +336,7 @@ describe('a preset the coordinator offers', () => {
         )
         assert.strictEqual(
           card?.kind === 'notice' ? card.content.description : undefined,
-          'large unchecked: a worktree, no review, ends here, led by large.',
+          'large unchecked: a worktree, no review, ends as the project says, led by large.',
         )
       }),
     ),
@@ -836,6 +835,7 @@ describe('a preset’s parts, on a plan', () => {
           { key: 'review', agentId: 'opencode', model: null, skipped: false },
         ],
         end: 'draft',
+        endChosen: true,
         worksIn: 'checkout',
       },
     )
@@ -851,6 +851,7 @@ describe('a preset’s parts, on a plan', () => {
     assert.deepStrictEqual(planFromPreset(proposed({ steps: [] }), parts({ checked: 'after', workspace: 'copy' })), {
       steps: [{ key: 'review', agentId: 'claude-code', model: null, skipped: true }],
       end: 'draft',
+      endChosen: true,
       reviewAfterMerge: true,
       here: true,
     })
@@ -862,6 +863,7 @@ describe('a preset’s parts, on a plan', () => {
     assert.deepStrictEqual(planFromPreset(proposed({ steps: [LEAD], worksIn: 'checkout' }), parts({ checked: 'none' })), {
       steps: [LEAD],
       end: 'draft',
+      endChosen: true,
       worksIn: 'worktree',
     })
   })

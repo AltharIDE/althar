@@ -1480,6 +1480,7 @@ export const handlers = Api.toLayer(
               })
               if (issue !== undefined) yield* issues.attach({ projectId: projectId as ProjectId, taskId: created.taskId, issue })
               // A task you start yourself is planned like any other, and starts at once; its card shows in the coordinator's thread.
+              const projectEnd = aside ? null : yield* pullRequests.endFor(projectId, created.taskId)
               const planId = yield* plans.propose({
                 projectId: projectId as ProjectId,
                 taskId: created.taskId,
@@ -1491,7 +1492,11 @@ export const handlers = Api.toLayer(
                 // rather than a card, and the coordinator hears nothing of it.
                 ...(aside
                   ? { end: null, here: true, aside: true }
-                  : { end: end === undefined ? yield* pullRequests.endFor(projectId, created.taskId) : end }),
+                  : {
+                      end: end === undefined ? projectEnd : end,
+                      // The form sends the ending it shows: another than the project's is the person's choice.
+                      ...(end !== undefined && end !== projectEnd ? { endChosen: true } : {}),
+                    }),
               })
               yield* plans.start(planId, instance.personId)
               return yield* queries.task(created.taskId)
@@ -1502,7 +1507,20 @@ export const handlers = Api.toLayer(
       HoldPlan: ({ commandId, planId }) => once(commandId, api(Effect.asVoid(plans.hold(planId, instance.personId)))),
       ChangePlan: ({ commandId, planId, steps, end, worksIn, toward }) =>
         once(commandId, api(plans.change(planId, steps, instance.personId, end, worksIn, toward))),
-      ApplyPreset: ({ commandId, planId, preset }) => once(commandId, api(plans.applyPreset(planId, preset, instance.personId))),
+      ApplyPreset: ({ commandId, planId, preset }) =>
+        once(
+          commandId,
+          api(
+            Effect.gen(function* () {
+              const [plan] = yield* sql<{
+                projectId: string
+                taskId: string
+              }>`SELECT project_id, task_id FROM task_plans WHERE id = ${planId}`
+              const end = plan === undefined ? undefined : yield* pullRequests.endFor(plan.projectId, plan.taskId)
+              return yield* plans.applyPreset(planId, preset, instance.personId, end)
+            }),
+          ),
+        ),
       ChangeTeam: ({ commandId, taskId, steps }) =>
         once(
           commandId,
