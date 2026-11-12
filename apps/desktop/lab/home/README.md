@@ -8,10 +8,10 @@ cd apps/desktop && ../../node_modules/.bin/vp dev --config lab/home/vite.config.
 
 At `http://localhost:6141`. Keys 1–5, or the bar along the bottom, swap the look; `c` and `b` are the app's own keys for the panes; `w` switches between a wide window and the app's narrowest (880 px), `t` between light and dark. The address takes `talk=0`, `board=0`, `swapped=1`, `room=settings`, `zoom=3` and `shot=1` (no bar) for screenshots.
 
-The third pass of looks (the first two are in the history):
+The fourth pass of looks, each the first map's shape drawn another way (the earlier passes are in the history):
 
-1. **Words in the map.** The panes named, Conversation and Board, on a segmented track; a pane that shows is raised paper.
-2. **Swap in the seam.** Swap is the divider between the halves, not a button beside them.
-3. **Blue accent.** A pane that shows is washed in the app's blue.
-4. **Window thumbnail.** A title bar over the panes, each drawn with what it holds while it shows; hidden, a dashed slot.
-5. **Bare seam.** No frame or fill: two glyphs, ink while they show and faint while hidden, split by a hairline.
+1. **First, softer.** The first map with a hairline frame, a pane that shows tinted in ink rather than filled grey.
+2. **Hatched when closed.** A pane that shows is plain with its glyph; one closed is hatched.
+3. **White window.** A white window on the chrome; a pane closed is greyed out of it.
+4. **System icon.** No glyphs, one stroke like a system icon; a pane that shows is filled.
+5. **Frameless.** A pane that shows has the header's pressed wash; one closed is a dashed outline.

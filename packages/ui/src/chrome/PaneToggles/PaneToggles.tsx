@@ -44,14 +44,14 @@ export const paneTogglesText: PaneTogglesText = {
 export type PaneTogglesDesign = 'today' | MapLook
 
 /** How the layout map is drawn and coloured. */
-type MapLook = 'words' | 'hinge' | 'live' | 'thumb' | 'seam'
+type MapLook = 'soft' | 'hatch' | 'sheet' | 'icon' | 'quiet'
 
 export const paneTogglesDesigns: ReadonlyArray<{ readonly key: MapLook; readonly label: string }> = [
-  { key: 'words', label: 'Words in the map' },
-  { key: 'hinge', label: 'Swap in the seam' },
-  { key: 'live', label: 'Blue accent' },
-  { key: 'thumb', label: 'Window thumbnail' },
-  { key: 'seam', label: 'Bare seam' },
+  { key: 'soft', label: 'First, softer' },
+  { key: 'hatch', label: 'Hatched when closed' },
+  { key: 'sheet', label: 'White window' },
+  { key: 'icon', label: 'System icon' },
+  { key: 'quiet', label: 'Frameless' },
 ]
 
 const Design = createContext<PaneTogglesDesign>('today')
@@ -123,88 +123,49 @@ function GlyphButtons(props: PaneTogglesProps) {
 }
 
 const LOOK: Record<MapLook, string | undefined> = {
-  words: s.words,
-  hinge: s.hinge,
-  live: s.live,
-  thumb: s.thumb,
-  seam: s.seam,
+  soft: s.soft,
+  hatch: s.hatch,
+  sheet: s.sheet,
+  icon: s.icon,
+  quiet: s.quiet,
 }
 
 /**
  * The layout map: one small drawing of the window, its two panes as they sit, the conversation the narrower; each half
- * shows or hides its pane. Swap beside it.
+ * shows or hides its pane. Swap beside it. All five keep the first map's shape and change only its drawing:
  *
- * - words: the panes named in the map, as wide as their words; a pane that shows is raised paper.
- * - hinge: swap is the seam between the halves, not a button beside them.
- * - live: a pane that shows is washed in the app's blue, its glyph blue.
- * - thumb: a thumbnail of the window, a title bar over its panes, each drawn with what it holds while it shows.
- * - seam: no frame or fill: the glyphs, ink while they show and faint while hidden, split by a hairline.
+ * - soft: the first, its frame a hairline and a pane that shows tinted in ink, not filled grey.
+ * - hatch: a pane that shows is plain with its glyph; one closed is hatched, as a space put away.
+ * - sheet: a white window on the chrome; a pane closed is greyed out of it.
+ * - icon: no glyphs, drawn as a system icon in one stroke; a pane that shows is filled.
+ * - quiet: no frame; a pane that shows is the header's pressed wash, one closed a dashed outline.
  */
 function LayoutMap(props: PaneTogglesProps & { look: MapLook }) {
   const { shown, swapped, keys = {}, className, look } = props
   const { t, both, only, toggle, swap, sides } = usePanes(props)
-  const half = (pane: Pane) => (
-    <Tooltip key={pane} label={t[pane]} {...(keys[pane] === undefined ? {} : { kbd: keys[pane] })} placement="below">
-      <button
-        type="button"
-        className={cx(s.half, pane === 'talk' ? s.talkHalf : s.boardHalf)}
-        aria-label={t[pane]}
-        aria-pressed={shown[pane]}
-        aria-disabled={only(pane) || undefined}
-        onClick={() => toggle(pane)}
-      >
-        {look === 'thumb' ? <Miniature pane={pane} /> : <Icon name={ICON[pane]} size={12} />}
-        {look === 'words' && <span className={s.word}>{t[pane]}</span>}
-      </button>
-    </Tooltip>
-  )
-  const hinge = look === 'hinge'
   return (
     <fieldset aria-label={t.label} data-pane-toggles className={cx(s.toggles, className)}>
       <span className={cx(s.map, LOOK[look])}>
-        {half(sides[0] ?? 'talk')}
-        {hinge ? (
-          <Tooltip label={t.swap} placement="below">
+        {sides.map((pane) => (
+          <Tooltip key={pane} label={t[pane]} {...(keys[pane] === undefined ? {} : { kbd: keys[pane] })} placement="below">
             <button
               type="button"
-              className={s.hingeButton}
-              aria-label={t.swap}
-              aria-pressed={both && swapped}
-              aria-disabled={!both || undefined}
-              onClick={swap}
+              className={cx(s.half, pane === 'talk' ? s.talkHalf : s.boardHalf)}
+              aria-label={t[pane]}
+              aria-pressed={shown[pane]}
+              aria-disabled={only(pane) || undefined}
+              onClick={() => toggle(pane)}
             >
-              <Icon name="swap" size={10} />
+              {look !== 'icon' && <Icon name={ICON[pane]} size={12} />}
             </button>
           </Tooltip>
-        ) : (
-          look === 'seam' && <span className={s.seamLine} aria-hidden="true" />
-        )}
-        {half(sides[1] ?? 'board')}
+        ))}
       </span>
-      {!hinge && <SwapButton label={t.swap} pressed={both && swapped} can={both} onSwap={swap} />}
+      <SwapButton label={t.swap} pressed={both && swapped} can={both} onSwap={swap} />
     </fieldset>
   )
 }
 
 function SwapButton({ label, pressed, can, onSwap }: { label: string; pressed: boolean; can: boolean; onSwap: () => void }) {
   return <ChromeButton icon="swap" label={label} pressed={pressed} compact aria-disabled={!can || undefined} onClick={onSwap} />
-}
-
-/** What a pane holds, drawn small: the conversation's lines; the board's lanes of cards. */
-function Miniature({ pane }: { pane: Pane }) {
-  if (pane === 'talk')
-    return (
-      <svg viewBox="0 0 12 10" width={12} height={10} aria-hidden="true" className={s.miniature}>
-        <path d="M5 2h6M1 5h10M1 8h7" stroke="currentColor" strokeWidth={1.3} strokeLinecap="round" />
-      </svg>
-    )
-  return (
-    <svg viewBox="0 0 22 10" width={22} height={10} aria-hidden="true" className={s.miniature}>
-      <rect x={1} y={1} width={5.5} height={3.5} rx={1} fill="currentColor" />
-      <rect x={1} y={5.5} width={5.5} height={3.5} rx={1} fill="currentColor" />
-      <rect x={8.25} y={1} width={5.5} height={3.5} rx={1} fill="currentColor" />
-      <rect x={15.5} y={1} width={5.5} height={3.5} rx={1} fill="currentColor" />
-      <rect x={15.5} y={5.5} width={5.5} height={3.5} rx={1} fill="currentColor" />
-    </svg>
-  )
 }

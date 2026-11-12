@@ -43,154 +43,118 @@
   cursor: default;
 }
 
-/* words: the panes named in the map, on a segmented track; a pane that shows is raised paper */
-.words {
-  width: auto;
+/* Every look keeps the first map's shape: a frame of two halves, the conversation the narrower. */
+.map {
   gap: 2px;
   padding: 2px;
-  border-radius: 8px;
-  background: var(--segment-track);
-}
-.words .half {
-  flex: none;
-  gap: 5px;
-  padding: 0 8px;
   border-radius: 6px;
-  font-size: 12px;
 }
-.words .half[aria-pressed='true'] {
-  background: var(--segment-on);
-  box-shadow: var(--lift);
+.half {
+  border-radius: 3px;
 }
-.word {
-  white-space: nowrap;
+.half:hover:not([aria-disabled='true']) {
+  color: var(--t-2);
 }
 
-/* hinge: swap is the seam between the two halves */
-.hinge {
-  width: 72px;
-  align-items: stretch;
+/* soft: the first, its frame a hairline, a pane that shows tinted in ink */
+.soft {
+  border: 1px solid var(--line-2);
+}
+.soft .half:hover:not([aria-disabled='true']) {
+  background: var(--line);
+}
+.soft .half[aria-pressed='true'] {
+  background: color-mix(in srgb, var(--t-1) 9%, transparent);
+  color: var(--t-1);
+}
+
+/* hatch: a pane that shows is plain with its glyph; one closed is hatched */
+.hatch {
+  border: 1.25px solid var(--t-4);
+}
+.hatch .half[aria-pressed='false'] {
+  background: repeating-linear-gradient(-45deg, var(--line-3) 0 1px, transparent 1px 4px);
+  color: transparent;
+}
+.hatch .half[aria-pressed='false']:hover:not([aria-disabled='true']) {
+  background: var(--line);
+  color: var(--t-2);
+}
+.hatch .half[aria-pressed='true'] {
+  color: var(--t-1);
+}
+
+/* sheet: a white window on the chrome; a pane closed is greyed out of it */
+.sheet {
+  padding: 0;
+  gap: 0;
   overflow: hidden;
   border: 1px solid var(--line-3);
-  border-radius: 6px;
+  background: var(--paper);
+  box-shadow: var(--lift);
 }
-.hinge .half:hover:not([aria-disabled='true']) {
+.sheet .half {
+  border-radius: 0;
+}
+.sheet .half + .half {
+  border-inline-start: 1px solid var(--line-2);
+}
+.sheet .half[aria-pressed='true'] {
+  color: var(--t-1);
+}
+.sheet .half[aria-pressed='false'] {
+  background: var(--line-2);
+}
+.sheet .half:hover:not([aria-disabled='true'], [aria-pressed='true']) {
   background: var(--line);
 }
-.hinge .half[aria-pressed='true'] {
-  background: var(--segment-on);
+
+/* icon: no glyphs, one stroke like a system icon; a pane that shows is filled */
+.icon {
+  width: 40px;
+  height: 26px;
+  padding: 5px 4px;
+  border-radius: var(--r);
 }
-.hinge .talkHalf {
-  flex-basis: 30%;
+.icon .half {
+  height: 16px;
+  border: 1.5px solid var(--t-3);
+  border-radius: 0;
 }
-.hingeButton {
-  display: inline-flex;
-  flex: none;
-  align-items: center;
-  justify-content: center;
-  width: 14px;
-  border-inline: 1px solid var(--line-3);
-  background: var(--line);
-  color: var(--t-3);
+.icon .half:first-child {
+  border-radius: 3.5px 0 0 3.5px;
 }
-.hingeButton:hover:not([aria-disabled='true']) {
+.icon .half:last-child {
+  border-radius: 0 3.5px 3.5px 0;
+}
+.icon .half + .half {
+  border-inline-start-width: 0;
+}
+.icon {
+  gap: 0;
+}
+.icon .half[aria-pressed='true'] {
+  background: color-mix(in srgb, var(--t-3) 55%, transparent);
+}
+.icon .half:hover:not([aria-disabled='true']) {
+  border-color: var(--t-1);
+}
+
+/* quiet: no frame; a pane that shows is the header's pressed wash, one closed a dashed outline */
+.quiet .half[aria-pressed='true'] {
   background: var(--line-2);
   color: var(--t-1);
 }
-.hingeButton[aria-disabled='true'] {
-  cursor: default;
-  color: transparent;
-}
-
-/* live: a pane that shows is washed in the app's blue */
-.live {
-  gap: 2px;
-}
-.live .half {
-  border: 1px solid var(--line-3);
-  border-radius: 5px;
-}
-.live .half[aria-pressed='true'] {
-  border-color: color-mix(in srgb, var(--live) 45%, transparent);
-  background: var(--live-dim);
-  color: var(--live);
-}
-.live .half:hover:not([aria-disabled='true'], [aria-pressed='true']) {
-  background: var(--line);
-}
-
-/* thumb: a thumbnail of the window, a title bar over its panes, each drawn with what it holds while it shows */
-.thumb {
-  position: relative;
-  width: 62px;
-  height: 26px;
-  gap: 2px;
-  padding: 6px 2px 2px;
-  border: 1px solid var(--line-3);
-  border-radius: 5px;
-  background: var(--line);
-}
-.thumb::before {
-  content: '';
-  position: absolute;
-  top: 2px;
-  left: 3px;
-  width: 9px;
-  height: 2px;
-  border-radius: 1px;
-  background: var(--line-3);
-}
-.thumb .half {
-  border-radius: 2px;
-  color: var(--t-3);
-}
-.thumb .half[aria-pressed='true'] {
-  background: var(--segment-on);
-}
-.thumb .half[aria-pressed='false'] {
+.quiet .half[aria-pressed='false'] {
   outline: 1px dashed var(--line-3);
   outline-offset: -1px;
 }
-.thumb .half[aria-pressed='false'] .miniature {
-  opacity: 0;
-}
-.thumb .half:hover:not([aria-disabled='true']) .miniature {
-  opacity: 1;
-  color: var(--t-1);
-}
-.miniature {
-  display: block;
-  transition: opacity var(--fast) var(--ease);
-}
-
-/* seam: no frame, no fill; the glyphs, ink while they show and faint while hidden, split by a hairline */
-.seam {
-  width: auto;
-  align-items: center;
-}
-.seam .half {
-  flex: none;
-  width: 24px;
-  height: 24px;
-  border-radius: var(--r);
-  color: var(--t-4);
-}
-.seam .half[aria-pressed='true'] {
-  color: var(--t-1);
-}
-.seam .half:hover:not([aria-disabled='true']) {
+.quiet .half:hover:not([aria-disabled='true']) {
   background: var(--line);
-}
-.seamLine {
-  width: 1px;
-  height: 14px;
-  margin: 0 1px;
-  background: var(--line-3);
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .half,
-  .miniature {
+  .half {
     transition: none;
   }
 }

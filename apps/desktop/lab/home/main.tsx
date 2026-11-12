@@ -63,7 +63,7 @@ function Home() {
 
 function Lab() {
   const asked = paneTogglesDesigns.find((one) => one.key === params.get('d'))?.key
-  const [design, setDesign] = useState<PaneTogglesDesign>(asked ?? 'words')
+  const [design, setDesign] = useState<PaneTogglesDesign>(asked ?? 'soft')
   const [narrow, setNarrow] = useState(params.get('narrow') === '1')
   const [theme, setTheme] = useState(params.get('theme') === 'dark' ? 'dark' : 'light')
   useEffect(() => {
