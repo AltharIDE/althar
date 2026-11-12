@@ -1,18 +1,20 @@
 import { createContext, Fragment, useContext, useState, type ReactNode } from 'react'
 
-import type { FieldAnswer, SentLineComment, Unfurl } from '@althar/contracts'
+import type { FieldAnswer, PresetParts, SentLineComment, Unfurl } from '@althar/contracts'
 import {
   AltharLine,
   Arrived,
   CodeBlock,
   CommentExcerpt,
   FailedLogs,
+  CanvasLine,
   Gallery,
   glyphOf,
   Issue,
   IssueRef,
   LinkButton,
   Markdown,
+  MergeLine,
   Plan,
   Question,
   type QuestionAnswer,
@@ -39,6 +41,7 @@ import { documentVersions } from './handed'
 import { fileAttachments } from './files'
 import { sentAttachments } from './images'
 import { useModelNames } from './modelNames'
+import { useServices } from '../data/services'
 import { WayOut } from './WayOut'
 import { serverBrand } from './mcpServers'
 import { keyOf, pastedIn } from './pasted'
@@ -64,7 +67,9 @@ import type {
   StepResult,
   TaskCardContent,
 } from './thread'
+import { ReviewOfferOf } from '../features/team/ReviewOfferOf'
 import s from './ThreadBlocks.module.css'
+import { duration, lineOf, spentWords } from './turnTime'
 
 /*
  * A thread's blocks as the kit draws them, the same in a task and in the
@@ -188,6 +193,24 @@ function SetupView({ setup }: { setup: SetupContent }) {
  * under its work (ADR-097): what acted on the world stands out of what only
  * read, which stays folded in the work.
  */
+/** A canvas an agent drew or opened (ADR-104): its line, which opens it beside the conversation. */
+export function CanvasOf({ part }: { part: Extract<Part, { kind: 'canvas' }> }) {
+  const { canvas } = part
+  return (
+    <CanvasLine
+      data-item={part.id}
+      canvas={{ canvasId: canvas.canvasId, name: canvas.name, title: canvas.title, kind: canvas.canvasKind, version: canvas.version }}
+      action={canvas.action}
+      note={canvas.note}
+    />
+  )
+}
+
+/** The canvases a round drew or opened, each its line, in order. */
+export function CanvasLines({ drawn }: { drawn: ReadonlyArray<Extract<Part, { kind: 'canvas' }>> }) {
+  return drawn.map((part) => <CanvasOf key={part.id} part={part} />)
+}
+
 export function McpActs({ parts }: { parts: ReadonlyArray<Part> }) {
   const acts = parts.flatMap((part) =>
     part.kind === 'tool' && part.mcp?.acts === true && part.state === ToolState.Done ? [{ id: part.id, mcp: part.mcp }] : [],
@@ -304,15 +327,41 @@ export function PartView({ part, threadId }: { part: Part; threadId: string }) {
     case 'plan':
       return <Plan steps={part.steps} />
     case 'notice':
+      // A review a lead offered: its line asks, with its buttons, and says what came of it once answered.
+      if (part.offer?.kind === 'review') return <ReviewOfferOf offer={part.offer} ask={part.text} />
       return (
         <>
           <p className={s[part.tone]}>{part.text}</p>
           {part.detail !== undefined && <p className={s.detail}>{part.detail}</p>}
+          {part.offer?.kind === 'preset' && <PresetOffer offer={part.offer} />}
         </>
       )
     case 'pictures':
       return <Gallery shots={shotsOf(part.id, part.pictures)} />
+    case 'canvas':
+      return <CanvasOf part={part} />
   }
+}
+
+/** The coordinator's offer to keep parts the person set up twice as a preset: one press keeps it, by its name. */
+function PresetOffer({ offer }: { offer: { readonly name: string; readonly parts: PresetParts } }) {
+  const { client } = useServices()
+  const [kept, setKept] = useState<'no' | 'keeping' | 'kept'>('no')
+  if (kept === 'kept') return <p className={s.detail}>{`Kept as “${offer.name}”: Settings has your presets.`}</p>
+  return (
+    <LinkButton
+      disabled={kept === 'keeping'}
+      onClick={() => {
+        setKept('keeping')
+        client.savePreset({ name: offer.name, parts: offer.parts }).then(
+          () => setKept('kept'),
+          () => setKept('no'),
+        )
+      }}
+    >
+      {`Keep it as “${offer.name}”`}
+    </LinkButton>
+  )
 }
 
 /** What the person said, each link that unfurled read as its key where they pasted it; its card, under the words, says the rest. */
@@ -408,7 +457,17 @@ export const logLines = (log: string) => {
  * wasn't passed to the lead, as anyone can comment on a public one; the
  * person reads it, and can pass it on.
  */
-function ArrivalView({ arrival, at, onPassOn }: { arrival: ArrivalContent; at: string; onPassOn?: (words: string) => void }) {
+function ArrivalView({
+  arrival,
+  at,
+  count,
+  onPassOn,
+}: {
+  arrival: ArrivalContent
+  at: string
+  count: number
+  onPassOn?: (words: string) => void
+}) {
   const where =
     arrival.path === null ? arrival.where : `${arrival.where} · ${arrival.path}${arrival.line === null ? '' : `:${arrival.line}`}`
   const verb = heardVerb(arrival)
@@ -428,6 +487,7 @@ function ArrivalView({ arrival, at, onPassOn }: { arrival: ArrivalContent; at: s
       verb={verb}
       where={where}
       at={at}
+      count={count}
       mark={productBrand(arrival.source)}
       {...(foot === false ? {} : { foot })}
     >
@@ -519,6 +579,7 @@ export function ThreadBlocks({
   onAnswerQuestion,
   focusQuestion,
   project,
+  signed,
 }: {
   blocks: ReadonlyArray<Block>
   /** The thread they are of: what a command printed and the documents an agent wrote are read by it. */
@@ -531,6 +592,8 @@ export function ThreadBlocks({
   project?: string
   /** The thread's session, whose model and account name its turns. */
   session?: { readonly agentId: string; readonly model: string | null; readonly account: string | null } | null
+  /** Who signs its turns in place of their model, with its mark: the coordinator, in its conversation and in its asides. */
+  signed?: { readonly voice: string; readonly mark: ReactNode }
   /** Sends what someone outside said to the lead, in the person's name. */
   onPassOn?: (words: string) => void
   /** Answers an agent's question; what went wrong, in words, or null. Without it, a question can't be answered here. */
@@ -582,6 +645,9 @@ export function ThreadBlocks({
       : session != null && agentId === session.agentId
         ? named(agentId, session.model, session.account)
         : named(agentId)
+  // Signed, the turns say who speaks rather than which model.
+  const speaker = (agentId: string | null, model: string | null = null) =>
+    signed === undefined ? { model: turnModel(agentId, model) } : { voice: signed.voice, mark: signed.mark }
   // The thread's last turn, where an error ended it: it can be tried again. What the person said in it may wait after it.
   const last = blocks.findLast((block) => block.kind === 'turn' || block.kind === 'waiting')
   const ending = last?.kind === 'turn' && !last.live ? last.said.at(-1) : undefined
@@ -614,12 +680,34 @@ export function ThreadBlocks({
           </You>
         )
       case 'arrival':
-        return <ArrivalView key={block.id} arrival={block.arrival} at={block.at} {...(onPassOn === undefined ? {} : { onPassOn })} />
+        return (
+          <ArrivalView
+            key={block.id}
+            arrival={block.arrival}
+            at={block.at}
+            count={block.count}
+            {...(onPassOn === undefined ? {} : { onPassOn })}
+          />
+        )
       case 'divider':
         return (
           <ThreadDivider key={block.id} icon="agents">
             {block.text}
           </ThreadDivider>
+        )
+      case 'offer':
+        if (block.offer.kind === 'review')
+          return (
+            <div key={block.id} className={s.offer}>
+              <ReviewOfferOf offer={block.offer} ask={block.text} />
+            </div>
+          )
+        return (
+          <div key={block.id} className={s.offer}>
+            <p className={s.info}>{block.text}</p>
+            {block.detail !== null && <p className={s.detail}>{block.detail}</p>}
+            <PresetOffer offer={block.offer} />
+          </div>
         )
       case 'step':
         // A step's report is a task's, and its thread draws it in its rounds (TaskThread, ADR-042).
@@ -655,11 +743,13 @@ export function ThreadBlocks({
         return <Fragment key={block.id}>{smallChange?.(block.card, block.id)}</Fragment>
       case 'model_move':
         return <Fragment key={block.id}>{modelMove?.(block.move, block.id)}</Fragment>
+      case 'merge_line':
+        return <MergeLine key={block.id} rows={block.line.rows} branch={block.line.branch} />
       case 'setting':
         return <SettingChangeOf key={block.id} change={block.change} itemId={block.id} />
       case 'waiting':
         return (
-          <Turn key={block.id} model={turnModel(session?.agentId ?? null)}>
+          <Turn key={block.id} {...speaker(session?.agentId ?? null)}>
             <Thinking {...(block.took === null ? {} : { took: block.took })} slow={block.slow} />
           </Turn>
         )
@@ -673,13 +763,15 @@ export function ThreadBlocks({
         return (
           <Turn
             key={block.id}
-            model={turnModel(block.agentId, block.model)}
+            {...speaker(block.agentId, block.model)}
             at={block.at}
             {...(said === '' || block.live ? {} : { copy: said })}
           >
             {block.work.length > 0 && (
               <WorkedFor
-                took={block.took}
+                took={block.spent === null ? block.took : duration(block.spent.total)}
+                {...(block.spent === null ? {} : { spent: spentWords(block.spent) })}
+                {...(block.spent === null || lineOf(block.spent) === undefined ? {} : { most: lineOf(block.spent) })}
                 live={working}
                 {...(onTheWay.length === 0
                   ? {}

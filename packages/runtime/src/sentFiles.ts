@@ -66,6 +66,9 @@ const folderOf = (threadId: string) =>
     return { projectId: thread.projectId, folder }
   })
 
+/** The folder a thread's agent starts from, for what else Althar keeps there (a canvas's working copies, ADR-104). */
+export const agentFolderOf = folderOf
+
 /** A name not yet taken in a message's folder: the file's own, or with a number before its extension. */
 const freeName = (name: string, taken: Set<string>) => {
   const extension = extname(name)

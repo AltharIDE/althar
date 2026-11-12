@@ -36,14 +36,24 @@ export type Blocker =
 export type Next =
   | { readonly kind: 'merge' }
   | { readonly kind: 'push'; readonly commits: number }
+  /** What waits on its branch for Ship goes up, its review first where its plan has one (a task is a conversation plus parts). */
+  | { readonly kind: 'ship'; readonly commits: number }
   | { readonly kind: 'resolve' }
   | { readonly kind: 'fix'; readonly failing: ReadonlyArray<string> }
+  /** What a review after a merge found goes to the lead, its fix shipping after the merged pull request (a task is a conversation plus parts). */
+  | { readonly kind: 'fix_after_merge'; readonly words: string }
 
 export interface Standing {
   /** Most pressing first. */
   readonly blockers: ReadonlyArray<Blocker>
   readonly next: Next | null
 }
+
+/** A head's checks without the skipped ones: they never ran, so they are neither passed nor missing from the total. */
+export const ranChecks = (checks: NonNullable<ChangeSummary['checks']>): { readonly passed: number; readonly total: number } => ({
+  passed: checks.passed,
+  total: checks.total - checks.list.filter((check) => check.state === 'skipped').length,
+})
 
 export const standingText = {
   commits: (n: number) => (n === 1 ? '1 commit' : `${n} commits`),
@@ -77,6 +87,8 @@ export const standingText = {
   nextFailed: {
     merge: (why: string) => `Merge failed: ${why}`,
     push: (why: string) => `Push failed: ${why}`,
+    ship: (why: string) => `Ship failed: ${why}`,
+    fix_after_merge: (why: string) => `Fix it failed: ${why}`,
     again: 'Try again',
   },
   /** What a screen reader hears of the button for a next thing, naming the pull request it acts on. */
@@ -111,8 +123,7 @@ export const standingOf = (change: ChangeSummary): Standing => {
   const cancelled = checks === null ? [] : checks.list.filter((check) => check.state === 'cancelled').map((check) => check.name)
   if (checks !== null && checks.failed > 0) blockers.push({ kind: 'failed', failing: checks.failing, failed: checks.failed })
   // Run again by Althar, a cancelled check is running before its host shows it so.
-  else if (checks !== null && (checks.running > 0 || checks.outcome === 'running'))
-    blockers.push({ kind: 'running', passed: checks.passed, total: checks.total })
+  else if (checks !== null && (checks.running > 0 || checks.outcome === 'running')) blockers.push({ kind: 'running', ...ranChecks(checks) })
   else if (cancelled.length > 0) blockers.push({ kind: 'cancelled', cancelled })
   return { blockers, next: nextOf(blockers[0]) }
 }
@@ -166,10 +177,11 @@ export const saidOf = (blocker: Blocker, change: Pick<ChangeSummary, 'short'>): 
 /** Nothing in the way: how its checks went, green only where every one passed, or that none ran. */
 export const clearOf = (change: Pick<ChangeSummary, 'checks'>): Said => {
   const checks = change.checks
-  if (checks === null || checks.total === 0) return { words: standingText.none, tone: 'quiet' }
-  return checks.passed === checks.total
-    ? { words: standingText.passed(checks.total), icon: 'check', tone: 'ok' }
-    : { words: standingText.soFar(checks.passed, checks.total), tone: 'quiet' }
+  const ran = checks === null ? null : ranChecks(checks)
+  if (ran === null || ran.total === 0) return { words: standingText.none, tone: 'quiet' }
+  return ran.passed === ran.total
+    ? { words: standingText.passed(ran.total), icon: 'check', tone: 'ok' }
+    : { words: standingText.soFar(ran.passed, ran.total), tone: 'quiet' }
 }
 
 /**
@@ -213,18 +225,27 @@ export const factsOf = (change: ChangeSummary, standing: Standing = standingOf(c
   return facts.length === 0 ? [clearOf(change)] : facts
 }
 
-/** Whether the next thing is the person's own, done from where it is shown: pushing and merging. The others are the lead's, and open the task. */
-export type DoneHere = Extract<Next, { kind: 'merge' | 'push' }>
+/** Whether the next thing is the person's own, done from where it is shown: pushing, merging and shipping. The others are the lead's, and open the task. */
+export type DoneHere = Extract<Next, { kind: 'merge' | 'push' | 'ship' | 'fix_after_merge' }>
 
-export const doneHere = (next: Next): next is DoneHere => next.kind === 'merge' || next.kind === 'push'
+export const doneHere = (next: Next): next is DoneHere =>
+  next.kind === 'merge' || next.kind === 'push' || next.kind === 'ship' || next.kind === 'fix_after_merge'
 
 /** The next thing while it is under way. */
-export const doingWords = (next: Extract<Next, { kind: 'merge' | 'push' }>): string =>
-  next.kind === 'merge' ? standingText.doing.merge : standingText.doing.push(next.commits)
+export const doingWords = (next: DoneHere): string =>
+  next.kind === 'merge'
+    ? standingText.doing.merge
+    : next.kind === 'ship'
+      ? shipText.shipping
+      : next.kind === 'fix_after_merge'
+        ? afterMergeText.fixing
+        : standingText.doing.push(next.commits)
 
 /** The next thing's button, for a screen reader: what it does and to which pull request; or, after it failed, that it tries again. */
-export const labelWords = (next: Extract<Next, { kind: 'merge' | 'push' }>, where: string, failed = false): string => {
+export const labelWords = (next: DoneHere, where: string, failed = false): string => {
   const t = standingText.label
+  if (next.kind === 'ship') return failed ? shipText.again(next.commits) : shipText.label(next.commits)
+  if (next.kind === 'fix_after_merge') return afterMergeText.fixHint(next.words)
   return next.kind === 'merge'
     ? failed
       ? t.mergeAgain(where)
@@ -242,11 +263,53 @@ export const nextWords = (next: Next): string => {
       return t.merge
     case 'push':
       return t.push(next.commits)
+    case 'ship':
+      return shipText.ship
     case 'resolve':
       return t.resolve
     case 'fix':
       return t.fix
+    case 'fix_after_merge':
+      return afterMergeText.fix
   }
+}
+
+/**
+ * What waits on a task's branch for Ship (a task is a conversation plus
+ * parts, "A tweak waits for Ship"), as its card, its header and Needs you
+ * say it: how many commits, and Ship, which reviews them where the plan has a
+ * reviewer before the work ships, and then sends them up.
+ */
+export const shipText = {
+  word: 'Not shipped',
+  commits: (n: number) => `${standingText.commits(n)} not shipped`,
+  ship: 'Ship',
+  shipping: 'Shipping',
+  failed: (why: string) => `Ship failed: ${why}`,
+  label: (n: number) => `Ship ${standingText.commits(n)}`,
+  /** What Ship does, on hover: its review reads them first, where the plan has a reviewer, and then they go up. */
+  hint: (n: number, reviewed: boolean) =>
+    reviewed ? `Its review reads ${standingText.commits(n)} first, then they go up` : `${standingText.commits(n)} go up`,
+  again: (n: number) => `Try shipping ${standingText.commits(n)} again`,
+}
+
+/**
+ * A review after a merge, in the same task (a task is a conversation plus
+ * parts): what it found waits on the person, for the change that merged, as
+ * its card, its header and Needs you say it, with Fix it and Leave it.
+ */
+export const afterMergeText = {
+  word: (n: number) => `Review found ${n}`,
+  /** Under the word, which already says what it found: which merge it was about. */
+  after: (words: string) => `After ${words} merged`,
+  sentence: (n: number, words: string) => `Review found ${n} after ${words} merged`,
+  fix: 'Fix it',
+  fixing: 'Fixing',
+  /** What Fix it does, on hover. */
+  fixHint: (words: string) => `The lead fixes them, and its fix goes up as a new pull request after ${words}`,
+  leave: 'Leave it',
+  leaving: 'Leaving',
+  leaveHint: 'Close the findings: they stay in the thread',
 }
 
 /** A ready change's word, where it isn't plainly ready to accept. */
@@ -257,6 +320,8 @@ export const readyText = {
   blocked: 'Not ready to accept',
   /** A conflict the commits waiting to be pushed resolve: ready once the person pushes them. */
   readyOnPush: 'Ready once pushed',
+  /** Its checks still run: not ready to accept until they pass, whichever pull request they are on. */
+  checksRunning: 'Checks running',
 }
 
 /**
@@ -272,14 +337,25 @@ export const readyWordOf = (
     readonly conflictUnsent?: string | null | undefined
     readonly unshipped?: unknown
     readonly nothingBuilt?: boolean | undefined
+    readonly held?: unknown
+    readonly replied?: string | undefined
+    readonly afterMerge?: { readonly state: string; readonly findings: number } | undefined
   },
   latest: ChangeSummary | null,
 ): string => {
   const change = task.unshipped == null || latest?.state === 'open' ? latest : null
+  // What a review after a merge found is the person's first: Fix it or Leave it.
+  if (task.afterMerge?.state === 'found') return afterMergeText.word(task.afterMerge.findings)
+  // Held for Ship, the person's word is what it waits on, whatever its pull request says: Ship's push replaces its head.
+  if (task.held !== undefined) return shipText.word
+  // Its lead answered them, unread, where no open pull request says more of where it stands.
+  if (task.replied !== undefined && latest?.state !== 'open' && task.unshipped == null) return kindWords.replied
   if (task.handedBack != null || task.conflictUnsent != null) return readyText.mergeConflict
   if (task.nothingBuilt === true) return kindWords.nothingBuilt
   if (change === null && task.unshipped != null) return kindWords.unshipped
   if (change?.state === 'open' && isBlocked(standingOf(change))) return readyText.blocked
   if (change?.state === 'open' && pushResolves(standingOf(change))) return readyText.readyOnPush
+  // The open pull request's checks run, as a next one's do after the first merged: they say it, not "Ready to accept".
+  if (change?.state === 'open' && standingOf(change).blockers.some((one) => one.kind === 'running')) return readyText.checksRunning
   return kindWords.ready
 }

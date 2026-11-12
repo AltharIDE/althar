@@ -14,8 +14,8 @@ export interface TurnText {
 
 export const turnText: TurnText = { quote: 'Quote' }
 
-/** Who speaks: a model, or a voice that is not one, like the coordinator. */
-type Speaker = { model: ModelInfo; voice?: undefined } | { voice: string; model?: undefined }
+/** Who speaks: a model, or a voice that is not one, like the coordinator, with its mark where it has one. */
+type Speaker = { model: ModelInfo; voice?: undefined; mark?: undefined } | { voice: string; mark?: ReactNode; model?: undefined }
 
 export type TurnProps = RootProps<
   'article',
@@ -39,14 +39,21 @@ export type TurnProps = RootProps<
  * actions row, when it has Copy, Quote or a note, waits for the turn to be
  * hovered or reached by keyboard.
  */
-export function Turn({ model, voice, at, children, meta, copy, onQuote, bare, className, text, ...rest }: TurnProps) {
+export function Turn({ model, voice, mark, at, children, meta, copy, onQuote, bare, className, text, ...rest }: TurnProps) {
   const t = { ...turnText, ...text }
   const name = model ? model.name : voice
   return (
     <article className={cx(s.turn, className)} aria-label={name} data-arrivals="" {...rest}>
       {!bare && (
         <header className={s.head}>
-          {model ? <Model model={model} strong className={s.agent} /> : <span className={s.who}>{voice}</span>}
+          {model ? (
+            <Model model={model} strong className={s.agent} />
+          ) : (
+            <span className={cx(s.who, mark !== undefined && s.marked)}>
+              {mark}
+              {voice}
+            </span>
+          )}
           {at && <span className={s.at}>{at}</span>}
         </header>
       )}

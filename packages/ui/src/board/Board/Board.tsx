@@ -308,6 +308,8 @@ export interface BoardColumnProps {
     readonly onChange: (value: string) => void
   }
   children?: ReactNode
+  /** What comes first in it, before its cards or its empty box, whether it holds any: Up next's Scratch chip. */
+  lead?: ReactNode
   /** What it says while it holds nothing, in its empty box: what will be here and how it gets here (BoardEmpty). Without it, the box is bare and its count, 0, says so. */
   empty?: ReactNode
   /** The lane's name's rank in the page's outline. */
@@ -322,7 +324,7 @@ export interface BoardColumnProps {
  * button that opens it again. The focus goes with it either way, and where
  * the board collapses or opens it by itself from under the focus, too.
  */
-export function BoardColumn({ lane, count, filled = count > 0, shelves, children, empty, headingLevel = 2, text }: BoardColumnProps) {
+export function BoardColumn({ lane, count, filled = count > 0, shelves, children, lead, empty, headingLevel = 2, text }: BoardColumnProps) {
   const t = { ...boardText, ...text }
   const id = useId()
   const bodyId = useId()
@@ -446,6 +448,7 @@ export function BoardColumn({ lane, count, filled = count > 0, shelves, children
         )}
       </header>
       <div className={s.body} id={bodyId}>
+        {lead}
         {/* An empty lane is an empty box: its count, 0, says so, unless it says what will be here. */}
         {filled ? (
           children

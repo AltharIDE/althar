@@ -30,7 +30,7 @@ export const ThreeRounds: Story = {
 export const OneRound: Story = {
   args: { rounds: 1 },
   play: async ({ canvasElement }) => {
-    await expect(within(canvasElement).getByRole('figure')).toHaveTextContent('up to 1 round')
+    await expect(within(canvasElement).getByRole('figure')).toHaveTextContent('one review')
     await expect(seals(canvasElement)).toHaveLength(1)
   },
 }
@@ -38,6 +38,7 @@ export const OneRound: Story = {
 export const TwoRounds: Story = {
   args: { rounds: 2 },
   play: async ({ canvasElement }) => {
+    await expect(within(canvasElement).getByRole('figure')).toHaveTextContent('a review, and one check of its fixes')
     await expect(seals(canvasElement)).toHaveLength(2)
   },
 }

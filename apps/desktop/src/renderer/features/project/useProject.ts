@@ -25,7 +25,7 @@ import { useOutputs } from '../../shared/useOutputs'
 import { useStreamed } from '../../shared/useStreamed'
 import { canPick } from '../../shared/agents'
 import { inView, isSending, mergeItems, newestReads, sending, takenBack, unsent, waiting } from '../../shared/items'
-import { type Choice, moveTo, runningOn, startOf } from '../../shared/models'
+import { type Choice, moveTo, runningOn, startOf, upcomingOn } from '../../shared/models'
 import type { Streamed } from '../../shared/thread'
 
 /*
@@ -88,8 +88,8 @@ export interface ProjectModel {
   readonly stopLaunch: (id: string) => Promise<void>
   readonly clearLaunch: (id: string) => Promise<void>
   /** Moves the running coordinator to another agent. */
-  /** Puts the coordinator on another model or effort, or another agent with one. */
-  readonly choose: (choice: Choice) => Promise<void>
+  /** Puts the coordinator on the model and effort chosen; whether it was taken, for the picker to go back to what it was if not. */
+  readonly choose: (choice: Choice) => Promise<boolean>
   /** Hands the conversation to another agent with what the person says, and any images: its first turn, after its brief. */
   readonly handOver: (choice: Choice, body: string, images?: Outgoing) => Promise<boolean>
   /** Answers the coordinator's question: what went wrong, in words, or null when it went through. */
@@ -105,6 +105,8 @@ export interface ProjectModel {
     worksIn?: WorksIn,
     toward?: string | null,
   ) => Promise<void>
+  /** Picks another preset for a plan before it starts, by name: its parts change to match. */
+  readonly applyPreset: (planId: string, preset: string) => Promise<void>
   /** Holds the plan, makes a branch the remote doesn't have from the default branch, then points the plan at it (ADR-093). */
   readonly changePlanToNewBranch: (
     planId: string,
@@ -219,6 +221,8 @@ export const useProject = (projectId: string): ProjectModel => {
     [client, threadId, newest, arrived, viewVersion, fail],
   )
 
+  // What the coordinator was last picked to, until the thread says it: a pick made before the last one was taken goes from there.
+  const lastPick = useRef<Choice | null>(null)
   /**
    * The thread's head again: the agent working, the one it would start on.
    * Its items stay as they are, but for those it may have moved on, read after
@@ -472,12 +476,31 @@ export const useProject = (projectId: string): ProjectModel => {
     },
     stopLaunch: (id) => act(() => client.stopLaunch(id)),
     clearLaunch: (id) => act(() => client.clearLaunch(id)),
-    choose: (choice) =>
-      act(async () => {
-        const session = coordinator?.session
+    choose: async (choice) => {
+      setError(null)
+      let taken = true
+      try {
+        // As the cache has it now, not as this render had it: a head read may have landed since.
+        const session = (cache.getQueryData<CoordinatorSnapshot>(keys.coordinator(projectId)) ?? coordinator)?.session
         // A session the runtime no longer holds can't be moved; the pick is applied when the person next says something.
-        if (threadId !== null && session != null && session.held) await moveTo(client, threadId, runningOn(session), choice)
-      }),
+        if (threadId !== null && session != null && session.held) {
+          // From what it was last picked to, else what the runtime holds for its next turn, else what it is on.
+          const from = lastPick.current ?? upcomingOn(session) ?? runningOn(session)
+          lastPick.current = choice
+          await moveTo(client, threadId, from, choice)
+        }
+      } catch (failure) {
+        fail(failure)
+        taken = false
+      }
+      // The pick stands as the last until the head read has landed: one made before it goes from here, not from the thread as it was.
+      try {
+        await readHead()
+      } finally {
+        if (lastPick.current === choice) lastPick.current = null
+      }
+      return taken
+    },
     handOver: (choice, body, images) =>
       shown(
         body,
@@ -509,6 +532,7 @@ export const useProject = (projectId: string): ProjectModel => {
             ? client.changePlan(planId, steps, end)
             : client.changePlan(planId, steps, end, worksIn),
       ),
+    applyPreset: (planId, preset) => act(() => client.applyPreset(planId, preset)),
     changePlanToNewBranch: (planId, steps, end, repositoryId, branch) =>
       act(async () => {
         // Held first, so its countdown can't start it toward the old branch while the host makes the new one; it then

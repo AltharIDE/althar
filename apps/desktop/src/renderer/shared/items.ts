@@ -106,7 +106,7 @@ export const mergeItems = (current: ReadonlyArray<ThreadItem>, incoming: Readonl
  * a message delivered (or never queued), a plan with every entry done, a
  * task settled, a question answered or withdrawn, a run or a setup ended, an issue
  * draft filed or discarded, changes to issues applied or discarded, a review draft posted or discarded, a push the lead
- * asked for pushed, asked again or closed, an automation deleted or its ask answered. What an agent
+ * asked for pushed, asked again or closed, an automation deleted or its ask answered, a merge line's card with every pull request merged. What an agent
  * said, a notice, a step's result, pictures shown and what arrived from outside
  * are settled once written.
  */
@@ -144,10 +144,14 @@ export const settled = (item: ThreadItem): boolean => {
     case 'step_result':
     case 'arrival':
     case 'pictures':
+    case 'canvas':
     // A small change's card and Auto's line are read from the task or kept current; neither waits open.
     case 'small_change':
     case 'model_move':
       return true
+    // The merge line's card moves in place until every pull request on it has merged; a later ask is a card of its own.
+    case 'merge_line':
+      return item.content.rows.every((row) => row.state === 'merged')
   }
 }
 

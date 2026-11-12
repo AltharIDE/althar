@@ -12,13 +12,13 @@ import { Projects } from '../src/Projects'
 import { Queries } from '../src/Queries'
 import * as Runtime from '../src/Runtime'
 import type { ToolAccess } from '../src/ToolServer'
-import { callTool, fakeConnectors, HOST, hosted, runtime } from './support'
+import { callTool, fakeConnectors, HOST, hosted, runtime, turnsFor } from './support'
 
 /*
  * The coordinator acting on the project's pull requests (ADR-081): running
  * checks again, reading the default branch's, marking ready, closing,
- * reopening and replying: on Althar's own, and on others', as each kind
- * allows, and on each host as it can.
+ * reopening and replying: on Althar's own and the person's own at once, on
+ * anyone else's on the person's word, and on each host as it can.
  */
 
 const seeded = (service: FakeService) => {
@@ -83,11 +83,10 @@ const openedFor = (projectId: string, taskId: string, url: string, number: numbe
   })
 
 describe('the coordinator marking ready, closing and reopening', () => {
-  it.live('does these on Althar’s own pull requests, and refuses one a person opened', () => {
+  it.live('does these on Althar’s own pull requests unasked', () => {
     const github = makeFakeService()
     const working = seeded(github)
     const mine = github.addPullRequest({ path: ['meridian', 'api'], title: 'Retry checkout', author: 'althar', draft: true })
-    const theirs = github.addPullRequest({ path: ['meridian', 'api'], title: 'Their fix', author: 'dana', draft: true })
     return Effect.gen(function* () {
       const { projectId, taskId, coordinator } = yield* project(working)
       yield* openedFor(projectId, taskId, mine.url, mine.number)
@@ -95,13 +94,9 @@ describe('the coordinator marking ready, closing and reopening', () => {
       assert.include(yield* callTool(coordinator, 'mark_ready', { pull_request: '#1' }), 'PR #1 is ready for review')
       assert.isFalse(github.changes[0]?.draft)
       assert.include(yield* callTool(coordinator, 'mark_ready', { pull_request: '#1' }), 'ready for review already')
-      assert.include(yield* callTool(coordinator, 'mark_ready', { pull_request: '#2' }), 'isn’t one Althar opened')
-      assert.isTrue(github.changes[1]?.draft)
 
       assert.include(yield* callTool(coordinator, 'close_pull_request', { pull_request: '#1' }), 'PR #1 is closed')
       assert.strictEqual(github.changes[0]?.state, 'closed')
-      assert.include(yield* callTool(coordinator, 'close_pull_request', { pull_request: '#2' }), 'isn’t one Althar opened')
-      assert.strictEqual(github.changes[1]?.state, 'open')
 
       assert.include(
         yield* callTool(coordinator, 'reopen_pull_request', { pull_request: `${HOST}/meridian/api/pull/1` }),
@@ -109,8 +104,66 @@ describe('the coordinator marking ready, closing and reopening', () => {
       )
       assert.strictEqual(github.changes[0]?.state, 'open')
       assert.include(yield* callTool(coordinator, 'reopen_pull_request', { pull_request: '#1' }), 'open already')
-      assert.include(yield* callTool(coordinator, 'reopen_pull_request', { pull_request: '#2' }), 'isn’t one Althar opened')
-      assert.strictEqual(theirs.number, 2)
+    }).pipe(Effect.provide(withQueries(github)))
+  })
+
+  it.live('does them unasked on the person’s own pull requests too, which Althar didn’t open', () => {
+    const github = makeFakeService()
+    const working = seeded(github)
+    // The connected account's login is the person's: `you`.
+    github.addPullRequest({ path: ['meridian', 'api'], title: 'My old spike', author: 'you', draft: true })
+    return Effect.gen(function* () {
+      const { coordinator } = yield* project(working)
+      assert.include(yield* callTool(coordinator, 'mark_ready', { pull_request: '#1' }), 'PR #1 is ready for review')
+      assert.isFalse(github.changes[0]?.draft)
+      assert.include(yield* callTool(coordinator, 'close_pull_request', { pull_request: '#1' }), 'PR #1 is closed')
+      assert.strictEqual(github.changes[0]?.state, 'closed')
+      assert.include(yield* callTool(coordinator, 'reopen_pull_request', { pull_request: '#1' }), 'PR #1 is open again')
+      assert.strictEqual(github.changes[0]?.state, 'open')
+    }).pipe(Effect.provide(withQueries(github)))
+  })
+
+  it.live('closes, reopens and marks ready anyone’s on the person’s message in the turn, and only on it', () => {
+    const github = makeFakeService()
+    const working = seeded(github)
+    github.addPullRequest({ path: ['meridian', 'api'], title: 'Their fix', author: 'dana', draft: true })
+    return Effect.gen(function* () {
+      const { coordinator: bare } = yield* project(working)
+      const { access: coordinator, turn } = yield* turnsFor(bare)
+
+      // Unasked, it says it goes on their word and what to name, and nothing changes.
+      for (const tool of ['mark_ready', 'close_pull_request'] as const) {
+        const said = yield* callTool(coordinator, tool, { pull_request: '#1' })
+        assert.include(said, 'PR #1 is dana’s, so it goes on the person’s word')
+        assert.include(said, 'message, from read_turn')
+      }
+      assert.isTrue(github.changes[0]?.draft)
+      assert.strictEqual(github.changes[0]?.state, 'open')
+
+      // News's message is no word of theirs.
+      const news = yield* turn('PR #1 looks stale.', 'news')
+      assert.include(
+        yield* callTool(coordinator, 'close_pull_request', { pull_request: '#1', message: news }),
+        "This needs the person's message in this turn",
+      )
+      assert.strictEqual(github.changes[0]?.state, 'open')
+
+      // Their own message in this turn: done at once.
+      const asked = yield* turn('Close my stale PR #1, then open it again and mark it ready.')
+      assert.include(yield* callTool(coordinator, 'close_pull_request', { pull_request: '#1', message: asked }), 'PR #1 is closed')
+      assert.strictEqual(github.changes[0]?.state, 'closed')
+      assert.include(yield* callTool(coordinator, 'reopen_pull_request', { pull_request: '#1', message: asked }), 'PR #1 is open again')
+      assert.strictEqual(github.changes[0]?.state, 'open')
+      assert.include(yield* callTool(coordinator, 'mark_ready', { pull_request: '#1', message: asked }), 'PR #1 is ready for review')
+      assert.isFalse(github.changes[0]?.draft)
+
+      // A message from an earlier turn no longer stands.
+      yield* turn('Thanks.')
+      assert.include(
+        yield* callTool(coordinator, 'close_pull_request', { pull_request: '#1', message: asked }),
+        "This needs the person's message in this turn",
+      )
+      assert.strictEqual(github.changes[0]?.state, 'open')
     }).pipe(Effect.provide(withQueries(github)))
   })
 
@@ -126,33 +179,37 @@ describe('the coordinator marking ready, closing and reopening', () => {
     }).pipe(Effect.provide(withQueries(github)))
   })
 
-  it.live('refuses closing where the host can’t reopen (Bitbucket Cloud), until the person’s word is on main', () => {
+  it.live('declines where the host can’t reopen (Bitbucket Cloud) only on the person’s word, even Althar’s own', () => {
     // Connected through the one fake host the harness has, declaring what Bitbucket Cloud's adapter does: no reopening.
     const bitbucket = makeFakeService()
     ;(bitbucket.capabilities as { reopen: boolean }).reopen = false
     const working = seeded(bitbucket)
     const mine = bitbucket.addPullRequest({ path: ['meridian', 'api'], title: 'Retry checkout', author: 'althar' })
     return Effect.gen(function* () {
-      const { projectId, taskId, coordinator } = yield* project(working)
+      const { projectId, taskId, coordinator: bare } = yield* project(working)
+      const { access: coordinator, turn } = yield* turnsFor(bare)
       yield* openedFor(projectId, taskId, mine.url, mine.number)
       const closing = yield* callTool(coordinator, 'close_pull_request', { pull_request: '#1' })
-      assert.include(closing, 'waits for the person’s word')
+      assert.include(closing, 'is final, so it goes on the person’s word')
       assert.strictEqual(bitbucket.changes[0]?.state, 'open')
-      bitbucket.close(1)
+      const asked = yield* turn('Decline #1.')
+      assert.include(yield* callTool(coordinator, 'close_pull_request', { pull_request: '#1', message: asked }), 'PR #1 is closed')
+      assert.strictEqual(bitbucket.changes[0]?.state, 'closed')
       assert.include(yield* callTool(coordinator, 'close_pull_request', { pull_request: '#1' }), 'is closed already')
     }).pipe(Effect.provide(withQueries(bitbucket)))
   })
 })
 
 describe('the coordinator replying', () => {
-  it.live('replies, signed, on Althar’s own and on a member’s, and leaves an outside author’s to the person', () => {
+  it.live('replies, signed, on Althar’s own and on a member’s, and on an outside author’s on the person’s word', () => {
     const github = makeFakeService()
     const working = seeded(github)
     const mine = github.addPullRequest({ path: ['meridian', 'api'], title: 'Retry checkout', author: 'althar' })
     github.addPullRequest({ path: ['meridian', 'api'], title: 'A teammate’s', author: 'dana', member: true })
     github.addPullRequest({ path: ['meridian', 'api'], title: 'A stranger’s', author: 'passerby', member: false })
     return Effect.gen(function* () {
-      const { projectId, taskId, coordinator } = yield* project(working)
+      const { projectId, taskId, coordinator: bare } = yield* project(working)
+      const { access: coordinator, turn } = yield* turnsFor(bare)
       yield* openedFor(projectId, taskId, mine.url, mine.number)
       assert.include(
         yield* callTool(coordinator, 'reply_on_pull_request', { pull_request: '#1', body: 'Fixed in the next push.' }),
@@ -162,8 +219,14 @@ describe('the coordinator replying', () => {
       assert.include(github.commentsOn(1)[0]?.body ?? '', 'From Althar')
       assert.include(yield* callTool(coordinator, 'reply_on_pull_request', { pull_request: '#2', body: 'Thanks!' }), 'Replied on PR #2')
       const stranger = yield* callTool(coordinator, 'reply_on_pull_request', { pull_request: '#3', body: 'Hello' })
-      assert.include(stranger, 'waits for the person’s word')
+      assert.include(stranger, 'PR #3 is passerby’s, an outside author’s, so it goes on the person’s word')
       assert.lengthOf(github.commentsOn(3), 0)
+      const asked = yield* turn('Tell passerby thanks on #3.')
+      assert.include(
+        yield* callTool(coordinator, 'reply_on_pull_request', { pull_request: '#3', body: 'Thanks!', message: asked }),
+        'Replied on PR #3',
+      )
+      assert.lengthOf(github.commentsOn(3), 1)
       assert.include(yield* callTool(coordinator, 'reply_on_pull_request', { pull_request: '#1', body: '  ' }), 'Say what to reply')
     }).pipe(Effect.provide(withQueries(github)))
   })
@@ -313,7 +376,7 @@ describe('the coordinator bringing a pull request’s branch up to date', () => 
       github.fallBehind(theirs.number)
       const said = yield* callTool(coordinator, 'update_branch', { pull_request: '#1' })
       assert.include(said, "can't push to PR #1's branch")
-      assert.include(said, "waits for the person's word")
+      assert.include(said, "goes on the person's word")
       // Nothing is posted on their pull request: asking them is a reply, which is the person's to ask for.
       assert.lengthOf(github.commentsOn(1), 0)
       assert.lengthOf(github.branchesUpdated, 0)

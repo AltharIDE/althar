@@ -75,6 +75,14 @@
   min-height: 0;
 }
 
+/* The coordinator's conversation under its asides' pills: the face fills what is left of the column */
+.coordinatorFace {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+}
+
 .loading {
   display: grid;
   flex: 1;

@@ -4,14 +4,13 @@ import { Effect, Fiber, Layer, Option } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { Instance } from '../src/Instance'
-import { overlapLine } from '../src/Overlaps'
 import { Permissions, refusedWords, setAsideWords } from '../src/Permissions'
 import { Policies } from '../src/Policies'
 import { Projects } from '../src/Projects'
 import { Queries } from '../src/Queries'
 import * as Runtime from '../src/Runtime'
 import { Sessions } from '../src/Sessions'
-import { endedLine, endedNews, reportLine, Situations } from '../src/Situations'
+import { endedNews, reportLine, Situations } from '../src/Situations'
 import { Tasks } from '../src/Tasks'
 import { runtime, task, turns, until } from './support'
 
@@ -109,24 +108,10 @@ describe('the words of a situation', () => {
     assert.strictEqual(reportLine('x'.repeat(200))?.length, 158)
   })
 
-  it('says how a child ended, to the person and to the lead', () => {
-    assert.strictEqual(endedLine('Reach the network', 'unchanged', 'No switch.'), 'Reach the network stopped without a change: No switch.')
-    assert.strictEqual(endedLine('Reach the network', 'stopped', 'ignored'), 'Reach the network stopped by you.')
-    assert.strictEqual(endedLine('Reach the network', 'failed'), 'Reach the network failed.')
+  it('says how a child ended to the lead, in words of its own', () => {
     const news = endedNews({ title: 'Reach the network', slug: 'reach-the-network' }, 'stopped')
     assert.include(news, 'was stopped by the person')
     assert.include(news, 'reach-the-network')
-  })
-
-  it('names the files two tasks both change by their file names', () => {
-    assert.strictEqual(
-      overlapLine('Runs show in the pill', ['apps/desktop/src/TaskView.tsx']),
-      'Runs show in the pill changes `TaskView.tsx` too. Both leads were told.',
-    )
-    assert.strictEqual(
-      overlapLine('Other', ['a/One.ts', 'b/Two.ts', 'c/Three.ts']),
-      'Other changes `One.ts`, `Two.ts` and 1 more too. Both leads were told.',
-    )
   })
 })
 
@@ -266,24 +251,22 @@ const parentAndChild = Effect.gen(function* () {
   return { project, parent, child }
 })
 
-/** What a thread's notices say, with the situation each carries, as the store kept them. */
-const notices = (threadId: string) =>
+/** Every line of a thread that says anything about another task: what the person would read in its chat. */
+const aboutOtherTasks = (threadId: string) =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient
-    const rows = yield* sql<{
-      content: string
-    }>`SELECT content FROM thread_items WHERE thread_id = ${threadId} AND kind = 'notice' ORDER BY sequence`
-    return rows.flatMap((row) => {
-      const content = JSON.parse(row.content) as {
-        title: string
-        severity: string
-        task?: { title: string }
-        situation?: unknown
-      }
-      return content.situation === undefined
-        ? []
-        : [{ title: content.title, severity: content.severity, task: content.task?.title, situation: content.situation }]
-    })
+    return yield* sql<{ title: string }>`
+      SELECT json_extract(content, '$.title') AS title FROM thread_items
+      WHERE thread_id = ${threadId} AND kind = 'notice'
+        AND (json_extract(content, '$.situation') IS NOT NULL OR json_extract(content, '$.task') IS NOT NULL)`
+  })
+
+/** What the lead of a thread was told quietly, as it was kept. */
+const toldQuietly = (threadId: string) =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient
+    const rows = yield* sql<{ body: string }>`SELECT body FROM user_inputs WHERE thread_id = ${threadId} ORDER BY sequence`
+    return rows.map((row) => row.body)
   })
 
 describe('An ask that has waited past its grace', () => {
@@ -302,7 +285,7 @@ describe('An ask that has waited past its grace', () => {
 })
 
 describe('A lead-started task that stops reaching its parent', () => {
-  it.live('settled without a change: a warning line in the parent’s thread, once', () =>
+  it.live('settled without a change: the parent’s lead is told once, and its chat gets no line', () =>
     Effect.gen(function* () {
       const situations = yield* Situations
       const sql = yield* SqlClient.SqlClient
@@ -314,18 +297,15 @@ describe('A lead-started task that stops reaching its parent', () => {
           '2026-11-07T10:00:00.000Z' FROM tasks WHERE id = ${child.taskId}`
       yield* situations.look()
       yield* situations.look()
-      assert.deepStrictEqual(yield* notices(parent.threadId), [
-        {
-          title: 'Reach the network stopped without a change: The sandbox has no network switch.',
-          severity: 'warning',
-          task: 'Reach the network',
-          situation: { kind: 'ended', how: 'unchanged', why: 'The sandbox has no network switch.' },
-        },
-      ])
+      assert.deepStrictEqual(yield* aboutOtherTasks(parent.threadId), [])
+      const told = yield* toldQuietly(parent.threadId)
+      assert.lengthOf(told, 1)
+      assert.include(told[0], 'reach-the-network')
+      assert.include(told[0], 'The sandbox has no network switch.')
     }).pipe(Effect.provide(withQueries())),
   )
 
-  it.live('stopped by the person: said as such', () =>
+  it.live('stopped by the person: the lead is told, and the chat says nothing', () =>
     Effect.gen(function* () {
       const situations = yield* Situations
       const tasks = yield* Tasks
@@ -335,14 +315,10 @@ describe('A lead-started task that stops reaching its parent', () => {
         taskId: child.taskId,
       })
       yield* situations.look()
-      assert.deepStrictEqual(yield* notices(parent.threadId), [
-        {
-          title: 'Reach the network stopped by you.',
-          severity: 'warning',
-          task: 'Reach the network',
-          situation: { kind: 'ended', how: 'stopped' },
-        },
-      ])
+      assert.deepStrictEqual(yield* aboutOtherTasks(parent.threadId), [])
+      const told = yield* toldQuietly(parent.threadId)
+      assert.lengthOf(told, 1)
+      assert.include(told[0], 'was stopped by the person')
     }).pipe(Effect.provide(withQueries())),
   )
 
@@ -353,7 +329,8 @@ describe('A lead-started task that stops reaching its parent', () => {
       const { task: parent } = yield* task('Alone')
       yield* sql`UPDATE tasks SET state = 'done' WHERE id = ${parent.taskId}`
       yield* situations.look()
-      assert.deepStrictEqual(yield* notices(parent.threadId), [])
+      assert.deepStrictEqual(yield* aboutOtherTasks(parent.threadId), [])
+      assert.deepStrictEqual(yield* toldQuietly(parent.threadId), [])
     }).pipe(Effect.provide(withQueries())),
   )
 })

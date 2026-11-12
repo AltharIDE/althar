@@ -1,11 +1,12 @@
 import { useState } from 'react'
 
-import type { ChangeSummary, ThreadItem, ThreadSnapshot } from '@althar/contracts'
+import type { BoardTask, ChangeSummary, ThreadItem, ThreadSnapshot } from '@althar/contracts'
 import { Button, Field, type PartKind, PartLines, PartShots, Segmented, type TaskPartModel } from '@althar/ui'
 
 import { outcomeOf } from '../../shared/outcome'
 import { productBrand } from '../../shared/products'
 import s from './parts.module.css'
+import { startedPart, type StartedEntry, type StartedReading } from './Started'
 
 /*
  * A task's parts, as its bar shows them (ADR-097, the 6 November direction
@@ -19,6 +20,21 @@ import s from './parts.module.css'
 
 export const partsText = {
   worktree: 'Worktree',
+  local: 'Local',
+  /** Moving a running task between a worktree and Local (a task is a conversation plus parts). */
+  toLocal: 'Move to Local',
+  toWorktree: 'Move to a worktree',
+  switchIt: 'Switch it',
+  stayInWorktree: 'Stay in the worktree',
+  callOff: 'Call it off',
+  /** A helper its lead started, at work on one of its changes (ADR-087). */
+  helper: (name: string) => `Helper · ${name}`,
+  helperOn: (change: string | null, model: string) => `${change === null ? 'On the task’s change' : `On ${change}`}, ${model}`,
+  stopHelper: 'Stop',
+  /** The branch a running task works toward, changed (a task is a conversation plus parts). */
+  towardField: 'Another branch to work toward',
+  towardIt: 'Work toward it',
+  towardNote: 'Nothing pushed, its branch moves onto it; pushed, its commits go to a new pull request into it.',
   files: (n: number) => (n === 0 ? 'No changes' : `${n} ${n === 1 ? 'file' : 'files'} changed`),
   branch: 'Branch',
   where: 'Where',
@@ -48,6 +64,16 @@ export const partsText = {
         ? 'Closed'
         : `${change.draft ? 'Draft' : 'Open'}${change.checks === null || change.checks.outcome === 'none' ? '' : change.checks.outcome === 'failed' ? ` · ${change.checks.failed} ${change.checks.failed === 1 ? 'check fails' : 'checks fail'}` : change.checks.outcome === 'running' ? ' · checks running' : ' · checks pass'}`,
   merge: 'Merge',
+  /** One of several changes, in its own row: where it stands without a pull request yet. */
+  noPullRequest: 'No pull request yet',
+  waitingForShip: 'Commits waiting for Ship',
+  stackedOn: 'Stacked on',
+  helperOnIt: 'Helper',
+  ship: 'Ship',
+  /** A change that waits for another of the task's to merge, without building on its code. */
+  waitsFor: (name: string) => `Waits for ${name} to merge`,
+  /** Merge on a change stacked on another's open pull request: the one below first. */
+  mergeThrough: (below: string, short: string) => `Merge ${below}, then ${short}`,
   onHost: (host: string) => `On ${host}`,
   seeCheck: 'See the check',
   fixIt: 'Ask the lead to fix it',
@@ -92,6 +118,8 @@ export const partsText = {
 }
 
 export interface PartsActions {
+  /** The tasks its lead started, with how the board has them now: a part of its own, listing each as the chip its thread has. */
+  readonly started?: { readonly tasks: ReadonlyArray<StartedEntry>; readonly reading: StartedReading }
   readonly seeChanges: () => void
   /** The key that shows the changes too: ⌘D. */
   readonly changesKey?: string
@@ -105,9 +133,23 @@ export interface PartsActions {
   readonly askLead: (words: string) => void
   readonly openChange?: () => void
   readonly attach?: (pullRequest: string) => void
+  /** Moves the running task between a worktree and Local; with what it asked about the person's checkout, Switch it. */
+  readonly move?: (to: 'worktree' | 'checkout', consent?: { readonly branch: string | null; readonly head: string }) => void
+  /** Calls off a move that waits. */
+  readonly dropMove?: () => void
+  /** Points the running task at another branch to work toward. */
+  readonly workToward?: (branch: string) => void
+  /** Stops a helper its lead started. */
+  readonly stopHelper?: (helper: string) => void
+  /** Ships one of its several changes, by name, with what waits beneath it. */
+  readonly shipChange?: (change: string) => void
 }
 
 /** The review drafts in the thread still waiting to be posted: the latest of each. */
+/** Merge, or, on a change stacked on another whose pull request is open, the stack through it: the one below first. */
+const mergeLabel = (change: { readonly short: string; readonly change?: { readonly below?: string } | undefined }) =>
+  change.change?.below === undefined ? partsText.merge : partsText.mergeThrough(change.change.below, change.short)
+
 const draftsIn = (items: ReadonlyArray<ThreadItem>) =>
   items.flatMap((item) => (item.kind === 'review_draft' && item.content.state === 'pending' ? [item.content] : []))
 
@@ -121,31 +163,63 @@ export const partsOf = (snapshot: ThreadSnapshot, act: PartsActions): ReadonlyAr
   const parts: Array<TaskPartModel> = []
   if (task.worktree !== null) {
     const uncommitted = task.files.filter((file) => file.uncommitted).length
+    const { move, dropMove } = act
+    const moving = task.moving
+    const moves =
+      move === undefined || dropMove === undefined
+        ? []
+        : moving === undefined
+          ? [
+              {
+                label: task.local === true ? t.toWorktree : t.toLocal,
+                onClick: () => move(task.local === true ? 'worktree' : 'checkout'),
+                variant: 'quiet' as const,
+              },
+            ]
+          : moving.seen === undefined
+            ? [{ label: t.callOff, onClick: dropMove, variant: 'quiet' as const }]
+            : [
+                { label: t.switchIt, onClick: () => move(moving.to, moving.seen), variant: 'signal' as const },
+                { label: t.stayInWorktree, onClick: dropMove, variant: 'quiet' as const },
+              ]
     parts.push({
       id: 'worktree',
       icon: 'folder',
-      name: t.worktree,
-      detail: t.files(task.files.length),
+      name: task.local === true ? t.local : t.worktree,
+      // A move that waits says why, in place of its files; one that asks waits on the person.
+      detail: moving?.why ?? t.files(task.files.length),
+      ...(moving?.seen === undefined || move === undefined
+        ? {}
+        : { tone: 'you' as const, act: { label: t.switchIt, onClick: () => move(moving.to, moving.seen) } }),
       facts: [
         ...(task.branch === null ? [] : [[t.branch, <code key="b">{task.branch}</code>] as const]),
+        ...(task.toward === undefined ? [] : [[t.into, <code key="t">{task.toward}</code>] as const]),
         [t.where, <code key="w">{task.worktree}</code>],
       ],
-      ...(task.files.length === 0
+      ...(task.files.length === 0 && act.workToward === undefined
         ? {}
         : {
             body: (
-              <PartLines
-                lines={[
-                  ...task.files.slice(0, SHOWN).map((file) => [file.path, file.binary ? '' : `+${file.add} −${file.del}`] as const),
-                  ...(task.files.length > SHOWN ? [[t.more(task.files.length - SHOWN), ''] as const] : []),
-                ]}
-              />
+              <>
+                {task.files.length > 0 && (
+                  <PartLines
+                    lines={[
+                      ...task.files.slice(0, SHOWN).map((file) => [file.path, file.binary ? '' : `+${file.add} −${file.del}`] as const),
+                      ...(task.files.length > SHOWN ? [[t.more(task.files.length - SHOWN), ''] as const] : []),
+                    ]}
+                  />
+                )}
+                {act.workToward !== undefined && (
+                  <OneField label={t.towardField} button={t.towardIt} note={t.towardNote} onGo={act.workToward} done={() => undefined} />
+                )}
+              </>
             ),
           }),
       actions: [
         ...(task.files.length === 0
           ? []
           : [{ label: t.seeChanges, onClick: act.seeChanges, ...(act.changesKey === undefined ? {} : { kbd: act.changesKey }) }]),
+        ...moves,
         ...(act.openInEditor === undefined
           ? []
           : [
@@ -170,21 +244,63 @@ export const partsOf = (snapshot: ThreadSnapshot, act: PartsActions): ReadonlyAr
       ],
     })
   }
+  // Its lead's helpers at work, each on one of its changes, with Stop (ADR-087).
+  for (const helper of task.helpers ?? []) {
+    const { stopHelper } = act
+    parts.push({
+      id: `helper:${helper.id}`,
+      icon: 'agents',
+      name: t.helper(helper.name),
+      detail: t.helperOn(helper.change, helper.model),
+      // At work for the task, beside what its lead left running; Stop in its row.
+      tone: 'live',
+      facts: [],
+      actions: stopHelper === undefined ? [] : [{ label: t.stopHelper, onClick: () => stopHelper(helper.id), variant: 'quiet' as const }],
+    })
+  }
+  // Several changes: a row for each, named; one with a pull request is that pull request's row, with its own Ship where
+  // commits wait on it.
+  const lines = task.lines ?? []
+  const { shipChange } = act
+  const shipOf = (line: (typeof lines)[number]) =>
+    line.waiting && shipChange !== undefined ? [{ label: t.ship, onClick: () => shipChange(line.name), variant: 'quiet' as const }] : []
+  const lineFacts = (line: (typeof lines)[number]) => [
+    [t.branch, <code key="b">{line.branch}</code>] as const,
+    ...(line.stackedOn === null ? [] : [[t.stackedOn, line.stackedOn] as const]),
+    ...(line.helper === null ? [] : [[t.helperOnIt, line.helper] as const]),
+  ]
+  for (const line of lines) {
+    if (line.url !== null && task.changes.some((change) => change.url === line.url)) continue
+    const standing = line.waitsFor === null ? t.noPullRequest : t.waitsFor(line.waitsFor)
+    parts.push({
+      id: `change:${line.id}`,
+      icon: 'branch',
+      name: line.name,
+      detail: line.waiting ? `${standing} · ${t.waitingForShip}` : standing,
+      ...(line.helper === null ? {} : { tone: 'live' as const }),
+      facts: lineFacts(line),
+      actions: shipOf(line),
+    })
+  }
   for (const change of task.changes) {
     const failing = change.state === 'open' && change.checks?.outcome === 'failed'
     const ready = change.state === 'open' && !change.draft && change.checks?.outcome === 'passed' && change.queued !== true
+    const line = lines.find((one) => one.url === change.url)
+    const standing = change.change?.waitsFor === undefined ? t.stands(change) : t.waitsFor(change.change.waitsFor)
     parts.push({
       id: `pr:${change.url}`,
       icon: 'pr',
-      name: change.short,
-      detail: t.stands(change),
+      // One of several changes: by its name, its pull request's number in where it stands.
+      name: line === undefined ? change.short : line.name,
+      detail: line === undefined ? standing : `${change.short} · ${standing}${line.waiting ? ` · ${t.waitingForShip}` : ''}`,
       ...(failing
         ? { tone: 'bad' as const, act: { label: t.seeCheck } }
         : ready
-          ? { tone: 'you' as const, act: { label: t.merge, onClick: () => act.merge(change) } }
+          ? { tone: 'you' as const, act: { label: mergeLabel(change), onClick: () => act.merge(change) } }
           : {}),
       facts: [
         [t.title, change.title],
+        ...(line === undefined ? [] : lineFacts(line)),
         ...(change.checks === null ? [] : [[t.checks, t.checksSaid(change.checks)] as const]),
         ...(change.target === undefined ? [] : [[t.into, <code key="i">{change.target}</code>] as const]),
       ],
@@ -201,7 +317,8 @@ export const partsOf = (snapshot: ThreadSnapshot, act: PartsActions): ReadonlyAr
           }
         : {}),
       actions: [
-        ...(ready ? [{ label: t.merge, onClick: () => act.merge(change), variant: 'signal' as const }] : []),
+        ...(ready ? [{ label: mergeLabel(change), onClick: () => act.merge(change), variant: 'signal' as const }] : []),
+        ...(line === undefined ? [] : shipOf(line)),
         ...(failing && change.checks !== null
           ? [{ label: t.fixIt, onClick: () => act.askLead(t.fixAsk(change.checks?.failing ?? [], change.short)) }]
           : []),
@@ -265,6 +382,7 @@ export const partsOf = (snapshot: ThreadSnapshot, act: PartsActions): ReadonlyAr
       ],
     })
   }
+  if (act.started !== undefined && act.started.tasks.length > 0) parts.push(startedPart(act.started.tasks, act.started.reading))
   const shots = outcomeOf(snapshot).shots
   if (shots.length > 0)
     parts.push({

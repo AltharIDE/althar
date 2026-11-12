@@ -381,7 +381,7 @@ export const SendingNow: Story = {
 export const Dictating: Story = { render: () => <Example recording /> }
 /** A transcriber that streams: the words arrive faint in the field as you say them. */
 export const DictatingWordByWord: Story = { render: () => <Example recording streaming initial="Keep the limiter where it is." /> }
-/** Enter while dictating stops without sending, and the field is the size the same text typed would be: one row for a short transcript. */
+/** Stopping dictation puts the words in the field, and it is the size the same text typed would be: one row for a short transcript. */
 export const EnterEndsDictationAtItsSize: Story = {
   render: () => {
     const said = SAID.join(' ')
@@ -415,14 +415,114 @@ export const EnterEndsDictationAtItsSize: Story = {
         await waitFor(() => expect((field.previousElementSibling as HTMLElement).getBoundingClientRect().height).toBeGreaterThan(80), {
           timeout: 10000,
         })
-      await userEvent.type(field, '{Enter}')
+      await userEvent.click(within(c.getByTestId(`dictated-${kind}`)).getByRole('button', { name: /^Stop dictating/ }))
       await expect(within(c.getByTestId(`dictated-${kind}`)).queryByRole('button', { name: /^Stop dictating/ })).not.toBeInTheDocument()
-      /* stopped, not sent: the words are in the field, and it is as tall as the same text typed */
+      /* the words are in the field, and it is as tall as the same text typed */
       await expect(field.value).toBe(box(`typed-${kind}`).value)
       await expect(height(`dictated-${kind}`)).toBeCloseTo(height(`typed-${kind}`), 0)
     }
     /* a short transcript stays one row; a long one is capped like typed text */
     await expect(height('dictated-short')).toBeLessThan(height('dictated-long'))
+  },
+}
+/*
+ * Sending while dictating: it stops the recording, waits for the words to be
+ * written down, and sends them with what is attached. `hold` leaves the
+ * writing down under way; `fails` has it fail.
+ */
+function SendWhileDictating({ hold = false, fails = false, typed = '' }: { hold?: boolean; fails?: boolean; typed?: string }) {
+  const [value, setValue] = useState(typed)
+  const [phase, setPhase] = useState<'recording' | 'writing' | 'idle'>('recording')
+  const [failed, setFailed] = useState<object | null>(null)
+  const [sent, setSent] = useState<string[]>([])
+  const [seconds, setSeconds] = useState(4)
+  const [tick, setTick] = useState(0)
+  useEffect(() => {
+    if (phase !== 'recording') return
+    const t = window.setInterval(() => setSeconds((n) => n + 1), 1000)
+    const w = window.setInterval(() => setTick((n) => n + 1), 140)
+    return () => {
+      window.clearInterval(t)
+      window.clearInterval(w)
+    }
+  }, [phase])
+  useEffect(() => {
+    if (phase !== 'writing' || hold) return
+    const t = window.setTimeout(() => {
+      if (fails) setFailed({})
+      else setValue((v) => `${v ? `${v.trimEnd()} ` : ''}${SAID.join(' ')}`)
+      setPhase('idle')
+    }, 600)
+    return () => window.clearTimeout(t)
+  }, [phase, hold, fails])
+  const [images, setImages] = useState<ComposerImage[]>([{ id: 'i1', name: 'refunds-before.png', src: SHOT_BEFORE.src }])
+  return (
+    <div style={{ maxWidth: 700, paddingTop: 60 }}>
+      <Composer
+        value={value}
+        onChange={setValue}
+        onSubmit={(text) => {
+          setSent((now) => [...now, `${text} + ${images.length} image`])
+          setValue('')
+          setImages([])
+        }}
+        images={images}
+        placeholder="Tell the lead"
+        hint="/"
+        picker={<Picker />}
+        dictation={{
+          elapsed: phase === 'recording' ? clock(seconds) : null,
+          levels: voice(tick),
+          busy: phase === 'writing',
+          failed,
+          kbd: '⌘⇧D',
+          onStart: () => {
+            setPhase('recording')
+            setSeconds(0)
+          },
+          onStop: () => setPhase('writing'),
+        }}
+      />
+      <output data-testid="sent" style={{ display: 'block', marginTop: 12, font: '12px var(--mono)' }}>
+        {sent.length === 0 ? 'Nothing sent' : `Sent: ${sent.join(' | ')}`}
+      </output>
+    </div>
+  )
+}
+
+/** Enter while dictating, with an image attached: the recording ends, the send button turns to say it is finishing the transcription, and nothing goes yet. */
+export const SendWaitsForTheTranscription: Story = {
+  render: () => <SendWhileDictating hold />,
+  play: async ({ canvasElement }) => {
+    const c = within(canvasElement)
+    await userEvent.type(c.getByRole('textbox', { name: 'Tell the lead' }), '{Enter}')
+    await expect(await c.findByRole('button', { name: 'Finishing the transcription' })).toBeInTheDocument()
+    await expect(c.queryByRole('button', { name: /^Stop dictating/ })).toBeNull()
+    await expect(c.getByTestId('sent')).toHaveTextContent('Nothing sent')
+  },
+}
+/** Once the words are written down they go with the image, as one message. */
+export const SendGoesWithTheTranscript: Story = {
+  render: () => <SendWhileDictating typed="Look at this." />,
+  play: async ({ canvasElement }) => {
+    const c = within(canvasElement)
+    await userEvent.click(c.getByRole('button', { name: 'Send' }))
+    await expect(await c.findByRole('button', { name: 'Finishing the transcription' })).toBeInTheDocument()
+    await waitFor(() => expect(c.getByTestId('sent')).toHaveTextContent(`Sent: Look at this. ${SAID.join(' ')} + 1 image`), {
+      timeout: 4000,
+    })
+    await expect(c.queryByRole('button', { name: 'Finishing the transcription' })).toBeNull()
+  },
+}
+/** The transcription failed: nothing is sent, the image stays, and a line says why. */
+export const SendHeldBackWhenItFails: Story = {
+  render: () => <SendWhileDictating fails />,
+  play: async ({ canvasElement }) => {
+    const c = within(canvasElement)
+    await userEvent.type(c.getByRole('textbox', { name: 'Tell the lead' }), '{Enter}')
+    await expect(await c.findByRole('alert', {}, { timeout: 4000 })).toHaveTextContent('Not sent')
+    await expect(c.getByTestId('sent')).toHaveTextContent('Nothing sent')
+    await expect(c.getByRole('list', { name: '1 attachment to send' })).toBeInTheDocument()
   },
 }
 /** A dictation grown past the composer's max height: it stays at 200px with the newest words in view, and the earlier text scrolls under the wheel. */
@@ -867,8 +967,8 @@ export const SendsOnEnter: Story = {
   },
 }
 
-/** Enter while dictating wraps up and writes down what was said, and does not send; with ⌘Enter the same. */
-export const EnterStopsDictating: Story = {
+/** Enter while dictating stops it and waits for what was said, to send it with the rest: pressed again, or with ⌘Enter, it does not stop or send twice. */
+export const EnterWhileDictatingStopsAndWaits: Story = {
   args: { onSubmit: fn(), onSendNow: fn(), busy: true, dictation: { elapsed: '0:04', onStart: () => {}, onStop: fn() } },
   render: (args) => <Composer {...args} value="Keep the limiter where it is." onChange={() => {}} />,
   play: async ({ args, canvasElement }) => {
@@ -877,13 +977,14 @@ export const EnterStopsDictating: Story = {
     await userEvent.click(field)
     await userEvent.keyboard('{Enter}')
     await userEvent.keyboard('{Meta>}{Enter}{/Meta}')
-    await expect(args.dictation?.onStop).toHaveBeenCalledTimes(2)
+    await expect(args.dictation?.onStop).toHaveBeenCalledTimes(1)
+    await expect(c.getByRole('button', { name: 'Finishing the transcription' })).toBeInTheDocument()
     await expect(args.onSubmit).not.toHaveBeenCalled()
     await expect(args.onSendNow).not.toHaveBeenCalled()
   },
 }
-/** Enter while what was said is written down does nothing: a half-finished message cannot go. */
-export const EnterWhileWritingDoesNothing: Story = {
+/** Enter while what was said is written down waits for it too, without stopping anything: a half-finished message cannot go. */
+export const EnterWhileWritingWaits: Story = {
   args: { onSubmit: fn(), onSendNow: fn(), dictation: { elapsed: null, busy: true, onStart: () => {}, onStop: fn() } },
   render: (args) => <Composer {...args} value="Keep the limiter where it is." onChange={() => {}} />,
   play: async ({ args, canvasElement }) => {
@@ -891,6 +992,7 @@ export const EnterWhileWritingDoesNothing: Story = {
     await userEvent.click(c.getByRole('textbox', { name: 'Tell the lead' }))
     await userEvent.keyboard('{Enter}')
     await expect(args.dictation?.onStop).not.toHaveBeenCalled()
+    await expect(c.getByRole('button', { name: 'Finishing the transcription' })).toBeInTheDocument()
     await expect(args.onSubmit).not.toHaveBeenCalled()
   },
 }

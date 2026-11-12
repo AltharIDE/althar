@@ -18,7 +18,12 @@ const meta = {
     // In the header, they are segments of the chip that says where the task stands: shown inside it.
     (Story, { args }) =>
       args.place === 'header' ? (
-        <TaskHeader title="Prototype: allow everything" status={TaskStatus.Yours} state="Finished" beside={<Story />} />
+        <TaskHeader
+          title="Prototype: allow everything"
+          status={TaskStatus.Yours}
+          state={args.onShip === undefined ? 'Finished' : '2 commits not shipped'}
+          beside={<Story />}
+        />
       ) : (
         <Story />
       ),
@@ -50,7 +55,45 @@ export const InHeader: Story = {
 }
 /** Kept for later already: Done alone. */
 export const Kept: Story = { args: { onKeep: undefined, place: 'header' } }
+
+/** Commits held for Ship: Ship first, in the chip, then the ways to settle it. */
+export const Ship: Story = {
+  args: { place: 'header', onShip: fn(), shipHint: '2 commits go up, reviewed first', onDone: undefined, onKeep: undefined },
+  play: async ({ args, canvasElement }) => {
+    const canvas = within(canvasElement)
+    await userEvent.click(canvas.getByRole('button', { name: 'Ship' }))
+    await expect(args.onShip).toHaveBeenCalledOnce()
+  },
+}
+
+/** A finished task that isn't a change, shipping: Ship says so, and Done waits. */
+export const Shipping: Story = {
+  args: { place: 'header', onShip: fn(), onKeep: undefined, busy: 'ship' },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await expect(canvas.getByRole('button', { name: 'Ship' })).toHaveAttribute('aria-busy', 'true')
+    await expect(canvas.getByRole('button', { name: 'Done' })).toBeDisabled()
+  },
+}
 /** A drafted review: Keep for later alone, as it settles once posted. */
+/** What a review after a merge found, in the task's header: Fix it hands it to the lead, Leave it closes it. */
+export const AfterMerge: Story = {
+  args: {
+    place: 'header',
+    onFix: fn(),
+    fixHint: 'The lead fixes them, and its fix goes up as a new pull request after #715',
+    onLeave: fn(),
+    leaveHint: 'Close the findings: they stay in the thread',
+    onDone: undefined,
+    onKeep: undefined,
+  },
+  play: async ({ args, canvasElement }) => {
+    const c = within(canvasElement)
+    await userEvent.click(c.getByRole('button', { name: 'Fix it' }))
+    await expect(args.onFix).toHaveBeenCalled()
+  },
+}
+
 export const Review: Story = { args: { onDone: undefined } }
 /** Done under way: it says so and keeps its place for the keyboard; the pin waits. */
 export const Settling: Story = {

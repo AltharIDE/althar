@@ -1,0 +1,64 @@
+name: Electron
+description: >-
+  Installs the workspace and prepares Electron: restores Electron and electron-builder caches, keyed by the exact versions the
+  lockfile resolves them to and the runner's OS and arch, under the OS's own cache paths (Linux ~/.cache, macOS ~/Library/Caches,
+  Windows ~/AppData/Local), installs with `bun install` from the repository root without downloading Electron's binary, then
+  fetches that binary with retry backoff before a build or test that runs it. Electron is a trusted dependency whose binary would
+  otherwise download during install; skipping it there and fetching explicitly means one bad minute on GitHub's releases doesn't fail
+  the install, and the cache below is restored before either fetches. Replaces the `bun install --frozen-lockfile` step in any job
+  that installs the workspace. With `binary: false`, where the job never runs Electron, it only installs without downloading the binary.
+inputs:
+  binary:
+    description: Whether to fetch Electron's binary after installing. Caches are always restored before install.
+    default: 'true'
+    required: false
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      working-directory: ${{ github.workspace }}
+      run: |
+        ELECTRON_VERSION="$(grep -oE '"electron": \["electron@[^"]+' bun.lock | head -n 1 | sed 's/.*electron@//')"
+        BUILDER_VERSION="$(grep -oE '"electron-builder": \["electron-builder@[^"]+' bun.lock | head -n 1 | sed 's/.*electron-builder@//')"
+        if [ -z "$ELECTRON_VERSION" ] || [ -z "$BUILDER_VERSION" ]; then
+          echo "::error::Couldn't read the locked Electron and builder versions from bun.lock."
+          exit 1
+        fi
+        echo "ELECTRON_VERSION=$ELECTRON_VERSION" >> "$GITHUB_ENV"
+        echo "BUILDER_VERSION=$BUILDER_VERSION" >> "$GITHUB_ENV"
+    - uses: actions/cache@v4
+      if: runner.os == 'Linux'
+      with:
+        path: |
+          ~/.cache/electron
+          ~/.cache/electron-builder
+        key: electron-${{ runner.os }}-${{ runner.arch }}-${{ env.ELECTRON_VERSION }}-builder-${{ env.BUILDER_VERSION }}
+    - uses: actions/cache@v4
+      if: runner.os == 'macOS'
+      with:
+        path: |
+          ~/Library/Caches/electron
+          ~/Library/Caches/electron-builder
+        key: electron-${{ runner.os }}-${{ runner.arch }}-${{ env.ELECTRON_VERSION }}-builder-${{ env.BUILDER_VERSION }}
+    - uses: actions/cache@v4
+      if: runner.os == 'Windows'
+      with:
+        path: |
+          ~/AppData/Local/electron/Cache
+          ~/AppData/Local/electron-builder/Cache
+        key: electron-${{ runner.os }}-${{ runner.arch }}-${{ env.ELECTRON_VERSION }}-builder-${{ env.BUILDER_VERSION }}
+    - shell: bash
+      working-directory: ${{ github.workspace }}
+      env:
+        ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
+      run: bun install --frozen-lockfile
+    - shell: bash
+      if: ${{ inputs.binary == 'true' }}
+      working-directory: ${{ github.workspace }}
+      run: |
+        installer="$(node -p 'require.resolve("electron/install.js", { paths: [process.cwd() + "/apps/desktop"] })')"
+        for wait in 5 15 45 0; do
+          node "$installer" && exit 0
+          [ "$wait" = 0 ] || { echo "Electron's download failed: trying again in ${wait}s"; sleep "$wait"; }
+        done
+        exit 1

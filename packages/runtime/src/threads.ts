@@ -1,6 +1,7 @@
 import { realpathSync } from 'node:fs'
 import { relative } from 'node:path'
 
+import { toolPhrase } from '@althar/contracts'
 import { Ids, newId, type ProjectId, type ThreadItemKind } from '@althar/domain'
 import { Ledger } from '@althar/persistence-sqlite'
 import {
@@ -62,7 +63,7 @@ const mcpKept = (
       tool: call.tool,
       ...(act === undefined
         ? had?.acts === undefined
-          ? { acts: false, did: call.tool }
+          ? { acts: false, did: toolPhrase(call.server, call.tool) }
           : {}
         : { acts: act.acts, did: act.done, ...(act.words === undefined ? {} : { words: act.words.slice(0, WORDS_KEPT) }) }),
       ...(link === undefined ? {} : { link }),

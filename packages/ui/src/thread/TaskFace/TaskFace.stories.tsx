@@ -1,19 +1,24 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
-import { useMemo, useState, type ReactNode } from 'react'
-import { expect, userEvent, waitFor, within } from 'storybook/test'
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { expect, fn, userEvent, waitFor, within } from 'storybook/test'
 
+import { PageLine, PagePanel } from '../../browser/PagePanel/PagePanel'
 import { Behind } from '../../composer/Behind/Behind'
 import { Brand } from '../../foundations/brands/brands'
 import { Composer } from '../../composer/Composer/Composer'
 import { FINDINGS_SETTLED, reviewDoc, STEPS, summaryDoc } from '../../fixtures/meridian'
+import { LAUNCH_PAGE, REFUNDS_PAGE } from '../../fixtures/scenes'
 import { GEMINI_PRO, OPUS, SONNET } from '../../fixtures/models'
-import { Delivery, StepState, Verdict } from '../../foundations/vocabulary'
+import { Delivery, StepState, ToolKind, ToolState, Verdict } from '../../foundations/vocabulary'
+import { CanvasLine } from '../Canvas/CanvasLine'
+import { CanvasPanel } from '../Canvas/CanvasPanel'
 import { DocPanel } from '../DocPanel/DocPanel'
 import { Document } from '../Document/Document'
 import { Review } from '../Review/Review'
 import { ThreadShellProvider, type DocRef, type StepRef, type ThreadShell } from '../Shell/Shell'
 import { StepPanel } from '../StepPanel/StepPanel'
 import { Thread } from '../Thread/Thread'
+import { Tool } from '../Tool/Tool'
 import { Prose, Turn } from '../Turn/Turn'
 import { You } from '../You/You'
 import { TaskFace } from './TaskFace'
@@ -217,4 +222,207 @@ export const LastMessageClearsTheEdge: Story = {
     await expect(chip.getBoundingClientRect().bottom).toBeLessThanOrEqual(alert.getBoundingClientRect().top)
     await expect(alert.getBoundingClientRect().bottom).toBeLessThanOrEqual(keep.getBoundingClientRect().top)
   },
+}
+
+const LONG = (
+  <>
+    {THREAD}
+    {Array.from({ length: 6 }, (_, i) => (
+      <Turn key={i} model={OPUS} at={`12:${10 + i}`}>
+        <Prose>Checked another batch of refunds against the keys: nothing to change, the dry run still matches the ledger.</Prose>
+      </Turn>
+    ))}
+  </>
+)
+const PR_PILL = { id: 'pr', mark: Brand.GitHub, label: 'PR #317', what: 'review comments and checks' }
+const TWO_PROCESSES = [
+  { id: 'site', name: 'Site dev server', command: 'bun run dev', url: 'localhost:5173', since: '41m' },
+  { id: 'sb', name: 'Storybook', command: 'bun run storybook', url: 'localhost:6116', since: '22m' },
+]
+
+/* The thread's scroller: the one inside the face that has more to scroll than it shows. */
+const scrollerOf = (root: HTMLElement | null) =>
+  Array.from(root?.querySelectorAll<HTMLElement>('[data-floats-host] *') ?? []).find(
+    (el) => getComputedStyle(el).overflowY === 'auto' && el.scrollHeight > el.clientHeight,
+  )
+
+/* Scrolls the thread inside it to the top once it has a size, as a reader scrolling up would. */
+function ReadingUp({ children, width = 640 }: { children: ReactNode; width?: number }) {
+  const box = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    // after the thread has settled at its end, so the following doesn't take the reader back down
+    const timer = setTimeout(() => scrollerOf(box.current)?.scrollTo({ top: 0 }), 400)
+    return () => clearTimeout(timer)
+  }, [])
+  return (
+    <div ref={box} style={{ height: 520, width }}>
+      {children}
+    </div>
+  )
+}
+
+/* The thread scrolled up to read, so the Latest pill shows, over a composer with `above` on its edge (and a notice, if given). */
+function scrolledUp(above?: ReactNode, opts: { width?: number; notice?: string } = {}): Story {
+  return {
+    render: () => (
+      <ReadingUp width={opts.width}>
+        <TaskFace
+          composer={
+            <Composer value="" onChange={() => {}} onSubmit={() => {}} placeholder="Tell the lead" above={above} notice={opts.notice} />
+          }
+        >
+          <Thread label="Task 432">{LONG}</Thread>
+        </TaskFace>
+      </ReadingUp>
+    ),
+    play: async ({ canvasElement }) => {
+      const c = within(canvasElement)
+      // Needs layout, so these stories are in BROWSER_ONLY (tests/stories.ts): jsdom draws no boxes.
+      const scroller = scrollerOf(canvasElement)
+      await expect(scroller).toBeTruthy()
+      scroller!.scrollTo({ top: 0 })
+      const jump = await c.findByRole('button', { name: /latest/i })
+      // What floats on the edge is one box, however its pills wrap; its top is what the pill must clear.
+      const floats = canvasElement.querySelector('[class*="floats"]')!
+      if (above || opts.notice) {
+        await expect(floats).not.toBeNull()
+        await expect(floats!.childElementCount).toBeGreaterThan(0)
+        await expect(jump.getBoundingClientRect().bottom).toBeLessThan(floats!.getBoundingClientRect().top)
+      } else {
+        // the composer draws no edge at all when nothing floats on it
+        await expect(floats?.childElementCount ?? 0).toBe(0)
+      }
+    },
+  }
+}
+
+/** Scrolled up with nothing on the composer's edge: the pill keeps its place just above the composer. */
+export const ScrolledUp: Story = scrolledUp()
+export const ScrolledUpDark: Story = { ...ScrolledUp, globals: { theme: 'dark' } }
+
+/** One pill on the composer's edge ("Listening to PR #317"): the Latest pill rests above it, not on it. */
+export const ScrolledUpWithOnePill: Story = scrolledUp(<Behind sources={[PR_PILL]} />)
+export const ScrolledUpWithOnePillDark: Story = { ...ScrolledUpWithOnePill, globals: { theme: 'dark' } }
+
+/** Two pills ("Listening to PR #317", "Running 2 processes"): the Latest pill clears both. */
+export const ScrolledUpWithTwoPills: Story = scrolledUp(<Behind sources={[PR_PILL]} processes={TWO_PROCESSES} />)
+export const ScrolledUpWithTwoPillsDark: Story = { ...ScrolledUpWithTwoPills, globals: { theme: 'dark' } }
+
+/** Two things on the edge (a PR chip and a processes chip) and a notice, in a narrow composer: the row wraps, grows taller, and the Latest pill still clears it. */
+export const ScrolledUpWrapped: Story = scrolledUp(
+  <>
+    <Behind sources={[PR_PILL]} />
+    <Behind processes={TWO_PROCESSES} />
+  </>,
+  { width: 300, notice: 'Sending hands this to the lead, who takes over from here and reads what you wrote before it carries on.' },
+)
+export const ScrolledUpWrappedDark: Story = { ...ScrolledUpWrapped, globals: { theme: 'dark' } }
+
+/*
+ * A task with what it made open beside it, as a person sees it at work: the
+ * page a lead drew, on the canvas; the page a task's run serves, in the
+ * browser. The page stands in a frame where the window lays its own view.
+ */
+function Beside({ children, panel, opened }: { children: ReactNode; panel: ReactNode; opened?: string }) {
+  return (
+    <ThreadShellProvider value={{ openCanvas: fn(), openedCanvas: opened ?? null }}>
+      <div style={{ height: '100vh' }}>
+        <TaskFace
+          panel={panel}
+          panelWidth={660}
+          composer={<Composer value="" onChange={() => {}} onSubmit={() => {}} placeholder="Tell the lead" hint="/" />}
+        >
+          <Thread label="Task 438">{children}</Thread>
+        </TaskFace>
+      </div>
+    </ThreadShellProvider>
+  )
+}
+
+const page = (title: string, source: string) => (
+  <iframe title={title} srcDoc={source} style={{ display: 'block', flex: 1, width: '100%', height: '100%', border: 0 }} />
+)
+
+const LAUNCH = { canvasId: 'cnv_payouts', name: 'payouts-launch', title: 'Payouts launch page', kind: 'html' } as const
+
+/** A page the lead drew on the canvas, open beside the task at its newest version, after a comment on the one before. */
+export const WithACanvas: Story = {
+  render: () => (
+    <Beside
+      opened={LAUNCH.canvasId}
+      panel={
+        <CanvasPanel
+          {...LAUNCH}
+          version={3}
+          latest={3}
+          by="The lead of Payouts launch · just now"
+          note="Bigger, bolder headline"
+          onVersion={fn()}
+          onComment={fn()}
+          onReload={fn()}
+          onClose={fn()}
+          fill
+        >
+          {page('Payouts launch page', LAUNCH_PAGE)}
+        </CanvasPanel>
+      }
+    >
+      <You at="10:12">Draw the launch page for Payouts. Lead with how fast the money lands.</You>
+      <Turn model={OPUS} at="10:19">
+        <Prose>Here it is: the speed in the headline, and today’s payout on a card, so the page shows it rather than says it twice.</Prose>
+        <CanvasLine canvas={{ ...LAUNCH, version: 2 }} action="published" />
+      </Turn>
+      <You at="10:26">Bigger, bolder headline. It should be the first thing you read.</You>
+      <Turn model={OPUS} at="10:27">
+        <Prose>Done. The headline is set larger and heavier, and the line under it is shorter, so nothing competes with it.</Prose>
+        <CanvasLine canvas={{ ...LAUNCH, version: 3 }} action="published" note="Bigger, bolder headline" />
+      </Turn>
+    </Beside>
+  ),
+}
+
+/** The page a task's run serves, open in the browser beside it, with the lead trying the fix on it. */
+export const WithTheBrowser: Story = {
+  render: () => (
+    <Beside
+      panel={
+        <PagePanel
+          address="localhost:5173/refunds"
+          full="http://localhost:5173/refunds"
+          canBack
+          canForward={false}
+          onBack={fn()}
+          onForward={fn()}
+          onReload={fn()}
+          onNavigate={fn()}
+          keep="until the task is done"
+          onClear={fn()}
+          viewport="fit"
+          viewports={[{ value: 'fit', label: 'Fit the panel' }]}
+          onViewport={fn()}
+          onComment={fn()}
+          docked="beside"
+          onDock={fn()}
+          onClose={fn()}
+          line={<PageLine icon="agents">The lead is at work on this page. A click or key press from you stops the lead.</PageLine>}
+        >
+          {page('Refunds', REFUNDS_PAGE)}
+        </PagePanel>
+      }
+    >
+      <You at="14:20">Retry does nothing on a failed refund. Fix it, and try it on the page.</You>
+      <Turn model={OPUS} at="14:31">
+        <Tool kind={ToolKind.Search} verb="Searched" target="refunds/retry" state={ToolState.Done} />
+        <Tool kind={ToolKind.Read} verb="Read" target="web/src/refunds/RetryButton.tsx" state={ToolState.Done} />
+        <Prose>
+          Retry still posted to the old refunds endpoint, which answers 404 now, and the page dropped the error. It calls the new one, and
+          says what came back.
+        </Prose>
+        <Tool kind={ToolKind.Edit} verb="Edited" target="web/src/refunds/RetryButton.tsx" meta="+14 −6" state={ToolState.Done} />
+        <Tool kind={ToolKind.Edit} verb="Edited" target="web/src/refunds/RetryButton.test.tsx" meta="+22" state={ToolState.Done} />
+        <Tool kind={ToolKind.Run} verb="Ran" target="bunx vitest run src/refunds" state={ToolState.Done} />
+        <Prose>The tests pass. Trying it on re_3Po, the refund that failed this morning.</Prose>
+      </Turn>
+    </Beside>
+  ),
 }

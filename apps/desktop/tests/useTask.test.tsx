@@ -239,6 +239,44 @@ describe('what the person does on a task', () => {
     expect(client.setModel).not.toHaveBeenCalled()
   })
 
+  it('sends a pick back to the model the lead is on while another is held for its next turn', async () => {
+    const base = snapshot().session!
+    const { result, client } = reading({
+      session: { ...base, model: 'opus', effort: 'high', nextLead: { agentId: base.agentId, model: 'sonnet', effort: null } },
+    })
+    await waitFor(() => expect(result.current.snapshot).not.toBeNull())
+    await act(() => result.current.choose({ agentId: base.agentId, model: 'opus', effort: 'high' }))
+    expect(client.setModel).toHaveBeenCalledWith({ threadId: 'th1', model: 'opus' })
+    expect(client.setEffort).not.toHaveBeenCalled()
+  })
+
+  it('sends a pick back to the model the lead is on, made after the first was taken and before the head read lands', async () => {
+    const base = snapshot().session!
+    const on = { agentId: base.agentId, model: 'opus', effort: 'high' }
+    let slow = false
+    const releases: Array<() => void> = []
+    const { client, ...view } = (() => {
+      const fake = fakeClient({
+        getThread: vi.fn(async () => {
+          if (slow) await new Promise<void>((resolve) => releases.push(resolve))
+          return snapshot({ session: { ...base, ...on } })
+        }),
+      })
+      return { ...fake, ...hook(fake.client) }
+    })()
+    await waitFor(() => expect(view.result.current.snapshot).not.toBeNull())
+    slow = true
+    act(() => void view.result.current.choose({ ...on, model: 'sonnet' }))
+    await waitFor(() => expect(client.setModel).toHaveBeenCalledWith({ threadId: 'th1', model: 'sonnet' }))
+    // The first is taken, and the thread isn't read again yet: still as it was, on the model the pick goes back to.
+    await waitFor(() => expect(releases.length).toBeGreaterThan(0))
+    act(() => void view.result.current.choose(on))
+    await waitFor(() => expect(client.setModel).toHaveBeenLastCalledWith({ threadId: 'th1', model: 'opus' }))
+    expect(client.setModel).toHaveBeenCalledTimes(2)
+    slow = false
+    await act(async () => releases.forEach((release) => release()))
+  })
+
   it('shows why Try again was refused instead of silently accepting the click', async () => {
     const { result, client } = reading()
     vi.mocked(client.tryAgain).mockRejectedValue(

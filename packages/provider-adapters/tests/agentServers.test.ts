@@ -132,7 +132,7 @@ describe('each agent’s servers, read into one shape', () => {
       homeDir,
       env: { CLAUDE_CONFIG_DIR: join(homeDir, 'c'), CODEX_HOME: codexHome, XDG_CONFIG_HOME: xdgHome },
     })
-    expect(moved.claude).toEqual({ file: join('~', 'c', '.claude.json'), path: join(homeDir, 'c', '.claude.json') })
+    expect(moved.claude).toEqual({ file: '~/c/.claude.json', path: join(homeDir, 'c', '.claude.json') })
     expect(moved.codex).toEqual({ file: join(codexHome, 'config.toml'), path: join(codexHome, 'config.toml') })
     expect(moved.opencode.path).toBe(join(xdgHome, 'opencode', 'opencode.json'))
   })
@@ -156,7 +156,7 @@ describe('each agent’s servers, read into one shape', () => {
     put(join(config, 'opencode.jsonc'), '{ // note\n "mcp": { "c": { "command": ["c"], }, }, }')
     const found = agentServers('opencode', { homeDir })
     expect(found.servers).toEqual([{ name: 'c', transport: 'stdio', command: 'c' }])
-    expect(found.file).toBe(join('~', '.config', 'opencode', 'opencode.jsonc'))
+    expect(found.file).toBe('~/.config/opencode/opencode.jsonc')
     put(join(config, 'opencode.jsonc'), '{ oops')
     expect(agentServers('opencode', { homeDir }).problem).toBe('it isn’t JSON Althar can read')
   })

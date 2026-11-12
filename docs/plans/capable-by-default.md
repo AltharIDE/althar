@@ -263,7 +263,7 @@ lasted of it).
   (ADR-071's review steps). *Moved to phase 4* when phase 2 was built: its
   copy becomes a worktree it can install in, as a team pull request's
   review's does, and both are one change to how a review's copy is made.
-- **Helpers** (ADR-087, when built) get their lead's MCP servers and skills.
+- **Helpers** ([tasks § Helpers](../decisions/tasks.md#helpers)) get their lead's MCP servers and skills.
 
 **As built.** One tool set: each tool is defined once and served to both
 roles (`ToolServer.serve(POOL, …)`); the coordinator has every tool but a
@@ -340,7 +340,7 @@ The remaining host-tool changes below build on it.
 ### 4. Reviews that run things
 
 > **Taken into phase 5** by
-> [a task is a conversation plus parts](../decisions/proposed/a-task-is-a-conversation-plus-parts.md#running-someone-elses-pull-request),
+> [a task is a conversation plus parts](../decisions/tasks.md#changing-parts),
 > which supersedes this list where they differ. There, "run it" asks how
 > far to trust the code: Run safely, offline in the sandbox as below, or
 > Trust fully, with the recorded setup and the network on.
@@ -373,7 +373,7 @@ The remaining host-tool changes below build on it.
 ### 5. The task as parts
 
 > **Superseded** by
-> [a task is a conversation plus parts](../decisions/proposed/a-task-is-a-conversation-plus-parts.md#the-parts)
+> [a task is a conversation plus parts](../decisions/tasks.md#changing-parts)
 > where they differ. It has five parts, not three: Workspace, Checked by
 > (who reviews the task's own work), Reviewing (the pull requests it
 > reviews, which this list puts in Outputs), Outputs and Access. Each
@@ -402,7 +402,7 @@ word. Then no kind needs a hand-written path to another.
 
 This phase is the largest. It changes ADR-035, ADR-052 and the change sets
 model (`change_sets`, `repository_changes`), so it gets an ADR of its own:
-[a task is a conversation plus parts](../decisions/proposed/a-task-is-a-conversation-plus-parts.md),
+[a task is a conversation plus parts](../decisions/tasks.md#changing-parts),
 proposed on 8 November. It takes in phase 4: a review that runs code is a
 review whose workspace moved up. It also makes talking to a lead quick: a
 message is a turn with no review, and a tweak is reviewed once, when the
