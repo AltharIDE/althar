@@ -38,9 +38,11 @@ import { POOL, type ToolAccess, ToolRefused, ToolServer } from './ToolServer'
  * setup that works, which replaces the old one. The person reads it in the
  * project's settings, and can change it there.
  *
- * It starts as the worktree is made, and the lead's first turn waits for it.
+ * It starts as the worktree is made, and the lead's turns wait for it.
  * Never in a copy a task only reads, such as the pull request a review reads:
- * nothing of someone else's code runs there.
+ * nothing of someone else's code runs there. Nor in an aside's, on Scratch
+ * (docs/decisions/tasks.md, "Asides"): an aside never installs or builds,
+ * and is set up only once it is made a task.
  * It runs once per worktree: how it went is kept on the workspace, so a lead
  * that resumes doesn't set it up again, and a worktree made again (a reopened
  * task's whose folder went) is. It runs in the person's login shell, so it
