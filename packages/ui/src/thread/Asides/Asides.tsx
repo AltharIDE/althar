@@ -2,7 +2,9 @@ import type { ReactNode } from 'react'
 
 import { cx } from '../../lib/cx'
 import type { RootProps } from '../../lib/props'
+import { Icon } from '../../foundations/Icon/Icon'
 import { Button } from '../../primitives/Button/Button'
+import { Tooltip } from '../../primitives/HoverCard/HoverCard'
 import { IconButton } from '../../primitives/IconButton/IconButton'
 import { LiveDot } from '../../primitives/LiveDot/LiveDot'
 import { Menu, MenuItem, MenuSeparator } from '../../primitives/Menu/Menu'
@@ -12,9 +14,10 @@ import s from './Asides.module.css'
  * Asides (a task is a conversation plus parts, "Asides"): quick chats beside
  * the coordinator's conversation, with its tools, kept off the board. Pills
  * over the conversation: the coordinator first, with its mark, then each
- * aside, the latest first, a live dot while its agent is at it; those left a
- * week fold into "N older", which clears them together; + starts one. In an
- * open aside, its own moves sit over its composer (AsideMoves).
+ * aside, the latest first, a live dot while its agent is at it, and an × that
+ * clears it (Delete, on the pill, too); those left a week fold into "N older",
+ * which clears them together; + starts one. In an open aside, its move to the
+ * board sits over its composer (AsideMoves).
  */
 
 export interface Aside {
@@ -35,6 +38,10 @@ export interface AsideTabsText {
   older: (count: number) => string
   olderNote: string
   clearOlder: (count: number) => string
+  /** The ×'s tooltip. */
+  clear: string
+  /** The ×'s name, for the aside it clears. */
+  clearOne: (title: string) => string
 }
 
 export const asideTabsText: AsideTabsText = {
@@ -45,6 +52,8 @@ export const asideTabsText: AsideTabsText = {
   older: (count) => `${count} older`,
   olderNote: 'Untouched for over a week. Cleared, ⌘K still finds them.',
   clearOlder: (count) => (count === 1 ? 'Clear it' : `Clear these ${count}`),
+  clear: 'Clear',
+  clearOne: (title) => `Clear ${title}`,
 }
 
 export type AsideTabsProps = RootProps<
@@ -63,6 +72,8 @@ export type AsideTabsProps = RootProps<
     current: string | null
     onPick: (id: string | null) => void
     onNew: () => void
+    /** Clears one, by its ×, or Delete on its pill: it leaves at once. Without it, its pill has no ×. */
+    onClear?: (id: string) => void
     /** Settles the older ones together. Without it, they can only be opened. */
     onClearOlder?: (ids: readonly string[]) => void
     /** The keys that start one, as its tooltip says them. */
@@ -78,6 +89,7 @@ export function AsideTabs({
   current,
   onPick,
   onNew,
+  onClear,
   onClearOlder,
   newKbd,
   text,
@@ -94,21 +106,37 @@ export function AsideTabs({
           {t.coordinator}
         </button>
         {asides.length > 0 && <span className={s.rule} aria-hidden />}
-        {[...asides, ...older.filter((one) => one.id === current)].map((aside) => (
-          <button
-            key={aside.id}
-            type="button"
-            role="tab"
-            aria-selected={current === aside.id}
-            className={s.pill}
-            data-aside={aside.id}
-            title={aside.said ?? (aside.title || t.newAside)}
-            onClick={() => onPick(aside.id)}
-          >
-            {aside.running === true && <LiveDot pulse />}
-            <span className={s.title}>{aside.title || t.newAside}</span>
-          </button>
-        ))}
+        {[...asides, ...older.filter((one) => one.id === current)].map((aside) => {
+          const title = aside.title || t.newAside
+          return (
+            // The pill is its tab and its ×, side by side: a button never holds another.
+            <span key={aside.id} className={cx(s.pill, s.aside)} data-aside={aside.id} data-current={current === aside.id || undefined}>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={current === aside.id}
+                className={s.tab}
+                title={aside.said ?? title}
+                onClick={() => onPick(aside.id)}
+                onKeyDown={(event) => {
+                  if (onClear === undefined || (event.key !== 'Delete' && event.key !== 'Backspace')) return
+                  event.preventDefault()
+                  onClear(aside.id)
+                }}
+              >
+                {aside.running === true && <LiveDot pulse />}
+                <span className={s.title}>{title}</span>
+              </button>
+              {onClear !== undefined && (
+                <Tooltip label={t.clear}>
+                  <button type="button" className={s.clear} aria-label={t.clearOne(title)} onClick={() => onClear(aside.id)}>
+                    <Icon name="close" size={9} />
+                  </button>
+                </Tooltip>
+              )}
+            </span>
+          )
+        })}
       </div>
       {older.length > 0 && (
         <Menu
@@ -140,40 +168,30 @@ export function AsideTabs({
 
 export interface AsideMovesText {
   makeTask: string
-  clear: string
-  clearHint: string
 }
 
 export const asideMovesText: AsideMovesText = {
   makeTask: 'Make it a task',
-  clear: 'Clear',
-  clearHint: 'It leaves the asides; ⌘K still finds it',
 }
 
 export type AsideMovesProps = RootProps<
   'div',
   {
-    /** Moves it to the board, as work. */
+    /** Moves it to the board, as work: it leaves the asides at once. */
     onMakeTask: () => void
-    /** Settles it: it leaves the asides, and ⌘K still finds it. */
-    onClear: () => void
     /** A quiet word at the end: when it was asked, or what it quotes. */
     note?: ReactNode
-    busy?: boolean
     text?: Partial<AsideMovesText>
   }
 >
 
-/** An open aside's own moves, over its composer, where the person is when they have read the answer. */
-export function AsideMoves({ onMakeTask, onClear, note, busy = false, text, className, ...rest }: AsideMovesProps) {
+/** An open aside's move to the board, over its composer, where the person is when they have read the answer; its pill clears it. */
+export function AsideMoves({ onMakeTask, note, text, className, ...rest }: AsideMovesProps) {
   const t = { ...asideMovesText, ...text }
   return (
     <div className={cx(s.moves, className)} {...rest}>
-      <Button size="small" variant="quiet" icon="work" disabled={busy} onClick={onMakeTask}>
+      <Button size="small" variant="quiet" icon="work" onClick={onMakeTask}>
         {t.makeTask}
-      </Button>
-      <Button size="small" variant="quiet" icon="close" disabled={busy} title={t.clearHint} onClick={onClear}>
-        {t.clear}
       </Button>
       {note !== undefined && <span className={s.note}>{note}</span>}
     </div>

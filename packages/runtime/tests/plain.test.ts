@@ -506,12 +506,14 @@ describe('a plain task', () => {
         taskId: created.taskId,
       }
       assert.strictEqual(yield* callTool(lead, 'finish_step', { summary: 'Read them.' }), 'Althar has your summary.')
-      // Handed a note that only says there was nothing to check, with nothing changed, it keeps none: what it shows is what it ran.
+      // Handed a note that only says there was nothing to check, it keeps none: what it shows is what it ran, and a note of what it
+      // found, though it changed nothing.
       yield* callTool(lead, 'finish_step', {
         summary: 'Said hi back.',
         evidence: [
           { kind: 'note', caption: 'Nothing to show', text: 'This was only a greeting, so nothing was changed or checked.' },
           { kind: 'command', caption: 'The logs', command: 'tail app.log', exit_code: 0, output: 'ok' },
+          { kind: 'note', caption: 'Where the retry backs off', text: 'Twice: in the client (client.ts:40) and in the queue.' },
         ],
       })
       const sql = yield* SqlClient.SqlClient
@@ -520,7 +522,7 @@ describe('a plain task', () => {
       const kept = (JSON.parse(report?.content ?? '{}') as { evidence?: ReadonlyArray<{ kind: string }> }).evidence ?? []
       assert.deepStrictEqual(
         kept.map((piece) => piece.kind),
-        ['command'],
+        ['command', 'note'],
       )
     }).pipe(Effect.provide(withQueries())),
   )

@@ -398,7 +398,7 @@ export function TaskView({
    * Shown as an aside, in the coordinator's pane (docs/decisions/tasks.md, "Asides"): its conversation alone, the same
    * composer as here, with `bar` (its own moves) over it, and no header, other faces or keys of its own.
    */
-  aside?: { readonly bar: ReactNode }
+  aside?: { readonly bar: ReactNode; readonly notice?: ReactNode }
 }) {
   // What the person writes to the lead, kept by the task while they are elsewhere, as are its images and what they dictate.
   const kept = draftKey.task(model.snapshot?.threadId ?? '')
@@ -1067,8 +1067,9 @@ export function TaskView({
         carried={<CarriedOver here={kept} />}
         // The lines about who answers go on the composer's edge, under the chip, so neither covers the other.
         notice={
-          model.error !== null || conflict !== null || line !== null ? (
+          model.error !== null || conflict !== null || line !== null || aside?.notice != null ? (
             <>
+              {aside?.notice}
               {model.error !== null && (
                 <div className={s.failure} role="alert">
                   {model.error}{' '}

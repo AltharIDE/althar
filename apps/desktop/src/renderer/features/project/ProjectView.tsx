@@ -79,7 +79,7 @@ import { Card, type CardActions } from './Card'
 import { useClearChat } from './ClearChat'
 import { TaskAskOf } from './TaskAskOf'
 import { FirstConnectionsView } from './FirstConnectionsView'
-import { AsideConversation, AsideQuote, AsidesBar, AskInAside, asidesText, useAsides } from './Asides'
+import { AsideConversation, AsideMoveFailed, AsideQuote, AsidesBar, AskInAside, asidesText, useAsideMoves, useAsides } from './Asides'
 import { coordinatorSigned } from '../../shared/signed'
 import { ChangesCard, type ChangesActions } from '../../shared/ChangesCard'
 import { DraftCard, type DraftActions } from '../../shared/DraftCard'
@@ -287,7 +287,10 @@ export function ProjectView({
   useEffect(() => onRoomChange?.(room), [room, onRoomChange])
   // The lanes the person collapsed, kept for every project, apart beside the conversation.
   const [folds, setFolds] = useFolds(room === Room.Both ? 'beside' : 'alone')
-  const lanes = board.board === null ? null : lanesOf(board.board, board.merging)
+  // The board as the person's moves on asides leave it, at once: one cleared gone, one made a task on it as work (`useAsideMoves`).
+  const asideMoves = useAsideMoves(useServices().client, board.board)
+  const seen = asideMoves.over
+  const lanes = seen === null ? null : lanesOf(seen, board.merging)
   const yours = lanes === null ? 0 : yoursOf(lanes)
   // An abandoned task's pull request left open, closed from its row.
   const closing = useClosePullRequests()
@@ -400,7 +403,8 @@ export function ProjectView({
     lead:
       chosen === null ? null : { key: 'implement', agentId: chosen.agentId, model: chosen.model, effort: chosen.effort, skipped: false },
     scratch: lanes?.scratch ?? NO_TASKS,
-    tasks: board.board?.tasks ?? NO_TASKS,
+    tasks: seen?.tasks ?? NO_TASKS,
+    moves: asideMoves,
   })
   const aside = asides.open
   const name = model.project?.name ?? coordinator?.project.name ?? text.project
@@ -559,8 +563,9 @@ export function ProjectView({
         carried={<CarriedOver here={draftOf} />}
         // The lines about who answers go on the composer's edge, so a running launch's chip and they never overlap.
         notice={
-          model.error !== null || line !== null ? (
+          model.error !== null || line !== null || asideMoves.failed !== null ? (
             <>
+              <AsideMoveFailed moves={asideMoves} className={s.failure} />
               {model.error !== null && (
                 <div className={s.failure} role="alert">
                   {model.error} <LinkButton onClick={model.dismissError}>{text.dismiss}</LinkButton>
@@ -797,15 +802,20 @@ export function ProjectView({
                         first={asides.first}
                         onPick={asides.pick}
                         onNew={() => asides.begin(null)}
-                        onClear={(ids) => {
-                          for (const id of ids) void client.markTaskDone(id)
-                        }}
-                        board={board.board?.tasks ?? []}
+                        onClear={asides.clear}
+                        board={seen?.tasks ?? []}
                         now={Date.parse(now)}
                       />
                     )}
                     {aside.kind === 'aside' ? (
-                      <AsideConversation key={aside.threadId} threadId={aside.threadId} onBack={asides.back} onOpenTask={onTask} />
+                      <AsideConversation
+                        key={aside.threadId}
+                        threadId={aside.threadId}
+                        onBack={asides.back}
+                        onOpenTask={onTask}
+                        onMakeTask={asides.makeTask}
+                        failed={asideMoves.failed === null ? null : <AsideMoveFailed moves={asideMoves} className={s.failure} />}
+                      />
                     ) : aside.kind === 'new' ? (
                       <TaskFace className={s.face} composer={composer}>
                         <Thread label={asidesText.newPlaceholder}>{null}</Thread>
@@ -907,6 +917,7 @@ export function ProjectView({
                         {text.olderFailed} {board.olderError}
                       </p>
                     )}
+                    {!talking && <AsideMoveFailed moves={asideMoves} className={s.failure} />}
                     <BoardView
                       // Beside the conversation, its asides are there; the board alone keeps them behind its chip.
                       lanes={talking ? { ...lanes, scratch: [] } : lanes}
@@ -914,7 +925,15 @@ export function ProjectView({
                       now={now}
                       onOpen={onTask}
                       closing={closing}
-                      actions={board}
+                      // An aside cleared from the chip goes at once, as from its pill.
+                      actions={{
+                        ...board,
+                        markDone: (taskId) => {
+                          if (!lanes.scratch.some((one) => one.taskId === taskId)) return board.markDone(taskId)
+                          asides.clear([taskId])
+                          return Promise.resolve(true)
+                        },
+                      }}
                       line={board.line}
                       folds={folds}
                       onFoldsChange={setFolds}

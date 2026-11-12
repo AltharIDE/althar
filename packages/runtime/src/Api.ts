@@ -1704,7 +1704,10 @@ export const handlers = Api.toLayer(
           commandId,
           api(
             Effect.flatMap(envelope('task.shelve', { taskId, shelf }, commandId), (said) =>
-              Effect.provideContext(shelve(taskId, shelf, said.actorId), folderStore),
+              Effect.provideContext(shelve(taskId, shelf, said.actorId), folderStore).pipe(
+                // An aside made a task is work now: its copy, never set up as an aside, is set up behind, before its next turn.
+                Effect.andThen(shelf === null ? setups.begin(taskId) : Effect.void),
+              ),
             ),
           ),
         ),

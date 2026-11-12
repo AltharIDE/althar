@@ -1,5 +1,5 @@
 import { randomBytes } from 'node:crypto'
-import { mkdtempSync } from 'node:fs'
+import { existsSync, mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { MessageChannel } from 'node:worker_threads'
@@ -16,9 +16,11 @@ import { until } from '@althar/testing/effect'
 import { connection, services } from '../src/Api'
 import { Folders } from '../src/Folders'
 import { Secrets } from '../src/Secrets'
+import { Setups } from '../src/Setups'
 import { addItem } from '../src/threads'
+import type { ToolAccess } from '../src/ToolServer'
 
-import { fakeAgents, fakeConnectors, repository, ROOMY } from './support'
+import { callTool, fakeAgents, fakeConnectors, repository, ROOMY } from './support'
 
 /*
  * An aside the person opens with + (docs/decisions/tasks.md, "Asides"), through the API as the window starts one: made on
@@ -171,6 +173,94 @@ describe('an aside opened with +', () => {
         // One that isn't there at all is still not found.
         const missing = yield* Effect.flip(client.GetThreadItem({ threadId: aside.threadId, itemId: 'item_missing' }))
         assert.strictEqual(missing.reason, 'NotFound')
+      }),
+    ),
+  )
+
+  it.live(
+    'never installs or sets up, as it is made, before its turns or asked to; its lead is told it becomes a task, and made one, it is set up',
+    () =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          const { client, store, project } = yield* connected
+          // The repository's recorded setup, as a lead records it: what every task's worktree gets before its lead starts.
+          const recorded = { copy: [], commands: ['echo installed > installed.txt'], at: '2026-11-12T00:00:00.000Z', taskId: null }
+          yield* store(
+            sqlOf(
+              (sql) => sql`UPDATE repository_bindings SET recorded_setup = ${JSON.stringify(recorded)} WHERE project_id = ${project.id}`,
+            ),
+          )
+          const taskId = `task_${randomBytes(16).toString('hex')}`
+          const aside = yield* client.StartTask({
+            commandId: commandId(),
+            projectId: project.id,
+            title: '',
+            steps: [{ key: 'implement', agentId: 'codex', model: null, skipped: false }],
+            chat: true,
+            taskId,
+          })
+          yield* client.Send({ commandId: commandId(), threadId: aside.threadId, body: 'hi', disposition: 'after_current' })
+          yield* until(store(sqlOf((sql) => sql<{ state: string }>`SELECT state FROM runs WHERE task_id = ${taskId}`)), (runs) =>
+            runs.some((run) => run.state === 'succeeded'),
+          )
+          const copy = () =>
+            store(sqlOf((sql) => sql<{ setup: string | null; path: string }>`SELECT setup, path FROM workspaces WHERE task_id = ${taskId}`))
+          // Asked as a turn asks, and as a folder brought back asks: nothing of it is set up, and nothing ran in it.
+          yield* store(Effect.flatMap(Setups, (setups) => setups.ready(taskId)))
+          const [made] = yield* copy()
+          assert.isNull(made?.setup ?? null)
+          assert.isFalse(existsSync(join(made?.path ?? '', 'installed.txt')))
+          const thread = yield* client.GetThread({ threadId: aside.threadId })
+          assert.isFalse(thread.items.some((item) => item.kind === 'setup'))
+          // Its lead asks for an install, or for the project, a branch or a task running: each is a build, so a task's.
+          const [session] = yield* store(
+            sqlOf((sql) => sql<{ id: string }>`SELECT id FROM provider_sessions WHERE thread_id = ${aside.threadId} LIMIT 1`),
+          )
+          const lead: ToolAccess = { role: 'lead', projectId: project.id, threadId: aside.threadId, sessionId: session?.id ?? '', taskId }
+          for (const [tool, args] of [
+            ['install_dependencies', {}],
+            ['run_project', {}],
+            ['run_project', { branch: 'main' }],
+          ] as const) {
+            const said = yield* store(callTool(lead, tool, args))
+            assert.include(said, 'an aside never installs', tool)
+            assert.include(said, 'Make it a task', tool)
+          }
+          // The person's own Run of its copy says so in their words.
+          const run = yield* Effect.flip(
+            client.RunProject({ commandId: commandId(), projectId: project.id, taskId, threadId: aside.threadId }),
+          )
+          assert.include(run.message, 'Make it a task to run it')
+          assert.isNull((yield* copy())[0]?.setup ?? null)
+          // Made a task, it is work: its copy is set up behind, as the person's press lands.
+          yield* client.ShelveTask({ commandId: commandId(), taskId, shelf: null })
+          yield* until(copy(), (rows) => rows[0]?.setup != null)
+          assert.isTrue(existsSync(join(made?.path ?? '', 'installed.txt')))
+        }),
+      ),
+  )
+
+  it.live('clears whatever it stands at: one waiting on the person’s answer settles as Done, its question withdrawn', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { client, store, project } = yield* connected
+        const aside = yield* client.StartTask({
+          commandId: commandId(),
+          projectId: project.id,
+          title: 'Which ADRs?',
+          description: 'Which ADRs should it keep? [lead:wait-for-person]',
+          steps: [{ key: 'implement', agentId: 'codex', model: null, skipped: false }],
+          chat: true,
+        })
+        const asks = () => store(sqlOf((sql) => sql<{ state: string }>`SELECT state FROM attention_requests WHERE task_id = ${aside.id}`))
+        yield* until(asks(), (rows) => rows.some((row) => row.state === 'open'))
+        // Done alone wouldn't settle it, as it waits on the person: cleared, it settles all the same.
+        yield* client.MarkTaskDone({ commandId: commandId(), taskId: aside.id })
+        const [task] = yield* store(sqlOf((sql) => sql<{ state: string }>`SELECT state FROM tasks WHERE id = ${aside.id}`))
+        assert.strictEqual(task?.state, 'done')
+        assert.isTrue((yield* asks()).every((row) => row.state === 'withdrawn'))
+        const card = (yield* client.GetBoard({ projectId: project.id })).tasks.find((one) => one.taskId === aside.id)
+        assert.strictEqual(card?.phase, 'settled')
       }),
     ),
   )

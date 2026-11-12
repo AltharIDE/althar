@@ -916,12 +916,14 @@ export class Coordinator extends Context.Service<
 
       /**
        * Drafts a task, from an issue where one is named: the task made, or the one this session made under that title before.
-       * `plain`, for one started with no plan: its worktrees have no branch until its lead changes the repository.
+       * `plain`, for one started with no plan: its worktrees have no branch until its lead changes the repository. `aside`, for
+       * one the coordinator starts at once: made on Scratch, so its copy is never set up (no install, no setup, no fetch).
        */
       const drafting = (
         access: ToolAccess,
         { title, description, issue: from, part_of: partOf, repositories, works_in: asked, toward }: typeof Drafted.Type,
         plain = false,
+        aside = false,
       ) =>
         Effect.gen(function* () {
           // A title is read at a glance, in a line on every screen: the rest of what was asked goes in the description.
@@ -967,6 +969,8 @@ export class Coordinator extends Context.Service<
               // Sent with no words, its images and files are still what they asked for.
               ...(request === undefined ? {} : { request, requestInputs: said.map((input) => input.id) }),
               ...(plain ? { plain } : {}),
+              // An aside is on Scratch from the moment it is made: its worktree's setup, begun as it is made, never runs.
+              ...(aside ? { shelf: 'scratch' as const } : {}),
               // Where it works: as the coordinator said, else the project's default (ADR-091).
               worksIn: yield* worksInFor(access.projectId, asked),
               // What it works toward: as the coordinator said, else the project's Work toward (ADR-093).
@@ -1134,12 +1138,12 @@ export class Coordinator extends Context.Service<
           // The lead is found first, so a model that can't be used drafts nothing.
           const lead = yield* stepOf(access.projectId, pick)
           yield* notAReview(access)
-          const { created } = yield* drafting(access, drafted, true)
+          // A lead's starts after the countdown, as any plan, so the person can hold it; the coordinator's at once, as an aside.
+          const byLead = parentOf(access) !== null
+          const { created } = yield* drafting(access, drafted, true, !byLead)
           // Called again, unsure the first worked, it doesn't start the same task twice.
           if ((yield* taskOf(access, created.taskId)).state !== 'draft') return `${created.slug} has started already.`
           const worksIn = yield* worksInFor(access.projectId, drafted.works_in)
-          // A lead's starts after the countdown, as any plan, so the person can hold it; the coordinator's at once.
-          const byLead = parentOf(access) !== null
           const planId = yield* plans.propose({
             projectId: access.projectId as ProjectId,
             taskId: created.taskId,
@@ -1156,7 +1160,7 @@ export class Coordinator extends Context.Service<
           if (byLead)
             return `Planned ${created.slug}, started from this task: its lead starts in 25 seconds unless the person holds it, with no review, and nothing goes outside the project when it is done. The person sees it as a card, started by this task; say in a sentence what it does.`
           // A chat: it sits on Scratch, off the board's lanes, until it takes a worktree or an output (a task is a conversation plus
-          // parts, "Asides").
+          // parts, "Asides"). Made there; one this session drafted before, under the same title, is put there now.
           yield* shelve(created.taskId, 'scratch', instance.coordinatorId)
           const started = yield* plans.start(planId, instance.coordinatorId)
           if (started === 'waiting' && worksIn === 'checkout') {

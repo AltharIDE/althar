@@ -16,6 +16,7 @@ import { Instance } from './Instance'
 import { printedMore, uncoloured } from './leftRunning'
 import { change, fact, timestamp } from './records'
 import { installIn } from './runCommand'
+import { ASIDE_BUILDS, onScratch } from './scratch'
 import { addItem, updateItem } from './threads'
 import { POOL, type ToolAccess, ToolRefused, ToolServer } from './ToolServer'
 
@@ -284,17 +285,17 @@ export class Setups extends Context.Service<
   Setups,
   {
     /**
-     * Sets up each of the task's worktrees that isn't yet, without waiting: as they are made. A chat's copy, on Scratch and
-     * on no branch of its own, is made without setup; `replay`, the first time its lead runs something, sets it up too.
+     * Sets up each of the task's worktrees that isn't yet, without waiting: as they are made, or as an aside becomes a task. An
+     * aside's copy, on Scratch, is never set up.
      */
-    begin(taskId: string, replay?: boolean): Effect.Effect<void>
+    begin(taskId: string): Effect.Effect<void>
     /**
      * Waits until each of the task's worktrees is set up, setting up any that
      * isn't yet: before its lead's first turn. Never fails; one that doesn't
-     * set up says so in the thread, and to the lead. A chat's copy only with
-     * `replay`, as something is about to run from it.
+     * set up says so in the thread, and to the lead. An aside's copy, on
+     * Scratch, is never set up: an aside answers from what it reads.
      */
-    ready(taskId: string, replay?: boolean): Effect.Effect<void>
+    ready(taskId: string): Effect.Effect<void>
     /** What the task's lead is told of how its worktrees were set up; null where nothing ran. */
     told(taskId: string): Effect.Effect<string | null>
   }
@@ -501,17 +502,16 @@ export class Setups extends Context.Service<
           ),
         ).pipe(Effect.catchCause((cause) => Effect.logWarning('Could not set up a task’s worktree', cause)))
 
-      const ready = (taskId: string, replay = false) =>
+      const ready = (taskId: string) =>
         provide(
           Effect.gen(function* () {
             const sql = yield* SqlClient.SqlClient
-            // A chat's copy, on Scratch and on no branch of its own, waits for something to run from it (a task is a conversation
-            // plus parts, "Asides"): a chat that only talks never pays for an install.
+            // An aside's copy, on Scratch, is never set up (docs/decisions/tasks.md, "Asides"): it never installs, builds or runs
+            // the setup before it answers, nor after. Made a task, by the person or its lead's work, it is set up as any task's.
             const unset = yield* sql<{ id: string }>`
               SELECT w.id FROM workspaces w JOIN repository_bindings b ON b.id = w.binding_id
               WHERE w.task_id = ${taskId} AND w.device_id = ${instance.deviceId} AND w.state = 'ready' AND (w.access = 'write' OR w.trust = 'full') AND w.kind IS NULL AND w.setup IS NULL
-                AND (${replay ? 1 : 0} = 1 OR w.branched_at IS NOT NULL
-                  OR coalesce((SELECT k.shelf FROM tasks k WHERE k.id = w.task_id), '') <> 'scratch')
+                AND coalesce((SELECT k.shelf FROM tasks k WHERE k.id = w.task_id), '') <> 'scratch'
               ORDER BY b.created_at, b.rowid`
             // Each in a fiber of Althar's own, side by side: a lead that stops waiting doesn't stop its worktree's setup.
             const fibers = yield* Effect.forEach(unset, (workspace) => Effect.forkIn(settle(workspace.id), setupsScope))
@@ -666,6 +666,7 @@ export class Setups extends Context.Service<
               return copies.map((one, at) => saidOf(one.name, copies.length > 1, ran[at], 'copy')).join('\n\n')
             }
             if (taskId === null) return yield* new ToolRefused({ message: 'This tool is for a task’s lead or the coordinator.' })
+            if (yield* provide(onScratch(taskId))) return yield* new ToolRefused({ message: ASIDE_BUILDS })
             const again = yield* provide(againOf(taskId, named))
             if (again.length === 0)
               return yield* new ToolRefused({
@@ -747,7 +748,7 @@ export class Setups extends Context.Service<
       yield* (yield* ToolServer).serve('lead', [recordTool])
 
       return Setups.of({
-        begin: (taskId, replay) => Effect.asVoid(Effect.forkIn(ready(taskId, replay === true), setupsScope)),
+        begin: (taskId) => Effect.asVoid(Effect.forkIn(ready(taskId), setupsScope)),
         ready,
         told,
       })

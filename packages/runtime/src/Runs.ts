@@ -99,6 +99,7 @@ import {
   PictureGiven,
   readEvidence,
   readShown,
+  saysNothing,
   SHOWN_MOST,
   keptViewsIn,
   unverifiedOf,
@@ -5066,9 +5067,9 @@ export class Runs extends Context.Service<
               : `${said} You changed the repository, so Althar put the task's work on a branch of its own, ${branched.join(', ')}, which stays on ${thisDevice()}: commit there.`
           const itemId = yield* newId(Ids.threadItem)
           const shows = Effect.gen(function* () {
-            // With nothing changed in the repository, a note can only say there was nothing to check: nothing to show, so none is
-            // kept, and its step draws no "What it checked". A run, a response or a picture still shows something.
-            const shown = plain ? evidence.filter((piece) => piece.given.kind !== 'note') : evidence
+            // A note that only says there was nothing to show shows nothing: it isn't kept, and a step with nothing else draws no
+            // "What it checked". Every other piece is kept, a note of what an answer found included.
+            const shown = evidence.filter((piece) => !saysNothing(piece.given))
             const kept = yield* keepEvidence({ projectId: access.projectId as ProjectId, itemId, folders: [] }, shown)
             // A list given is kept even empty: what an earlier step couldn't show, this one may have.
             return {
