@@ -1,0 +1,65 @@
+.lab {
+  display: grid;
+  grid-template-rows: 1fr auto;
+  height: 100vh;
+  background: var(--n-0);
+}
+.stage {
+  display: flex;
+  justify-content: center;
+  min-height: 0;
+}
+/* The app's window: the whole stage, or as narrow as the app's window goes. */
+.window {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+  height: 100%;
+  background: var(--n-2);
+}
+.window[style] {
+  flex: none;
+  box-shadow: 0 0 0 1px var(--line-2);
+}
+.window > * {
+  flex: 1;
+  min-height: 0;
+}
+.bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  align-items: center;
+  padding: 6px 10px;
+  border-top: 1px solid var(--line-2);
+  background: var(--n-1);
+  font-size: 12px;
+}
+.bar button {
+  padding: 4px 10px;
+  border-radius: 6px;
+  color: var(--t-2);
+}
+.bar button:hover {
+  background: var(--line);
+}
+.bar button[aria-pressed='true'] {
+  background: var(--n-2);
+  color: var(--t-1);
+  box-shadow: 0 0 0 1px var(--line-2);
+}
+.bar kbd {
+  font-family: var(--mono);
+  color: var(--t-4);
+}
+.gap {
+  flex: 1;
+}
+.hint {
+  padding: 0 8px;
+  color: var(--t-3);
+}
+.bar[hidden] {
+  display: none;
+}
