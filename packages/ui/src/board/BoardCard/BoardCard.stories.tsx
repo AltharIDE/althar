@@ -748,8 +748,26 @@ export const StartedByALeadOpensIt: Story = {
   },
 }
 
-export const ErrandWaiting: Story = { args: { ...CHANGE_READY, errands: ['Waiting for #1187: checks at 9b50d2c.'] } }
-export const ErrandPaused: Story = { args: { ...CHANGE_READY, errands: ['Paused for #1187: changes requested.'] } }
+/*
+ * A merge the person asked for, in a few plain words under its title (the runtime's errandWords): never an address, a
+ * repository or a branch, nor what the chip, its checks or the word say already, on one line.
+ */
+/** Its checks running, the merge asked for: it merges once they pass. */
+export const ErrandChecksRunning: Story = {
+  args: { ...CHANGE_CHECKS_RUNNING, errands: ['Merges once checks pass'] },
+  play: async ({ canvasElement }) => {
+    const line = within(canvasElement).getByText('Merges once checks pass')
+    await expect(line).toBeVisible()
+    await expect(canvasElement.textContent).not.toMatch(/https?:|AltharIDE/)
+  },
+}
+/** In the merge queue while its lead still works on it: the word says the step, the line the queue. */
+export const ErrandInMergeQueue: Story = { args: { ...CHANGE_RUNNING_PR, errands: ['In the merge queue'] } }
+/** In the merge queue, its steps done: the word says it, so the line says nothing. */
+export const ErrandInMergeQueueSaid: Story = { args: { ...CHANGE_IN_MERGE_QUEUE, errands: [] } }
+/** At work, a merge asked for once its checks pass. */
+export const ErrandWorking: Story = { args: { ...CHANGE_RUNNING_PR, errands: ['Merges once checks pass'] } }
+export const ErrandPaused: Story = { args: { ...CHANGE_READY, errands: ['Merge on hold'] } }
 
 /** A branch and no pull request: its lead's pictures above the branch chip, not instead of it. */
 export const BranchWithPictures: Story = {
