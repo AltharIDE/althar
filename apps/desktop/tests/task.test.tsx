@@ -1559,6 +1559,29 @@ describe('a task', () => {
     )
   })
 
+  it('drops another agent picked to take over once the lead it was to take over from stops', async () => {
+    const base = thread()
+    let current = base
+    const { client, emit } = fakeClient({ getThread: vi.fn(async () => current) })
+    withServices(<Task />, client)
+    await screen.findByRole('textbox', { name: 'Tell Claude Code something' })
+    await userEvent.click(screen.getByRole('button', { name: 'Lead: Claude Opus High' }))
+    await userEvent.click(await screen.findByRole('radio', { name: /gpt-5\.2-codex/ }))
+    await userEvent.keyboard('{Escape}')
+    await screen.findByRole('textbox', { name: 'Tell Codex something' })
+    // The lead stops before the person says anything; later a lead is on it again, on Claude Code, as it was.
+    const lead = { agentId: 'claude-code', model: 'opus', account: null }
+    current = { ...base, session: null, task: { ...base.task, phase: 'stopped', actions: ['resume', 'abandon'], lead } }
+    act(() => emit(changed('provider_session', 's1')))
+    await screen.findByText('Stopped')
+    current = base
+    act(() => emit(changed('provider_session', 's1')))
+    // What the person says goes to it: Codex taking over was for the lead that stopped.
+    await userEvent.type(await screen.findByRole('textbox', { name: 'Tell Claude Code something' }), 'Go on{Enter}')
+    await waitFor(() => expect(client.send).toHaveBeenCalledWith({ threadId: 'th1', body: 'Go on', disposition: 'after_current' }))
+    expect(client.switchAgent).not.toHaveBeenCalled()
+  })
+
   it('puts a queued message back in the composer with its images, which go again by their digests', async () => {
     const picture = { digest: 'f'.repeat(64), mediaType: 'image/png', bytes: 68, width: 1, height: 1, name: 'shot.png', unkept: null }
     const queued = items.you('Like this', { state: 'queued', interrupting: false }, [], [picture])

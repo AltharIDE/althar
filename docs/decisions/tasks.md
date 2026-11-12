@@ -201,9 +201,15 @@ leaves its conversation as it was.
   refuses comes back with a line over the composer saying why. Clear waited
   on the runtime and then on the board's next read, so the pill went late
   and came back for a moment (12 Nov 2026).
-- A call of its that waits on the person still shows in Needs you. With the
-  conversation closed, the board keeps the asides behind one chip at the
+- A call of its that waits on the person still shows in Needs you, and is
+  counted; the aside itself never is, answered or answering: the board, the
+  home, the edge, the tabs, the Dock's badge, the menu bar and the
+  notifications leave it out of what waits and of the work in progress.
+  With the conversation closed, the board keeps the asides behind one chip at the
   head of Up next (`ScratchShelf`), opened in place.
+- **Not a task to the coordinator** either: `project_overview` doesn't
+  count asides, and `list_tasks` and a fresh session's brief leave them out.
+  `find_tasks` finds one when asked for it and says it is an aside.
 
 An aside never installs or upgrades dependencies, runs the repository's
 setup, or builds, before it answers or after: it reads its copy as it was
@@ -420,7 +426,9 @@ uncommitted changes that aren't evidence.
     commit is ([code-hosts.md](code-hosts.md)).
   - With its last pull request merged or closed, the round opens the next by
     itself, as a draft titled "After #N", where the project's rules would
-    have opened the first. A card with **Open a new pull request** appears
+    have opened the first. Its title and description come from what the
+    lead said since the last push to #N, never from words given for work
+    that went in it. A card with **Open a new pull request** appears
     only where the lead said it only answered a question (`answered`), or
     where the pull request couldn't open.
 

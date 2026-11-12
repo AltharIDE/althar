@@ -87,6 +87,8 @@ export const offScratch = (taskId: string) =>
               : 'On the board now: it has a pull request.',
         role: 'aside',
       })
+    // Its card is worked out again, as when the person moves it (`shelve`): off Scratch, it waits on its board like any task.
+    yield* touchTask(taskId)
   })
 
 /**

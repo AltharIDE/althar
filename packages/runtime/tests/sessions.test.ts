@@ -1030,8 +1030,10 @@ describe('sessions', () => {
         assert.deepStrictEqual(notes, ['Fake codex takes over.'])
         const reply = (yield* threadItems(created.threadId)).filter((item) => item.kind === 'agent_message').at(-1)?.content.text as string
         assert.include(reply, 'You are taking over a task, in the same worktree.')
-        assert.include(reply, '[person] start with the worker')
+        // What waits is the turn's message, once: not in its brief's thread so far too.
+        assert.notInclude(reply, '[person] start with the worker')
         assert.isTrue(reply.endsWith('start with the worker'))
+        assert.strictEqual(reply.split('start with the worker').length - 1, 1)
       }).pipe(Effect.provide(runtime())),
     )
 
@@ -1181,6 +1183,9 @@ describe('sessions', () => {
               },
             },
           },
+          // The test moves its clock three minutes at once, past when a lead's turn is followed: none of that here, so the
+          // last notice is the one the start left.
+          idle: { reports: Duration.hours(1) },
         },
       ).pipe(Layer.provideMerge(observedClock))
       return Effect.gen(function* () {

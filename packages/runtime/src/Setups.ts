@@ -281,6 +281,8 @@ type Store = SqlClient.SqlClient | Ledger | Crypto.Crypto | Instance | RuntimeCo
 interface Again extends Unset {
   readonly bindingSlug: string
   readonly bindingId: string
+  /** A Local task's folder: the person's own checkout, set up again only when its lead asks, with nothing kept of it. */
+  readonly local?: number
 }
 
 export class Setups extends Context.Service<
@@ -554,11 +556,13 @@ export class Setups extends Context.Service<
           const all = yield* sql<Again>`
             SELECT w.id, w.project_id, t.id AS thread_id, w.path AS worktree, b.folder AS within, b.display_name AS name,
               b.run_setup AS kept, b.recorded_setup AS recorded, b.slug AS binding_slug, b.id AS binding_id,
-              (SELECT l.path FROM repository_locations l WHERE l.binding_id = b.id AND l.device_id = ${instance.deviceId}) AS checkout
+              (SELECT l.path FROM repository_locations l WHERE l.binding_id = b.id AND l.device_id = ${instance.deviceId}) AS checkout,
+              w.kind IS 'checkout' AS local
             FROM workspaces w
             JOIN repository_bindings b ON b.id = w.binding_id
             JOIN threads t ON t.task_id = w.task_id AND t.kind = 'task'
-            WHERE w.task_id = ${taskId} AND w.device_id = ${instance.deviceId} AND w.state = 'ready' AND w.access = 'write' AND w.kind IS NULL
+            WHERE w.task_id = ${taskId} AND w.device_id = ${instance.deviceId} AND w.state = 'ready' AND w.access = 'write'
+              AND (w.kind IS NULL OR w.kind = 'checkout')
             ORDER BY b.created_at, b.rowid`
           if (named === undefined) return all
           const wanted = named.trim().toLowerCase()
@@ -634,7 +638,7 @@ export class Setups extends Context.Service<
       ) => {
         const where = several ? `${name}'s ${folder}` : `the ${folder}`
         if (ran === undefined || ran.setUp.command === null)
-          return `${several ? name : 'The repository'} has no setup recorded, and nothing Althar can tell to install: there is no lockfile or manifest it knows. If it needs one, get the folder ready yourself and record what worked with record_setup.`
+          return `${several ? name : 'The repository'} has no setup recorded, and nothing Althar can tell to install: there is no lockfile or manifest it knows.${folder === 'checkout' ? '' : ' If it needs one, get the folder ready yourself and record what worked with record_setup.'}`
         const { setUp, printed } = ran
         const ended = failedSetUp(setUp) ? howItFailed(setUp) : 'it went through'
         return [
@@ -674,9 +678,12 @@ export class Setups extends Context.Service<
               return yield* new ToolRefused({
                 message: "The task's worktree isn't on this computer, so Althar can't set it up. Tell the person.",
               })
-            // One at a time in a worktree: one being set up as it was made is waited for, then this runs after it.
-            const ran = yield* Effect.forEach(again, (one) => locked(one.id, provide(setUp(one))))
-            return again.map((one, at) => saidOf(one.name, again.length > 1, ran[at])).join('\n\n')
+            // One at a time in a worktree: one being set up as it was made is waited for, then this runs after it. A Local
+            // task's folder is the person's checkout, which Althar sets up only now, as asked, and keeps no record of.
+            const ran = yield* Effect.forEach(again, (one) => locked(one.id, provide(setUp(one, one.local !== 1))))
+            return again
+              .map((one, at) => saidOf(one.name, again.length > 1, ran[at], one.local === 1 ? 'checkout' : 'worktree'))
+              .join('\n\n')
           }).pipe(
             Effect.catch((error) =>
               error instanceof ToolRefused
@@ -715,11 +722,16 @@ export class Setups extends Context.Service<
             if ('refused' in tidy) return yield* new ToolRefused({ message: tidy.refused })
             const { copy, commands } = tidy
             const repository = typeof asked.repository === 'string' && asked.repository.trim() !== '' ? asked.repository : undefined
-            const all = yield* provide(againOf(taskId, repository))
+            const found = yield* provide(againOf(taskId, repository))
+            // Local, the person's checkout was ready before the task: what it needed isn't what a new worktree needs.
+            const all = found.filter((each) => each.local !== 1)
             const [one] = all
             if (one === undefined)
               return yield* new ToolRefused({
-                message: "The task's worktree isn't on this computer, so Althar can't record its setup. Tell the person.",
+                message:
+                  found.length > 0
+                    ? "The task works Local, in the person's own checkout, which they set up themselves: there is no setup to record from it."
+                    : "The task's worktree isn't on this computer, so Althar can't record its setup. Tell the person.",
               })
             if (all.length > 1)
               return yield* new ToolRefused({

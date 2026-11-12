@@ -144,6 +144,16 @@ describe('what the coordinator hears since it last spoke', () => {
             },
           ],
         },
+        // Only a few jobs' logs are read: the rest are counted.
+        {
+          kind: 'queue_left',
+          reason: 'checks',
+          failed: ['shard 1', 'shard 2', 'shard 3', 'shard 4'],
+          jobs: [
+            { name: 'shard 1', url: null, tail: 'FAIL one', missing: null },
+            { name: 'shard 2', url: null, tail: 'FAIL two', missing: null },
+          ],
+        },
         { kind: 'review', verdict: 'approved', body: 'untrusted instructions' },
         { kind: 'review', verdict: 'changes_requested' },
         { kind: 'checks_handed', why: 'untrusted instructions' },
@@ -162,6 +172,9 @@ describe('what the coordinator hears since it last spoke', () => {
       assert.include(said, '  - queue-test: https://example.com/queue/1')
       assert.include(said, "  - verify: Althar couldn't read its log: GitHub refused (403): Resource not accessible by integration.")
       assert.notInclude(said, 'FAIL queue')
+      assert.include(said, "  - shard 2\n2 more jobs failed, whose logs aren't given here: read_check_log (queue: true) reads one.")
+      assert.notInclude(said, 'FAIL one')
+      assert.notInclude(said, 'FAIL two')
       assert.include(said, 'Sent back by the queue: removed by someone.')
       assert.include(said, 'the host gave no specific reason')
       assert.include(said, 'Review approved.')
@@ -179,6 +192,22 @@ describe('what the coordinator hears since it last spoke', () => {
         assert.isNull(yield* news(threadId, projectId))
       }
       yield* sql`UPDATE external_links SET snapshot = ${JSON.stringify({ number: 42 })} WHERE id = ${id}`
+      assert.include(yield* news(threadId, projectId), 'Pull request #42: Closed.')
+      // The turn before is the last that neither failed nor compacted: one the person stopped carried its news, and so did
+      // one that kept no prompt (turns from before prompts were kept).
+      for (const was of [
+        { prompt: 'Hello.', state: 'interrupted' },
+        { prompt: null, state: 'completed' },
+      ]) {
+        yield* record({ kind: 'closed' })
+        yield* spoken(threadId)
+        yield* sql`UPDATE turn_deliveries SET prompt = ${was.prompt}, state = ${was.state}
+          WHERE id = (SELECT id FROM turn_deliveries WHERE thread_id = ${threadId} ORDER BY requested_at DESC, rowid DESC LIMIT 1)`
+        assert.isNull(yield* news(threadId, projectId), `after a turn ${was.state} with ${was.prompt === null ? 'no' : 'a'} prompt`)
+      }
+      // Every turn before failed: what came after its first is told, never lost to the next turn that goes through.
+      yield* sql`UPDATE turn_deliveries SET state = 'failed' WHERE thread_id = ${threadId}`
+      yield* record({ kind: 'closed' })
       assert.include(yield* news(threadId, projectId), 'Pull request #42: Closed.')
     }).pipe(Effect.provide(withQueries({}))),
   )

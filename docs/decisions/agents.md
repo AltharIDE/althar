@@ -95,7 +95,7 @@ People choose who does work by model, not by the tool that runs it. The coordina
 - **What is known of models comes from OpenRouter's public list:** Artificial Analysis's indices, price and context size, matched by id or name. It is read at start and fetched again in the background, and nothing waits for it. The scores are for the coordinator, and the window doesn't show them.
 - **Agents are routes.** Althar reaches a named model the best way there is: on an agent whose account a plan pays for before one on a key, then in the agents' order.
 - **When a step's agent runs out,** the step goes to the strongest free model on a plan. A different maker wins within five points of the strongest. Althar never spends on a key unasked ([scheduling.md](scheduling.md)).
-- **The person can switch models off,** per agent, in Settings and from the model browser. A model switched off is never planned, and no picker offers it.
+- **The person can switch models off,** per agent, in Settings and from the model browser. A model switched off is never planned, and no picker offers it. Work that names no model, only its agent, never starts on one: where the agent's own default is a model switched off, its session starts on the agent's model a takeover would pick, or, before Althar has read the agent's models, the first other one it lists. With none left on, it doesn't start, and says why.
 - **The window names who works by model,** as people know it, such as "Claude Sonnet 5.5", with its maker's mark. The agent and account show on hover. Agent names appear only where the agent is what's meant, such as signing in.
 
 ## Keeping context small
