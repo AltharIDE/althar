@@ -54,7 +54,7 @@ test('lists the tasks that wait for a free agent in Up next, in the order they s
     await startTask(page, 'Rename the helper', '[lead:finish]')
     await expect(page.getByText(/^Waiting: 1 of 1 agents busy/)).toHaveCount(3)
     // A plan the person holds, and one counting down, are not started either.
-    await planTask(page, 'Hold this plan')
+    await planTask(page, 'Hold this plan', '[lead:wait]')
     // Its card is the last in the conversation, once it is there: the waiting tasks' cards have a Hold of their own. Exactly: the
     // plan up next on the board beside is named for it.
     await expect(shown(page, 'Hold this plan', { exact: true }).last()).toBeVisible()
@@ -103,7 +103,7 @@ test('lists the tasks that wait for a free agent in Up next, in the order they s
     if (top === null) throw new Error('Up next isn’t laid out')
     await drag('Hold this plan', { x: top.x + 20, y: top.y + 4 })
     await expect(rows.nth(0)).toContainText('Hold this plan')
-    await expect(rows.nth(0)).toContainText('Next in line', { timeout: 15000 })
+    await expect(rows.nth(0)).toContainText('Next in line')
     await expect(rows.nth(1)).toContainText('Add a retry')
     await expect(rows.nth(4)).toContainText('Plan the release')
     await expect(rows).toHaveCount(5)
@@ -113,7 +113,7 @@ test('lists the tasks that wait for a free agent in Up next, in the order they s
     if (bottom === null) throw new Error('Up next isn’t laid out')
     await drag('Add a retry', { x: bottom.x + 20, y: bottom.y + bottom.height + 20 })
     await expect(rows.nth(4)).toContainText('Add a retry')
-    await expect(rows.nth(4)).toContainText('5th in line', { timeout: 15000 })
+    await expect(rows.nth(4)).toContainText('5th in line')
     await expect(rows.nth(3)).toContainText('Plan the release')
     await expect(rows.nth(3)).toContainText('4th in line')
     await expect(next.getByText('Planned', { exact: true })).toHaveCount(0)
@@ -129,7 +129,8 @@ test('lists the tasks that wait for a free agent in Up next, in the order they s
     await expect(rows.nth(3)).toContainText('Plan the release')
     await expect(rows.nth(4)).toContainText('Add a retry')
 
-    // The place frees: the plan put first starts by itself, and moves to Running.
+    // The place frees: the plan put first starts by itself, and moves to Running, where it keeps the place; the rest wait on
+    // in the order put.
     await page.getByRole('radio', { name: /^Conversation/ }).click()
     await page
       .getByRole('button', { name: /^Keeping a place/ })
