@@ -659,6 +659,15 @@ export class MergeLine extends Context.Service<
               const merged = yield* host.merge(repository, change, how).pipe(Effect.catch(failed))
               if (merged.state === 'merged') {
                 yield* note(projectId, lineOf(entry), 'landed', `landed:${change.number}`, { number: change.number })
+                // Its step is done with this turn, so no sweep sees it waiting: the card says it landed now.
+                const line = (yield* entriesOf(projectId)).filter((one) => lineOf(one) === lineOf(entry))
+                yield* showCard(
+                  projectId,
+                  lineOf(entry),
+                  line,
+                  new Map([[entry.errandId, { state: 'merged' as const, title: seen.change.title }]]),
+                  seen.repository.defaultBranch,
+                ).pipe(Effect.catchCause((cause) => Effect.logWarning('Could not show the merge line', cause)))
                 yield* settleTask(entry)
                 return `Merged ${name} at ${short(change.headSha)} into ${entry.branch}, by ${how.method}.`
               }
@@ -1041,16 +1050,19 @@ export class MergeLine extends Context.Service<
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
           const [first] = here
-          if (first === undefined) return
-          const threadId = first.threadId
-          const found = (yield* sql<{ id: string; content: string }>`
-            SELECT id, content FROM thread_items WHERE thread_id = ${threadId} AND kind = 'merge_line' ORDER BY sequence DESC`).flatMap(
-            (row) => {
-              const content = JSON.parse(row.content) as { key?: string; branch?: string | null; rows?: ReadonlyArray<CardRow> }
-              return content.key === key ? [{ id: row.id, branch: content.branch ?? null, rows: content.rows ?? [] }] : []
-            },
-          )
+          // Cards of this line in the project, newest first: with nothing waiting any more, it is the card's own thread that says where it is.
+          const found = (yield* sql<{ id: string; threadId: string; content: string }>`
+            SELECT id, thread_id, content FROM thread_items
+            WHERE project_id = ${projectId} AND kind = 'merge_line' AND (${first?.threadId ?? null} IS NULL OR thread_id = ${first?.threadId ?? null})
+            ORDER BY rowid DESC`).flatMap((row) => {
+            const content = JSON.parse(row.content) as { key?: string; branch?: string | null; rows?: ReadonlyArray<CardRow> }
+            return content.key === key
+              ? [{ id: row.id, threadId: row.threadId, branch: content.branch ?? null, rows: content.rows ?? [] }]
+              : []
+          })
           const [latest] = found
+          const threadId = first?.threadId ?? latest?.threadId
+          if (threadId === undefined) return
           const known = new Set(latest?.rows.map((row) => row.number))
           // A card whose pull requests all merged is what happened: a new ask is a card of its own.
           const fresh =
@@ -1059,32 +1071,37 @@ export class MergeLine extends Context.Service<
             here.some((entry) => !known.has(entry.request.number))
           const before = fresh ? [] : (latest?.rows ?? [])
           const landed = new Set((yield* notes(key, 'landed')).map((one) => Number(one.number)))
-          const rows = new Map(before.map((row) => [row.number, row]))
-          for (const entry of here) {
+          const waiting = new Set(here.map((entry) => entry.request.number))
+          const old = new Map(before.map((row) => [row.number, row]))
+          // What landed or was taken out of the line is history, in the place it had: it merged, or it was taken out and the person was told so.
+          const history = before.flatMap((row): Array<CardRow> => {
+            if (waiting.has(row.number)) return []
+            if (!landed.has(row.number) && row.state !== 'merged') return []
+            const { reason: _gone, ...merged } = row
+            return [{ ...merged, state: 'merged' }]
+          })
+          // What is still in the line, in the order it merges now, which a "now" ask changes.
+          const active = here.map((entry): CardRow => {
             const number = entry.request.number
-            const old = rows.get(number)
             const got = now.get(entry.errandId)
-            const state = got?.state ?? (old?.state === 'merged' ? 'merged' : 'waiting')
-            const title = got?.title ?? old?.title ?? entry.request.title ?? ''
-            rows.set(number, {
+            const before = old.get(number)
+            return {
               number,
-              title,
+              title: got?.title ?? before?.title ?? entry.request.title ?? '',
               url: entry.target,
-              state,
+              state: got?.state ?? before?.state ?? 'waiting',
               ...(got?.reason === undefined ? {} : { reason: got.reason }),
-            })
-          }
-          // One that left the line merged, or it was taken out: the person was told so, and the card no longer holds it.
-          for (const [number, row] of rows) {
-            if (here.some((entry) => entry.request.number === number)) continue
-            if (landed.has(number)) {
-              const { reason: _gone, ...merged } = row
-              rows.set(number, { ...merged, state: 'merged' })
-            } else rows.delete(number)
-          }
+            }
+          })
           const branch =
-            defaultBranch === undefined ? (fresh ? null : (latest?.branch ?? null)) : first.branch === defaultBranch ? null : first.branch
-          const content = { key, branch, rows: [...rows.values()] }
+            defaultBranch === undefined
+              ? fresh
+                ? null
+                : (latest?.branch ?? null)
+              : first?.branch === defaultBranch
+                ? null
+                : (first?.branch ?? null)
+          const content = { key, branch, rows: [...history, ...active] }
           if (content.rows.length === 0) return
           if (!fresh && latest !== undefined) {
             if (JSON.stringify({ key, branch: latest.branch, rows: latest.rows }) === JSON.stringify(content)) return
