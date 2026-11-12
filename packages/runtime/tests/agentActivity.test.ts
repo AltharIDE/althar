@@ -84,6 +84,86 @@ describe('what an agent does beyond the repository, in the thread', () => {
     }).pipe(Effect.provide(runtime())),
   )
 
+  it.live('keeps a fetch’s title without the query or fragment of the address it reads, refused or failed too', () =>
+    Effect.gen(function* () {
+      const where = yield* place
+      const record = recorder(where)
+      // Claude Code's WebFetch is titled by the address it reads.
+      yield* record.record({
+        _tag: 'ToolCall',
+        toolCallId: 'secret',
+        title: 'Fetch https://example.com/doc?token=secret#private',
+        kind: 'fetch',
+        status: 'pending',
+        web: { action: 'fetch', url: 'https://example.com/doc' },
+      })
+      // Its updates after say no web call of their own, and fail: the title stays without the token.
+      yield* record.record({
+        _tag: 'ToolCallUpdate',
+        toolCallId: 'secret',
+        status: 'failed',
+        title: 'Fetch https://example.com/doc?token=secret#private',
+      })
+      const stored = yield* row(where.threadId, 'secret')
+      assert.strictEqual(stored?.content['title'], 'Fetch https://example.com/doc')
+      assert.notInclude(JSON.stringify(stored?.content), 'secret#')
+      assert.notInclude(JSON.stringify(stored?.content), 'token=')
+      // A call that isn't a web call keeps its title as it said it.
+      yield* record.record({
+        _tag: 'ToolCall',
+        toolCallId: 'curl',
+        title: 'curl https://example.com/?q=1',
+        kind: 'execute',
+        status: 'completed',
+      })
+      assert.strictEqual((yield* row(where.threadId, 'curl'))?.content['title'], 'curl https://example.com/?q=1')
+    }).pipe(Effect.provide(runtime())),
+  )
+
+  it.live('puts a call that came before its sub-agent under it once the sub-agent comes, across a restart too', () =>
+    Effect.gen(function* () {
+      const where = yield* place
+      const first = recorder(where)
+      const parentOf = (toolCallId: string) =>
+        Effect.map(row(where.threadId, toolCallId), (one) => read('tool_call', one?.content)?.['parent'])
+      // The child is heard of first, then updated without saying its sub-agent again.
+      yield* first.record({
+        _tag: 'ToolCall',
+        toolCallId: 'early',
+        title: 'Read a.ts',
+        kind: 'read',
+        status: 'in_progress',
+        parent: 'late',
+      })
+      yield* first.record({ _tag: 'ToolCallUpdate', toolCallId: 'early', status: 'completed' })
+      assert.isUndefined(yield* parentOf('early'))
+      assert.strictEqual((yield* row(where.threadId, 'early'))?.content['parentCall'], 'late')
+      // Althar restarted between them: the recorder that hears the sub-agent is a new one.
+      const second = recorder(where)
+      yield* second.record({
+        _tag: 'ToolCall',
+        toolCallId: 'late',
+        title: 'Find the readers',
+        kind: 'think',
+        status: 'in_progress',
+        subAgent: { label: 'Find the readers' },
+      })
+      const parent = yield* row(where.threadId, 'late')
+      const ids = yield* Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient
+        return yield* sql<{
+          id: string
+        }>`SELECT id FROM thread_items WHERE provider_session_id = ${where.sessionId} AND tool_call_id = 'late'`
+      })
+      assert.isDefined(parent)
+      assert.strictEqual(yield* parentOf('early'), ids[0]?.id)
+      assert.isUndefined((yield* row(where.threadId, 'early'))?.content['parentCall'])
+      // A later update of the child keeps it there.
+      yield* second.record({ _tag: 'ToolCallUpdate', toolCallId: 'early', status: 'completed', parent: 'late' })
+      assert.strictEqual(yield* parentOf('early'), ids[0]?.id)
+    }).pipe(Effect.provide(runtime())),
+  )
+
   it.live('keeps a sub-agent by what it was asked, its calls under it, and the start of what it reported back', () =>
     Effect.gen(function* () {
       const where = yield* place

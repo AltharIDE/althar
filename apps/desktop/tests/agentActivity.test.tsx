@@ -95,6 +95,35 @@ describe('a sub-agent, as its turn has it', () => {
     expect(under?.subAgent?.calls.map((call) => call.id)).toEqual([deep.id])
   })
 
+  it('keeps every call of a chain of sub-agents however deep, and leaves calls that name each other in a ring where they are', () => {
+    const made: Array<ThreadItem> = []
+    for (let i = 0; i < 10; i++) {
+      const parent = made[i - 1]
+      made.push(
+        items.tool({
+          title: `Look ${i}`,
+          toolKind: 'think',
+          subAgent: { label: `Look ${i}` },
+          ...(parent === undefined ? {} : { parent: parent.id }),
+        }),
+      )
+    }
+    const count = (calls: ReadonlyArray<Part>): number =>
+      calls.reduce((n, call) => n + 1 + (call.kind === 'tool' && call.subAgent !== undefined ? count(call.subAgent.calls) : 0), 0)
+    const deep = tools(partsOf(made, true))
+    expect(deep.map((part) => part.id)).toEqual([made[0]?.id])
+    expect(count(deep)).toBe(10)
+    // Two sub-agents that say each is the other's, and one under itself: each stays where it is.
+    const a = items.tool({ title: 'A', toolKind: 'think', subAgent: { label: 'A' } })
+    const b = items.tool({ title: 'B', toolKind: 'think', subAgent: { label: 'B' }, parent: a.id })
+    const withParent = (item: ThreadItem, parent: string): ThreadItem =>
+      item.kind === 'tool_call' ? { ...item, content: { ...item.content, parent } } : item
+    const ringed = withParent(a, b.id)
+    const self = items.tool({ title: 'C', toolKind: 'think', subAgent: { label: 'C' } })
+    const own = withParent(self, self.id)
+    expect(count(tools(partsOf([ringed, b, own], true)))).toBe(3)
+  })
+
   it('leaves a call whose sub-agent isn’t in the turn where it is', () => {
     const lost = items.tool({ title: 'Read a.ts', parent: 'gone' })
     expect(nested(partsOf([lost])).map((part) => part.id)).toEqual([lost.id])

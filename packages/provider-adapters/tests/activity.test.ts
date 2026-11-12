@@ -1,7 +1,7 @@
 import type * as acp from '@agentclientprotocol/sdk'
 import { assert, describe, it } from '@effect/vitest'
 
-import { pageOf, parentOf, subAgentOf, webCallOf } from '../src/activity'
+import { pageOf, pagesIn, parentOf, subAgentOf, webCallOf } from '../src/activity'
 import { normalize } from '../src/events'
 
 /*
@@ -78,6 +78,14 @@ describe('pageOf', () => {
     assert.strictEqual(pageOf('http://example.com/'), 'http://example.com')
     assert.strictEqual(pageOf('not a url'), undefined)
     assert.strictEqual(pageOf('javascript:alert(1)'), undefined)
+  })
+})
+
+describe('pagesIn', () => {
+  it('keeps every web address in words to where its page is, and leaves the rest as it is', () => {
+    assert.strictEqual(pagesIn('Fetch https://example.com/doc?token=secret#private'), 'Fetch https://example.com/doc')
+    assert.strictEqual(pagesIn('Read http://a.test/x#y and https://b.test/?q=1 too'), 'Read http://a.test/x and https://b.test too')
+    assert.strictEqual(pagesIn('Fetch the docs'), 'Fetch the docs')
   })
 })
 

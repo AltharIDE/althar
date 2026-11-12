@@ -741,21 +741,37 @@ export const text = {
 export const nested = (parts: ReadonlyArray<Part>): ReadonlyArray<Part> => {
   const agents = new Set(parts.flatMap((part) => (part.kind === 'tool' && part.subAgent !== undefined ? [part.id] : [])))
   if (agents.size === 0) return parts
+  const parentOf = new Map(
+    parts.flatMap((part) =>
+      part.kind === 'tool' && part.parent !== undefined && agents.has(part.parent) ? [[part.id, part.parent] as const] : [],
+    ),
+  )
+  // A call goes under its sub-agent where following its sub-agents up ends at one of the turn's own steps: calls that
+  // name each other in a ring stay where they are, all of them shown.
+  const rooted = (id: string) => {
+    const seen = new Set([id])
+    for (let up = parentOf.get(id); up !== undefined; up = parentOf.get(up)) {
+      if (seen.has(up)) return false
+      seen.add(up)
+    }
+    return true
+  }
   const under = new Map<string, Array<Extract<Part, { kind: 'tool' }>>>()
   const top: Array<Part> = []
   for (const part of parts) {
-    if (part.kind === 'tool' && part.parent !== undefined && agents.has(part.parent)) {
-      const calls = under.get(part.parent) ?? []
+    const parent = parentOf.get(part.id)
+    if (part.kind === 'tool' && parent !== undefined && rooted(part.id)) {
+      const calls = under.get(parent) ?? []
       calls.push(part)
-      under.set(part.parent, calls)
+      under.set(parent, calls)
     } else top.push(part)
   }
-  // A sub-agent's own sub-agents keep theirs under them, as deep as they go.
-  const withCalls = <P extends Part>(part: P, depth: number): P =>
-    part.kind === 'tool' && part.subAgent !== undefined && depth < 8
-      ? { ...part, subAgent: { ...part.subAgent, calls: (under.get(part.id) ?? []).map((call) => withCalls(call, depth + 1)) } }
+  // A sub-agent's own sub-agents keep theirs under them, as deep as they go: what is nested is a tree, so this ends.
+  const withCalls = <P extends Part>(part: P): P =>
+    part.kind === 'tool' && part.subAgent !== undefined
+      ? { ...part, subAgent: { ...part.subAgent, calls: (under.get(part.id) ?? []).map(withCalls) } }
       : part
-  return top.map((part) => withCalls(part, 0))
+  return top.map(withCalls)
 }
 
 /** The blocks of a thread, oldest first, with what is still being written but not yet read at the end. */

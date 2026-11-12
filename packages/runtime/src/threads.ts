@@ -9,6 +9,7 @@ import {
   type FieldAnswer,
   type Handed,
   type QuestionField,
+  pagesIn,
   type SeenSkill,
   serverOfCall,
   type SessionEvent,
@@ -207,6 +208,19 @@ export const updateItem = (projectId: ProjectId, id: string, content: unknown) =
         yield* ledger.notify({ projectId, aggregateType: 'thread_item', aggregateId: id, aggregateRevision: revision })
       }),
     )
+  })
+
+/**
+ * The calls of a session that wait for the sub-agent's call they were made by
+ * (`parentCall`, the agent's own id for it): they came before it did.
+ */
+const waitingFor = (sessionId: string, toolCallId: string) =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient
+    const rows = yield* sql<{ id: string; content: string }>`
+      SELECT id, content FROM thread_items
+      WHERE provider_session_id = ${sessionId} AND kind = 'tool_call' AND json_extract(content, '$.parentCall') = ${toolCallId}`
+    return rows.map((row) => ({ id: row.id, content: JSON.parse(row.content) as Record<string, unknown> }))
   })
 
 /** A session's tool call, as the thread keeps it. */
@@ -664,14 +678,16 @@ export const recorder = (place: ItemPlace & { readonly sessionId: string }) => {
           // The call's command and paths are kept, not what it writes or what came back (docs/architecture/07).
           const kept = event.rawInput === undefined ? undefined : essentials(event.rawInput)
           const output = event.rawOutput !== undefined
+          const existing = yield* toolItem(place.sessionId, event.toolCallId)
+          // A web call's title names the address it reads: kept to where its page is, as its block keeps it.
+          const web = event.web !== undefined || (typeof existing?.content.web === 'object' && existing.content.web !== null)
           const content = defined({
-            title: event.title,
+            title: web && event.title !== undefined ? pagesIn(event.title) : event.title,
             kind: event._tag === 'ToolCall' ? event.kind : undefined,
             status: event.status,
             rawInput: kept?.input,
             locations: event.locations,
           })
-          const existing = yield* toolItem(place.sessionId, event.toolCallId)
           const cut = [...new Set([...cutOf(existing?.content), ...(kept?.cut ?? []), ...(output ? ['output'] : [])])]
           const marked = {
             ...(cut.length === 0 ? content : { ...content, cut }),
@@ -693,11 +709,14 @@ export const recorder = (place: ItemPlace & { readonly sessionId: string }) => {
             const id = yield* addItem(place, 'tool_call', stored, { toolCallId: event.toolCallId })
             const extras = yield* extrasOf(event.toolCallId, id, stored, event)
             if (extras !== undefined) yield* updateItem(place.projectId, id, { ...stored, ...extras })
+            if (marked.subAgent !== undefined) yield* adopt(event.toolCallId, id)
           } else {
-            const merged = { ...existing.content, ...marked }
+            const { parentCall: _, ...had } = existing.content
+            const merged = { ...(marked.parent === undefined ? existing.content : had), ...marked }
             const stored = { ...merged, ...(yield* read(merged)) }
             const extras = yield* extrasOf(event.toolCallId, existing.id, stored, event)
             yield* updateItem(place.projectId, existing.id, { ...stored, ...extras })
+            if (marked.subAgent !== undefined && existing.content.subAgent === undefined) yield* adopt(event.toolCallId, existing.id)
           }
         })
       case 'Compaction':
@@ -731,11 +750,26 @@ export const recorder = (place: ItemPlace & { readonly sessionId: string }) => {
     }
   }
 
-  /** The sub-agent's call a call is made by, by that call's item, where the agent says and the call is in the thread. */
-  const parentKept = (event: Extract<SessionEvent, { _tag: 'ToolCall' | 'ToolCallUpdate' }>) =>
-    event.parent === undefined
-      ? Effect.succeed({})
-      : Effect.map(toolItem(place.sessionId, event.parent), (parent) => (parent === undefined ? {} : { parent: parent.id }))
+  /**
+   * The sub-agent's call a call is made by, by that call's item, where the
+   * agent says: or, where that call isn't in the thread yet, the agent's id
+   * for it, until it comes (`adopt`).
+   */
+  const parentKept = (event: Extract<SessionEvent, { _tag: 'ToolCall' | 'ToolCallUpdate' }>) => {
+    const call = event.parent
+    return call === undefined
+      ? Effect.succeed<{ readonly parent?: string; readonly parentCall?: string }>({})
+      : Effect.map(toolItem(place.sessionId, call), (parent) => (parent === undefined ? { parentCall: call } : { parent: parent.id }))
+  }
+
+  /** A sub-agent's call come after calls it made: they go under it now. */
+  const adopt = (toolCallId: string, id: string) =>
+    Effect.gen(function* () {
+      for (const child of yield* waitingFor(place.sessionId, toolCallId)) {
+        const { parentCall: _, ...content } = child.content
+        yield* updateItem(place.projectId, child.id, { ...content, parent: id })
+      }
+    })
 
   /**
    * The agent compacting its context: one line in the thread, placed when it

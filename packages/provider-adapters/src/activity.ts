@@ -61,6 +61,14 @@ export const pageOf = (url: string): string | undefined => {
   }
 }
 
+/**
+ * Words with every web address in them kept to where its page is (`pageOf`):
+ * a fetch's title names the address it reads, whose query or fragment can
+ * carry a token.
+ */
+export const pagesIn = (words: string): string =>
+  words.replace(/https?:\/\/[^\s"'<>]+/g, (url) => pageOf(url) ?? url.replace(/[?#].*$/, ''))
+
 const search = (query: string | undefined): WebCall | undefined =>
   query === undefined ? undefined : { action: 'search', query: line(query) }
 
