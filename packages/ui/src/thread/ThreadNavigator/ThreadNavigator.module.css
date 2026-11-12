@@ -1,6 +1,7 @@
 .navigator {
   position: absolute;
-  inset-inline-end: max(4px, calc((100% - var(--measure)) / 2));
+  /* Galleries extend beyond the reading measure; keep the rail in their outer gutter. */
+  inset-inline-end: 4px;
   top: 50%;
   transform: translateY(-50%);
   z-index: 1;
@@ -15,12 +16,12 @@
   align-items: center;
   justify-content: flex-end;
   flex: none;
-  width: 28px;
+  width: 24px;
   height: 12px;
-  padding: 0 4px;
+  padding: 0 2px;
   border: 0;
   border-radius: var(--r-sm);
-  background: var(--face-surface, var(--n-2));
+  background: transparent;
   color: var(--t-1);
   cursor: pointer;
 }
