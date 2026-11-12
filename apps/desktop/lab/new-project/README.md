@@ -1,13 +1,18 @@
 # The new-project lab
 
-Setting up a project in a folder with no remote, in the project's own window (tabs, header, the coordinator's conversation and the board), on the kit's real pieces, with no runtime.
+Setting up a project in a folder with no remote, on the kit's real screens and cards, with no runtime.
 
 ```bash
 cd apps/desktop && ../../node_modules/.bin/vp dev --config lab/new-project/vite.config.ts
 ```
 
-At `http://localhost:6163`. Nothing asks where its code goes. A, drop it in: the new tab is the project already, waiting for its folder; dropped or chosen, it takes the folder's name and its mark, git is started or its first commit made where needed (said in one line), and the coordinator says what it read and plans a first task that learns how it runs. An empty folder is asked what you're making instead. B, say what you're making: name it (the tab follows as you type) and say it in the composer, the folder its chip; Start opens it with that under way. Later: tasks merge into main on this computer, and "Put it on GitHub" to the coordinator makes the repository and pushes.
+At `http://localhost:6163`. Step one is the New project page as it is, taking any folder. Create opens the project, and its first conversation offers what it still needs: git where it has none, where its code lives (GitHub, GitLab, or only this computer), and where its issues go. Each is a walk on the integrations' own cards (ConnectCard, ConnectWays, ConnectChecks).
 
-Keys A–B swap the direction, 1–8 the folder (empty, files without git, git without commits, git without a remote, one that can't be read, one that's a project already, later at work, later on GitHub), R plays it again, T the theme. A folder dropped anywhere on the window works too. The line under the bars says what that folder does in Althar today. `?d=b&s=empty&theme=dark` opens on one.
+- A, today's card, with git: the first-conversation card (FirstConnections) with Git, Code and Issues rows; each opens its walk in the card and comes back ticked.
+- B, a walk in the conversation: one card, one question at a time, gliding from git to code to issues, then a summary.
+- C, the coordinator asks: in its own words, with its answers to press; typing an answer works too.
+- D, only what blocks, now: just git, at once; where the code goes is offered when the first task is done (merge here, or put it on a host first), and issues from the board's empty Up next.
+
+Keys A–D swap the direction, 1–7 the folder (empty, files without git, git without commits, git without a remote, one that can't be read, one that's a project already, later with a task done), G what's connected, R starts again from New project, T the theme. The line under the bars says what that folder does in Althar today. `?p=1&d=b&s=files&theme=dark` opens in the project.
 
 `node lab/new-project/shoot.ts` shoots each at 1× into `lab/new-project/shots`, with the lab running (outside an agent's sandbox on a Mac).

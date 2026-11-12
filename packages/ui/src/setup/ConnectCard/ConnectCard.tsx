@@ -42,6 +42,8 @@ export type ConnectCardProps = RootProps<
   'div',
   {
     brand?: Brand
+    /** Without a brand, what the tile shows in place of the plug: a branch, for git. */
+    icon?: IconName
     /** One heading: Connect GitHub, Type this code on GitHub. */
     title: string
     headingLevel?: HeadingLevel
@@ -67,6 +69,7 @@ const focusLost = () => document.activeElement === null || document.activeElemen
 /** A walk in to a service, one step at a time, as a sign-in card. */
 export function ConnectCard({
   brand,
+  icon,
   title,
   headingLevel = 3,
   line,
@@ -108,7 +111,12 @@ export function ConnectCard({
     <div ref={card} className={cx(s.card, start && s.start, className)} data-align={start ? 'start' : undefined} {...rest}>
       <div className={cx(s.top, pager !== undefined && s.stepped)}>
         <span className={s.chipWrap}>
-          <BrandChip brand={brand} size={start ? 32 : pager === undefined ? 52 : 40} className={s.chip} />
+          <BrandChip
+            brand={brand}
+            {...(icon === undefined ? {} : { icon })}
+            size={start ? 32 : pager === undefined ? 52 : 40}
+            className={s.chip}
+          />
           {done && (
             <span className={s.tick}>
               <Icon name="check" size={10} />

@@ -1,60 +1,79 @@
-import { mkdirSync } from 'node:fs'
+import { mkdirSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 
 import { chromium, type Page } from '@playwright/test'
 
 /*
  * Shoots the lab at 1×, into lab/new-project/shots, with it running (README.md):
- * each shot by its address, some after a press or a sentence, in the order the person reads them.
+ * each shot by its address, some after presses, in the order the person reads them.
  */
 
 const out = join(import.meta.dirname, 'shots')
+rmSync(out, { recursive: true, force: true })
 mkdirSync(out, { recursive: true })
 const port = process.env.LAB_PORT ?? '6163'
+type Act = (page: Page) => Promise<void>
 const press =
-  (name: string | RegExp, wait = 700) =>
-  async (page: Page) => {
-    await page.getByRole('button', { name }).first().click()
+  (name: string | RegExp, wait = 500, role: 'button' | 'menuitem' = 'button'): Act =>
+  async (page) => {
+    await page.getByRole(role, { name }).first().click()
     await page.waitForTimeout(wait)
   }
-const say =
-  (text: string, wait = 2200) =>
-  async (page: Page) => {
-    await page.keyboard.type(text)
-    await page.keyboard.press('Enter')
-    await page.waitForTimeout(wait)
+const all =
+  (...acts: Act[]): Act =>
+  async (page) => {
+    for (const act of acts) await act(page)
   }
-const choose = press('Choose a folder…', 2600)
-const shots: ReadonlyArray<[string, string, ((page: Page) => Promise<void>)?]> = [
-  ['01-a-waiting', 'd=a&s=files'],
-  ['02-a-reading', 'd=a&s=files', press('Choose a folder…', 350)],
-  ['03-a-files', 'd=a&s=files', choose],
-  ['04-a-unborn-dark', 'd=a&s=unborn&theme=dark', choose],
-  ['05-a-empty', 'd=a&s=empty', choose],
+const gitUp = all(press('Set up', 400), press('Set up git', 2200))
+const shots: ReadonlyArray<[string, string, Act?]> = [
+  ['01-new-project', 'd=a&s=files'],
+  ['02-a-card', 'p=1&d=a&s=files'],
+  ['03-a-git', 'p=1&d=a&s=files', press('Set up', 600)],
+  ['04-a-github-dark', 'p=1&d=a&s=files&theme=dark', all(gitUp, press('Put it on', 300), press('GitHub', 500, 'menuitem'))],
   [
-    '06-a-empty-said',
-    'd=a&s=empty',
-    async (page) => {
-      await choose(page)
-      await say('A tide table for the Pacific coast, in the browser.')(page)
-    },
+    '05-a-done',
+    'p=1&d=a&s=files',
+    all(gitUp, press('Put it on', 300), press('GitHub', 500, 'menuitem'), press('Create and push main', 2200)),
   ],
-  ['07-a-unreadable', 'd=a&s=unreadable', press('Choose a folder…', 500)],
-  ['08-a-project-dark', 'd=a&s=project&theme=dark', press('Choose a folder…', 500)],
-  ['09-b-files', 'd=b&s=files'],
-  ['10-b-empty-dark', 'd=b&s=empty&theme=dark'],
-  ['11-b-started', 'd=b&s=files', press(/^Start Tidepool/, 2600)],
-  ['12-b-unreadable', 'd=b&s=unreadable'],
-  ['13-later-working', 'd=a&s=working'],
-  ['14-later-on-github', 'd=a&s=working', press(/^Send/, 2200)],
-  ['15-later-on-github-dark', 'd=a&s=remote&theme=dark'],
+  ['06-b-git', 'p=1&d=b&s=files'],
+  ['07-b-code', 'p=1&d=b&s=files', press('Set up git', 2200)],
+  ['08-b-host-dark', 'p=1&d=b&s=files&theme=dark', all(press('Set up git', 2200), press(/A new repository on GitHub/))],
+  [
+    '09-b-issues',
+    'p=1&d=b&s=files',
+    all(press('Set up git', 2200), press(/A new repository on GitHub/), press('Create and push main', 2200)),
+  ],
+  [
+    '10-b-done',
+    'p=1&d=b&s=files',
+    all(
+      press('Set up git', 2200),
+      press(/A new repository on GitHub/),
+      press('Create and push main', 2200),
+      press(/^Linear/),
+      press(/A new team, Tidepool/, 700),
+    ),
+  ],
+  ['11-c-ask', 'p=1&d=c&s=files'],
+  ['12-c-answered', 'p=1&d=c&s=files', all(press('Set it up', 1300), press(/^GitHub$/, 1300))],
+  ['13-c-empty-dark', 'p=1&d=c&s=empty&theme=dark'],
+  ['14-d-git', 'p=1&d=d&s=files'],
+  ['15-d-later', 'd=d&s=later'],
+  ['16-d-later-put-dark', 'd=d&s=later&theme=dark', all(press('Put it on a host first', 300), press('GitHub', 500, 'menuitem'))],
+  ['17-new-unreadable', 'd=a&s=unreadable'],
+  ['18-new-project-dark', 'd=a&s=project&theme=dark'],
+  ['19-a-nothing-connected', 'p=1&d=a&s=local&c=none'],
 ]
 const browser = await chromium.launch()
 const page = await browser.newPage({ viewport: { width: 1280, height: 800 }, deviceScaleFactor: 1 })
 for (const [name, query, act] of shots) {
   await page.goto(`http://localhost:${port}/?${query}`)
   await page.waitForTimeout(600)
-  if (act !== undefined) await act(page)
+  try {
+    if (act !== undefined) await act(page)
+  } catch (error) {
+    console.error(name, String(error).split('\n')[0])
+  }
   await page.screenshot({ path: join(out, `${name}.png`) })
 }
 await browser.close()

@@ -46,141 +46,61 @@
   overflow: clip;
   padding: 0 0 0 16px;
 }
-.arrive {
-  display: block;
-}
-
-/* A: where the conversation will be, the folder's place. */
-.invite {
-  display: grid;
-  place-items: center;
-  min-height: calc(100vh - 300px);
-  padding: 40px 32px;
-}
-.drop {
-  display: grid;
-  justify-items: center;
-  gap: 6px;
-  width: min(100%, 440px);
-  padding: 44px 28px 32px;
-  border: 1px dashed var(--line-2);
-  border-radius: var(--r-lg);
-  text-align: center;
-  transition:
-    background var(--fast) var(--ease),
-    border-color var(--fast) var(--ease),
-    transform var(--enter) var(--ease-slide);
-}
-.drop[data-over='true'] {
-  border-color: var(--t-3);
-  background: var(--sunk);
-  transform: scale(1.015);
-}
-.dropGlyph {
-  display: grid;
-  place-items: center;
-  width: 48px;
-  height: 48px;
-  margin-bottom: 10px;
-  border-radius: 50%;
-  background: var(--sunk);
-  color: var(--t-2);
-  transition: transform var(--enter) var(--ease-slide);
-}
-.drop[data-over='true'] .dropGlyph {
-  transform: translateY(-3px);
-}
-.dropTitle {
-  margin: 0;
-  font-size: 17px;
-  font-weight: 600;
-  letter-spacing: -0.01em;
-}
-.dropLine {
-  margin: 0;
-  color: var(--t-3);
-  font-size: 13px;
-}
-.dropActions {
+/* The New project page, as the window shows it. */
+.page {
+  position: absolute;
+  inset: 0;
   display: flex;
-  gap: 8px;
-  margin-top: 18px;
 }
-
-/* B: the project's name and what it is, where its conversation will start. */
-.begin {
-  display: grid;
-  align-items: center;
-  min-height: calc(100vh - 300px);
-  padding: 40px 32px 64px;
-}
-.beginInner {
-  display: grid;
-  gap: 14px;
-  width: min(100%, 540px);
-  margin: 0 auto;
-}
-.nameRow {
-  display: flex;
-  align-items: center;
-  gap: 14px;
-  margin-bottom: 6px;
-}
-.markSwap {
-  display: inline-flex;
-  animation: swap var(--enter) var(--ease);
-}
-@keyframes swap {
-  from {
-    opacity: 0.35;
-    transform: scale(0.94);
-  }
-}
-@media (prefers-reduced-motion: reduce) {
-  .markSwap {
-    animation-name: fade;
-  }
-  @keyframes fade {
-    from {
-      opacity: 0.35;
-    }
-  }
-}
-.bigName {
+.page > * {
   flex: 1;
   min-width: 0;
-  padding: 2px 0;
-  border: 0;
-  background: none;
-  color: var(--t-1);
-  font: inherit;
-  font-size: 24px;
-  font-weight: 640;
-  letter-spacing: -0.015em;
-  outline: none;
 }
-.bigName::placeholder {
+
+/* A walk's card in the conversation, at the thread's width, on the sheet FirstConnections is drawn on. */
+.walkCard {
+  padding: 18px 20px 16px;
+  border-radius: 14px;
+  background: var(--paper);
+  box-shadow: 0 0 0 1px var(--line);
+}
+/* In the board's lane, the card at the lane's width. */
+.inLane {
+  padding: 14px;
+  border-radius: 12px;
+  background: var(--paper);
+  box-shadow: 0 0 0 1px var(--line);
+}
+
+/* The host's form: owner / name, then who can see it. */
+.hostForm {
+  display: grid;
+  justify-items: start;
+  gap: 10px;
+}
+.ownerName {
+  display: grid;
+  grid-template-columns: auto auto minmax(0, 1fr);
+  align-items: end;
+  gap: 8px;
+  width: 100%;
+}
+.slash {
+  padding-bottom: 8px;
   color: var(--t-4);
 }
-.whereRow {
-  min-height: 24px;
-}
-.where {
+
+/* C: the coordinator's question, and the answers to press under it. */
+.replies {
   display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 10px;
+}
+.reply {
+  display: inline-flex;
   align-items: center;
   gap: 6px;
-  margin: 0;
-  padding: 0 4px;
-  color: var(--t-3);
-  font-size: 12.5px;
-}
-.where code {
-  font-family: var(--mono);
-  font-size: 12px;
-  color: var(--t-2);
-}
-.where > :last-child {
-  margin-left: 4px;
 }
 
 /* The lab's own bar: what's shown, and what happens today. */
