@@ -95,7 +95,7 @@ import { describeModels, usableModels } from './usableModels'
 export const LEAD_STARTS = { turn: 3, all: 10 } as const
 
 /** What a task's lead is told of starting tasks, in each tool that starts one. */
-const LEAD_STARTING = ` From a task's lead: for work the person asked for that your task shouldn't do itself, such as turning a prototype into the real build, or a review's findings into a fix, never for work your brief covers. It records your task as where it came from: its card says it was started by your task, and your thread has a line linking to it. You may start ${LEAD_STARTS.turn} in a turn and ${LEAD_STARTS.all} from your task in all.`
+const LEAD_STARTING = ` From a task's lead: for work the person asked for that your task shouldn't do itself, such as a review's findings into a fix, never for work your brief covers (a prototype the person wants built goes on as a change in its own task: change_part). It records your task as where it came from: its card says it was started by your task, and your thread has a line linking to it. You may start ${LEAD_STARTS.turn} in a turn and ${LEAD_STARTS.all} from your task in all.`
 
 /*
  * The project's coordinator (docs/architecture/04; docs/plans/mvp.md, "The
@@ -310,7 +310,8 @@ const Noted = Schema.Struct({ note: Schema.String })
 const Dropped = Schema.Struct({ id: Schema.String })
 const Passed = Schema.Struct({ task: Schema.String, message: Schema.String, now: Schema.optional(Schema.Boolean) })
 const Relead = Schema.Struct({
-  task: Schema.String,
+  /* A lead leaves it out for its own. */
+  task: Schema.optional(Schema.String),
   lead: Schema.optional(StepPick),
   /* Its reviewer: another model, or null for none. Left out, it stays as it is. */
   review: Schema.optional(Schema.NullOr(StepPick)),
@@ -1310,16 +1311,77 @@ export class Coordinator extends Context.Service<
           if (task === undefined) return 'Only the lead of one of the project’s tasks makes its task a change.'
           if (task.quick === 1) return task
           if (task.reviews === 1)
-            return 'This task reviews someone else’s pull request: it has no work of its own to make a change of. Where the person wants what it found fixed, start that as a task of its own: draft_task, then propose_plan.'
-          if (task.made === 1)
-            return 'This task is a change already: it was made one as the person asked. Commit your work and call finish_step when it’s ready; its review and its pull request follow.'
-          if (task.changes === 1)
-            return 'This task has a pull request already, so it is a change: there is nothing to make. Where the person wants another change made from it, such as the real build of a prototype, start it as a task of its own: draft_task, then propose_plan.'
-          return 'This task was planned as a change from its start: its plan already says who reviews it and how it ends. Carry on, and call finish_step when it’s done. Where the person wants another change made from it, start it as a task of its own: draft_task, then propose_plan.'
+            return 'This task reviews someone else’s pull request: it has no work of its own to make a change of. To fix what it found here, add_part takes a worktree for it.'
+          // Planned, made a change before, or with a pull request: it is given its review and ending in place.
+          return { ...task, planned: true as const }
         })
 
       /** Why a task's lead may not make it a change, or null where it may. */
-      const notQuick = (taskId: string | null) => Effect.map(quickOf(taskId), (found) => (typeof found === 'string' ? found : null))
+      const notQuick = (taskId: string | null) =>
+        Effect.map(quickOf(taskId), (found) => (typeof found === 'string' ? found : 'planned' in found ? 'planned' : null))
+
+      /**
+       * A task that isn't a quick one made a change as the person asked, in place (a task is a conversation plus parts): a
+       * prototype, a change made one before, or one with a pull request. Renamed for what it does, its review put on by the
+       * model named or taken off, and its ending a pull request, as change_part's do; Ship then reviews and opens it.
+       */
+      const changeInPlace = (
+        access: ToolAccess,
+        task: { readonly id: string; readonly title: string; readonly projectId: ProjectId; readonly threadId: string },
+        input: unknown,
+      ) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const runs = yield* Runs
+          const asked = yield* read(MadeChange, input)
+          const title = asked.title.trim()
+          if (title === '') return yield* new ToolRefused({ message: 'Give it a title: what the change does, in a few words.' })
+          if (title.length > TITLE_LENGTH)
+            return yield* new ToolRefused({
+              message: `That title is ${title.length} characters. Keep it to ${TITLE_LENGTH}: what the change does, in a few words.`,
+            })
+          const [plan] = yield* sql<{ parameters: string }>`
+            SELECT parameters FROM task_plans WHERE task_id = ${task.id} AND state IN ('proposed', 'accepted')
+            ORDER BY proposed_at DESC LIMIT 1`
+          const before = yield* Schema.decodeUnknownEffect(Schema.fromJsonString(PlanParameters))(
+            plan?.parameters ?? '{"steps":[],"reason":null}',
+          )
+          const lead = before.steps.find((step) => step.key === 'implement')
+          if (lead === undefined) return yield* new ToolRefused({ message: 'This task has no lead in its plan to make a change of.' })
+          const own = before.steps.find((step) => step.key === 'review')
+          const review: PlanStep | null =
+            asked.review === null ? null : { key: 'review', ...(yield* stepOf(access.projectId, asked.review, REVIEWER)), skipped: false }
+          const hosts = yield* changes.hostsFor(access.projectId, task.id)
+          const end = hosts.some((host) => host !== null) ? asked.output : 'none'
+          yield* changes.exclusive(task.id, branchOnFirstWrite(task.id, [], true))
+          if (title !== task.title)
+            yield* (yield* Tasks).rename({
+              envelope: yield* envelope('task.rename', { taskId: task.id, title }, undefined, instance.systemId),
+              taskId: task.id,
+              title,
+              follow: 'none',
+            })
+          yield* runs.changeTeam({
+            taskId: task.id,
+            steps: [lead, ...(review === null ? (own === undefined ? [] : [{ ...own, skipped: true }]) : [review])],
+            actorId: instance.systemId,
+          })
+          yield* runs.reshape({ taskId: task.id, end, ...(review === null ? {} : { afterMerge: null }), actorId: instance.systemId })
+          const named = yield* modelNamer
+          const who = review === null ? 'with no review' : `reviewed by ${named(review)}`
+          const ends =
+            end === 'none'
+              ? 'ending on its branch'
+              : `ending in ${end === 'ready' ? 'a pull request ready for review' : 'a draft pull request'}`
+          yield* addItem({ projectId: task.projectId, threadId: task.threadId }, 'notice', {
+            source: 'runtime',
+            severity: 'info',
+            title: `This task is a change now: ${who}, ${ends}.`,
+            role: 'aside',
+          })
+          yield* touchCard(task.id)
+          return `The task is a change now, called “${title}”, ${who}, ${ends}. Commit your work: Ship ${review === null ? 'opens' : 'runs its review, then opens'} its pull request, where the person asked for it to go up now with ship_task (it ships once your turn ends), else with their Ship. Don't push or open it yourself.`
+        })
 
       /**
        * A quick task's lead makes it a change, as the person asked: renamed for
@@ -1338,6 +1400,7 @@ export class Coordinator extends Context.Service<
           const runs = yield* Runs
           const task = yield* quickOf(access.taskId)
           if (typeof task === 'string') return yield* new ToolRefused({ message: task })
+          if ('planned' in task) return yield* changeInPlace(access, task, input)
           const taskId = task.id
           const asked = yield* read(MadeChange, input)
           const title = asked.title.trim()
@@ -1363,7 +1426,10 @@ export class Coordinator extends Context.Service<
             Effect.gen(function* () {
               // Read again where it is written: made a change meanwhile, it isn't made twice.
               const now = yield* notQuick(taskId)
-              if (now !== null) return yield* new ToolRefused({ message: now })
+              if (now !== null)
+                return yield* new ToolRefused({
+                  message: now === 'planned' ? 'This task was made a change meanwhile: call make_it_a_change again.' : now,
+                })
               // Made a change now, it has no pull request yet to follow its title.
               yield* (yield* Tasks).rename({
                 envelope: yield* envelope('task.rename', { taskId, title }, undefined, instance.systemId),
@@ -1565,17 +1631,17 @@ export class Coordinator extends Context.Service<
         })
 
       /**
-       * Puts a task's lead and reviewer on other models, efforts or agents, as the task's team dialog does: from the lead's next
-       * turn, never in the one it is in, by the same handover as its model picker, which gives the new agent the thread so far;
-       * the reviewer until its review round starts, and from the next round during one. The lead's own step, held for an agent's usage limit, goes
-       * to the lead named at once, as the held card's Hand over does.
+       * Puts a task's lead and reviewer on other models, efforts or agents, as the task's team dialog does, any task's, a lead's
+       * own included, on the person's word (a task is a conversation plus parts): from the lead's next turn, never in the one it
+       * is in, by the same handover as its model picker, which gives the new agent the thread so far; the reviewer until its
+       * review round starts, from the next round during one, and once a review of it ran, for what ships next. A plan not
+       * started yet takes its new team as it is. The lead's own step, held for an agent's usage limit, goes to the lead named at
+       * once, as the held card's Hand over does.
        */
       const changeLead = (access: ToolAccess, input: unknown) =>
         Effect.gen(function* () {
           const asked = yield* read(Relead, input)
-          const task = yield* taskOf(access, asked.task)
-          if (task.id === access.taskId)
-            return yield* new ToolRefused({ message: `${task.slug} is your own task: the person changes who leads it.` })
+          const task = yield* taskOf(access, asked.task ?? (access.role === 'lead' ? (access.taskId ?? '') : ''))
           if (asked.lead === undefined && asked.review === undefined)
             return yield* new ToolRefused({ message: 'Name the lead, the review, or both: what should change on the task.' })
           const lead = asked.lead === undefined ? undefined : yield* stepOf(access.projectId, asked.lead)
@@ -1614,8 +1680,8 @@ export class Coordinator extends Context.Service<
             const [plan] = yield* sql<{ state: string; parameters: string }>`
               SELECT state, parameters FROM task_plans WHERE task_id = ${task.id} AND state IN ('proposed', 'accepted')
               ORDER BY proposed_at DESC LIMIT 1`
-            if (plan === undefined || plan.state === 'proposed')
-              return yield* new ToolRefused({ message: `${task.slug} hasn't started: change its plan with propose_plan.` })
+            if (plan === undefined)
+              return yield* new ToolRefused({ message: `${task.slug} has no plan yet: propose_plan plans it, with its team.` })
             const before = yield* Schema.decodeUnknownEffect(Schema.fromJsonString(PlanParameters))(plan.parameters)
             const rest = before.steps.filter((step) => step.key !== 'implement' && step.key !== 'review')
             const ownLead = before.steps.find((step) => step.key === 'implement')
@@ -1690,7 +1756,9 @@ export class Coordinator extends Context.Service<
             SELECT state, parameters FROM task_plans WHERE task_id = ${task.id} AND state IN ('proposed', 'accepted')
             ORDER BY proposed_at DESC LIMIT 1`
           if (plan === undefined || plan.state === 'proposed')
-            return yield* new ToolRefused({ message: `${task.slug} hasn't started: give its plan a review with propose_plan.` })
+            return yield* new ToolRefused({
+              message: `${task.slug}'s plan hasn't started: its card shows its team to the person, and change_lead puts a review on it now.`,
+            })
           const parameters = yield* Schema.decodeUnknownEffect(Schema.fromJsonString(PlanParameters))(plan.parameters)
           const facts = {
             taskId: task.id,
@@ -1711,7 +1779,7 @@ export class Coordinator extends Context.Service<
                   : not === 'merged'
                     ? `${task.slug} is merged: a review now is one after the merge.`
                     : not === 'no_review_of_its_own'
-                      ? `${task.slug}'s plan reads no review of its own.`
+                      ? `${task.slug} reviews someone else's pull request: it has no work of its own to review.`
                       : `${task.slug} isn't open.`,
             })
           }
@@ -2568,7 +2636,7 @@ export class Coordinator extends Context.Service<
           {
             type: 'object',
             properties: {
-              task: { type: 'string', description: "The task's slug." },
+              task: { type: 'string', description: "The task's slug; a lead leaves it out for its own." },
               lead: {
                 type: 'object',
                 properties: { model: { type: 'string', description: 'As list_models writes it.' }, effort, reason: { type: 'string' } },
@@ -2786,7 +2854,7 @@ export class Coordinator extends Context.Service<
         ),
         tool(
           'change_lead',
-          "Changes who leads or reviews a task, as its Change the team dialog does, at any time before it merges. The lead changes from its next turn, never in the one it is in: another model, effort or agent takes over as the task's model picker and Hand over do, briefed with the thread so far, and message, where you give one, is said to it first. The reviewer changes until its review round starts, and from the next round during one; null for review removes it, and it can't change once a review of it ran to its end. A review that was skipped, or never planned, isn't a done one: until the task merges it can be added back here, and where the work is pushed already that starts a review round on its head, reading what changed since the last review, or all of it where none ran; its findings go to the lead to settle. Name models as list_models writes them. The lead's own step, held for an agent's usage limit, goes to the lead named at once, as the held card's Hand over does. It acts at once, with a line in your thread and the task's.",
+          "Changes who leads or reviews a task, as its Change the team dialog does, at any time and either way, on the person's word: any task's, your own included (a lead leaves task out for its own, and its own new lead takes over from its next turn). The lead changes from its next turn, never in the one it is in: another model, effort or agent takes over as the task's model picker and Hand over do, briefed with the thread so far, and message, where you give one, is said to it first. The reviewer changes until its review round starts, from the next round during one, and once a review of it ran or it merged, for what ships next; null for review removes it. A review that was skipped, never planned, or planned for after a merge that hasn't come, isn't a done one: added here, it reads the work before it ships, and where the work is in an open pull request already that starts a review round on its head, reading what changed since the last review, or all of it where none ran; its findings go to the lead to settle. A plan not started yet takes its new team as it is. Name models as list_models writes them. The lead's own step, held for an agent's usage limit, goes to the lead named at once, as the held card's Hand over does. It acts at once, with a line in your thread and the task's.",
           {
             type: 'object',
             properties: {
@@ -2808,13 +2876,12 @@ export class Coordinator extends Context.Service<
                 description: 'Why, in a few plain words, said in both threads: "the person asked", or what is going wrong.',
               },
             },
-            required: ['task'],
           },
           changeLead,
         ),
         tool(
           'offer_review',
-          "Offers a task a review, as a line of your thread the person answers with Add or No thanks: where what they said makes work with no review a real change, such as asking a prototype's lead to harden it, or a chat's to open a pull request for it. It adds nothing by itself. Added, the reviewer goes on as change_lead would put it, and where the work is pushed a review round starts on its head. Its reviewer is the one the project's rules pick, another maker's than the lead's, unless you name one. A lead leaves task out for its own. Offer it once: turned down, it isn't offered again; where they plainly asked for a review, add it with change_lead instead.",
+          "Offers a task a review, as a line of your thread the person answers with Add or No thanks: only where they didn't say whether they want one, and what they said may make work with no review a real change. Where they asked for the change, a review or a pull request, don't ask again: change_part does it at once (preset Change, or checked_by). It adds nothing by itself. Added, the reviewer goes on as change_lead would put it, before the work ships, and where the work is in an open pull request a review round starts on its head. Its reviewer is the one the project's rules pick, another maker's than the lead's, unless you name one. A lead leaves task out for its own. Offer it once: turned down, it isn't offered again.",
           {
             type: 'object',
             properties: {
@@ -2993,7 +3060,7 @@ export class Coordinator extends Context.Service<
         ),
         tool(
           'make_it_a_change',
-          `Makes this quick task a real change, with a review and a pull request: call it only when the person asks to turn what you made into a real thing (to keep it, review it, or open a pull request), never on your own. Give the task a title for what the change does now (at most ${TITLE_LENGTH} characters); the model that reviews it, which only reads (pick a strong one, from another maker than yours where there is one), or null only where the person said it needs no review; and whether its pull request opens as a draft or ready for review (a draft, unless the person said ready). Its work goes on a branch of its own if it has none; then commit what belongs in the change, and call finish_step: the review comes next, then the pull request. Any other task, such as a prototype that should become the real build, or a review whose findings need a fix, starts the change as a task of its own: draft_task, then propose_plan.`,
+          `Makes this quick task a real change, with a review and a pull request: call it only when the person asks to turn what you made into a real thing (to keep it, review it, or open a pull request), never on your own. Give the task a title for what the change does now (at most ${TITLE_LENGTH} characters); the model that reviews it, which only reads (pick a strong one, from another maker than yours where there is one), or null only where the person said it needs no review; and whether its pull request opens as a draft or ready for review (a draft, unless the person said ready). Its work goes on a branch of its own if it has none; then commit what belongs in the change, and call finish_step: the review comes next, then the pull request. A task that isn't a quick one, such as a prototype the person wants built, takes the same review and ending in place, and Ship then reviews it and opens its pull request (change_part with preset Change does it too).`,
           {
             type: 'object',
             properties: {
@@ -3018,6 +3085,7 @@ export class Coordinator extends Context.Service<
         tool.name !== 'make_it_a_change'
           ? Effect.succeed(null)
           : provide(notQuick(access.taskId)).pipe(
+              Effect.map((why) => (why === 'planned' ? null : why)),
               Effect.orElseSucceed(() => 'Althar couldn’t tell whether this task may be made a change. Try again, or tell the person.'),
             ),
       )

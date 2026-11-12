@@ -1974,6 +1974,7 @@ export const handlers = Api.toLayer(
       OpenChange: ({ commandId, taskId }) => once(commandId, api(runs.publish(taskId))),
       SetReviewAfterMerge: ({ commandId, taskId, review }) =>
         once(commandId, api(Effect.asVoid(mergeReviews.choose(taskId, review, instance.personId)))),
+      ShapeTask: ({ commandId, taskId, preset }) => once(commandId, api(taskActions.shape(taskId, preset, instance.personId))),
       SkipReview: ({ commandId, taskId }) =>
         once(
           commandId,

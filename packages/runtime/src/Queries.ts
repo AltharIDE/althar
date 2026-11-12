@@ -3731,6 +3731,16 @@ export class Queries extends Context.Service<
                 ? { nothingBuilt: true }
                 : {}),
               skipReview: (reviewing?.left ?? 0) > 0 && card?.step !== 'publish',
+              // Begun, of its own work, not merged, and ending with no pull request: Make it a change gives it both at once.
+              ...(card?.plan != null &&
+              card.reviewing == null &&
+              card.plan.end !== 'draft' &&
+              card.plan.end !== 'ready' &&
+              card.change?.state !== 'merged' &&
+              card.phase !== null &&
+              !['drafting', 'planned', 'held', 'settled'].includes(card.phase)
+                ? { toChange: true }
+                : {}),
               followUp: card?.followUp === true,
               files: said.files,
               commits: said.commits,

@@ -125,6 +125,8 @@ export interface TaskModel {
   readonly stop: () => Promise<void>
   /** Skips the review of the work under way: ready once its lead is done. */
   readonly skipReview: () => Promise<void>
+  /** Makes it a change in one move: a reviewer on, and its pull request ending (a task is a conversation plus parts). */
+  readonly makeChange: () => Promise<void>
   /** Carries the task on from the step it stopped on, with its last lead. */
   readonly resume: () => Promise<void>
   /** Whether its lead resolves conflicts on its own, otherwise than its project says; null goes back to the project. */
@@ -666,6 +668,7 @@ export const useTask = (threadId: string): TaskModel => {
       shown(body, 'after_current', () => client.switchAgent({ ...startOf(threadId, choice), body, ...sentWith(images) }), images, false),
     stop: () => onTask((taskId) => client.stopTask(taskId)),
     skipReview: () => onTask((taskId) => client.skipReview(taskId)),
+    makeChange: () => onTask((taskId) => client.shapeTask(taskId, 'Change')),
     resume: () => onTask((taskId) => client.resumeTask({ taskId })),
     setResolveConflicts: (on) => onTask((taskId) => client.setTaskResolveConflicts({ taskId, resolveConflicts: on })),
     resolveConflictsNow: () => onTask((taskId) => client.resolveConflictsNow(taskId)),

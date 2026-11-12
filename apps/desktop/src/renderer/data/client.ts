@@ -589,6 +589,8 @@ export interface Client {
   readonly openChange: (taskId: string) => Promise<void>
   /** Skips the review of the task's work under way. */
   readonly skipReview: (taskId: string) => Promise<void>
+  /** Gives a task another preset's parts at once, as Make it a change does with Change: its review, ending and worktree. */
+  readonly shapeTask: (taskId: string, preset: string) => Promise<void>
   /**
    * One small change's own word on its review after the merge, over its project's rule, until it merges: `review`, `none`,
    * or null for the rule. Its card reads what holds (`afterMerge` on the small change's card).
@@ -1026,6 +1028,7 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
     postScreenshots: (input) => command((commandId) => api.PostScreenshots({ commandId, ...input })),
     openChange: (taskId) => command((commandId) => api.OpenChange({ commandId, taskId })),
     skipReview: (taskId) => command((commandId) => api.SkipReview({ commandId, taskId })),
+    shapeTask: (taskId, preset) => command((commandId) => api.ShapeTask({ commandId, taskId, preset })),
     setReviewAfterMerge: (taskId, review) => command((commandId) => api.SetReviewAfterMerge({ commandId, taskId, review })),
     merge: (taskId, head, url, how) =>
       command((commandId) =>

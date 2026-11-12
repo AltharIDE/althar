@@ -179,11 +179,24 @@ export const PlanStep = Schema.Struct({
 })
 export type PlanStep = typeof PlanStep.Type
 
-/** What changing a team changed: its lead, and its review (null with none), and when each takes effect. */
+/**
+ * What changing a team changed: its lead, and its review (null with none), and when each takes effect: a reviewer from a review
+ * round under way's next round, or, once a review of it ran to its end or it merged, from what ships next.
+ */
 export interface TeamChanged {
   readonly lead?: { readonly step: PlanStep; readonly was: PlanStep; readonly when: 'next_turn' | 'now' }
-  readonly review?: { readonly step: PlanStep | null; readonly was: PlanStep | null; readonly when: 'now' | 'next_round' }
+  readonly review?: { readonly step: PlanStep | null; readonly was: PlanStep | null; readonly when: ReviewerChange }
 }
+
+/** When a task's reviewer changes: at once, from the next round of a review under way, or from what ships next. */
+export type ReviewerChange = 'now' | 'next_round' | 'next_ship'
+
+/** How a task ends, as its parts say it: `here`, nothing leaving this computer until it ships; else as `TaskEnd`. */
+export type TaskEnding = 'here' | TaskEnd
+
+/** How a plan's parameters end, as `TaskEnding` says it: null where they say nothing, which the project's rule settles. */
+export const endingOf = (parameters: { readonly end?: TaskEnd | null | undefined; readonly here?: boolean | undefined }) =>
+  parameters.end != null ? parameters.end : parameters.here === true ? ('here' as const) : null
 
 /**
  * What a task does when its steps are done (the kit's "When the work is
@@ -691,30 +704,31 @@ export const beforeFirstStep = (taskId: string) =>
   })
 
 /**
- * Where a task's reviewer stands to change: `now`, before its review round starts or between rounds; `next_round`, in a round
- * under way, which the change waits for; `never`, once a review of it ran to its end: its run over, or its review passed or
- * went on to the run's ending, though that still publishes or waits. A review that was skipped, or never planned, is not a done
- * one: until the task merges its reviewer can be added, and where its work is up already, it starts a round on its head.
+ * Where a task's reviewer stands to change (a task is a conversation plus parts: every part changes at any time, either way):
+ * `now`, before its review round starts or between rounds; `next_round`, in a round under way, which the change waits for;
+ * `next_ship`, once a review of it ran to its end (its run over, or its review passed or went on to the run's ending, though that
+ * still publishes or waits): the reviewer named reads what ships next. A review that was skipped, or never planned, is not a done
+ * one, nor one planned for after the merge that hasn't merged: its reviewer can be added, and where its work is up already, it
+ * starts a round on its head.
  */
 export const reviewerChange = (taskId: string) =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient
-    const [latest] = yield* sql<{ state: string; executionId: string; parameters: string }>`
-      SELECT r.state, r.parameters, e.id AS execution_id FROM runs r JOIN workflow_executions e ON e.run_id = r.id
+    const [latest] = yield* sql<{ state: string; executionId: string }>`
+      SELECT r.state, e.id AS execution_id FROM runs r JOIN workflow_executions e ON e.run_id = r.id
       WHERE r.task_id = ${taskId} ORDER BY r.created_at DESC, r.rowid DESC LIMIT 1`
     // Its first step not begun: nothing of its review has.
-    if (latest === undefined) return 'now' as const
+    if (latest === undefined) return 'now' as ReviewerChange
     // A review that really ran, or is under way: not one skipped by the person (its attempt cancelled as skipped) or never planned.
     const [ran] = yield* sql<{ one: number }>`
       SELECT 1 AS one FROM node_attempts a JOIN nodes n ON n.id = a.node_id
       WHERE n.execution_id = ${latest.executionId} AND n.node_key = 'review'
         AND NOT (a.state = 'cancelled' AND coalesce(json_extract(a.output, '$.skipped'), 0) = 1)
         AND a.state NOT IN ('ready', 'superseded') LIMIT 1`
-    if (latest.state !== 'running' && latest.state !== 'suspended') {
-      // Its run over: its review is done where one ran; a skipped one is still to add. The fast lane's reads only after the merge.
-      if (ran !== undefined) return 'never' as const
-      return JSON.parse(latest.parameters || '{}').reviewAfterMerge === true ? ('never' as const) : ('now' as const)
-    }
+    if (latest.state !== 'running' && latest.state !== 'suspended')
+      // Its run over: its review is done where one ran, and another reads what ships next; a skipped one, never planned, or the
+      // fast lane's that waits for the merge, is still to add.
+      return ran !== undefined ? ('next_ship' as const) : ('now' as const)
     // Its review passed, or its run went on to its ending without another round: done, though the run still publishes or waits.
     const [finished] = yield* sql<{ one: number }>`
       SELECT 1 AS one FROM node_attempts a JOIN nodes n ON n.id = a.node_id
@@ -723,7 +737,7 @@ export const reviewerChange = (taskId: string) =>
       UNION ALL
       SELECT 1 AS one FROM nodes n WHERE n.execution_id = ${latest.executionId} AND n.node_key = 'publish' AND ${ran === undefined ? 0 : 1} = 1
       LIMIT 1`
-    if (finished !== undefined) return 'never' as const
+    if (finished !== undefined) return 'next_ship' as const
     const [under] = yield* sql<{ one: number }>`
       SELECT 1 AS one FROM node_attempts a JOIN nodes n ON n.id = a.node_id
       WHERE n.execution_id = ${latest.executionId} AND n.node_key = 'review'
@@ -862,13 +876,15 @@ export class Runs extends Context.Service<
     ): Effect.Effect<boolean, unknown, SqlClient.SqlClient | Ledger | Crypto.Crypto>
     /**
      * Where the reviewer of a task stands to change: `now`, before its review round starts or between rounds; `next_round`, in a
-     * round under way, which the change waits for; `never`, once its review is done.
+     * round under way, which the change waits for; `next_ship`, once its review is done: the reviewer named reads what ships next.
      */
-    reviewerChange(taskId: string): Effect.Effect<'now' | 'next_round' | 'never', unknown, SqlClient.SqlClient>
+    reviewerChange(taskId: string): Effect.Effect<ReviewerChange, unknown, SqlClient.SqlClient>
     /**
-     * Changes who leads and who reviews a task that has begun, at any time before it merges. The lead changes from its next turn,
-     * never in the one it is in; the reviewer until its review round starts, and from the next round during one. Says what it
-     * changed, for its caller to say in the task's thread. Refused once it merged, and for a reviewer once its review is done.
+     * Changes who leads and who reviews a task, at any time (a task is a conversation plus parts: every part changes either way,
+     * on the person's word). The lead changes from its next turn, never in the one it is in; the reviewer until its review round
+     * starts, from the next round during one, and once a review of it ran or it merged, from what ships next. A review added
+     * before the work ships where its plan read it only after the merge (the fast lane) reads it before now. Says what it
+     * changed, for its caller to say in the task's thread. Refused only for an abandoned task.
      */
     changeTeam(input: {
       readonly taskId: string
@@ -882,6 +898,20 @@ export class Runs extends Context.Service<
      * counted from where the task started. Whether one opened.
      */
     madeRound(taskId: string, sessionId: string): Effect.Effect<boolean, unknown>
+    /**
+     * Changes how a task ends, and when its review reads it, at any time and either way (a task is a conversation plus parts):
+     * `end`, `here` (nothing of it leaving this computer until the person ships it), `none` (its branch pushed) or a pull
+     * request, a draft or ready for review; `afterMerge`, a reviewer that reads it only once it merged (the fast lane's), or
+     * null for its review before it ships again. Its plan, the run of it and its latest run take them, so its next ending and
+     * its next Ship go by them. How it ended before, for its caller to say. Refused only for an abandoned task, or one with no
+     * plan.
+     */
+    reshape(input: {
+      readonly taskId: string
+      readonly end?: TaskEnding
+      readonly afterMerge?: PlanStep | null
+      readonly actorId: ActorId
+    }): Effect.Effect<{ readonly was: TaskEnding | null }, unknown>
     /** The person's answer to what Althar asked before a Local task takes a checkout (ADR-091); its task is placed again at once. */
     answerCheckout(input: {
       readonly envelope: CommandEnvelope
@@ -1459,9 +1489,12 @@ export class Runs extends Context.Service<
               title: "What the follow-up committed isn't in a pull request yet.",
             })
             // Only a task that had a pull request, in any of its repositories: one whose project leaves its work on its branch, or
-            // on no host, stays so.
+            // on no host, stays so, and so does one whose plan ends with its branch now (it dropped its pull request).
             const had = (yield* changes.ofTask(run.taskId).pipe(Effect.orElseSucceed(() => []))).length > 0
-            const end = had ? yield* changes.endFor(run.projectId, run.taskId, true).pipe(Effect.orElseSucceed(() => null)) : null
+            const end =
+              had && ending.end !== 'none'
+                ? yield* changes.endFor(run.projectId, run.taskId, true).pipe(Effect.orElseSucceed(() => null))
+                : null
             // Nor a round its lead said only answered the person: what it committed in passing waits for them (ADR-034).
             const [last] = yield* sql<{ answered: number | null }>`
               SELECT json_extract(a.output, '$.answered') AS answered FROM node_attempts a JOIN nodes n ON n.id = a.node_id
@@ -3219,12 +3252,14 @@ export class Runs extends Context.Service<
               const opened = yield* changes.ofTask(run.taskId)
               // Its new work going out, a merged task is open again, until that merges too.
               yield* reopened(run.taskId, run.projectId)
+              // A task that ends with its branch pushes it, as it stands, and opens nothing (a task is a conversation plus parts:
+              // dropping its pull request leaves it a branch).
               const published = yield* changes.publish({
                 projectId: run.projectId,
                 taskId: run.taskId,
                 runId: run.runId,
-                end: end === 'none' ? 'draft' : end,
-                ...(opened.length > 0 && fresh.length === 0 ? { again: true } : {}),
+                end,
+                ...(opened.length > 0 && fresh.length === 0 && end !== 'none' ? { again: true } : {}),
                 ships: true,
                 ...(only === undefined ? {} : { only }),
               })
@@ -7241,6 +7276,80 @@ export class Runs extends Context.Service<
           ),
         )
 
+      const reshape = (input: Parameters<Runs['Service']['reshape']>[0]) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const [task] = yield* sql<{ state: string }>`SELECT state FROM tasks WHERE id = ${input.taskId}`
+          if (task === undefined) return yield* new NotFound({ kind: 'task', id: input.taskId })
+          if (task.state === 'abandoned') return yield* new TaskRefused({ taskId: input.taskId, why: 'abandoned' })
+          const [plan] = yield* sql<{ id: string; projectId: ProjectId; parameters: string }>`
+            SELECT id, project_id, parameters FROM task_plans WHERE task_id = ${input.taskId} AND state IN ('proposed', 'accepted')
+            ORDER BY proposed_at DESC LIMIT 1`
+          if (plan === undefined) return yield* new TaskRefused({ taskId: input.taskId, why: 'no_lead' })
+          const was = endingOf(yield* Schema.decodeUnknownEffect(Schema.fromJsonString(PlanParameters))(plan.parameters))
+          // Here: nothing goes up until it ships; else its ending, with nothing more of staying here. Read after the merge: its
+          // reviewer's row skipped, so nothing waits on it before; read before it ships again: the fast lane's mark gone.
+          const reshaped = (parameters: string) => {
+            const before = JSON.parse(parameters) as Record<string, unknown> & { steps?: ReadonlyArray<PlanStep> }
+            const { here, end, reviewAfterMerge, ...rest } = before
+            const ending =
+              input.end === undefined
+                ? { ...(here === undefined ? {} : { here }), ...(end === undefined ? {} : { end }) }
+                : input.end === 'here'
+                  ? { end: null, here: true }
+                  : { end: input.end }
+            const after =
+              input.afterMerge === undefined
+                ? reviewAfterMerge === undefined
+                  ? {}
+                  : { reviewAfterMerge }
+                : input.afterMerge === null
+                  ? {}
+                  : {
+                      reviewAfterMerge: true,
+                      steps: [
+                        ...(before.steps ?? []).filter((step) => step.key !== 'review'),
+                        { ...input.afterMerge, key: 'review' as const, skipped: true },
+                      ],
+                    }
+            return JSON.stringify({ ...rest, ...ending, ...after })
+          }
+          if ((input.end === undefined || was === input.end) && input.afterMerge === undefined) return { was }
+          yield* sql.withTransaction(
+            Effect.gen(function* () {
+              const revision = yield* change('task_plans', plan.id, { parameters: reshaped(plan.parameters) })
+              yield* fact({
+                projectId: plan.projectId,
+                aggregateType: 'task_plan',
+                aggregateId: plan.id,
+                revision,
+                type: 'task_plan.changed',
+                payload: { end: input.end ?? null, afterMerge: input.afterMerge ?? null },
+                actorId: input.actorId,
+              })
+              // The plan's run, which Ship and the rounds after it read, and the latest run, a round of it or the same.
+              const rows = yield* sql<{ id: string; projectId: ProjectId; parameters: string }>`
+                SELECT r.id, r.project_id, r.parameters FROM runs r
+                WHERE r.task_id = ${input.taskId} AND (r.plan_id = ${plan.id}
+                  OR r.id = (SELECT id FROM runs WHERE task_id = ${input.taskId} ORDER BY created_at DESC, rowid DESC LIMIT 1))`
+              for (const run of rows) {
+                const runRevision = yield* change('runs', run.id, { parameters: reshaped(run.parameters) })
+                yield* fact({
+                  projectId: run.projectId,
+                  aggregateType: 'run',
+                  aggregateId: run.id,
+                  revision: runRevision,
+                  type: 'run.plan_changed',
+                  payload: { end: input.end ?? null, afterMerge: input.afterMerge ?? null },
+                  actorId: input.actorId,
+                })
+              }
+            }),
+          )
+          yield* touchCard(input.taskId)
+          return { was }
+        })
+
       const changeTeam = (input: Parameters<Runs['Service']['changeTeam']>[0]) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
@@ -7249,10 +7358,11 @@ export class Runs extends Context.Service<
             SELECT k.state, t.id AS thread_id FROM tasks k JOIN threads t ON t.task_id = k.id AND t.kind = 'task' WHERE k.id = ${input.taskId}`
           if (task === undefined) return yield* new NotFound({ kind: 'task', id: input.taskId })
           if (task.state === 'abandoned') return yield* new TaskRefused({ taskId: input.taskId, why: 'abandoned' })
-          // Merged, its change is in: the one it shows is the open one, else its latest.
-          const pulls = yield* changes.ofTask(input.taskId)
+          // Merged, its change is in: the one it shows is the open one, else its latest. Its reviewer then reads what ships next.
+          // One that can't be read yet counts as none: a change of its team never fails for it.
+          const pulls = yield* changes.ofTask(input.taskId).pipe(Effect.orElseSucceed(() => []))
           const shown = pulls.find((one) => one.state === 'open') ?? pulls.at(-1)
-          if (task.state === 'done' || shown?.state === 'merged') return yield* new TaskRefused({ taskId: input.taskId, why: 'merged' })
+          const merged = task.state === 'done' || shown?.state === 'merged'
           const [plan] = yield* sql<{ id: string; projectId: ProjectId; parameters: string }>`
             SELECT id, project_id, parameters FROM task_plans WHERE task_id = ${input.taskId} AND state IN ('proposed', 'accepted')
             ORDER BY proposed_at DESC LIMIT 1`
@@ -7276,8 +7386,9 @@ export class Runs extends Context.Service<
           const reviews = wantedReview !== undefined && !wantedReview.skipped
           const reviewChanges = reviewed !== reviews || (reviews && review !== undefined && !alike(review, wantedReview))
           if (!leadChanges && !reviewChanges) return {} as TeamChanged
-          const reviewWhen = reviewChanges ? yield* reviewerChange(input.taskId) : 'now'
-          if (reviewWhen === 'never') return yield* new TaskRefused({ taskId: input.taskId, why: 'review_done' })
+          const reviewWhen: ReviewerChange = !reviewChanges ? 'now' : merged ? 'next_ship' : yield* reviewerChange(input.taskId)
+          // A review put on before the work ships, where the plan read it only once it merged (the fast lane): it reads it before now.
+          const readsBefore = reviewChanges && reviews && before.reviewAfterMerge === true
           const at = yield* timestamp
           // Each row's own steps: a round of work may have had its review skipped, which a change to the lead leaves as it is.
           const reshaped = (steps: ReadonlyArray<PlanStep>) => {
@@ -7293,9 +7404,15 @@ export class Runs extends Context.Service<
             return own === undefined ? rest : [...rest, { ...own, skipped: true }]
           }
           const rewritten = (parameters: string) =>
-            Effect.map(decode(parameters), (now) =>
-              JSON.stringify({ ...JSON.parse(parameters), steps: reshaped(now.steps), ...(leadChanges ? { leadChanged: at } : {}) }),
-            )
+            Effect.map(decode(parameters), (now) => {
+              const { reviewAfterMerge, ...rest } = JSON.parse(parameters) as Record<string, unknown>
+              return JSON.stringify({
+                ...rest,
+                ...(readsBefore || reviewAfterMerge === undefined ? {} : { reviewAfterMerge }),
+                steps: reshaped(now.steps),
+                ...(leadChanges ? { leadChanged: at } : {}),
+              })
+            })
           yield* sql.withTransaction(
             Effect.gen(function* () {
               const planChange = yield* change('task_plans', plan.id, { parameters: yield* rewritten(plan.parameters) })
@@ -7347,8 +7464,9 @@ export class Runs extends Context.Service<
                   type: 'run.plan_changed',
                   actorId: input.actorId,
                 })
-                // Under way, its graph has the review it has now, as a patch to it.
-                if (!reviewChanges || (run.state !== 'running' && run.state !== 'suspended')) continue
+                // Under way, its graph has the review it has now, as a patch to it; one whose review is done keeps the graph it ran,
+                // and the reviewer named reads what ships next.
+                if (!reviewChanges || reviewWhen === 'next_ship' || (run.state !== 'running' && run.state !== 'suspended')) continue
                 const [graph] = yield* sql<{
                   revision: number
                 }>`SELECT graph_revision AS revision FROM workflow_executions WHERE id = ${run.executionId}`
@@ -7382,8 +7500,9 @@ export class Runs extends Context.Service<
                 : ('now' as const)
               : ('now' as const)
           yield* touchCard(input.taskId)
-          // A review added where its run is over, or at its ending, has no round to come in it: it reads the head now.
-          if (reviewChanges && reviews && !reviewed && reviewWhen === 'now') {
+          // A review added where its run is over, or at its ending, has no round to come in it: where its work is up in an open
+          // pull request, it reads the head now; where it isn't, Ship reviews it before sending it up.
+          if (reviewChanges && reviews && !reviewed && reviewWhen === 'now' && pulls.some((one) => one.state === 'open')) {
             const [last] = yield* sql<{ state: string; late: number }>`
               SELECT r.state, EXISTS (SELECT 1 FROM nodes n WHERE n.execution_id = e.id AND n.node_key = 'publish') AS late
               FROM runs r JOIN workflow_executions e ON e.run_id = r.id WHERE r.task_id = ${input.taskId}
@@ -7564,6 +7683,7 @@ export class Runs extends Context.Service<
         planWaits,
         reviewerChange,
         changeTeam: (input) => provide(changeTeam(input)),
+        reshape: (input) => provide(reshape(input)),
         makeChange,
         madeRound: (taskId, sessionId) => provide(Effect.map(openRound(taskId, sessionId), (opened) => opened !== undefined)),
         answerCheckout: (input) => provide(answerCheckout(input)),
