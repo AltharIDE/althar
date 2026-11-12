@@ -65,6 +65,31 @@ export const SCREENSHOTS: readonly Screenshot[] = [
     shows: 'First run: the agents you already pay for, each signed in on its own plan',
   },
   {
+    file: 'canvas',
+    bar: true,
+    story: 'thread-taskface--with-a-canvas',
+    width: 1440,
+    height: 900,
+    shows: 'A task with its canvas beside it: the launch page its lead drew, at the version that answers a comment',
+  },
+  {
+    file: 'browser',
+    bar: true,
+    story: 'thread-taskface--with-the-browser',
+    width: 1440,
+    height: 900,
+    shows: 'A task with the browser beside it: the page its run serves, and the lead trying the fix on it',
+  },
+  {
+    file: 'automations',
+    bar: true,
+    story: 'screens-automations--a-good-morning',
+    /* Small, so the cards fill it. */
+    width: 900,
+    height: 690,
+    shows: 'Automations: work that starts itself, on a schedule, and how each has run',
+  },
+  {
     file: 'plan',
     story: 'coordinator-tasklaunch--in-the-conversation',
     width: 960,
