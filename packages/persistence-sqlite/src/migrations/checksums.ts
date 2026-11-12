@@ -82,5 +82,5 @@ export const checksums: Readonly<Record<string, string>> = {
   '0076_change_waits': '377b00faa1422cf19a0c48579ca67ca8a85c3604fc9afd88dd29a1fa9f7d61a9',
   '0077_helper_copies': '227f03fdb43df2006d705f9fe7026ede76c43a39390f0f5ac8e5c364b6a7430a',
   '0078_canvases': '1820f0a0a8808821ab4e44ff799b2c3a76eb4c6d9b14ac47b8a9ec5f0298a568',
-  '0079_reply_reads': 'ca8739bf3dec7813b549334954148b0afc251016f6fb1dcb86055595a2804698',
+  '0079_key_reads': '2f40ac3b85d4c65cdb90ff92f10fe85a68a419d619afd6ab6e6c97190b1d9581',
 }

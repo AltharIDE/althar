@@ -1619,3 +1619,11 @@ CREATE INDEX canvas_comments_by_canvas ON canvas_comments (canvas_id, version);
 CREATE INDEX thread_items_by_delivery ON thread_items (delivery_id, kind) WHERE delivery_id IS NOT NULL;
 
 CREATE INDEX turn_deliveries_with_heads ON turn_deliveries (thread_id, delivered_at) WHERE heads IS NOT NULL;
+
+CREATE INDEX thread_items_task_cards ON thread_items (json_extract(content, '$.taskId')) WHERE kind = 'task';
+
+CREATE INDEX decisions_answered ON decisions (decided_by_actor_id, decided_at) WHERE permission_request_id IS NOT NULL;
+
+CREATE INDEX thread_items_setups ON thread_items (kind) WHERE kind = 'setup';
+
+CREATE INDEX thread_items_runs ON thread_items (kind) WHERE kind = 'run';
