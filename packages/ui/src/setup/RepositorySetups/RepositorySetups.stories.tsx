@@ -132,7 +132,7 @@ export const Refused: Story = {
 }
 
 const NONE: SetupRepository = { id: 'r0', name: 'althar', checkout: '~/Projects/althar', setup: null }
-const SAID = 'New tasks use this; worktrees already made keep what they have.'
+const SAID = 'New tasks use this; existing worktrees keep theirs.'
 
 /** Nothing kept yet: the first task's agent sets it. There is nothing to clear. */
 export const None: Story = {
@@ -161,7 +161,7 @@ export const AgentSet: Story = {
 export const PersonEdited: Story = {
   args: { repositories: [{ ...ALTHAR, setup: { by: 'person', copy: ['.env'], commands: ['make deps'] } }] },
   play: async ({ canvasElement }) => {
-    await expect(within(canvasElement).getByText(/Edited by you\. An agent asks you before it replaces it\./)).toBeInTheDocument()
+    await expect(within(canvasElement).getByText(/Edited by you; an agent asks before replacing it\./)).toBeInTheDocument()
   },
 }
 
@@ -173,7 +173,7 @@ export const Editing: Story = {
     await userEvent.click(commands)
     await userEvent.type(commands, '{End}\nmake deps')
     await userEvent.tab()
-    await expect(canvas.getByText(/Edited by you\./)).toBeInTheDocument()
+    await expect(canvas.getByText(/Edited by you;/)).toBeInTheDocument()
   },
 }
 
