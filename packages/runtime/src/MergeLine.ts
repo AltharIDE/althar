@@ -19,7 +19,7 @@ import { Instance } from './Instance'
 import { makeKeyedLock } from './keyedLock'
 import { checksOf, nameOf } from './pullRequestWords'
 import { timestamp } from './records'
-import { addItem } from './threads'
+import { addItem, updateItem } from './threads'
 import { ActionNotPerformed, ToolRefused } from './toolErrors'
 import { POOL, type Tool, type ToolAccess, ToolServer } from './ToolServer'
 
@@ -72,6 +72,8 @@ const MergeRequest = Schema.Struct({
   number: Schema.Number,
   method: MergeMethod,
   now: Schema.Boolean,
+  /** Its title when it was asked for, so the line's card names it before it is read. */
+  title: Schema.optional(Schema.String),
 })
 type MergeRequest = typeof MergeRequest.Type
 
@@ -142,6 +144,58 @@ const queueWords = (ways: MergeWays) => (ways.queue === 'merge_train' ? 'merge t
 const addButton = (host: CodeHost) =>
   host.product === 'gitlab' ? 'Set to auto-merge' : host.product === 'github' ? 'Merge when ready' : 'Add to merge queue'
 const ordinal = (n: number) => (n === 1 ? '1st' : n === 2 ? '2nd' : n === 3 ? '3rd' : `${n}th`)
+
+/** One pull request in the line's card. */
+interface CardRow {
+  readonly number: number
+  readonly title: string
+  readonly url: string
+  readonly state: 'waiting' | 'checks' | 'queued' | 'merging' | 'merged' | 'sent_back' | 'conflict'
+  readonly reason?: string
+}
+
+/** A reason said of a pull request by its name, as the card says it under its row, where the row already names it: "It was closed." */
+const withoutName = (reason: string, name: string) => {
+  const at = reason.indexOf(name)
+  if (at === -1) return reason
+  const rest = `${reason.slice(0, at)}${at === 0 ? 'It' : 'it'}${reason.slice(at + name.length)}`
+  return rest.replaceAll(name, 'it')
+}
+
+/** Where a pull request stands in the line, and for one that needs someone, what to do: as its row says it. */
+const rowOf = (seen: Look): Pick<CardRow, 'state' | 'reason'> => {
+  switch (seen.next) {
+    case 'settle':
+      return seen.fresh.state === 'done'
+        ? { state: 'merged' }
+        : { state: 'sent_back', reason: withoutName(seen.fresh.reason ?? seen.why, seen.name) }
+    case 'red':
+      return { state: 'sent_back', reason: 'Checks failed. It goes back in once they pass.' }
+    case 'conflict':
+      return { state: 'conflict', reason: 'Its task’s lead settles it.' }
+    case 'stuck':
+      return {
+        state: 'sent_back',
+        reason:
+          seen.passing === true
+            ? 'Couldn’t be brought up to date just now. Trying again in a few minutes.'
+            : 'Can’t be brought up to date. Its task’s lead merges the branch in.',
+      }
+    case 'enqueue':
+      return { state: 'queued' }
+    case 'merge':
+    case 'auto':
+      return { state: 'merging' }
+    case 'update':
+    case 'behind':
+      return { state: 'waiting' }
+    case 'wait':
+      if (/queue|train|auto-merge/.test(seen.why)) return { state: 'queued' }
+      if (seen.why === 'merging') return { state: 'merging' }
+      if (seen.why.startsWith('checks')) return { state: 'checks' }
+      return { state: 'waiting' }
+  }
+}
 
 const decodeRequest = Schema.decodeUnknownOption(Schema.fromJsonString(MergeRequest))
 
@@ -749,6 +803,7 @@ export class MergeLine extends Context.Service<
             number: place.number,
             method,
             now: asked.now === true,
+            title: change.title,
           }
           const kept: ErrandStep = {
             key: STEP,
@@ -969,14 +1024,74 @@ export class MergeLine extends Context.Service<
           }
         })
 
-      /** The line, as one line in the chat: said again only when it changes. */
-      const summary = (entries: ReadonlyArray<Entry>, states: ReadonlyMap<string, string>, branch: string, repository: string) =>
-        `${branch} of ${repository.replace(/^[a-z_]+:/, '')}, Althar’s merge line: ${entries
-          .map(
-            (entry, index) =>
-              `${index + 1}. #${entry.request.number}${entry.request.now ? ' (now)' : ''} ${states.get(entry.errandId) ?? 'waiting'}`,
+      /**
+       * The line for a branch as one card in the thread, kept current in
+       * place: each pull request in order with where it stands, written again
+       * only when something in it changed, never as a line of chat. Once all
+       * have merged it stays as it was (the card folds itself), and a later
+       * ask starts a card of its own.
+       */
+      const showCard = (
+        projectId: string,
+        key: string,
+        here: ReadonlyArray<Entry>,
+        now: ReadonlyMap<string, Pick<CardRow, 'state' | 'reason'> & { readonly title?: string }>,
+        defaultBranch: string | undefined,
+      ) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const [first] = here
+          if (first === undefined) return
+          const threadId = first.threadId
+          const found = (yield* sql<{ id: string; content: string }>`
+            SELECT id, content FROM thread_items WHERE thread_id = ${threadId} AND kind = 'merge_line' ORDER BY sequence DESC`).flatMap(
+            (row) => {
+              const content = JSON.parse(row.content) as { key?: string; branch?: string | null; rows?: ReadonlyArray<CardRow> }
+              return content.key === key ? [{ id: row.id, branch: content.branch ?? null, rows: content.rows ?? [] }] : []
+            },
           )
-          .join(' · ')}`
+          const [latest] = found
+          const known = new Set(latest?.rows.map((row) => row.number))
+          // A card whose pull requests all merged is what happened: a new ask is a card of its own.
+          const fresh =
+            latest !== undefined &&
+            latest.rows.every((row) => row.state === 'merged') &&
+            here.some((entry) => !known.has(entry.request.number))
+          const before = fresh ? [] : (latest?.rows ?? [])
+          const landed = new Set((yield* notes(key, 'landed')).map((one) => Number(one.number)))
+          const rows = new Map(before.map((row) => [row.number, row]))
+          for (const entry of here) {
+            const number = entry.request.number
+            const old = rows.get(number)
+            const got = now.get(entry.errandId)
+            const state = got?.state ?? (old?.state === 'merged' ? 'merged' : 'waiting')
+            const title = got?.title ?? old?.title ?? entry.request.title ?? ''
+            rows.set(number, {
+              number,
+              title,
+              url: entry.target,
+              state,
+              ...(got?.reason === undefined ? {} : { reason: got.reason }),
+            })
+          }
+          // One that left the line merged, or it was taken out: the person was told so, and the card no longer holds it.
+          for (const [number, row] of rows) {
+            if (here.some((entry) => entry.request.number === number)) continue
+            if (landed.has(number)) {
+              const { reason: _gone, ...merged } = row
+              rows.set(number, { ...merged, state: 'merged' })
+            } else rows.delete(number)
+          }
+          const branch =
+            defaultBranch === undefined ? (fresh ? null : (latest?.branch ?? null)) : first.branch === defaultBranch ? null : first.branch
+          const content = { key, branch, rows: [...rows.values()] }
+          if (content.rows.length === 0) return
+          if (!fresh && latest !== undefined) {
+            if (JSON.stringify({ key, branch: latest.branch, rows: latest.rows }) === JSON.stringify(content)) return
+            return yield* updateItem(projectId as ProjectId, latest.id, content)
+          }
+          yield* addItem({ projectId: projectId as ProjectId, threadId }, 'merge_line', content)
+        })
 
       /** A branch the line merged into lately, read for going red: a write by someone else between the last read and a merge landing shows so. */
       const redWatch = (projectId: string, key: string, wakes: Array<string>) =>
@@ -990,10 +1105,14 @@ export class MergeLine extends Context.Service<
           const head = yield* viaHost(place.host.branchHead(place.repository, branch))
           const sum = checksOf(head, yield* viaHost(place.host.checks(place.repository, head)))
           if (sum.outcome !== 'failed' || !(yield* note(projectId, key, 'red', `red:${head}`, { head }))) return
-          const said = `${place.repository.path.join('/')}’s ${branch} is red at ${short(head)}: ${sum.failing.join(', ')} failed. Althar’s line merged #${String(last.number)} into it within the hour: that merge, or a write someone made beside it, landed untested together.`
+          const failed = sum.failing.join(', ')
+          // For the person: what is wrong, and what to do. The agent's news below keeps the detail.
+          const said = `${branch} is red at ${short(head)}: ${failed} failed after #${String(last.number)} merged. Fixing it is a task.`
           const thread = yield* coordinatorThread(projectId)
           if (thread !== undefined) yield* line(projectId, thread, said)
-          wakes.push(`- Main is red: ${said} Read its checks (read_default_branch_checks) and say what you find; a fix is a task.`)
+          wakes.push(
+            `- Main is red: ${place.repository.path.join('/')}’s ${branch} is red at ${short(head)}: ${failed} failed. Althar’s line merged #${String(last.number)} into it within the hour: that merge, or a write someone made beside it, landed untested together. Read its checks (read_default_branch_checks) and say what you find; a fix is a task.`,
+          )
         })
 
       const tickProject = (projectId: string) =>
@@ -1039,11 +1158,12 @@ export class MergeLine extends Context.Service<
                   Effect.catchCause((cause) => Effect.logWarning('Could not read a merged branch’s checks', cause)),
                 )
                 const here = entries.filter((entry) => lineOf(entry) === key)
-                const states = new Map<string, string>()
+                const states = new Map<string, Pick<CardRow, 'state' | 'reason'> & { title?: string }>()
+                let defaultBranch: string | undefined
                 let held = false
                 for (const entry of here) {
                   if (entry.state === 'paused') {
-                    states.set(entry.errandId, 'paused')
+                    states.set(entry.errandId, { state: 'sent_back', reason: 'On hold. It goes back in when you say.' })
                     continue
                   }
                   if (held) continue
@@ -1053,12 +1173,12 @@ export class MergeLine extends Context.Service<
                     ),
                   )
                   if (seen === undefined) {
-                    states.set(entry.errandId, 'unread')
                     held = true
                     continue
                   }
                   const queued = seen.ways.queue !== null
-                  states.set(entry.errandId, seen.why)
+                  defaultBranch = seen.repository.defaultBranch
+                  states.set(entry.errandId, { ...rowOf(seen), title: seen.change.title })
                   // Noted as it changes: red at a head, back in once green, and red again on a rerun that fails.
                   const standing = seen.next === 'red' || seen.next === 'conflict' || seen.next === 'stuck' ? 'out' : 'in'
                   if ((yield* latest(stepOf(entry), 'standing'))?.state !== standing)
@@ -1098,16 +1218,9 @@ export class MergeLine extends Context.Service<
                       break
                   }
                 }
-                if (here.length > 0) {
-                  const [first] = here
-                  const words = summary(here, states, first?.branch ?? '', first?.request.repository ?? '')
-                  const thread = first?.threadId
-                  if (
-                    thread !== undefined &&
-                    (yield* note(projectId, key, 'said', createHash('sha256').update(words).digest('hex').slice(0, 24)))
-                  )
-                    yield* line(projectId, thread, words)
-                }
+                yield* showCard(projectId, key, here, states, defaultBranch).pipe(
+                  Effect.catchCause((cause) => Effect.logWarning('Could not show the merge line', cause)),
+                )
               }
               for (const [threadId, said] of wakes) yield* wake(threadId, said)
             }),

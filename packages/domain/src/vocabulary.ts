@@ -134,6 +134,8 @@ export const ThreadItemKind = Schema.Literals([
   'model_move',
   /** A version of one of the project's canvases an agent published (ADR-104): its name, title and version, which open it beside the conversation. Althar posts it. */
   'canvas',
+  /** The merge line for a branch, in the thread of whoever asked for the merges: one card listing each pull request with where it stands. Althar posts it and keeps it current. */
+  'merge_line',
 ])
 export type ThreadItemKind = typeof ThreadItemKind.Type
 

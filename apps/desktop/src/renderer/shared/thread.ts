@@ -132,6 +132,7 @@ export type TaskAskContent = Extract<ThreadItem, { kind: 'task_ask' }>['content'
 export type SettingChangeContent = Extract<ThreadItem, { kind: 'setting' }>['content']
 export type SmallChangeContent = Extract<ThreadItem, { kind: 'small_change' }>['content']
 export type ModelMoveContent = Extract<ThreadItem, { kind: 'model_move' }>['content']
+export type MergeLineContent = Extract<ThreadItem, { kind: 'merge_line' }>['content']
 
 export type Block =
   | {
@@ -217,6 +218,8 @@ export type Block =
   | { readonly kind: 'small_change'; readonly id: string; readonly card: SmallChangeContent }
   /** Auto's line on moving the lead to a lighter model, with the way back (README section 7). */
   | { readonly kind: 'model_move'; readonly id: string; readonly move: ModelMoveContent }
+  /** The merge line for a branch: one card, kept current in place. */
+  | { readonly kind: 'merge_line'; readonly id: string; readonly line: MergeLineContent }
   /**
    * The agent's turn runs on what it was last asked, and it hasn't said
    * anything yet: where its reply will start, held for it, with how long it
@@ -803,6 +806,9 @@ export const blocksOf = (
         continue
       case 'model_move':
         blocks.push({ kind: 'model_move', id: item.id, move: item.content })
+        continue
+      case 'merge_line':
+        blocks.push({ kind: 'merge_line', id: item.id, line: item.content })
         continue
       case 'notice':
         // A restart is Althar's business, not the person's; earlier versions said so in the thread.

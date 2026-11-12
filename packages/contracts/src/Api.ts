@@ -3005,10 +3005,40 @@ export const ModelMoveItem = Schema.Struct({
   }),
 })
 
+/** Where one pull request in the merge line stands. */
+export const MergeLineState = Schema.Literals(['waiting', 'checks', 'queued', 'merging', 'merged', 'sent_back', 'conflict'])
+export type MergeLineState = typeof MergeLineState.Type
+
+/**
+ * The merge line for a branch, in the thread of whoever asked for the merges: each pull request in order, with where it
+ * stands. Althar posts it once and keeps it current; it folds to one line once every pull request has merged.
+ */
+export const MergeLineItem = Schema.Struct({
+  ...itemFields,
+  kind: Schema.Literal('merge_line'),
+  content: Schema.Struct({
+    /** The repository and branch it is for, which tell its card from another's in the same thread. */
+    key: Schema.String,
+    /** The branch, where it isn't the repository's default; null where it is. */
+    branch: Schema.NullOr(Schema.String),
+    rows: Schema.Array(
+      Schema.Struct({
+        number: Schema.Number,
+        title: Schema.String,
+        url: Schema.String,
+        state: MergeLineState,
+        /** For a pull request that needs someone: what is wrong, and who settles it. */
+        reason: Schema.optional(Schema.String),
+      }),
+    ),
+  }),
+})
+
 export const ThreadItem = Schema.Union([
   SettingItem,
   SmallChangeItem,
   ModelMoveItem,
+  MergeLineItem,
   UserMessageItem,
   AgentTextItem,
   ToolCallItem,
