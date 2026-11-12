@@ -1,6 +1,6 @@
 .navigator {
   position: absolute;
-  inset-inline-end: 4px;
+  inset-inline-end: max(4px, calc((100% - var(--measure)) / 2));
   top: 50%;
   transform: translateY(-50%);
   z-index: 1;
@@ -16,7 +16,7 @@
   justify-content: flex-end;
   flex: none;
   width: 28px;
-  height: 24px;
+  height: 12px;
   padding: 0 4px;
   border: 0;
   border-radius: var(--r-sm);
@@ -63,5 +63,11 @@
 @media (prefers-reduced-motion: reduce) {
   .tick {
     transition: none;
+  }
+}
+
+@media (pointer: coarse) {
+  .stop {
+    height: 24px;
   }
 }
