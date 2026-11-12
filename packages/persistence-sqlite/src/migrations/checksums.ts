@@ -85,4 +85,5 @@ export const checksums: Readonly<Record<string, string>> = {
   '0079_cards': 'ce48c0d983651d66a6f95150091c85df3ae1423ddc422d8a628bdec77bcbb42a',
   '0080_key_reads': '2f40ac3b85d4c65cdb90ff92f10fe85a68a419d619afd6ab6e6c97190b1d9581',
   '0081_merge_line_card': '34ee9865f46c5090435da7892805c65821dbfeecb8d31b6c2dcbfe0a9a9c6e95',
+  '0082_noted_input': '3145f15d49061460831960fbe34ba94a57bc37dd85e760adaa71353158632a71',
 }

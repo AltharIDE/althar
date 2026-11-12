@@ -497,7 +497,7 @@ describe('up next', () => {
   })
 
   it('says why moving the line failed, and gives a plain task no kind’s word', () => {
-    const line = { move: vi.fn(async () => {}), oldestFirst: vi.fn(), failed: 'The runtime is restarting.' }
+    const line = { move: vi.fn(async () => {}), oldestFirst: vi.fn(), cancelTurn: vi.fn(), failed: 'The runtime is restarting.' }
     show(
       lanesOf(
         board([

@@ -2073,9 +2073,9 @@ export class Queries extends Context.Service<
 
       /**
        * A waiting task's place in its project's Up next (ADR-065), in the order it gets one (1 first): its tasks under way,
-       * none of whose agents is at work, which continue, then its line, the tasks no agent has worked on yet; whether it
-       * stands behind another in the line, and whether the line is in the person's order. Null where it is in neither: an
-       * agent of its is at work.
+       * none of whose agents is at work, which continue, and its line, the tasks no agent has worked on yet, in one order;
+       * whether it continues, whether it stands behind another, and whether the person put them in an order of their own.
+       * Null where it is in neither: an agent of its is at work.
        */
       const placeOf = (taskId: string) =>
         Effect.gen(function* () {
@@ -2083,10 +2083,9 @@ export class Queries extends Context.Service<
           const [task] = yield* sql<{ projectId: string }>`SELECT project_id FROM tasks WHERE id = ${taskId}`
           if (task === undefined) return null
           const line = yield* lineIn(task.projectId)
-          const ahead = line.continuing.indexOf(taskId)
-          if (ahead >= 0) return { place: ahead + 1, continues: true, behind: false, reordered: false }
-          const at = line.tasks.indexOf(taskId)
-          return at < 0 ? null : { place: line.continuing.length + at + 1, continues: false, behind: at > 0, reordered: line.reordered }
+          const at = line.order.indexOf(taskId)
+          if (at < 0) return null
+          return { place: at + 1, continues: !line.tasks.includes(taskId), behind: at > 0, reordered: line.reordered }
         })
 
       /*
@@ -2714,6 +2713,8 @@ export class Queries extends Context.Service<
             ...((queued || waitsForCheckout !== null) && (yield* planWaits(taskId)) ? { planWaits: true } : {}),
             // And it can be held, out of the line, until the person starts it: nothing of it begun.
             ...((queued || waitsForCheckout !== null) && (yield* beforeFirstStep(taskId)) ? { holdable: true } : {}),
+            // A turn Althar asked of its lead or reviewer waits for a place, none of its agents at work: it can be let go.
+            ...(task.turnWaits > 0 && !busy && task.state !== 'abandoned' ? { turnWaits: true } : {}),
             ...(line === null
               ? paused
                 ? { continues: true }
@@ -3690,8 +3691,15 @@ export class Queries extends Context.Service<
               ...(card?.reconnects == null ? {} : { reconnects: card.reconnects }),
               queued: card?.queued ?? null,
               ...(card?.place === undefined ? {} : { place: card.place }),
-              // In the line behind another of its tasks, the person can put it first from here.
-              ...(card?.inLine === true && (yield* placeOf(head.taskId))?.behind === true ? { front: true } : {}),
+              // In Up next behind another of its tasks, continuing or in the line, or a plan waiting to start, the person can put it
+              // first from here.
+              ...((card?.inLine === true || card?.continues === true) && card.queued !== null
+                ? (yield* placeOf(head.taskId))?.behind === true
+                  ? { front: true }
+                  : {}
+                : card?.phase === 'planned' || card?.phase === 'held'
+                  ? { front: true }
+                  : {}),
               steps: card?.plan?.steps ?? [],
               // Its graph is a part of its own: one that can't be read leaves the face out, not the thread.
               ...Option.match(graph, { onNone: () => ({}), onSome: (rounds) => ({ graph: rounds }) }),

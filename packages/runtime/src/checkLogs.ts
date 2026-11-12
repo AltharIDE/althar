@@ -1,7 +1,7 @@
 import { type Check, type CodeHost, type ConnectorFailed, products, type Repository } from '@althar/connectors'
 import { Effect } from 'effect'
 
-import { queueMainLine, type QueueDetail } from './pullRequestWords'
+import { failingOnBase, passingOnBase, queueMainLine, type QueueDetail } from './pullRequestWords'
 
 /*
  * A failed check's log, as Althar reads it for the thread's card and for
@@ -167,25 +167,32 @@ export const queueDetailOf = (host: CodeHost, repository: Repository, queueSha: 
         ),
       { concurrency: 3 },
     )
-    const main = yield* host.branchHead(repository, base).pipe(
+    const failing = failed.map((check) => check.name)
+    const { main, onBaseToo, passedOnBase } = yield* host.branchHead(repository, base).pipe(
       Effect.flatMap((tip) =>
         host.checks(repository, tip, { strict: true }).pipe(
-          Effect.map((checks) =>
-            queueMainLine(
-              `${base} (${tip.slice(0, 7)})`,
-              failed.map((check) => check.name),
-              checks,
-            ),
-          ),
+          Effect.map((checks) => ({
+            main: queueMainLine(`${base} (${tip.slice(0, 7)})`, failing, checks),
+            onBaseToo: failingOnBase(failing, checks),
+            passedOnBase: passingOnBase(failing, checks),
+          })),
         ),
       ),
-      Effect.catch((error) => Effect.succeed(`Couldn't compare with ${base}'s latest commit: ${lookupFailure(host, error)}.`)),
+      Effect.catch((error) =>
+        Effect.succeed({
+          main: `Couldn't compare with ${base}'s latest commit: ${lookupFailure(host, error)}.`,
+          onBaseToo: [] as ReadonlyArray<string>,
+          passedOnBase: [] as ReadonlyArray<string>,
+        }),
+      ),
     )
     return {
       queueSha,
-      failing: failed.map((check) => check.name),
+      failing,
       logs: reads.map((read) => (read.log !== null && read.url !== null ? `${logForLead(read)} Its page: ${read.url}` : logForLead(read))),
       main,
       jobs: reads.map((read) => ({ name: read.name, url: read.url, tail: read.log, missing: read.missing })),
+      onBaseToo,
+      passedOnBase,
     } satisfies QueueDetail
   })

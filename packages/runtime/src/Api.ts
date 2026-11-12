@@ -144,6 +144,7 @@ import { checkHealth } from './mcpHealth'
 import { Canvases } from './Canvases'
 import * as mcpSync from './mcpSync'
 import * as skillSync from './skillSync'
+import { cancelWaitingTurn, upNextMove } from './upNextMoves'
 
 /** Runs one of sync's steps against the person's agents' settings, where this runtime reads them; refused where it doesn't. */
 const withSync = (step: (io: mcpSync.SyncIo & skillSync.SkillIo) => Promise<unknown>) =>
@@ -1194,7 +1195,9 @@ export const handlers = Api.toLayer(
       GetTaskFolders: () => api(cleanup.list),
       CleanUpFolders: ({ commandId }) => once(commandId, api(cleanup.cleanUp(instance.personId))),
       RemoveTaskFolder: ({ commandId, taskId, seen }) => once(commandId, api(cleanup.remove(taskId, seen, instance.personId))),
-      MoveInLine: ({ commandId, taskId, to }) => once(commandId, api(Effect.asVoid(busy.move(taskId, to)))),
+      // One that no longer waits up next, started or held meanwhile, moves nowhere: the board shows the line as it is.
+      MoveInLine: ({ commandId, taskId, to }) =>
+        once(commandId, api(Effect.asVoid(upNextMove(busy, plans, sql)(taskId, to, instance.personId)))),
       LineOldestFirst: ({ commandId, projectId }) => once(commandId, api(busy.oldestFirst(projectId))),
       SetPostTeamReviews: ({ commandId, on }) =>
         once(commandId, api(setPostTeamReviews(on)).pipe(Effect.provideService(SqlClient.SqlClient, sql))),
@@ -1245,8 +1248,22 @@ export const handlers = Api.toLayer(
         once(commandId, api(automations.setPostsReviews(automationId, on, instance.personId))),
       SetAutomationsPaused: ({ commandId, paused }) => once(commandId, api(automations.setAllPaused(paused))),
       // Interrupted by the person, a conflict its lead was resolving is theirs (ADR-030): handed over first, so the turn's end doesn't ask the lead again.
+      // A lead between turns, a turn Althar asked of it waiting for a place up next: that turn is let go (stop_task with turn).
       Interrupt: ({ commandId, threadId }) =>
-        once(commandId, api(Effect.andThen(pullRequests.leadStopped({ threadId }, 'interrupted'), sessions.interrupt(threadId)))),
+        once(
+          commandId,
+          api(
+            Effect.gen(function* () {
+              const live = yield* sessions.running(threadId)
+              if (Option.isNone(live) || !live.value.turnRunning) {
+                const [task] = yield* sql<{ taskId: string | null }>`SELECT task_id FROM threads WHERE id = ${threadId}`
+                if (task?.taskId != null && (yield* cancelWaitingTurn(busy, sessions, sql)(task.taskId)) > 0) return
+              }
+              yield* pullRequests.leadStopped({ threadId }, 'interrupted')
+              yield* sessions.interrupt(threadId)
+            }),
+          ),
+        ),
       TryAgain: ({ commandId, threadId }) =>
         once(
           commandId,

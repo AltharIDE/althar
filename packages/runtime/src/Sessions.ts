@@ -783,7 +783,17 @@ export class Sessions extends Context.Service<
       readonly origin?: 'news' | 'system'
       /** Input Althar writes, such as findings to settle: delivered, but shown in the thread by what it came from, not as the person's message. */
       readonly quiet?: boolean
+      /**
+       * What Althar tells it that needs nothing done now, quiet: it starts no turn, and waits for no place among the agents at
+       * work, but is noted, and read with the agent's next turn, whatever starts that.
+       */
+      readonly note?: boolean
     }): Effect.Effect<AcceptedInput, NotFound | Failure>
+    /**
+     * Notes what waits in a thread's queue for Althar's own turn there, so it starts none: its agent reads it with its next
+     * turn. What the person said stays as it is. How many were noted.
+     */
+    noteQueued(threadId: string): Effect.Effect<number, unknown>
     /**
      * Asks the thread's agent to compact its context, with its own command
      * (`COMPACT`), as a turn of its own after what was said before it. It
@@ -1840,8 +1850,9 @@ export class Sessions extends Context.Service<
             cutBy: string | null
             senderKind: string
             inputOrigin: string
+            state: string
           }>`
-            SELECT i.id, i.body, i.disposition, i.dictated, i.sender_kind, i.input_origin, a.kind AS author,
+            SELECT i.id, i.body, i.disposition, i.dictated, i.sender_kind, i.input_origin, i.state, a.kind AS author,
               EXISTS (SELECT 1 FROM thread_items ti WHERE ti.user_input_id = i.id) AS shown,
               -- An earlier turn gave it to an agent already: the thread shows it where that one read it.
               EXISTS (SELECT 1 FROM turn_delivery_inputs di JOIN turn_deliveries d ON d.id = di.delivery_id
@@ -1850,7 +1861,7 @@ export class Sessions extends Context.Service<
                 JOIN provider_sessions s ON s.id = d.provider_session_id
                 WHERE di.user_input_id = i.id AND d.error_class = 'usage_limit' ORDER BY d.requested_at DESC LIMIT 1) AS cut_by
             FROM user_inputs i JOIN actors a ON a.id = i.author_actor_id
-            WHERE i.thread_id = ${thread.threadId} AND i.state = 'queued'
+            WHERE i.thread_id = ${thread.threadId} AND i.state IN ('queued', 'noted')
             ORDER BY i.sequence`
           // The images the person sent with each, read from the store for this turn: only an agent that takes images is sent them.
           const sent = yield* imagesFor(
@@ -1874,13 +1885,16 @@ export class Sessions extends Context.Service<
           })
           // Compacting the agent's context is a turn of its own, said bare as the agent's own command: what was said before it goes
           // first, and what after, next. A brief not yet read waits for the turn after, so nothing is left behind it.
+          // Notes before it start nothing, so they wait for the turn after it.
           const compactAt = all.findIndex((input) => input.body === COMPACT)
-          const compacting = compactAt === 0
-          const inputs = compacting ? all.slice(0, 1) : compactAt === -1 ? all : all.slice(0, compactAt)
+          const compacting = compactAt >= 0 && all.slice(0, compactAt).every((input) => input.state === 'noted')
+          const inputs = compacting ? all.slice(compactAt, compactAt + 1) : compactAt === -1 ? all : all.slice(0, compactAt)
           const before = running.context
-          if (inputs.length === 0 && running.brief === undefined) return false
+          // Notes alone start no turn: they are read with the next one, whatever starts it.
+          const asking = inputs.some((input) => input.state === 'queued')
+          if (!asking && running.brief === undefined) return false
           // The coordinator speaks when spoken to: its brief waits for the person's first message.
-          if (inputs.length === 0 && thread.role === 'coordinator') return false
+          if (!asking && thread.role === 'coordinator') return false
           // A compaction says nothing of the brief: that is read with the next turn.
           const briefOf = compacting ? undefined : running.brief
           // Its copies of the repositories are brought up to date for each turn; offline, it reads what it has.
@@ -1923,7 +1937,7 @@ export class Sessions extends Context.Service<
                 // A message may have been withdrawn, or another arrived while the prompt was prepared.
                 // Read the whole burst again, including attachments still being prepared, before claiming it.
                 const still = yield* sql<{ id: string }>`SELECT id FROM user_inputs
-                  WHERE thread_id = ${thread.threadId} AND state = 'queued' ORDER BY sequence`
+                  WHERE thread_id = ${thread.threadId} AND state IN ('queued', 'noted') ORDER BY sequence`
                 if (
                   inputBatches.pending(thread.threadId) ||
                   still.length !== queued.length ||
@@ -2242,7 +2256,8 @@ export class Sessions extends Context.Service<
                     ? inputs.filter((input) => input.author === 'person')
                     : []
               for (const input of back) {
-                const inputRevision = yield* change('user_inputs', input.id, { state: 'queued' })
+                // A note goes back to being one: it still starts no turn of its own.
+                const inputRevision = yield* change('user_inputs', input.id, { state: input.state === 'noted' ? 'noted' : 'queued' })
                 yield* fact({
                   projectId: thread.projectId,
                   aggregateType: 'user_input',
@@ -3317,6 +3332,7 @@ export class Sessions extends Context.Service<
         readonly sender?: MessageSender
         readonly origin?: 'news' | 'system'
         readonly quiet?: boolean
+        readonly note?: boolean
       }) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
@@ -3353,7 +3369,8 @@ export class Sessions extends Context.Service<
                 inputOrigin: input.origin ?? 'system',
                 // What Althar writes quietly is its own, whoever's command it came with: the person's words are only what they say.
                 authorActorId: input.quiet === true ? instance.systemId : input.envelope.actorId,
-                state: 'queued',
+                // A note waits for the agent's next turn rather than starting one: only Althar's own, quiet words are noted.
+                state: input.note === true && input.quiet === true ? 'noted' : 'queued',
                 acceptedAt: yield* timestamp,
               })}`
               // Its images, in order, each an artifact the input refers to; their bytes are in the store already.
@@ -4315,6 +4332,36 @@ export class Sessions extends Context.Service<
         retryable: (threadId) => run(Effect.map(retryOf(threadId), (retry) => retry.retryable)),
         accepting: inputBatches.accepting,
         send: (input) => run(send(input)),
+        noteQueued: (threadId) =>
+          run(
+            Effect.gen(function* () {
+              const sql = yield* SqlClient.SqlClient
+              const [thread] = yield* sql<{ projectId: ProjectId }>`SELECT project_id FROM threads WHERE id = ${threadId}`
+              if (thread === undefined) return 0
+              const waiting = yield* sql<{ id: string }>`
+                SELECT i.id FROM user_inputs i JOIN actors a ON a.id = i.author_actor_id
+                WHERE i.thread_id = ${threadId} AND i.state = 'queued' AND a.kind <> 'person' AND i.body <> ${COMPACT}`
+              yield* sql.withTransaction(
+                Effect.forEach(
+                  waiting,
+                  (input) =>
+                    Effect.gen(function* () {
+                      const revision = yield* change('user_inputs', input.id, { state: 'noted' })
+                      yield* fact({
+                        projectId: thread.projectId,
+                        aggregateType: 'user_input',
+                        aggregateId: input.id,
+                        revision,
+                        type: 'user_input.noted',
+                        actorId: instance.systemId,
+                      })
+                    }),
+                  { discard: true },
+                ),
+              )
+              return waiting.length
+            }),
+          ),
         compact: (input) =>
           run(
             Effect.gen(function* () {

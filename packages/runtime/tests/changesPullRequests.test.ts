@@ -7,7 +7,7 @@ import { Ids, newId } from '@althar/domain'
 
 import { type FakeService, makeFakeService } from '@althar/connectors/testing'
 import { assert, describe, it } from '@effect/vitest'
-import { Deferred, Effect } from 'effect'
+import { Deferred, Effect, Option } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { Busy } from '../src/Busy'
@@ -22,7 +22,7 @@ import { Queries } from '../src/Queries'
 import { Sessions } from '../src/Sessions'
 import { Tasks } from '../src/Tasks'
 import * as Runtime from '../src/Runtime'
-import { callTool, HOST, hosted, turns, until } from './support'
+import { callTool, HOST, hosted, notices, turns, until } from './support'
 
 import { refused, runtimeWith, connect, ask, cards, tipOf, git, arrivals, pushByHand } from './changesSupport'
 
@@ -79,10 +79,20 @@ describe('what the host says of a ready pull request’s conflicts', () => {
 })
 
 describe('a pull request, by the person and the lead', () => {
-  for (const news of ['comment', 'review', 'queue', 'message', 'limited', 'noise', 'merged-comment', 'place'] as const) {
+  for (const news of ['comment', 'review', 'queue', 'message', 'limited', 'noise', 'place'] as const) {
     it.live(`wakes a stopped lead with its ${news} news in hand`, () => {
       const { working, bare } = hosted()
-      const github = makeFakeService({ pushUrl: () => bare, headOf: tipOf(bare) })
+      // The queue's build fails a job the default branch passes: the send-back is the pull request's own, which wakes its lead.
+      const github = makeFakeService({
+        pushUrl: () => bare,
+        headOf: tipOf(bare),
+        checksOn: (sha) =>
+          sha === 'group-sha'
+            ? [{ name: 'test', state: 'failed', log: 'FAIL retry.test.ts' }]
+            : sha === 'main-0' || sha === 'main'
+              ? [{ name: 'test', state: 'passed' }]
+              : undefined,
+      })
       github.addRepository(['meridian', 'api'])
       github.mergeQueue()
       return Effect.gen(function* () {
@@ -142,10 +152,10 @@ describe('a pull request, by the person and the lead', () => {
           return
         }
         let expected = 'Please rename the retry.'
-        if (news === 'comment' || news === 'limited' || news === 'merged-comment' || news === 'place') github.commentAs(1, 'lee', expected)
-        if (news === 'merged-comment') github.mergeByHand(1)
+        if (news === 'comment' || news === 'limited' || news === 'place') github.commentAs(1, 'lee', expected)
         if (news === 'review') github.reviewAs(1, 'lee', 'changes_requested', expected)
         if (news === 'queue') {
+          github.queueCommit(1, 'group-sha')
           github.dequeue(1, 'checks')
           expected = 'The merge queue took PR #1 out: its checks failed.'
         }
@@ -193,6 +203,70 @@ describe('a pull request, by the person and the lead', () => {
               ),
           )
         assert.notStrictEqual(heard.at(-1)?.providerSessionId, heard.at(before - 1)?.providerSessionId)
+      }).pipe(Effect.provide(runtimeWith({ github })))
+    })
+  }
+
+  // News that needs nothing of the lead now starts no turn: it is noted, and read with the lead's next turn.
+  for (const news of ['merged-comment', 'queue-unnamed', 'queue-on-main', 'queue-main-unknown'] as const) {
+    it.live(`notes ${news} news for its lead's next turn, waking nothing`, () => {
+      const { working, bare } = hosted()
+      const github = makeFakeService({
+        pushUrl: () => bare,
+        headOf: tipOf(bare),
+        // The queue's build fails a job the default branch fails too: nothing names the pull request.
+        // Or a job the default branch hasn't reported on: nothing says it passes there.
+        checksOn: (sha) =>
+          (news === 'queue-on-main' && (sha === 'group-sha' || sha === 'main-0' || sha === 'main')) ||
+          (news === 'queue-main-unknown' && sha === 'group-sha')
+            ? [{ name: 'test', state: 'failed', log: 'boom' }]
+            : undefined,
+      })
+      github.addRepository(['meridian', 'api'])
+      github.mergeQueue()
+      return Effect.gen(function* () {
+        yield* connect('github', HOST)
+        const projectId = yield* ask(working, 'Add a retry. [coordinator:plan-no-review] [coordinator:plan] [lead:finish] [lead:edit]')
+        const [ready] = yield* until(cards(projectId), (all) => all[0]?.phase === 'ready')
+        const taskId = ready?.taskId ?? ''
+        const threadId = ready?.threadId ?? ''
+        const sessions = yield* Sessions
+        const changes = yield* Changes
+        const sql = yield* SqlClient.SqlClient
+        if (news !== 'merged-comment') {
+          // At the head the host has: the card can show the one before the lead's last push, which the merge would refuse.
+          yield* changes.refresh(taskId)
+          const [seen] = yield* until(cards(projectId), (all) => all[0]?.change?.head === tipOf(bare)())
+          yield* changes.merge(taskId, seen?.change?.head ?? '')
+          yield* changes.refresh(taskId)
+        }
+        yield* sessions.stop(threadId)
+        const before = (yield* turns(threadId)).length
+        const said = news === 'merged-comment' ? 'Please rename the retry.' : 'The merge queue took PR #1 out'
+        if (news === 'merged-comment') {
+          github.commentAs(1, 'lee', said)
+          github.mergeByHand(1)
+        } else {
+          if (news !== 'queue-unnamed') github.queueCommit(1, 'group-sha')
+          github.dequeue(1, news === 'queue-unnamed' ? 'other' : 'checks')
+        }
+        yield* changes.refresh(taskId)
+        const noted = yield* until(
+          sql<{ body: string }>`SELECT body FROM user_inputs WHERE thread_id = ${threadId} AND state = 'noted'`,
+          (rows) => rows.some((row) => row.body.includes(said)),
+        )
+        assert.isTrue(noted.some((row) => row.body.includes(said)))
+        // Nothing queued for a turn, no turn, and no session started for it.
+        assert.lengthOf(yield* sql`SELECT id FROM user_inputs WHERE thread_id = ${threadId} AND state = 'queued'`, 0)
+        assert.lengthOf(yield* turns(threadId), before)
+        assert.isTrue(Option.isNone(yield* sessions.running(threadId)))
+        if (news !== 'merged-comment') {
+          // The person is told nothing names it, rather than its lead guessing.
+          const heard = yield* until(notices(threadId), (all) =>
+            all.some((notice) => String(notice['description'] ?? '').includes('Nothing names PR #1 as why it was taken out')),
+          )
+          assert.isTrue(heard.some((notice) => String(notice['description'] ?? '').includes('wasn’t asked to change anything')))
+        }
       }).pipe(Effect.provide(runtimeWith({ github })))
     })
   }

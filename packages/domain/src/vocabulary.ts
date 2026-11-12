@@ -144,7 +144,7 @@ export const InputDisposition = Schema.Literals(['after_current', 'interrupt_and
 export type InputDisposition = typeof InputDisposition.Type
 
 /** Where something the person said stands: waiting its turn, given to the agent, replaced, or taken back before it went. */
-export const UserInputState = Schema.Literals(['queued', 'delivered', 'superseded', 'withdrawn'])
+export const UserInputState = Schema.Literals(['queued', 'delivered', 'superseded', 'withdrawn', 'noted'])
 export type UserInputState = typeof UserInputState.Type
 
 export const TurnDeliveryState = Schema.Literals(['pending', 'delivered', 'completed', 'interrupted', 'interruption_uncertain', 'failed'])
