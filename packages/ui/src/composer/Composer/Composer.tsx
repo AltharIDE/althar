@@ -439,6 +439,8 @@ export function Composer({
     if (!failedNow) setNotSent(false)
   }, [failedNow])
   const canSendNow = busy && drafted && onSendNow !== undefined
+  /* The key also sends now while dictating with nothing written yet: what was said is the message, and it goes the way it was asked for. */
+  const sendNowByKey = busy && (drafted || dictating) && onSendNow !== undefined
 
   /* A suggestion to take, while nothing is written or arriving and the agent is free. */
   const suggested = suggestion !== undefined && suggestion !== '' && !busy && !drafted && !dictating ? suggestion : null
@@ -643,7 +645,7 @@ export function Composer({
               }
               if (e.key !== 'Enter' || e.shiftKey || e.nativeEvent.isComposing) return
               /* Enter while dictating ends it and waits for what was said, then sends it with the rest (submit). */
-              submit(e, commandDown(e) && canSendNow)
+              submit(e, commandDown(e) && sendNowByKey)
             }}
           />
         </div>

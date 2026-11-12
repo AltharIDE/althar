@@ -199,6 +199,17 @@ describe('sending while dictating', () => {
     expect(p.onSubmit).toHaveBeenCalledWith('Typed. Said.')
   })
 
+  it('sends now with ⌘Enter when the voice note is all there is, once it is written down', () => {
+    const onSendNow = vi.fn()
+    const p = { ...props({ elapsed: '0:05' }), images: [], busy: true, onSendNow }
+    const { getByRole, rerender } = render(<Composer {...p} />)
+    fireEvent.keyDown(getByRole('textbox'), { key: 'Enter', metaKey: true, ctrlKey: true })
+    expect(p.dictation.onStop).toHaveBeenCalledTimes(1)
+    rerender(<Composer {...p} value="Said." dictation={{ ...p.dictation, elapsed: null }} />)
+    expect(onSendNow).toHaveBeenCalledWith('Said.')
+    expect(p.onSubmit).not.toHaveBeenCalled()
+  })
+
   it('sends at once when nothing dictates', () => {
     const p = props({}, 'Typed.')
     const { getByRole } = render(<Composer {...p} />)
