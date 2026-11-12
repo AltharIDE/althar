@@ -71,7 +71,7 @@ describe('a pull request a task follows, against its branch here', () => {
       assert.deepStrictEqual(yield* shown, [{ localHead: null, unpushed: 0, diverged: null }])
 
       // The worktree is gone: the pull request is as its host has it, with nothing of the branch here.
-      rmSync(task.worktree, { recursive: true, force: true })
+      rmSync(task.worktree, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 })
       assert.deepStrictEqual(yield* shown, [{ localHead: null, unpushed: 0, diverged: null }])
       assert.strictEqual((yield* queries.thread(task.threadId, {})).task.changes[0]?.url, 'https://github.com/meridian/api/pull/1')
     }).pipe(Effect.provide(Queries.layer.pipe(Layer.provideMerge(runtime(':memory:', {}, { connectors: fakeConnectors({ github }) })))))
