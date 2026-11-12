@@ -1166,8 +1166,8 @@ export function BoardView({
           <BoardDivider end={<LinkButton onClick={line.oldestFirst}>{text.oldestFirst}</LinkButton>}>{text.yourOrder}</BoardDivider>
         )}
         {waitingRows.length + planRows.length > 0 && (
-          // One order, the one places are given in: any row goes anywhere in it, a plan starting where it is put. Planned heads
-          // the first plan after what waits.
+          // One order, the one places are given in: any row goes anywhere among what waits, a plan starting where it is put.
+          // Planned heads the first plan after what waits.
           <NextLine
             rows={[...waitingRows, ...planRows].map((work) => ({
               id: work.taskId,
@@ -1184,6 +1184,12 @@ export function BoardView({
               ? {}
               : {
                   onMove: line.move,
+                  // What waits stands ahead of the plans, which hold no place until they start: one put among or after them
+                  // goes to the back of what waits, and a plan starts only where it is put among what waits, or right after it.
+                  place: (id: string, to: number, others: ReadonlyArray<string>) => {
+                    const waits = others.filter((one) => waitingRows.some((work) => work.taskId === one)).length
+                    return waitingRows.some((work) => work.taskId === id) ? Math.min(to, waits) : to <= waits ? to : null
+                  },
                   more: (id: string) => {
                     const work = shown.next.find((one) => one.taskId === id)
                     return work?.turnWaits === true && waitingRows.includes(work) ? (

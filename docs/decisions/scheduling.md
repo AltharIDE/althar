@@ -150,8 +150,10 @@ that goes on by itself, in the order it will.
      what it would have said is read with the agent's next turn.
   2. **The line:** new work no agent has worked on yet, oldest first.
   3. **Plans** on their countdown, then plans held, under Planned. A plan moved
-     among what waits starts there, as its Start would, at the place it was
-     put.
+     among what waits, or to the head of the plans, starts there, as its Start
+     would, at the place it was put. A plan holds no place until it starts, so
+     nothing that waits stands below one: a row moved past the plans goes to
+     the back of what waits, and a plan isn't moved down among the plans.
   4. **What is paused:** a step held for a usage limit or for the connection,
      under its own divider, saying what it waits for ("Codex is out of usage
      until 13:40", "Waiting for the connection"). It waits for no place now,
@@ -173,7 +175,9 @@ that goes on by itself, in the order it will.
   and anything said to a task that is merged or settled, or of a pull request
   merged or closed. A merge-queue send-back starts its lead's turn only where
   Althar knows the reason is the pull request's own: a job the queue's build
-  failed that the default branch passes, or a conflict with what is ahead.
+  failed that the default branch's latest commit reports passing (not one it
+  fails too, still runs, or hasn't reported), or a conflict with what is
+  ahead.
   Otherwise the person is told nothing names it, and its lead hears with its
   next turn.
 - **Nothing moves under the person.** While the pointer is over Running or Up

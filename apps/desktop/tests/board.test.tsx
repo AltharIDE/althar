@@ -518,6 +518,39 @@ describe('the board’s lanes', () => {
         ])
       })
 
+      it('puts a row moved past the plans at the back of what waits, where the runtime keeps it; a plan moves only among what waits', async () => {
+        const line = drawn(three)
+        const grips = () =>
+          within(screen.getByRole('region', { name: 'Up next' }))
+            .getAllByRole('button', { name: /in the line$/ })
+            .map((grip) => grip.getAttribute('aria-label'))
+        const menuOf = async (title: string) => {
+          screen.getByRole('button', { name: `Move ${title} in the line` }).focus()
+          await userEvent.keyboard('{Enter}')
+          return within(await screen.findByRole('menu', { name: 'Move in the line' }))
+        }
+        // The first of what waits, to the back: behind the line, ahead of the plans, which hold no place until they start.
+        await userEvent.click((await menuOf('Waiting a')).getByRole('menuitem', { name: 'Move to the back of the line' }))
+        expect(line.move).toHaveBeenCalledWith('a', 2)
+        expect(grips()).toEqual([
+          'Move Waiting b in the line',
+          'Move Waiting c in the line',
+          'Move Waiting a in the line',
+          'Move Add a retry in the line',
+          'Move Hold off in the line',
+        ])
+        // The last of what waits can't go further down; nor a plan down among the plans: it holds no place there to move.
+        const last = await menuOf('Waiting a')
+        expect(last.getByRole('menuitem', { name: 'Move down' }).getAttribute('aria-disabled')).toBe('true')
+        expect(last.getByRole('menuitem', { name: 'Move to the back of the line' }).getAttribute('aria-disabled')).toBe('true')
+        await userEvent.keyboard('{Escape}')
+        const plan = await menuOf('Add a retry')
+        expect(plan.getByRole('menuitem', { name: 'Move down' }).getAttribute('aria-disabled')).toBe('true')
+        expect(plan.getByRole('menuitem', { name: 'Move up' }).getAttribute('aria-disabled')).toBeNull()
+        await userEvent.keyboard('{Escape}')
+        expect(line.move).toHaveBeenCalledTimes(1)
+      })
+
       it('offers to cancel a turn Althar asked that waits for a place, from its row’s menu', async () => {
         const line = drawn([
           waiting('a', 1),

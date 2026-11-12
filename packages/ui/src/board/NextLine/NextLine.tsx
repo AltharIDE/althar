@@ -23,8 +23,9 @@ import s from './NextLine.module.css'
  * (ListMotion, the board's where it is in one); dragged, it is the drag's.
  *
  * The line is one order however its rows differ: a row of one group (what
- * continues, the line, plans waiting to start) goes anywhere in it, and a
- * group's heading heads the first of its rows wherever they stand. A row's
+ * continues, the line, plans waiting to start) goes anywhere in it that
+ * `place` lets it stand, and a group's heading heads the first of its rows
+ * wherever they stand. A row's
  * menu may offer more than moves, after them (`more`).
  */
 
@@ -66,6 +67,12 @@ export interface NextLineProps {
    * fails. Without it, nothing moves and no grip shows.
    */
   onMove?: (id: string, to: number) => void | Promise<unknown>
+  /**
+   * Where a row put at `to`, from 0, among the others (`others`, the line without it) goes: another place where it can't
+   * stand there, or null where it doesn't move at all. Without it, where it is put. The line shows it there, and the menu
+   * offers only moves that move it.
+   */
+  place?: (id: string, to: number, others: ReadonlyArray<string>) => number | null
   /** A heading by group, over the first of its rows that follows another group's: a quiet divider, such as Planned. */
   heads?: Readonly<Record<string, ReactNode>>
   /** More of what a row's menu offers, after its moves, as menu items; null for nothing more. A row with more has its grip though nothing moves. */
@@ -106,7 +113,7 @@ interface Put {
   readonly settled: boolean
 }
 
-export function NextLine({ rows, render, onMove, heads, more, text }: NextLineProps) {
+export function NextLine({ rows, render, onMove, place, heads, more, text }: NextLineProps) {
   const t = { ...nextLineText, ...text }
   const ids = rows.map((row) => row.id)
   const byId = new Map(rows.map((row) => [row.id, row]))
@@ -129,9 +136,23 @@ export function NextLine({ rows, render, onMove, heads, more, text }: NextLinePr
   }, [put])
   const movable = onMove !== undefined && rows.length > 1
 
+  // The line with a row put at `to`, where it can stand; null where that moves nothing.
+  const putting = (id: string, to: number) => {
+    const at =
+      place === undefined
+        ? to
+        : place(
+            id,
+            to,
+            shown.filter((one) => one !== id),
+          )
+    const next = at === null ? shown : moved(shown, id, at)
+    return same(next, shown) ? null : next
+  }
+
   const move = (id: string, to: number) => {
-    const next = moved(shown, id, to)
-    if (same(next, shown)) return
+    const next = putting(id, to)
+    if (next === null) return
     const going = onMove?.(id, next.indexOf(id))
     const mine: Put = { order: next, from: ids, settled: going === undefined }
     setPut(mine)
@@ -241,16 +262,16 @@ export function NextLine({ rows, render, onMove, heads, more, text }: NextLinePr
                   >
                     {movable && (
                       <>
-                        <MenuItem icon="up" disabled={index === 0} onSelect={() => move(id, 0)}>
+                        <MenuItem icon="up" disabled={putting(id, 0) === null} onSelect={() => move(id, 0)}>
                           {t.front}
                         </MenuItem>
-                        <MenuItem disabled={index === 0} onSelect={() => move(id, index - 1)}>
+                        <MenuItem disabled={index === 0 || putting(id, index - 1) === null} onSelect={() => move(id, index - 1)}>
                           {t.up}
                         </MenuItem>
-                        <MenuItem disabled={index === shown.length - 1} onSelect={() => move(id, index + 1)}>
+                        <MenuItem disabled={putting(id, index + 1) === null} onSelect={() => move(id, index + 1)}>
                           {t.down}
                         </MenuItem>
-                        <MenuItem icon="down" disabled={index === shown.length - 1} onSelect={() => move(id, shown.length - 1)}>
+                        <MenuItem icon="down" disabled={putting(id, shown.length - 1) === null} onSelect={() => move(id, shown.length - 1)}>
                           {t.back}
                         </MenuItem>
                       </>
