@@ -96,6 +96,36 @@ const graphOf = (overrides: Partial<ThreadSnapshot> & { rounds?: ReadonlyArray<G
 }
 
 describe('a task’s graph, from its snapshot', () => {
+  it('draws its lead’s helpers on lanes of their models, after the steps’ agents and before Althar’s', () => {
+    const helper = (id: string, model: string, state: 'working' | 'done' | 'stopped' | 'failed') => ({
+      id,
+      name: `Helper ${id}`,
+      agentId: 'claude-code',
+      model,
+      state,
+      startedAt: at(5),
+      endedAt: state === 'working' ? null : at(15),
+    })
+    const graph = graphOf({
+      rounds: [
+        round(LOOP, { helpers: [helper('h1', 'haiku', 'done'), helper('h2', 'haiku', 'working'), helper('h3', 'sonnet', 'failed')] }),
+      ],
+    })
+    expect(graph?.lanes.map((lane) => lane.id)).toEqual([
+      'claude-code|opus',
+      'codex|gpt-5.2',
+      'helper|claude-code|haiku',
+      'helper|claude-code|sonnet',
+      'althar',
+    ])
+    const helpers = graph?.steps.filter((one) => one.id.startsWith('helper:')) ?? []
+    expect(helpers.map((one) => [one.label, one.lane, one.state, one.corner, one.outcome ?? null])).toEqual([
+      ['Helper h1', 'helper|claude-code|haiku', 'done', '10m', null],
+      ['Helper h2', 'helper|claude-code|haiku', 'now', '54m', null],
+      ['Helper h3', 'helper|claude-code|sonnet', 'stopped', '10m', 'Couldn’t go on'],
+    ])
+  })
+
   it('is nothing where the runtime keeps no rounds of work for the task', () => {
     expect(taskGraphOf(snapshot(), named, NOW)).toBeNull()
     const base = snapshot()

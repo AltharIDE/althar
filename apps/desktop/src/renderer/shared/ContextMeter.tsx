@@ -1,5 +1,5 @@
 import type { AccountUse, SessionSummary } from '@althar/contracts'
-import { ContextRing, UsageLines } from '@althar/ui'
+import { ContextRing } from '@althar/ui'
 import { type Ref, useEffect, useState } from 'react'
 
 import { type NameModel, type NameProvider, useProviderNames } from './modelNames'
@@ -21,7 +21,7 @@ const thousands = (tokens: number) => Math.round(tokens / 100) / 10
 /** The ring's usage, where the conversation used any account. */
 const usageOf = (usage: MeterUsage | undefined, named: NameModel, nameProvider: NameProvider) => {
   const lines = usageLines(usage?.usage, named, nameProvider)
-  return usage === undefined || lines.length === 0 ? {} : { usage: <UsageLines lines={lines} heading={usage.heading} /> }
+  return usage === undefined || lines.length === 0 ? {} : { usage: { heading: usage.heading, lines } }
 }
 
 /** How long Compact stays off, at most, for an agent that never says how full it is after. */

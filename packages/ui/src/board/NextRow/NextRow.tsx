@@ -17,8 +17,10 @@ import s from './NextRow.module.css'
  *
  * One that can start now, such as a plan held for the person, turns its line
  * into Start where the person points at it or reaches it by keyboard, in the
- * line's place and colour; and a menu of what else it can do sits at the
- * line's end, out of sight until then too, so the lane stays calm at rest.
+ * line's place and colour; one that has not begun and isn't held, counting
+ * down or waiting for a free agent, into Hold, which takes it out of the line
+ * until it is started; and a menu of what else it can do sits at the line's
+ * end, out of sight until then too, so the lane stays calm at rest.
  */
 
 const glyph = (wait: Wait): IconName => {
@@ -40,6 +42,7 @@ export interface NextRowText {
   /** Under way, it goes on: with the step it goes on with, where it has one. */
   continues: (step?: string) => string
   start: string
+  hold: string
 }
 
 export const nextRowText: NextRowText = {
@@ -47,6 +50,7 @@ export const nextRowText: NextRowText = {
   task: (task) => `Task ${task}`,
   continues: (step) => (step === undefined || step === '' ? 'Continues' : `Continues · ${step}`),
   start: 'Start',
+  hold: 'Hold',
 }
 
 export type NextRowProps = RootProps<
@@ -72,6 +76,8 @@ export type NextRowProps = RootProps<
     onOpen?: () => void
     /** Starts it now: its line turns into Start while the row is pointed at or has focus. */
     onStart?: () => void
+    /** Holds it, out of the line, until it is started: its line turns into Hold beside Start while the row is pointed at or has focus. */
+    onHold?: () => void
     /** What else it can do, as a menu's trigger, at its line's end: shown while the row is pointed at, has focus, or the menu is open. */
     menu?: ReactNode
     text?: Partial<NextRowText>
@@ -91,6 +97,7 @@ export function NextRow({
   foot,
   onOpen,
   onStart,
+  onHold,
   menu,
   text,
   className,
@@ -109,7 +116,7 @@ export function NextRow({
         {title}
       </CardTitle>
       <span className={cx(s.wait, wait === Wait.You && s.you)}>
-        <span className={cx(s.reason, onStart && s.rest)}>
+        <span className={cx(s.reason, (onStart || onHold) && s.rest)}>
           <Icon name={glyph(wait)} size={11} />
           <span className={s.words}>{reason}</span>
         </span>
@@ -117,6 +124,12 @@ export function NextRow({
           <button type="button" className={s.start} onClick={onStart}>
             <Icon name="play" size={11} />
             {t.start}
+          </button>
+        )}
+        {onHold && (
+          <button type="button" className={s.start} onClick={onHold}>
+            <Icon name="hold" size={11} />
+            {t.hold}
           </button>
         )}
         {menu !== undefined && menu !== null && <span className={s.menu}>{menu}</span>}

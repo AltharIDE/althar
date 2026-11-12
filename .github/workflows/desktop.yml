@@ -30,6 +30,7 @@ on:
         'patches/**',
         'packages/testing/**',
         '.github/actions/flaky/**',
+        '.github/actions/electron/**',
         '.github/workflows/desktop.yml',
         '.github/workflows/e2e.yml',
       ]
@@ -90,7 +91,9 @@ jobs:
       - uses: actions/setup-node@v5
         with:
           node-version-file: .node-version
-      - run: bun install --frozen-lockfile
+      - uses: ./.github/actions/electron
+        with:
+          binary: 'false'
       # Ubuntu 24.04 keeps unprivileged user namespaces from apps, and Chromium's sandbox needs them.
       - run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
       # Tests with an open flaky issue run, but don't fail this job (packages/testing).
@@ -124,13 +127,10 @@ jobs:
           node-version-file: .node-version
       - uses: actions/cache@v4
         with:
-          path: |
-            ~/.bun/install/cache
-            ~/AppData/Local/electron/Cache
+          path: ~/.bun/install/cache
           key: windows-bun-${{ hashFiles('bun.lock') }}
           restore-keys: windows-bun-
-      - run: bun install --frozen-lockfile
-        working-directory: .
+      - uses: ./.github/actions/electron
       # Tests with an open flaky issue run, but don't fail this job (packages/testing).
       - uses: ./.github/actions/flaky/quarantine
       - run: bun run test:e2e e2e/smoke.spec.ts

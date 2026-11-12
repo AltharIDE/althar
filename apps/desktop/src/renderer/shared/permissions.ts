@@ -1,3 +1,4 @@
+import { toolPhrase } from '@althar/contracts'
 import type { AllowedBy, AlwaysScope, AttentionRequest, RuleKind } from '@althar/contracts'
 import { titleOf } from './callCommand'
 import { Decision, type PermissionAnswer, type PermissionRequest, PermissionScope } from '@althar/ui'
@@ -73,7 +74,11 @@ export const permissionOf = (call: AttentionRequest): PermissionRequest => {
             ? { command: lasting.through.command }
             : (() => {
                 const brand = serverBrand(lasting.through.server)
-                return { server: lasting.through.server, tool: lasting.through.tool, ...(brand === undefined ? {} : { brand }) }
+                return {
+                  server: lasting.through.server,
+                  tool: toolPhrase(lasting.through.server, lasting.through.tool),
+                  ...(brand === undefined ? {} : { brand }),
+                }
               })(),
       },
     }

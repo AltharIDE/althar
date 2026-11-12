@@ -36,7 +36,16 @@ saw came from screens starting empty, not from slow reads.
   whole read it touches, on screen or not, so the next place the person goes
   is already right. A change to a thread only marks it out of date; the
   screen showing it reads what changed, item by item, and a thread not on
-  screen is read when it next opens.
+  screen is read when it next opens. A read under way is let finish and
+  read once more, never cut short to begin again.
+- **A board follows its cards, as the runtime says they changed.** The
+  runtime works a task's card out again as anything of the task changes,
+  whatever kind of record it is, and says `card` on the feed only where it
+  came out different, and of a project's own calls (its coordinator's
+  questions) as a card of the project. Boards, the home and the coordinator's cards read
+  again on that, so they keep up with a task as its view does, with no list
+  of kinds to keep; a task's header and its card say where it stands from
+  one reading (`taskStatusOf`).
 - **A screen reads before it shows.** Each route's loader waits for its
   reads, and the screen being left stays until then, so a screen opens whole.
 - **A slow read shows the place's outline,** and only past 150 ms, kept at
@@ -154,6 +163,13 @@ agent's words, and one live line (`WorkedFor`).
   on the message. Claude Code and OpenCode don't, so a message after the work
   that is longer than 280 characters, or holds a list, heading, table or
   code, is taken for the answer; a short one folds as the turn ends.
+- **The line says where its time went** (a task is a conversation plus
+  parts, "Where a turn's time goes"): the total, from what the runtime kept
+  of each turn (waiting for a place, starting or handing over its session,
+  the agent's own work and its tools), and the part that took most where it
+  wasn't the agent's own work and took a quarter of it or more: "Worked for
+  4m · 3m 10s waiting for a place". Opened, every part comes first in the
+  trail. A task adds its turns up under its Usage in Outputs.
 - **What needs the person never folds:** a stuck step, a question, a
   permission, an error and its way out.
 - **What stands open carries the whole turn.** A lead's last message (or its
@@ -561,3 +577,6 @@ way of what is done often. The tokens and their values are in
 
 - 8 Nov 2026: written from the ADRs under Replaces.
 - 8 Nov 2026: what stands open after a turn folds carries everything the person needs, never "see above" (#699).
+- 10 Nov 2026: a thread marks a new change as a stamped row of its own; the board keeps chats on Scratch behind one chip; the plan card's kicker names its preset; the header's parts move a task, point it elsewhere, run a review's code and stop a helper ([tasks](tasks.md#changing-parts)).
+- 10 Nov 2026: Scratch is a shelf of its own, by each chat's latest exchange, with Clear; the board card says one sentence across a task's changes with a mark for each; Shipped, Merged and Helper rows in the thread, a helper's opening in place to its work, and helpers' lanes on the Graph face; the plan card's preset picks another; Settings edits presets ([tasks](tasks.md#asides)).
+- 11 Nov 2026: asides over the coordinator's conversation replace Scratch's chip beside it; the chip stays with the board alone ([tasks](tasks.md#asides)).

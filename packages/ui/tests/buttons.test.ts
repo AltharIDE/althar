@@ -15,9 +15,14 @@ const PLAIN: Readonly<Record<string, string>> = {
   'dock/ListPeek/ListPeek.tsx': 'an entry of the list',
   'outputs/ArtifactCard/ArtifactCard.tsx': 'the card’s title, which opens it',
   'outputs/ChangeSet/ChangeSet.tsx': 'the line of its checks, which folds their list; a folder’s row, which folds its files',
+  'outputs/ChangeSet/MergeNeeds.tsx':
+    'the line of its checks among its needs, which folds their list; its met needs’ line, which folds them',
   'outputs/WhatItMade/WhatItMade.tsx': 'a picture, which opens full size',
   'thread/External/External.tsx': 'the row of an external call',
   'thread/FileArtifact/FileArtifact.tsx': 'the preview, which opens the file',
+  'thread/StartedTask/StartedTask.tsx': 'a started task’s chip, the whole of which opens that task',
+  'thread/Canvas/CanvasLine.tsx': 'a canvas’s title and version in its line, which opens it beside the conversation',
+  'screens/Artifacts/Artifacts.tsx': 'an artifact’s row, the whole of which opens it',
   'chrome/ProjectSwitcher/ProjectSwitcher.tsx': 'the switcher’s trigger and its project rows',
   'home/SinceRow/SinceRow.tsx': 'what happened, stretched over its row',
   'home/NeedLine/NeedLine.tsx': 'the call’s title, which opens its task',
@@ -45,7 +50,6 @@ const PLAIN: Readonly<Record<string, string>> = {
   'thread/Reasoning/Reasoning.tsx': 'the row that folds the reasoning',
   'outputs/Usage/Usage.tsx': 'the card’s head, which folds its lines',
   'thread/WorkedFor/WorkedFor.tsx': 'the row that folds the work',
-  'thread/SkillsSeen/SkillsSeen.tsx': 'the line that folds what a lead could see',
   'thread/ReviewLine/ReviewLine.tsx': 'the line that folds a review round’s findings and words',
   'thread/WorkLine/WorkLine.tsx': 'the line that folds a round’s work; what it looked at, as thumbnails',
   'thread/Checked/Checked.tsx': 'the row of a check, which folds what it printed',
@@ -87,6 +91,10 @@ const PLAIN: Readonly<Record<string, string>> = {
   'home/Island/Island.tsx': 'the mark and the count, on the notch’s black',
   'board/NextRow/NextRow.tsx': 'Start, in a held row’s line, in the line’s own place, words and colour while the row is pointed at',
   'board/SettleWays/SettleWays.tsx': 'Done and the pin in a task’s header, segments of the chip that says where it stands',
+  'board/ScratchShelf/ScratchShelf.tsx': 'a chat on Scratch, the whole of its row, its title, last words and when, which opens it',
+  'thread/Asides/Asides.tsx':
+    'a pill over the coordinator’s conversation, a tab with its mark or a live dot, and the older ones’ pill, which opens their menu',
+  'coordinator/TaskLaunch/TaskLaunch.tsx': 'the preset, the kicker’s first word in the kicker’s own type, which opens the others',
   /* close to a primitive, not yet moved onto one */
   'chrome/BackCrumb/BackCrumb.tsx': 'a ChromeButton that is never pressed',
 }

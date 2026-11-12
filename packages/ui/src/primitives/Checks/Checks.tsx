@@ -36,6 +36,7 @@ export const checksText: ChecksText = {
     [CheckState.Held]: 'held on your call',
     [CheckState.Queued]: 'queued',
     [CheckState.Failed]: 'failed',
+    [CheckState.Skipped]: 'skipped',
   },
   added: 'by rule',
 }
@@ -51,6 +52,7 @@ function Mark({ state }: { state: CheckState }) {
     case CheckState.Failed:
       return <Icon name="close" size={10} />
     case CheckState.Queued:
+    case CheckState.Skipped:
       return null
     default:
       return unreachable(state)
@@ -97,4 +99,10 @@ export function Checks({ checks, className, text }: ChecksProps) {
 }
 
 /** How many passed, for a heading: 3 of 4. */
+/** Skipped ones last, the rest in the order given. */
+export const skippedLast = (checks: readonly ChangeCheck[]) => [
+  ...checks.filter((c) => c.state !== CheckState.Skipped),
+  ...checks.filter((c) => c.state === CheckState.Skipped),
+]
+
 export const passedOf = (checks: readonly ChangeCheck[]) => checks.filter((c) => c.state === CheckState.Passed).length

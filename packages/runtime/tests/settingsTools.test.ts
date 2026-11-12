@@ -321,11 +321,23 @@ describe('settings, for the coordinator and leads', () => {
       yield* turn(lead, 'carry on', false)
       yield* callTool(lead, 'change_settings', { section: 'project/general', change: { name: 'Renamed' } })
       yield* callTool(lead, 'change_settings', { section: 'project/tasks', change: { moveIssues: false } })
+      // What a small change's review after its merge brings back is read and changed there too, as the screen does.
+      assert.include(
+        yield* callTool(lead, 'read_settings', { section: 'project/tasks' }),
+        '- afterMergeReview (After a small change merges): "major"',
+      )
+      yield* callTool(lead, 'change_settings', { section: 'project/tasks', change: { afterMergeReview: 'none' } })
+      assert.strictEqual((yield* rulesNow(projectId)).afterMergeReview, 'none')
+      yield* callTool(lead, 'change_settings', { section: 'althar/tasks', change: { afterMergeReview: 'all' } })
+      assert.include(
+        yield* callTool(lead, 'read_settings', { section: 'althar/tasks' }),
+        '- afterMergeReview (New projects: after a small change merges): "all"',
+      )
       const settings = yield* SettingsTools
       const changed = yield* settings.changed(projectId)
       assert.sameMembers(
         changed.map((one) => `${one.section}#${one.key}`),
-        ['project/tasks#moveIssues', 'project/general#name'],
+        ['project/tasks#moveIssues', 'project/tasks#afterMergeReview', 'project/general#name'],
       )
       assert.strictEqual(changed[0]?.by.title, 'Settings page')
       const sql = yield* SqlClient.SqlClient
@@ -335,7 +347,7 @@ describe('settings, for the coordinator and leads', () => {
       yield* (yield* Projects).rename(projectId, 'Mine')
       assert.deepStrictEqual(
         (yield* settings.changed(projectId)).map((one) => one.key),
-        ['moveIssues'],
+        ['afterMergeReview', 'moveIssues'],
       )
       // Each change is in the record, as the agents' own.
       const [recorded] = yield* sql<{ count: number }>`SELECT count(*) AS count FROM record_events WHERE aggregate_type = 'setting'`

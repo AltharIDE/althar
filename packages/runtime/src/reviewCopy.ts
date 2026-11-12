@@ -25,6 +25,19 @@ export const reviewCopyOf = (worktree: string) => {
   return join(dirname(task), '.review', basename(task), basename(worktree))
 }
 
+/** The node key of the thread a review after a merge runs in (MergeReviews.ts). */
+export const MERGE_REVIEW = 'merge_review'
+
+/**
+ * Where a review after a merge reads, beside the task's other review copies:
+ * `<project>/.review/<task>-after-<n>/<repository>`, the merged head checked
+ * out (MergeReviews.ts).
+ */
+export const mergeCopyOf = (worktree: string, number: number | null) => {
+  const task = dirname(worktree)
+  return join(dirname(task), '.review', `${basename(task)}-after-${number ?? 'merge'}`, basename(worktree))
+}
+
 /** Where a task's reviewer reads the lead's evidence, beside the copies it reads: from one of the copies. */
 export const evidenceFolderOf = (copy: string) => join(dirname(copy), '.evidence')
 

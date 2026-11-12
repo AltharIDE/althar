@@ -15,6 +15,10 @@ export const reportText = {
   /** A pull request the task opened, or a branch it pushed, where Althar's report doesn't say. */
   opened: (name: string) => `Opened ${name}.`,
   pushed: 'Pushed the branch.',
+  /** A review after a merge, in the same task: which pull request it read. */
+  afterMerge: (words: string) => `Reviewed what ${words} merged.`,
+  /** Its findings, none blocking or major, stay in the thread: nothing comes back to the person. */
+  kept: 'None major',
 }
 
 /**
@@ -32,6 +36,8 @@ export function ReviewReport({ id, result, said = true }: { id: string; result: 
   const open = useContext(OpenFinding)
   return (
     <>
+      {/* A review after a merge says which merge it read: the task's other changes carried on meanwhile. */}
+      {result.afterMerge !== undefined && <AltharLine>{reportText.afterMerge(result.afterMerge.words)}</AltharLine>}
       <Reviewer
         said={said}
         verdict={result.verdict === 'pass' ? Verdict.Pass : Verdict.Changes}

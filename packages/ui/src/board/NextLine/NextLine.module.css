@@ -10,6 +10,16 @@
 .list > .item + .item {
   border-top-color: var(--line-2);
 }
+/* The first of a group after another's: its heading, the lane's quiet divider, stands in for the rule. */
+.list > .item.headed {
+  border-top-color: transparent;
+}
+.head {
+  padding-top: 10px;
+}
+.body {
+  position: relative;
+}
 .grip {
   position: absolute;
   top: 10px;
