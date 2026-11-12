@@ -304,6 +304,10 @@ test('a plain hi and a short code question, in the coordinator’s conversation 
           // How long before Enter its lead was ready: started with + and waiting for the words; negative, after.
           readyBeforeEnter: begun.active === null ? null : enter - begun.active,
           turnsAfter: after.length,
+          // Whatever set up its copy, an install or the recorded setup: none, for an aside, ever.
+          setups: Number(
+            one(store, `SELECT count(*) AS n FROM thread_items WHERE thread_id = ? AND kind = 'setup'`, task?.thread ?? '')?.n ?? 0,
+          ),
         }
   }
   const results = {

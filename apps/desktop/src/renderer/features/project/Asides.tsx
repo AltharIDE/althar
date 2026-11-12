@@ -37,6 +37,7 @@ export const asidesText = {
   asked: (when: string) => `Asked ${when}`,
   clearFailed: (title: string, why: string) => `Couldn’t clear ${title}. ${why}`,
   taskFailed: (title: string, why: string) => `Couldn’t make ${title} a task. ${why}`,
+  startFailed: (why: string) => `Couldn’t start the aside. ${why}`,
   dismiss: 'Dismiss',
 }
 
@@ -108,6 +109,8 @@ export function useAsideMoves(client: Client, board: BoardSnapshot | null) {
     clear: (tasks: ReadonlyArray<BoardTask>) => act('clear', tasks),
     makeTask: (task: BoardTask) => act('task', [task]),
     failed,
+    /** Says why an aside's own start didn't go through, as a move's failure is said. */
+    startFailed: (error: unknown) => setFailed(asidesText.startFailed(messageOf(error))),
     dismiss: () => setFailed(null),
   }
 }
@@ -384,7 +387,7 @@ export function AsidesBar({
  * there, or to the Board tab with the board closed; one cleared just goes.
  */
 function useFlights(strip: RefObject<HTMLDivElement | null>, scratch: ReadonlyArray<BoardTask>, board: ReadonlyArray<BoardTask>) {
-  // Where each pill was, last drawn: once it leaves, it is gone from the page.
+  // Where each pill was, last drawn, and the pill: once it leaves, it is gone from the page, and only then copied to fly.
   const rects = useRef(new Map<string, { rect: DOMRect; node: HTMLElement }>())
   const was = useRef<ReadonlySet<string>>(new Set(scratch.map((task) => task.taskId)))
   useLayoutEffect(() => {
@@ -394,13 +397,13 @@ function useFlights(strip: RefObject<HTMLDivElement | null>, scratch: ReadonlyAr
       const left = board.find((task) => task.taskId === id)
       const from = rects.current.get(id)
       if (left === undefined || left.scratch === true || left.phase === 'settled' || from === undefined) continue
-      fly(from.node, from.rect, id)
+      fly(from.node.cloneNode(true) as HTMLElement, from.rect, id)
     }
     was.current = ids
     rects.current = new Map(
       [...(strip.current?.querySelectorAll<HTMLElement>('[data-aside]') ?? [])].map((node) => [
         node.dataset.aside ?? '',
-        { rect: node.getBoundingClientRect(), node: node.cloneNode(true) as HTMLElement },
+        { rect: node.getBoundingClientRect(), node },
       ]),
     )
   })

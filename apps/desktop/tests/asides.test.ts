@@ -130,6 +130,9 @@ describe('moves on asides', () => {
     expect(result.current.moves.failed).toBe('Couldn’t clear “Retry”. Althar is still starting it.')
     act(() => result.current.moves.dismiss())
     expect(result.current.moves.failed).toBeNull()
+    // An aside that couldn't start says why the same way, its words back in the composer.
+    act(() => result.current.moves.startFailed(new ApiError({ reason: 'conflict', message: 'Codex is signed out.' })))
+    expect(result.current.moves.failed).toBe('Couldn’t start the aside. Codex is signed out.')
   })
 
   it('makes one a task at once: it is on the board as work, off the pills, and the pane is the coordinator’s', () => {

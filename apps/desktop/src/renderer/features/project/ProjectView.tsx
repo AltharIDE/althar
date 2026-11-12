@@ -459,7 +459,11 @@ export function ProjectView({
       (went) => {
         if (!went) setDraft((current) => (current === '' ? body : current))
       },
-      () => setDraft((current) => (current === '' ? body : current)),
+      (error: unknown) => {
+        // The words come back, and the line over the composer says why.
+        setDraft((current) => (current === '' ? body : current))
+        asideMoves.startFailed(error)
+      },
     )
   }
   const send = (body: string, now: boolean) => {
