@@ -1,15 +1,16 @@
-import { spawn } from 'node:child_process'
-import { copyFileSync, existsSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
-import { readFile, stat } from 'node:fs/promises'
+import { existsSync, mkdirSync, writeFileSync } from 'node:fs'
+import { copyFile, mkdtemp, readFile, stat } from 'node:fs/promises'
 import { homedir, tmpdir } from 'node:os'
 import { dirname, join, posix, resolve, sep } from 'node:path'
 
 import type { ChangeTarget } from '@althar/domain'
 import { cleanUp } from '@althar/provider-adapters'
-import { Cause, Clock, Context, Duration, Effect } from 'effect'
+import { Cause, Clock, Context, Deferred, Duration, Effect } from 'effect'
 
 import { afterOpen, startup } from './startup'
 import { GitFailed } from './errors'
+import { refStamp } from './refStamps'
+import { Foreground, reachesRemote, startApart } from './spawner'
 import { forkOf } from './forks'
 import { linkBroke } from './worktreeLinks'
 
@@ -50,7 +51,7 @@ const READ_COPY = 'althar-read-copy'
 export const isReadCopy = (cwd: string) => existsSync(join(cwd, '.git', READ_COPY))
 
 /** Where the Flatpak keeps the bridge that runs Althar's own ssh on the device (flatpak/host-ssh.sh). */
-const HOST_SSH = '/app/bin/althar-host-ssh'
+export const HOST_SSH = '/app/bin/althar-host-ssh'
 
 /**
  * The ssh Althar's own git runs, by its environment: inside a Flatpak, the
@@ -73,18 +74,20 @@ const ASKERS = new Set(['GIT_ASKPASS', 'SSH_ASKPASS'])
  * person's, not the system's, nor any the environment carries
  * (`GIT_CONFIG_*`).
  */
-const environmentIn = (cwd: string, env: Readonly<Record<string, string>>): NodeJS.ProcessEnv => ({
-  ...Object.fromEntries(
-    Object.entries(process.env).filter(([key]) => !ASKERS.has(key) && !(isReadCopy(cwd) && key.startsWith('GIT_CONFIG'))),
-  ),
-  ...(isReadCopy(cwd) ? { GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: '/dev/null' } : {}),
-  ...sshEnvironment(),
-  GIT_TERMINAL_PROMPT: '0',
-  SSH_ASKPASS_REQUIRE: 'never',
-  GCM_INTERACTIVE: 'never',
-  LC_ALL: 'C',
-  ...env,
-})
+const environmentIn = (cwd: string, env: Readonly<Record<string, string>>): NodeJS.ProcessEnv => {
+  // Looked at once: asked for each variable, it was a look at the disk for each, every git command.
+  const readCopy = isReadCopy(cwd)
+  return {
+    ...Object.fromEntries(Object.entries(process.env).filter(([key]) => !ASKERS.has(key) && !(readCopy && key.startsWith('GIT_CONFIG')))),
+    ...(readCopy ? { GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: '/dev/null' } : {}),
+    ...sshEnvironment(),
+    GIT_TERMINAL_PROMPT: '0',
+    SSH_ASKPASS_REQUIRE: 'never',
+    GCM_INTERACTIVE: 'never',
+    LC_ALL: 'C',
+    ...env,
+  }
+}
 
 /**
  * Runs git in `cwd` with nothing to ask on: in a session of its own, so no
@@ -109,6 +112,7 @@ const spawnGit = (
   args: ReadonlyArray<string>,
   env: Readonly<Record<string, string>>,
   input: string | undefined,
+  first: boolean,
 ): {
   readonly result: Effect.Effect<GitProcessResult>
   readonly timeout: (milliseconds: number) => void
@@ -116,81 +120,63 @@ const spawnGit = (
 } => {
   const at = gitIn(cwd, ['-c', 'core.hooksPath=/dev/null', ...args])
   // Windows has no sessions to leave, and a detached child there gets a console of its own.
-  // `spawn`, not `execFile`, which doesn't pass `detached` on.
-  const ownSession = process.platform !== 'win32'
-  const child = spawn('git', [...at.args], {
+  // Started on the runner's thread, not the one that answers the window (spawner.ts).
+  const started = startApart({
+    command: 'git',
+    args: at.args,
     ...(at.cwd === undefined ? {} : { cwd: at.cwd }),
-    windowsHide: true,
-    detached: ownSession,
+    detached: process.platform !== 'win32',
     env: environmentIn(cwd, env),
+    ...(input === undefined ? {} : { input }),
+    max: MAX_OUTPUT,
+    first,
+    // A fetch or a push waits on the network, in a lane of its own: never what a read of the repository waits behind.
+    network: reachesRemote(args),
   })
-  const stop = () => {
-    try {
-      if (ownSession && child.pid !== undefined) process.kill(-child.pid, 'SIGTERM')
-      else child.kill()
-    } catch {
-      child.kill()
-    }
-  }
-  let why: string | null = null
-  let timeoutMilliseconds: number | undefined
-  const out: Array<Buffer> = []
-  const err: Array<Buffer> = []
-  let size = 0
-  let resolveResult: (result: GitProcessResult) => void = () => undefined
-  const result = new Promise<GitProcessResult>((resolve) => (resolveResult = resolve))
-  const collect = (into: Array<Buffer>) => (chunk: Buffer) => {
-    size += chunk.length
-    if (size > MAX_OUTPUT) {
-      why ??= 'git said more than Althar reads.'
-      return stop()
-    }
-    into.push(chunk)
-  }
-  child.stdout.on('data', collect(out))
-  child.stderr.on('data', collect(err))
   let ended = false
-  const end = (error: (Error & { readonly code?: unknown }) | null, code?: number, signal?: string | null) => {
-    if (ended) return
+  let timeoutMilliseconds: number | undefined
+  const result = started.result.then((done): GitProcessResult => {
     ended = true
-    const stderr = Buffer.concat(err).toString()
-    const reason =
-      timeoutMilliseconds !== undefined
-        ? undefined
-        : (why ?? (error !== null && typeof error.code === 'string' ? error.message : undefined))
-    resolveResult({
-      error,
-      stdout: Buffer.concat(out).toString(),
-      stderr,
-      ...(reason === undefined ? {} : { reason }),
-      ...(code === undefined ? {} : { code }),
-      ...(signal == null ? {} : { signal }),
-      ...(timeoutMilliseconds === undefined ? {} : { timedOut: true, timeout: timeoutMilliseconds }),
-    })
-  }
-  child.on('error', end)
-  child.on('close', (code, signal) =>
-    end(
-      code === 0 && why === null
+    const why = done.over
+      ? 'git said more than Althar reads.'
+      : timeoutMilliseconds === undefined
         ? null
-        : Object.assign(new Error(why ?? `git ${args[0] ?? ''} failed (${code ?? signal})`), { code: code ?? 128 }),
-      code ?? 128,
-      signal,
-    ),
-  )
-  // A git that ends before it has read everything fails on its own; the pipe closing under it isn't another failure.
-  child.stdin.on('error', () => undefined)
-  child.stdin.end(input)
+        : `No answer within ${timeoutMilliseconds / 1000} s, so Althar stopped waiting.`
+    // It couldn't start, as for a git that isn't there: what Node said, with its code.
+    if (done.error !== null) {
+      const error = Object.assign(new Error(done.error.message), { code: done.error.code ?? undefined })
+      return {
+        error,
+        stdout: done.stdout,
+        stderr: done.stderr,
+        ...(timeoutMilliseconds === undefined ? { reason: why ?? done.error.message } : {}),
+        ...(timeoutMilliseconds === undefined ? {} : { timedOut: true, timeout: timeoutMilliseconds }),
+      }
+    }
+    const code = done.code ?? 128
+    const reason = timeoutMilliseconds !== undefined ? undefined : (why ?? undefined)
+    return {
+      error:
+        done.code === 0 && why === null
+          ? null
+          : Object.assign(new Error(why ?? `git ${args[0] ?? ''} failed (${done.code ?? done.signal})`), { code }),
+      stdout: done.stdout,
+      stderr: done.stderr,
+      ...(reason === undefined ? {} : { reason }),
+      code,
+      ...(done.signal === null ? {} : { signal: done.signal }),
+      ...(timeoutMilliseconds === undefined ? {} : { timedOut: true, timeout: timeoutMilliseconds }),
+    }
+  })
   return {
     result: Effect.promise(() => result),
     timeout: (milliseconds) => {
       if (ended) return
       timeoutMilliseconds = milliseconds
-      why ??= `No answer within ${milliseconds / 1000} s, so Althar stopped waiting.`
-      stop()
+      started.stop()
     },
     stop: () => {
-      if (!ended) stop()
+      if (!ended) started.stop()
     },
   }
 }
@@ -323,9 +309,9 @@ const runProcess = (
   env: Readonly<Record<string, string>>,
   input: string | undefined,
 ): Effect.Effect<GitProcessResult> =>
-  Effect.flatMap(Untouched, (aside) =>
+  Effect.flatMap(Effect.all([Untouched, Foreground]), ([aside, first]) =>
     Effect.acquireUseRelease(
-      Effect.sync(() => spawnGit(cwd, args, { ...aside, ...env }, input)),
+      Effect.sync(() => spawnGit(cwd, args, { ...aside, ...env }, input, first)),
       (running) =>
         Effect.race(
           running.result,
@@ -342,10 +328,14 @@ const runProcess = (
 const indexCopy = (cwd: string, args: ReadonlyArray<string>) =>
   Effect.gen(function* () {
     const index = resolve(cwd, yield* git(cwd, 'rev-parse', '--git-path', 'index'))
-    return yield* Effect.try({
-      try: () => {
-        const copy = join(mkdtempSync(join(tmpdir(), 'althar-index-')), 'index')
-        if (existsSync(index)) copyFileSync(index, copy)
+    // Copied off the runtime's thread: an index can be megabytes, and the disk busy.
+    return yield* Effect.tryPromise({
+      try: async () => {
+        const copy = join(await mkdtemp(join(tmpdir(), 'althar-index-')), 'index')
+        await copyFile(index, copy).catch((error: { readonly code?: string }) => {
+          // No index yet, as in a repository nothing was ever staged in: git reads none.
+          if (error.code !== 'ENOENT') throw error
+        })
         return copy
       },
       catch: (error) => new GitFailed({ args: [...args], cwd, stderr: String(error) }),
@@ -602,7 +592,7 @@ export const commitOf = (cwd: string, ref: string) => git(cwd, 'rev-parse', '--v
 export const commitsOf = (cwd: string, revisions: ReadonlyArray<string>): Effect.Effect<ReadonlyArray<string | null>> => {
   const named = revisions.filter((revision) => /^[^\s^:]+$/.test(revision))
   if (named.length === 0) return Effect.succeed(revisions.map(() => null))
-  return run(
+  const ask = run(
     60_000,
     cwd,
     ['cat-file', '--batch-check=%(objectname)'],
@@ -619,9 +609,55 @@ export const commitsOf = (cwd: string, revisions: ReadonlyArray<string>): Effect
         return commit !== undefined && /^[0-9a-f]{40,64}$/.test(commit) ? commit : null
       })
     }),
+  )
+  // Where git couldn't answer (it timed out, or couldn't start), no commits this once: nothing is kept, and the next read asks
+  // again. What git did answer is kept, a name it said is missing too, until the refs move.
+  return keptByStamp(`${cwd}\0${revisions.join('\0')}`, () => refStamp(cwd, named), ask).pipe(
     Effect.orElseSucceed(() => revisions.map(() => null)),
   )
 }
+
+/** Answers `commitsOf` gave, by what they stood on (refStamps.ts), the newest 2,000: most reads find their refs unmoved. */
+const commitsKept = new Map<string, { readonly stamp: string; readonly value: ReadonlyArray<string | null> }>()
+/** Those being answered now, by their stamp: the board and the home asking for the same at once start git once. */
+const commitsGoing = new Map<string, Deferred.Deferred<ReadonlyArray<string | null>, GitFailed>>()
+
+/** What `ask` answers, kept under the stamp it stood on; a failure is never kept. */
+const keptByStamp = (
+  key: string,
+  stampOf: () => Promise<string | undefined>,
+  ask: Effect.Effect<ReadonlyArray<string | null>, GitFailed>,
+): Effect.Effect<ReadonlyArray<string | null>, GitFailed> =>
+  Effect.gen(function* () {
+    const stamp = yield* Effect.promise(stampOf)
+    if (stamp === undefined) return yield* ask
+    const was = commitsKept.get(key)
+    if (was !== undefined && was.stamp === stamp) return was.value
+    const asking = `${key}\n${stamp}`
+    const under = commitsGoing.get(asking)
+    // Asked again while it is being answered: that answer, or its failure; where it was stopped before either, its own.
+    if (under !== undefined)
+      return yield* Deferred.await(under).pipe(
+        Effect.catchCause((cause) => (Cause.hasInterruptsOnly(cause) ? ask : Effect.failCause(cause))),
+      )
+    const answer = Deferred.makeUnsafe<ReadonlyArray<string | null>, GitFailed>()
+    commitsGoing.set(asking, answer)
+    return yield* ask.pipe(
+      Effect.tap((value) =>
+        Effect.sync(() => {
+          commitsKept.delete(key)
+          commitsKept.set(key, { stamp, value })
+          if (commitsKept.size > 2_000) commitsKept.delete(commitsKept.keys().next().value ?? '')
+        }),
+      ),
+      Effect.onExit((exit) =>
+        Effect.andThen(
+          Effect.sync(() => commitsGoing.delete(asking)),
+          Deferred.done(answer, exit),
+        ),
+      ),
+    )
+  })
 
 /**
  * A worktree's index file as the file system has it now: where it is, its

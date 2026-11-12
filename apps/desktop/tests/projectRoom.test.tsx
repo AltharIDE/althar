@@ -400,7 +400,7 @@ describe('a task’s card in the Talk room', () => {
     )
     const where = await screen.findByRole('radiogroup', { name: 'Works in' })
     expect(within(where).getByRole('radio', { name: 'Worktree' }).getAttribute('aria-checked')).toBe('true')
-    expect(screen.getByText('Local is taken by Dark mode for Settings. Side by side with other tasks. Builds from cold.')).toBeTruthy()
+    expect(screen.getByText('Local is taken by Dark mode for Settings.')).toBeTruthy()
     await userEvent.click(within(where).getByRole('radio', { name: 'Local' }))
     await waitFor(() => expect(client.changePlan).toHaveBeenLastCalledWith('pln1', expect.any(Array), plan.end, 'checkout'))
     expect(await screen.findByText('Waits for Dark mode for Settings.')).toBeTruthy()

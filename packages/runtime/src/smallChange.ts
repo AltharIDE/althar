@@ -1,3 +1,5 @@
+import type { AfterMergeRule } from '@althar/contracts'
+
 import type { PlanStep } from './Runs'
 
 /*
@@ -49,10 +51,15 @@ export const smallChangeSteps = (input: {
   ...(input.review === null ? [] : [{ key: 'review' as const, ...input.review, skipped: true }]),
 ]
 
-/** What a small change leaves out, in the short lines its card says: no plan to read, and the review after the merge. */
-export const smallChangeSkips = (review: PlanStep | null): ReadonlyArray<string> => [
+/**
+ * What a small change leaves out, in the short lines its card says: no plan to read, and the review after the merge, as what
+ * holds of its project's rule and its own word says it (afterMergeReview.ts): only major findings back, any, or no review.
+ */
+export const smallChangeSkips = (review: PlanStep | null, holds: AfterMergeRule = 'major'): ReadonlyArray<string> => [
   'no plan',
-  ...(review === null ? [] : ['reviewed after it merges']),
+  ...(review === null
+    ? []
+    : [holds === 'none' ? 'no review' : holds === 'all' ? 'reviewed after it merges' : 'reviewed after it merges, major findings only']),
 ]
 
 /**

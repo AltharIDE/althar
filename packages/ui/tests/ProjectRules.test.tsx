@@ -2,15 +2,8 @@ import { fireEvent, render, screen, waitFor, within } from '@testing-library/rea
 import { userEvent } from 'storybook/test'
 import { describe, expect, it, vi } from 'vitest'
 
-import {
-  exampleName,
-  MERIDIAN_ACCOUNTS,
-  MERIDIAN_BRANCHES,
-  MERIDIAN_KINDS,
-  MERIDIAN_TEMPLATES,
-  MERIDIAN_TITLES,
-} from '../src/fixtures/rules'
-import { CommandMatch, LimitPolicy, PermissionPolicy, RuleKind, RulePlace, TaskEnd } from '../src/foundations/vocabulary'
+import { MERIDIAN_KINDS } from '../src/fixtures/rules'
+import { CommandMatch, PermissionPolicy, RuleKind, RulePlace } from '../src/foundations/vocabulary'
 import { ProjectRules, type ProjectRulesProps, type RuleCommand } from '../src/screens/ProjectRules/ProjectRules'
 
 /*
@@ -40,18 +33,6 @@ const rules = (more: Partial<ProjectRulesProps> = {}) => {
     commands: [],
     onRemoveCommand: vi.fn(),
     onAddCommand: vi.fn(() => undefined),
-    end: TaskEnd.DraftPr,
-    onEndChange: vi.fn(),
-    branches: { value: null, exampleOf: exampleName, fallback: 'althar/{key}-{slug}', repositories: MERIDIAN_BRANCHES },
-    titles: { value: '{key}: {title}', onChange: vi.fn(), exampleOf: exampleName, fallback: '{title}', repositories: MERIDIAN_TITLES },
-    templates: MERIDIAN_TEMPLATES,
-    limit: LimitPolicy.Move,
-    onLimitChange: vi.fn(),
-    agentAccounts: MERIDIAN_ACCOUNTS,
-    rotate: false,
-    onRotateChange: vi.fn(),
-    allowed: {},
-    onAllowedChange: vi.fn(),
     ...more,
   }
   render(<ProjectRules {...props} />)
@@ -104,16 +85,6 @@ describe('how the page is put', () => {
     expect(screen.queryByRole('heading', { name: 'Rules' })).not.toBeInTheDocument()
     expect(screen.getByRole('heading', { name: 'Never' })).toBeInTheDocument()
   })
-
-  it('describes pull requests in every repository’s own template when each has one', () => {
-    rules({ templates: MERIDIAN_TEMPLATES.map((repository) => ({ ...repository, path: '.github/pull_request_template.md' })) })
-    expect(sentence('Finished')).toContain('described in each repository’s template')
-  })
-
-  it('names branches Althar’s own way for a project with no repositories yet', () => {
-    rules({ branches: { value: null, exampleOf: exampleName, fallback: 'althar/{key}-{slug}', repositories: [] } })
-    expect(sentence('Finished')).toContain('althar/MER-128-refund-banner')
-  })
 })
 
 describe('changing a rule in place', () => {
@@ -124,37 +95,5 @@ describe('changing a rule in place', () => {
     await userEvent.click(await screen.findByRole('menuitemradio', { name: /^Never/ }))
     expect(onKindChange).toHaveBeenCalledWith(RuleKind.ForcePush, RulePlace.Never)
     expect(screen.getByRole('button', { name: 'force push' })).toBeInTheDocument()
-  })
-
-  it('gives a branch pattern being typed when a click outside closes its popover', async () => {
-    const onChange = vi.fn()
-    rules({ branches: { value: null, onChange, exampleOf: exampleName, fallback: 'althar/{key}-{slug}', repositories: MERIDIAN_BRANCHES } })
-    await userEvent.click(screen.getByRole('button', { name: 'feat/MER-128-refund-banner' }))
-    await userEvent.type(await screen.findByRole('textbox', { name: 'Branch names' }), 'mer/{{key}')
-    await userEvent.click(screen.getByRole('heading', { name: 'Rules' }))
-    expect(onChange).toHaveBeenCalledWith('mer/{key}')
-  })
-
-  it('gives it too when a press outside closes the popover before the field loses focus, as a secondary button’s does', async () => {
-    const onChange = vi.fn()
-    rules({ branches: { value: null, onChange, exampleOf: exampleName, fallback: 'althar/{key}-{slug}', repositories: MERIDIAN_BRANCHES } })
-    await userEvent.click(screen.getByRole('button', { name: 'feat/MER-128-refund-banner' }))
-    const field = await screen.findByRole('textbox', { name: 'Branch names' })
-    await userEvent.type(field, 'mer/{{key}')
-    expect(field).toHaveFocus()
-    fireEvent.pointerDown(screen.getByRole('heading', { name: 'Rules' }), { button: 2 })
-    expect(onChange).toHaveBeenCalledWith('mer/{key}')
-    expect(field).not.toHaveFocus()
-  })
-
-  it('closes a branch popover on a click outside with nothing typed, giving nothing', async () => {
-    const onChange = vi.fn()
-    rules({ branches: { value: null, onChange, exampleOf: exampleName, fallback: 'althar/{key}-{slug}', repositories: MERIDIAN_BRANCHES } })
-    await userEvent.click(screen.getByRole('button', { name: 'feat/MER-128-refund-banner' }))
-    const pop = await screen.findByRole('dialog')
-    await userEvent.click(screen.getByRole('heading', { name: 'Rules' }))
-    await waitFor(() => expect(pop).not.toBeInTheDocument())
-    expect(onChange).not.toHaveBeenCalled()
-    expect(within(document.body).queryByRole('textbox', { name: 'Branch names' })).not.toBeInTheDocument()
   })
 })

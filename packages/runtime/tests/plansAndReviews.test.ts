@@ -7,7 +7,7 @@ import { SqlClient } from 'effect/sql'
 import { Instance } from '../src/Instance'
 import { plansAndReviewsOf, roundsOutNow, newProjectDefaultsOf, setPlansAndReviews, setNewProjectDefaults } from '../src/plansAndReviews'
 import { Plans } from '../src/Plans'
-import { Policies } from '../src/Policies'
+import { afterMergeReviewOf, Policies } from '../src/Policies'
 import { Projects } from '../src/Projects'
 import { Queries } from '../src/Queries'
 import * as Runtime from '../src/Runtime'
@@ -153,21 +153,56 @@ describe('the rules a new project starts with', () => {
       const projects = yield* Projects
       const before = yield* projects.open({ envelope: yield* Runtime.envelope('project.open', {}), path: repository() })
       // Its rules exist from the moment it is made, whenever they are first read.
-      yield* setNewProjectDefaults({ permissions: 'coordinator', usageLimit: 'wait', rotateAccounts: true, end: 'ready' })
+      yield* setNewProjectDefaults({
+        usageLimit: 'wait',
+        rotateAccounts: true,
+        end: 'ready',
+        pushCommits: false,
+        postScreenshots: true,
+        resolveConflicts: false,
+        moveIssues: false,
+        afterMergeReview: 'none',
+      })
       const after = yield* projects.open({ envelope: yield* Runtime.envelope('project.open', {}), path: repository() })
       const made = yield* rulesOf(after.projectId)
       assert.deepStrictEqual(
-        [made.source, made.permissions, made.usageLimit, made.accounts?.rotate, made.end],
-        ['defaults', 'coordinator', 'wait', true, 'ready'],
+        [
+          made.source,
+          made.usageLimit,
+          made.accounts?.rotate,
+          made.end,
+          made.pushCommits,
+          made.postScreenshots,
+          made.resolveConflicts,
+          made.moveIssues,
+          made.afterMergeReview,
+        ],
+        ['defaults', 'wait', true, 'ready', false, true, false, false, 'none'],
       )
       const earlier = yield* rulesOf(before.projectId)
       assert.deepStrictEqual(
-        [earlier.source, earlier.permissions, earlier.usageLimit, earlier.accounts, earlier.end],
-        ['mvp', undefined, undefined, undefined, undefined],
+        [earlier.source, earlier.usageLimit, earlier.accounts, earlier.end, earlier.pushCommits, earlier.postScreenshots],
+        ['mvp', undefined, undefined, undefined, undefined, undefined],
       )
+      // A project made before keeps no rule for its review after a merge, and reads as Major only.
+      assert.isUndefined(earlier.afterMergeReview)
+      assert.strictEqual(afterMergeReviewOf(earlier), 'major')
+      assert.strictEqual((yield* newProjectDefaultsOf).afterMergeReview, 'none')
+      // Put back to Major only, the default is forgotten.
+      yield* setNewProjectDefaults({ afterMergeReview: 'major' })
+      const sql = yield* SqlClient.SqlClient
+      const [kept] = yield* sql<{ n: number }>`SELECT count(*) AS n FROM settings WHERE key = 'new_project_after_merge_review'`
+      assert.strictEqual(kept?.n, 0)
       // And what the person changes in the project afterwards is the project's own, whatever the defaults say.
-      yield* setNewProjectDefaults({ permissions: 'ask' })
-      assert.strictEqual((yield* rulesOf(after.projectId)).permissions, 'coordinator')
+      yield* setNewProjectDefaults({ usageLimit: 'ask' })
+      assert.strictEqual((yield* rulesOf(after.projectId)).usageLimit, 'wait')
+      // A switch put back to what it is without one is forgotten, so a profile that chose nothing makes the same rules as always.
+      yield* setNewProjectDefaults({ pushCommits: true, postScreenshots: false, resolveConflicts: true, moveIssues: true })
+      const defaults = yield* newProjectDefaultsOf
+      assert.deepStrictEqual(
+        [defaults.pushCommits, defaults.postScreenshots, defaults.resolveConflicts, defaults.moveIssues],
+        [true, false, true, true],
+      )
     }).pipe(Effect.provide(runtime())),
   )
 })

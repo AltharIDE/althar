@@ -9,6 +9,8 @@ export const kindWords = {
   permission: 'Permission',
   /** A call for a step that can't go on without the person. */
   stuck: 'Stuck',
+  /** A lead that ended its turn to wait for the person's answer. */
+  waiting: 'Waiting on you',
   /** A question an agent asks the person. */
   question: 'Question',
   /** What Althar asks before a Local task takes the person's checkout (ADR-091). */
@@ -25,6 +27,10 @@ export const kindWords = {
   drafted: 'Review drafted',
   /** A task that isn't a change, its lead done: the person settles it (Done) or keeps it for later. */
   finished: 'Finished',
+  /** What the person's turns with its lead committed waits on its branch for Ship (a task is a conversation plus parts). */
+  notShipped: 'Not shipped',
+  /** Its lead answered the person, who hasn't read it yet: it waits in Needs you until they open it. */
+  replied: 'Replied',
 } as const
 
 /**
@@ -42,18 +48,27 @@ export const readyKindOf = (task: {
   readonly nothingBuilt?: boolean | undefined
   readonly change?: { readonly state: string } | null | undefined
   readonly reviewing?: Reviewing
+  readonly held?: unknown
+  readonly replied?: string | undefined
+  readonly afterMerge?: { readonly state: string; readonly findings: number } | undefined
 }): string =>
-  task.kind === 'review' && !isAnswered(task.reviewing)
-    ? kindWords.drafted
-    : task.kind === 'plain' || task.kind === 'review'
-      ? kindWords.finished
-      : task.handedBack != null || task.checksBack != null
-        ? kindWords.stuck
-        : task.nothingBuilt === true
-          ? kindWords.nothingBuilt
-          : isUnshipped(task)
-            ? kindWords.unshipped
-            : kindWords.ready
+  task.afterMerge?.state === 'found'
+    ? `Review found ${task.afterMerge.findings}`
+    : task.kind === 'review' && !isAnswered(task.reviewing)
+      ? kindWords.drafted
+      : task.held !== undefined
+        ? kindWords.notShipped
+        : task.replied !== undefined && task.kind === 'change' && task.change?.state !== 'open'
+          ? kindWords.replied
+          : task.kind === 'plain' || task.kind === 'review'
+            ? kindWords.finished
+            : task.handedBack != null || task.checksBack != null
+              ? kindWords.stuck
+              : task.nothingBuilt === true
+                ? kindWords.nothingBuilt
+                : isUnshipped(task)
+                  ? kindWords.unshipped
+                  : kindWords.ready
 
 /** Whether a task has commits after its last pull request merged or closed (or with none), and no pull request open to accept. */
 export const isUnshipped = (task: {
@@ -71,7 +86,9 @@ export const callKindOf = (call: { readonly kind: string; readonly stuck: { read
         ? kindWords.permission
         : call.stuck.why === 'usage_limit'
           ? kindWords.limit
-          : kindWords.stuck
+          : call.stuck.why === 'waiting_on_person'
+            ? kindWords.waiting
+            : kindWords.stuck
 
 /** Where a call waits, in words: its task, or the conversation with the coordinator, for a question the coordinator asks. */
 export const whereOf = (call: { readonly taskTitle: string | null }): string => call.taskTitle ?? 'Coordinator'

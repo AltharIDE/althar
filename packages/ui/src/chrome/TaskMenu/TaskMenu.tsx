@@ -40,9 +40,16 @@ export interface TaskMenuText {
   open: (editor: string) => string
   rename: string
   startNow: string
+  /** Takes its plan out of the line, or stops its countdown, until it is started. */
+  hold: string
   changeTeam: string
   markReady: string
   attach: string
+  /** Its parts kept as a preset of the person's own (a task is a conversation plus parts). */
+  savePreset: string
+  /** A chat moved off Scratch to the board, or a task to Scratch. */
+  toBoard: string
+  toScratch: string
   skipReview: string
   stop: string
   resume: string
@@ -72,9 +79,13 @@ export const taskMenuText: TaskMenuText = {
   open: (editor) => `Open in ${editor}`,
   rename: 'Rename',
   startNow: 'Start now',
+  hold: 'Hold',
   changeTeam: 'Change the team…',
   markReady: 'Mark ready for review',
   attach: 'Attach a pull request…',
+  savePreset: 'Save as preset',
+  toBoard: 'Move to the board',
+  toScratch: 'Move to Scratch',
   skipReview: 'Skip the review',
   stop: 'Stop the task',
   resume: 'Resume',
@@ -104,12 +115,18 @@ export interface TaskMenuProps {
   editor?: string
   /** Starts its plan now, while it waits to start. */
   onStartNow?: () => void
+  /** Holds its plan until it is started, while it counts down or waits for a free agent: it leaves the line. */
+  onHold?: () => void
   /** Changes who does its plan's steps, while nothing of it has begun: the consumer opens the team. */
   onChangeTeam?: () => void
   /** Marks its draft pull request ready for review. */
   onMarkReady?: () => void
   /** Attaches it to an open pull request it didn't open; the consumer asks which. */
   onAttach?: () => void
+  /** Saves its parts, team and the start of its brief as a preset. */
+  onSavePreset?: () => void
+  /** Moves it between Scratch and the board: `to` says which way. */
+  shelf?: { readonly to: 'scratch' | 'board'; readonly onMove: () => void }
   /** Skips the review of the work under way, while it still has one to come or under way. */
   onSkipReview?: () => void
   onStop?: () => void
@@ -149,9 +166,12 @@ export function TaskMenu({
   onOpen,
   editor,
   onStartNow,
+  onHold,
   onChangeTeam,
   onMarkReady,
   onAttach,
+  onSavePreset,
+  shelf,
   onSkipReview,
   onStop,
   onResume,
@@ -183,6 +203,11 @@ export function TaskMenu({
     onStartNow && (
       <MenuItem key="start" icon="play" onSelect={onStartNow}>
         {t.startNow}
+      </MenuItem>
+    ),
+    onHold && (
+      <MenuItem key="hold" icon="hold" onSelect={onHold}>
+        {t.hold}
       </MenuItem>
     ),
     onChangeTeam && (
@@ -230,6 +255,16 @@ export function TaskMenu({
     onAttach && (
       <MenuItem key="attach" icon="clip" onSelect={onAttach}>
         {t.attach}
+      </MenuItem>
+    ),
+    shelf && (
+      <MenuItem key="shelf" icon="move" onSelect={shelf.onMove}>
+        {shelf.to === 'scratch' ? t.toScratch : t.toBoard}
+      </MenuItem>
+    ),
+    onSavePreset && (
+      <MenuItem key="preset" icon="list" onSelect={onSavePreset}>
+        {t.savePreset}
       </MenuItem>
     ),
   ].filter(present)

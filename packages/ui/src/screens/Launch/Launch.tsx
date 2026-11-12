@@ -66,8 +66,6 @@ export type LaunchProps = RootProps<
     ready: boolean
     /** Open with the mark already set, and fade. */
     quick?: boolean
-    /** A local startup step that takes longer than a few seconds. */
-    waiting?: string
     /** It is over: what it opened onto is the window's. */
     onDone?: () => void
     /** What it opens onto, drawn under it as soon as it is given, and inert until it starts to open. */
@@ -89,14 +87,8 @@ const placeIn = (width: number, height: number) => ({
   y: height * 0.43,
 })
 
-export function Launch({ ready, quick = false, waiting, onDone, children, className, ...rest }: LaunchProps) {
+export function Launch({ ready, quick = false, onDone, children, className, ...rest }: LaunchProps) {
   const [done, setDone] = useState(false)
-  const [slow, setSlow] = useState(false)
-  useEffect(() => {
-    if (ready) return
-    const timer = setTimeout(() => setSlow(true), 3000)
-    return () => clearTimeout(timer)
-  }, [ready])
   // Opened: what is behind can be used, and the veil, only decoration now, lets the pointer through.
   const [opened, setOpened] = useState(false)
   const root = useRef<HTMLDivElement>(null)
@@ -248,11 +240,6 @@ export function Launch({ ready, quick = false, waiting, onDone, children, classN
       <div ref={behind} className={s.behind} inert={!opened}>
         {children}
       </div>
-      {slow && !ready && !done && waiting && (
-        <p className={s.waiting} role="status">
-          {waiting}
-        </p>
-      )}
       {!done && (
         // Decoration: what it opens onto is what reads, once it is there.
         <div ref={veil} className={cx(s.veil, opened && s.through)} aria-hidden="true" onPointerDown={skip}>

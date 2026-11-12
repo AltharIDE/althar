@@ -357,6 +357,69 @@ export const FailedToStart: Story = {
   play: offers('Try again', 'Continue with another model', 'Abandon this step'),
 }
 
+/**
+ * Why its agent couldn't start, in one plain line (DEV-196). Not installed, and a sign-in that ended, are cards of their own,
+ * each with the fix that puts it right in Settings; its servers out of reach, or else the agent's own first error line, say
+ * so after "couldn't start".
+ */
+export const WhyItCouldntStart: Story = {
+  render: (args) => (
+    <States
+      size="thread"
+      cells={[
+        {
+          state: 'not installed',
+          node: (
+            <HandingOn
+              {...args}
+              {...FailedToStart.args}
+              what="Codex isn't installed, or isn't on this Mac's PATH."
+              fix={{ label: 'Install', onFix: fn() }}
+            />
+          ),
+        },
+        {
+          state: 'sign-in ended',
+          node: <HandingOn {...args} {...SignedOut.args} what="Claude Code's sign-in has ended." />,
+        },
+        {
+          state: 'network unreachable',
+          node: (
+            <HandingOn
+              {...args}
+              {...FailedToStart.args}
+              what="Claude Code couldn't start. Its servers can't be reached. Check this Mac's connection, then try again."
+            />
+          ),
+        },
+        {
+          state: 'its own first error line',
+          node: (
+            <HandingOn
+              {...args}
+              {...FailedToStart.args}
+              what={`Codex couldn't start. The agent stopped: Error: invalid config at ~/.codex/config.toml: line 4: unknown key "modle".`}
+            />
+          ),
+        },
+      ]}
+    />
+  ),
+}
+
+/** Not installed: Install opens the agent in Settings, where it is installed, then it is tried again. */
+export const NotInstalled: Story = {
+  args: {
+    ...FailedToStart.args,
+    what: "Codex isn't installed, or isn't on this Mac's PATH.",
+    fix: { label: 'Install', onFix: fn() },
+  },
+  play: async ({ args, canvasElement }) => {
+    await userEvent.click(within(canvasElement).getByRole('button', { name: 'Install' }))
+    await expect(args.fix?.onFix).toHaveBeenCalledOnce()
+  },
+}
+
 /** It stopped without reporting, after a reminder: the lead is told what to do, first; reminding it again would do the same. */
 export const NoReport: Story = {
   args: {

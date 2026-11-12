@@ -80,11 +80,20 @@ describe('a task whose worktree’s starting commit isn’t known', () => {
             envelope: yield* Runtime.envelope('task.create', {}),
             projectId: project.projectId,
             title: 'Retry the checkout',
-            description: 'Do it. [lead:finish] [review:pass]',
+            description: several ? 'Do it. [lead:finish] [review:pass]' : 'Do it. [lead:finish] [lead:edit] [review:pass]',
             draft: true,
             ...(several ? { repositories: ['api', 'web'] } : {}),
           })
           yield* forget(created.taskId)
+          // A task with a review builds something first: nothing built runs no review.
+          if (several) {
+            const worktrees = yield* sql<{ path: string }>`SELECT path FROM workspaces WHERE task_id = ${created.taskId}`
+            for (const worktree of worktrees) {
+              writeFileSync(join(worktree.path, 'retry.txt'), 'retry\n')
+              git(worktree.path, 'add', '.')
+              git(worktree.path, 'commit', '-q', '-m', 'Retry')
+            }
+          }
           const planId = yield* plans.propose({
             projectId: project.projectId as ProjectId,
             taskId: created.taskId,

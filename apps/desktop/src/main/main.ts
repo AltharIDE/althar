@@ -27,6 +27,10 @@ import { dockCount, notificationsShown, soundOf, tells } from './notify'
 import { idle, isQuitAnswer, type QuitAnswer, type QuitQuestion, type Work, workIn } from './quitWork'
 import { readAppPreferences, writeAppPreference } from './preferences'
 import { PICTURE_SCHEME } from './pictureAddress'
+import { CANVAS_SCHEME } from '@althar/contracts'
+import { handleCanvases } from './canvases/ipc'
+import { canvasTokens } from './canvases/tokens'
+import { type Canvases, startCanvases } from './canvases/views'
 import { type Resize, servePicture } from './pictures'
 import type { Shot } from '@althar/runtime'
 import { pageWindow } from './screenshotWindow'
@@ -45,6 +49,7 @@ import { installOf, usageData } from './usageData'
 import { masker } from '../logs/mask'
 import { outsideOf } from './browser/addresses'
 import { browserAgent } from './browser/devices'
+import { type Bridge, bridgeOf } from './browser/bridge'
 import { handlePages } from './browser/ipc'
 import { ownersOnDisk, partitionsIn, type Pages, startPages } from './browser/pages'
 // Where each editor is, from the runtime's list of them, so its icon can be drawn here.
@@ -84,7 +89,6 @@ import {
   sealsWithPortal,
   withPortalFeature,
 } from './keyring'
-import { skillsCatalog } from './skillsCatalog'
 
 /*
  * Electron's main process (docs/architecture/02): windows, the app's
@@ -254,7 +258,11 @@ const facts = factsAsker()
  * answered from the artifact store (pictures.ts): a standard, secure scheme,
  * registered before the app is ready, as Electron asks.
  */
-protocol.registerSchemesAsPrivileged([{ scheme: PICTURE_SCHEME, privileges: { standard: true, secure: true } }])
+protocol.registerSchemesAsPrivileged([
+  { scheme: PICTURE_SCHEME, privileges: { standard: true, secure: true } },
+  // An HTML canvas's files (ADR-104): an origin for each canvas, handled only in its project's canvas partition (canvases/views.ts).
+  { scheme: CANVAS_SCHEME, privileges: { standard: true, secure: true, supportFetchAPI: true, codeCache: true } },
+])
 
 /** A smaller copy of a picture, drawn by Chromium's own decoder: a JPEG stays one, anything else becomes a PNG, keeping its transparency. */
 const resize: Resize = (bytes, type, width) => {
@@ -279,8 +287,12 @@ interface RuntimeMessage {
   readonly crash?: unknown
   /** A screenshot an agent asked for (screenshots.ts). */
   readonly shot?: Shot
+  /** A page call from a tool of the runtime's (browser/bridge.ts): whose page, and what is asked of it. */
+  readonly call?: unknown
   /** Tasks over and projects removed (settled.ts), whose pages' cookies may go. */
   readonly owners?: unknown
+  /** The ports the runtime listens on, which no canvas may reach (ADR-104). */
+  readonly ports?: unknown
   readonly event?: {
     readonly _tag?: string
     readonly kind?: unknown
@@ -453,6 +465,11 @@ let edge: Edge | undefined
 
 /* The pages beside the conversations (browser/pages.ts), once the app is ready. */
 let pages: Pages | undefined
+let canvases: Canvases | undefined
+/** The ports Althar's runtime listens on, as it says once it is ready: no canvas reaches them (ADR-104). */
+const listening = new Set<number>()
+/* How the runtime's tools reach them (browser/bridge.ts): the runtime's own process alone. */
+let bridge: Bridge | undefined
 /** Whether web contents are one of Althar's own windows: only they reach its bridge's calls. */
 const mine = (contents: WebContents) => [...windows].some((window) => !window.isDestroyed() && window.webContents === contents)
 
@@ -550,10 +567,23 @@ const screenshot = (child: UtilityProcess, message: RuntimeMessage) => {
       child.postMessage({ type: 'screenshot-taken', requestId, error: error instanceof Error ? error.message : String(error) }),
   )
 }
+/** A call from a tool of the runtime's on the page beside a conversation, answered in words (browser/bridge.ts). */
+const pageCall = (child: UtilityProcess, message: RuntimeMessage) => {
+  if (bridge?.handle(child, message) === true) return
+  if (typeof message.requestId === 'string' && bridge === undefined && message.type === 'page')
+    child.postMessage({ type: 'page-done', requestId: message.requestId, error: 'Althar’s pages aren’t ready yet.' })
+}
+/* The end-to-end tests drive a page as a tool of the runtime's does, through the same bridge. Packaged builds leave this out. */
+if (__ALTHAR_TEST_HOOKS__)
+  (globalThis as unknown as { drivePage: (owner: string, call: unknown) => Promise<unknown> }).drivePage = (owner, call) =>
+    bridge === undefined ? Promise.resolve({ error: 'Althar’s pages aren’t ready yet.' }) : bridge.request(owner, call)
 /* The end-to-end tests take one as an agent would, straight from the main process (e2e/screenshots.spec.ts). Packaged builds leave this out. */
 if (__ALTHAR_TEST_HOOKS__)
   (globalThis as unknown as { takeScreenshot: (shot: Shot) => Promise<unknown> }).takeScreenshot = (shot) =>
     takeScreenshot(shot, pageWindow)
+
+/** Tells the runtime whether the meter is on (`showLoad`), so it reads the computer in the background for its trace only then. */
+const meterLoad = (child: UtilityProcess | undefined) => child?.postMessage({ type: 'load', on: preferences.showLoad })
 
 const startRuntime = () => {
   const { profile, worktrees } = locations()
@@ -567,12 +597,12 @@ const startRuntime = () => {
       ALTHAR_PROFILE: profile,
       ALTHAR_WORKTREES: worktrees,
       ALTHAR_APP_VERSION: app.getVersion(),
-      ALTHAR_SKILLS_CATALOG: skillsCatalog(here, app.isPackaged),
       ALTHAR_LOGS: logs.dir,
       // The Node the agent adapters run on (ADR-033): the packaged app's own, as its binary doesn't run as Node; in dev, Electron's.
       ...(app.isPackaged
         ? { ALTHAR_NODE: join(process.resourcesPath, 'node', 'bin', process.platform === 'win32' ? 'node.exe' : 'node') }
-        : {}),
+        : // A development build's runtime says in its log when its thread ran late, and which calls took long (lag.ts).
+          { ALTHAR_LAG_LOG: '1' }),
     },
   })
   logs.keepOutput(child)
@@ -602,6 +632,10 @@ const startRuntime = () => {
         .catch(() => undefined)
       return
     }
+    if (message.type === 'listening') {
+      for (const port of Array.isArray(message.ports) ? message.ports : []) if (Number.isInteger(port)) listening.add(port as number)
+      return
+    }
     if (message.type === 'settled') return void pages?.moment('settled', ownersIn(message.owners)).catch(() => undefined)
     if (message.type === 'settled-among') {
       if (message.requestId !== undefined) settling.get(message.requestId)?.(ownersIn(message.value))
@@ -610,6 +644,7 @@ const startRuntime = () => {
     }
     if (message.type === 'seal' || message.type === 'open') return seal(child, message)
     if (message.type === 'screenshot') return screenshot(child, message)
+    if (message.type === 'page' || message.type === 'page-cancel') return pageCall(child, message)
     if (message.type === 'facts') return facts.answer(message)
     if (message.type === 'names') return names.answer(message)
     if (message.type === 'work') return works.answer(message)
@@ -667,6 +702,8 @@ const startRuntime = () => {
     void sendersStopped().finally(() => app.quit())
   })
   runtime = child
+  // Whether to read the computer for the meter's trace while no window asks, once the preferences are known.
+  void preferencesRead.then(() => (runtime === child ? meterLoad(child) : undefined))
   if (firstScreenDrawn) child.postMessage({ type: 'first-screen' })
 }
 
@@ -983,6 +1020,7 @@ ipcMain.handle('althar:set-preference', async (_event, key: unknown, value: unkn
   if (key === 'openAtLogin') startAtLogin(preferences.openAtLogin)
   awake.wants(preferences)
   if (key === 'appearance') applyAppearance()
+  if (key === 'showLoad') meterLoad(runtime)
   app.setBadgeCount(dockCount(waiting, preferences))
   return preferences
 })
@@ -1071,8 +1109,36 @@ void ready.then(() => {
     },
     chrome: process.versions.chrome,
     agent: browserAgent(app.userAgentFallback),
+    // A page a lead opened, or woke, with no window showing it: the windows place it beside its conversation.
+    opened: (owner) => {
+      for (const window of windows) if (!window.isDestroyed()) window.webContents.send('althar:page-opened', owner)
+    },
+    windows: () => [...windows].filter((window) => !window.isDestroyed()).length,
+    quitting: () => quitting,
   })
   handlePages(pages, mine)
+  // The canvases beside the conversations, each in its project's canvas partition (ADR-104).
+  canvases = startCanvases({
+    root: join(locations().profile, 'artifacts'),
+    tokens: () => canvasTokens(),
+    listening: () => listening,
+    outside: (address) => {
+      const out = outsideOf(address)
+      if (out !== null) void shell.openExternal(out)
+    },
+  })
+  handleCanvases(canvases, mine)
+  bridge = bridgeOf({
+    pages,
+    isRuntime: (from) => from !== undefined && from === runtime,
+    reply: (to, requestId, done) => {
+      try {
+        ;(to as UtilityProcess).postMessage({ type: 'page-done', requestId, ...done })
+      } catch {
+        // The runtime went with the question: nothing is left to hear the answer.
+      }
+    },
+  })
   void preferencesRead.then(() => pages?.moment('started')).catch(() => undefined)
   void showChosenIcon()
   // Plugged in or on battery changes whether the Mac is held awake.

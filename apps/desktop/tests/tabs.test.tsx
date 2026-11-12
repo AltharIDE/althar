@@ -247,7 +247,7 @@ describe('the window’s tabs', () => {
     const asked = [project, { ...halyard, waiting: 3 }]
     vi.mocked(client.listProjects).mockResolvedValue({ cursor: 4, projects: asked })
     vi.mocked(client.getHome).mockResolvedValue(homeOf(asked))
-    emit(changed('attention_request', 'a1'))
+    emit(changed('card', 't9'))
     await waitFor(() => expect(tab('halyard, 3 calls wait on you')).toBeTruthy())
     // What changes elsewhere doesn't read them again.
     emit(changed('thread_item', 'i1'))
@@ -461,10 +461,11 @@ describe('Althar’s settings, in the window', () => {
   })
 
   it('open again on the section they were on, after a launch, and close to the home where there is no project tab', async () => {
+    // The section the tab was on before the sections moved (Reviews, now Pull requests) is kept as where its settings went.
     window.localStorage.setItem('althar.tabs', JSON.stringify({ open: [], places: {}, settings: 'reviews' }))
     windowAt('/', [halyard])
     await userEvent.click(await waitFor(() => tab('Settings')))
-    expect(where()).toBe('/settings/reviews')
+    expect(where()).toBe('/settings/pull-requests')
     await userEvent.click(nav().getByRole('button', { name: 'Close Settings' }))
     await waitFor(() => expect(where()).toBe('/'))
   })

@@ -15,6 +15,21 @@
   font-size: 11.5px;
   color: var(--t-3);
 }
+/* the preset it starts from, in the kicker's own type: a press lists the others */
+.preset {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+.preset:hover {
+  color: var(--t-1);
+}
 .title {
   grid-column: 1;
   margin: 3px 0 0;
@@ -181,22 +196,6 @@
   font-size: 12px;
   color: var(--t-3);
 }
-.ring {
-  flex: none;
-  transform: rotate(-90deg);
-}
-.ring circle {
-  fill: none;
-  stroke-width: 2;
-}
-.ringBg {
-  stroke: var(--n-4);
-}
-.ringFg {
-  stroke: var(--t-2);
-  stroke-linecap: round;
-  transition: stroke-dashoffset 1s linear;
-}
 .when {
   font-size: 12px;
   font-variant-numeric: tabular-nums;
@@ -213,7 +212,6 @@
   transition: width 1s linear;
 }
 @media (prefers-reduced-motion: reduce) {
-  .ringFg,
   .bar {
     transition: none;
   }

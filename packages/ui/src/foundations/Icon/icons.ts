@@ -25,10 +25,12 @@ import {
   Folder,
   Frame,
   GitBranch,
+  GitCompare,
   GitMerge,
   GitPullRequest,
   Globe,
   HalfMoon,
+  KanbanBoard,
   LightBulb,
   List,
   Lock,
@@ -41,6 +43,7 @@ import {
   NavArrowUp,
   OpenNewWindow,
   Page,
+  Palette,
   PageMinus,
   PagePlus,
   PageRight,
@@ -171,6 +174,10 @@ export const ICONS = {
   /** Fetches something to this computer: an agent Althar can download. */
   download: Download,
   pr: GitPullRequest,
+  /** Two changes that touch the same lines, and resolving them: merge conflicts. */
+  conflict: GitCompare,
+  /** A tracker's issues, moving through its statuses as their tasks go. */
+  issues: KanbanBoard,
   /** Loads a page again. */
   reload: Refresh,
   /** Points at something on a page, to comment on it for the lead. */
@@ -185,6 +192,8 @@ export const ICONS = {
   beside: SidebarExpand,
   /** What sites keep: cookies and storage. */
   cookie: Cookie,
+  /** One of the project's canvases: what its agents drew for the person to look at and iterate on (ADR-104). */
+  canvas: Palette,
 } satisfies Record<string, ComponentType<SVGProps<SVGSVGElement> & { strokeWidth?: number | string }>>
 
 export type IconName = keyof typeof ICONS

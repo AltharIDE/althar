@@ -25,6 +25,14 @@ export const FRAME_WALLPAPER = 'wallpaper/aurora-dark-display.jpg'
 
 export const SCREENSHOTS: readonly Screenshot[] = [
   {
+    file: 'project-home',
+    story: 'screens-projecthome--busy',
+    /* Wider than the others, so the conversation and the board each have room. */
+    width: 1680,
+    height: 1010,
+    shows: "A project's home: the coordinator's conversation, with its plan, beside the board",
+  },
+  {
     file: 'home',
     story: 'screens-home--busy',
     width: 1440,
@@ -42,7 +50,7 @@ export const SCREENSHOTS: readonly Screenshot[] = [
   {
     file: 'project-rules',
     bar: true,
-    story: 'screens-projectrules--default',
+    story: 'screens-projectrules--at-rest',
     width: 1440,
     height: 900,
     shows: 'Project rules: when agents need a yes',
@@ -50,10 +58,36 @@ export const SCREENSHOTS: readonly Screenshot[] = [
   {
     file: 'first-run',
     bar: true,
-    story: 'screens-start--found',
+    story: 'screens-welcome--signed-in',
+    /* A smaller window, so the card holds its agents without room to spare. */
+    width: 1040,
+    height: 720,
+    shows: 'First run: the agents you already pay for, each signed in on its own plan',
+  },
+  {
+    file: 'canvas',
+    bar: true,
+    story: 'thread-taskface--with-a-canvas',
     width: 1440,
     height: 900,
-    shows: 'First run: the agents on this Mac, and a first project',
+    shows: 'A task with its canvas beside it: the launch page its lead drew, at the version that answers a comment',
+  },
+  {
+    file: 'browser',
+    bar: true,
+    story: 'thread-taskface--with-the-browser',
+    width: 1440,
+    height: 900,
+    shows: 'A task with the browser beside it: the page its run serves, and the lead trying the fix on it',
+  },
+  {
+    file: 'automations',
+    bar: true,
+    story: 'screens-automations--a-good-morning',
+    /* Small, so the cards fill it. */
+    width: 900,
+    height: 690,
+    shows: 'Automations: work that starts itself, on a schedule, and how each has run',
   },
   {
     file: 'plan',
@@ -61,6 +95,23 @@ export const SCREENSHOTS: readonly Screenshot[] = [
     width: 960,
     height: 900,
     shows: "What you asked, the coordinator's answer, and its plan: who does each step, starting on its own unless you change it",
+    crop: true,
+  },
+  {
+    file: 'graph',
+    story: 'thread-stepgraph--round-until-clean',
+    width: 1360,
+    height: 900,
+    shows: 'A task as a graph: a lane for each agent, and a card for each step, round until the review passes',
+    crop: true,
+  },
+  {
+    file: 'dictation',
+    story: 'composer-composer--dictating-word-by-word',
+    /* Narrow, as a composer beside a conversation, so its words read in a table cell; any narrower and the wallpaper's mark shows above it. */
+    width: 760,
+    height: 400,
+    shows: 'Dictating to a lead: your voice as bars, and the words arriving in the field as you say them',
     crop: true,
   },
   {

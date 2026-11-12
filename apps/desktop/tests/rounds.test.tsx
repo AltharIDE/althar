@@ -324,20 +324,44 @@ describe('a task’s thread in rounds', () => {
     expect(roundOf(blocks)).toMatchObject({ agentId: 'claude-code', report: { result: { summary: 'Settled.' } } })
   })
 
-  it('says what a lead could see in a line before its round, which stays one round', () => {
-    const blocks = read([
-      items.says('On it.'),
-      items.notice({
-        source: 'runtime',
-        role: 'skills',
-        title: 'Codex could see a skill',
-        skills: [{ name: 'mine', path: '/h/mine/SKILL.md', from: 'person' }],
-      }),
-      items.tool(),
-      items.step({ step: 'implement', summary: 'Done.', agentId: 'codex' }),
+  it('draws no fold for a turn that said and did nothing a person could see', () => {
+    const empty = read([items.you('Catch me up'), when(items.says('  '), 1), when(items.thinks(''), 1)])
+    expect(empty.map((block) => block.kind)).toEqual(['you'])
+    // Its reply, as a turn of its own, is the round: on its own agent, and the fold counts from there.
+    const replied = read([
+      when(items.you('Catch me up'), 0),
+      when(items.says('', 'codex'), 1),
+      when(items.thinks('', 'codex'), 1),
+      when(items.says('You asked for a leaner card.'), 5),
     ])
-    expect(blocks.map((block) => block.kind)).toEqual(['skills', 'round'])
-    expect(blocks[0]).toMatchObject({ title: 'Codex could see a skill', skills: [{ name: 'mine' }] })
+    expect(replied.map((block) => block.kind)).toEqual(['you', 'round'])
+    expect(roundOf(replied)).toMatchObject({ agentId: 'claude-code', work: null, result: { text: 'You asked for a leaner card.' } })
+    // An empty message among a turn's real work isn't a step of it.
+    const mixed = roundOf(read([when(items.you('Go'), 0), when(items.says(''), 1), when(items.tool({}), 2), when(items.says('Done.'), 3)]))
+    expect(mixed?.work?.steps.map((step) => step.kind)).toEqual(['tool'])
+    expect(mixed?.work?.took).toBe('1m 0s')
+  })
+
+  it('keeps the turn at work as a round while it has said nothing yet', () => {
+    const blocks = read([when(items.you('Go'), 0), when(items.says(''), 1)], true)
+    expect(roundOf(blocks)).toMatchObject({ live: true })
+  })
+
+  it('says one line of a task its lead started, and none of another task’s news', () => {
+    const blocks = read([
+      when(items.you('Split it'), 0),
+      when(items.tool({}), 1),
+      when(
+        items.notice({
+          source: 'runtime',
+          title: 'Started “Retry the checkout”',
+          task: { taskId: 't2', slug: 'retry-the-checkout', title: 'Retry the checkout', threadId: 'th2' },
+        }),
+        2,
+      ),
+      when(items.says('Started it.'), 3),
+    ])
+    expect(blocks.filter((block) => block.kind === 'althar')).toMatchObject([{ task: { threadId: 'th2', title: 'Retry the checkout' } }])
   })
 
   it('counts work in the words a person uses, and says what it is on shortly', () => {

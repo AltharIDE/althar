@@ -6,6 +6,7 @@ import { SqlClient } from 'effect/sql'
 import { Busy } from './Busy'
 import { Changes } from './Changes'
 import { Installs } from './Installs'
+import { Accounts } from './Accounts'
 import { Limits } from './Limits'
 import { ModelFacts } from './ModelFacts'
 import { Models } from './Models'
@@ -18,13 +19,21 @@ import { CantMerge, PushRefused } from './errors'
 import { commitsOf } from './git'
 import { Instance } from './Instance'
 import { answeredIn, quickIn } from './kinds'
+import { MergeReviews } from './MergeReviews'
+import { Reviews } from './Reviews'
+import { shelve } from './scratch'
+import { branchOnFirstWrite } from './firstWrite'
+import { Projects } from './Projects'
 import { Plans } from './Plans'
-import { fact } from './records'
+import { PlanUsage } from './PlanUsage'
+import { fact, timestamp } from './records'
 import { Runs, type StuckAnswer, type StuckInfo } from './Runs'
 import { Sessions } from './Sessions'
 import { actionsOf, standingOf, Tasks } from './Tasks'
 import { addItem, updateItem } from './threads'
+import { touchTask } from './cards'
 import { POOL, ToolRefused, ToolServer, type Tool, type ToolAccess } from './ToolServer'
+import { cancelWaitingTurn, upNextMove } from './upNextMoves'
 import { expected, words } from './words'
 
 /*
@@ -45,6 +54,17 @@ import { expected, words } from './words'
  * themselves. Discarding deletes nothing: the task's worktree and branch
  * stay, and its folder goes only as ADR-056's cleanup lets it.
  */
+
+/**
+ * Whether the caller's own thread says what it did to another task: the coordinator's does, as its record of the board; a
+ * task lead's doesn't, as its chat shows only what is about its own task (its call is there already), and the other task's does.
+ */
+export const hearsOf = (access: { readonly role: string; readonly threadId: string }, task: { readonly threadId: string }) =>
+  access.threadId !== task.threadId && access.role !== 'lead'
+
+/** Which threads carry the line a task action leaves, for the words a tool answers with. */
+export const threadsSaying = (access: { readonly role: string; readonly threadId: string }, task: { readonly threadId: string }) =>
+  hearsOf(access, task) ? 'Both threads have a line saying so' : 'Its thread has a line saying so'
 
 /**
  * What the coordinator can do to a task: the person's own buttons, by what
@@ -139,6 +159,9 @@ type Store =
   | Changes
   | Sessions
   | Runs
+  | MergeReviews
+  | Reviews
+  | Projects
   | Errands
   | Busy
   | Agents
@@ -146,6 +169,8 @@ type Store =
   | Installs
   | ModelFacts
   | Limits
+  | Accounts
+  | PlanUsage
   | SignIns
 
 /** What each move did, as a line says it of the task. */
@@ -208,6 +233,8 @@ export const cantMerge = (slug: string, error: CantMerge) => {
       return `${error.detail} moved while it merged: nothing was merged. Accept it again.`
     case 'missing':
       return `${slug} has no ${error.detail} here to merge into.`
+    case 'nothing':
+      return `${slug} has nothing to merge: its work is already in ${into}.`
   }
 }
 
@@ -257,6 +284,9 @@ export class TaskActions extends Context.Service<
       const changes = yield* Changes
       const sessions = yield* Sessions
       const runs = yield* Runs
+      const mergeReviews = yield* MergeReviews
+      const reviews = yield* Reviews
+      const projects = yield* Projects
       const errands = yield* Errands
       const busy = yield* Busy
       const provide = <A, E>(effect: Effect.Effect<A, E, Store>) => Effect.provideContext(effect, context)
@@ -408,8 +438,14 @@ export class TaskActions extends Context.Service<
               return did(`Stopped ${task.slug}: its step is cut short and its agents stopped. Restarting carries it on.`)
             case 'stop_turn': {
               const lead = yield* sessions.running(task.threadId)
-              if (Option.isNone(lead) || !lead.value.turnRunning)
-                return nothing(`${task.slug}’s lead isn’t in a turn: there is nothing to stop.`)
+              if (Option.isNone(lead) || !lead.value.turnRunning) {
+                // A turn Althar asked of it waits for a place, up next: let go, its words read with the lead's next turn.
+                if ((yield* cancelWaitingTurn(busy, sessions, sql)(task.id)) > 0)
+                  return did(
+                    `Cancelled the turn ${task.slug}’s lead waited to take: it is out of Up next, and reads what it would have been told with its next turn.`,
+                  )
+                return nothing(`${task.slug}’s lead isn’t in a turn, nor waiting to take one: there is nothing to stop.`)
+              }
               yield* changes.leadStopped({ threadId: task.threadId }, 'interrupted')
               yield* sessions.interrupt(task.threadId)
               return did(`Stopped the lead’s turn on ${task.slug}: it waits for the next message.`)
@@ -417,15 +453,21 @@ export class TaskActions extends Context.Service<
             case 'hold': {
               const [plan] = yield* sql<{ id: string; startsAt: string | null }>`
                 SELECT id, starts_at FROM task_plans WHERE task_id = ${task.id} AND state = 'proposed' ORDER BY proposed_at DESC LIMIT 1`
-              if (plan === undefined)
-                return nothing(
-                  can.includes('stop')
-                    ? `${task.slug} has started: there is no plan to hold. Stop it instead.`
-                    : `${task.slug} has no plan waiting to start.`,
-                )
-              if (plan.startsAt === null) return nothing(`${task.slug} is held already: it waits until it is started.`)
-              yield* plans.hold(plan.id, actorId)
-              return did(`Held ${task.slug}: its plan waits until it is started.`)
+              if (plan !== undefined) {
+                if (plan.startsAt === null) return nothing(`${task.slug} is held already: it waits until it is started.`)
+                yield* plans.hold(plan.id, actorId)
+                return did(`Held ${task.slug}: its plan waits until it is started.`)
+              }
+              // Started, but its first step still waits for a free agent or its checkout: it leaves the line.
+              const [started] = yield* sql<{ id: string }>`
+                SELECT id FROM task_plans WHERE task_id = ${task.id} AND state = 'accepted' ORDER BY proposed_at DESC LIMIT 1`
+              if (started !== undefined && (yield* plans.hold(started.id, actorId)))
+                return did(`Held ${task.slug}: it is out of the line, and its plan waits until it is started.`)
+              return nothing(
+                can.includes('stop')
+                  ? `${task.slug} has started: there is no plan to hold. Stop it instead.`
+                  : `${task.slug} has no plan waiting to start.`,
+              )
             }
             case 'restart': {
               if (standing.state === 'abandoned') {
@@ -629,7 +671,7 @@ export class TaskActions extends Context.Service<
           const outcome = yield* perform(task, move, actorOf(access), { ...args, stands: word?.stands })
           if (!outcome.done) return `Nothing changed: ${outcome.said}`
           const as = words === undefined ? becauseOf(asked.why) : `, as you asked: ${quoted(words)}`
-          if (access.threadId !== task.threadId) yield* line(task.projectId, access.threadId, `${DID[move](`“${task.title}”`)}${as}`)
+          if (hearsOf(access, task)) yield* line(task.projectId, access.threadId, `${DID[move](`“${task.title}”`)}${as}`)
           yield* line(task.projectId, task.threadId, `${own ? 'Its lead' : yield* whoOf(access)} ${DID_HERE[move]}${as}`)
           yield* fact({
             projectId: task.projectId,
@@ -645,7 +687,7 @@ export class TaskActions extends Context.Service<
             },
             actorId: actorOf(access),
           })
-          return `${outcome.said} ${access.threadId === task.threadId ? 'Its thread has a line saying so' : 'Both threads have a line saying so'}; say it in a sentence.`
+          return `${outcome.said} ${threadsSaying(access, task)}; say it in a sentence.`
         })
 
       const answer = (itemId: string, yes: boolean, actorId: ActorId) =>
@@ -805,6 +847,9 @@ export class TaskActions extends Context.Service<
           // As the card's buttons, at once: none of them can't be undone (ADR-097).
           const on = (move: TaskMove, answer: StuckAnswer) =>
             act(access, task, move, { args: { attentionId: call.id, answer }, why: asked.why })
+          // A lead waiting on the person is answered by them, with the answer they give it; none of the card's other ways apply.
+          if (info.why === 'waiting_on_person')
+            return yield* cant('it waits for the person’s answer: they answer it in the task, and their answer starts it again.')
           switch (asked.answer) {
             case 'as_is':
             case 'skip_review':
@@ -854,6 +899,39 @@ export class TaskActions extends Context.Service<
         pull_request: Schema.optional(Schema.String),
       })
       const Named = Schema.Struct({ task: Schema.optional(Schema.String) })
+      const ShipAsked = Schema.Struct({ task: Schema.optional(Schema.String), change: Schema.optional(Schema.String) })
+      const AfterMerge = Schema.Struct({ task: Schema.optional(Schema.String), answer: Schema.Literals(['fix', 'leave']) })
+      const NewChange = Schema.Struct({
+        task: Schema.optional(Schema.String),
+        name: Schema.String,
+        branch: Schema.optional(Schema.String),
+        on: Schema.optional(Schema.String),
+        toward: Schema.optional(Schema.String),
+        repository: Schema.optional(Schema.String),
+        waits_for: Schema.optional(Schema.String),
+        why: Schema.optional(Schema.String),
+      })
+      const ReviewAsked = Schema.Struct({
+        task: Schema.optional(Schema.String),
+        pull_request: Schema.Union([Schema.String, Schema.Number]),
+        why: Schema.optional(Schema.String),
+      })
+      const PartAsked = Schema.Struct({
+        task: Schema.optional(Schema.String),
+        part: Schema.Literals(['workspace', 'checked_by', 'reviewing', 'output', 'access', 'shelf']),
+        name: Schema.optional(Schema.String),
+        pull_request: Schema.optional(Schema.Union([Schema.String, Schema.Number])),
+        to: Schema.optional(Schema.Literals(['worktree', 'checkout'])),
+        toward: Schema.optional(Schema.NullOr(Schema.String)),
+        shelf: Schema.optional(Schema.Literals(['scratch', 'board'])),
+        why: Schema.optional(Schema.String),
+      })
+      const TowardAsked = Schema.Struct({
+        task: Schema.optional(Schema.String),
+        toward: Schema.NullOr(Schema.String),
+        change: Schema.optional(Schema.String),
+        why: Schema.optional(Schema.String),
+      })
       const Branches = Schema.Struct({
         task: Schema.optional(Schema.String),
         heads: Schema.optional(Schema.Array(Schema.Struct({ repository: Schema.String, head: Schema.String }))),
@@ -870,7 +948,7 @@ export class TaskActions extends Context.Service<
         Effect.gen(function* () {
           const own = access.role === 'lead' && task.id === access.taskId
           const as = becauseOf(whyOf(input))
-          if (access.threadId !== task.threadId) yield* line(task.projectId, access.threadId, `${what}${as}`)
+          if (hearsOf(access, task)) yield* line(task.projectId, access.threadId, `${what}${as}`)
           yield* line(task.projectId, task.threadId, `${own ? 'Its lead' : yield* whoOf(access)} ${here}${as}`)
         })
 
@@ -899,7 +977,7 @@ export class TaskActions extends Context.Service<
             return yield* new ToolRefused({ message: `head is a commit's hash, as read_task shows ${task.slug}'s branch at.` })
           const { change } = yield* plainly(changes.push(task.id, asked.head, asked.pull_request), task.slug)
           yield* did(access, input, task, `Pushed “${task.title}” to its pull request`, 'pushed its commits to its pull request')
-          return `Pushed ${task.slug}'s branch up to ${asked.head.slice(0, 7)} to ${change.url ?? 'its pull request'}: a plain push, nothing forced. Both threads have a line saying so.`
+          return `Pushed ${task.slug}'s branch up to ${asked.head.slice(0, 7)} to ${change.url ?? 'its pull request'}: a plain push, nothing forced. ${threadsSaying(access, task)}.`
         })
 
       const skipReview = (access: ToolAccess, input: unknown) =>
@@ -909,7 +987,344 @@ export class TaskActions extends Context.Service<
           const said = yield* envelope('task.skip_review', { taskId: task.id }, undefined, actorOf(access))
           yield* plainly(runs.skipReview({ envelope: said, taskId: task.id }), task.slug)
           yield* did(access, input, task, `Skipped the review of “${task.title}”`, 'skipped this task’s review')
-          return `Skipped ${task.slug}'s review: it is ready once its lead is done, with no review. Both threads have a line saying so.`
+          return `Skipped ${task.slug}'s review: it is ready once its lead is done, with no review. ${threadsSaying(access, task)}.`
+        })
+
+      const ReviewAfterMerge = Schema.Struct({
+        task: Schema.optional(Schema.String),
+        review: Schema.Literals(['review', 'none', 'project']),
+        why: Schema.optional(Schema.String),
+      })
+      /** One small change's own word on its review after the merge, as its card will offer it: on the person's word. */
+      const reviewAfterMerge = (access: ToolAccess, input: unknown) =>
+        Effect.gen(function* () {
+          const asked = yield* read(ReviewAfterMerge, input)
+          const task = yield* named(access, asked.task)
+          const review = asked.review === 'project' ? null : asked.review
+          const now = yield* plainly(mergeReviews.choose(task.id, review, actorOf(access)), task.slug)
+          const rule = { major: 'only blocking and major findings come back', all: 'any finding comes back', none: '' }
+          const holds =
+            now.holds === 'none' ? 'it isn’t reviewed after it merges' : `it is reviewed after it merges, and ${rule[now.holds]}`
+          yield* did(
+            access,
+            input,
+            task,
+            review === 'none'
+              ? `No review after “${task.title}” merges`
+              : review === 'review'
+                ? `A review after “${task.title}” merges`
+                : `“${task.title}”’s review after its merge goes by the project’s rule`,
+            review === 'none'
+              ? 'dropped its review after the merge'
+              : review === 'review'
+                ? 'kept a review after the merge'
+                : 'left its review after the merge to the project’s rule',
+          )
+          return `${task.slug}: ${holds}${review === null ? ', as the project’s rule says' : ''}. ${threadsSaying(access, task)}.`
+        })
+
+      const shipTask = (access: ToolAccess, input: unknown) =>
+        Effect.gen(function* () {
+          const asked = yield* read(ShipAsked, input)
+          const task = yield* named(access, asked.task)
+          // Its own lead asks in its turn: it ships once that turn ends, with all the turn committed.
+          const own = access.role === 'lead' && task.id === access.taskId
+          const said = yield* envelope('task.ship', { taskId: task.id, change: asked.change ?? null }, undefined, actorOf(access))
+          yield* plainly(
+            runs.ship({
+              envelope: said,
+              taskId: task.id,
+              ...(own ? { afterTurn: true } : {}),
+              ...(asked.change === undefined ? {} : { change: asked.change }),
+            }),
+            task.slug,
+          )
+          yield* did(access, input, task, `Shipped “${task.title}”`, 'shipped this task')
+          return `${own ? 'Althar ships this task once your turn ends' : `Shipping ${task.slug}`}: where its plan has a reviewer before the work ships, the review runs first, over everything since the last one, and the lead settles what it finds; then its commits go up, to the open pull request, or a new one after the last merged or closed. read_task shows where it stands. ${threadsSaying(access, task)}.`
+        })
+
+      /**
+       * Starts another change in a task (a task is a conversation plus parts): its own branch and worktree, beside the others,
+       * shipped and reviewed on its own. The task's thread marks it as a step in the work.
+       */
+      /*
+       * A task's parts, changed by its lead or the coordinator when the task needs it (a task is a conversation plus parts,
+       * "Changing parts"), each with a reason, as the person changes them from the parts row: add_part, change_part and
+       * remove_part. Each does what that part's own move does; running an outside author's code is the person's word alone.
+       */
+      const prOf = (asked: typeof PartAsked.Type) =>
+        asked.pull_request === undefined
+          ? undefined
+          : typeof asked.pull_request === 'number'
+            ? `#${asked.pull_request}`
+            : asked.pull_request.trim()
+
+      const addPart = (access: ToolAccess, input: unknown): Effect.Effect<string, unknown, Store> =>
+        Effect.gen(function* () {
+          const asked = yield* read(PartAsked, input)
+          const task = yield* named(access, asked.task)
+          const pullRequest = prOf(asked)
+          switch (asked.part) {
+            case 'workspace': {
+              // A copy takes its branch where it stands, so nothing is lost on a detached head; one with its branch takes another
+              // change, by name.
+              const made = yield* changes.exclusive(task.id, branchOnFirstWrite(task.id, [], true))
+              if (made.length > 0) {
+                yield* touchTask(task.id)
+                return `Took a worktree: ${task.slug}'s work is on ${made.join(' and ')} now.`
+              }
+              if (asked.name === undefined)
+                return `${task.slug} has a worktree with its branch already: to start another change beside it, give it a name.`
+              return yield* startChange(access, {
+                task: asked.task,
+                name: asked.name,
+                ...(asked.why === undefined ? {} : { why: asked.why }),
+              })
+            }
+            case 'reviewing':
+              if (pullRequest === undefined) return yield* new ToolRefused({ message: 'Name the pull request it reviews: pull_request.' })
+              return yield* addReview(access, { task: asked.task, pull_request: pullRequest })
+            case 'output': {
+              if (pullRequest === undefined) return yield* new ToolRefused({ message: 'Name the pull request it follows: pull_request.' })
+              const done = yield* plainly(changes.attach({ taskId: task.id, pullRequest, actorId: actorOf(access) }), task.slug)
+              // Its branch not based on that pull request's head, nothing is followed yet: starting from there is the person's word.
+              if (done.kind === 'start')
+                return `Nothing changed yet: ${task.slug}'s branch isn't based on ${done.name}'s head. Starting it from there ${done.own === 0 ? 'loses nothing: it has no commits of its own' : `keeps its ${done.own === 1 ? 'one commit' : `${done.own} commits`} of its own, on top of the head`}. Ask the person; once they agree, call attach_pull_request with start_from_head: true.`
+              yield* touchTask(task.id)
+              return `${task.slug} follows ${pullRequest} now, as a change of its own.`
+            }
+            case 'checked_by':
+              return yield* new ToolRefused({
+                message: `${task.slug}'s review comes from its plan: a quick task gets one with make_it_a_change; a planned one has it already, and remove_part takes it away.`,
+              })
+            case 'access':
+              return yield* new ToolRefused({
+                message:
+                  'Every task has its Access: running an outside author’s code is the person’s word alone (Run it). Suggest it to them.',
+              })
+            case 'shelf':
+              return yield* changePart(access, input)
+          }
+        })
+
+      const changePart = (access: ToolAccess, input: unknown): Effect.Effect<string, unknown, Store> =>
+        Effect.gen(function* () {
+          const asked = yield* read(PartAsked, input)
+          const task = yield* named(access, asked.task)
+          switch (asked.part) {
+            case 'workspace': {
+              if (asked.toward !== undefined) return yield* workToward(access, { task: asked.task, toward: asked.toward })
+              if (asked.to === undefined)
+                return yield* new ToolRefused({
+                  message: 'Say where it moves (to: worktree or checkout), or what it works toward (toward).',
+                })
+              const moved = yield* plainly(
+                runs.move({
+                  envelope: yield* envelope('task.move', { taskId: task.id, to: asked.to }, undefined, actorOf(access)),
+                  taskId: task.id,
+                  to: asked.to,
+                }),
+                task.slug,
+              )
+              return moved.kind === 'moved'
+                ? `${task.slug} works ${asked.to === 'checkout' ? 'Local, in the person’s checkout' : 'in a worktree of its own'} now; its lead starts afresh there.`
+                : moved.kind === 'waits'
+                  ? `${task.slug} moves once it can: ${moved.why}`
+                  : `The person’s checkout is on ${moved.ask.branch}, a branch of theirs: they answer from the task's header whether to switch it.`
+            }
+            case 'shelf': {
+              const shelf = asked.shelf === 'scratch' ? 'scratch' : null
+              yield* plainly(shelve(task.id, shelf, actorOf(access)), task.slug)
+              return shelf === 'scratch' ? `${task.slug} is on Scratch now.` : `${task.slug} is on the board now.`
+            }
+            case 'access':
+              return yield* new ToolRefused({
+                message: 'Running an outside author’s code is the person’s word alone (Run it). Suggest it to them.',
+              })
+            default:
+              return yield* addPart(access, input)
+          }
+        })
+
+      const removePart = (access: ToolAccess, input: unknown): Effect.Effect<string, unknown, Store> =>
+        Effect.gen(function* () {
+          const asked = yield* read(PartAsked, input)
+          const task = yield* named(access, asked.task)
+          const pullRequest = prOf(asked)
+          switch (asked.part) {
+            case 'output':
+              if (pullRequest === undefined) return yield* new ToolRefused({ message: 'Name the pull request: pull_request.' })
+              return yield* stopFollowing(access, { task: asked.task, pull_request: pullRequest })
+            case 'checked_by': {
+              yield* plainly(
+                runs.skipReview({
+                  envelope: yield* envelope('task.skip_review', { taskId: task.id }, undefined, actorOf(access)),
+                  taskId: task.id,
+                }),
+                task.slug,
+              )
+              return `${task.slug} has no review this round: one under way stops, findings filed already stay in its thread.`
+            }
+            case 'reviewing': {
+              const sql = yield* SqlClient.SqlClient
+              const [waiting] = yield* sql<{ id: string }>`
+                SELECT id FROM review_drafts WHERE task_id = ${task.id} AND state IN ('pending', 'failed') LIMIT 1`
+              // A draft never posted would be lost: the person says.
+              if (waiting !== undefined)
+                return yield* new ToolRefused({
+                  message: `${task.slug}'s draft review was never posted: removing it would lose it. Ask the person to post or discard it first.`,
+                })
+              yield* sql`UPDATE workspaces SET state = 'cleaned', cleaned_at = ${yield* timestamp}, revision = revision + 1
+                WHERE task_id = ${task.id} AND reviewing IS NOT NULL AND access = 'read'
+                  AND (${pullRequest ?? null} IS NULL OR reviewing LIKE ${`%${pullRequest?.replace(/^#/, '/') ?? ''}`})`
+              yield* touchTask(task.id)
+              return `${task.slug} reviews that pull request no more: its thread, and any posted review, stay.`
+            }
+            case 'workspace': {
+              // A change named: its folder goes, its branch stays (Drop it). The task's only worktree: it moves down to a copy.
+              if (asked.name !== undefined) {
+                yield* plainly(changes.dropChange(task.id, asked.name, actorOf(access)), task.slug)
+                return `Dropped “${asked.name}”: its folder went, its branch stays.`
+              }
+              yield* plainly(changes.leaveWorktree(task.id, actorOf(access)), task.slug)
+              return `${task.slug}'s worktree is a copy now: its branch stays, with all its work.`
+            }
+            case 'access':
+              return yield* new ToolRefused({ message: 'Access isn’t removed: the person says Run it, or stops it.' })
+            case 'shelf':
+              return yield* changePart(access, { ...asked, shelf: 'board' })
+          }
+        })
+
+      const JoinAsked = Schema.Struct({
+        task: Schema.optional(Schema.String),
+        change: Schema.String,
+        into: Schema.optional(Schema.String),
+        why: Schema.optional(Schema.String),
+      })
+      /** Keep them together: one change's commits carried onto another's, before either ships. */
+      const joinChanges = (access: ToolAccess, input: unknown) =>
+        Effect.gen(function* () {
+          const asked = yield* read(JoinAsked, input)
+          const task = yield* named(access, asked.task)
+          yield* plainly(changes.joinChanges(task.id, asked.change, asked.into ?? null, actorOf(access)), task.slug)
+          yield* touchTask(task.id)
+          return `Kept “${asked.change}” together with ${asked.into === undefined ? 'the task’s first change' : `“${asked.into}”`}: its commits are on that change's branch, its folder went, and its branch stays.`
+        })
+
+      /** Adds a review of a pull request to a task with work of its own: a copy beside its worktree, drafted by its lead. */
+      const addReview = (access: ToolAccess, input: unknown) =>
+        Effect.gen(function* () {
+          const asked = yield* read(ReviewAsked, input)
+          const task = yield* named(access, asked.task)
+          const pullRequest = typeof asked.pull_request === 'number' ? `#${asked.pull_request}` : asked.pull_request.trim()
+          const added = yield* plainly(reviews.reviewIn({ taskId: task.id, pullRequest, actorId: actorOf(access) }), task.slug)
+          yield* touchTask(task.id)
+          return added.already
+            ? `${task.slug} reviews ${added.name} already: its copy is in ${added.path}.`
+            : `${task.slug} reviews ${added.name} now, beside its own work: a read-only copy of its head is in ${added.path}. Its lead reads it and drafts the review with draft_review; nothing is posted until the person posts it.`
+        })
+
+      /** Points a running task at another branch to work toward, on the person's word, as its header does. */
+      const workToward = (access: ToolAccess, input: unknown) =>
+        Effect.gen(function* () {
+          const asked = yield* read(TowardAsked, input)
+          const task = yield* named(access, asked.task)
+          const said = yield* plainly(
+            runs.workToward({
+              taskId: task.id,
+              toward: asked.toward === null || asked.toward.trim() === '' ? null : asked.toward.trim(),
+              ...(asked.change === undefined ? {} : { change: asked.change }),
+              byLead: access.role === 'lead' && access.taskId === task.id,
+            }),
+            task.slug,
+          )
+          yield* touchTask(task.id)
+          return said.length === 0 ? `${task.slug} works toward that already: nothing changed.` : said.join(' ')
+        })
+
+      const startChange = (access: ToolAccess, input: unknown) =>
+        Effect.gen(function* () {
+          const asked = yield* read(NewChange, input)
+          const task = yield* named(access, asked.task)
+          const started = yield* plainly(
+            projects.startChange({
+              taskId: task.id,
+              name: asked.name,
+              ...(asked.branch === undefined ? {} : { branch: asked.branch }),
+              ...(asked.on === undefined ? {} : { on: asked.on }),
+              ...(asked.toward === undefined ? {} : { toward: asked.toward }),
+              ...(asked.repository === undefined ? {} : { repository: asked.repository }),
+              ...(asked.waits_for === undefined ? {} : { waitsFor: asked.waits_for }),
+              actorId: actorOf(access),
+            }),
+            task.slug,
+          )
+          const sql = yield* SqlClient.SqlClient
+          const [thread] = yield* sql<{ id: string; projectId: ProjectId }>`
+            SELECT t.id, t.project_id FROM threads t WHERE t.task_id = ${task.id} AND t.kind = 'task'`
+          if (thread !== undefined)
+            yield* addItem({ projectId: thread.projectId, threadId: thread.id }, 'notice', {
+              source: 'runtime',
+              severity: 'info',
+              title: `New change · ${started.name}, on ${started.branch}.`,
+              description: asked.why ?? null,
+              step: {
+                kind: 'new_change',
+                name: started.name,
+                branch: started.branch,
+                // Named only where it isn't what the task's first change works toward.
+                toward: started.elsewhere ? started.toward : null,
+                // Split on its lead's or the coordinator's own choice: Keep them together offers to undo it.
+                by: access.role === 'coordinator' ? 'coordinator' : 'lead',
+                ...(asked.waits_for === undefined ? {} : { waits: asked.waits_for }),
+              },
+            })
+          // Started by someone else, its lead hears where the change is, as its own tool would have told it.
+          if (!(access.role === 'lead' && access.taskId === task.id) && thread !== undefined)
+            yield* sessions
+              .send({
+                envelope: yield* envelope('thread.send', { threadId: thread.id, change: started.workspaceId }, undefined, actorOf(access)),
+                threadId: thread.id,
+                body: `A new change of this task, “${started.name}”, is in ${started.path}, on ${started.branch}, working toward ${started.toward}. Commit its work there; it ships and is reviewed on its own.${asked.why === undefined ? '' : ` Why: ${asked.why}`}`,
+                quiet: true,
+              })
+              .pipe(Effect.ignore)
+          yield* touchTask(task.id)
+          return `Started a change of ${task.slug}, “${started.name}”: its worktree is ${started.path}, on ${started.branch}${started.on === null ? `, working toward ${started.toward}` : `, stacked on ${started.on} (its pull request goes into ${started.toward})`}. Commit its work there, in that folder: it ships, and is reviewed, on its own, and its pull request opens with Ship, or with open_pull_request.`
+        })
+
+      /** What a review after a merge found, answered on the person's word, as the task's Fix it and Leave it do. */
+      const answerAfterMerge = (access: ToolAccess, input: unknown) =>
+        Effect.gen(function* () {
+          const asked = yield* read(AfterMerge, input)
+          const task = yield* named(access, asked.task)
+          if (asked.answer === 'leave') {
+            yield* plainly(mergeReviews.leave(task.id), task.slug)
+            yield* did(
+              access,
+              input,
+              task,
+              `Left what the review after the merge found on “${task.title}”`,
+              'left what the review after the merge found',
+            )
+            return `Left what the review after the merge found on ${task.slug}: its findings close, and stay in its thread. ${threadsSaying(access, task)}.`
+          }
+          const sent = yield* plainly(mergeReviews.fix(task.id), task.slug)
+          const said = yield* envelope('task.ship', { taskId: task.id, afterMerge: true }, undefined, actorOf(access))
+          yield* Effect.forkDetach(
+            Effect.andThen(mergeReviews.afterTurnOf(sent.threadId, sent.inputId), runs.ship({ envelope: said, taskId: task.id })).pipe(
+              Effect.catchCause((cause) => Effect.logWarning('Could not ship a fix after a merge', cause)),
+            ),
+          )
+          yield* did(
+            access,
+            input,
+            task,
+            `Fix it on what the review after the merge found on “${task.title}”`,
+            'asked its lead to fix what the review after the merge found',
+          )
+          return `${task.slug}'s lead has what the review after the merge found, as the person's word: once its turn is over, its fix ships as a new pull request after the merged one. ${threadsSaying(access, task)}.`
         })
 
       const publishTask = (access: ToolAccess, input: unknown) =>
@@ -918,7 +1333,7 @@ export class TaskActions extends Context.Service<
           const task = yield* named(access, asked.task)
           yield* plainly(runs.publish(task.id), task.slug)
           yield* did(access, input, task, `Opened a pull request for “${task.title}”`, 'opened a pull request for this task')
-          return `Althar opens ${task.slug}'s pull request now, as its card's button does: read_task shows it once it is up. Both threads have a line saying so.`
+          return `Althar opens ${task.slug}'s pull request now, as its card's button does: read_task shows it once it is up. ${threadsSaying(access, task)}.`
         })
 
       const pushBranch = (access: ToolAccess, input: unknown) =>
@@ -966,23 +1381,38 @@ export class TaskActions extends Context.Service<
             )
             said.push(`${task.slug}'s lead is asked to resolve its conflict with the branch it goes into, where it has one.`)
           }
-          return `${said.join(' ')} Both threads have a line saying so.`
+          return `${said.join(' ')} ${threadsSaying(access, task)}.`
         })
 
       const moveToFront = (access: ToolAccess, input: unknown) =>
         Effect.gen(function* () {
           const asked = yield* read(Named, input)
           const task = yield* named(access, asked.task)
-          if (!(yield* busy.move(task.id, 0))) return `Nothing changed: ${task.slug} isn't waiting for a place among the agents at work.`
+          const sql = yield* SqlClient.SqlClient
+          const moved = yield* upNextMove(busy, plans, sql)(task.id, 0, actorOf(access))
+          if (moved === 'none')
+            return `Nothing changed: ${task.slug} isn't in Up next, waiting for a place among the agents at work or with a plan waiting to start.`
           yield* did(access, input, task, `Moved “${task.title}” to the front of the line`, 'moved this task to the front of the line')
-          return `${task.slug} is first in line now: it starts when the next agent's place frees.`
+          return moved === 'started'
+            ? `${task.slug}'s plan started, first in line: it goes on as soon as an agent's place frees, or now where one is free.`
+            : `${task.slug} is first in line now: it goes on when the next agent's place frees.`
         })
 
       const stopFollowing = (access: ToolAccess, input: unknown) =>
         Effect.gen(function* () {
           const asked = yield* read(Following, input)
           const task = yield* named(access, asked.task)
-          yield* plainly(changes.stopListening(task.id, asked.pull_request), task.slug)
+          // By its link, or its number, as add_part takes it: one the task doesn't follow is said, and nothing changes.
+          const sql = yield* SqlClient.SqlClient
+          const number = /^#?(\d+)$/.exec(asked.pull_request.trim())?.[1]
+          const [followed] = yield* sql<{ url: string }>`
+            SELECT json_extract(snapshot, '$.url') AS url FROM external_links
+            WHERE task_id = ${task.id} AND kind = 'change' AND listening = 1
+              AND (json_extract(snapshot, '$.url') = ${asked.pull_request.trim()} OR json_extract(snapshot, '$.number') = ${Number(number ?? -1)})
+            ORDER BY created_at DESC LIMIT 1`
+          if (followed === undefined)
+            return yield* new ToolRefused({ message: `${task.slug} doesn't follow ${asked.pull_request}: nothing changed.` })
+          yield* plainly(changes.stopListening(task.id, followed.url), task.slug)
           yield* did(
             access,
             input,
@@ -1001,7 +1431,7 @@ export class TaskActions extends Context.Service<
       yield* (yield* ToolServer).serve(POOL, [
         tool(
           'stop_task',
-          'Stops a task, as its Stop does: its step is cut short and its agents stop, its work kept. With turn, only its lead’s current turn ends, and it waits for the next message. restart_task carries a stopped task on. It acts at once, with a line in your thread and the task’s; do it when the person asks, or when a task is plainly going wrong and say why. A lead can’t stop its own task: it ends its turn.',
+          'Stops a task, as its Stop does: its step is cut short and its agents stop, its work kept. With turn, only its lead’s current turn ends, and it waits for the next message; or, where a turn Althar asked of its lead or reviewer waits for a place up next, that turn is cancelled, and what it would have said is read with the agent’s next turn. restart_task carries a stopped task on. It acts at once, with a line in your thread and the task’s; do it when the person asks, or when a task is plainly going wrong and say why. A lead can’t stop its own task: it ends its turn.',
           { type: 'object', properties: { task, turn: { type: 'boolean' }, why }, required: ['task'] },
           (access, input) =>
             Effect.flatMap(read(Stopping, input), (asked) =>
@@ -1010,7 +1440,7 @@ export class TaskActions extends Context.Service<
         ),
         tool(
           'hold_task',
-          'Holds a task’s plan that is counting down to start: it waits until it is started (restart_task). For a task already at work, stop it instead. It acts at once, with a line in your thread and the task’s.',
+          'Holds a task’s plan that is counting down to start, or whose first step still waits for a free agent or its checkout: it leaves the line and waits until it is started (restart_task). For a task already at work, stop it instead. It acts at once, with a line in your thread and the task’s.',
           { type: 'object', properties: { task, why }, required: ['task'] },
           (access, input) => Effect.flatMap(read(Asked, input), (asked) => act(access, asked.task, 'hold', { why: asked.why })),
         ),
@@ -1051,6 +1481,20 @@ export class TaskActions extends Context.Service<
           skipReview,
         ),
         tool(
+          'review_after_merge',
+          "Says whether one small change is reviewed after it merges, over its project's rule (read_settings project/tasks, afterMergeReview), on the person's word: review keeps a review after its merge where the rule has none (only blocking and major findings come back to the person, unless the rule says all); none drops it; project goes back to the rule. Only a small change, before it merges. To review it before it merges, make it a full task instead. It acts at once, with a line in your thread and the task's.",
+          {
+            type: 'object',
+            properties: {
+              task: optionalTask,
+              review: { type: 'string', enum: ['review', 'none', 'project'] },
+              why,
+            },
+            required: ['review'],
+          },
+          reviewAfterMerge,
+        ),
+        tool(
           'push_task',
           'Pushes a task’s commits to its pull request, up to the commit you read (head, as read_task shows its branch), as the Push button on its Change card does: a plain push, never forced, and nothing newer than that head. pull_request picks one, by its link, in a task of several. Where its pull request has commits the branch doesn’t, nothing is pushed and it says so: its lead merges them in. It acts at once, with a line in your thread and the task’s.',
           {
@@ -1064,6 +1508,151 @@ export class TaskActions extends Context.Service<
             required: ['head'],
           },
           pushTask,
+        ),
+        tool(
+          'ship_task',
+          'Ships what waits on a task’s branch, as its Ship button does, on the person’s word ("ship it", "push it"): what the person’s turns with its lead committed after its plan stays on the branch until then. Where its plan has a reviewer before the work ships, one review runs first, over everything since the last review, and its lead settles what it finds; then the commits go up, to its open pull request, or a new one after the last merged or closed. A task of several changes ships each waiting in a Ship of its own, the bottom of a stack first, each after its own review; with change, only that one, and what waits beneath it in its stack. A lead shipping its own task ships it once its turn ends. It acts at once, with a line in your thread and the task’s.',
+          {
+            type: 'object',
+            properties: {
+              task: optionalTask,
+              why,
+              change: {
+                type: 'string',
+                description: 'One change to ship, by its name or branch, with what waits beneath it; else every change waiting.',
+              },
+            },
+          },
+          shipTask,
+        ),
+        tool(
+          'start_change',
+          'Starts another change in a task (a task holds as many as it needs): a branch of its own, in a worktree of its own beside the task’s others, set up as they were, which ships, is reviewed and has its pull request on its own. For work that should be reviewed or merged apart from the rest, or go to another branch or repository; what only works together stays one change. It branches from what the task works toward, or, with on, from another of its changes’ branch, stacked on it, its pull request going into that one (only where it needs that change’s code); or toward another branch with toward. name is a few words for what it does. It acts at once, and the task’s thread marks it.',
+          {
+            type: 'object',
+            properties: {
+              task: optionalTask,
+              why,
+              name: { type: 'string', description: 'A few words for what the change does: "Lane heights".' },
+              branch: { type: 'string', description: 'Its branch, where you want one named; else Althar names it by the project’s rule.' },
+              on: {
+                type: 'string',
+                description: 'Another change of the task’s to stack on, by its name or branch: only where it needs that one’s code.',
+              },
+              toward: { type: 'string', description: 'A branch it works toward other than the task’s, such as release/0.8.0.' },
+              repository: { type: 'string', description: 'The repository, where the task has several.' },
+              waits_for: {
+                type: 'string',
+                description:
+                  'Another change of the task’s this one waits for to merge without needing its code, such as a release waiting for "Fix main": both go into the same branch, its failing checks that the other fixes wait with it, and the branch they go into is brought in once the other merges.',
+              },
+            },
+            required: ['name'],
+          },
+          startChange,
+        ),
+        tool(
+          'join_changes',
+          'Keep them together: carries one of the task’s changes’ commits onto another of its changes in the same repository, the task’s first unless into names one, before either has a pull request; the joined change’s folder goes and its branch stays. For a split you or the lead made that the person wants as one. It acts at once, with a line in the task’s thread.',
+          {
+            type: 'object',
+            properties: {
+              task: optionalTask,
+              why,
+              change: { type: 'string', description: 'The change carried over, by its name or branch.' },
+              into: { type: 'string', description: 'The change it joins; the task’s first without one.' },
+            },
+            required: ['change'],
+          },
+          joinChanges,
+        ),
+        tool(
+          'add_part',
+          'Adds a part to a task when it needs one, with why (a task is a conversation plus parts): workspace, a worktree with its branch for a chat or quick task that has to write (it takes its branch where it stands), or, with name, another change beside its first; reviewing, a review of a related pull request (pull_request); output, a pull request it follows as a change of its own (pull_request). It acts at once; a change you make on your way folds into your work, and only one someone else made gets a line of its own.',
+          {
+            type: 'object',
+            properties: {
+              task: optionalTask,
+              why,
+              part: { type: 'string', enum: ['workspace', 'reviewing', 'output'] },
+              name: { type: 'string', description: 'For another change: a few words for what it does.' },
+              pull_request: { type: 'string', description: 'Its link, or its number in the project’s repository: #123.' },
+            },
+            required: ['part', 'why'],
+          },
+          addPart,
+        ),
+        tool(
+          'change_part',
+          'Changes one of a task’s parts, with why: workspace moves it between a worktree and Local (to: worktree or checkout; it waits for the lead’s turn to end, and asks the person before taking their checkout off a branch of their own) or points it at another branch to work toward (toward, null for the default); shelf puts it on Scratch or on the board. Running an outside author’s code is the person’s word alone: suggest Run it to them.',
+          {
+            type: 'object',
+            properties: {
+              task: optionalTask,
+              why,
+              part: { type: 'string', enum: ['workspace', 'shelf'] },
+              to: { type: 'string', enum: ['worktree', 'checkout'] },
+              toward: { type: ['string', 'null'] },
+              shelf: { type: 'string', enum: ['scratch', 'board'] },
+            },
+            required: ['part', 'why'],
+          },
+          changePart,
+        ),
+        tool(
+          'remove_part',
+          'Removes one of a task’s parts, with why; it loses nothing: workspace, a change’s folder (name), what it hadn’t committed committed first and its branch staying (Drop it), or the task’s only worktree, which moves down to a copy; checked_by, its review this round (a review under way stops, findings filed stay); reviewing, a pull request it reviews (pull_request), refused while its draft was never posted, for the person to post or discard; output, a pull request it follows (pull_request), left open on its host. Its folder goes once it’s settled, its branch staying.',
+          {
+            type: 'object',
+            properties: {
+              task: optionalTask,
+              why,
+              part: { type: 'string', enum: ['workspace', 'checked_by', 'reviewing', 'output'] },
+              name: { type: 'string', description: 'For workspace: the change whose folder goes; the task’s only worktree without one.' },
+              pull_request: { type: 'string' },
+            },
+            required: ['part', 'why'],
+          },
+          removePart,
+        ),
+        tool(
+          'add_review',
+          'Adds a review of a pull request to this task, whatever else it does: a chat asked to review one, or a change reviewing a related one beside its own work. A read-only copy of its head, beside the task’s folder, which its lead reads and reviews with draft_review, as a review task’s lead does: the review is a card the person posts in one press. Nothing is posted until the person posts the draft. By its link, or its number in the project’s repository (#123). For a review on its own, the coordinator plans one with review_pull_request. It acts at once, with a line in the task’s thread.',
+          {
+            type: 'object',
+            properties: {
+              task: optionalTask,
+              why,
+              pull_request: { type: 'string', description: 'Its link, or its number in the project’s repository: #123.' },
+            },
+            required: ['pull_request'],
+          },
+          addReview,
+        ),
+        tool(
+          'work_toward',
+          'Points a running task at another branch to work toward, such as release/0.8.0, or back at its repository’s default with null, on the person’s word. Nothing pushed yet, its branch is rebased onto the new one; a conflict stops the rebase, for its lead to finish. Pushed already, its own commits are cherry-picked onto a fresh branch from the new one, whose pull request opens into it, unless what waits for Ship holds it; the old pull request is left open for the person to close. Its review’s mark moves with its commits. change names one of its changes, where it has several (its first otherwise). It acts at once, with a line in the task’s thread.',
+          {
+            type: 'object',
+            properties: {
+              task: optionalTask,
+              why,
+              toward: { type: ['string', 'null'], description: 'The branch, or null for the repository’s default.' },
+              change: { type: 'string', description: 'One of the task’s changes, by name, where it has several.' },
+            },
+            required: ['toward'],
+          },
+          workToward,
+        ),
+        tool(
+          'answer_review_after_merge',
+          'Answers what a task’s review after a merge found, as its Fix it and Leave it do, on the person’s word: fix hands the findings to its lead, whose fix ships as a new pull request after the merged one once its turn ends; leave closes them, and they stay in its thread. read_task says what the review found. It acts at once, with a line in your thread and the task’s.',
+          {
+            type: 'object',
+            properties: { task: optionalTask, why, answer: { type: 'string', enum: ['fix', 'leave'] } },
+            required: ['answer'],
+          },
+          answerAfterMerge,
         ),
         tool(
           'open_task_pull_request',

@@ -119,6 +119,11 @@ const pagesClosed = new Set<(owner: string) => void>()
 ipcRenderer.on('althar:page-closed', (_event, owner: string) => {
   for (const listener of pagesClosed) listener(owner)
 })
+/* A page a lead opened (or woke) that no window shows yet: the window places it beside the conversation. */
+const pagesOpened = new Set<(owner: string) => void>()
+ipcRenderer.on('althar:page-opened', (_event, owner: string) => {
+  for (const listener of pagesOpened) listener(owner)
+})
 
 contextBridge.exposeInMainWorld('althar', {
   // Which system it is, for the words the window uses (this Mac, this PC, this computer) and for its own chrome: on macOS the system draws the lights.
@@ -193,6 +198,7 @@ contextBridge.exposeInMainWorld('althar', {
           allow: (): Promise<boolean> => ipcRenderer.invoke('althar:dictation-allow'),
           download: (): Promise<void> => ipcRenderer.invoke('althar:dictation-download'),
           cancel: (): Promise<void> => ipcRenderer.invoke('althar:dictation-cancel'),
+          remove: (): Promise<void> => ipcRenderer.invoke('althar:dictation-remove'),
           prepare: (): Promise<void> => ipcRenderer.invoke('althar:dictation-prepare'),
           transcribe: (samples: Float32Array, sampleRate: number): Promise<string> =>
             ipcRenderer.invoke('althar:dictation-transcribe', samples, sampleRate),
@@ -236,8 +242,8 @@ contextBridge.exposeInMainWorld('althar', {
   pages: {
     open: (owner: string, address: string): Promise<unknown> => ipcRenderer.invoke('althar:page-open', owner, address),
     states: (): Promise<unknown> => ipcRenderer.invoke('althar:pages-states'),
-    show: (owner: string, panel: { x: number; y: number; width: number; height: number } | null): void =>
-      ipcRenderer.send('althar:page-show', owner, panel),
+    show: (owner: string, panel: { x: number; y: number; width: number; height: number } | null, where?: 'beside' | 'tab'): void =>
+      ipcRenderer.send('althar:page-show', owner, panel, where),
     move: (owner: string, move: string): Promise<void> => ipcRenderer.invoke('althar:page-move', owner, move),
     viewport: (owner: string, viewport: string): Promise<void> => ipcRenderer.invoke('althar:page-viewport', owner, viewport),
     point: (owner: string): Promise<unknown> => ipcRenderer.invoke('althar:page-point', owner),
@@ -264,6 +270,20 @@ contextBridge.exposeInMainWorld('althar', {
       pagesClosed.add(listener)
       return () => void pagesClosed.delete(listener)
     },
+    onOpened: (listener: (owner: string) => void): (() => void) => {
+      pagesOpened.add(listener)
+      return () => void pagesOpened.delete(listener)
+    },
+  },
+  // The HTML canvases beside the conversations: each by the thread it is beside, at a version's address (ADR-104).
+  canvases: {
+    show: (
+      threadId: string,
+      target: { projectId: string; canvasId: string; version: number; manifest: string },
+      panel: { x: number; y: number; width: number; height: number } | null,
+    ): void => ipcRenderer.send('althar:canvas-show', threadId, target, panel),
+    close: (threadId: string): void => ipcRenderer.send('althar:canvas-close', threadId),
+    reload: (threadId: string): void => ipcRenderer.send('althar:canvas-reload', threadId),
   },
   // What the page couldn't handle, for main's log: its message and stack, nothing else.
   logError: (error: { kind: 'error' | 'rejection'; message: string; stack: string; source?: string }): void =>

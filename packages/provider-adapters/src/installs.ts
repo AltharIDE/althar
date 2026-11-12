@@ -147,6 +147,20 @@ const inATerminal = (found: Located, flatpakId: string | undefined): string =>
     : quoted(found.command)
 
 /**
+ * An adapter that drives the agent's command rather than being it, told by
+ * its variable (`AgentCli.drivenBy`) to drive the person's own copy where
+ * they have one here: by its full path where it was found off the PATH. A
+ * copy out on the device (a Flatpak's host) is reached its own way; without
+ * one of theirs, the adapter drives the copy it ships with, as before.
+ */
+const drivingTheirs = (spec: LaunchSpec, variable: string | undefined, find: () => Located | null): LaunchSpec => {
+  if (variable === undefined) return spec
+  const found = find()
+  if (found === null || found.whose !== 'theirs' || found.out !== undefined) return spec
+  return { ...spec, env: { ...spec.env, [variable]: found.command } }
+}
+
+/**
  * The agent, with every command it runs pointed at where its command is,
  * looked up each time, so a copy downloaded while Althar runs is used at
  * once; and what the person runs to sign in names the same copy — through
@@ -165,7 +179,8 @@ export const usingLocated = (
     <A extends ReadonlyArray<unknown>>(make: (...args: A) => LaunchSpec) =>
     (...args: A): LaunchSpec => {
       const spec = make(...args)
-      const found = spec.command === cli.name ? find() : null
+      if (spec.command !== cli.name) return drivingTheirs(spec, cli.drivenBy, find)
+      const found = find()
       if (found === null) return spec
       // An npm-installed Node script found off the PATH finds the Node beside it, as it would in the terminal that installed it.
       const path =

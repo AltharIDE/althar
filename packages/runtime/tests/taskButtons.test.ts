@@ -83,7 +83,7 @@ describe('a task’s buttons, as tools', () => {
         yield* callTool(coordinator, 'push_task_branch', { task: task.slug }),
         /^Nothing changed for add-a-retry: Its repositories have no remote to push to/,
       )
-      assert.match(yield* callTool(coordinator, 'move_to_front', { task: task.slug }), /^Nothing changed: .* isn't waiting for a place/)
+      assert.match(yield* callTool(coordinator, 'move_to_front', { task: task.slug }), /^Nothing changed: .* isn't in Up next/)
       // Heads named, as read_task shows them: the same, as its branch's work is in its pull request.
       assert.match(
         yield* callTool(coordinator, 'push_task_branch', { task: task.slug, heads: [{ repository: 'api', head: 'abc1234' }] }),
@@ -109,10 +109,10 @@ describe('a task’s buttons, as tools', () => {
       // Its own lead names no task: it is its own, and its line says its lead did it.
       assert.match(
         yield* callTool(lead, 'resolve_conflicts', { automatically: false, why: 'the person resolves them' }),
-        /^add-a-retry resolves conflicts only when asked now\. Both threads/,
+        /^add-a-retry resolves conflicts only when asked now\. Its thread has a line/,
       )
       assert.include(yield* titles(task.threadId), 'Its lead set this task to resolve conflicts only when asked: the person resolves them')
-      assert.match(yield* callTool(lead, 'move_to_front', {}), /^Nothing changed: add-a-retry isn't waiting/)
+      assert.match(yield* callTool(lead, 'move_to_front', {}), /^Nothing changed: add-a-retry isn't in Up next/)
 
       const both = yield* callTool(coordinator, 'resolve_conflicts', { task: task.slug, automatically: null, now: true })
       assert.include(both, 'resolves conflicts as its project says now.')
@@ -275,6 +275,7 @@ describe('what an agent is told when a merge or push doesn’t go', () => {
     assert.strictEqual(merge('unreadable'), 'Althar couldn’t read a checkout: the checkout')
     assert.match(merge('moved'), /moved while it merged: nothing was merged/)
     assert.strictEqual(merge('missing'), 'fix-it has no the checkout here to merge into.')
+    assert.strictEqual(merge('nothing', { into: 'main' }), 'fix-it has nothing to merge: its work is already in main.')
 
     assert.match(
       pushRefused(new PushRefused({ taskId: 't', why: 'behind', remote: 'origin/main' })),

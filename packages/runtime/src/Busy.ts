@@ -106,7 +106,11 @@ export interface AtOnce {
  */
 export type Order = 'person' | 'underway' | 'new' | 'automation'
 
-const RANK: Readonly<Record<Order, number>> = { person: 0, underway: 1, new: 2, automation: 3 }
+/*
+ * Work under way and new work stand in one band, Up next's (ADR-065): by default what is under way first (`tier`), then
+ * new work, each by since when it waits; once the person puts the band in their order, by where they put each task.
+ */
+const RANK: Readonly<Record<Order, number>> = { person: 0, underway: 1, new: 1, automation: 3 }
 
 /** How many automations' tasks may be at work at once, unless a test says: one, so nothing of the person's waits behind them. */
 const AUTOMATIONS_AT_ONCE = 1
@@ -115,11 +119,13 @@ const AUTOMATIONS_AT_ONCE = 1
 export const orderIn = (order: Order, taskId: string, automated: ReadonlySet<string>): Order =>
   order === 'person' ? 'person' : automated.has(taskId) ? 'automation' : order
 
-/** Which of a task's agents: its lead, or its reviewer. */
+/** Which of a task's agents: its lead, its reviewer, or one of its lead's helpers. */
 export interface Agent {
   readonly taskId: string
   /** Its reviewer, not its lead. */
   readonly review?: boolean | undefined
+  /** One of its lead's helpers, by its thread: a place of its own (ADR-087), never its lead's or its reviewer's. */
+  readonly helper?: string | undefined
 }
 
 /** How a step after another on the same task enters: the agent it follows, whose place it takes, with what that agent left running. */
@@ -142,6 +148,9 @@ export interface Holder extends Agent {
   readonly kept: boolean
 }
 
+/** How many of a task's helpers are at work at once (ADR-087); more wait for a place, up to ten (Helpers.ts). */
+export const HELPERS_AT_ONCE = 4
+
 /** How much of a core, of the time between two samples, what an agent left running must use to count as at work. */
 const WORKING_SHARE = 0.05
 
@@ -160,9 +169,16 @@ export interface Waiter extends Agent {
   readonly start: Effect.Effect<void, unknown> | ((begun: Effect.Effect<void>) => Effect.Effect<void, unknown>)
 }
 
-/** A task's agent as it is counted: its lead by the task, its reviewer apart. */
-const keyOf = (taskId: string, review?: boolean) => (review === true ? `${taskId} review` : taskId)
-const waiterKey = (waiter: Agent) => keyOf(waiter.taskId, waiter.review)
+/** A task's agent as it is counted: its lead by the task, its reviewer apart, and each of its helpers apart. */
+const keyOf = (taskId: string, review?: boolean, helper?: string) =>
+  helper !== undefined ? `${taskId} helper ${helper}` : review === true ? `${taskId} review` : taskId
+const waiterKey = (waiter: Agent) => keyOf(waiter.taskId, waiter.review, waiter.helper)
+/** A key's task, and which of its agents. */
+const agentOf = (key: string): Agent => {
+  const helper = / helper (\S+)$/.exec(key)
+  if (helper !== null) return { taskId: key.slice(0, helper.index), helper: helper[1] }
+  return key.endsWith(' review') ? { taskId: key.replace(/ review$/, ''), review: true } : { taskId: key }
+}
 
 /**
  * Something waiting, where it stands: its rank, the time it stands at within
@@ -172,9 +188,17 @@ const waiterKey = (waiter: Agent) => keyOf(waiter.taskId, waiter.review)
 interface Ranked {
   readonly waiter: Waiter
   readonly rank: number
+  /** Within its rank: where the person put it, or work under way, before new work that waits as it came. */
+  readonly tier: number
   readonly at: string
   readonly line: boolean
+  /** Where the person put its task in Up next: it stands at that time, whatever it waits for. */
+  readonly placed: boolean
 }
+
+/** What stands first: by rank, then tier, then the time it stands at. */
+const ahead = (a: { rank: number; tier: number; at: string }, b: { rank: number; tier: number; at: string }) =>
+  a.rank - b.rank || a.tier - b.tier || a.at.localeCompare(b.at)
 
 /**
  * A project's work that waits for a place, as its board's Up next shows it
@@ -186,6 +210,8 @@ interface Ranked {
 export interface Line {
   readonly continuing: ReadonlyArray<string>
   readonly tasks: ReadonlyArray<string>
+  /** Both, in the one order they get a place: what continues and the line, as the person put them. */
+  readonly order: ReadonlyArray<string>
   readonly reordered: boolean
 }
 
@@ -232,11 +258,19 @@ export class Busy extends Context.Service<
      */
     line(projectId: string): Effect.Effect<Line>
     /**
-     * Puts a task in its project's line at a place, from 0, the rest keeping
+     * Puts a task in its project's Up next at a place, from 0, the rest keeping
      * their order, as the person moved it; a place past the end is its end.
-     * False, and nothing moved, where it isn't in the line.
+     * What continues and the line are one order here: either goes anywhere in
+     * it. False, and nothing moved, where it doesn't wait there; `joining`,
+     * one about to wait (a plan the person starts by moving it) is put there
+     * for when it does.
      */
-    move(taskId: string, to: number): Effect.Effect<boolean, SqlError.SqlError>
+    move(taskId: string, to: number, joining?: boolean): Effect.Effect<boolean, SqlError.SqlError>
+    /**
+     * Lets go of the turns a task's lead and reviewer wait for a place to
+     * give: the threads they were for, none where nothing waited.
+     */
+    letGo(taskId: string): Effect.Effect<ReadonlyArray<string>, SqlError.SqlError>
     /** Puts a project's line back in the order its tasks began waiting. */
     oldestFirst(projectId: string): Effect.Effect<void, SqlError.SqlError>
     /** Adds where waiting work is read from: each time the queue is looked at, every source is read, and what waited longest starts first. */
@@ -283,7 +317,7 @@ export class Busy extends Context.Service<
             )
       /** The most at work that leaves room for an agent: the number, and for a small task's lead the quick lane beyond it. */
       const roomUpTo = (most: number, agent: Agent, small: ReadonlySet<string>) =>
-        agent.review !== true && small.has(agent.taskId) ? most + quickLane : most
+        agent.review !== true && agent.helper === undefined && small.has(agent.taskId) ? most + quickLane : most
       /** The tasks automations' runs started that are under way; none where they can't be read, so nothing waits for that. */
       const automated = provide(automatedTasks).pipe(
         Effect.catchCause((cause) =>
@@ -292,7 +326,7 @@ export class Busy extends Context.Service<
       )
       /** How many automations' tasks are at work, of those at work. */
       const automationsAt = (at: ReadonlySet<string>, tasks: ReadonlySet<string>) =>
-        new Set([...at].map((key) => key.replace(/ review$/, '')).filter((taskId) => tasks.has(taskId))).size
+        new Set([...at].map((key) => agentOf(key).taskId).filter((taskId) => tasks.has(taskId))).size
       const cpuOf =
         options.cpuOf ??
         ((agents: ReadonlyArray<{ readonly threadId: string; readonly pid: number | null }>) =>
@@ -392,8 +426,9 @@ export class Busy extends Context.Service<
       const atWork = Effect.gen(function* () {
         // What the store says is under way, on the thread it is on: a step of a running run on an agent, a round its lead was
         // asked about, an agent starting.
-        const under = yield* sql<{ taskId: string; threadId: string | null; review: number }>`
-          SELECT r.task_id, CASE WHEN n.node_key = 'review' THEN s.id ELSE t.id END AS thread_id, n.node_key = 'review' AS review
+        const under = yield* sql<{ taskId: string; threadId: string | null; review: number; helper: string | null }>`
+          SELECT r.task_id, CASE WHEN n.node_key = 'review' THEN s.id ELSE t.id END AS thread_id, n.node_key = 'review' AS review,
+            NULL AS helper
           FROM runs r JOIN workflow_executions e ON e.run_id = r.id JOIN nodes n ON n.execution_id = e.id
           JOIN node_attempts a ON a.node_id = n.id
           JOIN threads t ON t.task_id = r.task_id AND t.kind = 'task'
@@ -402,10 +437,13 @@ export class Busy extends Context.Service<
             -- A round of work after the plan counts as its lead's turns do (ADR-034): in one, or starting, not between them.
             AND NOT (r.plan_id IS NULL AND n.node_key = 'implement' AND a.state = 'running')
           UNION ALL
-          SELECT c.task_id, t.id, 0 FROM conflict_resolutions c JOIN threads t ON t.task_id = c.task_id AND t.kind = 'task'
+          SELECT c.task_id, t.id, 0, NULL FROM conflict_resolutions c JOIN threads t ON t.task_id = c.task_id AND t.kind = 'task'
           WHERE c.state = 'resolving' AND c.waiting IS NULL
           UNION ALL
-          SELECT h.task_id, h.id, h.kind = 'step' FROM provider_sessions p JOIN threads h ON h.id = p.thread_id
+          -- A helper starting takes a place of its own, by its thread (ADR-087).
+          SELECT h.task_id, h.id, h.kind = 'step' AND coalesce(h.node_key, '') NOT LIKE 'helper:%',
+            CASE WHEN h.node_key LIKE 'helper:%' THEN h.id END
+          FROM provider_sessions p JOIN threads h ON h.id = p.thread_id
           WHERE p.state = 'starting' AND h.kind IN ('task', 'step') AND h.task_id IS NOT NULL`
         // An agent waiting on the person's answer, to a question or a permission, keeps its place a few minutes, so an answer
         // soon goes on where it was; past that it isn't using the machine, nor while an answer kept before waits for a place.
@@ -422,14 +460,18 @@ export class Busy extends Context.Service<
             WHERE q.kind = 'permission' AND q.state = 'open' AND q.created_at <= ${askedBefore}`).map((row) => row.threadId),
         )
         const holders = new Map<string, Holder>()
-        const take = (taskId: string, review: boolean, threadId: string | null, kept: boolean) => {
-          const key = keyOf(taskId, review)
+        const take = (taskId: string, review: boolean, threadId: string | null, kept: boolean, helper?: string) => {
+          const key = keyOf(taskId, review, helper)
           // What is under way is taken first, so an agent at work in its step or a turn is never kept only by what it left running.
-          if (!holders.has(key)) holders.set(key, { taskId, review, threadId, kept })
+          if (!holders.has(key)) holders.set(key, { taskId, review, threadId, kept, ...(helper === undefined ? {} : { helper }) })
         }
-        for (const key of starting.keys()) take(key.replace(/ review$/, ''), key.endsWith(' review'), null, false)
+        for (const key of starting.keys()) {
+          const agent = agentOf(key)
+          take(agent.taskId, agent.review === true, null, false, agent.helper)
+        }
         for (const row of under)
-          if (row.threadId === null || !asking.has(row.threadId)) take(row.taskId, row.review === 1, row.threadId, false)
+          if (row.threadId === null || !asking.has(row.threadId))
+            take(row.taskId, row.review === 1, row.threadId, false, row.helper ?? undefined)
         // What the person said to an agent, still to be delivered, is its next turn on its way: the place isn't given to
         // anything else in between.
         const told = new Set(
@@ -441,7 +483,8 @@ export class Busy extends Context.Service<
           // Left running and idle, it is nothing to wait for; not yet read, it counts.
           const working = session.background && (sampled.get(session.threadId)?.working ?? true)
           const turning = (session.turnRunning || told.has(session.threadId)) && !asking.has(session.threadId)
-          if (working || turning) take(session.taskId, session.reviewer, session.threadId, !turning)
+          if (working || turning)
+            take(session.taskId, session.reviewer, session.threadId, !turning, session.helper ? session.threadId : undefined)
         }
         // One task, one place: what its agents left running counts once, and not at all beside an agent of its at work.
         const placed = new Set([...holders.values()].flatMap((holder) => (holder.kept ? [] : [holder.taskId])))
@@ -451,13 +494,13 @@ export class Busy extends Context.Service<
           placed.add(holder.taskId)
           return true
         })
-        return { at: new Set(held.map((holder) => keyOf(holder.taskId, holder.review))), holders: held }
+        return { at: new Set(held.map((holder) => keyOf(holder.taskId, holder.review, holder.helper))), holders: held }
       })
 
       /** The place a task holds only by what its agents left running, which its next work takes; undefined where it holds none so. */
       const keptPlace = (taskId: string, holders: ReadonlyArray<Holder>) => {
         const its = holders.filter((holder) => holder.taskId === taskId)
-        return its.length === 1 && its[0]?.kept === true ? keyOf(taskId, its[0].review) : undefined
+        return its.length === 1 && its[0]?.kept === true ? keyOf(taskId, its[0].review, its[0].helper) : undefined
       }
 
       /** Whether nothing of a task has had an agent yet: no turn of any of its agents reached one. */
@@ -481,41 +524,56 @@ export class Busy extends Context.Service<
           )).flat(),
           ...turns.values(),
         ]
-        // A task's lead waiting before anything of its task has had an agent is in the line, with where the person put it.
-        const asked = [...new Set(all.flatMap((waiter) => (waiter.order === 'person' || waiter.review === true ? [] : [waiter.taskId])))]
-        const lined =
+        // A task's lead or reviewer waiting stands where the person put its task in Up next; its lead waiting before anything of
+        // its task has had an agent is in the line.
+        const asked = [
+          ...new Set(all.flatMap((waiter) => (waiter.order === 'person' || waiter.helper !== undefined ? [] : [waiter.taskId]))),
+        ]
+        const read =
           asked.length === 0
             ? []
-            : yield* sql<{ id: string; lineAt: string | null }>`
-                SELECT k.id, k.line_at FROM tasks k WHERE k.id IN (SELECT value FROM json_each(${JSON.stringify(asked)}))
-                  AND NOT EXISTS (SELECT 1 FROM turn_deliveries d JOIN threads h ON h.id = d.thread_id
-                    WHERE h.task_id = k.id AND d.delivered_at IS NOT NULL)`.pipe(
+            : yield* sql<{ id: string; lineAt: string | null; untouched: number }>`
+                SELECT k.id, k.line_at, NOT EXISTS (SELECT 1 FROM turn_deliveries d JOIN threads h ON h.id = d.thread_id
+                    WHERE h.task_id = k.id AND d.delivered_at IS NOT NULL) AS untouched
+                FROM tasks k WHERE k.id IN (SELECT value FROM json_each(${JSON.stringify(asked)}))`.pipe(
                 Effect.catchCause((cause) => Effect.as(Effect.logWarning('Could not read the line of what waits', cause), [])),
               )
-        const line = new Map(lined.map((row) => [row.id, row.lineAt]))
+        const line = new Set(read.flatMap((row) => (row.untouched === 1 ? [row.id] : [])))
+        const put = new Map(read.flatMap((row) => (row.lineAt === null ? [] : [[row.id, row.lineAt] as const])))
         const tasks = yield* automated
         return all
           .map((waiter): Ranked => {
-            const inLine = waiter.order !== 'person' && waiter.review !== true && line.has(waiter.taskId)
-            // An automation's run waits after everything else, in the line or not (ADR-061).
+            const theirs = waiter.order !== 'person' && waiter.helper === undefined
+            const inLine = theirs && waiter.review !== true && line.has(waiter.taskId)
+            const placedAt = theirs ? put.get(waiter.taskId) : undefined
+            // An automation's run waits after everything else, in the line or not (ADR-061), unless the person put it somewhere.
             const order = orderIn(waiter.order, waiter.taskId, tasks)
             return {
               waiter,
               line: inLine,
+              placed: placedAt !== undefined,
               // Owed its task's place, it stands before all but what the person did; an automation's run, else, after all.
               rank:
                 waiter.order !== 'person' && owed.has(waiter.taskId)
                   ? RANK.person + 0.5
-                  : order === 'automation'
-                    ? RANK.automation
-                    : inLine
-                      ? RANK.new
+                  : placedAt !== undefined
+                    ? RANK.underway
+                    : order === 'automation'
+                      ? RANK.automation
                       : RANK[waiter.order],
-              at: (inLine ? line.get(waiter.taskId) : null) ?? waiter.since,
+              tier: placedAt !== undefined || (!inLine && waiter.order !== 'new') ? 0 : 1,
+              at: placedAt ?? waiter.since,
             }
           })
-          .toSorted((a, b) => a.rank - b.rank || a.at.localeCompare(b.at))
+          .toSorted(ahead)
       })
+
+      /** A task at work, or gone from Up next: where the person put it there no longer stands. */
+      const unplace = (taskId: string) => sql`UPDATE tasks SET line_at = NULL WHERE id = ${taskId} AND line_at IS NOT NULL`
+
+      /** Where the person put a task in Up next, if they did: the time it stands at. */
+      const placedAt = (taskId: string) =>
+        Effect.map(sql<{ lineAt: string | null }>`SELECT line_at FROM tasks WHERE id = ${taskId}`, (rows) => rows[0]?.lineAt ?? undefined)
 
       /**
        * Whether a task's agent has a place now: what the person did always has; its agent at work already has; so has
@@ -528,13 +586,19 @@ export class Busy extends Context.Service<
         asked: Order,
       ) =>
         Effect.gen(function* () {
-          const key = keyOf(agent.taskId, agent.review)
+          const key = keyOf(agent.taskId, agent.review, agent.helper)
           const tasks = yield* automated
           const order = orderIn(asked, agent.taskId, tasks)
           if (order === 'person' || at.has(key)) return true
           // Offline, it waits for the computer to be back rather than start into a dead connection.
           if (!(yield* connectivity.online)) return false
-          if (keptPlace(agent.taskId, holders) !== undefined) return true
+          // A task's helpers take four places at most at once (ADR-087): the rest wait their turn, whatever is free.
+          if (
+            agent.helper !== undefined &&
+            holders.filter((holder) => holder.taskId === agent.taskId && holder.helper !== undefined).length >= HELPERS_AT_ONCE
+          )
+            return false
+          if (agent.helper === undefined && keptPlace(agent.taskId, holders) !== undefined) return true
           const most = (yield* atOnce).count
           // Every place of the number taken, only a small task's lead has room, in the quick lane beyond it.
           const beyond = at.size >= most
@@ -542,15 +606,19 @@ export class Busy extends Context.Service<
           // An automation's run takes a place only while fewer automations than it may have are at work.
           if (order === 'automation' && automationsAt(at, tasks) >= automationsAtOnce) return false
           // Work waiting for a place of its own, standing where this does or before it, goes first; what waits on an agent at
-          // work, or is on its way, takes none. In the quick lane, only what could take its place stands before it.
+          // work, or is on its way, takes none. In the quick lane, only what could take its place stands before it. Put somewhere
+          // in Up next by the person, this stands there.
           const queue = yield* waiting
           const small = beyond ? yield* smallOf(queue.map(({ waiter }) => waiter.taskId)) : new Set<string>()
+          const put = agent.helper === undefined ? yield* placedAt(agent.taskId) : undefined
+          const mine =
+            put === undefined ? { rank: RANK[order], tier: order === 'new' ? 1 : 0, at: '￿' } : { rank: RANK.underway, tier: 0, at: put }
           return !queue.some(
-            ({ waiter, rank }) =>
-              waiterKey(waiter) !== key &&
-              !at.has(waiterKey(waiter)) &&
-              rank <= RANK[order] &&
-              (!beyond || roomUpTo(most, waiter, small) > most),
+            (one) =>
+              waiterKey(one.waiter) !== key &&
+              !at.has(waiterKey(one.waiter)) &&
+              ahead(one, mine) <= 0 &&
+              (!beyond || roomUpTo(most, one.waiter, small) > most),
           )
         })
 
@@ -582,12 +650,25 @@ export class Busy extends Context.Service<
           const left: Array<string> = []
           // The tasks whose place kept by what they left running is taken in this look: by one of their work only.
           const taken = new Set<string>()
-          for (const { waiter, line, rank } of queue) {
+          for (const { waiter, placed, rank } of queue) {
             const key = waiterKey(waiter)
             // On its way already: it is counted, and not started twice.
             if (starting.has(key)) continue
             // Offline, only what the person did starts, and what follows on for an agent at work.
             if (!online && waiter.order !== 'person' && !busy.has(key)) {
+              left.push(waiter.taskId)
+              continue
+            }
+            // A task's helpers take four places at most at once (ADR-087), however many are free: the rest wait their turn, after a
+            // restart too, where what waited is started from here.
+            if (
+              waiter.helper !== undefined &&
+              !busy.has(key) &&
+              [...busy].filter((one) => {
+                const agent = agentOf(one)
+                return agent.taskId === waiter.taskId && agent.helper !== undefined
+              }).length >= HELPERS_AT_ONCE
+            ) {
               left.push(waiter.taskId)
               continue
             }
@@ -613,8 +694,8 @@ export class Busy extends Context.Service<
             owed.delete(waiter.taskId)
             busy.add(key)
             hold(key)
-            // Out of the line: where the person put it no longer stands.
-            if (line) yield* sql`UPDATE tasks SET line_at = NULL WHERE id = ${waiter.taskId} AND line_at IS NOT NULL`
+            // Out of Up next: where the person put it no longer stands.
+            if (placed) yield* unplace(waiter.taskId)
             // A turn that waited has its place now: it waits no more, here or on its thread.
             for (const [threadId, turn] of turns)
               if (turn === waiter) {
@@ -639,7 +720,7 @@ export class Busy extends Context.Service<
           // Who holds the places, and whether by what they left running, is on the cards too, as is each one's place in Up next:
           // read again when either changes.
           const shown = `${holders
-            .map((holder) => `${keyOf(holder.taskId, holder.review)}${holder.kept ? ' kept' : ''}`)
+            .map((holder) => `${keyOf(holder.taskId, holder.review, holder.helper)}${holder.kept ? ' kept' : ''}`)
             .toSorted()
             .join(',')} ${most} ${queue.map(({ waiter }) => waiterKey(waiter)).join(',')}`
           if (shown !== said) {
@@ -716,8 +797,8 @@ export class Busy extends Context.Service<
        * merged one's lead goes back to work for it (ADR-034).
        */
       const restored = Effect.gen(function* () {
-        const rows = yield* sql<{ threadId: string; taskId: string; kind: string; since: string }>`
-          SELECT h.id AS thread_id, h.task_id, h.kind, h.waits_for_place AS since FROM threads h
+        const rows = yield* sql<{ threadId: string; taskId: string; kind: string; nodeKey: string | null; since: string }>`
+          SELECT h.id AS thread_id, h.task_id, h.kind, h.node_key, h.waits_for_place AS since FROM threads h
           JOIN tasks k ON k.id = h.task_id JOIN projects p ON p.id = h.project_id
           WHERE h.waits_for_place IS NOT NULL AND k.state IN ('draft', 'open', 'done') AND p.archived_at IS NULL
             AND NOT EXISTS (SELECT 1 FROM runs r WHERE r.task_id = h.task_id AND r.state = 'suspended'
@@ -728,7 +809,8 @@ export class Busy extends Context.Service<
           (row) =>
             Effect.map(Effect.all([personSaid(row.threadId), untouched(row.taskId)]), ([person, fresh]) => ({
               taskId: row.taskId,
-              review: row.kind === 'step',
+              review: row.kind === 'step' && !(row.nodeKey ?? '').startsWith('helper:'),
+              ...((row.nodeKey ?? '').startsWith('helper:') ? { helper: row.threadId } : {}),
               // What the person said starts at once; what Althar said to it is the work of a task under way, or new work
               // where nothing of its task has had an agent yet.
               order: person ? ('person' as const) : fresh ? ('new' as const) : ('underway' as const),
@@ -766,6 +848,8 @@ export class Busy extends Context.Service<
                     handed ||
                     (yield* roomFor({ taskId, review: how.review }, work, how.order ?? (how.after === undefined ? 'new' : 'underway')))
                   const done = yield* then(room)
+                  // At work now, it no longer stands where the person put it in Up next.
+                  if (room) yield* unplace(taskId)
                   // Held from here, so nothing takes the place before what starts it is under way.
                   if (room && how.next !== undefined) hold(key)
                   return { room, done }
@@ -784,7 +868,7 @@ export class Busy extends Context.Service<
         work: (begun: Effect.Effect<void>) => Effect.Effect<void>,
       ) =>
         Effect.gen(function* () {
-          const key = keyOf(agent.taskId, agent.review)
+          const key = keyOf(agent.taskId, agent.review, agent.helper)
           // What the person says to an agent, or an agent they started or switched to, goes on at once; what Althar tells it is the
           // work of a task under way, or new work where nothing of its task has had an agent yet, as a review's first turn.
           const order: Order =
@@ -800,6 +884,7 @@ export class Busy extends Context.Service<
                   Effect.gen(function* () {
                     const room = yield* roomFor(agent, yield* atWork, order)
                     if (room) {
+                      yield* unplace(agent.taskId)
                       turns.delete(agent.threadId)
                       yield* sql`UPDATE threads SET waits_for_place = NULL WHERE id = ${agent.threadId} AND waits_for_place IS NOT NULL`
                       // Held last, so nothing that fails after leaves it held; let go by the turn, attached with nothing between.
@@ -841,14 +926,16 @@ export class Busy extends Context.Service<
         })
 
       /**
-       * A project's work that waits for a place, in the order it gets one, each task once: its tasks under way, none of
-       * whose agents is at work (one with an agent at work is running, and what else of it waits goes on beside that), then
-       * its line, each with the time it stands at and since when it waits.
+       * A project's work that waits for a place, in the order it gets one, each task once (ADR-065): its tasks under way, none
+       * of whose agents is at work (one with an agent at work is running, and what else of it waits goes on beside that), and
+       * its line, the tasks no agent has worked on yet, in one band: what is under way first unless the person put them in an
+       * order of their own. Each with the time it stands at, since when it waits, whether it is in the line, and whether the
+       * person put it where it stands.
        */
       const standingOf = (projectId: string) =>
         Effect.gen(function* () {
           const queue = yield* waiting
-          if (queue.length === 0) return { continuing: [], line: [] }
+          if (queue.length === 0) return []
           const ids = [...new Set(queue.map((entry) => entry.waiter.taskId))]
           const ours = new Set(
             (yield* sql<{ id: string }>`
@@ -857,56 +944,54 @@ export class Busy extends Context.Service<
             ),
           )
           const lined = new Set(queue.flatMap((entry) => (entry.line ? [entry.waiter.taskId] : [])))
-          const under = new Set(queue.flatMap(({ waiter: { taskId } }) => (ours.has(taskId) && !lined.has(taskId) ? [taskId] : [])))
+          const under = queue.some(({ waiter: { taskId } }) => ours.has(taskId) && !lined.has(taskId))
           // Who is at work is read only where something of the project's under way waits: the line alone needs none of it.
-          const working =
-            under.size === 0
-              ? new Set<string>()
-              : new Set((yield* atWork).holders.flatMap((holder) => (holder.kept ? [] : [holder.taskId])))
-          const continuing = [...under].filter((taskId) => !working.has(taskId))
+          const working = under
+            ? new Set((yield* atWork).holders.flatMap((holder) => (holder.kept ? [] : [holder.taskId])))
+            : new Set<string>()
           const seen = new Set<string>()
-          const line = queue.flatMap(({ waiter, at, line: inLine }) => {
-            if (!inLine || !ours.has(waiter.taskId) || seen.has(waiter.taskId)) return []
-            seen.add(waiter.taskId)
-            return [{ taskId: waiter.taskId, at, since: waiter.since }]
+          return queue.flatMap(({ waiter, at, placed }) => {
+            const { taskId } = waiter
+            if (!ours.has(taskId) || seen.has(taskId) || (!lined.has(taskId) && working.has(taskId))) return []
+            seen.add(taskId)
+            return [{ taskId, at, since: waiter.since, line: lined.has(taskId), placed }]
           })
-          return { continuing, line }
         })
-
-      /** A project's line in the order it starts: each task once, with the time it stands at and since when it waits. */
-      const lineOf = (projectId: string) => Effect.map(standingOf(projectId), (standing) => standing.line)
 
       /** The cards of a line's tasks, read again: each one's place in it changed. */
       const touchLine = (line: ReadonlyArray<{ readonly taskId: string }>) =>
         Effect.forEach(line, (one) => Effect.ignore(provide(touchTask(one.taskId))), { discard: true })
 
-      const move = (taskId: string, to: number) =>
+      const move = (taskId: string, to: number, joining = false) =>
         Effect.gen(function* () {
           const [task] = yield* sql<{ projectId: string }>`SELECT project_id FROM tasks WHERE id = ${taskId}`
           if (task === undefined) return false
           const moved = yield* lock.withPermits(1)(
             Effect.gen(function* () {
-              const line = yield* lineOf(task.projectId)
-              const it = line.find((one) => one.taskId === taskId)
+              const band = yield* standingOf(task.projectId)
+              // One about to join, such as a plan the person starts by moving it: it stands where they put it once it waits.
+              const found = band.find((one) => one.taskId === taskId)
+              const it = found ?? (joining ? { taskId, at: yield* timestamp } : undefined)
               if (it === undefined) return null
-              const others = line.filter((one) => one !== it)
+              const others = band.filter((one) => one.taskId !== taskId)
               const at = Math.max(0, Math.min(others.length, Math.floor(to)))
               const order = [...others.slice(0, at), it, ...others.slice(at)]
-              // Each takes one of the times the line stands at now, in its new order: a task that joins later, waiting since
-              // later, still goes after them all, and the line keeps its place among other projects' work.
+              // Each takes one of the times the band stands at now, in its new order, rising: a task that joins later, waiting
+              // since later, still goes after them all, and the band keeps its place among other projects' work.
+              const times = [...band.map((one) => one.at), ...(found === undefined ? [it.at] : [])]
               let last = ''
               yield* sql.withTransaction(
                 Effect.forEach(
                   order,
                   (one, i) => {
-                    const stands = line[i]?.at ?? one.at
+                    const stands = times[i] ?? one.at
                     last = stands > last ? stands : after(last)
                     return sql`UPDATE tasks SET line_at = ${last} WHERE id = ${one.taskId}`
                   },
                   { discard: true },
                 ),
               )
-              return line
+              return order
             }),
           )
           if (moved === null) return false
@@ -917,15 +1002,43 @@ export class Busy extends Context.Service<
 
       const oldestFirst = (projectId: string) =>
         Effect.gen(function* () {
-          const line = yield* lock.withPermits(1)(
+          const band = yield* lock.withPermits(1)(
             Effect.gen(function* () {
-              const line = yield* lineOf(projectId)
+              const band = yield* standingOf(projectId)
               yield* sql`UPDATE tasks SET line_at = NULL WHERE project_id = ${projectId} AND line_at IS NOT NULL`
-              return line
+              return band
             }),
           )
-          yield* touchLine(line)
+          yield* touchLine(band)
           yield* wake
+        })
+
+      /**
+       * Lets go of the turns a task's lead and reviewer wait for a place to give: they wait no more, here or on their threads,
+       * and the task leaves Up next. The threads they were for; what they would have delivered is the caller's.
+       */
+      const letGo = (taskId: string) =>
+        Effect.gen(function* () {
+          const gone = yield* lock.withPermits(1)(
+            Effect.gen(function* () {
+              const threads = (yield* sql<{ id: string }>`
+                SELECT id FROM threads WHERE task_id = ${taskId} AND waits_for_place IS NOT NULL
+                  AND coalesce(node_key, '') NOT LIKE 'helper:%'`).map((row) => row.id)
+              for (const [threadId, turn] of turns) if (turn.taskId === taskId && turn.helper === undefined) threads.push(threadId)
+              const all = [...new Set(threads)]
+              for (const threadId of all) {
+                turns.delete(threadId)
+                yield* sql`UPDATE threads SET waits_for_place = NULL WHERE id = ${threadId}`
+              }
+              if (all.length > 0) yield* unplace(taskId)
+              return all
+            }),
+          )
+          if (gone.length > 0) {
+            yield* Effect.ignore(provide(touchTask(taskId)))
+            yield* wake
+          }
+          return gone
         })
 
       return Busy.of({
@@ -937,20 +1050,28 @@ export class Busy extends Context.Service<
         }),
         order: Effect.map(waiting, (all) => all.map(({ waiter, line }) => ({ taskId: waiter.taskId, review: waiter.review, line }))),
         line: (projectId) =>
-          Effect.map(standingOf(projectId), ({ continuing, line }): Line => {
-            const oldest = line.toSorted((a, b) => a.since.localeCompare(b.since))
+          Effect.map(standingOf(projectId), (band): Line => {
+            // What continues first, then the line, each by since when it waits: the order the person hasn't changed.
+            const natural = band.toSorted((a, b) => Number(a.line) - Number(b.line) || a.since.localeCompare(b.since))
             return {
-              continuing,
-              tasks: line.map((one) => one.taskId),
-              reordered: line.some((one, i) => one.taskId !== oldest[i]?.taskId),
+              continuing: band.flatMap((one) => (one.line ? [] : [one.taskId])),
+              tasks: band.flatMap((one) => (one.line ? [one.taskId] : [])),
+              order: band.map((one) => one.taskId),
+              reordered: band.some((one, i) => one.taskId !== natural[i]?.taskId),
             }
           }).pipe(
             Effect.catchCause((cause) =>
-              Effect.as(Effect.logWarning('Could not read a project’s line', cause), { continuing: [], tasks: [], reordered: false }),
+              Effect.as(Effect.logWarning('Could not read a project’s line', cause), {
+                continuing: [],
+                tasks: [],
+                order: [],
+                reordered: false,
+              }),
             ),
           ),
         move,
         oldestFirst,
+        letGo,
         enter,
         turn,
 

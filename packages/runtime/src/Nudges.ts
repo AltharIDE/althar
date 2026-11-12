@@ -1,4 +1,5 @@
 import type { StuckStep } from '@althar/contracts'
+import { plainTitle } from '@althar/contracts'
 import { Ledger } from '@althar/persistence-sqlite'
 import { Cause, Context, Duration, Effect, Layer, Option, PubSub, Ref, Stream } from 'effect'
 import { SqlClient } from 'effect/sql'
@@ -67,6 +68,13 @@ export const callWords = (
       const agent = agents.find((entry) => entry.definition.id === stuck.agentId)?.definition.name ?? stuck.agentId
       return `Needs you: ${agent} ran out of usage${stuck.step === 'publish' ? '' : ` ${outStep[stuck.step].during}`}`
     }
+    // The lead asks, and waits for the answer: the question is what the person sees first.
+    if (stuck.why === 'waiting_on_person') {
+      const asked = (stuck.detail ?? '').replace(/\s+/g, ' ').trim()
+      return asked === ''
+        ? 'Needs you: A step waits on your answer'
+        : `Needs you: ${asked.length > 140 ? `${asked.slice(0, 139)}…` : asked}`
+    }
     return `Needs you: ${STEPS[stuck.step]} is stuck`
   }
   if (call.kind === 'question') {
@@ -133,7 +141,7 @@ export class Nudges extends Context.Service<
             _tag: 'Nudge',
             kind: call.kind === 'stuck' ? 'stopped' : 'call',
             key: `call:${call.id}`,
-            title: call.title,
+            title: call.title === null ? call.title : plainTitle(call.title),
             body: callWords({ kind: call.kind, payload: parse(call.payload) }, agents.list),
             threadId: call.threadId,
           })
@@ -141,7 +149,7 @@ export class Nudges extends Context.Service<
         // and no agent of its is starting or mid-turn.
         const ready = yield* sql<{ taskId: string; threadId: string; title: string; review: string | null; latest: string | null }>`
           SELECT k.id AS task_id, t.id AS thread_id, k.title,
-            (SELECT s.id FROM threads s WHERE s.task_id = k.id AND s.kind = 'step' LIMIT 1) AS review,
+            (SELECT s.id FROM threads s WHERE s.task_id = k.id AND s.kind = 'step' AND s.node_key = 'review' LIMIT 1) AS review,
             (SELECT i.content FROM thread_items i WHERE i.thread_id = t.id AND i.kind = 'step_result'
               AND json_extract(i.content, '$.step') IN ('implement', 'settle') ORDER BY i.sequence DESC LIMIT 1) AS latest
           FROM tasks k

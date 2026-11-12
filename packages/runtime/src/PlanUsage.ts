@@ -1,7 +1,7 @@
 import { afterOpen, startup } from './startup'
 import { homedir } from 'node:os'
 
-import type { AccountUsage, PlanUsage as PlanUsageView, UsageFaultKind } from '@althar/contracts'
+import type { AccountUsage, PlanUsage as PlanUsageView, SignInEnding, UsageFaultKind } from '@althar/contracts'
 import {
   adapterNode,
   type AgentDefinition,
@@ -29,9 +29,11 @@ import { SqlClient, type SqlError } from 'effect/sql'
 
 import { type Account, Accounts } from './Accounts'
 import { Agents, RuntimeConfig } from './Config'
+import type { NotFound } from './errors'
 import { Live } from './Live'
 import { timestamp } from './records'
 import { SignIns } from './SignIns'
+import { type Stage, type Warned, warnedKey, warnedOf, warning } from './signInEnding'
 
 /*
  * What each account's plan has left (docs/plans/plan-usage.md), for
@@ -157,8 +159,20 @@ export class PlanUsage extends Context.Service<
   {
     /** Every account's plan usage; `refresh` asks the sources again first. */
     readonly now: (refresh?: boolean) => Effect.Effect<PlanUsageView, Failure>
+    /**
+     * Asks the sources again for these accounts only and waits for the readings (at most once every few seconds each), for steering
+     * that finds an account marked out of usage: the person may have reset it since. Tells the view once they are read.
+     */
+    readonly refresh: (accountIds: ReadonlyArray<string>) => Effect.Effect<void, Failure>
     /** The windows Claude Code's adapter reported on a session of the account, from one event. */
     readonly heard: (accountId: string, agentId: string, windows: ReadonlyArray<UsageWindow>) => Effect.Effect<void, never>
+    /**
+     * Puts aside the warning that the account's sign-in ends at `endsAt`, for good: only another sign-in raises one again. Only
+     * for an account there is: what is kept goes with the account when it is removed (`Accounts.remove`).
+     */
+    readonly dismiss: (accountId: string, endsAt: string, stage: Stage) => Effect.Effect<void, NotFound | Failure>
+    /** Tells the view again at once, as an account signed in again: a warning its old sign-in raised goes from the window's bar with it. */
+    readonly retell: Effect.Effect<void>
     /**
      * How the account is paid for and its plan's name, as last read, without asking again: null where nothing was read of it
      * yet. For an agent whose providers each have a sign-in (OpenCode), how each listed is paid too, as its listing was last
@@ -330,8 +344,8 @@ export class PlanUsage extends Context.Service<
               windows = excluded.windows, observed_at = excluded.observed_at`
           })
 
-        /* Reads one account from its agent's source and keeps what it said. */
-        const readAccount = (account: Account) =>
+        /* Reads one account from its agent's source and keeps what it said; `onDemand` where steering wants it read again, whatever a session said lately. */
+        const readAccount = (account: Account, onDemand = false) =>
           Effect.gen(function* () {
             const entry = agents.list.find((each) => each.definition.id === account.agentId)
             if (entry === undefined) return
@@ -474,6 +488,7 @@ export class PlanUsage extends Context.Service<
               const lately = now - Duration.toMillis(HEARD_LATELY)
               const windows = before?.windows ?? []
               if (
+                !onDemand &&
                 before?.source === 'acp_extension' &&
                 windows.length > 0 &&
                 windows.every((window) => !past(window.resetsAt, now) && Date.parse(window.observedAt) > lately)
@@ -557,7 +572,7 @@ export class PlanUsage extends Context.Service<
             })
           })
 
-        const readAll = (force: boolean) =>
+        const readAll = (force: boolean, only?: ReadonlyArray<string>) =>
           Effect.gen(function* () {
             yield* hydrate
             const now = yield* Clock.currentTimeMillis
@@ -565,6 +580,7 @@ export class PlanUsage extends Context.Service<
             for (const entry of agents.list) {
               // Each account at once: one agent slow to answer (up to its timeout) holds up none of the others.
               const due = (yield* accounts.of(entry.definition.id)).filter((account) => {
+                if (only !== undefined && !only.includes(account.id)) return false
                 const last = asked.get(account.id)
                 if (last !== undefined && now - last < Duration.toMillis(options.kept ?? (force ? LEAST : KEPT))) return false
                 asked.set(account.id, now)
@@ -572,7 +588,10 @@ export class PlanUsage extends Context.Service<
               })
               yield* Effect.forEach(
                 due,
-                (account) => readAccount(account).pipe(Effect.catchCause((cause) => Effect.logWarning('Could not read plan usage', cause))),
+                (account) =>
+                  readAccount(account, only !== undefined).pipe(
+                    Effect.catchCause((cause) => Effect.logWarning('Could not read plan usage', cause)),
+                  ),
                 { concurrency: 'unbounded', discard: true },
               )
               read += due.length
@@ -580,13 +599,37 @@ export class PlanUsage extends Context.Service<
             return read
           })
 
+        /* Each account's warning put aside, by the end it was about: read from the store each time the view is. */
+        const warnedAll = Effect.map(
+          sql<{ key: string; value: string }>`SELECT key, value FROM settings WHERE key LIKE ${`${warnedKey('')}%`}`.pipe(
+            Effect.orElseSucceed(() => []),
+          ),
+          (rows) => new Map(rows.map((row) => [row.key, warnedOf(row.value)])),
+        )
+
         const view = Effect.gen(function* () {
           yield* hydrate
           const now = yield* Clock.currentTimeMillis
           const list: AccountUsage[] = []
+          const endings: SignInEnding[] = []
+          const warned = yield* warnedAll
           for (const entry of agents.list) {
-            for (const account of yield* accounts.of(entry.definition.id)) {
+            const all = yield* accounts.of(entry.definition.id)
+            for (const account of all) {
               const check = yield* signIns.account(account)
+              // A sign-in that ends within its last days, read with its account, warns once at each stage (signInEnding.ts); one
+              // whose check already says signed out has ended, so the bar never says "ends by" beside a signed-out row.
+              const stage = warning(check.endsAt, warned.get(warnedKey(account.id)), now, check.status === 'signed_out')
+              if (check.endsAt !== undefined && stage !== undefined)
+                endings.push({
+                  agentId: entry.definition.id,
+                  agentName: entry.definition.name,
+                  accountId: account.id,
+                  accountName: account.name,
+                  several: all.length > 1,
+                  endsAt: check.endsAt,
+                  stage,
+                })
               const mine = held.get(account.id)
               const paidBy = mine?.paidBy ?? check.paidBy
               const key = paidBy === 'key'
@@ -615,7 +658,9 @@ export class PlanUsage extends Context.Service<
               })
             }
           }
-          return { accounts: list } satisfies PlanUsageView
+          // The soonest first: the one card says it, and the rest wait behind it.
+          endings.sort((a, b) => Date.parse(a.endsAt) - Date.parse(b.endsAt))
+          return { accounts: list, ...(endings.length === 0 ? {} : { endings }) } satisfies PlanUsageView
         })
 
         const told = view.pipe(
@@ -645,6 +690,15 @@ export class PlanUsage extends Context.Service<
           )
 
         return PlanUsage.of({
+          retell: told,
+          dismiss: (accountId, endsAt, stage) =>
+            Effect.gen(function* () {
+              yield* accounts.get(accountId)
+              const value = JSON.stringify({ endsAt, dismissed: stage } satisfies Warned)
+              yield* sql`INSERT INTO settings ${sql.insert({ key: warnedKey(accountId), value, updatedAt: yield* timestamp })}
+                ON CONFLICT (key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`
+              yield* told
+            }),
           paidBy: (accountId) =>
             Effect.map(hydrate, () => {
               const one = held.get(accountId)
@@ -673,6 +727,8 @@ export class PlanUsage extends Context.Service<
                   ),
                   view,
                 ),
+          refresh: (accountIds) =>
+            accountIds.length === 0 ? Effect.void : afterOpen(startup('plan-usage-read', Effect.andThen(readAll(true, accountIds), told))),
           // One event at a time, so two heard together don't write over each other; the session forks it, and never waits on it.
           heard: (accountId, agentId, said) =>
             hearing

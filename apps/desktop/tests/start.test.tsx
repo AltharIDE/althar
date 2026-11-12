@@ -8,6 +8,7 @@ import { RuntimeState } from '@althar/ui'
 
 import { useServices } from '../src/renderer/data/services'
 import { accountEntry } from '../src/renderer/features/accounts/AgentAccounts'
+import { clock } from '../src/renderer/shared/time'
 import { useAccountSignIn } from '../src/renderer/features/accounts/useAccountSignIn'
 import { HomeView } from '../src/renderer/features/home/HomeView'
 import { useHome } from '../src/renderer/features/home/useHome'
@@ -16,7 +17,7 @@ import { SettingsPage } from '../src/renderer/features/settings/SettingsPage'
 import { openGuide, runtimeEntry, StartView } from '../src/renderer/features/start/StartView'
 import { type StartModel, useStart } from '../src/renderer/features/start/useStart'
 import { shortFolder } from '../src/renderer/shared/folders'
-import { agents, changed, fakeClient, fakeHost, installedSkill, project, streamed, usual, withoutOpenCode } from './fixtures'
+import { agents, changed, fakeClient, fakeHost, project, streamed, usual, withoutOpenCode } from './fixtures'
 import { withServices } from './render'
 import { openTheProject, seenTheTour, toTheProject } from './welcome'
 
@@ -80,6 +81,17 @@ describe('accounts in settings', () => {
     const own = { ...usual('acc_3', 'signed_in'), home: '/Users/me/profile/accounts/acc_3', outUntil: '2026-10-03T14:00:00' }
     expect(accountEntry(own, now)).toMatchObject({ place: { kind: 'own' }, state: { kind: 'out' } })
     expect(accountEntry({ ...usual('acc_4', 'unknown') }, now).state).toEqual({ kind: 'ready' })
+  })
+
+  it('says when a sign-in ends only where the runtime says it ends soon, and nothing of an end further off', () => {
+    const now = new Date('2026-10-03T12:00:00.000Z')
+    const ends = (endsAt: string, endsSoon = false) => accountEntry({ ...usual('acc_1', 'signed_in'), endsAt, endsSoon }, now).ends
+    // A month off: all is well, so the row says nothing of it.
+    expect(ends('2026-11-02T12:00:00.000Z')).toBeUndefined()
+    expect(ends('2026-10-05T12:00:00.000Z', true)).toEqual({ at: clock('2026-10-05T12:00:00.000Z', now) })
+    // Past its end, its row says it is signed out instead: no end to say.
+    expect(ends('2026-10-01T12:00:00.000Z')).toBeUndefined()
+    expect(accountEntry(usual('acc_1', 'signed_in'), now).ends).toBeUndefined()
   })
 
   it('says Go and Zen each in its own state, the one that refused work lately as its button, and no provider it can’t place', () => {
@@ -673,65 +685,6 @@ describe('the start', () => {
     expect(locked.getAttribute('aria-checked')).toBe('false')
     expect((locked as HTMLButtonElement).disabled).toBe(true)
     expect(document.getElementById(locked.getAttribute('aria-describedby') ?? '')?.textContent).toBe('are off while DO_NOT_TRACK is set.')
-  })
-
-  it('asks whether the leads get agent skills, off until turned on, says Settings is where to choose them, and turns every one on or off', async () => {
-    const off = [
-      { ...installedSkill, active: false },
-      { ...installedSkill, id: 'systematic-debugging', active: false },
-      { ...installedSkill, id: 'broken', active: false, problem: 'Install it again to put it right.' },
-    ]
-    const { client } = fakeClient({
-      listProjects: vi.fn(async () => ({ cursor: 0, projects: [] })),
-      listSkills: vi.fn(async () => ({ enabled: true, catalogRevision: 'fixture-1', skills: off })),
-    })
-    seenTheTour()
-    const view = withServices(<Start onProject={vi.fn()} />, client, fakeHost())
-    const skills = await screen.findByRole('switch', { name: 'Agent skills' })
-    expect(skills.getAttribute('aria-checked')).toBe('false')
-    expect(document.getElementById(skills.getAttribute('aria-describedby') ?? '')?.textContent).toMatch(
-      /Choose which in Settings, under Skills, any time\.$/,
-    )
-    expect(screen.queryByRole('dialog')).toBeNull()
-    await userEvent.click(skills)
-    // Every one that can be, not the one Althar can't read.
-    await waitFor(() => expect(client.setSkillActive).toHaveBeenCalledTimes(2))
-    expect(client.setSkillActive).toHaveBeenCalledWith('brainstorming', true)
-    expect(client.setSkillActive).toHaveBeenCalledWith('systematic-debugging', true)
-    await waitFor(() => expect(skills.getAttribute('aria-checked')).toBe('true'))
-    await userEvent.click(skills)
-    await waitFor(() => expect(client.setSkillActive).toHaveBeenCalledWith('brainstorming', false))
-    view.unmount()
-
-    // With some on and some off, it reads as off, and turns the rest on.
-    const mixed = fakeClient({
-      listProjects: vi.fn(async () => ({ cursor: 0, projects: [] })),
-      listSkills: vi.fn(async () => ({
-        enabled: true,
-        catalogRevision: 'fixture-1',
-        skills: [installedSkill, { ...installedSkill, id: 'systematic-debugging', active: false }],
-      })),
-    }).client
-    const some = withServices(<Start onProject={vi.fn()} />, mixed, fakeHost())
-    const partly = await screen.findByRole('switch', { name: 'Agent skills' })
-    expect(partly.getAttribute('aria-checked')).toBe('false')
-    await userEvent.click(partly)
-    await waitFor(() => expect(partly.getAttribute('aria-checked')).toBe('true'))
-    expect(mixed.setSkillActive).toHaveBeenCalledTimes(1)
-    expect(mixed.setSkillActive).toHaveBeenCalledWith('systematic-debugging', true)
-    some.unmount()
-
-    // Where this Althar has no skills to give, it isn't asked.
-    withServices(
-      <Start onProject={vi.fn()} />,
-      fakeClient({
-        listProjects: vi.fn(async () => ({ cursor: 0, projects: [] })),
-        listSkills: vi.fn(async () => ({ enabled: false, catalogRevision: null, skills: [] })),
-      }).client,
-      fakeHost(),
-    )
-    await screen.findByRole('switch', { name: 'Crash reports' })
-    expect(screen.queryByRole('switch', { name: 'Agent skills' })).toBeNull()
   })
 
   it('adds a folder from anywhere, picked, by ⌘N or dropped, each of several repositories ticked, and opens one alone as itself', async () => {

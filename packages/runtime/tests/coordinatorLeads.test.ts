@@ -150,7 +150,8 @@ describe('the buttons on a task’s lead, as tools', () => {
       // Compact, from another task's lead, signed with its task.
       assert.match(yield* callTool(lead, 'compact_lead', { task: one.slug, why: 'its context is full' }), /lead compacts its context/)
       assert.include(yield* titles(one.threadId), 'The lead of “Read the logs” had its lead compact its context: its context is full')
-      assert.include(yield* titles(other.threadId), 'Compacted the context of “Sketch the settings”: its context is full')
+      // Its own chat, being about its own task, has no line about the other's.
+      assert.notInclude(yield* titles(other.threadId), 'Compacted the context of “Sketch the settings”: its context is full')
 
       // Its issue's switch: refused for a task that came from none, set and set back for one that did.
       assert.strictEqual(

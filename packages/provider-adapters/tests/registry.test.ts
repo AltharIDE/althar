@@ -3,7 +3,7 @@ import { existsSync } from 'node:fs'
 import { assert, describe, it } from '@effect/vitest'
 
 import { agents, claudeSandboxStarts, type Contained } from '../src/registry'
-import { SECRET_PLACES, secretReadRules } from '../src/secrets'
+import { CLI_SIGN_INS, SANDBOX_SECRETS, SECRET_PLACES, secretReadRules } from '../src/secrets'
 
 describe('the agent registry', () => {
   it('ships every bundled adapter where it says', () => {
@@ -78,6 +78,27 @@ describe('the agent registry', () => {
     }
   })
 
+  it('switches off each agent’s own helpers in the background at its launch, and says where it can’t (ADR-087)', () => {
+    const env = (id: keyof typeof agents) => agents[id].launch('/usr/bin/node').env ?? {}
+    assert.strictEqual(env('claude-code').CLAUDE_CODE_DISABLE_BACKGROUND_TASKS, '1')
+    assert.strictEqual(env('opencode').OPENCODE_EXPERIMENTAL_BACKGROUND_SUBAGENTS, 'false')
+    assert.strictEqual(env('grok').GROK_SUBAGENTS, '0')
+    assert.strictEqual(env('mistral-vibe').VIBE_ENABLE_SUBAGENTS, 'false')
+    assert.deepStrictEqual((agents.copilot.launch('/usr/bin/node').args ?? []).slice(-2), ['--excluded-tools', 'task'])
+    const codex = JSON.parse(agents.codex.sessionEnv?.({}, {}).CODEX_CONFIG ?? '{}') as Record<string, unknown>
+    assert.strictEqual(codex['features.multi_agent'], false)
+    assert.deepStrictEqual(agents.antigravity.sessionMeta?.(), { agy: { disabledTools: ['start_subagent'] } })
+    // Each says what it switches off and what it keeps; those it can't switch off say so.
+    for (const agent of Object.values(agents)) assert.isNotEmpty(agent.ownHelpers.how)
+    assert.deepStrictEqual(
+      Object.values(agents)
+        .filter((agent) => !agent.ownHelpers.off)
+        .map((agent) => agent.id)
+        .toSorted(),
+      ['junie', 'kimi', 'qwen-code'],
+    )
+  })
+
   it('runs Antigravity’s server as Google’s registry launches it, its sign-in its home’s own, with no browser and a temporary folder of its own', () => {
     const spec = agents.antigravity.launch('/usr/bin/node')
     assert.strictEqual(spec.command, 'agy_acp_server.par')
@@ -110,7 +131,7 @@ describe('the agent registry', () => {
     assert.deepStrictEqual(JSON.parse(spec.env?.OPENCODE_CONFIG_CONTENT ?? '{}'), {
       permission: asks,
       agent: { build: { permission: asks }, plan: { permission: asks } },
-      experimental: { continue_loop_on_deny: true },
+      experimental: { continue_loop_on_deny: true, location_idle_timeout: false },
     })
   })
 
@@ -181,7 +202,23 @@ describe('the agent registry', () => {
       assert.includeMembers(deny, ['Read(~/.ssh/**)', 'Read(~/.aws/**)', 'Read(~/.npmrc)'], role)
       assert.includeMembers(deny, secretReadRules() as Array<string>, role)
     }
-    assert.lengthOf(secretReadRules(), SECRET_PLACES.length * 2)
+    assert.lengthOf(secretReadRules(), SANDBOX_SECRETS.length * 2)
+  })
+
+  it('lets gh and glab read their own folders in a session’s sandbox, so commands carry the person’s sign-in', () => {
+    type Meta = { claudeCode: { options: { settings: { permissions: { deny?: Array<string> } } } } }
+    const metaOf = agents['claude-code'].sessionMeta
+    if (metaOf === undefined) return assert.fail('Claude Code has session options')
+    const deny = (metaOf('lead', {}) as Meta).claudeCode.options.settings.permissions.deny ?? []
+    // Claude Code's sandbox denies its commands what its Read rules deny: gh failed on `open …/config.yml` while these were.
+    for (const place of CLI_SIGN_INS) {
+      assert.notInclude(deny, `Read(~/${place})`)
+      assert.notInclude(deny, `Read(~/${place}/**)`)
+    }
+    assert.includeMembers([...CLI_SIGN_INS], ['.config/gh', '.config/glab-cli'])
+    // They stay secret places, so a command or read that names one is still refused by Althar's rules.
+    assert.includeMembers([...SECRET_PLACES], [...CLI_SIGN_INS])
+    assert.deepStrictEqual([...SANDBOX_SECRETS, ...CLI_SIGN_INS].toSorted(), [...SECRET_PLACES].toSorted())
   })
 
   it('lets a Claude Code lead listen on localhost and reach any host in its sandbox, with only the SSH agent’s socket, and a reader neither', () => {
@@ -423,12 +460,14 @@ describe('the agent registry', () => {
     )
   })
 
-  it('reviews a pull request from outside only on an agent its session holds to reading', () => {
-    assert.isTrue(agents['claude-code'].reviewing?.outside)
-    assert.isTrue(agents.opencode.reviewing?.outside)
+  it('holds every agent that can lead a review as one, Codex included', () => {
+    // Any agent leads a review (the person's note of 11 Nov): none is marked as unable to.
+    for (const id of ['claude-code', 'opencode', 'codex'] as const) {
+      assert.isDefined(agents[id].reviewing)
+      assert.notProperty(agents[id].reviewing ?? {}, 'outside')
+    }
     // Codex's shell network is open; its own sandbox still decides when it asks.
     assert.isTrue(JSON.parse(agents.codex.sessionEnv?.({}, {}).CODEX_CONFIG ?? '{}')['sandbox_workspace_write.network_access'])
-    assert.isFalse(agents.codex.reviewing?.outside)
   })
 
   it('turns Codex’s web search and hooks off for a review’s lead, beside the person’s MCP servers switched off', () => {
@@ -451,7 +490,7 @@ describe('the agent registry', () => {
     const own = {
       OPENCODE_CONFIG_CONTENT: JSON.stringify({
         permission: { edit: 'ask', bash: 'ask', webfetch: 'ask' },
-        experimental: { continue_loop_on_deny: true },
+        experimental: { continue_loop_on_deny: true, location_idle_timeout: false },
         mcp: { github: { enabled: false } },
       }),
     }
@@ -460,7 +499,7 @@ describe('the agent registry', () => {
     assert.deepStrictEqual(JSON.parse(held.OPENCODE_CONFIG_CONTENT ?? '{}'), {
       permission: asks,
       agent: { build: { permission: asks }, plan: { permission: asks } },
-      experimental: { continue_loop_on_deny: true },
+      experimental: { continue_loop_on_deny: true, location_idle_timeout: false },
       mcp: { github: { enabled: false } },
       lsp: false,
     })
@@ -559,7 +598,6 @@ describe('project web tools', () => {
       assert.strictEqual(agents.codex.sessionEnv?.(own, options).ALTHAR_APPROVAL_POLICY, 'untrusted')
     }
     assert.isTrue(JSON.parse(agents.codex.sessionEnv?.({}, {}).CODEX_CONFIG ?? '{}')['sandbox_workspace_write.network_access'])
-    assert.isFalse(agents.codex.reviewing?.outside)
   })
   it('allows OpenCode search and fetch globally and for both agents, but offline and off still ask', () => {
     const own = agents.opencode.launch('/usr/bin/node').env ?? {}

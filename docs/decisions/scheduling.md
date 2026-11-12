@@ -45,6 +45,10 @@ its installs, builds and tests easily takes several GB and many cores.
 - **These count:** a task's lead while a step of its run is under way, while
   it resolves a conflict or fixes checks, or while it is in a turn. A task's
   reviewer counts while a review is under way, or while it is in a turn.
+  Each of a lead's helpers takes a place of its own while it starts or is in
+  a turn, apart from its lead's and its reviewer's: four of a task's at
+  once, the rest waiting their turn whatever is free ([tasks §
+  Helpers](tasks.md#helpers)).
 - **These don't count:** the coordinator, the permission judge, and the runs
   Althar makes itself (`run_project`). They are light or the person's own, and
   counting the coordinator would let a task waiting on its plan deadlock the
@@ -80,8 +84,9 @@ what waited longest goes first.
    round, and what Althar tells an agent, such as a failed check or a nudge to
    carry on.
 3. **New work:** a plan's first step, as the coordinator files it or the
-   person starts it, and the first turn of a review's lead. This is the line
-   the person can reorder (see [Running and Up next](#running-and-up-next)).
+   person starts it, and the first turn of a review's lead. The person can put
+   this and the work under way in an order of their own (see
+   [Running and Up next](#running-and-up-next)), which then goes before both.
 4. **An automation's run** goes after everything else. Only one
    automation's task is at work at a time.
 
@@ -132,24 +137,51 @@ that goes on by itself, in the order it will.
 - **Running** holds a task with an agent at work (in a turn, starting, or on
   its step), or with checks Althar is watching. Its count counts only those. A
   stopped task stays at Running's foot, saying so, and isn't counted.
-- **Up next** reads in this order:
+- **Up next** is one order, the one places are given in. Every row in it can
+  be dragged anywhere in it, or moved from its menu, and Move to front works
+  on any of them (`MoveInLine`, `move_to_front`). A row that can't be ordered
+  for a place isn't in that order. By default it reads:
   1. **What continues:** a task already under way whose next work waits for a
      place, with none of its agents at work. Its row says what continues and
      why it waits ("Continues · Review", "6 of 6 agents busy on this Mac"). It
-     keeps the order of [What goes first](#what-goes-first) and can't be
-     dragged. Its agent's cache is warm and its work half done. A person who
-     wants it sooner says so to its agent, which then goes at once.
-  2. **The line:** new work no agent has worked on yet, in the person's order.
-     They drag a task to a place (`MoveInLine`). Each task in the line takes
-     one of the times the line stood at, kept on the task (`line_at`), so the
-     order survives a restart and a task that joins later goes to the end.
-     "Back to oldest first" (`LineOldestFirst`) clears it. The line is ordered
-     within a project; it doesn't reorder other projects' work.
-  3. **What is paused:** a step held for a usage limit or for the connection,
+     goes first unless the person moves it: its agent's cache is warm and its
+     work half done. Where what waits is a turn Althar asked of its agent, the
+     person can cancel it from the row's menu (or `stop_task` with `turn`):
+     what it would have said is read with the agent's next turn.
+  2. **The line:** new work no agent has worked on yet, oldest first.
+  3. **Plans** on their countdown, then plans held, under Planned. A plan moved
+     among what waits, or to the head of the plans, starts there, as its Start
+     would, at the place it was put. Every row above one that waits waits
+     too: a row put below plans starts them, each at its place ahead of it, so
+     the order shown is the one places are given in. A plan isn't moved down
+     among the plans: they stand by when they start, and hold no place until
+     then.
+  4. **What is paused:** a step held for a usage limit or for the connection,
      under its own divider, saying what it waits for ("Codex is out of usage
-     until 13:40", "Waiting for the connection"). Once it can go on, it asks
-     for a place as work under way.
-  4. Plans on their countdown, then plans held.
+     until 13:40", "Waiting for the connection"). It waits for no place now,
+     so it isn't in the order. Once it can go on, it asks for a place as work
+     under way.
+
+  Once the person moves a row, each task in the order takes one of the times
+  it stood at, kept on the task (`line_at`), so the order survives a restart,
+  a task that joins later goes to the end, and work under way and new work
+  stand by those times rather than in their default ranks. "Back to oldest
+  first" (`LineOldestFirst`) clears it. The order is kept within a project; it
+  doesn't reorder other projects' work. A task loses its place once an agent
+  of it is at work.
+- **Althar's notes start no turn.** What Althar tells a lead that needs
+  nothing done now is noted rather than queued: it waits for no place, shows
+  nowhere in Up next, and the lead reads it with its next turn, whatever
+  starts that. That covers the heads-up of another task changing the same
+  files, what became of a pull request it follows or a change of its task,
+  and anything said to a task that is merged or settled, or of a pull request
+  merged or closed. A merge-queue send-back starts its lead's turn only where
+  Althar knows the reason is the pull request's own: a job the queue's build
+  failed that the default branch's latest commit reports passing (not one it
+  fails too, still runs, or hasn't reported), or a conflict with what is
+  ahead.
+  Otherwise the person is told nothing names it, and its lead hears with its
+  next turn.
 - **Nothing moves under the person.** While the pointer is over Running or Up
   next, or a row is being dragged, a task that would change lanes stays where
   it is and moves once the pointer leaves. When it moves, the card travels to
@@ -223,11 +255,19 @@ dependency bump.
   - every automation is paused ("Pause all automations" in Settings);
   - it has five pull requests open;
   - it is past 24 runs a day across automations;
-  - none of its agent's accounts is on a plan.
+  - its agent is signed out, out of usage or refused by its model's provider,
+    and no other agent on a plan could take its place.
 
-  A usage limit moves it to another agent on a plan, never to an account paid
-  per use. A run works at most its minutes, and three failures in a row pause
-  the automation, saying why.
+  A skipped run says which, and what would make it run ("OpenCode Go refused
+  its sign-in, and no other plan had room. Sign in to OpenCode Go in
+  Settings."). A second such skip in a row is one call in Needs you, not one a
+  night; its "Run it now" runs the automation. Where another plan could take
+  the run, it starts there, its line saying so. Out of usage, that holds only
+  where the project's rule is `move`: under `wait` or `ask` the run starts on
+  its own agent and holds for the reset or asks, as any task does. A run picks
+  its agent, account and model as any step does, per use included, under the
+  caps any task has. It works at most its minutes, and three failures in a row
+  pause the automation, saying why.
 - **With nobody there, it goes ahead.** Its task allows everything where the
   automation says, which is the default. An unattended run can never push to
   the default branch (`runRules` in `automated.ts`), because nobody is there
@@ -247,7 +287,7 @@ dependency bump.
 
 Not built yet: events as triggers (a review asked for, checks failing on main,
 a label), a run that carries on its open pull request instead of opening
-another, cost caps for models paid per use, and runs in the cloud.
+another, and runs in the cloud.
 
 ## Althar's share of the load
 
@@ -259,8 +299,13 @@ Althar's work is the cause, and which task.
 - **The runtime reads the computer** (`MachineLoad.ts`), because only it
   knows which process is whose. The window asks for a reading (`GetLoad`)
   every three seconds while the meter is on and the window is in view, and
-  never otherwise. The runtime reads at most once every 2.5 seconds however
-  many windows ask, and keeps two minutes of readings in memory.
+  never otherwise. While the meter is on the runtime also reads on its own
+  every three seconds, whenever no window has just asked, so the trace in the
+  peek holds the last two minutes however long the window was out of view;
+  such a reading is lean (the cores and the processes, no memory), and none
+  is taken while the meter is off. The runtime reads at most once every 2.5
+  seconds however many windows ask, and keeps two minutes of readings in
+  memory, starting them afresh after a gap (sleep, the meter off).
 - **Everything Althar starts for a piece of work carries it in its
   environment** (`ALTHAR_WORK=task:<id>`, `coordinator:<project>` or
   `run:<project>`). Everything it starts inherits that, across process groups
@@ -284,3 +329,5 @@ Althar's work is the cause, and which task.
 ## Changes
 
 - 8 Nov 2026: written from the ADRs under Replaces.
+- 11 Nov 2026: the runtime reads the computer in the background while the meter is on, so the peek's trace isn't empty when a window comes back into view.
+- 10 Nov 2026: a lead's helpers each take a place of their own, four of a task's at once (ADR-087, [tasks § Helpers](tasks.md#helpers)).

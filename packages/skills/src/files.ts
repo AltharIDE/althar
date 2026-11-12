@@ -10,6 +10,10 @@ import { type Files } from './hash'
 export const io = <A>(what: string, work: () => Promise<A>): Effect.Effect<A, SkillStoreFailed> =>
   Effect.tryPromise({ try: work, catch: (cause) => new SkillStoreFailed({ message: `${what}: ${messageOf(cause)}`, cause }) })
 
+/** JSON text as a value, or why it isn't JSON. */
+export const parseJson = (text: string, what: string): Effect.Effect<unknown, SkillStoreFailed> =>
+  Effect.try({ try: (): unknown => JSON.parse(text), catch: () => new SkillStoreFailed({ message: `${what} is not JSON` }) })
+
 /** Whether anything is at a path, a link to nothing included. */
 export const exists = (path: string): Effect.Effect<boolean> =>
   Effect.promise(() =>

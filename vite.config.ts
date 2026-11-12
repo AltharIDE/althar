@@ -14,8 +14,6 @@ export default defineConfig({
       '**/playwright-report/**',
       '**/test-results/**',
       '**/storybook-static/**',
-      // Vendored skills, kept byte for byte as their pins hash them.
-      'packages/skills/catalog/**',
     ],
     plugins: ['typescript', 'unicorn', 'oxc', 'react', 'jsx-a11y', 'import'],
     jsPlugins: ['./lint/althar.js'],
@@ -49,16 +47,7 @@ export default defineConfig({
     ],
   },
   fmt: {
-    ignorePatterns: [
-      '**/dist/**',
-      '**/.ssr/**',
-      '**/coverage/**',
-      '**/*.html',
-      'apps/**/*.css',
-      '**/*.md',
-      'bun.lock',
-      'packages/skills/catalog/**',
-    ],
+    ignorePatterns: ['**/dist/**', '**/.ssr/**', '**/coverage/**', '**/*.html', 'apps/**/*.css', '**/*.md', 'bun.lock'],
     semi: false,
     singleQuote: true,
     printWidth: 140,

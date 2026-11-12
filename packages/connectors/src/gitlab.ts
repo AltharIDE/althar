@@ -1,11 +1,12 @@
 import { createHash } from 'node:crypto'
 
-import { Clock, Effect, Schema } from 'effect'
+import { Clock, Duration, Effect, Schedule, Schema } from 'effect'
 
 import { type Access, type AccessLine, type AccessReason, line } from './access'
 import { type AdapterOptions, authorizationOf } from './credential'
 import { updateInCopy } from './branchUpdate'
 import { ConnectorFailed } from './errors'
+import { ApprovalsAnswer, ApprovalStateAnswer, gitlabRulesOf, ProjectRules, RequestRules, ReviewersAnswer } from './gitlabRules'
 import { makeHttp, paged } from './http'
 import { makeGitLabReleases } from './gitlabReleases'
 import { pageOfCursor, tail } from './github'
@@ -92,6 +93,18 @@ const Pipeline = Schema.Struct({
   project_id: Schema.optional(Schema.Number),
   sha: Schema.optional(Schema.String),
   source: Schema.optional(Schema.String),
+  ref: Schema.optional(Schema.String),
+  status: Schema.optional(Schema.String),
+})
+
+/** Where a merge request stands on its merge train: `idle`, `fresh` or `stale` while active; `merging`, `merged` or `skip_merged` once complete. */
+const TrainAnswer = Schema.Struct({
+  status: Schema.String,
+  pipeline: Schema.optional(
+    Schema.NullOr(
+      Schema.Struct({ sha: Schema.optional(Schema.NullOr(Schema.String)), status: Schema.optional(Schema.NullOr(Schema.String)) }),
+    ),
+  ),
 })
 
 /** A commit status: what GitLab's own CI posts for each job, and what a CI service outside it posts for the commit. */
@@ -571,6 +584,15 @@ const issueRef = /^(.+\/[^/#\s]+)#(\d+)$/
 /** How many pages of a merge request's threads are read: a hundred threads each. */
 const THREAD_PAGES = 10
 
+/**
+ * GitLab says a branch pushed a moment ago "does not exist" until it has
+ * worked through the push in the background: a merge request asked for
+ * straight after the push is refused, and the same one a few seconds later
+ * opens. Nothing was made, so it's asked again, for a quarter of a minute.
+ */
+const sourceUnknown = (error: ConnectorFailed) => error.reason === 'rejected' && /source_branch\b.*does not exist/i.test(error.message)
+const SOURCE_AGAIN = { times: 5, schedule: Schedule.exponential(Duration.millis(500)), while: sourceUnknown }
+
 /** How many merge requests' sizes are kept: more than are open at once, in any project Althar follows. */
 const SIZES_KEPT = 1_000
 
@@ -605,6 +627,19 @@ export const makeGitLab = (options: AdapterOptions): CodeHost & Tracker => {
     )
 
   const read = (repository: Repository, number: number) => http.json(MergeAnswer, 'GET', `${project(repository)}/merge_requests/${number}`)
+  /**
+   * Where a merge request stands on its merge train, as GitLab says: null
+   * where it isn't on one (404). Removed entries may no longer exist, so the
+   * caller then reads historical train pipelines. Refusals remain unknown,
+   * never a false departure.
+   */
+  const trainOf = (repository: Repository, number: number) =>
+    http.json(TrainAnswer, 'GET', `${project(repository)}/merge_trains/merge_requests/${number}`).pipe(
+      Effect.catchIf(
+        (error) => error.reason === 'not_found',
+        () => Effect.succeed(null as typeof TrainAnswer.Type | null),
+      ),
+    )
   /** 401 is GitLab's word for an account that may not do something here, while its token still works: forbidden, where it does. */
   const mayNot = <A>(effect: Effect.Effect<A, ConnectorFailed>) =>
     Effect.catchIf(
@@ -954,6 +989,18 @@ export const makeGitLab = (options: AdapterOptions): CodeHost & Tracker => {
           description: change.body,
         })
         .pipe(
+          Effect.retry(SOURCE_AGAIN),
+          // Still unknown after that: which project hasn't the branch, in words that say so, not GitLab's field name.
+          Effect.mapError((error) =>
+            sourceUnknown(error)
+              ? new ConnectorFailed({
+                  product,
+                  reason: 'rejected',
+                  ...(error.status === undefined ? {} : { status: error.status }),
+                  message: `${(change.from ?? repository).path.join('/')} has no branch ${change.source}`,
+                })
+              : error,
+          ),
           Effect.map(changeOf),
           // One already open from the branch is the one: adopted, not duplicated.
           Effect.catchIf(
@@ -964,13 +1011,47 @@ export const makeGitLab = (options: AdapterOptions): CodeHost & Tracker => {
               ),
           ),
         ),
-    change: (repository, number) =>
+    change: (repository, number, ask) =>
       Effect.gen(function* () {
         const request = yield* http.cached(MergeAnswer, `${project(repository)}/merge_requests/${number}`)
         const size = yield* sizeOf(repository, request)
         const fork = yield* forkOf(request)
         const change = fork === undefined ? changeOf(request) : { ...changeOf(request), headRepository: fork }
-        return size === null ? change : { ...change, additions: size.additions, deletions: size.deletions, changedFiles: size.files }
+        const sized = size === null ? change : { ...change, additions: size.additions, deletions: size.deletions, changedFiles: size.files }
+        if (ask?.queue !== true || sized.state !== 'open') return sized
+        const result = yield* trainOf(repository, number).pipe(
+          Effect.flatMap((train): Effect.Effect<{ train: typeof TrainAnswer.Type | null; historical: boolean }, ConnectorFailed> =>
+            train !== null
+              ? Effect.succeed({ train, historical: false })
+              : http.json(Schema.Array(Pipeline), 'GET', `${project(repository)}/merge_requests/${number}/pipelines?per_page=100`).pipe(
+                  Effect.map((pipelines) => {
+                    const pipeline = pipelines
+                      .filter((one) => one.ref === `refs/merge-requests/${number}/train`)
+                      .toSorted((a, b) => b.id - a.id)[0]
+                    return { train: pipeline === undefined ? null : { status: 'removed', pipeline }, historical: true }
+                  }),
+                ),
+          ),
+          Effect.map((value) => ({ ...value, error: null })),
+          Effect.catch((error) =>
+            Effect.succeed({
+              train: null,
+              historical: false,
+              error: `GitLab couldn't read the merge train (${error.reason}${error.status === undefined ? '' : `, ${error.status}`}): ${error.message}`,
+            }),
+          ),
+        )
+        if (result.error !== null) return { ...sized, queueError: result.error }
+        const train = result.train
+        if (train === null) return { ...sized, queued: false, leftQueue: null, queueSha: null }
+        if (!result.historical && !['idle', 'fresh', 'stale', 'merging', 'merged', 'skip_merged'].includes(train.status))
+          return { ...sized, queueError: `GitLab reported an unknown merge-train status: ${train.status}` }
+        const queued = !result.historical && ['idle', 'fresh', 'stale', 'merging'].includes(train.status)
+        const leftQueue =
+          train.status === 'merged' || train.status === 'skip_merged' ? 'merged' : train.pipeline?.status === 'failed' ? 'checks' : null
+        // The merge train's pipeline ran on its merge commit: its jobs are read by its SHA.
+        const queueSha = train.pipeline?.sha ?? null
+        return { ...sized, queued, leftQueue, queueSha }
       }),
     listChanges: (repository, query) =>
       Effect.gen(function* () {
@@ -1029,6 +1110,23 @@ export const makeGitLab = (options: AdapterOptions): CodeHost & Tracker => {
               }),
           ),
         ),
+    mergeRules: (repository, change) =>
+      Effect.gen(function* () {
+        const at = `${project(repository)}/merge_requests/${change.number}`
+        // Each by ETag where GitLab gives one; approval rules are Premium's, and a reviewer's state may not be said: without
+        // them, what they'd say isn't.
+        const [settings, request, approvals, state, reviewers] = yield* Effect.all(
+          [
+            http.cached(ProjectRules, project(repository)),
+            http.cached(RequestRules, `${at}?include_diverged_commits_count=true`),
+            http.cached(ApprovalsAnswer, `${at}/approvals`).pipe(Effect.orElseSucceed(() => null)),
+            http.cached(ApprovalStateAnswer, `${at}/approval_state`).pipe(Effect.orElseSucceed(() => null)),
+            http.cached(ReviewersAnswer, `${at}/reviewers`).pipe(Effect.orElseSucceed(() => null)),
+          ],
+          { concurrency: 'unbounded' },
+        )
+        return gitlabRulesOf({ project: settings, request, approvals, state, reviewers })
+      }),
     // Read each time, as the project's settings and the server's version can change: a merge is rare, and two reads are cheap.
     mergeWays: (repository) =>
       Effect.gen(function* () {
@@ -1113,6 +1211,7 @@ export const makeGitLab = (options: AdapterOptions): CodeHost & Tracker => {
             http.json(MergeAnswer, 'PUT', `${project(repository)}/merge_requests/${change.number}`, {
               ...(title === undefined ? {} : { title }),
               ...(edit.body === undefined ? {} : { description: edit.body }),
+              ...(edit.base === undefined ? {} : { target_branch: edit.base }),
             }),
           ),
         )

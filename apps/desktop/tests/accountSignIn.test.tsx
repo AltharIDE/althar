@@ -13,7 +13,7 @@ import { useAccountSignIn } from '../src/renderer/features/accounts/useAccountSi
 import type { Section } from '../src/renderer/features/settings/sections'
 import { SettingsPage } from '../src/renderer/features/settings/SettingsPage'
 import { type StartModel, useStart } from '../src/renderer/features/start/useStart'
-import { agents, fakeClient, fakeHost, usual } from './fixtures'
+import { agents, fakeClient, fakeHost, usual, withoutOpenCode } from './fixtures'
 import { servicesFor, withServices } from './render'
 
 /*
@@ -374,6 +374,43 @@ describe('Settings opened to sign an agent in again, from its error', () => {
     withServices(<Asked />, client)
     await waitFor(() => expect(client.signInAccount).toHaveBeenCalledWith('acc_work'))
     expect(client.signInAccount).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('Settings opened on an agent that isn’t installed, from a step that couldn’t start', () => {
+  it('opens that agent’s tab, nothing started', async () => {
+    const { client } = fakeClient({ status: vi.fn(async () => ({ apiVersion: 1, appVersion: '0.0.0', agents: withoutOpenCode })) })
+    function Asked() {
+      return <SettingsPage start={useStart()} section="agents" onSection={() => {}} agent="opencode" />
+    }
+    withServices(<Asked />, client)
+    await waitFor(() => expect(screen.getByRole('tab', { name: /OpenCode/, selected: true })).toBeTruthy())
+    expect(client.signInAccount).not.toHaveBeenCalled()
+    expect(client.addAccount).not.toHaveBeenCalled()
+  })
+})
+
+describe('Settings opened to sign in again an account whose sign-in ends soon', () => {
+  it('starts the next account’s sign-in too, where it is another account of the same agent', async () => {
+    // Claude Code (work) handled from the bar; Claude Code (personal) the next to end, while Settings is still open on the agent.
+    const work = { ...usual('acc_work', 'signed_in'), name: 'work', home: '/Users/me/work' }
+    const { client } = fakeClient({ status: vi.fn(async () => codexWith([], usualCodex, work)) })
+    function Asked() {
+      const [meant, setMeant] = useState('acc_work')
+      return (
+        <>
+          <button type="button" onClick={() => setMeant('acc_usual')}>
+            Next ending
+          </button>
+          <SettingsPage start={useStart()} section="agents" onSection={() => {}} signIn="codex" account={meant} />
+        </>
+      )
+    }
+    withServices(<Asked />, client)
+    await waitFor(() => expect(client.signInAccount).toHaveBeenCalledWith('acc_work'))
+    await userEvent.click(screen.getByRole('button', { name: 'Next ending' }))
+    await waitFor(() => expect(client.signInAccount).toHaveBeenCalledWith('acc_usual'))
+    expect(client.signInAccount).toHaveBeenCalledTimes(2)
   })
 })
 

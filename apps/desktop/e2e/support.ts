@@ -265,6 +265,31 @@ export const say = async (page: Page, words: string) => {
 }
 
 /**
+ * Moves a chat the coordinator started at once off Scratch and onto the board, as the person does (a task is a
+ * conversation plus parts, "Asides"): beside the conversation, from its pill over it, then Make it a task; the board alone,
+ * from the chip heading Up next, its row, then More for this task, and back.
+ */
+export const toBoard = async (page: Page, title: string) => {
+  const work = page.getByRole('region', { name: 'The project’s work' })
+  const asides = page.getByRole('tablist', { name: 'Conversations' }).filter({ visible: true })
+  if ((await asides.count()) > 0) {
+    await asides.getByRole('tab', { name: title }).click()
+    await page.getByRole('button', { name: 'Make it a task' }).click()
+    await expect(asides.getByRole('tab', { name: title })).toHaveCount(0)
+    return
+  }
+  await work.getByRole('button', { name: /^Asides · / }).click()
+  await page.getByRole('list', { name: 'Asides' }).getByRole('listitem').filter({ hasText: title }).getByRole('button').first().click()
+  await page.getByRole('button', { name: 'More for this task' }).click()
+  await page
+    .getByRole('menu')
+    .getByRole('menuitem', { name: /^Move to the board/ })
+    .click()
+  await page.getByRole('button', { name: /^Back to / }).click()
+  await expect(work.getByRole('button', { name: /^Asides · / })).toHaveCount(0)
+}
+
+/**
  * Asks the project's coordinator for a task, as the person does: it drafts
  * the task and proposes its plan, a card that starts on its own after a
  * countdown. The fake coordinator titles the task with what is said up to
@@ -286,7 +311,7 @@ export const startTask = async (page: Page, title: string, lead = '[lead:finish]
 }
 
 /** A section of the project's settings: Settings, the last of its views in its header, then the section down the side. */
-export const projectSettings = async (page: Page, section: 'General' | 'Code and issues' | 'Rules' | 'Running' | 'Notes') => {
+export const projectSettings = async (page: Page, section: 'General' | 'Code and issues' | 'Tasks' | 'Rules' | 'Running' | 'Notes') => {
   await page
     .getByRole('radiogroup', { name: 'View' })
     .getByRole('radio', { name: /^Settings/ })
@@ -319,7 +344,7 @@ export const askAboutMore = async (page: Page) => {
 
 /** Leaves what the lead commits for the person's Push, as before it went up on its own (ADR-072); then back to the conversation. */
 export const pushByHand = async (page: Page) => {
-  await projectSettings(page, 'General')
+  await projectSettings(page, 'Tasks')
   const pushes = page.getByRole('switch', { name: 'Push the lead’s commits automatically' })
   await pushes.click()
   await expect(pushes).not.toBeChecked()

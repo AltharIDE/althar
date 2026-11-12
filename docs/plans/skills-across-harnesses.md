@@ -1,14 +1,14 @@
 # Skills across harnesses: shared defaults, installs, and repository boundaries
 
-**Status:** Partly built; what landed and what didn't is under [Implementation status](#implementation-status). Decisions: [ADR-094](../decisions/the-persons-setup.md#skills), [ADR-095](../decisions/the-persons-setup.md#skill-and-openspec-files-in-a-change)
+**Status:** Partly built; what landed and what didn't is under [Implementation status](#implementation-status). Decisions: [ADR-094](../decisions/the-persons-setup.md#skills), [ADR-095](../decisions/the-persons-setup.md#skill-and-openspec-files-in-a-change). **Changed 8 Nov 2026:** Althar ships no skills of its own; the default catalog of this plan's section 6 was built, then taken out ([section 6](#6-default-catalog-dropped))
 **Research checked:** 2026-10-14
 **Upstream baseline:** `upstream/main` at `818df85e35ce4aa704334ffd846878750a30702c`
 
 ## Goal
 
-Give every harness Althar runs the same Althar-managed skills, with a maintained
-default set, per-project selection, and reviewed installs and updates from
-GitHub. Use the open Agent Skills directory format so the skill content does
+Give every harness Althar runs the same Althar-managed skills: what the person
+adds from GitHub, with per-project selection, and reviewed installs and updates.
+Althar carries no default set of its own. Use the open Agent Skills directory format so the skill content does
 not fork by provider. Keep managed skills and OpenSpec artifacts outside
 project repositories by default. A person must explicitly change a project's
 setting before Althar may place these files in that repository.
@@ -60,23 +60,16 @@ project checkout, with metadata in Althar's store. A proposed layout is:
 
 ```text
 <Althar user data>/skills/
-  catalog.json                 # packaged default catalog and pinned revision
   objects/<content-hash>/       # immutable skill trees
   installs.json                # source, pinned commit, path, hashes, review state
-                               # (source: github | local | althar-default)
+                               # (source: github | local)
   runs/<run-id>/<adapter>/      # read-only adapter projection for one run
 ```
 
-The package/release should include a small curated Althar default catalog and
-its exact source revision, so defaults work offline and do not depend on a
-branch moving. The catalog source is not settled by this research. OpenAI's
-`openai/skills` is a candidate for some general-purpose skills, not an assumed
-complete Althar catalog; the initial set should be selected and reviewed for
-license, maintenance, portability, and fit. Althar-owned skills can live in
-the Althar source tree and be versioned with a release. The catalog records
-which entries are defaults and the commit/hash from which each was built.
+Althar carries no skills of its own (decided 8 Nov 2026, [section 6](#6-default-catalog-dropped)):
+the store holds what the person adds.
 
-User-installed skills use the same store and format. First-run migration may
+Skills the person installs use the store and format described here. First-run migration may
 scan recognized native skill roots, show a names-and-paths inventory, and let
 the person copy selected skills into Althar. For each imported skill, record
 a GitHub repository, subpath, and resolved commit SHA only when the source can
@@ -118,9 +111,9 @@ Codex project exclusions should also use its documented per-skill
 isolated run config. Keep the resolved projection limited to selected skills
 as the primary control; the config entry handles a discovered/native skill
 that must be disabled. Codex may shorten descriptions or omit skills when its
-initial catalog exceeds the default budget (about 2% of context, or 8,000
+initial list exceeds the default budget (about 2% of context, or 8,000
 characters when context size is unknown); `skills.max_context_tokens` can
-change that budget. Preflight should estimate the catalog, warn when it may
+change that budget. Preflight should estimate the list, warn when it may
 be truncated, and report any omission warning from Codex rather than claim
 that the full selected list reached the model.
 
@@ -197,8 +190,7 @@ The update screen should show installed, available, and changed versions and
 support update one/update selected. Never auto-replace an active version or
 move a user's existing home installation. Keep old immutable versions while
 a run references them; garbage-collect only unreferenced versions after a
-retention period. Package updates can ship a refreshed default catalog, with
-an optional explicit check for a newer catalog revision between app releases.
+retention period.
 
 ### 4. Repository boundary and project setting
 
@@ -285,251 +277,44 @@ Althar. Repository mode remains opt-in and uses the normal OpenSpec layout.
 In either mode, OpenSpec itself does not commit or push; Althar must keep its
 own push path from publishing private-store artifacts by construction.
 
-### 6. Default catalog: sources, licensing, and how we carry them
+### 6. Default catalog (dropped)
 
-Candidates for the default set are
+This section planned a default set: 32 skills copied from
 [addyosmani/agent-skills](https://github.com/addyosmani/agent-skills) and
-[obra/superpowers](https://github.com/obra/superpowers). Both were shallow
-cloned into a scratch directory on 2026-10-15 and measured; nothing was run.
+[obra/superpowers](https://github.com/obra/superpowers) at pinned commits, each
+with its licence and the patches Althar applied, shipped with the app and kept
+in the store as `althar-default`. It was built (2026-10-18) and used until
+8 Nov 2026, when the person decided **Althar ships no skills of its own**.
 
-#### 6.1 Licence and provenance
+Why it went: a default set is Althar choosing how every lead works, patched
+and carried by Althar's releases, while the person's own agents already load
+the skills they chose. What the person has comes from their agents' own skill
+folders and plugins, the repository's `.claude/skills`, and what they add from
+GitHub through the review card of section 3.
 
-| | agent-skills | superpowers |
-| --- | --- | --- |
-| Licence | MIT, `LICENSE` "Copyright (c) 2025 Addy Osmani" | MIT, `LICENSE` "Copyright (c) 2025 Jesse Vincent" |
-| Head checked | `aeac41d4` (2026-10-13), 25 skills | `bb92a77` (2026-10-09), 15 skills |
-| Top level | `skills/ commands/ agents/ hooks/ references/ evals/ scripts/ plugin.json` and per-harness dirs | `skills/ hooks/ scripts/ package.json index.js` and per-harness plugin dirs |
+What went with it: `packages/skills/catalog/` (the 32 skills, `catalog.json`,
+`CURATION.md`, the licences and `THIRD_PARTY.md`), the scripts that vendored
+and curated it, the loader that installed it, the desktop app's packaging step
+and `ALTHAR_SKILLS_CATALOG`, the `althar-default` source, the catalog's hash
+and revision, and the first-run switch that turned it on. What stays: the
+store, GitHub install, review, updates and rollback, validation, projection
+and the repository guard.
 
-MIT permits copying, modifying and redistributing, on one condition: the
-copyright notice and licence text stay in all copies or substantial portions.
-Neither repo has a `NOTICE` file or an attribution clause beyond that. So:
+**On the first start after the update,** the runtime takes the installs the
+older Althar made (`althar-default`) out of the person's store, so no run is
+given them again, with the stored versions nothing else points at.
+What the person added from GitHub is left as it was. Until that has run, a
+read of the store leaves those installs out (`packages/skills/src/legacy.ts`).
 
-- Ship each upstream's full `LICENSE` and a `THIRD_PARTY` file (name, repo,
-  pinned SHA, copyright line, list of vendored skills) with the vendored
-  snapshot and with the `althar-skills` repo, and show the licence on a
-  skill's review card.
-- A patched skill is a modified copy: keep the notice, mark the file as
-  modified, and keep the patch visible in the catalog.
-- **Not everything under `skills/` is the author's.**
-  `superpowers/skills/writing-skills/anthropic-best-practices.md` (46 KB) is
-  Anthropic's published authoring guide, copied in verbatim; the upstream MIT
-  licence does not clearly cover it. Exclude it from the vendored copy (or
-  clear its terms) before shipping `writing-skills`. A per-file scan for
-  similar third-party text is a stage 1 task; this document did not complete
-  one.
-- Provenance is the pinned SHA plus a per-file content hash; the catalog
-  records both so a later reader can prove what was reviewed. This is a
-  planning reading of MIT, not legal advice.
-
-#### 6.2 What is in the two sets
-
-**Frontmatter is clean.** Every `SKILL.md` in both sets has only `name` and
-`description`; none carries `allowed-tools` or `hooks`, so the section 3
-frontmatter validator would accept all 40.
-
-**They overlap heavily where it matters.**
-
-| Job | agent-skills | superpowers |
-| --- | --- | --- |
-| Test-driven development | `test-driven-development` | `test-driven-development` (same name) |
-| Debugging | `debugging-and-error-recovery` | `systematic-debugging` |
-| Planning | `planning-and-task-breakdown` | `writing-plans`, `executing-plans` |
-| Design before code | `spec-driven-development`, `idea-refine` | `brainstorming` |
-| Review | `code-review-and-quality` | `requesting-code-review`, `receiving-code-review` |
-| Finish | `shipping-and-launch`, `git-workflow-and-versioning` | `finishing-a-development-branch`, `using-git-worktrees` |
-| Meta router | `using-agent-skills` | `using-superpowers` |
-
-Shipping both whole means two TDD skills with the same `name` (a name collision;
-how each harness resolves duplicates must be probed, section 2), two planning procedures, and two routers each
-telling the agent to consult skills first. Pick one per job. Only
-agent-skills has API design, CI/CD, performance, security hardening,
-frontend, observability, deprecation, source-driven and documentation skills;
-only superpowers has parallel-agent dispatch, subagent-driven execution,
-worktrees and the skill-authoring skill. They complement more than they
-compete outside the table above.
-
-**Codex context budget.** Codex lists each skill's name, description and path
-at startup within a budget (about 2% of context, 8,000 characters when the
-context size is unknown, see section 2). Measured name plus description
-text, before path and formatting overhead:
-
-| Set | Skills | Catalog characters | About tokens |
-| --- | --- | --- | --- |
-| agent-skills | 25 | 9,425 | 2,350 |
-| superpowers | 15 | 2,632 | 660 |
-| both | 40 | 12,057 | 3,000 |
-
-Both together, or agent-skills alone, exceed the 8,000-character fallback
-before paths are added, so Codex could drop descriptions or entries. A
-curated set of roughly 15 skills (about 5,000 characters at these averages)
-fits with room for the person's own installs. Full `SKILL.md` bodies are
-large (about 85K tokens for agent-skills, 40K for superpowers, bodies only)
-but load on demand; the point is that the *catalog line* is the always-paid
-cost, and agent-skills' descriptions average 377 characters against 175 for
-superpowers. A catalog patch may shorten a description, which is a modified
-copy under 6.1.
-
-**Hooks and harness-specific wiring.**
-
-- Neither repo's skills need a hook to be *valid*. agent-skills'
-  `hooks/session-start.sh` only injects its router, and its own comments say
-  not to wire it on hosts with native skill routing. superpowers' `hooks/`
-  does the same job for `using-superpowers`; its plugin dirs and
-  `package.json`/`index.js` exist to install that bootstrap per harness. The
-  catalog takes none of it.
-- `using-superpowers` is the exception that matters: it is written as the
-  always-on router (an `EXTREMELY-IMPORTANT` block telling the agent that a
-  1% chance a skill applies means it must invoke it) and mentions
-  `TodoWrite`, the `Skill` tool and per-harness tool maps
-  (`references/hermes-tools.md`, `muse-tools.md`). It assumes the bootstrap
-  hook and names tools that not every harness has. Do not ship it unchanged.
-  Skills are already routed by each harness's native catalog; if a router is
-  wanted, Althar writes one of its own.
-- `writing-skills` has 15 references to `.claude` paths, and
-  `diagnosing-superpowers` is about debugging the superpowers plugin itself;
-  both are Claude/plugin-specific and should be left out.
-- `subagent-driven-development` (85 mentions of subagents),
-  `dispatching-parallel-agents`, `executing-plans` and `requesting-code-review`
-  depend on the harness dispatching subagents. Treat them as **capability
-  dependent**: the catalog marks them `needs: subagents`, and the per-run
-  projection omits them for a harness without the capability instead of
-  presenting a skill the agent cannot follow. This is a real exception to
-  "the same skills in every harness" and should be shown in parity
-  diagnostics (section 2) rather than hidden.
-- agent-skills mentions `CLAUDE.md`/`AGENTS.md` in a handful of skills
-  (`constraint-driven-development`, `context-engineering`,
-  `documentation-and-adrs`, `code-simplification`) and `AskUserQuestion` once
-  (`idea-refine`). These are advice about context files, harmless as text; the
-  review card should list them.
-
-**Executable content.** agent-skills has one script
-(`idea-refine/scripts/idea-refine.sh`). superpowers has many: a local web
-server for `brainstorming` (`server.cjs`, `start-server.sh`, `helper.js`),
-`task-brief`/`sdd-workspace`/`review-package` for subagent-driven development,
-`task-start`/`task-done` for `executing-plans`, `find-polluter.sh`, and
-`render-graphs.js`. Under section 3 these are flagged on the review card and
-never executed by Althar; running them is the harness's tool call under the
-run's permission rules. Prefer skills without scripts for the default set.
-
-**Several skills instruct the agent to write into, commit to, or push from
-the repository.** This is the finding that most affects the guardrail and
-is easy to miss because it is skill *content*, not skill *files*:
-
-- superpowers `brainstorming` and `writing-plans` save to
-  `docs/superpowers/specs/` and `docs/superpowers/plans/` and commit them.
-- agent-skills `spec-driven-development` and `planning-and-task-breakdown`
-  write `SPEC.md`, `tasks/plan.md` and `tasks/todo.md` in the project root.
-- superpowers `finishing-a-development-branch` offers "Push and create a
-  Pull Request" and runs `git push -u origin`; agent-skills
-  `git-workflow-and-versioning` and `shipping-and-launch` include
-  `git push` for tags and rollbacks.
-
-None of these paths are skill roots or `openspec/`, so the protected-path
-checks in section 4 do not catch them, and the push instruction conflicts
-with Althar owning pushes (the task flow, section 4). The design therefore
-treats them as follows:
-
-1. **Plans and specs are ordinary task output, not skill files.** They are
-   allowed in the working tree when the task's agent writes them, subject to
-   the usual diff review, but the default catalog **patches the output
-   location** to the run's private workspace outside the checkout (Althar
-   supplies the path in the run context) unless the project has opted in to
-   repository-backed planning files. Whether this should be a fourth
-   "Repository files" setting, or fold into the OpenSpec one (planning
-   artifacts being the thing OpenSpec replaces), is an open decision.
-2. **Push and PR steps are removed or rewritten** in catalog patches to
-   "stop and report; Althar pushes." No default skill may tell an agent to
-   run `git push` or open a PR. A validator check enforces this for catalog
-   entries (a lint, not a security boundary: the real boundary is the
-   harness permission rules and Althar's push flow).
-3. User-installed skills are not patched; they are shown on the review card
-   with these instructions highlighted, and the push boundary is Althar's
-   permission and push guard, not trust in skill text.
-
-#### 6.3 Options considered
-
-| Option | For | Against |
-| --- | --- | --- |
-| Fork both into `althar-skills`, curate periodically | Familiar; full control; local edits are plain commits | Two diverging forks merged by hand. The forks carry `hooks/`, plugin manifests, `package.json`, scripts and per-harness dirs we reject or would have to strip on every merge. Needed edits (push removal, output paths, descriptions, third-party file) touch many files, so each upstream update becomes a conflict. Large, noisy repo to review |
-| In-app baseline only (copy skills into the Althar repo) | Offline; versioned with the app | Skill churn becomes app-release churn; upstream text and licences live in the app repo; no path to newer skills between releases; same patching problem with no pin trail |
-| Catalog repo of pins (manifest only, nothing vendored) | Tiny; upstream stays the source of truth; one mechanism for default and user installs | First run needs the network; pins to repos we do not control (force-push or deletion breaks a fresh install) |
-| **Hybrid: catalog repo of pins, with `skills/` content vendored, plus an in-app snapshot** | Combines reviewed pins and content hashes with offline first run and rollback if upstream disappears; patches stay small and named; users' own GitHub sources use the identical flow | A small repo to maintain, and a human review per update |
-
-**Recommendation: the hybrid, confirming the coordinator's lean with
-adjustments the measurements force.** The evidence for it: the forks would
-carry about as much non-skill code as skill content (hooks, plugin manifests,
-`index.js`, per-harness dirs), the content we want needs real edits (6.2:
-output paths, push steps, third-party file, descriptions, the router), and
-the two sets overlap enough that we must choose rather than merge.
-
-1. `althar-skills` holds `catalog.json` plus `skills/<id>/` directories
-   vendored from the upstream `skills/<name>/` only. Each catalog entry
-   records upstream repo, full commit SHA, upstream subpath, per-file content
-   hashes of the *upstream* tree, the licence and copyright line, the
-   capability needs (`subagents`, scripts present), a review note, and the
-   patch applied, if any. Patches are small named diffs kept next to the
-   entry so a re-vendor reapplies them and shows when one no longer applies.
-   Aim to carry few; they are the price of 6.2 and not optional.
-2. Take skill directories only, never upstream `hooks/`, `commands/`,
-   personas, plugin manifests or `package.json`. This is a catalog-build rule;
-   for user installs the subtree-only fetch in section 3 enforces it.
-3. Curate, don't union: one skill per job from the 6.2 table. As a starting
-   point to confirm in stage 1, not a decision (since settled otherwise:
-   every skill of both is carried unless two do the same job, 32 in all, in
-   `packages/skills/catalog/CURATION.md` and ADR-094): agent-skills for the
-   lifecycle and engineering skills it alone has (API design, CI/CD,
-   security, performance, documentation, source-driven development, code
-   review), superpowers for what it alone has (systematic debugging,
-   verification-before-completion, worktrees, parallel dispatch where the
-   harness has subagents), and one TDD skill. Keep the total near 15 to fit
-   Codex's budget alongside the person's own skills.
-4. (Not created: the catalog is vendored in this repository for now,
-   `packages/skills/catalog/`.) `althar-skills` is hosted under the account Althar's own repositories use
-   (`ninemate`), decided in stage 1.
-5. The app ships a vendored snapshot of the catalog at a pinned catalog
-   version with each upstream `LICENSE` and the `THIRD_PARTY` file. It lands
-   in the store (section 1) with `source: althar-default` in `installs.json`.
-6. Updates reach people as **catalog releases**, not app releases. The check
-   is off until the person turns it on or presses "Check for updates"; it
-   sends one unauthenticated GitHub request for the catalog's latest release
-   and nothing about the person, their projects or their installed skills
-   beyond what any HTTPS request reveals (IP, user agent). The app shows the
-   changed-file diff per skill (section 3) and applies only on approval.
-   Users can deselect, pin back, or add their own GitHub sources, which go
-   through the same pin, hash and review flow; their choices are bindings
-   over the store and survive catalog updates.
-7. Curation is periodic and human: a scheduled job opens a catalog PR when an
-   upstream head moves, listing the diff per pinned skill and whether any
-   patch still applies; a person reads it, and the stage 6 fixture runs on
-   all adapters, before the pin moves. Nothing auto-follows an upstream
-   branch. The job is maintainer-side automation with write access to the
-   `althar-skills` repository only, using a token scoped to it; it never
-   touches a user's repositories, and the app never runs it. A monthly
-   cadence plus on-demand for security fixes is a starting point.
-
-If a skill's licence, contents or required patch make it unsuitable, drop it
-from the catalog; the structure does not depend on either upstream.
-
-#### 6.4 Repository defaults still hold
-
-Nothing in this section relaxes section 4. The default catalog materializes
-only into Althar's app data and per-run overlays; no skill, `THIRD_PARTY`
-file or OpenSpec artifact is written to a user's repository or pushed unless
-the person has turned on the matching per-project setting (and, to push, the
-separate push setting). The catalog's output-path and no-push patches above
-exist so default skills do not undermine that default through their own
-instructions, but they are not relied on: the path-based write and push
-checks and the harness permission rules remain the enforcement.
+The licence and provenance notes that came with it are in this file's history,
+and the catalog itself in the repository's, before this change.
 
 ## Staged implementation after the newest Althar
 
-1. **Lock product decisions.** Create `althar-skills` per section 6 (owner
-   account included); choose the initial skills from the two MIT sources and
-   record licences; confirm default versus per-project skill selection; pin
+1. **Lock product decisions.** Confirm per-project skill selection; pin
    supported harness versions; decide whether to consume OpenSpec's beta
    stores or keep artifacts in Althar's own store.
-2. **Build catalog and store.** Bundle a pinned default catalog; add immutable
-   local versions and provenance; import selected existing skills without
+2. **Build the store.** Add immutable local versions and provenance; import selected existing skills without
    changing harness homes; add Agent Skills validation and safe GitHub fetch.
 3. **Add review and updates.** Add GitHub source entry, pinned checkout,
    changed-file diff, install approval, manual update check, rollback, and
@@ -543,7 +328,7 @@ checks and the harness permission rules remain the enforcement.
    checks before staging/commit/push, with provenance as a secondary signal.
    Add repository mode only behind the corresponding explicit setting.
 6. **Verify before release.** Exercise all adapters against the same fixture
-   catalog; prove an app-managed skill and OpenSpec change never appears in
+   skills; prove an app-managed skill and OpenSpec change never appears in
    a repository or task diff; prove opt-in repository mode is visible in the
    diff and follows normal commit/push policy; test update pinning, rollback,
    malformed archives, unsafe paths/symlinks, and unchanged active-run
@@ -551,20 +336,17 @@ checks and the harness permission rules remain the enforcement.
 7. **Document.** Once the implementation is final, write the ADR and docs
    below; not before, so they describe what shipped.
    - **ADR (next free number in `docs/decisions/`, currently 036):** "Skills
-     are one shared store, carried as a curated catalog of pins." Records the
-     shared store and per-run projection, the hybrid catalog sourcing, the
-     reject-by-default frontmatter and subtree-only install rules, and the
+     are one shared store." Records the shared store and per-run projection,
+     the reject-by-default frontmatter and subtree-only install rules, and the
      repository boundary (default-off write, OpenSpec and push settings).
      Possibly a second ADR for the repository boundary alone, since it
      amends [ADR-013](../decisions/what-agents-may-do.md#the-persons-rules) project rules.
    - **Docs:** update `docs/architecture/06-integrations-and-skills.md` (the
      skills section) and `docs/architecture/07-persistence-security-and-cloud.md`
      (store, trust, the update-check data); the `docs/decisions/README.md`
-     index; `docs/glossary.md` (skill, catalog, projection, pin); add a
+     index; `docs/glossary.md` (skill, projection, pin); add a
      user guide for installing, reviewing and updating skills and the
-     Repository files settings; add a maintainer runbook for curating
-     `althar-skills` (cadence, review checklist, patches, `THIRD_PARTY`);
-     update `apps/desktop/README.md` for the settings UI, and the privacy
+     Repository files settings; update `apps/desktop/README.md` for the settings UI, and the privacy
      notes for the update check.
 
 ## Implementation status
@@ -572,9 +354,9 @@ checks and the harness permission rules remain the enforcement.
 **Landed (Claude Code, 2026-10-15), on the branch, not pushed:**
 
 - `packages/skills` (`@althar/skills`): validation, the content-addressed store,
-  `installs.json` (an unreviewed install cannot be active), the catalog format,
-  a local-directory catalog loader that stands in for the real source, the
-  per-run projection, and the path-based guard.
+  `installs.json` (an unreviewed install cannot be active), the per-run
+  projection, and the path-based guard. (A catalog format and a local-directory
+  catalog loader stood here until 8 Nov 2026.)
 - **Delivery to Claude Code.** The registry's `claude-code` entry takes a
   `skillsPlugin` session option and passes it as the SDK's
   `plugins: [{ type: 'local', path }]`. The path is a plugin Althar builds
@@ -596,7 +378,9 @@ checks and the harness permission rules remain the enforcement.
   config's `skills.paths` in `OPENCODE_CONFIG_CONTENT`, beside its asks
   (OpenCode 1.19.0 reads it; read from the binary, not yet a live session).
   Codex is not counted on for subagents, so a skill that needs them is left out
-  for it, and the thread gets a notice naming what was left out and why.
+  for it, and the thread gets a notice naming what was left out and why. (No
+  skill says it needs them now that the catalog is gone, which was the only
+  place that was written; the projection and the notice stay.)
 - **Who gets it.** Only a task's lead, on any agent that says how, and only where the runtime
   was given a skills store. Readers, reviewers, a review's lead (untrusted) and
   other agents get none. A failure to set skills up costs the session its
@@ -627,18 +411,11 @@ checks and the harness permission rules remain the enforcement.
   nothing found to stop at, every commit counts, so the push is held, not let
   by.
 
-- **Catalog updates.** Installing the local catalog is serialized per store,
-  and a default the catalog no longer lists is dropped from `installs.json`
-  (its stored version is kept) and reported (`removedByCatalog` lists them first,
-  for the later update screen); a person's own installs are untouched.
+- **Default catalog (2026-10-18; dropped 8 Nov 2026).** 32 skills from
+  agent-skills and superpowers at pinned commits, patched to fit, vendored in
+  `packages/skills/catalog/` and installed as `althar-default`. Section 6 says
+  why Althar no longer ships any, and what happens to a store that has them.
 
-- **Default catalog (2026-10-18).** `packages/skills/catalog/`: 33 skills from
-  agent-skills and superpowers at pinned commits, every skill of both except
-  where two do the same job, read in full and patched to fit (no push or pull
-  request steps, planning files kept out of commits, harness-neutral text);
-  `catalog/CURATION.md` says what was chosen and why, `scripts/vendor.ts`
-  rebuilds it. The desktop app and the CLI turn delivery on with it, the store
-  in the profile's `skills/`.
 - **GitHub install, review, update, rollback (2026-10-18).** A ref is resolved
   once to a commit, only the skill's folder is fetched (files from GitHub's
   raw host, each checked against the commit tree's blob hash), and a review
@@ -648,8 +425,26 @@ checks and the harness permission rules remain the enforcement.
   all of it. Public repositories only: the connections hold no token the
   skills page may use.
 - **Checked live (2026-10-18), without a model call:** OpenCode 1.19.0's
-  `debug skill` lists all 33 from `skills.paths` with an isolated home; Codex
-  0.160.1's app server lists all 33 from the extra root codex-acp sets.
+  `debug skill` lists the skills of a run's folder from `skills.paths` with an
+  isolated home; Codex 0.160.1's app server lists them from the extra root
+  codex-acp sets.
+- **Checked on every run of `test:agents` (DEV-187), without a sign-in or a
+  model call:** a run's folder, laid out by `@althar/skills`' `projectRun` for
+  each registry entry's layout and handed over as Althar hands it, is found by
+  the real agent: Claude Code (through claude-agent-acp 0.101.0) lists its
+  plugin's skills as `althar:<skill>` commands, Codex (codex-acp 2.5.0) lists
+  the folder added to its session, and OpenCode lists it from `skills.paths`:
+  1.x in `debug skill` (seen with 1.18.31), 2.x, which has no `debug skill`,
+  from its own server's `GET /api/skill` (seen with 2.2.6). Althar runs the
+  person's OpenCode where they have one, of either major, and downloads 2.x
+  where they don't; `ALTHAR_TEST_OPENCODE` names the copy to check. Claude Code
+  skips where its adapter or the program it starts can't be found, OpenCode
+  where it isn't installed. No workflow runs `test:agents` yet. On every pull
+  request, the runtime's tests check the other half: that the plugin and the
+  added directory reach the session the fake agent opens, and that the launch
+  `Agents.fromRegistry` composes for OpenCode carries the run's folder in
+  `skills.paths` (the fake runs in the test's process, so that is the
+  composed environment, not one a process received).
 - **Repository files in the project's settings (2026-10-18).** The project's
   Settings panel has a Repository files module that says where they stand and
   opens out to the three switches of section 4, each off until turned on and
@@ -667,8 +462,18 @@ checks and the harness permission rules remain the enforcement.
   in each agent (section 4), the commit-time check before staging, and the
   one-time grant naming a destination. Today the push is the only barrier.
 - Guarding Althar's local merge into a default branch.
-- Per-project selection and bindings, name conflicts between sources, and
-  Codex's `[[skills.config]]` exclusions (stage 4).
+- Bindings beyond roles and projects (stage 4). Roles and projects are built
+  ([ADR-097](../decisions/the-persons-setup.md#skills)): every skill is one
+  list, the store's winning a name it shares with an agent's folder. A
+  session leaves a held store skill out of its copies. It holds one the agent
+  loads itself back there: Claude Code by `Skill(<name>)` deny rules and
+  `skillOverrides`, Codex by `[[skills.config]]` `{ name, enabled = false }`,
+  OpenCode by `permission.skill` deny (`heldSkills.ts`). Each was read from
+  the installed versions, not from a logged-in session. Not verified: whether
+  Claude Code still lists a held plugin skill, and whether OpenCode 2.x lists
+  a denied one.
+- A repository skill and one of the person's under one name are held back
+  together, as each agent holds by name.
 - The Codex size check: estimating the list against its budget, warning, and
   reporting what Codex left out (section 2).
 - Reporting skills a repository already has, and same-name collisions with
@@ -676,7 +481,6 @@ checks and the harness permission rules remain the enforcement.
 - First-run import of skills already in an agent's home (section 1).
 - Removing old stored versions no run uses (section 3's retention).
 - Installs from private repositories.
-- A catalog update channel between app releases (`althar-skills`).
 - Refusing OpenCode 2.x (per the OpenCode 2 plan, which is not in this tree).
 - A logged-in Claude Code, Codex or OpenCode session using a skill end to end.
 - Skills for the agents that came over ACP after this plan: Copilot, Junie,
@@ -685,25 +489,17 @@ checks and the harness permission rules remain the enforcement.
   to load a folder for one session alone, so each entry says `skills: null`
   and its sessions get none. Each needs the probe Codex and OpenCode had.
 - OpenSpec (section 5).
-- The user guide and the maintainer runbook for curating the catalog
-  (stage 7).
+- The user guide for installing, reviewing and updating skills (stage 7).
 
 ## Open decisions and risks
 
-- **Settled:** the skills carried. Every skill of both was read in full on
-  2026-10-18 and 33 were carried (`packages/skills/catalog/CURATION.md`), more
-  than the ~15 section 6 aimed at for Codex's budget; ADR-094 records why and
-  what it costs. After review, `using-git-worktrees` was left out (Althar makes
-  the worktrees), leaving 32, and all ship off until the person turns them on.
 - Where skill-written planning files (`SPEC.md`, `docs/superpowers/...`) sit
   in the repository settings: a fourth setting, or part of the OpenSpec one.
-- **Settled:** third-party text. The per-file read found Anthropic's
-  authoring guide (left out) and text close to Google's Engineering Practices
-  (credited); see `CURATION.md`.
 - Where Codex and OpenCode read skills from was probed (Implementation
   status, "Checked live"): Codex 0.160.1 through codex-acp's extra roots,
   OpenCode 1.19.0 through `skills.paths`. Each new version needs the probe
-  again. Codex may still truncate its initial list under its context budget;
+  again: `test:agents` repeats it for Althar's own folder, by hand until a
+  workflow runs it. Codex may still truncate its initial list under its context budget;
   reporting that is not built.
 - Native repo skills can differ by harness and may be automatically loaded.
   Althar must surface this extra context and prove any attempt to suppress it;

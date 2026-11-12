@@ -28,6 +28,8 @@ export { connection, handlers, serve, services } from './Api'
 export { FolderCleanup } from './FolderCleanup'
 export { LeftBehind } from './LeftBehind'
 export { Folders } from './Folders'
+export { ToolServer } from './ToolServer'
+export { Canvases } from './Canvases'
 export { Queries, type ThreadChange } from './Queries'
 export { type NudgeEvent, type NudgeKind, Nudges } from './Nudges'
 export { settledAmong, settling } from './settled'
@@ -53,3 +55,4 @@ export { backupsIn, databaseIn, defaultProfile, defaultWorktrees } from './locat
 export { InstallFailed, Installs, type OnDevice } from './Installs'
 
 export { AfterOpen, startup } from './startup'
+export { lagLogged, watchLag } from './lag'

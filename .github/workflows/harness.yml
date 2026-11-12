@@ -27,6 +27,7 @@ on:
         'patches/**',
         'packages/testing/**',
         '.github/actions/flaky/**',
+        '.github/actions/electron/**',
         '.github/workflows/harness.yml',
       ]
 
@@ -92,7 +93,9 @@ jobs:
       - uses: actions/setup-node@v5
         with:
           node-version-file: .node-version
-      - run: bun install --frozen-lockfile
+      - uses: ./.github/actions/electron
+        with:
+          binary: 'false'
       # Tests with an open flaky issue run, but don't fail this job (packages/testing).
       - uses: ./.github/actions/flaky/quarantine
       - env:
@@ -127,8 +130,9 @@ jobs:
       - uses: actions/setup-node@v5
         with:
           node-version-file: .node-version
-      - run: bun install --frozen-lockfile
-        working-directory: .
+      - uses: ./.github/actions/electron
+        with:
+          binary: 'false'
       # Tests with an open flaky issue run, but don't fail this job (packages/testing).
       - uses: ./.github/actions/flaky/quarantine
       # A part covers only what its own tests reach, so the thresholds wait for the merge.
@@ -166,8 +170,9 @@ jobs:
       - uses: actions/setup-node@v5
         with:
           node-version-file: .node-version
-      - run: bun install --frozen-lockfile
-        working-directory: .
+      - uses: ./.github/actions/electron
+        with:
+          binary: 'false'
       - uses: actions/download-artifact@v6
         with:
           pattern: runtime-coverage-blob-*

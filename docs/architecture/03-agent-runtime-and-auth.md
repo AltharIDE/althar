@@ -459,9 +459,11 @@ in two layers:
    Today (`usageSources.ts` declares each pair's sources, or why it has none):
    - Claude Code: live, `claude-agent-acp` forwards the Agent SDK's
      `rate_limit_event` in `usage_update` `_meta["_claude/rateLimit"]`, and
-     drops it if it arrives before a turn's first usage figure
+     dropped an event that arrived before a turn's first usage figure
+     until 0.106.0
      ([#1127](https://github.com/agentclientprotocol/claude-agent-acp/issues/1127)),
-     so Althar carries a patch for that (`patches/`, on the pinned version).
+     where upstream sends it with the next update; Althar's patch (`patches/`)
+     no longer carries that.
      The event's own window has a use only near its limit; each window the
      CLI tracks is in its `unifiedWindows`, sent whenever one's rounded
      percentage moves. Where no session has said for a quarter of an hour, as
@@ -1225,8 +1227,11 @@ the rules keep for them does ([ADR-021](../decisions/tasks.md#questions-to-the-p
 
 As of 10 October 2026, Claude Code asks in a form. Codex offers
 request_user_input only in its Plan mode, which a lead isn't in, and OpenCode
-keeps its question tool off over ACP; both ask in their own words, and a lead
-that stops to wait is reminded to report its step (05).
+keeps its question tool off over ACP. A lead whose agent has no way to ask
+still needn't guess or report its step done: it calls `wait_for_person` with
+its question and ends its turn. Its step waits in Needs you, with the question,
+and the person's answer starts it again where it stopped (05). `finish_step`
+says not to be used for work that waits on the person.
 
 ## Approval boundary
 
