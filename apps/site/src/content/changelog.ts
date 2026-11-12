@@ -33,6 +33,55 @@ export const releaseUrl = (version: string) => `${REPO}/releases/tag/v${version}
 /** The releases, newest first. */
 export const RELEASES: readonly Release[] = [
   {
+    version: '0.8.0',
+    date: '2026-11-12',
+    title: 'Your app, beside the conversation',
+    changes: [
+      { kind: 'new', text: 'A browser beside the conversation: a task’s app, and links in a thread, open beside it.' },
+      { kind: 'new', text: 'Comment on the page: point at anything and write; it goes to the lead with a picture of the spot.' },
+      {
+        kind: 'new',
+        text: 'Leads use the page: they click, type and take screenshots in the page you’re looking at, to check what they built.',
+      },
+      { kind: 'new', text: 'Canvases: leads draw pages, mockups, diagrams and charts; comment, and the next version answers.' },
+      { kind: 'new', text: 'Artifacts: every canvas a project’s agents drew, in one view, with each version.' },
+      {
+        kind: 'new',
+        text: 'Keep talking to a finished task. What its lead commits waits for Ship, which reviews it and pushes it.',
+      },
+      { kind: 'new', text: 'Several changes in one task, each with its own pull request, side by side or stacked.' },
+      { kind: 'new', text: 'Helpers: a lead starts other agents that work in the background while you talk to it.' },
+      { kind: 'new', text: 'Small changes in one step on a quick model, reviewed after they merge.' },
+      { kind: 'new', text: 'Asides: quick questions beside the coordinator’s conversation. One that changes code becomes a task.' },
+      { kind: 'new', text: 'Out of usage: the step moves to the strongest model you have with usage left.' },
+      { kind: 'new', text: 'Settings, rebuilt: add an MCP server or a skill once, and every agent gets it.' },
+      { kind: 'new', text: 'Reorder Up next by dragging: the order you set is the order tasks get an agent.' },
+      { kind: 'new', text: 'Changes across several repositories show as one track, merged in order.' },
+      { kind: 'new', text: 'Tasks can work toward a branch other than the default one.' },
+      { kind: 'new', text: 'What a pull request needs before it can merge, on its card.' },
+      { kind: 'new', text: 'Leads change issues in bulk, on every tracker, and can read other tasks’ work.' },
+      { kind: 'new', text: 'Leads start tasks, which show live in their thread.' },
+      { kind: 'new', text: 'The coordinator’s merges in one card that updates as each lands.' },
+      { kind: 'new', text: 'Review after merge brings back only major findings, or every finding, or none: your choice.' },
+      { kind: 'new', text: 'A warning a few days before an agent’s sign-in ends.' },
+      { kind: 'new', text: 'Window controls that match your desktop on GNOME, KDE and Windows.' },
+      { kind: 'improved', text: 'Althar stays responsive when your computer is busy.' },
+      { kind: 'improved', text: 'Agents ask only before what can’t be undone.' },
+      { kind: 'improved', text: 'Hold, start or change the team of any task from the board.' },
+      { kind: 'improved', text: 'Cleaner threads: a turn’s work is one live line, then folds.' },
+      { kind: 'improved', text: 'Threads load earlier turns as you scroll up.' },
+      { kind: 'improved', text: 'The coordinator plans from presets.' },
+      { kind: 'improved', text: 'Models named as you know them.' },
+      { kind: 'improved', text: 'Your own Codex install runs Codex’s sessions.' },
+      { kind: 'improved', text: 'Light theme meets WCAG AA contrast.' },
+      { kind: 'fixed', text: 'Messages sent during a turn arrive in the order you sent them.' },
+      { kind: 'fixed', text: 'Any reply from you clears “Waiting on you”.' },
+      { kind: 'fixed', text: 'A fresh usage reading clears a stale “Out of usage”.' },
+      { kind: 'fixed', text: 'Comments by a repository’s maintainers reach the lead.' },
+      { kind: 'fixed', text: 'Merging main into a task’s branch no longer starts a review round.' },
+    ],
+  },
+  {
     version: '0.7.0',
     date: '2026-11-04',
     title: 'Reviewed before you see it',
@@ -339,12 +388,6 @@ export const ROADMAP: readonly Planned[] = [
     title: 'Mobile app',
     detail:
       'See what needs you and answer it from your phone: allow a command, read a finished change, merge it. The work keeps running on your computer.',
-  },
-  {
-    stage: 'next',
-    title: 'Integrated browser',
-    detail:
-      'A browser inside Althar. A lead opens the page it changed, clicks through it and shows you what it saw, and you check it without leaving the task.',
   },
   {
     stage: 'next',
