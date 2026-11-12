@@ -128,55 +128,89 @@ Althar runs each one under your own sign-in: your Claude plan, your ChatGPT plan
   </tr>
 </table>
 
-## Tell it what. It picks the team.
+## Fall in love with building again.
 
-Every project has a coordinator. Say what you want done, and it turns that into tasks, each with a lead to build it and a model from another lab to review it. Leave it, and it starts.
+Tired of juggling terminals, re-explaining your project and babysitting agents? So were we.
 
-<img src="brand/export/screenshots/framed/plan.jpg" width="100%" alt="You ask for a fix to the VAT rate on EU invoices; the coordinator answers with one task: one agent implements, another reviews, then a draft pull request. It starts on its own unless changed or held." />
-
-## Implement. Review. Fix. Review again.
-
-Other models review the lead's work, the lead fixes what they find, and it goes round until the review is clean. You step in to merge.
-
-<img src="brand/export/screenshots/framed/graph.jpg" width="100%" alt="A task as a graph, a lane for each agent: the lead implements, the first review finds two things, the lead settles both, the second review passes, and Althar opens a draft pull request." />
-
-<img src="brand/export/screenshots/framed/review.jpg" width="100%" alt="A review settled: what two reviewers found, by severity and file, and what the lead fixed in the second round or set aside, with its reason." />
-
-## Every agent's work. One board.
-
-Up next, running, needs you, settled: every task in the project, whichever agent has it.
-
-<img src="brand/export/screenshots/framed/board.jpg" width="100%" alt="A project's board: up next, running, needs you, and settled, with each running task's steps and its lead." />
-
-## It draws it out. You mark it up.
-
-Leads draw pages and diagrams on the canvas. Comment on a version, and the next one answers it.
-
-<img src="brand/export/screenshots/framed/canvas.jpg" width="100%" alt="A task with its canvas open beside it: the payouts launch page its lead drew, at version 3, after you asked for a bigger, bolder headline." />
-
-## See it running.
-
-The page a task is building opens beside it, in a session of its own. The lead tries its fix there; a click from you stops it.
-
-<img src="brand/export/screenshots/framed/browser.jpg" width="100%" alt="A task with the browser beside it: the refunds page its run serves, the failed refund now refunded, while the lead tries the fix it just made." />
-
-## Work that starts itself.
-
-Ask once, for a time or for when something happens. It runs on your computer while Althar is open, and not until you turn it on.
-
-<img src="brand/export/screenshots/framed/automations.jpg" width="100%" alt="Automations: a nightly dependency bump running now, a morning review of new pull requests, a Sunday end-to-end run that paused itself, each with how its last runs went." />
-
-## Say it. Don't type it.
-
-Dictate to the coordinator or any task, transcribed on your computer.
-
-<img src="brand/export/screenshots/framed/dictation.jpg" width="100%" alt="Dictating to a lead: what was said so far is in the field, the newest words arriving faint, and the voice drawn as bars." />
-
-## Still in reach.
-
-On a Mac, Althar sits round the notch or in the menu bar; on Windows and Linux, in the tray. Point at it to answer a permission or open a pull request, and carry on.
-
-<img src="brand/export/reels/island.gif" width="100%" alt="The island round the notch: two calls wait, and pointing at it drops it open to answer them." />
+<table>
+  <tr>
+    <td width="44%" valign="top">
+      <h3>Tell it what. It picks the team.</h3>
+      <p>Every project has a coordinator. Say what you want done, and it turns that into tasks, each with a lead to build it and a model from another lab to review it.</p>
+      <p>Leave it, and it starts.</p>
+    </td>
+    <td width="56%" valign="top">
+      <img src="brand/export/screenshots/framed/plan.jpg" width="100%" alt="You ask for a fix to the VAT rate on EU invoices; the coordinator answers with one task: one agent implements, another reviews, then a draft pull request. It starts on its own unless changed or held." />
+    </td>
+  </tr>
+  <tr>
+    <td valign="top">
+      <h3>Implement. Review. Fix. Review again.</h3>
+      <p>Other models review the lead's work, the lead fixes what they find, and it goes round until the review is clean.</p>
+      <p>You step in to merge.</p>
+    </td>
+    <td valign="top">
+      <img src="brand/export/screenshots/framed/review.jpg" width="100%" alt="A review settled: what two reviewers found, by severity and file, and what the lead fixed in the second round or set aside, with its reason." />
+    </td>
+  </tr>
+  <tr>
+    <td valign="top">
+      <h3>Every agent's work. One board.</h3>
+      <p>Up next, running, needs you, settled: every task in the project, whichever agent has it.</p>
+    </td>
+    <td valign="top">
+      <img src="brand/export/screenshots/framed/board.jpg" width="100%" alt="A project's board: up next, running, needs you, and settled, with each running task's steps and its lead." />
+    </td>
+  </tr>
+  <tr>
+    <td valign="top">
+      <h3>It draws it out. You mark it up.</h3>
+      <p>Leads draw pages and diagrams on the canvas.</p>
+      <p>Comment on a version, and the next one answers it.</p>
+    </td>
+    <td valign="top">
+      <img src="brand/export/screenshots/framed/canvas.jpg" width="100%" alt="A task with its canvas open beside it: the payouts launch page its lead drew, at version 3, after you asked for a bigger, bolder headline." />
+    </td>
+  </tr>
+  <tr>
+    <td valign="top">
+      <h3>See it running.</h3>
+      <p>The page a task is building opens beside it, in a session of its own.</p>
+      <p>The lead tries its fix there; a click from you stops it.</p>
+    </td>
+    <td valign="top">
+      <img src="brand/export/screenshots/framed/browser.jpg" width="100%" alt="A task with the browser beside it: the refunds page its run serves, the failed refund now refunded, while the lead tries the fix it just made." />
+    </td>
+  </tr>
+  <tr>
+    <td valign="top">
+      <h3>Work that starts itself.</h3>
+      <p>Ask once, for a time or for when something happens. It runs on your computer while Althar is open, and not until you turn it on.</p>
+    </td>
+    <td valign="top">
+      <img src="brand/export/screenshots/framed/automations.jpg" width="100%" alt="Automations: a nightly dependency bump running now, a morning review of new pull requests, a Sunday end-to-end run that paused itself, each with how its last runs went." />
+    </td>
+  </tr>
+  <tr>
+    <td valign="top">
+      <h3>Say it. Don't type it.</h3>
+      <p>Dictate to the coordinator or any task, transcribed on your computer.</p>
+    </td>
+    <td valign="top">
+      <img src="brand/export/screenshots/framed/dictation.jpg" width="100%" alt="Dictating to a lead: what was said so far is in the field, the newest words arriving faint, and the voice drawn as bars." />
+    </td>
+  </tr>
+  <tr>
+    <td valign="top">
+      <h3>Wherever you are, still in reach.</h3>
+      <p>On a Mac, Althar sits round the notch or in the menu bar; on Windows and Linux, in the tray.</p>
+      <p>Point at it to answer a permission or open a pull request, and carry on.</p>
+    </td>
+    <td valign="top">
+      <img src="brand/export/reels/island.gif" width="100%" alt="The island round the notch: two calls wait, and pointing at it drops it open to answer them." />
+    </td>
+  </tr>
+</table>
 
 ## Get started
 
