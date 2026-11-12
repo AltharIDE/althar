@@ -181,3 +181,15 @@ describe('cloning', () => {
     expect(screen.getByRole('button', { name: 'Clone…' })).toBeInTheDocument()
   })
 })
+
+describe('a side of the consumer’s own', () => {
+  it('sets it in place of the folders, says what Create will do, and says what is missing in the foot', () => {
+    const { onCreate } = tab({ folders: [], side: <p>Clone a repository</p>, footNote: 'Clones northwind-co/web.' })
+    expect(screen.getByText('Clone a repository')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Choose a folder…' })).not.toBeInTheDocument()
+    expect(screen.getByText('Clones northwind-co/web.')).toBeInTheDocument()
+    fireEvent.keyDown(page(), { key: 'Enter', metaKey: true })
+    expect(onCreate).not.toHaveBeenCalled()
+    expect(screen.getByRole('alert')).toHaveTextContent('Add a folder first.')
+  })
+})

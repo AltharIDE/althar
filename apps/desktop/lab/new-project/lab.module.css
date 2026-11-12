@@ -64,14 +64,6 @@
   background: var(--paper);
   box-shadow: 0 0 0 1px var(--line);
 }
-/* In the board's lane, the card at the lane's width. */
-.inLane {
-  padding: 14px;
-  border-radius: 12px;
-  background: var(--paper);
-  box-shadow: 0 0 0 1px var(--line);
-}
-
 /* The host's form: owner / name, then who can see it. */
 .hostForm {
   display: grid;
@@ -90,34 +82,192 @@
   color: var(--t-4);
 }
 
-/* C: the coordinator's question, and the answers to press under it. */
-.replies {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  margin-top: 10px;
+/* ---- The setup, on the New project page's side ---- */
+.fieldset {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
 }
-.reply {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
+.stack {
+  display: grid;
+  gap: 22px;
+}
+.mono {
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: -0.01em;
+}
+.owner {
+  color: var(--t-3);
+  font-weight: 450;
 }
 
-/* Clone…: the field that finds one or takes its URL, the repositories on the hosts it's connected to, and where clones go. */
-.clone {
+/* A part of it: its name, and how it's going once Create is pressed. */
+.section {
   display: grid;
+  gap: 8px;
 }
-.cloneFind {
+.sectionHead {
   display: flex;
   align-items: center;
   gap: 8px;
-  height: 40px;
-  padding: 0 12px;
-  border-bottom: 1px solid var(--line);
+  min-height: 18px;
+}
+.sectionTitle {
+  margin: 0;
+  color: var(--t-2);
+  font: 500 10.5px/1.2 var(--font-label);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.tick {
+  display: grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--ink-fill);
+  color: var(--n-0);
+  animation: arrive var(--slow) var(--ease-out) both;
+}
+@keyframes arrive {
+  from {
+    opacity: 0;
+    transform: scale(0.6);
+  }
+}
+
+/* One of a few, as rows on one sheet: the chosen one opens to what it needs. */
+.picks {
+  display: grid;
+  border-radius: var(--r-lg);
+  background: var(--paper);
+  box-shadow: 0 0 0 1px var(--line-2);
+}
+.pick + .pick,
+.pick + .connectRow,
+.connectRow + .pick,
+.connectRow + .connectRow {
+  box-shadow: inset 0 1px 0 var(--line);
+}
+.pickHead {
+  display: grid;
+  grid-template-columns: 14px 18px auto minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 40px;
+  padding: 0 14px;
+  text-align: left;
+  border-radius: var(--r-lg);
+}
+.pickHead:hover {
+  background: var(--hover-paper);
+}
+.pickHead:focus-visible {
+  outline: none;
+  box-shadow: inset 0 0 0 1.5px var(--signal);
+}
+.dot,
+.dotless {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+}
+.dot {
+  box-shadow: inset 0 0 0 1.5px var(--t-4);
+  transition: box-shadow var(--fast) var(--ease);
+}
+.pickOn .dot {
+  box-shadow: inset 0 0 0 4px var(--ink-fill);
+}
+.pickMark {
+  display: grid;
+  place-items: center;
+  color: var(--t-2);
+}
+.pickTitle {
+  font-size: 13px;
+  font-weight: 540;
+  color: var(--t-1);
+  white-space: nowrap;
+}
+.pickNote {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--t-3);
+  font-size: 12px;
+}
+.pickMore {
+  padding: 0 14px 12px 66px;
+  animation: fade var(--slow) var(--ease-out) both;
+}
+@keyframes fade {
+  from {
+    opacity: 0;
+  }
+}
+.connectRow {
+  display: grid;
+  grid-template-columns: 14px 18px auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  min-height: 40px;
+  padding: 0 8px 0 14px;
+}
+.connectRow .pickMark {
+  opacity: 0.55;
+}
+.hostFields {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.nameField {
+  width: 150px;
+}
+.fixed {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0;
+  padding: 11px 14px;
+  border-radius: var(--r-lg);
+  background: var(--sunk);
+  color: var(--t-2);
+  font-size: 12.5px;
+}
+
+/* Your repositories: found as typed, the one named like the project lit in its colour. */
+.repos {
+  display: grid;
+  gap: 8px;
+}
+.reposBar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.find {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: 8px;
+  height: 32px;
+  padding: 0 10px;
+  border-radius: 7px;
+  background: var(--paper);
+  box-shadow: inset 0 0 0 1px var(--line-2);
   color: var(--t-3);
   cursor: text;
 }
-.cloneFind input {
+.find:focus-within {
+  box-shadow: inset 0 0 0 1.5px var(--signal);
+}
+.find input {
   flex: 1;
   min-width: 0;
   height: 100%;
@@ -125,97 +275,452 @@
   border: 0;
   outline: 0;
   background: transparent;
-  font-size: 13px;
-  color: var(--t-1);
-}
-.cloneFind input::placeholder {
-  color: var(--t-3);
-}
-.cloneFind input::-webkit-search-cancel-button {
-  display: none;
-}
-.cloneList {
-  display: grid;
-  max-height: 280px;
-  overflow-y: auto;
-  margin: 0;
-  padding: 5px;
-  list-style: none;
-}
-.cloneRow {
-  display: grid;
-  grid-template-columns: 16px minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 10px;
-  width: 100%;
-  height: 34px;
-  padding: 0 9px;
-  border-radius: 6px;
   color: var(--t-1);
   font-size: 12.5px;
-  text-align: left;
 }
-.cloneRow:hover {
+.find input::placeholder {
+  color: var(--t-3);
+}
+.find input::-webkit-search-cancel-button {
+  display: none;
+}
+.repoList {
+  display: grid;
+  align-content: start;
+  gap: 2px;
+  margin: 0;
+  padding: 4px;
+  overflow-y: auto;
+  list-style: none;
+  border-radius: var(--r-lg);
+  background: var(--paper);
+  box-shadow: 0 0 0 1px var(--line-2);
+}
+.repo {
+  position: relative;
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 9px 10px;
+  border-radius: 8px;
+  text-align: left;
+  transition: background var(--fast) var(--ease);
+}
+.repo:hover {
   background: var(--hover-paper);
 }
-.cloneRow:focus-visible {
+.repo:focus-visible {
   outline: none;
   box-shadow: inset 0 0 0 1.5px var(--signal);
 }
-.cloneRow:active {
-  background: var(--pressed-paper);
+/* named like the project: lit in the project's own colour, as its mark is */
+.repoLike {
+  background: color-mix(in oklab, var(--ink) 9%, var(--paper));
 }
-.cloneName {
+.repoLike:hover {
+  background: color-mix(in oklab, var(--ink) 14%, var(--paper));
+}
+.repoOn {
+  box-shadow: inset 0 0 0 1.5px var(--ink);
+}
+.repoMark {
+  display: grid;
+  place-items: center;
+  color: var(--t-1);
+}
+.repoMain {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  text-align: left;
+}
+.repoName {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  color: var(--t-1);
+  font-size: 13.5px;
+  font-weight: 580;
+  white-space: nowrap;
+}
+.repoName > svg {
+  color: var(--t-4);
+}
+.likeTag {
+  padding: 1px 7px;
+  border-radius: 99px;
+  background: color-mix(in oklab, var(--ink) 18%, transparent);
+  color: color-mix(in oklab, var(--ink), var(--t-1) 35%);
+  font-size: 10.5px;
+  font-weight: 560;
+}
+.repoFacts {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--t-3);
+  font-size: 12px;
+  white-space: nowrap;
+}
+.about {
   overflow: hidden;
   text-overflow: ellipsis;
-  white-space: nowrap;
+  color: var(--t-2);
+}
+.lang {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.lang i {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+.repoAct {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 26px;
+  padding: 0 10px;
+  border-radius: 7px;
+  background: var(--paper);
+  box-shadow: 0 0 0 1px var(--line-2), var(--lift);
+  color: var(--t-1);
+  font-size: 12px;
   font-weight: 540;
 }
-.cloneOwner {
-  color: var(--t-3);
-  font-weight: 450;
+.repoLike .repoAct {
+  background: var(--ink-fill);
+  box-shadow: none;
+  color: var(--n-0);
 }
-.cloneFacts {
-  color: var(--t-3);
-  font-size: 11.5px;
-  white-space: nowrap;
+.repoActOn,
+.repoLike .repoActOn {
+  background: var(--ink);
+  box-shadow: none;
+  color: #fff;
 }
-.cloneQuiet {
+.reposQuiet {
+  display: grid;
+  place-items: center;
   margin: 0;
-  padding: 14px 14px;
+  border-radius: var(--r-lg);
+  background: var(--sunk);
   color: var(--t-3);
   font-size: 12.5px;
 }
-.cloneConnect {
+.connectHosts {
   display: grid;
-  gap: 10px;
-  padding: 14px;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
 }
-.cloneConnect p {
-  margin: 0;
+.connectHost {
+  display: grid;
+  justify-items: center;
+  align-content: center;
+  gap: 6px;
+  padding: 20px;
+  border-radius: var(--r-lg);
+  background: var(--paper);
+  box-shadow: 0 0 0 1px var(--line-2);
+  text-align: center;
+}
+.connectHostName {
+  margin-top: 4px;
+  font-size: 14px;
+  font-weight: 600;
+}
+.connectHostNote {
+  max-width: 180px;
+  margin-bottom: 6px;
+  color: var(--t-3);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+/* Where its code comes from, once chosen. */
+.card {
+  position: relative;
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  overflow: hidden;
+  padding: 12px 14px;
+  border-radius: var(--r-lg);
+  background: var(--paper);
+  box-shadow: 0 0 0 1px var(--line-2);
+  text-align: left;
+}
+.cardMark {
+  display: grid;
+  place-items: center;
+  color: var(--t-2);
+}
+.cardMain {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+.cardName {
+  color: var(--t-1);
+  font-size: 14px;
+  font-weight: 600;
+}
+.cardFacts {
+  display: flex;
+  gap: 12px;
+  color: var(--t-3);
+  font-size: 12px;
+  white-space: nowrap;
+}
+.cardChange {
+  font-size: 12px;
+}
+.cardLine {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin: 2px 0 0;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
   color: var(--t-2);
   font-size: 12.5px;
   line-height: 1.45;
 }
-.cloneConnectButtons {
-  display: flex;
-  gap: 6px;
+.cardLine > svg {
+  flex: none;
+  position: relative;
+  top: 2px;
+  color: var(--t-3);
 }
-.cloneFoot {
+.cardBad,
+.cardBad > svg {
+  color: var(--danger);
+}
+/* Cloning: the card fills from the left in the project's colour. */
+.fill {
+  position: absolute;
+  inset: auto 0 0 0;
+  height: 2px;
+  background: var(--ink);
+  transform-origin: left;
+  animation: filling 1.7s cubic-bezier(0.3, 0.1, 0.3, 1) both;
+}
+@keyframes filling {
+  from {
+    transform: scaleX(0);
+  }
+  to {
+    transform: scaleX(1);
+  }
+}
+
+/* A: your repositories, as the side's first and largest thing. */
+.heroHead {
   display: flex;
-  align-items: center;
+  align-items: baseline;
   justify-content: space-between;
   gap: 12px;
-  padding: 8px 12px;
-  border-top: 1px solid var(--line);
-  background: var(--n-2);
+}
+.hero {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 620;
+  letter-spacing: -0.018em;
+}
+.accounts {
+  display: flex;
+  gap: 12px;
   color: var(--t-3);
   font-size: 12px;
 }
-.mono {
-  font-family: var(--mono);
-  font-size: 11px;
+.account {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.orRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: -8px;
+}
+.or {
+  color: var(--t-3);
+  font-size: 12px;
+}
+
+/* B: three ways in, side by side; under them, each one's room, the same height whichever it is. */
+.doors {
+  display: grid;
+  grid-template-columns: 1.3fr 1fr 1fr;
+  gap: 8px;
+}
+.door {
+  display: grid;
+  justify-items: start;
+  gap: 3px;
+  padding: 14px 14px 12px;
+  border-radius: var(--r-lg);
+  background: var(--paper);
+  box-shadow: 0 0 0 1px var(--line-2);
+  text-align: left;
+  transition:
+    box-shadow var(--fast) var(--ease),
+    background var(--fast) var(--ease);
+}
+.door:hover {
+  background: var(--hover-paper);
+}
+.door:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 1px var(--line-2), 0 0 0 3px var(--signal);
+}
+.door[aria-checked='true'] {
+  box-shadow: 0 0 0 2px var(--ink-fill);
+}
+/* Clone: lit in the project's colour */
+.doorClone {
+  background:
+    radial-gradient(120% 140% at 0% 0%, color-mix(in oklab, var(--ink) 16%, transparent), transparent 70%),
+    var(--paper);
+}
+.doorClone[aria-checked='true'] {
+  box-shadow: 0 0 0 2px var(--ink);
+}
+.doorArt {
+  display: flex;
+  align-items: center;
+  height: 26px;
+  margin-bottom: 6px;
   color: var(--t-2);
+}
+.doorMarks {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--t-1);
+}
+.doorTitle {
+  font-size: 14px;
+  font-weight: 600;
+}
+.doorNote {
+  color: var(--t-3);
+  font-size: 12px;
+}
+.doorBody {
+  height: 236px;
+}
+.zone {
+  display: grid;
+  align-content: center;
+  height: 100%;
+  padding: 16px;
+  border-radius: var(--r-lg);
+  background: var(--sunk);
+}
+.zoneEmpty {
+  justify-items: center;
+  gap: 8px;
+  border: 1px dashed var(--line-3);
+  color: var(--t-2);
+}
+.zoneTitle {
+  color: var(--t-1);
+  font-size: 13px;
+  font-weight: 560;
+}
+
+/* C: one sheet, a label to each row. */
+.sheet {
+  display: grid;
+  border-radius: var(--r-lg);
+  background: var(--paper);
+  box-shadow: 0 0 0 1px var(--line-2);
+}
+.sheetRow {
+  display: grid;
+  grid-template-columns: 92px minmax(0, 1fr);
+  gap: 16px;
+  padding: 16px 18px;
+}
+.sheetRow + .sheetRow {
+  border-top: 1px solid var(--line);
+}
+.sheetLabel {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 28px;
+  color: var(--t-2);
+  font-size: 12.5px;
+  font-weight: 540;
+}
+.sheetControl {
+  display: grid;
+  justify-items: start;
+  gap: 10px;
+  min-width: 0;
+}
+.sheetControl > * {
+  max-width: 100%;
+}
+.sheetStack {
+  display: grid;
+  gap: 10px;
+}
+.sheetLine {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+}
+.sheetNote {
+  color: var(--t-3);
+  font-size: 12px;
+}
+.repoField {
+  position: relative;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  width: 440px;
+  max-width: 100%;
+  overflow: hidden;
+  padding: 10px 12px;
+  border-radius: var(--r-lg);
+  background: var(--paper);
+  box-shadow: 0 0 0 1px var(--line-2), var(--lift);
+  color: var(--t-1);
+  text-align: left;
+}
+.repoField:hover {
+  background: var(--hover-paper);
+}
+.repoField.repoLike {
+  background: color-mix(in oklab, var(--ink) 9%, var(--paper));
+  box-shadow: 0 0 0 1.5px color-mix(in oklab, var(--ink) 60%, transparent);
+}
+.repoField > svg:last-of-type {
+  color: var(--t-3);
+}
+.repoFieldName {
+  font-size: 13px;
+  font-weight: 540;
+}
+.popRepos {
+  padding: 10px;
 }
 
 /* The lab's own bar: what's shown, and what happens today. */

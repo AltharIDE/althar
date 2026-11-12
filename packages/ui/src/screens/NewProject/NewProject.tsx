@@ -259,6 +259,14 @@ export type NewProjectProps = RootProps<
     /** The repositories on connected hosts named like the project, each cloned in one press with onClone. */
     hosted?: NewProjectHosted | null
     onClone?: (id: string) => void
+    /**
+     * In place of its folders: the consumer's own way of choosing where the
+     * project's code comes from and how it is set up, given the side's room.
+     * The folders still say what it is made of, and Create still waits on them.
+     */
+    side?: ReactNode
+    /** In the foot, before Create: what Create will do. */
+    footNote?: ReactNode
     /** Folders dropped on the page. Without it, a drop does nothing. */
     onDrop?: (files: readonly File[]) => void
     /** What is on this computer to add; null while it is still being looked for. */
@@ -317,6 +325,8 @@ export function NewProject({
   clone,
   hosted,
   onClone,
+  side,
+  footNote,
   onDrop,
   found,
   onAdd,
@@ -337,7 +347,7 @@ export function NewProject({
   const chooseButton = useRef<HTMLButtonElement>(null)
   const [missing, setMissing] = useState<Missing>(null)
   const refocus = useRef<Refocus | null>(null)
-  const side = useRef<HTMLDivElement>(null)
+  const sideBox = useRef<HTMLDivElement>(null)
   const { over, handlers } = useDragOver(onDrop)
   const named = name.trim()
   const read = folders.flatMap((folder) => (folder.reading === true ? [] : [folder]))
@@ -381,7 +391,7 @@ export function NewProject({
     if (was === null) return
     refocus.current = null
     if (document.activeElement !== null && document.activeElement !== document.body) return
-    const buttons = side.current?.querySelectorAll<HTMLButtonElement>(`[data-refocus="${was.list}"]`) ?? []
+    const buttons = sideBox.current?.querySelectorAll<HTMLButtonElement>(`[data-refocus="${was.list}"]`) ?? []
     ;(buttons[Math.min(was.at, buttons.length - 1)] ?? chooseButton.current)?.focus()
   })
 
@@ -477,115 +487,132 @@ export function NewProject({
       </section>
 
       <section className={s.side} aria-labelledby={ids.folders}>
-        <div className={s.sideInner} ref={side}>
-          <h2 id={ids.folders} className={s.title}>
-            {t.folders}
-          </h2>
-          {over && !empty && <div className={s.empty} aria-hidden="true" />}
-          {folders.length > 0 && (
-            <ul className={s.folders} aria-label={t.folders}>
-              {folders.map((folder, at) => (
-                <FolderRow
-                  key={folder.id}
-                  folder={folder}
-                  t={t}
-                  onRemove={(id) => {
-                    refocus.current = { list: 'folders', at }
-                    onRemove(id)
-                  }}
-                />
-              ))}
-            </ul>
-          )}
-          {empty ? (
-            // Nothing added yet: where the folders will be, taking a drop, with the two ways to add one.
-            <div className={cx(s.zone, over && s.zoneOver)}>
-              <span className={s.zoneIcon} aria-hidden="true">
-                <Icon name="folder" size={18} />
-              </span>
-              <p className={s.zoneTitle}>{t.zone}</p>
-              <div className={s.zoneButtons}>
-                <Button
-                  ref={chooseButton}
-                  size="small"
-                  icon="folder"
-                  onClick={onChoose}
-                  aria-describedby={missing === 'folder' ? ids.missing : undefined}
-                >
-                  {t.choose}
-                </Button>
-                {fresh && (
-                  <Button size="small" icon="plus" onClick={startFresh}>
-                    {t.fresh}
-                  </Button>
-                )}
-                {clone}
-              </div>
-              {missing === 'folder' ? (
-                <p id={ids.missing} className={s.missing} role="alert">
-                  {fresh ? t.needsFolderOrFresh : t.needsFolder}
-                </p>
-              ) : (
-                fresh && <p className={s.note}>{t.freshNote(named === '' ? null : repositoryFolder(named))}</p>
-              )}
-            </div>
+        <div className={s.sideInner} ref={sideBox}>
+          {side !== undefined ? (
+            <VisuallyHidden>
+              <h2 id={ids.folders}>{t.folders}</h2>
+            </VisuallyHidden>
           ) : (
-            <div className={s.chooseRow}>
-              <Button
-                ref={chooseButton}
-                size="small"
-                icon="folder"
-                onClick={onChoose}
-                aria-describedby={missing === 'folder' ? ids.missing : undefined}
-              >
-                {t.choose}
-              </Button>
-              {fresh && (
-                <Button size="small" icon="plus" onClick={startFresh}>
-                  {t.fresh}
-                </Button>
-              )}
-              {clone}
-              {missing === 'folder' ? (
-                <span id={ids.missing} className={s.missing} role="alert">
-                  {fresh ? t.needsFolderOrFresh : t.needsFolder}
-                </span>
-              ) : (
-                <span className={s.note}>{t.chooseNote}</span>
-              )}
-            </div>
+            <h2 id={ids.folders} className={s.title}>
+              {t.folders}
+            </h2>
           )}
-          {(findings.length > 0 || (found !== null && found.first.length + found.more.length > 0) || cloneable !== null) && (
-            <div className={s.below}>
-              {findings.length > 0 && <Findings findings={findings} t={t} {...(onConnect === undefined ? {} : { onConnect })} />}
-              {found !== null && (
-                <Found
-                  found={found}
-                  t={t}
-                  onAdd={(id, at) => {
-                    refocus.current = { list: 'found', at }
-                    onAdd(id)
-                  }}
-                />
+          {side}
+          {side === undefined && (
+            <>
+              {over && !empty && <div className={s.empty} aria-hidden="true" />}
+              {folders.length > 0 && (
+                <ul className={s.folders} aria-label={t.folders}>
+                  {folders.map((folder, at) => (
+                    <FolderRow
+                      key={folder.id}
+                      folder={folder}
+                      t={t}
+                      onRemove={(id) => {
+                        refocus.current = { list: 'folders', at }
+                        onRemove(id)
+                      }}
+                    />
+                  ))}
+                </ul>
               )}
-              {cloneable !== null && (
-                <Hosted
-                  hosted={cloneable.hosted}
-                  t={t}
-                  onClone={(id, at) => {
-                    refocus.current = { list: 'hosted', at }
-                    cloneable.onClone(id)
-                  }}
-                />
+              {empty ? (
+                // Nothing added yet: where the folders will be, taking a drop, with the two ways to add one.
+                <div className={cx(s.zone, over && s.zoneOver)}>
+                  <span className={s.zoneIcon} aria-hidden="true">
+                    <Icon name="folder" size={18} />
+                  </span>
+                  <p className={s.zoneTitle}>{t.zone}</p>
+                  <div className={s.zoneButtons}>
+                    <Button
+                      ref={chooseButton}
+                      size="small"
+                      icon="folder"
+                      onClick={onChoose}
+                      aria-describedby={missing === 'folder' ? ids.missing : undefined}
+                    >
+                      {t.choose}
+                    </Button>
+                    {fresh && (
+                      <Button size="small" icon="plus" onClick={startFresh}>
+                        {t.fresh}
+                      </Button>
+                    )}
+                    {clone}
+                  </div>
+                  {missing === 'folder' ? (
+                    <p id={ids.missing} className={s.missing} role="alert">
+                      {fresh ? t.needsFolderOrFresh : t.needsFolder}
+                    </p>
+                  ) : (
+                    fresh && <p className={s.note}>{t.freshNote(named === '' ? null : repositoryFolder(named))}</p>
+                  )}
+                </div>
+              ) : (
+                <div className={s.chooseRow}>
+                  <Button
+                    ref={chooseButton}
+                    size="small"
+                    icon="folder"
+                    onClick={onChoose}
+                    aria-describedby={missing === 'folder' ? ids.missing : undefined}
+                  >
+                    {t.choose}
+                  </Button>
+                  {fresh && (
+                    <Button size="small" icon="plus" onClick={startFresh}>
+                      {t.fresh}
+                    </Button>
+                  )}
+                  {clone}
+                  {missing === 'folder' ? (
+                    <span id={ids.missing} className={s.missing} role="alert">
+                      {fresh ? t.needsFolderOrFresh : t.needsFolder}
+                    </span>
+                  ) : (
+                    <span className={s.note}>{t.chooseNote}</span>
+                  )}
+                </div>
               )}
-            </div>
+              {(findings.length > 0 || (found !== null && found.first.length + found.more.length > 0) || cloneable !== null) && (
+                <div className={s.below}>
+                  {findings.length > 0 && <Findings findings={findings} t={t} {...(onConnect === undefined ? {} : { onConnect })} />}
+                  {found !== null && (
+                    <Found
+                      found={found}
+                      t={t}
+                      onAdd={(id, at) => {
+                        refocus.current = { list: 'found', at }
+                        onAdd(id)
+                      }}
+                    />
+                  )}
+                  {cloneable !== null && (
+                    <Hosted
+                      hosted={cloneable.hosted}
+                      t={t}
+                      onClone={(id, at) => {
+                        refocus.current = { list: 'hosted', at }
+                        cloneable.onClone(id)
+                      }}
+                    />
+                  )}
+                </div>
+              )}
+            </>
           )}
         </div>
         <footer className={s.foot}>
-          {error !== undefined && error !== null && (
+          {error !== undefined && error !== null ? (
             <span className={s.error} role="alert">
               {error}
             </span>
+          ) : side !== undefined && missing === 'folder' ? (
+            <span className={s.error} role="alert">
+              {t.needsFolder}
+            </span>
+          ) : (
+            footNote !== undefined && <span className={s.footNote}>{footNote}</span>
           )}
           <Button kbd={t.createKbd} variant={read.length === 0 ? 'quiet' : 'default'} busy={creating || reading} onClick={create}>
             {named === '' ? t.createUnnamed : t.create(named)}

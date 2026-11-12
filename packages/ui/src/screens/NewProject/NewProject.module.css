@@ -371,6 +371,14 @@
   padding: 14px 24px;
   border-top: 1px solid var(--line);
 }
+/* what Create will do, before it */
+.footNote {
+  min-width: 0;
+  margin-right: auto;
+  color: var(--t-3);
+  font-size: 12px;
+  line-height: 1.45;
+}
 .error {
   min-width: 0;
   margin-right: auto;
