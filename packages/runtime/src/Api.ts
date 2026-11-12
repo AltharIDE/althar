@@ -1378,7 +1378,10 @@ export const handlers = Api.toLayer(
           commandId,
           api(
             Effect.asVoid(
-              Effect.flatMap(envelope('task.mark_done', { taskId }, commandId), (said) => tasks.markDone({ envelope: said, taskId })),
+              // The person's own press: an aside settles as it stands, as its pill's × says (Tasks.markDone's `clear`).
+              Effect.flatMap(envelope('task.mark_done', { taskId }, commandId), (said) =>
+                tasks.markDone({ envelope: said, taskId, clear: true }),
+              ),
             ),
           ),
         ),

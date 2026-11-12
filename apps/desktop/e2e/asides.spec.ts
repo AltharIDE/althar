@@ -195,10 +195,10 @@ test('an aside’s × clears it in the frame it is pressed, for good, and Make i
       }
     }, id)
     expect(gone).toEqual({ found: true, pill: true, coordinator: true })
-    // Althar catches up behind: the board says it settled, and still nothing of it came back.
+    // Althar catches up behind: the board's own read says it settled, and still nothing of it came back.
+    const clearedBack = () => page.evaluate(() => (window as unknown as { clearedBack: () => boolean }).clearedBack())
     await expect(page.getByRole('region', { name: 'The project’s work' }).getByText('Which file holds the retry?')).toBeVisible()
-    await page.waitForTimeout(1500)
-    expect(await page.evaluate(() => (window as unknown as { clearedBack: () => boolean }).clearedBack())).toBe(false)
+    expect(await clearedBack()).toBe(false)
     await expect(page.getByRole('alert').filter({ visible: true })).toHaveCount(0)
 
     // Make it a task: its pill goes and its card is on the board in the frame it is pressed.
@@ -221,6 +221,8 @@ test('an aside’s × clears it in the frame it is pressed, for good, and Make i
     expect(moved).toEqual({ pill: true, card: true })
     await expect(shown(page, 'An aside became a task: Shorten the retry wait')).toBeVisible()
     await expect(work).toHaveCount(0)
+    // Through every read of the board since, the cleared one never came back.
+    expect(await clearedBack()).toBe(false)
   } finally {
     await electronApp.close()
   }

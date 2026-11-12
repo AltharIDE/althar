@@ -234,9 +234,16 @@ export class Tasks extends Context.Service<
      * a page, stops after, in the background, and its agents once their
      * turns end (LeftBehind.ts); what wouldn't is said in its thread, and the
      * task is done all the same. Writing to its lead later opens it again
-     * (ADR-034), and starts it again. Whether it settled.
+     * (ADR-034), and starts it again. With `clear`, the person's own press
+     * on an aside (its pill's ×, or Done on it): one on Scratch settles
+     * whatever it stands at, what waits on the person withdrawn. A lead's
+     * or the coordinator's `settle_task` never clears so. Whether it settled.
      */
-    markDone(input: { readonly envelope: CommandEnvelope; readonly taskId: string }): Effect.Effect<boolean, unknown>
+    markDone(input: {
+      readonly envelope: CommandEnvelope
+      readonly taskId: string
+      readonly clear?: boolean
+    }): Effect.Effect<boolean, unknown>
     /**
      * Keeps a finished task that isn't a change for later, as the person said:
      * out of Needs you as it is, with nothing stopped, not settled. A quick
@@ -671,10 +678,10 @@ export class Tasks extends Context.Service<
         })
 
       // As abandoning: counted as stopping until LeftBehind has it.
-      const markDone = (input: { readonly envelope: CommandEnvelope; readonly taskId: string }) =>
+      const markDone = (input: { readonly envelope: CommandEnvelope; readonly taskId: string; readonly clear?: boolean }) =>
         leftBehind.stoppingWhile(input.taskId, markingDone(input))
 
-      const markingDone = (input: { readonly envelope: CommandEnvelope; readonly taskId: string }) =>
+      const markingDone = (input: { readonly envelope: CommandEnvelope; readonly taskId: string; readonly clear?: boolean }) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
           // Settled already, in Needs you for a reply the person hadn't read: Done says they have, and it is settled again. Pressed
@@ -687,7 +694,8 @@ export class Tasks extends Context.Service<
             return true
           }
           const ready = yield* doneable(input.taskId)
-          if (ready === undefined) return yield* clearing(input)
+          // Only the person's own press clears an aside as it stands: an agent's Done waits for what waits on the person.
+          if (ready === undefined) return input.clear === true ? yield* clearing(input) : false
           const at = yield* timestamp
           const settled = yield* sql.withTransaction(
             Effect.gen(function* () {
