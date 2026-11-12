@@ -39,7 +39,7 @@ export const presetsText = {
   onlyInNote: 'Kept to the project of the task it was saved from; off, it works in every project.',
   workspaces: { copy: 'A copy', worktree: 'A worktree', local: 'Local' },
   checks: { before: 'Before it ships', after: 'After it merges', none: 'Nobody' },
-  ends: { draft: 'Draft pull request', ready: 'Ready for review', none: 'Here' },
+  ends: { project: 'As the project says', draft: 'Draft pull request', ready: 'Ready for review', none: 'Here' },
   shelves: { board: 'The board', scratch: 'Scratch' },
 } as const
 
@@ -79,7 +79,15 @@ function PresetEditor({ preset, onDone }: { preset: Preset; onDone: () => void }
         <Segmented value={parts.checked} onChange={(checked) => set({ checked })} options={options(presetsText.checks)} />
       </FormRow>
       <FormRow label={presetsText.end}>
-        <Segmented value={parts.end} onChange={(end) => set({ end })} options={options(presetsText.ends)} />
+        <Segmented
+          value={parts.end ?? 'project'}
+          onChange={(end) => {
+            if (end !== 'project') return set({ end })
+            const { end: _own, ...rest } = parts
+            setParts(rest)
+          }}
+          options={options(presetsText.ends)}
+        />
       </FormRow>
       <FormRow label={presetsText.shelf}>
         <Segmented value={parts.shelf} onChange={(shelf) => set({ shelf })} options={options(presetsText.shelves)} />
