@@ -22,7 +22,9 @@ import { Context } from 'effect'
  *
  * The runner's code is plain JavaScript in a string, run as the worker's
  * script, so it needs nothing bundled beside the runtime. Where a worker
- * can't be made, commands start on this thread, as they always did.
+ * can't be made, or one stops before it ever answered, commands start on
+ * this thread from then on, as they always did; one that stops later is
+ * made again, and what it was running says it stopped.
  */
 
 /** Whether what runs now is the person's: a window's call, whose commands go before the background's. */
@@ -146,15 +148,19 @@ type Waiting = (ended: Ended) => void
 let runner: { readonly worker: Worker; readonly waiting: Map<number, Waiting> } | undefined
 let made = 0
 let ids = 0
+/* A runner that stopped before it ever answered can't run here: commands start on this thread from then on, as they did. */
+let here = false
 
 const runnerNow = (cap: number) => {
   if (runner !== undefined) return runner
   const worker = new Worker(RUNNER, { eval: true, workerData: { cap } })
   const waiting = new Map<number, Waiting>()
   const one = { worker, waiting }
+  let answered = false
   // It keeps the process open only while a command runs, as a child process of this thread's would.
   worker.unref()
   worker.on('message', (message: { readonly kind: 'ended'; readonly id: number; readonly ended: Ended }) => {
+    answered = true
     const resolve = waiting.get(message.id)
     waiting.delete(message.id)
     if (waiting.size === 0) worker.unref()
@@ -162,6 +168,7 @@ const runnerNow = (cap: number) => {
   })
   const gone = (why: string) => {
     if (runner === one) runner = undefined
+    if (!answered) here = true
     for (const resolve of waiting.values())
       resolve({ code: null, signal: null, error: { message: why, code: null }, stdout: '', stderr: '', over: false })
     waiting.clear()
@@ -178,10 +185,12 @@ export const runnersMade = () => made
 
 /** Starts a command on the runner thread, or here where there can be none. */
 export const startApart = (command: Command, cap = AT_ONCE): Started => {
+  if (here) return startHere(command)
   let at: ReturnType<typeof runnerNow>
   try {
     at = runnerNow(cap)
   } catch {
+    here = true
     return startHere(command)
   }
   const id = (ids += 1)

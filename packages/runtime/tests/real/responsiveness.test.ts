@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process'
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 
@@ -390,7 +390,11 @@ describe.runIf(setting('ALTHAR_RUN', 'responsiveness') === 'responsiveness')('th
         }
         mkdirSync(dirname(OUT), { recursive: true })
         writeFileSync(OUT, JSON.stringify(results, null, 2))
-      }).pipe(Effect.provide(runtimeWith(github)))
+      }).pipe(
+        Effect.provide(runtimeWith(github)),
+        // Its store goes once the runtime has closed it: hundreds of MB at the person's size.
+        Effect.ensuring(Effect.sync(() => rmSync(dirname(store), { recursive: true, force: true }))),
+      )
     },
     60 * 60_000,
   )
