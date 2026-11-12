@@ -205,7 +205,7 @@ const tasksOwed = (taskId: string) =>
   })
 
 /** A merged task whose review found one thing, waiting on the person. */
-const found = (working: string, bare: string, github: FakeService) =>
+const found = (working: string, bare: string, github: FakeService, claim = 'Name it for what it retries.') =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient
     const task = yield* opened(working, '[review:wait]')
@@ -225,7 +225,7 @@ const found = (working: string, bare: string, github: FakeService) =>
     yield* callTool(access, 'report_review', {
       verdict: 'changes_requested',
       summary: 'One thing to tidy.',
-      findings: [{ severity: 'major', title: 'Name the retry', claim: 'Name it for what it retries.' }],
+      findings: [{ severity: 'major', title: 'Name the retry', claim }],
     })
     yield* until(cards(task.projectId), (all) => all[0]?.afterMerge?.state === 'found')
     return task
@@ -257,7 +257,7 @@ const watching = (threadId: string) =>
         }),
       ),
     )
-    return { stop: Effect.as(Fiber.interrupt(reading), phases) }
+    return { stop: Effect.as(Fiber.interrupt(reading), phases), seen: Effect.sync(() => [...phases]) }
   })
 
 describe('the review after a merge, at its edges', () => {
@@ -342,7 +342,8 @@ describe('the review after a merge, at its edges', () => {
     const { working, bare, github } = onGitHub()
     const place = holds()
     return Effect.gen(function* () {
-      const task = yield* found(working, bare, github)
+      // Only the fix is held: its finding supplies the marker, after the original work and review have finished.
+      const task = yield* found(working, bare, github, 'Name it for what it retries. [answers-after:5s]')
       const mergeReviews = yield* MergeReviews
       // Found, its lead gone as a merged task's is: the person's, Fix it and Leave it beside it.
       yield* gone(task.threadId)
@@ -352,6 +353,8 @@ describe('the review after a merge, at its edges', () => {
       const sent = yield* mergeReviews.fix(task.taskId, task.url)
       // The instant it is answered: its lead held, the turn begun or not: under way, not Done, not Stopped.
       assert.strictEqual((yield* standingOf(task.threadId)).phase, 'running')
+      yield* until(watched.seen, (phases) => phases.includes('running'))
+      place.open('[answers-after:5s]')
       yield* mergeReviews.afterTurnOf(sent.threadId, sent.inputId)
       const phases = yield* watched.stop
       assert.notInclude(phases, 'settled', `Done showed while Fix it was taken: ${phases.join(' > ')}`)

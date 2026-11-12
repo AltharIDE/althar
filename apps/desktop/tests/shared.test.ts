@@ -199,7 +199,7 @@ describe('the time now', () => {
 
 describe('what the person sends', () => {
   it('shows at once as the window’s copy, after what is there, until the store’s copy of it arrives, or the send fails', () => {
-    const held = [{ ...items.you('Add a retry'), sequence: 4 }]
+    const held = [{ ...items.you('Add a retry'), id: 'already-held', sequence: 4 }]
     const first = sending(held, { text: 'Use the helper', queued: false, interrupting: false })
     expect(isSending(first.id)).toBe(true)
     expect(first.items.at(-1)).toMatchObject({
@@ -221,7 +221,11 @@ describe('what the person sends', () => {
   })
 
   it('never asks Althar for a copy, and keeps copies straight when two say the same', () => {
-    const queued = sending([{ ...items.you('Add a retry'), sequence: 4 }], { text: 'Retry', queued: true, interrupting: false })
+    const queued = sending([{ ...items.you('Add a retry'), id: 'already-held', sequence: 4 }], {
+      text: 'Retry',
+      queued: true,
+      interrupting: false,
+    })
     expect(waiting(queued.items)).toEqual([])
     // Two the same: the store's copy of the second arrives first, then the first fails; one copy of each stays shown, and no more.
     const one = sending(queued.items, { text: 'Again', queued: false, interrupting: false })
