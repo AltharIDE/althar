@@ -485,6 +485,14 @@ export type PlansAndReviewsChange = { readonly [Key in keyof PlansAndReviews]?: 
 export const PLANS_AND_REVIEWS: PlansAndReviews = { countdown: 25, rounds: 3, roundsOut: 'settled' }
 
 /**
+ * What a small change's review after it merges brings back (docs/decisions/reviews.md): `major`, only blocking and major findings
+ * come back to the person, the rest stay in the thread; `all`, any finding does; `none`, no review is owed after the merge.
+ */
+export const AFTER_MERGE_REVIEWS = ['major', 'all', 'none'] as const
+export const AfterMergeRule = Schema.Literals(AFTER_MERGE_REVIEWS)
+export type AfterMergeRule = typeof AfterMergeRule.Type
+
+/**
  * What a project's rules start from when it is made. A project made earlier keeps its own rules, and each is changed in a
  * project afterwards on its rules screen.
  */
@@ -503,6 +511,8 @@ export const NewProjectDefaults = Schema.Struct({
   resolveConflicts: Schema.Boolean,
   /** Whether a task's issue moves along with it. */
   moveIssues: Schema.Boolean,
+  /** What a small change's review after it merges brings back. */
+  afterMergeReview: AfterMergeRule,
 })
 export type NewProjectDefaults = typeof NewProjectDefaults.Type
 
@@ -518,6 +528,7 @@ export const NEW_PROJECT_DEFAULTS: NewProjectDefaults = {
   postScreenshots: false,
   resolveConflicts: true,
   moveIssues: true,
+  afterMergeReview: 'major',
 }
 
 /** How the review seal on a pull request looks: a round engraved stamp, a pressed wax seal, or a printer's colophon. */
@@ -1140,6 +1151,8 @@ export const ProjectRulesView = Schema.Struct({
   titlePattern: Schema.NullOr(Schema.String),
   /** Whether a task's issue is moved along with it: to its tracker's In Progress as it starts, In Review and Done with its pull request. */
   moveIssues: Schema.Boolean,
+  /** What a small change's review after it merges brings back to the person: only major findings, any, or no review at all. */
+  afterMergeReview: AfterMergeRule,
   /** Whether skill and OpenSpec files may be written to, committed in, or pushed from the project's repositories; each off unless turned on. */
   repositoryFiles: RepositoryFilesSetting,
   /** What each of the project's repositories says, in the project's order. */
@@ -2041,8 +2054,12 @@ export const StepResultItem = Schema.Struct({
     unverified: Schema.NullOr(Schema.Array(Schema.String)),
     /** For the lead's steps: its pull request's description, by the slug of the repository each is for, where it gave one. */
     descriptions: Schema.optional(Schema.Record(Schema.String, Schema.String)),
-    /** For a review after a merge: the pull request that merged, which it read, as its host names it. Absent for any other. */
-    afterMerge: Schema.optional(Schema.Struct({ url: Schema.String, words: Schema.String })),
+    /**
+     * For a review after a merge: the pull request that merged, which it read, as its host names it; and `kept` where what it
+     * found stays in the thread, nothing in it being what the project's rule brings back to the person (only blocking and
+     * major findings, under Major only). Absent for any other.
+     */
+    afterMerge: Schema.optional(Schema.Struct({ url: Schema.String, words: Schema.String, kept: Schema.optional(Schema.Boolean) })),
     /** Who reported it, for a review. */
     agentId: Schema.NullOr(Schema.String),
     /**
@@ -2567,9 +2584,14 @@ export const TaskCard = Schema.Struct({
    */
   continues: Schema.optional(Schema.Boolean),
   /**
+   * A turn Althar asked of its lead or reviewer waits for a place, none of its agents at work: the person can let it go
+   * (`Interrupt` on its thread), and its agent reads what it would have said with its next turn.
+   */
+  turnWaits: Schema.optional(Schema.Boolean),
+  /**
    * With `inLine`, or `continues` and `queued`: its place in its project's
-   * Up next, in the order it gets one, what continues first, then the line;
-   * 1 gets one first.
+   * Up next, in the order it gets one, what continues and the line in one
+   * order, the person's where they put it; 1 gets one first.
    */
   place: Schema.optional(Schema.Int),
   /** With `inLine`: the line is in an order the person gave it, not the oldest first. */
@@ -3016,6 +3038,18 @@ export const SmallChangeItem = Schema.Struct({
     fullTask: Schema.optional(
       Schema.NullOr(Schema.Struct({ taskId: Schema.String, slug: Schema.String, threadId: Schema.String, title: Schema.String })),
     ),
+    /**
+     * What its review after the merge brings back: the project's rule (`afterMergeReview`), the task's own word over it (null
+     * where it has none; SetReviewAfterMerge changes it until it merges), and what holds of the two. `none` holds: no review
+     * after its merge. Absent from a runtime before it.
+     */
+    afterMerge: Schema.optional(
+      Schema.Struct({
+        project: AfterMergeRule,
+        task: Schema.NullOr(Schema.Literals(['review', 'none'])),
+        holds: AfterMergeRule,
+      }),
+    ),
   }),
 })
 
@@ -3047,10 +3081,40 @@ export const ModelMoveItem = Schema.Struct({
   }),
 })
 
+/** Where one pull request in the merge line stands. */
+export const MergeLineState = Schema.Literals(['waiting', 'checks', 'queued', 'merging', 'merged', 'sent_back', 'conflict'])
+export type MergeLineState = typeof MergeLineState.Type
+
+/**
+ * The merge line for a branch, in the thread of whoever asked for the merges: each pull request in order, with where it
+ * stands. Althar posts it once and keeps it current; it folds to one line once every pull request has merged.
+ */
+export const MergeLineItem = Schema.Struct({
+  ...itemFields,
+  kind: Schema.Literal('merge_line'),
+  content: Schema.Struct({
+    /** The repository and branch it is for, which tell its card from another's in the same thread. */
+    key: Schema.String,
+    /** The branch, where it isn't the repository's default; null where it is. */
+    branch: Schema.NullOr(Schema.String),
+    rows: Schema.Array(
+      Schema.Struct({
+        number: Schema.Number,
+        title: Schema.String,
+        url: Schema.String,
+        state: MergeLineState,
+        /** For a pull request that needs someone: what is wrong, and who settles it. */
+        reason: Schema.optional(Schema.String),
+      }),
+    ),
+  }),
+})
+
 export const ThreadItem = Schema.Union([
   SettingItem,
   SmallChangeItem,
   ModelMoveItem,
+  MergeLineItem,
   UserMessageItem,
   AgentTextItem,
   ToolCallItem,
@@ -3707,7 +3771,7 @@ export const ThreadSnapshot = Schema.Struct({
     queued: Schema.NullOr(Queued),
     /** Its place in its project's Up next, waiting for a place, as its card says: 1 gets one first; absent out of it. */
     place: Schema.optional(Schema.Int),
-    /** It waits in its project's line behind another of its tasks, so the person can put it at the line's front. */
+    /** It waits up next behind another of its tasks, or is a plan waiting to start, so the person can put it at the front. */
     front: Schema.optional(Schema.Boolean),
     /** Its plan's steps, as its header's track shows them; empty without a plan. */
     steps: Schema.Array(PlanStep),
@@ -4890,6 +4954,7 @@ export const Api = RpcGroup.make(
       postScreenshots: Schema.optional(NewProjectDefaults.fields.postScreenshots),
       resolveConflicts: Schema.optional(NewProjectDefaults.fields.resolveConflicts),
       moveIssues: Schema.optional(NewProjectDefaults.fields.moveIssues),
+      afterMergeReview: Schema.optional(NewProjectDefaults.fields.afterMergeReview),
     },
     Schema.Void,
   ),
@@ -4905,15 +4970,20 @@ export const Api = RpcGroup.make(
    */
   command('RemoveTaskFolder', { taskId: Schema.String, seen: Schema.NullOr(FolderHeld) }, FoldersFreed),
   /**
-   * Puts a task waiting for a free agent before any has worked on it at a
-   * place in its project's line, from 0 the front, the rest keeping their
-   * order; past the end is its end. The line starts in that order, and keeps
-   * it after a restart; a task that joins later goes to its end. Nothing
-   * moves for a task that isn't in the line.
+   * Puts a task in its project's Up next at a place, from 0 the front, the
+   * rest keeping their order; past the end is its end. What continues and
+   * the line are one order: a task goes anywhere in it. A plan waiting to
+   * start starts, at that place. Places are given in that order, kept after
+   * a restart; a task that joins later goes to its end. Nothing moves for a
+   * task that isn't up next.
    */
   command('MoveInLine', { taskId: Schema.String, to: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)) }, Schema.Void),
   /** Puts a project's line back in the order its tasks began waiting: the oldest first. */
   command('LineOldestFirst', { projectId: Schema.String }, Schema.Void),
+  /**
+   * Stops the turn the thread's agent is in. Between turns, where a turn Althar asked of a task's lead or reviewer waits for a
+   * place up next, that turn is let go instead: it leaves Up next, and its agent reads what it would have said with its next.
+   */
   command('Interrupt', { threadId: Schema.String }, Schema.Void),
   /**
    * Tries the thread's last turn again, where it failed, as on the
@@ -5223,6 +5293,7 @@ export const Api = RpcGroup.make(
       branchPattern: Schema.optional(Schema.NullOr(Schema.String)),
       titlePattern: Schema.optional(Schema.NullOr(Schema.String)),
       moveIssues: Schema.optional(Schema.Boolean),
+      afterMergeReview: Schema.optional(AfterMergeRule),
       repositoryFiles: Schema.optional(RepositoryFilesSetting),
       /** What the person changed of what leads' sandboxes let through, each list whole. */
       sandbox: Schema.optional(Schema.Struct({ commands: Schema.optional(SandboxEdits), hosts: Schema.optional(SandboxEdits) })),
@@ -5253,6 +5324,12 @@ export const Api = RpcGroup.make(
   command('SkipReview', { taskId: Schema.String }, Schema.Void),
   /** Turns down the review a change was offered as its work turned real: it isn't offered again. */
   command('DeclineReview', { taskId: Schema.String }, Schema.Void),
+  /**
+   * One small change's own word on its review after the merge, over its project's rule (`afterMergeReview`), until it merges:
+   * `review`, reviewed after it merges though the rule says none; `none`, not reviewed after it; null, as the rule says. Its
+   * card reads what holds (`SmallChangeContent.afterMerge`).
+   */
+  command('SetReviewAfterMerge', { taskId: Schema.String, review: Schema.NullOr(Schema.Literals(['review', 'none'])) }, Schema.Void),
   /**
    * Ships what waits on the task's branch, as the person said (a task is a
    * conversation plus parts, "A tweak waits for Ship"): its review first,

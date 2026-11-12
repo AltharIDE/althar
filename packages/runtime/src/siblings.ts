@@ -16,8 +16,9 @@ export const siblingsOf = (taskId: string) =>
       JOIN tasks o ON o.project_id = k.project_id AND o.id <> k.id AND o.request = k.request
       JOIN threads h ON h.task_id = o.id AND h.kind = 'task'
       WHERE k.id = ${taskId} AND k.request IS NOT NULL AND EXISTS (
-        SELECT 1 FROM turn_deliveries d JOIN threads c ON c.id = d.thread_id AND c.kind = 'coordinator'
-        WHERE d.project_id = k.project_id AND d.requested_at <= min(k.created_at, o.created_at)
+        -- From the coordinator's thread to its turns, by their thread: never through every turn of the project.
+        SELECT 1 FROM threads c JOIN turn_deliveries d ON d.thread_id = c.id
+        WHERE c.project_id = k.project_id AND c.kind = 'coordinator' AND d.requested_at <= min(k.created_at, o.created_at)
           AND coalesce(d.ended_at, '9999') >= max(k.created_at, o.created_at))
       ORDER BY o.created_at, o.rowid`
   })

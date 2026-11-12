@@ -187,7 +187,8 @@ const reviewOf = (snapshot: ThreadSnapshot, named: NameModel): ChangeReview | un
   if (last === undefined) return undefined
   const by = [...new Set(reviews.flatMap((item) => (item.content.agentId === null ? [] : [item.content.agentId])))]
   return {
-    state: last.content.verdict === 'changes_requested' ? CheckState.Failed : CheckState.Passed,
+    // A review after a merge whose findings the project's rule keeps in the thread (none major) asked for nothing.
+    state: last.content.verdict === 'changes_requested' && last.content.afterMerge?.kept !== true ? CheckState.Failed : CheckState.Passed,
     by: by.map((id) => named(id, reviewModelOf(snapshot, id))),
   }
 }

@@ -33,7 +33,11 @@ describe('a small change', () => {
       { key: 'implement', agentId: 'claude-code', model: 'claude-sonnet-5', effort: 'low', skipped: false },
       { key: 'review', agentId: 'codex', model: 'gpt-6-sol', skipped: true },
     ])
-    assert.deepStrictEqual(smallChangeSkips(steps[1] ?? null), ['no plan', 'reviewed after it merges'])
+    // As the project's rule says: Major only by default, Everything, or no review after the merge.
+    assert.deepStrictEqual(smallChangeSkips(steps[1] ?? null), ['no plan', 'reviewed after it merges, major findings only'])
+    assert.deepStrictEqual(smallChangeSkips(steps[1] ?? null, 'all'), ['no plan', 'reviewed after it merges'])
+    assert.deepStrictEqual(smallChangeSkips(steps[1] ?? null, 'none'), ['no plan', 'no review'])
+    assert.deepStrictEqual(smallChangeSkips(null, 'major'), ['no plan'])
   })
 
   it('reads a small change from its plan, and nothing else as one', () => {
@@ -95,7 +99,7 @@ describe('a small change', () => {
       assert.isDefined(card)
       if (card?.kind !== 'small_change') return
       assert.strictEqual(card.content.title, 'The Run menu says Strat')
-      assert.deepStrictEqual(card.content.skips, ['no plan', 'reviewed after it merges'])
+      assert.deepStrictEqual(card.content.skips, ['no plan', 'reviewed after it merges, major findings only'])
       assert.deepStrictEqual(card.content.lead, { agentId: 'claude-code', model: 'claude-sonnet-5', effort: 'low' })
       assert.deepStrictEqual(
         card.content.steps.map((step) => [step.key, step.done]),

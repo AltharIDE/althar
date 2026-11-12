@@ -114,6 +114,7 @@ import { Instance } from './Instance'
 import { Live, type LiveEvent } from './Live'
 import { hasBranch, startCommitOf, startOf, towardIn } from './Projects'
 import { applyMerges, conflictsOf, planMerge } from './localMerge'
+import { onlyBase, ownCommits } from './baseOnly'
 import { outward, reconcileOutward } from './outward'
 import {
   answerHint,
@@ -133,7 +134,11 @@ import {
   describedOf,
   fromAlthar,
   leftQueueForLead,
+  leftQueueNoteForLead,
+  leftQueueUnclaimed,
+  queueOwnFailures,
   leftQueueNote,
+  sendBackHint,
   nameOf,
   outsidersLine,
   queuedNote,
@@ -802,6 +807,20 @@ export class Changes extends Context.Service<
     ): Effect.Effect<ReadonlyArray<{ readonly id: string; readonly name: string | null }>, unknown>
     /** What Ship would send to the task's open pull requests now, by pull request, sending nothing. */
     aheadOfOpen(taskId: string): Effect.Effect<ReadonlyArray<{ readonly where: string; readonly count: number }>, unknown>
+    /**
+     * Whether what waits for the task's open pull requests only brings their
+     * base branch in, as a merge of main that settled no conflict does: none of
+     * it is the task's work (`onlyBase`), and something waits. False where any
+     * of it is the task's own, or a hold waits on a worktree with no open pull
+     * request to measure it against.
+     */
+    onlyBaseWaits(taskId: string): Effect.Effect<boolean, unknown>
+    /**
+     * Sends what only brings the base branch in up to the task's open pull
+     * requests, with no review, past the hold, and says so in the task's
+     * thread: the task stays where it was. What went where.
+     */
+    sendBaseOnly(taskId: string): Effect.Effect<ReadonlyArray<{ readonly where: string; readonly count: number }>, unknown>
     /** Lets go of the task's holds for Ship: what waited went up (`shipped`), or the person left it on the branch (`left`). */
     releaseHolds(taskId: string, why: 'shipped' | 'left', only?: ReadonlyArray<string>): Effect.Effect<void, unknown>
     /**
@@ -2284,10 +2303,16 @@ export class Changes extends Context.Service<
             title: `Following ${name}${where}: ${pull.title}`,
           })
           const [link] = (yield* linksOf(input.taskId)).filter((one) => one.id === linkId)
+          // News for its lead, read with its next turn: it needs nothing done now.
           if (link !== undefined)
-            yield* tellLead(link, [
-              `This task follows ${name} on ${path.join('/')} now, "${pull.title}": ${pull.url}. ${started ? `Your branch ${row.branch} starts from its head now, with your own commits on top. ` : ''}read_pull_request reads it, reply_on_pull_request answers on it, and push_to_pull_request pushes your commits to its branch, or asks the person to, ${pull.source}.`,
-            ])
+            yield* tellLead(
+              link,
+              [
+                `This task follows ${name} on ${path.join('/')} now, "${pull.title}": ${pull.url}. ${started ? `Your branch ${row.branch} starts from its head now, with your own commits on top. ` : ''}read_pull_request reads it, reply_on_pull_request answers on it, and push_to_pull_request pushes your commits to its branch, or asks the person to, ${pull.source}.`,
+              ],
+              false,
+              'note',
+            )
           // A chat on Scratch that follows a pull request now moves to the board.
           yield* offScratch(input.taskId)
           yield* touchCard(input.taskId)
@@ -2439,6 +2464,7 @@ export class Changes extends Context.Service<
               description: null,
               ...(step === undefined ? {} : { step }),
             })
+      // What became of a change of its task, which needs nothing of the lead now: read with its next turn, never starting one.
       const leadHears = (row: Pick<ChangeRow, 'threadId'>, body: string) =>
         Effect.gen(function* () {
           if (row.threadId === null) return
@@ -2449,6 +2475,7 @@ export class Changes extends Context.Service<
               body,
               origin: 'system',
               quiet: true,
+              note: true,
             })
             .pipe(Effect.ignore)
         })
@@ -3044,7 +3071,8 @@ export class Changes extends Context.Service<
                 : `The person pushed your ${asked.content.count} commits to ${asked.content.where}, as you asked: the pull request has them now.`,
             )
           }
-          yield* tellLead(link, told)
+          // News that needs nothing of the lead: read with its next turn.
+          yield* tellLead(link, told, false, 'note')
         })
 
       /**
@@ -4913,24 +4941,31 @@ export class Changes extends Context.Service<
       /**
        * Tells the task's lead, quietly, when it has a session; with `wake`,
        * one that has none is started again for it, on the agent it was last
-       * on (ADR-040).
+       * on (ADR-040). What needs nothing of it now (`note`) starts no turn,
+       * and waits for no place among the agents at work: its lead reads it
+       * with its next turn. So is all of it for a task merged or settled, or
+       * a pull request merged or closed: nothing Althar says starts its lead.
        */
-      const tellLead = (link: LinkRow, parts: ReadonlyArray<string>, wake = false) =>
+      const tellLead = (link: LinkRow, parts: ReadonlyArray<string>, wake = false, how: 'turn' | 'note' = 'turn') =>
         Effect.gen(function* () {
           if (parts.length === 0) return
           const sql = yield* SqlClient.SqlClient
           const [thread] = yield* sql<{ id: string; state: string }>`
             SELECT t.id, k.state FROM threads t JOIN tasks k ON k.id = t.task_id WHERE t.task_id = ${link.taskId} AND t.kind = 'task'`
           if (thread === undefined || !['open', 'done'].includes(thread.state)) return
+          const seen = Option.getOrUndefined(yield* Effect.option(decodeSnapshot(link.snapshot)))
+          const note = how === 'note' || thread.state === 'done' || seen?.state === 'merged' || seen?.state === 'closed'
           const running = Option.isSome(yield* sessions.running(thread.id))
-          if (!running && !wake) return
+          // A note is kept whatever: the lead reads it with its next turn, in this session or the next.
+          if (!running && !wake && !note) return
           yield* sessions.send({
             envelope: yield* envelope('thread.send', { threadId: thread.id, heard: link.id }, undefined, instance.systemId),
             threadId: thread.id,
             body: parts.join('\n\n'),
             quiet: true,
+            note,
           })
-          if (!running) yield* sessions.startLast(thread.id)
+          if (!running && !note) yield* sessions.startLast(thread.id)
         })
 
       /**
@@ -5249,9 +5284,15 @@ export class Changes extends Context.Service<
           // While it is in the queue, it is worth asking about often: it lands, or comes back, as soon as the queue's checks end.
           if (after.queued === true) happened = true
           if (entered) yield* sayOn(link, queuedNote(name, now.target))
+          // Told the lead with its next turn, rather than starting one: what needs nothing of it now.
+          const forNote: Array<string> = []
           if (leftQueue) {
-            // Sent back for failing checks: what the merge-group build failed, as its host has it, with the default branch on the same jobs.
-            const queued = now.leftQueue === 'checks' ? yield* queueDetailOf(host, repository, now.queueSha, now.queueError) : null
+            // Sent back for failing checks, or with no reason the host gives: what the merge-group build failed, read again as its
+            // host has it, with the default branch on the same jobs.
+            const queued =
+              now.leftQueue === 'checks' || ((now.leftQueue === 'other' || now.leftQueue == null) && now.queueSha != null)
+                ? yield* queueDetailOf(host, repository, now.queueSha, now.queueError)
+                : null
             yield* heard(link, 'queue_left', `queue_left:${after.leftQueue}`, {
               reason: now.leftQueue ?? 'other',
               sha: now.headSha,
@@ -5268,15 +5309,20 @@ export class Changes extends Context.Service<
             happened = true
             const head = leftQueueNote(name, now.leftQueue)
             const said = leftQueueForLead(name, now.leftQueue, queued)
-            if (queued === null) {
-              yield* sayOn(link, head)
-              forLead.push(head)
-            } else {
-              // The thread's notice carries the same detail as the lead's line: title its first line, the rest as its description.
-              yield* sayOn(link, head, said.slice(head.length).trim() || undefined)
-              forLead.push(said)
-            }
-            addressed = true
+            // Its lead is put to work only where Althar knows the reason is the pull request's own: a job its build failed that the
+            // default branch doesn't, or a conflict with what is ahead of it. Else the person hears that nothing names it, and its
+            // lead reads it with its next turn, so it doesn't guess and push.
+            const own = now.leftQueue === 'conflict' || queueOwnFailures(now.leftQueue, queued).length > 0
+            // The thread's notice carries the same detail as the lead's line: title its first line, the rest as its description.
+            const detail = queued === null ? undefined : said.slice(head.length).trim() || undefined
+            if (own || now.leftQueue === 'removed') yield* sayOn(link, head, detail)
+            else yield* sayOn(link, head, [leftQueueUnclaimed(name, now.leftQueue, queued), detail].filter(Boolean).join('\n\n'))
+            if (own) {
+              // Not a conflict: an update from its target is update_branch or the queue, not a new round.
+              const hint = now.leftQueue === 'conflict' ? [] : [sendBackHint(now.target ?? 'the target branch')]
+              forLead.push([queued === null ? head : said, ...hint].join('\n\n'))
+              addressed = true
+            } else forNote.push(now.leftQueue === 'removed' ? head : leftQueueNoteForLead(name, now.leftQueue, queued))
           }
           if (after.state !== before.state) {
             if (after.state === 'merged' || after.state === 'closed')
@@ -5331,10 +5377,13 @@ export class Changes extends Context.Service<
           // Waiting for another change of the task's to merge, its failures are that one's to fix: they start no fix either.
           const forShip =
             (yield* worktreeOf(link.taskId, before.url))?.heldAt != null || (yield* waitingOn(link.taskId, before.url)) !== null
+          yield* tellLead(link, forNote, false, 'note')
+          // Merged or closed, what is said on it after starts no turn: its lead reads it with its next one (tellLead).
           yield* tellLead(
             link,
             rounds || forShip ? forLead.filter((part) => !part.startsWith('Checks failed')) : forLead,
             addressed || (after.state === 'open' && alone && !rounds && !forShip),
+            after.state === 'open' ? 'turn' : 'note',
           )
           if (now.state === 'open' && !held)
             yield* bringTogether(link, now.headSha, now.url).pipe(
@@ -5357,6 +5406,25 @@ export class Changes extends Context.Service<
           repository.defaultBase === null ? null : `refs/heads/${repository.defaultBase}`,
         ].filter((ref): ref is string => ref !== null && ref !== '')
       }
+
+      /**
+       * A worktree's base branch's refs (`defaultsOf`), by its workspace, and each remote's branch of its name, as a lead
+       * fetches and merges `origin/main`: what a merge of its base brings in is read against them.
+       */
+      const baseRefsOf = (workspaceId: string) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const [row] = yield* sql<{ path: string; baseRef: string | null; defaultBase: string | null }>`
+            SELECT w.path, w.base_ref, coalesce(w.toward, b.default_base_ref) AS default_base
+            FROM workspaces w JOIN repository_bindings b ON b.id = w.binding_id WHERE w.id = ${workspaceId}`
+          if (row === undefined) return []
+          const refs = defaultsOf(row)
+          const target = (row.baseRef ?? '').replace(/^origin\//, '') || row.defaultBase
+          if (target === null || target === '') return refs
+          const remotes = yield* gitOutcome(row.path, 'for-each-ref', '--format=%(refname)', 'refs/remotes/')
+          const named = remotes.stdout.split('\n').filter((ref) => ref.split('/').slice(3).join('/') === target && !refs.includes(ref))
+          return [...refs, ...named]
+        })
 
       /**
        * Of commits on a worktree's branch after `head`, those its default
@@ -7326,6 +7394,8 @@ export class Changes extends Context.Service<
             if (before === undefined || !existsSync(row.path)) continue
             const now = yield* commitOf(row.path, 'HEAD').pipe(Effect.orElseSucceed(() => null))
             if (now === null || now === before) continue
+            // A merge of its base that settled no conflict is none of the task's work: it goes up as it is, with no Ship to wait for.
+            if (yield* onlyBase(row.path, before, now, yield* baseRefsOf(row.id))) continue
             yield* sql.withTransaction(
               Effect.gen(function* () {
                 const revision = yield* change('workspaces', row.id, { heldAt: yield* timestamp })
@@ -7402,6 +7472,48 @@ export class Changes extends Context.Service<
             went.push({ where: nameOf(seen), count: here.count, url: seen.url, change: named?.name ?? null })
           }
           return went
+        })
+
+      /** `onlyBaseWaits`: each open pull request's waiting commits bring its base in alone, and a hold has nothing else. */
+      const onlyBaseWaitsOf = (taskId: string) =>
+        Effect.gen(function* () {
+          const measured = new Set<string>()
+          let waits = false
+          for (const link of yield* linksOf(taskId)) {
+            if (link.listening !== 1) continue
+            const seen = yield* decodeSnapshot(link.snapshot)
+            if (seen.state !== 'open') continue
+            const workspace = yield* worktreeOf(taskId, seen.url)
+            if (workspace === undefined || !existsSync(workspace.path)) continue
+            const here = yield* aheadOf(workspace.path, null, [yield* sentTo(link.projectId, seen.url), seen.headSha])
+            if (here.kind !== 'ahead') return false
+            measured.add(workspace.id)
+            if (here.count === 0) continue
+            if (!(yield* onlyBase(workspace.path, here.from, here.head, yield* baseRefsOf(workspace.id)))) return false
+            waits = true
+          }
+          // A hold on a worktree with no open pull request waits for a new one: that is the task's, as it always was.
+          if ((yield* holdsOf(taskId)).some((held) => !measured.has(held.workspaceId))) return false
+          return waits
+        })
+
+      const sendBaseOnly = (taskId: string) =>
+        Effect.gen(function* () {
+          const went = yield* shipToOpen(taskId)
+          yield* releaseHolds(taskId, 'shipped')
+          const links = yield* linksOf(taskId)
+          for (const one of went) {
+            for (const link of links) {
+              const seen = yield* decodeSnapshot(link.snapshot)
+              if (seen.url !== one.url) continue
+              yield* sayOn(
+                link,
+                `Pushed ${commitsWord(one.count)} to ${one.where}. They only bring its base branch in, so they start no review.`,
+              )
+              break
+            }
+          }
+          return went.map(({ where, count }) => ({ where, count }))
         })
 
       const waitingChanges = (taskId: string, asked?: string) =>
@@ -7584,7 +7696,12 @@ export class Changes extends Context.Service<
             if (tip === seen.headSha || tip === sent) continue
             const here = yield* aheadOf(row.path, null, [sent, seen.headSha])
             if (here.kind !== 'ahead' || here.count === 0) continue
-            const written = yield* git(row.path, 'log', '--format=%H %at', `${here.from}..${here.head}`).pipe(
+            // Only the task's own commits can be the person's: what a merge of its base brought was written elsewhere, by others.
+            const refs = yield* baseRefsOf(row.id)
+            if (yield* onlyBase(row.path, here.from, here.head, refs)) continue
+            const own = yield* ownCommits(row.path, here.from, here.head, refs)
+            if (own.length === 0) continue
+            const written = yield* git(row.path, 'log', '--no-walk=unsorted', '--format=%H %at', ...own).pipe(
               Effect.orElseSucceed(() => ''),
             )
             const byHand = written
@@ -8956,6 +9073,8 @@ export class Changes extends Context.Service<
         shipToOpen: (taskId, only) => provide(locked(taskId)(shipToOpen(taskId, true, only))),
         waitingChanges: (taskId, change) => provide(waitingChanges(taskId, change)),
         aheadOfOpen: (taskId) => provide(shipToOpen(taskId, false)),
+        onlyBaseWaits: (taskId) => provide(onlyBaseWaitsOf(taskId)),
+        sendBaseOnly: (taskId) => provide(locked(taskId)(sendBaseOnly(taskId))),
         releaseHolds: (taskId, why, only) => provide(releaseHolds(taskId, why, only)),
         replace: (taskId, head, replaces, url) =>
           provide(locked(taskId)(Effect.andThen(taken(taskId, 'pushed'), replace(taskId, head, replaces, url)))),

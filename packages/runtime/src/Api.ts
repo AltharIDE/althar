@@ -89,6 +89,7 @@ import {
   postsScreenshots,
   ruleSetOf,
   usageLimitOf,
+  afterMergeReviewOf,
 } from './Policies'
 import { Models } from './Models'
 import { Installs } from './Installs'
@@ -101,6 +102,8 @@ import { projectTracker } from './projectTracker'
 import { applyRules } from './rulesChange'
 import { UsageData } from './UsageData'
 import { Queries } from './Queries'
+import { lagLogged, slowCall } from './lag'
+import { Foreground } from './spawner'
 import { Busy } from './Busy'
 import { clearView, showEarlier, undoClearView } from './chatView'
 import { timestamp } from './records'
@@ -141,6 +144,7 @@ import { checkHealth } from './mcpHealth'
 import { Canvases } from './Canvases'
 import * as mcpSync from './mcpSync'
 import * as skillSync from './skillSync'
+import { cancelWaitingTurn, upNextMove } from './upNextMoves'
 
 /** Runs one of sync's steps against the person's agents' settings, where this runtime reads them; refused where it doesn't. */
 const withSync = (step: (io: mcpSync.SyncIo & skillSync.SkillIo) => Promise<unknown>) =>
@@ -334,8 +338,13 @@ export const handlers = Api.toLayer(
      * A call's failure as the window gets it: in words; and, when it isn't
      * the person's to put right, in the log and reported, by the call's name.
      */
+    // A window's call is the person's: its git commands start before the background's (spawner.ts). One that takes long
+    // says so in a development build's log (lag.ts).
+    const timedCall = lagLogged()
+      ? <A, E, R>(effect: Effect.Effect<A, E, R>) => slowCall(callName, effect)
+      : <A, E, R>(effect: Effect.Effect<A, E, R>) => effect
     const api = <A, E, R>(effect: Effect.Effect<A, E, R>): Effect.Effect<A, ApiError, R> =>
-      Effect.catchCause(effect, (cause) => {
+      Effect.catchCause(timedCall(Effect.provideService(effect, Foreground, true)), (cause) => {
         if (Cause.hasInterruptsOnly(cause)) return Effect.interrupt
         const error = Cause.findErrorOption(cause)
         // Refused by the call itself, in the window's own words already: as it is, and nothing went wrong.
@@ -558,6 +567,7 @@ export const handlers = Api.toLayer(
         branchPattern: rules.branchPattern ?? null,
         titlePattern: rules.titlePattern ?? null,
         moveIssues: movesIssues(rules),
+        afterMergeReview: afterMergeReviewOf(rules),
         repositoryFiles: repositoryFilesOf(rules),
       }
     }
@@ -1185,7 +1195,9 @@ export const handlers = Api.toLayer(
       GetTaskFolders: () => api(cleanup.list),
       CleanUpFolders: ({ commandId }) => once(commandId, api(cleanup.cleanUp(instance.personId))),
       RemoveTaskFolder: ({ commandId, taskId, seen }) => once(commandId, api(cleanup.remove(taskId, seen, instance.personId))),
-      MoveInLine: ({ commandId, taskId, to }) => once(commandId, api(Effect.asVoid(busy.move(taskId, to)))),
+      // One that no longer waits up next, started or held meanwhile, moves nowhere: the board shows the line as it is.
+      MoveInLine: ({ commandId, taskId, to }) =>
+        once(commandId, api(Effect.asVoid(upNextMove(busy, plans, sql)(taskId, to, instance.personId)))),
       LineOldestFirst: ({ commandId, projectId }) => once(commandId, api(busy.oldestFirst(projectId))),
       SetPostTeamReviews: ({ commandId, on }) =>
         once(commandId, api(setPostTeamReviews(on)).pipe(Effect.provideService(SqlClient.SqlClient, sql))),
@@ -1236,8 +1248,22 @@ export const handlers = Api.toLayer(
         once(commandId, api(automations.setPostsReviews(automationId, on, instance.personId))),
       SetAutomationsPaused: ({ commandId, paused }) => once(commandId, api(automations.setAllPaused(paused))),
       // Interrupted by the person, a conflict its lead was resolving is theirs (ADR-030): handed over first, so the turn's end doesn't ask the lead again.
+      // A lead between turns, a turn Althar asked of it waiting for a place up next: that turn is let go (stop_task with turn).
       Interrupt: ({ commandId, threadId }) =>
-        once(commandId, api(Effect.andThen(pullRequests.leadStopped({ threadId }, 'interrupted'), sessions.interrupt(threadId)))),
+        once(
+          commandId,
+          api(
+            Effect.gen(function* () {
+              const live = yield* sessions.running(threadId)
+              if (Option.isNone(live) || !live.value.turnRunning) {
+                const [task] = yield* sql<{ taskId: string | null }>`SELECT task_id FROM threads WHERE id = ${threadId}`
+                if (task?.taskId != null && (yield* cancelWaitingTurn(busy, sessions, sql)(task.taskId)) > 0) return
+              }
+              yield* pullRequests.leadStopped({ threadId }, 'interrupted')
+              yield* sessions.interrupt(threadId)
+            }),
+          ),
+        ),
       TryAgain: ({ commandId, threadId }) =>
         once(
           commandId,
@@ -1946,6 +1972,8 @@ export const handlers = Api.toLayer(
       SetUsageLimit: ({ commandId, projectId, policy }) =>
         once(commandId, api(policies.setUsageLimit(projectId, policy, instance.personId))),
       OpenChange: ({ commandId, taskId }) => once(commandId, api(runs.publish(taskId))),
+      SetReviewAfterMerge: ({ commandId, taskId, review }) =>
+        once(commandId, api(Effect.asVoid(mergeReviews.choose(taskId, review, instance.personId)))),
       SkipReview: ({ commandId, taskId }) =>
         once(
           commandId,

@@ -81,6 +81,9 @@ import { statements as changeWaits } from './0076_change_waits'
 import { statements as helperCopies } from './0077_helper_copies'
 import { statements as canvases } from './0078_canvases'
 import { statements as cards } from './0079_cards'
+import { statements as keyReads } from './0080_key_reads'
+import { statements as mergeLineCard } from './0081_merge_line_card'
+import { statements as notedInput } from './0082_noted_input'
 
 export interface Migration {
   /** `<number>_<name>`, the order they run in. */
@@ -179,6 +182,9 @@ export const migrations: ReadonlyArray<Migration> = [
   { key: '0077_helper_copies', statements: helperCopies },
   { key: '0078_canvases', statements: canvases },
   { key: '0079_cards', statements: cards },
+  { key: '0080_key_reads', statements: keyReads },
+  { key: '0081_merge_line_card', statements: mergeLineCard },
+  { key: '0082_noted_input', statements: notedInput },
 ]
 
 const run = (statements: ReadonlyArray<string>) =>

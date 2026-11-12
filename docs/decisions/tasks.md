@@ -328,6 +328,20 @@ the first, as the plan ends. The hold goes once they're up. A plan with no
 reviewer, or whose review runs after the merge, ships at once. A lead that
 calls `ship_task` in its own turn ships once that turn ends.
 
+**Bringing the base branch in is never the task's work** (`baseOnly.ts`).
+New work is measured by the task's change against its base, from where its
+branch forks off it, not by counting commits since the pull request's head. A
+merge of main that settled no conflict brings main's commits, which no one
+wrote in the task's turns, yet changes nothing of the task's: such commits
+are never held for Ship, as a turn's or the person's by hand, and go up to
+the open pull request as the lead's turn ends, with no review and no round;
+Ship on a hold of only those sends them up the same way. A merge that
+settled a conflict, or any commit of the task's own, is new work, as before,
+and Ship's review is told how each merge settled with `git show
+--remerge-diff`. Sent back by the merge queue for anything but a conflict,
+the lead is told an update from main is `update_branch` or the queue, never
+the plan's steps again.
+
 **The rounds that are left** are those Althar's own course and
 `make_it_a_change` open, and Ship's run. Where a round ends depends on what
 it made. New work means new commits in any of the task's repositories, or
@@ -434,8 +448,12 @@ few lines is the exception to the usual course of a change:
   reviewer then reads what merged, in a thread of the task's, and reports in
   the task's thread ([reviews.md](reviews.md#a-small-change-is-reviewed-after-it-merges)).
   Nothing is posted on the merged pull request, and no second task is made.
-  Nothing blocks the merge. A plan that named no reviewer gets no review
-  after merge, and neither does a pull request that was closed unmerged.
+  Nothing blocks the merge. By the project's rule, only blocking and major
+  findings bring the task back (the default), every finding does, or there
+  is no review after the merge; one small change may keep or drop its own
+  ([reviews.md](reviews.md#what-the-review-after-a-merge-brings-back)). A
+  plan that named no reviewer gets no review after merge, and neither does a
+  pull request that was closed unmerged.
 - **One card in its thread says what it skipped.** It lists each step with
   its time (Started, Changed a line in …, Checks pass, Merged). It offers
   Merge, which still asks, and **Make it a full task**, which starts the
@@ -483,6 +501,9 @@ made:
 - **Whether work tries an agent's next account first.**
 - **How a task ends:** a draft pull request (the default), one ready for
   review, or nothing.
+- **What a small change's review after it merges brings back:** only major
+  findings (the default), every finding, or no review
+  ([reviews.md](reviews.md#what-the-review-after-a-merge-brings-back)).
 
 Only what differs from the built-in defaults is written. A project made
 earlier keeps its own rules, and its rules screen is where they change. The
@@ -589,3 +610,4 @@ optionally a model, an agent, an effort and the change.
 - 10 Nov 2026: a task is a conversation plus parts, built (#739) and folded in from its proposal: the five parts and changing them, several changes in a task and stacks, chats on Scratch, presets, and helpers handed a change (ADR-087's tasks 1 to 5); what it decided and didn't build is under Not built yet.
 - 10 Nov 2026: the rest of it built (#739): each change shipped in a Ship of its own with its own review, the card's sentence and marks across changes, the header's row for each, stamped Shipped and Merged rows, where a turn's commits went; Keep them together, Drop it, a change that waits for another, removing a running task's workspace; Stop running it; picking another preset on the plan card, the coordinator planning from presets, editing them in Settings; Scratch's own shelf and a chat's copy made without setup. ADR-087 folded in whole and removed from `proposed/`: helpers in copies of their own, writing ones' commits, places, limits, retries, the hour, restarts, agents' own helpers switched off, and the thread, Graph face and usage by model.
 - 11 Nov 2026: chats are asides, pills over the coordinator's conversation with a composer and moves of their own, started there or from the coordinator's words; one made a task flies to the board and the coordinator's conversation notes it; the coordinator's turns are signed with Althar's mark ([Asides](#asides)).
+- 12 Nov 2026: commits that only bring the base branch in, as a clean merge of main, are never the task's work: no hold for Ship, no review, no round; they go up to the open pull request (#773's merge of main had started a second Review and Pull request).

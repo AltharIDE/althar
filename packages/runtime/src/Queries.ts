@@ -5,6 +5,7 @@ import { existsSync, readFileSync, realpathSync, statSync } from 'node:fs'
 import { isAbsolute, join, resolve, sep } from 'node:path'
 
 import {
+  type AfterMergeRule,
   CheckoutAsk,
   AllowedBy,
   AttachedFile,
@@ -45,6 +46,7 @@ import {
   TaskAskItem,
   QuestionField,
   type ThreadItem,
+  MergeLineItem,
   ModelMoveItem,
   NoticeItem,
   type ThreadSnapshot,
@@ -72,6 +74,7 @@ import { PullRequestScreenshots } from './PullRequestScreenshots'
 import type { PullRequestFacts } from './pullRequestStanding'
 import { baseOf, changedBetween, type ChangedFile, changedFiles, fileDiff, type FileDiff, unchangedFileDiff } from './diffs'
 import { changedWords, smallChangeOf, smallChangeSkips } from './smallChange'
+import { afterMergeNow } from './afterMergeReview'
 import { builtIn, descriptionsIn, evidenceOf, evidencePaths, keptViewsIn, shownOf, unverifiedIn } from './evidence'
 import { graphOf, type RunRows, type StepRow } from './graph'
 import { taskFindingsOf } from './taskFindings'
@@ -535,6 +538,7 @@ const decodePushRequest = Schema.decodeUnknownOption(PushRequestItem.fields.cont
 const decodeTaskAsk = Schema.decodeUnknownOption(TaskAskItem.fields.content)
 const decodeSettingChange = Schema.decodeUnknownOption(SettingChangeCard)
 const decodeModelMove = Schema.decodeUnknownOption(ModelMoveItem.fields.content)
+const decodeMergeLine = Schema.decodeUnknownOption(MergeLineItem.fields.content)
 /** The task a notice is about, which the thread links to: one its lead started (ADR-097), in one line. */
 const decodeNoticeTask = Schema.decodeUnknownOption(
   Schema.Struct({ taskId: Schema.String, slug: Schema.String, title: Schema.String, threadId: Schema.String }),
@@ -713,7 +717,13 @@ export const itemOf = (row: ItemRow): ThreadItem | undefined => {
           // A review after a merge says which pull request it read.
           ...(text(field(content, 'afterMerge'), 'url') === ''
             ? {}
-            : { afterMerge: { url: text(field(content, 'afterMerge'), 'url'), words: text(field(content, 'afterMerge'), 'words') } }),
+            : {
+                afterMerge: {
+                  url: text(field(content, 'afterMerge'), 'url'),
+                  words: text(field(content, 'afterMerge'), 'words'),
+                  ...(field(field(content, 'afterMerge'), 'kept') === true ? { kept: true } : {}),
+                },
+              }),
           agentId: agentId === '' ? null : agentId,
           ...(model === '' ? {} : { model }),
         },
@@ -867,6 +877,12 @@ export const itemOf = (row: ItemRow): ThreadItem | undefined => {
       return Option.match(decodeModelMove(content), {
         onNone: () => undefined,
         onSome: (move): ThreadItem => ({ ...base, kind: 'model_move', content: move }),
+      })
+    // The merge line for a branch (MergeLine.ts), kept current in place.
+    case 'merge_line':
+      return Option.match(decodeMergeLine(content), {
+        onNone: () => undefined,
+        onSome: (card): ThreadItem => ({ ...base, kind: 'merge_line', content: card }),
       })
     case 'setup': {
       const ended = field(content, 'ended')
@@ -2057,9 +2073,9 @@ export class Queries extends Context.Service<
 
       /**
        * A waiting task's place in its project's Up next (ADR-065), in the order it gets one (1 first): its tasks under way,
-       * none of whose agents is at work, which continue, then its line, the tasks no agent has worked on yet; whether it
-       * stands behind another in the line, and whether the line is in the person's order. Null where it is in neither: an
-       * agent of its is at work.
+       * none of whose agents is at work, which continue, and its line, the tasks no agent has worked on yet, in one order;
+       * whether it continues, whether it stands behind another, and whether the person put them in an order of their own.
+       * Null where it is in neither: an agent of its is at work.
        */
       const placeOf = (taskId: string) =>
         Effect.gen(function* () {
@@ -2067,10 +2083,9 @@ export class Queries extends Context.Service<
           const [task] = yield* sql<{ projectId: string }>`SELECT project_id FROM tasks WHERE id = ${taskId}`
           if (task === undefined) return null
           const line = yield* lineIn(task.projectId)
-          const ahead = line.continuing.indexOf(taskId)
-          if (ahead >= 0) return { place: ahead + 1, continues: true, behind: false, reordered: false }
-          const at = line.tasks.indexOf(taskId)
-          return at < 0 ? null : { place: line.continuing.length + at + 1, continues: false, behind: at > 0, reordered: line.reordered }
+          const at = line.order.indexOf(taskId)
+          if (at < 0) return null
+          return { place: at + 1, continues: !line.tasks.includes(taskId), behind: at > 0, reordered: line.reordered }
         })
 
       /*
@@ -2698,6 +2713,8 @@ export class Queries extends Context.Service<
             ...((queued || waitsForCheckout !== null) && (yield* planWaits(taskId)) ? { planWaits: true } : {}),
             // And it can be held, out of the line, until the person starts it: nothing of it begun.
             ...((queued || waitsForCheckout !== null) && (yield* beforeFirstStep(taskId)) ? { holdable: true } : {}),
+            // A turn Althar asked of its lead or reviewer waits for a place, none of its agents at work: it can be let go.
+            ...(task.turnWaits > 0 && !busy && task.state !== 'abandoned' ? { turnWaits: true } : {}),
             ...(line === null
               ? paused
                 ? { continues: true }
@@ -3139,9 +3156,19 @@ export class Queries extends Context.Service<
             FROM external_links x JOIN tasks k ON k.id = x.task_id JOIN threads t ON t.task_id = k.id AND t.kind = 'task'
             WHERE x.kind = 'review' AND x.url = ${change?.url ?? ''}
             ORDER BY k.created_at DESC, k.rowid DESC LIMIT 1`
-          const [review] = yield* sql<{ state: string; findings: number; updatedAt: string }>`
-            SELECT state, json_array_length(findings) AS findings, updated_at AS updatedAt FROM merge_reviews
+          const [review] = yield* sql<{
+            state: string
+            findings: number
+            verdict: string | null
+            bringsBack: string | null
+            updatedAt: string
+          }>`
+            SELECT state, json_array_length(findings) AS findings, verdict, json_extract(reviewer, '$.bringsBack') AS bringsBack,
+              updated_at AS updatedAt FROM merge_reviews
             WHERE url = ${change?.url ?? ''}`
+          // What its review after the merge brings back: as the rule and its own word say now, and once owed, as it was kept then.
+          const rule = yield* afterMergeNow(task.id)
+          const holds: AfterMergeRule = review === undefined ? rule.holds : review.bringsBack === 'all' ? 'all' : 'major'
           const [reported] = yield* sql<{ at: string }>`
             SELECT created_at AS at FROM thread_items WHERE thread_id = ${threadId} AND kind = 'step_result'
               AND json_extract(content, '$.step') = 'implement' ORDER BY sequence LIMIT 1`
@@ -3188,7 +3215,7 @@ export class Queries extends Context.Service<
                 model: small.implement.model,
                 ...(small.implement.effort === undefined ? {} : { effort: small.implement.effort }),
               },
-              skips: smallChangeSkips(reviewBefore ? null : small.review),
+              skips: smallChangeSkips(reviewBefore ? null : small.review, holds),
               steps: [
                 { key: 'started', what: 'Started', at, done: true },
                 {
@@ -3217,7 +3244,9 @@ export class Queries extends Context.Service<
                               ? 'Reviewing'
                               : review.state === 'stopped'
                                 ? 'Review stopped'
-                                : 'Reviewed',
+                                : review.state === 'clear' && review.verdict === 'changes_requested' && review.findings > 0
+                                  ? 'Reviewed, nothing major'
+                                  : 'Reviewed',
                         at: review.state === 'owed' || review.state === 'running' ? null : review.updatedAt,
                         done: review.state !== 'owed' && review.state !== 'running',
                       },
@@ -3230,6 +3259,7 @@ export class Queries extends Context.Service<
               ...(reviewBefore
                 ? { fullTask: { taskId: reviewed.taskId, slug: reviewed.slug, threadId: reviewed.threadId, title: reviewed.title } }
                 : {}),
+              afterMerge: { project: rule.project, task: rule.task, holds },
             },
           }
           return card
@@ -3661,8 +3691,15 @@ export class Queries extends Context.Service<
               ...(card?.reconnects == null ? {} : { reconnects: card.reconnects }),
               queued: card?.queued ?? null,
               ...(card?.place === undefined ? {} : { place: card.place }),
-              // In the line behind another of its tasks, the person can put it first from here.
-              ...(card?.inLine === true && (yield* placeOf(head.taskId))?.behind === true ? { front: true } : {}),
+              // In Up next behind another of its tasks, continuing or in the line, or a plan waiting to start, the person can put it
+              // first from here.
+              ...((card?.inLine === true || card?.continues === true) && card.queued !== null
+                ? (yield* placeOf(head.taskId))?.behind === true
+                  ? { front: true }
+                  : {}
+                : card?.phase === 'planned' || card?.phase === 'held'
+                  ? { front: true }
+                  : {}),
               steps: card?.plan?.steps ?? [],
               // Its graph is a part of its own: one that can't be read leaves the face out, not the thread.
               ...Option.match(graph, { onNone: () => ({}), onSome: (rounds) => ({ graph: rounds }) }),

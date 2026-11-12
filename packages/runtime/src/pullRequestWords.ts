@@ -62,6 +62,14 @@ export const leftQueueNote = (name: string, why: ChangeRequest['leftQueue']) => 
   }
 }
 
+/**
+ * Told the lead with a sendback that isn't a conflict or a person's: bringing
+ * the target in is the host's update or the person's queue, never a redo of
+ * the plan, and a merge of it that settles nothing is none of the task's work.
+ */
+export const sendBackHint = (target: string) =>
+  `Where it only needs ${target} brought in, call update_branch for it, or leave putting it back in the queue to the person: don't redo the plan's steps. A merge of ${target} that settles no conflict goes up to the pull request as it is and starts no review.`
+
 /** One job the queue's build failed, as the sendback reports it: its page, its log's end, or why its log couldn't be read. */
 export interface QueueJob {
   readonly name: string
@@ -79,7 +87,69 @@ export interface QueueDetail {
   readonly logs: ReadonlyArray<string>
   readonly main: string | null
   readonly jobs?: ReadonlyArray<QueueJob>
+  /** Of the jobs it failed, those that fail on the default branch's latest commit too: not the pull request's own doing. */
+  readonly onBaseToo?: ReadonlyArray<string>
+  /** Of the jobs it failed, those the default branch's latest commit reports passing: only these name the pull request. */
+  readonly passedOnBase?: ReadonlyArray<string>
 }
+
+/** Of the jobs the queue's build failed, those its default branch's latest commit fails too, as that commit reports them. */
+export const failingOnBase = (
+  failing: ReadonlyArray<string>,
+  baseChecks: ReadonlyArray<{ readonly name: string; readonly state: Check['state'] }>,
+) => failing.filter((name) => baseChecks.some((check) => check.name === name && check.state === 'failed'))
+
+/**
+ * Of the jobs the queue's build failed, those its default branch's latest commit reports passing, every run of it: a job it
+ * hasn't reported on, or still runs, neither passes nor fails.
+ */
+export const passingOnBase = (
+  failing: ReadonlyArray<string>,
+  baseChecks: ReadonlyArray<{ readonly name: string; readonly state: Check['state'] }>,
+) =>
+  failing.filter(
+    (name) =>
+      baseChecks.some((check) => check.name === name) && baseChecks.every((check) => check.name !== name || check.state === 'passed'),
+  )
+
+/**
+ * The jobs that name the pull request as why the merge queue took it out: those its build failed that the default branch's
+ * latest commit reports passing. None where the host gave no reason, the build's jobs couldn't be read, or the default branch
+ * fails them too, hasn't reported on them or couldn't be read: Althar doesn't know it is the pull request's own doing, so its
+ * lead isn't put to work guessing.
+ */
+export const queueOwnFailures = (why: ChangeRequest['leftQueue'], detail: QueueDetail | null | undefined) =>
+  detail === null || detail === undefined || (why !== 'checks' && why !== 'other' && why !== null && why !== undefined)
+    ? []
+    : detail.failing.filter((name) => (detail.passedOnBase ?? []).includes(name))
+
+/**
+ * Said to the person, in the task's thread, as the merge queue takes a pull request out with nothing in its build that names
+ * it: why Althar didn't put its lead to work, and what is theirs to do.
+ */
+export const leftQueueUnclaimed = (name: string, why: ChangeRequest['leftQueue'], detail: QueueDetail | null | undefined) => {
+  const failing = detail?.failing ?? []
+  const too = failing.filter((job) => (detail?.onBaseToo ?? []).includes(job))
+  const unknown = failing.filter((job) => !too.includes(job))
+  const because =
+    failing.length > 0
+      ? [
+          ...(too.length > 0 ? [`${too.join(', ')} fail${too.length === 1 ? 's' : ''} on the default branch too`] : []),
+          ...(unknown.length > 0
+            ? [
+                `the default branch hasn’t reported ${unknown.join(', ')} passing, so Althar can’t tell ${unknown.length === 1 ? 'it' : 'them'} from a failure of its own`,
+              ]
+            : []),
+        ].join(', and ')
+      : why === 'checks'
+        ? 'Althar couldn’t read which of its build’s jobs failed'
+        : 'the host gave no specific reason, and its build names no job that failed'
+  return `Nothing names ${name} as why it was taken out: ${because}. Its lead wasn’t asked to change anything. Put it back in the queue when you want, or ask its lead to look.`
+}
+
+/** What its lead reads, with its next turn, of a send-back nothing names it in: what happened, and that the person has it. */
+export const leftQueueNoteForLead = (name: string, why: ChangeRequest['leftQueue'], detail: QueueDetail | null | undefined) =>
+  `${leftQueueForLead(name, why, detail)}\n\nNothing in the queue's build names ${name}, so Althar told the person rather than you: change nothing for it unless they ask.`
 
 /**
  * How the default branch stands on the jobs the merge queue failed, from its
@@ -93,12 +163,8 @@ export const queueMainLine = (
   baseChecks: ReadonlyArray<{ readonly name: string; readonly state: Check['state'] }>,
 ) => {
   if (baseChecks.length === 0) return `No checks have run on ${base}, so this says nothing of whether ${base} is broken.`
-  const failed = new Set(baseChecks.filter((check) => check.state === 'failed').map((check) => check.name))
-  const passed = new Set(
-    baseChecks
-      .filter((check) => check.state === 'passed' && baseChecks.every((other) => other.name !== check.name || other.state === 'passed'))
-      .map((check) => check.name),
-  )
+  const failed = new Set(failingOnBase(failing, baseChecks))
+  const passed = new Set(passingOnBase(failing, baseChecks))
   const too = failing.filter((name) => failed.has(name))
   const there = failing.filter((name) => !failed.has(name) && passed.has(name))
   const unreported = failing.filter((name) => !failed.has(name) && !passed.has(name))
@@ -117,7 +183,7 @@ export const queueMainLine = (
  */
 export const leftQueueForLead = (name: string, why: ChangeRequest['leftQueue'], detail?: QueueDetail | null) => {
   const head = leftQueueNote(name, why)
-  if (detail === null || detail === undefined || why !== 'checks') return head
+  if (detail === null || detail === undefined || (why !== 'checks' && why !== 'other')) return head
   return [
     head,
     ...(detail.failing.length === 0

@@ -20,6 +20,7 @@ import {
   Findings,
   KeptRow,
   LinkButton,
+  MenuItem,
   NextLine,
   NextRow,
   NextStep,
@@ -63,7 +64,7 @@ import { ago, clock, running } from '../../shared/time'
 import { text as stuckText } from '../task/StuckCall'
 import { canHold, teamChangeOf, TeamMenu } from '../team/Team'
 import s from './Board.module.css'
-import { type Held, heldOf, holding, type Lanes, type Waiting } from './lanes'
+import { type Held, heldOf, holding, type Lanes, movesInLine, type Waiting } from './lanes'
 import type { LineActions } from './useBoard'
 import type { WorkActions } from './useWorkActions'
 
@@ -89,10 +90,11 @@ export const text = {
   scratchLabel: 'Asides',
   startsIn: (seconds: number) => (seconds <= 0 ? 'Starting' : `Starts in ${seconds}s`),
   held: 'Held. Starts when you say',
-  /** The quiet divider over the tasks that wait for a free agent before any has worked on them, and, under them, the plans. */
-  startsWhenFree: 'Starts when an agent is free',
-  /** At the divider's end, once the person changed the line: the way back. */
+  /** Over Up next once the person put it in an order of their own, and at its end, the way back. */
+  yourOrder: 'In your order',
   oldestFirst: 'Back to oldest first',
+  /** In a row's menu, where Althar asked its agent a turn that waits for a place: let it go, read with the agent's next turn. */
+  cancelTurn: 'Cancel this turn',
   /** The quiet divider over work under way held for a usage limit or the connection: it goes on by itself once it can. */
   paused: 'Paused',
   /** The one over tasks started Local that wait for the checkout: another task's there, or the person's changes (ADR-091). */
@@ -1019,8 +1021,11 @@ export function BoardView({
   const [held, setHeld] = useState<Held | null>(null)
   const shown = held === null ? lanes : holding(lanes, held)
   const { continuing, free, paused } = shown
+  // What waits for an agent's place, what continues and the line in the one order places are given in; then the plans.
+  const waitingRows = shown.next.slice(0, continuing + free)
+  const planRows = shown.next.slice(continuing + free, shown.next.length - paused)
   // What is paused for a limit or the connection, and, under a divider of its own, what waits for its checkout (ADR-091).
-  const pausedRows = shown.next.slice(continuing + free, continuing + free + paused)
+  const pausedRows = shown.next.slice(shown.next.length - paused)
   const halted = pausedRows.filter((work) => work.waitsForCheckout == null)
   const forLocal = pausedRows.filter((work) => work.waitsForCheckout != null)
   const pointed = (lane: BoardLane | null) =>
@@ -1032,29 +1037,28 @@ export function BoardView({
     const startsAt = work.plan?.startsAt ?? null
     const kind = kindWordOf(work)
     const parent = work.startedBy
+    const waits = waitingRows.includes(work)
+    const pausedRow = pausedRows.includes(work)
     // Under way, it goes on with its step: a change's, as its card in Running would say it; a plain task or a review just goes on.
     // Not one that waits for its checkout: nothing of it has begun (ADR-091).
-    const goesOn = index < continuing || (index >= continuing + free && index < continuing + free + paused && work.waitsForCheckout == null)
-    const reason =
-      index < continuing
-        ? work.queued === null
-          ? text.startsIn(0)
+    const goesOn = (waits && work.inLine !== true) || (pausedRow && work.waitsForCheckout == null)
+    const reason = waits
+      ? work.queued === null
+        ? text.startsIn(0)
+        : work.inLine === true
+          ? inLineWords(index + 1)
           : busyWords(work.queued)
-        : index < continuing + free
-          ? work.queued === null
-            ? text.startsIn(0)
-            : inLineWords(index + 1)
-          : index < continuing + free + paused
-            ? work.waitsForCheckout != null
-              ? localText.after(work.waitsForCheckout)
-              : work.waits !== null
-                ? waitsWords(name(work.waits.agentId), clock(work.waits.until), undefined, work.waits.left)
-                : work.reconnects != null
-                  ? reconnectsWords(work.reconnects, clock)
-                  : text.startsIn(0)
-            : startsAt === null
-              ? text.held
-              : text.startsIn(Math.ceil((new Date(startsAt).getTime() - new Date(now).getTime()) / 1000))
+      : pausedRow
+        ? work.waitsForCheckout != null
+          ? localText.after(work.waitsForCheckout)
+          : work.waits !== null
+            ? waitsWords(name(work.waits.agentId), clock(work.waits.until), undefined, work.waits.left)
+            : work.reconnects != null
+              ? reconnectsWords(work.reconnects, clock)
+              : text.startsIn(0)
+        : startsAt === null
+          ? text.held
+          : text.startsIn(Math.ceil((new Date(startsAt).getTime() - new Date(now).getTime()) / 1000))
     return (
       <NextRow
         key={work.taskId}
@@ -1065,7 +1069,7 @@ export function BoardView({
         {...(goesOn ? { continues: work.kind === 'change' ? stepWordOf(work) : '' } : {})}
         {...(parent === undefined ? {} : { foot: <StartedBy task={parent.title} onOpen={() => onOpen(parent.threadId)} /> })}
         title={work.title}
-        wait={index < continuing + free + paused || startsAt !== null ? Wait.Workers : Wait.You}
+        wait={waits || pausedRow || startsAt !== null ? Wait.Workers : Wait.You}
         reason={reason}
         onOpen={() => onOpen(work.threadId)}
         {...teamOf(work)}
@@ -1152,32 +1156,51 @@ export function BoardView({
             }
           : {})}
       >
-        {continuing > 0 && <BoardList>{shown.next.slice(0, continuing).map(nextRow)}</BoardList>}
-        {free > 0 && (
-          <BoardDivider
-            end={
-              line === undefined || free < 2 || !shown.reordered ? undefined : (
-                <LinkButton onClick={line.oldestFirst}>{text.oldestFirst}</LinkButton>
-              )
-            }
-          >
-            {text.startsWhenFree}
-          </BoardDivider>
-        )}
         {line?.failed != null && (
           <p className={s.failure} role="alert">
             {line.failed}
           </p>
         )}
-        {free > 0 && (
+        {line !== undefined && shown.reordered && waitingRows.length > 1 && (
+          <BoardDivider end={<LinkButton onClick={line.oldestFirst}>{text.oldestFirst}</LinkButton>}>{text.yourOrder}</BoardDivider>
+        )}
+        {waitingRows.length + planRows.length > 0 && (
+          // One order, the one places are given in: a row goes anywhere in it, a plan starting where it is put or where a row
+          // is put below it. Planned heads the first plan after what waits.
           <NextLine
-            rows={shown.next.slice(continuing, continuing + free).map((work) => ({ id: work.taskId, title: work.title }))}
-            // While a row is dragged, each says the place it would take, after what continues.
+            rows={[...waitingRows, ...planRows].map((work) => ({
+              id: work.taskId,
+              title: work.title,
+              group: planRows.includes(work) ? 'planned' : 'waiting',
+            }))}
+            heads={{ planned: <BoardDivider>{text.planned}</BoardDivider> }}
+            // While a row is dragged, each says the place it would take.
             render={(id, place) => {
               const work = shown.next.find((one) => one.taskId === id)
-              return work === undefined ? null : nextRow(work, continuing + place - 1)
+              return work === undefined ? null : nextRow(work, place - 1)
             }}
-            {...(line === undefined ? {} : { onMove: line.move })}
+            {...(line === undefined
+              ? {}
+              : {
+                  // A row put below plans starts them, each at its place, so the order shown is the one places are given in.
+                  onMove: async (id: string, to: number) => {
+                    const ids = (rows: ReadonlyArray<BoardTask>) => rows.map((work) => work.taskId)
+                    for (const [one, at] of movesInLine(ids(waitingRows), ids(planRows), id, to)) await line.move(one, at)
+                  },
+                  // A plan moves only where it starts: among what waits, or at the head of the plans.
+                  place: (id: string, to: number, others: ReadonlyArray<string>) => {
+                    const waits = others.filter((one) => waitingRows.some((work) => work.taskId === one)).length
+                    return waitingRows.some((work) => work.taskId === id) || to <= waits ? to : null
+                  },
+                  more: (id: string) => {
+                    const work = shown.next.find((one) => one.taskId === id)
+                    return work?.turnWaits === true && waitingRows.includes(work) ? (
+                      <MenuItem icon="close" onSelect={() => line.cancelTurn(work.threadId)}>
+                        {text.cancelTurn}
+                      </MenuItem>
+                    ) : null
+                  },
+                })}
           />
         )}
         {[halted, forLocal].map(
@@ -1188,12 +1211,6 @@ export function BoardView({
                 <BoardList>{rows.map((work) => nextRow(work, shown.next.indexOf(work)))}</BoardList>
               </Fragment>
             ),
-        )}
-        {continuing + free + paused > 0 && continuing + free + paused < shown.next.length && <BoardDivider>{text.planned}</BoardDivider>}
-        {continuing + free + paused < shown.next.length && (
-          <BoardList>
-            {shown.next.slice(continuing + free + paused).map((work, index) => nextRow(work, continuing + free + paused + index))}
-          </BoardList>
         )}
       </BoardColumn>
 

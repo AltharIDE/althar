@@ -121,6 +121,12 @@ describe('what the client sends', () => {
     expect((await sent(heard, client.declineReview('task_1'))).payload).toEqual({ taskId: 'task_1' })
   })
 
+  it('says whether one small change is reviewed after it merges, or goes back to the project’s rule', async () => {
+    const { client, heard } = await standIn()
+    expect((await sent(heard, client.setReviewAfterMerge('task_1', 'none'))).payload).toEqual({ taskId: 'task_1', review: 'none' })
+    expect((await sent(heard, client.setReviewAfterMerge('task_1', null))).payload).toEqual({ taskId: 'task_1', review: null })
+  })
+
   it('removes an account, anyway only where the person said so', async () => {
     const { client, heard } = await standIn()
     expect((await sent(heard, client.removeAccount('acc_1'))).payload).toEqual({ accountId: 'acc_1' })
