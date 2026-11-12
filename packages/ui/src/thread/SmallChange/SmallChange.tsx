@@ -348,7 +348,7 @@ export function SmallChange({
         </div>
       ) : found ? (
         <div className={s.foot} style={columns}>
-          <Button size="small" trailingIcon="arrow" className={s.act} style={under('review')} onClick={onFindings}>
+          <Button size="small" variant="quiet" trailingIcon="arrow" className={s.to} style={under('review')} onClick={onFindings}>
             {t.seeFindings}
           </Button>
         </div>

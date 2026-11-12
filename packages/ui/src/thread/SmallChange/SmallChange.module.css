@@ -219,3 +219,9 @@
   justify-self: start;
   margin-left: -1px;
 }
+/* a way into the thread, no box: its words start where its stop's do */
+.to {
+  justify-self: start;
+  margin: -3px 0 0 -9px;
+  color: var(--t-2);
+}
