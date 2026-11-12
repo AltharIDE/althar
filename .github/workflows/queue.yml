@@ -15,8 +15,8 @@ name: queue
 # tests, the other packages' coverage and the packages run after merge, in post-merge.yml.
 #
 # Main's rules require one check, `merge queue`. On a pull request it passes once the pull request's own stress run
-# has (or it has none), and the Windows smoke test hasn't failed: a stress run takes up to 75 minutes, and waited for
-# here, on the pull request, it no longer holds the queue, where every entry behind a waiting one waited too. In the
+# has (or it has none), and the Windows smoke test hasn't failed: waited for here, on the pull request, a stress run
+# no longer holds the queue, where every entry behind a waiting one waited too. In the
 # queue, it passes once every check that ran there did, and the stress run it reads again has long finished.
 on:
   pull_request:
