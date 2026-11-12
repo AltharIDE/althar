@@ -303,7 +303,7 @@
   padding: 0 2px;
 }
 .noRemote p {
-  flex: 1 1 180px;
+  flex: 0 1 auto;
   margin: 0;
   font-size: 11.5px;
   line-height: 1.5;

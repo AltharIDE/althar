@@ -111,7 +111,7 @@ describe('the repository a fork forks, among its clone’s remotes', () => {
     MAP_HALYARD.map((one) =>
       one.fork === undefined ? one : { ...one, fork: { ...one.fork, ...(remote === undefined ? {} : { remote }) } },
     )
-  const NO_REMOTE = 'Your clone has no remote for halyard/api, so tasks start from your fork, and you can’t push branches there yourself.'
+  const NO_REMOTE = 'Your clone has no remote for it.'
 
   it('names the remote its clone has it as, where that isn’t upstream', () => {
     map({ repositories: forkWith('base') })
@@ -131,14 +131,14 @@ describe('the repository a fork forks, among its clone’s remotes', () => {
     const onAddRemote = vi.fn()
     map({ repositories: forkWith(null), onAddRemote })
     expect(screen.getByText(NO_REMOTE)).toBeTruthy()
-    act(() => screen.getByRole('button', { name: 'Add it as a remote' }).click())
+    act(() => screen.getByRole('button', { name: 'Add remote' }).click())
     expect(onAddRemote).toHaveBeenCalledWith('halyard')
   })
 
   it('says so without a button where there is no way to add it here', () => {
     map({ repositories: forkWith(null) })
     expect(screen.getByText(NO_REMOTE)).toBeTruthy()
-    expect(screen.queryByRole('button', { name: 'Add it as a remote' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Add remote' })).toBeNull()
   })
 })
 
