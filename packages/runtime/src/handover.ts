@@ -1,4 +1,5 @@
 import { errandLines } from './Errands'
+import { plainTitle } from '@althar/contracts'
 import type { ProjectId } from '@althar/domain'
 import { Effect, Option, Schema } from 'effect'
 import { SqlClient } from 'effect/sql'
@@ -122,7 +123,7 @@ const callWords = (call: { readonly kind: string; readonly payload: string; read
   const words = (key: string) => (typeof payload[key] === 'string' ? (payload[key] as string) : '')
   switch (call.kind) {
     case 'permission':
-      return `a permission request${call.title === null ? '' : `: ${call.title}`}`
+      return `a permission request${call.title === null ? '' : `: ${plainTitle(call.title)}`}`
     case 'question': {
       const fields = Array.isArray(payload.fields) ? (payload.fields as ReadonlyArray<{ readonly question?: string }>) : []
       const asked = fields.flatMap((field) => (field.question === undefined || field.question === '' ? [] : [field.question]))
