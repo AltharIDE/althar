@@ -250,6 +250,7 @@ test('a new aside’s picker is its own: its first words go on what it shows, an
     await page.getByRole('radio', { name: 'High' }).click()
     await page.keyboard.press('Escape')
     await expect(asidePick).toHaveAttribute('aria-label', /High$/)
+    await shoot(page, pills, 'new-pick')
     const box = page.getByRole('textbox', { name: /^Ask on the side/ })
     await box.click()
     await box.fill('Hi')
