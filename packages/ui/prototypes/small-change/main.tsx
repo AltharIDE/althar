@@ -6,13 +6,13 @@ import { Button, ChangeSet, ChangeState, CheckState, SmallChange, type SmallChan
 import { StrictMode, useEffect, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 
-import { CALM, type Direction, REVIEW_MODES, ReviewMode } from './calm'
-import { REVIEWS } from './review'
+import { type Direction, REVIEW_MODES, ReviewMode } from './calm'
+import { FRESH } from './fresh'
 import { type SmallState, SOL, SONNET, STATES } from './states'
 import p from './page.module.css'
 
 /*
- * The small change's card, a few directions: keys 0 and A–F swap the
+ * The small change's card, a few directions: keys 0 and A–D swap the
  * direction, R what follows the merge (the project's setting), T the theme, 1–9 and - = pick the state the thread column shows.
  * The grid draws every state of the direction at once; the column beside it
  * draws the picked one in a thread, between the plan card and the Change card.
@@ -68,7 +68,7 @@ const NOW: Direction = {
   Card: Now,
 }
 
-const ALL: readonly Direction[] = [NOW, ...CALM, ...REVIEWS]
+const ALL: readonly Direction[] = [NOW, ...FRESH]
 const params = new URLSearchParams(location.search)
 const SHOT = params.has('shot')
 const ONLY = params.get('only')
@@ -111,7 +111,7 @@ function Neighbours({ dir, state }: { dir: Direction; state: SmallState }) {
 }
 
 function Page() {
-  const [dirKey, setDir] = useState(() => ALL.find((d) => d.key === params.get('d'))?.key ?? 'd')
+  const [dirKey, setDir] = useState(() => ALL.find((d) => d.key === params.get('d'))?.key ?? 'route')
   const [mode, setMode] = useState<ReviewMode>(() => {
     const r = params.get('r')
     return r === 'all' || r === 'off' ? r : 'major'

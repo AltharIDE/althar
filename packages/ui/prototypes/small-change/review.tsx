@@ -14,10 +14,10 @@ import { type SmallState, SOL } from './states'
  * setting (R) is where each starts.
  */
 
-type Review = 'before' | 'after' | 'none'
+export type Review = 'before' | 'after' | 'none'
 
 /** This change's review, starting from the project's setting; Before makes it a full task. */
-function useReview(s: SmallState) {
+export function useReview(s: SmallState) {
   const project = useContext(ReviewMode)
   const [review, setReview] = useState<Review>(project === 'off' ? 'none' : 'after')
   useEffect(() => setReview(project === 'off' ? 'none' : 'after'), [project])
@@ -42,10 +42,10 @@ function Line({ s, children }: { s: SmallState; children?: ReactNode }) {
   )
 }
 
-const WORDS: Record<Review, string> = { before: 'Review first', after: 'Review after merge', none: 'No review' }
+export const WORDS: Record<Review, string> = { before: 'Review first', after: 'Review after merge', none: 'No review' }
 
 /** The three choices, as a menu; Before is what Make it a full task was. */
-function Choices({ review, onChange, project }: { review: Review; onChange: (v: Review) => void; project: ReviewMode }) {
+export function Choices({ review, onChange, project }: { review: Review; onChange: (v: Review) => void; project: ReviewMode }) {
   return (
     <MenuRadioGroup label="Review" value={review} onChange={(v) => onChange(v as Review)}>
       <MenuRadioItem value="before" description="Makes it a full task">

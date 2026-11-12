@@ -24,13 +24,23 @@ const shot = async (name: string, query: string) => {
   await page.waitForTimeout(700)
   await page.screenshot({ path: join(out, `${name}.png`), fullPage: true })
 }
-for (const d of (process.argv[2] ?? 'now,a,b,c').split(',').filter(Boolean)) {
+for (const d of (process.argv[2] ?? 'route,ring,sentence,contents').split(',').filter(Boolean)) {
   await shot(`${d}-grid-light`, `d=${d}&theme=light&only=grid`)
   await shot(`${d}-grid-dark`, `d=${d}&theme=dark&only=grid`)
   await page.setViewportSize({ width: 640, height: 900 })
   await shot(`${d}-thread-ready-light`, `d=${d}&theme=light&only=thread&s=5`)
   await shot(`${d}-thread-findings-dark`, `d=${d}&theme=dark&only=thread&s=10`)
   await shot(`${d}-thread-hover-light`, `d=${d}&theme=light&only=thread&s=3&hover`)
+  if (d !== 'now') {
+    await page.goto(`http://localhost:6143/?d=${d}&theme=light&only=thread&s=5&shot`)
+    await page.waitForTimeout(500)
+    const t = page.locator('[class*="thread"] button[aria-haspopup]').first()
+    if ((await t.count()) > 0) {
+      await t.click()
+      await page.waitForTimeout(300)
+      await page.screenshot({ path: join(out, `${d}-thread-menu-light.png`) })
+    }
+  }
   await page.setViewportSize({ width: 1240, height: 900 })
 }
 // B, the one picked, under each of the project's settings for what follows the merge.
