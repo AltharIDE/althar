@@ -57,7 +57,7 @@ export function ThreadNavigator({ scroll, text, className, ref, ...rest }: Threa
       <HoverCardProvider delay={100}>
         {stops.map((stop, i) => (
           <HoverCard
-            key={i}
+            key={stop.id}
             placement="left"
             align="center"
             className={s.preview}

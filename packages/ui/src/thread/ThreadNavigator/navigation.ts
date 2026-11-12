@@ -1,6 +1,7 @@
 import { useEffect, useState, type RefObject } from 'react'
 
 export interface ThreadStop {
+  readonly id: number
   readonly target: HTMLElement
   readonly prompt: string
   readonly reply: string
@@ -18,6 +19,8 @@ export function useThreadNavigation(scroll: RefObject<HTMLElement | null>) {
     if (!el) return
     let frame = 0
     let indexed: ThreadStop[] = []
+    const ids = new WeakMap<HTMLElement, number>()
+    let nextId = 0
     const position = () => {
       setOverflow(el.scrollHeight > el.clientHeight + 1)
       const edge = el.getBoundingClientRect().top + 40
@@ -34,7 +37,9 @@ export function useThreadNavigation(scroll: RefObject<HTMLElement | null>) {
       for (const node of el.querySelectorAll<HTMLElement>('[data-thread-prompt], [data-thread-preview]')) {
         if (node.closest('[hidden], [aria-hidden="true"]')) continue
         if (node.hasAttribute('data-thread-prompt')) {
-          indexed.push({ target: node, prompt: words(node.querySelector('[data-thread-preview]') ?? node), reply: '' })
+          const id = ids.get(node) ?? nextId++
+          ids.set(node, id)
+          indexed.push({ id, target: node, prompt: words(node.querySelector('[data-thread-preview]') ?? node), reply: '' })
         } else if (!node.closest('[data-thread-prompt]')) {
           const stop = indexed.at(-1)
           if (stop && stop.reply.length < 280)

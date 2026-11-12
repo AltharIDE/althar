@@ -61,10 +61,11 @@ describe('conversation navigation', () => {
   it('updates streaming previews and indexes earlier messages only when opened', async () => {
     const { rerender } = render(<Conversation />)
     await navigation()
+    act(() => screen.getByRole('button', { name: 'Go to message 1: First question' }).focus())
     rerender(<Conversation reply="The completed answer" earlier />)
     await waitFor(() => expect(within(screen.getByRole('navigation')).getAllByRole('button')).toHaveLength(3))
     const first = screen.getByRole('button', { name: 'Go to message 2: First question' })
-    act(() => first.focus())
+    expect(first).toHaveFocus()
     expect(await screen.findByRole('tooltip')).toHaveTextContent('The completed answer')
     rerender(<Conversation reply="Another update" />)
     await waitFor(() => expect(within(screen.getByRole('navigation')).getAllByRole('button')).toHaveLength(2))
