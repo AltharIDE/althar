@@ -28,6 +28,7 @@ export type ThreadNavigatorProps = RootProps<
 export function ThreadNavigator({ scroll, text, className, ref, ...rest }: ThreadNavigatorProps) {
   const t = { ...threadNavigatorText, ...text }
   const { stops, active, overflow } = useThreadNavigation(scroll)
+  const activeIndex = stops.findIndex((stop) => stop.target === active)
   const own = useRef<HTMLElement | null>(null)
   const both = useCallback(
     (el: HTMLElement | null) => {
@@ -72,6 +73,7 @@ export function ThreadNavigator({ scroll, text, className, ref, ...rest }: Threa
               type="button"
               className={s.stop}
               aria-label={t.jump(i + 1, stop.prompt)}
+              data-distance={activeIndex < 0 ? 3 : Math.min(Math.abs(i - activeIndex), 3)}
               aria-current={stop.target === active ? 'location' : undefined}
               onKeyDown={(event) => {
                 if (event.defaultPrevented) return

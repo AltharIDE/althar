@@ -21,26 +21,34 @@
   border: 0;
   border-radius: var(--r-sm);
   background: var(--face-surface, var(--n-2));
-  color: var(--t-3);
+  color: var(--t-1);
   cursor: pointer;
 }
 .tick {
   width: 20px;
   height: 2px;
   background: currentColor;
-  transform: scaleX(0.5);
+  transform: scaleX(0.3);
+  opacity: 0.3;
   transform-origin: right;
-  transition: transform var(--fast) var(--ease-out);
+  transition:
+    transform var(--fast) var(--ease-out),
+    opacity var(--fast) var(--ease-out);
 }
-.stop[aria-current],
-.stop:hover,
-.stop:focus-visible {
-  color: var(--t-1);
+/* At rest, every mark stays short; brightness follows the reading position. */
+.stop[data-distance='2'] .tick {
+  opacity: 0.4;
 }
-.stop[aria-current] .tick,
+.stop[data-distance='1'] .tick {
+  opacity: 0.55;
+}
+.stop[aria-current] .tick {
+  opacity: 0.7;
+}
 .stop:hover .tick,
 .stop:focus-visible .tick {
   transform: scaleX(1);
+  opacity: 1;
 }
 .preview {
   width: 320px;
