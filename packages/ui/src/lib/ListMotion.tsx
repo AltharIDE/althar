@@ -143,6 +143,7 @@ export class ListMotion extends Component<ListMotionProps> {
       // On its way to where it is laid out already: it carries on.
       if (now !== undefined && same(now.to, to[i]!)) return null
       now?.stop()
+      if (was.el !== el && seen(el)) return null
       const from = was.rect
       if (reduced || !moved(from, to[i]!) || resized(from, to[i]!) || (offscreen(from) && offscreen(to[i]!))) return null
       return { el, from, to: to[i]!, again: was.el !== el, far: Math.hypot(from.left - to[i]!.left, from.top - to[i]!.top) }
@@ -153,7 +154,7 @@ export class ListMotion extends Component<ListMotionProps> {
       if (one.again) travel(this.own, one.el, one.from, one.to)
       else slide(this.own, one.el, one.from, one.to, one.far === furthest)
     }
-    if (came.length <= FRESH) for (const el of came) enter(el, this.props.enter ?? 'rise', reduced)
+    if (came.length <= FRESH) for (const el of came) if (!seen(el)) enter(el, this.props.enter ?? 'rise', reduced)
     if (went.length <= FRESH)
       for (const was of went) if (!was.el.isConnected && was.list?.isConnected === true) leave(this.own, was.el, was.rect, reduced)
   }
@@ -178,6 +179,9 @@ const itemsIn = (root: HTMLElement, held: ReadonlyArray<HTMLElement> = []) => {
     return true
   })
 }
+
+/** Whether it has come to where it is drawn before: nothing travels it there or brings it in again. */
+const seen = (el: HTMLElement) => el.hasAttribute('data-move-seen')
 
 const listOf = (el: HTMLElement) => {
   const parent = el.parentElement
