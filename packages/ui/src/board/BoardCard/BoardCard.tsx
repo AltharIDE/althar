@@ -86,6 +86,7 @@ export type BoardCardProps = RootProps<
     local?: boolean
     /** How long, or since when: 9m. */
     at?: string
+    /** What its open errands wait on, in a few plain words each, one line apiece: In the merge queue, Merges once checks pass. */
     errands?: readonly string[] | undefined
     title: string
     /** Under the title, where the word isn't enough to say why it needs you. */
@@ -231,7 +232,7 @@ export function BoardCard({
         </p>
       )}
       {errands?.map((line) => (
-        <p className={s.why} key={line}>
+        <p className={s.errand} key={line} title={line}>
           {line}
         </p>
       ))}
