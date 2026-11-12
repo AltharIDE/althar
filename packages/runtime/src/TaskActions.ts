@@ -33,6 +33,7 @@ import { actionsOf, standingOf, Tasks } from './Tasks'
 import { addItem, updateItem } from './threads'
 import { touchTask } from './cards'
 import { POOL, ToolRefused, ToolServer, type Tool, type ToolAccess } from './ToolServer'
+import { cancelWaitingTurn, upNextMove } from './upNextMoves'
 import { expected, words } from './words'
 
 /*
@@ -437,8 +438,14 @@ export class TaskActions extends Context.Service<
               return did(`Stopped ${task.slug}: its step is cut short and its agents stopped. Restarting carries it on.`)
             case 'stop_turn': {
               const lead = yield* sessions.running(task.threadId)
-              if (Option.isNone(lead) || !lead.value.turnRunning)
-                return nothing(`${task.slug}’s lead isn’t in a turn: there is nothing to stop.`)
+              if (Option.isNone(lead) || !lead.value.turnRunning) {
+                // A turn Althar asked of it waits for a place, up next: let go, its words read with the lead's next turn.
+                if ((yield* cancelWaitingTurn(busy, sessions, sql)(task.id)) > 0)
+                  return did(
+                    `Cancelled the turn ${task.slug}’s lead waited to take: it is out of Up next, and reads what it would have been told with its next turn.`,
+                  )
+                return nothing(`${task.slug}’s lead isn’t in a turn, nor waiting to take one: there is nothing to stop.`)
+              }
               yield* changes.leadStopped({ threadId: task.threadId }, 'interrupted')
               yield* sessions.interrupt(task.threadId)
               return did(`Stopped the lead’s turn on ${task.slug}: it waits for the next message.`)
@@ -1348,9 +1355,14 @@ export class TaskActions extends Context.Service<
         Effect.gen(function* () {
           const asked = yield* read(Named, input)
           const task = yield* named(access, asked.task)
-          if (!(yield* busy.move(task.id, 0))) return `Nothing changed: ${task.slug} isn't waiting for a place among the agents at work.`
+          const sql = yield* SqlClient.SqlClient
+          const moved = yield* upNextMove(busy, plans, sql)(task.id, 0, actorOf(access))
+          if (moved === 'none')
+            return `Nothing changed: ${task.slug} isn't in Up next, waiting for a place among the agents at work or with a plan waiting to start.`
           yield* did(access, input, task, `Moved “${task.title}” to the front of the line`, 'moved this task to the front of the line')
-          return `${task.slug} is first in line now: it starts when the next agent's place frees.`
+          return moved === 'started'
+            ? `${task.slug}'s plan started, first in line: it goes on as soon as an agent's place frees, or now where one is free.`
+            : `${task.slug} is first in line now: it goes on when the next agent's place frees.`
         })
 
       const stopFollowing = (access: ToolAccess, input: unknown) =>
@@ -1386,7 +1398,7 @@ export class TaskActions extends Context.Service<
       yield* (yield* ToolServer).serve(POOL, [
         tool(
           'stop_task',
-          'Stops a task, as its Stop does: its step is cut short and its agents stop, its work kept. With turn, only its lead’s current turn ends, and it waits for the next message. restart_task carries a stopped task on. It acts at once, with a line in your thread and the task’s; do it when the person asks, or when a task is plainly going wrong and say why. A lead can’t stop its own task: it ends its turn.',
+          'Stops a task, as its Stop does: its step is cut short and its agents stop, its work kept. With turn, only its lead’s current turn ends, and it waits for the next message; or, where a turn Althar asked of its lead or reviewer waits for a place up next, that turn is cancelled, and what it would have said is read with the agent’s next turn. restart_task carries a stopped task on. It acts at once, with a line in your thread and the task’s; do it when the person asks, or when a task is plainly going wrong and say why. A lead can’t stop its own task: it ends its turn.',
           { type: 'object', properties: { task, turn: { type: 'boolean' }, why }, required: ['task'] },
           (access, input) =>
             Effect.flatMap(read(Stopping, input), (asked) =>

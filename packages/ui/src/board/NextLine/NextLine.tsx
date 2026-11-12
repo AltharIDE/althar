@@ -3,7 +3,7 @@ import { type CSSProperties, type KeyboardEvent, type PointerEvent, type ReactNo
 import { cx } from '../../lib/cx'
 import { ListMotion } from '../../lib/ListMotion'
 import { useReorder } from '../../lib/useReorder'
-import { Menu, MenuItem } from '../../primitives/Menu/Menu'
+import { Menu, MenuItem, MenuSeparator } from '../../primitives/Menu/Menu'
 import b from '../Board/Board.module.css'
 import s from './NextLine.module.css'
 
@@ -21,6 +21,11 @@ import s from './NextLine.module.css'
  * tabs' (`useReorder`), down a column instead of along a bar. Moved by its
  * menu or by key, or put back where a move failed, a row slides to its place
  * (ListMotion, the board's where it is in one); dragged, it is the drag's.
+ *
+ * The line is one order however its rows differ: a row of one group (what
+ * continues, the line, plans waiting to start) goes anywhere in it, and a
+ * group's heading heads the first of its rows wherever they stand. A row's
+ * menu may offer more than moves, after them (`more`).
  */
 
 export interface NextLineText {
@@ -46,6 +51,8 @@ export interface NextLineRow {
   readonly id: string
   /** What the row's grip names. */
   readonly title: string
+  /** Which of the line's groups it is in: a heading of the group's (`heads`) goes over the first of them after another group's. */
+  readonly group?: string
 }
 
 export interface NextLineProps {
@@ -59,6 +66,10 @@ export interface NextLineProps {
    * fails. Without it, nothing moves and no grip shows.
    */
   onMove?: (id: string, to: number) => void | Promise<unknown>
+  /** A heading by group, over the first of its rows that follows another group's: a quiet divider, such as Planned. */
+  heads?: Readonly<Record<string, ReactNode>>
+  /** More of what a row's menu offers, after its moves, as menu items; null for nothing more. A row with more has its grip though nothing moves. */
+  more?: (id: string) => ReactNode
   text?: Partial<NextLineText>
 }
 
@@ -95,7 +106,7 @@ interface Put {
   readonly settled: boolean
 }
 
-export function NextLine({ rows, render, onMove, text }: NextLineProps) {
+export function NextLine({ rows, render, onMove, heads, more, text }: NextLineProps) {
   const t = { ...nextLineText, ...text }
   const ids = rows.map((row) => row.id)
   const byId = new Map(rows.map((row) => [row.id, row]))
@@ -177,12 +188,15 @@ export function NextLine({ rows, render, onMove, text }: NextLineProps) {
           if (row === undefined) return null
           const held = movable ? bind(id) : undefined
           const lifted = dragging?.id === id
+          const extra = more?.(id) ?? null
+          const before = index === 0 ? undefined : byId.get(shown[index - 1] ?? '')
+          const head = row.group !== undefined && before !== undefined && before.group !== row.group ? heads?.[row.group] : undefined
           return (
             <li
               key={id}
               data-row={id}
               data-move={id}
-              className={cx(s.item, lifted && s.lifted, lifted && dragging.settling && s.settling)}
+              className={cx(s.item, head != null && s.headed, lifted && s.lifted, lifted && dragging.settling && s.settling)}
               style={shifted(id)}
               {...(held === undefined
                 ? {}
@@ -204,40 +218,49 @@ export function NextLine({ rows, render, onMove, text }: NextLineProps) {
                     },
                   })}
             >
-              {movable && (
-                <Menu
-                  label={t.menu}
-                  open={menu === id}
-                  onOpenChange={(open) => setMenu(open ? id : null)}
-                  placement="below"
-                  align="start"
-                  trigger={
-                    <button
-                      type="button"
-                      data-grip=""
-                      className={s.grip}
-                      aria-label={t.grip(row.title)}
-                      // Opened by its click, which a drag from it doesn't make, rather than by the press that may start one.
-                      onPointerDown={(event: PointerEvent<HTMLElement>) => event.button === 0 && event.preventDefault()}
-                      onClick={() => setMenu(id)}
-                    />
-                  }
-                >
-                  <MenuItem icon="up" disabled={index === 0} onSelect={() => move(id, 0)}>
-                    {t.front}
-                  </MenuItem>
-                  <MenuItem disabled={index === 0} onSelect={() => move(id, index - 1)}>
-                    {t.up}
-                  </MenuItem>
-                  <MenuItem disabled={index === shown.length - 1} onSelect={() => move(id, index + 1)}>
-                    {t.down}
-                  </MenuItem>
-                  <MenuItem icon="down" disabled={index === shown.length - 1} onSelect={() => move(id, shown.length - 1)}>
-                    {t.back}
-                  </MenuItem>
-                </Menu>
-              )}
-              {render(id, index + 1)}
+              {head != null && <div className={s.head}>{head}</div>}
+              <div className={s.body}>
+                {(movable || extra !== null) && (
+                  <Menu
+                    label={t.menu}
+                    open={menu === id}
+                    onOpenChange={(open) => setMenu(open ? id : null)}
+                    placement="below"
+                    align="start"
+                    trigger={
+                      <button
+                        type="button"
+                        data-grip=""
+                        className={s.grip}
+                        aria-label={t.grip(row.title)}
+                        // Opened by its click, which a drag from it doesn't make, rather than by the press that may start one.
+                        onPointerDown={(event: PointerEvent<HTMLElement>) => event.button === 0 && event.preventDefault()}
+                        onClick={() => setMenu(id)}
+                      />
+                    }
+                  >
+                    {movable && (
+                      <>
+                        <MenuItem icon="up" disabled={index === 0} onSelect={() => move(id, 0)}>
+                          {t.front}
+                        </MenuItem>
+                        <MenuItem disabled={index === 0} onSelect={() => move(id, index - 1)}>
+                          {t.up}
+                        </MenuItem>
+                        <MenuItem disabled={index === shown.length - 1} onSelect={() => move(id, index + 1)}>
+                          {t.down}
+                        </MenuItem>
+                        <MenuItem icon="down" disabled={index === shown.length - 1} onSelect={() => move(id, shown.length - 1)}>
+                          {t.back}
+                        </MenuItem>
+                      </>
+                    )}
+                    {movable && extra !== null && <MenuSeparator />}
+                    {extra}
+                  </Menu>
+                )}
+                {render(id, index + 1)}
+              </div>
             </li>
           )
         })}

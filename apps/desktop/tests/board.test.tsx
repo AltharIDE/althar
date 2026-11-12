@@ -340,7 +340,7 @@ describe('the board’s lanes', () => {
       })
 
       it('says what continues and why it waits, with no grip, and counts it ahead of the line’s places', () => {
-        const line = { move: vi.fn(async () => {}), oldestFirst: vi.fn(), failed: null }
+        const line = { move: vi.fn(async () => {}), oldestFirst: vi.fn(), cancelTurn: vi.fn(), failed: null }
         withServices(
           <BoardView lanes={lanesOf(board({ tasks: busy, calls: [] }))} agents={agents} now={NOW} onOpen={vi.fn()} line={line} />,
           fakeClient().client,
@@ -448,7 +448,7 @@ describe('the board’s lanes', () => {
 
     it('draws a divider over the line, each row saying its place in it; one alone has nothing to reorder', () => {
       const lanes = lanesOf(board({ tasks: [held, planned, waiting('a', 1)], calls: [] }))
-      const line = { move: vi.fn(async () => {}), oldestFirst: vi.fn(), failed: null }
+      const line = { move: vi.fn(async () => {}), oldestFirst: vi.fn(), cancelTurn: vi.fn(), failed: null }
       withServices(<BoardView lanes={lanes} agents={agents} now={NOW} onOpen={vi.fn()} line={line} />, fakeClient().client)
       expect(screen.getByText('Starts when an agent is free')).toBeTruthy()
       expect(screen.getByText('Next in line')).toBeTruthy()
@@ -460,7 +460,7 @@ describe('the board’s lanes', () => {
     describe('in the person’s order', () => {
       const three = [waiting('a', 1), waiting('b', 2), waiting('c', 3), planned, held]
       const drawn = (tasks: ReadonlyArray<BoardTask>) => {
-        const line = { move: vi.fn(async () => {}), oldestFirst: vi.fn(), failed: null as string | null }
+        const line = { move: vi.fn(async () => {}), oldestFirst: vi.fn(), cancelTurn: vi.fn(), failed: null as string | null }
         withServices(
           <BoardView lanes={lanesOf(board({ tasks, calls: [] }))} agents={agents} now={NOW} onOpen={vi.fn()} line={line} />,
           fakeClient().client,

@@ -79,7 +79,44 @@ export interface QueueDetail {
   readonly logs: ReadonlyArray<string>
   readonly main: string | null
   readonly jobs?: ReadonlyArray<QueueJob>
+  /** Of the jobs it failed, those that fail on the default branch's latest commit too: not the pull request's own doing. */
+  readonly onBaseToo?: ReadonlyArray<string>
 }
+
+/** Of the jobs the queue's build failed, those its default branch's latest commit fails too, as that commit reports them. */
+export const failingOnBase = (
+  failing: ReadonlyArray<string>,
+  baseChecks: ReadonlyArray<{ readonly name: string; readonly state: Check['state'] }>,
+) => failing.filter((name) => baseChecks.some((check) => check.name === name && check.state === 'failed'))
+
+/**
+ * The jobs that name the pull request as why the merge queue took it out: those its build failed that the default branch
+ * doesn't fail too. None where the host gave no reason, or the build's jobs couldn't be read: Althar doesn't know it is the
+ * pull request's own doing, so its lead isn't put to work guessing.
+ */
+export const queueOwnFailures = (why: ChangeRequest['leftQueue'], detail: QueueDetail | null | undefined) =>
+  detail === null || detail === undefined || (why !== 'checks' && why !== 'other' && why !== null && why !== undefined)
+    ? []
+    : detail.failing.filter((name) => !(detail.onBaseToo ?? []).includes(name))
+
+/**
+ * Said to the person, in the task's thread, as the merge queue takes a pull request out with nothing in its build that names
+ * it: why Althar didn't put its lead to work, and what is theirs to do.
+ */
+export const leftQueueUnclaimed = (name: string, why: ChangeRequest['leftQueue'], detail: QueueDetail | null | undefined) => {
+  const failing = detail?.failing ?? []
+  const because =
+    failing.length > 0
+      ? `the jobs its build failed (${failing.join(', ')}) fail on the default branch too`
+      : why === 'checks'
+        ? 'Althar couldn’t read which of its build’s jobs failed'
+        : 'the host gave no specific reason, and its build names no job that failed'
+  return `Nothing names ${name} as why it was taken out: ${because}. Its lead wasn’t asked to change anything. Put it back in the queue when you want, or ask its lead to look.`
+}
+
+/** What its lead reads, with its next turn, of a send-back nothing names it in: what happened, and that the person has it. */
+export const leftQueueNoteForLead = (name: string, why: ChangeRequest['leftQueue'], detail: QueueDetail | null | undefined) =>
+  `${leftQueueForLead(name, why, detail)}\n\nNothing in the queue's build names ${name}, so Althar told the person rather than you: change nothing for it unless they ask.`
 
 /**
  * How the default branch stands on the jobs the merge queue failed, from its
@@ -117,7 +154,7 @@ export const queueMainLine = (
  */
 export const leftQueueForLead = (name: string, why: ChangeRequest['leftQueue'], detail?: QueueDetail | null) => {
   const head = leftQueueNote(name, why)
-  if (detail === null || detail === undefined || why !== 'checks') return head
+  if (detail === null || detail === undefined || (why !== 'checks' && why !== 'other')) return head
   return [
     head,
     ...(detail.failing.length === 0

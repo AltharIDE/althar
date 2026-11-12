@@ -2525,9 +2525,14 @@ export const TaskCard = Schema.Struct({
    */
   continues: Schema.optional(Schema.Boolean),
   /**
+   * A turn Althar asked of its lead or reviewer waits for a place, none of its agents at work: the person can let it go
+   * (`Interrupt` on its thread), and its agent reads what it would have said with its next turn.
+   */
+  turnWaits: Schema.optional(Schema.Boolean),
+  /**
    * With `inLine`, or `continues` and `queued`: its place in its project's
-   * Up next, in the order it gets one, what continues first, then the line;
-   * 1 gets one first.
+   * Up next, in the order it gets one, what continues and the line in one
+   * order, the person's where they put it; 1 gets one first.
    */
   place: Schema.optional(Schema.Int),
   /** With `inLine`: the line is in an order the person gave it, not the oldest first. */
@@ -3661,7 +3666,7 @@ export const ThreadSnapshot = Schema.Struct({
     queued: Schema.NullOr(Queued),
     /** Its place in its project's Up next, waiting for a place, as its card says: 1 gets one first; absent out of it. */
     place: Schema.optional(Schema.Int),
-    /** It waits in its project's line behind another of its tasks, so the person can put it at the line's front. */
+    /** It waits up next behind another of its tasks, or is a plan waiting to start, so the person can put it at the front. */
     front: Schema.optional(Schema.Boolean),
     /** Its plan's steps, as its header's track shows them; empty without a plan. */
     steps: Schema.Array(PlanStep),
@@ -4853,15 +4858,20 @@ export const Api = RpcGroup.make(
    */
   command('RemoveTaskFolder', { taskId: Schema.String, seen: Schema.NullOr(FolderHeld) }, FoldersFreed),
   /**
-   * Puts a task waiting for a free agent before any has worked on it at a
-   * place in its project's line, from 0 the front, the rest keeping their
-   * order; past the end is its end. The line starts in that order, and keeps
-   * it after a restart; a task that joins later goes to its end. Nothing
-   * moves for a task that isn't in the line.
+   * Puts a task in its project's Up next at a place, from 0 the front, the
+   * rest keeping their order; past the end is its end. What continues and
+   * the line are one order: a task goes anywhere in it. A plan waiting to
+   * start starts, at that place. Places are given in that order, kept after
+   * a restart; a task that joins later goes to its end. Nothing moves for a
+   * task that isn't up next.
    */
   command('MoveInLine', { taskId: Schema.String, to: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)) }, Schema.Void),
   /** Puts a project's line back in the order its tasks began waiting: the oldest first. */
   command('LineOldestFirst', { projectId: Schema.String }, Schema.Void),
+  /**
+   * Stops the turn the thread's agent is in. Between turns, where a turn Althar asked of a task's lead or reviewer waits for a
+   * place up next, that turn is let go instead: it leaves Up next, and its agent reads what it would have said with its next.
+   */
   command('Interrupt', { threadId: Schema.String }, Schema.Void),
   /**
    * Tries the thread's last turn again, where it failed, as on the

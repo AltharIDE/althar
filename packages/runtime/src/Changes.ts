@@ -133,6 +133,9 @@ import {
   describedOf,
   fromAlthar,
   leftQueueForLead,
+  leftQueueNoteForLead,
+  leftQueueUnclaimed,
+  queueOwnFailures,
   leftQueueNote,
   nameOf,
   outsidersLine,
@@ -2254,10 +2257,16 @@ export class Changes extends Context.Service<
             title: `Following ${name}${where}: ${pull.title}`,
           })
           const [link] = (yield* linksOf(input.taskId)).filter((one) => one.id === linkId)
+          // News for its lead, read with its next turn: it needs nothing done now.
           if (link !== undefined)
-            yield* tellLead(link, [
-              `This task follows ${name} on ${path.join('/')} now, "${pull.title}": ${pull.url}. ${started ? `Your branch ${row.branch} starts from its head now, with your own commits on top. ` : ''}read_pull_request reads it, reply_on_pull_request answers on it, and push_to_pull_request pushes your commits to its branch, or asks the person to, ${pull.source}.`,
-            ])
+            yield* tellLead(
+              link,
+              [
+                `This task follows ${name} on ${path.join('/')} now, "${pull.title}": ${pull.url}. ${started ? `Your branch ${row.branch} starts from its head now, with your own commits on top. ` : ''}read_pull_request reads it, reply_on_pull_request answers on it, and push_to_pull_request pushes your commits to its branch, or asks the person to, ${pull.source}.`,
+              ],
+              false,
+              'note',
+            )
           // A chat on Scratch that follows a pull request now moves to the board.
           yield* offScratch(input.taskId)
           yield* touchCard(input.taskId)
@@ -2409,6 +2418,7 @@ export class Changes extends Context.Service<
               description: null,
               ...(step === undefined ? {} : { step }),
             })
+      // What became of a change of its task, which needs nothing of the lead now: read with its next turn, never starting one.
       const leadHears = (row: Pick<ChangeRow, 'threadId'>, body: string) =>
         Effect.gen(function* () {
           if (row.threadId === null) return
@@ -2419,6 +2429,7 @@ export class Changes extends Context.Service<
               body,
               origin: 'system',
               quiet: true,
+              note: true,
             })
             .pipe(Effect.ignore)
         })
@@ -3014,7 +3025,8 @@ export class Changes extends Context.Service<
                 : `The person pushed your ${asked.content.count} commits to ${asked.content.where}, as you asked: the pull request has them now.`,
             )
           }
-          yield* tellLead(link, told)
+          // News that needs nothing of the lead: read with its next turn.
+          yield* tellLead(link, told, false, 'note')
         })
 
       /**
@@ -4883,24 +4895,31 @@ export class Changes extends Context.Service<
       /**
        * Tells the task's lead, quietly, when it has a session; with `wake`,
        * one that has none is started again for it, on the agent it was last
-       * on (ADR-040).
+       * on (ADR-040). What needs nothing of it now (`note`) starts no turn,
+       * and waits for no place among the agents at work: its lead reads it
+       * with its next turn. So is all of it for a task merged or settled, or
+       * a pull request merged or closed: nothing Althar says starts its lead.
        */
-      const tellLead = (link: LinkRow, parts: ReadonlyArray<string>, wake = false) =>
+      const tellLead = (link: LinkRow, parts: ReadonlyArray<string>, wake = false, how: 'turn' | 'note' = 'turn') =>
         Effect.gen(function* () {
           if (parts.length === 0) return
           const sql = yield* SqlClient.SqlClient
           const [thread] = yield* sql<{ id: string; state: string }>`
             SELECT t.id, k.state FROM threads t JOIN tasks k ON k.id = t.task_id WHERE t.task_id = ${link.taskId} AND t.kind = 'task'`
           if (thread === undefined || !['open', 'done'].includes(thread.state)) return
+          const seen = Option.getOrUndefined(yield* Effect.option(decodeSnapshot(link.snapshot)))
+          const note = how === 'note' || thread.state === 'done' || seen?.state === 'merged' || seen?.state === 'closed'
           const running = Option.isSome(yield* sessions.running(thread.id))
-          if (!running && !wake) return
+          // A note is kept whatever: the lead reads it with its next turn, in this session or the next.
+          if (!running && !wake && !note) return
           yield* sessions.send({
             envelope: yield* envelope('thread.send', { threadId: thread.id, heard: link.id }, undefined, instance.systemId),
             threadId: thread.id,
             body: parts.join('\n\n'),
             quiet: true,
+            note,
           })
-          if (!running) yield* sessions.startLast(thread.id)
+          if (!running && !note) yield* sessions.startLast(thread.id)
         })
 
       /**
@@ -5219,9 +5238,15 @@ export class Changes extends Context.Service<
           // While it is in the queue, it is worth asking about often: it lands, or comes back, as soon as the queue's checks end.
           if (after.queued === true) happened = true
           if (entered) yield* sayOn(link, queuedNote(name, now.target))
+          // Told the lead with its next turn, rather than starting one: what needs nothing of it now.
+          const forNote: Array<string> = []
           if (leftQueue) {
-            // Sent back for failing checks: what the merge-group build failed, as its host has it, with the default branch on the same jobs.
-            const queued = now.leftQueue === 'checks' ? yield* queueDetailOf(host, repository, now.queueSha, now.queueError) : null
+            // Sent back for failing checks, or with no reason the host gives: what the merge-group build failed, read again as its
+            // host has it, with the default branch on the same jobs.
+            const queued =
+              now.leftQueue === 'checks' || ((now.leftQueue === 'other' || now.leftQueue == null) && now.queueSha != null)
+                ? yield* queueDetailOf(host, repository, now.queueSha, now.queueError)
+                : null
             yield* heard(link, 'queue_left', `queue_left:${after.leftQueue}`, {
               reason: now.leftQueue ?? 'other',
               sha: now.headSha,
@@ -5238,15 +5263,18 @@ export class Changes extends Context.Service<
             happened = true
             const head = leftQueueNote(name, now.leftQueue)
             const said = leftQueueForLead(name, now.leftQueue, queued)
-            if (queued === null) {
-              yield* sayOn(link, head)
-              forLead.push(head)
-            } else {
-              // The thread's notice carries the same detail as the lead's line: title its first line, the rest as its description.
-              yield* sayOn(link, head, said.slice(head.length).trim() || undefined)
-              forLead.push(said)
-            }
-            addressed = true
+            // Its lead is put to work only where Althar knows the reason is the pull request's own: a job its build failed that the
+            // default branch doesn't, or a conflict with what is ahead of it. Else the person hears that nothing names it, and its
+            // lead reads it with its next turn, so it doesn't guess and push.
+            const own = now.leftQueue === 'conflict' || queueOwnFailures(now.leftQueue, queued).length > 0
+            // The thread's notice carries the same detail as the lead's line: title its first line, the rest as its description.
+            const detail = queued === null ? undefined : said.slice(head.length).trim() || undefined
+            if (own || now.leftQueue === 'removed') yield* sayOn(link, head, detail)
+            else yield* sayOn(link, head, [leftQueueUnclaimed(name, now.leftQueue, queued), detail].filter(Boolean).join('\n\n'))
+            if (own) {
+              forLead.push(queued === null ? head : said)
+              addressed = true
+            } else forNote.push(now.leftQueue === 'removed' ? head : leftQueueNoteForLead(name, now.leftQueue, queued))
           }
           if (after.state !== before.state) {
             if (after.state === 'merged' || after.state === 'closed')
@@ -5301,10 +5329,13 @@ export class Changes extends Context.Service<
           // Waiting for another change of the task's to merge, its failures are that one's to fix: they start no fix either.
           const forShip =
             (yield* worktreeOf(link.taskId, before.url))?.heldAt != null || (yield* waitingOn(link.taskId, before.url)) !== null
+          yield* tellLead(link, forNote, false, 'note')
+          // Merged or closed, what is said on it after starts no turn: its lead reads it with its next one (tellLead).
           yield* tellLead(
             link,
             rounds || forShip ? forLead.filter((part) => !part.startsWith('Checks failed')) : forLead,
             addressed || (after.state === 'open' && alone && !rounds && !forShip),
+            after.state === 'open' ? 'turn' : 'note',
           )
           if (now.state === 'open' && !held)
             yield* bringTogether(link, now.headSha, now.url).pipe(
