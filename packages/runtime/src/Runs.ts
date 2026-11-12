@@ -2216,18 +2216,32 @@ export class Runs extends Context.Service<
             )
         })
 
+      /** A monotonic count fences a host read against a newer instruction, even before its event is handled. */
+      const externalInstructions = (threadId: string) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const [inputs] = yield* sql<{ total: number; queued: number }>`
+            SELECT count(*) AS total, coalesce(sum(CASE WHEN u.state = 'queued' THEN 1 ELSE 0 END), 0) AS queued
+            FROM user_inputs u JOIN actors a ON a.id = u.author_actor_id
+            WHERE u.thread_id = ${threadId} AND a.kind = 'person'`
+          return inputs ?? { total: 0, queued: 0 }
+        })
+
       /** The person's instruction or explicit stop takes back an external wait, atomically with its fact. */
       const releaseExternalOn = (threadId: string, why: 'person' | 'lead_stopped') =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
           yield* sql.withTransaction(
             Effect.gen(function* () {
-              const waiting = yield* sql<{ id: string; taskId: string; projectId: ProjectId }>`
-            SELECT a.id, r.task_id, r.project_id FROM threads t JOIN runs r ON r.task_id = t.task_id AND r.state = 'running'
+              const waiting = yield* sql<{ id: string; taskId: string; projectId: ProjectId; output: string | null }>`
+            SELECT a.id, r.task_id, r.project_id, a.output FROM threads t JOIN runs r ON r.task_id = t.task_id AND r.state = 'running'
             JOIN workflow_executions e ON e.run_id = r.id JOIN nodes n ON n.execution_id = e.id
             JOIN node_attempts a ON a.node_id = n.id AND a.state = 'held' AND a.hold_reason = 'external'
             WHERE t.id = ${threadId}`
               for (const one of waiting) {
+                // A delayed turn-start event must not cancel a wait the lead set after reading that instruction.
+                const count = externalWaitOf(one.output)?.instructionCount
+                if (why === 'person' && count !== undefined && count >= (yield* externalInstructions(threadId)).total) continue
                 const revision = yield* change('node_attempts', one.id, { state: 'running', holdReason: null, output: null })
                 yield* fact({
                   projectId: one.projectId,
@@ -5130,6 +5144,9 @@ export class Runs extends Context.Service<
           if (held !== undefined) return 'The wait is already recorded. End your turn; Althar will start you again when it changes.'
           const attempt = yield* running(current, ['implement', 'settle'])
           if (attempt === undefined) return yield* new ToolRefused({ message: 'No lead step is waiting for you.' })
+          const instructions = yield* externalInstructions(current.threadId)
+          if (instructions.queued > 0)
+            return yield* new ToolRefused({ message: 'A new instruction is waiting. Read it before deciding what to wait for.' })
           const wait = yield* prepareExternalWait(access.projectId, input)
           // Establish the baseline for change watches. Terminal conditions are checked again after the hold commits.
           const conditions = yield* Effect.forEach(wait.conditions, (one) =>
@@ -5142,10 +5159,12 @@ export class Runs extends Context.Service<
               const [still] = yield* sql<{ state: string }>`SELECT state FROM node_attempts WHERE id = ${attempt.id}`
               if (still?.state !== 'running' || !(yield* going(current)))
                 return yield* new ToolRefused({ message: 'The step changed while the wait was prepared. Read the task again.' })
+              if ((yield* externalInstructions(current.threadId)).total !== instructions.total)
+                return yield* new ToolRefused({ message: 'The instruction changed while the wait was prepared. Read it before waiting.' })
               const revision = yield* change('node_attempts', attempt.id, {
                 state: 'held',
                 holdReason: 'external',
-                output: JSON.stringify({ externalWait: { ...wait, conditions } }),
+                output: JSON.stringify({ externalWait: { ...wait, conditions, instructionCount: instructions.total } }),
               })
               yield* fact({
                 projectId: current.projectId,
@@ -7010,6 +7029,8 @@ export class Runs extends Context.Service<
           const live = yield* sessions.running(current.threadId)
           const now = yield* Clock.currentTimeMillis
           const stillHeld = Effect.gen(function* () {
+            if (wait.instructionCount !== undefined && (yield* externalInstructions(current.threadId)).total !== wait.instructionCount)
+              return false
             const [still] = yield* sql<{
               state: string
               output: string | null

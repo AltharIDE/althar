@@ -32,6 +32,7 @@ export const ExternalWait = Schema.Struct({
   reason: Schema.String,
   conditions: Schema.Array(Condition).check(Schema.isMinLength(1), Schema.isMaxLength(16)),
   mode: Schema.Literals(['any', 'all']),
+  instructionCount: Schema.optional(Schema.Int),
   since: Timestamp,
   deadline: Timestamp,
   nextCheck: Timestamp,

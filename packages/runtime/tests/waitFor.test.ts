@@ -286,6 +286,47 @@ describe('a lead waiting for an external condition', () => {
     )
   })
 
+  it.effect('a new instruction during registration prevents the old turn from installing its wait', () => {
+    const gate = holds()
+    const { working, bare } = hosted()
+    let waitForRead = Effect.void
+    const github = makeFakeService({ pushUrl: () => bare, waitsFor: (method) => (method === 'change' ? waitForRead : Effect.void) })
+    github.addRepository(['meridian', 'api'])
+    github.addPullRequest({ path: ['meridian', 'api'], title: 'A change', author: 'ada' })
+    return onTestClock(
+      Effect.gen(function* () {
+        const entered = yield* Deferred.make<void>()
+        const release = yield* Deferred.make<void>()
+        waitForRead = Effect.andThen(Deferred.succeed(entered, undefined), Deferred.await(release))
+        yield* (yield* Connections).connectToken({ product: 'github', token: 't', actorId: (yield* Instance).personId, webUrl: HOST })
+        const task = yield* planned(working)
+        const result = yield* Deferred.make<string>()
+        yield* callTool(task.access, 'wait_for', {
+          reason: 'Wait for a review',
+          conditions: [{ kind: 'pull_request', repository: 'meridian/api', number: 1, until: 'changed' }],
+        }).pipe(
+          Effect.flatMap((answer) => Deferred.succeed(result, answer)),
+          Effect.forkChild,
+        )
+        yield* Deferred.await(entered)
+        yield* (yield* Sessions).send({
+          envelope: yield* Runtime.envelope('thread.send', {}),
+          threadId: task.threadId,
+          body: 'Carry on now; do not wait for the review.',
+        })
+        yield* Deferred.succeed(release, undefined)
+        assert.include(yield* Deferred.await(result), 'instruction changed')
+        assert.lengthOf(yield* held(task.taskId), 0)
+        gate.open('[lead:slowly]')
+        yield* ready(task.projectId, task.taskId)
+      }).pipe(
+        Effect.provide(
+          withQueries(':memory:', { holds: gate }, { connectors: fakeConnectors({ github }), listenEvery: Duration.hours(1) }),
+        ),
+      ),
+    )
+  })
+
   it.effect('retains a review change in all mode while a second condition is still pending', () => {
     const gate = holds()
     const { working, bare } = hosted()
