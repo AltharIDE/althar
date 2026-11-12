@@ -1,4 +1,3 @@
-import { spawn } from 'node:child_process'
 import { copyFileSync, existsSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { readFile, stat } from 'node:fs/promises'
 import { homedir, tmpdir } from 'node:os'
@@ -10,6 +9,7 @@ import { Context, Duration, Effect } from 'effect'
 
 import { afterOpen, startup } from './startup'
 import { GitFailed } from './errors'
+import { Foreground, startApart } from './spawner'
 import { forkOf } from './forks'
 
 /*
@@ -72,18 +72,20 @@ const ASKERS = new Set(['GIT_ASKPASS', 'SSH_ASKPASS'])
  * person's, not the system's, nor any the environment carries
  * (`GIT_CONFIG_*`).
  */
-const environmentIn = (cwd: string, env: Readonly<Record<string, string>>): NodeJS.ProcessEnv => ({
-  ...Object.fromEntries(
-    Object.entries(process.env).filter(([key]) => !ASKERS.has(key) && !(isReadCopy(cwd) && key.startsWith('GIT_CONFIG'))),
-  ),
-  ...(isReadCopy(cwd) ? { GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: '/dev/null' } : {}),
-  ...sshEnvironment(),
-  GIT_TERMINAL_PROMPT: '0',
-  SSH_ASKPASS_REQUIRE: 'never',
-  GCM_INTERACTIVE: 'never',
-  LC_ALL: 'C',
-  ...env,
-})
+const environmentIn = (cwd: string, env: Readonly<Record<string, string>>): NodeJS.ProcessEnv => {
+  // Looked at once: asked for each variable, it was a look at the disk for each, every git command.
+  const readCopy = isReadCopy(cwd)
+  return {
+    ...Object.fromEntries(Object.entries(process.env).filter(([key]) => !ASKERS.has(key) && !(readCopy && key.startsWith('GIT_CONFIG')))),
+    ...(readCopy ? { GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: '/dev/null' } : {}),
+    ...sshEnvironment(),
+    GIT_TERMINAL_PROMPT: '0',
+    SSH_ASKPASS_REQUIRE: 'never',
+    GCM_INTERACTIVE: 'never',
+    LC_ALL: 'C',
+    ...env,
+  }
+}
 
 /**
  * Runs git in `cwd` with nothing to ask on: in a session of its own, so no
@@ -108,6 +110,7 @@ const spawnGit = (
   args: ReadonlyArray<string>,
   env: Readonly<Record<string, string>>,
   input: string | undefined,
+  first: boolean,
 ): {
   readonly result: Effect.Effect<GitProcessResult>
   readonly timeout: (milliseconds: number) => void
@@ -115,81 +118,61 @@ const spawnGit = (
 } => {
   const at = gitIn(cwd, ['-c', 'core.hooksPath=/dev/null', ...args])
   // Windows has no sessions to leave, and a detached child there gets a console of its own.
-  // `spawn`, not `execFile`, which doesn't pass `detached` on.
-  const ownSession = process.platform !== 'win32'
-  const child = spawn('git', [...at.args], {
+  // Started on the runner's thread, not the one that answers the window (spawner.ts).
+  const started = startApart({
+    command: 'git',
+    args: at.args,
     ...(at.cwd === undefined ? {} : { cwd: at.cwd }),
-    windowsHide: true,
-    detached: ownSession,
+    detached: process.platform !== 'win32',
     env: environmentIn(cwd, env),
+    ...(input === undefined ? {} : { input }),
+    max: MAX_OUTPUT,
+    first,
   })
-  const stop = () => {
-    try {
-      if (ownSession && child.pid !== undefined) process.kill(-child.pid, 'SIGTERM')
-      else child.kill()
-    } catch {
-      child.kill()
-    }
-  }
-  let why: string | null = null
-  let timeoutMilliseconds: number | undefined
-  const out: Array<Buffer> = []
-  const err: Array<Buffer> = []
-  let size = 0
-  let resolveResult: (result: GitProcessResult) => void = () => undefined
-  const result = new Promise<GitProcessResult>((resolve) => (resolveResult = resolve))
-  const collect = (into: Array<Buffer>) => (chunk: Buffer) => {
-    size += chunk.length
-    if (size > MAX_OUTPUT) {
-      why ??= 'git said more than Althar reads.'
-      return stop()
-    }
-    into.push(chunk)
-  }
-  child.stdout.on('data', collect(out))
-  child.stderr.on('data', collect(err))
   let ended = false
-  const end = (error: (Error & { readonly code?: unknown }) | null, code?: number, signal?: string | null) => {
-    if (ended) return
+  let timeoutMilliseconds: number | undefined
+  const result = started.result.then((done): GitProcessResult => {
     ended = true
-    const stderr = Buffer.concat(err).toString()
-    const reason =
-      timeoutMilliseconds !== undefined
-        ? undefined
-        : (why ?? (error !== null && typeof error.code === 'string' ? error.message : undefined))
-    resolveResult({
-      error,
-      stdout: Buffer.concat(out).toString(),
-      stderr,
-      ...(reason === undefined ? {} : { reason }),
-      ...(code === undefined ? {} : { code }),
-      ...(signal == null ? {} : { signal }),
-      ...(timeoutMilliseconds === undefined ? {} : { timedOut: true, timeout: timeoutMilliseconds }),
-    })
-  }
-  child.on('error', end)
-  child.on('close', (code, signal) =>
-    end(
-      code === 0 && why === null
+    const why = done.over
+      ? 'git said more than Althar reads.'
+      : timeoutMilliseconds === undefined
         ? null
-        : Object.assign(new Error(why ?? `git ${args[0] ?? ''} failed (${code ?? signal})`), { code: code ?? 128 }),
-      code ?? 128,
-      signal,
-    ),
-  )
-  // A git that ends before it has read everything fails on its own; the pipe closing under it isn't another failure.
-  child.stdin.on('error', () => undefined)
-  child.stdin.end(input)
+        : `No answer within ${timeoutMilliseconds / 1000} s, so Althar stopped waiting.`
+    // It couldn't start, as for a git that isn't there: what Node said, with its code.
+    if (done.error !== null) {
+      const error = Object.assign(new Error(done.error.message), { code: done.error.code ?? undefined })
+      return {
+        error,
+        stdout: done.stdout,
+        stderr: done.stderr,
+        ...(timeoutMilliseconds === undefined ? { reason: why ?? done.error.message } : {}),
+        ...(timeoutMilliseconds === undefined ? {} : { timedOut: true, timeout: timeoutMilliseconds }),
+      }
+    }
+    const code = done.code ?? 128
+    const reason = timeoutMilliseconds !== undefined ? undefined : (why ?? undefined)
+    return {
+      error:
+        done.code === 0 && why === null
+          ? null
+          : Object.assign(new Error(why ?? `git ${args[0] ?? ''} failed (${done.code ?? done.signal})`), { code }),
+      stdout: done.stdout,
+      stderr: done.stderr,
+      ...(reason === undefined ? {} : { reason }),
+      code,
+      ...(done.signal === null ? {} : { signal: done.signal }),
+      ...(timeoutMilliseconds === undefined ? {} : { timedOut: true, timeout: timeoutMilliseconds }),
+    }
+  })
   return {
     result: Effect.promise(() => result),
     timeout: (milliseconds) => {
       if (ended) return
       timeoutMilliseconds = milliseconds
-      why ??= `No answer within ${milliseconds / 1000} s, so Althar stopped waiting.`
-      stop()
+      started.stop()
     },
     stop: () => {
-      if (!ended) stop()
+      if (!ended) started.stop()
     },
   }
 }
@@ -259,9 +242,9 @@ const runProcess = (
   env: Readonly<Record<string, string>>,
   input: string | undefined,
 ): Effect.Effect<GitProcessResult> =>
-  Effect.flatMap(Untouched, (aside) =>
+  Effect.flatMap(Effect.all([Untouched, Foreground]), ([aside, first]) =>
     Effect.acquireUseRelease(
-      Effect.sync(() => spawnGit(cwd, args, { ...aside, ...env }, input)),
+      Effect.sync(() => spawnGit(cwd, args, { ...aside, ...env }, input, first)),
       (running) =>
         Effect.race(
           running.result,

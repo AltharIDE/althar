@@ -1615,3 +1615,7 @@ CREATE INDEX canvases_by_project ON canvases (project_id, archived_at);
 CREATE INDEX canvas_copies_by_canvas ON canvas_copies (canvas_id);
 
 CREATE INDEX canvas_comments_by_canvas ON canvas_comments (canvas_id, version);
+
+CREATE INDEX thread_items_by_delivery ON thread_items (delivery_id, kind) WHERE delivery_id IS NOT NULL;
+
+CREATE INDEX turn_deliveries_with_heads ON turn_deliveries (thread_id, delivered_at) WHERE heads IS NOT NULL;
