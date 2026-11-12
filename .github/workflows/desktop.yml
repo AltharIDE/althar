@@ -65,7 +65,7 @@ jobs:
       # What the change is: against the pull request's base, or in the merge queue against main, since the build at a
       # group's head merges the whole group when it passes, and so must cover every entry in it.
       - env:
-          BASE: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_ref }}
+          BASE: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha }}
         run: |
           if [ -n "$BASE" ] && git fetch --no-tags --depth=1 origin "$BASE"; then
             git diff --name-only --no-renames FETCH_HEAD HEAD > "$RUNNER_TEMP/changed"
