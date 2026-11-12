@@ -324,7 +324,7 @@
   left: 35px;
   top: 30px;
   bottom: 36px;
-  border-left: 1.5px dashed var(--line-3);
+  border-left: 2px dotted var(--line-3);
   pointer-events: none;
 }
 .rosterItem {
@@ -337,7 +337,7 @@
   left: 27px;
   top: -28px;
   height: 56px;
-  border-left: 1.5px solid var(--t-4);
+  border-left: 2px dotted var(--t-4);
   pointer-events: none;
   transform-origin: top;
   transition: transform var(--move) var(--ease-out);
