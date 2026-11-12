@@ -6,6 +6,7 @@ import { Ledger } from '@althar/persistence-sqlite'
 import { Clock, Context, Crypto, Duration, Effect, Layer, Option, Queue, Schema } from 'effect'
 import { SqlClient } from 'effect/sql'
 
+import { touchTask } from './cards'
 import { Changes } from './Changes'
 import { hostName } from './checkLogs'
 import { RuntimeConfig } from './Config'
@@ -236,6 +237,17 @@ const note = (projectId: string, subject: string, kind: string, id: string, payl
     })}`
     const [inserted] = yield* sql<{ n: number }>`SELECT changes() AS n`
     return (inserted?.n ?? 0) > 0
+  })
+
+/**
+ * Notes where a step stands, as it changes, and tells its task's card to read it again: the card's words come from it
+ * (errandWords), and nothing else need change on the task when only this does.
+ */
+const standAt = (projectId: string, entry: Pick<Entry, 'errandId' | 'taskId'>, state: string) =>
+  Effect.gen(function* () {
+    if ((yield* latest(stepOf(entry), 'stands'))?.state === state) return
+    yield* note(projectId, stepOf(entry), 'stands', `stands:${state}:${yield* timestamp}`, { state })
+    if (entry.taskId !== null) yield* touchTask(entry.taskId)
   })
 
 /** A note as kept: what it said, and when. */
@@ -1073,8 +1085,7 @@ export class MergeLine extends Context.Service<
                   }
                   if (held) {
                     // Not read while one ahead of it holds the slot: it waits its turn, which its card says.
-                    if ((yield* latest(stepOf(entry), 'stands'))?.state !== 'behind')
-                      yield* note(projectId, stepOf(entry), 'stands', `stands:behind:${yield* timestamp}`, { state: 'behind' })
+                    yield* standAt(projectId, entry, 'behind')
                     continue
                   }
                   const seen = yield* look(projectId, entry, entries).pipe(
@@ -1096,9 +1107,7 @@ export class MergeLine extends Context.Service<
                       state: standing,
                     })
                   // Where it stands, as a word its task's card says plainly (errandWords): noted as it changes, so the card reads it.
-                  const stands = standsOf(seen, entry)
-                  if ((yield* latest(stepOf(entry), 'stands'))?.state !== stands)
-                    yield* note(projectId, stepOf(entry), 'stands', `stands:${stands}:${yield* timestamp}`, { state: stands })
+                  yield* standAt(projectId, entry, standsOf(seen, entry))
                   switch (seen.next) {
                     case 'settle':
                       yield* take(entry, `${seen.fresh.answer ?? seen.fresh.reason ?? seen.why}`)

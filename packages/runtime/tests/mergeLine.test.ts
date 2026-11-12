@@ -5,8 +5,9 @@ import { join } from 'node:path'
 import type { CheckState } from '@althar/connectors'
 import { type FakeService, type FakeServiceOptions, makeFakeService } from '@althar/connectors/testing'
 import { Ids, newId } from '@althar/domain'
+import { Ledger } from '@althar/persistence-sqlite'
 import { assert, describe, it } from '@effect/vitest'
-import { Duration, Effect } from 'effect'
+import { Duration, Effect, Layer } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { Connections } from '../src/Connections'
@@ -15,6 +16,7 @@ import { Instance } from '../src/Instance'
 import { errandRecords } from '../src/Errands'
 import { errandCardLines } from '../src/errandWords'
 import { MergeLine } from '../src/MergeLine'
+import { Queries } from '../src/Queries'
 import { Projects } from '../src/Projects'
 import { timestamp } from '../src/records'
 import * as Runtime from '../src/Runtime'
@@ -368,6 +370,46 @@ describe('the coordinator’s merge line', () => {
       assert.match(yield* merge(access, { pull_request: `#${second}`, head: `head-${second}`, message }), /Merged PR #2/)
       assert.strictEqual((yield* errandsOf(access)).get(first)?.state, 'open')
     }).pipe(Effect.provide(layer(service)))
+  })
+
+  it.live('a task’s card hears its merge move on, and says it no longer waits behind another', () => {
+    const { service, pull } = host()
+    const { working } = hosted(['meridian', 'api'])
+    return Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const access = yield* opened(working)
+      const task = yield* (yield* Projects).createTask({
+        envelope: yield* Runtime.envelope('task.create', { title: 'Cap retries' }),
+        projectId: access.projectId,
+        title: 'Cap retries',
+      })
+      service.landLater()
+      const first = pull('Retry refunds')
+      const second = pull('Cap retries')
+      const at = new Date().toISOString()
+      const url = `https://github.com/meridian/api/pull/${second}`
+      yield* sql`INSERT INTO external_links ${sql.insert({ id: 'xlink_c4d0000000000000000000000000000a', projectId: access.projectId, taskId: task.taskId, connectionId: null, product: 'github', kind: 'change', externalId: String(second), ref: String(second), key: String(second), url, snapshot: JSON.stringify({ number: second, title: 'Cap retries', url, state: 'open', draft: false, words: { noun: 'pull request', short: 'PR', prefix: '#' }, repository: ['meridian', 'api'] }), createdAt: at, updatedAt: at })}`
+      const message = yield* turn(access, 'person')
+      yield* merge(access, { pull_request: `#${first}`, head: `head-${first}`, message })
+      yield* merge(access, { pull_request: `#${second}`, head: `head-${second}`, message })
+      const queries = yield* Queries
+      const ledger = yield* Ledger
+      const card = Effect.map(Effect.orDie(queries.board(access.projectId)), (board) =>
+        board.tasks.find((one) => one.taskId === task.taskId),
+      )
+      yield* sweep(access)
+      assert.include((yield* card)?.errands ?? [], 'Waiting its turn to merge')
+      const cursor = (yield* ledger.changesSince(0, 100_000)).at(-1)?.cursor ?? 0
+
+      // The first lands and is done: the second is first in line, its card told to read again, and it no longer says it waits.
+      service.mergeByHand(first)
+      yield* sweep(access)
+      assert.match(yield* takeStep(access, (yield* errandsOf(access)).get(first)?.id ?? ''), /is merged into main/)
+      yield* sweep(access)
+      const heard = yield* ledger.changesSince(cursor, 100_000)
+      assert.isTrue(heard.some((change) => change.aggregateType === 'task' && change.aggregateId === task.taskId))
+      assert.notInclude((yield* card)?.errands ?? [], 'Waiting its turn to merge')
+    }).pipe(Effect.provide(Queries.layer.pipe(Layer.provideMerge(layer(service)))))
   })
 
   it.live('a restart keeps the line', () => {
