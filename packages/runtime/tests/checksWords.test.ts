@@ -8,12 +8,16 @@ import {
   filesLine,
   fromAlthar,
   gaveUpLine,
+  failingOnBase,
   leftQueueForLead,
   leftQueueNote,
+  leftQueueNoteForLead,
+  leftQueueUnclaimed,
   nameInLine,
   outsidersLine,
   queuedNote,
   queueMainLine,
+  queueOwnFailures,
   signed,
   spentLine,
   stoppedLine,
@@ -180,5 +184,48 @@ describe('this computer, in the words the runtime writes', () => {
       (['darwin', 'win32', 'linux'] as const).map((platform) => thisDevice(platform)),
       ['this Mac', 'this PC', 'this computer'],
     )
+  })
+})
+
+describe('a merge queue send-back, and whose it is', () => {
+  const detail = (failing: ReadonlyArray<string>, onBaseToo: ReadonlyArray<string> = []) => ({
+    queueSha: 'group-sha',
+    failing,
+    logs: [],
+    main: null,
+    onBaseToo,
+  })
+
+  it('names the pull request only by a job its build failed that the default branch passes', () => {
+    assert.deepStrictEqual(queueOwnFailures('checks', detail(['test', 'lint'], ['lint'])), ['test'])
+    assert.deepStrictEqual(queueOwnFailures('other', detail(['test'])), ['test'])
+    // Every job it failed fails on the default branch too, none could be read, or the host said nothing of its build.
+    assert.deepStrictEqual(queueOwnFailures('checks', detail(['test'], ['test'])), [])
+    assert.deepStrictEqual(queueOwnFailures('checks', detail([])), [])
+    assert.deepStrictEqual(queueOwnFailures('other', null), [])
+    // Someone took it out, or it conflicts: no job is why.
+    assert.deepStrictEqual(queueOwnFailures('removed', detail(['test'])), [])
+    assert.deepStrictEqual(queueOwnFailures('conflict', detail(['test'])), [])
+  })
+
+  it('reads which failing jobs fail on the default branch too, by what its latest commit reports', () => {
+    assert.deepStrictEqual(
+      failingOnBase(['test', 'lint', 'e2e'], [check('test', 'failed'), check('lint', 'passed'), check('e2e', 'running')]),
+      ['test'],
+    )
+  })
+
+  it('tells the person why nothing names it, and its lead, for its next turn, to change nothing for it', () => {
+    assert.strictEqual(
+      leftQueueUnclaimed('PR #4', 'other', null),
+      'Nothing names PR #4 as why it was taken out: the host gave no specific reason, and its build names no job that failed. Its lead wasn’t asked to change anything. Put it back in the queue when you want, or ask its lead to look.',
+    )
+    assert.include(
+      leftQueueUnclaimed('PR #4', 'checks', detail(['test'], ['test'])),
+      'the jobs its build failed (test) fail on the default branch too',
+    )
+    const note = leftQueueNoteForLead('PR #4', 'checks', detail(['test'], ['test']))
+    assert.include(note, 'The merge queue took PR #4 out: its checks failed.')
+    assert.include(note, 'change nothing for it unless they ask')
   })
 })

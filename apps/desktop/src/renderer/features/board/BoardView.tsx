@@ -89,7 +89,8 @@ export const text = {
   scratchLabel: 'Chats on Scratch',
   startsIn: (seconds: number) => (seconds <= 0 ? 'Starting' : `Starts in ${seconds}s`),
   held: 'Held. Starts when you say',
-  /** In a row's menu, once the person changed the line: the way back. */
+  /** Over Up next once the person put it in an order of their own, and at its end, the way back. */
+  yourOrder: 'In your order',
   oldestFirst: 'Back to oldest first',
   /** In a row's menu, where Althar asked its agent a turn that waits for a place: let it go, read with the agent's next turn. */
   cancelTurn: 'Cancel this turn',
@@ -1161,6 +1162,9 @@ export function BoardView({
             {line.failed}
           </p>
         )}
+        {line !== undefined && shown.reordered && waitingRows.length > 1 && (
+          <BoardDivider end={<LinkButton onClick={line.oldestFirst}>{text.oldestFirst}</LinkButton>}>{text.yourOrder}</BoardDivider>
+        )}
         {waitingRows.length + planRows.length > 0 && (
           // One order, the one places are given in: any row goes anywhere in it, a plan starting where it is put. Planned heads
           // the first plan after what waits.
@@ -1182,14 +1186,11 @@ export function BoardView({
                   onMove: line.move,
                   more: (id: string) => {
                     const work = shown.next.find((one) => one.taskId === id)
-                    const cancel = work?.turnWaits === true && waitingRows.includes(work)
-                    const back = shown.reordered && waitingRows.length > 1
-                    return !cancel && !back ? null : (
-                      <>
-                        {cancel && <MenuItem onSelect={() => line.cancelTurn(work.threadId)}>{text.cancelTurn}</MenuItem>}
-                        {back && <MenuItem onSelect={line.oldestFirst}>{text.oldestFirst}</MenuItem>}
-                      </>
-                    )
+                    return work?.turnWaits === true && waitingRows.includes(work) ? (
+                      <MenuItem icon="close" onSelect={() => line.cancelTurn(work.threadId)}>
+                        {text.cancelTurn}
+                      </MenuItem>
+                    ) : null
                   },
                 })}
           />

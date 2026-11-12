@@ -1050,12 +1050,16 @@ export class Busy extends Context.Service<
         }),
         order: Effect.map(waiting, (all) => all.map(({ waiter, line }) => ({ taskId: waiter.taskId, review: waiter.review, line }))),
         line: (projectId) =>
-          Effect.map(standingOf(projectId), (band): Line => ({
-            continuing: band.flatMap((one) => (one.line ? [] : [one.taskId])),
-            tasks: band.flatMap((one) => (one.line ? [one.taskId] : [])),
-            order: band.map((one) => one.taskId),
-            reordered: band.some((one) => one.placed),
-          })).pipe(
+          Effect.map(standingOf(projectId), (band): Line => {
+            // What continues first, then the line, each by since when it waits: the order the person hasn't changed.
+            const natural = band.toSorted((a, b) => Number(a.line) - Number(b.line) || a.since.localeCompare(b.since))
+            return {
+              continuing: band.flatMap((one) => (one.line ? [] : [one.taskId])),
+              tasks: band.flatMap((one) => (one.line ? [one.taskId] : [])),
+              order: band.map((one) => one.taskId),
+              reordered: band.some((one, i) => one.taskId !== natural[i]?.taskId),
+            }
+          }).pipe(
             Effect.catchCause((cause) =>
               Effect.as(Effect.logWarning('Could not read a project’s line', cause), {
                 continuing: [],

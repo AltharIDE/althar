@@ -1,4 +1,4 @@
-import { act, screen, waitFor, within } from '@testing-library/react'
+import { act, cleanup, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { Activity, useState } from 'react'
@@ -331,15 +331,15 @@ describe('the board’s lanes', () => {
       const working = task({ taskId: 'w', phase: 'running', step: 'implement', startedAt: '2026-10-01T09:00:00.000Z' })
       const busy = [working, waiting('b', 4), paused, continuing('y', 2), waiting('a', 3), continuing('x', 1), planned]
 
-      it('continues up next ahead of the line, then what is paused, then plans; Running counts only work at it', () => {
+      it('continues up next ahead of the line, then plans, then what is paused; Running counts only work at it', () => {
         const lanes = lanesOf(board({ tasks: busy, calls: [] }))
-        expect(lanes.next.map((work) => work.taskId)).toEqual(['x', 'y', 'a', 'b', 'z', 'p'])
+        expect(lanes.next.map((work) => work.taskId)).toEqual(['x', 'y', 'a', 'b', 'p', 'z'])
         expect([lanes.continuing, lanes.free, lanes.paused, lanes.upNext]).toEqual([2, 2, 1, 6])
         expect(lanes.running.map((work) => work.taskId)).toEqual(['w'])
         expect(lanes.atWork).toBe(1)
       })
 
-      it('says what continues and why it waits, with no grip, and counts it ahead of the line’s places', () => {
+      it('says what continues and why it waits, in the one order with the line and the plans, each with a grip', () => {
         const line = { move: vi.fn(async () => {}), oldestFirst: vi.fn(), cancelTurn: vi.fn(), failed: null }
         withServices(
           <BoardView lanes={lanesOf(board({ tasks: busy, calls: [] }))} agents={agents} now={NOW} onOpen={vi.fn()} line={line} />,
@@ -351,12 +351,15 @@ describe('the board’s lanes', () => {
         expect(next.getAllByText(/^4 of 4 agents busy on /)).toHaveLength(2)
         expect(next.getByText('Waiting for the connection')).toBeTruthy()
         expect(next.getByText('Paused')).toBeTruthy()
-        // The line's places come after what continues; only its rows have grips.
+        // The line's places come after what continues; every row Althar orders for a place has a grip, what is paused none.
         expect(next.getByText('3rd in line')).toBeTruthy()
         expect(next.getByText('4th in line')).toBeTruthy()
         expect(next.getAllByRole('button', { name: /in the line$/ }).map((grip) => grip.getAttribute('aria-label'))).toEqual([
+          'Move Going on x in the line',
+          'Move Going on y in the line',
           'Move Waiting a in the line',
           'Move Waiting b in the line',
+          'Move Add a retry in the line',
         ])
         const running = within(screen.getByRole('region', { name: 'Running' }))
         expect(running.queryByText(/^Going on|^Offline/)).toBeNull()
@@ -446,14 +449,24 @@ describe('the board’s lanes', () => {
       expect(lanes.running.map((work) => work.taskId)).toEqual(['a'])
     })
 
-    it('draws a divider over the line, each row saying its place in it; one alone has nothing to reorder', () => {
-      const lanes = lanesOf(board({ tasks: [held, planned, waiting('a', 1)], calls: [] }))
+    it('heads the plans with Planned under the line, each row saying its place; one alone has nothing to reorder', () => {
       const line = { move: vi.fn(async () => {}), oldestFirst: vi.fn(), cancelTurn: vi.fn(), failed: null }
+      const lanes = lanesOf(board({ tasks: [held, planned, waiting('a', 1)], calls: [] }))
       withServices(<BoardView lanes={lanes} agents={agents} now={NOW} onOpen={vi.fn()} line={line} />, fakeClient().client)
-      expect(screen.getByText('Starts when an agent is free')).toBeTruthy()
       expect(screen.getByText('Next in line')).toBeTruthy()
       expect(screen.getByText('Planned')).toBeTruthy()
       expect(screen.queryByRole('button', { name: 'Back to oldest first' })).toBeNull()
+      cleanup()
+      withServices(
+        <BoardView
+          lanes={lanesOf(board({ tasks: [waiting('a', 1)], calls: [] }))}
+          agents={agents}
+          now={NOW}
+          onOpen={vi.fn()}
+          line={line}
+        />,
+        fakeClient().client,
+      )
       expect(screen.queryByRole('button', { name: /in the line$/ })).toBeNull()
     })
 
@@ -472,8 +485,8 @@ describe('the board’s lanes', () => {
           .getAllByRole('button', { name: /^Waiting / })
           .map((row) => row.textContent)
 
-      it('gives a grip to each row in it, none to the plans under it', () => {
-        drawn(three)
+      it('gives a grip to each row in it, and to the plans under it, which start where they are moved', async () => {
+        const line = drawn(three)
         expect(screen.queryByText('Drag to change the order')).toBeNull()
         expect(screen.queryByRole('button', { name: 'Back to oldest first' })).toBeNull()
         expect(screen.getByText('Next in line')).toBeTruthy()
@@ -483,7 +496,54 @@ describe('the board’s lanes', () => {
           'Move Waiting a in the line',
           'Move Waiting b in the line',
           'Move Waiting c in the line',
+          'Move Add a retry in the line',
+          'Move Hold off in the line',
         ])
+        // A held plan put at the front: the runtime starts it there, and the board shows it first meanwhile.
+        screen.getByRole('button', { name: 'Move Hold off in the line' }).focus()
+        await userEvent.keyboard('{Enter}')
+        const menu = within(await screen.findByRole('menu', { name: 'Move in the line' }))
+        await userEvent.click(menu.getByRole('menuitem', { name: 'Move to the front of the line' }))
+        expect(line.move).toHaveBeenCalledWith('h', 0)
+        expect(
+          within(screen.getByRole('region', { name: 'Up next' }))
+            .getAllByRole('button', { name: /in the line$/ })
+            .map((grip) => grip.getAttribute('aria-label')),
+        ).toEqual([
+          'Move Hold off in the line',
+          'Move Waiting a in the line',
+          'Move Waiting b in the line',
+          'Move Waiting c in the line',
+          'Move Add a retry in the line',
+        ])
+      })
+
+      it('offers to cancel a turn Althar asked that waits for a place, from its row’s menu', async () => {
+        const line = drawn([
+          waiting('a', 1),
+          task({
+            taskId: 'x',
+            threadId: 'th-x',
+            title: 'Going on x',
+            phase: 'running',
+            step: 'implement',
+            queued,
+            continues: true,
+            turnWaits: true,
+            place: 2,
+          }),
+        ])
+        screen.getByRole('button', { name: 'Move Waiting a in the line' }).focus()
+        await userEvent.keyboard('{Enter}')
+        expect(
+          within(await screen.findByRole('menu', { name: 'Move in the line' })).queryByRole('menuitem', { name: 'Cancel this turn' }),
+        ).toBeNull()
+        await userEvent.keyboard('{Escape}')
+        screen.getByRole('button', { name: 'Move Going on x in the line' }).focus()
+        await userEvent.keyboard('{Enter}')
+        const menu = within(await screen.findByRole('menu', { name: 'Move in the line' }))
+        await userEvent.click(menu.getByRole('menuitem', { name: 'Cancel this turn' }))
+        expect(line.cancelTurn).toHaveBeenCalledWith('th-x')
       })
 
       it('moves a row from its grip’s menu, at once, and asks the runtime to start the line so', async () => {
