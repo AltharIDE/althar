@@ -1,4 +1,5 @@
 export * from './access'
+export { makeServiceApi, prepareApi, type ApiRequest, type ApiResponse, type ServiceApi } from './api'
 export { type CopyMerge, type CopyMerged, type MergeInCopy, mergeInCopy } from './branchCopy'
 export { makeBitbucketCloud } from './bitbucketCloud'
 export { makeBitbucketDataCenter } from './bitbucketDataCenter'
@@ -27,3 +28,11 @@ export { identify, type Identified } from './servers'
 export * from './signIn'
 export { makeTrello } from './trello'
 export { changeTable, findTable, trackerCapabilities, TRACKERS } from './trackers'
+export { readIssueDiscussion, issueCommentRequest } from './issueDiscussion'
+export {
+  LINEAR_RESOURCES,
+  linearResourceRequest,
+  linearRelationsRequest,
+  linearRelationChange,
+  type LinearResource,
+} from './linearResources'

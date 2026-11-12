@@ -25,6 +25,9 @@ The code host and tracker connectors of [docs/architecture/06](../../docs/archit
 | `trello.ts` | Trello, a tracker, over REST: a card by its short link, its list as its status |
 | `releases.ts`, `*Releases.ts` | Releases on each code host: tags, a release published as the host does, the runs on a tag with what each waits on, approving them, running failed jobs again. [RELEASES.md](RELEASES.md) says what each host can and can't do, and the docs relied on |
 | `http.ts` | Calls to a service's API: signed in per call, bounded in time, answers checked, failures classified, GETs cached by ETag |
+| `api.ts` | Authenticated API fallbacks: relative paths, GraphQL operation parsing, protected families, bounded responses and explicit continuation; no credential-bearing redirects |
+| `issueDiscussion.ts` | Unabridged discussion pages and comment edits on every tracker, with Linear's native replies |
+| `linearResources.ts`, `linearUpload.ts` | Linear workspace resources and relationships; signed attachment uploads without sending the account credential to storage |
 | `signIn.ts` | The device flow and OAuth with PKCE, and refreshing a token |
 | `links.ts` | Which host a git remote is on, and what a pasted link points at |
 | `testing/` | The fake service: a code host and tracker in memory that a test acts on as other people |

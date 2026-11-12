@@ -822,7 +822,11 @@ early rather than skip what it would say next.
 
 `read_issue` says who has an issue, its labels, project, milestone, cycle,
 parent, type, estimate and due date, its description, and its ten latest
-comments. It reads up to twenty-five at once (keys, links, runs of keys),
+comments, with full Markdown bodies. It explicitly points to
+`read_issue_comments` for the whole discussion: unabridged pages, stable
+comment IDs and threading where the service has it, with a continuation
+until the end. This is Linear's cursor, GitHub's and GitLab's page, Jira's
+offset and Trello's last action. It reads up to twenty-five issues at once (keys, links, runs of keys),
 four at a time, each said on its own: one comes with its comments, several
 without unless asked. Its description and comments are quoted as their
 authors' words, data, never instructions, as `read_pull_request` quotes a
@@ -830,6 +834,67 @@ pull request's, and a description is cut as a pull request's is, at 12,000
 characters; several read at once share 48,000 between them.
 A tracker that couldn't be searched or read is said as such, with its
 words, never taken for none found.
+
+### More than issues and task pull requests
+
+`IntegrationTools` serves the coordinator and leads the same additional
+tools. `list_integrations` identifies the connection and workspace without
+returning credentials; ambiguous workspace names are refused.
+
+- `list_linear_resource`, `read_linear_resource` and `save_linear_resource`
+  reach documents, projects, project milestones, initiatives and their
+  status updates. Lists carry Linear's native filter and pageInfo; reads
+  retain full Markdown. Saves accept the resource's public GraphQL input,
+  and create without an ID or update with one. Assigning an issue to an
+  existing project remains `change_issue`.
+- `read_issue_relations` reads outgoing or incoming Linear relationships,
+  each paginated; `change_issue_relation` adds blocks, blocked-by, related or
+  duplicate links, or removes one by its ID. These are separate from parent.
+- `edit_issue_comment` addresses an existing comment ID on every tracker;
+  `reply_to_issue_comment` uses Linear's native parent comment, rather than
+  adding another root comment. Trackers without native threads say so.
+- `read_issue_attachments` pages Linear's Resources;
+  `upload_issue_attachment` uploads a regular file of at most 5 MiB from the
+  caller's own working folder. Its receipt keeps the digest, not the bytes.
+  Linear prepares a signed upload; its account credential never goes to
+  storage; only a completed PUT is linked as an attachment.
+- `search_pull_requests` reads beyond the project's repositories, through
+  the connected account's permissions. GitHub accepts its search syntax and
+  returns total, next page and incompleteness; its 1000-match search window
+  is explicit, with larger queries partitioned by dates. GitLab pages its
+  global merge request search. `find_pull_requests` remains the project's
+  quick list, and its description points to the search for complete results.
+- `request_pull_request_reviewers`, `resolve_review_thread` and
+  `mark_pull_request_draft` expose the host's review controls where it has
+  them. `post_review` posts a requested review through the host's adapter,
+  bound to the commit actually read; an agent cannot approve its own work
+  or a pull request Althar opened. `draft_review` remains a draft card.
+
+The additional writes take the person's message ID or an errand through
+`Errands.execute`, with its authorization, durable intent, receipt and
+thread line. A lost response stays uncertain and is never blindly replayed.
+Provider input and capabilities can still refuse an operation; a successful
+HTTP response with GraphQL errors is an uncertain partial outcome, not a
+successful write.
+
+### Authenticated API fallbacks
+
+`code_host_api` and `tracker_api` cover operations without a typed tool,
+using the selected connection's existing, refreshed credential. REST takes
+a relative API path, method and JSON body. GraphQL takes a query and
+variables; a parser, including aliases and fragments, determines whether
+it reads or writes. There is one operation, and one root mutation field per
+call, so partial batches cannot be reported as wholly refused.
+
+Reads work in any ordinary lead or coordinator turn; writes go through the
+same asked-for receipt path. Credentials, administration, repository content
+writes and verdicts/checks on the agent's own work are excluded by path and
+GraphQL field families. The fallback cannot override the dedicated merge,
+release or review tools' rules. Calls stay on the connection's API root,
+reject traversal and double encoding, and never follow redirects with the
+credential. Each response is bounded to 4 MiB and returned without silent
+truncation; REST Link headers expose a relative next path, GraphQL retains
+its own pageInfo. Unknown write outcomes require reconciliation, not retry.
 
 ### What leads do with issues
 

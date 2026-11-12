@@ -63,6 +63,12 @@ export const allowanceHeaders = (headers: Headers, now: number): Omit<Allowance,
 }
 
 export interface Http {
+  /** One bounded JSON response, without following redirects with the connection's credential. */
+  request(
+    method: string,
+    url: string,
+    body?: unknown,
+  ): Effect.Effect<{ readonly status: number; readonly headers: Headers; readonly body: unknown }, ConnectorFailed>
   /** What the service has let this connection ask of it so far. */
   allowance(): Allowance
   /** A JSON call, its answer read by `schema`. */
@@ -236,14 +242,14 @@ export const failureOf = (
   return new ConnectorFailed({ product, reason, status, message })
 }
 
-const GraphqlError = Schema.Struct({
+export const GraphqlError = Schema.Struct({
   message: Schema.String,
   type: Schema.optional(Schema.String),
   extensions: Schema.optional(Schema.Struct({ code: Schema.optional(Schema.String), type: Schema.optional(Schema.String) })),
 })
 
 /** Classifies a GraphQL `errors` entry: GitHub names a `type`, Linear an extension code. */
-const graphqlFailure = (product: Product, error: typeof GraphqlError.Type, status: number): ConnectorFailed => {
+export const graphqlFailure = (product: Product, error: typeof GraphqlError.Type, status: number): ConnectorFailed => {
   const code = (error.type ?? error.extensions?.code ?? error.extensions?.type ?? '').toUpperCase()
   // The service failing as it worked on it (a 5xx, an internal error) is no refusal: a mutation may have gone through.
   const reason =
@@ -467,6 +473,23 @@ export const makeHttp = (options: HttpOptions): Http => {
 
   return {
     allowance: () => allowance,
+    request: (method, url, body) =>
+      Effect.gen(function* () {
+        const answer = yield* call(method, url, { body, manual: true, maxBytes: 4 * 1024 * 1024 }).pipe(
+          Effect.flatMap(success),
+          Effect.mapError((error) =>
+            error.sizeLimit !== undefined && method !== 'GET' && method !== 'HEAD'
+              ? new ConnectorFailed({
+                  product,
+                  reason: 'invalid_response',
+                  message: 'The write’s response exceeded its size cap; its outcome is uncertain.',
+                  sizeLimit: error.sizeLimit,
+                })
+              : error,
+          ),
+        )
+        return { status: answer.status, headers: answer.headers, body: yield* decode(Schema.Unknown, answer.body) }
+      }),
     json: (schema, method, url, body) =>
       call(method, url, { body }).pipe(
         Effect.flatMap(success),
