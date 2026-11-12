@@ -8,7 +8,7 @@ The direction picked from the first round is C, a team assembled: seats for the 
 - **2. C2, as before**: seats over a row of step slots.
 - **3. Columns**: each seat over its step, tied to it by a line; the steps run as a chain with arrows to how the work ends.
 - **4. Relay**: one row of pills, the step and who does it on each, arrows between, ending in how it ends.
-- **5. Roster**: a list down a line, a node for each step, who does it at the row's end; the whole row is the dropdown.
+- **5. Roster** (picked, the default): a list down a line, a node for each step, who does it at the row's end; the whole row is the dropdown, opening where it's clicked. `node lab/drafting/shoot-roster.ts` shoots it.
 - **6. Map**: who hands to whom. Big marks for each seat, and arrows that say what happens between them (implements, reviews).
 
 ```bash

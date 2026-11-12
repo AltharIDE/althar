@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from 'react'
+import { type PointerEvent, type ReactNode, useEffect, useState } from 'react'
 
 import { Brand, BrandMark, Icon, Menu, MenuRadioGroup, MenuRadioItem, type ModelInfo, ModelPick, TaskEnd, taskEndText } from '@althar/ui'
 
@@ -69,7 +69,7 @@ function Avatar({ member, size = 30, end = false }: { member?: Member; size?: nu
     return () => window.clearInterval(id)
   }, [choosing])
   const filled = end || (member?.model != null && !member.skipped)
-  const mark = Math.round(size * 0.55)
+  const mark = Math.round(size * 0.58)
   return (
     <span className={cx(k.avatar, filled && k.filled, choosing && k.choosing)} style={{ width: size, height: size }}>
       {end ? (
@@ -96,6 +96,25 @@ function Who({ member }: { member: Member }) {
 }
 
 /**
+ * A seat's whole-row trigger, moved under the pointer as it's pressed, so the
+ * dropdown opens where the person clicked rather than at the row's start; back
+ * to the whole row once it closes. The keyboard opens it from the row's start.
+ */
+function useAtPointer() {
+  const [x, setX] = useState<number | null>(null)
+  return {
+    coverStyle: x === null ? undefined : { left: x - 8, right: 'auto', width: 16 },
+    onPointerDown: (e: PointerEvent<HTMLElement>) => {
+      const row = e.currentTarget.parentElement?.getBoundingClientRect()
+      if (row !== undefined) setX(e.clientX - row.left)
+    },
+    onOpenChange: (open: boolean) => {
+      if (!open) setX(null)
+    },
+  }
+}
+
+/**
  * A seat that is its model's dropdown, whole: the kit's picker, its trigger
  * stretched over the seat and drawn by it. The reviewer's dropdown skips the
  * review; a skipped review is a press that adds it back.
@@ -112,6 +131,7 @@ function WholePick({
   children: ReactNode
 }) {
   const prefs = useModelPrefs()
+  const at = useAtPointer()
   if (planned === undefined || member.model === null) return <div className={cx(k.whole, className)}>{children}</div>
   if (member.skipped)
     return (
@@ -126,8 +146,9 @@ function WholePick({
   return (
     <div className={cx(k.whole, k.pickable, className)}>
       {children}
-      <span className={k.cover}>
+      <span className={k.cover} style={at.coverStyle} onPointerDown={at.onPointerDown}>
         <ModelPick
+          onOpenChange={at.onOpenChange}
           variant="quiet"
           placement="below"
           owner={member.key === 'lead' ? 'Lead for this task' : 'Review'}
@@ -158,29 +179,32 @@ function EndPick({
   className?: string
   children: ReactNode
 }) {
+  const at = useAtPointer()
   if (planned === undefined || props.draft.spec.onBranch) return <div className={cx(k.whole, className)}>{children}</div>
   return (
-    <Menu
-      label="When the work is done"
-      width={320}
-      trigger={
-        <button type="button" className={cx(k.whole, k.pickable, className)}>
-          {children}
-        </button>
-      }
-    >
-      <MenuRadioGroup
-        label="When the work is done"
-        value={planned.end}
-        onChange={(v) => planned.set({ end: ENDS.find((x) => x === v) ?? planned.end })}
-      >
-        {ENDS.map((x) => (
-          <MenuRadioItem key={x} value={x} hint={taskEndText[x].note}>
-            {taskEndText[x].title}
-          </MenuRadioItem>
-        ))}
-      </MenuRadioGroup>
-    </Menu>
+    <div className={cx(k.whole, k.pickable, className)}>
+      {children}
+      <span className={k.cover} style={at.coverStyle} onPointerDown={at.onPointerDown}>
+        <Menu
+          label="When the work is done"
+          width={420}
+          onOpenChange={at.onOpenChange}
+          trigger={<button type="button" aria-label={`When the work is done: ${endWords(props, planned)}`} />}
+        >
+          <MenuRadioGroup
+            label="When the work is done"
+            value={planned.end}
+            onChange={(v) => planned.set({ end: ENDS.find((x) => x === v) ?? planned.end })}
+          >
+            {ENDS.map((x) => (
+              <MenuRadioItem key={x} value={x} hint={taskEndText[x].note}>
+                {taskEndText[x].title}
+              </MenuRadioItem>
+            ))}
+          </MenuRadioGroup>
+        </Menu>
+      </span>
+    </div>
   )
 }
 
@@ -267,7 +291,7 @@ export function Relay(props: DirectionProps) {
           <div key={member.key} className={k.relayItem}>
             {i > 0 && <Arrow on={member.model !== null} />}
             <WholePick member={member} planned={planned} className={k.relayPill}>
-              <Avatar member={member} size={28} />
+              <Avatar member={member} size={34} />
               <span className={k.twoLines}>
                 <span className={k.role}>{member.key === 'lead' ? `${member.step} · Lead` : member.step}</span>
                 <span className={k.name}>
@@ -281,7 +305,7 @@ export function Relay(props: DirectionProps) {
         <div className={k.relayItem}>
           <Arrow on={draft.end} />
           <EndPick props={props} planned={planned} className={cx(k.relayPill, !draft.end && k.waiting)}>
-            <Avatar end={draft.end} size={28} />
+            <Avatar end={draft.end} size={34} />
             <span className={k.twoLines}>
               <span className={k.role}>When it’s done</span>
               <span className={k.name}>{draft.end ? <Arrive>{endWords(props, planned)}</Arrive> : <span className={k.faint}>…</span>}</span>
@@ -307,7 +331,7 @@ export function Roster(props: DirectionProps) {
       {members.map((member) => (
         <li key={member.key} className={cx(k.rosterItem, member.model !== null && k.rosterOn)}>
           <WholePick member={member} planned={planned} className={k.rosterRow}>
-            <Avatar member={member} size={28} />
+            <Avatar member={member} size={34} />
             <span className={k.twoLines}>
               <span className={cx(k.rosterStep, member.skipped && k.struck)}>{member.step}</span>
               <span className={k.rosterWhy}>
@@ -333,7 +357,7 @@ export function Roster(props: DirectionProps) {
       ))}
       <li className={cx(k.rosterItem, draft.end && k.rosterOn)}>
         <EndPick props={props} planned={planned} className={k.rosterRow}>
-          <Avatar end={draft.end} size={28} />
+          <Avatar end={draft.end} size={34} />
           <span className={k.twoLines}>
             <span className={k.rosterStep}>When it’s done</span>
           </span>

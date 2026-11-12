@@ -51,7 +51,7 @@ function Drafting({ spec, ms, Card }: { spec: Spec; ms: number; Card: (props: Di
 }
 
 function Lab() {
-  const [key, setKey] = useState<Key>((params.get('d') as Key | null) ?? '3')
+  const [key, setKey] = useState<Key>((params.get('d') as Key | null) ?? '5')
   const [run, setRun] = useState(0)
   const [speed, setSpeed] = useState<(typeof SPEEDS)[number]>(Number(params.get('speed') ?? 2) as 1 | 2 | 4)
   const [narrow, setNarrow] = useState(params.get('narrow') === '1')

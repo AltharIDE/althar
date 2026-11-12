@@ -37,7 +37,7 @@ export const VAT: Spec = {
   leadEffort: 'High',
   review: CODEX,
   onBranch: false,
-  estimate: 'About 25 min · about $1 on your subscriptions',
+  estimate: 'About 25 min',
 }
 
 /** The person's own message, which planned three tasks: drafted one after the other. */
@@ -76,7 +76,7 @@ export const THREE: ReadonlyArray<Spec> = [
     leadEffort: 'High',
     review: CODEX,
     onBranch: false,
-    estimate: 'About 50 min · about $3 on your subscriptions',
+    estimate: 'About 50 min',
   },
 ]
 
