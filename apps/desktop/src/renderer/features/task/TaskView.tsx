@@ -173,6 +173,7 @@ export const text = {
   },
   working: 'Working',
   needsYou: 'Needs you',
+  waiting: 'Waiting',
   /** A review of someone else's pull request, drafted: the person's to post. */
   drafted: 'Review drafted',
   /** Drafted by the coordinator, its plan not proposed yet: it is off the board until it is. */
@@ -220,7 +221,7 @@ export const statusOf = (
   // Where it stands is its card's, as the board and the home say it (`taskStatusOf`); only the words are the header's own.
   const status = taskStatusOf({ ...snapshot.task, inMergeQueue: inQueue, calls: snapshot.attention.length })
   if (status === TaskStatus.Running && snapshot.task.externalWait !== undefined)
-    return { status, state: externalWaitWords(snapshot.task.externalWait, clock) }
+    return { status, state: text.waiting, why: externalWaitWords(snapshot.task.externalWait, clock) }
   // A round of work after its plan is its lead following up, as the person asked (ADR-034).
   const doing =
     step === null ? undefined : step === 'implement' && snapshot.task.followUp === true ? stepText.followingUp : stepText.now[step]
