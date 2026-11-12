@@ -2,6 +2,7 @@ import '@fontsource-variable/inter'
 import '@fontsource-variable/jetbrains-mono'
 import '@althar/ui/styles.css'
 import '../../src/renderer/app.css'
+import './morph.css'
 
 import { StrictMode, useEffect, useState } from 'react'
 
@@ -9,13 +10,13 @@ import { createRoot } from 'react-dom/client'
 
 import { TaskFace, Thread, Turn, You } from '@althar/ui'
 
-import { type DirectionProps, directions, Plan } from './Directions'
+import { type DirectionProps, directions } from './Directions'
 import { AT, draftAt, type Spec, THREE, useElapsed, VAT } from './timeline'
 import s from './lab.module.css'
 
 /*
  * The drafting lab (README.md): a task's card from the moment the coordinator
- * starts drafting it. Keys A–D swap the direction, R plays it again, S its
+ * starts drafting it. Keys 1–3 swap how C becomes the plan, R plays it again, S its
  * speed, N a narrow window, T three tasks from one message.
  */
 
@@ -35,13 +36,13 @@ function Drafting({ spec, ms, Card }: { spec: Spec; ms: number; Card: (props: Di
   const draft = draftAt(spec, ms)
   return (
     <div className={s.cardIn} data-ready={draft.ready}>
-      {draft.ready ? <Plan spec={spec} held={held} /> : <Card draft={draft} held={held} onHold={() => setHeld(true)} />}
+      <Card draft={draft} held={held} onHold={setHeld} />
     </div>
   )
 }
 
 function Lab() {
-  const [key, setKey] = useState<Key>((params.get('d') as Key | null) ?? 'a')
+  const [key, setKey] = useState<Key>((params.get('d') as Key | null) ?? '2')
   const [run, setRun] = useState(0)
   const [speed, setSpeed] = useState<(typeof SPEEDS)[number]>(Number(params.get('speed') ?? 2) as 1 | 2 | 4)
   const [narrow, setNarrow] = useState(params.get('narrow') === '1')
@@ -49,7 +50,8 @@ function Lab() {
   // Frozen at a moment, for a screenshot: ?at=9000.
   const frozen = params.get('at')
   const live = useElapsed(run, speed, (three ? STAGGER * 2 : 0) + AT.ready + 1000)
-  const ms = frozen === null ? live : Number(frozen)
+  // Started part-way in, to see one moment play: ?from=26000.
+  const ms = frozen === null ? Number(params.get('from') ?? 0) + live : Number(frozen)
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -118,7 +120,7 @@ function Lab() {
               setRun((n) => n + 1)
             }}
           >
-            <kbd>{one.key.toUpperCase()}</kbd> {one.label}
+            <kbd>{one.key}</kbd> {one.label}
           </button>
         ))}
         <span className={s.gap} />

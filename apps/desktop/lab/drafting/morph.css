@@ -1,0 +1,24 @@
+/*
+ * C1's morph: each part of the team card travels to where it lives on the
+ * plan card, and grows or shrinks into its shape there, quick off the mark
+ * with a long soft landing (the kit's --ease-out, --move a little longer).
+ * The rest of the page doesn't fade: only what is named moves.
+ */
+::view-transition-group(*) {
+  animation-duration: 640ms;
+  animation-timing-function: cubic-bezier(0.23, 1, 0.32, 1);
+}
+::view-transition-old(*),
+::view-transition-new(*) {
+  animation-duration: 300ms;
+  animation-timing-function: cubic-bezier(0.23, 1, 0.32, 1);
+}
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  ::view-transition-group(*) {
+    animation: none;
+  }
+}
