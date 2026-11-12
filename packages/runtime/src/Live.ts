@@ -43,6 +43,12 @@ export type LiveEvent =
   | { readonly _tag: 'SessionEnded'; readonly threadId: string; readonly sessionId: string; readonly state: string }
   /** The computer came online, or went offline, as the app says (`Connectivity.ts`). */
   | { readonly _tag: 'Connection'; readonly online: boolean }
+  /**
+   * The person's own message to a thread was accepted (from the window or a paired device), whichever way it is delivered:
+   * into a turn running, queued behind one, kept for a place among the agents at work, or as the turn that starts its lead
+   * again. It is the person's word at the moment they send it, not when a turn picks it up.
+   */
+  | { readonly _tag: 'PersonSaid'; readonly threadId: string }
   /** A turn began; `byPerson` when it carries something the person said, not only what Althar wrote. */
   | { readonly _tag: 'TurnStarted'; readonly threadId: string; readonly turnId: string; readonly byPerson?: boolean }
   | {

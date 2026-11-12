@@ -39,7 +39,7 @@ function Once({ after, quick }: { after: number; quick: boolean }) {
     return () => clearTimeout(timer)
   }, [after])
   return (
-    <Launch ready={ready} quick={quick} waiting="Opening your data…">
+    <Launch ready={ready} quick={quick}>
       <Behind />
     </Launch>
   )

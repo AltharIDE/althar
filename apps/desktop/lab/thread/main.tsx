@@ -29,6 +29,7 @@ import {
   LIVE_ANSWER,
   LIVE_THOUGHT,
   LONG_ANSWER,
+  busyTail,
   longTask,
   REQUEST,
   WORKTREE,
@@ -46,6 +47,7 @@ const scenes = [
   { key: 'live', label: 'Task, live' },
   { key: 'coordinator', label: 'Coordinator, live' },
   { key: 'three', label: 'Three streaming' },
+  { key: 'busy', label: 'Busy task chat' },
 ] as const
 type Scene = (typeof scenes)[number]['key']
 
@@ -152,8 +154,8 @@ function Face({ children }: { children: ReactNode }) {
 }
 
 /** A task's thread, as its screen draws it; live, with a turn of its lead's playing on the end. */
-function TaskScene({ live }: { live: boolean }) {
-  const before = TASK
+function TaskScene({ live, busy = false }: { live: boolean; busy?: boolean }) {
+  const before = useMemo(() => (busy ? [...TASK, ...busyTail(params.get('raw') === '1')] : TASK), [busy])
   const played = usePlayed(before, 'Does the back-off survive a restart?', LEAD, LEAD_MODEL, live ? leadBeats : STILL)
   const now = useNow(true)
   const settledOf = useReviewOutcomes('lab', reviewsIn(before), latestReport(before))
@@ -222,6 +224,7 @@ function Lab() {
       <main className={s.scene}>
         {scene === 'task' && <TaskScene key="task" live={false} />}
         {scene === 'live' && <TaskScene key="live" live />}
+        {scene === 'busy' && <TaskScene key="busy" live={false} busy />}
         {scene === 'coordinator' && (
           <Face>
             <CoordinatorThread />

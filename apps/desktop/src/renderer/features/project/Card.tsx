@@ -73,6 +73,10 @@ export interface CardActions {
   readonly onStopBackground: (threadId: string, id: string) => void
   /** The one waiting task that shows who holds the places, the newest: the others only wait. */
   readonly holdersOn?: string | null
+  /** The presets a plan can start from instead, each with what it holds; a review's only with the others that review. */
+  readonly presets?: ReadonlyArray<{ readonly name: string; readonly about: string; readonly reviews: boolean }>
+  /** Picks another preset for a plan: its parts change to match. */
+  readonly onPreset?: (planId: string, preset: string) => void
 }
 
 type Plan = NonNullable<TaskCardContent['plan']>
@@ -146,12 +150,17 @@ function PlanCard({
     else actions.onChange(plan.id, next, nextEnd, nextWhere, nextToward)
   }
   const from = fromOf(card)
-  // Only the agents the plan allows: a review's lead only reads, so an agent that can't be held to that isn't offered.
-  const allowed = plan.agents
-  const agents = allowed === undefined ? actions.agents : actions.agents.filter((agent) => allowed.includes(agent.id))
   return (
     <TaskLaunch
       task={card.slug}
+      {...(plan.preset === undefined ? {} : { preset: plan.preset })}
+      // A press on the preset lists the others it can start from: a review only reviews, and work never becomes one.
+      {...(actions.presets === undefined || actions.onPreset === undefined
+        ? {}
+        : {
+            presets: actions.presets.filter((one) => one.reviews === (card.reviewing != null)),
+            onPresetChange: (name: string) => actions.onPreset?.(plan.id, name),
+          })}
       title={card.title}
       {...(from === undefined ? {} : { from })}
       project={actions.project}
@@ -165,7 +174,7 @@ function PlanCard({
           planned !== undefined && (
             <ModelChoice
               owner={owner}
-              agents={agents}
+              agents={actions.agents}
               value={{ agentId: planned.agentId, model: planned.model, effort: planned.effort ?? null }}
               {...(actions.projectId === undefined ? {} : { projectId: actions.projectId })}
               onChange={(choice) => change(steps.map((candidate) => (candidate.key === step.id ? { ...candidate, ...choice } : candidate)))}

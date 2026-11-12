@@ -122,6 +122,8 @@ describe('a command its sandbox holds', () => {
       reason: "The project's rules never allow deploying and publishing.",
     })
     assert.strictEqual(decideInside(command('rm -rf build'), never).verdict, 'deny')
+    // A key it reads is refused inside the sandbox as outside it, whatever the project allows.
+    assert.strictEqual(decideInside(command('cat ~/.ssh/id_rsa'), context('allow')).verdict, 'deny')
     // Opaque scripts run; an unrelated Never is not a reason to refuse them.
     const publish = "python3 - <<'EOF'\nimport subprocess\nsubprocess.run(['npm', 'publish'])\nEOF"
     for (const line of [publish, "bun -e \"Bun.spawnSync(['npm', 'publish'])\"", 'deno run tools/fix.ts', '/tmp/fix.sh'])

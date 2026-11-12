@@ -44,6 +44,8 @@ interface AtWork {
   review?: string
   /** Its review is done: the reviewer is shown as it stays. */
   done?: string
+  /** Its review was skipped: it starts with none, and can be added back. */
+  skipped?: boolean
   error?: string
 }
 
@@ -60,7 +62,7 @@ function Team({
   onStart: () => void
 }) {
   const [lead, setLead] = useState(OPUS)
-  const [review, setReview] = useState<ModelInfo | null>(CODEX)
+  const [review, setReview] = useState<ModelInfo | null>(atWork?.skipped === true ? null : CODEX)
   const [end, setEnd] = useState(TaskEnd.DraftPr)
   return (
     <TeamDialog
@@ -128,6 +130,21 @@ export const AtWorkInAReviewRound: Story = { args: { held: false, atWork: { ...A
 /** The review is done: the reviewer stays, and the dialog says so. The lead still changes. */
 export const ReviewDone: Story = {
   args: { held: false, atWork: { ...AT_WORK, done: 'The review is done, so the reviewer stays.' } },
+}
+
+/** A review that was skipped is not a done one: until the task merges, it can be added back, and its model picked. */
+export const SkippedReviewToAddBack: Story = {
+  args: { held: false, atWork: { ...AT_WORK, skipped: true } },
+}
+
+/** Added back to a change whose work is up: it says its review starts on saving, on the change as it stands. */
+export const SkippedReviewAddedBack: Story = {
+  args: { held: false, atWork: { ...AT_WORK, skipped: true, review: 'Its review starts now, on the change as it stands.' } },
+  play: async () => {
+    const page = within(document.body)
+    await userEvent.click(page.getByRole('button', { name: 'Add a review' }))
+    await expect(page.getByText('Its review starts now, on the change as it stands.')).toBeInTheDocument()
+  },
 }
 
 export const ReviewDoneDark: Story = { ...ReviewDone, globals: { theme: 'dark' } }

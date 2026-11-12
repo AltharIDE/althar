@@ -31,6 +31,9 @@ export interface AbandonTaskText {
   /** For a merged task: its pull request, which stays merged, and the commits after it, left out. */
   mergedDescription: (change: string) => string
   mergedCommits: (count: number) => string
+  /** Commits that wait for Ship (a task is a conversation plus parts): settling leaves them on its branch, unless they ship first. */
+  unshipped: (count: number) => string
+  ship: (count: number) => string
   abandon: string
   cancel: string
   /** Abandoned, with a pull request it was to close still open. */
@@ -50,6 +53,9 @@ export const abandonTaskText: AbandonTaskText = {
   mergedDescription: (change) => `${change} stays merged.`,
   mergedCommits: (count) =>
     count === 1 ? 'The commit after it goes in no pull request.' : `The ${count} commits after it go in no pull request.`,
+  unshipped: (count) =>
+    count === 1 ? 'Its commit not shipped stays on its branch.' : `Its ${count} commits not shipped stay on its branch.`,
+  ship: (count) => (count === 1 ? 'Ship 1 commit' : `Ship ${count} commits`),
   abandon: 'Abandon task',
   cancel: 'Cancel',
   abandonedTitle: 'Task abandoned',
@@ -82,6 +88,8 @@ export interface AbandonTaskProps {
   abandoned?: boolean
   /** Its change merged: its last pull request, by name, and how many commits after it are left out. */
   merged?: { readonly name: string; readonly commits: number }
+  /** Commits that wait for Ship: shipping them is offered first, beside settling without them. */
+  held?: { readonly commits: number; readonly onShip: () => void }
   onAbandon: (choices: AbandonChoices) => void
   onClose: () => void
   busy?: boolean
@@ -99,6 +107,7 @@ export function AbandonTask({
   changes = [],
   abandoned = false,
   merged,
+  held,
   onAbandon,
   onClose,
   busy = false,
@@ -127,6 +136,11 @@ export function AbandonTask({
           <Button variant="quiet" onClick={onClose}>
             {abandoned ? t.leaveOpen : t.cancel}
           </Button>
+          {!abandoned && held !== undefined && (
+            <Button disabled={busy} onClick={held.onShip}>
+              {t.ship(held.commits)}
+            </Button>
+          )}
           <Button
             variant={abandoned ? 'default' : 'danger'}
             busy={busy}
@@ -138,9 +152,10 @@ export function AbandonTask({
         </>
       }
     >
-      {!abandoned && (merged !== undefined || worktree !== null) && (
+      {!abandoned && (merged !== undefined || worktree !== null || held !== undefined) && (
         <ul className={s.list}>
-          {merged !== undefined && <li>{t.mergedCommits(merged.commits)}</li>}
+          {held !== undefined && <li>{t.unshipped(held.commits)}</li>}
+          {merged !== undefined && held === undefined && <li>{t.mergedCommits(merged.commits)}</li>}
           {worktree !== null && <li>{branch === null ? t.keptWorktree : t.kept}</li>}
         </ul>
       )}

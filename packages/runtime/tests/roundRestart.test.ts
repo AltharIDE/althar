@@ -15,10 +15,11 @@ import { Sessions } from '../src/Sessions'
 import { notices, repository, runtime, until } from './support'
 
 /*
- * A round of work (ADR-034) a restart stopped, where restarts.test.ts and
- * rounds.test.ts don't go: one whose lead's last turn had ended, having made
- * nothing new, as Althar stopped. It ends as that turn's end would have, the
- * task back where it was, and nothing is carried on.
+ * A turn the person's words began after a task's plan (a task is a
+ * conversation plus parts), that a restart stopped, where restarts.test.ts
+ * and rounds.test.ts don't go: one whose lead's turn had ended, having made
+ * nothing new, as Althar stopped. It is a turn, not a round: nothing is
+ * carried on, nothing is held for Ship, and the task is where it was.
  */
 
 const withQueries = (file: string) => Queries.layer.pipe(Layer.provideMerge(runtime(file)))
@@ -30,8 +31,8 @@ const runsOf = (taskId: string) =>
       SELECT state, plan_id FROM runs WHERE task_id = ${taskId} ORDER BY created_at, rowid`
   })
 
-describe('a round of work a restart stopped', () => {
-  it.live('ends where its lead had made nothing new, back where the task was, with nothing carried on', () =>
+describe('a turn a restart stopped', () => {
+  it.live('leaves the task where it was where its lead had made nothing new: no round, nothing held, nothing carried on', () =>
     Effect.gen(function* () {
       const file = join(mkdtempSync(join(tmpdir(), 'althar-round-')), 'althar.sqlite')
       const task = yield* Effect.gen(function* () {
@@ -59,10 +60,13 @@ describe('a round of work a restart stopped', () => {
         })
         yield* plans.start(planId, actor)
         yield* until(runsOf(created.taskId), (rows) => rows[0]?.state === 'succeeded')
-        // The person asks its lead something: a round of work opens, and its lead looks around.
+        // The person asks its lead something: a turn, which looks around.
         const body = 'What does the retry do? [lead:explore]'
         yield* sessions.send({ envelope: yield* Runtime.envelope('thread.send', { body }), threadId: created.threadId, body })
-        yield* until(runsOf(created.taskId), (rows) => rows.length === 2 && rows[1]?.state === 'running')
+        yield* until(
+          sql<{ heads: string | null }>`SELECT heads FROM turn_deliveries WHERE thread_id = ${created.threadId} AND heads IS NOT NULL`,
+          (rows) => rows.length === 1,
+        )
         return created
       }).pipe(Effect.provide(withQueries(file)))
       // Its turn had ended as Althar stopped, with nothing new made.
@@ -74,13 +78,20 @@ describe('a round of work a restart stopped', () => {
       db.close()
 
       yield* Effect.gen(function* () {
-        const [, round] = yield* until(runsOf(task.taskId), (rows) => rows[1]?.state === 'succeeded')
-        assert.isNull(round?.planId)
+        const queries = yield* Queries
         const sql = yield* SqlClient.SqlClient
-        const [attempt] = yield* sql<{ state: string; output: string | null }>`
-          SELECT a.state, a.output FROM node_attempts a JOIN nodes n ON n.id = a.node_id JOIN workflow_executions e ON e.id = n.execution_id
-          JOIN runs r ON r.id = e.run_id WHERE r.task_id = ${task.taskId} AND r.plan_id IS NULL`
-        assert.deepStrictEqual([attempt?.state, JSON.parse(attempt?.output ?? '{}')], ['succeeded', { quiet: true }])
+        // Started again and settled into what it holds, the task is as its plan left it: the plan's run alone, nothing held.
+        yield* until(
+          Effect.map(queries.card(task.taskId), (card) => [card.phase]),
+          ([phase]) => phase === 'ready',
+        )
+        assert.deepStrictEqual(
+          (yield* runsOf(task.taskId)).map((run) => [run.state, run.planId === null]),
+          [['succeeded', false]],
+        )
+        const [workspace] = yield* sql<{ heldAt: string | null }>`SELECT held_at FROM workspaces WHERE task_id = ${task.taskId}`
+        assert.isNull(workspace?.heldAt ?? null)
+        assert.isUndefined((yield* queries.card(task.taskId)).held)
         assert.isFalse((yield* notices(task.threadId)).some((notice) => notice.title === 'Carried on after Althar restarted.'))
       }).pipe(Effect.provide(withQueries(file)))
     }),

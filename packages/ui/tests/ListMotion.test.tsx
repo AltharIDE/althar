@@ -103,7 +103,18 @@ afterEach(() => {
 })
 
 /** Lists of keys, each a list side by side. */
-function Lists({ lists, enter, still = false }: { lists: ReadonlyArray<ReadonlyArray<string>>; enter?: 'rise' | 'grow'; still?: boolean }) {
+function Lists({
+  lists,
+  enter,
+  still = false,
+  seen = [],
+}: {
+  lists: ReadonlyArray<ReadonlyArray<string>>
+  enter?: 'rise' | 'grow'
+  still?: boolean
+  /** Keys marked as having come to where they are drawn before. */
+  seen?: ReadonlyArray<string>
+}) {
   const ref = useRef<HTMLDivElement>(null)
   return (
     <div ref={ref}>
@@ -111,7 +122,7 @@ function Lists({ lists, enter, still = false }: { lists: ReadonlyArray<ReadonlyA
         {lists.map((keys, i) => (
           <ol key={i}>
             {keys.map((key) => (
-              <li key={key} data-move={key}>
+              <li key={key} data-move={key} {...(seen.includes(key) ? { 'data-move-seen': '' } : {})}>
                 {key}
               </li>
             ))}
@@ -215,6 +226,31 @@ describe('ListMotion', () => {
     trip.finish()
     expect(b.style.visibility).toBe('')
     expect(twin.isConnected).toBe(false)
+  })
+
+  it('carries nothing to where an item has come before: it is drawn there, once the lists change again', () => {
+    const { rerender } = render(<Lists lists={[['a', 'b'], ['c']]} />)
+    // b changes lists: it travels there, the first time.
+    rerender(<Lists lists={[['a'], ['b', 'c']]} />)
+    expect(layer()!.children).toHaveLength(1)
+    of(item('b')).forEach((one) => one.finish())
+    for (const one of [...layer()!.children]) of(one).forEach((trip) => trip.finish())
+    played = []
+    // It leaves and comes back, now seen there: no copy travels, and it doesn't come in.
+    rerender(<Lists lists={[['a', 'b'], ['c']]} />)
+    played = []
+    rerender(<Lists lists={[['a'], ['b', 'c']]} seen={['b']} />)
+    expect(layer()?.children.length ?? 0).toBe(0)
+    expect(item('b').style.visibility).toBe('')
+    expect(of(item('b'))).toEqual([])
+  })
+
+  it('brings no item in again that has come before, and still slides it where its place changes', () => {
+    const { rerender } = render(<Lists lists={[['a', 'b']]} seen={['c']} />)
+    rerender(<Lists lists={[['a', 'b', 'c']]} seen={['c']} />)
+    expect(of(item('c'))).toEqual([])
+    rerender(<Lists lists={[['c', 'a', 'b']]} seen={['c']} />)
+    expect(of(item('c'))[0]!.keyframes).toEqual([{ translate: '0px 100px' }, { translate: '0px 0px' }])
   })
 
   it('brings a new item in, rising, or growing where the list says', () => {

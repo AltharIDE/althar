@@ -55,7 +55,7 @@ export const reconnectsWords = (held: HeldForConnection, at: (iso: string) => st
  * What work waiting for a free agent waits for (ADR-032): every agent this
  * computer runs at once is busy, its own task's left out. More busy than
  * that, by what the person started or after they lowered the number, says
- * how many more.
+ * how many are busy and how many run at a time.
  */
 export const queuedWords = (queued: Queued, where: string = device.this) => `Waiting: ${busyWords(queued, where)}`
 
@@ -75,7 +75,7 @@ export const upNextWords = (place: number) => `${place === 1 ? 'First' : ordinal
 
 /** How busy this computer's agents are, as work that waits for one says it. */
 export const busyWords = ({ busy, atOnce }: Queued, where: string = device.this) =>
-  `${Math.min(busy, atOnce)} of ${atOnce} agents busy on ${where}${busy > atOnce ? `, and ${busy - atOnce} more` : ''}`
+  busy > atOnce ? `${busy} agents busy on ${where}, ${atOnce} at a time` : `${busy} of ${atOnce} agents busy on ${where}`
 
 /**
  * The same, short, for a project's tasks on the home, which is this
@@ -83,7 +83,7 @@ export const busyWords = ({ busy, atOnce }: Queued, where: string = device.this)
  * project's name.
  */
 export const queuedOfWords = (n: number, { busy, atOnce }: Queued) =>
-  `${n === 1 ? 'Waiting' : `${n} waiting`}: ${Math.min(busy, atOnce)} of ${atOnce} agents busy${busy > atOnce ? `, and ${busy - atOnce} more` : ''}`
+  `${n === 1 ? 'Waiting' : `${n} waiting`}: ${busy > atOnce ? `${busy} agents busy, ${atOnce} at a time` : `${busy} of ${atOnce} agents busy`}`
 
 /** What an agent signs in to in the browser, as the window names it: the plan, and the site that asks. */
 const SIGN_IN: Readonly<Record<string, { readonly plan: string; readonly host: string }>> = {

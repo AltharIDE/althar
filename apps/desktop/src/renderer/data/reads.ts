@@ -60,6 +60,12 @@ export const keys = {
   output: (threadId: string, itemId: string) => ['output', threadId, itemId] as const,
   /** A document an agent wrote, as it was after the thread's last call that touched it (`version`). */
   document: (threadId: string, path: string, version: string) => ['document', threadId, path, version] as const,
+  /** A project's canvases (ADR-104), each with its latest version. */
+  canvases: (projectId: string) => ['canvases', projectId] as const,
+  /** One canvas whole: its versions and comments, read again as it changes. */
+  canvas: (canvasId: string) => ['canvas', canvasId] as const,
+  /** A version's words, which never change. */
+  canvasText: (canvasId: string, version: number) => ['canvasText', canvasId, version] as const,
 }
 
 /**
@@ -196,6 +202,16 @@ export const reads = (client: Client) => ({
     queryOptions({
       queryKey: keys.document(threadId, path, version),
       queryFn: () => client.readDocument(threadId, path),
+      gcTime: 5 * 60_000,
+    }),
+  canvases: (projectId: string) => queryOptions({ queryKey: keys.canvases(projectId), queryFn: () => client.listCanvases(projectId) }),
+  canvas: (canvasId: string) => queryOptions({ queryKey: keys.canvas(canvasId), queryFn: () => client.getCanvas(canvasId) }),
+  canvasText: (canvasId: string, version: number) =>
+    queryOptions({
+      queryKey: keys.canvasText(canvasId, version),
+      queryFn: () => client.readCanvasText(canvasId, version),
+      // A version never changes.
+      staleTime: Number.POSITIVE_INFINITY,
       gcTime: 5 * 60_000,
     }),
 })

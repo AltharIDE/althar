@@ -1,3 +1,4 @@
+import { plainTitle } from '@althar/contracts'
 import type { LiveEvent } from '@althar/runtime'
 
 /*
@@ -38,6 +39,8 @@ export const printer = (threadId: string): Printer => {
       case 'SessionEnded':
         return line(`● The session ended: ${event.state}.`)
       case 'TurnStarted':
+      // What the person said is theirs already, on their own screen.
+      case 'PersonSaid':
       // The agent's own events already stream the message here; a command's output is the window's to show.
       case 'Streaming':
       case 'Output':
@@ -81,11 +84,11 @@ export const printer = (threadId: string): Printer => {
             return '\n· thinking'
           case 'ToolCall':
             tools.set(agent.toolCallId, agent.title)
-            return line(`→ ${agent.title}`)
+            return line(`→ ${plainTitle(agent.title)}`)
           case 'ToolCallUpdate': {
             if (agent.title !== undefined) tools.set(agent.toolCallId, agent.title)
             if (agent.status !== 'completed' && agent.status !== 'failed') return ''
-            return line(`  ${agent.status === 'completed' ? '✓' : '✗'} ${tools.get(agent.toolCallId) ?? ''}`.trimEnd())
+            return line(`  ${agent.status === 'completed' ? '✓' : '✗'} ${plainTitle(tools.get(agent.toolCallId) ?? '')}`.trimEnd())
           }
           case 'Plan':
             return line(

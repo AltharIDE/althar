@@ -30,6 +30,8 @@ import { text } from './text'
 const worded = (key: DefaultKey, value: unknown): string => {
   if (typeof value === 'boolean') return value ? text.on : text.off
   if (key === 'end') return newProjectDefaultsText.end.options[value as NewProjectDefaultsValue['end']].label
+  if (key === 'afterMergeReview')
+    return newProjectDefaultsText.afterMergeReview.options[value as NewProjectDefaultsValue['afterMergeReview']].label
   if (key === 'usageLimit') return newProjectDefaultsText.usageLimit.options[value as NewProjectDefaultsValue['usageLimit']].label
   return String(value)
 }
@@ -43,7 +45,8 @@ export function TasksSection() {
       {plans !== null && (
         <SettingPreviews>
           <PlanPreview countdown={plans.value.countdown} sample={PLAN_PREVIEW_SAMPLE} />
-          <RoundsPreview rounds={plans.value.rounds} out={plans.value.roundsOut} facts={TASK_PREVIEW_SEAL} />
+          {/* A review and the one check of its fixes, whatever the old rounds setting kept: no fix is reviewed again in whole. */}
+          <RoundsPreview rounds={2} out={plans.value.roundsOut} facts={TASK_PREVIEW_SEAL} />
         </SettingPreviews>
       )}
       {plans !== null && (
