@@ -103,6 +103,10 @@ describe('authenticated service calls', () => {
         (yield* prepareApi('github', 'https://github.test/api/v3', { query: 'query { viewer { id } }' })).url,
         'https://github.test/api/graphql',
       )
+      assert.strictEqual(
+        (yield* prepareApi('github', `https://github.test/api/v3${'/'.repeat(20000)}`, { path: '/user' })).url,
+        'https://github.test/api/v3/user',
+      )
     }),
   )
 

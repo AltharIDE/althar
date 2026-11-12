@@ -53,12 +53,17 @@ const hasControl = (text: string) => {
   for (let at = 0; at < text.length; at++) if (text.charCodeAt(at) < 32) return true
   return false
 }
+const rootOf = (value: string) => {
+  let end = value.length
+  while (end > 0 && value[end - 1] === '/') end--
+  return new URL(`${value.slice(0, end)}/`)
+}
 
 /** Parse before authorization: GraphQL POST is a read only when its sole operation is a query. */
 export const prepareApi = (product: Product, apiRoot: string, request: ApiRequest): Effect.Effect<ApiPlan, ConnectorFailed> =>
   Effect.try({
     try: () => {
-      const root = new URL(`${apiRoot.replace(/\/+$/, '')}/`)
+      const root = rootOf(apiRoot)
       if (root.protocol !== 'https:' && root.hostname !== 'localhost' && root.hostname !== '127.0.0.1')
         throw new Error('An API connection must use HTTPS.')
       if (request.query !== undefined) {
@@ -173,7 +178,7 @@ export const makeServiceApi = (product: Product, options: AdapterOptions): Servi
         }
         const linked = /<([^>]+)>;\s*rel="next"/.exec(response.headers.get('link') ?? '')?.[1]
         const next = linked === undefined ? null : new URL(linked, plan.url)
-        const root = new URL(`${options.apiUrl.replace(/\/+$/, '')}/`)
+        const root = rootOf(options.apiUrl)
         return {
           status: response.status,
           body: response.body,

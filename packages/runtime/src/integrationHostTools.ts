@@ -1,4 +1,4 @@
-import type { ApiRequest } from '@althar/connectors'
+import type { ApiRequest, Product, ServiceApi } from '@althar/connectors'
 import { Effect, Schema } from 'effect'
 import { SqlClient } from 'effect/sql'
 
@@ -81,6 +81,49 @@ const pullAt = (projectId: string, wanted: string | number) =>
     return { host: found.host, api: found.api, repository, change, base }
   })
 
+/** These hosts replace the reviewer list, so add to the people already requested. */
+export const reviewerRequest = (
+  product: Product,
+  api: ServiceApi,
+  base: string,
+  reviewers: ReadonlyArray<string>,
+  teams: ReadonlyArray<string>,
+): Effect.Effect<ApiRequest, unknown> =>
+  Effect.gen(function* () {
+    if (product === 'github') return { method: 'POST', path: `${base}/requested_reviewers`, body: { reviewers, team_reviewers: teams } }
+    if (product === 'gitlab' && reviewers.some((one) => !/^\d+$/.test(one)))
+      return yield* refused('GitLab reviewers are numeric user IDs; read /users with code_host_api to resolve names.')
+    const now = yield* api.request({ path: base })
+    if (product === 'gitlab') {
+      const current = yield* decode(Schema.Struct({ reviewers: Schema.Array(Schema.Struct({ id: Schema.Number })) }), now.body)
+      return {
+        method: 'PUT',
+        path: base,
+        body: { reviewer_ids: [...new Set([...current.reviewers.map((one) => one.id), ...reviewers.map(Number)])] },
+      }
+    }
+    if (product === 'bitbucket_cloud') {
+      const current = yield* decode(Schema.Struct({ reviewers: Schema.Array(Schema.Struct({ uuid: Schema.String })) }), now.body)
+      return {
+        method: 'PUT',
+        path: base,
+        body: { reviewers: [...new Set([...current.reviewers.map((one) => one.uuid), ...reviewers])].map((uuid) => ({ uuid })) },
+      }
+    }
+    const current = yield* decode(
+      Schema.Struct({ version: Schema.Number, reviewers: Schema.Array(Schema.Struct({ user: Schema.Struct({ name: Schema.String }) })) }),
+      now.body,
+    )
+    return {
+      method: 'PUT',
+      path: base,
+      body: {
+        version: current.version,
+        reviewers: [...new Set([...current.reviewers.map((one) => one.user.name), ...reviewers])].map((name) => ({ user: { name } })),
+      },
+    }
+  })
+
 export const hostIntegrationTools = (tool: IntegrationTool): ReadonlyArray<Tool> => [
   tool(
     'search_pull_requests',
@@ -148,28 +191,7 @@ export const hostIntegrationTools = (tool: IntegrationTool): ReadonlyArray<Tool>
         const found = yield* pullAt(access.projectId, asked.pull_request)
         if (found.host.product !== 'github' && (asked.teams?.length ?? 0) > 0)
           return yield* refused('Team review requests are supported on GitHub; name individual reviewers on this host.')
-        let request: ApiRequest
-        if (found.host.product === 'github')
-          request = {
-            method: 'POST',
-            path: `${found.base}/requested_reviewers`,
-            body: { reviewers: asked.reviewers ?? [], team_reviewers: asked.teams ?? [] },
-          }
-        else if (found.host.product === 'gitlab') {
-          if ((asked.teams?.length ?? 0) > 0 || (asked.reviewers ?? []).some((one) => !/^\d+$/.test(one)))
-            return yield* refused('GitLab reviewers are numeric user IDs; read /users with code_host_api to resolve names.')
-          request = { method: 'PUT', path: found.base, body: { reviewer_ids: (asked.reviewers ?? []).map(Number) } }
-        } else if (found.host.product === 'bitbucket_cloud')
-          request = { method: 'PUT', path: found.base, body: { reviewers: (asked.reviewers ?? []).map((uuid) => ({ uuid })) } }
-        else {
-          const now = yield* found.api.request({ path: found.base })
-          const { version } = yield* decode(Schema.Struct({ version: Schema.Number }), now.body)
-          request = {
-            method: 'PUT',
-            path: found.base,
-            body: { version, reviewers: (asked.reviewers ?? []).map((name) => ({ user: { name } })) },
-          }
-        }
+        const request = yield* reviewerRequest(found.host.product, found.api, found.base, asked.reviewers ?? [], asked.teams ?? [])
         return yield* write(
           'request_pull_request_reviewers',
           access,
