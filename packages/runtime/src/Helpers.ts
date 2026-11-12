@@ -505,15 +505,26 @@ export class Helpers extends Context.Service<
         ),
       )
 
+      // The helpers at work as Althar started: those a restart left behind. Read now, before the delay below, so a helper
+      // started since — its row in, its session still starting — isn't taken for one a restart left, and failed for it.
+      const leftBehind = yield* SqlClient.SqlClient.pipe(
+        Effect.flatMap(
+          (sql) => sql<HelperRow & { taskId: string }>`
+            SELECT id, name, thread_id, agent_id, model, state, task_id FROM helpers WHERE state = 'working'`,
+        ),
+        Effect.orDie,
+      )
+
       /**
        * After a restart, a helper that was at work carries on: its agent started again on its thread, told to go on from where
        * it stands. One that can't start is its lead's to hear of, as a failure.
        */
       const carryOn = Effect.gen(function* () {
         const sql = yield* SqlClient.SqlClient
-        const working = yield* sql<HelperRow & { taskId: string }>`
-          SELECT id, name, thread_id, agent_id, model, state, task_id FROM helpers WHERE state = 'working'`
-        for (const helper of working) {
+        for (const helper of leftBehind) {
+          // Stopped or ended since Althar started: nothing left to carry on.
+          const [still] = yield* sql<{ state: string }>`SELECT state FROM helpers WHERE id = ${helper.id}`
+          if (still?.state !== 'working') continue
           if (Option.isSome(yield* sessions.running(helper.threadId))) continue
           const started = yield* sessions.startLast(helper.threadId).pipe(Effect.orElseSucceed(() => false))
           if (!started) {
