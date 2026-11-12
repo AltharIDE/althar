@@ -275,9 +275,17 @@
 }
 
 .notSent {
-  margin: 0 0 6px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 0 0 6px -4px;
+  padding: 2px 3px 2px 10px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--danger) 8%, transparent);
+  font-size: 12.5px;
+  line-height: 1.4;
   color: var(--danger);
-  font-weight: 500;
 }
 
 .imageNote:empty {

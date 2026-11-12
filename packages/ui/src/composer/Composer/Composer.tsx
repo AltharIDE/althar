@@ -135,6 +135,8 @@ export interface ComposerText {
   finishing: string
   /** Over the field, when sending waited for what was said and it couldn't be written down: nothing went. */
   notSent: string
+  /** Takes the not-sent line away. */
+  dismissNotSent: string
   /** The microphone while the speech model downloads. */
   dictateProgress: (percent: number) => string
   stopDictating: (elapsed: string) => string
@@ -181,6 +183,7 @@ export const composerText: ComposerText = {
   dictateBusy: 'Writing down what you said',
   finishing: 'Finishing the transcription',
   notSent: 'Not sent. The voice note couldn’t be written down.',
+  dismissNotSent: 'Dismiss',
   dictateProgress: (percent) => `Dictate, downloading ${percent}%`,
   stopDictating: (elapsed) => `Stop dictating, ${elapsed}`,
   chooseInput: 'Choose the microphone',
@@ -520,9 +523,10 @@ export function Composer({
         )}
         {dictation?.arrived && <p className={s.imageNote}>{t.dictatedAway}</p>}
         {notSent && (
-          <p className={cx(s.imageNote, s.notSent)} role="alert">
-            {t.notSent}
-          </p>
+          <div className={s.notSent} role="alert">
+            <span>{t.notSent}</span>
+            <IconButton icon="close" size="small" label={t.dismissNotSent} onClick={() => setNotSent(false)} />
+          </div>
         )}
         {/* what is attached grows in, and fades once taken off */}
         <ListMotion within={form} enter="grow">

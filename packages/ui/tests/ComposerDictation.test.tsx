@@ -186,6 +186,9 @@ describe('sending while dictating', () => {
     rerender(<Composer {...p} dictation={{ ...p.dictation, elapsed: null, busy: false, failed: {} }} />)
     expect(p.onSubmit).not.toHaveBeenCalled()
     expect(getByRole('alert').textContent).toContain('Not sent')
+    // It can be put away without dealing with the failure.
+    fireEvent.click(getByRole('button', { name: 'Dismiss' }))
+    expect(queryByRole('alert')).toBeNull()
     rerender(<Composer {...p} dictation={{ ...p.dictation, elapsed: null, failed: undefined }} />)
     expect(queryByRole('alert')).toBeNull()
   })
