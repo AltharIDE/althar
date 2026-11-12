@@ -129,6 +129,14 @@ export const ChangeRequest = Schema.Struct({
    */
   leftQueue: Schema.optional(Schema.NullOr(Schema.Literals(['checks', 'conflict', 'removed', 'merged', 'other']))),
   /**
+   * The merge-group commit whose checks the queue judged, identified from its
+   * entry, workflow runs or train pipeline (not the PR head). Null where it
+   * can't be found, or it never was in a queue. Read with `queue`.
+   */
+  queueSha: Schema.optional(Schema.NullOr(Schema.String)),
+  /** Why the host couldn't identify the queue build, where that lookup failed. */
+  queueError: Schema.optional(Schema.NullOr(Schema.String)),
+  /**
    * Whether the host is set to merge it by itself once its checks pass:
    * GitLab's auto-merge, a merge train's entry included, and Data Center's
    * (read with `queue`). Absent where the host doesn't say.
@@ -199,6 +207,65 @@ export const ListedChange = Schema.Struct({
   checks: Schema.NullOr(Schema.Literals(['passed', 'failed', 'running'])),
 })
 export type ListedChange = typeof ListedChange.Type
+
+/**
+ * Where one thing merging needs stands (DEV-204): met; unmet, for someone to
+ * do something; waiting, on someone already asked or something under way; or
+ * unknown, where the host doesn't say, never taken as met.
+ */
+export const NeedState = Schema.Literals(['met', 'unmet', 'waiting', 'unknown'])
+export type NeedState = typeof NeedState.Type
+
+/**
+ * What a host requires of a change before it merges, beside its checks, a
+ * conflict and a draft, which a change says already:
+ *
+ * - `approvals`: approving reviews, `have` of `need` (absent where the host
+ *   doesn't say how many), `who` approved, or, waiting, who is asked;
+ * - `code_owners`: a code owner's review, `who` it waits on;
+ * - `changes_requested`: none outstanding, else `who` asked for them;
+ * - `conversations`: every conversation resolved, `have` of `need` resolved;
+ * - `up_to_date`: has what its target has, `have` commits behind where not;
+ * - `signatures`: every commit signed, `have` not;
+ * - `linear_history`: merged as squash or rebase, no merge commit;
+ * - `merge_queue`: merges through its branch's queue, waiting once in it;
+ * - `other`: something else holds it back, in the host's words (`said`),
+ *   or, without them, a rule Althar can't read.
+ */
+export const HostNeedKind = Schema.Literals([
+  'approvals',
+  'code_owners',
+  'changes_requested',
+  'conversations',
+  'up_to_date',
+  'signatures',
+  'linear_history',
+  'merge_queue',
+  'other',
+])
+export type HostNeedKind = typeof HostNeedKind.Type
+
+export const HostNeed = Schema.Struct({
+  kind: HostNeedKind,
+  state: NeedState,
+  have: Schema.optional(Schema.Number),
+  need: Schema.optional(Schema.Number),
+  who: Schema.optional(Schema.Array(Schema.String)),
+  said: Schema.optional(Schema.String),
+})
+export type HostNeed = typeof HostNeed.Type
+
+/**
+ * What merging a change needs, as its host says now (DEV-204): which of its
+ * checks must pass, by name, `all` of them, or null where the host can't
+ * tell; and each of the rest, in order, one the branch doesn't require left
+ * out. Read with `mergeRules`, where a host has it.
+ */
+export const MergeRules = Schema.Struct({
+  requiredChecks: Schema.Union([Schema.Literal('all'), Schema.Array(Schema.String), Schema.Null]),
+  needs: Schema.Array(HostNeed),
+})
+export type MergeRules = typeof MergeRules.Type
 
 /** A list of changes, newest change first, and whether the host has more than it holds. */
 export interface ChangeList {
@@ -355,10 +422,15 @@ export interface PictureUpload {
   readonly mediaType: string
 }
 
-/** What `editChange` sets on a change: its title, its description, or both. */
+/**
+ * What `editChange` sets on a change: its title, its description, the branch
+ * it goes into (as a stacked change's does once the one below merges), or any
+ * of them.
+ */
 export interface ChangeEdit {
   readonly title?: string
   readonly body?: string
+  readonly base?: string
 }
 
 /** How git pushes to a repository: its URL, and the header that signs the push in. */
@@ -419,10 +491,11 @@ export interface CodeHost extends HostReleases {
   ): Effect.Effect<ChangeRequest, ConnectorFailed>
   /**
    * A change as the host has it now. With `queue`, whether an open one is in
-   * its target branch's merge queue too, and why the queue last took it out,
-   * however it got there: asked only where that branch has a queue, as the
-   * host learns once a while per branch, so one without costs nothing more.
-   * Absent where the branch has none, or the host couldn't say.
+   * its target branch's merge queue too, why the queue last took it out, and
+   * the merge-group commit it judged, however it got there: asked only where
+   * that branch has a queue, as the host learns once a while per branch, so
+   * one without costs nothing more. Absent where the branch has none, or the
+   * host couldn't say.
    */
   change(repository: Repository, number: number, ask?: { readonly queue?: boolean }): Effect.Effect<ChangeRequest, ConnectorFailed>
   /**
@@ -432,6 +505,14 @@ export interface CodeHost extends HostReleases {
    * connection lacks one; as `rejected` (`noListing`) where the host can't.
    */
   listChanges(repository: Repository, query: ChangeQuery): Effect.Effect<ChangeList, ConnectorFailed>
+  /**
+   * What merging an open change needs on the host now, each as it stands
+   * (DEV-204): its approvals and from whom, changes asked for, conversations,
+   * being up to date, signatures and the like, as far as the host says, and
+   * which checks must pass. What the host can't tell is `unknown`. Read-only;
+   * a few calls, the branch's rules kept a while.
+   */
+  mergeRules?(repository: Repository, change: ChangeRequest): Effect.Effect<MergeRules, ConnectorFailed>
   /**
    * The repository's open changes, for following them: each one's number,
    * head and whether it comes from a fork, without caring for the rest.
@@ -525,7 +606,8 @@ export interface CodeHost extends HostReleases {
     change: ChangeRequest,
     ask: { readonly expectedHead: string },
   ): Effect.Effect<BranchUpdate, ConnectorFailed>
-  checks(repository: Repository, sha: string): Effect.Effect<ReadonlyArray<Check>, ConnectorFailed>
+  /** With strict, don't hide a denied check-run listing behind commit statuses alone (queue diagnosis needs every job). */
+  checks(repository: Repository, sha: string, ask?: { readonly strict?: boolean }): Effect.Effect<ReadonlyArray<Check>, ConnectorFailed>
   /**
    * The end of a check's log, or with `whole` all of it. Null for a check the
    * host keeps no log of, such as one another CI service reported; one it

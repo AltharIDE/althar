@@ -4,7 +4,7 @@ import { Effect, Layer, Option } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { Coordinator } from '../src/Coordinator'
-import { CACHE_LIFE, dueForLeadHandover, LEAD_BREAK_TOKENS, LEAD_HANDOVER_TOKENS, shrinks } from '../src/handover'
+import { dueForLeadHandover, LEAD_HANDOVER_TOKENS, shrinks } from '../src/handover'
 import { Plans } from '../src/Plans'
 import { Projects } from '../src/Projects'
 import { Queries } from '../src/Queries'
@@ -14,9 +14,12 @@ import { notices, repository, runtime, until } from './support'
 
 /*
  * Althar hands a task's lead to a fresh session, briefed from the task,
- * before its context grows large (ADR-038): past 200,000 tokens, or 80% of
- * its window, at any turn; past 80,000 at a break in its work. Never in a
- * turn, and never while something it left running still runs. The fake
+ * only once its context is full (a task is a conversation plus parts, "A
+ * lead's session lasts until it's full"): past 200,000 tokens, or 80% of
+ * its window, whichever comes first. A break in its work (a step done, the
+ * task made a change, a pause past its prompt cache's life) hands nothing
+ * over, at any size. Never in a turn, and never while something it left
+ * running still runs. The fake
  * agent says its context is as full as a message ending `[context:25/1000000]`
  * says: a quarter of a million-token window.
  */
@@ -114,19 +117,18 @@ const titles = (threadId: string) => Effect.map(notices(threadId), (said) => sai
 const AFRESH = 'Started Fake codex afresh.'
 
 describe('when to hand a lead over', () => {
-  it('past its mark at any turn, or 80% of a smaller window; past a lower one at a break', () => {
+  it('past its mark, or 80% of a smaller window, whichever comes first, and at no other size', () => {
     assert.strictEqual(LEAD_HANDOVER_TOKENS, 200_000)
-    assert.strictEqual(LEAD_BREAK_TOKENS, 80_000)
-    assert.strictEqual(CACHE_LIFE, 300_000)
-    assert.isFalse(dueForLeadHandover(null, true))
-    assert.isFalse(dueForLeadHandover({ used: 199_999, size: 1_000_000 }, false))
-    assert.isTrue(dueForLeadHandover({ used: 200_000, size: 1_000_000 }, false))
+    assert.isFalse(dueForLeadHandover(null))
+    assert.isFalse(dueForLeadHandover({ used: 199_999, size: 1_000_000 }))
+    assert.isTrue(dueForLeadHandover({ used: 200_000, size: 1_000_000 }))
     // A 200,000-token window fills to 80% first.
-    assert.isTrue(dueForLeadHandover({ used: 160_000, size: 200_000 }, false))
-    assert.isFalse(dueForLeadHandover({ used: 100_000, size: 1_000_000 }, false))
-    assert.isFalse(dueForLeadHandover({ used: 79_999, size: 1_000_000 }, true))
-    assert.isTrue(dueForLeadHandover({ used: 80_000, size: 1_000_000 }, true))
-    assert.isFalse(dueForLeadHandover({ used: 500_000, size: 0 }, true))
+    assert.isFalse(dueForLeadHandover({ used: 159_999, size: 200_000 }))
+    assert.isTrue(dueForLeadHandover({ used: 160_000, size: 200_000 }))
+    // What a break once handed over, past 80,000, now carries on.
+    assert.isFalse(dueForLeadHandover({ used: 100_000, size: 1_000_000 }))
+    // An agent that hasn't said its window's size is never due.
+    assert.isFalse(dueForLeadHandover({ used: 500_000, size: 0 }))
   })
 
   it('only where its brief is well under the context it replaces', () => {
@@ -164,7 +166,7 @@ describe('handing a lead to a fresh session', () => {
     }).pipe(Effect.provide(withQueries())),
   )
 
-  it.live('hands one over at a break past the lower mark, and not between turns of the same work', () =>
+  it.live('carries the conversation on across a break, at any size under its mark', () =>
     Effect.gen(function* () {
       const projectId = yield* opened
       const task = yield* started(projectId, 'Do it. [lead:finish]')
@@ -176,18 +178,18 @@ describe('handing a lead to a fresh session', () => {
       yield* answered(task.threadId, 3)
       assert.lengthOf(yield* sessionsOn(task.threadId), 1)
 
-      // The same, ending a round of work that changed it with finish_step: a break, and the next turn starts afresh.
+      // The same, ending a round of work that changed it with finish_step: a break, which once started the next turn afresh.
+      // Now the conversation carries on, with all the lead knows of the work.
       yield* say(task.threadId, 'Finish it. [lead:edit] [lead:finish] [context:10/1000000]')
       yield* answered(task.threadId, 4)
-      // Once it is done, as the person reads its answer before writing again: while it still seems at work, as when what it
-      // said last in its turn is heard after the turn, its next turn is the same session's, and the break is the next one's.
       yield* until(
         Effect.flatMap(Sessions, (sessions) => sessions.busy(task.threadId)),
         (busy) => !busy,
       )
       yield* say(task.threadId, 'What next?')
-      yield* until(sessionsOn(task.threadId), (all) => all.length === 2 && all[1]?.state === 'active')
-      assert.include(yield* titles(task.threadId), AFRESH)
+      yield* answered(task.threadId, 5)
+      assert.lengthOf(yield* sessionsOn(task.threadId), 1)
+      assert.notInclude(yield* titles(task.threadId), AFRESH)
     }).pipe(Effect.provide(withQueries())),
   )
 

@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { expect, test } from '@playwright/test'
 
 import { repository } from '../tests/repository'
-import { launch, openFirstProject, startTask, still } from './support'
+import { launch, openFirstProject, say, startTask, still } from './support'
 
 /*
  * A lead that says it is waiting on the person's answers, as the person
@@ -45,6 +45,34 @@ test('waits on the home and in its thread with the lead’s question, not as don
     await expect(page.getByRole('button', { name: 'Send the answer' })).toBeVisible()
     await still(page)
     await page.screenshot({ path: 'test-results/waiting-for-person-thread-full.png', scale: 'css' })
+  } finally {
+    await electronApp.close()
+  }
+})
+
+test('closes the lead’s Waiting on you card when the person answers in the composer instead of on the card', async () => {
+  const home = mkdtempSync(join(tmpdir(), 'althar-e2e-'))
+  const repo = repository(home)
+  const { electronApp, page } = await launch(home)
+  try {
+    await openFirstProject(electronApp, page, repo)
+    await startTask(page, 'Compact the ADRs', '[lead:wait-for-person]')
+    await page.getByRole('navigation', { name: 'Projects' }).getByRole('button', { name: /^Home/ }).click()
+    const needs = page.getByRole('region', { name: /needs? you/ })
+    const card = needs.getByRole('article').filter({ hasText: 'Compact the ADRs' })
+    await expect(card.getByText('Waiting on you', { exact: true })).toBeVisible()
+    await card.getByRole('button', { name: 'Open' }).click()
+    await expect(page.getByRole('button', { name: 'Answer the lead' })).toBeVisible()
+
+    // The person answers in the task's composer, not with the card's button.
+    await say(page, 'Keep the dozen current-state decisions.')
+    await expect(page.getByRole('button', { name: 'Answer the lead' })).toHaveCount(0)
+    await expect(page.getByText('Waiting on you', { exact: true }).locator('visible=true')).toHaveCount(0)
+
+    // And on the home, Needs you no longer lists it as waiting on them.
+    await page.getByRole('navigation', { name: 'Projects' }).getByRole('button', { name: /^Home/ }).click()
+    await expect(card.getByText('Waiting on you', { exact: true })).toHaveCount(0)
+    await still(page)
   } finally {
     await electronApp.close()
   }

@@ -5,6 +5,7 @@ import { type AdapterOptions, authorizationOf } from './credential'
 import { updateInCopy } from './branchUpdate'
 import { ConnectorFailed } from './errors'
 import { tail } from './github'
+import { CloudParticipants, CloudRestrictions, cloudRulesOf } from './bitbucketRules'
 import { makeHttp } from './http'
 import { makeBitbucketCloudReleases } from './bitbucketCloudReleases'
 import type {
@@ -595,6 +596,20 @@ export const makeBitbucketCloud = (options: AdapterOptions): CodeHost => {
       }),
     listChanges,
     allowance: () => http.allowance(),
+    mergeRules: (repository, change) =>
+      Effect.gen(function* () {
+        // Branch restrictions only an admin may list: for anyone else, what they require stays unknown.
+        const [now, restrictions] = yield* Effect.all(
+          [
+            http.cached(CloudParticipants, pull(repository, change.number)),
+            http
+              .cached(CloudRestrictions, `${repo(repository.path)}/branch-restrictions?pagelen=100`)
+              .pipe(Effect.orElseSucceed(() => null)),
+          ],
+          { concurrency: 'unbounded' },
+        )
+        return cloudRulesOf({ target: change.target, pull: now, restrictions })
+      }),
     change: (repository, number, ask) =>
       Effect.gen(function* () {
         const answer = yield* http.cached(PullAnswer, pull(repository, number))
@@ -684,6 +699,7 @@ export const makeBitbucketCloud = (options: AdapterOptions): CodeHost => {
           reviewers: (now.reviewers ?? []).flatMap((reviewer) => (reviewer.uuid === undefined ? [] : [{ uuid: reviewer.uuid }])),
           ...(now.close_source_branch === undefined ? {} : { close_source_branch: now.close_source_branch }),
           ...(now.draft === undefined ? {} : { draft: now.draft }),
+          ...(edit.base === undefined ? {} : { destination: { branch: { name: edit.base } } }),
         })
         return changeOf(repository, edited)
       }),

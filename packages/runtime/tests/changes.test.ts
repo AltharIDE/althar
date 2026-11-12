@@ -1,6 +1,7 @@
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
+import { ConnectorFailed } from '@althar/connectors'
 import { makeFakeService } from '@althar/connectors/testing'
 import { BUILT, BUILT_FIXED, BUILT_SETTLED, DESCRIBED } from '@althar/provider-adapters/testing'
 import type { ProjectId } from '@althar/domain'
@@ -164,30 +165,27 @@ describe('a task that ends in a pull request', () => {
     }).pipe(Effect.provide(runtimeWith({ github })))
   })
 
-  it.live(
-    'opens its draft after the last round of review with fixes no review read, and says so in the description and not in the seal',
-    () => {
-      const { working, bare } = hosted()
-      const github = makeFakeService({ pushUrl: () => bare, headOf: tipOf(bare) })
-      github.addRepository(['meridian', 'api'])
-      git(working, 'config', 'user.name', 'Fake')
-      git(working, 'config', 'user.email', 'fake@althar.test')
-      return Effect.gen(function* () {
-        yield* setPlansAndReviews({ rounds: 1 })
-        yield* connect('github', HOST)
-        const projectId = yield* ask(working, 'Add a retry. [coordinator:plan] [lead:finish] [lead:edit] [review:always]')
-        const [ready] = yield* until(cards(projectId), (all) => all[0]?.phase === 'ready')
-        assert.strictEqual(ready?.change?.state, 'open')
-        const sql = yield* SqlClient.SqlClient
-        assert.lengthOf(yield* sql`SELECT id FROM attention_requests WHERE kind = 'stuck'`, 0)
-        const body = github.changes[0]?.body ?? ''
-        // Said at the head, plainly; no seal claims a pass read the change; the fold says it too.
-        assert.notInclude(body, '<picture>')
-        assert.match(body, /^> \*\*Reviewed once; the last fixes weren’t reviewed\.\*\*/)
-        assert.include(body, '<summary>Reviewed by Small in 1 pass; the last fixes weren’t reviewed</summary>')
-      }).pipe(Effect.provide(runtimeWith({ github })))
-    },
-  )
+  it.live('opens its draft after the check with a second fix no review read, and says so in the description and not in the seal', () => {
+    const { working, bare } = hosted()
+    const github = makeFakeService({ pushUrl: () => bare, headOf: tipOf(bare) })
+    github.addRepository(['meridian', 'api'])
+    git(working, 'config', 'user.name', 'Fake')
+    git(working, 'config', 'user.email', 'fake@althar.test')
+    return Effect.gen(function* () {
+      yield* connect('github', HOST)
+      // Its reviewer finds something every time: the check of the fix reopens it, and the lead's second fix is read by none.
+      const projectId = yield* ask(working, 'Add a retry. [coordinator:plan] [lead:finish] [lead:edit] [review:always]')
+      const [ready] = yield* until(cards(projectId), (all) => all[0]?.phase === 'ready')
+      assert.strictEqual(ready?.change?.state, 'open')
+      const sql = yield* SqlClient.SqlClient
+      assert.lengthOf(yield* sql`SELECT id FROM attention_requests WHERE kind = 'stuck'`, 0)
+      const body = github.changes[0]?.body ?? ''
+      // Said at the head, plainly; no seal claims a pass read the change; the fold says it too.
+      assert.notInclude(body, '<picture>')
+      assert.match(body, /^> \*\*Reviewed twice; the last fixes weren’t reviewed\.\*\*/)
+      assert.include(body, '<summary>Reviewed by Small in 2 passes; the last fixes weren’t reviewed</summary>')
+    }).pipe(Effect.provide(runtimeWith({ github })))
+  })
 
   it.live('says the last fixes were not reviewed in its description even with the review left out of it', () => {
     const { working, bare } = hosted()
@@ -561,6 +559,95 @@ describe('a task that ends in a pull request', () => {
       }).pipe(Effect.provide(runtimeWith({ github }, ':memory:', Duration.minutes(1))))
     },
   )
+
+  it.live('reports a sendback’s merge-group jobs with their log tails, links, unreadable reasons and the default branch', () => {
+    const { working, bare } = hosted()
+    const github = makeFakeService({
+      pushUrl: () => bare,
+      checksOn: (sha) =>
+        sha === 'group-sha'
+          ? [
+              { name: 'test', state: 'failed', log: 'FAIL limit.test.ts\n boom', url: 'https://example.com/jobs/1' },
+              {
+                name: 'verify',
+                state: 'failed',
+                log: new ConnectorFailed({
+                  product: 'github',
+                  reason: 'forbidden',
+                  status: 403,
+                  message: 'Resource not accessible by integration',
+                }),
+                url: 'https://example.com/jobs/2',
+              },
+            ]
+          : sha === 'main-0' || sha === 'main'
+            ? [{ name: 'test', state: 'passed' }]
+            : undefined,
+    })
+    github.addRepository(['meridian', 'api'])
+    github.mergeQueue()
+    return Effect.gen(function* () {
+      yield* connect('github', HOST)
+      const projectId = yield* ask(working, 'Add a retry. [coordinator:plan-no-review] [coordinator:plan] [lead:finish] [lead:edit]')
+      const [ready] = yield* until(cards(projectId), (all) => all[0]?.phase === 'ready')
+      const taskId = ready?.taskId ?? ''
+      const number = ready?.change?.number ?? 0
+      const changes = yield* Changes
+      yield* changes.merge(taskId, ready?.change?.head ?? '')
+      // The queue takes it out, its checks failed there: its thread names the job, shows its log tail and page, and how main stands.
+      github.queueCommit(number, 'group-sha')
+      github.dequeue(number, 'checks')
+      yield* changes.refresh(taskId)
+      const heard = yield* until(notices(ready?.threadId ?? ''), (all) =>
+        all.some((notice) => notice['title'] === 'The merge queue took PR #1 out: its checks failed.'),
+      )
+      const taken = heard.find((notice) => notice['title'] === 'The merge queue took PR #1 out: its checks failed.')
+      const text = taken?.['description'] ?? ''
+      assert.isDefined(taken)
+      assert.include(text, 'Failed on the queue build (group-s): test, verify.')
+      assert.include(text, 'FAIL limit.test.ts')
+      assert.include(text, 'https://example.com/jobs/1')
+      assert.include(text, "Althar couldn't read verify's log: GitHub refused (403)")
+      assert.include(text, 'https://example.com/jobs/2')
+      assert.include(text, 'test passes on main (main-0).')
+      assert.include(text, 'read_checks (queue: true)')
+    }).pipe(Effect.provide(runtimeWith({ github }, ':memory:', Duration.minutes(1))))
+  })
+
+  it.live('reports a sendback that fails on the default branch too, where its only job fails', () => {
+    const { working, bare } = hosted()
+    const github = makeFakeService({
+      pushUrl: () => bare,
+      checksOn: (sha) =>
+        sha === 'group-sha'
+          ? [{ name: 'test', state: 'failed', log: 'boom', url: 'https://example.com/jobs/9' }]
+          : sha === 'main-0' || sha === 'main'
+            ? [{ name: 'test', state: 'failed', log: 'boom there too' }]
+            : undefined,
+    })
+    github.addRepository(['meridian', 'api'])
+    github.mergeQueue()
+    return Effect.gen(function* () {
+      yield* connect('github', HOST)
+      const projectId = yield* ask(working, 'Add a retry. [coordinator:plan-no-review] [coordinator:plan] [lead:finish] [lead:edit]')
+      const [ready] = yield* until(cards(projectId), (all) => all[0]?.phase === 'ready')
+      const taskId = ready?.taskId ?? ''
+      const number = ready?.change?.number ?? 0
+      const changes = yield* Changes
+      yield* changes.merge(taskId, ready?.change?.head ?? '')
+      github.queueCommit(number, 'group-sha')
+      github.dequeue(number, 'checks')
+      yield* changes.refresh(taskId)
+      const heard = yield* until(notices(ready?.threadId ?? ''), (all) =>
+        all.some((notice) => notice['title'] === 'The merge queue took PR #1 out: its checks failed.'),
+      )
+      const taken = heard.find((notice) => notice['title'] === 'The merge queue took PR #1 out: its checks failed.')
+      const text = taken?.['description'] ?? ''
+      assert.isDefined(taken)
+      assert.include(text, 'Failed on the queue build (group-s): test.')
+      assert.include(text, 'The same jobs also fail on main (main-0): test. Their failure causes may differ.')
+    }).pipe(Effect.provide(runtimeWith({ github }, ':memory:', Duration.minutes(1))))
+  })
 
   it.live(
     'hears a pull request put in its merge queue outside Althar, keeps Accept and merge from merging it again, and settles it once merged',

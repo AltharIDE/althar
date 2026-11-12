@@ -153,6 +153,19 @@ describe('a thread as blocks', () => {
     expect(stopped?.kind === 'turn' && stopped.parts[1]).toMatchObject({ verb: 'Read', state: ToolState.Cancelled })
   })
 
+  it('says one of Althar’s own tools in plain words, never by its raw name', () => {
+    const call = (status: string, title = 'mcp__althar__propose_plan') => items.tool({ title, toolKind: 'other', status })
+    const part = (status: string, running: boolean, title?: string) => {
+      const [turn] = blocksOf(source([call(status, title)], running), new Map(), at)
+      return turn?.kind === 'turn' ? turn.parts[0] : undefined
+    }
+    // OpenCode names them althar_<tool>.
+    expect(part('completed', false, 'althar_propose_plan')).toMatchObject({ verb: 'Planned', target: 'the task' })
+    expect(part('in_progress', true)).toMatchObject({ verb: 'Planning', target: 'the task' })
+    expect(part('completed', false)).toMatchObject({ verb: 'Planned', target: 'the task' })
+    expect(part('failed', false)).toMatchObject({ verb: 'Plan', target: 'the task' })
+  })
+
   it('takes no turn before Althar carried the step on after a restart, or what the agent read since, for the one running', () => {
     const earlier = [items.says('Reading.'), items.tool({ status: 'completed' })]
     const live = (thread: ReadonlyArray<ThreadItem>) =>
@@ -579,7 +592,7 @@ describe('tool calls', () => {
     expect(targetOf(tool({ locations: [{ path: '/w/a.ts' }] }), null)).toBe('/w/a.ts')
     expect(targetOf(tool({ command: 'bun test' }), '/w')).toBe('bun test')
     expect(targetOf(tool({ title: 'Write hello.txt', toolKind: 'edit' }), '/w')).toBe('hello.txt')
-    expect(targetOf(tool({ title: 'mcp__linear__search', toolKind: 'other' }), '/w')).toBe('mcp__linear__search')
+    expect(targetOf(tool({ title: 'mcp__linear__search', toolKind: 'other' }), '/w')).toBe('Search')
     expect(targetOf(tool({ title: 'format sql', toolKind: 'other' }), '/w')).toBe('format sql')
     expect(targetOf(tool({ title: 'Use format_sql', toolKind: 'other' }), '/w')).toBe('format_sql')
     // A command's title is the command: none of it is a verb to take off.
@@ -601,5 +614,56 @@ describe('tool calls', () => {
     )
     const tools = turn?.kind === 'turn' ? turn.parts.flatMap((part) => (part.kind === 'tool' ? [part.allowedBy ?? null] : [])) : []
     expect(tools).toEqual([{ pattern: 'git status', match: 'prefix' }, null])
+  })
+})
+
+describe('repeated host news in a thread', () => {
+  const kinds = (blocks: ReadonlyArray<Block>) =>
+    blocks.map((block) => (block.kind === 'arrival' ? `${block.arrival.kind}×${block.count}` : block.kind))
+  const passed = (id: string, where = 'PR #766') => ({
+    ...items.arrival({ kind: 'checks', from: null, text: null, passed: 3, failed: 0, where }),
+    id,
+  })
+  const failed = (id: string) => ({
+    ...items.arrival({ kind: 'checks', from: null, text: null, passed: 1, failed: 2, where: 'PR #766' }),
+    id,
+  })
+  const build = (thread: ReadonlyArray<ThreadItem>) => blocksOf(source(thread), new Map(), (iso) => iso)
+
+  it('folds back-to-back lines of the same outcome on the same PR into the latest, counted', () => {
+    const blocks = build([passed('a1'), passed('a2')])
+    expect(kinds(blocks)).toEqual(['checks×2'])
+    expect(blocks[0]).toMatchObject({ id: 'a1' })
+  })
+
+  it('keeps a lone line uncounted, and other PRs, other outcomes and lines split by something else apart', () => {
+    expect(kinds(build([passed('a1')]))).toEqual(['checks×1'])
+    expect(kinds(build([passed('a1'), passed('a2', 'PR #767')]))).toEqual(['checks×1', 'checks×1'])
+    expect(kinds(build([passed('a1'), failed('a2'), passed('a3')]))).toEqual(['checks×1', 'checks×1', 'checks×1'])
+    expect(kinds(build([passed('a1'), items.you('Hi'), passed('a2')]))).toEqual(['checks×1', 'you', 'checks×1'])
+  })
+
+  it('keeps same-numbered PRs in different repositories apart', () => {
+    const at = (id: string, url: string) => ({
+      ...items.arrival({ kind: 'checks', from: null, text: null, passed: 3, failed: 0, url }),
+      id,
+    })
+    expect(kinds(build([at('a1', 'https://github.com/o/x/pull/12'), at('a2', 'https://github.com/o/y/pull/12')]))).toEqual([
+      'checks×1',
+      'checks×1',
+    ])
+  })
+
+  it('folds failures only when they show the same details', () => {
+    const bad = (id: string, failing: string[]) => ({
+      ...items.arrival({ kind: 'checks', from: null, text: null, passed: 1, failed: 1, failing }),
+      id,
+    })
+    expect(kinds(build([bad('a1', ['lint']), bad('a2', ['test'])]))).toEqual(['checks×1', 'checks×1'])
+    expect(kinds(build([bad('a1', ['lint']), bad('a2', ['lint'])]))).toEqual(['checks×2'])
+  })
+
+  it('never folds what people said', () => {
+    expect(kinds(build([items.arrival({ text: 'a' }), items.arrival({ text: 'a' })]))).toEqual(['comment×1', 'comment×1'])
   })
 })

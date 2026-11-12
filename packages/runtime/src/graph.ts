@@ -53,6 +53,8 @@ export interface RunRows {
   readonly planned: ReadonlyArray<PlannedStep>
   /** Whether it ends in publishing, as `conclude` would decide now: a pull request opened, or its branch pushed. */
   readonly publishes: boolean
+  /** A Ship's run: no work step, its review if the plan has one, then what waited goes up. */
+  readonly ships?: boolean
   /** The steps its graph had as it began, by key. */
   readonly began: ReadonlyArray<string>
   /** When a change to its steps (a patch of its graph) added to them, if one did. */
@@ -152,8 +154,10 @@ const stillToCome = (run: RunRows, had: ReadonlyArray<GraphStep>): ReadonlyArray
   if (run.endedAt !== null) return []
   const has = (key: StepKey) => had.some((step) => step.key === key)
   const reviews = run.planned.some((one) => one.key === 'review' && !one.skipped)
+  // A Ship's run has no work of its own to come: what it ships was done in the conversation.
+  const works = run.ships !== true
   return [
-    ...(has('implement') ? [] : [toCome(run, 'implement')]),
+    ...(has('implement') || !works ? [] : [toCome(run, 'implement')]),
     ...(reviews && !has('review') ? [toCome(run, 'review')] : []),
     ...(run.publishes && !has('publish') ? [toCome(run, 'publish')] : []),
   ]
@@ -166,6 +170,7 @@ export const graphOf = (runs: ReadonlyArray<RunRows>): ReadonlyArray<GraphRound>
     return {
       id: run.id,
       followUp: run.planId === null,
+      ...(run.ships === true ? { ships: true } : {}),
       createdAt: run.createdAt,
       endedAt: run.endedAt,
       said: run.said,

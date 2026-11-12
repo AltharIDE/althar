@@ -70,7 +70,8 @@ describe('a server that runs as a command', () => {
     const unrun = await probe({ name: 'folder', transport: 'stdio', command: folder })
     if (unrun.tools !== null) throw new Error('it should not have counted this server')
     expect(unrun.why).toMatch(/^It didn’t start: /)
-    expect(unrun.why).not.toContain('isn’t on this computer')
+    // Windows reports a folder as not found, as it does a missing command.
+    if (process.platform !== 'win32') expect(unrun.why).not.toContain('isn’t on this computer')
   })
 
   it('says a command that isn’t there', async () => {

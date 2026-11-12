@@ -4,6 +4,7 @@ import { type Access, type AccessReason, line } from './access'
 import { type AdapterOptions, authorizationOf } from './credential'
 import { updateInCopy } from './branchUpdate'
 import { ConnectorFailed } from './errors'
+import { DataCenterMerge, dataCenterRulesOf } from './bitbucketRules'
 import { type Http, makeHttp } from './http'
 import { makeBitbucketDataCenterReleases } from './bitbucketDataCenterReleases'
 import type {
@@ -620,6 +621,14 @@ export const makeBitbucketDataCenter = (options: AdapterOptions): CodeHost => {
         const set = yield* autoMergeOf(repository, number)
         return set === null ? change : { ...change, autoMerge: set }
       }),
+    mergeRules: (repository, change) =>
+      Effect.gen(function* () {
+        const url = pull(repository, change.number)
+        const [now, merge] = yield* Effect.all([http.cached(PullAnswer, url), http.json(DataCenterMerge, 'GET', `${url}/merge`)], {
+          concurrency: 'unbounded',
+        })
+        return dataCenterRulesOf({ reviewers: now.reviewers ?? [], merge })
+      }),
     markReady: (repository, change) =>
       Effect.gen(function* () {
         const now = yield* http.json(PullAnswer, 'GET', pull(repository, change.number))
@@ -754,6 +763,7 @@ export const makeBitbucketDataCenter = (options: AdapterOptions): CodeHost => {
           description: edit.body ?? now.description ?? '',
           reviewers: (now.reviewers ?? []).map((reviewer) => ({ user: { name: reviewer.user.name } })),
           ...(now.draft === undefined ? {} : { draft: now.draft }),
+          ...(edit.base === undefined ? {} : { toRef: { id: `refs/heads/${edit.base}`, repository: now.toRef.repository } }),
         })
         return changeOf(repository, edited)
       }),

@@ -87,9 +87,35 @@ person's checkout. So a task may work Local, in each repository's own clone
   removes it, nothing is brought back into it, and the recorded setup doesn't
   run there, since the person's environment is already set up. Run runs in it.
 
-Not built yet: Handoff, moving a running task between Local and a worktree
-with its branch and session. A reopened task moving to a worktree is its
-first half.
+### Moving a running task
+
+The Handoff: a running task moves between a worktree and Local, between its
+lead's turns, with its branch and its conversation, from its folder's row
+in the header or the lead's `change_part`. One change of a task is Local at
+a time.
+
+- **To Local:** what the worktree hadn't committed is committed on the
+  task's branch first. Then, once the person's checkout is free (no other
+  task holds it) and clean, it switches to the task's branch, remembering
+  where it was (`returns_to`), and the worktree folder goes; the branch
+  stays. On a branch of the person's own, it asks first ("switch it, or stay
+  in the worktree"), and their answer holds while the checkout is as they
+  saw it.
+- **To a worktree:** clean and still on the task's branch, the checkout goes
+  back where it was; already on another branch, the branch is free. Then a
+  worktree takes the branch, set up as any is. With changes not committed,
+  which are the person's, the move waits and the task carries on in Local.
+- **What holds a move** is kept on the workspace (`moving_to`), said once in
+  the thread and on the folder's row ("Moves to a worktree once Board.tsx is
+  committed"), and tried again every few seconds, the lead's turn ending
+  first; the person can call it off.
+- **The conversation carries on:** the lead's next turn starts a fresh
+  session in the new folder, handed the work so far, since an agent's
+  session can't follow its folder.
+
+Every Local rule above stays: Althar never switches a checkout with
+uncommitted changes, never off a branch of the person's own without asking,
+and never stashes, resets or cleans it.
 
 [ADR-103](proposed/103-projects-live-locally-or-on-a-host-and-place-work-in-pools.md)
 proposes pinning Local to a named computer's checkout and adding remote
@@ -126,9 +152,23 @@ it is kept current with it. Null means the default branch.
 - **Local follows the same rules:** a Local task makes its branch from its
   target in the person's checkout, never over uncommitted changes.
 
-Moving a task that has started to another target would need its commits
-rebased, and isn't offered. Putting a merged fix on another branch is a task
-toward that branch. Release branches the coordinator makes are in
+**A running task changes its target at any time,** from its folder's row
+or the lead's `work_toward`, between its lead's turns:
+
+- **Nothing pushed yet,** its branch is rebased onto the new target. A
+  conflict stops the rebase, names the files and hands it to the lead.
+- **Pushed,** the open pull request can't change its history: its own
+  commits are cherry-picked onto a fresh branch from the new target, named
+  with `-2`, whose pull request opens into it. The old one is left open,
+  followed no more, for the person to close; its branch isn't touched. A
+  conflict leaves everything as it was, and says which files.
+- **Held for Ship,** the fresh branch stays on this computer, held as the
+  old one was, and only Ship pushes it and opens its pull request.
+- **The review's mark moves with the commits:** each commit a move rewrites
+  is kept beside its copy, so the next review reads only what came since the
+  last.
+
+Putting a merged fix on another branch is a task toward that branch. Release branches the coordinator makes are in
 [code hosts](code-hosts.md).
 
 ## Setting up a task's folder
@@ -401,3 +441,4 @@ sweep finds the rest.
 
 - 8 Nov 2026: written from the ADRs under Replaces.
 - 8 Nov 2026: the limits sweep (#696) opened every sandbox's network.
+- 10 Nov 2026: a running task moves between a worktree and Local, and changes the branch it works toward at any time (a task is a conversation plus parts, [tasks](tasks.md#changing-parts)).

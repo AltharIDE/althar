@@ -47,15 +47,7 @@ export default defineConfig({
     ],
   },
   fmt: {
-    ignorePatterns: [
-      '**/dist/**',
-      '**/.ssr/**',
-      '**/coverage/**',
-      '**/*.html',
-      'apps/**/*.css',
-      '**/*.md',
-      'bun.lock',
-    ],
+    ignorePatterns: ['**/dist/**', '**/.ssr/**', '**/coverage/**', '**/*.html', 'apps/**/*.css', '**/*.md', 'bun.lock'],
     semi: false,
     singleQuote: true,
     printWidth: 140,

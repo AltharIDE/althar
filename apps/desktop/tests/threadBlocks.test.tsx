@@ -73,6 +73,52 @@ describe('Althar’s lines and a step’s report', () => {
   })
 })
 
+describe('the merge line', () => {
+  it('draws the line as one card, each pull request linked with where it stands, and no line of chat', () => {
+    show([items.mergeLine()])
+    const card = screen.getByRole('region', { name: 'Merge line' })
+    expect(card.querySelectorAll('li')).toHaveLength(4)
+    expect(screen.getByRole('link', { name: /#783/ }).getAttribute('href')).toBe('https://github.com/meridian/api/pull/783')
+    for (const word of ['Merged', 'In the queue', 'Checks running', 'Waiting']) expect(screen.getByText(word)).toBeTruthy()
+    // Nothing of the internal name, the repository or a number said twice.
+    expect(screen.queryByText(/merge line,|AltharIDE|of meridian/i)).toBeNull()
+  })
+
+  it('folds to one line once every pull request has merged', () => {
+    const merged = (number: number) => ({
+      number,
+      title: `Change ${number}`,
+      url: `https://github.com/meridian/api/pull/${number}`,
+      state: 'merged' as const,
+    })
+    show([items.mergeLine({ rows: [merged(778), merged(783)] })])
+    expect(screen.getByText(/Merged/).textContent).toMatch(/^Merged #778.*, #783/)
+    expect(screen.getAllByRole('link').map((link) => link.getAttribute('href'))).toEqual([
+      'https://github.com/meridian/api/pull/778',
+      'https://github.com/meridian/api/pull/783',
+    ])
+    expect(screen.queryByText('Waiting')).toBeNull()
+  })
+
+  it('says what is wrong with a pull request sent back, and what to do', () => {
+    show([
+      items.mergeLine({
+        rows: [
+          {
+            number: 773,
+            title: 'Board cards show handed-back pictures',
+            url: 'https://github.com/meridian/api/pull/773',
+            state: 'sent_back',
+            reason: 'Checks failed. It goes back in once they pass.',
+          },
+        ],
+      }),
+    ])
+    expect(screen.getByText('Sent back')).toBeTruthy()
+    expect(screen.getByText('Checks failed. It goes back in once they pass.')).toBeTruthy()
+  })
+})
+
 describe('what was heard from outside', () => {
   it('says where a comment was left, by file, with no line where it named none', () => {
     show([items.arrival({ path: 'src/retry.ts', line: null })])

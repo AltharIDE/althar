@@ -1,4 +1,5 @@
 import { errandLines } from './Errands'
+import { plainTitle } from '@althar/contracts'
 import type { ProjectId } from '@althar/domain'
 import { Effect, Option, Schema } from 'effect'
 import { SqlClient } from 'effect/sql'
@@ -42,22 +43,16 @@ export const dueForHandover = (context: { readonly used: number; readonly size: 
  */
 export const LEAD_HANDOVER_TOKENS = 200_000
 
-/** At a break in a lead's work, a context this full is handed over too: the next turn starts afresh at little cost. */
-export const LEAD_BREAK_TOKENS = 80_000
-
-/** How long an agent's prompt cache lives, in milliseconds: a lead idle longer reads its whole context afresh anyway, which makes a break. */
-export const CACHE_LIFE = 5 * 60_000
-
 /**
  * Whether a lead whose context is this full is handed to a fresh session
- * before its next turn: past `LEAD_HANDOVER_TOKENS` or 80% of its window at
- * any turn; past `LEAD_BREAK_TOKENS` at a break (a step done, the task made a
- * change, or idle past its cache's life).
+ * before its next turn: only once it is full, past `LEAD_HANDOVER_TOKENS` or
+ * 80% of its window, whichever comes first. A break in its work (a step done,
+ * the task made a change, a pause past its prompt cache's life) hands nothing
+ * over at any size, so coming back to a task carries the conversation on (a
+ * task is a conversation plus parts, "A lead's session lasts until it's full").
  */
-export const dueForLeadHandover = (context: { readonly used: number; readonly size: number } | null, atBreak: boolean) =>
-  context !== null &&
-  context.size > 0 &&
-  (context.used >= Math.min(context.size * HANDOVER_AT, LEAD_HANDOVER_TOKENS) || (atBreak && context.used >= LEAD_BREAK_TOKENS))
+export const dueForLeadHandover = (context: { readonly used: number; readonly size: number } | null) =>
+  context !== null && context.size > 0 && context.used >= Math.min(context.size * HANDOVER_AT, LEAD_HANDOVER_TOKENS)
 
 /** About how many characters a token holds, in the words and code a brief is written in: to judge a brief's size before an agent reads it. */
 const CHARS_PER_TOKEN = 4
@@ -128,7 +123,7 @@ const callWords = (call: { readonly kind: string; readonly payload: string; read
   const words = (key: string) => (typeof payload[key] === 'string' ? (payload[key] as string) : '')
   switch (call.kind) {
     case 'permission':
-      return `a permission request${call.title === null ? '' : `: ${call.title}`}`
+      return `a permission request${call.title === null ? '' : `: ${plainTitle(call.title)}`}`
     case 'question': {
       const fields = Array.isArray(payload.fields) ? (payload.fields as ReadonlyArray<{ readonly question?: string }>) : []
       const asked = fields.flatMap((field) => (field.question === undefined || field.question === '' ? [] : [field.question]))

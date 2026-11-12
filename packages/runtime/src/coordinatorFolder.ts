@@ -2,7 +2,7 @@ import { existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, rmSync, w
 import { homedir } from 'node:os'
 import { basename, dirname, join, resolve } from 'node:path'
 
-import { removeFully, SECRET_PLACES } from '@althar/provider-adapters'
+import { removeFully, SANDBOX_SECRETS } from '@althar/provider-adapters'
 import { Effect, Option } from 'effect'
 import { SqlClient } from 'effect/sql'
 
@@ -93,7 +93,9 @@ const real = (path: string): string => {
 
 /**
  * Secret paths denied to coordinator commands and read tools. Include git's
- * credential store at its actual XDG location as well as the shared list.
+ * credential store at its actual XDG location as well as the shared list,
+ * but not the code-host tools' own folders (`CLI_SIGN_INS`): its `gh` and
+ * `glab` start with the person's sign-in, as the coordinator's brief says.
  */
 export const readsOf = (place: {
   readonly home: string
@@ -113,7 +115,7 @@ export const readsOf = (place: {
     // Whether or not they are there: git reading one held from it fails rather than going without.
     ...GIT_CONFIG_FILES.map((file) => join(gitConfig, file)),
   ].map(real)
-  const denied = [...SECRET_PLACES.map((secret) => join(place.home, secret)), join(gitConfig, 'credentials')].map(real)
+  const denied = [...SANDBOX_SECRETS.map((secret) => join(place.home, secret)), join(gitConfig, 'credentials')].map(real)
   return { allowed: [...new Set(allowed)], denied: [...new Set(denied)] }
 }
 

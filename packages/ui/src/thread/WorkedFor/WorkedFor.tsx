@@ -19,6 +19,14 @@ export interface WorkedForProps extends Disclosable {
   /** How long the turn took, or has taken so far. */
   took: string
   /**
+   * Once it is over, the part of its time that took most, where one did:
+   * "3m 10s waiting for a place", after how long it took. None where its
+   * time was the agent's own work.
+   */
+  most?: string
+  /** Once it is over, where all its time went, a few words each, what opening it shows first: "40s thinking and writing". */
+  spent?: ReadonlyArray<string>
+  /**
    * The turn is at work: its header counts, and under it stand what it has
    * said on the way and what it is doing now, until it answers or ends,
    * when they fold away under the header, as does its work where the person
@@ -46,6 +54,8 @@ export interface WorkedForProps extends Disclosable {
  */
 export function WorkedFor({
   took,
+  most,
+  spent,
   live = false,
   said,
   now,
@@ -64,10 +74,12 @@ export function WorkedFor({
     if (wasLive.current && !live && opened) setOpened(false)
     wasLive.current = live
   }, [live, opened, setOpened])
-  const opens = children !== undefined && children !== null
+  const where = !live && spent !== undefined && spent.length > 0 ? spent : undefined
+  const opens = (children !== undefined && children !== null) || where !== undefined
   const head = (
     <>
       <span className={s.took}>{live ? t.working(took) : t.took(took)}</span>
+      {!live && most !== undefined && <span className={s.most}>· {most}</span>}
       {opens && <Icon name="chevron" size={10} className={s.chevron} />}
     </>
   )
@@ -104,7 +116,10 @@ export function WorkedFor({
         </button>
       </DisclosureTrigger>
       <Fold bleed={false}>
-        <div className={s.trail}>{children}</div>
+        <div className={s.trail}>
+          {where !== undefined && <p className={s.spent}>{where.join(' · ')}</p>}
+          {children}
+        </div>
       </Fold>
       {going}
     </Disclosure>

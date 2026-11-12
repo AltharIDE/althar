@@ -1177,6 +1177,8 @@ describe('the agents', () => {
       assert.deepStrictEqual(JSON.parse(env.CODEX_CONFIG ?? '{}'), {
         'mcp_servers.github.command': 'npx',
         'mcp_servers.github.enabled': false,
+        // Its own subagents off: Althar's helpers are the one way it hands work on (ADR-087).
+        'features.multi_agent': false,
         'sandbox_workspace_write.network_access': true,
       })
       assert.strictEqual(env.CODEX_HOME, home)
@@ -1206,6 +1208,7 @@ describe('the agents', () => {
       assert.deepStrictEqual(JSON.parse(envOf('codex', true).CODEX_CONFIG ?? '{}'), {
         web_search: 'disabled',
         'features.hooks': false,
+        'features.multi_agent': false,
         'sandbox_workspace_write.network_access': true,
       })
       assert.isTrue(JSON.parse(envOf('codex', false).CODEX_CONFIG ?? '{}')['sandbox_workspace_write.network_access'])

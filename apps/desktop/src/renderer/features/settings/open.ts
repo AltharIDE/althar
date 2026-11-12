@@ -7,10 +7,10 @@ import { useNavigate } from '@tanstack/react-router'
  */
 
 export interface SettingsWays {
-  /** Opens the agent's tab with its sign-in started, by the agent's id. */
-  readonly signIn: (agentId: string) => void
-  /** Opens the agents, to sign one in. */
-  readonly agents: () => void
+  /** Opens the agent's tab with its sign-in started, by the agent's id: the account's, where one is named. */
+  readonly signIn: (agentId: string, accountId?: string) => void
+  /** Opens the agents, to sign one in; on one agent's tab, nothing started, where one is named: one to install. */
+  readonly agents: (agentId?: string) => void
   /** Opens the code hosts and trackers, to connect one or sign in to it again. */
   readonly connections: () => void
 }
@@ -18,8 +18,14 @@ export interface SettingsWays {
 export const useSettingsWays = (): SettingsWays => {
   const navigate = useNavigate()
   return {
-    signIn: (agentId) => void navigate({ to: '/settings/$section', params: { section: 'agents' }, search: { signIn: agentId } }),
-    agents: () => void navigate({ to: '/settings/$section', params: { section: 'agents' } }),
+    signIn: (agentId, accountId) =>
+      void navigate({
+        to: '/settings/$section',
+        params: { section: 'agents' },
+        search: { signIn: agentId, ...(accountId === undefined ? {} : { account: accountId }) },
+      }),
+    agents: (agentId) =>
+      void navigate({ to: '/settings/$section', params: { section: 'agents' }, search: agentId === undefined ? {} : { agent: agentId } }),
     connections: () => void navigate({ to: '/settings/$section', params: { section: 'code-hosts' } }),
   }
 }

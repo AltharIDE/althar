@@ -232,13 +232,46 @@ is a unit of work, so commits aren't pushed one by one as they're made.
   else pushed to PR #402"). Commits on their way show "1 commit going up to
   the PR", with no Accept, so the pull request is never merged before them.
 - Off, every push but a fix for failing checks is the person's.
+- **Held for Ship, nothing goes up but Ship.** What a turn the person's words
+  began after the plan committed holds the branch until the person ships it
+  ([tasks](tasks.md#rounds-back-to-work-and-shipping-again)): this rule, the
+  Push card, `push_to_pull_request` and publishing all refuse it, failing
+  checks of the pushed head aren't put to the lead, and a conflict waits for
+  Ship's push. Ship reviews first, where the plan has a reviewer before the
+  work ships, then pushes past the hold.
 
-Commits the person made in the task's own folder and never pushed go up
-with the lead's: Althar can't tell them apart there.
+**Commits the person makes by hand in the task's folder hold the branch for
+Ship too.** Of what isn't sent yet, a commit written outside every turn of
+the task's agents (from a moment before each began to two minutes after it
+ended, as a lead may commit just after) is the person's. Althar looks as
+each turn of its lead begins, before the lead reads anything, and before it
+pushes on its own; crediting keeps when a commit was written, so a commit
+made again for its credit is still the lead's.
+
+**Merge, with commits not shipped, offers two.** Review and merge is a Ship
+that merges once what waited is up, unless the lead set a finding of its
+review aside, which a line says, leaving the merge to the person. Merge now
+sends them up past the hold and merges at once, and they are reviewed after
+the merge, in the same task, where it has a reviewer
+([reviews](reviews.md#a-small-change-is-reviewed-after-it-merges)).
 
 `push_to_pull_request` pushes at once wherever the rule or a checks fix
 would, and says what it did; otherwise it shows the person the commits with
 Push.
+
+**A hold reaches up a stack.** A push sends a branch's whole history, so a
+change whose branch carries commits that wait for Ship on the change it is
+stacked on is held as if they were its own: nothing pushes it but the Ship
+that ships the one below too, which goes first. Althar works this out from
+git before each push (where the branch meets the one below, past what that
+one's pull request has), rather than keeping it
+([tasks](tasks.md#a-task-holds-as-many-changes-as-it-needs)).
+
+**A stacked change follows the one below.** Once a change's pull request
+merges, the pull request of each change stacked on it goes into what the
+merged one went into: `editChange` sets its base on every host (GitHub's
+`base`, GitLab's `target_branch`, Bitbucket's destination and `toRef`), and
+the thread says so. One its host won't move is said, for the person to move.
 
 ## Attaching a pull request a task didn't open
 
@@ -451,8 +484,17 @@ see it.
   word again. One that hears nothing for a day says what it waits on.
 
 **Speaking for the person:** a post goes ahead on a pull request or issue
-that a task of Althar's opened or came from, and asks everywhere else
+that a task of Althar's opened or came from, the person's own or one by the
+repository's own people, and on an outside author's goes on the person's word
 ([what agents may do](what-agents-may-do.md#speaking-for-the-person)).
+
+**Whose pull request it is holds nothing back** (the person's note of 11
+Nov): `mark_ready`, `close_pull_request`, `reopen_pull_request`,
+`reply_on_pull_request` and `edit_pull_request` act on any of the project's
+pull requests. Unasked on Althar's own and the person's own (and a reply or
+edit on one by the repository's own people); on anyone else's at once on the
+person's word, their message in the turn that asks it. Declining on
+Bitbucket Cloud is final, so it goes only on their word, whoever opened it.
 
 **The tools,** beside pushing and reading:
 
@@ -470,7 +512,8 @@ that a task of Althar's opened or came from, and asks everywhere else
 
 A lead keeps its own `rerun_check`, `read_default_branch_checks`,
 `reply_on_pull_request`, `edit_pull_request` and `push_tag`, which act on
-its task's pull request unless told another.
+its task's pull request unless told another; named by its link or number,
+another of the project's goes as the coordinator's tools take it.
 
 **Accepting a change merges it.** The person's Accept on a card, their
 merge on the host, or `merge_pull_request` on their word all merge it, and
@@ -626,12 +669,6 @@ The decisions above are current. These parts of them aren't built on main:
 - **`post_review` and `delete_branch` for agents:** posting a review the
   person asked for, and deleting a branch on their word. A review task's
   draft is posted by the person, and so is a branch deleted on Close.
-- **Declining on Bitbucket Cloud,** where it is final: refused for agents
-  today, rather than going on the person's word.
-- **Speaking for you, as decided:** a reply or an edit on an outside
-  author's pull request is refused outright today, rather than going on the
-  person's word. Marking ready, closing and reopening are refused on pull
-  requests Althar didn't open.
 - **A lead's tag on the person's word in its thread:** a lead's `push_tag`
   still asks every time. A lead's merge goes through the same tool and line
   as the coordinator's.
@@ -653,3 +690,6 @@ The decisions above are current. These parts of them aren't built on main:
 
 - 8 Nov 2026: written from the ADRs under Replaces.
 - 8 Nov 2026: the limits sweep (#696) built: agents carry the person's own sign-in, and `gh` and `glab` are read as git is.
+- 9 Nov 2026: what a turn the person's words began after the plan commits holds the branch for Ship (a task is a conversation plus parts, [tasks](tasks.md#changing-parts)).
+- 10 Nov 2026: commits made by hand hold the branch too; Merge with commits not shipped offers Review and merge or Merge now (a task is a conversation plus parts, [tasks](tasks.md#changing-parts)).
+- 10 Nov 2026: a task follows several pull requests at once, one for each change; stacks hold, ship, merge and retarget from the bottom up, and a pull request opened outside Althar from a change's own branch is that change's (a task is a conversation plus parts, [tasks](tasks.md#a-task-holds-as-many-changes-as-it-needs)).

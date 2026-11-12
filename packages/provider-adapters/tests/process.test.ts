@@ -1,5 +1,5 @@
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { getPriority, setPriority, tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import { assert, beforeAll, describe, it } from '@effect/vitest'
@@ -9,7 +9,7 @@ import { until } from '@althar/testing/effect'
 import { connect } from '../src/AgentConnection'
 import { AgentExited, AgentStartFailed } from '../src/errors'
 import { keeper } from '../src/keeper'
-import { adapterNode, asNode, type CapturedFrame, childEnvironment, environmentDigest, spawnOwned } from '../src/process'
+import { adapterNode, asNode, BACKGROUND, type CapturedFrame, childEnvironment, environmentDigest, spawnOwned } from '../src/process'
 import { agents } from '../src/registry'
 import { fakeAgentMain, scenarios } from '../src/testing'
 import { text } from './contract'
@@ -19,6 +19,16 @@ import { ownTemp } from './ownTemp'
 const here = tmpdir()
 /** Stopping a process group is POSIX's: Windows has none, and how Althar stops an agent there is still to come. */
 const windows = process.platform === 'win32'
+
+/** Whether this system lets a process set priorities: it does, but inside a sandbox that forbids it. */
+const lowers = (() => {
+  try {
+    setPriority(0, getPriority())
+    return true
+  } catch {
+    return false
+  }
+})()
 /** A command for any system: Node, running `script`. */
 const onNode = (script: string) => ({ command: process.execPath, args: ['-e', script] })
 
@@ -139,6 +149,37 @@ describe('the process transport', () => {
       assert.isFalse(isAlive(pid))
       assert.deepStrictEqual(yield* connection.process?.stopped ?? Effect.die('no process'), { signal: 'SIGTERM', survivors: false })
     }),
+  )
+
+  it.live("runs agents' work in the background, and the rest as it starts", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const set: Array<readonly [number, number]> = []
+        const prioritize = (pid: number, priority: number) => void set.push([pid, priority])
+        const agent = yield* spawnOwned(onNode(''), here, { background: true, prioritize })
+        const run = yield* spawnOwned(onNode(''), here, { prioritize })
+        yield* Deferred.await(agent.exited)
+        yield* Deferred.await(run.exited)
+        assert.deepStrictEqual(set, [[agent.pid, BACKGROUND]])
+      }),
+    ),
+  )
+
+  it.live.runIf(lowers)('lowers what an agent starts with it, on the system itself', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        // It asks for a moment's start, then says the priority it and what it starts run at.
+        const owned = yield* spawnOwned(
+          onNode(
+            "setTimeout(() => { const child = require('node:child_process').execFileSync(process.execPath, ['-e', 'process.stdout.write(String(require(\\'node:os\\').getPriority()))']); process.stdout.write(require('node:os').getPriority() + ' ' + child) }, 200)",
+          ),
+          here,
+          { background: true },
+        )
+        const printed = yield* Effect.promise(() => new Response(owned.stdout).text())
+        assert.strictEqual(printed, `${BACKGROUND} ${BACKGROUND}`)
+      }),
+    ),
   )
 
   it.live('keeps what a process printed though it exited before it was read, every time', () =>
