@@ -156,6 +156,8 @@ export interface TaskModel {
   readonly attach: (pullRequest: string, start: boolean) => Promise<Attachment | null>
   /** Starts its plan now, while it waits to start. */
   readonly startPlan: (planId: string) => Promise<void>
+  /** Holds its plan until it is started, while it counts down or waits for a free agent. */
+  readonly holdPlan: (planId: string) => Promise<void>
   /** Answers a call; with `always`, the answer is kept in the project's rules by that scope. */
   readonly answer: (attentionId: string, decision: 'allow' | 'reject', reason?: string, always?: AlwaysScope) => Promise<boolean>
   /** Answers a step that needs the person. */
@@ -701,6 +703,7 @@ export const useTask = (threadId: string): TaskModel => {
       return done
     },
     startPlan: (planId) => act(() => client.startPlan(planId)),
+    holdPlan: (planId) => act(() => client.holdPlan(planId)),
     answer: async (attentionId, decision, reason, always) => {
       // Whether it went through: a call whose answer didn't is answerable again.
       let through = true
@@ -836,7 +839,7 @@ export const useTask = (threadId: string): TaskModel => {
           } catch (failure) {
             // Commits on it the branch doesn't have are the lead's to bring in: the card says so, and offers to ask it, in place of an error.
             if (failure instanceof ApiError && failure.reason === 'PushRefused' && failure.why === 'behind') {
-              setRefused(url ?? snapshot.task.changes[0]?.url ?? '')
+              setRefused(url ?? (snapshot.task.changes.find((one) => one.state === 'open') ?? snapshot.task.changes.at(-1))?.url ?? '')
               return
             }
             throw failure

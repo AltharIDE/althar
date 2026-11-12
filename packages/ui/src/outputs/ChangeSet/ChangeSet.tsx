@@ -62,7 +62,7 @@ export interface ChangeSetText {
   uncommitted: (n: number) => string
   /** The host's page for a new pull request from the branch, pushed without a connection. */
   newPullRequest: (host: string | undefined) => string
-  checksPassed: (n: number) => string
+  checksPassed: (n: number, skipped?: number) => string
   checksFailed: (names: readonly string[]) => string
   checksRunning: (passed: number, total: number) => string
   checksHeld: (name: string) => string
@@ -93,7 +93,11 @@ export const changeSetText: ChangeSetText = {
   unpushed: (n) => (n === 1 ? '1 commit not pushed' : `${n.toLocaleString('en-US')} commits not pushed`),
   uncommitted: (n) => (n === 1 ? 'Uncommitted changes in 1 file' : `Uncommitted changes in ${n.toLocaleString('en-US')} files`),
   newPullRequest: (host) => (host === undefined ? 'Open a pull request' : `Open a pull request on ${host}`),
-  checksPassed: (n) => (n === 1 ? '1 check passed' : `${n} checks passed`),
+  checksPassed: (n, skipped = 0) => {
+    const ran = n - skipped
+    if (skipped === 0) return n === 1 ? '1 check passed' : `${n} checks passed`
+    return ran === 0 ? `${skipped} skipped` : `${ran} ${ran === 1 ? 'check' : 'checks'} passed, ${skipped} skipped`
+  },
   checksFailed: (names) => (names.length === 1 ? `${names[0] ?? ''} failed` : `${names.length} checks failed: ${names.join(', ')}`),
   checksRunning: (passed, total) => `${passed} of ${total} checks passed, the rest running`,
   checksHeld: (name) => `${name} waits on your call`,
@@ -345,7 +349,8 @@ export function ChecksLine({
   if (checks.length === 0) return <p className={cx(s.line, s.quiet)}>{t.noChecks}</p>
   const failed = checks.filter((check) => check.state === CheckState.Failed)
   const held = checks.find((check) => check.state === CheckState.Held)
-  const passed = checks.filter((check) => check.state === CheckState.Passed).length
+  const skipped = checks.filter((check) => check.state === CheckState.Skipped).length
+  const passed = checks.filter((check) => check.state === CheckState.Passed).length + skipped
   const [mark, said, tone] =
     failed.length > 0
       ? [<Icon key="m" name="close" size={12} />, t.checksFailed(failed.map((check) => check.name)), s.bad]
@@ -353,7 +358,7 @@ export function ChecksLine({
         ? [<span key="m" className={s.you} aria-hidden="true" />, t.checksHeld(held.name), s.held]
         : passed < checks.length
           ? [<LiveDot key="m" ping />, t.checksRunning(passed, checks.length), s.running]
-          : [<Icon key="m" name="check" size={12} />, t.checksPassed(checks.length), s.good]
+          : [<Icon key="m" name="check" size={12} />, t.checksPassed(checks.length, skipped), s.good]
   return (
     <Disclosure>
       <DisclosureTrigger>

@@ -131,6 +131,7 @@ import { makeRepository, placeRepository } from './newRepository'
 import { type InputFile, keepFiles } from './sentFiles'
 import { type InputImage, keepSent } from './sentImages'
 import { anyOf, SignIns } from './SignIns'
+import { endingOf } from './signInEnding'
 import { describe, listSkills, type SkillsConfig } from './Skills'
 import { expected, words } from './words'
 import { makeBranch } from './newBranch'
@@ -567,6 +568,7 @@ export const handlers = Api.toLayer(
         const check = yield* signIns.account(account, recheck)
         const out = yield* limits.outAccount(account.id)
         const providers = yield* signIns.providers(account, check)
+        const ending = endingOf(check.endsAt, yield* Clock.currentTimeMillis)
         return {
           id: account.id,
           name: account.name,
@@ -575,6 +577,7 @@ export const handlers = Api.toLayer(
           paidBy: check.paidBy,
           outUntil: Option.getOrNull(Option.map(out, (each) => each.until)),
           adoptedFrom: account.adoptedFrom,
+          ...(check.endsAt === undefined ? {} : { endsAt: check.endsAt, endsSoon: ending !== undefined && ending !== 'later' }),
           ...(providers === undefined ? {} : { providers }),
         } satisfies AccountStatus
       }).pipe(
@@ -1460,7 +1463,7 @@ export const handlers = Api.toLayer(
           ),
         ),
       StartPlan: ({ commandId, planId }) => once(commandId, api(Effect.asVoid(plans.start(planId, instance.personId)))),
-      HoldPlan: ({ commandId, planId }) => once(commandId, api(plans.hold(planId, instance.personId))),
+      HoldPlan: ({ commandId, planId }) => once(commandId, api(Effect.asVoid(plans.hold(planId, instance.personId)))),
       ChangePlan: ({ commandId, planId, steps, end, worksIn, toward }) =>
         once(commandId, api(plans.change(planId, steps, instance.personId, end, worksIn, toward))),
       ApplyPreset: ({ commandId, planId, preset }) => once(commandId, api(plans.applyPreset(planId, preset, instance.personId))),
@@ -1942,6 +1945,7 @@ export const handlers = Api.toLayer(
           commandId,
           api(Effect.flatMap(envelope('task.skip_review', { taskId }, commandId), (said) => runs.skipReview({ envelope: said, taskId }))),
         ),
+      DeclineReview: ({ commandId, taskId }) => once(commandId, api(runs.declineReview(taskId, instance.personId))),
       Ship: ({ commandId, taskId, change }) =>
         once(
           commandId,
@@ -1992,6 +1996,7 @@ export const handlers = Api.toLayer(
       ListEditors: () => Effect.succeed(config.editors?.list() ?? []),
       GetLoad: () => api(machine.now),
       GetPlanUsage: ({ refresh }) => api(planUsage.now(refresh === true)),
+      DismissSignInEnding: ({ commandId, accountId, endsAt, stage }) => once(commandId, api(planUsage.dismiss(accountId, endsAt, stage))),
       GetModelRooms: ({ projectId }) =>
         api(
           modelRooms(projectId).pipe(

@@ -1248,52 +1248,56 @@ describe('changing the team of a task that has begun', () => {
     }).pipe(Effect.provide(runtimeWith(github, ':memory:', { holds: slow })))
   })
 
-  it.live(
-    'is changed by the coordinator’s change_lead too: the reviewer, with the line in both threads, and not once the review is done',
-    () => {
-      const { working, github } = onGitHub()
-      const slow = holds()
-      return Effect.gen(function* () {
-        const sql = yield* SqlClient.SqlClient
-        const task = yield* start(working, '[lead:slowly] [lead:finish] [lead:edit] [review:pass]')
-        const [row] = yield* sql<{ slug: string }>`SELECT slug FROM tasks WHERE id = ${task.taskId}`
-        const slug = row?.slug ?? ''
-        const coordinatorThread = yield* (yield* Coordinator).thread(task.projectId)
-        const access: ToolAccess = {
-          role: 'coordinator',
-          projectId: task.projectId,
-          threadId: coordinatorThread,
-          sessionId: 'none',
-          taskId: null,
-        }
-        assert.match(
-          yield* callTool(access, 'change_lead', { task: slug, review: { agent: 'claude-code' }, why: 'the person asked' }),
-          /^add-a-retry: changed the review to Fake claude-code's default model\. Both threads have a line saying so\.$/,
-        )
-        assert.deepStrictEqual(
-          (yield* notices(task.threadId)).map((notice) => notice.title).filter((title) => title?.includes('review') === true),
-          ["The coordinator changed the review to Fake claude-code's default model: the person asked"],
-        )
-        assert.isTrue((yield* notices(coordinatorThread)).some((notice) => notice.title?.startsWith('Changed the review to') === true))
-        assert.deepStrictEqual(
-          (yield* planOf(task.taskId)).steps.map((one) => [one.key, one.agentId, one.skipped]),
-          [
-            ['implement', 'claude-code', false],
-            ['review', 'claude-code', false],
-          ],
-        )
-        assert.match(yield* callTool(access, 'change_lead', { task: slug }), /^Name the lead, the review, or both/)
-        assert.match(yield* callTool(access, 'change_lead', { task: slug, review: null }), /^add-a-retry: removed the review\./)
-        slow.open('[lead:slowly]')
-        yield* until(cards(task.projectId), (all) => all[0]?.phase === 'ready')
-        // No review ran: it was taken off before its round, so none is left to change.
-        assert.match(
-          yield* callTool(access, 'change_lead', { task: slug, review: { agent: 'codex' } }),
-          /Its review is done, so its reviewer can’t change/,
-        )
-      }).pipe(Effect.provide(runtimeWith(github, ':memory:', { holds: slow })))
-    },
-  )
+  it.live('is changed by the coordinator’s change_lead too: the reviewer, with the line in both threads, and not once a review ran', () => {
+    const { working, github } = onGitHub()
+    const slow = holds()
+    return Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const task = yield* start(working, '[lead:slowly] [lead:finish] [lead:edit] [review:pass]')
+      const [row] = yield* sql<{ slug: string }>`SELECT slug FROM tasks WHERE id = ${task.taskId}`
+      const slug = row?.slug ?? ''
+      const coordinatorThread = yield* (yield* Coordinator).thread(task.projectId)
+      const access: ToolAccess = {
+        role: 'coordinator',
+        projectId: task.projectId,
+        threadId: coordinatorThread,
+        sessionId: 'none',
+        taskId: null,
+      }
+      assert.match(
+        yield* callTool(access, 'change_lead', { task: slug, review: { agent: 'claude-code' }, why: 'the person asked' }),
+        /^add-a-retry: changed the review to Fake claude-code's default model\. Both threads have a line saying so\.$/,
+      )
+      assert.deepStrictEqual(
+        (yield* notices(task.threadId)).map((notice) => notice.title).filter((title) => title?.includes('review') === true),
+        ["The coordinator changed the review to Fake claude-code's default model: the person asked"],
+      )
+      assert.isTrue((yield* notices(coordinatorThread)).some((notice) => notice.title?.startsWith('Changed the review to') === true))
+      assert.deepStrictEqual(
+        (yield* planOf(task.taskId)).steps.map((one) => [one.key, one.agentId, one.skipped]),
+        [
+          ['implement', 'claude-code', false],
+          ['review', 'claude-code', false],
+        ],
+      )
+      assert.match(yield* callTool(access, 'change_lead', { task: slug }), /^Name the lead, the review, or both/)
+      assert.match(yield* callTool(access, 'change_lead', { task: slug, review: null }), /^add-a-retry: removed the review\./)
+      slow.open('[lead:slowly]')
+      yield* until(cards(task.projectId), (all) => all[0]?.phase === 'ready')
+      // No review ran: it was taken off before its round, which is not a review done. It can be added back until the task merges.
+      assert.match(
+        yield* callTool(access, 'change_lead', { task: slug, review: { agent: 'codex' } }),
+        /^add-a-retry: changed the review to Fake codex's default model\./,
+      )
+      // Its round reads the work that is up, and once it ran, the review is done.
+      yield* until(results(task.threadId), (all) => all.some((result) => result.step === 'review'))
+      yield* until(cards(task.projectId), (all) => all[0]?.phase === 'ready' && all[0]?.reviewerChange === 'never')
+      assert.match(
+        yield* callTool(access, 'change_lead', { task: slug, review: { agent: 'claude-code' } }),
+        /Its review is done, so its reviewer can’t change/,
+      )
+    }).pipe(Effect.provide(runtimeWith(github, ':memory:', { holds: slow })))
+  })
 
   /** The plan as the coordinator's propose_plan makes it with no review: no review step in it, nor in the run it started. */
   const withoutReview = (taskId: string) =>
@@ -1342,11 +1346,19 @@ describe('changing the team of a task that has begun', () => {
       const sql = yield* SqlClient.SqlClient
       const task = yield* start(working, '[lead:slowly] [lead:finish] [lead:edit] [review:pass]')
       // Its review passed and its run went on to publish, which is under way: the run is still running.
+      const [attempt] = yield* sql<{ runAttemptId: string; at: string }>`
+        SELECT a.run_attempt_id, a.admitted_at AS at FROM node_attempts a JOIN nodes n ON n.id = a.node_id
+        WHERE n.node_key = 'implement' AND n.execution_id IN (SELECT e.id FROM workflow_executions e JOIN runs r ON r.id = e.run_id
+          WHERE r.task_id = ${task.taskId})`
       yield* sql`
         INSERT INTO nodes (id, project_id, execution_id, node_key, iteration, type, added_in_revision, state, created_at)
-        SELECT 'node_' || lower(hex(randomblob(16))), project_id, execution_id, 'publish', 0, 'integration', 1, state, created_at
-        FROM nodes WHERE node_key = 'implement' AND execution_id IN (SELECT e.id FROM workflow_executions e JOIN runs r ON r.id = e.run_id
-          WHERE r.task_id = ${task.taskId})`
+        SELECT 'node_' || lower(hex(randomblob(16))), project_id, execution_id, key, 0, 'integration', 1, state, created_at
+        FROM nodes, (SELECT 'review' AS key UNION ALL SELECT 'publish') WHERE node_key = 'implement' AND execution_id IN (
+          SELECT e.id FROM workflow_executions e JOIN runs r ON r.id = e.run_id WHERE r.task_id = ${task.taskId})`
+      yield* sql`
+        INSERT INTO node_attempts (id, project_id, node_id, attempt_number, run_attempt_id, controller_generation, state, output, admitted_at)
+        SELECT 'natt_' || lower(hex(randomblob(16))), project_id, id, 1, ${attempt?.runAttemptId ?? ''}, 1, 'succeeded',
+          '{"verdict":"pass"}', ${attempt?.at ?? ''} FROM nodes WHERE node_key = 'review'`
       assert.strictEqual((yield* cards(task.projectId))[0]?.reviewerChange, 'never')
       const refused = yield* Effect.flip(
         changeTeam(task.taskId, [step('implement', 'claude-code'), step('review', 'claude-code', 'large')]),
@@ -1356,6 +1368,188 @@ describe('changing the team of a task that has begun', () => {
         (yield* changeTeam(task.taskId, [step('implement', 'codex'), step('review', 'codex')])).lead?.step.agentId,
         'codex',
       )
+      slow.open('[lead:slowly]')
+    }).pipe(Effect.provide(runtimeWith(github, ':memory:', { holds: slow })))
+  })
+
+  it.live('adds a skipped review back once the work is up: a round reads all of it, and a review that ran stays done', () => {
+    const { working, github } = onGitHub()
+    const slow = holds()
+    return Effect.gen(function* () {
+      const task = yield* start(working, '[lead:slowly] [lead:finish] [lead:edit] [review:pass]')
+      // Skipped when planned: the work finishes and goes up with no review.
+      yield* changeTeam(task.taskId, [step('implement', 'claude-code'), step('review', 'codex', null, true)])
+      slow.open('[lead:slowly]')
+      yield* until(cards(task.projectId), (all) => all[0]?.phase === 'ready')
+      assert.deepStrictEqual(
+        (yield* results(task.threadId)).filter((result) => result.step === 'review'),
+        [],
+      )
+      // Not done: nothing ran. Until it merges, the person adds it back and picks its model.
+      assert.strictEqual((yield* cards(task.projectId))[0]?.reviewerChange, 'now')
+      const added = yield* changeTeam(task.taskId, [step('implement', 'claude-code'), step('review', 'claude-code', 'large')])
+      assert.deepStrictEqual([added.review?.step?.agentId, added.review?.step?.model, added.review?.when], ['claude-code', 'large', 'now'])
+      // Its round reads the task's head, and its findings, if any, go to the lead as ever.
+      const reviewed = (yield* until(results(task.threadId), (all) => all.some((result) => result.step === 'review'))).find(
+        (result) => result.step === 'review',
+      )
+      assert.deepStrictEqual([reviewed?.agentId, reviewed?.verdict], ['claude-code', 'pass'])
+      yield* until(cards(task.projectId), (all) => all[0]?.phase === 'ready' && all[0]?.reviewerChange === 'never')
+      // A review that ran keeps today's rule: done stays done.
+      const refused = yield* Effect.flip(changeTeam(task.taskId, [step('implement', 'claude-code'), step('review', 'codex')]))
+      assert.strictEqual((refused as { why?: string }).why, 'review_done')
+    }).pipe(Effect.provide(runtimeWith(github, ':memory:', { holds: slow })))
+  })
+
+  it.live('reads the pushed head for a review added back while more is held for Ship, and leaves what is held unshipped', () => {
+    const { working, bare, github } = onGitHub()
+    const slow = holds()
+    return Effect.gen(function* () {
+      const task = yield* start(working, '[lead:slowly] [lead:finish] [lead:edit] [review:pass]')
+      yield* changeTeam(task.taskId, [step('implement', 'claude-code'), step('review', 'codex', null, true)])
+      slow.open('[lead:slowly]')
+      yield* until(cards(task.projectId), (all) => all[0]?.phase === 'ready' && all[0]?.change != null)
+      // The lead commits after the push, and the commit is held for Ship: it goes up only with it, beside the pull request.
+      const sql = yield* SqlClient.SqlClient
+      const [workspace] = yield* sql<{ path: string }>`SELECT path FROM workspaces WHERE task_id = ${task.taskId}`
+      yield* sql`UPDATE workspaces SET held_at = ${new Date().toISOString()} WHERE task_id = ${task.taskId}`
+      commitIn(workspace?.path ?? '', 'later.txt', 'Later')
+      yield* (yield* Changes).refresh(task.taskId)
+      yield* until(cards(task.projectId), (all) => all[0]?.held?.commits === 1)
+      // Adding the review back starts a round all the same: the pull request is not left unreviewed until Ship.
+      yield* changeTeam(task.taskId, [step('implement', 'claude-code'), step('review', 'codex')])
+      const reviewed = (yield* until(results(task.threadId), (all) => all.some((result) => result.step === 'review'))).find(
+        (result) => result.step === 'review',
+      )
+      assert.deepStrictEqual([reviewed?.agentId, reviewed?.verdict], ['codex', 'pass'])
+      // What was held still waits: the review sent nothing up.
+      const [after] = yield* until(cards(task.projectId), (all) => all[0]?.phase === 'ready' && all[0]?.reviewerChange === 'never')
+      assert.strictEqual(after?.held?.commits, 1)
+      assert.notInclude(git(bare, 'log', '--format=%s', 'althar/add-a-retry'), 'Later')
+    }).pipe(Effect.provide(runtimeWith(github, ':memory:', { holds: slow })))
+  })
+
+  it.live('offers a review only where a lead offers one, as a line of its thread, once, and not again once turned down', () => {
+    const { working, github } = onGitHub()
+    const slow = holds()
+    return Effect.gen(function* () {
+      const instance = yield* Instance
+      const task = yield* start(working, '[lead:slowly] [lead:finish] [lead:edit] [review:pass]')
+      const offer = () => Effect.map(cards(task.projectId), (all) => all[0]?.reviewOffer)
+      const lead: ToolAccess = { role: 'lead', projectId: task.projectId, threadId: task.threadId, sessionId: 'none', taskId: task.taskId }
+      // Planned with a reviewer: nothing to offer, and the lead is told who reviews it.
+      assert.match(yield* callTool(lead, 'offer_review', {}), /has a review already, by .*change_lead changes its reviewer/)
+      // A plan made with no review, as a prototype's: its pull request opens, and still nothing is offered by itself.
+      yield* withoutReview(task.taskId)
+      slow.open('[lead:slowly]')
+      yield* until(cards(task.projectId), (all) => all[0]?.phase === 'ready' && all[0]?.change != null)
+      assert.strictEqual(yield* offer(), undefined)
+      // Its lead offers it, as the person asked to harden it: the one the rules would pick, another maker's than the lead's.
+      assert.match(yield* callTool(lead, 'offer_review', {}), /^Offered .* a review by .*Nothing is added until the person adds it\.$/)
+      const offered = yield* offer()
+      assert.deepStrictEqual([offered?.key, offered?.agentId, offered?.skipped], ['review', 'codex', false])
+      // A line of its thread, with the reviewer its buttons put on.
+      const line = (yield* notices(task.threadId)).find((one) => one['offer'] !== undefined) as Record<string, unknown> | undefined
+      assert.deepStrictEqual(
+        [line?.['title'], (line?.['offer'] as Record<string, unknown> | undefined)?.['kind']],
+        ['Add a review?', 'review'],
+      )
+      assert.strictEqual((line?.['offer'] as Record<string, unknown> | undefined)?.['agentId'], 'codex')
+      // Nothing was added by itself, and one that stands isn't offered twice.
+      assert.deepStrictEqual(
+        (yield* planOf(task.taskId)).steps.map((one) => [one.key, one.skipped]),
+        [['implement', false]],
+      )
+      assert.match(yield* callTool(lead, 'offer_review', {}), /is offered already: it waits on the person\./)
+      assert.strictEqual((yield* notices(task.threadId)).filter((one) => one['offer'] !== undefined).length, 1)
+      // Turned down, it doesn't come back, however often it is asked again, and the review can still be added by hand.
+      yield* (yield* Runs).declineReview(task.taskId, instance.personId)
+      yield* (yield* Runs).declineReview(task.taskId, instance.personId)
+      assert.strictEqual(yield* offer(), undefined)
+      assert.match(yield* callTool(lead, 'offer_review', {}), /turned down a review of .*: it isn't offered again/)
+      assert.strictEqual((yield* cards(task.projectId))[0]?.reviewerChange, 'now')
+    }).pipe(Effect.provide(runtimeWith(github, ':memory:', { holds: slow })))
+  })
+
+  it.live('keeps an offer answered once its review is added, even where the review is taken off before it starts', () => {
+    const { working, github } = onGitHub()
+    const slow = holds()
+    return Effect.gen(function* () {
+      const task = yield* start(working, '[lead:slowly] [lead:finish] [lead:edit] [review:pass]')
+      const lead: ToolAccess = { role: 'lead', projectId: task.projectId, threadId: task.threadId, sessionId: 'none', taskId: task.taskId }
+      const offer = () => Effect.map(cards(task.projectId), (all) => all[0]?.reviewOffer)
+      yield* withoutReview(task.taskId)
+      // Offered while its lead still works, so the review added has nothing to read yet.
+      assert.match(yield* callTool(lead, 'offer_review', {}), /^Offered /)
+      const offered = yield* offer()
+      assert.strictEqual(offered?.agentId, 'codex')
+      yield* changeTeam(task.taskId, [step('implement', 'claude-code'), step('review', offered?.agentId ?? '', offered?.model ?? null)])
+      assert.strictEqual(yield* offer(), undefined)
+      // Taken off again before it ran: the offer was answered, and its line keeps no buttons.
+      yield* changeTeam(task.taskId, [step('implement', 'claude-code')])
+      assert.deepStrictEqual(
+        (yield* planOf(task.taskId)).steps.filter((one) => one.key === 'review' && !one.skipped),
+        [],
+      )
+      assert.strictEqual(yield* offer(), undefined)
+      slow.open('[lead:slowly]')
+    }).pipe(Effect.provide(runtimeWith(github, ':memory:', { holds: slow })))
+  })
+
+  it.live('stops offering a review once it is added, and the review it adds reads the pushed head', () => {
+    const { working, github } = onGitHub()
+    const slow = holds()
+    return Effect.gen(function* () {
+      const task = yield* start(working, '[lead:slowly] [lead:finish] [lead:edit] [review:pass]')
+      const lead: ToolAccess = { role: 'lead', projectId: task.projectId, threadId: task.threadId, sessionId: 'none', taskId: task.taskId }
+      yield* withoutReview(task.taskId)
+      slow.open('[lead:slowly]')
+      yield* until(cards(task.projectId), (all) => all[0]?.phase === 'ready' && all[0]?.change != null)
+      // The coordinator offers it, as the person asked it there: the line stands in its own thread, and names the task.
+      const coordinatorThread = yield* (yield* Coordinator).thread(task.projectId)
+      const coordinator: ToolAccess = {
+        role: 'coordinator',
+        projectId: task.projectId,
+        threadId: coordinatorThread,
+        sessionId: 'none',
+        taskId: null,
+      }
+      assert.match(yield* callTool(coordinator, 'offer_review', {}), /Name the task/)
+      assert.match(yield* callTool(coordinator, 'offer_review', { task: task.taskId }), /^Offered /)
+      const line = (yield* notices(coordinatorThread)).find((one) => one['offer'] !== undefined)
+      assert.match(line?.['title'] ?? '', /^Add a review of “.+”\?$/)
+      assert.isUndefined((yield* notices(task.threadId)).find((one) => one['offer'] !== undefined))
+      const offered = (yield* cards(task.projectId))[0]?.reviewOffer
+      // Add, as its line's button does: the offer's step, through the dialog's own command.
+      assert.strictEqual(offered?.agentId, 'codex')
+      yield* changeTeam(task.taskId, [step('implement', 'claude-code'), step('review', offered?.agentId ?? '', offered?.model ?? null)])
+      assert.strictEqual((yield* cards(task.projectId))[0]?.reviewOffer, undefined)
+      const reviewed = (yield* until(results(task.threadId), (all) => all.some((result) => result.step === 'review'))).find(
+        (result) => result.step === 'review',
+      )
+      assert.deepStrictEqual([reviewed?.agentId, reviewed?.verdict], ['codex', 'pass'])
+      // Reviewed: a review that ran can't be offered again.
+      yield* until(cards(task.projectId), (all) => all[0]?.reviewerChange === 'never')
+      assert.match(yield* callTool(lead, 'offer_review', {}), /has a review already/)
+    }).pipe(Effect.provide(runtimeWith(github, ':memory:', { holds: slow })))
+  })
+
+  it.live('lets a skipped review be added where its run is at its publishing, which has no review in it', () => {
+    const { working, github } = onGitHub()
+    const slow = holds()
+    return Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const task = yield* start(working, '[lead:slowly] [lead:finish] [lead:edit] [review:pass]')
+      yield* changeTeam(task.taskId, [step('implement', 'claude-code'), step('review', 'codex', null, true)])
+      // Its run went on to publish with no review: the review is skipped, not done.
+      yield* sql`
+        INSERT INTO nodes (id, project_id, execution_id, node_key, iteration, type, added_in_revision, state, created_at)
+        SELECT 'node_' || lower(hex(randomblob(16))), project_id, execution_id, 'publish', 0, 'integration', 1, state, created_at
+        FROM nodes WHERE node_key = 'implement' AND execution_id IN (SELECT e.id FROM workflow_executions e JOIN runs r ON r.id = e.run_id
+          WHERE r.task_id = ${task.taskId})`
+      assert.strictEqual((yield* cards(task.projectId))[0]?.reviewerChange, 'now')
+      const added = yield* changeTeam(task.taskId, [step('implement', 'claude-code'), step('review', 'codex')])
+      assert.deepStrictEqual([added.review?.step?.agentId, added.review?.when], ['codex', 'now'])
       slow.open('[lead:slowly]')
     }).pipe(Effect.provide(runtimeWith(github, ':memory:', { holds: slow })))
   })

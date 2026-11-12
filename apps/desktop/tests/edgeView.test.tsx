@@ -223,7 +223,7 @@ describe('the edge', () => {
       withServices(<Edge shown={{ place: 'menu' }} />, client)
       await act(async () => {})
       calls = [permission]
-      act(() => emit(changed('attention_request', 'a1', 'th3', 'p2')))
+      act(() => emit(changed('card', 't3', 'th3', 'p2')))
       const allow = await within(await screen.findByRole('article', { name: 'Run npm publish' })).findByRole('button', {
         name: 'Allow once',
       })
@@ -274,7 +274,7 @@ describe('the edge', () => {
     await screen.findByRole('button', { name: 'Nothing needs you' })
     expect(screen.queryByText('Permission')).toBeNull()
     calls = [permission]
-    act(() => emit(changed('attention_request', 'a1', 'th3', 'p2')))
+    act(() => emit(changed('card', 't3', 'th3', 'p2')))
     const region = screen.getByRole('region', { name: 'Althar' })
     // Said beside the notch, whose by its mark, and on its line in the sheet.
     await waitFor(() => expect(within(region).getAllByText('Permission')).toHaveLength(2))
@@ -321,8 +321,8 @@ describe('the edge’s reads', () => {
       listeners.forEach((listener) => listener(changed('decision', 'd1')))
       vi.advanceTimersByTime(500)
       expect(invalidate).not.toHaveBeenCalled()
-      listeners.forEach((listener) => listener(changed('attention_request', 'a1')))
-      listeners.forEach((listener) => listener(changed('task', 't1')))
+      listeners.forEach((listener) => listener(changed('card', 't1')))
+      listeners.forEach((listener) => listener(changed('project', 'p1')))
       vi.advanceTimersByTime(500)
       expect(invalidate).toHaveBeenCalledTimes(1)
       expect(invalidate).toHaveBeenCalledWith({ queryKey: edgeKey })

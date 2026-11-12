@@ -1858,6 +1858,49 @@ describe('a task', () => {
     await waitFor(() => expect(client.startPlan).toHaveBeenCalledWith('pln1'))
   })
 
+  it('offers holding its plan while it counts down or waits for a free agent, from its menu, and then only starting', async () => {
+    const onBoard = (overrides: object) => ({
+      ...card({ taskId: 't1', threadId: 'th1', ...overrides }),
+      state: 'open',
+      createdAt: '',
+      settledAt: null,
+      changed: null,
+      here: [],
+    })
+    const opened = async (phase: 'planned' | 'running' | 'held', extra: object, actions: string[]) => {
+      const { client } = fakeClient({
+        getThread: vi.fn(async () =>
+          thread({ task: { ...thread().task, phase, actions: actions as never, planId: 'pln1' }, session: null }),
+        ),
+        getBoard: vi.fn(async () => ({ cursor: 1, tasks: [onBoard({ phase, ...extra })], calls: [], settledTotal: 0 })),
+      })
+      const view = withServices(<Task />, client)
+      await userEvent.click(await screen.findByRole('button', { name: 'More for this task' }))
+      await screen.findAllByRole('menuitem')
+      return { client, view }
+    }
+
+    // Counting down: Start now, and Hold.
+    const counting = await opened('planned', {}, ['start', 'abandon'])
+    expect(await screen.findByRole('menuitem', { name: /Hold/ })).toBeTruthy()
+    await userEvent.click(screen.getByRole('menuitem', { name: /Hold/ }))
+    await waitFor(() => expect(counting.client.holdPlan).toHaveBeenCalledWith('pln1'))
+    counting.view.unmount()
+
+    // Started, waiting for a free agent: nothing to start, but it can be held.
+    const queued = await opened('running', { queued: { busy: 4, atOnce: 4 }, planWaits: true, holdable: true }, ['stop', 'abandon'])
+    expect(await screen.findByRole('menuitem', { name: /Hold/ })).toBeTruthy()
+    expect(screen.queryByRole('menuitem', { name: /Start now/ })).toBeNull()
+    await userEvent.click(screen.getByRole('menuitem', { name: /Hold/ }))
+    await waitFor(() => expect(queued.client.holdPlan).toHaveBeenCalledWith('pln1'))
+    queued.view.unmount()
+
+    // Held: only Start.
+    await opened('held', {}, ['start', 'abandon'])
+    expect(await screen.findByRole('menuitem', { name: /Start now/ })).toBeTruthy()
+    expect(screen.queryByRole('menuitem', { name: /Hold/ })).toBeNull()
+  })
+
   it('changes the team of its plan before it begins, from its menu and its composer’s picker, in one dialog', async () => {
     const held = {
       ...card({ taskId: 't1', threadId: 'th1', phase: 'held' }),
@@ -3102,7 +3145,10 @@ describe('a task', () => {
           ? items.says('Found it, and a second call. Done.', 'claude-code', 'reply')
           : items.says('A new line.', 'codex', itemId),
       )
-      vi.mocked(client.getThread).mockImplementation(async () => ({ ...thread({ items: [] }), attention: [], session: null }))
+      vi.mocked(client.getThread).mockImplementation(async () => {
+        const stopped = thread({ items: [] })
+        return { ...stopped, task: { ...stopped.task, phase: 'stopped' as const }, attention: [], session: null }
+      })
       act(() => {
         emit(changed('thread_item', 'reply'))
         emit(changed('thread_item', 'reply'))
@@ -3371,16 +3417,17 @@ describe('a task', () => {
       status: TaskStatus.Paused,
       state: `The work waits: Codex is out of usage until ${clock(until)}`,
     })
-    // One waiting for a free agent says how many are busy, of how many this Mac runs at once; past that, how many more.
+    // One waiting for a free agent says how many are busy, of how many this Mac runs at once; past that, how many are busy and how many run at a time.
     expect(statusOf({ ...base, task: { ...base.task, queued: { busy: 4, atOnce: 4 } } })).toEqual({
       status: TaskStatus.Queued,
       state: 'Waiting: 4 of 4 agents busy on this Mac',
     })
     expect(statusOf({ ...base, task: { ...base.task, queued: { busy: 6, atOnce: 2 } } }).state).toBe(
-      'Waiting: 2 of 2 agents busy on this Mac, and 4 more',
+      'Waiting: 6 agents busy on this Mac, 2 at a time',
     )
     expect(statusOf(running())).toEqual({ status: TaskStatus.Running, state: 'Working' })
-    expect(statusOf({ ...base, session: null })).toEqual({ status: TaskStatus.Stopped, state: 'Stopped' })
+    // Under way with no session yet, between agents or on its way, as its card on the board says: working, not stopped.
+    expect(statusOf({ ...base, session: null })).toEqual({ status: TaskStatus.Running, state: 'Working' })
     // Its lead's session starting, as it does for a merged task given something to fix: the agent is on its way, not gone.
     expect(statusOf({ ...base, session: { ...base.session!, state: 'starting', held: false, turnRunning: false } })).toEqual({
       status: TaskStatus.Running,
@@ -3410,7 +3457,11 @@ describe('a task', () => {
       status: TaskStatus.Done,
       state: 'Abandoned',
     })
-    expect(statusOf({ ...running(), task: { ...base.task, phase: 'ready' } })).toEqual({ status: TaskStatus.Running, state: 'Working' })
+    // Ready as its card on the board is, whatever its lead's session says: a turn running makes its card running first (`taskStatusOf`).
+    expect(statusOf({ ...running(), task: { ...base.task, phase: 'ready' } })).toEqual({
+      status: TaskStatus.Yours,
+      state: 'Ready to accept',
+    })
     expect(
       statusOf({
         ...base,

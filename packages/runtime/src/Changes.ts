@@ -152,6 +152,7 @@ import {
 } from './pullRequestWords'
 import { change, fact, timestamp } from './records'
 import { retitleTask, TITLE_LENGTH } from './taskTitle'
+import { type Answers, answersOf, followUpBody, followUpWords } from './followUpWords'
 import { indexTask } from './Search'
 import { IssueChanges } from './IssueChanges'
 import { FastLane } from './fastLane'
@@ -1224,6 +1225,8 @@ export class Changes extends Context.Service<
         repository: { readonly slug: string; readonly template: string | null },
         since: string | null = null,
         review: { readonly seal: string | null; readonly details: string | null; readonly note?: string | null } | null = null,
+        /** What a next pull request says where the lead wrote nothing since the last: its finding and its commits (`followUpOf`). */
+        fallback: { readonly text: string; readonly answers: boolean } | null = null,
       ) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
@@ -1248,6 +1251,8 @@ export class Changes extends Context.Service<
           return bodyOf({
             built: built === null ? null : withoutAgentCredit(built, agentNames),
             lead: lead === undefined ? null : withoutAgentCredit(lead.summary, agentNames),
+            // Its finding and commits come first where it answers one: the lead's summary of the task doesn't say why this exists.
+            ...(fallback === null ? {} : fallback.answers ? { ahead: fallback.text } : { fallback: fallback.text }),
             issue,
             template: repository.template,
             written: written === undefined || written.text === null ? null : withoutAgentCredit(written.text, agentNames),
@@ -1513,6 +1518,67 @@ export class Changes extends Context.Service<
         })
 
       /**
+       * What a next pull request says of itself, after the one it follows (ADR-034): the words of its title (the lead's, given with its
+       * fix; for a fix of what a review found, else its first commit's subject, else the finding it answers; none for other work, which
+       * keeps the task's own title), and a description for where the lead wrote none: the
+       * finding a review after the merge made, and the commits since. The finding is the one the person had the lead fix, if it was
+       * asked for one; none otherwise.
+       */
+      const followUpOf = (
+        taskId: string,
+        threadId: string,
+        path: string,
+        next: Unshipped & { readonly change: NonNullable<Unshipped['change']> },
+      ) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const [review] = yield* sql<{ findings: string | null }>`
+            SELECT json_extract(content, '$.fixing.findings') AS findings FROM thread_items
+            WHERE thread_id = ${threadId} AND kind = 'notice' AND json_extract(content, '$.fixing.url') = ${next.change.url}
+              AND (${next.openedAt} IS NULL OR created_at > ${next.openedAt})
+            ORDER BY sequence DESC LIMIT 1`
+          const findings: ReadonlyArray<Answers> = answersOf(review?.findings)
+          const [titled] = yield* sql<{ text: string | null }>`
+            SELECT json_extract(content, '$.title') AS text FROM thread_items WHERE thread_id = ${threadId} AND kind = 'step_result'
+              AND json_extract(content, '$.title') IS NOT NULL AND (${next.openedAt} IS NULL OR created_at > ${next.openedAt})
+            ORDER BY sequence DESC LIMIT 1`
+          const listed =
+            next.commits.length === 0
+              ? ''
+              : yield* git(path, 'log', '--no-walk=unsorted', '--format=%s%x1f%b%x1e', ...next.commits).pipe(Effect.orElseSucceed(() => ''))
+          const commits = listed
+            .split('\x1e')
+            .map((entry) => entry.trim())
+            .filter((entry) => entry !== '')
+            .map((entry) => {
+              const at = entry.indexOf('\x1f')
+              return { subject: at === -1 ? entry : entry.slice(0, at), body: at === -1 ? '' : entry.slice(at + 1) }
+            })
+          return {
+            words: followUpWords(
+              {
+                written: titled?.text === undefined ? null : withoutAgentCredit(titled.text ?? '', agentNames),
+                // A fix of what a review found is named for its commit or its finding; other work after a merge keeps the task's own title.
+                commits: findings.length === 0 ? [] : commits,
+                findings,
+              },
+              agentNames,
+              yield* issueKeyOf(taskId),
+              TITLE_LENGTH - `After ${next.change.words.prefix}${next.change.number}: `.length,
+            ),
+            body: {
+              text: followUpBody({
+                follows: `${next.change.words.prefix}${next.change.number}`,
+                state: next.change.state === 'closed' ? 'closed' : 'merged',
+                findings,
+                commits,
+              }),
+              answers: findings.length > 0,
+            },
+          }
+        })
+
+      /**
        * Publishes one of the task's repositories: pushes its branch, and opens or adopts its pull request where the ending says to.
        * With `next`, its next pull request, after its last merged or closed: on a new branch, described from what came since.
        */
@@ -1653,9 +1719,15 @@ export class Changes extends Context.Service<
           // The team's conventions, as the task's worktree has them now, under the person's own rule for titles.
           const conventions = yield* conventionsAt(task.path, 'HEAD')
           const rule = ruleOf('title', (yield* (yield* Policies).current(input.projectId)).rules.titlePattern)
-          // A task's next pull request, after its last merged or closed, says which it follows (ADR-034).
+          // A task's next pull request, after its last merged or closed, says which it follows (ADR-034), and then what it does:
+          // its own words, not the task's, which say what the first one did.
+          const following =
+            next?.change == null ? null : yield* followUpOf(input.taskId, task.threadId, task.path, { ...next, change: next.change })
           const title = titleFor(rule ?? conventions.title?.pattern ?? null, {
-            title: next?.change == null ? task.title : `After ${next.change.words.prefix}${next.change.number}: ${task.title}`,
+            title:
+              next?.change == null
+                ? task.title
+                : `After ${next.change.words.prefix}${next.change.number}: ${following?.words ?? task.title}`,
             issue: issueLink === undefined ? null : { key: issueLink.key, sameHost },
           })
           const body = yield* bodyFor(
@@ -1664,6 +1736,7 @@ export class Changes extends Context.Service<
             { slug: task.slug, template: conventions.template?.text ?? null },
             next?.openedAt ?? null,
             yield* reviewFor({ runId: input.runId, workspaceId: task.workspaceId, cwd: task.path, end, github: host.product === 'github' }),
+            following?.body ?? null,
           )
           const opened = yield* outward({
             projectId: input.projectId,
@@ -1796,7 +1869,8 @@ export class Changes extends Context.Service<
           yield* touchCard(input.taskId)
           yield* news(input.taskId)
           wakeNow(input.taskId)
-          const [row] = yield* linksOf(input.taskId)
+          // This pull request's own link: the task's first is an earlier one's, merged or closed, where this is a next.
+          const row = (yield* linksOf(input.taskId)).find((one) => one.id === linkId)
           return {
             kind: 'opened',
             change: { ...snapshot, linkId, product: host.product, listening: row?.listening === 1 },
@@ -4547,8 +4621,10 @@ export class Changes extends Context.Service<
                 AND o.observed_at >= max(r.ended_at, coalesce((SELECT max(p.observed_at) FROM observations p
                   WHERE p.subject_type = 'external_link' AND p.subject_id = l.id AND p.kind = 'checks'
                   AND json_extract(p.payload, '$.outcome') = 'passed'), ''))) AS failed
-            FROM tasks k JOIN runs r ON r.id = (SELECT id FROM runs WHERE task_id = k.id AND plan_id IS NOT NULL ORDER BY created_at DESC LIMIT 1)
-            JOIN external_links l ON l.task_id = k.id AND l.kind = 'change'
+            FROM tasks k JOIN external_links l ON l.task_id = k.id AND l.kind = 'change'
+            -- The run whose end it came back from: its plan's, or, for a next pull request, the Ship that opened it (created before it).
+            JOIN runs r ON r.id = (SELECT id FROM runs WHERE task_id = k.id AND (plan_id IS NOT NULL OR created_at <= l.created_at)
+              ORDER BY created_at DESC, rowid DESC LIMIT 1)
             WHERE k.id = ${taskId} AND k.state = 'open' AND r.state = 'succeeded'
               AND r.ended_at IS NOT NULL AND (k.seen_at IS NULL OR k.seen_at < r.ended_at)
               AND json_extract(l.snapshot, '$.state') = 'open' AND l.listening = 1
@@ -4595,7 +4671,8 @@ export class Changes extends Context.Service<
             spokenAt: string | null
           }>`
             SELECT l.id, l.snapshot,
-              (SELECT ended_at FROM runs WHERE task_id = k.id AND plan_id IS NOT NULL ORDER BY created_at DESC LIMIT 1) AS ended_at,
+              (SELECT ended_at FROM runs WHERE task_id = k.id AND (plan_id IS NOT NULL OR created_at <= l.created_at)
+                ORDER BY created_at DESC, rowid DESC LIMIT 1) AS ended_at,
               (SELECT max(p.observed_at) FROM observations p WHERE p.subject_type = 'external_link' AND p.subject_id = l.id
                 AND p.kind = 'pushed') AS pushed_at,
               EXISTS (SELECT 1 FROM external_links e JOIN observations c ON c.subject_type = 'external_link' AND c.subject_id = e.id

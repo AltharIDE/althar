@@ -6,7 +6,7 @@ import { ApiError, type BoardSnapshot, type BoardTask } from '@althar/contracts'
 
 import { BoardView } from '../src/renderer/features/board/BoardView'
 import { lanesOf } from '../src/renderer/features/board/lanes'
-import { ChangeTeam, teamChangeOf } from '../src/renderer/features/team/Team'
+import { canHold, ChangeTeam, teamChangeOf } from '../src/renderer/features/team/Team'
 import { agents, card, change, fakeClient } from './fixtures'
 import { servicesFor, withServices } from './render'
 import { ServicesProvider } from '../src/renderer/data/services'
@@ -44,6 +44,7 @@ const queued = task({
   phase: 'running',
   inLine: true,
   planWaits: true,
+  holdable: true,
   queued: { busy: 4, atOnce: 4 },
   plan: { ...card().plan!, id: 'plq', startsAt: null },
 })
@@ -106,6 +107,28 @@ describe('changing the team of a task that has begun', () => {
     expect(plain.getByRole('button', { name: /^Implement:/ })).toBeTruthy()
   })
 
+  it('adds a skipped review back to a change whose work is up, and says its review starts now', async () => {
+    const skipped = {
+      kind: 'change' as const,
+      phase: 'ready' as const,
+      change: change({ state: 'open' }),
+      reviewerChange: 'now' as const,
+      plan: { ...card().plan!, steps: card().plan!.steps.map((step) => (step.key === 'review' ? { ...step, skipped: true } : step)) },
+    }
+    const { client } = fakeClient()
+    const dialog = opened(skipped, client)
+    expect(dialog.getByText('No review')).toBeTruthy()
+    await userEvent.click(dialog.getByRole('button', { name: 'Add a review' }))
+    expect(dialog.getByText('Its review starts now, on the change as it stands.')).toBeTruthy()
+    await userEvent.click(dialog.getByRole('button', { name: 'Save' }))
+    await waitFor(() =>
+      expect(client.changeTeam).toHaveBeenCalledWith('r', [
+        { key: 'implement', agentId: 'claude-code', model: null, skipped: false },
+        { key: 'review', agentId: 'codex', model: null, skipped: false },
+      ]),
+    )
+  })
+
   it('offers adding a review to a plan made with no review step at all, and saves it as one', async () => {
     const none = (kind: BoardTask['kind']) => ({
       kind,
@@ -151,7 +174,7 @@ describe('changing the team of a task that has begun', () => {
   })
 
   it('keeps a row on the board without a team menu: it is the task’s own menu that changes the team', () => {
-    const team = { projectId: 'p1', start: vi.fn(async () => {}), change: vi.fn() }
+    const team = { projectId: 'p1', start: vi.fn(async () => {}), hold: vi.fn(async () => {}), change: vi.fn() }
     withServices(
       <BoardView lanes={lanesOf(board([running]))} agents={agents} now={NOW} onOpen={vi.fn()} team={team} />,
       fakeClient().client,
@@ -178,7 +201,7 @@ describe('changing a plan’s team before it begins', () => {
   })
 
   it('starts a held plan from its row, and opens its team from the row’s menu', async () => {
-    const team = { projectId: 'p1', start: vi.fn(async () => {}), change: vi.fn() }
+    const team = { projectId: 'p1', start: vi.fn(async () => {}), hold: vi.fn(async () => {}), change: vi.fn() }
     withServices(
       <BoardView lanes={lanesOf(board([held, queued]))} agents={agents} now={NOW} onOpen={vi.fn()} team={team} />,
       fakeClient().client,
@@ -193,8 +216,8 @@ describe('changing a plan’s team before it begins', () => {
     expect(team.change).toHaveBeenCalledWith('h')
   })
 
-  it('offers no Start on a plan that starts by itself once an agent is free, only its team', async () => {
-    const team = { projectId: 'p1', start: vi.fn(async () => {}), change: vi.fn() }
+  it('offers no Start on a plan that starts by itself once an agent is free, but Hold, and its team', async () => {
+    const team = { projectId: 'p1', start: vi.fn(async () => {}), hold: vi.fn(async () => {}), change: vi.fn() }
     withServices(
       <BoardView lanes={lanesOf(board([held, queued]))} agents={agents} now={NOW} onOpen={vi.fn()} team={team} />,
       fakeClient().client,
@@ -203,7 +226,42 @@ describe('changing a plan’s team before it begins', () => {
     await userEvent.click(rowOf(queued.title).getByRole('button', { name: 'The team' }))
     const menu = await screen.findByRole('menu')
     expect(within(menu).queryByRole('menuitem', { name: 'Start' })).toBeNull()
+    expect(within(menu).getByRole('menuitem', { name: 'Hold' })).toBeTruthy()
     expect(within(menu).getByRole('menuitem', { name: 'Change the team…' })).toBeTruthy()
+  })
+
+  it('holds a task that waits for a free agent, or counts down, from its row, and a held one only starts', async () => {
+    const team = { projectId: 'p1', start: vi.fn(async () => {}), hold: vi.fn(async () => {}), change: vi.fn() }
+    const counting = task({
+      taskId: 'c',
+      threadId: 'thc',
+      title: 'Counting down',
+      phase: 'planned',
+      plan: { ...card().plan!, id: 'plc', startsAt: '2026-10-01T10:00:20.000Z' },
+    })
+    withServices(
+      <BoardView lanes={lanesOf(board([held, queued, counting]))} agents={agents} now={NOW} onOpen={vi.fn()} team={team} />,
+      fakeClient().client,
+    )
+    await userEvent.click(rowOf(queued.title).getByRole('button', { name: 'Hold' }))
+    expect(team.hold).toHaveBeenCalledWith('plq')
+    await userEvent.click(rowOf(counting.title).getByRole('button', { name: 'Hold' }))
+    expect(team.hold).toHaveBeenCalledWith('plc')
+    // Held already, it only starts: from the line and from the menu.
+    expect(rowOf(held.title).queryByRole('button', { name: 'Hold' })).toBeNull()
+    await userEvent.click(rowOf(held.title).getByRole('button', { name: 'The team' }))
+    expect(within(await screen.findByRole('menu')).queryByRole('menuitem', { name: 'Hold' })).toBeNull()
+  })
+
+  it('says which tasks can be held: on their countdown, or started and waiting for an agent or their checkout, nothing begun', () => {
+    expect(canHold(task({ phase: 'planned' }))).toBe(true)
+    expect(canHold(queued)).toBe(true)
+    // Waiting for its Local checkout instead of a place: nothing begun either.
+    expect(canHold({ ...queued, queued: null, holdable: true })).toBe(true)
+    expect(canHold(held)).toBe(false)
+    expect(canHold(running)).toBe(false)
+    expect(canHold({ ...queued, holdable: false })).toBe(false)
+    expect(canHold({ ...held, phase: 'planned', plan: null })).toBe(false)
   })
 
   it('leaves a row alone without the board’s team actions', () => {
@@ -318,7 +376,12 @@ describe('changing a plan’s team before it begins', () => {
 
   it('starts a plan once from its row, however often Start is pressed while it starts', async () => {
     let started = () => {}
-    const team = { projectId: 'p1', start: vi.fn(() => new Promise<void>((done) => (started = done))), change: vi.fn() }
+    const team = {
+      projectId: 'p1',
+      start: vi.fn(() => new Promise<void>((done) => (started = done))),
+      hold: vi.fn(async () => {}),
+      change: vi.fn(),
+    }
     withServices(<BoardView lanes={lanesOf(board([held]))} agents={agents} now={NOW} onOpen={vi.fn()} team={team} />, fakeClient().client)
     await userEvent.click(rowOf(held.title).getByRole('button', { name: 'Start' }))
     expect(rowOf(held.title).queryByRole('button', { name: 'Start' })).toBeNull()
