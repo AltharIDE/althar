@@ -17,7 +17,9 @@ import { withServices } from './render'
 
 const when = '2026-11-06T14:03:00.000Z'
 
-const smallChange = (): ThreadItem => ({
+const PASSED = { outcome: 'passed', passed: 2, failed: 0, running: 0, total: 2, failing: [], list: [] } as const
+
+const smallChange = (over: Partial<Extract<ThreadItem, { kind: 'small_change' }>['content']> = {}): ThreadItem => ({
   id: 'i-small',
   sequence: 1,
   agentId: null,
@@ -36,9 +38,12 @@ const smallChange = (): ThreadItem => ({
       { key: 'checks', what: 'Checks pass', at: when, done: true },
       { key: 'merged', what: 'Merged', at: null, done: false },
     ],
-    change: change({ state: 'open', head: 'abc123' }),
+    change: change({ state: 'open', head: 'abc123', checks: PASSED }),
     review: null,
     fullTask: null,
+    reviewer: { agentId: 'codex', model: null },
+    afterMerge: { project: 'major', task: null, holds: 'major' },
+    ...over,
   },
 })
 
@@ -60,15 +65,51 @@ const modelMove = (kept = false): ThreadItem => ({
 const Task = () => <TaskView model={useTask('th1')} onBack={vi.fn()} />
 
 describe('the fast lane on a task’s screen', () => {
-  it('merges a small change as the header does, and makes it a full task', async () => {
+  it('merges a small change as the header does, and moves its review from its stop', async () => {
     const { client } = fakeClient({ getThread: vi.fn(async () => snapshot({ items: [smallChange()] })) })
     withServices(<Task />, client)
     expect(await screen.findByText('The Run menu says Strat')).toBeTruthy()
-    expect(screen.getByText(/Sonnet, no plan, reviewed after it merges/)).toBeTruthy()
+    expect(screen.getByText('1 line in RunMenu.tsx', { exact: false })).toBeTruthy()
+    expect(screen.getByText('After merge')).toBeTruthy()
     await userEvent.click(screen.getByRole('button', { name: 'Merge' }))
     await waitFor(() => expect(client.merge).toHaveBeenCalledWith('t1', 'abc123', 'https://github.com/meridian/api/pull/12'))
-    await userEvent.click(screen.getByRole('button', { name: 'Make it a full task' }))
+    // No review: at once, the route ends at Merge.
+    await userEvent.click(screen.getByRole('button', { name: 'Review' }))
+    await userEvent.click(await screen.findByRole('menuitemradio', { name: /No review/ }))
+    await waitFor(() => expect(client.setReviewAfterMerge).toHaveBeenCalledWith('t1', 'none'))
+    expect(screen.queryByText('After merge')).toBeNull()
+    // Before it merges makes it a full task.
+    await userEvent.click(screen.getByRole('button', { name: 'Review' }))
+    await userEvent.click(await screen.findByRole('menuitemradio', { name: /Before it merges/ }))
     await waitFor(() => expect(client.makeItAFullTask).toHaveBeenCalledWith('t1'))
+    expect(screen.getByText('Before merge')).toBeTruthy()
+  })
+
+  it('goes back, with a line, where moving its review fails', async () => {
+    const { client } = fakeClient({
+      getThread: vi.fn(async () => snapshot({ items: [smallChange()] })),
+      setReviewAfterMerge: vi.fn(async () => {
+        throw new Error('The runtime is away.')
+      }),
+    })
+    withServices(<Task />, client)
+    await userEvent.click(await screen.findByRole('button', { name: 'Review' }))
+    await userEvent.click(await screen.findByRole('menuitemradio', { name: /No review/ }))
+    expect(await screen.findByRole('alert')).toBeTruthy()
+    expect(screen.getByText('After merge')).toBeTruthy()
+  })
+
+  it('says what its review after the merge found, without listing it', async () => {
+    const merged = smallChange({
+      change: change({ state: 'merged', head: 'abc123', checks: PASSED }),
+      reviewAfter: { state: 'found', findings: 2, at: when, item: 'i-verdict' },
+    })
+    const { client } = fakeClient({ getThread: vi.fn(async () => snapshot({ items: [merged] })) })
+    withServices(<Task />, client)
+    expect(await screen.findByText('2 found')).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Merge' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Review' })).toBeNull()
+    expect(screen.getByRole('button', { name: 'See findings' })).toBeTruthy()
   })
 
   it('keeps the model Auto moved from, and undoes the keep', async () => {

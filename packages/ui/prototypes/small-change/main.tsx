@@ -2,13 +2,13 @@ import '@fontsource-variable/inter'
 import '@fontsource-variable/jetbrains-mono'
 import '@althar/ui/styles.css'
 
-import { Button, ChangeSet, ChangeState, CheckState, SmallChange, type SmallChangeStep } from '@althar/ui'
+import { Button, ChangeSet, ChangeState, CheckState } from '@althar/ui'
 import { StrictMode, useEffect, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 
 import { type Direction, REVIEW_MODES, ReviewMode } from './calm'
-import { FRESH } from './fresh'
-import { type SmallState, SOL, SONNET, STATES } from './states'
+import { REAL } from './real'
+import { type SmallState, SOL, STATES } from './states'
 import p from './page.module.css'
 
 /*
@@ -20,55 +20,7 @@ import p from './page.module.css'
  * &only=grid or &only=thread draws one of the two.
  */
 
-/** Today's card, from the kit, in each state, as the runtime would give it. */
-function nowSteps(s: SmallState): SmallChangeStep[] {
-  const failed = s.key === 'failed'
-  return [
-    { key: 'started', what: 'Started', at: `2026-11-11T${s.started}:00`, done: true },
-    {
-      key: 'changed',
-      what: s.changed ? `Changed ${s.files} files` : 'Changed',
-      at: s.changed ? `2026-11-11T${s.changed}:00` : null,
-      done: s.changed !== undefined,
-    },
-    {
-      key: 'checks',
-      what: failed ? 'Checks failed' : 'Checks pass',
-      at: s.checked ? `2026-11-11T${s.checked}:00` : null,
-      done: s.checked !== undefined,
-    },
-    { key: 'merged', what: 'Merged', at: s.merged ? `2026-11-11T${s.merged}:00` : null, done: s.merged !== undefined },
-  ]
-}
-
-function Now({ state: s }: { state: SmallState }) {
-  const isMerged = s.merged !== undefined
-  const review = isMerged || s.key === 'full' ? { title: `Review #${s.pr}: ${s.title}`, onOpen: () => {} } : null
-  return (
-    <SmallChange
-      title={s.title}
-      model={SONNET.name}
-      skips={['no plan', 'reviewed after it merges']}
-      steps={nowSteps(s)}
-      change={s.files === undefined ? null : { name: `PR #${s.pr}`, state: isMerged ? 'merged' : 'open' }}
-      review={review}
-      fullTask={s.key === 'full'}
-      busy={s.key === 'merging'}
-      {...(s.key === 'ready' || s.key === 'merging' ? { onMerge: () => {} } : {})}
-      onMakeFullTask={() => {}}
-    />
-  )
-}
-
-const NOW: Direction = {
-  key: 'now',
-  letter: '0',
-  name: 'Now',
-  idea: 'The card as it is today, from the kit.',
-  Card: Now,
-}
-
-const ALL: readonly Direction[] = [NOW, ...FRESH]
+const ALL: readonly Direction[] = [REAL]
 const params = new URLSearchParams(location.search)
 const SHOT = params.has('shot')
 const ONLY = params.get('only')
@@ -118,7 +70,7 @@ function Page() {
   })
   const [theme, setTheme] = useState(params.get('theme') === 'dark' ? 'dark' : 'light')
   const [live, setLive] = useState(() => Math.max(0, Number(params.get('s') ?? 5) - 1))
-  const dir = ALL.find((d) => d.key === dirKey) ?? NOW
+  const dir = ALL.find((d) => d.key === dirKey) ?? REAL
   const state = STATES[live] ?? STATES[0]!
 
   useEffect(() => {
