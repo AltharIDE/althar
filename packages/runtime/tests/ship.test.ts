@@ -541,7 +541,7 @@ describe('a Ship', () => {
     }).pipe(Effect.provide(runtimeWith(github)))
   })
 
-  it.live('opens the task’s first pull request, a draft, where its plan ended on its branch', () => {
+  it.live('pushes the branch of a task that ends with it, opening nothing, and Open pull request opens its first, a draft', () => {
     const { working, bare, github } = onGitHub()
     return Effect.gen(function* () {
       const runs = yield* Runs
@@ -550,14 +550,15 @@ describe('a Ship', () => {
       yield* say(task.threadId, 'Make it retry twice. tidy pls [lead:commit]')
       yield* answered(task.threadId, task.turns + 1)
       yield* until(heldAt(task.taskId), (at) => at !== null)
+      // Ship sends it up as the task ends: its branch, and no pull request (a task is a conversation plus parts: one that
+      // ends with its branch, as a prototype does or a change that dropped its pull request, stays a branch).
       yield* runs.ship({ envelope: yield* Runtime.envelope('task.ship', { taskId: task.taskId }), taskId: task.taskId })
-      yield* until(
-        Effect.sync(() => github.changes.length),
-        (count) => count === 1,
-      )
-      assert.deepStrictEqual([github.changes[0]?.source, github.changes[0]?.draft], [BRANCH, true])
-      assert.strictEqual(git(bare, 'rev-parse', BRANCH), git(task.path, 'rev-parse', 'HEAD'))
       yield* until(heldAt(task.taskId), (at) => at === null)
+      assert.strictEqual(git(bare, 'rev-parse', BRANCH), git(task.path, 'rev-parse', 'HEAD'))
+      assert.lengthOf(github.changes, 0)
+      // The person opens its pull request on purpose, from its Change card: a draft.
+      yield* runs.publish(task.taskId)
+      assert.deepStrictEqual([github.changes[0]?.source, github.changes[0]?.draft], [BRANCH, true])
       const [card] = yield* until(cards(task.projectId), (all) => all[0]?.change?.number === 1)
       assert.isUndefined(card?.held)
     }).pipe(Effect.provide(runtimeWith(github)))
