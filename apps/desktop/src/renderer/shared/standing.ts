@@ -314,6 +314,8 @@ export const readyText = {
   blocked: 'Not ready to accept',
   /** A conflict the commits waiting to be pushed resolve: ready once the person pushes them. */
   readyOnPush: 'Ready once pushed',
+  /** Its checks still run: not ready to accept until they pass, whichever pull request they are on. */
+  checksRunning: 'Checks running',
 }
 
 /**
@@ -347,5 +349,7 @@ export const readyWordOf = (
   if (change === null && task.unshipped != null) return kindWords.unshipped
   if (change?.state === 'open' && isBlocked(standingOf(change))) return readyText.blocked
   if (change?.state === 'open' && pushResolves(standingOf(change))) return readyText.readyOnPush
+  // The open pull request's checks run, as a next one's do after the first merged: they say it, not "Ready to accept".
+  if (change?.state === 'open' && standingOf(change).blockers.some((one) => one.kind === 'running')) return readyText.checksRunning
   return kindWords.ready
 }

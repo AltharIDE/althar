@@ -365,7 +365,8 @@ export class Setups extends Context.Service<
               state: 'launching',
               launchedAt: yield* timestamp,
             })}`
-            const spawned = yield* Effect.exit(spawnOwned(spec, folder))
+            // A worktree's setup is agents' work, an install or a build: in the background, as its lead runs (process.ts).
+            const spawned = yield* Effect.exit(spawnOwned(spec, folder, { background: true }))
             if (Exit.isFailure(spawned)) {
               yield* change('processes', id, { state: 'unknown', endedAt: yield* timestamp })
               const reason = Option.match(Cause.findErrorOption(spawned.cause), {

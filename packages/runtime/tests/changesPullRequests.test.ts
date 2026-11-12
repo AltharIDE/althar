@@ -180,6 +180,18 @@ describe('a pull request, by the person and the lead', () => {
         }
         const heard = yield* until(turns(threadId), (rows) => rows.slice(before).some((row) => row.prompt?.includes(expected) === true))
         assert.isTrue(heard.slice(before).some((row) => row.prompt?.includes(expected) === true))
+        // Sent back for its checks, it is told an update from main is update_branch or the queue, never the plan again.
+        if (news === 'queue')
+          assert.isTrue(
+            heard
+              .slice(before)
+              .some(
+                (row) =>
+                  row.prompt?.includes(
+                    "call update_branch for it, or leave putting it back in the queue to the person: don't redo the plan's steps",
+                  ) === true,
+              ),
+          )
         assert.notStrictEqual(heard.at(-1)?.providerSessionId, heard.at(before - 1)?.providerSessionId)
       }).pipe(Effect.provide(runtimeWith({ github })))
     })

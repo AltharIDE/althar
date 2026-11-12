@@ -102,6 +102,8 @@ import { projectTracker } from './projectTracker'
 import { applyRules } from './rulesChange'
 import { UsageData } from './UsageData'
 import { Queries } from './Queries'
+import { lagLogged, slowCall } from './lag'
+import { Foreground } from './spawner'
 import { Busy } from './Busy'
 import { clearView, showEarlier, undoClearView } from './chatView'
 import { timestamp } from './records'
@@ -132,6 +134,7 @@ import { makeRepository, placeRepository } from './newRepository'
 import { type InputFile, keepFiles } from './sentFiles'
 import { type InputImage, keepSent } from './sentImages'
 import { anyOf, SignIns } from './SignIns'
+import { endingOf } from './signInEnding'
 import { describe, listSkills, type SkillsConfig } from './Skills'
 import { expected, words } from './words'
 import { makeBranch } from './newBranch'
@@ -334,8 +337,13 @@ export const handlers = Api.toLayer(
      * A call's failure as the window gets it: in words; and, when it isn't
      * the person's to put right, in the log and reported, by the call's name.
      */
+    // A window's call is the person's: its git commands start before the background's (spawner.ts). One that takes long
+    // says so in a development build's log (lag.ts).
+    const timedCall = lagLogged()
+      ? <A, E, R>(effect: Effect.Effect<A, E, R>) => slowCall(callName, effect)
+      : <A, E, R>(effect: Effect.Effect<A, E, R>) => effect
     const api = <A, E, R>(effect: Effect.Effect<A, E, R>): Effect.Effect<A, ApiError, R> =>
-      Effect.catchCause(effect, (cause) => {
+      Effect.catchCause(timedCall(Effect.provideService(effect, Foreground, true)), (cause) => {
         if (Cause.hasInterruptsOnly(cause)) return Effect.interrupt
         const error = Cause.findErrorOption(cause)
         // Refused by the call itself, in the window's own words already: as it is, and nothing went wrong.
@@ -569,6 +577,7 @@ export const handlers = Api.toLayer(
         const check = yield* signIns.account(account, recheck)
         const out = yield* limits.outAccount(account.id)
         const providers = yield* signIns.providers(account, check)
+        const ending = endingOf(check.endsAt, yield* Clock.currentTimeMillis)
         return {
           id: account.id,
           name: account.name,
@@ -577,6 +586,7 @@ export const handlers = Api.toLayer(
           paidBy: check.paidBy,
           outUntil: Option.getOrNull(Option.map(out, (each) => each.until)),
           adoptedFrom: account.adoptedFrom,
+          ...(check.endsAt === undefined ? {} : { endsAt: check.endsAt, endsSoon: ending !== undefined && ending !== 'later' }),
           ...(providers === undefined ? {} : { providers }),
         } satisfies AccountStatus
       }).pipe(
@@ -1056,8 +1066,8 @@ export const handlers = Api.toLayer(
             }),
           ),
         ),
-      SetModel: ({ commandId, threadId, model }) => once(commandId, api(sessions.setModel({ threadId, model }))),
-      SetEffort: ({ commandId, threadId, effort }) => once(commandId, api(sessions.setEffort({ threadId, effort }))),
+      SetModel: ({ commandId, threadId, model }) => once(commandId, api(Effect.asVoid(sessions.chooseLead({ threadId, model })))),
+      SetEffort: ({ commandId, threadId, effort }) => once(commandId, api(Effect.asVoid(sessions.chooseLead({ threadId, effort })))),
       GetModels: () => api(models.catalog),
       SetDefaultEffort: ({ commandId, agentId, model, effort }) =>
         once(commandId, api(models.setDefaultEffort({ agentId, model, effort }))),
@@ -1462,7 +1472,7 @@ export const handlers = Api.toLayer(
           ),
         ),
       StartPlan: ({ commandId, planId }) => once(commandId, api(Effect.asVoid(plans.start(planId, instance.personId)))),
-      HoldPlan: ({ commandId, planId }) => once(commandId, api(plans.hold(planId, instance.personId))),
+      HoldPlan: ({ commandId, planId }) => once(commandId, api(Effect.asVoid(plans.hold(planId, instance.personId)))),
       ChangePlan: ({ commandId, planId, steps, end, worksIn, toward }) =>
         once(commandId, api(plans.change(planId, steps, instance.personId, end, worksIn, toward))),
       ApplyPreset: ({ commandId, planId, preset }) => once(commandId, api(plans.applyPreset(planId, preset, instance.personId))),
@@ -1946,6 +1956,7 @@ export const handlers = Api.toLayer(
           commandId,
           api(Effect.flatMap(envelope('task.skip_review', { taskId }, commandId), (said) => runs.skipReview({ envelope: said, taskId }))),
         ),
+      DeclineReview: ({ commandId, taskId }) => once(commandId, api(runs.declineReview(taskId, instance.personId))),
       Ship: ({ commandId, taskId, change }) =>
         once(
           commandId,
@@ -1996,6 +2007,7 @@ export const handlers = Api.toLayer(
       ListEditors: () => Effect.succeed(config.editors?.list() ?? []),
       GetLoad: () => api(machine.now),
       GetPlanUsage: ({ refresh }) => api(planUsage.now(refresh === true)),
+      DismissSignInEnding: ({ commandId, accountId, endsAt, stage }) => once(commandId, api(planUsage.dismiss(accountId, endsAt, stage))),
       GetModelRooms: ({ projectId }) =>
         api(
           modelRooms(projectId).pipe(

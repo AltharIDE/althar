@@ -119,6 +119,11 @@ export interface TaskThreadProps extends Shared {
   readonly versionOf: (whole: string) => string
   /** Opens another task, by its thread: one this task's lead started, from the line that says so. */
   readonly onOpenTask?: (threadId: string) => void
+  /**
+   * Where this task's lead started another, in place of a line: a chip that stays current as the task moves, so what became
+   * of it shows where it was started (ADR-097). Without it, a line with the task's title, which opens it.
+   */
+  readonly started?: (task: { readonly threadId: string; readonly title: string }) => ReactNode
   /** What became of a review's findings, in words ("2 fixed, 1 declined"), by its report; undefined while none is settled. */
   readonly settledOf?: (review: string) => string | undefined
   /** A review running now, by who and for how long: a line at the thread's end. */
@@ -368,7 +373,16 @@ const YouView = memo(
 /** What the thread says of a task this task's lead started, before its title, which opens it. */
 const STARTED = 'Started'
 
-export function TaskThread({ rounds, versionOf, onOpenTask, settledOf, reviewing = null, stepAction, ...shared }: TaskThreadProps) {
+export function TaskThread({
+  rounds,
+  versionOf,
+  onOpenTask,
+  started,
+  settledOf,
+  reviewing = null,
+  stepAction,
+  ...shared
+}: TaskThreadProps) {
   const { threadId, worktree = null, openFile, session, project, onTryAgain, onCompact, onSignIn } = shared
   const named = useModelNames()
   // A round on the model its own turn ran, as the runtime recorded it; an older one without, on the thread's current
@@ -442,6 +456,7 @@ export function TaskThread({ rounds, versionOf, onOpenTask, settledOf, reviewing
       case 'relayed':
         return <Relayed key={block.id} title={block.title} body={block.body} data-item={block.id} />
       case 'althar':
+        if (block.task !== undefined && started !== undefined) return <Fragment key={block.id}>{started(block.task)}</Fragment>
         return (
           <AltharLine key={block.id} tone={block.tone}>
             {block.task !== undefined && onOpenTask !== undefined ? (

@@ -444,6 +444,12 @@ interface Running {
    * between turns, as what is said to it next is delivered, never in one.
    */
   nextLead: { readonly agentId: string; readonly model?: string; readonly effort?: string } | undefined
+  /** Held while its agent is set to a model or effort, so two settings never cross: the chosen one and the one before (`chooseLead`). */
+  leadLock: Semaphore.Semaphore
+  /** Its agent is being set to a model or effort now. */
+  settingLead: boolean
+  /** A turn is being delivered, from the lead being taken up to the prompt going out: nothing sets the lead then, but that delivery. */
+  leadHeld: boolean
   /**
    * Its folder moved under it (a task moving between a worktree and Local): what is said to it next goes to a fresh session
    * there, handed the work so far, as a handover's would, since an agent's session can't follow its folder.
@@ -803,6 +809,17 @@ export class Sessions extends Context.Service<
     setModel(input: { readonly threadId: string; readonly model: string }): Effect.Effect<void, NoSession | ModelUnchanged | Failure>
     /** How hard the running session's agent thinks, from here on. */
     setEffort(input: { readonly threadId: string; readonly effort: string }): Effect.Effect<void, NoSession | EffortUnchanged | Failure>
+    /**
+     * The person's pick of the same agent's model or effort, as the picker makes it: recorded at once as who leads from the
+     * next turn (`nextLead`, which the thread's session shows), and set on the agent in the background, once no turn runs, since
+     * an agent answers one request at a time and one asked mid-turn waits for the turn to end. What it wouldn't take is said in
+     * the thread, and the lead stays as it was. Where it merges with an earlier pick not yet set, the later of each wins.
+     */
+    chooseLead(input: {
+      readonly threadId: string
+      readonly model?: string
+      readonly effort?: string
+    }): Effect.Effect<'later' | 'same', NoSession | Failure>
     /** Delivers what waits in the thread's queue now, if an agent is on it: after a usage limit resets, say. */
     wake(threadId: string): Effect.Effect<void>
     /**
@@ -1673,24 +1690,63 @@ export class Sessions extends Context.Service<
           return waiting !== undefined
         })
 
-      /** The same agent on another model or effort, set between turns as the composer sets them. One it won't take stays as it is, said. */
+      /**
+       * The same agent on another model or effort, set between turns as the composer sets them. One it won't take stays as it is,
+       * said with why. Held under `leadLock` by whoever calls it, so two settings never cross.
+       */
       const settleLead = (running: Running, next: { readonly model?: string; readonly effort?: string }) =>
         Effect.gen(function* () {
+          running.settingLead = true
           const sql = yield* SqlClient.SqlClient
           const { threadId } = running.thread
           const [now] = yield* sql<{ model: string | null; effort: string | null }>`
-            SELECT model, effort FROM provider_sessions WHERE id = ${running.sessionId}`
-          const refused = (what: string) =>
+              SELECT model, effort FROM provider_sessions WHERE id = ${running.sessionId}`
+          const refused = (what: string, why: string) =>
             addItem({ projectId: running.thread.projectId, threadId, sessionId: running.sessionId }, 'notice', {
               source: 'runtime',
               severity: 'warning',
-              title: `${running.entry.definition.name} stays on ${what} as it is: it wouldn’t change.`,
+              title: `${running.entry.definition.name} stays on ${what} as it is: ${why}`,
             })
+          const because = (error: { readonly _tag: string; readonly summary?: string }) =>
+            error._tag === 'ModelUnchanged' || error._tag === 'EffortUnchanged'
+              ? (error.summary ?? 'it wouldn’t change.')
+              : 'it wouldn’t change.'
           if (next.model !== undefined && next.model !== now?.model)
-            yield* setModel({ threadId, model: next.model }).pipe(Effect.catch(() => refused('its model')))
+            yield* setModel({ threadId, model: next.model }).pipe(Effect.catch((error) => refused('its model', because(error))))
           if (next.effort !== undefined && next.effort !== now?.effort)
-            yield* setEffort({ threadId, effort: next.effort }).pipe(Effect.catch(() => refused('its effort')))
-        })
+            yield* setEffort({ threadId, effort: next.effort }).pipe(Effect.catch((error) => refused('its effort', because(error))))
+        }).pipe(
+          Effect.ensuring(
+            Effect.sync(() => {
+              running.settingLead = false
+            }),
+          ),
+        )
+
+      /**
+       * What the person chose of the same agent's model or effort is set on the agent, where nothing runs: the lead taken up as
+       * chosen, whatever was chosen since while it was being set. A turn at work waits: it is set when the turn ends, or
+       * between turns as what is said next is delivered (`deliver`).
+       */
+      const applyLead = (running: Running): Effect.Effect<void, never, Store> =>
+        running.leadLock
+          .withPermits(1)(
+            Effect.gen(function* () {
+              // Read under the lock, as what was chosen last: a turn that began, or was being delivered, while this waited has it.
+              for (;;) {
+                if (running.turnRunning || running.leadHeld || running.stopping || threads.get(running.thread.threadId) !== running) return
+                const next = running.nextLead
+                if (next === undefined || next.agentId !== running.entry.definition.id) return
+                yield* settleLead(running, next)
+                // Taken up once set, or refused: until then the thread says it leads from here. Chosen again meanwhile, that one next.
+                if (running.nextLead === next) {
+                  running.nextLead = undefined
+                  return
+                }
+              }
+            }),
+          )
+          .pipe(Effect.catchCause((cause) => Effect.logWarning('Could not set the lead as chosen', cause)))
 
       /**
        * Another agent takes over a lead between turns, as it was changed: the same hand-over as the composer's, with what waits
@@ -1734,17 +1790,31 @@ export class Sessions extends Context.Service<
           // A coordinator or lead handing its work over takes no more turns. One whose context is filling up hands it over now,
           // between turns, never in one: what waits goes to the fresh session (ADR-031, ADR-038).
           if (running.handover === 'under_way') return false
+          // A model or effort chosen from here is kept for the turn after this one: it is the lead as it stands now that goes out.
+          running.leadHeld = true
           yield* inputBatches.ready(thread.threadId)
           // A lead changed meanwhile takes up what is said to it now, between turns: another agent takes over with it.
           if (running.nextLead !== undefined && (yield* inputWaiting(thread.threadId))) {
             const next = running.nextLead
-            running.nextLead = undefined
             if (next.agentId !== running.entry.definition.id) {
+              running.nextLead = undefined
               running.handover = 'under_way'
               yield* Effect.forkIn(run(takeOver(running, next)), sessionsScope)
               return false
             }
-            yield* settleLead(running, next)
+            // Under the lock, and again for whatever is chosen while it is being set: the turn begins on the last choice.
+            yield* running.leadLock.withPermits(1)(
+              Effect.gen(function* () {
+                for (let current = running.nextLead; current !== undefined && current.agentId === running.entry.definition.id;) {
+                  yield* settleLead(running, current)
+                  if (running.nextLead === current) {
+                    running.nextLead = undefined
+                    return
+                  }
+                  current = running.nextLead
+                }
+              }),
+            )
           }
           // Its folder moved: a fresh session there takes up what is said now, handed the work so far.
           if (running.moved && running.handover === 'none' && (yield* inputWaiting(thread.threadId))) {
@@ -2102,6 +2172,8 @@ export class Sessions extends Context.Service<
           running.turnRunning = false
           running.promptSent = null
           running.turnEndedAt = yield* Clock.currentTimeMillis
+          // A model or effort chosen while the turn ran is set on its agent now, rather than when something is said next.
+          if (running.nextLead?.agentId === running.entry.definition.id) yield* Effect.forkIn(run(applyLead(running)), sessionsScope)
           // A session started for a step that waited for a place counts that wait in its first turn (Runs' `startPlaced`).
           const [placed] =
             spent.starting === null
@@ -2259,7 +2331,17 @@ export class Sessions extends Context.Service<
           }
           // Out of usage, or out of reach, nothing more goes to it until what carries the work on says so.
           return !refused && !held && !lost
-        })
+        }).pipe(
+          Effect.ensuring(
+            Effect.suspend(() => {
+              running.leadHeld = false
+              // Nothing began, and a pick came meanwhile: it is set now, as no turn will end to do it.
+              return !running.turnRunning && running.nextLead?.agentId === running.entry.definition.id
+                ? Effect.forkIn(run(applyLead(running)), sessionsScope).pipe(Effect.asVoid)
+                : Effect.void
+            }),
+          ),
+        )
 
       /** A usage limit belongs to the account the session runs on (docs/architecture/03, ADR-012), not the agent. */
       const accountLimited = (running: Running, resetsAt: string | undefined) =>
@@ -2627,7 +2709,7 @@ export class Sessions extends Context.Service<
           // A lead's git runs Althar's guard, which stops at git itself what can't be undone from the task (pushGuard.ts, ADR-071).
           const guarded =
             thread.role === 'task' && !reads && guardHolds
-              ? guardEnv({
+              ? yield* guardEnv({
                   sessionId,
                   taskBranch: thread.branch,
                   defaultBranches: [thread.defaultBranch, ...thread.repositories.map((repository) => repository.defaultBranch)],
@@ -3002,6 +3084,9 @@ export class Sessions extends Context.Service<
             turnStartedAt: null,
             turnEndedAt: null,
             nextLead: undefined,
+            leadLock: Semaphore.makeUnsafe(1),
+            settingLead: false,
+            leadHeld: false,
             moved: false,
             before: { session: opened, starting: brief.starting ?? 'start', place: 0 },
           }
@@ -3724,6 +3809,8 @@ export class Sessions extends Context.Service<
             "When you have done the task, call Althar's finish_step tool with a summary of a few lines: what you changed, how you checked it, and anything left open. The person reads that summary rather than everything you did. If you can't go further without the person's answer, call wait_for_person with your question and end your turn: the task waits in their Needs you, and their answer starts you again. Don't use finish_step for work that waits on them.",
             // After its plan, what the person says is a turn, not a round (a task is a conversation plus parts): its commits wait for Ship.
             'Once the plan\'s steps are done, what the person says to you is a turn of the conversation, not a step: do what they ask and answer; your last message is your answer, and there is no report to give and no finish_step to call. What you commit stays on the task\'s branch, where they can try it, and nothing pushes it: it waits for their Ship, which runs the review over everything since the last one and then sends it up (to the open pull request, or a new one after the last merged or closed). Where they ask you to ship it ("ship it", "push it"), call ship_task once your work for it is committed. Where what you commit goes in a new pull request (the last merged or closed, or there is none yet), call finish_step with its description once it\'s committed, so Ship opens it with yours.',
+            // A review offered, never added by a rule: where what the person says makes work with none a real change (a skipped review can be added back until merge).
+            "Where the person asks you to turn work that has no review into a real change, such as hardening a prototype, keeping a chat's work or opening a pull request for it, offer it a review with offer_review, once: a line in the thread they answer with Add or No thanks, and Add puts the reviewer on. Where they ask for a review outright, offer it the same way. Where they turned one down, leave it.",
             // The thread reads in rounds: what was asked, the lead's word on it, its work folded into one line, and what it did.
             'When you pick up something to do, whether the task, a message from the person, what the coordinator passes on or the findings of a review, first say in a sentence or two what you understood and what you will do, then do it. Say little while you work: your words along the way are folded in with your work. When you are done, end with a message that says what you did, what to look at, and what is left.',
             // What stands open of a round is its last message, or its report where nothing follows it: it carries everything (ADR-099).
@@ -3840,6 +3927,7 @@ export class Sessions extends Context.Service<
             "- rerun_check, read_default_branch_checks, mark_ready, close_pull_request, reopen_pull_request, update_branch, reply_on_pull_request and edit_pull_request, to act on the project's pull requests on the code host, by their number or link. They act on any of the project's pull requests, whoever opened it, and each can be undone in a step. Without asking: run a failed check again when it looks like chance (a flaky test, a runner that went away; on the default branch too), read the default branch's checks to tell whether a failure is the change's or broken already, mark a draft of Althar's or the person's own ready, close one of those that is plainly dead and reopen it if that was wrong, reply on one Althar opened or one by the person or the repository's own people, and give one of those another title or description when it no longer says what the change does (on one a task follows, the title keeps the project's naming and the task's card follows it; rename_task, for a task, retitles its pull request too). update_branch merges the default branch into a pull request's branch when it is behind and that holds it up (a merge commit, never a rebase or a forced push; a conflict is named, not settled, and a branch the account can't push to is left for its author, whom only the person asks). Say what you did in a line. On the person's word, their message in this turn that asks it (message, from read_turn), do the same to anyone's: close, reopen or mark ready one someone else opened, reply on or edit an outside author's. Do it at once, one call for each, without asking again. Closing on Bitbucket Cloud, where declining is final, goes on their word too, whoever opened it. Without their word, say what you would do and why, and they decide. A host that can't do one (Bitbucket Cloud can't reopen; Bitbucket Data Center's builds are another service's) says so in its own words: pass that on, with the link.",
             "- attach_pull_request, when a task should follow an open pull request it didn't open: one opened by hand, or upstream after the task's own went to the fork. The task then hears its reviews, comments, checks and conflicts, its lead's pull request tools act on it, and its work goes to that pull request's branch, never a new one. Where its branch isn't based on that pull request's head, it starts from the head at once in a turn the person's message started, keeping the task's commits on top; otherwise ask them before you call it again with start_from_head. A task drafted to work on an open pull request, such as to answer its review, takes it as draft_task's pull_request, and starts on its head.",
             "- message_lead, to pass something to a task's lead. Leads have your tools too (ADR-097): a lead may draft, plan and start tasks from its own, which its card says it was started by, and move other tasks; read_task_diff shows any task's change as it stands, and show_pictures shows the person pictures from your copies.",
+            "- offer_review, where what the person says makes a task's work with no review a real change (they ask its lead to harden a prototype, or for a pull request of a chat's work): a line in your thread they answer with Add or No thanks, once. Its lead offers it where they said it there. Where they plainly asked for a review, add it with change_lead instead.",
             "- The rest of what the window's buttons on a task do, each at once with a line in your thread and the task's: skip_review (Skip the review), push_task (the Change card's Push, up to the head you read, never forced), open_task_pull_request (open its pull request, or a new one for commits after it merged), push_task_branch, resolve_conflicts (now, or whether it resolves them automatically), move_to_front, stop_following, change_lead (another model, effort or agent on its lead from its next turn, or its reviewer; or a step held for a usage limit handed on), try_again, compact_lead, set_part_of_issue, mark_ready and rename_task.",
             "- read_settings and change_settings, for the project's settings and Althar's, everything the Settings screens show. A change that tightens, or changes nothing about what asks, goes at once with a line and Undo; one that loosens what asks goes only on the person's own message in this turn, and is a card for them otherwise.",
             // Release branches (ADR-093): made, and brought back, on the person's word, as a merge is.
@@ -4250,6 +4338,34 @@ export class Sessions extends Context.Service<
         takeBack: (input) => run(takeBack(input)),
         setModel: (input) => run(setModel(input)),
         setEffort: (input) => run(setEffort(input)),
+        chooseLead: (input) =>
+          run(
+            Effect.gen(function* () {
+              const running = threads.get(input.threadId)
+              if (running === undefined || running.stopping) return yield* new NoSession({ threadId: input.threadId })
+              const sql = yield* SqlClient.SqlClient
+              const [now] = yield* sql<{ model: string | null; effort: string | null }>`
+                SELECT model, effort FROM provider_sessions WHERE id = ${running.sessionId}`
+              const agentId = running.entry.definition.id
+              // What was chosen before and isn't set yet stands, but for what is chosen now.
+              const before = running.nextLead?.agentId === agentId ? running.nextLead : undefined
+              const model = input.model ?? before?.model
+              const effort = input.effort ?? before?.effort
+              const same = (model === undefined || model === now?.model) && (effort === undefined || effort === now?.effort)
+              // Back on what it is on, with nothing being set: nothing is left to take up. While one is being set it is kept, so it
+              // is set back after.
+              running.nextLead =
+                same && !running.settingLead
+                  ? undefined
+                  : {
+                      agentId,
+                      ...(model === undefined ? {} : { model }),
+                      ...(effort === undefined ? {} : { effort }),
+                    }
+              if (running.nextLead !== undefined) yield* Effect.forkIn(run(applyLead(running)), sessionsScope)
+              return same ? ('same' as const) : ('later' as const)
+            }),
+          ),
         wake: (threadId) =>
           Effect.suspend(() => {
             const running = threads.get(threadId)

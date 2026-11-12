@@ -23,8 +23,9 @@ import { ENDS, endOf } from '../project/Card'
  * free agent, nothing of it begun, can still change (`planWaits`), as its
  * card says. Once it has begun, its team still changes until it is settled, through
  * ChangeTeam: its lead from its next turn, its reviewer until its review round
- * starts, from the next round during one, and not once its review is done. Merged,
- * it stays as it is.
+ * starts, from the next round during one, and not once a review of it ran to its end:
+ * a review that was skipped, or never planned, is not a done one, and can be added
+ * until the task merges. Merged, it stays as it is.
  */
 
 export const text = {
@@ -32,6 +33,7 @@ export const text = {
   more: 'The team',
   menu: 'The team',
   start: 'Start',
+  hold: 'Hold',
   change: 'Change the team…',
   /** The team in a line, at the head of a row's menu: Opus 5.5 · High, GPT-6.1 Sol reviews. */
   team: (lead: string, review: string | null) => (review === null ? lead : `${lead}, ${review}`),
@@ -43,6 +45,8 @@ export const text = {
   nextTurn: 'From its next turn.',
   nextRound: 'From the next round.',
   reviewDone: 'The review is done, so the reviewer stays.',
+  /** A review added to a change whose work is up already: it starts on saving. */
+  readsNow: 'Its review starts now, on the change as it stands.',
   merged: 'It’s merged, so its team stays.',
   settled: 'It’s settled, so its team stays.',
 }
@@ -53,7 +57,15 @@ type Plan = NonNullable<BoardTask['plan']>
 export type Teamed = Pick<
   BoardTask,
   'taskId' | 'title' | 'phase' | 'plan' | 'planWaits' | 'queued' | 'reviewing' | 'kind' | 'change' | 'reviewerChange'
->
+> &
+  Partial<Pick<BoardTask, 'holdable'>>
+
+/**
+ * Whether its plan can be held, as its card does: on its countdown, or started with its first step still waiting for a free
+ * agent or, Local, its checkout, nothing of it begun (`holdable`). Holding takes it out of the line until the person
+ * starts it.
+ */
+export const canHold = (task: Teamed): boolean => task.plan !== null && (task.phase === 'planned' || task.holdable === true)
 
 /**
  * What changing its team does where it stands: `starts`, a plan held or on its countdown, which can start now too; `waits`,
@@ -102,16 +114,18 @@ const useTeamLine = (plan: Plan, projectId: string) => {
   )
 }
 
-/** A row's menu, up next: who's on it, then Start where it starts now, and Change the team…. */
+/** A row's menu, up next: who's on it, then Start where it starts now, Hold where it can be held, and Change the team…. */
 export function TeamMenu({
   projectId,
   task,
   onStart,
+  onHold,
   onChange,
 }: {
   projectId: string
   task: Teamed
   onStart?: () => void
+  onHold?: () => void
   onChange: () => void
 }) {
   const line = useTeamLine(task.plan!, projectId)
@@ -126,6 +140,11 @@ export function TeamMenu({
       {onStart !== undefined && (
         <MenuItem icon="play" onSelect={onStart}>
           {text.start}
+        </MenuItem>
+      )}
+      {onHold !== undefined && (
+        <MenuItem icon="hold" onSelect={onHold}>
+          {text.hold}
         </MenuItem>
       )}
       <MenuItem icon="agents" onSelect={onChange}>
@@ -200,6 +219,8 @@ export function ChangeTeam({
         ]
       : plan.steps
   const steps = withEdits(given, edits)
+  // Its review was skipped or never planned: adding one now reads the change as it stands.
+  const wasUnreviewed = plan.steps.find((step) => step.key === 'review')?.skipped !== false
   const ending = end === undefined ? plan.end : end
   const put = (key: PlanStep['key'], patch: Partial<PlanStep>) => setEdits((was) => ({ ...was, [key]: { ...was[key], ...patch } }))
   const save = async (andStart: boolean) => {
@@ -254,7 +275,9 @@ export function ChangeTeam({
                       ? text.nextTurn
                       : now.reviewerChange === 'next_round'
                         ? text.nextRound
-                        : undefined,
+                        : step.key === 'review' && !step.skipped && wasUnreviewed && now.change?.state === 'open'
+                          ? text.readsNow
+                          : undefined,
                 }
               : step.key === 'implement' && plan.reason !== null
                 ? { why: plan.reason }

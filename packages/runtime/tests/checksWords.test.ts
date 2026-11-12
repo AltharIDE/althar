@@ -14,6 +14,7 @@ import {
   outsidersLine,
   queuedNote,
   queueMainLine,
+  sendBackHint,
   signed,
   spentLine,
   stoppedLine,
@@ -92,6 +93,13 @@ describe('the merge queue, in the task’s thread', () => {
     assert.strictEqual(leftQueueNote('PR #1', 'checks'), 'The merge queue took PR #1 out: its checks failed.')
     assert.strictEqual(leftQueueNote('PR #1', 'conflict'), "The merge queue took PR #1 out: it conflicts with what's ahead of it.")
     assert.strictEqual(leftQueueNote('PR #1', undefined), 'The merge queue took PR #1 out.')
+  })
+
+  it('tells the lead, on a sendback, that bringing main in is update_branch or the queue, not the plan again', () => {
+    assert.strictEqual(
+      sendBackHint('main'),
+      "Where it only needs main brought in, call update_branch for it, or leave putting it back in the queue to the person: don't redo the plan's steps. A merge of main that settles no conflict goes up to the pull request as it is and starts no review.",
+    )
   })
 
   it('says, on a sendback for failing checks, which merge-group jobs failed, their logs, and the default branch on the same jobs', () => {

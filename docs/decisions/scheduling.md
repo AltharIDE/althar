@@ -271,8 +271,13 @@ Althar's work is the cause, and which task.
 - **The runtime reads the computer** (`MachineLoad.ts`), because only it
   knows which process is whose. The window asks for a reading (`GetLoad`)
   every three seconds while the meter is on and the window is in view, and
-  never otherwise. The runtime reads at most once every 2.5 seconds however
-  many windows ask, and keeps two minutes of readings in memory.
+  never otherwise. While the meter is on the runtime also reads on its own
+  every three seconds, whenever no window has just asked, so the trace in the
+  peek holds the last two minutes however long the window was out of view;
+  such a reading is lean (the cores and the processes, no memory), and none
+  is taken while the meter is off. The runtime reads at most once every 2.5
+  seconds however many windows ask, and keeps two minutes of readings in
+  memory, starting them afresh after a gap (sleep, the meter off).
 - **Everything Althar starts for a piece of work carries it in its
   environment** (`ALTHAR_WORK=task:<id>`, `coordinator:<project>` or
   `run:<project>`). Everything it starts inherits that, across process groups
@@ -296,4 +301,5 @@ Althar's work is the cause, and which task.
 ## Changes
 
 - 8 Nov 2026: written from the ADRs under Replaces.
+- 11 Nov 2026: the runtime reads the computer in the background while the meter is on, so the peek's trace isn't empty when a window comes back into view.
 - 10 Nov 2026: a lead's helpers each take a place of their own, four of a task's at once (ADR-087, [tasks § Helpers](tasks.md#helpers)).

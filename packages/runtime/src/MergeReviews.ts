@@ -18,6 +18,7 @@ import { MERGE_REVIEW, mergeCopyOf } from './reviewCopy'
 import { Sessions } from './Sessions'
 import { addItem } from './threads'
 import { ToolRefused } from './toolErrors'
+import { DESCRIPTION_SHAPE } from './pullRequestWords'
 import { summarize } from './words'
 
 /*
@@ -124,6 +125,18 @@ const listed = (findings: ReadonlyArray<Found>) =>
       return `${index + 1}. [${finding.severity}]${title}${where}\n   ${finding.claim}`
     })
     .join('\n')
+
+/**
+ * What the lead is told when the person says Fix it: the findings, and what its fix goes out as. Its fix opens as a new pull request
+ * after the merged one, so it is asked for that pull request's title and description now, as a first one's lead gives them: what its
+ * reviewer reads is this pull request, not the task.
+ */
+export const fixBrief = (merged: string, findings: string) =>
+  [
+    `Fix what the review after ${merged} merged found. ${merged} merged already: commit your fix on the task's branch, and it goes out as a new pull request after it once your turn is over.`,
+    findings,
+    `Then call finish_step, once it is committed, with your summary and what the task has built in \`built\`, and for that new pull request: in \`title\`, what it does in a few words, the way a title reads (not the task's title, which says what ${merged} did); and in \`descriptions\`, its description, for whoever reviews it on the code host. ${DESCRIPTION_SHAPE} Here that means: why it exists (the finding it answers, naming ${merged} so the host links it), what changed, and what stays the same. Althar puts "After ${merged}:" before your title itself.`,
+  ].join('\n\n')
 
 const countOf = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`
 
@@ -684,7 +697,7 @@ export class MergeReviews extends Context.Service<
           const threadId = yield* taskThreadOf(taskId)
           if (threadId === undefined) return yield* new MergeReviewRefused({ message: 'The task has no lead to fix it.' })
           yield* setState(row.url, { state: 'fixing' })
-          const body = `Fix what the review after ${wordsOf(row)} merged found. ${wordsOf(row)} merged already: commit your fix on the task's branch, and it goes out as a new pull request after it once your turn is over.\n\n${listed(findings)}`
+          const body = fixBrief(wordsOf(row), listed(findings))
           yield* sessions.send({
             envelope: yield* envelope('thread.send', { threadId, afterMerge: row.url }),
             threadId,
@@ -702,6 +715,8 @@ export class MergeReviews extends Context.Service<
             severity: 'info',
             title: `Fix it: the lead takes the ${countOf(findings.length, 'finding')} after ${wordsOf(row)} merged, and its fix goes out after it.`,
             description: null,
+            // What the lead was given, for the pull request its fix opens to say what it answers (Changes.followUpOf).
+            fixing: { url: row.url, findings },
           })
           yield* touchTask(taskId)
           return { threadId, inputId: input?.id ?? null }

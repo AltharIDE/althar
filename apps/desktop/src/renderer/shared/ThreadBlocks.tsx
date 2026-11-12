@@ -13,6 +13,7 @@ import {
   IssueRef,
   LinkButton,
   Markdown,
+  MergeLine,
   Plan,
   Question,
   type QuestionAnswer,
@@ -65,6 +66,7 @@ import type {
   StepResult,
   TaskCardContent,
 } from './thread'
+import { ReviewOfferOf } from '../features/team/ReviewOfferOf'
 import s from './ThreadBlocks.module.css'
 import { duration, lineOf, spentWords } from './turnTime'
 
@@ -322,11 +324,13 @@ export function PartView({ part, threadId }: { part: Part; threadId: string }) {
     case 'plan':
       return <Plan steps={part.steps} />
     case 'notice':
+      // A review a lead offered: its line asks, with its buttons, and says what came of it once answered.
+      if (part.offer?.kind === 'review') return <ReviewOfferOf offer={part.offer} ask={part.text} />
       return (
         <>
           <p className={s[part.tone]}>{part.text}</p>
           {part.detail !== undefined && <p className={s.detail}>{part.detail}</p>}
-          {part.offer !== undefined && <PresetOffer offer={part.offer} />}
+          {part.offer?.kind === 'preset' && <PresetOffer offer={part.offer} />}
         </>
       )
     case 'pictures':
@@ -673,6 +677,12 @@ export function ThreadBlocks({
           </ThreadDivider>
         )
       case 'offer':
+        if (block.offer.kind === 'review')
+          return (
+            <div key={block.id} className={s.offer}>
+              <ReviewOfferOf offer={block.offer} ask={block.text} />
+            </div>
+          )
         return (
           <div key={block.id} className={s.offer}>
             <p className={s.info}>{block.text}</p>
@@ -714,6 +724,8 @@ export function ThreadBlocks({
         return <Fragment key={block.id}>{smallChange?.(block.card, block.id)}</Fragment>
       case 'model_move':
         return <Fragment key={block.id}>{modelMove?.(block.move, block.id)}</Fragment>
+      case 'merge_line':
+        return <MergeLine key={block.id} rows={block.line.rows} branch={block.line.branch} />
       case 'setting':
         return <SettingChangeOf key={block.id} change={block.change} itemId={block.id} />
       case 'waiting':

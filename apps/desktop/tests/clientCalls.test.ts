@@ -118,6 +118,7 @@ describe('what the client sends', () => {
     const { client, heard } = await standIn()
     const steps: ReadonlyArray<PlanStep> = [{ key: 'implement', agentId: 'codex', model: null, skipped: false }]
     expect((await sent(heard, client.changeTeam('task_1', steps))).payload).toEqual({ taskId: 'task_1', steps })
+    expect((await sent(heard, client.declineReview('task_1'))).payload).toEqual({ taskId: 'task_1' })
   })
 
   it('says whether one small change is reviewed after it merges, or goes back to the project’s rule', async () => {

@@ -463,6 +463,22 @@ export const items = {
       ...content,
     },
   }),
+  mergeLine: (content: Partial<Extract<ThreadItem, { kind: 'merge_line' }>['content']> = {}): ThreadItem => ({
+    ...next(),
+    agentId: null,
+    kind: 'merge_line',
+    content: {
+      key: 'github:meridian/api main',
+      branch: null,
+      rows: [
+        { number: 778, title: 'Follow-up PRs say what they do', url: 'https://github.com/meridian/api/pull/778', state: 'merged' },
+        { number: 783, title: 'The model picker shows a change at once', url: 'https://github.com/meridian/api/pull/783', state: 'queued' },
+        { number: 773, title: 'Board cards show handed-back pictures', url: 'https://github.com/meridian/api/pull/773', state: 'checks' },
+        { number: 779, title: 'A queued task can be held', url: 'https://github.com/meridian/api/pull/779', state: 'waiting' },
+      ],
+      ...content,
+    },
+  }),
   arrival: (content: Partial<Extract<ThreadItem, { kind: 'arrival' }>['content']> = {}): ThreadItem => ({
     ...next(),
     agentId: null,
@@ -1117,6 +1133,7 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
     ]),
     getLoad: vi.fn(async () => load),
     getPlanUsage: vi.fn(async () => ({ accounts: [] })),
+    dismissSignInEnding: vi.fn(async () => undefined),
     getModelRooms: vi.fn(async () => []),
     getMissedReports: vi.fn(async () => []),
     openInEditor: vi.fn(async () => true),
@@ -1255,6 +1272,7 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
     holdPlan: vi.fn(async () => {}),
     changePlan: vi.fn(async () => {}),
     changeTeam: vi.fn(async () => {}),
+    declineReview: vi.fn(async () => {}),
     changeIssueDraft: vi.fn(async () => {}),
     fileIssueDraft: vi.fn(async () => {}),
     discardIssueDraft: vi.fn(async () => {}),
