@@ -274,6 +274,12 @@
   color: var(--t-2);
 }
 
+.notSent {
+  margin: 0 0 6px;
+  color: var(--danger);
+  font-weight: 500;
+}
+
 .imageNote:empty {
   height: 0;
   margin: -4px 0 0;

@@ -180,7 +180,7 @@ export const composerText: ComposerText = {
   dictate: 'Dictate',
   dictateBusy: 'Writing down what you said',
   finishing: 'Finishing the transcription',
-  notSent: 'Not sent: what you said couldn’t be written down. Try it again, or type it.',
+  notSent: 'Not sent. The voice note couldn’t be written down.',
   dictateProgress: (percent) => `Dictate, downloading ${percent}%`,
   stopDictating: (elapsed) => `Stop dictating, ${elapsed}`,
   chooseInput: 'Choose the microphone',
@@ -520,7 +520,7 @@ export function Composer({
         )}
         {dictation?.arrived && <p className={s.imageNote}>{t.dictatedAway}</p>}
         {notSent && (
-          <p className={s.imageNote} role="alert">
+          <p className={cx(s.imageNote, s.notSent)} role="alert">
             {t.notSent}
           </p>
         )}
