@@ -507,7 +507,7 @@ export function ProjectView({
       </>
     ) : (session === null || !session.held) && model.agentsKnown && model.agents.length === 0 ? (
       <>
-        {text.needsAgent} {ways !== undefined && <LinkButton onClick={ways.agents}>{text.signOneIn}</LinkButton>}
+        {text.needsAgent} {ways !== undefined && <LinkButton onClick={() => ways.agents()}>{text.signOneIn}</LinkButton>}
       </>
     ) : (session === null || !session.held) && model.agentsKnown && suggested !== null && !suggested.available && chosen !== null ? (
       <>

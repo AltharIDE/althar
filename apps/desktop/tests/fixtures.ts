@@ -1116,6 +1116,7 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
     ]),
     getLoad: vi.fn(async () => load),
     getPlanUsage: vi.fn(async () => ({ accounts: [] })),
+    dismissSignInEnding: vi.fn(async () => undefined),
     getModelRooms: vi.fn(async () => []),
     getMissedReports: vi.fn(async () => []),
     openInEditor: vi.fn(async () => true),

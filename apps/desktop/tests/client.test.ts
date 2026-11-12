@@ -228,6 +228,7 @@ describe('the client', () => {
           ListEditors: () => Effect.die('unused'),
           GetLoad: () => Effect.die('unused'),
           GetPlanUsage: () => Effect.die('unused'),
+          DismissSignInEnding: () => Effect.die('unused'),
           GetModelRooms: () => Effect.die('unused'),
           GetMissedReports: () => Effect.die('unused'),
           InstallAgent: () => Effect.die('unused'),

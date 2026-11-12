@@ -516,6 +516,7 @@ describe('the API', () => {
                   history: [{ cpu: 0.4, work: 0.1 }],
                 }),
               GetPlanUsage: () => Effect.succeed({ accounts: [] }),
+              DismissSignInEnding: () => Effect.void,
               GetModelRooms: () => Effect.succeed([]),
               GetMissedReports: () => Effect.succeed([]),
               InstallAgent: () => Effect.die('unused'),

@@ -190,6 +190,10 @@ export const AccountStatus = Schema.Struct({
   outUntil: Schema.NullOr(Schema.String),
   /** What made its folder, when Althar didn't. */
   adoptedFrom: Schema.NullOr(Schema.String),
+  /** When its sign-in ends, where its agent's status says (Claude Code's claude.ai sign-in); not given where it doesn't. */
+  endsAt: Schema.optional(Schema.String),
+  /** Its sign-in ends within the days the runtime warns in, or has ended: given with `endsAt`, so the row and the warning agree. */
+  endsSoon: Schema.optional(Schema.Boolean),
   /**
    * For an agent that reaches several providers with sign-ins of their own (OpenCode): each one it lists as signed in, and, where
    * a turn on it was refused since, when; how it is paid for where that is known (OpenCode Go a plan, Zen per use). Not given
@@ -268,8 +272,25 @@ export const AccountUsage = Schema.Struct({
 })
 export type AccountUsage = typeof AccountUsage.Type
 
-/** Every account's plan usage. */
-export const PlanUsage = Schema.Struct({ accounts: Schema.Array(AccountUsage) })
+/**
+ * An account whose sign-in ends within its last days, or has just ended (DEV-196): the one warning Althar raises about it, until
+ * the person signs in again or puts it aside. Raised once for each sign-in.
+ */
+export const SignInEnding = Schema.Struct({
+  agentId: Schema.String,
+  agentName: Schema.String,
+  accountId: Schema.String,
+  accountName: Schema.String,
+  /** The agent has more than one account here, so the account is worth naming. */
+  several: Schema.Boolean,
+  endsAt: Schema.String,
+  /** Where it stands: within its last days, any day now (past the earliest it can end), or ended, by its date or as its check already says signed out. Put aside at one, it is raised again at a later one. */
+  stage: Schema.Literals(['soon', 'last', 'ended']),
+})
+export type SignInEnding = typeof SignInEnding.Type
+
+/** Every account's plan usage, and the sign-ins that end soon, read with them. */
+export const PlanUsage = Schema.Struct({ accounts: Schema.Array(AccountUsage), endings: Schema.optional(Schema.Array(SignInEnding)) })
 export type PlanUsage = typeof PlanUsage.Type
 
 /**
@@ -3270,6 +3291,10 @@ export const StuckStep = Schema.Struct({
     'transient',
     // Its agent's account is signed out: signing it in again in Settings, then trying again, is the way on.
     'signed_out',
+    // Its agent's sign-in was there and has ended: the same way on (DEV-196).
+    'sign_in_ended',
+    // Its agent isn't installed, or isn't where Althar runs it from: installing it in Settings, then trying again.
+    'not_installed',
     // The lead stopped to wait for the person's answer: its detail is the question, and the answer starts it again.
     'waiting_on_person',
   ]),
@@ -5289,6 +5314,12 @@ export const Api = RpcGroup.make(
   call('GetLoad', {}, Load),
   /** Every account's plan usage: read again first where `refresh`, else as kept (at most a minute old). */
   call('GetPlanUsage', { refresh: Schema.optional(Schema.Boolean) }, PlanUsage),
+  /** Puts aside the warning that an account's sign-in ends at `endsAt`: it isn't raised again for that sign-in. */
+  command(
+    'DismissSignInEnding',
+    { accountId: Schema.String, endsAt: Schema.String, stage: Schema.Literals(['soon', 'last', 'ended']) },
+    Schema.Void,
+  ),
   /** Each model's room where work on it would start, in the project where given (its rule for moving work through accounts): read again as plan usage changes. */
   call('GetModelRooms', { projectId: Schema.optional(Schema.String) }, Schema.Array(ModelRoom)),
   /** Each model that ended steps without its report in the last week, once reminded, with how often. */
