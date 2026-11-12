@@ -2,7 +2,8 @@
  * What .github/workflows/stress.yml runs: a pull request's new and changed tests, many times over with no retry, so a
  * test that passes nine runs in ten fails on the pull request that brought it, not one run in ten on main. Chromium
  * runs a new test twenty times before it can land; this does the same, but a pull request that changes many tests runs
- * each fewer times, so the whole takes about as long as the other checks.
+ * each fewer times, and a slow file runs as many times as fit in its share of fifteen minutes (three at least), so the
+ * whole takes about as long as the other checks: a 220 s file run twenty times took over an hour.
  *
  * `bun stress.ts plan <changed>` writes the plan for the file of changed paths to GITHUB_OUTPUT; `bun stress.ts run`
  * runs the part of it in PLAN.
@@ -69,33 +70,50 @@ export const plan = (changed: ReadonlyArray<string>): Plan => {
   }
 }
 
+/** The time the Linux run has for all its packages, shared out between them. */
+export const BUDGET_SECONDS = 15 * 60
+/** The fewest runs a changed test has, however slow. */
+const LEAST_RUNS = 3
+
 /**
- * Runs each package's changed tests as many times as planned, in an order shuffled by the run's number, with no retry:
- * one failure in any run fails it. Every package runs even when one before it fails, so a run says all that broke, and
- * the seed it prints runs the same order again (`--sequence.seed`).
+ * How many more runs a package's tests get after a first that took `seconds`: what fits in its share of the budget,
+ * but no more than planned and no fewer than LEAST_RUNS in all. The first run's time includes starting Vitest, so the
+ * estimate errs short.
+ */
+export const moreRuns = (planned: number, seconds: number, share: number): number =>
+  Math.max(LEAST_RUNS - 1, Math.min(planned - 1, Math.floor(share / Math.max(seconds, 1)) - 1))
+
+/**
+ * Runs each package's changed tests once, timed, and then again as many times as planned or as fit in its share of
+ * BUDGET_SECONDS, in an order shuffled by the run's number, with no retry: one failure in any run fails it. Every
+ * package runs even when one before it fails, so a run says all that broke, and the seed it prints runs the same
+ * order again (`--sequence.seed`).
  */
 const run = ({ parts, runs }: Plan['linux']) => {
   const seed = process.env.GITHUB_RUN_ID ?? '1'
-  process.stdout.write(`Each test runs ${runs} times, shuffled with seed ${seed}.\n`)
+  const share = BUDGET_SECONDS / Math.max(parts.length, 1)
+  process.stdout.write(`Each test runs up to ${runs} times, shuffled with seed ${seed}.\n`)
+  const vitest = (dir: string, files: ReadonlyArray<string>, repeats: number) =>
+    spawnSync(
+      'bun',
+      ['run', 'test', `--repeats=${repeats}`, '--retry=0', '--sequence.shuffle', `--sequence.seed=${seed}`, '--passWithNoTests', ...files],
+      { cwd: dir, stdio: 'inherit' },
+    ).status
   const failed = parts.filter(({ dir, files }) => {
     process.stdout.write(`::group::${dir}: ${files.join(' ')}\n`)
-    const args = [
-      'run',
-      'test',
-      `--repeats=${runs - 1}`,
-      '--retry=0',
-      '--sequence.shuffle',
-      `--sequence.seed=${seed}`,
-      '--passWithNoTests',
-      ...files,
-    ]
-    const { status } = spawnSync('bun', args, { cwd: dir, stdio: 'inherit' })
+    const started = performance.now()
+    let status = vitest(dir, files, 0)
+    if (status === 0) {
+      const more = moreRuns(runs, (performance.now() - started) / 1000, share)
+      process.stdout.write(`${dir}: ${more + 1} runs in all.\n`)
+      status = vitest(dir, files, more - 1)
+    }
     process.stdout.write('::endgroup::\n')
     return status !== 0
   })
   if (failed.length > 0) {
     process.stdout.write(
-      `::error::A changed test failed in one of its ${runs} runs, in ${failed.map(({ dir }) => dir).join(', ')}. It fails sometimes: find why before it lands.\n`,
+      `::error::A changed test failed in one of its runs, in ${failed.map(({ dir }) => dir).join(', ')}. It fails sometimes: find why before it lands.\n`,
     )
     process.exit(1)
   }

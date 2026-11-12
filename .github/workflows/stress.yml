@@ -54,7 +54,8 @@ jobs:
     needs: plan
     if: needs.plan.outputs.any-linux == 'true'
     runs-on: ubuntu-24.04
-    timeout-minutes: 75
+    # Each package's tests run as many times as fit in fifteen minutes, three at least (packages/testing/src/stress.ts).
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v5
       - uses: oven-sh/setup-bun@v2

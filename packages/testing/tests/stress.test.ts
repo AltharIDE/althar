@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vite-plus/test'
 
-import { plan } from '../src/stress'
+import { BUDGET_SECONDS, moreRuns, plan } from '../src/stress'
 
 describe('the stress plan', () => {
   it('runs one changed test twenty times on Linux and ten on Windows', () => {
@@ -43,5 +43,15 @@ describe('the stress plan', () => {
     const many = plan(Array.from({ length: 30 }, (_, index) => `apps/desktop/e2e/s${index}.spec.ts`))
     expect(many.specs.runs).toBe(2)
     expect(many.specs.shards).toEqual(['1/4', '2/4', '3/4', '4/4'])
+  })
+
+  it('runs a slow file as many times as fit in its share of the time, never fewer than three, never more than planned', () => {
+    // One file of 220 s, alone: four runs fit in fifteen minutes, not twenty.
+    expect(1 + moreRuns(20, 220, BUDGET_SECONDS)).toBe(4)
+    // A fast one runs as many times as planned.
+    expect(1 + moreRuns(20, 2, BUDGET_SECONDS)).toBe(20)
+    // One slower than its whole share still runs three times.
+    expect(1 + moreRuns(20, 1200, BUDGET_SECONDS)).toBe(3)
+    expect(1 + moreRuns(20, 0, BUDGET_SECONDS)).toBe(20)
   })
 })
