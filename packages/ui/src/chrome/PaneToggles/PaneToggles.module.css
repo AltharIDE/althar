@@ -67,8 +67,9 @@
 .soft .half {
   border-radius: 5px;
 }
-.soft .half:hover:not([aria-disabled='true']) {
-  background: var(--line);
+/* hover is never the shown tint: a hidden half gets a hairline ring and a darker glyph, no fill */
+.soft .half[aria-pressed='false']:hover {
+  box-shadow: inset 0 0 0 1px var(--line-3);
 }
 .soft .half[aria-pressed='true'] {
   background: color-mix(in srgb, var(--t-1) 9%, transparent);
