@@ -279,6 +279,16 @@ contextBridge.exposeInMainWorld('althar', {
       return () => void pagesOpened.delete(listener)
     },
   },
+  // The HTML canvases beside the conversations: each by the thread it is beside, at a version's address (ADR-104).
+  canvases: {
+    show: (
+      threadId: string,
+      target: { projectId: string; canvasId: string; version: number; manifest: string },
+      panel: { x: number; y: number; width: number; height: number } | null,
+    ): void => ipcRenderer.send('althar:canvas-show', threadId, target, panel),
+    close: (threadId: string): void => ipcRenderer.send('althar:canvas-close', threadId),
+    reload: (threadId: string): void => ipcRenderer.send('althar:canvas-reload', threadId),
+  },
   // What the page couldn't handle, for main's log: its message and stack, nothing else.
   logError: (error: { kind: 'error' | 'rejection'; message: string; stack: string; source?: string }): void =>
     ipcRenderer.send('althar:window-error', error),

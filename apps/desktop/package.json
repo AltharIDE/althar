@@ -23,7 +23,7 @@
     "release": "node scripts/release.ts"
   },
   "dependencies": {
-    "@agentclientprotocol/claude-agent-acp": "0.101.0",
+    "@agentclientprotocol/claude-agent-acp": "0.106.0",
     "@agentclientprotocol/codex-acp": "2.6.0",
     "@althar/connectors": "workspace:*",
     "@althar/contracts": "workspace:*",
@@ -46,7 +46,7 @@
     "@effect/vitest": "4.0.7",
     "@playwright/test": "^1.65.0",
     "@testing-library/react": "^16.3.3",
-    "@testing-library/user-event": "^14.6.8",
+    "@testing-library/user-event": "^14.6.9",
     "@types/node": "^24.0.0",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",

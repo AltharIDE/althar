@@ -1,6 +1,6 @@
 # Foundations
 
-How Althar is put together: the shell and the runtime, the code's style on each side, how failures are kept small, what CI gates, and the rule that a feature ships for every service that can have it.
+How Althar is put together: the shell and the runtime, how it stays quick while the computer is busy, the code's style on each side, how failures are kept small, what CI gates, and the rule that a feature ships for every service that can have it.
 
 **Replaces:** ADR-003, ADR-008, ADR-009, ADR-010, ADR-047, ADR-048, ADR-074, ADR-082
 
@@ -33,6 +33,21 @@ Today the runtime runs in the app, one per profile. Work outlives the window, bu
 Not built yet: the socket listener itself, a headless host on plain Node, pairing a phone, and a relay the runtime dials out to. The gate above is in place for when they come.
 
 **Proposed:** [ADR-103](proposed/103-projects-live-locally-or-on-a-host-and-place-work-in-pools.md) would let a project live on this computer, on a host the person runs, or on a managed one. It would add a persistent headless host, SSH beside a relay, and pools of workers that take work on leases. It keeps one writer per profile and keeps paired input apart from what a socket or an agent may do. Until it is accepted, the state above is the current one.
+
+## The window answers while the computer is busy
+
+One runtime thread answers every window and runs every agent's session, so anything that holds it holds every click. Agents' builds and tests compete for the same cores and disk. So:
+
+- **Agents run in the background.** An agent, everything it starts, and a worktree's setup run at niceness 10 (Below normal on Windows). The person's own runs of their project, and Althar's own processes, keep normal priority. A build where nothing else wants the cores takes as long as before. While Althar or the person's other apps want them, those go first. macOS's stronger task policies (`taskpolicy -c utility`, `-b`) were tried: under contention they made a build take 13 to 14 times as long, so they aren't used.
+- **Nothing waits on the runtime's thread.** The runtime's own commands, git's above all, start on a runner thread (`spawner.ts`), since starting a process holds the thread that starts it until the child has started, 5 to 30 ms each under load. At most half the cores' worth run at once (2 to 8), and a window's call has as many again of its own, so it never waits behind the background's. Fetches, pushes and whatever else reaches a remote run in a lane of their own, with the same allowance, since they wait on the network for up to minutes: a read of the repository never waits behind them. No synchronous child process or large file copy runs on the thread.
+- **The store waits for the disk at checkpoints, not at every commit.** It runs in WAL with `synchronous = NORMAL`, SQLite's own advice for WAL. It stays whole after any crash. A crash of the computer itself, not of Althar, may lose the last moment's commits.
+- **What is read on every change is found by an index.** The board, the home and a task's view are read again on each change an agent makes, so none of their statements may read every row of a table that grows with use (items, turns, events, answers). `keyReads.test.ts` fails on one that does.
+- **What git said is kept by what it stood on.** The commits a worktree's refs name are read again only once a file they stand on changes (`refStamps.ts`).
+- **Ship answers once its run is admitted.** The review's start or the push goes on apart, and shows on the task as it goes. What fails after admission needs the person, as a plan's ending does.
+
+A development build logs each window of five seconds in which the runtime's event loop ran more than 100 ms late, and each window call that took longer than 250 ms (`lag.ts`). `tests/real/responsiveness.test.ts` is a by-hand run that times a task's view, the board, the home and Ship on a store of the person's size, idle and with every core and the disk busy.
+
+The store still runs on the runtime's thread: with the above, its statements took about 1.5 s of a two-minute window under load, and none held the thread past 200 ms. Moving it to a worker of its own is the next step if the lag log shows otherwise.
 
 ## Recorded facts are complete; behaviour may start simple
 
@@ -108,3 +123,4 @@ Not built yet:
 ## Changes
 
 - 8 Nov 2026: written from the ADRs under Replaces.
+- 12 Nov 2026: the window answers while the computer is busy: agents in the background, nothing waiting on the runtime's thread, the store's commits not waiting for the disk, key reads by index, Ship answering once admitted.

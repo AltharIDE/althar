@@ -35,6 +35,9 @@
   stroke-linejoin: round;
   stroke-linecap: round;
 }
+.sparkStart {
+  fill: var(--t-3);
+}
 .sparkOurs {
   fill: var(--live);
   fill-opacity: 0.22;

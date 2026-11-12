@@ -94,6 +94,22 @@ describe('what stands in a change’s way', () => {
     expect(standingOf(running).next).toBeNull()
   })
 
+  it('leaves skipped checks out of the counts', () => {
+    const skipped = { name: 'deploy', state: 'skipped', summary: null } as const
+    const list = [{ name: 'test', state: 'passed', summary: null } as const, skipped, skipped]
+    expect(said({ checks: checks({ passed: 1, total: 3, list }) })).toEqual([['1 check passed', 'ok']])
+    const running = change({
+      checks: checks({
+        outcome: 'running',
+        passed: 1,
+        running: 1,
+        total: 4,
+        list: [...list, { name: 'e2e', state: 'running', summary: null }],
+      }),
+    })
+    expect(factsOf(running).map((fact) => fact.words)).toEqual(['Checks running, 1 of 2 passed'])
+  })
+
   it('holds on cancelled checks once the rest are done, as a host holds a merge on one', () => {
     const list = (...names: ReadonlyArray<string>) => names.map((name) => ({ name, state: 'cancelled' as const, summary: null }))
     const one = change({ checks: checks({ passed: 1, list: list('deploy') }) })

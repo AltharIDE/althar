@@ -16,8 +16,9 @@ import { Sessions } from '../src/Sessions'
 import { repository, runtime, task } from './support'
 
 /*
- * How hard this computer works, and Althar's part (MachineLoad.ts): read only
- * when asked and at most once a moment however often; each task's agents, a
+ * How hard this computer works, and Althar's part (MachineLoad.ts): read when
+ * asked, and in the background while the meter is on and no window asks, at
+ * most once a moment however often; each task's agents, a
  * project's coordinator and its runs, each with what they started, however
  * it has left their trees, and what ended between two readings; work an
  * earlier launch left running; Althar itself; and the last readings, started
@@ -31,6 +32,12 @@ const MB = 1024 * 1024
  * A stand-in computer: four cores, a quarter of them busy; and the processes the test lists, each reading `n` having used `n`
  * times its share; `reaped`, each one's time counting its reaped children's, as on a Mac with its reader and on Linux.
  */
+/**
+ * Where a test's computer has no Althar of its own in its listing: no pid. Left to itself, the load takes this process's pid
+ * for Althar's, and a pid a listing makes up can be this one's, as one on Windows was (700), taking its share as Althar's.
+ */
+const NO_APP = -1
+
 const machine = (listed: (n: number) => ReadonlyArray<readonly [number, Listed]> | null, reaped = false) => {
   let reads = 0
   const read = Effect.sync((): Reading => {
@@ -149,7 +156,7 @@ describe('this computer’s load', () => {
       assert.strictEqual(yield* machineLoad.now, load)
       assert.strictEqual(stand.reads(), 2)
       yield* launches.stop(started.id)
-    }).pipe(Effect.provide(runtime(':memory:', {}, { load: { read: stand.read, settle: Duration.millis(1) } })))
+    }).pipe(Effect.provide(runtime(':memory:', {}, { load: { read: stand.read, app: NO_APP, settle: Duration.millis(1) } })))
   })
 
   it.live('counts a task’s run as the task’s, and its lead names its agent before its steps’', () => {
@@ -187,7 +194,7 @@ describe('this computer’s load', () => {
       })
       assert.deepStrictEqual(share?.agent, { id: 'process', name: 'Fake process' })
       yield* launches.stop(started.id)
-    }).pipe(Effect.provide(runtime(':memory:', {}, { load: { read: stand.read, settle: Duration.millis(1) } })))
+    }).pipe(Effect.provide(runtime(':memory:', {}, { load: { read: stand.read, app: NO_APP, settle: Duration.millis(1) } })))
   })
 
   it.live('starts the readings afresh after a gap, and keeps two minutes of them', () => {
@@ -207,7 +214,88 @@ describe('this computer’s load', () => {
       const reads = stand.reads()
       assert.lengthOf((yield* machineLoad.now).history, 1)
       assert.strictEqual(stand.reads(), reads + 2)
-    }).pipe(Effect.provide(runtime(':memory:', {}, { load: { read: stand.read, every: Duration.millis(50), settle: Duration.millis(1) } })))
+    }).pipe(
+      Effect.provide(
+        runtime(':memory:', {}, { load: { read: stand.read, app: NO_APP, every: Duration.millis(50), settle: Duration.millis(1) } }),
+      ),
+    )
+  })
+
+  it.live('fills the history while no window asks, from lean readings, once the app says the meter is on', () => {
+    const world = { lead: 0 }
+    const stand = machine(() => [[world.lead, { parent: 1, cpu: 600, memory: 5 * MB }]])
+    let lean = 0
+    return Effect.gen(function* () {
+      const machineLoad = yield* MachineLoad
+      // The meter is off until the app says: nothing is read, however long it waits.
+      yield* Effect.sleep(Duration.millis(300))
+      assert.strictEqual(stand.reads(), 0)
+
+      yield* machineLoad.meter(true)
+      yield* Effect.sleep(Duration.millis(900))
+      // Read on its own, and lean: no window asked.
+      assert.isAbove(lean, 4)
+      assert.strictEqual(stand.reads(), lean)
+
+      // A window opening now hears the two minutes' start at once: with the trace there, and one full reading of its own.
+      const load = yield* machineLoad.now
+      assert.isAtLeast(load.history.length, 5)
+      assert.strictEqual(stand.reads() - lean, 1)
+      assert.deepInclude(load, { memoryUsed: 8_000 * MB, memoryTotal: 16_000 * MB, pressure: 'normal' })
+      for (const point of load.history) assert.strictEqual(point.cpu, 0.25)
+
+      // The meter turned off, nothing is read again.
+      yield* machineLoad.meter(false)
+      yield* Effect.sleep(Duration.millis(100))
+      const reads = stand.reads()
+      yield* Effect.sleep(Duration.millis(400))
+      assert.strictEqual(stand.reads(), reads)
+    }).pipe(
+      Effect.provide(
+        runtime(
+          ':memory:',
+          {},
+          {
+            load: {
+              read: stand.read,
+              lean: stand.read.pipe(Effect.tap(() => Effect.sync(() => void (lean += 1)))),
+              app: NO_APP,
+              every: Duration.millis(50),
+              settle: Duration.millis(1),
+              sample: Duration.millis(20),
+            },
+          },
+        ),
+      ),
+    )
+  })
+
+  it.live('starts the background readings afresh after a gap, the trace beginning where they do', () => {
+    const stand = machine(() => [])
+    return Effect.gen(function* () {
+      const machineLoad = yield* MachineLoad
+      yield* machineLoad.meter(true)
+      yield* Effect.sleep(Duration.millis(700))
+      const kept = yield* machineLoad.now
+      assert.isAtLeast(kept.history.length, 4)
+      // The meter off for a while, as a Mac asleep: what it read last is too old to measure from.
+      yield* machineLoad.meter(false)
+      yield* Effect.sleep(Duration.millis(400))
+      const reads = stand.reads()
+      const afresh = yield* machineLoad.now
+      // One point, where it begins: not the old trace, nor one padded with nothing.
+      assert.lengthOf(afresh.history, 1)
+      assert.strictEqual(afresh.history[0]?.cpu, 0.25)
+      assert.strictEqual(stand.reads(), reads + 2)
+    }).pipe(
+      Effect.provide(
+        runtime(
+          ':memory:',
+          {},
+          { load: { read: stand.read, app: NO_APP, every: Duration.millis(50), settle: Duration.millis(1), sample: Duration.millis(20) } },
+        ),
+      ),
+    )
   })
 
   it.live('says Althar’s part is unknown where processes can’t be listed, and measures CPU only from a listing before', () => {
@@ -225,7 +313,11 @@ describe('this computer’s load', () => {
       assert.deepInclude((yield* machineLoad.now).shares?.[0], { taskId: created.taskId, cpu: 0, memory: 5 * MB, processes: 1 })
       yield* Effect.sleep(Duration.millis(60))
       assert.deepInclude((yield* machineLoad.now).shares?.[0], { taskId: created.taskId, cpu: 0.05 })
-    }).pipe(Effect.provide(runtime(':memory:', {}, { load: { read: stand.read, every: Duration.millis(50), settle: Duration.millis(1) } })))
+    }).pipe(
+      Effect.provide(
+        runtime(':memory:', {}, { load: { read: stand.read, app: NO_APP, every: Duration.millis(50), settle: Duration.millis(1) } }),
+      ),
+    )
   })
 
   it.live('counts as a task’s a server its lead left in the background, and what ended between two readings', () => {
@@ -274,7 +366,7 @@ describe('this computer’s load', () => {
       assert.notInclude(asked, world.lead)
     }).pipe(
       Effect.provide(
-        runtime(':memory:', {}, { load: { read: stand.read, marks, every: Duration.millis(50), settle: Duration.millis(1) } }),
+        runtime(':memory:', {}, { load: { read: stand.read, app: NO_APP, marks, every: Duration.millis(50), settle: Duration.millis(1) } }),
       ),
     )
   })
@@ -305,7 +397,7 @@ describe('this computer’s load', () => {
           processes: 1,
         },
       ])
-    }).pipe(Effect.provide(runtime(':memory:', {}, { load: { read: stand.read, marks, settle: Duration.millis(1) } })))
+    }).pipe(Effect.provide(runtime(':memory:', {}, { load: { read: stand.read, app: NO_APP, marks, settle: Duration.millis(1) } })))
   })
 
   it.live('counts Althar itself, the app and what it started that is no work’s, in Althar’s part', () => {

@@ -25,8 +25,8 @@ import { CODEX, GEMINI_PRO, NEXT, OPUS, QWEN, READY_TWO_REPOS } from '../kit/wor
 import s from './AtWork.module.css'
 
 /*
- * Tally's board, in Althar's light on the dark of the panel, under "Usage
- * gets cut. Models get pulled. Althar stays.": tasks running at once, each
+ * Tally's board, in Althar's light on the dark of the panel, under "Every
+ * agent’s work. One board.": tasks running at once, each
  * led by another lab. While it is watched the work goes on: a beat every
  * couple of seconds, a minute on each task's clock and, at its own pace, a
  * step on.

@@ -69,6 +69,12 @@ export const text = {
   /* Reviews and pull requests. */
   postTeamTitle: 'Post reviews of my team’s pull requests without asking',
   postTeamNote: 'Pull requests from outside the team still wait for you.',
+  /** What "Run it" on code from outside the team does, as the person answers it ahead. */
+  runOutsideTitle: 'When I say Run it on code from outside the team',
+  runOutsideNote: 'It still runs only once you say Run it.',
+  runOutsideAsk: 'Ask each time',
+  runOutsideSafe: 'Run safely',
+  runOutsideFull: 'Trust fully',
   coAuthorTitle: 'Althar as co-author',
   /** Who the person is on the commit co-author is shown on, without a GitHub account connected. */
   you: 'you',

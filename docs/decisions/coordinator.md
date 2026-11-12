@@ -134,7 +134,7 @@ Althar hands the coordinator over itself.
   itself, and Althar doesn't try again for that session. Neither does it hand
   over where the brief would take 40% or more of a fresh context.
 
-A task's lead is handed over the same way, at a break ([agents.md](agents.md)).
+A task's lead is handed over the same way, once its context is full ([agents.md](agents.md)).
 
 ## The project's notes
 

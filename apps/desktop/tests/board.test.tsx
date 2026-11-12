@@ -1,4 +1,4 @@
-import { act, screen, waitFor, within } from '@testing-library/react'
+import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { Activity, useState } from 'react'
@@ -11,7 +11,7 @@ import { DockView } from '../src/renderer/features/board/DockView'
 import { MERGE_QUEUE_STEP, MERGING_STEP } from '../src/renderer/data/merges'
 import { pictureUrl } from '../src/main/pictureAddress'
 import { clock, running } from '../src/renderer/shared/time'
-import { lanesOf, yoursOf } from '../src/renderer/features/board/lanes'
+import { lanesOf, movesInLine, yoursOf } from '../src/renderer/features/board/lanes'
 import { firstNeedOf, needsOf } from '../src/renderer/features/board/needs'
 import { readHeadsAhead, useBoard } from '../src/renderer/features/board/useBoard'
 import { useClosePullRequests } from '../src/renderer/features/board/useClosePullRequests'
@@ -21,7 +21,9 @@ import { makeQueryClient } from '../src/renderer/data/reads'
 import { useMerge } from '../src/renderer/data/merges'
 import { useProject } from '../src/renderer/features/project/useProject'
 import { agents, card, change, changed, fakeClient, snapshot } from './fixtures'
-import { useSettingsOf, withServices } from './render'
+import { ServicesProvider } from '../src/renderer/data/services'
+import { forgetArrived, hasArrived, markArrived } from '../src/renderer/features/board/arrived'
+import { servicesFor, useSettingsOf, withServices } from './render'
 
 function Project({ onTask = vi.fn() }: { onTask?: (threadId: string) => void }) {
   return (
@@ -166,6 +168,18 @@ describe('the board’s lanes', () => {
     expect(lanes.ready.map((work) => work.taskId)).toEqual(['t4', 't5'])
     expect(lanes.settled.map((work) => work.taskId)).toEqual(['t6', 't7'])
     expect(yoursOf(lanes)).toBe(3)
+  })
+
+  it('keeps chats on Scratch off the lanes, until they settle', () => {
+    const chat = task({ taskId: 't9', threadId: 'th9', title: 'How does retry work?', slug: 'how-retry', phase: 'ready', scratch: true })
+    const working = task({ taskId: 't10', threadId: 'th10', title: 'Looking', slug: 'looking', phase: 'running', scratch: true })
+    const lanes = lanesOf(board({ tasks: [...board().tasks, chat, working] }))
+    expect(lanes.scratch.map((work) => work.taskId).toSorted()).toEqual(['t10', 't9'])
+    expect(lanes.ready.map((work) => work.taskId)).not.toContain('t9')
+    expect(lanes.running.map((work) => work.taskId)).not.toContain('t10')
+    // Settled, a chat leaves Scratch.
+    const cleared = lanesOf(board({ tasks: [...board().tasks, { ...chat, phase: 'settled', settledAt: '2026-10-01T10:00:00.000Z' }] }))
+    expect(cleared.scratch).toEqual([])
   })
 
   it('keeps a task only drafted off the board until its plan comes', () => {
@@ -319,16 +333,16 @@ describe('the board’s lanes', () => {
       const working = task({ taskId: 'w', phase: 'running', step: 'implement', startedAt: '2026-10-01T09:00:00.000Z' })
       const busy = [working, waiting('b', 4), paused, continuing('y', 2), waiting('a', 3), continuing('x', 1), planned]
 
-      it('continues up next ahead of the line, then what is paused, then plans; Running counts only work at it', () => {
+      it('continues up next ahead of the line, then plans, then what is paused; Running counts only work at it', () => {
         const lanes = lanesOf(board({ tasks: busy, calls: [] }))
-        expect(lanes.next.map((work) => work.taskId)).toEqual(['x', 'y', 'a', 'b', 'z', 'p'])
+        expect(lanes.next.map((work) => work.taskId)).toEqual(['x', 'y', 'a', 'b', 'p', 'z'])
         expect([lanes.continuing, lanes.free, lanes.paused, lanes.upNext]).toEqual([2, 2, 1, 6])
         expect(lanes.running.map((work) => work.taskId)).toEqual(['w'])
         expect(lanes.atWork).toBe(1)
       })
 
-      it('says what continues and why it waits, with no grip, and counts it ahead of the line’s places', () => {
-        const line = { move: vi.fn(async () => {}), oldestFirst: vi.fn(), failed: null }
+      it('says what continues and why it waits, in the one order with the line and the plans, each with a grip', () => {
+        const line = { move: vi.fn(async () => {}), oldestFirst: vi.fn(), cancelTurn: vi.fn(), failed: null }
         withServices(
           <BoardView lanes={lanesOf(board({ tasks: busy, calls: [] }))} agents={agents} now={NOW} onOpen={vi.fn()} line={line} />,
           fakeClient().client,
@@ -339,12 +353,15 @@ describe('the board’s lanes', () => {
         expect(next.getAllByText(/^4 of 4 agents busy on /)).toHaveLength(2)
         expect(next.getByText('Waiting for the connection')).toBeTruthy()
         expect(next.getByText('Paused')).toBeTruthy()
-        // The line's places come after what continues; only its rows have grips.
+        // The line's places come after what continues; every row Althar orders for a place has a grip, what is paused none.
         expect(next.getByText('3rd in line')).toBeTruthy()
         expect(next.getByText('4th in line')).toBeTruthy()
         expect(next.getAllByRole('button', { name: /in the line$/ }).map((grip) => grip.getAttribute('aria-label'))).toEqual([
+          'Move Going on x in the line',
+          'Move Going on y in the line',
           'Move Waiting a in the line',
           'Move Waiting b in the line',
+          'Move Add a retry in the line',
         ])
         const running = within(screen.getByRole('region', { name: 'Running' }))
         expect(running.queryByText(/^Going on|^Offline/)).toBeNull()
@@ -434,21 +451,31 @@ describe('the board’s lanes', () => {
       expect(lanes.running.map((work) => work.taskId)).toEqual(['a'])
     })
 
-    it('draws a divider over the line, each row saying its place in it; one alone has nothing to reorder', () => {
+    it('heads the plans with Planned under the line, each row saying its place; one alone has nothing to reorder', () => {
+      const line = { move: vi.fn(async () => {}), oldestFirst: vi.fn(), cancelTurn: vi.fn(), failed: null }
       const lanes = lanesOf(board({ tasks: [held, planned, waiting('a', 1)], calls: [] }))
-      const line = { move: vi.fn(async () => {}), oldestFirst: vi.fn(), failed: null }
       withServices(<BoardView lanes={lanes} agents={agents} now={NOW} onOpen={vi.fn()} line={line} />, fakeClient().client)
-      expect(screen.getByText('Starts when an agent is free')).toBeTruthy()
       expect(screen.getByText('Next in line')).toBeTruthy()
       expect(screen.getByText('Planned')).toBeTruthy()
       expect(screen.queryByRole('button', { name: 'Back to oldest first' })).toBeNull()
+      cleanup()
+      withServices(
+        <BoardView
+          lanes={lanesOf(board({ tasks: [waiting('a', 1)], calls: [] }))}
+          agents={agents}
+          now={NOW}
+          onOpen={vi.fn()}
+          line={line}
+        />,
+        fakeClient().client,
+      )
       expect(screen.queryByRole('button', { name: /in the line$/ })).toBeNull()
     })
 
     describe('in the person’s order', () => {
       const three = [waiting('a', 1), waiting('b', 2), waiting('c', 3), planned, held]
       const drawn = (tasks: ReadonlyArray<BoardTask>) => {
-        const line = { move: vi.fn(async () => {}), oldestFirst: vi.fn(), failed: null as string | null }
+        const line = { move: vi.fn(async () => {}), oldestFirst: vi.fn(), cancelTurn: vi.fn(), failed: null as string | null }
         withServices(
           <BoardView lanes={lanesOf(board({ tasks, calls: [] }))} agents={agents} now={NOW} onOpen={vi.fn()} line={line} />,
           fakeClient().client,
@@ -460,8 +487,8 @@ describe('the board’s lanes', () => {
           .getAllByRole('button', { name: /^Waiting / })
           .map((row) => row.textContent)
 
-      it('gives a grip to each row in it, none to the plans under it', () => {
-        drawn(three)
+      it('gives a grip to each row in it, and to the plans under it, which start where they are moved', async () => {
+        const line = drawn(three)
         expect(screen.queryByText('Drag to change the order')).toBeNull()
         expect(screen.queryByRole('button', { name: 'Back to oldest first' })).toBeNull()
         expect(screen.getByText('Next in line')).toBeTruthy()
@@ -471,7 +498,88 @@ describe('the board’s lanes', () => {
           'Move Waiting a in the line',
           'Move Waiting b in the line',
           'Move Waiting c in the line',
+          'Move Add a retry in the line',
+          'Move Hold off in the line',
         ])
+        // A held plan put at the front: the runtime starts it there, and the board shows it first meanwhile.
+        screen.getByRole('button', { name: 'Move Hold off in the line' }).focus()
+        await userEvent.keyboard('{Enter}')
+        const menu = within(await screen.findByRole('menu', { name: 'Move in the line' }))
+        await userEvent.click(menu.getByRole('menuitem', { name: 'Move to the front of the line' }))
+        expect(line.move).toHaveBeenCalledWith('h', 0)
+        expect(
+          within(screen.getByRole('region', { name: 'Up next' }))
+            .getAllByRole('button', { name: /in the line$/ })
+            .map((grip) => grip.getAttribute('aria-label')),
+        ).toEqual([
+          'Move Hold off in the line',
+          'Move Waiting a in the line',
+          'Move Waiting b in the line',
+          'Move Waiting c in the line',
+          'Move Add a retry in the line',
+        ])
+      })
+
+      it('starts the plans a row is put below, each at its place, so the line keeps the order put', async () => {
+        const line = drawn(three)
+        const grips = () =>
+          within(screen.getByRole('region', { name: 'Up next' }))
+            .getAllByRole('button', { name: /in the line$/ })
+            .map((grip) => grip.getAttribute('aria-label'))
+        const menuOf = async (title: string) => {
+          screen.getByRole('button', { name: `Move ${title} in the line` }).focus()
+          await userEvent.keyboard('{Enter}')
+          return within(await screen.findByRole('menu', { name: 'Move in the line' }))
+        }
+        // A plan can't move down among the plans: they stand by when they start, and hold no place until then.
+        const plan = await menuOf('Add a retry')
+        expect(plan.getByRole('menuitem', { name: 'Move down' }).getAttribute('aria-disabled')).toBe('true')
+        expect(plan.getByRole('menuitem', { name: 'Move up' }).getAttribute('aria-disabled')).toBeNull()
+        await userEvent.keyboard('{Escape}')
+        // The first of what waits, to the back, below both plans: it goes to the back of what waits, then each plan starts
+        // ahead of it, top down, and the line shows the order put meanwhile.
+        await userEvent.click((await menuOf('Waiting a')).getByRole('menuitem', { name: 'Move to the back of the line' }))
+        await waitFor(() => expect(line.move).toHaveBeenCalledTimes(3))
+        expect(line.move.mock.calls).toEqual([
+          ['a', 2],
+          ['p', 2],
+          ['h', 3],
+        ])
+        expect(grips()).toEqual([
+          'Move Waiting b in the line',
+          'Move Waiting c in the line',
+          'Move Add a retry in the line',
+          'Move Hold off in the line',
+          'Move Waiting a in the line',
+        ])
+      })
+
+      it('offers to cancel a turn Althar asked that waits for a place, from its row’s menu', async () => {
+        const line = drawn([
+          waiting('a', 1),
+          task({
+            taskId: 'x',
+            threadId: 'th-x',
+            title: 'Going on x',
+            phase: 'running',
+            step: 'implement',
+            queued,
+            continues: true,
+            turnWaits: true,
+            place: 2,
+          }),
+        ])
+        screen.getByRole('button', { name: 'Move Waiting a in the line' }).focus()
+        await userEvent.keyboard('{Enter}')
+        expect(
+          within(await screen.findByRole('menu', { name: 'Move in the line' })).queryByRole('menuitem', { name: 'Cancel this turn' }),
+        ).toBeNull()
+        await userEvent.keyboard('{Escape}')
+        screen.getByRole('button', { name: 'Move Going on x in the line' }).focus()
+        await userEvent.keyboard('{Enter}')
+        const menu = within(await screen.findByRole('menu', { name: 'Move in the line' }))
+        await userEvent.click(menu.getByRole('menuitem', { name: 'Cancel this turn' }))
+        expect(line.cancelTurn).toHaveBeenCalledWith('th-x')
       })
 
       it('moves a row from its grip’s menu, at once, and asks the runtime to start the line so', async () => {
@@ -900,7 +1008,7 @@ describe('the board', () => {
 
     // One more settles: 36 in all, the older ones still there.
     getBoard.mockImplementation(async () => board({ tasks: [settledTask(35), ...latest.slice(1)], calls: [], settledTotal: 36 }))
-    emit(changed('task', 's35'))
+    emit(changed('card', 's35'))
     expect(await within(column).findByText('36')).toBeTruthy()
     // Every card stays, the one that aged out of the snapshot (5) among them.
     expect(within(column).getAllByRole('listitem')).toHaveLength(36)
@@ -1090,7 +1198,7 @@ describe('the board', () => {
       expect(lane('Running').getByText('Rate-limit refunds')).toBeTruthy()
       expect(lane('Needs you').queryByText('Rate-limit refunds')).toBeNull()
       // The runtime says it settled: read once, and it is in Settled.
-      emit(changed('task', 't4'))
+      emit(changed('card', 't4'))
       expect(await lane('Settled').findByText('Rate-limit refunds')).toBeTruthy()
       expect(lane('Running').queryByText('Rate-limit refunds')).toBeNull()
       expect(getBoard).toHaveBeenCalledTimes(reads + 1)
@@ -1110,7 +1218,7 @@ describe('the board', () => {
       expect(lane('Needs you').queryByText('Rate-limit refunds')).toBeNull()
       // The queue took it out: it is the person's to merge again.
       getBoard.mockImplementation(async () => board())
-      emit(changed('task', 't4'))
+      emit(changed('card', 't4'))
       expect(await lane('Needs you').findByText('Rate-limit refunds')).toBeTruthy()
       expect(lane('Running').queryByText('In the merge queue')).toBeNull()
     })
@@ -1135,7 +1243,7 @@ describe('the board', () => {
       )
       await userEvent.click(screen.getByRole('button', { name: 'Merge there' }))
       await waitFor(() => expect(merge).toHaveBeenCalled())
-      emit(changed('task', 't4'))
+      emit(changed('card', 't4'))
       expect(await lane('Needs you').findByText('Rate-limit refunds')).toBeTruthy()
       expect(lane('Running').queryByText('Merging')).toBeNull()
     })
@@ -1396,7 +1504,7 @@ describe('the board', () => {
     await waitFor(() => expect(mergeHere).toHaveBeenCalledWith('t4', [{ repository: 'tools', head: 'abc111' }]))
   })
 
-  it('is read again when something it shows changes, not for what is said in a thread', async () => {
+  it('is read again when a card of its comes out different, not for every change of its tasks', async () => {
     const getBoard = vi.fn(async () => board())
     const { client, emit } = fakeClient({ getBoard })
     withServices(<Project />, client)
@@ -1406,14 +1514,16 @@ describe('the board', () => {
     await act(async () => {
       emit(changed('thread_item', 'i9', 'th2'))
       emit(changed('user_input', 'u1', 'th2'))
-      // Another project's task isn't this board's.
-      emit(changed('task', 't9', null, 'p2'))
+      // A change of a task that left its card as it was: the runtime says which moved one.
+      emit(changed('turn_delivery', 'd1', 'th2'))
+      emit(changed('external_link', 'x1', null))
+      // Another project's card isn't this board's.
+      emit(changed('card', 't9', null, 'p2'))
       await new Promise((resolve) => setTimeout(resolve, 120))
     })
     expect(getBoard.mock.calls.length).toBe(reads)
     await act(async () => {
-      emit(changed('turn_delivery', 'd1', 'th2'))
-      emit(changed('external_link', 'x1', null))
+      emit(changed('card', 't2', 'th2'))
     })
     await waitFor(() => expect(getBoard.mock.calls.length).toBe(reads + 1))
   })
@@ -2052,7 +2162,7 @@ describe('what stands between a ready change and merging', () => {
     // Cancelled: said in place of a pass, and nothing to do from here but open the task.
     expect(said('A check cancelled')).toContain('check 4 cancelled')
     expect(said('A check cancelled')).not.toMatch(/checks passed|Accept and merge/)
-    expect(said('A check skipped')).toMatch(/4 of 5 checks passed\s*Accept and merge/)
+    expect(said('A check skipped')).toMatch(/All 4 checks passed\s*Accept and merge/)
     expect(said('Closed since')).not.toMatch(/checks passed|Accept and merge/)
   })
 })
@@ -2188,7 +2298,7 @@ describe('a ready card’s next step, done from the card', () => {
             ? ready('s5', 'Commits to push', { localHead: 'def456', head: 'def456', unpushed: 0, additions: 20, deletions: 5 })
             : one,
         )
-        emit(changed('task', 's5'))
+        emit(changed('card', 's5'))
       }),
       getBoard: getBoard(),
     })
@@ -2538,3 +2648,91 @@ describe('a ready task’s head, read ahead', () => {
     await waitFor(() => expect(getThread).toHaveBeenCalledTimes(3))
   })
 })
+
+describe('the moves a row put in Up next asks of the runtime', () => {
+  it('moves what waits among what waits, and starts a plan put there or at the head of the plans', () => {
+    expect(movesInLine(['a', 'b'], ['p', 'q'], 'b', 0)).toEqual([['b', 0]])
+    expect(movesInLine(['a', 'b'], ['p', 'q'], 'q', 0)).toEqual([['q', 0]])
+    expect(movesInLine(['a', 'b'], ['p', 'q'], 'q', 2)).toEqual([['q', 2]])
+    // Further down among the plans, nothing: they stand by when they start.
+    expect(movesInLine(['a', 'b'], ['p', 'q'], 'p', 3)).toEqual([])
+  })
+
+  it('starts the plans a row is put below, top down, each ahead of it, after it goes to the back of what waits', () => {
+    // What continues, below a plan that hasn't started: the plan starts ahead of it.
+    expect(movesInLine(['a'], ['p'], 'a', 1)).toEqual([
+      ['a', 0],
+      ['p', 0],
+    ])
+    // Between two plans: the first starts, the second stays a plan.
+    expect(movesInLine(['a', 'b'], ['p', 'q'], 'a', 2)).toEqual([
+      ['a', 1],
+      ['p', 1],
+    ])
+    expect(movesInLine(['a', 'b'], ['p', 'q'], 'a', 3)).toEqual([
+      ['a', 1],
+      ['p', 1],
+      ['q', 2],
+    ])
+  })
+})
+
+describe('A settled card moves into Settled once', () => {
+  const NOW = '2026-10-01T10:00:00.000Z'
+  const moves = (title: string) =>
+    (screen.getByRole('button', { name: title }).closest('article') as HTMLElement).closest('[data-move]') as HTMLElement
+  const quiet = (title: string) => moves(title).hasAttribute('data-move-seen')
+  const services = () => servicesFor(fakeClient().client)
+  const shownBy = (value: ReturnType<typeof servicesFor>) => (tasks: BoardSnapshot['tasks']) => (
+    <ServicesProvider value={value}>
+      <BoardView lanes={lanesOf(board({ tasks, calls: [] }))} agents={agents} now={NOW} onOpen={vi.fn()} />
+    </ServicesProvider>
+  )
+  const all = board().tasks
+  const old = all.find((one) => one.taskId === 't6')!
+  const without = (id: string) => all.filter((one) => one.taskId !== id)
+  const as = (id: string, phase: BoardTask['phase']) => all.map((one) => (one.taskId === id ? { ...one, phase } : one))
+
+  it('moves in when this window watched it settle, and is drawn there as it is after: a lane change back and forth', () => {
+    const shown = shownBy(services())
+    const { rerender } = render(shown(as('t6', 'ready')))
+    rerender(shown(all))
+    expect(quiet('Old work')).toBe(false)
+    // Its lead works on it again, and it settles again: it is in Settled as before.
+    rerender(shown(as('t6', 'running')))
+    rerender(shown(all))
+    expect(quiet('Old work')).toBe(true)
+  })
+
+  it('draws what settled before this window looked as it is: first drawn, or brought by a later snapshot', () => {
+    const shown = shownBy(services())
+    const { rerender } = render(shown(without('t6')))
+    // No history kept, and a snapshot brings a task settled long ago: it doesn't move in.
+    rerender(shown(all))
+    expect(quiet('Old work')).toBe(true)
+    expect(quiet('Given up')).toBe(true)
+  })
+
+  it('remembers what moved in across a reload or restart, and every task it has drawn however many there are', () => {
+    const shown = shownBy(services())
+    const first = render(shown(as('t6', 'ready')))
+    first.rerender(shown(all))
+    first.unmount()
+    // A window reloaded: the task is at work when it is first drawn, and settles again.
+    forgetArrivedMemory()
+    const again = render(shown(as('t6', 'running')))
+    again.rerender(shown(all))
+    expect(quiet('Old work')).toBe(true)
+    again.unmount()
+    // Thousands of settled tasks later, the first is still known.
+    markArrived(Array.from({ length: 5000 }, (_, i) => `many${i}`))
+    expect(hasArrived('t6')).toBe(true)
+    expect(hasArrived('many0')).toBe(true)
+    forgetArrivedMemory()
+    expect(hasArrived('t6')).toBe(true)
+    expect(hasArrived('many4999')).toBe(true)
+  })
+})
+
+/** A window reloaded: what it held in memory is gone, what it kept in storage is read again. */
+const forgetArrivedMemory = () => forgetArrived()

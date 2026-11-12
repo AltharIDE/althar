@@ -276,6 +276,26 @@ export interface Host {
   readonly logError?: (error: WindowError) => void
   /** The pages beside the conversations (ADR-100); absent where a page can't have them, as the edge's. */
   readonly pages?: PagesHost
+  /** The HTML canvases beside the conversations (ADR-104); absent where a page can't have them, as the edge's. */
+  readonly canvases?: CanvasesHost
+}
+
+/**
+ * The HTML canvases beside the conversations (ADR-104), as the main process
+ * holds them (`main/canvases`): each by the thread it is beside, a view of
+ * its own in its project's canvas partition, at one version's address.
+ */
+export interface CanvasesHost {
+  /** Lays a version over the window where it keeps its place, in the window's pixels; null takes it off. */
+  readonly show: (
+    threadId: string,
+    target: { readonly projectId: string; readonly canvasId: string; readonly version: number; readonly manifest: string },
+    panel: { x: number; y: number; width: number; height: number } | null,
+  ) => void
+  /** Takes the thread's canvas view away. */
+  readonly close: (threadId: string) => void
+  /** Loads the version shown again, as it was published. */
+  readonly reload: (threadId: string) => void
 }
 
 /**

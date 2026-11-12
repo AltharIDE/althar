@@ -432,17 +432,19 @@ describe('automations', () => {
           }),
           /Say when as days and a time/,
         )
-        // A review is led only by an agent held to reading.
-        assert.match(
+        // Any agent leads a review, Codex included.
+        assert.notMatch(
           yield* callTool(coordinator, 'propose_automation', {
-            name: 'Morning review',
+            name: 'Morning review on Codex',
             prompt: 'Review the new pull requests.',
             when: { at: '09:00' },
             lead: { agent: 'codex' },
             ends_in: 'reviews',
           }),
-          /can't be held to reading only/,
+          /can't be held to reading only|can't lead a review/,
         )
+        for (const one of yield* automations.list(projectId))
+          if (one.id !== automationId) yield* automations.remove(one.id, instance.personId)
         yield* automations.remove(automationId, instance.personId)
         assert.strictEqual((yield* automations.list(projectId)).length, 0)
         assert.deepInclude((yield* cards)[0], { state: 'deleted' })

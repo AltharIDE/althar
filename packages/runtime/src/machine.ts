@@ -20,7 +20,8 @@ import { cpuTimeOf } from './processTree'
  * reader Althar builds (processReader.ts), and on Linux /proc does. Where
  * neither can, `ps` lists them, each with its own time only. A reading costs
  * a few milliseconds, the listing most of them (about 10 ms for 800 processes
- * on an M-series Mac). What used how much is worked out between two readings
+ * on an M-series Mac); the background sampling (`MachineLoad.ts`) reads the
+ * listing and the cores alone. What used how much is worked out between two readings
  * (`MachineLoad.ts`).
  *
  * Everything Althar starts for a piece of work carries it in its environment,
@@ -393,11 +394,16 @@ const processesOn = (platform: NodeJS.Platform): Effect.Effect<Pick<Reading, 'pr
 export const listProcesses = (platform: NodeJS.Platform = process.platform): Effect.Effect<ReadonlyMap<number, Listed> | null> =>
   Effect.map(processesOn(platform), (listed) => listed.processes)
 
-/** This computer as it is now. */
-export const readMachine = (platform: NodeJS.Platform = process.platform): Effect.Effect<Reading> =>
+/**
+ * This computer as it is now. `lean` reads only what the CPU shares are
+ * measured from, every core's time and the processes, and leaves memory and
+ * the memory pressure unread (zero, and none): two commands fewer to run.
+ */
+export const readMachine = (platform: NodeJS.Platform = process.platform, lean = false): Effect.Effect<Reading> =>
   Effect.gen(function* () {
     const at = yield* Clock.currentTimeMillis
     const cores = coresOf(cpus())
+    if (lean) return { at, cores, memory: { used: 0, total: 0 }, pressure: null, ...(yield* processesOn(platform)) }
     const [memory, level, listing] = yield* Effect.all(
       [
         memoryOn(platform),

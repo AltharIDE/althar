@@ -270,13 +270,24 @@ export const given = (threadId: string) =>
     (rows) => rows.map((row) => row.body),
   )
 
-/** Until the lead has committed the merge in the task's worktree: it is working still, as `[lead:resolve-hold]` does. */
+/**
+ * Until the lead has committed the merge in the task's worktree: it is working still, as `[lead:resolve-hold]` does. Committed
+ * means git is done with it: the merge commit is HEAD and git no longer has a merge under way, which it says a moment after.
+ */
 export const mergedHere = (taskId: string) =>
   Effect.gen(function* () {
     const { path } = yield* worktreeOf(taskId)
+    const merging = () => {
+      try {
+        git(path, 'rev-parse', '-q', '--verify', 'MERGE_HEAD')
+        return true
+      } catch {
+        return false
+      }
+    }
     yield* until(
-      Effect.sync(() => [git(path, 'rev-list', '--parents', '-n', '1', 'HEAD').split(' ').length]),
-      ([parts]) => parts === 3,
+      Effect.sync(() => [git(path, 'rev-list', '--parents', '-n', '1', 'HEAD').split(' ').length === 3 && !merging()]),
+      ([done]) => done === true,
     )
   })
 

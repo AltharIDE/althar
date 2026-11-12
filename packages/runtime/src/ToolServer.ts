@@ -93,6 +93,8 @@ export interface ToolCalled {
 export class ToolServer extends Context.Service<
   ToolServer,
   {
+    /** The port it listens on, on this computer only: what no canvas may reach (ADR-104). */
+    readonly port: number
     /** The server a session is given, and how to take it back. */
     grant(access: ToolAccess): Effect.Effect<{ readonly server: McpServer; readonly revoke: Effect.Effect<void> }>
     /**
@@ -220,9 +222,11 @@ export class ToolServer extends Context.Service<
           http.closeAllConnections()
         }),
       )
-      const url = `http://127.0.0.1:${(http.address() as AddressInfo).port}/mcp`
+      const port = (http.address() as AddressInfo).port
+      const url = `http://127.0.0.1:${port}/mcp`
 
       return ToolServer.of({
+        port,
         grant: (access) =>
           Effect.sync(() => {
             const token = randomBytes(24).toString('hex')

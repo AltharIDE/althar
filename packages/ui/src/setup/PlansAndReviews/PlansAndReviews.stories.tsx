@@ -46,7 +46,9 @@ export const Today: Story = {
   play: async ({ canvasElement }) => {
     const c = within(canvasElement)
     await expect(c.getByRole('combobox', { name: 'Start a plan after' })).toHaveTextContent('25 seconds')
-    await expect(c.getByRole('combobox', { name: 'Rounds of review' })).toHaveTextContent('3 rounds')
+    // No rounds to count: a fix is checked once at most.
+    await expect(c.queryByRole('combobox', { name: 'Rounds of review' })).toBeNull()
+    await expect(c.getByRole('combobox', { name: 'When a check finds more' })).toHaveTextContent('Carry on when every finding is settled')
     await expect(c.queryByRole('button', { name: /^Default: / })).toBeNull()
   },
 }
@@ -80,10 +82,10 @@ export const AskMe: Story = {
   render: () => <Rows start={{ ...plansAndReviewsDefault, roundsOut: 'ask' }} onChange={onChange} />,
   play: async ({ canvasElement }) => {
     const c = within(canvasElement)
-    await expect(c.getByRole('combobox', { name: 'When rounds run out' })).toHaveTextContent('Ask me')
+    await expect(c.getByRole('combobox', { name: 'When a check finds more' })).toHaveTextContent('Ask me')
     await userEvent.click(c.getByRole('button', { name: 'Default: Carry on when every finding is settled' }))
     await expect(onChange).toHaveBeenLastCalledWith({ roundsOut: 'settled' })
-    await expect(c.getByRole('combobox', { name: 'When rounds run out' })).toHaveTextContent('Carry on when every finding is settled')
+    await expect(c.getByRole('combobox', { name: 'When a check finds more' })).toHaveTextContent('Carry on when every finding is settled')
   },
 }
 

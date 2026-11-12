@@ -31,16 +31,17 @@ describe('every task', () => {
     withServices(<Settings section="tasks" />, client)
     const page = screen.getByRole('main')
     expect(await within(page).findByRole('combobox', { name: 'Start a plan after' })).toHaveProperty('textContent', '25 seconds')
-    expect(within(page).getByRole('combobox', { name: 'Rounds of review' }).textContent).toBe('3 rounds')
+    // No rounds to count: a fix is checked once at most (a task is a conversation plus parts).
+    expect(within(page).queryByRole('combobox', { name: 'Rounds of review' })).toBeNull()
     await choose(page, 'Start a plan after', '10 seconds')
     expect(client.setPlansAndReviews).toHaveBeenLastCalledWith({ countdown: 10 })
     expect(within(page).getByRole('combobox', { name: 'Start a plan after' }).textContent).toBe('10 seconds')
-    await choose(page, 'Rounds of review', '2 rounds')
-    expect(client.setPlansAndReviews).toHaveBeenLastCalledWith({ rounds: 2 })
     await userEvent.click(within(page).getByRole('button', { name: 'Default: 25 seconds' }))
     expect(client.setPlansAndReviews).toHaveBeenLastCalledWith({ countdown: 25 })
-    expect(within(page).getByRole('combobox', { name: 'When rounds run out' }).textContent).toBe('Carry on when every finding is settled')
-    await choose(page, 'When rounds run out', 'Ask me')
+    expect(within(page).getByRole('combobox', { name: 'When a check finds more' }).textContent).toBe(
+      'Carry on when every finding is settled',
+    )
+    await choose(page, 'When a check finds more', 'Ask me')
     expect(client.setPlansAndReviews).toHaveBeenLastCalledWith({ roundsOut: 'ask' })
     await userEvent.click(within(page).getByRole('button', { name: 'Default: Carry on when every finding is settled' }))
     expect(client.setPlansAndReviews).toHaveBeenLastCalledWith({ roundsOut: 'settled' })
@@ -50,8 +51,8 @@ describe('every task', () => {
     const { client } = fakeClient({ setPlansAndReviews: vi.fn(async () => Promise.reject(new Error('disk full'))) })
     withServices(<Settings section="tasks" />, client)
     const page = screen.getByRole('main')
-    await within(page).findByRole('combobox', { name: 'Rounds of review' })
-    await choose(page, 'Rounds of review', '2 rounds')
+    await within(page).findByRole('combobox', { name: 'When a check finds more' })
+    await choose(page, 'When a check finds more', 'Ask me')
     await waitFor(() => expect(within(page).getByRole('alert').textContent).toBe('That couldn’t be kept. Try again.'))
   })
 })
@@ -82,6 +83,12 @@ describe('new projects start with', () => {
     expect(client.setNewProjectDefaults).toHaveBeenLastCalledWith({ moveIssues: false })
     await choose(page, 'When a task is done', 'Push the branch only')
     expect(client.setNewProjectDefaults).toHaveBeenLastCalledWith({ end: 'none' })
+    // A small change's review after it merges: Major only to start with, said under its line.
+    const afterMerge = within(page).getByRole('combobox', { name: 'Review after a small change merges' })
+    expect(afterMerge.textContent).toBe('Bring back major findings')
+    expect(within(page).getByText('Minor findings and nits stay in the task’s thread.')).toBeTruthy()
+    await choose(page, 'Review after a small change merges', 'Don’t review it')
+    expect(client.setNewProjectDefaults).toHaveBeenLastCalledWith({ afterMergeReview: 'none' })
   })
 
   it('says a choice couldn’t be kept', async () => {
