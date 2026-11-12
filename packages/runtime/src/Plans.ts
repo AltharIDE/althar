@@ -69,6 +69,8 @@ export class Plans extends Context.Service<
       readonly startsIn?: Duration.Duration
       /** What happens when the work is done: a pull request, the branch pushed, or nothing outside. */
       readonly end?: TaskEnd | null
+      /** The ending is the person's own choice, rather than the project's setting. */
+      readonly endChosen?: boolean
       /** Held from the start: it waits until someone starts it, with no countdown. */
       readonly held?: boolean
       /** Nothing of it leaves this Mac when it is done, whatever the project's host (`PlanParameters.here`). */
@@ -179,6 +181,7 @@ export class Plans extends Context.Service<
           steps: ReadonlyArray<PlanStep>
           reason?: string | null
           end?: TaskEnd | null
+          endChosen?: boolean
           here?: boolean
           reads?: boolean
           worksIn?: WorksIn
@@ -228,6 +231,7 @@ export class Plans extends Context.Service<
                     steps: input.steps,
                     reason: input.reason,
                     end: input.end ?? null,
+                    ...(input.endChosen === true ? { endChosen: true } : {}),
                     ...(input.here === true ? { here: true } : {}),
                     ...(input.reads === true ? { reads: true } : {}),
                     ...(input.reviewAfterMerge === true ? { reviewAfterMerge: true } : {}),
@@ -371,6 +375,8 @@ export class Plans extends Context.Service<
                   steps,
                   reason: before.reason ?? null,
                   end: end === undefined ? (before.end ?? null) : end,
+                  // A card sends the ending it shows with every change: only another one than the plan had is the person's choice.
+                  ...(before.endChosen === true || (end !== undefined && end !== (before.end ?? null)) ? { endChosen: true } : {}),
                   ...(before.here === true ? { here: true } : {}),
                   ...(before.reads === true ? { reads: true } : {}),
                   ...(where === undefined ? {} : { worksIn: where }),

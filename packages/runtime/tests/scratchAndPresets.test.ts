@@ -296,18 +296,33 @@ describe('presets', () => {
         actorId: instance.personId,
       })
       assert.strictEqual((yield* planned('Change four', 'change-four', 'Always draft')).parameters.end, 'draft')
-      // Saved from a task that ended as the project says, a preset follows the project when it changes; one saved from a task
-      // whose ending the person changed keeps that ending.
+      // Where the ending came from decides what a preset saved from the task holds, whatever the project says by then.
+      // Inherited: the project said draft, then ready; the preset follows the project, not the draft the task had.
       yield* policies.set(projectId, { end: 'draft' }, instance.personId)
       const five = yield* planned('Change five', 'change-five', 'Change')
-      const [fiveTask] = yield* sql<{ taskId: string }>`SELECT task_id FROM task_plans WHERE id = ${five.id}`
-      const followed = yield* partsOfTask(fiveTask?.taskId ?? '')
-      assert.isUndefined(followed.parts.end)
-      yield* savePreset({ name: 'Saved change', parts: followed.parts, projectId: null, fromTaskId: null, actorId: instance.personId })
-      yield* plans.change(five.id, five.parameters.steps, instance.personId, 'none')
-      assert.strictEqual((yield* partsOfTask(fiveTask?.taskId ?? '')).parts.end, 'none')
+      const taskOf = (planId: string) =>
+        Effect.map(sql<{ taskId: string }>`SELECT task_id FROM task_plans WHERE id = ${planId}`, ([row]) => row?.taskId ?? '')
       yield* policies.set(projectId, { end: 'ready' }, instance.personId)
+      const inherited = yield* partsOfTask(yield* taskOf(five.id))
+      assert.isUndefined(inherited.parts.end)
+      yield* savePreset({ name: 'Saved change', parts: inherited.parts, projectId: null, fromTaskId: null, actorId: instance.personId })
       assert.strictEqual((yield* planned('Change six', 'change-six', 'Saved change')).parameters.end, 'ready')
+      yield* policies.set(projectId, { end: 'draft' }, instance.personId)
+      yield* plans.applyPreset((yield* latest()).id, 'Saved change', instance.personId, 'draft')
+      assert.strictEqual((yield* latest()).parameters.end, 'draft')
+      // Chosen: the person changes the plan's ending, even to what the project says at that moment; the preset keeps it.
+      const seven = yield* planned('Change seven', 'change-seven', 'Change')
+      yield* plans.change(seven.id, seven.parameters.steps, instance.personId, 'none')
+      yield* plans.change(seven.id, seven.parameters.steps, instance.personId, 'draft')
+      yield* policies.set(projectId, { end: 'ready' }, instance.personId)
+      const chosen = yield* partsOfTask(yield* taskOf(seven.id))
+      assert.strictEqual(chosen.parts.end, 'draft')
+      yield* savePreset({ name: 'Chosen draft', parts: chosen.parts, projectId: null, fromTaskId: null, actorId: instance.personId })
+      assert.strictEqual((yield* planned('Change eight', 'change-eight', 'Chosen draft')).parameters.end, 'draft')
+      // A card that sends the ending it shows with each change chooses nothing.
+      const nine = yield* planned('Change nine', 'change-nine', 'Change')
+      yield* plans.change(nine.id, nine.parameters.steps, instance.personId, nine.parameters.end)
+      assert.isUndefined((yield* partsOfTask(yield* taskOf(nine.id))).parts.end)
     }).pipe(Effect.provide(runtimeWith(github)))
   })
 })

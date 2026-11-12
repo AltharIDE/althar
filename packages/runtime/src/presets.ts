@@ -156,19 +156,9 @@ export const editPreset = (input: {
       WHERE id = ${input.id}`
   })
 
-/** How the project's "How a task ends" stands now: its rule, or a draft pull request where it says nothing. */
-export const projectEndOf = (projectId: string) =>
-  Effect.gen(function* () {
-    const sql = yield* SqlClient.SqlClient
-    const [row] = yield* sql<{ end: string | null }>`
-      SELECT json_extract(rules, '$.end') AS end FROM policies WHERE project_id = ${projectId} ORDER BY revision DESC LIMIT 1`
-    return row?.end === 'ready' || row?.end === 'none' ? row.end : ('draft' as const)
-  })
-
 /**
- * The parts of a plan, as a preset holds them. With `projectEnd`, the project's ending now, a plan that ends as it does (or
- * has no ending of its own) leaves the preset's unset, so it follows the project later: only an ending that differs was the
- * person's choice.
+ * The parts of a plan, as a preset holds them. Its ending goes in only where the person chose it (`endChosen`); a plan that
+ * took the project's leaves the preset's unset, so it follows the project later.
  */
 export const partsOfPlan = (
   parameters: {
@@ -179,6 +169,7 @@ export const partsOfPlan = (
       readonly skipped: boolean
     }>
     readonly end?: string | null | undefined
+    readonly endChosen?: boolean | undefined
     readonly here?: boolean | undefined
     readonly reads?: boolean | undefined
     readonly reviewAfterMerge?: boolean | undefined
@@ -186,7 +177,6 @@ export const partsOfPlan = (
   },
   shelf: string | null,
   brief: string,
-  projectEnd?: 'draft' | 'ready' | 'none',
 ): PresetParts => {
   const lead = parameters.steps.find((step) => step.key === 'implement')
   const review = parameters.steps.find((step) => step.key === 'review')
@@ -199,9 +189,9 @@ export const partsOfPlan = (
         : parameters.reviewAfterMerge === true
           ? 'after'
           : 'before',
-    ...(projectEnd !== undefined && (parameters.end == null || parameters.end === projectEnd)
-      ? {}
-      : { end: parameters.end === 'draft' || parameters.end === 'ready' ? parameters.end : ('none' as const) }),
+    ...(parameters.endChosen === true
+      ? { end: parameters.end === 'draft' || parameters.end === 'ready' ? parameters.end : ('none' as const) }
+      : {}),
     shelf: shelf === 'scratch' ? 'scratch' : 'board',
     lead: named(lead),
     reviewer: review === undefined ? null : named(review),
@@ -269,8 +259,7 @@ export const partsOfTask = (taskId: string) =>
       FROM tasks k WHERE k.id = ${taskId}`
     if (task === undefined) return yield* new NotFound({ kind: 'task', id: taskId })
     const parameters = JSON.parse(task.parameters ?? '{"steps":[]}') as Parameters<typeof partsOfPlan>[0]
-    const projectEnd = yield* projectEndOf(task.projectId)
-    return { projectId: task.projectId, title: task.title, parts: partsOfPlan(parameters, task.shelf, task.description, projectEnd) }
+    return { projectId: task.projectId, title: task.title, parts: partsOfPlan(parameters, task.shelf, task.description) }
   })
 
 /** Removes one of the person's presets; a built-in one stays. */
@@ -294,10 +283,7 @@ export const offerPreset = (projectId: ProjectId, actorId: ActorId) =>
       WHERE p.project_id = ${projectId} AND p.state IN ('accepted', 'proposed')
       ORDER BY p.proposed_at DESC LIMIT 2`
     if (recent.length < 2) return
-    const projectEnd = yield* projectEndOf(projectId)
-    const [a, b] = recent.map((row) =>
-      partsOfPlan(JSON.parse(row.parameters) as Parameters<typeof partsOfPlan>[0], row.shelf, '', projectEnd),
-    )
+    const [a, b] = recent.map((row) => partsOfPlan(JSON.parse(row.parameters) as Parameters<typeof partsOfPlan>[0], row.shelf, ''))
     if (a === undefined || b === undefined || !alike(a, b) || a.lead === null || a.lead !== b.lead) return
     const presets = yield* presetsIn(projectId)
     if (presets.some((one) => !one.builtin && alike(one.parts, a) && one.parts.lead === a.lead)) return
@@ -358,6 +344,7 @@ export interface PresetPlan {
     readonly skipped: boolean
   }>
   readonly end?: 'draft' | 'ready' | 'none' | null | undefined
+  readonly endChosen?: boolean | undefined
   readonly here?: boolean | undefined
   readonly reads?: boolean | undefined
   readonly reviewAfterMerge?: boolean | undefined
@@ -428,12 +415,14 @@ export const planFromPreset = <P extends PresetPlan>(
             // After the merge, nothing waits on it before: skipped in the run, read once the work merged.
             skipped: parts.checked === 'after',
           }
-  const { reviewAfterMerge: _after, here: _here, worksIn: _worksIn, ...rest } = before
+  const { reviewAfterMerge: _after, here: _here, worksIn: _worksIn, endChosen: _chosen, ...rest } = before
   return {
     ...rest,
     steps: [...(implement === undefined ? [] : [implement]), ...(reviewing === undefined ? [] : [reviewing])],
     // An ending the preset has is the person's own; without one, the project's, else the plan's as it was.
     end: parts.end ?? (projectEnd === undefined ? before.end : projectEnd),
+    // Only a preset's own ending is chosen; one taken from the project follows it again when saved.
+    ...(parts.end === undefined ? {} : { endChosen: true }),
     ...(parts.checked === 'after' ? { reviewAfterMerge: true } : {}),
     ...(parts.workspace === 'copy' ? { here: true } : { worksIn: parts.workspace === 'local' ? 'checkout' : 'worktree' }),
   } as unknown as P

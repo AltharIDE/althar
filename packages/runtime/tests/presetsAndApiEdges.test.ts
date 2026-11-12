@@ -835,6 +835,7 @@ describe('a preset’s parts, on a plan', () => {
           { key: 'review', agentId: 'opencode', model: null, skipped: false },
         ],
         end: 'draft',
+        endChosen: true,
         worksIn: 'checkout',
       },
     )
@@ -850,6 +851,7 @@ describe('a preset’s parts, on a plan', () => {
     assert.deepStrictEqual(planFromPreset(proposed({ steps: [] }), parts({ checked: 'after', workspace: 'copy' })), {
       steps: [{ key: 'review', agentId: 'claude-code', model: null, skipped: true }],
       end: 'draft',
+      endChosen: true,
       reviewAfterMerge: true,
       here: true,
     })
@@ -861,6 +863,7 @@ describe('a preset’s parts, on a plan', () => {
     assert.deepStrictEqual(planFromPreset(proposed({ steps: [LEAD], worksIn: 'checkout' }), parts({ checked: 'none' })), {
       steps: [LEAD],
       end: 'draft',
+      endChosen: true,
       worksIn: 'worktree',
     })
   })
