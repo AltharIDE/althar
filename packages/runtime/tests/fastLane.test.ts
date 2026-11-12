@@ -295,6 +295,8 @@ describe('Auto’s lighter model', () => {
   })
 
   it.live('moves a lead whose session is still running when its plan crosses the mark, and says why once', () => {
+    // A reset still ahead on the real clock: the plan's reading drops a window whose reset has passed.
+    const resetsAt = new Date(Date.now() + Duration.toMillis(Duration.days(7))).toISOString()
     const cache = join(mkdtempSync(join(tmpdir(), 'althar-facts-')), 'models.json')
     writeFileSync(
       cache,
@@ -351,7 +353,7 @@ describe('Auto’s lighter model', () => {
       assert.deepInclude(moved?.content, {
         from: { agentId: 'claude-code', model: 'large' },
         to: { agentId: 'claude-code', model: 'small' },
-        why: { percent: 92, plan: 'Claude', window: 'the week', resetsAt: '2026-11-12T09:00:00.000Z' },
+        why: { percent: 92, plan: 'Claude', window: 'the week', resetsAt },
         kept: false,
       })
       const [now] = yield* sql<{ model: string | null }>`
@@ -397,7 +399,7 @@ describe('Auto’s lighter model', () => {
                           kind: 'usage',
                           stale: false,
                           usage: {
-                            windows: [{ kind: 'weekly', usedPercent: 92, resetsAt: '2026-11-12T09:00:00.000Z' }],
+                            windows: [{ kind: 'weekly', usedPercent: 92, resetsAt }],
                             source: 'endpoint',
                             observedAt: new Date().toISOString(),
                           },
