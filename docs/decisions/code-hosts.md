@@ -194,7 +194,10 @@ is a unit of work, so commits aren't pushed one by one as they're made.
   to the task's next pull request, which opens as the round ends
   ([tasks](tasks.md)).
 - **What holds it:** the pull request's branch is anywhere but where Althar
-  last pushed it (someone else pushed there); the person stopped or
+  last pushed it, or where Althar's own update of it on the host left it
+  (`update_branch`, the merge line's: a merge of the target's head into the
+  head it asked from, read back once), so someone else pushed there; the
+  person stopped or
   interrupted the lead since anything last went up; the push, or the read
   before it, failed; the host isn't connected; or the lead was still at
   work long after its turn. A hold is the last word: nothing else goes up
@@ -209,7 +212,11 @@ is a unit of work, so commits aren't pushed one by one as they're made.
   Push card, `push_to_pull_request` and publishing all refuse it, failing
   checks of the pushed head aren't put to the lead, and a conflict waits for
   Ship's push. Ship reviews first, where the plan has a reviewer before the
-  work ships, then pushes past the hold.
+  work ships, then pushes past the hold. Whatever the phase, Ship's review
+  or the lead's turn under way, nothing says they go up as the turn ends
+  or offers their Push: the pull request's `pushing.ship` says they wait for
+  Ship, and the coordinator's `read_task` says so, and when Ship is under
+  way.
 
 **Commits the person makes by hand in the task's folder hold the branch for
 Ship too.** Of what isn't sent yet, a commit written outside every turn of
@@ -224,7 +231,9 @@ that merges once what waited is up, unless the lead set a finding of its
 review aside, which a line says, leaving the merge to the person. Merge now
 sends them up past the hold and merges at once, and they are reviewed after
 the merge, in the same task, where it has a reviewer
-([reviews](reviews.md#a-small-change-is-reviewed-after-it-merges)).
+([reviews](reviews.md#a-small-change-is-reviewed-after-it-merges)). A plain
+Accept, from the Dock or anywhere, is refused while they wait: it would
+merge the pull request without them, unreviewed. The Dock offers Ship.
 
 `push_to_pull_request` pushes at once wherever the rule or a checks fix
 would, and says what it did; otherwise it shows the person the commits with

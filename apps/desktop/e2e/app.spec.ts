@@ -387,7 +387,7 @@ const catchWhatReachesThem = (electronApp: ElectronApplication) =>
 /** Where the system carries an app's count, as Settings names it: the Dock, Linux's launcher. */
 const COUNT = process.platform === 'darwin' ? 'Count them on the Dock icon' : 'Count them on the launcher icon'
 
-test('notifies the person of a ready task while they look elsewhere, counts it on the Dock, and opens it on a click', async () => {
+test('notifies the person of a finished task in its card’s words, counts it on the Dock, and opens it on a click', async () => {
   const home = mkdtempSync(join(tmpdir(), 'althar-e2e-'))
   const repo = repository(home)
   const { electronApp, page } = await launch(home)
@@ -399,12 +399,13 @@ test('notifies the person of a ready task while they look elsewhere, counts it o
 
     await expect
       .poll(() => electronApp.evaluate(() => globalThis.shown))
-      .toEqual([{ title: 'Add a retry to the checkout call', body: 'Ready: Did the task.', silent: true }])
+      .toEqual([{ title: 'Add a retry to the checkout call', body: 'Nothing built', silent: true }])
     await expect.poll(() => electronApp.evaluate(() => globalThis.badge)).toBe(1)
 
     // Clicked, it opens the task.
     await electronApp.evaluate(() => globalThis.clickLast?.())
     await expect(page.getByRole('heading', { name: 'Add a retry to the checkout call', level: 1 })).toBeVisible()
+    await expect(shown(page, 'Nothing built', { exact: true })).toBeVisible()
   } finally {
     await electronApp.close()
   }

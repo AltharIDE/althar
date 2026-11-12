@@ -32,6 +32,11 @@ export const ChangingTheTeam: Story = { args: { onChangeTeam: fn(), defaultOpen:
 
 export const ChangingTheTeamDark: Story = { ...ChangingTheTeam, globals: { theme: 'dark' } }
 
+/** A prototype, finished on its branch: made a change in one move, a reviewer on and a pull request to end in. */
+export const MakingItAChange: Story = { args: { onChangeTeam: fn(), onMakeChange: fn(), defaultOpen: true } }
+
+export const MakingItAChangeDark: Story = { ...MakingItAChange, globals: { theme: 'dark' } }
+
 export const Stopped: Story = { args: { onStop: undefined, onResume: fn(), defaultOpen: true } }
 /** Its plan waits to start, counting down or held: start it now, or abandon it. */
 export const Planned: Story = { args: { onOpen: undefined, onStop: undefined, onStartNow: fn(), defaultOpen: true } }

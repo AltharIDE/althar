@@ -1,3 +1,4 @@
+import { plainTitle, toolWordsOf } from '@althar/contracts'
 import type { AllowedBy, AttachedFile, FileMention, Picture, ShownPicture, ThreadItem, TurnTime, Unfurl } from '@althar/contracts'
 import { Delivery, headingOf, oneLine, PlanState, ToolKind, ToolState } from '@althar/ui'
 
@@ -125,6 +126,20 @@ export type SettingChangeContent = Extract<ThreadItem, { kind: 'setting' }>['con
 export type SmallChangeContent = Extract<ThreadItem, { kind: 'small_change' }>['content']
 export type ModelMoveContent = Extract<ThreadItem, { kind: 'model_move' }>['content']
 export type MergeLineContent = Extract<ThreadItem, { kind: 'merge_line' }>['content']
+
+/**
+ * How a setup stands: under way; stopped as Althar quit; gone through; or
+ * failed, as its command did, or as it couldn't copy a file a recorded setup
+ * names (ADR-080), though its command exited 0. The one rule the thread's
+ * line for it and its round's fold both read.
+ */
+export const setupStanding = (setup: SetupContent): 'running' | 'stopped' | 'done' | 'failed' | 'missing' => {
+  const { ended } = setup
+  if (ended === null) return 'running'
+  if (ended.stopped) return 'stopped'
+  if (ended.code !== 0) return 'failed'
+  return (ended.missing?.length ?? 0) > 0 ? 'missing' : 'done'
+}
 
 export type Block =
   | {
@@ -377,7 +392,7 @@ export const targetOf = (content: ToolContent, worktree: string | null): string 
   if (content.command !== null) return content.label ?? content.command
   const space = content.title.indexOf(' ')
   const first = space > 0 ? content.title.slice(0, space).toLowerCase() : ''
-  return TITLE_VERBS.has(first) ? content.title.slice(space + 1) : content.title
+  return TITLE_VERBS.has(first) ? content.title.slice(space + 1) : plainTitle(content.title)
 }
 
 /** Text an agent is still writing, by the item it will be. */
@@ -453,12 +468,32 @@ const partOf = (
       const state = toolStateOf(item.content.status, turnRunning, item.content.declined)
       const refused = ruleRefusal(item.content)
       const why = refused === undefined ? declinedWords(item.content.declinedBy, item.content.declinedWhy) : undefined
+      // An MCP tool's raw name never shows: it reads as what it does, in the tense of how far it is.
+      const own =
+        toolKind === ToolKind.Other
+          ? toolWordsOf(item.content.title, state === ToolState.Running ? 'running' : state === ToolState.Done ? 'done' : 'plain')
+          : undefined
+      const ownSpace = own === undefined ? -1 : own.indexOf(' ')
       return {
         kind: 'tool',
         id: item.id,
         toolKind,
-        verb: toolKind === ToolKind.Skill && skill?.reported === false ? 'Read skill' : verbFor(toolKind, state),
-        target: toolKind === ToolKind.Skill && skill !== undefined ? skill.names.join(', ') : targetOf(item.content, worktree),
+        verb:
+          own !== undefined
+            ? ownSpace > 0
+              ? own.slice(0, ownSpace)
+              : own
+            : toolKind === ToolKind.Skill && skill?.reported === false
+              ? 'Read skill'
+              : verbFor(toolKind, state),
+        target:
+          own !== undefined
+            ? ownSpace > 0
+              ? own.slice(ownSpace + 1)
+              : ''
+            : toolKind === ToolKind.Skill && skill !== undefined
+              ? skill.names.join(', ')
+              : targetOf(item.content, worktree),
         ...(skill === undefined ? {} : { skills: skill }),
         state,
         command: item.content.command,

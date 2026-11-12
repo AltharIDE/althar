@@ -6,8 +6,8 @@ import { Connections } from './Connections'
 import { NotFound } from './errors'
 import { addReadCopy } from './git'
 import { LAST_MESSAGE_REVIEWING } from './lastMessage'
-import { logForLead, readLog } from './checkLogs'
-import { checksLine, checksOf, commentLine, reviewLine, standing } from './pullRequestWords'
+import { LOGS_TO_LEAD, logForLead, readLog } from './checkLogs'
+import { checksLine, checksOf, commentLine, descriptionWords, reviewLine, standing } from './pullRequestWords'
 
 /*
  * What every part of Althar knows of a review task (docs/architecture/06,
@@ -18,8 +18,7 @@ import { checksLine, checksOf, commentLine, reviewLine, standing } from './pullR
  * so, and read_pull_request reads it the pull request's own words.
  */
 
-/** How many failed checks' logs a reading of the pull request gives, and how much of what people said: its latest. */
-export const LOGS_SHOWN = 2
+/** How much of what people said a reading of the pull request gives: its latest. */
 export const SAID_SHOWN = 40
 
 /** Someone else's pull request, as a review task keeps it. */
@@ -140,11 +139,11 @@ export const readReviewed = (review: ReviewOf) =>
       lines.push(
         `Its head is ${now.headSha.slice(0, 12)} now; your copy holds ${review.head.slice(0, 12)}, as Althar fetched it. Review what you have, and say so in your summary.`,
       )
-    lines.push(now.body.trim() === '' ? 'It has no description.' : `Its description:\n${now.body.trim()}`)
+    lines.push(descriptionWords(now.body) ?? 'It has no description.')
     if (now.headSha !== null) {
       const checks = yield* host.checks(repository, now.headSha)
       lines.push(checksLine(checksOf(now.headSha, checks)))
-      for (const check of checks.filter((candidate) => candidate.state === 'failed').slice(0, LOGS_SHOWN))
+      for (const check of checks.filter((candidate) => candidate.state === 'failed').slice(0, LOGS_TO_LEAD))
         lines.push(logForLead(yield* readLog(host, repository, check)))
     }
     const activity = yield* host.activity(repository, review.number, null)
