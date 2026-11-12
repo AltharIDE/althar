@@ -21,7 +21,7 @@ import { Queries } from '../src/Queries'
 import { type PlanStep, Runs } from '../src/Runs'
 import * as Runtime from '../src/Runtime'
 import { Sessions } from '../src/Sessions'
-import { callTool, fakeConnectors, HOST, hosted, notices, runtime, until } from './support'
+import { callTool, fakeConnectors, HOST, hosted, notices, repository, runtime, until } from './support'
 
 /*
  * A sanity pass over a task's life in the runtime: the edges between its
@@ -413,4 +413,41 @@ describe('a lead that ships its own task', () => {
       assert.notInclude(lines, 'Its lead shipped this task', 'the thread says it shipped')
     }).pipe(Effect.provide(runtimeWith(github)))
   })
+})
+
+describe('a plan whose countdown ended as Althar stopped', () => {
+  // Finding (sanity pass): Plans.start commits a plan's acceptance before it makes its run. Where Althar stops in between (it
+  // quits or restarts, or the run can't be made), nothing starts the plan or holds it again: the countdown looks only at plans
+  // still proposed, and startup holds only those that came due while it was closed. The task sits with an accepted plan and no
+  // run, nothing said: its card says Running, with no step and nothing it waits for, find_tasks says "stopped" and read_task
+  // "planned", until the person finds Start. Seen on "A message sent mid-turn goes straight to the queue", accepted by its countdown at 17:54:29, as Althar
+  // restarted. Flips to passing when fixed.
+  it.live.fails('waits for the person after a restart, held, as a plan that came due while Althar was closed does', () =>
+    Effect.gen(function* () {
+      const file = join(mkdtempSync(join(tmpdir(), 'althar-plans-')), 'althar.sqlite')
+      const projectId = yield* Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient
+        const project = yield* (yield* Projects).open({ envelope: yield* Runtime.envelope('project.open', {}), path: repository() })
+        const coordinator = yield* Coordinator
+        const threadId = yield* coordinator.thread(project.projectId)
+        const body = 'Later. [coordinator:plan]'
+        yield* coordinator.say({ envelope: yield* Runtime.envelope('thread.send', { body }), threadId, body, disposition: 'after_current' })
+        yield* until(cards(project.projectId), (all) => all[0]?.phase === 'planned')
+        // Its countdown ends, and accepts it as Plans.start does (state, start and decision); Althar stops before its run is made.
+        yield* sql`UPDATE task_plans SET state = 'accepted', starts_at = NULL, decided_at = ${new Date().toISOString()}`
+        return project.projectId
+      }).pipe(Effect.provide(Queries.layer.pipe(Layer.provideMerge(runtime(file, {}, { countdown: Duration.minutes(5) })))))
+      // Althar opens again: its card says Running, with no step, no start and nothing it waits for.
+      const { card, runs } = yield* Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient
+        const [card] = yield* cards(projectId)
+        return { card, runs: (yield* sql<{ id: string }>`SELECT id FROM runs WHERE task_id = ${card?.taskId ?? ''}`).length }
+      }).pipe(Effect.provide(Queries.layer.pipe(Layer.provideMerge(runtime(file)))))
+      assert.deepStrictEqual(
+        { phase: card?.phase, runs },
+        runs > 0 ? { phase: 'running', runs } : { phase: 'held', runs: 0 },
+        'the plan waits for the person, its card saying so, or starts as it was accepted to',
+      )
+    }),
+  )
 })
