@@ -234,7 +234,10 @@ describe('a pull request, by the person and the lead', () => {
         const changes = yield* Changes
         const sql = yield* SqlClient.SqlClient
         if (news !== 'merged-comment') {
-          yield* changes.merge(taskId, ready?.change?.head ?? '')
+          // At the head the host has: the card can show the one before the lead's last push, which the merge would refuse.
+          yield* changes.refresh(taskId)
+          const [seen] = yield* until(cards(projectId), (all) => all[0]?.change?.head === tipOf(bare)())
+          yield* changes.merge(taskId, seen?.change?.head ?? '')
           yield* changes.refresh(taskId)
         }
         yield* sessions.stop(threadId)
