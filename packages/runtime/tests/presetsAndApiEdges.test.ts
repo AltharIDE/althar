@@ -139,7 +139,7 @@ describe('presets, through the API', () => {
         )
         assert.strictEqual(
           builtIn.find((one) => one.name === 'Change')?.about,
-          'a worktree, reviewed before it ships, a draft pull request, the coordinator picks its lead',
+          'a worktree, reviewed before it ships, ends as the project says, the coordinator picks its lead',
         )
         assert.isTrue(builtIn.every((one) => one.builtin && one.keptTo === undefined && one.from === undefined))
 

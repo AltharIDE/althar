@@ -115,9 +115,10 @@ export class Plans extends Context.Service<
     /**
      * Picks another preset for a plan before it starts (a task is a conversation plus parts, "How a task starts"): its parts
      * change to match, by the preset's id or name: its lead and reviewer where it names them, Checked by and when, its ending,
-     * where it works and sits, and its brief added to the task's description. The preset's name.
+     * where it works and sits, and its brief added to the task's description. A preset with no ending of its own ends the plan
+     * as `projectEnd` says, the project's. The preset's name.
      */
-    applyPreset(planId: string, preset: string, actorId: ActorId): Effect.Effect<string, unknown>
+    applyPreset(planId: string, preset: string, actorId: ActorId, projectEnd?: TaskEnd | null): Effect.Effect<string, unknown>
   }
 >()('@althar/runtime/Plans') {
   static readonly layer: Layer.Layer<Plans, never, Store> = Layer.effect(
@@ -384,7 +385,7 @@ export class Plans extends Context.Service<
               return yield* reshape(planId, changed, actorId, toward, worksIn !== undefined)
             }),
           ),
-        applyPreset: (planId, asked, actorId) =>
+        applyPreset: (planId, asked, actorId, projectEnd) =>
           provide(
             Effect.gen(function* () {
               const sql = yield* SqlClient.SqlClient
@@ -409,7 +410,7 @@ export class Plans extends Context.Service<
               if (before.reads === true) for (const step of steps) if (!step.skipped) yield* reviews.canLead(step.agentId)
               yield* reshape(
                 planId,
-                (now) => JSON.stringify(planFromPreset(parametersOf(now), preset.parts, models)),
+                (now) => JSON.stringify(planFromPreset(parametersOf(now), preset.parts, models, projectEnd)),
                 actorId,
                 undefined,
                 true,

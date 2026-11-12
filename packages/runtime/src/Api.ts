@@ -1498,7 +1498,20 @@ export const handlers = Api.toLayer(
       HoldPlan: ({ commandId, planId }) => once(commandId, api(Effect.asVoid(plans.hold(planId, instance.personId)))),
       ChangePlan: ({ commandId, planId, steps, end, worksIn, toward }) =>
         once(commandId, api(plans.change(planId, steps, instance.personId, end, worksIn, toward))),
-      ApplyPreset: ({ commandId, planId, preset }) => once(commandId, api(plans.applyPreset(planId, preset, instance.personId))),
+      ApplyPreset: ({ commandId, planId, preset }) =>
+        once(
+          commandId,
+          api(
+            Effect.gen(function* () {
+              const [plan] = yield* sql<{
+                projectId: string
+                taskId: string
+              }>`SELECT project_id, task_id FROM task_plans WHERE id = ${planId}`
+              const end = plan === undefined ? undefined : yield* pullRequests.endFor(plan.projectId, plan.taskId)
+              return yield* plans.applyPreset(planId, preset, instance.personId, end)
+            }),
+          ),
+        ),
       ChangeTeam: ({ commandId, taskId, steps }) =>
         once(
           commandId,

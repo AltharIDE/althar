@@ -9,6 +9,7 @@ import { Connections } from '../src/Connections'
 import { Coordinator } from '../src/Coordinator'
 import { Instance } from '../src/Instance'
 import { Plans } from '../src/Plans'
+import { Policies } from '../src/Policies'
 import { partsOfTask, presetsIn, savePreset } from '../src/presets'
 import { Projects } from '../src/Projects'
 import { Queries } from '../src/Queries'
@@ -202,7 +203,8 @@ describe('presets', () => {
         )
       const first = yield* plan()
       yield* (yield* Plans).hold(first.id, (yield* Instance).personId)
-      assert.deepInclude(first.parameters, { end: 'ready', reviewAfterMerge: true })
+      // Small change has no ending of its own: it ends as the project says (a draft where the project says nothing).
+      assert.deepInclude(first.parameters, { end: 'draft', reviewAfterMerge: true })
       assert.deepStrictEqual(
         first.parameters.steps.map((step: { key: string; skipped: boolean }) => [step.key, step.skipped]),
         [
@@ -236,6 +238,62 @@ describe('presets', () => {
       // A plan of work never becomes a review.
       const refused = yield* Effect.flip((yield* Plans).applyPreset(first.id, 'Review a PR', instance.personId))
       assert.include(String((refused as { message?: string }).message), 'Review a PR starts from a pull request')
+    }).pipe(Effect.provide(runtimeWith(github)))
+  })
+
+  it.live('end as the project says, unless the person set an ending on one of their own', () => {
+    const { working, bare } = hosted()
+    const github = makeFakeService({ pushUrl: () => bare })
+    github.addRepository(['meridian', 'api'])
+    return Effect.gen(function* () {
+      const { projectId, coordinator } = yield* opened(working)
+      const sql = yield* SqlClient.SqlClient
+      const instance = yield* Instance
+      const policies = yield* Policies
+      const plans = yield* Plans
+      const latest = () =>
+        Effect.map(sql<{ id: string; parameters: string }>`SELECT id, parameters FROM task_plans ORDER BY rowid DESC LIMIT 1`, ([row]) => ({
+          id: row?.id ?? '',
+          parameters: JSON.parse(row?.parameters ?? '{}'),
+        }))
+      const planned = (title: string, slug: string, preset: string, small?: boolean) =>
+        Effect.gen(function* () {
+          yield* callTool(coordinator, 'draft_task', { title })
+          yield* callTool(coordinator, 'propose_plan', {
+            task: slug,
+            lead: { agent: 'codex', model: 'large' },
+            review: { agent: 'claude-code' },
+            preset,
+            ...(small === true ? { small_change: true } : {}),
+          })
+          const plan = yield* latest()
+          yield* plans.hold(plan.id, instance.personId)
+          return plan
+        })
+      // "How a task ends" is a pull request ready for review: the built-in presets follow it.
+      yield* policies.set(projectId, { end: 'ready' }, instance.personId)
+      assert.strictEqual((yield* planned('Change one', 'change-one', 'Change')).parameters.end, 'ready')
+      assert.strictEqual((yield* planned('Small one', 'small-one', 'Small change', true)).parameters.end, 'ready')
+      // Another project setting, another ending.
+      yield* policies.set(projectId, { end: 'draft' }, instance.personId)
+      assert.strictEqual((yield* planned('Change two', 'change-two', 'Change')).parameters.end, 'draft')
+      // Picking the preset on a plan card from one that ended otherwise (Prototype ends with its branch) follows it again.
+      yield* policies.set(projectId, { end: 'ready' }, instance.personId)
+      const picked = yield* planned('Change three', 'change-three', 'Prototype')
+      assert.strictEqual(picked.parameters.end, 'none')
+      yield* plans.applyPreset(picked.id, 'Change', instance.personId, 'ready')
+      assert.strictEqual((yield* latest()).parameters.end, 'ready')
+      // An ending the person set on a preset of their own overrides the project's.
+      const parts = (yield* presetsIn(projectId)).find((one) => one.id === 'builtin:change')?.parts
+      assert.isUndefined(parts?.end)
+      yield* savePreset({
+        name: 'Always draft',
+        parts: { ...(parts as NonNullable<typeof parts>), end: 'draft' },
+        projectId: null,
+        fromTaskId: null,
+        actorId: instance.personId,
+      })
+      assert.strictEqual((yield* planned('Change four', 'change-four', 'Always draft')).parameters.end, 'draft')
     }).pipe(Effect.provide(runtimeWith(github)))
   })
 })
