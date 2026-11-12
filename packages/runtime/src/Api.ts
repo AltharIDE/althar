@@ -101,6 +101,8 @@ import { projectTracker } from './projectTracker'
 import { applyRules } from './rulesChange'
 import { UsageData } from './UsageData'
 import { Queries } from './Queries'
+import { lagLogged, slowCall } from './lag'
+import { Foreground } from './spawner'
 import { Busy } from './Busy'
 import { clearView, showEarlier, undoClearView } from './chatView'
 import { timestamp } from './records'
@@ -334,8 +336,13 @@ export const handlers = Api.toLayer(
      * A call's failure as the window gets it: in words; and, when it isn't
      * the person's to put right, in the log and reported, by the call's name.
      */
+    // A window's call is the person's: its git commands start before the background's (spawner.ts). One that takes long
+    // says so in a development build's log (lag.ts).
+    const timedCall = lagLogged()
+      ? <A, E, R>(effect: Effect.Effect<A, E, R>) => slowCall(callName, effect)
+      : <A, E, R>(effect: Effect.Effect<A, E, R>) => effect
     const api = <A, E, R>(effect: Effect.Effect<A, E, R>): Effect.Effect<A, ApiError, R> =>
-      Effect.catchCause(effect, (cause) => {
+      Effect.catchCause(timedCall(Effect.provideService(effect, Foreground, true)), (cause) => {
         if (Cause.hasInterruptsOnly(cause)) return Effect.interrupt
         const error = Cause.findErrorOption(cause)
         // Refused by the call itself, in the window's own words already: as it is, and nothing went wrong.
