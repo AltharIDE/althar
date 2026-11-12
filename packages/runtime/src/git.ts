@@ -10,7 +10,7 @@ import { Cause, Context, Deferred, Duration, Effect } from 'effect'
 import { afterOpen, startup } from './startup'
 import { GitFailed } from './errors'
 import { refStamp } from './refStamps'
-import { Foreground, startApart } from './spawner'
+import { Foreground, reachesRemote, startApart } from './spawner'
 import { forkOf } from './forks'
 
 /*
@@ -129,6 +129,8 @@ const spawnGit = (
     ...(input === undefined ? {} : { input }),
     max: MAX_OUTPUT,
     first,
+    // A fetch or a push waits on the network, in a lane of its own: never what a read of the repository waits behind.
+    network: reachesRemote(args),
   })
   let ended = false
   let timeoutMilliseconds: number | undefined

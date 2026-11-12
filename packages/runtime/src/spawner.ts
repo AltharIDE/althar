@@ -15,7 +15,12 @@ import { Context } from 'effect'
  * At most a few run at once, as many as half the computer's cores, from 2 to
  * 8: what agents' builds leave of the computer goes to the window's reads
  * rather than to a crowd of git processes. Those the person waits on (a
- * window's call, `Foreground`) go before the rest. What each command printed
+ * window's call, `Foreground`) have as many again of their own, so none
+ * waits behind the background's. A command that reaches a remote, such as a
+ * fetch or a push, waits on the network for up to minutes, not on the
+ * computer: those run in a lane of their own, the same few and the person's
+ * few, so however many are under way, a read of the computer's own still
+ * starts at once. What each command printed
  * comes back whole, as text, up to `max` bytes; past that it is stopped and
  * says so (`over`). Stopped, a command started in a session of its own is
  * stopped with its whole group, as git with the ssh it started.
@@ -57,29 +62,52 @@ export interface Command {
   readonly detached: boolean
   readonly input?: string
   readonly max: number
-  /** The person's: it starts before any of the background's waiting. */
+  /** The person's: it never waits behind the background's. */
   readonly first?: boolean
+  /** It reaches a remote, as a fetch or a push does: it runs in the network's lane, never holding the computer's. */
+  readonly network?: boolean
 }
 
-/** How many run at once: half the cores, from 2 to 8. */
+/** How many run at once in each lane, the person's and the background's, of the computer's and of the network's: half the cores, from 2 to 8. */
 export const AT_ONCE = Math.min(8, Math.max(2, Math.floor(availableParallelism() / 2)))
 
-/* The runner, in the worker: it takes commands, runs as many at once as it's told, and answers with how each ended. */
+/**
+ * Whether git's arguments reach a remote: a fetch, a push, a clone, `ls-remote`, or a remote's or submodule's update.
+ * What comes before the command's name, as `-c name=value` or `-C folder`, is passed over.
+ */
+export const reachesRemote = (args: ReadonlyArray<string>) => {
+  let at = 0
+  while (at < args.length && (args[at] ?? '').startsWith('-'))
+    at += ['-c', '-C', '--git-dir', '--work-tree', '--namespace'].includes(args[at] ?? '') ? 2 : 1
+  const [name, then] = [args[at], args[at + 1]]
+  if (name === undefined) return false
+  if (['fetch', 'push', 'pull', 'clone', 'ls-remote', 'fetch-pack', 'send-pack'].includes(name)) return true
+  return (name === 'remote' && ['update', 'show', 'prune'].includes(then ?? '')) || (name === 'submodule' && then === 'update')
+}
+
+/*
+ * The runner, in the worker: it takes commands, runs as many at once as it's told in each lane (the person's or the
+ * background's, of the computer or of the network), and answers with how each ended.
+ */
 const RUNNER = `
 const { parentPort, workerData } = require('node:worker_threads')
 const { spawn } = require('node:child_process')
 let cap = workerData.cap
-const waiting = { first: [], rest: [] }
+const lanes = new Map()
+const laneOf = (job) => {
+  const key = (job.network ? 'network' : 'local') + (job.first ? ' first' : ' rest')
+  let lane = lanes.get(key)
+  if (lane === undefined) lanes.set(key, (lane = { waiting: [], running: 0 }))
+  return lane
+}
 const running = new Map()
 const answer = (id, ended) => parentPort.postMessage({ kind: 'ended', id, ended })
 const next = () => {
-  while (running.size < cap) {
-    const job = waiting.first.shift() || waiting.rest.shift()
-    if (job === undefined) return
-    start(job)
-  }
+  for (const lane of lanes.values())
+    while (lane.running < cap && lane.waiting.length > 0) start(lane.waiting.shift(), lane)
 }
-const start = (job) => {
+const start = (job, lane) => {
+  lane.running += 1
   const out = []
   const err = []
   let size = 0
@@ -90,6 +118,7 @@ const start = (job) => {
     if (done) return
     done = true
     running.delete(job.id)
+    lane.running -= 1
     answer(job.id, { code: null, signal: null, error: null, ...ended, over, stdout: Buffer.concat(out).toString(), stderr: Buffer.concat(err).toString() })
     next()
   }
@@ -125,13 +154,13 @@ const start = (job) => {
 }
 parentPort.on('message', (message) => {
   if (message.kind === 'start') {
-    ;(message.job.first ? waiting.first : waiting.rest).push(message.job)
+    laneOf(message.job).waiting.push(message.job)
     return next()
   }
   if (message.kind === 'stop') {
     const one = running.get(message.id)
     if (one !== undefined) return one.stop()
-    for (const queue of [waiting.first, waiting.rest]) {
+    for (const { waiting: queue } of lanes.values()) {
       const at = queue.findIndex((job) => job.id === message.id)
       if (at >= 0) {
         queue.splice(at, 1)
@@ -213,6 +242,7 @@ export const startApart = (command: Command, cap = AT_ONCE): Started => {
       input: command.input,
       max: command.max,
       first: command.first === true,
+      network: command.network === true,
     },
   })
   return { result, stop: () => at.worker.postMessage({ kind: 'stop', id }) }

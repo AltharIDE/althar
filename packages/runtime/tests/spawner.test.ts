@@ -4,7 +4,7 @@ import { join } from 'node:path'
 
 import { describe, expect, it } from 'vitest'
 
-import { AT_ONCE, type Command, runnersMade, startApart, startHere } from '../src/spawner'
+import { AT_ONCE, type Command, reachesRemote, runnersMade, startApart, startHere } from '../src/spawner'
 
 /*
  * The runtime's own commands start on a thread of their own (spawner.ts), so
@@ -59,24 +59,41 @@ describe('a command started apart', () => {
     expect(ended.signal).toBe('SIGTERM')
   })
 
-  it("runs a few at a time, the person's before the rest, all on one thread", async () => {
+  it("runs a few at a time, and the person's never waits behind the background's, all on one thread", async () => {
     const before = runnersMade()
     const folder = mkdtempSync(join(tmpdir(), 'althar-spawner-'))
-    // Every place taken by one that holds it until its gate opens; then one waiting of the background's, and one of the person's.
+    // Every place of the background's taken by one that holds it until its gate opens; then one more of the background's.
     const gates = Array.from({ length: AT_ONCE }, (_, index) => join(folder, `gate-${index}`))
     const holding = gates.map((gate) => startApart(held(gate)))
     const mark = join(folder, 'background-started')
     const background = startApart(node(`require('node:fs').writeFileSync(${JSON.stringify(mark)}, '')`))
+    // The person's starts at once, in places of its own, while the background's waits for one of its own to come free.
     const person = startApart({ ...node("process.stdout.write('first')"), first: true })
-    // One place comes free: the person's takes it, and the background's waits on.
-    writeFileSync(gates[0] ?? '', '')
     expect((await person.result).stdout).toBe('first')
     expect(existsSync(mark)).toBe(false)
-    for (const gate of gates.slice(1)) writeFileSync(gate, '')
+    writeFileSync(gates[0] ?? '', '')
     await background.result
     expect(existsSync(mark)).toBe(true)
+    for (const gate of gates.slice(1)) writeFileSync(gate, '')
     await Promise.all(holding.map((one) => one.result))
     expect(runnersMade() - before).toBe(0)
+  })
+
+  it("starts a read at once while fetches and pushes fill the network's places, the person's and the background's", async () => {
+    const folder = mkdtempSync(join(tmpdir(), 'althar-spawner-'))
+    const gate = join(folder, 'network-answers')
+    // As many slow network commands as the network's lane takes, of the person's and of the background's, and more waiting.
+    const network = Array.from({ length: AT_ONCE * 2 + 2 }, (_, index) =>
+      startApart({ ...held(gate), network: true, first: index % 2 === 0 }),
+    )
+    const person = startApart({ ...node("process.stdout.write('read')"), first: true })
+    const background = startApart(node("process.stdout.write('also')"))
+    // Both reads come back while every network command still waits on its remote.
+    expect((await person.result).stdout).toBe('read')
+    expect((await background.result).stdout).toBe('also')
+    expect(existsSync(gate)).toBe(false)
+    writeFileSync(gate, '')
+    await Promise.all(network.map((one) => one.result))
   })
 
   it('never starts once stopped while it waits', async () => {
@@ -104,5 +121,27 @@ describe('a command started here', () => {
     const stopped = startHere(node('setInterval(() => {}, 1000)'))
     stopped.stop()
     expect((await stopped.result).signal).toBe('SIGTERM')
+  })
+})
+
+describe('a git command', () => {
+  it('reaches a remote as a fetch, a push, a clone or an update of a remote does, past the options before its name', () => {
+    for (const args of [
+      ['fetch', '--quiet', 'origin'],
+      ['-c', 'credential.helper=', 'push', 'origin', 'HEAD'],
+      ['-C', '/somewhere', 'ls-remote', '--heads', 'origin'],
+      ['clone', 'https://example.test/one.git'],
+      ['remote', 'update'],
+      ['submodule', 'update', '--init'],
+    ])
+      expect(reachesRemote(args)).toBe(true)
+    for (const args of [
+      ['status'],
+      ['-c', 'core.quotePath=false', 'diff', '--name-only'],
+      ['remote', '-v'],
+      ['cat-file', '--batch-check'],
+      [],
+    ])
+      expect(reachesRemote(args)).toBe(false)
   })
 })
