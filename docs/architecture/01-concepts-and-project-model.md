@@ -240,7 +240,7 @@ project again.
   fork, as before; pull requests on the repository it was forked from, from
   the fork's branch; or, where the host says the person can push there, both
   branches and pull requests on that repository, which Althar offers once
-  ([ADR-085](../decisions/085-a-fork-s-branches-go-upstream-by-a-per-project-choice.md)).
+  ([ADR-085](../decisions/code-hosts.md#a-forks-branches)).
   The remotes are never rewritten, and a pull request already open stays where
   its branch is. A task made for the repository it came from starts from that
   repository's default branch, and its pull request targets it.
@@ -258,7 +258,7 @@ An existing clone is an input source, not the default execution workspace,
 unless a task works Local (below). Althar prepares a Git worktree per task in
 a folder it owns,
 `~/Althar/<project>/<task>/<repository>` by default, with a root that can
-be changed per project ([ADR-006](../decisions/006-worktree-per-task.md)).
+be changed per project ([ADR-006](../decisions/workspaces-and-runs.md#worktree)).
 Opening the task's folder in an editor shows all its repositories together.
 It never:
 
@@ -267,13 +267,13 @@ It never:
 - resets their working tree;
 - removes their worktree, but for a finished task's folder once its wait
   is up, its branch kept, and only where nothing in it exists nowhere
-  else ([ADR-056](../decisions/056-a-finished-task-s-folder-goes-after-a-wait-and-comes-back-when-needed.md));
+  else ([ADR-056](../decisions/workspaces-and-runs.md#finished-tasks-folders));
 - rewrites remotes;
 - initializes Git without a separate explicit action.
 
 A task may work **Local** instead, in each of its repositories' own clone
 here, where the person works, as a project's default or the coordinator's
-choice for a task ([ADR-091](../decisions/091-a-task-works-local-in-the-person-s-checkout-or-in-a-worktree.md)).
+choice for a task ([ADR-091](../decisions/workspaces-and-runs.md#local)).
 That relaxes the first rule, and only it: as its first step begins, a Local
 task makes its branch where it starts and checks it out, one task at a time,
 and once it is settled the checkout goes back to the branch it was on. It
@@ -283,11 +283,13 @@ cleans; and never removes the checkout or sets it up. Git that would throw
 away what isn't committed there asks, even with everything allowed.
 
 Each new worktree is set up before its lead starts, by Althar itself and
-outside any agent's sandbox: the setup kept for its repository, else the
-install its lockfile names, which never changes the lockfile
-([ADR-023](../decisions/023-althar-runs-the-project.md),
-[03](03-agent-runtime-and-auth.md#setting-up-a-worktree)). Untracked files to
-copy into it, such as `.env`, are not declared yet.
+outside any agent's sandbox: the setup the project's first lead worked out
+and recorded, replayed as a plain script, which copies files such as `.env`
+too; before one is recorded, the install its lockfile names, which never
+changes the lockfile. Nobody writes setup config by hand; a lead fixes and
+records it again when it fails
+([setting up a task's folder](../decisions/workspaces-and-runs.md#setting-up-a-tasks-folder),
+[03](03-agent-runtime-and-auth.md#setting-up-a-worktree)).
 
 A planned task's worktree is on its own branch from the start. A plain task's,
 one the coordinator starts with no plan (a question, a quick look, a
@@ -297,7 +299,7 @@ everything in it for what its lead throws away. Its branch's name is planned
 as any task's, and Althar makes the branch where the lead first changes the
 repository, with that work on it, as its turn ends or as it reports
 (`workspaces.branched_at`;
-[ADR-035](../decisions/035-a-task-s-kind-is-read-from-what-it-has.md)), so
+[ADR-035](../decisions/tasks.md#kinds-read-from-what-a-task-has)), so
 nothing is lost. The lead stays in the same folder and session, the branch
 stays on this Mac, and the task stays plain until the person asks its lead to
 make it a change (`make_it_a_change`), which makes its branch then where it

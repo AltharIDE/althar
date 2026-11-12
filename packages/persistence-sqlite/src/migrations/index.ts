@@ -70,6 +70,20 @@ import { statements as settingChanges } from './0065_setting_changes'
 import { statements as clearedView } from './0066_cleared_view'
 import { statements as fastLane } from './0067_fast_lane'
 import { statements as reviewsAfterMerge } from './0068_reviews_after_merge'
+import { statements as heldForShip } from './0069_held_for_ship'
+import { statements as turnTimings } from './0070_turn_timings'
+import { statements as mergeReviews } from './0071_merge_reviews'
+import { statements as severalChanges } from './0072_several_changes'
+import { statements as reviewTrust } from './0073_review_trust'
+import { statements as scratchAndPresets } from './0074_scratch_and_presets'
+import { statements as helpers } from './0075_helpers'
+import { statements as changeWaits } from './0076_change_waits'
+import { statements as helperCopies } from './0077_helper_copies'
+import { statements as canvases } from './0078_canvases'
+import { statements as cards } from './0079_cards'
+import { statements as keyReads } from './0080_key_reads'
+import { statements as mergeLineCard } from './0081_merge_line_card'
+import { statements as notedInput } from './0082_noted_input'
 
 export interface Migration {
   /** `<number>_<name>`, the order they run in. */
@@ -157,6 +171,20 @@ export const migrations: ReadonlyArray<Migration> = [
   { key: '0066_cleared_view', statements: clearedView },
   { key: '0067_fast_lane', statements: fastLane },
   { key: '0068_reviews_after_merge', statements: reviewsAfterMerge },
+  { key: '0069_held_for_ship', statements: heldForShip },
+  { key: '0070_turn_timings', statements: turnTimings },
+  { key: '0071_merge_reviews', statements: mergeReviews },
+  { key: '0072_several_changes', statements: severalChanges },
+  { key: '0073_review_trust', statements: reviewTrust },
+  { key: '0074_scratch_and_presets', statements: scratchAndPresets },
+  { key: '0075_helpers', statements: helpers },
+  { key: '0076_change_waits', statements: changeWaits },
+  { key: '0077_helper_copies', statements: helperCopies },
+  { key: '0078_canvases', statements: canvases },
+  { key: '0079_cards', statements: cards },
+  { key: '0080_key_reads', statements: keyReads },
+  { key: '0081_merge_line_card', statements: mergeLineCard },
+  { key: '0082_noted_input', statements: notedInput },
 ]
 
 const run = (statements: ReadonlyArray<string>) =>

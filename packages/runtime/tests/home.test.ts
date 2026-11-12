@@ -17,7 +17,8 @@ import { repository, runtime, turns, until } from './support'
  * waits on the person, and what the loop did since they last left it.
  */
 
-const withQueries = () => Queries.layer.pipe(Layer.provideMerge(runtime()))
+// Codex, the leads' agent, alone is free, so a step that ends without its report needs the person rather than going to another agent.
+const withQueries = () => Queries.layer.pipe(Layer.provideMerge(runtime(':memory:', {}, { perUse: ['claude-code', 'opencode'] })))
 
 const open = Effect.gen(function* () {
   const projects = yield* Projects

@@ -20,7 +20,7 @@ import { Cause, Context, Duration, Effect, Fiber, Layer, Option, Queue, Stream }
 import { RpcClient } from 'effect/rpc'
 import { SqlClient } from 'effect/sql'
 
-import { fakeGitHub, writeCatalog } from '../../skills/tests/support'
+import { fakeGitHub, install } from '../../skills/tests/support'
 import { ToolServer } from '../src/ToolServer'
 import { thisDevice } from '../src/device'
 import { connection, isInside, services } from '../src/Api'
@@ -44,6 +44,7 @@ import {
 import { NotConnected } from '../src/Connections'
 import { Projects } from '../src/Projects'
 import * as Runtime from '../src/Runtime'
+import { ALWAYS } from '../src/sandboxReach'
 import { Folders } from '../src/Folders'
 import { listProcesses, marksOf, WORK } from '../src/machine'
 import { itemOf, stuckOf } from '../src/Queries'
@@ -75,7 +76,7 @@ const connected = (
     readonly editors?: RuntimeOptions['editors']
     /** The machine how many agents are at work at once comes from: a large one unless a test says. */
     readonly machine?: { readonly cores: number; readonly memory: number }
-    /** A skills store and the catalog it is seeded from, and how GitHub is reached. */
+    /** A skills store, and how GitHub is reached. */
     readonly skills?: RuntimeOptions['skills']
     readonly fetch?: RuntimeOptions['fetch']
     /** The agents, where a test changes one: the fake ones otherwise. */
@@ -1099,12 +1100,30 @@ describe('finished tasks’ folders, through the API', () => {
         // How long work goes on alone, and what new projects start with: today's until changed, and a change leaves the rest.
         const before = yield* client.GetSettings({})
         assert.deepStrictEqual(before.plansAndReviews, { countdown: 25, rounds: 3, roundsOut: 'settled' })
-        assert.deepStrictEqual(before.newProjects, { permissions: 'rules', usageLimit: 'move', rotateAccounts: false, end: 'draft' })
+        assert.deepStrictEqual(before.newProjects, {
+          usageLimit: 'move',
+          rotateAccounts: false,
+          end: 'draft',
+          pushCommits: true,
+          postScreenshots: false,
+          resolveConflicts: true,
+          moveIssues: true,
+          afterMergeReview: 'major',
+        })
         yield* client.SetPlansAndReviews({ commandId: commandId(), countdown: 10, rounds: 2, roundsOut: 'ask' })
         yield* client.SetNewProjectDefaults({ commandId: commandId(), usageLimit: 'wait', rotateAccounts: true })
         const after = yield* client.GetSettings({})
         assert.deepStrictEqual(after.plansAndReviews, { countdown: 10, rounds: 2, roundsOut: 'ask' })
-        assert.deepStrictEqual(after.newProjects, { permissions: 'rules', usageLimit: 'wait', rotateAccounts: true, end: 'draft' })
+        assert.deepStrictEqual(after.newProjects, {
+          usageLimit: 'wait',
+          rotateAccounts: true,
+          end: 'draft',
+          pushCommits: true,
+          postScreenshots: false,
+          resolveConflicts: true,
+          moveIssues: true,
+          afterMergeReview: 'major',
+        })
         const project = yield* client.OpenProject({ commandId: commandId(), grant: yield* grant(repository()) })
         const task = yield* client.CreateTask({ commandId: commandId(), projectId: project.id, title: 'Add a retry' })
         const worktree = (yield* client.GetThread({ threadId: task.threadId })).task.worktree ?? ''
@@ -1214,11 +1233,14 @@ describe('project rules, through the API', () => {
           branchPattern: null,
           titlePattern: null,
           moveIssues: true,
+          // A small change's review after it merges brings back only blocking and major findings, until the person says.
+          afterMergeReview: 'major',
           // Skill and OpenSpec files stay out of the repositories, and off the remote, until the person says.
           repositoryFiles: { writeSkills: false, writeOpenSpec: false, pushProtected: false },
-          // A repository with no packages, on no host: only what every lead runs outside its sandbox.
+          // A repository with no packages, on no host: only what every lead runs outside its sandbox, plus the dev servers and
+          // test runners ADR-097 lets leave it by hand as the project’s run command does.
           sandbox: {
-            commands: ['ps', 'env -i'],
+            commands: [...ALWAYS],
             hosts: [],
             edits: { commands: { added: [], removed: [] }, hosts: { added: [], removed: [] } },
           },
@@ -1280,7 +1302,10 @@ describe('project rules, through the API', () => {
           projectId: project.id,
           sandbox: { commands: { added: ['bunx  playwright *'], removed: ['env -i'] } },
         })
-        assert.deepStrictEqual([trimmed.sandbox.commands, trimmed.sandbox.hosts], [['ps', 'bunx playwright'], ['registry.acme.dev']])
+        assert.deepStrictEqual(
+          [trimmed.sandbox.commands, trimmed.sandbox.hosts],
+          [ALWAYS.filter((command) => command !== 'env -i'), ['registry.acme.dev']],
+        )
         // Back to deciding the ending by the host, and every account; the rest stays.
         const back = yield* client.SetProjectRules({ commandId: commandId(), projectId: project.id, end: null, onlyAccounts: null })
         assert.deepStrictEqual(
@@ -2000,6 +2025,13 @@ describe('the coordinator, through the API', () => {
             .message,
           "That task isn't there any more.",
         )
+        // Turning down an offered review is kept once, for a task that is there, and refused for one that isn't.
+        yield* client.DeclineReview({ commandId: commandId(), taskId: task.id })
+        yield* client.DeclineReview({ commandId: commandId(), taskId: task.id })
+        assert.strictEqual(
+          (yield* Effect.flip(client.DeclineReview({ commandId: commandId(), taskId: 'tsk_missing' }))).message,
+          "That task isn't there any more.",
+        )
       }),
     ),
   )
@@ -2013,7 +2045,7 @@ describe('the coordinator, through the API', () => {
           commandId: commandId(),
           projectId: project.id,
           title: 'Tidy the README',
-          description: 'Short. [lead:finish] [review:pass]',
+          description: 'Short. [lead:finish] [lead:edit] [review:pass]',
           steps: [
             { key: 'implement' as const, agentId: 'codex', model: null, skipped: false },
             { key: 'review' as const, agentId: 'claude-code', model: 'large', skipped: false },
@@ -2341,7 +2373,7 @@ describe('the coordinator, through the API', () => {
         const call = waiting.attention[0]
         assert.deepStrictEqual(
           [call?.kind, call?.stuck?.step, call?.stuck?.why, call?.stuck?.agentId],
-          ['stuck', 'implement', 'failed_to_start', 'missing'],
+          ['stuck', 'implement', 'not_installed', 'missing'],
         )
         // On the board, the call waits on the person, with the task it holds, and the task says it waits.
         const board = yield* client.GetBoard({ projectId: project.id })
@@ -2941,6 +2973,15 @@ describe('thread items', () => {
     createdAt: '2026-09-29T12:00:00.000Z',
   })
 
+  it('keeps what a lead could see, and what older threads said of other tasks, out of the window', () => {
+    const line = { source: 'runtime', role: 'skills', title: 'Codex could see 2 skills', skills: [] }
+    assert.strictEqual(itemOf(row('notice', line)), undefined)
+    assert.strictEqual(itemOf(row('notice', { ...line, hidden: true })), undefined)
+    const about = { source: 'runtime', severity: 'info', title: 'Other changes `A.ts` too. Both leads were told.' }
+    assert.strictEqual(itemOf(row('notice', { ...about, situation: { kind: 'overlap', files: ['A.ts'] } })), undefined)
+    assert.strictEqual(itemOf(row('notice', about))?.kind, 'notice')
+  })
+
   it('gives each kind its own content, and leaves out kinds the window has no use for yet', () => {
     assert.deepStrictEqual(itemOf(row('user_message', { text: 'Now' }, { state: 'queued', disposition: 'interrupt_and_continue' })), {
       id: 'i1',
@@ -3088,10 +3129,11 @@ describe('the skills page', () => {
   const A = 'a'.repeat(40)
   const B = 'b'.repeat(40)
   const skill = (name: string, body: string) => `---\nname: ${name}\ndescription: Use when testing ${name}.\nlicense: MIT\n---\n${body}`
+  /** A store with one skill of the person's own, off. */
   const store = async () => {
-    const catalog = mkdtempSync(join(tmpdir(), 'althar-skills-catalog-'))
-    await writeCatalog(catalog, { alpha: { 'SKILL.md': skill('alpha', 'Default.\n') } }, { alpha: ['subagents'] })
-    return { root: mkdtempSync(join(tmpdir(), 'althar-skills-store-')), catalog }
+    const root = mkdtempSync(join(tmpdir(), 'althar-skills-store-'))
+    await install(root, 'alpha', { 'SKILL.md': skill('alpha', 'Mine.\n') }, false)
+    return { root }
   }
   /** What the record keeps of the person's changes to skills, in order: each skill's revision, the act, its payload and command. */
   const skillActs = Effect.gen(function* () {
@@ -3110,41 +3152,47 @@ describe('the skills page', () => {
     Effect.scoped(
       Effect.gen(function* () {
         const { client } = yield* connected()
-        assert.deepStrictEqual(yield* client.ListSkills({}), { enabled: false, catalogRevision: null, skills: [] })
+        assert.deepStrictEqual(yield* client.ListSkills({}), { enabled: false, skills: [] })
         assert.strictEqual((yield* Effect.flip(client.CheckSkillUpdates({}))).message, 'Skills are off in this runtime.')
       }),
     ),
   )
 
-  it.live('lists the catalog’s skills off, turns one on and off, and keeps one Althar ships from being removed', () =>
+  it.live('lists the person’s skills, turns one on and off, and removes it', () =>
     Effect.scoped(
       Effect.gen(function* () {
         const { client, store: record } = yield* connected({ skills: yield* Effect.promise(store) })
         const listed = yield* client.ListSkills({})
         assert.deepStrictEqual(
-          [listed.enabled, listed.catalogRevision, listed.skills.map((one) => [one.id, one.source, one.active, one.needs, one.license])],
-          [true, 'fixture-1', [['alpha', 'althar-default', false, ['subagents'], 'MIT']]],
+          [listed.enabled, listed.skills.map((one) => [one.id, one.source, one.active, one.license])],
+          [true, [['alpha', 'local', false, 'MIT']]],
         )
         assert.strictEqual(listed.skills[0]?.description, 'Use when testing alpha.')
         const on = commandId()
-        const alpha = yield* client.SetSkillActive({ commandId: on, id: 'alpha', active: true })
-        assert.isTrue(alpha.active)
-        const off = yield* client.SetSkillActive({ commandId: commandId(), id: 'alpha', active: false })
-        assert.isFalse(off.active)
+        // A skill is on while any role gets it: the round switch gives it to every role, or none.
+        yield* client.SetToolRoles({
+          commandId: on,
+          kind: 'skill',
+          name: 'alpha',
+          roles: ['lead', 'reviewer', 'coordinator'],
+          projectId: null,
+        })
+        assert.isTrue((yield* client.ListSkills({})).skills[0]?.active)
+        yield* client.SetToolRoles({ commandId: commandId(), kind: 'skill', name: 'alpha', roles: [], projectId: null })
+        assert.isFalse((yield* client.ListSkills({})).skills[0]?.active)
         // Each switch is the person's act, recorded under the window's command with the version it was at.
         const acts = yield* record(skillActs)
         assert.deepStrictEqual(
           acts.map(({ id, revision, type, payload }) => [id, revision, type, payload]),
           [
-            ['alpha', 1, 'skill.turned_on', { treeHash: alpha.treeHash }],
-            ['alpha', 2, 'skill.turned_off', { treeHash: alpha.treeHash }],
+            ['alpha', 1, 'skill.turned_on', { treeHash: listed.skills[0]?.treeHash }],
+            ['alpha', 2, 'skill.turned_off', { treeHash: listed.skills[0]?.treeHash }],
           ],
         )
         assert.strictEqual(acts[0]?.commandId, on)
-        const refused = yield* Effect.flip(client.UninstallSkill({ commandId: commandId(), id: 'alpha' }))
-        assert.deepStrictEqual([refused.reason, refused.message], ['SkillRefused', 'alpha comes with Althar; turn it off instead.'])
-        // A refused change records nothing.
-        assert.lengthOf(yield* record(skillActs), 2)
+        yield* client.UninstallSkill({ commandId: commandId(), id: 'alpha' })
+        assert.deepStrictEqual((yield* client.ListSkills({})).skills, [])
+        assert.lengthOf(yield* record(skillActs), 3)
       }),
     ),
   )

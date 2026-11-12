@@ -5,7 +5,8 @@ import type { CommentFact, ComposerComment } from '@althar/ui'
 import { DEVICES, type Viewport } from '../../main/browser/devices'
 import type { Picked } from '../../main/browser/picked'
 import { shownAddress } from '../../main/browser/addresses'
-import type { Picture, SentImage } from '@althar/contracts'
+import { elementLine, onLine, selectorLine, sized, sizeLine } from '../../main/browser/elementWords'
+import type { CanvasAnchor, Picture, SentCanvasComment, SentImage } from '@althar/contracts'
 import { pictureOf, type ReadImage, readImage, remember, type Shrink, sentOf, shrinkInWindow } from './images'
 
 /*
@@ -27,8 +28,44 @@ export interface PageSpot {
   readonly viewport: Viewport
 }
 
-/** What a comment is on. A line of the diff is to come (DEV-175). */
-export type CommentOn = PageSpot
+/** A spot on one of the project's canvases (ADR-104): a version, and where in it: the whole canvas, or the words selected. */
+export interface CanvasSpot {
+  readonly kind: 'canvas'
+  readonly canvasId: string
+  readonly name: string
+  readonly title: string
+  readonly version: number
+  readonly anchor: CanvasAnchor
+}
+
+/** What a comment is on: a spot on a page, or on a canvas. A line of the diff is to come (DEV-175). */
+export type CommentOn = PageSpot | CanvasSpot
+
+/** Where a comment on a canvas points, in a few words: the whole canvas, or the words it is on. */
+export const canvasPlace = (anchor: CanvasAnchor): string => {
+  switch (anchor.kind) {
+    case 'whole':
+      return text.wholeCanvas
+    case 'passage':
+      return `“${anchor.text}”`
+    case 'area':
+      return text.area
+    case 'element':
+      return anchor.label
+  }
+}
+
+/** The comments on canvases among a draft's, as the message sends them for the runtime to keep with it (ADR-104). */
+export const canvasCommentsOf = (comments: ReadonlyArray<GatheredComment>): ReadonlyArray<SentCanvasComment> =>
+  comments.flatMap((comment) =>
+    comment.on.kind === 'canvas'
+      ? [{ canvasId: comment.on.canvasId, version: comment.on.version, anchor: comment.on.anchor, body: comment.note }]
+      : [],
+  )
+
+/** The comments on pages among a draft's: what a page draws pins for. */
+export const pageCommentsOf = (comments: ReadonlyArray<GatheredComment>): ReadonlyArray<GatheredComment & { readonly on: PageSpot }> =>
+  comments.flatMap((comment) => (comment.on.kind === 'page' ? [comment as GatheredComment & { readonly on: PageSpot }] : []))
 
 export interface GatheredComment {
   readonly id: string
@@ -121,18 +158,26 @@ export const text = {
   background: 'Background',
   page: 'Page',
   selector: 'Selector',
-  sized: (width: number, height: number) => `${width} × ${height}`,
+  sized,
   at: (address: string, size: string) => `${address} at ${size}`,
   /** What the lead reads before them. */
   heading: (count: number) => (count === 1 ? 'A comment on a page:' : `${count} comments on pages:`),
-  on: (label: string, words: string, size: string) => `On \`${label}\`${words === '' ? '' : ` (“${words}”)`}, ${size}`,
-  selectorLine: (selector: string) => `Selector: \`${selector}\``,
+  /** What the lead reads before them, where some are on canvases. */
+  headingCanvas: (count: number) => (count === 1 ? 'A comment on a canvas:' : `${count} comments:`),
+  canvas: 'Canvas',
+  passage: 'On',
+  wholeCanvas: 'Whole canvas',
+  area: 'An area of it',
+  canvasLine: (name: string, version: number, place: string) => `On canvas ${name} v${version}: ${place}`,
+  canvasVersion: (name: string, version: number) => `${name} v${version}`,
+  on: onLine,
+  selectorLine,
   pageLine: (address: string, size: string, device: string | null) => `Page: ${address} at ${size}${device === null ? '' : ` (${device})`}`,
   pictureLine: (n: number) => `Picture ${n} of those attached.`,
   devices: { desktop: 'desktop', laptop: 'laptop', tablet: 'tablet', phone: 'phone' } as Readonly<Record<Exclude<Viewport, 'fit'>, string>>,
 } as const
 
-const sizeOf = (spot: PageSpot) => text.sized(spot.picked.rect.width, spot.picked.rect.height)
+const sizeOf = (spot: PageSpot) => sizeLine(spot.picked)
 const pageSize = (spot: PageSpot) => {
   const device = spot.viewport === 'fit' ? null : DEVICES[spot.viewport]
   return device === null ? text.sized(spot.picked.page.width, spot.picked.page.height) : text.sized(device.width, device.height)
@@ -140,6 +185,19 @@ const pageSize = (spot: PageSpot) => {
 
 /** A comment as its chip and card show it in the composer: its number is its place. */
 export const composerComment = (comment: GatheredComment, n: number): ComposerComment => {
+  if (comment.on.kind === 'canvas') {
+    const spot = comment.on
+    return {
+      id: comment.id,
+      n,
+      note: comment.note,
+      place: spot.title,
+      facts: [
+        { label: text.canvas, value: text.canvasVersion(spot.name, spot.version), kind: 'code' },
+        ...(spot.anchor.kind === 'passage' ? [{ label: text.passage, value: spot.anchor.text, kind: 'quote' as const }] : []),
+      ],
+    }
+  }
   const { picked } = comment.on
   const facts: Array<CommentFact> = [
     { label: text.element, value: picked.label, kind: 'code' },
@@ -173,11 +231,16 @@ export const commentsText = (comments: ReadonlyArray<GatheredComment>, before: n
   let picture = before
   const each = comments.map((comment, index) => {
     const spot = comment.on
+    if (spot.kind === 'canvas')
+      return [
+        `${index + 1}. ${comment.note.replace(/\n/g, '\n   ')}`,
+        `   - ${text.canvasLine(spot.name, spot.version, canvasPlace(spot.anchor))}`,
+      ].join('\n')
     const device = spot.viewport === 'fit' ? null : text.devices[spot.viewport]
     const lines = [
       `${index + 1}. ${comment.note.replace(/\n/g, '\n   ')}`,
-      `   - ${text.on(spot.picked.label, spot.picked.text, sizeOf(spot))}`,
-      `   - ${text.selectorLine(spot.picked.selector)}`,
+      `   - ${elementLine(spot.picked)}`,
+      `   - ${selectorLine(spot.picked.selector)}`,
       `   - ${text.pageLine(spot.address, pageSize(spot), device)}`,
     ]
     if (pictures && comment.crop !== null) {
@@ -186,7 +249,10 @@ export const commentsText = (comments: ReadonlyArray<GatheredComment>, before: n
     }
     return lines.join('\n')
   })
-  return [text.heading(comments.length), ...each].join('\n\n')
+  const heading = comments.some((comment) => comment.on.kind === 'canvas')
+    ? text.headingCanvas(comments.length)
+    : text.heading(comments.length)
+  return [heading, ...each].join('\n\n')
 }
 
 /** The person's words, then the comments: what the message says. */

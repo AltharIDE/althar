@@ -7,6 +7,7 @@ import { type ElectronApplication, expect, test } from '@playwright/test'
 
 import { repository } from '../tests/repository'
 import {
+  askAboutMore,
   backToWork,
   launch,
   openFirstProject,
@@ -58,6 +59,9 @@ test('makes the first project of a repository it found, starts a task, and talks
 
     await expect(page.getByRole('heading', { name: 'meridian', level: 1 })).toBeVisible()
     await page.screenshot({ path: 'test-results/project.png' })
+    // Asking about more than what can't be undone, as a person may: a deploy is kept for them, as the call below shows.
+    // Allowing everything, which lets a deploy run unasked, is its own test.
+    await askAboutMore(page)
     // Told what should change, the coordinator plans it. Its lead reports Implement done at once, with no review, so what follows is talking to it.
     await startTask(page, 'Add a retry to the checkout call')
     await expect(page.getByText('Ready', { exact: true })).toBeVisible()
@@ -95,8 +99,9 @@ test('makes the first project of a repository it found, starts a task, and talks
       .click()
     await expect(page.getByText('hello.txt', { exact: true })).toBeVisible()
 
-    // A deploy is kept for the person: it waits in the thread as a call until it is answered.
-    await say(page, 'command-choices')
+    // A deploy needs the network, so it asks to run outside the lead's sandbox; the project asks about it, and it waits in the
+    // thread as a call until it is answered.
+    await say(page, 'run env -i make deploy')
     await expect(shown(page, 'Needs you', { exact: true })).toBeVisible()
     await expect(shown(page, 'Needs your permission')).toBeVisible()
     await page.screenshot({ path: 'test-results/call.png' })
@@ -172,7 +177,7 @@ test('asks the coordinator, which plans a task that is implemented, reviewed, se
     await expect(page.getByRole('heading', { name: 'meridian', level: 1 })).toBeVisible()
 
     const box = page.getByRole('textbox', { name: /^(Tell the coordinator something|Add to the queue)/ })
-    await box.fill('Add a retry to the checkout call. [coordinator:plan] [lead:finish] [review:findings]')
+    await box.fill('Add a retry to the checkout call. [coordinator:plan] [lead:edit] [lead:finish] [review:findings]')
     await box.press('Enter')
 
     // The plan, with the time it starts on its own; held, it waits. Up next on the board beside says the same.
@@ -181,7 +186,7 @@ test('asks the coordinator, which plans a task that is implemented, reviewed, se
     await expect(page.getByText('It knows the code.')).toHaveCount(0)
     await page.screenshot({ path: 'test-results/plan.png' })
     await page.getByRole('button', { name: 'Hold' }).click()
-    await expect(conversation.getByText('Held. Starts when you say')).toBeVisible()
+    await expect(conversation.getByText('Held', { exact: true })).toBeVisible()
     await page.getByRole('button', { name: 'Start', exact: true }).click()
 
     // Implement, a review with a finding, settling it, and a review that passes: the card says it is ready.

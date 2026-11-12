@@ -153,6 +153,25 @@ export const Room: Story = {
   },
 }
 
+/**
+ * A model that ended steps without its report this week, once reminded: how
+ * many, in faint ink before its room, the rest on hover. Nothing where none.
+ */
+export const MissedReports: Story = {
+  args: {
+    model: OPUS,
+    pinned: [OPUS, model('qwen3-coder'), model('gpt-5.2-codex')],
+    defaultOpen: true,
+    room: (x) => (x.runtime === OPUS.runtime ? { left: 62, until: '17:00', account: null } : undefined),
+    missed: (x) => (x.id === 'qwen3-coder' ? 3 : x.id === 'gpt-5.2-codex' ? 1 : undefined),
+  },
+  play: async () => {
+    const page = within(document.body)
+    await expect(page.getByText('3 missed reports')).toBeInTheDocument()
+    await expect(page.getByText('1 missed report')).toHaveAttribute('title', 'Ended a step without a report this week, even once reminded.')
+  },
+}
+
 /** Nearly out, beside the chip: one run in the chip's ink, deeper as it runs down; out says so. */
 const nearly = (left: number): Story => ({
   args: {

@@ -21,6 +21,7 @@ import { Installs, type OnDevice } from './Installs'
 import type { LoadOptions } from './MachineLoad'
 import type { PlanUsageOptions } from './PlanUsage'
 import type { ModelFactsOptions } from './ModelFacts'
+import type { PageAnswer, PageCall } from './pageBridge'
 import type { SkillsConfig } from './Skills'
 
 /** A screenshot an agent asks for: the page, the viewport it is drawn at, and what of it, all of it or one element. */
@@ -32,7 +33,7 @@ export interface Shot {
   readonly fullPage: boolean
   /** A CSS selector: only the first element it finds. */
   readonly selector: string | null
-  /** The origins of Althar's runs it may be of beside this computer's: a page it goes on to, by a redirect or itself, must be at one of them too (screenshots.ts, mayDraw). */
+  /** The origins of Althar's runs the shot is about; screenshots may be of any HTTP page (ADR-097). */
   readonly origins: ReadonlyArray<string>
 }
 
@@ -84,6 +85,13 @@ export interface RuntimeOptions {
    * for the agent. Without it, the screenshot tool says this Althar can't.
    */
   readonly screenshot?: (shot: Shot) => Effect.Effect<Screenshot, string>
+  /**
+   * Carries what a lead or the coordinator asks of the page beside its conversation to where the page is: the desktop app's main
+   * process, with Chromium (ADR-100). `owner` is the session's own task or project, never the agent's say. It answers in words
+   * for the agent, a picture beside them for a screenshot, or fails with why it can't (no window, no page, a guard refusing).
+   * Without it, the page tools say this Althar can't drive pages.
+   */
+  readonly page?: (owner: string, call: PageCall) => Effect.Effect<PageAnswer, string>
   /** Opens a page in the person's browser, for an agent's sign-in that doesn't itself; whether it could. Without it, the window offers the link. */
   readonly openUrl?: (url: string) => Effect.Effect<boolean>
   /** The editors on this device a task's files open in, and opening one on a folder, at a file and line where it can; without it, none. */
@@ -321,18 +329,10 @@ export class Agents extends Context.Service<
     })
 
   /**
-   * The registry's agents, each run as a process without the person's ways
-   * into a code host, so they reach one only through Althar (ADR-011):
-   * `gh` and `glab` signed out, their config folders an empty one; git's
-   * credential helpers reset, so neither git nor `curl` through it signs in
-   * as the person; and git never asks for a password. The person's SSH agent
-   * isn't passed on either (provider-adapters' process environment). Nor
-   * are the MCP servers the person set up for an agent themselves, which
-   * Codex and OpenCode would otherwise load beside Althar's (ownTools.ts).
-   * The lead of a review of someone else's pull request also starts with what
-   * its registry entry says keeps that repository's config, hooks and plugins
-   * from loading, and with git that takes no repository the pull request
-   * carries for its own (`readingUntrusted`).
+   * The registry's agents, carrying the person's own code-host sign-ins (ADR-097).
+   * Althar's sealed connection tokens are never put in their environment. An
+   * outside review still loads none of the repository's config or hooks and
+   * uses git's untrusted-copy settings (`readingUntrusted`).
    */
   static readonly registry = (stderr?: AgentStderr): Layer.Layer<Agents, never, Installs> =>
     Layer.effect(
@@ -382,7 +382,8 @@ export class Agents extends Context.Service<
                 ...spec,
                 env: {
                   ...spec.env,
-                  ...withoutSignIns(signedOut),
+                  ...agentGit,
+                  ...(options.untrusted === true ? withoutSignIns(signedOut) : {}),
                   ...own,
                   ...held,
                   ...skills,
@@ -399,8 +400,16 @@ export class Agents extends Context.Service<
   }
 }
 
-/** How many entries of git's config `withoutSignIns` sets by the environment: what a lead's guard adds goes after them. */
-export const SIGNED_OUT_GIT_CONFIG = 2
+/** How many ordinary git config entries precede the lead's guard. */
+export const SIGNED_OUT_GIT_CONFIG = 1
+
+/** Keep branch creation within the worktree without resetting the person's credential helpers (ADR-097). */
+export const agentGit: Readonly<Record<string, string>> = {
+  GIT_CONFIG_COUNT: String(SIGNED_OUT_GIT_CONFIG),
+  GIT_CONFIG_KEY_0: 'branch.autoSetupMerge',
+  GIT_CONFIG_VALUE_0: 'false',
+  GIT_TERMINAL_PROMPT: '0',
+}
 
 /**
  * What an agent's environment adds so it carries none of the person's
@@ -413,7 +422,7 @@ export const withoutSignIns = (signedOut: string): Readonly<Record<string, strin
   GH_CONFIG_DIR: signedOut,
   GLAB_CONFIG_DIR: signedOut,
   // An empty helper resets git's list of them: the person's keychain and stored credentials aren't asked.
-  GIT_CONFIG_COUNT: String(SIGNED_OUT_GIT_CONFIG),
+  GIT_CONFIG_COUNT: '2',
   GIT_CONFIG_KEY_0: 'credential.helper',
   GIT_CONFIG_VALUE_0: '',
   GIT_CONFIG_KEY_1: 'branch.autoSetupMerge',

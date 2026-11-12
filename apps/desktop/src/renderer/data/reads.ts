@@ -41,6 +41,7 @@ export const keys = {
   planUsage: ['planUsage'] as const,
   /** Each model's room where work on it would start, in a project or (null) anywhere: read again as plan usage changes. */
   modelRooms: (projectId: string | null) => ['modelRooms', projectId] as const,
+  missedReports: ['missedReports'] as const,
   /** A project's automations, for its Automations tab and the dot on it. */
   automations: (projectId: string) => ['automations', projectId] as const,
   /** One automation, for its own page. */
@@ -49,6 +50,8 @@ export const keys = {
   skills: ['skills'] as const,
   /** The person's MCP servers and skills, for every project (null) or one: read again after each change from Settings. */
   agentTools: (projectId: string | null) => ['agentTools', projectId] as const,
+  /** A server opened out: each agent's file as it keeps it, and its tools counted. */
+  serverDetail: (name: string, repository: string | null) => ['agentTools', 'server', name, repository] as const,
   /** Finished tasks' folders on this computer, and the disk they are on: read again as the feed says they changed. */
   folders: ['folders'] as const,
   /** Tasks found by words, in a project or (null) in every one. */
@@ -57,6 +60,12 @@ export const keys = {
   output: (threadId: string, itemId: string) => ['output', threadId, itemId] as const,
   /** A document an agent wrote, as it was after the thread's last call that touched it (`version`). */
   document: (threadId: string, path: string, version: string) => ['document', threadId, path, version] as const,
+  /** A project's canvases (ADR-104), each with its latest version. */
+  canvases: (projectId: string) => ['canvases', projectId] as const,
+  /** One canvas whole: its versions and comments, read again as it changes. */
+  canvas: (canvasId: string) => ['canvas', canvasId] as const,
+  /** A version's words, which never change. */
+  canvasText: (canvasId: string, version: number) => ['canvasText', canvasId, version] as const,
 }
 
 /**
@@ -155,6 +164,8 @@ export const reads = (client: Client) => ({
       queryFn: () => client.getModelRooms(projectId),
       staleTime: 30_000,
     }),
+  // Shared by every picker in the window: a week's count, which a step without its report adds to now and then.
+  missedReports: () => queryOptions({ queryKey: keys.missedReports, queryFn: () => client.getMissedReports(), staleTime: 60_000 }),
   automations: (projectId: string) =>
     queryOptions({ queryKey: keys.automations(projectId), queryFn: () => client.getAutomations(projectId) }),
   automation: (automationId: string) =>
@@ -162,6 +173,14 @@ export const reads = (client: Client) => ({
   skills: () => queryOptions({ queryKey: keys.skills, queryFn: () => client.listSkills() }),
   agentTools: (projectId: string | null) =>
     queryOptions({ queryKey: keys.agentTools(projectId), queryFn: () => client.getAgentTools(projectId) }),
+  serverDetail: (name: string, repository: string | null) =>
+    queryOptions({
+      queryKey: keys.serverDetail(name, repository),
+      queryFn: () => client.getServerDetail(name, repository),
+      // Counting its tools starts the server: read once as it opens, and again only when it is opened again.
+      staleTime: 60_000,
+      gcTime: 60_000,
+    }),
   // Read again every second or so while their sizes are still being measured; after that, as the feed says.
   folders: () =>
     queryOptions({
@@ -183,6 +202,16 @@ export const reads = (client: Client) => ({
     queryOptions({
       queryKey: keys.document(threadId, path, version),
       queryFn: () => client.readDocument(threadId, path),
+      gcTime: 5 * 60_000,
+    }),
+  canvases: (projectId: string) => queryOptions({ queryKey: keys.canvases(projectId), queryFn: () => client.listCanvases(projectId) }),
+  canvas: (canvasId: string) => queryOptions({ queryKey: keys.canvas(canvasId), queryFn: () => client.getCanvas(canvasId) }),
+  canvasText: (canvasId: string, version: number) =>
+    queryOptions({
+      queryKey: keys.canvasText(canvasId, version),
+      queryFn: () => client.readCanvasText(canvasId, version),
+      // A version never changes.
+      staleTime: Number.POSITIVE_INFINITY,
       gcTime: 5 * 60_000,
     }),
 })

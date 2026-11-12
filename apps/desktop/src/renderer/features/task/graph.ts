@@ -17,7 +17,13 @@ export const graphText = {
   label: { ...stepText.label, settle: 'Settle', publish: 'Pull request' },
   review: (n: number) => `Review ${n}`,
   althar: 'Althar',
-  by: { asked: 'You asked', followedUp: 'You followed up', relayed: 'From the coordinator', followUp: 'Follow-up' },
+  by: {
+    asked: 'You asked',
+    followedUp: 'You followed up',
+    relayed: 'From the coordinator',
+    followUp: 'Follow-up',
+    shipped: 'You shipped',
+  },
   later: (minutes: number) =>
     minutes < 60
       ? `${minutes}m later`
@@ -34,6 +40,8 @@ export const graphText = {
     held: 'waits for an agent',
     limit: 'at its limit',
   },
+  /** A helper that didn't end with its result, at its corner's side. */
+  helper: { stopped: 'Stopped', failed: 'Couldn’t go on' },
   outcome: {
     passed: (notes: number) => (notes === 0 ? 'Passed' : `Passed · ${notes === 1 ? '1 note' : `${notes} notes`}`),
     findings: (n: number) => (n === 1 ? '1 finding' : `${n} findings`),
@@ -234,7 +242,22 @@ export function taskGraphOf(snapshot: ThreadSnapshot, named: NameModel, now: str
   const reports = [...new Map([...snapshot.reports, ...snapshot.items].map((item) => [item.id, item])).values()]
     .filter((item): item is Report => item.kind === 'step_result')
     .sort((one, other) => one.sequence - other.sequence)
-  const { lanes, laneOf } = lanesOf(snapshot, rounds, named)
+  const { lanes: stepLanes, laneOf } = lanesOf(snapshot, rounds, named)
+  // Its lead's helpers (ADR-087): a lane for each of their agents and models, after the steps' agents and before Althar's.
+  const helperKeys = [
+    ...new Set(rounds.flatMap((round) => (round.helpers ?? []).map((helper) => `helper|${helper.agentId}|${helper.model ?? ''}`))),
+  ]
+  const helperLanes = helperKeys.map((key): StepGraphLane => {
+    const [, agentId = '', model = ''] = key.split('|')
+    return { id: key, who: { kind: 'model', model: named(agentId, model === '' ? null : model) } }
+  })
+  const althar = stepLanes.findIndex((lane) => lane.id === 'althar')
+  const lanes =
+    helperLanes.length === 0
+      ? stepLanes
+      : althar === -1
+        ? [...stepLanes, ...helperLanes]
+        : [...stepLanes.slice(0, althar), ...helperLanes, ...stepLanes.slice(althar)]
   const facts = new Map<string, StepFacts>()
   const steps: StepGraphStep[] = []
   const markers: StepGraphRound[] = []
@@ -288,15 +311,34 @@ export function taskGraphOf(snapshot: ThreadSnapshot, named: NameModel, now: str
       })
     }
 
+    // Its helpers, each on its model's lane in the round it started in: at work, done, or stopped.
+    for (const helper of round.helpers ?? []) {
+      const state = helper.state === 'working' ? GraphNodeState.Now : helper.state === 'done' ? GraphNodeState.Done : GraphNodeState.Stopped
+      steps.push({
+        id: `helper:${helper.id}`,
+        lane: `helper|${helper.agentId}|${helper.model ?? ''}`,
+        round: round.id,
+        label: helper.name,
+        state,
+        corner: running(helper.startedAt, helper.endedAt ?? now),
+        ...(helper.state === 'stopped' || helper.state === 'failed'
+          ? { outcome: graphText.helper[helper.state], ...(helper.state === 'failed' ? { warn: true } : {}) }
+          : {}),
+      })
+    }
+
     // Its marker: who started it, how long after the round before, what they said, and what a change to its steps put in.
     const said = round.said
-    const by = !round.followUp
-      ? graphText.by.asked
-      : said === null
-        ? graphText.by.followUp
-        : said.relayed
-          ? graphText.by.relayed
-          : graphText.by.followedUp
+    const by =
+      round.ships === true
+        ? graphText.by.shipped
+        : !round.followUp
+          ? graphText.by.asked
+          : said === null
+            ? graphText.by.followUp
+            : said.relayed
+              ? graphText.by.relayed
+              : graphText.by.followedUp
     const gap = before === undefined ? null : minutesBetween(before.endedAt ?? before.createdAt, round.createdAt)
     const added = [
       ...new Set(

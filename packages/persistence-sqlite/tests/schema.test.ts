@@ -418,6 +418,58 @@ describe('schema', () => {
       ),
   )
 
+  it.effect('opens a worktree made before holds for Ship as holding nothing, and keeps a hold only as when it began', () =>
+    withFile((filename) =>
+      Effect.gen(function* () {
+        const before = migrations.findIndex((migration) => migration.key === '0069_held_for_ship')
+        const made = Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const { projectId, deviceId, actorId, createdAt } = yield* seed
+          const bindingId = yield* newId(Ids.repositoryBinding)
+          yield* sql`INSERT INTO repository_bindings ${sql.insert({ id: bindingId, projectId, slug: 'meridian', role: 'other', displayName: 'meridian', createdAt })}`
+          const taskId = yield* newId(Ids.task)
+          yield* sql`INSERT INTO tasks ${sql.insert({ id: taskId, projectId, title: 'Retry', slug: 'retry', state: 'open', createdByActorId: actorId, createdAt })}`
+          const workspaceId = yield* newId(Ids.workspace)
+          yield* sql`INSERT INTO workspaces ${sql.insert({
+            id: workspaceId,
+            projectId,
+            taskId,
+            bindingId,
+            deviceId,
+            access: 'write',
+            path: '/worktrees/meridian/retry/meridian',
+            baseRef: 'main',
+            branch: 'althar/retry',
+            state: 'ready',
+            createdAt,
+          })}`
+          return { workspaceId, createdAt }
+        }).pipe(Effect.provide(WebCrypto))
+        const { workspaceId, createdAt } = yield* Effect.provide(
+          made,
+          Layer.fresh(Database.layer({ filename, migrations: migrations.slice(0, before) })),
+        )
+        const read = Effect.flatMap(
+          SqlClient.SqlClient,
+          (sql) => sql<{ heldAt: string | null }>`SELECT held_at FROM workspaces WHERE id = ${workspaceId}`,
+        )
+        // Made before, it holds nothing: its commits go up as they did.
+        assert.deepStrictEqual(yield* Effect.provide(read, Layer.fresh(Database.layer({ filename }))), [{ heldAt: null }])
+        const held = Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          yield* sql`UPDATE workspaces SET held_at = ${createdAt} WHERE id = ${workspaceId}`
+          const kept = yield* read
+          // A hold is when it began, as every time in the store is.
+          const loose = yield* succeeds(sql`UPDATE workspaces SET held_at = 'soon' WHERE id = ${workspaceId}`)
+          return { kept, loose }
+        })
+        const { kept, loose } = yield* Effect.provide(held, Layer.fresh(Database.layer({ filename })))
+        assert.deepStrictEqual(kept, [{ heldAt: createdAt }])
+        assert.isFalse(loose)
+      }),
+    ),
+  )
+
   it.effect('keeps a connection made before workspaces, and lets one account connect once per workspace and a project bind to one', () =>
     withFile((filename) =>
       Effect.gen(function* () {

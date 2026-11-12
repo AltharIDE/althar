@@ -175,6 +175,20 @@ export class NoChangeToOpen extends Schema.TaggedError<NoChangeToOpen>()('NoChan
 }) {}
 
 /**
+ * Shipping a task (a task is a conversation plus parts, "A tweak waits for
+ * Ship") can't go as asked: what the person's turns committed is held for
+ * Ship, and only Ship pushes it (`held`); the task is at work, and ships once
+ * that's done (`working`); or nothing waits to go up (`nothing`).
+ */
+/** A change the task can't start or change as asked (a task is a conversation plus parts), in words for whoever asked. */
+export class ChangeRefused extends Schema.TaggedError<ChangeRefused>()('ChangeRefused', { message: Schema.String }) {}
+
+export class ShipRefused extends Schema.TaggedError<ShipRefused>()('ShipRefused', {
+  taskId: Schema.String,
+  why: Schema.Literals(['held', 'working', 'nothing']),
+}) {}
+
+/**
  * A task's branch can't be merged here: it has a pull request to merge
  * instead, it's settled, what the person saw isn't on its branch any more,
  * it conflicts (and, where the project says so, the lead is resolving it),
@@ -197,6 +211,7 @@ export class CantMerge extends Schema.TaggedError<CantMerge>()('CantMerge', {
     'untracked',
     'moved',
     'missing',
+    'nothing',
   ]),
   detail: Schema.String,
   /** The branch it would merge into, named by its repository in a task of several: main, web’s main. */

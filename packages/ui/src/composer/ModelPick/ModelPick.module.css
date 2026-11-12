@@ -96,6 +96,20 @@
 .room + .check {
   margin-left: 0;
 }
+/* a model that keeps ending steps without its report: faint ink before its room, as quiet as the room is */
+.missed {
+  flex: none;
+  margin-left: auto;
+  font-size: 11px;
+  font-weight: 400;
+  font-variant-numeric: tabular-nums;
+  color: var(--t-3);
+  white-space: nowrap;
+}
+.missed + .room,
+.missed + .check {
+  margin-left: 0;
+}
 
 /* A pick that asks first: what it would do, and the answer. */
 .ask {

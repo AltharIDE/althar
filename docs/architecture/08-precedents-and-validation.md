@@ -72,7 +72,7 @@ Claude Code and Codex reach it through adapters the ACP project maintains, and
 OpenCode and Gemini CLI speak it natively.
 
 Althar uses it for every agent in the MVP
-([ADR-002](../decisions/002-acp-for-every-agent.md)). The domain is still not
+([ADR-002](../decisions/agents.md#acp-for-every-agent)). The domain is still not
 frozen to it: protocol drafts evolve, it has no usage limits or cross-agent
 history, and it does not solve the control-plane product model.
 
@@ -168,13 +168,14 @@ future workflow machinery from first principles.
 
 ## Required ADRs
 
-An architecture decision record (ADR) is a short document that captures one
-important choice, its alternatives, and the evidence behind it. These ADRs keep
-implementation-specific decisions from becoming undocumented assumptions:
+This is the list of decisions the architecture needed when it was first
+drawn, kept as a record. Each is now held in one of the area documents in
+[`docs/decisions/`](../decisions/README.md), which describe the current
+state; the links below lead there.
 
 1. **Runtime lifetime and packaging**
    Electron with the runtime in a utility process is decided
-   ([ADR-003](../decisions/003-electron-shell.md)). Quit semantics,
+   ([ADR-003](../decisions/foundations.md#the-shell-and-the-runtime)). Quit semantics,
    reconciliation, and daemon extraction are still open.
 
 2. **Local control-plane transport**
@@ -184,7 +185,7 @@ implementation-specific decisions from becoming undocumented assumptions:
 
 3. **First provider integration**
    Decided: ACP for every agent, with native side channels
-   ([ADR-002](../decisions/002-acp-for-every-agent.md)). Still needs the
+   ([ADR-002](../decisions/agents.md#acp-for-every-agent)). Still needs the
    support matrix and degraded behaviour per agent.
 
 4. **Provider and external authentication**
@@ -225,14 +226,14 @@ implementation-specific decisions from becoming undocumented assumptions:
 15. **Cloud authority and local-runner leases**
     Link/unlink, aggregate authority, fencing, artifact/secret movement.
 
-ADRs record decisions and evidence; they do not duplicate these documents.
-They live in [`docs/decisions/`](../decisions/). Beyond this list, the
-coordinator ([ADR-004](../decisions/004-coordinator-is-an-agent-session.md)),
-briefing agents ([ADR-005](../decisions/005-althar-briefs-every-agent.md)),
-workspaces ([ADR-006](../decisions/006-worktree-per-task.md)), permission
-routing ([ADR-007](../decisions/007-permission-requests-reach-althar.md)),
+The decision documents record what was decided and why; they don't
+duplicate these documents. Beyond this list, the
+coordinator ([ADR-004](../decisions/coordinator.md#always-on)),
+briefing agents ([ADR-005](../decisions/agents.md#briefs-and-switching-agent-or-model)),
+workspaces ([ADR-006](../decisions/workspaces-and-runs.md#worktree)), permission
+routing ([ADR-007](../decisions/what-agents-may-do.md#how-a-request-reaches-althar)),
 and the build standard
-([ADR-008](../decisions/008-shortcuts-in-behaviour-not-in-records.md)) are
+([ADR-008](../decisions/foundations.md#recorded-facts-are-complete-behaviour-may-start-simple)) are
 decided.
 
 ## Architecture validation criteria

@@ -10,7 +10,6 @@ import { Permissions } from './Permissions'
 import { fact } from './records'
 import { Runs } from './Runs'
 import { Sessions } from './Sessions'
-import { addItem } from './threads'
 
 /*
  * What Althar tells a thread of the work around it (docs/decisions/097,
@@ -19,11 +18,10 @@ import { addItem } from './threads'
  *
  * A child that ends. A task a lead started (it has a parent) that is settled
  * without a change, failed, or stopped by the person doesn't reach its parent
- * by itself. Once, Althar puts a line in the parent's thread, in its warning
- * tone, linking the child and its report; and gives the parent's lead the same
- * as news, which starts it if it stopped, as message_lead does. Kept in the
- * record (`task.parent_told`) so neither a later look nor a relaunch says it
- * again.
+ * by itself. Once, Althar gives the parent's lead the news, which starts it if
+ * it stopped, as message_lead does. The parent's chat has no line for it: its
+ * one line about the child is where the lead started it. Kept in the record
+ * (`task.parent_told`) so neither a later look nor a relaunch says it again.
  *
  * A call that waits while the person is away. A permission that reached a
  * paired device (Permissions.reached) and has waited past `AWAY_AFTER` since
@@ -52,12 +50,6 @@ export const reportLine = (summary: string | undefined): string | undefined => {
     .split(/(?<=[.!?])\s/)[0]
   if (first === undefined || first === '') return undefined
   return first.length > 160 ? `${first.slice(0, 157).trimEnd()}…` : first
-}
-
-/** The line a child's end leaves in its parent's thread, as plain text for where nothing draws it better. */
-export const endedLine = (title: string, how: Ended, why?: string): string => {
-  const head = how === 'stopped' ? `${title} stopped by you` : `${title} ${how === 'failed' ? 'failed' : 'stopped without a change'}`
-  return why === undefined || how === 'stopped' ? `${head}.` : `${head}: ${why.replace(/\.$/, '')}.`
 }
 
 /** What the parent's lead is told: the child, how it ended, its report. */
@@ -181,15 +173,8 @@ export class Situations extends Context.Service<
             payload: { how: child.how, parent: child.parentId },
             actorId: instance.systemId,
           })
-          yield* addItem({ projectId: child.projectId as ProjectId, threadId: child.parentThreadId }, 'notice', {
-            source: 'runtime',
-            severity: 'warning',
-            title: endedLine(child.title, child.how, why),
-            description: null,
-            task: { taskId: child.id, slug: child.slug, title: child.title, threadId: child.threadId },
-            situation: { kind: 'ended', how: child.how, ...(why === undefined ? {} : { why }) },
-          })
-          // News that wakes the parent's lead, as message_lead does: after its turn, starting it if it stopped.
+          // News that wakes the parent's lead, as message_lead does: after its turn, starting it if it stopped. Its chat has its
+          // one line about the child where it was started; the child's end isn't a second one.
           if (!child.parentOpen) return
           const body = endedNews(child, child.how, why)
           const lead = yield* sessions.running(child.parentThreadId)

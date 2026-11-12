@@ -1,7 +1,7 @@
 import { spawn } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { mkdtempSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { setPriority, tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Readable, Writable } from 'node:stream'
 
@@ -29,12 +29,11 @@ export { platformTrees, type ProcessTrees, type StopReport } from './processTree
  * The environment variables a child inherits from Althar (docs/architecture
  * 07: an allowlist, never the whole environment). Provider API keys are not on
  * it: one could decide which account pays, over the plan the sign-in check
- * reported. An agent that needs one gets it through its launch spec. Nor is
- * the person's SSH agent: Althar pushes for agents, so their shells get
- * none of the person's ways into a code host (ADR-011).
+ * reported. Code-host sign-ins and the SSH agent are inherited (ADR-097).
+ * Althar's own secrets and provider API keys are still excluded.
  */
 const INHERITED =
-  /^(PATH|HOME|USER|LOGNAME|SHELL|TMPDIR|TMP|TEMP|LANG|LANGUAGE|TERM|TZ|COLORTERM|NODE_EXTRA_CA_CERTS|SSL_CERT_FILE|SSL_CERT_DIR|LC_[A-Z_]+|XDG_[A-Z_]+|(HTTPS?|NO|ALL)_PROXY|(https?|no|all)_proxy)$/
+  /^(PATH|HOME|USER|LOGNAME|SHELL|TMPDIR|TMP|TEMP|LANG|LANGUAGE|TERM|TZ|COLORTERM|NODE_EXTRA_CA_CERTS|SSL_CERT_FILE|SSL_CERT_DIR|LC_[A-Z_]+|XDG_[A-Z_]+|(HTTPS?|NO|ALL)_PROXY|(https?|no|all)_proxy|GH_(TOKEN|ENTERPRISE_TOKEN|CONFIG_DIR|HOST)|GITHUB_(TOKEN|ENTERPRISE_TOKEN)|GLAB_(TOKEN|CONFIG_DIR)|GITLAB_(TOKEN|ACCESS_TOKEN|HOST)|SSH_AUTH_SOCK|SSH_AGENT_PID|SSH_ASKPASS|GIT_(SSH|SSH_COMMAND|ASKPASS|CONFIG_GLOBAL|CONFIG_SYSTEM|CONFIG_NOSYSTEM))$/
 
 export const childEnvironment = (
   spec: LaunchSpec,
@@ -123,6 +122,29 @@ export interface SpawnOptions {
   readonly stderr?: (chunk: string, pid: number) => void
   /** How its tree is reached: the platform's, unless a test says otherwise. */
   readonly trees?: ProcessTrees
+  /**
+   * Agents' work, run in the background (`BACKGROUND`): below what the person waits on, so Althar's window, and every
+   * other app, answers while agents build and test. What the process starts takes its priority from it.
+   */
+  readonly background?: boolean
+  /** How a process's priority is set: the system's, unless a test says. */
+  readonly prioritize?: (pid: number, priority: number) => void
+}
+
+/**
+ * How agents' work runs (`SpawnOptions.background`): niceness 10 on macOS and Linux, Below normal on Windows, which is
+ * what Node makes of 10 there. The scheduler gives the rest of the computer the cores first while it is busy, and
+ * agents all of them while it isn't: a build on an idle computer takes as long as before.
+ */
+export const BACKGROUND = 10
+
+/** Sets a process's priority, or leaves it as it is where the system won't, as inside a sandbox that forbids it. */
+const setPriorityOf = (pid: number, priority: number) => {
+  try {
+    setPriority(pid, priority)
+  } catch {
+    // Left at the priority it started with: it runs as it always did.
+  }
 }
 
 const STDERR_KEPT = 8_192
@@ -205,6 +227,8 @@ export const spawnOwned = (
           ),
         )
       })
+      // Lowered as soon as it is there, before it has started much of its own: what it starts inherits it.
+      if (options.background === true) (options.prioritize ?? setPriorityOf)(pid, BACKGROUND)
       const osStartedAt = yield* osStartTime(pid, trees)
       return {
         pid,

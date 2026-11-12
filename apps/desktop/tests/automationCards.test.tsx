@@ -65,7 +65,7 @@ describe('an automation’s card in the coordinator’s thread', () => {
     expect(screen.getByText('Morning review')).toBeTruthy()
     expect(screen.getByText('Off', { exact: true })).toBeTruthy()
     // When it would first run, from its schedule, as nothing has said yet.
-    expect(screen.getByText('next tomorrow at 9:00')).toBeTruthy()
+    expect(screen.getByText('next tomorrow')).toBeTruthy()
     await userEvent.click(screen.getByRole('button', { name: 'Its limits' }))
     expect(screen.getByText('45 minutes')).toBeTruthy()
     expect(screen.getByText('Run once when it’s back, if it’s not too late')).toBeTruthy()
@@ -162,9 +162,9 @@ describe('an automation’s card in the coordinator’s thread', () => {
       ),
     })
     withServices(<Project />, client)
-    expect(await screen.findByText('Off', { exact: true })).toBeTruthy()
+    expect(await screen.findByText('Off until you update it')).toBeTruthy()
     expect(screen.getByText('Nothing leaves this Mac').closest('s')).not.toBeNull()
-    await userEvent.click(screen.getByRole('button', { name: 'Turn on' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Update' }))
     expect(client.turnOnAutomation).toHaveBeenCalledWith('auto1', 'ia3')
   })
 

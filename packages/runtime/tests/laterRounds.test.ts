@@ -12,10 +12,10 @@ import { Sessions } from '../src/Sessions'
 import { repository, runtime, until } from './support'
 
 /*
- * A later round of review whose lead's server still runs (Busy.ts), where
- * placesKept.test.ts and busy.test.ts don't go: it starts at once in its
- * task's place, the server running on in it (ADR-032's follow-up of 21
- * October), with what the lead settled before it.
+ * A later look of review, the check of the fixes, whose lead's server still
+ * runs (Busy.ts), where placesKept.test.ts and busy.test.ts don't go: it
+ * starts at once in its task's place, the server running on in it (ADR-032's
+ * follow-up of 21 October), with what the lead settled before it.
  */
 
 const GB = 1024 ** 3
@@ -43,7 +43,7 @@ const served = Effect.gen(function* () {
     envelope: yield* Runtime.envelope('task.create', {}),
     projectId: project.projectId,
     title: 'Fix the heading',
-    description: 'Serve it, then finish. [lead:serve] [lead:finish] [review:findings]',
+    description: 'Serve it, then finish. [lead:serve] [lead:finish] [lead:edit] [review:findings]',
     draft: true,
   })
   const planId = yield* plans.propose({
@@ -62,20 +62,20 @@ const served = Effect.gen(function* () {
   return task
 })
 
-/** What the review was told for a later round. */
+/** What the reviewer was told for its check of the fixes, its later look. */
 const toldLater = (taskId: string) =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient
     const [told] = yield* until(
       sql<{ body: string }>`
         SELECT i.body FROM user_inputs i JOIN threads t ON t.id = i.thread_id
-        WHERE t.task_id = ${taskId} AND t.kind = 'step' AND i.body LIKE 'Round 2.%'`,
+        WHERE t.task_id = ${taskId} AND t.kind = 'step' AND i.body LIKE 'A check of the fixes%'`,
       (rows) => rows.length === 1,
     )
     return told?.body ?? ''
   })
 
-/** Waits until the task's run is over, its later round passed. */
+/** Waits until the task's run is over, its check of the fixes passed. */
 const passed = (taskId: string) =>
   until(attempts(taskId), (rows) => rows.some((row) => row.step === 'review' && row.iteration === 1 && row.state === 'succeeded'))
 

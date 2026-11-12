@@ -33,7 +33,11 @@ describe('a small change', () => {
       { key: 'implement', agentId: 'claude-code', model: 'claude-sonnet-5', effort: 'low', skipped: false },
       { key: 'review', agentId: 'codex', model: 'gpt-6-sol', skipped: true },
     ])
-    assert.deepStrictEqual(smallChangeSkips(steps[1] ?? null), ['no plan', 'reviewed after it merges'])
+    // As the project's rule says: Major only by default, Everything, or no review after the merge.
+    assert.deepStrictEqual(smallChangeSkips(steps[1] ?? null), ['no plan', 'reviewed after it merges, major findings only'])
+    assert.deepStrictEqual(smallChangeSkips(steps[1] ?? null, 'all'), ['no plan', 'reviewed after it merges'])
+    assert.deepStrictEqual(smallChangeSkips(steps[1] ?? null, 'none'), ['no plan', 'no review'])
+    assert.deepStrictEqual(smallChangeSkips(null, 'major'), ['no plan'])
   })
 
   it('reads a small change from its plan, and nothing else as one', () => {
@@ -95,7 +99,7 @@ describe('a small change', () => {
       assert.isDefined(card)
       if (card?.kind !== 'small_change') return
       assert.strictEqual(card.content.title, 'The Run menu says Strat')
-      assert.deepStrictEqual(card.content.skips, ['no plan', 'reviewed after it merges'])
+      assert.deepStrictEqual(card.content.skips, ['no plan', 'reviewed after it merges, major findings only'])
       assert.deepStrictEqual(card.content.lead, { agentId: 'claude-code', model: 'claude-sonnet-5', effort: 'low' })
       assert.deepStrictEqual(
         card.content.steps.map((step) => [step.key, step.done]),
@@ -295,6 +299,8 @@ describe('Auto’s lighter model', () => {
   })
 
   it.live('moves a lead whose session is still running when its plan crosses the mark, and says why once', () => {
+    // A day from now, whenever it runs: a reset already past is a plan with its week back, and nothing moves.
+    const resetsAt = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString()
     const cache = join(mkdtempSync(join(tmpdir(), 'althar-facts-')), 'models.json')
     writeFileSync(
       cache,
@@ -351,7 +357,7 @@ describe('Auto’s lighter model', () => {
       assert.deepInclude(moved?.content, {
         from: { agentId: 'claude-code', model: 'large' },
         to: { agentId: 'claude-code', model: 'small' },
-        why: { percent: 92, plan: 'Claude', window: 'the week', resetsAt: '2026-11-12T09:00:00.000Z' },
+        why: { percent: 92, plan: 'Claude', window: 'the week', resetsAt },
         kept: false,
       })
       const [now] = yield* sql<{ model: string | null }>`
@@ -397,7 +403,7 @@ describe('Auto’s lighter model', () => {
                           kind: 'usage',
                           stale: false,
                           usage: {
-                            windows: [{ kind: 'weekly', usedPercent: 92, resetsAt: '2026-11-12T09:00:00.000Z' }],
+                            windows: [{ kind: 'weekly', usedPercent: 92, resetsAt }],
                             source: 'endpoint',
                             observedAt: new Date().toISOString(),
                           },
@@ -523,7 +529,7 @@ describe('the fast lane at its edges', () => {
     }).pipe(Effect.provide(layer)),
   )
 
-  it.effect('owes nothing for a task with no reviewer or no change, and clears it once a review is there', () =>
+  it.effect('owes nothing for a task with no reviewer or no change, and a merged one with a reviewer its review', () =>
     Effect.gen(function* () {
       const projects = yield* Projects
       const plans = yield* Plans
@@ -574,15 +580,15 @@ describe('the fast lane at its edges', () => {
             })}`
         })
       const owed = (taskId: string) =>
-        Effect.map(sql<{ n: number }>`SELECT count(*) AS n FROM reviews_after_merge WHERE task_id = ${taskId}`, ([row]) => row?.n)
+        Effect.map(sql<{ n: number }>`SELECT count(*) AS n FROM merge_reviews WHERE task_id = ${taskId}`, ([row]) => row?.n)
       // No reviewer to start one.
       const noReviewer = yield* make('No reviewer', false)
       yield* change(noReviewer.taskId, 'https://github.test/meridian/api/pull/1')
-      yield* fastLane.reviewMerged(noReviewer.taskId)
+      yield* fastLane.reviewMerged(noReviewer.taskId, 'https://github.test/meridian/api/pull/1')
       assert.strictEqual(yield* owed(noReviewer.taskId), 0)
       // A reviewer, but no change to read.
       const noChange = yield* make('No change', true)
-      yield* fastLane.reviewMerged(noChange.taskId)
+      yield* fastLane.reviewMerged(noChange.taskId, 'https://github.test/meridian/api/pull/3')
       assert.strictEqual(yield* owed(noChange.taskId), 0)
       // Already reviewed: nothing is owed.
       const reviewed = yield* make('Reviewed', true)
@@ -604,8 +610,14 @@ describe('the fast lane at its edges', () => {
           createdAt: when,
           updatedAt: when,
         })}`
-      yield* fastLane.reviewMerged(reviewed.taskId)
+      yield* fastLane.reviewMerged(reviewed.taskId, url)
       assert.strictEqual(yield* owed(reviewed.taskId), 0)
+      // A merged small change with a reviewer and no review yet: owed, in the task itself, not a review task of its own.
+      const merged = yield* make('Merged', true)
+      const mergedUrl = 'https://github.test/meridian/api/pull/4'
+      yield* change(merged.taskId, mergedUrl)
+      yield* fastLane.reviewMerged(merged.taskId, mergedUrl)
+      assert.strictEqual(yield* owed(merged.taskId), 1)
     }).pipe(Effect.provide(layer)),
   )
 

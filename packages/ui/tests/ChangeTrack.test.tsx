@@ -61,6 +61,21 @@ describe('the order they merge in', () => {
     expect(screen.getByText('No checks have run yet')).toBeInTheDocument()
   })
 
+  it('counts skipped checks as settled, not as still running', () => {
+    const [first] = TRACK_FOUR
+    const stop: TrackStop = {
+      ...first!,
+      standing: 'open',
+      checks: [
+        { id: '1', name: 'build', state: CheckState.Passed },
+        { id: '2', name: 'ui', state: CheckState.Skipped },
+      ],
+    }
+    render(<ChangeTrack stops={[stop]} />)
+    expect(screen.getByRole('button', { name: /checks: 1 check passed, 1 skipped$/ })).toBeInTheDocument()
+    expect(screen.queryByText(/the rest running/)).not.toBeInTheDocument()
+  })
+
   it('says which repository conflicts, and with what', () => {
     render(<ChangeTrack stops={TRACK_CONFLICT} />)
     expect(stops()[1]?.textContent).toMatch(/Conflicts with main/)

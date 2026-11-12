@@ -53,7 +53,7 @@ button.file:hover {
   font: 600 11px/1 var(--mono);
 }
 .add {
-  color: var(--ok);
+  color: var(--ok-ink);
 }
 .del {
   color: var(--danger);

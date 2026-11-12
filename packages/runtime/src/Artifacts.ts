@@ -24,10 +24,11 @@ import { timestamp } from './records'
  * test that doesn't give one, nothing is kept.
  */
 
-/** Where an artifact is referred to from: a thread's item, as a picture or as a command's output; or what the person said, as an image they sent with it. */
+/** Where an artifact is referred to from: a thread's item, as a picture or as a command's output; what the person said, as an image they sent with it; or a canvas's version, as one of its files or its manifest (ADR-104). */
 export type ArtifactSubject =
   | { readonly type: 'thread_item'; readonly id: string; readonly role: 'image' | 'output' }
   | { readonly type: 'user_input'; readonly id: string; readonly role: 'image' }
+  | { readonly type: 'canvas_version'; readonly id: string; readonly role: 'file' | 'manifest' }
 
 export interface KeepInput {
   readonly projectId: ProjectId

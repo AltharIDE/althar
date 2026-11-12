@@ -3,21 +3,18 @@ import { writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 
 import { type FakeService, makeFakeService } from '@althar/connectors/testing'
-import { Ids, newId, type ProjectId } from '@althar/domain'
+import type { ProjectId } from '@althar/domain'
 import { assert, describe, it } from '@effect/vitest'
-import { Duration, Effect, Layer } from 'effect'
+import { Effect, Layer } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { Connections } from '../src/Connections'
 import { Coordinator } from '../src/Coordinator'
-import { FastLane } from '../src/fastLane'
 import { Instance } from '../src/Instance'
-import { Plans } from '../src/Plans'
 import { Projects } from '../src/Projects'
 import { Queries } from '../src/Queries'
 import { Reviews } from '../src/Reviews'
 import { Sessions } from '../src/Sessions'
-import { smallChangeSteps } from '../src/smallChange'
 import { Tasks } from '../src/Tasks'
 import * as Runtime from '../src/Runtime'
 import type { ToolAccess } from '../src/ToolServer'
@@ -313,180 +310,6 @@ describe('a review, at its edges', () => {
       assert.strictEqual(git(workspace?.path ?? '', 'rev-parse', 'HEAD'), head)
       // The commit main made after it is not part of the change.
       assert.deepStrictEqual(git(workspace?.path ?? '', 'diff', '--name-only', before).split('\n'), ['send.ts'])
-    }).pipe(Effect.provide(withQueries(github)))
-  })
-})
-
-describe('the review after a merge', () => {
-  it.live('says in the task why it hasn’t started and goes again until it does', () => {
-    const at = hosted()
-    const github = makeFakeService({ pushUrl: () => at.bare })
-    github.addRepository(['meridian', 'api'])
-    const { pull, head } = mergedPullRequest(at, github)
-    return Effect.gen(function* () {
-      const { projectId } = yield* opened(at.working)
-      const projects = yield* Projects
-      const plans = yield* Plans
-      const fastLane = yield* FastLane
-      const sql = yield* SqlClient.SqlClient
-      const actor = (yield* Instance).personId
-      const created = yield* projects.createTask({
-        envelope: yield* Runtime.envelope('task.create', {}),
-        projectId,
-        title: 'The Run menu says Strat',
-        draft: true,
-      })
-      yield* plans.propose({
-        projectId,
-        taskId: created.taskId,
-        steps: smallChangeSteps({
-          lead: { agentId: 'claude-code', model: null },
-          review: { agentId: 'claude-code', model: null },
-        }),
-        reason: null,
-        actorId: actor,
-        reviewAfterMerge: true,
-        startsIn: Duration.hours(1),
-      })
-      const when = '2026-11-06T14:03:00.000Z'
-      yield* sql`
-        INSERT INTO external_links ${sql.insert({
-          id: yield* newId(Ids.externalLink),
-          projectId,
-          taskId: created.taskId,
-          product: 'github',
-          kind: 'change',
-          externalId: String(pull.number),
-          ref: `meridian/api#${pull.number}`,
-          key: `${pull.number}`,
-          url: `${HOST}/meridian/api/pull/${pull.number}`,
-          snapshot: JSON.stringify({
-            number: pull.number,
-            title: pull.title,
-            url: pull.url,
-            state: 'merged',
-            draft: false,
-            headSha: head,
-            additions: 1,
-            deletions: 0,
-            changedFiles: 1,
-            repository: ['meridian', 'api'],
-            words: { noun: 'pull request', short: 'PR', prefix: '#' },
-          }),
-          listening: 0,
-          createdAt: when,
-          updatedAt: when,
-        })}`
-      // The host is down for a moment as the merge is heard.
-      github.failNext('changeToReview', 'unreachable')
-      yield* fastLane.reviewMerged(created.taskId)
-      const [waiting] = yield* sql<{ title: string; attempts: number }>`
-        SELECT json_extract(content, '$.title') AS title, json_extract(content, '$.attempts') AS attempts
-        FROM thread_items WHERE thread_id = ${created.threadId} AND kind = 'notice'
-          AND json_extract(content, '$.reviewAfterMerge') = 1`
-      assert.strictEqual(waiting?.attempts, 1)
-      assert.include(waiting?.title ?? '', 'The review after the merge didn’t start')
-      assert.notInclude(waiting?.title ?? '', 'FastLaneRefused')
-      const [none] = yield* sql<{ n: number }>`
-        SELECT count(*) AS n FROM external_links WHERE kind = 'review' AND url = ${pull.url}`
-      assert.strictEqual(none?.n, 0)
-      // It is owed still, so a launch that stopped after the merge finds it and goes again.
-      const [owed] = yield* sql<{ attempts: number }>`
-        SELECT attempts FROM reviews_after_merge WHERE task_id = ${created.taskId}`
-      assert.strictEqual(owed?.attempts, 1)
-      // A second failure keeps the one line, saying how many times it was tried.
-      github.failNext('changeToReview', 'unreachable')
-      yield* fastLane.reviewMerged(created.taskId)
-      const [again] = yield* sql<{ attempts: number; n: number }>`
-        SELECT r.attempts AS attempts, (SELECT count(*) FROM thread_items x WHERE x.thread_id = ${created.threadId} AND x.kind = 'notice'
-          AND json_extract(x.content, '$.reviewAfterMerge') = 1) AS n
-        FROM reviews_after_merge r WHERE r.task_id = ${created.taskId}`
-      assert.deepStrictEqual(again, { attempts: 2, n: 1 })
-      yield* fastLane.retryPendingReviews()
-      const [made] = yield* sql<{ n: number }>`
-        SELECT count(*) AS n FROM external_links WHERE kind = 'review' AND url = ${pull.url}`
-      assert.strictEqual(made?.n, 1)
-      const [said] = yield* sql<{ n: number }>`
-        SELECT count(*) AS n FROM thread_items WHERE thread_id = ${created.threadId} AND kind = 'notice'
-          AND json_extract(content, '$.reviewAfterMerge') = 1`
-      assert.strictEqual(said?.n, 0)
-      const [done] = yield* sql<{ one: number }>`
-        SELECT 1 AS one FROM reviews_after_merge WHERE task_id = ${created.taskId}`
-      assert.isUndefined(done)
-    }).pipe(Effect.provide(withQueries(github)))
-  })
-
-  it.live('recovers a merged small change whose launch stopped before its review was owed', () => {
-    const at = hosted()
-    const github = makeFakeService({ pushUrl: () => at.bare })
-    github.addRepository(['meridian', 'api'])
-    const { pull, head } = mergedPullRequest(at, github)
-    return Effect.gen(function* () {
-      const { projectId } = yield* opened(at.working)
-      const projects = yield* Projects
-      const plans = yield* Plans
-      const fastLane = yield* FastLane
-      const sql = yield* SqlClient.SqlClient
-      const actor = (yield* Instance).personId
-      const created = yield* projects.createTask({
-        envelope: yield* Runtime.envelope('task.create', {}),
-        projectId,
-        title: 'The Run menu says Strat',
-        draft: true,
-      })
-      yield* plans.propose({
-        projectId,
-        taskId: created.taskId,
-        steps: smallChangeSteps({
-          lead: { agentId: 'claude-code', model: null },
-          review: { agentId: 'claude-code', model: null },
-        }),
-        reason: null,
-        actorId: actor,
-        reviewAfterMerge: true,
-        startsIn: Duration.hours(1),
-      })
-      const when = '2026-11-06T14:03:00.000Z'
-      // The merged snapshot is saved and the launch stopped there: no row, no line, no review.
-      yield* sql`
-        INSERT INTO external_links ${sql.insert({
-          id: yield* newId(Ids.externalLink),
-          projectId,
-          taskId: created.taskId,
-          product: 'github',
-          kind: 'change',
-          externalId: String(pull.number),
-          ref: `meridian/api#${pull.number}`,
-          key: `${pull.number}`,
-          url: `${HOST}/meridian/api/pull/${pull.number}`,
-          snapshot: JSON.stringify({
-            number: pull.number,
-            title: pull.title,
-            url: pull.url,
-            state: 'merged',
-            draft: false,
-            headSha: head,
-            additions: 1,
-            deletions: 0,
-            changedFiles: 1,
-            repository: ['meridian', 'api'],
-            words: { noun: 'pull request', short: 'PR', prefix: '#' },
-          }),
-          listening: 0,
-          createdAt: when,
-          updatedAt: when,
-        })}`
-      const [owed] = yield* sql<{ n: number }>`
-        SELECT count(*) AS n FROM reviews_after_merge WHERE task_id = ${created.taskId}`
-      assert.strictEqual(owed?.n, 0)
-      // The merge is read again, and the review is owed from there.
-      yield* fastLane.retryPendingReviews()
-      const [made] = yield* sql<{ n: number }>`
-        SELECT count(*) AS n FROM external_links WHERE kind = 'review' AND url = ${pull.url}`
-      assert.strictEqual(made?.n, 1)
-      const [done] = yield* sql<{ one: number }>`
-        SELECT 1 AS one FROM reviews_after_merge WHERE task_id = ${created.taskId}`
-      assert.isUndefined(done)
     }).pipe(Effect.provide(withQueries(github)))
   })
 })

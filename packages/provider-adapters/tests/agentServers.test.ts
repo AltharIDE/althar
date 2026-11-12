@@ -120,18 +120,21 @@ describe('each agent’s servers, read into one shape', () => {
   })
 
   it('finds each agent’s file where its folder is moved, and where it is not', () => {
-    const homeDir = '/home/p'
+    const homeDir = home()
     const plain = serverFiles({ homeDir })
-    expect(plain.claude).toEqual({ file: '~/.claude.json', path: '/home/p/.claude.json' })
-    expect(plain.codex).toEqual({ file: '~/.codex/config.toml', path: '/home/p/.codex/config.toml' })
-    expect(plain.opencode.path).toBe('/home/p/.config/opencode/opencode.json')
+    expect(plain.claude).toEqual({ file: '~/.claude.json', path: join(homeDir, '.claude.json') })
+    expect(plain.codex).toEqual({ file: '~/.codex/config.toml', path: join(homeDir, '.codex', 'config.toml') })
+    expect(plain.opencode.path).toBe(join(homeDir, '.config', 'opencode', 'opencode.json'))
+    const elsewhere = home()
+    const codexHome = join(elsewhere, 'codex')
+    const xdgHome = join(elsewhere, 'xdg')
     const moved = serverFiles({
       homeDir,
-      env: { CLAUDE_CONFIG_DIR: '/home/p/c', CODEX_HOME: '/x/codex', XDG_CONFIG_HOME: '/x/xdg' },
+      env: { CLAUDE_CONFIG_DIR: join(homeDir, 'c'), CODEX_HOME: codexHome, XDG_CONFIG_HOME: xdgHome },
     })
-    expect(moved.claude).toEqual({ file: '~/c/.claude.json', path: '/home/p/c/.claude.json' })
-    expect(moved.codex).toEqual({ file: '/x/codex/config.toml', path: '/x/codex/config.toml' })
-    expect(moved.opencode.path).toBe('/x/xdg/opencode/opencode.json')
+    expect(moved.claude).toEqual({ file: '~/c/.claude.json', path: join(homeDir, 'c', '.claude.json') })
+    expect(moved.codex).toEqual({ file: join(codexHome, 'config.toml'), path: join(codexHome, 'config.toml') })
+    expect(moved.opencode.path).toBe(join(xdgHome, 'opencode', 'opencode.json'))
   })
 
   it('reads each agent’s file from disk, and says what it could not read', () => {

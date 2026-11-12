@@ -24,6 +24,8 @@ export const GROUPS = [
       { href: '/shifts', name: 'Shifts' },
       { href: '/changelog', name: 'Changelog' },
       { href: '/wallpaper', name: 'Wallpaper' },
+      { href: '/office-hours', name: 'Office hours' },
+      { href: '/privacy', name: 'Privacy' },
     ],
   },
 ] as const

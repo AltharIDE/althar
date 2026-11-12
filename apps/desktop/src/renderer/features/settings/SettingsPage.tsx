@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 
-import { type AgentStatus, MOST_AT_ONCE, type ToolRow } from '@althar/contracts'
+import { type AgentStatus, MOST_AT_ONCE } from '@althar/contracts'
 import {
   AgentInstall,
   AgentsAtOnce,
@@ -10,11 +10,11 @@ import {
   AgentTabPanel,
   AgentTabs,
   AppVersion,
-  Button,
   Choices,
   CoAuthor,
   CoAuthorFace,
   CrashReports,
+  DictationSettings,
   DockPreview,
   EdgeHere,
   EdgeMini,
@@ -22,9 +22,8 @@ import {
   EdgeSpot,
   Icon,
   KeepAwake,
-  PlansAndReviews,
   LinkButton,
-  NewProjectDefaults,
+  SettingGroup,
   NotificationSettings,
   NotificationSound,
   type NotifyChoices,
@@ -37,14 +36,9 @@ import {
   SettingsLayout,
   SettingsNav,
   SettingSwitch,
-  SkillInstall,
-  SkillList,
-  SkillReview,
   TaskFolders,
   UpdateReady,
   UsageData,
-  AgentTools,
-  type ToolRowModel,
 } from '@althar/ui'
 
 import altharFace from '../../../../resources/faces/althar-ai.svg'
@@ -57,7 +51,7 @@ import { systemAccentState } from '../../shared/accent'
 import { appIcons } from '../../shared/appIcons'
 import { device, platform } from '../../shared/device'
 import { choosing, edgePlaces, edgeWords } from '../../shared/edge'
-import { useEditorList, useEditorPictures } from '../../shared/OpenIn'
+import { useEditorPictures, useEditorsRead } from '../../shared/OpenIn'
 import { type PreferencesModel, usePreferences } from '../../shared/usePreferences'
 import { useSounds } from '../../shared/useSounds'
 import { useUpdate } from '../../shared/useUpdate'
@@ -75,20 +69,20 @@ import { ChangedBy } from './ChangedBy'
 import { GROUPS, type Section, sectionText } from './sections'
 import s from './Settings.module.css'
 import { text } from './text'
+import { useDictationSettings } from './useDictationSettings'
 import { useAgentsAtOnce } from './useAgentsAtOnce'
 import { useAutomationsPaused } from './useAutomationsPaused'
 import { type AppIconModel, useAppIcon } from './useAppIcon'
 import { useCoAuthor } from './useCoAuthor'
 import { useReviewSeal } from './useReviewSeal'
 import { useEdgeGlance } from './useEdgeGlance'
-import { usePlansAndReviews } from './usePlansAndReviews'
-import { useNewProjectDefaults } from './useNewProjectDefaults'
+import { TasksSection } from './TasksSection'
 import { type EdgePlaceModel, useEdgePlace } from './useEdgePlace'
+import { PresetsSection, presetsText } from './PresetsSection'
 import { usePostTeamReviews } from './usePostTeamReviews'
-import { useSkills } from './useSkills'
-import { type AgentToolsModel, useAgentTools } from './useAgentTools'
-import { serverBrand } from '../../shared/mcpServers'
+import { type RunOutside, useRunOutside } from './useRunOutside'
 import { useTaskFolders } from './useTaskFolders'
+import { ServersSection, SkillsSection } from './ToolSections'
 
 /*
  * Althar's settings, as a tab of the window beside the home's. Down the
@@ -114,9 +108,13 @@ export interface SettingsPageProps {
    * its tab opens, with its sign-in started, once while the page shows.
    */
   signIn?: string
+  /** Its account to sign in again, where one is meant: one whose sign-in ends soon. */
+  account?: string
+  /** An agent whose tab opens, nothing started: one that isn't installed, where its Install is. */
+  agent?: string
 }
 
-export function SettingsPage({ start, section, onSection, onTask, signIn }: SettingsPageProps) {
+export function SettingsPage({ start, section, onSection, onTask, signIn, account: meant, agent: shown }: SettingsPageProps) {
   const preferences = usePreferences()
   const sounds = useSounds()
   const connections = useConnections()
@@ -126,8 +124,8 @@ export function SettingsPage({ start, section, onSection, onTask, signIn }: Sett
   const looks: Looks = { appIcon: useAppIcon(), edge: useEdgePlace(section === 'appearance') }
   const agents = start.status?.agents ?? []
   // Asked to sign an agent in again: its tab opens with its signed-out account's sign-in started, which takes focus. Once.
-  const [asked, setAsked] = useState(signIn)
-  if (signIn !== undefined && signIn !== asked) setAsked(signIn)
+  const [asked, setAsked] = useState(signIn ?? shown)
+  if ((signIn ?? shown) !== undefined && (signIn ?? shown) !== asked) setAsked(signIn ?? shown)
   // Started once the agents are read again as the page opens: a read already under way would take a Terminal sign-in as done.
   const [openedAt] = useState(start.checkedAt)
   const wanted = start.checkedAt > openedAt ? agents.find((agent) => agent.id === signIn) : undefined
@@ -136,14 +134,15 @@ export function SettingsPage({ start, section, onSection, onTask, signIn }: Sett
     if (wanted.installed && wanted.problem === null) {
       // The account signed out, else one a provider within it refused (OpenCode Go), else its first.
       const account =
+        wanted.accounts.find((one) => one.id === meant) ??
         wanted.accounts.find((one) => one.signIn === 'signed_out') ??
         wanted.accounts.find((one) => one.providers?.some((provider) => provider.refusedAt !== null) === true) ??
         wanted.accounts[0]
       if (account === undefined) accounts.add(wanted.id)
       else accounts.again(wanted.id, account.id)
     }
-    // oxlint-disable-next-line react-hooks/exhaustive-deps -- started once for the agent asked about, as it is read
-  }, [wanted?.id])
+    // oxlint-disable-next-line react-hooks/exhaustive-deps -- started once for the agent and account asked about, as it is read
+  }, [wanted?.id, meant])
   // A section where something waits on the person has a dot: an account to sign in again.
   const yours: Partial<Record<Section, boolean>> = {
     agents: agents.some((agent) => agent.accounts.some((account) => account.signIn === 'signed_out')),
@@ -216,27 +215,37 @@ function SectionBody({
     case 'agents':
       return <AgentsSection start={start} accounts={accounts} {...(asked === undefined ? {} : { asked })} />
     case 'mcp-servers':
-      return <ServersSection />
+      return <ServersSection start={start} />
     case 'skills':
-      return <SkillsSection />
+      return <SkillsSection start={start} />
     case 'code-hosts':
       return <ConnectionsView model={connections} columns />
     case 'this-mac':
       return <ThisMacSection {...(onTask === undefined ? {} : { onTask })} />
-    case 'plans-and-reviews':
-      return <PlansAndReviewsSection />
-    case 'new-projects':
-      return <NewProjectsSection />
-    case 'reviews':
+    case 'tasks':
+      return (
+        <>
+          <TasksSection />
+          <SettingGroup title={presetsText.title} headingLevel={2}>
+            <PresetsSection />
+          </SettingGroup>
+        </>
+      )
+    case 'pull-requests':
       return <ReviewsSection connections={connections} />
     case 'notifications':
       return <NotificationsSection />
     case 'appearance':
       return <AppearanceSection {...looks} />
-    case 'editor':
-      return <EditorSection />
-    case 'browser':
-      return <BrowserSection />
+    case 'editor-and-browser':
+      return (
+        <>
+          <EditorSection />
+          <SettingGroup title={text.pageBesideConversations} headingLevel={2}>
+            <BrowserSection />
+          </SettingGroup>
+        </>
+      )
     case 'about':
       return <AboutSection start={start} />
   }
@@ -327,103 +336,6 @@ function AgentsSection({ start, accounts, asked }: { start: StartModel; accounts
   )
 }
 
-/* ---- skills ----------------------------------------------------------------------- */
-
-/** A row of the person's servers or skills, as the kit's table takes it. */
-const toolRowOf = (row: ToolRow): ToolRowModel => {
-  const brand = serverBrand(row.name)
-  return { ...row, ...(brand === undefined ? {} : { brand }) }
-}
-
-/** When a line under Since happened, as the section says it. */
-const sinceWhen = (at: string) => {
-  const date = new Date(at)
-  return Number.isNaN(date.getTime()) ? at : date.toLocaleDateString(undefined, { day: 'numeric', month: 'short' })
-}
-
-/** The person's own servers or skills, the roles each gets, and the switch that keeps their agents the same (ADR-097). */
-function PersonsTools({ kind, model }: { kind: 'server' | 'skill'; model: AgentToolsModel }) {
-  const tools = model.tools
-  if (tools === undefined) return <Failed when={model.loadFailed} />
-  if (!tools.enabled) return null
-  return (
-    <>
-      {model.error !== null && (
-        <p role="alert" className={s.failed}>
-          {model.error}
-        </p>
-      )}
-      <AgentTools
-        kind={kind}
-        rows={(kind === 'server' ? tools.servers : tools.skills).map(toolRowOf)}
-        sync={kind === 'server' ? tools.serverSync : tools.skillSync}
-        {...(kind === 'server' ? { scope: { projects: model.projects, value: model.projectId, onChange: model.setProjectId } } : {})}
-        onRoles={(name, roles) => model.setRoles(kind, name, roles)}
-        onSync={(on, takeBack) => model.setSync(kind, on, takeBack)}
-        onKeep={(agent, name, out) => model.keep(kind, agent, name, out)}
-        onPick={(name, way) => model.pick(kind, name, way)}
-        onUndo={model.undo}
-        onSignIn={model.signIn}
-        when={sinceWhen}
-      />
-    </>
-  )
-}
-
-/** The person's MCP servers: which roles get each, and the switch that keeps their agents' the same. */
-function ServersSection() {
-  return <PersonsTools kind="server" model={useAgentTools()} />
-}
-
-/** The person's own skills and the switch that links them into each agent; then the skills every lead is given, the one review open, and installing from GitHub. */
-function SkillsSection() {
-  const skills = useSkills()
-  const persons = useAgentTools()
-  if (skills.rows === undefined) return <Failed when={skills.loadFailed} />
-  if (!skills.enabled) return <p className={s.quiet}>{text.skillsOff}</p>
-  return (
-    <div className={s.skills}>
-      <PersonsTools kind="skill" model={persons} />
-      {skills.card !== null ? (
-        <SkillReview card={skills.card} busy={skills.busy} onInstall={skills.install} onCancel={skills.cancel} />
-      ) : (
-        <SkillInstall found={skills.found} busy={skills.busy} error={skills.error} onFind={skills.find} onReview={skills.review} />
-      )}
-      {skills.card !== null && skills.error !== null && (
-        <p role="alert" className={s.failed}>
-          {skills.error}
-        </p>
-      )}
-      <div className={s.skillUpdates}>
-        <Button size="small" variant="quiet" disabled={skills.busy} onClick={skills.checkUpdates}>
-          {text.skillsCheck}
-        </Button>
-        {skills.checked && skills.available.length === 0 && skills.unchecked.length === 0 && (
-          <span className={s.quiet}>{text.skillsCurrent}</span>
-        )}
-        {skills.available.map((id) => (
-          <Button key={id} size="small" disabled={skills.busy} onClick={() => skills.reviewUpdate(id)}>
-            {text.skillsUpdate(id)}
-          </Button>
-        ))}
-        {skills.unchecked.map((one) => (
-          <span key={one.id} className={s.quiet}>
-            {text.skillsUnchecked(one.id, one.error)}
-          </span>
-        ))}
-      </div>
-      <SkillList
-        skills={skills.rows}
-        onToggle={skills.toggle}
-        onToggleAll={skills.toggleAll}
-        onRollBack={skills.rollBack}
-        onRemove={skills.remove}
-      />
-      {skills.catalogRevision !== null && <p className={s.quiet}>{text.skillsCatalog(skills.catalogRevision)}</p>}
-    </div>
-  )
-}
-
 /* ---- work on this computer --------------------------------------------------------- */
 
 /** The system lets Althar open at login: a Mac, and Windows. */
@@ -497,30 +409,9 @@ function ThisMacSection({ onTask }: { onTask?: (threadId: string) => void }) {
         )}
       </SettingList>
       <Failed when={failed || atOnce?.failed === true || paused?.failed === true} />
-    </>
-  )
-}
-
-/* ---- plans and reviews ------------------------------------------------------------- */
-
-function PlansAndReviewsSection() {
-  const plansAndReviews = usePlansAndReviews()
-  return (
-    <>
-      {plansAndReviews !== null && <PlansAndReviews value={plansAndReviews.value} onChange={plansAndReviews.set} />}
-      <Failed when={plansAndReviews?.failed === true} />
-    </>
-  )
-}
-
-/* ---- new projects ------------------------------------------------------------------ */
-
-function NewProjectsSection() {
-  const defaults = useNewProjectDefaults()
-  return (
-    <>
-      {defaults !== null && <NewProjectDefaults value={defaults.value} onChange={defaults.set} />}
-      <Failed when={defaults?.failed === true} />
+      <SettingGroup title={text.dictation} headingLevel={2}>
+        <DictationSection />
+      </SettingGroup>
     </>
   )
 }
@@ -531,6 +422,7 @@ const face = <img src={altharFace} alt="" />
 
 function ReviewsSection({ connections }: { connections: ConnectionsModel }) {
   const postTeam = usePostTeamReviews()
+  const runOutside = useRunOutside()
   const coAuthor = useCoAuthor()
   const seal = useReviewSeal()
   // The person, on the commit co-author is shown on, as GitHub names them.
@@ -546,6 +438,22 @@ function ReviewsSection({ connections }: { connections: ConnectionsModel }) {
             checked={postTeam.on}
             onChange={postTeam.set}
           />
+        )}
+        {runOutside !== null && (
+          <SettingRow title={text.runOutsideTitle} note={text.runOutsideNote} glyph={<Icon name="lock" size={15} />}>
+            {() => (
+              <Segmented<RunOutside>
+                label={text.runOutsideTitle}
+                value={runOutside.to}
+                onChange={runOutside.set}
+                options={[
+                  { value: 'ask', label: text.runOutsideAsk },
+                  { value: 'safe', label: text.runOutsideSafe },
+                  { value: 'full', label: text.runOutsideFull },
+                ]}
+              />
+            )}
+          </SettingRow>
         )}
         {coAuthor !== null && (
           <SettingSwitch
@@ -577,7 +485,7 @@ function ReviewsSection({ connections }: { connections: ConnectionsModel }) {
           </div>
         </>
       )}
-      <Failed when={postTeam?.failed === true || coAuthor?.failed === true || seal?.failed === true} />
+      <Failed when={postTeam?.failed === true || runOutside?.failed === true || coAuthor?.failed === true || seal?.failed === true} />
     </>
   )
 }
@@ -745,12 +653,15 @@ function AppearanceSection({ appIcon, edge }: Looks) {
 
 function EditorSection() {
   const { preferences, set, failed } = usePreferences()
-  const editors = useEditorList()
+  const { editors, loading, looking, again } = useEditorsRead()
   const pictures = useEditorPictures()
-  if (editors.length === 0) return <p className={s.quiet}>{text.noEditors}</p>
+  // Until they are read, none isn't known: nothing yet, not an empty state that gives way.
+  if (loading) return null
   return (
     <>
       <OpenFilesIn
+        onLookAgain={again}
+        looking={looking}
         editors={editors.map((editor) => ({
           value: editor.id,
           label: editor.name,
@@ -760,6 +671,37 @@ function EditorSection() {
         onChange={(editor) => set('editor', editor)}
       />
       <Failed when={failed} />
+    </>
+  )
+}
+
+/* ---- dictation -------------------------------------------------------------------- */
+
+/** Which microphone dictation hears, whether the system lets it, and the speech model on disk, with Remove. */
+function DictationSection() {
+  const dictation = useDictationSettings()
+  if (dictation.kind === 'none') return <p className={s.quiet}>{text.noDictation}</p>
+  if (dictation.kind === 'loading') return null
+  if (dictation.kind === 'unreadable')
+    return (
+      <p className={s.quiet}>
+        {text.dictationUnreadable} <LinkButton onClick={dictation.retry}>{text.tryAgain}</LinkButton>
+      </p>
+    )
+  return (
+    <>
+      <DictationSettings
+        microphones={dictation.microphones}
+        microphone={dictation.microphone}
+        onMicrophone={dictation.choose}
+        permission={dictation.permission}
+        {...(dictation.openSettings === undefined ? {} : { onOpenSettings: dictation.openSettings })}
+        model={dictation.model}
+        onRemove={dictation.remove}
+        removing={dictation.removing}
+        text={dictation.text}
+      />
+      <Failed when={dictation.failed}>{text.removeFailed}</Failed>
     </>
   )
 }

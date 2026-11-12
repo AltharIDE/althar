@@ -211,4 +211,33 @@ describe('the person’s MCP servers, through the API', () => {
       }),
     ),
   )
+
+  it.live('adds, opens out, presses out of a project and takes out a server through the API, an agent not changed said in words', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const home = homeWith({})
+        const { io } = fakeCommands(home, ['codex'])
+        const client = yield* connected({ homeDir: home, folder: io.folder, run: io.run, env: {} })
+        const failed = yield* client
+          .AddServer({ commandId: commandId(), server: { name: 'docs', command: 'althar-test-no-such-docs' }, agents: ['claude', 'codex'] })
+          .pipe(Effect.flip)
+        assert.strictEqual(failed.reason, 'ServerRefused')
+        assert.deepStrictEqual(
+          agentServers('claude', { homeDir: home }).servers.map((one) => one.name),
+          ['docs'],
+        )
+        const detail = yield* client.GetServerDetail({ name: 'docs', repository: null })
+        assert.deepStrictEqual(
+          detail.files.map((one) => one.state),
+          ['yours', 'missing', 'missing'],
+        )
+        yield* client.SetToolInProject({ commandId: commandId(), kind: 'server', name: 'docs', projectId: 'project-a', on: false })
+        assert.deepStrictEqual((yield* client.GetAgentTools({ projectId: null })).servers[0]?.offIn, ['project-a'])
+        yield* client.SetToolInProject({ commandId: commandId(), kind: 'server', name: 'docs', projectId: 'project-a', on: true })
+        assert.deepStrictEqual((yield* client.GetAgentTools({ projectId: null })).servers[0]?.offIn, [])
+        yield* client.RemoveServer({ commandId: commandId(), name: 'docs' })
+        assert.deepStrictEqual((yield* client.GetAgentTools({ projectId: null })).servers, [])
+      }),
+    ),
+  )
 })

@@ -139,7 +139,7 @@ test('comes back to what runs and what waits across projects, with the projects 
       await expect(page.getByText(/^(In the menu bar|In the system tray|Only in Althar’s window)$/)).toBeVisible()
     }
     // Althar as co-author, beside posting the team's reviews; turned off, it asks once, large, why it would stay.
-    await section('Reviews and pull requests')
+    await section('Pull requests')
     const credit = page.getByRole('switch', { name: 'Althar as co-author' })
     await expect(credit).toHaveAttribute('aria-checked', 'true')
     await credit.click()

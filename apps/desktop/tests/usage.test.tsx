@@ -156,13 +156,13 @@ describe('what a task used of each account', () => {
           session,
           (_, model) => ({ id: model ?? '', name: model ?? '', short: model ?? '', runtime: 'Claude Code', efforts: [] }),
           undefined,
-          { usage: USAGE, heading: 'This task so far' },
+          { usage: USAGE, heading: 'This task' },
         )}
       </>,
       fakeClient().client,
     )
     await userEvent.click(screen.getByRole('button', { name: /60%/ }))
-    expect(screen.getByText('This task so far')).toBeTruthy()
+    expect(screen.getByText('This task')).toBeTruthy()
     expect(screen.getByText('~8% of week')).toBeTruthy()
     expect(screen.getByText('$1.24')).toBeTruthy()
   })

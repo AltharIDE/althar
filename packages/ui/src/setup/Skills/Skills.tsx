@@ -4,133 +4,16 @@ import { cx } from '../../lib/cx'
 import type { RootProps } from '../../lib/props'
 import { Button } from '../../primitives/Button/Button'
 import { Field } from '../../primitives/Field/Field'
-import { LinkButton } from '../../primitives/LinkButton/LinkButton'
-import { Switch } from '../../primitives/Switch/Switch'
 import s from './Skills.module.css'
 
 /*
- * The skills every task's lead is given, whichever agent leads it: the ones
- * Althar ships and the ones the person installed from GitHub, each on or
- * off from the next time a lead starts. A skill from GitHub is read before it is installed: a
- * card shows where it is from, the commit it is pinned to, its licence, what
- * Althar noticed in it, every file and what changes from the version
- * installed, and only Install puts it in. Nothing in a skill is run by
- * Althar; an agent may run its scripts, under the task's rules.
+ * Adding a skill from GitHub: a repository looked in for its skill folders,
+ * then the one chosen read before it is added. A card shows where it is
+ * from, the commit it is pinned to, its licence, what Althar noticed in it,
+ * every file and what changes from the version added before, and only
+ * Install puts it in. Nothing in a skill is run by Althar; an agent may run
+ * its scripts, under the task's rules.
  */
-
-export interface SkillRowModel {
-  id: string
-  description: string | null
-  /** Where it is from, as the person reads it: "Althar", or the repository. */
-  from: string
-  on: boolean
-  /** It needs an agent that dispatches subagents; the others aren't given it. */
-  needsSubagents: boolean
-  canRollBack: boolean
-  /** One the person installed, which can go; one Althar ships can only be off. */
-  removable: boolean
-  /** Why it is broken and how to put it right, where Althar can't read what it keeps of it; no run is given it. */
-  problem?: string | undefined
-}
-
-export interface SkillListText {
-  find: string
-  none: string
-  needsSubagents: string
-  rollBack: string
-  remove: string
-  count: (on: number, all: number) => string
-  allOn: string
-  allOff: string
-}
-
-export const skillListText: SkillListText = {
-  find: 'Find a skill',
-  none: 'No skill matches',
-  needsSubagents: 'Only for agents that dispatch subagents',
-  rollBack: 'Previous version',
-  remove: 'Remove',
-  count: (on, all) => (on === all ? `all ${all} on` : `${on} of ${all} on`),
-  allOn: 'Turn all on',
-  allOff: 'Turn all off',
-}
-
-/** A list this long is found in by name. */
-const LONG = 8
-
-export type SkillListProps = RootProps<
-  'div',
-  {
-    skills: readonly SkillRowModel[]
-    onToggle: (id: string, on: boolean) => void
-    onRollBack: (id: string) => void
-    onRemove: (id: string) => void
-    /** Turns every skill on, or off once every one that can be is: one with a problem is left as it is. */
-    onToggleAll?: (on: boolean) => void
-    text?: Partial<SkillListText>
-  }
->
-
-/** The skills, each on or off, with where it is from, and all at once; found by name where there are many. */
-export function SkillList({ skills, onToggle, onRollBack, onRemove, onToggleAll, text, className, ...rest }: SkillListProps) {
-  const t = { ...skillListText, ...text }
-  const sound = skills.filter((skill) => skill.problem === undefined)
-  const allOn = sound.length > 0 && sound.every((skill) => skill.on)
-  const [query, setQuery] = useState('')
-  const wanted = skills.length > LONG ? query.trim().toLowerCase() : ''
-  const shown = skills.filter((skill) => `${skill.id} ${skill.description ?? ''}`.toLowerCase().includes(wanted))
-  return (
-    <div className={cx(s.skills, className)} {...rest}>
-      <div className={s.top}>
-        {skills.length > LONG && (
-          <Field
-            type="search"
-            aria-label={t.find}
-            placeholder={t.find}
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
-            className={s.find}
-          />
-        )}
-        <span className={s.count}>{t.count(skills.filter((skill) => skill.on).length, skills.length)}</span>
-        {onToggleAll !== undefined && sound.length > 0 && (
-          <LinkButton className={s.all} onClick={() => onToggleAll(!allOn)}>
-            {allOn ? t.allOff : t.allOn}
-          </LinkButton>
-        )}
-      </div>
-      {shown.length === 0 && <p className={s.quiet}>{t.none}</p>}
-      <ul className={s.list}>
-        {shown.map((skill) => (
-          <li key={skill.id} className={s.row}>
-            <span className={s.words}>
-              <span id={`skill-${skill.id}`} className={s.name}>
-                {skill.id}
-              </span>
-              {skill.description !== null && <span className={s.description}>{skill.description}</span>}
-              {skill.problem !== undefined && <span className={s.problem}>{skill.problem}</span>}
-              <span className={s.meta}>
-                <span>{skill.from}</span>
-                {skill.needsSubagents && <span>{t.needsSubagents}</span>}
-                {skill.canRollBack && (
-                  <LinkButton className={s.action} onClick={() => onRollBack(skill.id)}>
-                    {t.rollBack}
-                  </LinkButton>
-                )}
-                {skill.removable && (
-                  <LinkButton className={s.action} onClick={() => onRemove(skill.id)}>
-                    {t.remove}
-                  </LinkButton>
-                )}
-              </span>
-            </span>
-            <Switch checked={skill.on} onChange={(on) => onToggle(skill.id, on)} labelledBy={`skill-${skill.id}`} />
-          </li>
-        ))}
-      </ul>
-    </div>
-  )
-}
 
 /* ---- installing from GitHub ------------------------------------------------------- */
 

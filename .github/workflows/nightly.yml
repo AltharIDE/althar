@@ -55,7 +55,9 @@ jobs:
       - uses: actions/setup-node@v5
         with:
           node-version-file: .node-version
-      - run: bun install --frozen-lockfile
+      - uses: ./.github/actions/electron
+        with:
+          binary: 'false'
       # Ubuntu 24.04 keeps unprivileged user namespaces from apps, and Chromium's sandbox needs them.
       - run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
       - env:
@@ -125,12 +127,10 @@ jobs:
           node-version-file: .node-version
       - uses: actions/cache@v4
         with:
-          path: |
-            ~/.bun/install/cache
-            ~/AppData/Local/electron/Cache
+          path: ~/.bun/install/cache
           key: windows-bun-${{ hashFiles('bun.lock') }}
           restore-keys: windows-bun-
-      - run: bun install --frozen-lockfile
+      - uses: ./.github/actions/electron
       - env:
           PACKAGES: ${{ matrix.packages }}
           SHARD: ${{ matrix.shard }}
@@ -182,7 +182,7 @@ jobs:
           git diff --name-only --diff-filter=AMR "${since:-HEAD}" HEAD > "$RUNNER_TEMP/changed"
           cat "$RUNNER_TEMP/changed"
       - id: plan
-        run: bun packages/testing/src/stress.ts plan "$RUNNER_TEMP/changed"
+        run: bun packages/testing/src/stress.ts plan "$RUNNER_TEMP/changed" nightly
       - if: steps.plan.outputs.any-windows == 'true'
         uses: actions/setup-node@v5
         with:
@@ -190,17 +190,23 @@ jobs:
       - if: steps.plan.outputs.any-windows == 'true'
         uses: actions/cache@v4
         with:
-          path: |
-            ~/.bun/install/cache
-            ~/AppData/Local/electron/Cache
+          path: ~/.bun/install/cache
           key: windows-bun-${{ hashFiles('bun.lock') }}
           restore-keys: windows-bun-
       - if: steps.plan.outputs.any-windows == 'true'
-        run: bun install --frozen-lockfile
+        uses: ./.github/actions/electron
       - if: steps.plan.outputs.any-windows == 'true'
         env:
           PLAN: ${{ steps.plan.outputs.windows }}
         run: bun packages/testing/src/stress.ts run
+
+  # The tests main added or changed in the last day, on Linux, twenty times over for a few and fewer for many, and the
+  # specs it changed up to five times, with no retry: the long stress run, here, where no pull request waits on it, as
+  # a pull request's own is three runs (stress.yml).
+  stress-linux:
+    uses: ./.github/workflows/stress.yml
+    with:
+      nightly: true
 
   # How fast the paths with a budget are, out of every gate (docs/plans/tests-that-hold.md, F): each package's
   # `test:performance`, Vitest's benchmarks in its tests/*.bench.ts, reported on the run's summary. One over its budget is
@@ -218,7 +224,9 @@ jobs:
       - uses: actions/setup-node@v5
         with:
           node-version-file: .node-version
-      - run: bun install --frozen-lockfile
+      - uses: ./.github/actions/electron
+        with:
+          binary: 'false'
       - env:
           LOG: ${{ runner.temp }}/performance.txt
         run: |
@@ -246,7 +254,7 @@ jobs:
 
   # The night's result as one open issue: opened (or added to) when a night fails, closed when one passes.
   report:
-    needs: [linux, windows, stress-windows]
+    needs: [linux, windows, stress-windows, stress-linux]
     if: ${{ always() && !cancelled() && github.event_name == 'schedule' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 5

@@ -1,10 +1,11 @@
-import type { ThreadItem } from '@althar/contracts'
+import type { ThreadItem, TurnTime } from '@althar/contracts'
 import { ToolKind, ToolState } from '@althar/ui'
 
 import { type Handed, handedBy, type OutputSoFar } from './handed'
 import { type Block, blocksOf, carriedOn, type Doing, doingOf, type Part, relayed, type StepResult, type Streamed } from './thread'
 import { text as threadText } from './ThreadBlocks'
 import { took } from './time'
+import { type Spent, spentOf, turnOfItems } from './turnTime'
 
 /*
  * A task's thread in rounds (ADR-042). A round starts with an ask: what the
@@ -55,10 +56,15 @@ export interface Work {
   readonly counts: string
   /** While it works: what it is doing now, in one line; none while it writes. */
   readonly doing: Doing | null
+  /** Once it is over, where its time went, as the runtime kept it for its turns; null where none of them did. */
+  readonly spent: Spent | null
 }
 
 /** Pictures the lead showed the person (show_pictures), as one set. */
 export type Shown = Extract<Part, { kind: 'pictures' }>
+
+/** A canvas the lead drew or opened in the round (ADR-104): a line under its work, that opens it. */
+export type Drawn = Extract<Part, { kind: 'canvas' }>
 
 export interface Round {
   readonly kind: 'round'
@@ -83,6 +89,8 @@ export interface Round {
   readonly handed: Handed
   /** Pictures it showed the person, in order, where it showed them: before its result, or after it. */
   readonly shown: { readonly before: ReadonlyArray<Shown>; readonly after: ReadonlyArray<Shown> }
+  /** The canvases it drew or opened, in order: open under its work, each a line that opens it. */
+  readonly drawn: ReadonlyArray<Drawn>
   readonly live: boolean
   /** Everything its lead did, in order: what a document it wrote was last changed by is read from them. */
   readonly parts: ReadonlyArray<Part>
@@ -99,15 +107,13 @@ export type RoundBlock =
       readonly id: string
       readonly text: string
       readonly tone: 'info' | 'warning'
-      /** A task the line is about, which it links to: one this task's lead started (ADR-097). */
+      /** A task the line is about, which it links to: one this task's lead started (ADR-097), in one line. */
       readonly task?: { readonly threadId: string; readonly title: string }
-      /** What the line is about another task, drawn as its own words: one that ended without reaching this, or one changing the same files. */
-      readonly situation?: NoticeContent['situation']
     }
   /** Its folder went, or came back: a line across the thread, a change of scene (ADR-056). */
   | { readonly kind: 'folder'; readonly id: string; readonly text: string }
-  /** What a lead's agent could see of the person's skills and the repository's. */
-  | { readonly kind: 'skills'; readonly id: string; readonly title: string; readonly skills: NonNullable<NoticeContent['skills']> }
+  /** A step of the work: a change started, a stamped row of its own (a task is a conversation plus parts). */
+  | { readonly kind: 'work_step'; readonly id: string; readonly step: NonNullable<NoticeContent['step']> }
   /**
    * A reviewer's verdict and findings, in its own voice, on the model its review ran; with the lead's round settling them,
    * where a later round of the lead's handed the work over since.
@@ -207,6 +213,8 @@ export interface RoundSource {
   readonly openedAt?: string | null
   readonly reading?: boolean
   readonly turnEnded?: string | null
+  /** Where each turn's time went, by its id (`turnsById`). */
+  readonly turns?: ReadonlyMap<string, TurnTime>
 }
 
 /** A task's thread in rounds, oldest first, with what is still being written but not yet read at the end. */
@@ -219,6 +227,16 @@ export const roundsOf = (
   const { items, turnRunning, worktree } = source
   const at = new Map(items.map((item) => [item.id, item.createdAt]))
   for (const [id, streamed] of streaming) if (!at.has(id)) at.set(id, streamed.at)
+  // Where a round's time went: its items' turns, as the runtime kept them.
+  const turnOf = turnOfItems(items)
+  const kept = source.turns
+  const spending = (ids: ReadonlyArray<string>) =>
+    kept === undefined
+      ? null
+      : spentOf(
+          ids.flatMap((id) => turnOf.get(id) ?? []),
+          kept,
+        )
   // In stretches that end at a report, so blocksOf never folds what was said after one into the turn before it.
   const stretches: Array<Array<ThreadItem>> = [[]]
   for (const item of items) {
@@ -246,6 +264,7 @@ export const roundsOf = (
         ...(last && source.reading !== undefined ? { reading: source.reading } : {}),
         ...(last && source.turnEnded !== undefined ? { turnEnded: source.turnEnded } : {}),
         ...(last && index > 0 ? { earlierAt } : {}),
+        ...(source.turns === undefined ? {} : { turns: source.turns }),
       },
       last ? streaming : new Map(),
       ago,
@@ -270,12 +289,17 @@ export const roundsOf = (
   // What Althar did between rounds goes in the next one's work.
   let pending: Array<WorkStep> = []
   const close = () => {
-    if (open !== null) out.push(roundOf(open, open.id === liveId, at, worktree, now))
+    if (open !== null) out.push(roundOf(open, open.id === liveId, at, worktree, now, spending))
     open = null
   }
   blocks.forEach((block, index) => {
     switch (block.kind) {
       case 'turn': {
+        // A turn that said and did nothing a person could see (an empty message, a blank thought) opens no round and draws no
+        // fold: the reply that follows, as a turn of its own, is the round, on its own model and from its own time. The turn
+        // at work now stays, as it may be about to say something.
+        const parts = block.parts.filter((part) => !isEmpty(part))
+        if (parts.length === 0 && !(running && index === lastTurn)) return
         if (open === null || open.agentId !== block.agentId) {
           close()
           open = {
@@ -289,7 +313,7 @@ export const roundsOf = (
           }
           pending = []
         }
-        open.steps.push(...block.parts)
+        open.steps.push(...parts)
         if (running && index === lastTurn) liveId = open.id
         return
       }
@@ -307,7 +331,7 @@ export const roundsOf = (
           if (open.report !== null) {
             const later = open.steps.slice(open.reportedAfter)
             const first = later[0]
-            out.push(roundOf({ ...open, steps: open.steps.slice(0, open.reportedAfter) }, false, at, worktree, now))
+            out.push(roundOf({ ...open, steps: open.steps.slice(0, open.reportedAfter) }, false, at, worktree, now, spending))
             const id = first?.id ?? block.id
             if (open.id === liveId) liveId = id
             open = {
@@ -338,6 +362,7 @@ export const roundsOf = (
             failed: null,
             handed: handedBy([], worktree),
             shown: { before: [], after: [] },
+            drawn: [],
             live: false,
             parts: [],
           })
@@ -345,9 +370,10 @@ export const roundsOf = (
       }
       case 'divider': {
         const content = noticeOf(block)
-        // Before the round it may arrive during, which it doesn't end: a session says what it could see once it has started.
-        if (content.role === 'skills') {
-          out.push({ kind: 'skills', id: block.id, title: content.title, skills: content.skills ?? [] })
+        // A step of the work is a row of its own, between rounds.
+        if (content.step !== undefined) {
+          close()
+          out.push({ kind: 'work_step', id: block.id, step: content.step })
           return
         }
         const role = roleOf(content)
@@ -375,7 +401,6 @@ export const roundsOf = (
           text: shorter(block.text),
           tone: content.severity === 'info' ? 'info' : 'warning',
           ...(content.task === undefined ? {} : { task: { threadId: content.task.threadId, title: content.task.title } }),
-          ...(content.situation === undefined ? {} : { situation: content.situation }),
         })
         return
       }
@@ -401,6 +426,11 @@ export const roundsOf = (
   return withSettled(out)
 }
 
+/** A message or a thought with nothing in it: no words, no pictures, no files. */
+const isEmpty = (part: Part): boolean =>
+  (part.kind === 'message' && part.text.trim() === '' && part.pictures.length === 0 && part.files.length === 0) ||
+  (part.kind === 'thought' && part.text.trim() === '')
+
 /** Whether a block is a round its lead reported in, on its work or on settling a review: a handoff. */
 const handsOver = (block: RoundBlock | undefined): block is Round =>
   block?.kind === 'round' && (block.report?.result.step === 'implement' || block.report?.result.step === 'settle')
@@ -408,7 +438,6 @@ const handsOver = (block: RoundBlock | undefined): block is Round =>
 /**
  * Each review with the round its lead settled it in, right after it, where a
  * later round handed the work over again: the latest handoff stands open.
- * What a session that started between them could see stays on its line, after the review's.
  */
 const withSettled = (blocks: ReadonlyArray<RoundBlock>): ReadonlyArray<RoundBlock> => {
   const latest = blocks.findLastIndex(handsOver)
@@ -416,11 +445,10 @@ const withSettled = (blocks: ReadonlyArray<RoundBlock>): ReadonlyArray<RoundBloc
   for (let at = 0; at < blocks.length; at++) {
     const block = blocks[at]
     if (block === undefined) continue
-    let ahead = at + 1
-    while (blocks[ahead]?.kind === 'skills') ahead += 1
+    const ahead = at + 1
     const next = blocks[ahead]
     if (block.kind === 'verdict' && handsOver(next) && next.report?.result.step === 'settle' && !next.live && ahead < latest) {
-      out.push({ ...block, settle: next }, ...blocks.slice(at + 1, ahead))
+      out.push({ ...block, settle: next })
       at = ahead
     } else out.push(block)
   }
@@ -428,7 +456,14 @@ const withSettled = (blocks: ReadonlyArray<RoundBlock>): ReadonlyArray<RoundBloc
 }
 
 /** A round, from everything its lead did: its acknowledgement, its work in one line, and its result. */
-const roundOf = (open: Gathering, live: boolean, at: ReadonlyMap<string, string>, worktree: string | null, now: string): Round => {
+const roundOf = (
+  open: Gathering,
+  live: boolean,
+  at: ReadonlyMap<string, string>,
+  worktree: string | null,
+  now: string,
+  spending: (ids: ReadonlyArray<string>) => Spent | null,
+): Round => {
   // An error its agent's turn ended with is said in the open; any other notice of its own stays in the work, as Althar's do.
   const ending = open.steps.at(-1)
   const failed = !live && ending?.kind === 'notice' && ending.tone === 'error' ? ending : undefined
@@ -436,8 +471,10 @@ const roundOf = (open: Gathering, live: boolean, at: ReadonlyMap<string, string>
   const afterReport = new Set(open.steps.slice(open.reportedAfter).map((step) => step.id))
   // Pictures it showed the person stand open in the round, not in its work.
   const pictures = open.steps.flatMap((step) => (step.kind === 'pictures' ? [step] : []))
+  // The canvases it drew stand open too, under its work.
+  const drawn = open.steps.flatMap((step) => (step.kind === 'canvas' ? [step] : []))
   const steps: ReadonlyArray<WorkStep> = open.steps.flatMap((step) =>
-    step === failed || step.kind === 'pictures'
+    step === failed || step.kind === 'pictures' || step.kind === 'canvas'
       ? []
       : step.kind === 'notice'
         ? [{ kind: 'aside' as const, id: step.id, text: step.text }]
@@ -509,6 +546,7 @@ const roundOf = (open: Gathering, live: boolean, at: ReadonlyMap<string, string>
                   writing !== undefined,
                 )
               : null,
+            spent: live ? null : spending(open.steps.map((step) => step.id)),
           },
     result: result === undefined ? null : said(result, true),
     writing: writing === undefined ? null : said(writing, false),
@@ -521,6 +559,7 @@ const roundOf = (open: Gathering, live: boolean, at: ReadonlyMap<string, string>
       before: pictures.filter((shown) => result === undefined || open.steps.indexOf(shown) < open.steps.indexOf(result)),
       after: pictures.filter((shown) => result !== undefined && open.steps.indexOf(shown) > open.steps.indexOf(result)),
     },
+    drawn,
     live,
     parts: open.steps.filter((step): step is Part => step.kind !== 'aside' && step !== failed),
   }

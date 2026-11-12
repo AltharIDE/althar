@@ -1,4 +1,5 @@
 import {
+  AFTER_MERGE_REVIEWS,
   PLANS_AND_REVIEWS,
   type PlansAndReviews,
   type PlansAndReviewsChange,
@@ -28,12 +29,28 @@ const COUNTDOWN = 'plan_countdown_seconds'
 const ROUNDS = 'review_rounds'
 const ROUNDS_OUT = 'review_rounds_out'
 
-const PERMISSIONS = 'new_project_permissions'
 const USAGE_LIMIT = 'new_project_usage_limit'
 const ROTATE = 'new_project_rotate_accounts'
 const END = 'new_project_end'
+const PUSH_COMMITS = 'new_project_push_commits'
+const POST_SCREENSHOTS = 'new_project_post_screenshots'
+const RESOLVE_CONFLICTS = 'new_project_resolve_conflicts'
+const MOVE_ISSUES = 'new_project_move_issues'
+const AFTER_MERGE_REVIEW = 'new_project_after_merge_review'
 
-const ALL = [COUNTDOWN, ROUNDS, ROUNDS_OUT, PERMISSIONS, USAGE_LIMIT, ROTATE, END] as const
+const ALL = [
+  COUNTDOWN,
+  ROUNDS,
+  ROUNDS_OUT,
+  USAGE_LIMIT,
+  ROTATE,
+  END,
+  PUSH_COMMITS,
+  POST_SCREENSHOTS,
+  RESOLVE_CONFLICTS,
+  MOVE_ISSUES,
+  AFTER_MERGE_REVIEW,
+] as const
 
 const rowsOf = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient
@@ -49,6 +66,9 @@ const numberOf = <N extends number>(kept: string | undefined, choices: ReadonlyA
 
 const choiceOf = <S extends string>(kept: string | undefined, choices: ReadonlyArray<S>, fallback: S): S =>
   choices.find((choice) => choice === kept) ?? fallback
+
+/** A kept switch: `on` or `off`, kept only where it differs from the value it has without one. */
+const switchOf = (kept: string | undefined, fallback: boolean): boolean => (kept === 'on' ? true : kept === 'off' ? false : fallback)
 
 const COUNTDOWNS: ReadonlyArray<PlansAndReviews['countdown']> = [0, 10, 25, 60]
 const ROUND_CHOICES: ReadonlyArray<PlansAndReviews['rounds']> = [1, 2, 3, 5]
@@ -71,10 +91,14 @@ export const roundsOutNow = Effect.map(plansAndReviewsOf, (settings) => settings
 
 /** What the rules of a project made now start with. */
 export const newProjectDefaultsOf = Effect.map(rowsOf, (kept): NewProjectDefaults => ({
-  permissions: choiceOf(kept.get(PERMISSIONS), ['rules', 'coordinator', 'ask'], NEW_PROJECT_DEFAULTS.permissions),
   usageLimit: choiceOf(kept.get(USAGE_LIMIT), ['move', 'wait', 'ask'], NEW_PROJECT_DEFAULTS.usageLimit),
   rotateAccounts: kept.get(ROTATE) === 'on',
   end: choiceOf(kept.get(END), ['draft', 'ready', 'none'], NEW_PROJECT_DEFAULTS.end),
+  pushCommits: switchOf(kept.get(PUSH_COMMITS), NEW_PROJECT_DEFAULTS.pushCommits),
+  postScreenshots: switchOf(kept.get(POST_SCREENSHOTS), NEW_PROJECT_DEFAULTS.postScreenshots),
+  resolveConflicts: switchOf(kept.get(RESOLVE_CONFLICTS), NEW_PROJECT_DEFAULTS.resolveConflicts),
+  moveIssues: switchOf(kept.get(MOVE_ISSUES), NEW_PROJECT_DEFAULTS.moveIssues),
+  afterMergeReview: choiceOf(kept.get(AFTER_MERGE_REVIEW), AFTER_MERGE_REVIEWS, NEW_PROJECT_DEFAULTS.afterMergeReview),
 }))
 
 /** Keeps a setting, or, at the value it has without one, forgets it. */
@@ -100,8 +124,16 @@ export const setPlansAndReviews = (change: PlansAndReviewsChange) =>
 /** Changes what the rules of projects made from now on start with; what isn't given stays. */
 export const setNewProjectDefaults = (change: NewProjectDefaultsChange) =>
   Effect.gen(function* () {
-    if (change.permissions !== undefined) yield* keep(PERMISSIONS, unlessDefault(change.permissions, NEW_PROJECT_DEFAULTS.permissions))
     if (change.usageLimit !== undefined) yield* keep(USAGE_LIMIT, unlessDefault(change.usageLimit, NEW_PROJECT_DEFAULTS.usageLimit))
     if (change.rotateAccounts !== undefined) yield* keep(ROTATE, change.rotateAccounts ? 'on' : null)
     if (change.end !== undefined) yield* keep(END, unlessDefault(change.end, NEW_PROJECT_DEFAULTS.end))
+    if (change.afterMergeReview !== undefined)
+      yield* keep(AFTER_MERGE_REVIEW, unlessDefault(change.afterMergeReview, NEW_PROJECT_DEFAULTS.afterMergeReview))
+    for (const [key, value, fallback] of [
+      [PUSH_COMMITS, change.pushCommits, NEW_PROJECT_DEFAULTS.pushCommits],
+      [POST_SCREENSHOTS, change.postScreenshots, NEW_PROJECT_DEFAULTS.postScreenshots],
+      [RESOLVE_CONFLICTS, change.resolveConflicts, NEW_PROJECT_DEFAULTS.resolveConflicts],
+      [MOVE_ISSUES, change.moveIssues, NEW_PROJECT_DEFAULTS.moveIssues],
+    ] as const)
+      if (value !== undefined) yield* keep(key, value === fallback ? null : value ? 'on' : 'off')
   })

@@ -5,6 +5,7 @@ import { join } from 'node:path'
 import type { Fetch } from '@althar/connectors'
 import { emitterPort } from '@althar/contracts'
 import type { EndpointRead } from '@althar/provider-adapters'
+import type { PageDone } from '@althar/runtime/pageBridge'
 import {
   AfterOpen,
   backupsIn,
@@ -13,13 +14,17 @@ import {
   databaseIn,
   Failures,
   Folders,
+  MachineLoad,
   Nudges,
   Secrets,
+  ToolServer,
   services,
   settledAmong,
   settling,
   startup,
   UsageData,
+  lagLogged,
+  watchLag,
 } from '@althar/runtime'
 import { Cause, Context, Deferred, Effect, Exit, Fiber, Layer, Logger, Queue, Stream } from 'effect'
 import { net } from 'electron'
@@ -32,6 +37,7 @@ import { runtimeFacts, runtimeNames } from './facts'
 import { agentsLog, stdoutLogger } from './logging'
 import { type Device, deviceHere } from './onDevice'
 import { profileInUse } from './profileInUse'
+import { pagesWith } from './pages'
 import { screenshotsWith, type Taken } from './screenshots'
 import { sealingWith } from './sealing'
 import { openInBrowser, openInTerminal } from './terminal'
@@ -125,6 +131,9 @@ const secrets = Secrets.sealed(join(profile, 'secrets'), {
 /* Screenshots agents ask for, which the main process draws, with Chromium (screenshots.ts). */
 const screenshots = screenshotsWith((message) => parent.postMessage(message))
 
+/* What the lead and the coordinator ask of the page beside their conversation, which the main process answers (pages.ts). */
+const pages = pagesWith((message) => parent.postMessage(message))
+
 /** Code hosts and trackers are called over the app's own network, Chromium's (appFetch.ts). */
 const firstScreen = Deferred.makeUnsafe<void>()
 const opened = Effect.runPromise(Deferred.await(firstScreen))
@@ -164,13 +173,12 @@ const options = {
   artifactsRoot: join(profile, 'artifacts'),
   // Agents the person asked Althar to download, kept in the profile, never on their PATH.
   agentsRoot: join(profile, 'agents'),
-  // Skills a task's lead is given: the store in the profile, never in a project, seeded from the catalog the app ships.
-  ...(process.env.ALTHAR_SKILLS_CATALOG === undefined
-    ? {}
-    : { skills: { root: join(profile, 'skills'), catalog: process.env.ALTHAR_SKILLS_CATALOG } }),
+  // Skills a task's lead is given: the store in the profile, never in a project, of what the person added from GitHub. Althar ships none.
+  skills: { root: join(profile, 'skills') },
   openTerminal: openInTerminal,
   openUrl: openInBrowser,
   screenshot: screenshots.ask,
+  page: pages.ask,
   editors: {
     list: () =>
       device === undefined
@@ -311,7 +319,11 @@ const program = Effect.gen(function* () {
   yield* Effect.logInfo('Startup profile').pipe(Effect.annotateLogs({ ...size, database_bytes: statSync(databaseIn(profile)).size }))
   isReady(context)
   parent.postMessage({ type: 'runtime-ready' })
+  // The ports the runtime listens on, which no canvas may reach (ADR-104).
+  parent.postMessage({ type: 'listening', ports: [Context.get(context, ToolServer).port] })
   yield* Effect.logInfo('Runtime ready').pipe(Effect.annotateLogs({ version: options.appVersion, pid: process.pid }))
+  // A development build's log says when the runtime's thread ran late, and which window's calls took long (lag.ts).
+  if (lagLogged()) yield* watchLag()
   // What needs the person goes to the main process, which notifies them and keeps the Dock's count.
   yield* Effect.forkScoped(
     Stream.runForEach(Context.get(context, Nudges).events, (event) => Effect.sync(() => parent.postMessage({ type: 'nudge', event }))),
@@ -415,6 +427,9 @@ const allowFolder = (requestId: string, path: string) =>
 /** Whether the computer is online, as the main process reads it (ADR-060): the last said, once the store is open. */
 const tellOnline = (online: boolean) => void ready.then((context) => Effect.runPromise(Context.get(context, Connectivity).set(online)))
 
+/** Whether the meter is on, as the main process keeps it (`showLoad`): only then does the runtime read the computer on its own, for the trace. */
+const tellLoad = (on: boolean) => void ready.then((context) => Effect.runPromise(Context.get(context, MachineLoad).meter(on)))
+
 parent.on('message', (message) => {
   const data = message.data as {
     readonly type?: string
@@ -427,6 +442,7 @@ parent.on('message', (message) => {
     readonly threadId?: string
     readonly shot?: unknown
     readonly online?: boolean
+    readonly on?: boolean
     readonly owners?: unknown
   } | null
   const port = message.ports[0]
@@ -434,6 +450,7 @@ parent.on('message', (message) => {
     answerSealed(data.requestId, data)
   }
   if (data?.type === 'screenshot-taken' && data.requestId !== undefined) screenshots.answer(data.requestId, data as Taken)
+  if (data?.type === 'page-done' && data.requestId !== undefined) pages.answer(data.requestId, data as PageDone)
   if (data?.type === 'first-screen') Effect.runSync(Deferred.succeed(firstScreen, undefined))
   if (data?.type === 'connect' && port !== undefined) accept(port)
   if (data?.type === 'allow-folder' && data.requestId !== undefined && data.path !== undefined) allowFolder(data.requestId, data.path)
@@ -446,6 +463,7 @@ parent.on('message', (message) => {
       (data.owners as ReadonlyArray<unknown>).filter((one): one is string => typeof one === 'string'),
     )
   if (data?.type === 'online' && typeof data.online === 'boolean') tellOnline(data.online)
+  if (data?.type === 'load' && typeof data.on === 'boolean') tellLoad(data.on)
   // Interrupting the program closes its scope: every session is stopped and recorded first.
   if (data?.type === 'shutdown') {
     Effect.runFork(Effect.logInfo('Runtime stopping').pipe(Effect.provide(Logger.layer([stdoutLogger]))))

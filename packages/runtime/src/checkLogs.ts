@@ -1,6 +1,8 @@
 import { type Check, type CodeHost, type ConnectorFailed, products, type Repository } from '@althar/connectors'
 import { Effect } from 'effect'
 
+import { failingOnBase, passingOnBase, queueMainLine, type QueueDetail } from './pullRequestWords'
+
 /*
  * A failed check's log, as Althar reads it for the thread's card and for
  * the lead: its end, or all of it, or, where there is none to read, why in
@@ -53,6 +55,10 @@ export const whyUnread = (host: string, error: ConnectorFailed): string => {
 
 /** The host's name, as people say it: GitHub, GitLab. */
 export const hostName = (host: Pick<CodeHost, 'product'>) => products[host.product].name
+
+/** A failed queue/check/branch lookup, without a log-specific explanation for an unrelated API call. */
+const lookupFailure = (host: CodeHost, error: ConnectorFailed) =>
+  `${hostName(host)} (${error.reason}${error.status === undefined ? '' : `, ${error.status}`}): ${error.message}${error.retryAt === undefined ? '' : `; retry after ${error.retryAt}`}`
 
 /**
  * A failed check's log, its end or with `whole` all of it, or why there is
@@ -127,3 +133,66 @@ export const logForLead = (read: LogRead): string => {
   const report = read.report === null ? '' : `\nWhat it reported of itself:\n\`\`\`\n${read.report}\n\`\`\``
   return `Althar couldn't read ${read.name}'s log: ${read.missing ?? 'its host keeps none'}.${again}${page}${report}`
 }
+
+/**
+ * What the queue's build failed: its jobs on its merge-group commit, the ends
+ * of their logs, and the repository's default branch at its latest commit on
+ * the same jobs (not the pull request's target). A failed lookup retains its
+ * exact reason; it never turns into an empty or successful check listing.
+ */
+export const queueDetailOf = (host: CodeHost, repository: Repository, queueSha: string | null | undefined, unread?: string | null) =>
+  Effect.gen(function* () {
+    const base = repository.defaultBranch
+    const unavailable = (why: string): QueueDetail => ({ queueSha: queueSha ?? null, failing: [], logs: [why], main: null, jobs: [] })
+    if (queueSha == null) return unavailable(unread ?? "The host didn't identify the merge-queue build, so its failed jobs can't be read.")
+    const built = yield* host.checks(repository, queueSha, { strict: true }).pipe(
+      Effect.map((checks) => ({ checks, error: null })),
+      Effect.catch((error) =>
+        Effect.succeed({
+          checks: [] as ReadonlyArray<Check>,
+          error: `Couldn't read the queue build's checks: ${lookupFailure(host, error)}.`,
+        }),
+      ),
+    )
+    if (built.error !== null) return unavailable(built.error)
+    const failed = built.checks.filter((check) => check.state === 'failed')
+    const reads = yield* Effect.forEach(
+      failed,
+      (check) =>
+        readLog(host, repository, check).pipe(
+          Effect.map((read) => ({
+            ...read,
+            log: read.log === null ? null : read.log.trimEnd().split('\n').slice(-150).join('\n').slice(-12_000),
+          })),
+        ),
+      { concurrency: 3 },
+    )
+    const failing = failed.map((check) => check.name)
+    const { main, onBaseToo, passedOnBase } = yield* host.branchHead(repository, base).pipe(
+      Effect.flatMap((tip) =>
+        host.checks(repository, tip, { strict: true }).pipe(
+          Effect.map((checks) => ({
+            main: queueMainLine(`${base} (${tip.slice(0, 7)})`, failing, checks),
+            onBaseToo: failingOnBase(failing, checks),
+            passedOnBase: passingOnBase(failing, checks),
+          })),
+        ),
+      ),
+      Effect.catch((error) =>
+        Effect.succeed({
+          main: `Couldn't compare with ${base}'s latest commit: ${lookupFailure(host, error)}.`,
+          onBaseToo: [] as ReadonlyArray<string>,
+          passedOnBase: [] as ReadonlyArray<string>,
+        }),
+      ),
+    )
+    return {
+      queueSha,
+      failing,
+      logs: reads.map((read) => (read.log !== null && read.url !== null ? `${logForLead(read)} Its page: ${read.url}` : logForLead(read))),
+      main,
+      jobs: reads.map((read) => ({ name: read.name, url: read.url, tail: read.log, missing: read.missing })),
+      onBaseToo,
+      passedOnBase,
+    } satisfies QueueDetail
+  })

@@ -1,0 +1,22 @@
+/* A wait as a ring that empties, from twelve o'clock. */
+.ring {
+  flex: none;
+  transform: rotate(-90deg);
+}
+.ring circle {
+  fill: none;
+  stroke-width: 2;
+}
+.track {
+  stroke: var(--n-4);
+}
+.left {
+  stroke: var(--t-2);
+  stroke-linecap: round;
+  transition: stroke-dashoffset 1s linear;
+}
+@media (prefers-reduced-motion: reduce) {
+  .left {
+    transition: none;
+  }
+}

@@ -106,15 +106,26 @@ export const Removing: Story = {
     await expect(c.getByRole('button', { name: /^Remove “Dependency setup/ })).toHaveFocus()
     await userEvent.keyboard('{Enter}')
     await expect(c.queryByRole('list')).toBeNull()
-    await expect(c.getByText('None yet')).toHaveFocus()
+    await expect(c.getByRole('region', { name: 'No notes yet' })).toHaveFocus()
   },
 }
 
 /** One whose change didn't hold says why. */
 export const Failed: Story = { args: { error: 'That project isn’t there any more.' } }
 
-/** With none kept, it says what will be here. */
-export const None: Story = { args: { notes: [] } }
+/** With none kept, it says what will be here, and how one gets here. */
+export const None: Story = {
+  args: { notes: [] },
+  play: async ({ canvasElement }) => {
+    const c = within(canvasElement)
+    await expect(c.getByRole('heading', { level: 3, name: 'No notes yet' })).toBeVisible()
+    await expect(c.getByText(/keeps a note of it here/)).toBeVisible()
+    await expect(c.queryByRole('list')).toBeNull()
+  },
+}
+
+/** The same, at night. */
+export const NoneDark: Story = { ...None, globals: { theme: 'dark' } }
 
 /** A long note wraps on its card, as tall as its words; a narrow sheet has one card across. */
 export const LongNote: Story = {

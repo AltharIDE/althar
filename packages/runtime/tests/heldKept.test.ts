@@ -12,7 +12,7 @@ import { Queries } from '../src/Queries'
 import { planWaits, Runs } from '../src/Runs'
 import * as Runtime from '../src/Runtime'
 import { Sessions } from '../src/Sessions'
-import { atReset, later, onTestClock, repository, runtime, until } from './support'
+import { atReset, later, onTestClock, repository, runtime, until, withWork } from './support'
 
 /*
  * Held steps as the store keeps them, read back however an earlier Althar
@@ -55,7 +55,10 @@ const started = (
       envelope: yield* Runtime.envelope('task.create', { title }),
       projectId,
       title,
-      description,
+      description: withWork(
+        description,
+        steps.some((step) => step.key === 'review'),
+      ),
       draft: true,
     })
     const actor = yield* person

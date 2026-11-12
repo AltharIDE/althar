@@ -414,7 +414,7 @@ describe('an automation’s page', () => {
     expect(await screen.findByText('Off until you turn it on')).toBeTruthy()
     expect(screen.getByText('No runs yet.')).toBeTruthy()
     // It runs next as its schedule says, though the runtime hasn't said.
-    expect(screen.getByText('next tomorrow at 9:00')).toBeTruthy()
+    expect(screen.getByText('next tomorrow')).toBeTruthy()
     await userEvent.click(screen.getByRole('button', { name: 'Try it once now' }))
     expect(client.runAutomationNow).toHaveBeenCalledWith('auto1')
     await userEvent.click(screen.getByRole('button', { name: 'Turn on' }))
