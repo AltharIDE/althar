@@ -16,6 +16,8 @@ runs:
   using: composite
   steps:
     - shell: bash
+      run: echo "TEST_TIMINGS=$GITHUB_WORKSPACE/test-results/timings.jsonl" >> "$GITHUB_ENV"
+    - shell: bash
       working-directory: ${{ github.workspace }}
       run: |
         ELECTRON_VERSION="$(grep -oE '"electron": \["electron@[^"]+' bun.lock | head -n 1 | sed 's/.*electron@//')"
