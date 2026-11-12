@@ -44,14 +44,14 @@ export const paneTogglesText: PaneTogglesText = {
 export type PaneTogglesDesign = 'today' | MapLook
 
 /** How the layout map is drawn and coloured. */
-type MapLook = 'tiles' | 'raised' | 'window' | 'ink' | 'mini'
+type MapLook = 'solid' | 'wash' | 'filled' | 'bar' | 'slot'
 
 export const paneTogglesDesigns: ReadonlyArray<{ readonly key: MapLook; readonly label: string }> = [
-  { key: 'tiles', label: 'Grey tiles (first)' },
-  { key: 'raised', label: 'Raised paper' },
-  { key: 'window', label: 'Paper window' },
-  { key: 'ink', label: 'Ink drawing' },
-  { key: 'mini', label: 'Miniature' },
+  { key: 'solid', label: 'Solid shape' },
+  { key: 'wash', label: 'Header wash' },
+  { key: 'filled', label: 'Ink filled' },
+  { key: 'bar', label: 'Underline' },
+  { key: 'slot', label: 'Dashed slot' },
 ]
 
 const Design = createContext<PaneTogglesDesign>('today')
@@ -123,22 +123,22 @@ function GlyphButtons(props: PaneTogglesProps) {
 }
 
 const LOOK: Record<MapLook, string | undefined> = {
-  tiles: s.tiles,
-  raised: s.raised,
-  window: s.window,
-  ink: s.ink,
-  mini: s.mini,
+  solid: s.solid,
+  wash: s.wash,
+  filled: s.filled,
+  bar: s.bar,
+  slot: s.slot,
 }
 
 /**
  * The layout map: one small drawing of the window, its two panes as they sit, the conversation the narrower; each half
  * shows or hides its pane. Swap beside it.
  *
- * - tiles: the first, a grey tile on each half that shows, in a frame.
- * - raised: on a segmented control's track, as the views beside it; a half that shows is raised paper.
- * - window: one framed window split by a hairline; a half that shows is paper, one hidden empty.
- * - ink: drawn in lines like an icon, nothing filled; a half that shows has its glyph in ink, one hidden faint.
- * - mini: a miniature of what each pane holds, lines of talk and lanes of cards, drawn while it shows.
+ * - solid: an icon's size, no glyphs: a pane that shows is a solid block of ink, one hidden an outline.
+ * - wash: the header's own buttons joined: a pane that shows has their pressed wash.
+ * - filled: a pane that shows is filled with ink, its glyph in paper; one hidden is an outline.
+ * - bar: glyphs always drawn, in a frame; a pane that shows has a bar of ink along its foot.
+ * - slot: on the chrome, a pane that shows is a sheet of paper; one hidden, a dashed slot where it goes.
  */
 function LayoutMap(props: PaneTogglesProps & { look: MapLook }) {
   const { shown, swapped, keys = {}, className, look } = props
@@ -156,7 +156,7 @@ function LayoutMap(props: PaneTogglesProps & { look: MapLook }) {
               aria-disabled={only(pane) || undefined}
               onClick={() => toggle(pane)}
             >
-              {look === 'mini' ? <Miniature pane={pane} /> : <Icon name={ICON[pane]} size={12} />}
+              {look === 'solid' ? <span className={s.block} /> : <Icon name={ICON[pane]} size={12} />}
             </button>
           </Tooltip>
         ))}
@@ -168,23 +168,4 @@ function LayoutMap(props: PaneTogglesProps & { look: MapLook }) {
 
 function SwapButton({ label, pressed, can, onSwap }: { label: string; pressed: boolean; can: boolean; onSwap: () => void }) {
   return <ChromeButton icon="swap" label={label} pressed={pressed} compact aria-disabled={!can || undefined} onClick={onSwap} />
-}
-
-/** What a pane holds, drawn small: the conversation's lines, one of them the person's on the right; the board's lanes of cards. */
-function Miniature({ pane }: { pane: Pane }) {
-  if (pane === 'talk')
-    return (
-      <svg viewBox="0 0 12 12" width={12} height={12} aria-hidden="true" className={s.miniature}>
-        <path d="M5 2.5h6M1 5.5h10M1 8h7.5" stroke="currentColor" strokeWidth={1.4} strokeLinecap="round" />
-      </svg>
-    )
-  return (
-    <svg viewBox="0 0 22 12" width={22} height={12} aria-hidden="true" className={s.miniature}>
-      <rect x={1} y={1.5} width={5.5} height={3.5} rx={1} fill="currentColor" />
-      <rect x={1} y={6.5} width={5.5} height={3.5} rx={1} fill="currentColor" />
-      <rect x={8.25} y={1.5} width={5.5} height={3.5} rx={1} fill="currentColor" />
-      <rect x={15.5} y={1.5} width={5.5} height={3.5} rx={1} fill="currentColor" />
-      <rect x={15.5} y={6.5} width={5.5} height={3.5} rx={1} fill="currentColor" />
-    </svg>
-  )
 }
