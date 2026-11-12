@@ -22,6 +22,7 @@ import type {
   IssueField,
   ListedChange,
   MergeMethod,
+  MergeRules,
   NewReview,
   Person,
   Product,
@@ -85,6 +86,8 @@ export interface FakeServiceOptions {
   readonly headOf?: (number: number) => string | null
   /** Whether a change conflicts with its target, as the host works it out now; without it, the host doesn't say. */
   readonly conflictsOf?: (number: number) => boolean | undefined
+  /** What merging a change needs, as the host says now (DEV-204); without it, the host doesn't read it at all. */
+  readonly rulesOf?: (number: number) => MergeRules
   /** The checks a change's commit has, by the commit, as a host runs them on each; without it, or where it says nothing, those `setChecks` gave. */
   readonly checksFor?: (number: number, sha: string) => ReadonlyArray<FakeCheck> | undefined
   /** The checks a commit that is no change's head has, such as its default branch's latest: none without it. */
@@ -248,6 +251,8 @@ export interface FakeControls {
   mergeQueue(): void
   /** Someone puts a change in the merge queue outside Althar, as on the host's site. */
   enqueueByHand(number: number): void
+  /** The merge-group commit the queue built for a change, whose checks the queue judged: read with `queue`. */
+  queueCommit(number: number, sha: string): void
   /** The merge queue takes a change out unmerged, saying why. */
   dequeue(number: number, why: NonNullable<ChangeRequest['leftQueue']>): void
   /** Someone else writes to a branch of a repository (its first unless said), outside Althar: its new head. */
@@ -265,8 +270,17 @@ export interface FakeControls {
   }>
   /** Every change whose branch Althar brought up to date, in order. */
   readonly updated: ReadonlyArray<number>
-  /** The next call to `method` fails with this: when to try again for a rate limit, and the HTTP status a host would give. */
-  failNext(method: string, reason: ConnectorFailed['reason'], retryAt?: string, status?: number): void
+  /**
+   * The next call to `method` fails with this: when to try again for a rate limit, and the HTTP status a host would give; with
+   * `said`, in the host's words, and `after` calls that go through first.
+   */
+  failNext(
+    method: string,
+    reason: ConnectorFailed['reason'],
+    retryAt?: string,
+    status?: number,
+    said?: { readonly message?: string; readonly after?: number },
+  ): void
   /** Every change opened, with every comment on it, Althar's included. */
   readonly changes: ReadonlyArray<ChangeRequest>
   /** The ids of the checks Althar ran again, in order. */
@@ -395,7 +409,10 @@ export const makeFakeService = (options: FakeServiceOptions = {}): FakeService =
   }
   /** Its statuses: a repository's issue is open or closed; any other has a team's. */
   const statusesOf = (issue: Issue) => (issue.ref.includes('#') ? OPEN_CLOSED : STATUSES)
-  const failures = new Map<string, { readonly reason: ConnectorFailed['reason']; readonly retryAt?: string; readonly status?: number }>()
+  const failures = new Map<
+    string,
+    { readonly reason: ConnectorFailed['reason']; readonly retryAt?: string; readonly status?: number; message?: string; after: number }
+  >()
   const calls: Array<string> = []
   const deleted: Array<number> = []
   let ids = 0
@@ -410,6 +427,8 @@ export const makeFakeService = (options: FakeServiceOptions = {}): FakeService =
   let queues = false
   const inQueue = new Set<number>()
   const leftQueue = new Map<number, NonNullable<ChangeRequest['leftQueue']>>()
+  /** The merge-group commit the queue built for each change, read with `queue`. */
+  const queueShas = new Map<number, string>()
   /** Changes set to merge by themselves, as GitLab's and Data Center's auto-merge, until `mergeByHand` lands one. */
   const autoMerging = new Set<number>()
   const autoMerges = options.autoMerge ?? (product === 'gitlab' || product === 'bitbucket_dc')
@@ -454,12 +473,16 @@ export const makeFakeService = (options: FakeServiceOptions = {}): FakeService =
     Effect.suspend(() => {
       const failure = failures.get(method)
       if (failure === undefined) return Effect.void
+      if (failure.after > 0) {
+        failure.after -= 1
+        return Effect.void
+      }
       failures.delete(method)
       return Effect.fail(
         new ConnectorFailed({
           product,
           reason: failure.reason,
-          message: `The fake ${method} failed (${failure.reason})`,
+          message: failure.message ?? `The fake ${method} failed (${failure.reason})`,
           ...(failure.retryAt === undefined ? {} : { retryAt: failure.retryAt }),
           ...(failure.status === undefined ? {} : { status: failure.status }),
         }),
@@ -667,12 +690,20 @@ export const makeFakeService = (options: FakeServiceOptions = {}): FakeService =
           ...(conflicts === undefined ? {} : { conflicts }),
           ...(options.saysHead === false ? {} : { headRepository: fork === undefined ? null : fork === '' ? [] : fork.split('/') }),
           ...(ask?.queue === true && queues && found.state === 'open'
-            ? { queued: inQueue.has(number), leftQueue: leftQueue.get(number) ?? null }
+            ? { queued: inQueue.has(number), leftQueue: leftQueue.get(number) ?? null, queueSha: queueShas.get(number) ?? null }
             : {}),
           // GitLab says it on every read, Data Center when asked.
           ...(autoMerges && (product === 'gitlab' || ask?.queue === true) ? { autoMerge: autoMerging.has(number) } : {}),
         })
       }),
+    ...(options.rulesOf === undefined
+      ? {}
+      : {
+          mergeRules: (_repository: Repository, change: ChangeRequest) =>
+            Effect.andThen(called('mergeRules'), () =>
+              Effect.succeed(options.rulesOf?.(change.number) ?? { requiredChecks: null, needs: [] }),
+            ),
+        }),
     listChanges: (repository, query) =>
       Effect.andThen(called('listChanges'), () => {
         if (options.lists === false) return Effect.fail(noListing(product, service.words))
@@ -762,6 +793,8 @@ export const makeFakeService = (options: FakeServiceOptions = {}): FakeService =
         if (queues && (product === 'github' || product === 'bitbucket_cloud')) {
           mergesAsked.push({ number: change.number, how: 'queue', method: null, head: change.headSha })
           inQueue.add(change.number)
+          leftQueue.delete(change.number)
+          queueShas.delete(change.number)
           return Effect.succeed({ ...changeNumbered(change.number), queued: true })
         }
         mergesAsked.push({ number: change.number, how: 'merge', method, head: change.headSha })
@@ -794,6 +827,7 @@ export const makeFakeService = (options: FakeServiceOptions = {}): FakeService =
         mergesAsked.push({ number: change.number, how: 'queue', method: null, head: change.headSha })
         inQueue.add(change.number)
         leftQueue.delete(change.number)
+        queueShas.delete(change.number)
         if (product === 'gitlab') autoMerging.add(change.number)
         return Effect.succeed({ ...now, queued: true })
       }),
@@ -815,8 +849,15 @@ export const makeFakeService = (options: FakeServiceOptions = {}): FakeService =
     // As GitHub's alone, which merges in the background: whether a head is the merge its update made from another.
     ...(product === 'github'
       ? {
-          madeFrom: (_repository: Repository, change: ChangeRequest, from: string) =>
-            Effect.andThen(called('madeFrom'), () => Effect.succeed(change.headSha?.startsWith(`${from}+`) === true)),
+          madeFrom: (repository: Repository, change: ChangeRequest, from: string, base?: string) =>
+            Effect.andThen(called('madeFrom'), () => {
+              if (change.headSha?.startsWith(`${from}+`) !== true) return Effect.succeed(false)
+              if (base === undefined) return Effect.succeed(true)
+              // Its target's head asked for, or a later one, where the target moved on before the merge.
+              const merged = change.headSha.slice(from.length + 1)
+              const history = historyOf(repository.id, change.target)
+              return Effect.succeed(merged === base || (history.includes(base) && history.indexOf(merged) >= history.indexOf(base)))
+            }),
         }
       : {}),
     closeChange: (_repository, change) =>
@@ -838,6 +879,7 @@ export const makeFakeService = (options: FakeServiceOptions = {}): FakeService =
         update(change.number, {
           ...(edit.title === undefined ? {} : { title: edit.title }),
           ...(edit.body === undefined ? {} : { body: edit.body }),
+          ...(edit.base === undefined ? {} : { target: edit.base }),
         })
         return Effect.succeed(changeNumbered(change.number))
       }),
@@ -1244,7 +1286,12 @@ export const makeFakeService = (options: FakeServiceOptions = {}): FakeService =
     landLater: () => void (landsLater = true),
     readBackLater: () => void (readsBackLater = true),
     mergeQueue: () => void (queues = true),
-    enqueueByHand: (number) => void inQueue.add(number),
+    enqueueByHand: (number) => {
+      inQueue.add(number)
+      leftQueue.delete(number)
+      queueShas.delete(number)
+    },
+    queueCommit: (number, sha) => void queueShas.set(number, sha),
     dequeue: (number, why) => {
       inQueue.delete(number)
       autoMerging.delete(number)
@@ -1267,9 +1314,11 @@ export const makeFakeService = (options: FakeServiceOptions = {}): FakeService =
     get updated() {
       return [...updates]
     },
-    failNext: (method, reason, retryAt, status) =>
+    failNext: (method, reason, retryAt, status, said) =>
       void failures.set(method, {
         reason,
+        after: said?.after ?? 0,
+        ...(said?.message === undefined ? {} : { message: said.message }),
         ...(retryAt === undefined ? {} : { retryAt }),
         ...(status === undefined ? {} : { status }),
       }),

@@ -378,7 +378,7 @@ describe('the API', () => {
         )
         assert.isEmpty((yield* client.GetThread({ threadId: task.threadId, limit: 0 })).items)
         const reply = yield* client.GetThreadItem({ threadId: task.threadId, itemId: newest.items[1]?.id ?? '' })
-        assert.deepStrictEqual(reply.content, { text: 'Hello', pictures: [], files: [] })
+        assert.deepStrictEqual(reply?.content, { text: 'Hello', pictures: [], files: [] })
 
         // A tool call keeps what the thread shows: the files it touched, not its raw input and output.
         yield* client.Send({ commandId: commandId(), threadId: task.threadId, body: scenarios.tool, disposition: 'after_current' })
@@ -691,7 +691,7 @@ describe('the API', () => {
           { title: waiting.attention[0]?.title, reason: waiting.attention[0]?.reason, command: waiting.attention[0]?.command },
           { title: 'Run make deploy', reason: 'Deploying or publishing always asks.', command: 'make deploy' },
         )
-        assert.strictEqual((yield* client.ListProjects()).projects[0]?.waiting, 1)
+        yield* until(client.ListProjects(), (list) => list.projects[0]?.yours === 1)
         const answering = {
           commandId: commandId(),
           attentionId: waiting.attention[0]?.id ?? '',
@@ -1108,6 +1108,7 @@ describe('finished tasks’ folders, through the API', () => {
           postScreenshots: false,
           resolveConflicts: true,
           moveIssues: true,
+          afterMergeReview: 'major',
         })
         yield* client.SetPlansAndReviews({ commandId: commandId(), countdown: 10, rounds: 2, roundsOut: 'ask' })
         yield* client.SetNewProjectDefaults({ commandId: commandId(), usageLimit: 'wait', rotateAccounts: true })
@@ -1121,6 +1122,7 @@ describe('finished tasks’ folders, through the API', () => {
           postScreenshots: false,
           resolveConflicts: true,
           moveIssues: true,
+          afterMergeReview: 'major',
         })
         const project = yield* client.OpenProject({ commandId: commandId(), grant: yield* grant(repository()) })
         const task = yield* client.CreateTask({ commandId: commandId(), projectId: project.id, title: 'Add a retry' })
@@ -1231,6 +1233,8 @@ describe('project rules, through the API', () => {
           branchPattern: null,
           titlePattern: null,
           moveIssues: true,
+          // A small change's review after it merges brings back only blocking and major findings, until the person says.
+          afterMergeReview: 'major',
           // Skill and OpenSpec files stay out of the repositories, and off the remote, until the person says.
           repositoryFiles: { writeSkills: false, writeOpenSpec: false, pushProtected: false },
           // A repository with no packages, on no host: only what every lead runs outside its sandbox, plus the dev servers and
@@ -1936,9 +1940,9 @@ describe('the coordinator, through the API', () => {
           end: 'none',
         })
         const held = yield* client.GetThreadItem({ threadId: planned.threadId, itemId: card?.id ?? '' })
-        assert.strictEqual(held.kind === 'task' ? held.content.plan?.end : undefined, 'none')
+        assert.strictEqual(held?.kind === 'task' ? held.content.plan?.end : undefined, 'none')
         assert.deepStrictEqual(
-          held.kind === 'task' ? [held.content.phase, held.content.plan?.steps.map((step) => [step.agentId, step.skipped])] : [],
+          held?.kind === 'task' ? [held.content.phase, held.content.plan?.steps.map((step) => [step.agentId, step.skipped])] : [],
           [
             'held',
             [
@@ -1950,9 +1954,9 @@ describe('the coordinator, through the API', () => {
         yield* client.StartPlan({ commandId: commandId(), planId })
         const started = yield* until(
           client.GetThreadItem({ threadId: planned.threadId, itemId: card?.id ?? '' }),
-          (item) => item.kind === 'task' && item.content.phase === 'running',
+          (item) => item?.kind === 'task' && item.content.phase === 'running',
         )
-        assert.isTrue(started.kind === 'task' && started.content.startedAt !== null)
+        assert.isTrue(started?.kind === 'task' && started.content.startedAt !== null)
         // The person's mistakes, in words.
         assert.strictEqual(
           (yield* Effect.flip(client.StartPlan({ commandId: commandId(), planId: 'pln_missing' }))).message,
@@ -2021,6 +2025,13 @@ describe('the coordinator, through the API', () => {
             .message,
           "That task isn't there any more.",
         )
+        // Turning down an offered review is kept once, for a task that is there, and refused for one that isn't.
+        yield* client.DeclineReview({ commandId: commandId(), taskId: task.id })
+        yield* client.DeclineReview({ commandId: commandId(), taskId: task.id })
+        assert.strictEqual(
+          (yield* Effect.flip(client.DeclineReview({ commandId: commandId(), taskId: 'tsk_missing' }))).message,
+          "That task isn't there any more.",
+        )
       }),
     ),
   )
@@ -2067,7 +2078,7 @@ describe('the coordinator, through the API', () => {
         const { client, grant } = yield* connected()
         const project = yield* client.OpenProject({ commandId: commandId(), grant: yield* grant(repository()) })
         // A plain task is one the coordinator starts with no plan, and stays one though its lead commits, on a branch of its own; one
-        // the person starts is a change, though it makes nothing.
+        // the person starts is a change, and made one in place as they ask, it is renamed and reviewed.
         const coordinator = yield* client.GetCoordinator({ projectId: project.id })
         yield* client.Send({
           commandId: commandId(),
@@ -2079,7 +2090,7 @@ describe('the coordinator, through the API', () => {
           commandId: commandId(),
           projectId: project.id,
           title: 'Retry',
-          description: '[lead:commit] [lead:make-change] [lead:finish]',
+          description: '[lead:commit] [lead:make-change] [lead:finish] [review:pass]',
           steps: [{ key: 'implement', agentId: 'claude-code', model: null, skipped: false }],
         })
         const both = yield* until(
@@ -2090,7 +2101,14 @@ describe('the coordinator, through the API', () => {
           both.tasks.map((one) => [one.title, one.kind]),
           [
             ['Which partners still call v1', 'plain'],
-            ['Retry', 'change'],
+            ['Make the sketch real', 'change'],
+          ],
+        )
+        assert.deepStrictEqual(
+          both.tasks.find((one) => one.kind === 'change')?.plan?.steps.map((step) => [step.key, step.agentId, step.skipped]),
+          [
+            ['implement', 'claude-code', false],
+            ['review', 'codex', false],
           ],
         )
         const question = both.tasks.find((one) => one.kind === 'plain')
@@ -2101,7 +2119,7 @@ describe('the coordinator, through the API', () => {
         // Opened, both still wait on the person.
         assert.sameDeepMembers(yield* phases, [
           ['Which partners still call v1', 'ready'],
-          ['Retry', 'ready'],
+          ['Make the sketch real', 'ready'],
         ])
         // Kept for later, the plain task is out of Needs you; a change with work on it can't be kept, nor marked done.
         yield* client.KeepTaskForLater({ commandId: commandId(), taskId: question?.taskId ?? '' })
@@ -2109,13 +2127,13 @@ describe('the coordinator, through the API', () => {
         yield* client.MarkTaskDone({ commandId: commandId(), taskId: change.id })
         assert.sameDeepMembers(yield* phases, [
           ['Which partners still call v1', 'kept'],
-          ['Retry', 'ready'],
+          ['Make the sketch real', 'ready'],
         ])
         // Marked done, it settles.
         yield* client.MarkTaskDone({ commandId: commandId(), taskId: question?.taskId ?? '' })
         assert.sameDeepMembers(yield* phases, [
           ['Which partners still call v1', 'settled'],
-          ['Retry', 'ready'],
+          ['Make the sketch real', 'ready'],
         ])
         const unknown = yield* Effect.flip(client.SeeTask({ commandId: commandId(), taskId: 'task_nothing' }))
         assert.strictEqual(unknown.reason, 'NotFound')
@@ -2362,7 +2380,7 @@ describe('the coordinator, through the API', () => {
         const call = waiting.attention[0]
         assert.deepStrictEqual(
           [call?.kind, call?.stuck?.step, call?.stuck?.why, call?.stuck?.agentId],
-          ['stuck', 'implement', 'failed_to_start', 'missing'],
+          ['stuck', 'implement', 'not_installed', 'missing'],
         )
         // On the board, the call waits on the person, with the task it holds, and the task says it waits.
         const board = yield* client.GetBoard({ projectId: project.id })
@@ -2962,10 +2980,13 @@ describe('thread items', () => {
     createdAt: '2026-09-29T12:00:00.000Z',
   })
 
-  it('keeps a session’s skills line that said nothing new from the window', () => {
+  it('keeps what a lead could see, and what older threads said of other tasks, out of the window', () => {
     const line = { source: 'runtime', role: 'skills', title: 'Codex could see 2 skills', skills: [] }
+    assert.strictEqual(itemOf(row('notice', line)), undefined)
     assert.strictEqual(itemOf(row('notice', { ...line, hidden: true })), undefined)
-    assert.strictEqual(itemOf(row('notice', line))?.kind, 'notice')
+    const about = { source: 'runtime', severity: 'info', title: 'Other changes `A.ts` too. Both leads were told.' }
+    assert.strictEqual(itemOf(row('notice', { ...about, situation: { kind: 'overlap', files: ['A.ts'] } })), undefined)
+    assert.strictEqual(itemOf(row('notice', about))?.kind, 'notice')
   })
 
   it('gives each kind its own content, and leaves out kinds the window has no use for yet', () => {

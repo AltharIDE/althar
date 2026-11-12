@@ -30,6 +30,8 @@ import { text } from './text'
 const worded = (key: DefaultKey, value: unknown): string => {
   if (typeof value === 'boolean') return value ? text.on : text.off
   if (key === 'end') return newProjectDefaultsText.end.options[value as NewProjectDefaultsValue['end']].label
+  if (key === 'afterMergeReview')
+    return newProjectDefaultsText.afterMergeReview.options[value as NewProjectDefaultsValue['afterMergeReview']].label
   if (key === 'usageLimit') return newProjectDefaultsText.usageLimit.options[value as NewProjectDefaultsValue['usageLimit']].label
   return String(value)
 }

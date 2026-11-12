@@ -132,9 +132,10 @@ describe('the buttons on a task’s lead, as tools', () => {
         yield* titles(one.threadId),
         "The coordinator changed the lead to Fake claude-code's default model: codex is out. It takes over from its next turn.",
       )
+      // A lead changes its own task's lead too, on the person's word: from its next turn.
       assert.match(
-        yield* callTool(lead, 'change_lead', { task: other.slug, lead: { agent: 'codex' } }),
-        /is your own task: the person changes who leads it/,
+        yield* callTool(lead, 'change_lead', { lead: { agent: 'claude-code' }, why: 'the person asked' }),
+        /^read-the-logs: changed the lead to Fake claude-code's default model\./,
       )
       assert.match(
         yield* callTool(coordinator, 'change_lead', { task: one.slug, lead: { agent: 'nobody' } }),
@@ -150,7 +151,8 @@ describe('the buttons on a task’s lead, as tools', () => {
       // Compact, from another task's lead, signed with its task.
       assert.match(yield* callTool(lead, 'compact_lead', { task: one.slug, why: 'its context is full' }), /lead compacts its context/)
       assert.include(yield* titles(one.threadId), 'The lead of “Read the logs” had its lead compact its context: its context is full')
-      assert.include(yield* titles(other.threadId), 'Compacted the context of “Sketch the settings”: its context is full')
+      // Its own chat, being about its own task, has no line about the other's.
+      assert.notInclude(yield* titles(other.threadId), 'Compacted the context of “Sketch the settings”: its context is full')
 
       // Its issue's switch: refused for a task that came from none, set and set back for one that did.
       assert.strictEqual(

@@ -23,8 +23,9 @@ import { ENDS, endOf } from '../project/Card'
  * free agent, nothing of it begun, can still change (`planWaits`), as its
  * card says. Once it has begun, its team still changes until it is settled, through
  * ChangeTeam: its lead from its next turn, its reviewer until its review round
- * starts, from the next round during one, and not once its review is done. Merged,
- * it stays as it is.
+ * starts, from the next round during one, and once a review of it ran to its end or
+ * it merged, for what ships next: a review that was skipped, or never planned, is not
+ * a done one, and can be added at any time.
  */
 
 export const text = {
@@ -32,6 +33,7 @@ export const text = {
   more: 'The team',
   menu: 'The team',
   start: 'Start',
+  hold: 'Hold',
   change: 'Change the team…',
   /** The team in a line, at the head of a row's menu: Opus 5.5 · High, GPT-6.1 Sol reviews. */
   team: (lead: string, review: string | null) => (review === null ? lead : `${lead}, ${review}`),
@@ -42,8 +44,10 @@ export const text = {
   /** A task that has begun: when each change takes effect. */
   nextTurn: 'From its next turn.',
   nextRound: 'From the next round.',
-  reviewDone: 'The review is done, so the reviewer stays.',
-  merged: 'It’s merged, so its team stays.',
+  /** Its review ran, or it merged: the reviewer named reads what it ships next. */
+  nextShip: 'It reads what ships next.',
+  /** A review added to a change whose work is up already: it starts on saving. */
+  readsNow: 'Its review starts now, on the change as it stands.',
   settled: 'It’s settled, so its team stays.',
 }
 
@@ -53,7 +57,15 @@ type Plan = NonNullable<BoardTask['plan']>
 export type Teamed = Pick<
   BoardTask,
   'taskId' | 'title' | 'phase' | 'plan' | 'planWaits' | 'queued' | 'reviewing' | 'kind' | 'change' | 'reviewerChange'
->
+> &
+  Partial<Pick<BoardTask, 'holdable'>>
+
+/**
+ * Whether its plan can be held, as its card does: on its countdown, or started with its first step still waiting for a free
+ * agent or, Local, its checkout, nothing of it begun (`holdable`). Holding takes it out of the line until the person
+ * starts it.
+ */
+export const canHold = (task: Teamed): boolean => task.plan !== null && (task.phase === 'planned' || task.holdable === true)
 
 /**
  * What changing its team does where it stands: `starts`, a plan held or on its countdown, which can start now too; `waits`,
@@ -102,16 +114,18 @@ const useTeamLine = (plan: Plan, projectId: string) => {
   )
 }
 
-/** A row's menu, up next: who's on it, then Start where it starts now, and Change the team…. */
+/** A row's menu, up next: who's on it, then Start where it starts now, Hold where it can be held, and Change the team…. */
 export function TeamMenu({
   projectId,
   task,
   onStart,
+  onHold,
   onChange,
 }: {
   projectId: string
   task: Teamed
   onStart?: () => void
+  onHold?: () => void
   onChange: () => void
 }) {
   const line = useTeamLine(task.plan!, projectId)
@@ -126,6 +140,11 @@ export function TeamMenu({
       {onStart !== undefined && (
         <MenuItem icon="play" onSelect={onStart}>
           {text.start}
+        </MenuItem>
+      )}
+      {onHold !== undefined && (
+        <MenuItem icon="hold" onSelect={onHold}>
+          {text.hold}
         </MenuItem>
       )}
       <MenuItem icon="agents" onSelect={onChange}>
@@ -159,7 +178,6 @@ export function ChangeTeam({
   onClose: () => void
 }) {
   const { client, cache } = useServices()
-  const named = useModelNames()
   // The task as it opened: what the dialog shows once it can no longer change.
   const [first] = useState(task)
   const [edits, setEdits] = useState<Edits>({})
@@ -177,33 +195,26 @@ export function ChangeTeam({
   const how = task === null ? null : teamChangeOf(task)
   // A task that has begun changes through ChangeTeam, until it is merged or settled.
   const begun = teamChangeOf(first) === 'begun'
-  const merged = begun && now.change?.state === 'merged'
-  const gone = how === null || merged
+  const gone = how === null
   // A plan made with no review has no review step: a change that can still have one shows it, off, for the person to add.
   const lead = plan.steps.find((step) => step.key === 'implement')
-  const addable =
-    begun &&
-    now.kind === 'change' &&
-    now.reviewing == null &&
-    now.reviewerChange !== 'never' &&
-    !plan.steps.some((step) => step.key === 'review')
+  const addable = begun && now.kind === 'change' && now.reviewing == null && !plan.steps.some((step) => step.key === 'review')
   const given: ReadonlyArray<PlanStep> =
     addable && lead !== undefined
       ? [
           ...plan.steps,
           {
             key: 'review',
-            agentId: (plan.agents ?? agents.map((one) => one.id)).find((id) => id !== lead.agentId) ?? lead.agentId,
+            agentId: agents.map((one) => one.id).find((id) => id !== lead.agentId) ?? lead.agentId,
             model: null,
             skipped: true,
           },
         ]
       : plan.steps
   const steps = withEdits(given, edits)
+  // Its review was skipped or never planned: adding one now reads the change as it stands.
+  const wasUnreviewed = plan.steps.find((step) => step.key === 'review')?.skipped !== false
   const ending = end === undefined ? plan.end : end
-  // Only the agents the plan allows: a review's lead only reads, so an agent that can't be held to that isn't offered.
-  const allowed = plan.agents
-  const offered = allowed === undefined ? agents : agents.filter((agent) => allowed.includes(agent.id))
   const put = (key: PlanStep['key'], patch: Partial<PlanStep>) => setEdits((was) => ({ ...was, [key]: { ...was[key], ...patch } }))
   const save = async (andStart: boolean) => {
     setBusy(true)
@@ -222,8 +233,7 @@ export function ChangeTeam({
     }
   }
   // A review its task has, or a change that can still have one; a plain task or a review shows only what it has.
-  const reviewShown = (step: PlanStep) =>
-    !begun || (now.reviewing == null && (!step.skipped ? true : now.kind === 'change' && now.reviewerChange !== 'never'))
+  const reviewShown = (step: PlanStep) => !begun || (now.reviewing == null && (!step.skipped ? true : now.kind === 'change'))
   const reviews = now.reviewing != null
   const label = (key: PlanStep['key']) => stepText.label[reviews ? 'review' : key]
   return (
@@ -232,14 +242,13 @@ export function ChangeTeam({
       steps={steps
         .filter((step) => step.key !== 'review' || reviewShown(step))
         .map((step) => {
-          const locked = begun && step.key === 'review' && now.reviewerChange === 'never'
           return {
             id: step.key,
             label: label(step.key),
             picker: (
               <ModelChoice
                 owner={label(step.key)}
-                agents={offered}
+                agents={agents}
                 projectId={projectId}
                 value={choiceOf(step)}
                 onChange={(choice) => put(step.key, { ...choice, skipped: false })}
@@ -248,22 +257,24 @@ export function ChangeTeam({
                 placement="below"
               />
             ),
-            ...(locked ? { locked: named(step.agentId, step.model).name } : {}),
             ...(begun
               ? {
-                  why: locked
-                    ? text.reviewDone
-                    : step.key === 'implement'
+                  why:
+                    step.key === 'implement'
                       ? text.nextTurn
                       : now.reviewerChange === 'next_round'
                         ? text.nextRound
-                        : undefined,
+                        : now.reviewerChange === 'next_ship' || now.change?.state === 'merged'
+                          ? text.nextShip
+                          : step.key === 'review' && !step.skipped && wasUnreviewed && now.change?.state === 'open'
+                            ? text.readsNow
+                            : undefined,
                 }
               : step.key === 'implement' && plan.reason !== null
                 ? { why: plan.reason }
                 : {}),
             skipped: step.skipped,
-            ...(step.key === 'review' && !locked ? { onAdd: () => put('review', { skipped: false }) } : {}),
+            ...(step.key === 'review' ? { onAdd: () => put('review', { skipped: false }) } : {}),
           }
         })}
       // Where the repository's host isn't connected, the task ends on its branch, and there is no ending to pick; a task
@@ -273,7 +284,7 @@ export function ChangeTeam({
       {...(!gone && how === 'starts' ? { onStart: () => void save(true) } : {})}
       onClose={onClose}
       busy={busy}
-      error={merged ? text.merged : how === null ? (begun ? text.settled : text.begun) : error}
+      error={how === null ? (begun ? text.settled : text.begun) : error}
     />
   )
 }

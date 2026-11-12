@@ -1,14 +1,14 @@
-import { act, renderHook, screen, waitFor, within } from '@testing-library/react'
+import { act, render, renderHook, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import type { ReactNode } from 'react'
 import { describe, expect, it, vi } from 'vitest'
 
 import { ApiError, type BoardCall, type BoardSnapshot, type BoardTask, type ChangeSummary, type ReviewBrief } from '@althar/contracts'
-import { TaskStatus } from '@althar/ui'
+import { BoardCard, TaskStatus } from '@althar/ui'
 
 import type { Client } from '../src/renderer/data/client'
 import { ServicesProvider } from '../src/renderer/data/services'
-import { BoardView, runningCardOf } from '../src/renderer/features/board/BoardView'
+import { BoardView, readyCardOf, runningCardOf, severalSaid } from '../src/renderer/features/board/BoardView'
 import { DockView } from '../src/renderer/features/board/DockView'
 import { lanesOf } from '../src/renderer/features/board/lanes'
 import { needsOf } from '../src/renderer/features/board/needs'
@@ -269,6 +269,38 @@ describe('a ready card’s own ways', () => {
     ...more,
   })
 
+  it('lists Scratch by each chat’s latest exchange, opens one in place, and clears one by settling it', async () => {
+    const said = (at: string, text: string, by: 'person' | 'lead' = 'lead') => ({ at, by, said: text })
+    const older = task({
+      taskId: 't9',
+      threadId: 'th9',
+      title: 'How does retry work?',
+      phase: 'ready',
+      scratch: true,
+      latest: said('2026-10-01T09:00:00.000Z', 'It doubles the wait each time.'),
+    })
+    const newer = task({
+      taskId: 't10',
+      threadId: 'th10',
+      title: 'Which lane heights?',
+      phase: 'ready',
+      scratch: true,
+      createdAt: '2026-09-01T09:00:00.000Z',
+      latest: said('2026-10-01T09:50:00.000Z', 'Try 52 and 64.', 'person'),
+    })
+    const lanes = lanesOf(board([older, newer]))
+    expect(lanes.scratch.map((work) => work.taskId)).toEqual(['t10', 't9'])
+    const onOpen = vi.fn()
+    const actions = ways()
+    show(lanes, { onOpen, actions })
+    await userEvent.click(screen.getByRole('button', { name: 'Asides · 2' }))
+    expect(await screen.findByText('Try 52 and 64.')).toBeTruthy()
+    await userEvent.click(screen.getByRole('button', { name: /^How does retry work\?/ }))
+    expect(onOpen).toHaveBeenCalledWith('th9')
+    await userEvent.click(await screen.findByRole('button', { name: 'Clear “Which lane heights?”' }))
+    expect(actions.markDone).toHaveBeenCalledWith('t10')
+  })
+
   it('says Done is under way, and keeps Keep for later from being pressed meanwhile', () => {
     const finished = task({ taskId: 'f1', threadId: 'thf1', title: 'Prototype the tabs', phase: 'ready', kind: 'plain', branch: null })
     show(lanesOf(board([finished])), { actions: ways({ settling: new Set(['f1']) }) })
@@ -299,6 +331,41 @@ describe('a ready card’s own ways', () => {
     expect(ship).toHaveBeenCalledWith('h1')
   })
 
+  it('says one sentence across several changes, naming only the exception, with a mark for each at its foot', () => {
+    const several = task({
+      taskId: 's1',
+      threadId: 'ths1',
+      title: 'Lanes and cards',
+      phase: 'ready',
+      change: change({ draft: false, checks: checks(2, 0) }),
+      changeCount: 3,
+      changeMarks: [
+        { name: 'Add a retry', stands: 'ready' },
+        { name: 'Lane heights', stands: 'failing' },
+        { name: 'Card sizes', stands: 'ready' },
+      ],
+    })
+    show(lanesOf(board([several])))
+    const shown = cardOf('Lanes and cards')
+    // Said once as the card's fact, and again by its mark, to a screen reader.
+    expect(shown.getAllByText('Lane heights: checks failing')).toHaveLength(2)
+    expect(shown.getByText('3 changes')).toBeTruthy()
+    expect(shown.getAllByRole('listitem').map((mark) => mark.textContent)).toEqual([
+      'Add a retry: ready to merge',
+      'Lane heights: checks failing',
+      'Card sizes: ready to merge',
+    ])
+    // What's alike is counted; merged ones drop out while any is open.
+    const said = (...stands: ReadonlyArray<'ready' | 'checking' | 'failing' | 'merged' | 'unshipped'>) =>
+      severalSaid(stands.map((one, at) => ({ name: `C${at + 1}`, stands: one })))?.words
+    expect(said('ready', 'ready')).toBe('Both ready to merge')
+    expect(said('checking', 'checking', 'checking')).toBe('Waiting for checks on all 3')
+    expect(said('merged', 'ready')).toBe('C2: ready to merge')
+    expect(said('failing', 'failing', 'ready')).toBe('Checks failing on 2 of 3')
+    expect(said('unshipped', 'unshipped')).toBe('Neither shipped yet')
+    expect(said('merged', 'merged')).toBe('Both merged')
+  })
+
   it('says Ship is under way, and why it failed, offering it again', () => {
     const held = task({ taskId: 'h2', threadId: 'thh2', title: 'Retry twice', phase: 'ready', held: { since: NOW, commits: 1 } })
     show(lanesOf(board([held])), { actions: ways({ ship: vi.fn(async () => true), shipping: new Set(['h2']) }) })
@@ -313,6 +380,29 @@ describe('a ready card’s own ways', () => {
     const failed = screen.getAllByRole('alert').map((one) => one.textContent)
     expect(failed).toContain('Ship failed: GitHub refused the push')
     expect(screen.getAllByRole('button', { name: 'Try shipping 1 commit again' }).length).toBeGreaterThan(0)
+  })
+
+  it('says what a review after a merge found, for that merge, with Fix it and Leave it', async () => {
+    const fixAfterMerge = vi.fn(async () => true)
+    const leaveAfterMerge = vi.fn(async () => true)
+    const merged = change({ state: 'merged', draft: false, checks: checks(2, 0) })
+    const found = task({
+      taskId: 'm1',
+      threadId: 'thm1',
+      title: 'Rename the setting',
+      phase: 'ready',
+      state: 'done',
+      change: merged,
+      afterMerge: { url: merged.url, words: '#715', state: 'found', findings: 2 },
+    })
+    show(lanesOf(board([found])), { actions: ways({ fixAfterMerge, leaveAfterMerge, answeringAfterMerge: new Set() }) })
+    const shown = cardOf('Rename the setting')
+    expect(shown.getByText('Review found 2')).toBeTruthy()
+    expect(shown.getByText('After #715 merged')).toBeTruthy()
+    await userEvent.click(shown.getByRole('button', { name: /new pull request after #715/ }))
+    expect(fixAfterMerge).toHaveBeenCalledWith('m1')
+    await userEvent.click(shown.getByRole('button', { name: /Close the findings/ }))
+    expect(leaveAfterMerge).toHaveBeenCalledWith('m1')
   })
 
   it('says a settled change’s lead replied, until the person reads it', () => {
@@ -407,7 +497,7 @@ describe('up next', () => {
   })
 
   it('says why moving the line failed, and gives a plain task no kind’s word', () => {
-    const line = { move: vi.fn(async () => {}), oldestFirst: vi.fn(), failed: 'The runtime is restarting.' }
+    const line = { move: vi.fn(async () => {}), oldestFirst: vi.fn(), cancelTurn: vi.fn(), failed: 'The runtime is restarting.' }
     show(
       lanesOf(
         board([
@@ -502,6 +592,25 @@ describe('the dock, for each', () => {
     await waitFor(() => expect(client.merge).toHaveBeenCalledWith('r', '', 'https://github.com/meridian/api/pull/12'))
   })
 
+  it('offers Ship, never Accept or Push, for a pull request whose commits wait for Ship', async () => {
+    const ready = task({
+      taskId: 'h',
+      threadId: 'thh',
+      title: 'A tweak not shipped',
+      phase: 'ready',
+      change: change({ draft: false, localHead: 'def456', unpushed: 2, pushing: { held: 'Held for Ship', ship: true } }),
+      held: { since: NOW, commits: 2 },
+    })
+    const { client, docked } = dock(board([ready]), { kind: 'task', id: 'h' })
+    const shown = await docked()
+    expect(await shown.findByText('2 commits aren’t shipped yet')).toBeTruthy()
+    expect(shown.queryByRole('button', { name: /^Accept/ })).toBeNull()
+    expect(shown.queryByRole('button', { name: 'Push' })).toBeNull()
+    await userEvent.click(shown.getByRole('button', { name: 'Ship' }))
+    await waitFor(() => expect(client.ship).toHaveBeenCalledWith('h'))
+    expect(client.merge).not.toHaveBeenCalled()
+  })
+
   it('sends a note back quietly where another start of the lead took over first', async () => {
     const ready = task({ taskId: 't4', threadId: 'th4', title: 'Rate-limit refunds', phase: 'ready', change: change({ draft: false }) })
     const startSession = vi.fn(async () => {
@@ -590,5 +699,55 @@ describe('the board’s model', () => {
     await waitFor(() => expect(result.current.board?.tasks).toEqual([]))
     await act(async () => page([settled('old', '2026-09-01T08:00:00.000Z')]))
     expect(result.current.board?.tasks).toEqual([])
+  })
+})
+
+describe('a card of a task that handed back pictures', () => {
+  const handed: BoardTask['handed'] = {
+    pictures: [
+      { digest: 'a'.repeat(64), mediaType: 'image/png', bytes: 9, width: 4, height: 3, name: 'one.png', unkept: null },
+      { digest: 'b'.repeat(64), mediaType: 'image/png', bytes: 9, width: 4, height: 3, name: 'two.png', unkept: null },
+    ],
+    files: [{ path: 'notes.md', add: null }],
+  }
+  const shown = (work: BoardTask) => {
+    render(<BoardCard {...readyCardOf(work)} />)
+    return screen
+  }
+
+  it('shows them above its branch where it has a branch and no pull request', () => {
+    const view = shown(task({ phase: 'ready', branch: 'althar/prototype-a-few-designs', changed: { files: 3, add: 1126, del: 0 }, handed }))
+    expect(within(view.getByLabelText('Pictures')).getAllByRole('img')).toHaveLength(2)
+    expect(view.getByText('althar/prototype-a-few-designs')).toBeTruthy()
+    // Pictures are what it shows of what was handed back, not its files too.
+    expect(view.queryByText('notes.md')).toBeNull()
+  })
+
+  it('shows them with its pull request chip', () => {
+    const view = shown(task({ phase: 'ready', change: change({ draft: false, checks: null }), handed }))
+    expect(within(view.getByLabelText('Pictures')).getAllByRole('img')).toHaveLength(2)
+    expect(view.getByText(/Add a retry/)).toBeTruthy()
+  })
+
+  it('shows them on a Replied card', () => {
+    const view = shown(
+      task({ phase: 'ready', replied: 'th1', branch: 'althar/prototype-a-few-designs', changed: { files: 3, add: 1126, del: 0 }, handed }),
+    )
+    expect(view.getByText('Replied')).toBeTruthy()
+    expect(within(view.getByLabelText('Pictures')).getAllByRole('img')).toHaveLength(2)
+    expect(view.getByText('althar/prototype-a-few-designs')).toBeTruthy()
+  })
+
+  it('shows its files with its branch where it handed back no pictures', () => {
+    const view = shown(
+      task({
+        phase: 'ready',
+        branch: 'althar/notes',
+        changed: { files: 1, add: 4, del: 0 },
+        handed: { pictures: [], files: [{ path: 'docs/notes.md', add: 4 }] },
+      }),
+    )
+    expect(view.getByText(/notes\.md/)).toBeTruthy()
+    expect(view.getByText('althar/notes')).toBeTruthy()
   })
 })

@@ -6,7 +6,7 @@ matters, and says plainly what is decided but not built yet.
 
 | Document | What it covers |
 |---|---|
-| [Foundations](foundations.md) | The Electron shell and the runtime, Effect, the desktop app's layers, how failures stay small, what CI gates, one feature for every host and agent, where the runtime runs |
+| [Foundations](foundations.md) | The Electron shell and the runtime, staying quick while the computer is busy, Effect, the desktop app's layers, how failures stay small, what CI gates, one feature for every host and agent, where the runtime runs |
 | [Agents](agents.md) | ACP, which agents join, accounts, briefs and switching, how models are picked, keeping context small, plan usage and what a task used |
 | [The coordinator](coordinator.md) | Always on, one pool of tools with leads, directing leads, its copies, its notes and handover, moving tasks, clearing its chat |
 | [What agents may do](what-agents-may-do.md) | Allow everything, what asks, speaking for the person, the sandbox as the boundary, git's guard, the person's rules, the web, what stays and why |
@@ -39,25 +39,28 @@ There are no more numbered ADRs. A proposal that isn't decided yet lives in
 
 Proposals waiting now:
 
-- [A task is a conversation plus parts, changeable at any time](proposed/a-task-is-a-conversation-plus-parts.md):
-  the parts, as many changes and pull requests in a task as it needs, the
-  workspace moving up, reviews that run code, talking to a lead as plain
-  turns with a review only when the person ships, the review
-  after a merge in the same task, chats on Scratch and presets. It would fold
-  into [tasks](tasks.md), [workspaces and runs](workspaces-and-runs.md),
-  [reviews](reviews.md), [code hosts](code-hosts.md), [agents](agents.md)
-  and [what agents may do](what-agents-may-do.md).
-- [ADR-087](proposed/087-a-lead-starts-helpers-on-any-agent-in-copies-of-their-own.md):
-  a lead's helpers.
 - [ADR-103](proposed/103-projects-live-locally-or-on-a-host-and-place-work-in-pools.md):
   projects on a host, and work placed across pools.
+- [ADR-104](proposed/104-a-project-keeps-canvases-its-agents-draw-and-the-person-comments-on.md):
+  canvases the project's agents draw, version and hear comments on; the first slice is built.
 
 ## The old ADRs
 
 ADR-002 to ADR-102 were folded into the area documents and removed. The
 documents hold what is current; git history keeps the old texts, last
-under `docs/decisions/archive/` at commit `997f0e99b`. Two of the old ADRs,
-ADR-087 and ADR-103, are still proposals in [`proposed/`](proposed/).
+under `docs/decisions/archive/` at commit `997f0e99b`. ADR-087 was built in
+#739 and folded into [tasks § Helpers](tasks.md#helpers); its text is in git
+history under `docs/decisions/proposed/`. One of the old ADRs, ADR-103, is
+still a proposal in [`proposed/`](proposed/).
+
+"A task is a conversation plus parts", decided on 8 November and built in
+#739, folded into [tasks](tasks.md), [workspaces and
+runs](workspaces-and-runs.md), [reviews](reviews.md), [code
+hosts](code-hosts.md), [agents](agents.md), [what agents may
+do](what-agents-may-do.md) and [the desktop app](desktop-app.md); what it
+decided was built there too.
+Its text, with the products it read and the alternatives it turned down, is
+in git history under `docs/decisions/proposed/`.
 
 Code and older docs cite decisions as `ADR-NNN`. This table resolves each
 one.
@@ -150,7 +153,7 @@ one.
 | 084 | What a task, or the coordinator's day, used is said per plan and per credit, as the share of a week or dollars, in the context ring and a Usage card in Outputs, with no total | [agents § What a task used](agents.md#what-a-task-used) |
 | 085 | A fork's branches go upstream by a choice of the project's, offered once on what its host says; remotes are never rewritten, and open pull requests stay where they are | [code-hosts § A fork's branches](code-hosts.md#a-forks-branches) |
 | 086 | The coordinator stops, holds, restarts and settles a task when the person's message in that turn asks, with a line in both threads; any other turn asks on a card, and discarding deletes nothing | [coordinator § Moving a task](coordinator.md#moving-a-task) |
-| [087](proposed/087-a-lead-starts-helpers-on-any-agent-in-copies-of-their-own.md) | A lead starts helpers on any agent, each in a copy of its own, and hears each one's result as a new turn | Proposed; would fold into [tasks § Helpers (proposed)](tasks.md#helpers-proposed) |
+| 087 | A lead starts helpers on any agent, each in a copy of its own or on a change it hands them, and hears each one's result as a new turn | [tasks § Helpers](tasks.md#helpers) |
 | 088 | The plan countdown, review rounds and new-project defaults are settings, read where they apply and seeding a project's first rules | [tasks § Plan and review settings](tasks.md#plan-and-review-settings) |
 | 089 | The asks and refusals left once the sandbox is the boundary are what can't be undone: a crossing goes unread, a line is read from the shell's folder, and tearing down or publishing asks | [what-agents-may-do § Git's guard](what-agents-may-do.md#gits-guard) |
 | 090 | Run opens its list, and runs where it is picked | [workspaces-and-runs § Run and where it runs](workspaces-and-runs.md#run-and-where-it-runs) |
@@ -167,3 +170,4 @@ one.
 | 101 | Clearing a coordinator's chat is one question with two kinds: clear only the view (a mark on the thread; the coordinator keeps the conversation; Show earlier and Undo) or forget the conversation too (the session ends and its messages are deleted); both keep what is still open and the project's records | [coordinator § Clearing its chat](coordinator.md#clearing-its-chat) |
 | 102 | A change of a few lines is one step on a light model, starts at once, and is reviewed after it merges, with one card in its thread; Auto moves a lead to a lighter model of its agent as the plan runs out, with Keep for the task | [tasks § The small-change lane](tasks.md#the-small-change-lane), [reviews § A small change is reviewed after it merges](reviews.md#a-small-change-is-reviewed-after-it-merges) |
 | [103](proposed/103-projects-live-locally-or-on-a-host-and-place-work-in-pools.md) | A project's runtime and database live locally, on a personal host or on Althar hosting; automatic task placement uses its assigned worker pools, with SSH or Connect access, forwarded previews and explicit local test copies | Proposed; would fold into [foundations § Where the runtime runs, and who may reach it](foundations.md#where-the-runtime-runs-and-who-may-reach-it) |
+| [104](proposed/104-a-project-keeps-canvases-its-agents-draw-and-the-person-comments-on.md) | A project keeps canvases: its agents write files and publish them as versions any lead or the coordinator can get, change and look at; HTML runs in a view and scheme of its own; the person's comments go to the conversation and stay on the canvas | Proposed, first slice built; would fold into [desktop-app](desktop-app.md), [tasks § What agents hand back](tasks.md#what-agents-hand-back) and [what-agents-may-do § Althar's tools outside the sandbox](what-agents-may-do.md#althars-tools-outside-the-sandbox) |

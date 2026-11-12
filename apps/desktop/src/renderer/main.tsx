@@ -1,4 +1,3 @@
-import { type StartupStage, startupWords } from '../startup'
 import '@fontsource-variable/inter'
 import '@fontsource-variable/jetbrains-mono'
 import '@althar/ui/styles.css'
@@ -80,8 +79,6 @@ function FailedOpen({ reason }: { reason: string }) {
 }
 
 function Window() {
-  const [stage, setStage] = useState<StartupStage>('data')
-  useEffect(() => window.althar.onStartupStage?.(setStage), [])
   const [opened, setOpened] = useState<Awaited<typeof opening> | null>(null)
   const [failed, setFailed] = useState<string | null>(null)
   const [mismatch, setMismatch] = useState<ApiError | null>(null)
@@ -113,7 +110,6 @@ function Window() {
   return (
     <Launch
       ready={opened !== null}
-      waiting={startupWords[stage]}
       quick={openedBefore || opened?.hasProjects === true}
       onDone={() =>
         requestAnimationFrame(() => {

@@ -1,3 +1,4 @@
+import { hearsOf, threadsSaying } from '../src/TaskActions'
 import { existsSync } from 'node:fs'
 
 import { Ids, newId, type ProjectId } from '@althar/domain'
@@ -112,6 +113,18 @@ const asks = (threadId: string) =>
 
 const titles = (threadId: string) => Effect.map(notices(threadId), (rows) => rows.map((row) => row['title'] ?? ''))
 
+describe('which thread says what a call did to a task', () => {
+  const task = { threadId: 'th-task' }
+  it('is the coordinator’s and the task’s, but a lead’s own chat says nothing of another task', () => {
+    assert.isTrue(hearsOf({ role: 'coordinator', threadId: 'th-coordinator' }, task))
+    assert.isFalse(hearsOf({ role: 'lead', threadId: 'th-other' }, task))
+    // Its own task: the one thread, the task's.
+    assert.isFalse(hearsOf({ role: 'lead', threadId: 'th-task' }, task))
+    assert.strictEqual(threadsSaying({ role: 'coordinator', threadId: 'th-coordinator' }, task), 'Both threads have a line saying so')
+    assert.strictEqual(threadsSaying({ role: 'lead', threadId: 'th-other' }, task), 'Its thread has a line saying so')
+  })
+})
+
 describe('stop_task', () => {
   it.live('stops a running task at once on the person’s word, with a line in both threads', () =>
     Effect.gen(function* () {
@@ -158,10 +171,11 @@ describe('stop_task', () => {
       const other = yield* started(c.projectId, 'Prototype the browser', 'Work on it. [lead:wait]')
       yield* until(standing(task.taskId), (row) => row?.run === 'running')
       const lead: ToolAccess = { ...c.access, role: 'lead', threadId: other.threadId, taskId: other.taskId, sessionId: 'none' }
-      assert.match(yield* callTool(lead, 'stop_task', { task: task.slug }), /^Stopped .*Both threads have a line saying so/)
+      assert.match(yield* callTool(lead, 'stop_task', { task: task.slug }), /^Stopped .*Its thread has a line saying so/)
       assert.strictEqual((yield* standing(task.taskId))?.run, 'suspended')
       assert.include(yield* titles(task.threadId), 'The lead of “Prototype the browser” stopped this task')
-      assert.include(yield* titles(other.threadId), 'Stopped “Review the importer”')
+      // The lead's own chat is about its own task: its call is there, and no line about the one it stopped.
+      assert.notInclude(yield* titles(other.threadId), 'Stopped “Review the importer”')
       // Its own task it doesn't stop from inside.
       assert.match(yield* callTool(lead, 'stop_task', { task: other.slug }), /is your own task/)
     }).pipe(Effect.provide(runtime())),
@@ -218,6 +232,38 @@ describe('hold_task and restart_task', () => {
       assert.match(yield* callTool(c.access, 'restart_task', { task: slug }), /^Started /)
       yield* until(standing(created.taskId), (row) => row?.run !== null && row?.run !== undefined)
     }).pipe(Effect.provide(runtime(':memory:', {}, { countdown: Duration.minutes(10) }))),
+  )
+
+  it.live('hold a task that waits for a free agent, out of the line, and start it again', () =>
+    Effect.gen(function* () {
+      const c = yield* coordinator
+      const first = yield* started(c.projectId, 'Work on the importer', 'Work on it. [lead:wait]')
+      yield* until(standing(first.taskId), (row) => row?.run === 'running')
+      const second = yield* started(c.projectId, 'Tidy the docs', 'Do it. [lead:finish]')
+      const sql = yield* SqlClient.SqlClient
+      const attemptOf = (taskId: string) =>
+        sql<{ state: string }>`
+          SELECT a.state FROM node_attempts a JOIN nodes n ON n.id = a.node_id JOIN workflow_executions e ON e.id = n.execution_id
+          JOIN runs r ON r.id = e.run_id WHERE r.task_id = ${taskId} ORDER BY a.rowid DESC LIMIT 1`
+      yield* until(attemptOf(second.taskId), (rows) => rows[0]?.state === 'held')
+
+      yield* c.turn('hold the docs one')
+      assert.match(yield* callTool(c.access, 'hold_task', { task: second.slug }), /^Held .*: it is out of the line/)
+      assert.deepInclude(yield* standing(second.taskId), { counting: 0, held: 1 })
+      assert.strictEqual((yield* attemptOf(second.taskId))[0]?.state, 'cancelled')
+      assert.include(yield* titles(second.threadId), 'The coordinator held this task’s plan')
+      // Held, it says so, and one at work has no plan to hold.
+      assert.match(yield* callTool(c.access, 'hold_task', { task: second.slug }), /is held already/)
+      assert.match(yield* callTool(c.access, 'hold_task', { task: first.slug }), /has started: there is no plan to hold/)
+
+      yield* c.turn('go ahead with the docs one')
+      assert.match(
+        yield* callTool(c.access, 'restart_task', { task: second.slug }),
+        /^Started .*: it waits for a place among the agents at work/,
+      )
+      yield* until(attemptOf(second.taskId), (rows) => rows[0]?.state === 'held')
+      assert.deepInclude(yield* standing(second.taskId), { counting: 0, held: 0 })
+    }).pipe(Effect.provide(runtime(':memory:', {}, { busy: { machine: { cores: 3, memory: 7 * 1024 ** 3 } } }))),
   )
 
   it.live('restarts a stopped task from its step, and a discarded one on its worktree', () =>

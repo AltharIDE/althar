@@ -16,6 +16,7 @@ import { Instance } from './Instance'
 import { printedMore, uncoloured } from './leftRunning'
 import { change, fact, timestamp } from './records'
 import { installIn } from './runCommand'
+import { ASIDE_BUILDS, onScratch } from './scratch'
 import { addItem, updateItem } from './threads'
 import { POOL, type ToolAccess, ToolRefused, ToolServer } from './ToolServer'
 
@@ -37,9 +38,11 @@ import { POOL, type ToolAccess, ToolRefused, ToolServer } from './ToolServer'
  * setup that works, which replaces the old one. The person reads it in the
  * project's settings, and can change it there.
  *
- * It starts as the worktree is made, and the lead's first turn waits for it.
+ * It starts as the worktree is made, and the lead's turns wait for it.
  * Never in a copy a task only reads, such as the pull request a review reads:
- * nothing of someone else's code runs there.
+ * nothing of someone else's code runs there. Nor in an aside's, on Scratch
+ * (docs/decisions/tasks.md, "Asides"): an aside never installs or builds,
+ * and is set up only once it is made a task.
  * It runs once per worktree: how it went is kept on the workspace, so a lead
  * that resumes doesn't set it up again, and a worktree made again (a reopened
  * task's whose folder went) is. It runs in the person's login shell, so it
@@ -278,17 +281,23 @@ type Store = SqlClient.SqlClient | Ledger | Crypto.Crypto | Instance | RuntimeCo
 interface Again extends Unset {
   readonly bindingSlug: string
   readonly bindingId: string
+  /** A Local task's folder: the person's own checkout, set up again only when its lead asks, with nothing kept of it. */
+  readonly local?: number
 }
 
 export class Setups extends Context.Service<
   Setups,
   {
-    /** Sets up each of the task's worktrees that isn't yet, without waiting: as they are made. */
+    /**
+     * Sets up each of the task's worktrees that isn't yet, without waiting: as they are made, or as an aside becomes a task. An
+     * aside's copy, on Scratch, is never set up.
+     */
     begin(taskId: string): Effect.Effect<void>
     /**
      * Waits until each of the task's worktrees is set up, setting up any that
      * isn't yet: before its lead's first turn. Never fails; one that doesn't
-     * set up says so in the thread, and to the lead.
+     * set up says so in the thread, and to the lead. An aside's copy, on
+     * Scratch, is never set up: an aside answers from what it reads.
      */
     ready(taskId: string): Effect.Effect<void>
     /** What the task's lead is told of how its worktrees were set up; null where nothing ran. */
@@ -361,7 +370,8 @@ export class Setups extends Context.Service<
               state: 'launching',
               launchedAt: yield* timestamp,
             })}`
-            const spawned = yield* Effect.exit(spawnOwned(spec, folder))
+            // A worktree's setup is agents' work, an install or a build: in the background, as its lead runs (process.ts).
+            const spawned = yield* Effect.exit(spawnOwned(spec, folder, { background: true }))
             if (Exit.isFailure(spawned)) {
               yield* change('processes', id, { state: 'unknown', endedAt: yield* timestamp })
               const reason = Option.match(Cause.findErrorOption(spawned.cause), {
@@ -490,7 +500,7 @@ export class Setups extends Context.Service<
                   JOIN tasks k ON k.id = w.task_id AND (k.state <> 'abandoned' OR w.cleaned_at IS NOT NULL)
                   JOIN projects p ON p.id = w.project_id AND p.archived_at IS NULL
                   JOIN threads t ON t.task_id = w.task_id AND t.kind = 'task'
-                  WHERE w.id = ${workspaceId} AND w.state = 'ready' AND w.access = 'write' AND w.kind IS NULL AND w.setup IS NULL`
+                  WHERE w.id = ${workspaceId} AND w.state = 'ready' AND (w.access = 'write' OR w.trust = 'full') AND w.kind IS NULL AND w.setup IS NULL`
               if (unset !== undefined) yield* setUp(unset)
             }),
           ),
@@ -500,9 +510,12 @@ export class Setups extends Context.Service<
         provide(
           Effect.gen(function* () {
             const sql = yield* SqlClient.SqlClient
+            // An aside's copy, on Scratch, is never set up (docs/decisions/tasks.md, "Asides"): it never installs, builds or runs
+            // the setup before it answers, nor after. Made a task, by the person or its lead's work, it is set up as any task's.
             const unset = yield* sql<{ id: string }>`
               SELECT w.id FROM workspaces w JOIN repository_bindings b ON b.id = w.binding_id
-              WHERE w.task_id = ${taskId} AND w.device_id = ${instance.deviceId} AND w.state = 'ready' AND w.access = 'write' AND w.kind IS NULL AND w.setup IS NULL
+              WHERE w.task_id = ${taskId} AND w.device_id = ${instance.deviceId} AND w.state = 'ready' AND (w.access = 'write' OR w.trust = 'full') AND w.kind IS NULL AND w.setup IS NULL
+                AND coalesce((SELECT k.shelf FROM tasks k WHERE k.id = w.task_id), '') <> 'scratch'
               ORDER BY b.created_at, b.rowid`
             // Each in a fiber of Althar's own, side by side: a lead that stops waiting doesn't stop its worktree's setup.
             const fibers = yield* Effect.forEach(unset, (workspace) => Effect.forkIn(settle(workspace.id), setupsScope))
@@ -518,7 +531,7 @@ export class Setups extends Context.Service<
               SELECT b.display_name AS name, w.setup, b.recorded_setup AS recorded,
                 (SELECT l.path FROM repository_locations l WHERE l.binding_id = b.id AND l.device_id = ${instance.deviceId}) AS checkout
               FROM workspaces w JOIN repository_bindings b ON b.id = w.binding_id
-              WHERE w.task_id = ${taskId} AND w.device_id = ${instance.deviceId} AND w.state = 'ready' AND w.access = 'write' AND w.kind IS NULL
+              WHERE w.task_id = ${taskId} AND w.device_id = ${instance.deviceId} AND w.state = 'ready' AND (w.access = 'write' OR w.trust = 'full') AND w.kind IS NULL
                 AND w.setup IS NOT NULL
               ORDER BY b.created_at, b.rowid`
             if (rows.length === 0) return null
@@ -543,11 +556,13 @@ export class Setups extends Context.Service<
           const all = yield* sql<Again>`
             SELECT w.id, w.project_id, t.id AS thread_id, w.path AS worktree, b.folder AS within, b.display_name AS name,
               b.run_setup AS kept, b.recorded_setup AS recorded, b.slug AS binding_slug, b.id AS binding_id,
-              (SELECT l.path FROM repository_locations l WHERE l.binding_id = b.id AND l.device_id = ${instance.deviceId}) AS checkout
+              (SELECT l.path FROM repository_locations l WHERE l.binding_id = b.id AND l.device_id = ${instance.deviceId}) AS checkout,
+              w.kind IS 'checkout' AS local
             FROM workspaces w
             JOIN repository_bindings b ON b.id = w.binding_id
             JOIN threads t ON t.task_id = w.task_id AND t.kind = 'task'
-            WHERE w.task_id = ${taskId} AND w.device_id = ${instance.deviceId} AND w.state = 'ready' AND w.access = 'write' AND w.kind IS NULL
+            WHERE w.task_id = ${taskId} AND w.device_id = ${instance.deviceId} AND w.state = 'ready' AND w.access = 'write'
+              AND (w.kind IS NULL OR w.kind = 'checkout')
             ORDER BY b.created_at, b.rowid`
           if (named === undefined) return all
           const wanted = named.trim().toLowerCase()
@@ -623,7 +638,7 @@ export class Setups extends Context.Service<
       ) => {
         const where = several ? `${name}'s ${folder}` : `the ${folder}`
         if (ran === undefined || ran.setUp.command === null)
-          return `${several ? name : 'The repository'} has no setup recorded, and nothing Althar can tell to install: there is no lockfile or manifest it knows. If it needs one, get the folder ready yourself and record what worked with record_setup.`
+          return `${several ? name : 'The repository'} has no setup recorded, and nothing Althar can tell to install: there is no lockfile or manifest it knows.${folder === 'checkout' ? '' : ' If it needs one, get the folder ready yourself and record what worked with record_setup.'}`
         const { setUp, printed } = ran
         const ended = failedSetUp(setUp) ? howItFailed(setUp) : 'it went through'
         return [
@@ -657,14 +672,18 @@ export class Setups extends Context.Service<
               return copies.map((one, at) => saidOf(one.name, copies.length > 1, ran[at], 'copy')).join('\n\n')
             }
             if (taskId === null) return yield* new ToolRefused({ message: 'This tool is for a task’s lead or the coordinator.' })
+            if (yield* provide(onScratch(taskId))) return yield* new ToolRefused({ message: ASIDE_BUILDS })
             const again = yield* provide(againOf(taskId, named))
             if (again.length === 0)
               return yield* new ToolRefused({
                 message: "The task's worktree isn't on this computer, so Althar can't set it up. Tell the person.",
               })
-            // One at a time in a worktree: one being set up as it was made is waited for, then this runs after it.
-            const ran = yield* Effect.forEach(again, (one) => locked(one.id, provide(setUp(one))))
-            return again.map((one, at) => saidOf(one.name, again.length > 1, ran[at])).join('\n\n')
+            // One at a time in a worktree: one being set up as it was made is waited for, then this runs after it. A Local
+            // task's folder is the person's checkout, which Althar sets up only now, as asked, and keeps no record of.
+            const ran = yield* Effect.forEach(again, (one) => locked(one.id, provide(setUp(one, one.local !== 1))))
+            return again
+              .map((one, at) => saidOf(one.name, again.length > 1, ran[at], one.local === 1 ? 'checkout' : 'worktree'))
+              .join('\n\n')
           }).pipe(
             Effect.catch((error) =>
               error instanceof ToolRefused
@@ -703,11 +722,16 @@ export class Setups extends Context.Service<
             if ('refused' in tidy) return yield* new ToolRefused({ message: tidy.refused })
             const { copy, commands } = tidy
             const repository = typeof asked.repository === 'string' && asked.repository.trim() !== '' ? asked.repository : undefined
-            const all = yield* provide(againOf(taskId, repository))
+            const found = yield* provide(againOf(taskId, repository))
+            // Local, the person's checkout was ready before the task: what it needed isn't what a new worktree needs.
+            const all = found.filter((each) => each.local !== 1)
             const [one] = all
             if (one === undefined)
               return yield* new ToolRefused({
-                message: "The task's worktree isn't on this computer, so Althar can't record its setup. Tell the person.",
+                message:
+                  found.length > 0
+                    ? "The task works Local, in the person's own checkout, which they set up themselves: there is no setup to record from it."
+                    : "The task's worktree isn't on this computer, so Althar can't record its setup. Tell the person.",
               })
             if (all.length > 1)
               return yield* new ToolRefused({

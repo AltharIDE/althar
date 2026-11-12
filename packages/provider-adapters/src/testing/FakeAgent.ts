@@ -371,6 +371,15 @@ export interface FakeAgentOptions {
   readonly allowAllStays?: boolean
   /** Once it leaves its mode by itself (`leaveMode`), it refuses to be put back in one. */
   readonly leavesForGood?: boolean
+  /** Called as it is asked to set its model or effort, before it answers. */
+  readonly optionAsked?: (configId: string, value: string) => void
+  /** Called as it is given a prompt, before it answers. */
+  readonly promptAsked?: () => void
+  /**
+   * Whether it holds its answer to a request to set its model or effort, asked while one waits: as an agent does that answers
+   * one request at a time and is at its turn. It answers once this says no.
+   */
+  readonly holdsSets?: () => boolean
 }
 
 /** The holds a test opens, by marker, for an agent to go on from (`FakeAgentOptions.holds`). */
@@ -545,6 +554,12 @@ const EXPLORED = [
 /** Worktrees where a lead has stopped answering once: started afresh, it answers. Kept across sessions, as a restart makes a new one. */
 const wedgedIn = new Set<string>()
 
+/**
+ * The tools a lead was told in words to call (`[lead:call <tool> <json>]`), by its worktree: each call once, so a lead handed
+ * the thread so far, as a new lead is, doesn't call again what the one before it called.
+ */
+const calledIn = new Map<string, Set<string>>()
+
 /** Worktrees where a lead's session has been lost once (`[lead:lost-once]`): a fresh session there carries on. */
 const lostIn = new Set<string>()
 
@@ -654,7 +669,8 @@ const playStall = async (
 /**
  * Calls Althar's tools over the MCP server a session was given. The fake
  * plays a role when its prompt carries a marker, as a task's description or
- * the person's message can: `[coordinator:plan]` drafts and plans a task,
+ * the person's message can: `[coordinator:plan]` drafts and plans a task (`[coordinator:plan-small]` as a small change, reviewed
+ * only once it merged; `[coordinator:plan-branch]` ending with its branch, as a prototype does),
  * passing on the `[lead:…]` and `[review:…]` markers it was given
  * (`[coordinator:plan-effort]` puts its lead on the large model at high
  * effort), and `[coordinator:start]` starts one at once, without a plan;
@@ -669,7 +685,8 @@ const playStall = async (
  * and ends its turn, then finishes once their answer comes; asked to, `[lead:make-change]` makes its quick task a change
  * first, reviewed by Codex and ending in a draft pull request, or with no
  * review (`[lead:make-change-alone]`), and without `[lead:finish]` ends its
- * turn there; `[review:pass]` and `[review:findings]`
+ * turn there; told `[lead:call <tool> <json>]`, it calls that tool with those arguments, once each, as a lead does what
+ * the person says (change_part, change_lead, ship_task); `[review:pass]` and `[review:findings]`
  * report a review. Settling findings, it writes a file and commits it, so
  * the change changes, and finishes; a later review round passes. The session remembers its
  * markers: `[review:always]` finds something every round, and
@@ -702,7 +719,8 @@ const playStall = async (
  * `[lead:fix-late]` leaves the full tests running and commits it once they
  * end, and `[lead:fix-hold]` works on after it until it is interrupted. Asked to "push pls" once its pull request is open,
  * `[lead:push]` commits what it has and asks the person to push it; asked to "tidy pls", `[lead:commit]` commits and ends its
- * turn, asking no one to push it. Told its checks failed, `[lead:fix-push]` commits a fix and calls push_to_pull_request itself, and out of tries, brings them to the person with hand_checks_to_person; `[lead:checks-main]` reads the default branch's checks and, where one fails there, brings it to the person instead; `[lead:fix-gone]` goes on its own instead, as an agent that crashes does, each time it is told. Asked to bring its branch up to date, `[lead:resolve]`
+ * turn, asking no one to push it; asked to "bring main in pls", `[lead:merge-main]` merges origin/main, keeping both sides of
+ * a conflict, and commits the merge ("and tidy" commits other work after it). Sent back by the merge queue and told to, `[lead:update-branch]` calls update_branch. Told its checks failed, `[lead:fix-push]` commits a fix and calls push_to_pull_request itself, and out of tries, brings them to the person with hand_checks_to_person; `[lead:checks-main]` reads the default branch's checks and, where one fails there, brings it to the person instead; `[lead:fix-gone]` goes on its own instead, as an agent that crashes does, each time it is told. Asked to bring its branch up to date, `[lead:resolve]`
  * merges what it was told to, keeps both sides of each conflict and commits
  * the merge; `[lead:resolve-more]` does too, then commits other work on top
  * of it in two commits; `[lead:resolve-fix]` commits one fix on top of the
@@ -928,7 +946,12 @@ const playRole = async (
     text.startsWith('Round ') ||
     text.includes('A check of the fixes, not another review.') ||
     text.includes('More to review. The person ships')
-  const asked = session.markers.size > 0 || text.includes('Settle each') || laterRound || text.startsWith('More to review')
+  const asked =
+    session.markers.size > 0 ||
+    text.includes('Settle each') ||
+    laterRound ||
+    text.startsWith('More to review') ||
+    text.includes('[lead:call ')
   if (session.tools === undefined || !asked) return undefined
   const client = new Client({ name: 'fake-agent', version: '1.0.0' })
   const transport = new StreamableHTTPClientTransport(new URL(session.tools.url), { requestInit: { headers: session.tools.headers } })
@@ -940,6 +963,14 @@ const playRole = async (
       const result = await client.callTool({ name, arguments: args })
       const content = Array.isArray(result.content) ? result.content : []
       return content.map((part) => (typeof part === 'object' && part !== null && 'text' in part ? String(part.text) : '')).join('')
+    }
+    // A lead's helper (ADR-087) has no step to finish: it does what its brief's markers say in its folder, slowly
+    // (`[lead:slowly]`), writing a file (`[lead:write]`) or committing one (`[lead:commit]`), and its last words are its result.
+    if (text.includes('You are a helper in Althar')) {
+      if (text.includes('[lead:slowly]')) await takesAWhile(session, '[lead:slowly]', 6_000)
+      if (text.includes('[lead:write]')) appendFileSync(join(session.cwd, 'draft.md'), 'A first draft.\n')
+      if (text.includes('[lead:commit]')) await commitIn(session.cwd, 'change.txt', 'Change it')
+      return `Done in ${session.cwd}: what I was asked is there.`
     }
     if (available.has('report_review')) {
       // Reviews until it is stopped: for a review cut short in the middle; or, `[review:wait-later]`, a later round.
@@ -1030,6 +1061,25 @@ const playRole = async (
         })
         if (!text.includes('[lead:finish]')) return made
       }
+      // Asked in these words to make work with no review real, it offers its task a review, as a line the person answers.
+      if (text.includes('[lead:offer-review]') && available.has('offer_review')) {
+        const offered = await call('offer_review', {})
+        if (!text.includes('[lead:finish]')) return offered
+      }
+      // Told in words to change something, `[lead:call <tool> <json>]` (change_part, change_lead, ship_task…), it calls that tool
+      // with those arguments, as an agent does what the person said, once each, and says what each answered.
+      const calls = [...text.matchAll(/\[lead:call ([a-z_]+)(?: (\{.*?\}))?\]/g)]
+      if (calls.length > 0) {
+        const done = calledIn.get(session.cwd) ?? new Set<string>()
+        calledIn.set(session.cwd, done)
+        const answers: Array<string> = []
+        for (const [marker, name, args] of calls) {
+          if (name === undefined || done.has(marker) || !available.has(name)) continue
+          done.add(marker)
+          answers.push(await call(name, args === undefined ? {} : (JSON.parse(args) as Record<string, unknown>)))
+        }
+        if (answers.length > 0 && !text.includes('[lead:finish]')) return answers.join('\n')
+      }
       // Told in these words to move its task on (`[lead:task-done]`, `[lead:task-keep]`, `[lead:task-discard]`), it does, and says what it was told.
       const moved = /\[lead:task-(done|keep|discard)\]/.exec(text)?.[1]
       if (moved !== undefined && available.has('settle_task')) return await call('settle_task', { how: moved })
@@ -1046,6 +1096,47 @@ const playRole = async (
           ],
         })
         return 'Those are the two states.'
+      }
+      // Asked to draw (`[lead:canvas]`), it writes three of the project's canvases in its folder and publishes them (ADR-104):
+      // a document of directions with a diagram in it, a chart as an SVG, and a page of the sign-in, which opens beside it.
+      // Asked again (`[lead:canvas-again]`), it gets the directions, reads what the person said on them, changes them in
+      // answer, publishes the next version and resolves what it answered. `[lead:canvas-list]` lists the project's canvases.
+      if (text.includes('[lead:canvas') && available.has('canvas_publish')) {
+        const said: Array<string> = []
+        const told = async (name: string, args: Record<string, unknown>) => {
+          const answer = await call(name, args)
+          said.push(`${name}: ${answer}`)
+          return answer
+        }
+        const draw = (name: string, files: Readonly<Record<string, string>>) => {
+          for (const [path, words] of Object.entries(files)) {
+            mkdirSync(join(session.cwd, '.althar', 'canvases', name, ...path.split('/').slice(0, -1)), { recursive: true })
+            writeFileSync(join(session.cwd, '.althar', 'canvases', name, ...path.split('/')), words)
+          }
+        }
+        if (text.includes('[lead:canvas-list]')) return await told('canvas_list', {})
+        if (text.includes('[lead:canvas-again]')) {
+          await told('canvas_get', { name: 'sign-in' })
+          const read = await told('canvas_read', { name: 'sign-in' })
+          const open = [...read.matchAll(/\[(ccm_[0-9a-f]{32})\]/g)].map((found) => found[1] ?? '')
+          draw('sign-in', {
+            'README.md': CANVAS_DIRECTIONS.replace(
+              '- **C, guided:**',
+              '- **B, split:** the picture now on the left, as asked.\n- **C, guided:**',
+            ),
+          })
+          await told('canvas_publish', { name: 'sign-in', note: 'The picture on the left, as asked' })
+          if (open.length > 0)
+            await told('canvas_resolve', { name: 'sign-in', comments: open, note: 'Moved the picture to the left in v2.' })
+          return said.join('\n\n')
+        }
+        draw('sign-in', { 'README.md': CANVAS_DIRECTIONS })
+        await told('canvas_publish', { name: 'sign-in', title: 'Sign-in, three directions', note: 'First directions', open: false })
+        draw('checkout-funnel', { 'funnel.svg': CANVAS_FUNNEL })
+        await told('canvas_publish', { name: 'checkout-funnel', title: 'Checkout funnel', open: false })
+        draw('sign-in-page', { 'index.html': CANVAS_PAGE, 'site.css': CANVAS_PAGE_CSS })
+        await told('canvas_publish', { name: 'sign-in-page', title: 'Sign-in page', note: 'Direction A, as a page' })
+        return said.join('\n\n')
       }
       // Asked to work on the page beside its task, `[lead:page]` with `page: <address>` and `shot: <file>`, it opens it there,
       // reads it, types in its Note field, presses Approve, reads it again and writes its screenshot to the file, and says
@@ -1219,6 +1310,16 @@ const playRole = async (
         await commitIn(session.cwd, 'pushed.txt', 'Tidy up before pushing')
         return await call('push_to_pull_request', {})
       }
+      // Asked to bring main in, it merges origin/main as it stands here, keeping both sides of a conflict, and commits the merge.
+      if (session.markers.has('[lead:merge-main]') && /\bbring main in pls\b/i.test(text)) {
+        await resolveIn(session.cwd, 'origin/main')
+        if (/\band tidy\b/i.test(text)) await commitIn(session.cwd, 'tidied.txt', 'Tidy up')
+        return 'Merged main in, and committed the merge.'
+      }
+      // Sent back by the merge queue and told an update from main is update_branch's, it calls that, and nothing of its plan again.
+      const sentBack = /The merge queue took (PR #\d+) out/.exec(text)?.[1]
+      if (session.markers.has('[lead:update-branch]') && sentBack !== undefined && text.includes('call update_branch'))
+        return await call('update_branch', { pull_request: sentBack.slice(3) })
       // Asked to tidy up, it commits and ends its turn: what goes up, and when, isn't its to say.
       if (session.markers.has('[lead:commit]') && /\btidy pls\b/i.test(text)) {
         // Within its turn, as a lead commits before it answers: what the turn's end looks at has it.
@@ -1389,7 +1490,7 @@ const playRole = async (
       const which = /as repositories: (.+)\.$/.exec(first)?.[1]
       const drafted = which === undefined ? first : await call('draft_task', { ...draft, repositories: which.split(', ') })
       const slug = /Drafted ([^\s,.]+)/.exec(drafted)?.[1] ?? ''
-      return await call('propose_plan', {
+      const planned = await call('propose_plan', {
         task: slug,
         lead: {
           agent: 'claude-code',
@@ -1398,7 +1499,13 @@ const playRole = async (
           reason: 'It knows the code.',
         },
         review: ask.includes('[coordinator:plan-no-review]') ? null : { agent: 'codex' },
+        // `[coordinator:plan-small]`: a small change, reviewed only once it merged.
+        ...(ask.includes('[coordinator:plan-small]') ? { small_change: true } : {}),
       })
+      // `[coordinator:plan-branch]`: it ends with its branch, as a prototype does, set on the plan before it starts.
+      if (ask.includes('[coordinator:plan-branch]') && available.has('change_part'))
+        await call('change_part', { task: slug, part: 'ending', end: 'branch', why: 'a prototype' })
+      return planned
     }
     return undefined
   } finally {
@@ -1606,9 +1713,13 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
       session.mode = params.modeId
       return {}
     })
-    .onRequest(acp.methods.agent.session.setConfigOption, ({ params }) => {
+    .onRequest(acp.methods.agent.session.setConfigOption, async ({ params }) => {
       const session = sessionOf(params.sessionId)
       const value = String(params.value)
+      if (params.configId === 'model' || params.configId === 'effort') {
+        options.optionAsked?.(params.configId, value)
+        while (options.holdsSets?.() === true && !session.closed) await pause(10)
+      }
       if (params.configId === 'mode' && MODES.includes(value)) session.mode = modes === 'stuck' ? session.mode : value
       else if (params.configId === 'model' && options.failsOnce?.includes(value) && !failedOnce.has(value)) {
         failedOnce.add(value)
@@ -1674,6 +1785,7 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
       // What it was given in the prompts it did nothing with, it reads with this one, as its transcript keeps them.
       const prompted = `${session.unread}${params.prompt.map((block) => (block.type === 'text' ? block.text : '')).join('')}`
       session.prompts += 1
+      options.promptAsked?.()
       const blank = options.blank ?? 0
       if (
         typeof blank === 'number'
@@ -1740,6 +1852,8 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
       const ended = (usage?: acp.Usage): acp.PromptResponse => ({ stopReason: 'end_turn', ...(usage === undefined ? {} : { usage }) })
       // Signed out, as its account no longer is, where the prompt says `[signed-out]`.
       if (text.includes('[signed-out]')) throw acp.RequestError.authRequired()
+      // Its service busy, every time it is asked (`[overloaded]`): a failure tried again, as a service's is.
+      if (text.includes('[overloaded]')) throw acp.RequestError.internalError({ details: 'The engine is currently overloaded' })
       // Slow to say its first word, as a model can be, where the prompt says so: `[answers-after:5s]` says nothing for five
       // seconds, then a sentence; `[thinks-after:5s]` and `[reads-after:5s]` first think aloud, or read a file, for a second and a
       // half; `[fails-after:5s]` gives up after them, as when Anthropic's API fails; `[ends-after:5s]` ends its turn having said
@@ -2501,3 +2615,51 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
       }
     })
 }
+
+/** The directions the fake lead draws as a canvas (`[lead:canvas]`): a document with a diagram in it. */
+const CANVAS_DIRECTIONS = `## Sign in
+
+Three directions for the sign-in page. Each keeps the email first and the providers under it.
+
+\`\`\`mermaid
+flowchart LR
+  Open[Open Althar] --> Email{Email known?}
+  Email -- yes --> Code[Send a code]
+  Email -- no --> Make[Make an account]
+  Code --> In[Signed in]
+  Make --> In
+\`\`\`
+
+- **A, quiet:** one field, one button, the providers folded under it.
+- **B, split:** the field beside a picture of the app.
+- **C, guided:** a step at a time, with a line that fills.
+`
+
+/** A chart the fake lead draws as an SVG canvas. */
+const CANVAS_FUNNEL = `<svg xmlns="http://www.w3.org/2000/svg" width="420" height="220" viewBox="0 0 420 220">
+<rect width="420" height="220" fill="#ffffff"/>
+<text x="24" y="30" font-family="Inter, sans-serif" font-size="14" font-weight="600" fill="#141417">Checkout, this week</text>
+<rect x="24" y="48" width="360" height="30" rx="6" fill="#2b3bff"/><text x="34" y="68" font-family="Inter, sans-serif" font-size="12" fill="#fff">Visited · 12,480</text>
+<rect x="24" y="88" width="252" height="30" rx="6" fill="#5563ff"/><text x="34" y="108" font-family="Inter, sans-serif" font-size="12" fill="#fff">Basket · 8,736</text>
+<rect x="24" y="128" width="158" height="30" rx="6" fill="#8a94ff"/><text x="34" y="148" font-family="Inter, sans-serif" font-size="12" fill="#fff">Paid · 5,490</text>
+<rect x="24" y="168" width="92" height="30" rx="6" fill="#bcc2ff"/><text x="34" y="188" font-family="Inter, sans-serif" font-size="12" fill="#141417">Came back · 3,190</text>
+</svg>
+`
+
+/** A page the fake lead draws as an HTML canvas, its style in a file of its own, linked relatively. */
+const CANVAS_PAGE = `<!doctype html><html><head><meta charset="utf-8"><title>Sign in</title><link rel="stylesheet" href="site.css"></head>
+<body><main class="card"><h1>Sign in to Althar</h1><p>We’ll send a code to your email.</p>
+<label>Email <input id="email" placeholder="you@company.com"></label><button id="send" type="button">Send a code</button>
+<p class="or">or</p><button class="provider" type="button">Continue with GitHub</button></main>
+<script>document.getElementById('send').onclick = () => (document.getElementById('send').textContent = 'Code sent')</script></body></html>
+`
+
+const CANVAS_PAGE_CSS = `body { margin: 0; min-height: 100vh; display: grid; place-items: center; background: #f4f2ec; color: #141417; font: 14px/1.45 Inter, -apple-system, system-ui, sans-serif }
+.card { width: 320px; padding: 28px; border-radius: 14px; background: #fff; box-shadow: 0 1px 2px rgba(60,50,30,.06), 0 10px 24px -12px rgba(60,50,30,.14) }
+h1 { margin: 0 0 4px; font-size: 18px } p { margin: 0 0 18px; color: #63636b }
+label { display: flex; flex-direction: column; gap: 6px; font-size: 12.5px; color: #45454c }
+input { box-sizing: border-box; width: 100%; padding: 9px 11px; border: 1px solid #85858b; border-radius: 8px; font: inherit; margin-bottom: 10px }
+button { width: 100%; padding: 9px; border: 0; border-radius: 8px; background: #141417; color: #fff; font: inherit; font-weight: 600 }
+.or { margin: 12px 0; text-align: center; font-size: 12px }
+.provider { background: #fff; color: #141417; box-shadow: inset 0 0 0 1px rgba(20,20,28,.18) }
+`

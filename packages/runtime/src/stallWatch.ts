@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto'
 
+import { plainTitle } from '@althar/contracts'
 import type { SessionEvent, ToolContent } from '@althar/provider-adapters'
 
 import type { LiveEvent } from './Live'
@@ -232,7 +233,7 @@ export const makeStallWatch = (limits: StallLimits) => {
     const output = event._tag === 'ToolCallUpdate' ? outputOf(event.rawOutput) : ''
     watch.finished = [
       ...watch.finished,
-      { key: keyOf(call), shown: call.command ?? call.title, failed: event.status === 'failed', output },
+      { key: keyOf(call), shown: call.command ?? plainTitle(call.title), failed: event.status === 'failed', output },
     ].slice(-KEPT)
     const loop = repeated(watch.finished)
     if (loop === null) return []
@@ -281,6 +282,9 @@ export const makeStallWatch = (limits: StallLimits) => {
         watch.stopAskedAt = null
         // What it asked waits on the person no longer through it: a question outlives its session (ADR-021), but the next one's turns aren't waiting.
         watch.asking.clear()
+        return []
+      // What the person said is heard; the turn it reaches is what the watch follows.
+      case 'PersonSaid':
         return []
       case 'AttentionNeeded':
         watch.asking.add(event.attentionId)

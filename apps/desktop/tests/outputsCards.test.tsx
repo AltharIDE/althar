@@ -55,6 +55,8 @@ const show = (
     onConnect: vi.fn(),
     onReplace: vi.fn(),
     onBringIn: vi.fn(),
+    onShip: vi.fn(),
+    onMergeWaiting: vi.fn(),
   }
   withServices(
     <Outputs
@@ -72,6 +74,18 @@ const show = (
 }
 
 describe('what a task changed, card by card', () => {
+  it('offers Review and merge, or Merge now, beside Ship where commits wait for it', async () => {
+    const changes = [pr('api', 1, { localHead: 'def456', unpushed: 2 })]
+    const { onMergeWaiting, onShip } = show(task({ changes, held: { since: '2026-11-10T09:00:00.000Z', commits: 2 } }))
+    await userEvent.click(screen.getByRole('button', { name: 'Ship 2 commits' }))
+    expect(onShip).toHaveBeenCalled()
+    await userEvent.click(screen.getByRole('button', { name: 'Review and merge' }))
+    expect(onMergeWaiting).toHaveBeenLastCalledWith('review')
+    await userEvent.click(screen.getByRole('button', { name: 'Other ways to merge' }))
+    await userEvent.click(await screen.findByRole('menuitem', { name: 'Merge now' }))
+    expect(onMergeWaiting).toHaveBeenLastCalledWith('now')
+  })
+
   it('accepts every pull request still open in a task of several, at the head each showed, and not one merged already', async () => {
     const changes = [
       pr('api', 1),
@@ -191,6 +205,29 @@ describe('what a task changed, card by card', () => {
     show(task({ changes: [pr('engine', 52, { queued: true }), pr('frontend', 27)] }))
     expect(screen.getByText('In the merge queue')).toBeTruthy()
     expect(screen.queryByRole('button', { name: /^Accept and merge/ })).toBeNull()
+  })
+
+  it('lists what its host needs before it merges in place of its checks’ line, the missing first, with what to do (DEV-204)', () => {
+    show(
+      task({
+        changes: [
+          pr('api', 1, {
+            target: 'main',
+            needs: [
+              { kind: 'checks', state: 'met', have: 1, need: 1, required: ['test'] },
+              { kind: 'approvals', state: 'unmet', have: 0, need: 1 },
+              { kind: 'up_to_date', state: 'unmet', have: 2 },
+              { kind: 'conflicts', state: 'met' },
+            ],
+          }),
+        ],
+      }),
+    )
+    const list = screen.getByRole('list', { name: 'What merging needs' })
+    expect(within(list).getByText('Needs an approval')).toBeTruthy()
+    expect(within(list).getByText('Ask for a review')).toBeTruthy()
+    expect(within(list).getByText('2 commits behind main')).toBeTruthy()
+    expect(within(list).getByRole('button', { name: /The required check passed/ })).toBeTruthy()
   })
 
   it('offers Accept and merge on a stopped task whose pull request is ready as it is, and not on one stopped without', async () => {

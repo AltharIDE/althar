@@ -31,8 +31,8 @@ import { withoutReview } from './changesSupport'
 
 /*
  * A plain task (DEV-96, ADR-035): what the coordinator starts with
- * start_task, a quick task, works in a worktree with no branch, set up as any
- * task's, with a scratch folder git ignores. Where its lead first changes the
+ * start_task, a quick task, works in a worktree with no branch, set up the
+ * first time something runs from it, with a scratch folder git ignores. Where its lead first changes the
  * repository, as its turn ends or as it calls finish_step, Althar makes the
  * task's branch right there, with that work on it, so nothing is lost: in the
  * same folder, with the same lead. The task stays plain, and the branch on
@@ -130,80 +130,85 @@ const sayAfterDone = (threadId: string, body: string) =>
   })
 
 describe('a plain task', () => {
-  it.live('starts with no branch, set up as any task, and a lead that changed nothing finishes with only its summary', () =>
-    Effect.gen(function* () {
-      const sql = yield* SqlClient.SqlClient
-      const queries = yield* Queries
-      const runs = yield* Runs
-      const changes = yield* Changes
-      const place = yield* opened
-      const task = yield* started(place, 'Which partners still call v1?', 'Look, and say. [lead:finish] [lead:terse]')
-      const card = yield* cardOnce(task.id, (one) => one.phase === 'ready')
-      // Finished, plain, and showing no branch: it never had one.
-      assert.deepInclude(card, { kind: 'plain', branch: null, summary: 'Did the task.' })
-      const worktree = yield* worktreeOf(task.id)
-      assert.isNull(worktree.branchedAt)
-      assert.strictEqual(worktree.branch, `althar/${task.slug}`)
-      assert.isNull(gitIn(worktree.path, 'symbolic-ref', '-q', 'HEAD'))
-      assert.isNull(gitIn(place.path, 'rev-parse', '--verify', '-q', `refs/heads/${worktree.branch}`))
-      assert.strictEqual(gitIn(worktree.path, 'rev-parse', 'HEAD'), worktree.baseCommit)
-      // Set up as any worktree is, so the project's tools work for its lead; its scratch folder is there, and git sees nothing.
-      const [setUp] = yield* sql<{ setup: string | null }>`SELECT setup FROM workspaces WHERE task_id = ${task.id}`
-      assert.isNotNull(setUp?.setup)
-      assert.isTrue(existsSync(join(scratchOf(worktree.path), '.gitignore')))
-      assert.strictEqual(gitIn(worktree.path, 'status', '--porcelain', '--untracked-files=all'), '')
-      // Its lead was told it has no branch, where to throw things away, that writing in the repository makes one on this Mac, and
-      // how it becomes a change.
-      const [first] = yield* sql<{ prompt: string | null }>`
+  it.live(
+    'starts with no branch, set up only once something runs from it, and a lead that changed nothing finishes with only its summary',
+    () =>
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient
+        const queries = yield* Queries
+        const runs = yield* Runs
+        const changes = yield* Changes
+        const place = yield* opened
+        const task = yield* started(place, 'Which partners still call v1?', 'Look, and say. [lead:finish] [lead:terse]')
+        const card = yield* cardOnce(task.id, (one) => one.phase === 'ready')
+        // Finished, plain, and showing no branch: it never had one.
+        assert.deepInclude(card, { kind: 'plain', branch: null, summary: 'Did the task.' })
+        const worktree = yield* worktreeOf(task.id)
+        assert.isNull(worktree.branchedAt)
+        assert.strictEqual(worktree.branch, `althar/${task.slug}`)
+        assert.isNull(gitIn(worktree.path, 'symbolic-ref', '-q', 'HEAD'))
+        assert.isNull(gitIn(place.path, 'rev-parse', '--verify', '-q', `refs/heads/${worktree.branch}`))
+        assert.strictEqual(gitIn(worktree.path, 'rev-parse', 'HEAD'), worktree.baseCommit)
+        // A chat that only talks never pays for an install: its setup waits for something to run from it (scratchAndPresets has
+        // the replay). Its scratch folder is there, and git sees nothing.
+        const [setUp] = yield* sql<{ setup: string | null }>`SELECT setup FROM workspaces WHERE task_id = ${task.id}`
+        assert.isNull(setUp?.setup ?? null)
+        assert.isTrue(existsSync(join(scratchOf(worktree.path), '.gitignore')))
+        assert.strictEqual(gitIn(worktree.path, 'status', '--porcelain', '--untracked-files=all'), '')
+        // Its lead was told it has no branch, where to throw things away, that writing in the repository makes one on this Mac, and
+        // how it becomes a change.
+        const [first] = yield* sql<{ prompt: string | null }>`
         SELECT prompt FROM turn_deliveries WHERE thread_id = ${task.threadId} ORDER BY requested_at LIMIT 1`
-      assert.include(first?.prompt, `${worktree.path}, with no branch yet, at main at ${worktree.baseCommit.slice(0, 12)}`)
-      assert.include(first?.prompt, `its scratch folder, ${scratchOf(worktree.path)}`)
-      assert.include(first?.prompt, `on a branch of its own, ${worktree.branch}, when your turn ends`)
-      assert.include(first?.prompt, `Nothing of it leaves ${thisDevice()}`)
-      assert.include(first?.prompt, 'call make_it_a_change')
-      assert.notInclude(first?.prompt, `The branch ${worktree.branch}`)
-      // Its report has no word of what it built, and needn't.
-      const [report] = yield* sql<{ content: string }>`
+        assert.include(first?.prompt, `${worktree.path}, with no branch yet, at main at ${worktree.baseCommit.slice(0, 12)}`)
+        assert.include(first?.prompt, `its scratch folder, ${scratchOf(worktree.path)}`)
+        assert.include(first?.prompt, `on a branch of its own, ${worktree.branch}, when your turn ends`)
+        assert.include(first?.prompt, `Nothing of it leaves ${thisDevice()}`)
+        assert.include(first?.prompt, 'call make_it_a_change')
+        assert.notInclude(first?.prompt, `The branch ${worktree.branch}`)
+        // Its report has no word of what it built, and needn't.
+        const [report] = yield* sql<{ content: string }>`
         SELECT content FROM thread_items WHERE thread_id = ${task.threadId} AND kind = 'step_result'`
-      assert.notProperty(JSON.parse(report?.content ?? '{}'), 'built')
-      // Nothing says it ends on a branch: it has none.
-      assert.notInclude((yield* notices(task.threadId)).map((notice) => notice.title).join('\n'), 'branch')
-      // Its screen shows no branch, nothing changed and nothing to merge; the board nothing of a size.
-      const thread = yield* queries.thread(task.threadId, {})
-      assert.deepInclude(thread.task, { branch: null, files: [], commits: 0, here: [] })
-      assert.isNotNull(thread.task.worktree)
-      assert.isNull((yield* queries.board(place.projectId)).tasks.find((one) => one.taskId === task.id)?.changed)
-      // There is nothing to open a pull request for, to merge here or to push.
-      const refused = yield* Effect.flip(runs.publish(task.id))
-      assert.instanceOf(refused, NoChangeToOpen)
-      assert.strictEqual((refused as NoChangeToOpen).why, 'nothing')
-      const merging = yield* Effect.flip(changes.mergeHere(task.id, [{ repository: 'x', head: worktree.baseCommit }]))
-      assert.instanceOf(merging, CantMerge)
-      assert.strictEqual((merging as CantMerge).why, 'changed')
-      assert.include(yield* Effect.flip(changes.pushBranch(task.id, [])), { _tag: 'NotFound' })
-      assert.deepStrictEqual(yield* changes.pushHere(task.id), [])
-      const [run] = yield* sql<{ id: string }>`SELECT id FROM runs WHERE task_id = ${task.id}`
-      const published = yield* changes.publish({
-        projectId: place.projectId as ProjectId,
-        taskId: task.id,
-        runId: run?.id ?? '',
-        end: 'draft',
-      })
-      assert.deepStrictEqual(
-        published.map((one) => [one.kind, one.left]),
-        [['nothing', []]],
-      )
-      // The coordinator reads it as a task with no branch.
-      const access: ToolAccess = { role: 'coordinator', ...place, sessionId: 'none', taskId: null }
-      assert.include(
-        yield* callTool(access, 'list_tasks', {}),
-        `${task.slug}: Which partners still call v1? (ready, led by Fake claude-code) — no branch`,
-      )
-      assert.include(
-        yield* callTool(access, 'read_task', { task: task.slug }),
-        'No branch yet: its lead has changed nothing in the repository',
-      )
-    }).pipe(Effect.provide(withQueries())),
+        assert.notProperty(JSON.parse(report?.content ?? '{}'), 'built')
+        // Nothing says it ends on a branch: it has none.
+        assert.notInclude((yield* notices(task.threadId)).map((notice) => notice.title).join('\n'), 'branch')
+        // Its screen shows no branch, nothing changed and nothing to merge; the board nothing of a size.
+        const thread = yield* queries.thread(task.threadId, {})
+        assert.deepInclude(thread.task, { branch: null, files: [], commits: 0, here: [] })
+        assert.isNotNull(thread.task.worktree)
+        assert.isNull((yield* queries.board(place.projectId)).tasks.find((one) => one.taskId === task.id)?.changed)
+        // There is nothing to open a pull request for, to merge here or to push.
+        const refused = yield* Effect.flip(runs.publish(task.id))
+        assert.instanceOf(refused, NoChangeToOpen)
+        assert.strictEqual((refused as NoChangeToOpen).why, 'nothing')
+        const merging = yield* Effect.flip(changes.mergeHere(task.id, [{ repository: 'x', head: worktree.baseCommit }]))
+        assert.instanceOf(merging, CantMerge)
+        assert.strictEqual((merging as CantMerge).why, 'changed')
+        assert.include(yield* Effect.flip(changes.pushBranch(task.id, [])), { _tag: 'NotFound' })
+        assert.deepStrictEqual(yield* changes.pushHere(task.id), [])
+        const [run] = yield* sql<{ id: string }>`SELECT id FROM runs WHERE task_id = ${task.id}`
+        const published = yield* changes.publish({
+          projectId: place.projectId as ProjectId,
+          taskId: task.id,
+          runId: run?.id ?? '',
+          end: 'draft',
+        })
+        assert.deepStrictEqual(
+          published.map((one) => [one.kind, one.left]),
+          [['nothing', []]],
+        )
+        // The coordinator leaves the aside out of its task list. On the board, it is a task with no branch.
+        const access: ToolAccess = { role: 'coordinator', ...place, sessionId: 'none', taskId: null }
+        assert.strictEqual(yield* callTool(access, 'list_tasks', {}), 'The project has no tasks yet.')
+        yield* sql`UPDATE tasks SET shelf = NULL WHERE id = ${task.id}`
+        assert.include(
+          yield* callTool(access, 'list_tasks', {}),
+          `${task.slug}: Which partners still call v1? (ready, led by Fake claude-code) — no branch`,
+        )
+        assert.include(
+          yield* callTool(access, 'read_task', { task: task.slug }),
+          'No branch yet: its lead has changed nothing in the repository',
+        )
+      }).pipe(Effect.provide(withQueries())),
   )
 
   it.live('tells a lead whose turn after it was done did nothing to carry on, and keeps its answer in Needs you until it is read', () =>
@@ -424,7 +429,6 @@ describe('a plain task', () => {
         const worktree = yield* worktreeOf(task.id)
         assert.isNotNull(worktree.branchedAt)
         assert.deepStrictEqual([card.kind, card.change, card.branch], ['plain', null, worktree.branch])
-        assert.deepStrictEqual([...(yield* (yield* Queries).kept)], [])
         // Nothing went to the host: no push, no pull request, and nothing in its thread says it ends on its branch.
         assert.lengthOf(github.changes, 0)
         assert.isNull(gitIn(bare, 'rev-parse', '--verify', '--quiet', `refs/heads/${worktree.branch}`))
@@ -503,6 +507,24 @@ describe('a plain task', () => {
         taskId: created.taskId,
       }
       assert.strictEqual(yield* callTool(lead, 'finish_step', { summary: 'Read them.' }), 'Althar has your summary.')
+      // Handed a note that only says there was nothing to check, it keeps none: what it shows is what it ran, and a note of what it
+      // found, though it changed nothing.
+      yield* callTool(lead, 'finish_step', {
+        summary: 'Said hi back.',
+        evidence: [
+          { kind: 'note', caption: 'Nothing to show', text: 'This was only a greeting, so nothing was changed or checked.' },
+          { kind: 'command', caption: 'The logs', command: 'tail app.log', exit_code: 0, output: 'ok' },
+          { kind: 'note', caption: 'Where the retry backs off', text: 'Twice: in the client (client.ts:40) and in the queue.' },
+        ],
+      })
+      const sql = yield* SqlClient.SqlClient
+      const [report] = yield* sql<{ content: string }>`
+        SELECT content FROM thread_items WHERE thread_id = ${created.threadId} AND kind = 'step_result' ORDER BY sequence DESC LIMIT 1`
+      const kept = (JSON.parse(report?.content ?? '{}') as { evidence?: ReadonlyArray<{ kind: string }> }).evidence ?? []
+      assert.deepStrictEqual(
+        kept.map((piece) => piece.kind),
+        ['command', 'note'],
+      )
     }).pipe(Effect.provide(withQueries())),
   )
 
@@ -813,13 +835,13 @@ describe('making a quick task a change', () => {
         (yield* coordinatorNews(place.threadId, place.projectId, yield* modelNamer)) ?? '',
         `- ${task.slug} (Make the sketch real) (it was “Sketch the settings”): the person asked its lead to make this quick task a change, and it is one now: Fake codex's default model reviews it, and it ends as a draft pull request.`,
       )
-      // Made once, it isn't made again.
+      // Made once, asked again it is made so in place: its parts as asked, with no round of its own.
       const lead: ToolAccess = { role: 'lead', ...place, threadId: task.threadId, sessionId: 'none', taskId: task.id }
+      assert.include(yield* listTools(lead), 'make_it_a_change')
       assert.match(
-        yield* callTool(lead, 'make_it_a_change', { title: 'Again', review: null, output: 'draft' }),
-        /^This task is a change already/,
+        yield* callTool(lead, 'make_it_a_change', { title: 'Make the sketch real', review: { agent: 'codex' }, output: 'draft' }),
+        /^The task is a change now, called “Make the sketch real”, reviewed by Fake codex's default model, ending in a draft pull request\./,
       )
-      assert.notInclude(yield* listTools(lead), 'make_it_a_change')
     }).pipe(Effect.provide(withGitHub(github)))
   })
 
@@ -973,7 +995,7 @@ describe('making a quick task a change', () => {
       const place = yield* opened
       const lead = (taskId: string, threadId: string): ToolAccess => ({ role: 'lead', ...place, threadId, sessionId: 'none', taskId })
       const asked = { title: 'Make it real', review: { agent: 'codex' }, output: 'draft' }
-      // A planned task: not offered to its lead, and refused, saying why.
+      // A planned task, such as a prototype: made a change in place, its review and its ending as asked.
       const planned = yield* projects.createTask({
         envelope: yield* Runtime.envelope('task.create', {}),
         projectId: place.projectId,
@@ -989,8 +1011,11 @@ describe('making a quick task a change', () => {
         startsIn: Duration.hours(1),
       })
       const plannedLead = lead(planned.taskId, planned.threadId)
-      assert.notInclude(yield* listTools(plannedLead), 'make_it_a_change')
-      assert.match(yield* callTool(plannedLead, 'make_it_a_change', asked), /^This task was planned as a change from its start/)
+      assert.include(yield* listTools(plannedLead), 'make_it_a_change')
+      assert.match(
+        yield* callTool(plannedLead, 'make_it_a_change', asked),
+        /^The task is a change now, called “Make it real”, reviewed by Fake codex's default model, ending /,
+      )
       // A review of someone else's pull request.
       const reviewing = yield* projects.createTask({
         envelope: yield* Runtime.envelope('task.create', {}),
@@ -1038,7 +1063,7 @@ describe('making a quick task a change', () => {
       )
       // None of it changed the task: it is still plain.
       assert.strictEqual((yield* cardOnce(quick.id, () => true)).kind, 'plain')
-      // With a pull request of its own, it is a change already.
+      // With a pull request of its own, it is a change already: made so again in place.
       yield* sql`INSERT INTO external_links ${sql.insert({
         id: `xlink_${'b'.repeat(32)}`,
         projectId: place.projectId,
@@ -1052,10 +1077,7 @@ describe('making a quick task a change', () => {
         createdAt: at,
         updatedAt: at,
       })}`
-      assert.match(
-        yield* callTool(quickLead, 'make_it_a_change', asked),
-        /^This task has a pull request already, so it is a change: there is nothing to make\. Where the person wants another change made from it, .*draft_task, then propose_plan\.$/,
-      )
+      assert.match(yield* callTool(quickLead, 'make_it_a_change', asked), /^The task is a change now, called “Make it real”/)
       // And only a task's lead makes its task one.
       const none: ToolAccess = { role: 'lead', ...place, sessionId: 'none', taskId: null }
       assert.notInclude(yield* listTools(none), 'make_it_a_change')

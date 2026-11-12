@@ -49,9 +49,9 @@ const squashMerge = (bare: string, branch: string) => {
 }
 
 /** A repository on the fake GitHub, its lead committing as the person does. */
-const onGitHub = () => {
+const onGitHub = (more: Omit<Parameters<typeof makeFakeService>[0] & object, 'pushUrl'> = {}) => {
   const { working, bare } = hosted()
-  const github = makeFakeService({ pushUrl: () => bare })
+  const github = makeFakeService({ pushUrl: () => bare, ...more })
   github.addRepository(['meridian', 'api'])
   git(working, 'config', 'user.name', 'Fake')
   git(working, 'config', 'user.email', 'fake@althar.test')
@@ -344,6 +344,38 @@ describe('talking to a lead once its plan is done', () => {
     }).pipe(Effect.provide(runtimeWith(github)))
   })
 
+  it.live('sends nothing where its task becomes a chat while its Ship’s review runs: what waited waits for the next Ship', () => {
+    const { working, bare, github } = onGitHub()
+    return Effect.gen(function* () {
+      const runs = yield* Runs
+      const sql = yield* SqlClient.SqlClient
+      const task = yield* opened(working, '[review:pass] [review:wait-later]')
+      const pushed = git(bare, 'rev-parse', BRANCH)
+      yield* say(task.threadId, 'Make it retry twice. tidy pls [lead:commit]')
+      yield* answered(task.threadId, task.turns + 1)
+      yield* until(heldAt(task.taskId), (at) => at !== null)
+      yield* runs.ship({ envelope: yield* Runtime.envelope('task.ship', { taskId: task.taskId }), taskId: task.taskId })
+      yield* until(
+        sql<{ state: string }>`
+          SELECT a.state FROM node_attempts a JOIN nodes n ON n.id = a.node_id JOIN workflow_executions e ON e.id = n.execution_id
+          JOIN runs r ON r.id = e.run_id WHERE r.task_id = ${task.taskId} AND r.plan_id IS NULL AND n.node_key = 'review'`,
+        (rows) => rows[0]?.state === 'running',
+      )
+      // "Make it a chat", on the person's word to its lead: its review stops, and the Ship it was in ends as a chat does.
+      const said = yield* callTool(yield* leadOf(task), 'change_part', { part: 'preset', preset: 'Chat', why: 'the person asked' })
+      assert.match(said, /made it a Chat: no review, nothing going up until it ships, PR #1 closed, its branch staying/)
+      yield* until(runsOf(task.taskId), (all) => all.every((run) => run.state !== 'running'))
+      // Nothing went up: not the commit that waited, nor a pull request; the one it had is closed, and what waited still waits.
+      assert.strictEqual(git(bare, 'rev-parse', BRANCH), pushed)
+      assert.deepStrictEqual(
+        github.changes.map((one) => one.state),
+        ['closed'],
+      )
+      assert.isNotNull(yield* heldAt(task.taskId))
+      assert.strictEqual((yield* results(task.threadId)).at(-1)?.summary, 'Kept here: nothing went up.')
+    }).pipe(Effect.provide(runtimeWith(github)))
+  })
+
   it.live('holds nothing where the turn only answered', () => {
     const { working, github } = onGitHub()
     return Effect.gen(function* () {
@@ -541,7 +573,7 @@ describe('a Ship', () => {
     }).pipe(Effect.provide(runtimeWith(github)))
   })
 
-  it.live('opens the task’s first pull request, a draft, where its plan ended on its branch', () => {
+  it.live('pushes the branch of a task that ends with it, opening nothing, and Open pull request opens its first, a draft', () => {
     const { working, bare, github } = onGitHub()
     return Effect.gen(function* () {
       const runs = yield* Runs
@@ -550,14 +582,15 @@ describe('a Ship', () => {
       yield* say(task.threadId, 'Make it retry twice. tidy pls [lead:commit]')
       yield* answered(task.threadId, task.turns + 1)
       yield* until(heldAt(task.taskId), (at) => at !== null)
+      // Ship sends it up as the task ends: its branch, and no pull request (a task is a conversation plus parts: one that
+      // ends with its branch, as a prototype does or a change that dropped its pull request, stays a branch).
       yield* runs.ship({ envelope: yield* Runtime.envelope('task.ship', { taskId: task.taskId }), taskId: task.taskId })
-      yield* until(
-        Effect.sync(() => github.changes.length),
-        (count) => count === 1,
-      )
-      assert.deepStrictEqual([github.changes[0]?.source, github.changes[0]?.draft], [BRANCH, true])
-      assert.strictEqual(git(bare, 'rev-parse', BRANCH), git(task.path, 'rev-parse', 'HEAD'))
       yield* until(heldAt(task.taskId), (at) => at === null)
+      assert.strictEqual(git(bare, 'rev-parse', BRANCH), git(task.path, 'rev-parse', 'HEAD'))
+      assert.lengthOf(github.changes, 0)
+      // The person opens its pull request on purpose, from its Change card: a draft.
+      yield* runs.publish(task.taskId)
+      assert.deepStrictEqual([github.changes[0]?.source, github.changes[0]?.draft], [BRANCH, true])
       const [card] = yield* until(cards(task.projectId), (all) => all[0]?.change?.number === 1)
       assert.isUndefined(card?.held)
     }).pipe(Effect.provide(runtimeWith(github)))
@@ -620,6 +653,301 @@ describe('a Ship', () => {
       assert.deepInclude(call.stuck, { step: 'publish', why: 'not_connected' })
       assert.strictEqual(git(bare, 'rev-parse', BRANCH), pushed)
       assert.isNotNull(yield* heldAt(task.taskId))
+    }).pipe(Effect.provide(runtimeWith(github)))
+  })
+})
+
+describe('commits the person makes by hand', () => {
+  it.live('hold the branch for Ship as the next turn begins, and nothing pushes them first', () => {
+    const { working, bare, github } = onGitHub()
+    return Effect.gen(function* () {
+      const task = yield* opened(working)
+      const pushed = git(bare, 'rev-parse', BRANCH)
+      assert.isNull(yield* heldAt(task.taskId))
+      // The person commits by hand in the task's folder, a while after the lead's last turn, then says something to its lead.
+      writeFileSync(join(task.path, 'by-hand.txt'), 'mine\n')
+      git(task.path, 'add', 'by-hand.txt')
+      const later = new Date(Date.now() + 10 * 60_000).toISOString()
+      execFileSync('git', ['commit', '-q', '-m', 'By hand'], { cwd: task.path, env: { ...process.env, GIT_AUTHOR_DATE: later } })
+      yield* say(task.threadId, 'What do you think of it?')
+      yield* until(heldAt(task.taskId), (at) => at !== null)
+      yield* answered(task.threadId, task.turns + 1)
+      // Held: nothing pushed it, and its card says it waits for Ship.
+      assert.strictEqual(git(bare, 'rev-parse', BRANCH), pushed)
+      const [card] = yield* until(cards(task.projectId), (all) => all[0]?.held !== undefined)
+      assert.strictEqual(card?.held?.commits, 1)
+    }).pipe(Effect.provide(runtimeWith(github)))
+  })
+})
+
+/**
+ * Main moves on while the task's pull request waits: other people's merged work, written an hour before, on the host, and
+ * fetched here as origin/main. With `clash`, one of them writes the file the task's lead wrote, so merging it conflicts.
+ */
+const mainMovesOn = (bare: string, path: string, clash = false) => {
+  const clone = mkdtempSync(join(tmpdir(), 'althar-main-'))
+  execFileSync('git', ['clone', '-q', bare, clone])
+  const earlier = new Date(Date.now() - 60 * 60_000).toISOString()
+  const env = { ...process.env, GIT_AUTHOR_DATE: earlier, GIT_COMMITTER_DATE: earlier }
+  const commit = (file: string, text: string, message: string) => {
+    writeFileSync(join(clone, file), text)
+    git(clone, 'add', '-A')
+    execFileSync('git', ['-c', 'user.name=Other', '-c', 'user.email=other@althar.test', 'commit', '-q', '-m', message], {
+      cwd: clone,
+      env,
+    })
+  }
+  commit('usage.ts', 'usage\n', 'Usage card drops the time breakdown (#763)')
+  commit('timing.ts', 'timing\n', 'Stop summing task timing (#767)')
+  if (clash) commit('change.txt', 'theirs\n', 'Change it on main too (#770)')
+  git(clone, 'push', '-q', 'origin', 'main')
+  git(path, 'fetch', '-q', bare, '+main:refs/remotes/origin/main')
+}
+
+const stepsSaid = (threadId: string) => Effect.map(results(threadId), (said) => said.map((result) => result.step))
+
+/** Its branch here and on the host are the same, and moved on from `pushed`: what waited went up. */
+const wentUp = (bare: string, path: string, pushed: string) =>
+  until(
+    Effect.sync(() => [git(bare, 'rev-parse', BRANCH), git(path, 'rev-parse', 'HEAD')] as const),
+    ([there, here]) => there === here && there !== pushed,
+  )
+
+describe('a merge of main into the task’s branch after its pull request opened', () => {
+  it.live('with no conflict starts no review and no round: it goes up to the pull request, and the task stays where it was', () => {
+    const { working, bare, github } = onGitHub()
+    return Effect.gen(function* () {
+      const task = yield* opened(working, '[review:pass] [lead:merge-main]')
+      const pushed = git(bare, 'rev-parse', BRANCH)
+      mainMovesOn(bare, task.path)
+      // As #773's lead did once the queue sent it back: it merges main, two merged pull requests and the merge.
+      yield* say(task.threadId, 'The queue sent it back. bring main in pls')
+      yield* answered(task.threadId, task.turns + 1)
+      assert.strictEqual(git(task.path, 'rev-list', '--count', `${pushed}..HEAD`), '3')
+
+      // Pushed to the pull request as the turn ended, with nothing held for Ship.
+      yield* wentUp(bare, task.path, pushed)
+      assert.strictEqual(git(bare, 'rev-list', '--count', `${pushed}..${BRANCH}`), '3')
+      assert.isNull(yield* heldAt(task.taskId))
+      // No round: the plan's run is the task's only one, and its steps are the plan's.
+      assert.deepStrictEqual(
+        (yield* runsOf(task.taskId)).map((run) => [run.state, run.planId === null]),
+        [['succeeded', false]],
+      )
+      assert.deepStrictEqual(yield* stepsSaid(task.threadId), ['implement', 'review', 'publish'])
+      const [card] = yield* cards(task.projectId)
+      assert.isUndefined(card?.held)
+      assert.strictEqual(card?.phase, 'ready')
+      assert.lengthOf(github.changes, 1)
+    }).pipe(Effect.provide(runtimeWith(github)))
+  })
+
+  it.live('that settled a conflict is the task’s work: it waits for Ship, whose review reads how the merge settled it', () => {
+    const { working, bare, github } = onGitHub()
+    return Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const runs = yield* Runs
+      const task = yield* opened(working, '[review:pass] [lead:merge-main]')
+      const pushed = git(bare, 'rev-parse', BRANCH)
+      mainMovesOn(bare, task.path, true)
+      yield* say(task.threadId, 'Main moved. bring main in pls')
+      yield* answered(task.threadId, task.turns + 1)
+      const merge = git(task.path, 'rev-parse', 'HEAD')
+      // Held for Ship, as a turn's own work is: nothing went up.
+      yield* until(heldAt(task.taskId), (at) => at !== null)
+      assert.strictEqual(git(bare, 'rev-parse', BRANCH), pushed)
+
+      yield* runs.ship({ envelope: yield* Runtime.envelope('task.ship', { taskId: task.taskId }), taskId: task.taskId })
+      const [brief] = yield* until(
+        sql<{ body: string }>`
+          SELECT i.body FROM user_inputs i JOIN threads t ON t.id = i.thread_id
+          WHERE t.task_id = ${task.taskId} AND t.kind = 'step' AND i.body LIKE 'More to review. The person ships%'`,
+        (rows) => rows.length === 1,
+      )
+      // It lists the merge, not main's commits as the task's, and says how to read what the merge settled.
+      assert.include(brief?.body, `git show --remerge-diff ${merge.slice(0, 12)}`)
+      assert.include(brief?.body, "- Merge remote-tracking branch 'origin/main'")
+      assert.notInclude(brief?.body, 'Usage card')
+      yield* wentUp(bare, task.path, pushed)
+      yield* until(stepsSaid(task.threadId), (steps) => steps.length === 5)
+      assert.deepStrictEqual(yield* stepsSaid(task.threadId), ['implement', 'review', 'publish', 'review', 'publish'])
+    }).pipe(Effect.provide(runtimeWith(github)))
+  })
+
+  it.live('with a commit of the task’s own after it, ships as today: held, reviewed, then sent up', () => {
+    const { working, bare, github } = onGitHub()
+    return Effect.gen(function* () {
+      const runs = yield* Runs
+      const task = yield* opened(working, '[review:pass] [lead:merge-main]')
+      const pushed = git(bare, 'rev-parse', BRANCH)
+      mainMovesOn(bare, task.path)
+      yield* say(task.threadId, 'bring main in pls and tidy')
+      yield* answered(task.threadId, task.turns + 1)
+      yield* until(heldAt(task.taskId), (at) => at !== null)
+      assert.strictEqual(git(bare, 'rev-parse', BRANCH), pushed)
+      yield* runs.ship({ envelope: yield* Runtime.envelope('task.ship', { taskId: task.taskId }), taskId: task.taskId })
+      yield* wentUp(bare, task.path, pushed)
+      yield* until(heldAt(task.taskId), (at) => at === null)
+      assert.deepStrictEqual(yield* stepsSaid(task.threadId), ['implement', 'review', 'publish', 'review', 'publish'])
+    }).pipe(Effect.provide(runtimeWith(github)))
+  })
+
+  it.live('sent back by the merge queue for its checks, its lead brings main in with update_branch: no new steps, no round', () => {
+    // As #773 was: the queue's build failed a job main passes, so the send-back is the pull request's own and wakes its lead.
+    const { working, bare, github } = onGitHub({
+      checksOn: (sha) =>
+        sha === 'group-sha'
+          ? [{ name: 'test', state: 'failed', log: 'FAIL retry.test.ts' }]
+          : sha.startsWith('main')
+            ? [{ name: 'test', state: 'passed' }]
+            : undefined,
+    })
+    return Effect.gen(function* () {
+      const changes = yield* Changes
+      github.mergeQueue()
+      const task = yield* opened(working, '[review:pass] [lead:update-branch]')
+      const pushed = git(bare, 'rev-parse', BRANCH)
+      const [card] = yield* cards(task.projectId)
+      yield* changes.merge(task.taskId, card?.change?.head ?? '')
+      yield* changes.refresh(task.taskId)
+      // As #773 was: behind main, and out of the queue for its checks, not for a conflict.
+      github.fallBehind(1)
+      github.queueCommit(1, 'group-sha')
+      github.dequeue(1, 'checks')
+      yield* changes.refresh(task.taskId)
+      yield* until(
+        Effect.sync(() => github.branchesUpdated.length),
+        (count) => count === 1,
+      )
+      yield* answered(task.threadId, task.turns + 1)
+      // The host merged main into the pull request's branch; the lead redid nothing, and Althar started nothing.
+      assert.deepStrictEqual(
+        github.branchesUpdated.map((one) => one.number),
+        [1],
+      )
+      assert.strictEqual(git(task.path, 'rev-parse', 'HEAD'), pushed)
+      assert.isNull(yield* heldAt(task.taskId))
+      assert.deepStrictEqual(
+        (yield* runsOf(task.taskId)).map((run) => [run.state, run.planId === null]),
+        [['succeeded', false]],
+      )
+      assert.deepStrictEqual(yield* stepsSaid(task.threadId), ['implement', 'review', 'publish'])
+    }).pipe(Effect.provide(runtimeWith(github)))
+  })
+
+  it.live('held for Ship before, as #773 was, Ship sends it up with no review and no round', () => {
+    const { working, bare, github } = onGitHub()
+    return Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const runs = yield* Runs
+      const task = yield* opened(working, '[review:pass]')
+      const pushed = git(bare, 'rev-parse', BRANCH)
+      mainMovesOn(bare, task.path)
+      git(task.path, '-c', 'user.name=Fake', '-c', 'user.email=fake@althar.test', 'merge', '-q', '--no-edit', 'origin/main')
+      // Held as Althar held #773's merge: main's commits taken for the person's by hand.
+      const at = new Date().toISOString()
+      yield* sql`UPDATE workspaces SET held_at = ${at} WHERE task_id = ${task.taskId}`
+      const [held] = yield* until(cards(task.projectId), (all) => all[0]?.held !== undefined)
+      assert.strictEqual(held?.held?.commits, 3)
+
+      yield* runs.ship({ envelope: yield* Runtime.envelope('task.ship', { taskId: task.taskId }), taskId: task.taskId })
+      yield* wentUp(bare, task.path, pushed)
+      yield* until(heldAt(task.taskId), (at) => at === null)
+      assert.lengthOf(yield* runsOf(task.taskId), 1)
+      assert.deepStrictEqual(yield* stepsSaid(task.threadId), ['implement', 'review', 'publish'])
+      const notices = yield* sql<{ title: string }>`
+        SELECT json_extract(content, '$.title') AS title FROM thread_items WHERE thread_id = ${task.threadId} AND kind = 'notice'`
+      assert.include(
+        notices.map((one) => one.title),
+        'Pushed 3 commits to PR #1. They only bring its base branch in, so they start no review.',
+      )
+    }).pipe(Effect.provide(runtimeWith(github)))
+  })
+})
+
+describe('Merge, with commits not shipped', () => {
+  it.live('Merge now sends what waits up and merges at once, and its review after the merge reads only that', () => {
+    const { working, bare, github } = onGitHub()
+    return Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const runs = yield* Runs
+      const task = yield* opened(working)
+      const reviewed = git(task.path, 'rev-parse', 'HEAD')
+      yield* say(task.threadId, 'Make it retry twice. tidy pls [lead:commit]')
+      yield* until(heldAt(task.taskId), (at) => at !== null)
+      const tweak = git(task.path, 'rev-parse', 'HEAD')
+
+      yield* runs.mergeWaiting({
+        envelope: yield* Runtime.envelope('task.merge', { taskId: task.taskId, how: 'now' }),
+        taskId: task.taskId,
+        how: 'now',
+      })
+      // Up and merged at once: no review before it, no Ship run.
+      assert.strictEqual(git(bare, 'log', '-1', '--format=%s', BRANCH), git(task.path, 'log', '-1', '--format=%s', tweak))
+      assert.deepStrictEqual(
+        github.merged.map((one) => [one.number, one.how]),
+        [[1, 'merge']],
+      )
+      assert.isNull(yield* heldAt(task.taskId))
+      assert.lengthOf(yield* runsOf(task.taskId), 1)
+      // Reviewed after the merge, in the task, from what the plan's review read: only the tweak.
+      const [owed] = yield* until(
+        sql<{ state: string; base: string | null }>`SELECT state, base FROM merge_reviews WHERE task_id = ${task.taskId}`,
+        (rows) => rows[0]?.state === 'clear' || rows[0]?.state === 'found',
+      )
+      assert.strictEqual(owed?.base, reviewed)
+    }).pipe(Effect.provide(runtimeWith(github)))
+  })
+
+  it.live('Review and merge ships what waits with one review, then merges it', () => {
+    const { working, bare, github } = onGitHub()
+    return Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const runs = yield* Runs
+      const task = yield* opened(working)
+      yield* say(task.threadId, 'Make it retry twice. tidy pls [lead:commit]')
+      yield* until(heldAt(task.taskId), (at) => at !== null)
+      const tweak = git(task.path, 'rev-parse', 'HEAD')
+
+      yield* runs.mergeWaiting({
+        envelope: yield* Runtime.envelope('task.merge', { taskId: task.taskId, how: 'review' }),
+        taskId: task.taskId,
+        how: 'review',
+      })
+      // A Ship's run that merges: its review reads what waited, then it goes up and merges.
+      yield* until(
+        Effect.sync(() => github.merged.length),
+        (count) => count === 1,
+      )
+      assert.strictEqual(git(bare, 'log', '-1', '--format=%s', BRANCH), git(task.path, 'log', '-1', '--format=%s', tweak))
+      const runs_ = yield* runsOf(task.taskId)
+      assert.lengthOf(runs_, 2)
+      assert.include(runs_[1]?.parameters ?? '', '"merges":true')
+      const asked = yield* sql<{ body: string }>`
+        SELECT i.body FROM user_inputs i JOIN threads t ON t.id = i.thread_id
+        WHERE t.task_id = ${task.taskId} AND t.kind = 'step' AND i.body LIKE 'More to review. The person ships%'`
+      assert.lengthOf(asked, 1)
+      // Reviewed before it merged: nothing is owed after.
+      const [after] = yield* sql<{ n: number }>`SELECT count(*) AS n FROM merge_reviews WHERE task_id = ${task.taskId}`
+      assert.strictEqual(after?.n, 0)
+    }).pipe(Effect.provide(runtimeWith(github)))
+  })
+
+  it.live('with nothing waiting, either merges it as it stands', () => {
+    const { working, github } = onGitHub()
+    return Effect.gen(function* () {
+      const runs = yield* Runs
+      const task = yield* opened(working)
+      yield* runs.mergeWaiting({
+        envelope: yield* Runtime.envelope('task.merge', { taskId: task.taskId, how: 'review' }),
+        taskId: task.taskId,
+        how: 'review',
+      })
+      assert.deepStrictEqual(
+        github.merged.map((one) => one.number),
+        [1],
+      )
+      assert.lengthOf(yield* runsOf(task.taskId), 1)
     }).pipe(Effect.provide(runtimeWith(github)))
   })
 })

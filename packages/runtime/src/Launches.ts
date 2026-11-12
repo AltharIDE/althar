@@ -24,6 +24,7 @@ import { shortCommand } from './rules'
 import { lineOf, type RunCommand, runOf, type Script, scriptsIn, setupIn } from './runCommand'
 import { endedHow, installedAsLocked, runSpec } from './runProcess'
 import { shotOf, shotWords, VIEWPORT } from './screenshots'
+import { ASIDE_BUILDS, onScratch } from './scratch'
 import { Setups } from './Setups'
 import { POOL, type Tool, type ToolAccess, ToolRefused, ToolServer } from './ToolServer'
 
@@ -117,8 +118,8 @@ interface Launch {
 
 /** Why the project can't run that way, in words for the person or an agent. */
 export class LaunchRefused extends Schema.TaggedError<LaunchRefused>()('LaunchRefused', {
-  /** `unknown`: nothing says how it runs; `elsewhere`: no copy here to run it in; `which`: the repository or runnable named isn't one, or none was in a project of several; `fetch`: the branch or pull request asked for couldn't be fetched. */
-  why: Schema.Literals(['unknown', 'elsewhere', 'which', 'fetch']),
+  /** `unknown`: nothing says how it runs; `elsewhere`: no copy here to run it in; `which`: the repository or runnable named isn't one, or none was in a project of several; `fetch`: the branch or pull request asked for couldn't be fetched; `aside`: an aside, which never sets its copy up to run. */
+  why: Schema.Literals(['unknown', 'elsewhere', 'which', 'fetch', 'aside']),
   message: Schema.String,
 }) {}
 
@@ -524,6 +525,13 @@ export class Launches extends Context.Service<
                   input.taskId,
                   Effect.gen(function* () {
                     const sql = yield* SqlClient.SqlClient
+                    // An aside's copy is never set up, so nothing of the project runs from it: running it makes it a task (cards.ts).
+                    if (input.taskId !== null && (yield* onScratch(input.taskId)))
+                      return yield* new LaunchRefused({
+                        why: 'aside',
+                        message:
+                          'An aside doesn’t run the project: nothing is installed in its copy, so it answers fast. Make it a task to run it.',
+                      })
                     // A task's folder is set up before anything runs from it, however it came back: here, or as it opened, or before (ADR-056).
                     if (input.taskId !== null) yield* setups.ready(input.taskId)
                     const places = yield* placesOf(input.projectId, input.taskId, input.repository)
@@ -1317,6 +1325,9 @@ export class Launches extends Context.Service<
             provide(
               Effect.gen(function* () {
                 const asked = yield* read(Asked, input)
+                // An aside's lead runs nothing, its own copy, a task's worktree or a branch's: each is set up to run (an install).
+                if (access.role === 'lead' && access.taskId !== null && (yield* onScratch(access.taskId)))
+                  return yield* new ToolRefused({ message: ASIDE_BUILDS })
                 if ([asked.task, asked.branch, asked.pull_request].filter((one) => one !== undefined).length > 1)
                   return yield* new ToolRefused({ message: 'Give one of task, branch or pull_request.' })
                 const ref: Exclude<Wanted, { readonly kind: 'tag' }> | undefined =

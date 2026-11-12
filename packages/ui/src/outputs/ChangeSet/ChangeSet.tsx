@@ -14,6 +14,7 @@ import { LinkButton } from '../../primitives/LinkButton/LinkButton'
 import { LiveDot } from '../../primitives/LiveDot/LiveDot'
 import { ModelList, type ModelInfo } from '../../primitives/Model/Model'
 import s from './ChangeSet.module.css'
+import { type MergeNeed, MergeNeeds, type MergeNeedsText } from './MergeNeeds'
 
 /*
  * What a task changed, beside what it is, for deciding on it: each thing
@@ -66,7 +67,7 @@ export interface ChangeSetText {
   commits: (n: number) => string
   /** The host's page for a new pull request from the branch, pushed without a connection. */
   newPullRequest: (host: string | undefined) => string
-  checksPassed: (n: number) => string
+  checksPassed: (n: number, skipped?: number) => string
   checksFailed: (names: readonly string[]) => string
   checksRunning: (passed: number, total: number) => string
   checksHeld: (name: string) => string
@@ -98,7 +99,11 @@ export const changeSetText: ChangeSetText = {
   uncommitted: (n) => (n === 1 ? 'Uncommitted changes in 1 file' : `Uncommitted changes in ${n.toLocaleString('en-US')} files`),
   commits: (n) => (n === 1 ? '1 commit' : `${n.toLocaleString('en-US')} commits`),
   newPullRequest: (host) => (host === undefined ? 'Open a pull request' : `Open a pull request on ${host}`),
-  checksPassed: (n) => (n === 1 ? '1 check passed' : `${n} checks passed`),
+  checksPassed: (n, skipped = 0) => {
+    const ran = n - skipped
+    if (skipped === 0) return n === 1 ? '1 check passed' : `${n} checks passed`
+    return ran === 0 ? `${skipped} skipped` : `${ran} ${ran === 1 ? 'check' : 'checks'} passed, ${skipped} skipped`
+  },
   checksFailed: (names) => (names.length === 1 ? `${names[0] ?? ''} failed` : `${names.length} checks failed: ${names.join(', ')}`),
   checksRunning: (passed, total) => `${passed} of ${total} checks passed, the rest running`,
   checksHeld: (name) => `${name} waits on your call`,
@@ -129,6 +134,15 @@ export interface ChangeSetProps {
   note?: ReactNode
   /** Its host's checks; without them, no line for them, and with none yet, a line saying so, unless it merged: none will run now. */
   checks?: readonly ChangeCheck[]
+  /**
+   * What merging it needs on its host, each ticked, crossed or waiting (DEV-204): in place of its checks' line, its checks'
+   * line among them, opening to its checks. Without it, its checks' line alone.
+   */
+  needs?: readonly MergeNeed[]
+  /** The branch it merges into, which its needs name: main. */
+  target?: string
+  /** Words for its needs. */
+  needsText?: Partial<MergeNeedsText>
   review?: ChangeReview
   /** What can be done with it now: one button, or two where it's a choice; the first is the one to press. */
   actions?: ReactNode
@@ -158,6 +172,9 @@ export function ChangeSet({
   uncommitted = 0,
   note,
   checks,
+  needs,
+  target,
+  needsText,
   review,
   actions,
   hint,
@@ -189,9 +206,18 @@ export function ChangeSet({
         <div className={s.facts}>
           <Head state={state} host={host} prs={prs} branch={branch} title={title} remote={remote} uncommitted={uncommitted} t={t} />
           {note !== undefined && <p className={s.note}>{note}</p>}
-          {(checked || review !== undefined) && (
+          {needs !== undefined && needs.length > 0 && (
+            <MergeNeeds
+              needs={needs}
+              host={host?.name ?? ''}
+              {...(target === undefined ? {} : { target })}
+              {...(checks === undefined ? {} : { checks })}
+              {...(needsText === undefined ? {} : { text: needsText })}
+            />
+          )}
+          {((checked && (needs === undefined || needs.length === 0)) || review !== undefined) && (
             <div className={s.lines}>
-              {checked && <ChecksLine checks={checks ?? []} t={t} />}
+              {checked && (needs === undefined || needs.length === 0) && <ChecksLine checks={checks ?? []} t={t} />}
               {review !== undefined && <ChangeReviewLine review={review} t={t} />}
             </div>
           )}
@@ -355,7 +381,8 @@ export function ChecksLine({
   if (checks.length === 0) return <p className={cx(s.line, s.quiet)}>{t.noChecks}</p>
   const failed = checks.filter((check) => check.state === CheckState.Failed)
   const held = checks.find((check) => check.state === CheckState.Held)
-  const passed = checks.filter((check) => check.state === CheckState.Passed).length
+  const skipped = checks.filter((check) => check.state === CheckState.Skipped).length
+  const passed = checks.filter((check) => check.state === CheckState.Passed).length + skipped
   const [mark, said, tone] =
     failed.length > 0
       ? [<Icon key="m" name="close" size={12} />, t.checksFailed(failed.map((check) => check.name)), s.bad]
@@ -363,7 +390,7 @@ export function ChecksLine({
         ? [<span key="m" className={s.you} aria-hidden="true" />, t.checksHeld(held.name), s.held]
         : passed < checks.length
           ? [<LiveDot key="m" ping />, t.checksRunning(passed, checks.length), s.running]
-          : [<Icon key="m" name="check" size={12} />, t.checksPassed(checks.length), s.good]
+          : [<Icon key="m" name="check" size={12} />, t.checksPassed(checks.length, skipped), s.good]
   return (
     <Disclosure>
       <DisclosureTrigger>

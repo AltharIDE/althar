@@ -163,6 +163,27 @@ describe("the coordinator's copies", () => {
     }),
   )
 
+  it.effect('check out with the index the last copy ended with, kept beside the mirror, and without one git can’t read', () =>
+    Effect.gen(function* () {
+      const { home, person, copy } = place()
+      const mirrors = join(home, 'worktrees', 'meridian', '.coordinator-mirrors')
+      const mirror = join(mirrors, 'meridian.git')
+      const kept = join(mirrors, 'meridian.index')
+      yield* freshCopy(person, copy, 'main', mirror)
+      assert.isTrue(existsSync(kept))
+      // What was written in the copy since is put back.
+      writeFileSync(join(copy, 'README.md'), 'changed\n')
+      yield* freshCopy(person, copy, 'main', mirror)
+      assert.strictEqual(readFileSync(join(copy, 'README.md'), 'utf8'), '# Meridian\n')
+      // One it can't read: checked out without it, and the one kept after is one it can.
+      writeFileSync(kept, 'not an index')
+      yield* freshCopy(person, copy, 'main', mirror)
+      assert.strictEqual(readFileSync(join(copy, 'README.md'), 'utf8'), '# Meridian\n')
+      assert.strictEqual(git(copy, 'status', '--porcelain'), '')
+      assert.notStrictEqual(readFileSync(kept, 'utf8'), 'not an index')
+    }),
+  )
+
   it('may read git’s config files but never its credential store, which is in the same folder', () => {
     const home = realpathSync(mkdtempSync(join(tmpdir(), 'althar-home-')))
     const projectFolder = join(home, 'worktrees', 'meridian')
@@ -180,6 +201,9 @@ describe("the coordinator's copies", () => {
       for (const ordinary of [join(home, 'Documents'), place.projectFolder, join(home, 'Projects', 'meridian')])
         assert.isFalse(within(ordinary, denied), 'ordinary files are readable')
       assert.isTrue(within(join(home, '.ssh', 'id_ed25519'), denied), 'secret files remain blocked')
+      // gh and glab start in its commands with the person's sign-in, as its brief says.
+      for (const tool of ['gh', 'glab-cli'])
+        assert.isFalse(within(join(home, '.config', tool, 'config.yml'), denied), `${tool} is held from it`)
     }
     holds(join(home, '.config', 'git'))
     // Where XDG_CONFIG_HOME is set, outside the home folder, as git reads it.

@@ -41,6 +41,8 @@ export interface WorkActions {
   readonly pushing: ReadonlySet<string>
   /** The tasks being shipped: what waits on their branch, reviewed first where their plan says, then sent up. */
   readonly shipping: ReadonlySet<string>
+  /** The tasks whose review after a merge the person is answering, Fix it or Leave it. */
+  readonly answeringAfterMerge: ReadonlySet<string>
   /** The tasks being marked done or kept for later. */
   readonly settling: ReadonlySet<string>
   /** The tasks whose conflict the lead is being asked to resolve, by the person's Resolve now. */
@@ -59,6 +61,10 @@ export interface WorkActions {
   readonly push: (taskId: string, head: string, url?: string) => Promise<boolean>
   /** Ships what waits on a task's branch for Ship; whether Althar took it. */
   readonly ship: (taskId: string) => Promise<boolean>
+  /** Fix it, on what a review after a merge found: the lead takes the findings, and its fix ships after the merged pull request. */
+  readonly fixAfterMerge: (taskId: string) => Promise<boolean>
+  /** Leave it, on what a review after a merge found: the findings close. */
+  readonly leaveAfterMerge: (taskId: string) => Promise<boolean>
   /** Sends a ready task back to its lead with a note, starting the lead again if it stopped; whether it went through. `onePress` where the note is the card's own, as Carry on's. */
   readonly sendBack: (task: BoardTask, note: string, onePress?: boolean) => Promise<boolean>
   /** Opens the pull request of a task whose work ended on its branch. */
@@ -98,6 +104,7 @@ export const useWorkActions = (tasks: ReadonlyArray<BoardTask> | null = null): W
   const [opening, setOpening] = useState<ReadonlySet<string>>(new Set())
   const [pushing, setPushing] = useState<ReadonlySet<string>>(new Set())
   const [shipping, setShipping] = useState<ReadonlySet<string>>(new Set())
+  const [answeringAfterMerge, setAnsweringAfterMerge] = useState<ReadonlySet<string>>(new Set())
   const [settling, setSettling] = useState<ReadonlySet<string>>(new Set())
   const [resolving, setResolving] = useState<ReadonlySet<string>>(new Set())
   const fail = useCallback((failure: unknown) => setError(messageOf(failure)), [])
@@ -153,6 +160,7 @@ export const useWorkActions = (tasks: ReadonlyArray<BoardTask> | null = null): W
     opening,
     pushing,
     shipping,
+    answeringAfterMerge,
     settling,
     resolving,
     resolveNow: useCallback(
@@ -183,6 +191,23 @@ export const useWorkActions = (tasks: ReadonlyArray<BoardTask> | null = null): W
     ship: useCallback(
       async (taskId) =>
         pressed(inNeeds(taskId), await busy(setShipping, taskId, () => client.ship(taskId), 'ship'), { taskId, action: 'push' }),
+      [busy, client, pressed, inNeeds],
+    ),
+    // What a review after a merge found: the person's Fix it or Leave it, each the one decision it waited on.
+    fixAfterMerge: useCallback(
+      async (taskId) =>
+        pressed(inNeeds(taskId), await busy(setAnsweringAfterMerge, taskId, () => client.fixAfterMerge(taskId)), {
+          taskId,
+          action: 'resolve',
+        }),
+      [busy, client, pressed, inNeeds],
+    ),
+    leaveAfterMerge: useCallback(
+      async (taskId) =>
+        pressed(inNeeds(taskId), await busy(setAnsweringAfterMerge, taskId, () => client.leaveAfterMerge(taskId)), {
+          taskId,
+          action: 'done',
+        }),
       [busy, client, pressed, inNeeds],
     ),
     // Its card says why it didn't merge (`failures`), as the window keeps it.

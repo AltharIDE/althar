@@ -5,7 +5,7 @@ import type { ProjectId } from '@althar/domain'
 import { Effect } from 'effect'
 import { SqlClient } from 'effect/sql'
 
-import { touchCard } from './cards'
+import { offScratch, touchCard } from './cards'
 import { evidencePaths } from './evidence'
 import { branchExists, commitsAhead, git, uncommittedFiles } from './git'
 import { Instance } from './Instance'
@@ -197,6 +197,8 @@ export const branchOnFirstWrite = (
         yield* indexTask(taskId)
       }),
     )
+    // A chat on Scratch that took a worktree moves to the board.
+    yield* offScratch(taskId)
     yield* touchCard(taskId)
     return already && !made ? [] : branched.map((worktree) => worktree.name)
   })

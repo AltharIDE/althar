@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react'
 import type { BoardCardProps } from '../board/BoardCard/BoardCard'
 import { BranchChip, CommandChip, Fact, FileChips, Findings, PullChip, Thumbs } from '../board/BoardCard/Chips'
 import { TaskKind, TaskStatus } from '../foundations/vocabulary'
@@ -178,6 +179,37 @@ export const PLAIN_PICTURES: Card = {
   at: '4m',
   title: 'Prototype the refunds page’s empty state',
   object: <Thumbs pictures={[picture(SHOT_BEFORE), picture(SHOT_AFTER), ...SHOT_RUN.slice(0, 1).map(picture)]} />,
+}
+
+/** Pictures it handed back sit above the branch or pull request chip, whatever its kind or state; never in its place. */
+const handedPictures = (chip: ReactNode) => (
+  <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+    <Thumbs pictures={[picture(SHOT_BEFORE), picture(SHOT_AFTER), ...SHOT_RUN.slice(0, 1).map(picture)]} />
+    {chip}
+  </div>
+)
+
+/** A branch and no pull request, its lead's screenshots handed back. */
+export const CHANGE_BRANCH_PICTURES: Card = {
+  status: TaskStatus.Yours,
+  word: 'Ready to accept',
+  kind: TaskKind.Change,
+  at: '12m',
+  title: 'Prototype: the “keep as a preset?” offer, a few designs',
+  object: handedPictures(<BranchChip name="althar/prototype-the-keep-as-a-preset-offer-a-few-desig" add={1126} del={0} />),
+}
+
+/** A pull request, its lead's screenshots handed back. */
+export const CHANGE_PR_PICTURES: Card = {
+  ...CHANGE_READY,
+  title: 'Empty state for the refunds page',
+  object: handedPictures(<PullChip host={GITHUB} repo="meridian-api" number={1187} add={412} del={37} />),
+}
+
+/** Its lead answered, unread: the pictures it handed back, with its branch. */
+export const CHANGE_REPLIED_PICTURES: Card = {
+  ...CHANGE_BRANCH_PICTURES,
+  word: 'Replied',
 }
 
 /** One of its pictures still being made. */

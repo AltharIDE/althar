@@ -424,6 +424,13 @@ describe('Bitbucket Cloud as a code host', () => {
         description: '## Notes for Atlassian Maintainers:\n\nThis is a public repo.',
         reviewers: [],
       })
+      // A stacked change goes into another branch once the one below merges.
+      const based = cloud([
+        ['GET', PR, { json: pull({ draft: undefined, close_source_branch: undefined, reviewers: undefined }) }],
+        ['PUT', PR, { json: pull() }],
+      ])
+      yield* based.host.editChange(ace, yield* host.change(ace, 552), { base: 'main' })
+      assert.deepInclude(based.sent.find((request) => request.method === 'PUT')?.body, { destination: { branch: { name: 'main' } } })
       // A repository the account can only read refuses it, in Bitbucket's words.
       const refusing = cloud([
         ['GET', PR, { json: pull() }],
@@ -1459,6 +1466,18 @@ describe('Bitbucket Data Center as a code host', () => {
         title: 'Talking Nerdy',
         description: 'Only this',
         reviewers: [],
+      })
+      // A stacked change goes into another branch once the one below merges, in the repository it went into.
+      const based = center([
+        ['GET', PULL, { json: pr({ draft: undefined, reviewers: undefined }) }],
+        ['PUT', PULL, { json: pr({ version: 4 }) }],
+      ])
+      yield* based.host.editChange(prj, yield* host.change(prj, 101), { base: 'main' })
+      assert.deepInclude(based.sent.find((request) => request.method === 'PUT')?.body, {
+        toRef: {
+          id: 'refs/heads/main',
+          repository: { slug: pr().toRef.repository.slug, project: { key: pr().toRef.repository.project.key } },
+        },
       })
       // An account that may not edit it hears Data Center's words, as forbidden.
       const refusing = center([

@@ -41,5 +41,22 @@ export const SECRET_PLACES: ReadonlyArray<string> = [
   '.codex/auth.json',
 ]
 
-/** The places as Claude Code's read rules name them, from the home folder: each, and everything in it. */
-export const secretReadRules = (): ReadonlyArray<string> => SECRET_PLACES.flatMap((place) => [`Read(~/${place})`, `Read(~/${place}/**)`])
+/**
+ * The code-host command-line tools' own folders, where gh, glab and hub keep
+ * their settings and the person's sign-in. Agents' commands inherit that
+ * sign-in (ADR-097), so their sandboxes let the tools read these: denied,
+ * `gh` doesn't start (`open …/config.yml: operation not permitted`). A
+ * command or read that names one is still refused by Althar's rules, as
+ * every place here is: the tool reads it, the agent doesn't.
+ */
+export const CLI_SIGN_INS: ReadonlyArray<string> = ['.config/gh', '.config/glab-cli', '.config/hub']
+
+/** Where keys and sign-ins are kept that an agent's sandboxed commands don't read: all but the code-host tools' own. */
+export const SANDBOX_SECRETS: ReadonlyArray<string> = SECRET_PLACES.filter((place) => !CLI_SIGN_INS.includes(place))
+
+/**
+ * The places as Claude Code's read rules name them, from the home folder:
+ * each, and everything in it. Claude Code's sandbox denies its commands
+ * reading these too, so the code-host tools' own folders aren't among them.
+ */
+export const secretReadRules = (): ReadonlyArray<string> => SANDBOX_SECRETS.flatMap((place) => [`Read(~/${place})`, `Read(~/${place}/**)`])

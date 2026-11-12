@@ -1,6 +1,7 @@
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
+import { ConnectorFailed } from '@althar/connectors'
 import { makeFakeService } from '@althar/connectors/testing'
 import { BUILT, BUILT_FIXED, BUILT_SETTLED, DESCRIBED } from '@althar/provider-adapters/testing'
 import type { ProjectId } from '@althar/domain'
@@ -558,6 +559,95 @@ describe('a task that ends in a pull request', () => {
       }).pipe(Effect.provide(runtimeWith({ github }, ':memory:', Duration.minutes(1))))
     },
   )
+
+  it.live('reports a sendback’s merge-group jobs with their log tails, links, unreadable reasons and the default branch', () => {
+    const { working, bare } = hosted()
+    const github = makeFakeService({
+      pushUrl: () => bare,
+      checksOn: (sha) =>
+        sha === 'group-sha'
+          ? [
+              { name: 'test', state: 'failed', log: 'FAIL limit.test.ts\n boom', url: 'https://example.com/jobs/1' },
+              {
+                name: 'verify',
+                state: 'failed',
+                log: new ConnectorFailed({
+                  product: 'github',
+                  reason: 'forbidden',
+                  status: 403,
+                  message: 'Resource not accessible by integration',
+                }),
+                url: 'https://example.com/jobs/2',
+              },
+            ]
+          : sha === 'main-0' || sha === 'main'
+            ? [{ name: 'test', state: 'passed' }]
+            : undefined,
+    })
+    github.addRepository(['meridian', 'api'])
+    github.mergeQueue()
+    return Effect.gen(function* () {
+      yield* connect('github', HOST)
+      const projectId = yield* ask(working, 'Add a retry. [coordinator:plan-no-review] [coordinator:plan] [lead:finish] [lead:edit]')
+      const [ready] = yield* until(cards(projectId), (all) => all[0]?.phase === 'ready')
+      const taskId = ready?.taskId ?? ''
+      const number = ready?.change?.number ?? 0
+      const changes = yield* Changes
+      yield* changes.merge(taskId, ready?.change?.head ?? '')
+      // The queue takes it out, its checks failed there: its thread names the job, shows its log tail and page, and how main stands.
+      github.queueCommit(number, 'group-sha')
+      github.dequeue(number, 'checks')
+      yield* changes.refresh(taskId)
+      const heard = yield* until(notices(ready?.threadId ?? ''), (all) =>
+        all.some((notice) => notice['title'] === 'The merge queue took PR #1 out: its checks failed.'),
+      )
+      const taken = heard.find((notice) => notice['title'] === 'The merge queue took PR #1 out: its checks failed.')
+      const text = taken?.['description'] ?? ''
+      assert.isDefined(taken)
+      assert.include(text, 'Failed on the queue build (group-s): test, verify.')
+      assert.include(text, 'FAIL limit.test.ts')
+      assert.include(text, 'https://example.com/jobs/1')
+      assert.include(text, "Althar couldn't read verify's log: GitHub refused (403)")
+      assert.include(text, 'https://example.com/jobs/2')
+      assert.include(text, 'test passes on main (main-0).')
+      assert.include(text, 'read_checks (queue: true)')
+    }).pipe(Effect.provide(runtimeWith({ github }, ':memory:', Duration.minutes(1))))
+  })
+
+  it.live('reports a sendback that fails on the default branch too, where its only job fails', () => {
+    const { working, bare } = hosted()
+    const github = makeFakeService({
+      pushUrl: () => bare,
+      checksOn: (sha) =>
+        sha === 'group-sha'
+          ? [{ name: 'test', state: 'failed', log: 'boom', url: 'https://example.com/jobs/9' }]
+          : sha === 'main-0' || sha === 'main'
+            ? [{ name: 'test', state: 'failed', log: 'boom there too' }]
+            : undefined,
+    })
+    github.addRepository(['meridian', 'api'])
+    github.mergeQueue()
+    return Effect.gen(function* () {
+      yield* connect('github', HOST)
+      const projectId = yield* ask(working, 'Add a retry. [coordinator:plan-no-review] [coordinator:plan] [lead:finish] [lead:edit]')
+      const [ready] = yield* until(cards(projectId), (all) => all[0]?.phase === 'ready')
+      const taskId = ready?.taskId ?? ''
+      const number = ready?.change?.number ?? 0
+      const changes = yield* Changes
+      yield* changes.merge(taskId, ready?.change?.head ?? '')
+      github.queueCommit(number, 'group-sha')
+      github.dequeue(number, 'checks')
+      yield* changes.refresh(taskId)
+      const heard = yield* until(notices(ready?.threadId ?? ''), (all) =>
+        all.some((notice) => notice['title'] === 'The merge queue took PR #1 out: its checks failed.'),
+      )
+      const taken = heard.find((notice) => notice['title'] === 'The merge queue took PR #1 out: its checks failed.')
+      const text = taken?.['description'] ?? ''
+      assert.isDefined(taken)
+      assert.include(text, 'Failed on the queue build (group-s): test.')
+      assert.include(text, 'The same jobs also fail on main (main-0): test. Their failure causes may differ.')
+    }).pipe(Effect.provide(runtimeWith({ github }, ':memory:', Duration.minutes(1))))
+  })
 
   it.live(
     'hears a pull request put in its merge queue outside Althar, keeps Accept and merge from merging it again, and settles it once merged',

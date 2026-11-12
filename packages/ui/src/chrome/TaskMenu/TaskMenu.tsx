@@ -6,8 +6,8 @@ import s from './TaskMenu.module.css'
 
 /*
  * What you can do with a task as a whole, from its bar, by intent. First what
- * moves it on where it stands (start its plan now or change who does it, mark its draft pull
- * request ready, skip the review under way, resume it, reopen it) and what
+ * moves it on where it stands (start its plan now or change who does it, make a
+ * prototype or a chat a change, mark its draft pull request ready, skip the review under way, resume it, reopen it) and what
  * you do with it (rename it, open its folder in an editor, attach a pull
  * request it didn't open). Then its own two settings, changed in place:
  * whether its lead resolves a conflict with the default branch on its own,
@@ -40,9 +40,19 @@ export interface TaskMenuText {
   open: (editor: string) => string
   rename: string
   startNow: string
+  /** Takes its plan out of the line, or stops its countdown, until it is started. */
+  hold: string
   changeTeam: string
+  /** Makes it a change in one move: a reviewer on, and a pull request to end in; and what that does, at the menu's foot. */
+  makeChange: string
+  makeChangeAbout: string
   markReady: string
   attach: string
+  /** Its parts kept as a preset of the person's own (a task is a conversation plus parts). */
+  savePreset: string
+  /** A chat moved off Scratch to the board, or a task to Scratch. */
+  toBoard: string
+  toScratch: string
   skipReview: string
   stop: string
   resume: string
@@ -72,9 +82,15 @@ export const taskMenuText: TaskMenuText = {
   open: (editor) => `Open in ${editor}`,
   rename: 'Rename',
   startNow: 'Start now',
+  hold: 'Hold',
   changeTeam: 'Change the team…',
+  makeChange: 'Make it a change',
+  makeChangeAbout: 'Adds a reviewer and a pull request. Ship reviews it, then opens the pull request.',
   markReady: 'Mark ready for review',
   attach: 'Attach a pull request…',
+  savePreset: 'Save as preset',
+  toBoard: 'Move to the board',
+  toScratch: 'Move to Scratch',
   skipReview: 'Skip the review',
   stop: 'Stop the task',
   resume: 'Resume',
@@ -104,12 +120,20 @@ export interface TaskMenuProps {
   editor?: string
   /** Starts its plan now, while it waits to start. */
   onStartNow?: () => void
+  /** Holds its plan until it is started, while it counts down or waits for a free agent: it leaves the line. */
+  onHold?: () => void
   /** Changes who does its plan's steps, while nothing of it has begun: the consumer opens the team. */
   onChangeTeam?: () => void
+  /** Makes a prototype, a chat or a quick task a change: a reviewer on, and a pull request to end in. */
+  onMakeChange?: () => void
   /** Marks its draft pull request ready for review. */
   onMarkReady?: () => void
   /** Attaches it to an open pull request it didn't open; the consumer asks which. */
   onAttach?: () => void
+  /** Saves its parts, team and the start of its brief as a preset. */
+  onSavePreset?: () => void
+  /** Moves it between Scratch and the board: `to` says which way. */
+  shelf?: { readonly to: 'scratch' | 'board'; readonly onMove: () => void }
   /** Skips the review of the work under way, while it still has one to come or under way. */
   onSkipReview?: () => void
   onStop?: () => void
@@ -149,9 +173,13 @@ export function TaskMenu({
   onOpen,
   editor,
   onStartNow,
+  onHold,
   onChangeTeam,
+  onMakeChange,
   onMarkReady,
   onAttach,
+  onSavePreset,
+  shelf,
   onSkipReview,
   onStop,
   onResume,
@@ -185,9 +213,19 @@ export function TaskMenu({
         {t.startNow}
       </MenuItem>
     ),
+    onHold && (
+      <MenuItem key="hold" icon="hold" onSelect={onHold}>
+        {t.hold}
+      </MenuItem>
+    ),
     onChangeTeam && (
       <MenuItem key="team" icon="agents" onSelect={onChangeTeam}>
         {t.changeTeam}
+      </MenuItem>
+    ),
+    onMakeChange && (
+      <MenuItem key="make-change" icon="pr" description={t.makeChangeAbout} onSelect={onMakeChange}>
+        {t.makeChange}
       </MenuItem>
     ),
     onMarkReady && (
@@ -230,6 +268,16 @@ export function TaskMenu({
     onAttach && (
       <MenuItem key="attach" icon="clip" onSelect={onAttach}>
         {t.attach}
+      </MenuItem>
+    ),
+    shelf && (
+      <MenuItem key="shelf" icon="move" onSelect={shelf.onMove}>
+        {shelf.to === 'scratch' ? t.toScratch : t.toBoard}
+      </MenuItem>
+    ),
+    onSavePreset && (
+      <MenuItem key="preset" icon="list" onSelect={onSavePreset}>
+        {t.savePreset}
       </MenuItem>
     ),
   ].filter(present)

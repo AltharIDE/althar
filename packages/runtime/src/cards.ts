@@ -3,7 +3,8 @@ import { Ledger } from '@althar/persistence-sqlite'
 import { Effect } from 'effect'
 import { SqlClient } from 'effect/sql'
 
-import { change } from './records'
+import { Instance } from './Instance'
+import { change, fact } from './records'
 import { addItem } from './threads'
 
 /*
@@ -31,6 +32,81 @@ export const postCard = (projectId: ProjectId, taskId: string) =>
     if ((yield* cardOf(taskId)) !== undefined) return yield* touchCard(taskId)
     const [thread] = yield* sql<{ id: string }>`SELECT id FROM threads WHERE project_id = ${projectId} AND kind = 'coordinator' LIMIT 1`
     if (thread !== undefined) yield* addItem({ projectId, threadId: thread.id }, 'task', { taskId })
+  })
+
+/**
+ * A chat on Scratch moves to the board as soon as it takes a worktree or an
+ * output (a task is a conversation plus parts, "Asides"), looked at
+ * where one can take them (its first write, a pull request, a review drafted): a branch
+ * of its own, a pull request, or a review it drafted, since it was put there;
+ * said in its thread. Nothing moves back to Scratch by itself, and one the
+ * person put back stays until it takes something new.
+ */
+export const offScratch = (taskId: string) =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient
+    // Most tasks are on the board: one look at the task's own row, before anything that reads more.
+    const [shelf] = yield* sql<{ shelf: string | null }>`SELECT shelf FROM tasks WHERE id = ${taskId}`
+    if (shelf?.shelf !== 'scratch') return
+    const [chat] = yield* sql<{ projectId: ProjectId; threadId: string | null; branched: number; linked: number; drafted: number }>`
+      WITH shelved AS (
+        SELECT coalesce(max(e.occurred_at), '') AS at FROM record_events e
+        WHERE e.aggregate_type = 'task' AND e.aggregate_id = ${taskId} AND e.type = 'task.shelved')
+      SELECT k.project_id, (SELECT t.id FROM threads t WHERE t.task_id = k.id AND t.kind = 'task') AS thread_id,
+        EXISTS (SELECT 1 FROM workspaces w WHERE w.task_id = k.id AND w.access = 'write' AND w.branched_at > shelved.at) AS branched,
+        EXISTS (SELECT 1 FROM external_links l WHERE l.task_id = k.id AND l.kind IN ('change', 'review') AND l.created_at > shelved.at) AS linked,
+        EXISTS (SELECT 1 FROM review_drafts d WHERE d.task_id = k.id AND d.created_at > shelved.at) AS drafted
+      FROM tasks k, shelved WHERE k.id = ${taskId} AND k.shelf = 'scratch'`
+    if (chat === undefined || (chat.branched === 0 && chat.linked === 0 && chat.drafted === 0)) return
+    // Recorded as the person's move is (`shelve`), by Althar: the record and every window hear it left.
+    const instance = yield* Instance
+    yield* sql.withTransaction(
+      Effect.gen(function* () {
+        const revision = yield* change('tasks', taskId, { shelf: null })
+        yield* fact({
+          projectId: chat.projectId,
+          aggregateType: 'task',
+          aggregateId: taskId,
+          revision,
+          type: 'task.shelved',
+          payload: { shelf: null },
+          actorId: instance.systemId,
+        })
+      }),
+    )
+    yield* leftAsides(chat.projectId, taskId)
+    if (chat.threadId !== null)
+      yield* addItem({ projectId: chat.projectId, threadId: chat.threadId }, 'notice', {
+        source: 'runtime',
+        severity: 'info',
+        title:
+          chat.branched === 1
+            ? 'On the board now: it took a worktree.'
+            : chat.drafted === 1
+              ? 'On the board now: it drafted a review.'
+              : 'On the board now: it has a pull request.',
+        role: 'aside',
+      })
+    // Its card is worked out again, as when the person moves it (`shelve`): off Scratch, it waits on its board like any task.
+    yield* touchTask(taskId)
+  })
+
+/**
+ * A chat that left Scratch for the board, said in one line in the
+ * coordinator's conversation, where its asides sit: so the conversation keeps
+ * a record of it, as of a task it started.
+ */
+export const leftAsides = (projectId: ProjectId, taskId: string) =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient
+    const [thread] = yield* sql<{ id: string }>`SELECT id FROM threads WHERE project_id = ${projectId} AND kind = 'coordinator' LIMIT 1`
+    const [task] = yield* sql<{ title: string }>`SELECT title FROM tasks WHERE id = ${taskId}`
+    if (thread === undefined || task === undefined) return
+    yield* addItem({ projectId, threadId: thread.id }, 'notice', {
+      source: 'runtime',
+      severity: 'info',
+      title: `An aside became a task: ${task.title}`,
+    })
   })
 
 /** Tells watching clients the task's card changed, so they read it again. */
