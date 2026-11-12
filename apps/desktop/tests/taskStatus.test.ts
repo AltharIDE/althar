@@ -4,7 +4,7 @@ import type { BoardTask, ThreadSnapshot } from '@althar/contracts'
 import { TaskStatus } from '@althar/ui'
 
 import { readyCardOf, runningCardOf, stoppedCardOf } from '../src/renderer/features/board/BoardView'
-import { statusOf } from '../src/renderer/features/task/TaskView'
+import { elapsedOf, statusOf, tookOf } from '../src/renderer/features/task/TaskView'
 import { taskStatusOf } from '../src/renderer/shared/taskStatus'
 import { card, snapshot } from './fixtures'
 
@@ -40,6 +40,7 @@ const both = (overrides: Partial<BoardTask>) => {
       queued: work.queued,
       waits: work.waits,
       ...(work.reconnects == null ? {} : { reconnects: work.reconnects }),
+      ...(work.externalWait === undefined ? {} : { externalWait: work.externalWait }),
       ...(work.stopped == null ? {} : { stopped: work.stopped }),
     },
   }
@@ -58,6 +59,18 @@ const busy = { busy: 4, atOnce: 4 }
 const waits = { agentId: 'codex', until: '2026-10-01T12:00:00.000Z' }
 
 describe('where a task stands', () => {
+  it('keeps an external wait running, shows its reason and next check, and hides idle clocks', () => {
+    const externalWait = { reason: 'Checks on PR #402', deadline: NOW, lastCheck: NOW, nextCheck: NOW, error: null }
+    const { work, view } = both({ externalWait, step: 'implement' })
+    const card = runningCardOf(work, NOW, () => '')
+    expect(card.status).toBe(TaskStatus.Running)
+    expect(card.word).toBe('Waiting')
+    expect(card.why).toContain('Checks on PR #402')
+    expect(card.at).toBeUndefined()
+    expect(statusOf(view).state).toContain('next check')
+    expect(elapsedOf(view, NOW)).toBeNull()
+    expect(tookOf(view, NOW)).toBeNull()
+  })
   for (const [what, overrides, status] of [
     ['under way, between agents, no session yet', { phase: 'running' }, TaskStatus.Running],
     ['on a step', { phase: 'running', step: 'implement' }, TaskStatus.Running],

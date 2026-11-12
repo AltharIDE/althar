@@ -44,7 +44,7 @@ import {
 import { isAnswered, isSettleable, kindWords, takesDone } from '../../shared/calls'
 import { text as boardText } from '../board/BoardView'
 import { doing } from './actions'
-import { queuedWords, reconnectsWords, upNextWords, waitsWords } from '../../shared/agents'
+import { externalWaitWords, queuedWords, reconnectsWords, upNextWords, waitsWords } from '../../shared/agents'
 import { useModels } from '../../data/models'
 import { contextMeter } from '../../shared/ContextMeter'
 import { CarriedOver } from '../../shared/dictation/Carried'
@@ -219,6 +219,8 @@ export const statusOf = (
   const inQueue = queuedToMerge({ phase, change: shown })
   // Where it stands is its card's, as the board and the home say it (`taskStatusOf`); only the words are the header's own.
   const status = taskStatusOf({ ...snapshot.task, inMergeQueue: inQueue, calls: snapshot.attention.length })
+  if (status === TaskStatus.Running && snapshot.task.externalWait !== undefined)
+    return { status, state: externalWaitWords(snapshot.task.externalWait, clock) }
   // A round of work after its plan is its lead following up, as the person asked (ADR-034).
   const doing =
     step === null ? undefined : step === 'implement' && snapshot.task.followUp === true ? stepText.followingUp : stepText.now[step]
@@ -300,7 +302,7 @@ const ticking = (snapshot: ThreadSnapshot | null) =>
  */
 export const elapsedOf = (snapshot: ThreadSnapshot, now: string): string | null => {
   const { startedAt, settledAt, phase } = snapshot.task
-  if (startedAt === null) return null
+  if (startedAt === null || snapshot.task.externalWait !== undefined) return null
   if (settledAt !== null) return running(startedAt, settledAt)
   if (ticking(snapshot)) return running(startedAt, now)
   const last = phase === 'ready' ? snapshot.items.findLast((item) => item.kind === 'step_result') : snapshot.items.at(-1)
@@ -310,6 +312,7 @@ export const elapsedOf = (snapshot: ThreadSnapshot, now: string): string | null 
 /** How long the step it is on has run, while it runs: what its header's card says beside that step. */
 export const tookOf = (snapshot: ThreadSnapshot, now: string): string | null => {
   const { phase, step, stepAt } = snapshot.task
+  if (snapshot.task.externalWait !== undefined) return null
   return phase === 'running' && step !== null && stepAt !== null ? running(stepAt, now) : null
 }
 

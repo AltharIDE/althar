@@ -36,7 +36,16 @@ import { Agents, RuntimeConfig } from './Config'
 import { ReviewRefused } from './Reviews'
 import { Changes, type Published } from './Changes'
 import { Connectivity } from './Connectivity'
-import { NotConnected } from './Connections'
+import { Connections, NotConnected } from './Connections'
+import {
+  externalWaitOf,
+  observeExternal,
+  prepareExternalWait,
+  waitOutcome,
+  waitTime,
+  type ExternalWait,
+  type Observation,
+} from './externalWaits'
 import {
   AttentionClosed,
   GitFailed,
@@ -495,6 +504,7 @@ type Store =
   | LeftBehind
   | MergeReviews
   | Setups
+  | Connections
 
 /**
  * Whether a publish step's failure may pass if tried again (DEV-173): the
@@ -998,6 +1008,7 @@ export class Runs extends Context.Service<
       const scope = yield* Effect.scope
       const blankPause = (yield* RuntimeConfig).idle?.blank ?? BLANK_PAUSE
       const publishAgain = (yield* RuntimeConfig).publishAgain ?? Duration.seconds(30)
+      const externalEvery = Duration.toMillis((yield* RuntimeConfig).externalWaitEvery ?? Duration.seconds(30))
       // Asked when a step is held for a reset, so the wait for it starts again.
       const holdsChanged = yield* Queue.sliding<void>(1)
       const provide = <A, E>(effect: Effect.Effect<A, E, Store>) => Effect.provideContext(effect, context)
@@ -2205,6 +2216,34 @@ export class Runs extends Context.Service<
             )
         })
 
+      /** The person's instruction or explicit stop takes back an external wait, atomically with its fact. */
+      const releaseExternalOn = (threadId: string, why: 'person' | 'lead_stopped') =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          yield* sql.withTransaction(
+            Effect.gen(function* () {
+              const waiting = yield* sql<{ id: string; taskId: string; projectId: ProjectId }>`
+            SELECT a.id, r.task_id, r.project_id FROM threads t JOIN runs r ON r.task_id = t.task_id AND r.state = 'running'
+            JOIN workflow_executions e ON e.run_id = r.id JOIN nodes n ON n.execution_id = e.id
+            JOIN node_attempts a ON a.node_id = n.id AND a.state = 'held' AND a.hold_reason = 'external'
+            WHERE t.id = ${threadId}`
+              for (const one of waiting) {
+                const revision = yield* change('node_attempts', one.id, { state: 'running', holdReason: null, output: null })
+                yield* fact({
+                  projectId: one.projectId,
+                  aggregateType: 'node_attempt',
+                  aggregateId: one.id,
+                  revision,
+                  type: 'node_attempt.external_cancelled',
+                  payload: { why },
+                  actorId: instance.personId,
+                })
+                yield* touchCard(one.taskId)
+              }
+            }),
+          )
+        })
+
       /**
        * When a step's agent ends a turn without reporting, it is reminded once,
        * and then the step is handed on (`noReport`). When it goes (and no other agent
@@ -2233,10 +2272,27 @@ export class Runs extends Context.Service<
             // The person wrote in the thread: a lead waiting on their answer has its card closed as they send, and goes on with the turn that carries it.
             if (event._tag === 'PersonSaid') yield* answerWaiting(event.threadId, false)
             if (event._tag === 'TurnStarted' && event.byPerson === true) yield* answerWaiting(event.threadId, true, event.turnId)
+            // The person's new instruction supersedes a lead's wait, before its next turn uses the step's tools.
+            if (event._tag === 'PersonSaid' || (event._tag === 'TurnStarted' && event.byPerson === true))
+              yield* releaseExternalOn(event.threadId, 'person')
             return
           }
-          // A quick task whose lead changed the repository in the turn that ended has its work on a branch of its own now.
+          // A quick task's writes still acquire their own branch when its turn ends, even when it yielded to a wait.
           yield* firstWriteOn(event.threadId)
+          // A declared external wait is a valid end of turn, not a missing report or a blank answer.
+          const [watching] = yield* sql<{ id: string }>`
+            SELECT a.id FROM threads t JOIN runs r ON r.task_id = t.task_id AND r.state = 'running'
+            JOIN workflow_executions e ON e.run_id = r.id JOIN nodes n ON n.execution_id = e.id
+            JOIN node_attempts a ON a.node_id = n.id AND a.state = 'held' AND a.hold_reason = 'external'
+            WHERE t.id = ${event.threadId} LIMIT 1`
+          if (watching !== undefined) {
+            if (
+              (event._tag === 'SessionEnded' && event.state === 'completed') ||
+              (event._tag === 'TurnEnded' && event.state === 'interrupted')
+            )
+              yield* releaseExternalOn(event.threadId, 'lead_stopped')
+            else return
+          }
           // A lead whose last message only points back at what folded says it again first: its next turn is what's read.
           if (
             event._tag === 'TurnEnded' &&
@@ -5061,6 +5117,57 @@ export class Runs extends Context.Service<
           return `Althar has your question. Your step waits in the person’s Needs you; their answer starts you again. End your turn now.`
         })
 
+      /** A durable hold is recorded before the agent yields; only the runtime polls it. */
+      const waitForExternal = (access: ToolAccess, input: unknown) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          if (access.taskId === null) return yield* new ToolRefused({ message: 'Only a task’s lead can wait for an external condition.' })
+          const current = yield* currentRun(access.taskId)
+          if (current === undefined) return yield* new ToolRefused({ message: 'No step is open to wait on an external condition.' })
+          const [held] = yield* sql<{ output: string | null }>`
+            SELECT a.output FROM node_attempts a JOIN nodes n ON n.id = a.node_id
+            WHERE n.execution_id = ${current.executionId} AND a.state = 'held' AND a.hold_reason = 'external'`
+          if (held !== undefined) return 'The wait is already recorded. End your turn; Althar will start you again when it changes.'
+          const attempt = yield* running(current, ['implement', 'settle'])
+          if (attempt === undefined) return yield* new ToolRefused({ message: 'No lead step is waiting for you.' })
+          const wait = yield* prepareExternalWait(access.projectId, input)
+          // Establish the baseline for change watches. Terminal conditions are checked again after the hold commits.
+          const conditions = yield* Effect.forEach(wait.conditions, (one) =>
+            one.target.kind === 'pull_request' && one.target.until === 'changed'
+              ? Effect.map(observeExternal(one), (seen) => ({ ...one, seen: seen.seen ?? null }))
+              : Effect.succeed(one),
+          )
+          yield* sql.withTransaction(
+            Effect.gen(function* () {
+              const [still] = yield* sql<{ state: string }>`SELECT state FROM node_attempts WHERE id = ${attempt.id}`
+              if (still?.state !== 'running' || !(yield* going(current)))
+                return yield* new ToolRefused({ message: 'The step changed while the wait was prepared. Read the task again.' })
+              const revision = yield* change('node_attempts', attempt.id, {
+                state: 'held',
+                holdReason: 'external',
+                output: JSON.stringify({ externalWait: { ...wait, conditions } }),
+              })
+              yield* fact({
+                projectId: current.projectId,
+                aggregateType: 'node_attempt',
+                aggregateId: attempt.id,
+                revision,
+                type: 'node_attempt.held',
+                payload: { reason: 'external', wait: wait.reason, deadline: wait.deadline },
+                actorId: instance.systemId,
+              })
+              yield* addItem({ projectId: current.projectId, threadId: current.threadId }, 'notice', {
+                source: 'runtime',
+                severity: 'info',
+                title: `Waiting: ${wait.reason}`,
+              })
+            }),
+          )
+          yield* touchCard(current.taskId)
+          yield* Queue.offer(holdsChanged, undefined)
+          return 'Althar is watching. End your turn without finish_step; the wait releases your agent place, and Althar starts your next turn with what changed.'
+        })
+
       /**
        * The lead says its step is done: Implement, or a round of settling. A
        * description it gives reaches the task's pull requests open already,
@@ -5077,6 +5184,14 @@ export class Runs extends Context.Service<
               })
         return Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
+          const [watching] = yield* sql<{ id: string }>`
+            SELECT a.id FROM node_attempts a JOIN nodes n ON n.id = a.node_id JOIN workflow_executions e ON e.id = n.execution_id
+            JOIN runs r ON r.id = e.run_id WHERE r.task_id = ${access.taskId ?? ''} AND r.state = 'running'
+              AND a.state = 'held' AND a.hold_reason = 'external' LIMIT 1`
+          if (watching !== undefined)
+            return yield* new ToolRefused({
+              message: 'Your step is waiting on an external condition. End your turn; do not finish it before the wait resolves.',
+            })
           // The model this step's turn ran on, kept with its report so its round keeps its name after a switch (DEV-154).
           const model = yield* modelOf(access.sessionId)
           // A review's lead has no step to finish: it ends with its draft, and is refused every tool but a review's (Reviews.ts).
@@ -5647,6 +5762,54 @@ export class Runs extends Context.Service<
             required: ['question'],
           },
           waitForPerson,
+        ),
+        tool(
+          'wait_for',
+          'Wait for an external condition without finishing your step or occupying an agent place. Give a short reason and up to 16 conditions. A pull_request is in a connected repository of this project, by its name or full host path and number; until is merged, checks_complete, checks_passed, or changed (new checks, review/comment, head or queue state). checks watches a branch or commit ref, such as main. time uses a UTC timestamp. mode any wakes on the first met condition; all waits for every one. A PR closed without merging needs the person. Checks with no results are unknown. Default timeout is 24 hours, at most 7 days. Once recorded, end your turn without finish_step. Althar resumes you with what changed; re-read before taking action. This grants no additional push or merge permission.',
+          {
+            type: 'object',
+            properties: {
+              reason: { type: 'string', minLength: 1, maxLength: 240 },
+              mode: { enum: ['any', 'all'] },
+              timeout_seconds: { type: 'integer', minimum: 1, maximum: 604800 },
+              conditions: {
+                type: 'array',
+                minItems: 1,
+                maxItems: 16,
+                items: {
+                  oneOf: [
+                    {
+                      type: 'object',
+                      properties: { kind: { const: 'time' }, at: { type: 'string', format: 'date-time' } },
+                      required: ['kind', 'at'],
+                    },
+                    {
+                      type: 'object',
+                      properties: {
+                        kind: { const: 'pull_request' },
+                        repository: { type: 'string' },
+                        number: { type: 'integer', minimum: 1 },
+                        until: { enum: ['merged', 'checks_complete', 'checks_passed', 'changed'] },
+                      },
+                      required: ['kind', 'repository', 'number', 'until'],
+                    },
+                    {
+                      type: 'object',
+                      properties: {
+                        kind: { const: 'checks' },
+                        repository: { type: 'string' },
+                        ref: { type: 'string' },
+                        until: { enum: ['checks_complete', 'checks_passed'] },
+                      },
+                      required: ['kind', 'repository', 'ref', 'until'],
+                    },
+                  ],
+                },
+              },
+            },
+            required: ['reason', 'conditions'],
+          },
+          waitForExternal,
         ),
       ])
       // Showing pictures is in the shared set (ADR-097): a lead's from its worktree, the coordinator's from its copies.
@@ -6835,6 +6998,150 @@ export class Runs extends Context.Service<
       /* What waited for a usage limit and couldn't go on at its reset, each waiting a while before it is tried again. */
       const tries = backoff()
 
+      /** Polls only while the hold is still the one read. Host I/O is always outside the transaction. */
+      const pollExternal = (
+        step: { taskId: string; attemptId: string; nodeKey: string; iteration: number; output: string },
+        wait: ExternalWait,
+      ) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const current = yield* currentRun(step.taskId)
+          if (current === undefined) return
+          const live = yield* sessions.running(current.threadId)
+          const now = yield* Clock.currentTimeMillis
+          const stillHeld = Effect.gen(function* () {
+            const [still] = yield* sql<{
+              state: string
+              output: string | null
+            }>`SELECT state, output FROM node_attempts WHERE id = ${step.attemptId}`
+            return still?.state === 'held' && still.output === step.output && (yield* going(current))
+          })
+          const keep = (after: ExternalWait) =>
+            sql.withTransaction(
+              Effect.gen(function* () {
+                if (!(yield* stillHeld)) return
+                yield* change('node_attempts', step.attemptId, { output: JSON.stringify({ externalWait: after }) })
+                yield* touchCard(current.taskId)
+              }),
+            )
+          // The tool records the wait in its turn. Never start another turn before that one has yielded.
+          if (Option.isSome(live) && live.value.turnRunning) return yield* keep({ ...wait, nextCheck: waitTime(now + 1000) })
+          const info: StuckInfo = {
+            step: stepOf(step.nodeKey),
+            why: 'waiting_on_person',
+            detail: null,
+            agentId: Option.isSome(live) ? live.value.agentId : (yield* lastLead(current)).agentId,
+            round: step.iteration,
+            open: 0,
+          }
+          const needsPerson = (detail: string) =>
+            sql.withTransaction(
+              Effect.gen(function* () {
+                if (yield* stillHeld) yield* stuck(current, { id: step.attemptId }, { ...info, detail })
+              }),
+            )
+          if (now >= Date.parse(wait.deadline))
+            return yield* needsPerson(
+              `Wait expired: ${wait.reason}. Check what is blocking it, then tell the lead whether to keep waiting or change the task.${wait.error === null ? '' : ` Last check: ${wait.error}`}`,
+            )
+          const observations = yield* Effect.forEach(wait.conditions, (one) =>
+            observeExternal(one).pipe(
+              Effect.map((observed): Observation => observed),
+              Effect.catch((error) =>
+                Effect.succeed<Observation>({
+                  met: false,
+                  error: error instanceof ConnectorFailed ? error.message : 'The code host could not be read.',
+                  ...(error instanceof ConnectorFailed && ['unauthorized', 'forbidden', 'not_found'].includes(error.reason)
+                    ? { blocked: `The wait cannot read its target: ${error.message}. Restore access or tell the lead what to do instead.` }
+                    : {}),
+                  ...(error instanceof ConnectorFailed && error.retryAt !== undefined ? { retryAt: error.retryAt } : {}),
+                }),
+              ),
+            ),
+          )
+          const outcome = waitOutcome(wait.mode, observations)
+          if (outcome === 'blocked')
+            return yield* needsPerson(
+              observations.find((one) => one.blocked !== undefined)?.blocked ?? `The wait cannot continue: ${wait.reason}.`,
+            )
+          if (outcome === 'waiting') {
+            const errors = observations.flatMap((one) => (one.error === undefined ? [] : [one.error]))
+            const failures = errors.length === 0 ? 0 : wait.failures + 1
+            const delay = errors.length === 0 ? externalEvery : Math.min(15 * 60_000, externalEvery * 2 ** Math.min(failures, 8))
+            const remote = wait.conditions.some((one) => one.target.kind !== 'time')
+            const times = wait.conditions.flatMap((one) =>
+              one.target.kind === 'time' && Date.parse(one.target.at) > now ? [Date.parse(one.target.at)] : [],
+            )
+            const due = Math.min(Date.parse(wait.deadline), ...(remote ? [now + delay] : times))
+            const retryAt = Math.max(
+              0,
+              ...observations.map((one) => (one.retryAt === undefined ? 0 : Date.parse(one.retryAt))).filter(Number.isFinite),
+            )
+            yield* keep({
+              ...wait,
+              conditions: wait.conditions.map((one, index) => ({
+                ...one,
+                seen: observations[index]?.seen ?? one.seen,
+                met: observations[index]?.met ?? false,
+              })),
+              lastCheck: waitTime(now),
+              nextCheck: waitTime(Math.min(Date.parse(wait.deadline), Math.max(due, retryAt))),
+              failures,
+              error: errors.length === 0 ? null : errors.join('; ').slice(0, 1000),
+            })
+            return
+          }
+          const note = `Carry on with the task from where it stands. The external wait resolved: ${wait.reason}\n${observations.flatMap((one) => (one.summary === undefined ? [] : [one.summary])).join('\n')}\nCarry on toward the task’s goal. Read current host state before writing; this wake-up does not approve any push or merge, and an uncertain earlier write must be checked before retrying.`
+          const answer = { kind: 'tell' as const, note }
+          const take = (room: boolean) =>
+            sql.withTransaction(
+              Effect.gen(function* () {
+                if (!(yield* stillHeld)) return false
+                // The notice is durable even if Althar stops between admitting the step and delivering its next turn.
+                yield* addItem({ projectId: current.projectId, threadId: current.threadId }, 'notice', {
+                  source: 'runtime',
+                  severity: 'info',
+                  title: note,
+                })
+                if (!room) {
+                  yield* waitForPlace(current, step.attemptId, { how: 'answered', info, answer })
+                  return false
+                }
+                const revision = yield* change('node_attempts', step.attemptId, {
+                  state: 'admitted',
+                  holdReason: null,
+                  output: JSON.stringify({ externalResume: note }),
+                })
+                yield* fact({
+                  projectId: current.projectId,
+                  aggregateType: 'node_attempt',
+                  aggregateId: step.attemptId,
+                  revision,
+                  type: 'node_attempt.external_ready',
+                  actorId: instance.systemId,
+                })
+                return true
+              }),
+            )
+          const resuming = yield* envelope('thread.send', { threadId: current.threadId, externalWait: step.attemptId })
+          yield* busy.enter(step.taskId, take, {
+            order: 'underway',
+            next: (taken) =>
+              !taken
+                ? Effect.void
+                : provide(
+                    carryOn(current, step.attemptId, info, answer, resuming, undefined, undefined, undefined, 'underway').pipe(
+                      Effect.catchCause((cause) =>
+                        Cause.hasInterruptsOnly(cause)
+                          ? Effect.interrupt
+                          : stuck(current, { id: step.attemptId }, { ...info, why: 'failed_to_start', detail: summarize(cause) || null }),
+                      ),
+                    ),
+                  ),
+          })
+          yield* touchCard(current.taskId)
+        })
+
       /*
        * What waits for a usage limit to reset runs again then, the soonest
        * first, or sooner if something new waits; after a restart too. A step
@@ -6857,7 +7164,9 @@ export class Runs extends Context.Service<
             SELECT r.task_id, r.project_id, a.id AS attempt_id, n.node_key, n.iteration, a.output, a.hold_reason
             FROM runs r JOIN workflow_executions e ON e.run_id = r.id JOIN nodes n ON n.execution_id = e.id
             JOIN node_attempts a ON a.node_id = n.id
-            WHERE r.state = 'running' AND a.state = 'held' AND a.hold_reason IN ('usage_limit', 'agent_unavailable')`
+            JOIN tasks k ON k.id = r.task_id JOIN projects p ON p.id = r.project_id
+            WHERE r.state = 'running' AND a.state = 'held' AND a.hold_reason IN ('usage_limit', 'agent_unavailable', 'external')
+              AND k.state IN ('draft', 'open') AND p.archived_at IS NULL`
           // Offline, nothing waiting for the connection is due: the computer coming back says so.
           const online = yield* connectivity.online
           // A message waits where the thread's last turn reached the limit, outside a step, and the person's input is queued.
@@ -6872,6 +7181,32 @@ export class Runs extends Context.Service<
                 WHERE i.thread_id = t.id AND i.state = 'queued' AND a.kind = 'person')`
           const due: Array<{ readonly key: string; readonly at: number; readonly run: Effect.Effect<void, unknown, Store> }> = []
           for (const step of held) {
+            if (step.holdReason === 'external') {
+              const wait = externalWaitOf(step.output)
+              if (wait === undefined) {
+                const current = yield* currentRun(step.taskId)
+                if (current !== undefined)
+                  yield* stuck(
+                    current,
+                    { id: step.attemptId },
+                    {
+                      step: stepOf(step.nodeKey),
+                      why: 'waiting_on_person',
+                      detail: 'The saved wait could not be read. Tell the lead what it should wait for again.',
+                      agentId: (yield* lastLead(current)).agentId,
+                      round: step.iteration,
+                      open: 0,
+                    },
+                  )
+                continue
+              }
+              due.push({
+                key: step.attemptId,
+                at: Math.min(Date.parse(wait.nextCheck), Date.parse(wait.deadline)),
+                run: pollExternal(step, wait),
+              })
+              continue
+            }
             const hold = yield* decodeHold(step.output).pipe(contained('Runs.held', () => undefined))
             if (hold === undefined) continue
             const connection = step.holdReason === 'agent_unavailable'
@@ -6937,7 +7272,11 @@ export class Runs extends Context.Service<
       yield* sessions.onPersonsTurn((lead) =>
         provide(
           Effect.gen(function* () {
-            if ((yield* currentRun(lead.taskId)) !== undefined) return
+            const current = yield* currentRun(lead.taskId)
+            if (current !== undefined) {
+              yield* releaseExternalOn(lead.threadId, 'person')
+              return
+            }
             const heads: Record<string, string> = {}
             for (const worktree of yield* worktreesOf(lead.taskId)) {
               const head = yield* commitOf(worktree.path, 'HEAD').pipe(Effect.orElseSucceed(() => null))

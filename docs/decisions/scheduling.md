@@ -334,8 +334,50 @@ Althar's work is the cause, and which task.
   since a Mac keeps memory full of cache on purpose. Neither meter adds words
   about strain or heat.
 
+## Waiting for an external change
+
+A lead can yield with `wait_for` while its step is unfinished. The runtime
+keeps the conditions on a held attempt and watches them without starting model
+turns or holding an agent place. The task remains in Running, with its waiting
+reason and the last and next check; idle work clocks are hidden.
+
+- **Conditions are typed reads:** a connected project repository's PR merging,
+  checks completing or passing, or a change to its head, comments, reviews or
+  merge-queue state; checks on a branch or commit; or a UTC time. An empty check
+  list is unknown. A wait can require any condition or all of them. A change
+  already observed in an all-mode wait stays observed while the others wait.
+- **The wait belongs to the runtime.** It survives a restart and reconciles
+  current host state on recovery. A read that returns after Stop or a new
+  instruction cannot resurrect the old hold. A wake is admitted once, through
+  the ordinary queue for agents at work; the thread keeps what caused it.
+- **Nothing is polled through an agent.** Existing connectors perform the
+  reads and keep their conditional HTTP and rate-limit handling. Reads are
+  normally thirty seconds apart, with backoff and the host's retry time on
+  errors. Time waits wake at their time. A fully stopped runtime observes
+  nothing until it starts again.
+- **The wait is bounded.** A lead can give a timeout of up to seven days;
+  without one it is twenty-four hours. The deadline is persisted. An expired
+  wait, a PR closed without merging, lost access or an unreadable saved wait
+  asks the person what to do. Transient read failures never count as success.
+- **The person's word takes precedence.** Stop and abandonment cancel waits;
+  a new message to the lead supersedes its wait before the next turn uses the
+  step's tools. Resuming a stopped task carries on the task rather than
+  rearming a cancelled watch silently.
+- **A wake is not completion or approval.** The lead reads current state and
+  carries on toward the request; it still reports the step only when done.
+  Watching grants no additional push or merge authority. Host merge queues
+  keep their own checks; a green PR is not proof it has merged.
+
+The alternative was an agent-owned sleeping or polling loop, which would
+occupy a place, spend context and lose its watch with its session. Typed
+polling is the first implementation; webhook delivery and general external
+services can feed the same lifecycle later. Repository maintainers own this
+decision; revisit the transport when polling latency or request volume
+justifies a receiver.
+
 ## Changes
 
 - 8 Nov 2026: written from the ADRs under Replaces.
+- 12 Nov 2026: leads can yield on durable external conditions and resume when they are met, without holding an agent place (DEV-176).
 - 11 Nov 2026: the runtime reads the computer in the background while the meter is on, so the peek's trace isn't empty when a window comes back into view.
 - 10 Nov 2026: a lead's helpers each take a place of their own, four of a task's at once (ADR-087, [tasks § Helpers](tasks.md#helpers)).
