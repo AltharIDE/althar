@@ -72,6 +72,7 @@ import { fact } from './records'
 import { declinedOf, offerable, reviewOfferOf } from './reviewOffer'
 import { PlanParameters, type PlanStep, Runs, type StuckInfo } from './Runs'
 import { smallChangeSteps } from './smallChange'
+import { afterMergeNow } from './afterMergeReview'
 import { type Disposition, passedOn, Sessions } from './Sessions'
 import type { InputFile } from './sentFiles'
 import type { InputImage } from './sentImages'
@@ -1515,8 +1516,16 @@ export class Coordinator extends Context.Service<
           const where = `${preset === undefined ? '' : ` As ${preset}.`}${yield* localLine(access.projectId, task.id, worksIn)}`
           if (held !== undefined)
             return `Changed ${task.slug}'s plan.${where} It stays held until the person starts it; they see it as a card, so there's no need to describe the plan again.`
-          if (small)
-            return `Planned ${task.slug} as a small change: ${where} It starts at once, on ${smallSteps?.[0]?.model ?? 'its lightest model'}, with no plan to read and one step. It is reviewed after it merges; the card in its thread says what it skipped, so there's no need to repeat it.`
+          if (small) {
+            const after = (yield* afterMergeNow(task.id)).holds
+            const reviewed =
+              after === 'none'
+                ? "The project's rule has no review after it merges (review_after_merge keeps one for it, on the person's word)"
+                : after === 'all'
+                  ? 'It is reviewed after it merges, and any finding comes back to the person'
+                  : 'It is reviewed after it merges, and only blocking and major findings come back to the person'
+            return `Planned ${task.slug} as a small change: ${where} It starts at once, on ${smallSteps?.[0]?.model ?? 'its lightest model'}, with no plan to read and one step. ${reviewed}; the card in its thread says what it skipped, so there's no need to repeat it.`
+          }
           return `Planned ${task.slug}.${where} It starts in 25 seconds unless the person holds or changes it; they see it as a card, so there's no need to describe the plan again.`
         })
 
@@ -2555,7 +2564,7 @@ export class Coordinator extends Context.Service<
         ),
         tool(
           'propose_plan',
-          `Proposes a drafted task's plan: the model that implements it (its lead), with why in a sentence; and the model that reviews it, which only reads, or null for something trivial. A change of a few lines is planned small: pass small_change, keep the review (it runs after the merge), and put its lead on a light, quick model (Sonnet, at low effort where that is the lowest it lists). It then has one step and no countdown: it starts at once in a place kept for small tasks, however many long ones are at work, and its card in the thread says what it skipped. Without small_change it starts on its own after 25 seconds unless the person holds or changes it. Name each model as list_models writes it, and, where it matters, one of the efforts it lists for that model. Proposing again for a task the person holds replaces the plan but keeps it held: it starts only when the person starts it. A task's lead plans only the tasks it drafted. ${PICK_A_PRESET}`,
+          `Proposes a drafted task's plan: the model that implements it (its lead), with why in a sentence; and the model that reviews it, which only reads, or null for something trivial. A change of a few lines is planned small: pass small_change, keep the review (it runs after the merge, as the project's afterMergeReview rule says: only major findings come back, any, or none at all), and put its lead on a light, quick model (Sonnet, at low effort where that is the lowest it lists). It then has one step and no countdown: it starts at once in a place kept for small tasks, however many long ones are at work, and its card in the thread says what it skipped. Without small_change it starts on its own after 25 seconds unless the person holds or changes it. Name each model as list_models writes it, and, where it matters, one of the efforts it lists for that model. Proposing again for a task the person holds replaces the plan but keeps it held: it starts only when the person starts it. A task's lead plans only the tasks it drafted. ${PICK_A_PRESET}`,
           {
             type: 'object',
             properties: {
@@ -2568,7 +2577,7 @@ export class Coordinator extends Context.Service<
               small_change: {
                 type: 'boolean',
                 description:
-                  'For a change of a few lines, such as a one-line fix: one step, no countdown, and a review after it merges instead of before. Its review names who reads it once it merged. Say what it skips in a sentence.',
+                  "For a change of a few lines, such as a one-line fix: one step, no countdown, and a review after it merges instead of before, where the project's rule has one. Its review names who reads it once it merged. Say what it skips in a sentence.",
               },
               review: {
                 type: ['object', 'null'],

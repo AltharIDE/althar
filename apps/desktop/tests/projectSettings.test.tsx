@@ -403,6 +403,19 @@ describe('a project’s settings', () => {
     expect(conflicts.getAttribute('aria-checked')).toBe('false')
   })
 
+  it('says what a small change’s review after it merges brings back, Major only to start with, and keeps another choice', async () => {
+    const { client } = windowAt('/projects/p1')
+    await openSettings('Tasks')
+    const region = within(screen.getByRole('region', { name: 'Tasks' }))
+    const select = region.getByRole('combobox', { name: 'Review after a small change merges' })
+    expect(select.textContent).toBe('Bring back major findings')
+    expect(region.getByText('Minor findings and nits stay in the task’s thread.')).toBeTruthy()
+    await userEvent.click(select)
+    await userEvent.click(screen.getByRole('option', { name: 'Don’t review it' }))
+    await waitFor(() => expect(client.setProjectRules).toHaveBeenCalledWith({ projectId: 'p1', afterMergeReview: 'none' }))
+    expect(region.getByText('Make it a full task to have it reviewed before it merges.')).toBeTruthy()
+  })
+
   it('moves a task’s issue to In Progress as it starts, on every tracker that has one, unless switched off', async () => {
     const { client } = windowAt('/projects/p1')
     await openSettings('Tasks')

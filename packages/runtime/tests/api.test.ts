@@ -1108,6 +1108,7 @@ describe('finished tasks’ folders, through the API', () => {
           postScreenshots: false,
           resolveConflicts: true,
           moveIssues: true,
+          afterMergeReview: 'major',
         })
         yield* client.SetPlansAndReviews({ commandId: commandId(), countdown: 10, rounds: 2, roundsOut: 'ask' })
         yield* client.SetNewProjectDefaults({ commandId: commandId(), usageLimit: 'wait', rotateAccounts: true })
@@ -1121,6 +1122,7 @@ describe('finished tasks’ folders, through the API', () => {
           postScreenshots: false,
           resolveConflicts: true,
           moveIssues: true,
+          afterMergeReview: 'major',
         })
         const project = yield* client.OpenProject({ commandId: commandId(), grant: yield* grant(repository()) })
         const task = yield* client.CreateTask({ commandId: commandId(), projectId: project.id, title: 'Add a retry' })
@@ -1231,6 +1233,8 @@ describe('project rules, through the API', () => {
           branchPattern: null,
           titlePattern: null,
           moveIssues: true,
+          // A small change's review after it merges brings back only blocking and major findings, until the person says.
+          afterMergeReview: 'major',
           // Skill and OpenSpec files stay out of the repositories, and off the remote, until the person says.
           repositoryFiles: { writeSkills: false, writeOpenSpec: false, pushProtected: false },
           // A repository with no packages, on no host: only what every lead runs outside its sandbox, plus the dev servers and

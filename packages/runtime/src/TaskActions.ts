@@ -983,6 +983,39 @@ export class TaskActions extends Context.Service<
           return `Skipped ${task.slug}'s review: it is ready once its lead is done, with no review. ${threadsSaying(access, task)}.`
         })
 
+      const ReviewAfterMerge = Schema.Struct({
+        task: Schema.optional(Schema.String),
+        review: Schema.Literals(['review', 'none', 'project']),
+        why: Schema.optional(Schema.String),
+      })
+      /** One small change's own word on its review after the merge, as its card will offer it: on the person's word. */
+      const reviewAfterMerge = (access: ToolAccess, input: unknown) =>
+        Effect.gen(function* () {
+          const asked = yield* read(ReviewAfterMerge, input)
+          const task = yield* named(access, asked.task)
+          const review = asked.review === 'project' ? null : asked.review
+          const now = yield* plainly(mergeReviews.choose(task.id, review, actorOf(access)), task.slug)
+          const rule = { major: 'only blocking and major findings come back', all: 'any finding comes back', none: '' }
+          const holds =
+            now.holds === 'none' ? 'it isn’t reviewed after it merges' : `it is reviewed after it merges, and ${rule[now.holds]}`
+          yield* did(
+            access,
+            input,
+            task,
+            review === 'none'
+              ? `No review after “${task.title}” merges`
+              : review === 'review'
+                ? `A review after “${task.title}” merges`
+                : `“${task.title}”’s review after its merge goes by the project’s rule`,
+            review === 'none'
+              ? 'dropped its review after the merge'
+              : review === 'review'
+                ? 'kept a review after the merge'
+                : 'left its review after the merge to the project’s rule',
+          )
+          return `${task.slug}: ${holds}${review === null ? ', as the project’s rule says' : ''}. ${threadsSaying(access, task)}.`
+        })
+
       const shipTask = (access: ToolAccess, input: unknown) =>
         Effect.gen(function* () {
           const asked = yield* read(ShipAsked, input)
@@ -1434,6 +1467,20 @@ export class TaskActions extends Context.Service<
           'Skips the review of a task’s work under way, as its menu’s Skip the review does: it is ready once its lead is done, with no review. For a task the person wants without its review; a stuck review is answered with answer_stuck_step. It acts at once, with a line in your thread and the task’s.',
           { type: 'object', properties: { task: optionalTask, why } },
           skipReview,
+        ),
+        tool(
+          'review_after_merge',
+          "Says whether one small change is reviewed after it merges, over its project's rule (read_settings project/tasks, afterMergeReview), on the person's word: review keeps a review after its merge where the rule has none (only blocking and major findings come back to the person, unless the rule says all); none drops it; project goes back to the rule. Only a small change, before it merges. To review it before it merges, make it a full task instead. It acts at once, with a line in your thread and the task's.",
+          {
+            type: 'object',
+            properties: {
+              task: optionalTask,
+              review: { type: 'string', enum: ['review', 'none', 'project'] },
+              why,
+            },
+            required: ['review'],
+          },
+          reviewAfterMerge,
         ),
         tool(
           'push_task',

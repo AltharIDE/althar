@@ -137,22 +137,64 @@ decision of a task is a conversation plus parts, [tasks](tasks.md#a-task-holds-a
 - It reports in the task's thread, naming the pull request it read. Nothing
   is posted on the merged pull request.
 - **Nothing found** is a line in the thread, and nothing more.
-- **Findings** bring the task back to Needs you, "Review found 2 after #715
-  merged", with **Fix it**, which hands them to the lead as the person's word
-  and ships its fix as a new pull request after the merged one once its turn
-  ends, and **Leave it**, which closes them. Agents answer it on the person's
-  word with `answer_review_after_merge`.
+- **What the project's rule brings back** puts the task back in Needs you,
+  "Review found 2 after #715 merged", with **Fix it**, which hands the
+  findings to the lead as the person's word and ships its fix as a new pull
+  request after the merged one once its turn ends, and **Leave it**, which
+  closes them. Agents answer it on the person's word with
+  `answer_review_after_merge`.
+- **What it doesn't bring back** ends as the same quiet line as nothing
+  found ("Review · … · 2 findings · None major"), its findings readable
+  there, and nothing waits on the person; its Outputs say "Reviewed by", not
+  "Changes asked by".
+
+### What the review after a merge brings back
+
+A project rule says it (`afterMergeReview`, on the project's Settings ›
+Tasks, under How they go; `read_settings` and `change_settings` reach it as
+`project/tasks`):
+
+- **Bring back major findings** (the default, and what a project made before
+  the rule has): the reviewer reads what merged, and only `blocking` and
+  `major` findings bring the task back. A review whose findings are all
+  `minor` or `nit` ends as a quiet line. Its brief tells the reviewer so,
+  so it doesn't pad the review with small things.
+- **Bring back every finding:** any finding brings it back, as before the
+  rule.
+- **Don't review it:** no review is owed after the merge. The small change's
+  card says "no review" in place of "reviewed after it merges". "Make it a
+  full task" still moves a review before the merge.
+
+New projects start from a default in Althar's Settings › Tasks (`althar/tasks`,
+`new_project_after_merge_review`), as the other new-project rules do.
+
+**One small change may say otherwise**, until it merges: keep a review after
+its merge where the rule has none (it brings back what Major only does), or
+drop it where the rule has one (`review_after_merge` on the person's word,
+`SetReviewAfterMerge` from the window, kept as `task.after_merge_review_set`).
+Its card reads what holds (`afterMerge` on the small change's card); the
+card's control for it waits on the card's redesign.
+
+The rule and the task's word are **read when the merge is heard**, not when
+Althar starts, and what the review brings back is kept on it then
+(`merge_reviews.reviewer`, `bringsBack`), so the reviewer's brief and its
+report read the same rule, whatever changes meanwhile.
 
 What Merge now merges with commits not shipped is reviewed after the merge
-the same way, where the task has a reviewer.
+the same way, where the task has a reviewer, and brings back what the rule
+says; only a small change's is dropped by Don't review it.
 
-The review after a merge isn't owed where the plan named no reviewer, or
-where the pull request closed without merging. "Make it a full task", on the
-small change's card, moves its review back before the merge.
+The review after a merge isn't owed where the plan named no reviewer, where
+the rule or the task's word says none, or where the pull request closed
+without merging. "Make it a full task", on the small change's card, moves
+its review back before the merge.
 
 Why: the review was a fifth of a small task's time, and the person wants
 small changes fast. Reviewing after the merge keeps a second reader without
-holding the merge. The trade is that a finding then needs a fix of its own.
+holding the merge. The trade is that a finding then needs a fix of its own,
+so only what is worth one comes back by default: a nit brought the person
+back to a change that had merged, which they didn't want (11 November). They
+asked for the choice of skipping it too, per project and as a default.
 
 Because nothing reviewed it before its pull request opened, **a fast-lane
 pull request carries no seal**, and its description has no review section.

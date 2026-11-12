@@ -5,6 +5,7 @@ import { existsSync, readFileSync, realpathSync, statSync } from 'node:fs'
 import { isAbsolute, join, resolve, sep } from 'node:path'
 
 import {
+  type AfterMergeRule,
   CheckoutAsk,
   AllowedBy,
   AttachedFile,
@@ -73,6 +74,7 @@ import { PullRequestScreenshots } from './PullRequestScreenshots'
 import type { PullRequestFacts } from './pullRequestStanding'
 import { baseOf, changedBetween, type ChangedFile, changedFiles, fileDiff, type FileDiff, unchangedFileDiff } from './diffs'
 import { changedWords, smallChangeOf, smallChangeSkips } from './smallChange'
+import { afterMergeNow } from './afterMergeReview'
 import { builtIn, descriptionsIn, evidenceOf, evidencePaths, keptViewsIn, shownOf, unverifiedIn } from './evidence'
 import { graphOf, type RunRows, type StepRow } from './graph'
 import { taskFindingsOf } from './taskFindings'
@@ -715,7 +717,13 @@ export const itemOf = (row: ItemRow): ThreadItem | undefined => {
           // A review after a merge says which pull request it read.
           ...(text(field(content, 'afterMerge'), 'url') === ''
             ? {}
-            : { afterMerge: { url: text(field(content, 'afterMerge'), 'url'), words: text(field(content, 'afterMerge'), 'words') } }),
+            : {
+                afterMerge: {
+                  url: text(field(content, 'afterMerge'), 'url'),
+                  words: text(field(content, 'afterMerge'), 'words'),
+                  ...(field(field(content, 'afterMerge'), 'kept') === true ? { kept: true } : {}),
+                },
+              }),
           agentId: agentId === '' ? null : agentId,
           ...(model === '' ? {} : { model }),
         },
@@ -3147,9 +3155,19 @@ export class Queries extends Context.Service<
             FROM external_links x JOIN tasks k ON k.id = x.task_id JOIN threads t ON t.task_id = k.id AND t.kind = 'task'
             WHERE x.kind = 'review' AND x.url = ${change?.url ?? ''}
             ORDER BY k.created_at DESC, k.rowid DESC LIMIT 1`
-          const [review] = yield* sql<{ state: string; findings: number; updatedAt: string }>`
-            SELECT state, json_array_length(findings) AS findings, updated_at AS updatedAt FROM merge_reviews
+          const [review] = yield* sql<{
+            state: string
+            findings: number
+            verdict: string | null
+            bringsBack: string | null
+            updatedAt: string
+          }>`
+            SELECT state, json_array_length(findings) AS findings, verdict, json_extract(reviewer, '$.bringsBack') AS bringsBack,
+              updated_at AS updatedAt FROM merge_reviews
             WHERE url = ${change?.url ?? ''}`
+          // What its review after the merge brings back: as the rule and its own word say now, and once owed, as it was kept then.
+          const rule = yield* afterMergeNow(task.id)
+          const holds: AfterMergeRule = review === undefined ? rule.holds : review.bringsBack === 'all' ? 'all' : 'major'
           const [reported] = yield* sql<{ at: string }>`
             SELECT created_at AS at FROM thread_items WHERE thread_id = ${threadId} AND kind = 'step_result'
               AND json_extract(content, '$.step') = 'implement' ORDER BY sequence LIMIT 1`
@@ -3196,7 +3214,7 @@ export class Queries extends Context.Service<
                 model: small.implement.model,
                 ...(small.implement.effort === undefined ? {} : { effort: small.implement.effort }),
               },
-              skips: smallChangeSkips(reviewBefore ? null : small.review),
+              skips: smallChangeSkips(reviewBefore ? null : small.review, holds),
               steps: [
                 { key: 'started', what: 'Started', at, done: true },
                 {
@@ -3225,7 +3243,9 @@ export class Queries extends Context.Service<
                               ? 'Reviewing'
                               : review.state === 'stopped'
                                 ? 'Review stopped'
-                                : 'Reviewed',
+                                : review.state === 'clear' && review.verdict === 'changes_requested' && review.findings > 0
+                                  ? 'Reviewed, nothing major'
+                                  : 'Reviewed',
                         at: review.state === 'owed' || review.state === 'running' ? null : review.updatedAt,
                         done: review.state !== 'owed' && review.state !== 'running',
                       },
@@ -3238,6 +3258,7 @@ export class Queries extends Context.Service<
               ...(reviewBefore
                 ? { fullTask: { taskId: reviewed.taskId, slug: reviewed.slug, threadId: reviewed.threadId, title: reviewed.title } }
                 : {}),
+              afterMerge: { project: rule.project, task: rule.task, holds },
             },
           }
           return card

@@ -587,6 +587,11 @@ export interface Client {
   readonly openChange: (taskId: string) => Promise<void>
   /** Skips the review of the task's work under way. */
   readonly skipReview: (taskId: string) => Promise<void>
+  /**
+   * One small change's own word on its review after the merge, over its project's rule, until it merges: `review`, `none`,
+   * or null for the rule. Its card reads what holds (`afterMerge` on the small change's card).
+   */
+  readonly setReviewAfterMerge: (taskId: string, review: 'review' | 'none' | null) => Promise<void>
   /** Merges the task's pull request at the head the person saw, as they said to; a draft is marked ready first. */
   readonly merge: (taskId: string, head: string, url?: string, how?: 'review' | 'now') => Promise<void>
   /** Merges a task without a pull request into its repositories' default branches on this Mac, up to the commit the person saw in each. */
@@ -1019,6 +1024,7 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
     postScreenshots: (input) => command((commandId) => api.PostScreenshots({ commandId, ...input })),
     openChange: (taskId) => command((commandId) => api.OpenChange({ commandId, taskId })),
     skipReview: (taskId) => command((commandId) => api.SkipReview({ commandId, taskId })),
+    setReviewAfterMerge: (taskId, review) => command((commandId) => api.SetReviewAfterMerge({ commandId, taskId, review })),
     merge: (taskId, head, url, how) =>
       command((commandId) =>
         api.Merge({ commandId, taskId, head, ...(url === undefined ? {} : { url }), ...(how === undefined ? {} : { how }) }),

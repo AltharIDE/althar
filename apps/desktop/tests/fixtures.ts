@@ -81,6 +81,7 @@ export const projectRules: ProjectRulesView = {
   branchPattern: null,
   titlePattern: null,
   moveIssues: true,
+  afterMergeReview: 'major',
   repositoryFiles: { writeSkills: false, writeOpenSpec: false, pushProtected: false },
   conventions: [{ repository: 'api', branch: null, title: null, template: null }],
   sandbox: {
@@ -1189,6 +1190,7 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
         postScreenshots: false,
         resolveConflicts: true,
         moveIssues: true,
+        afterMergeReview: 'major',
       } as const,
     })),
     setCoAuthor: vi.fn(async () => {}),
@@ -1342,6 +1344,7 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
     postScreenshots: vi.fn(async () => {}),
     openChange: vi.fn(async () => {}),
     skipReview: vi.fn(async () => {}),
+    setReviewAfterMerge: vi.fn(async () => {}),
     refreshTask: vi.fn(async () => {}),
     stopListening: vi.fn(async () => {}),
     attachPullRequest: vi.fn(async () => ({

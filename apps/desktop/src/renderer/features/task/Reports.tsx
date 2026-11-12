@@ -17,6 +17,8 @@ export const reportText = {
   pushed: 'Pushed the branch.',
   /** A review after a merge, in the same task: which pull request it read. */
   afterMerge: (words: string) => `Reviewed what ${words} merged.`,
+  /** Its findings, none blocking or major, stay in the thread: nothing comes back to the person. */
+  kept: 'None major',
 }
 
 /**
