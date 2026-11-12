@@ -126,24 +126,40 @@ or several is the lead's call where the person hasn't said.
   said only once something of it has merged. Outputs groups its pull
   requests by change, and the card counts them ("3 changes").
 
-## Chats and Scratch
+## Asides
 
-A chat is a task with a conversation and a copy of the default branch, and
-nothing else: what the coordinator starts at once with `start_task`. It
-sits on **Scratch** (`tasks.shelf`), off the board's lanes, behind one chip
-at the head of Up next, there whether anything else waits in Up next or not
-(`ScratchShelf`). Opened in place, never a sidebar, it lists the chats by
-their latest exchange, the latest first: each by its title, what was said
-last and by whom, when, a live dot while its lead is at it, and Clear, which
-settles it. A call of its that waits on the person still shows in Needs you.
-It moves to the board, saying so in its thread, once it takes a worktree or
-an output (a branch of its own, a pull request, a drafted review) after it
-was put there. The person moves a plain task either way from its menu;
-nothing moves back by itself. Settled, a chat leaves Scratch, and ⌘K finds
-it.
+An aside is a chat: a task with a conversation and a copy of the default
+branch, and nothing else, kept off the board (`tasks.shelf`, "Scratch" in
+the code). It sits beside the coordinator's conversation, as a pill over it:
+**Coordinator** first, with Althar's mark, then each aside, the latest
+exchange first, a live dot while its agent is at it (`AsideTabs`). Its agent
+has the coordinator's tools, and its turns are signed Coordinator too, as
+the coordinator's are: an aside is a quick word with the coordinator that
+leaves its conversation as it was.
 
-A chat's copy is made without setup: a chat that only talks never pays for
-an install. The setup replays the first time its lead runs a command, or
+- **Started** with + over the conversation, which turns the coordinator's
+  composer to a new aside (`StartTask` with `chat`): the person's words open
+  its thread, on the model the composer has picked, with no card in the
+  coordinator's conversation. Words the coordinator said, selected, start one
+  about them, quoted over the composer and above the person's words. The
+  coordinator still starts one at once with `start_task`.
+- **Open,** it takes the coordinator's place in the pane: its conversation,
+  and the composer every task has, with its own runs over it and its own
+  moves, Make it a task and Clear (`AsideMoves`).
+- **Made a task,** it moves to the board: by the person's Make it a task,
+  from its menu, or by itself once it takes a worktree or an output (a
+  branch of its own, a pull request, a drafted review) after it was put
+  there, said in its thread. Its pill flies to its card on the board, and
+  the coordinator's conversation keeps a line of it ("An aside became a
+  task: …"). Nothing moves back by itself; the person can from its menu.
+- **Cleared,** it settles, leaves the pills, and ⌘K finds it. Those left a
+  week fold into one "N older" pill, which clears them together.
+- A call of its that waits on the person still shows in Needs you. With the
+  conversation closed, the board keeps the asides behind one chip at the
+  head of Up next (`ScratchShelf`), opened in place.
+
+An aside's copy is made without setup: one that only talks never pays for
+an install. The setup replays the first time its agent runs a command, or
 `run_project`.
 
 ## Presets
@@ -593,4 +609,5 @@ optionally a model, an agent, an effort and the change.
 - 9 Nov 2026: what the person says to a lead after its plan is a turn, not a round, and what it commits waits for Ship, which reviews only what came since the last review (a task is a conversation plus parts).
 - 10 Nov 2026: a task is a conversation plus parts, built (#739) and folded in from its proposal: the five parts and changing them, several changes in a task and stacks, chats on Scratch, presets, and helpers handed a change (ADR-087's tasks 1 to 5); what it decided and didn't build is under Not built yet.
 - 10 Nov 2026: the rest of it built (#739): each change shipped in a Ship of its own with its own review, the card's sentence and marks across changes, the header's row for each, stamped Shipped and Merged rows, where a turn's commits went; Keep them together, Drop it, a change that waits for another, removing a running task's workspace; Stop running it; picking another preset on the plan card, the coordinator planning from presets, editing them in Settings; Scratch's own shelf and a chat's copy made without setup. ADR-087 folded in whole and removed from `proposed/`: helpers in copies of their own, writing ones' commits, places, limits, retries, the hour, restarts, agents' own helpers switched off, and the thread, Graph face and usage by model.
+- 11 Nov 2026: chats are asides, pills over the coordinator's conversation with a composer and moves of their own, started there or from the coordinator's words; one made a task flies to the board and the coordinator's conversation notes it; the coordinator's turns are signed with Althar's mark ([Asides](#asides)).
 - 12 Nov 2026: commits that only bring the base branch in, as a clean merge of main, are never the task's work: no hold for Ship, no review, no round; they go up to the open pull request (#773's merge of main had started a second Review and Pull request).

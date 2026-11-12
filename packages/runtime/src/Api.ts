@@ -1456,7 +1456,7 @@ export const handlers = Api.toLayer(
         ),
       GetCoordinator: ({ projectId, before, limit }) =>
         api(queries.coordinator(projectId, { ...(before === undefined ? {} : { before }), ...(limit === undefined ? {} : { limit }) })),
-      StartTask: ({ commandId, projectId, title, description, steps, issue, end, repositories }) =>
+      StartTask: ({ commandId, projectId, title, description, steps, issue, end, repositories, chat }) =>
         once(
           commandId,
           api(
@@ -1470,9 +1470,12 @@ export const handlers = Api.toLayer(
                 draft: true,
                 ...(from === undefined ? {} : { issueKey: from.key }),
                 ...(repositories === undefined ? {} : { repositories }),
-                ...requestOf(title, description, issue),
+                // An aside's words are the person's, whole: its thread opens with them.
+                ...(chat === true ? { plain: true, request: description ?? title } : requestOf(title, description, issue)),
               })
               if (issue !== undefined) yield* issues.attach({ projectId: projectId as ProjectId, taskId: created.taskId, issue })
+              // An aside sits on Scratch from the start, beside the coordinator's conversation rather than on the board.
+              if (chat === true) yield* Effect.provideContext(shelve(created.taskId, 'scratch', instance.personId), folderStore)
               // A task you start yourself is planned like any other, and starts at once; its card shows in the coordinator's thread.
               const planId = yield* plans.propose({
                 projectId: projectId as ProjectId,
@@ -1481,7 +1484,10 @@ export const handlers = Api.toLayer(
                 reason: null,
                 actorId: instance.personId,
                 startsIn: Duration.zero,
-                end: end === undefined ? yield* pullRequests.endFor(projectId, created.taskId) : end,
+                // An aside, as a chat the coordinator starts: nothing of it goes outside the project when it is done.
+                ...(chat === true
+                  ? { end: null, here: true, card: false as const }
+                  : { end: end === undefined ? yield* pullRequests.endFor(projectId, created.taskId) : end }),
               })
               yield* plans.start(planId, instance.personId)
               return yield* queries.task(created.taskId)

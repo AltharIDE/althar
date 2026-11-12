@@ -1156,7 +1156,7 @@ export class Coordinator extends Context.Service<
           if (byLead)
             return `Planned ${created.slug}, started from this task: its lead starts in 25 seconds unless the person holds it, with no review, and nothing goes outside the project when it is done. The person sees it as a card, started by this task; say in a sentence what it does.`
           // A chat: it sits on Scratch, off the board's lanes, until it takes a worktree or an output (a task is a conversation plus
-          // parts, "Chats and Scratch").
+          // parts, "Asides").
           yield* shelve(created.taskId, 'scratch', instance.coordinatorId)
           const started = yield* plans.start(planId, instance.coordinatorId)
           if (started === 'waiting' && worksIn === 'checkout') {

@@ -86,8 +86,8 @@ import type { WorkActions } from './useWorkActions'
 export const text = {
   label: 'The project’s work',
   /** Chats on Scratch, off the lanes (a task is a conversation plus parts): the chip that lists them. */
-  scratch: (count: number) => `Scratch · ${count}`,
-  scratchLabel: 'Chats on Scratch',
+  scratch: (count: number) => `Asides · ${count}`,
+  scratchLabel: 'Asides',
   startsIn: (seconds: number) => (seconds <= 0 ? 'Starting' : `Starts in ${seconds}s`),
   held: 'Held. Starts when you say',
   /** Over Up next once the person put it in an order of their own, and at its end, the way back. */

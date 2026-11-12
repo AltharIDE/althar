@@ -79,6 +79,18 @@ import { Card, type CardActions } from './Card'
 import { useClearChat } from './ClearChat'
 import { TaskAskOf } from './TaskAskOf'
 import { FirstConnectionsView } from './FirstConnectionsView'
+import {
+  type AsideOpen,
+  AsideConversation,
+  AsideQuote,
+  AsidesBar,
+  AskInAside,
+  asideTitle,
+  asideWords,
+  asidesText,
+  COORDINATOR,
+} from './Asides'
+import { coordinatorSigned } from '../../shared/signed'
 import { ChangesCard, type ChangesActions } from '../../shared/ChangesCard'
 import { DraftCard, type DraftActions } from '../../shared/DraftCard'
 import { partsOf, tasksOf, trackersOf, trackersWithBinding } from './front'
@@ -266,6 +278,9 @@ export function ProjectView({
   ways?: SettingsWays
 }) {
   const [room, setRoom] = useState<Room>(asked ?? Room.Both)
+  // What the coordinator's pane shows: its conversation, an aside, or a new one being started (Asides).
+  const [asideOpen, setAside] = useState<AsideOpen>(COORDINATOR)
+  const coordinatorFace = useRef<HTMLDivElement>(null)
   const [automation, setAutomation] = useState<string | null>(openingAutomation)
   useEffect(() => onAutomationChange?.(automation), [automation, onAutomationChange])
   // The section its settings show, kept while the person is on another view.
@@ -282,6 +297,11 @@ export function ProjectView({
   // The lanes the person collapsed, kept for every project, apart beside the conversation.
   const [folds, setFolds] = useFolds(room === Room.Both ? 'beside' : 'alone')
   const lanes = board.board === null ? null : lanesOf(board.board, board.merging)
+  // An aside that left Scratch, for the board or cleared, gives the pane back to the coordinator; one just started stays open
+  // until the board has it.
+  const asideTask = asideOpen.kind === 'aside' ? board.board?.tasks.find((task) => task.taskId === asideOpen.taskId) : undefined
+  const aside: AsideOpen =
+    asideTask !== undefined && (asideTask.scratch !== true || asideTask.phase === 'settled') ? COORDINATOR : asideOpen
   const yours = lanes === null ? 0 : yoursOf(lanes)
   // An abandoned task's pull request left open, closed from its row.
   const closing = useClosePullRequests()
@@ -431,10 +451,33 @@ export function ProjectView({
   // The agent what the person says goes to, and whether it takes images.
   const receiver = { name: agentName(chosen?.agentId ?? null), takes: takesImages(models, chosen?.agentId ?? null) }
   const clearing = useClearChat(model)
+  /** Starts an aside of the person's words, on the model the composer has picked, and opens it; the words come back where it fails. */
+  const startAside = (body: string, quote: string | null) => {
+    const words = body.trim()
+    if (words === '' || about === null || chosen === null) return
+    setDraft('')
+    void client
+      .startTask({
+        projectId: about,
+        title: asideTitle(words),
+        description: asideWords(words, quote),
+        steps: [{ key: 'implement', agentId: chosen.agentId, model: chosen.model, effort: chosen.effort, skipped: false }],
+        chat: true,
+      })
+      .then(
+        (task) => setAside({ kind: 'aside', taskId: task.id, threadId: task.threadId }),
+        () => setDraft((current) => (current === '' ? body : current)),
+      )
+  }
   const send = (body: string, now: boolean) => {
     // Asking to clear the chat is not said to the coordinator.
     if (clearing.command(body)) {
       setDraft('')
+      return
+    }
+    // A new aside: the coordinator's composer starts it, with what it quotes, and it opens.
+    if (aside.kind === 'new') {
+      startAside(body, aside.quote)
       return
     }
     // Images that can't go yet hold the message back, and the composer says why.
@@ -540,23 +583,25 @@ export function ProjectView({
         }
         // The project's own runs, the ones of no task, as the task's chip says its own (ADR-096).
         above={
-          (offer.offering !== null || projectRuns.some((launch) => launch.ended === null)) && (
-            <>
-              {offer.offering !== null && <ForkOffer offer={offer} />}
-              <Behind
-                processes={pillOf([], projectRuns, now, { where: true })}
-                onStop={(id) => {
-                  const run = runIdOf(id)
-                  if (run !== null) void model.stopLaunch(run)
-                }}
-                onOpenUrl={(id) => {
-                  const url = projectRuns.find((launch) => launch.id === runIdOf(id))?.url
-                  // Beside the coordinator's conversation, the board stepping aside for it.
-                  if (url != null) opener.run(url)
-                }}
-              />
-            </>
-          )
+          aside.kind === 'new'
+            ? aside.quote !== null && <AsideQuote quote={aside.quote} onDrop={() => setAside({ kind: 'new', quote: null })} />
+            : (offer.offering !== null || projectRuns.some((launch) => launch.ended === null)) && (
+                <>
+                  {offer.offering !== null && <ForkOffer offer={offer} />}
+                  <Behind
+                    processes={pillOf([], projectRuns, now, { where: true })}
+                    onStop={(id) => {
+                      const run = runIdOf(id)
+                      if (run !== null) void model.stopLaunch(run)
+                    }}
+                    onOpenUrl={(id) => {
+                      const url = projectRuns.find((launch) => launch.id === runIdOf(id))?.url
+                      // Beside the coordinator's conversation, the board stepping aside for it.
+                      if (url != null) opener.run(url)
+                    }}
+                  />
+                </>
+              )
         }
         onSubmit={(body) => send(body, false)}
         onSendNow={(body) => send(body, true)}
@@ -570,15 +615,28 @@ export function ProjectView({
           pages.reopen(about, id)
         }}
         onRemoveComment={(id) => drop(draftOf, id)}
-        {...(busy ? { onStopAgent: () => void model.interrupt() } : {})}
-        busy={busy}
-        queued={queuedOf(coordinator?.items ?? [], queue)}
+        {...(busy && aside.kind !== 'new' ? { onStopAgent: () => void model.interrupt() } : {})}
+        busy={busy && aside.kind !== 'new'}
+        queued={aside.kind === 'new' ? [] : queuedOf(coordinator?.items ?? [], queue)}
         onEditQueued={(id) => void edit(id)}
         onSendQueuedNow={(id) => void sendQueuedNow(id)}
         onUnqueue={(id) => void model.takeBack(id)}
         text={{ queued: text.queue, sendNowKey: modKey(keys.return) }}
-        placeholder={busy ? text.placeholderBusy : text.placeholder}
-        meter={contextMeter(session, named, model.compact, { usage: coordinator?.usage, heading: text.usageHeading }, clearing.ring)}
+        placeholder={
+          aside.kind === 'new'
+            ? aside.quote === null
+              ? asidesText.newPlaceholder
+              : asidesText.quotePlaceholder
+            : busy
+              ? text.placeholderBusy
+              : text.placeholder
+        }
+        // A new aside has used nothing of the coordinator's context.
+        {...(aside.kind === 'new'
+          ? {}
+          : {
+              meter: contextMeter(session, named, model.compact, { usage: coordinator?.usage, heading: text.usageHeading }, clearing.ring),
+            })}
         picker={
           model.agents.length > 0 &&
           chosen !== null && (
@@ -741,82 +799,114 @@ export function ProjectView({
                     </div>
                   )
                 ) : (
-                  <TaskFace
-                    className={s.face}
-                    composer={composer}
-                    // Beside the board, the conversation has no room to share: what it opens goes over the board instead.
-                    {...(room === Room.Both ? {} : { panel: shown.workbench(null), panelWidth: shown.bench.width })}
-                  >
-                    <Thread label={text.conversation} busy={busy}>
-                      {/* A new project's first word: what its tasks will need later, while its conversation hasn't begun. */}
-                      {coordinator.items.length === 0 && !coordinator.earlier && !coordinator.view.cleared && (
-                        <FirstConnectionsView
-                          projectId={projectId}
-                          project={model.project?.name ?? coordinator.project.name}
-                          model={connections}
-                          className={s.firstConnections}
-                        />
-                      )}
-                      <EarlierTurns
-                        key={coordinator.threadId}
-                        earlier={coordinator.earlier}
-                        load={model.loadEarlier}
-                        version={coordinator.items}
-                        loading={model.loadingEarlier}
+                  <>
+                    {/* The coordinator first, then its asides: the conversation says who it is with. */}
+                    {lanes !== null && (
+                      <AsidesBar
+                        scratch={lanes.scratch}
+                        open={aside}
+                        onOpen={setAside}
+                        onClear={(ids) => {
+                          for (const id of ids) void client.markTaskDone(id)
+                        }}
+                        board={board.board?.tasks ?? []}
+                        now={Date.parse(now)}
                       />
-                      {clearing.line}
-                      {/* The coordinator only reads: what it hands back is pictures, which open in the lightbox; it writes no documents. */}
-                      <ThreadShellProvider value={shown.shell}>
-                        <ThreadBlocks
-                          blocks={blocksOf(
-                            {
-                              items: coordinator.items,
-                              turnRunning: busy,
-                              turnStarted: session?.turnStartedAt ?? null,
-                              reading: readingNow(session, model.pending),
-                              turnEnded: session?.turnEndedAt ?? null,
-                              worktree: null,
-                              queue,
-                              outputs: model.outputs,
-                              turns: turnsById(coordinator.turns),
-                            },
-                            model.streaming,
-                            (iso) => ago(iso),
-                            now,
-                          )}
-                          threadId={coordinator.threadId}
-                          session={session}
-                          retryable={coordinator.retryable}
-                          {...(busy ? {} : { onTryAgain: () => void model.tryAgain(), onCompact: () => void model.compact() })}
-                          {...(ways === undefined ? {} : { onSignIn: ways.signIn })}
-                          card={(card) => <Card card={card} actions={actions} />}
-                          draft={(draft) => <DraftCard draft={draft} actions={draftActions} />}
-                          automation={(card, itemId) => (
-                            <AutomationInThread
-                              card={card}
-                              itemId={itemId}
-                              project={kept.name ?? name}
-                              agents={model.agents}
-                              actions={automationActions}
-                              onOpen={openAutomation}
+                    )}
+                    {aside.kind === 'aside' ? (
+                      <AsideConversation
+                        key={aside.threadId}
+                        threadId={aside.threadId}
+                        onBack={() => setAside(COORDINATOR)}
+                        onOpenTask={onTask}
+                      />
+                    ) : aside.kind === 'new' ? (
+                      <TaskFace className={s.face} composer={composer}>
+                        <Thread label={asidesText.newPlaceholder}>{null}</Thread>
+                      </TaskFace>
+                    ) : (
+                      <div ref={coordinatorFace} className={s.coordinatorFace}>
+                        <TaskFace
+                          className={s.face}
+                          composer={composer}
+                          // Beside the board, the conversation has no room to share: what it opens goes over the board instead.
+                          {...(room === Room.Both ? {} : { panel: shown.workbench(null), panelWidth: shown.bench.width })}
+                        >
+                          <Thread label={text.conversation} busy={busy}>
+                            {/* A new project's first word: what its tasks will need later, while its conversation hasn't begun. */}
+                            {coordinator.items.length === 0 && !coordinator.earlier && !coordinator.view.cleared && (
+                              <FirstConnectionsView
+                                projectId={projectId}
+                                project={model.project?.name ?? coordinator.project.name}
+                                model={connections}
+                                className={s.firstConnections}
+                              />
+                            )}
+                            <EarlierTurns
+                              key={coordinator.threadId}
+                              earlier={coordinator.earlier}
+                              load={model.loadEarlier}
+                              version={coordinator.items}
+                              loading={model.loadingEarlier}
                             />
-                          )}
-                          taskAsk={(ask, itemId) => <TaskAskOf ask={ask} itemId={itemId} onOpen={onTask} />}
-                          changes={(changes) => <ChangesCard changes={changes} actions={changesActions} />}
-                          run={(run) => (
-                            <RunOf
-                              run={run}
-                              now={now}
-                              onStop={(id) => void model.stopLaunch(id)}
-                              onRunAgain={(taskId, runnableId, ref) => void model.runProject(taskId, runnableId, ref)}
-                            />
-                          )}
-                          queued={text.queued}
-                          onAnswerQuestion={model.answerQuestion}
-                        />
-                      </ThreadShellProvider>
-                    </Thread>
-                  </TaskFace>
+                            {clearing.line}
+                            {/* The coordinator only reads: what it hands back is pictures, which open in the lightbox; it writes no documents. */}
+                            <ThreadShellProvider value={shown.shell}>
+                              <ThreadBlocks
+                                blocks={blocksOf(
+                                  {
+                                    items: coordinator.items,
+                                    turnRunning: busy,
+                                    turnStarted: session?.turnStartedAt ?? null,
+                                    reading: readingNow(session, model.pending),
+                                    turnEnded: session?.turnEndedAt ?? null,
+                                    worktree: null,
+                                    queue,
+                                    outputs: model.outputs,
+                                    turns: turnsById(coordinator.turns),
+                                  },
+                                  model.streaming,
+                                  (iso) => ago(iso),
+                                  now,
+                                )}
+                                threadId={coordinator.threadId}
+                                session={session}
+                                retryable={coordinator.retryable}
+                                {...(busy ? {} : { onTryAgain: () => void model.tryAgain(), onCompact: () => void model.compact() })}
+                                {...(ways === undefined ? {} : { onSignIn: ways.signIn })}
+                                card={(card) => <Card card={card} actions={actions} />}
+                                draft={(draft) => <DraftCard draft={draft} actions={draftActions} />}
+                                automation={(card, itemId) => (
+                                  <AutomationInThread
+                                    card={card}
+                                    itemId={itemId}
+                                    project={kept.name ?? name}
+                                    agents={model.agents}
+                                    actions={automationActions}
+                                    onOpen={openAutomation}
+                                  />
+                                )}
+                                taskAsk={(ask, itemId) => <TaskAskOf ask={ask} itemId={itemId} onOpen={onTask} />}
+                                changes={(changes) => <ChangesCard changes={changes} actions={changesActions} />}
+                                run={(run) => (
+                                  <RunOf
+                                    run={run}
+                                    now={now}
+                                    onStop={(id) => void model.stopLaunch(id)}
+                                    onRunAgain={(taskId, runnableId, ref) => void model.runProject(taskId, runnableId, ref)}
+                                  />
+                                )}
+                                queued={text.queued}
+                                onAnswerQuestion={model.answerQuestion}
+                                signed={coordinatorSigned}
+                              />
+                            </ThreadShellProvider>
+                          </Thread>
+                        </TaskFace>
+                        <AskInAside within={coordinatorFace} onAsk={(quote) => setAside({ kind: 'new', quote })} />
+                      </div>
+                    )}
+                  </>
                 )}
                 {shown.lightbox}
                 {clearing.dialog}
@@ -832,7 +922,8 @@ export function ProjectView({
                       </p>
                     )}
                     <BoardView
-                      lanes={lanes}
+                      // Beside the conversation, its asides are there; the board alone keeps them behind its chip.
+                      lanes={talking ? { ...lanes, scratch: [] } : lanes}
                       agents={model.agents}
                       now={now}
                       onOpen={onTask}
