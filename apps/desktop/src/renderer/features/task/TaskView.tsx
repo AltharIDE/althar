@@ -983,6 +983,8 @@ export function TaskView({
             }
           : {})}
         {...(snapshot.task.skipReview === true ? { onSkipReview: () => void model.skipReview() } : {})}
+        // A prototype, a chat or a quick task made a change in one move: a reviewer on, and its pull request ending.
+        {...(snapshot.task.toChange === true ? { onMakeChange: () => void model.makeChange() } : {})}
         // Its parts kept as a preset, named for it; and a chat moved between Scratch and the board, either way.
         onSavePreset={() => void model.savePreset(snapshot.task.title.slice(0, 40))}
         {...(snapshot.task.phase !== 'settled' &&

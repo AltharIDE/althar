@@ -2500,10 +2500,10 @@ export const TaskCard = Schema.Struct({
   nothingBuilt: Schema.optional(Schema.Boolean),
   /**
    * When a change of its reviewer takes effect, once its steps have begun: `now`, before its review round starts or between
-   * rounds; `next_round`, in a round under way; `never`, once a review of it ran to its end: a skipped review is not a done one.
-   * Absent before its plan runs.
+   * rounds; `next_round`, in a round under way; `next_ship`, once a review of it ran to its end or it merged: the reviewer named
+   * reads what ships next. A skipped review, or one never planned, is not a done one. Absent before its plan runs.
    */
-  reviewerChange: Schema.optional(Schema.Literals(['now', 'next_round', 'never'])),
+  reviewerChange: Schema.optional(Schema.Literals(['now', 'next_round', 'next_ship'])),
   /**
    * The review its lead or the coordinator offered it, as its work turned real with none (`offer_review`, after the person
    * asked to harden a prototype, say), while it stands: no review on yet, not turned down, not merged. The offer's line in
@@ -3806,6 +3806,11 @@ export const ThreadSnapshot = Schema.Struct({
     nothingBuilt: Schema.optional(Schema.Boolean),
     /** The review of its run under way can still be skipped, as the person may (ADR-034). */
     skipReview: Schema.optional(Schema.Boolean),
+    /**
+     * It can be made a change in one move, as its menu's Make it a change does: begun, of its own work, not merged, and
+     * ending with no pull request (a prototype, a chat, a quick task).
+     */
+    toChange: Schema.optional(Schema.Boolean),
     /** It runs a round of work after its plan. */
     followUp: Schema.optional(Schema.Boolean),
     /** What it changed since it started, committed or not, file by file, and in how many commits; empty without a worktree here. */
@@ -5323,6 +5328,11 @@ export const Api = RpcGroup.make(
   command('OpenChange', { taskId: Schema.String }, Schema.Void),
   /** Skips the review of the task's run under way: a review under way stops, and work whose lead is done is ready (ADR-034). */
   command('SkipReview', { taskId: Schema.String }, Schema.Void),
+  /**
+   * Gives a task another preset's parts at once, as its menu's Make it a change does (a task is a conversation plus parts):
+   * its review, its ending, a worktree with its branch where it had none, and where it sits; its lead stays.
+   */
+  command('ShapeTask', { taskId: Schema.String, preset: Schema.String }, Schema.Void),
   /** Turns down the review a change was offered as its work turned real: it isn't offered again. */
   command('DeclineReview', { taskId: Schema.String }, Schema.Void),
   /**

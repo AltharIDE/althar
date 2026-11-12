@@ -600,7 +600,6 @@ const taskRefused = {
   title_too_long: 'Keep the title to a few words.',
   folder_in_use: 'Something is running in the task’s folder. Stop it, then remove the folder.',
   folder_in_way: 'Something else is where the task’s folder goes. Move it away, then try again.',
-  review_done: 'Its review is done, so its reviewer can’t change.',
   no_lead: 'The task has no lead to change.',
 } as const satisfies Record<TaskRefused['why'], string>
 

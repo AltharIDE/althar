@@ -375,7 +375,7 @@ describe('what the coordinator and a lead are told of presets', () => {
       assert.include(brief, 'The person’s own presets count too')
       // A prototype ends with its branch; it may graduate to a change in the same task, or not, and the person decides.
       assert.include(brief, 'A prototype ends with its branch')
-      assert.include(brief, 'the same task can go on as a change, with its pull request ending and its review added then')
+      assert.include(brief, 'the same task goes on as a change, rather than a new task by default: change_part with preset Change')
       assert.include(brief, 'never assume either way')
 
       const tools = yield* toolDescriptions(coordinator)
