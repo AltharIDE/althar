@@ -1048,6 +1048,11 @@ const playRole = async (
         })
         if (!text.includes('[lead:finish]')) return made
       }
+      // Asked in these words to make work with no review real, it offers its task a review, as a line the person answers.
+      if (text.includes('[lead:offer-review]') && available.has('offer_review')) {
+        const offered = await call('offer_review', {})
+        if (!text.includes('[lead:finish]')) return offered
+      }
       // Told in these words to move its task on (`[lead:task-done]`, `[lead:task-keep]`, `[lead:task-discard]`), it does, and says what it was told.
       const moved = /\[lead:task-(done|keep|discard)\]/.exec(text)?.[1]
       if (moved !== undefined && available.has('settle_task')) return await call('settle_task', { how: moved })

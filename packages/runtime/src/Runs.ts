@@ -111,7 +111,7 @@ import type { Tried } from './stallWatch'
 import { addItem } from './threads'
 import { coordinatorFolderAt } from './coordinatorFolder'
 import { POOL, ToolRefused, ToolServer, type Tool, type ToolAccess } from './ToolServer'
-import { signedOutWords, summarize } from './words'
+import { stuckWhyOf, summarize } from './words'
 
 /*
  * A task's run (docs/architecture/05; docs/plans/mvp.md, "The plan"): its
@@ -242,6 +242,12 @@ export const PlanParameters = Schema.Struct({
        * Each is its workspaces' ids, joined by commas: a change in several repositories ships as one.
        */
       next: Schema.optional(Schema.Array(Schema.String)),
+      /**
+       * A review added after the work went up (a skipped review can be added back until merge): the run only reviews what is
+       * on the branch now, from the last review or, with none, from where the task started, and sends nothing: the commits
+       * are up already.
+       */
+      reviewOnly: Schema.optional(Schema.Boolean),
     }),
   ),
   /**
@@ -501,6 +507,10 @@ export type StuckWhy =
   | 'transient'
   /** Its agent's account is signed out: reminding it can't help; signing it in again can. */
   | 'signed_out'
+  /** Its agent's sign-in was there and has ended (DEV-196): signing it in again is the way on, as for signed out. */
+  | 'sign_in_ended'
+  /** Its agent isn't installed, or isn't where Althar runs it from: installing it is the way on. */
+  | 'not_installed'
   /** The lead stopped to wait for the person's answer, which starts it again. */
   | 'waiting_on_person'
 
@@ -682,26 +692,37 @@ export const beforeFirstStep = (taskId: string) =>
 
 /**
  * Where a task's reviewer stands to change: `now`, before its review round starts or between rounds; `next_round`, in a round
- * under way, which the change waits for; `never`, once its review is done: its run over, or its review passed or went on to the
- * run's ending, though that still publishes or waits.
+ * under way, which the change waits for; `never`, once a review of it ran to its end: its run over, or its review passed or
+ * went on to the run's ending, though that still publishes or waits. A review that was skipped, or never planned, is not a done
+ * one: until the task merges its reviewer can be added, and where its work is up already, it starts a round on its head.
  */
 export const reviewerChange = (taskId: string) =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient
-    const [latest] = yield* sql<{ state: string; executionId: string }>`
-      SELECT r.state, e.id AS execution_id FROM runs r JOIN workflow_executions e ON e.run_id = r.id
+    const [latest] = yield* sql<{ state: string; executionId: string; parameters: string }>`
+      SELECT r.state, r.parameters, e.id AS execution_id FROM runs r JOIN workflow_executions e ON e.run_id = r.id
       WHERE r.task_id = ${taskId} ORDER BY r.created_at DESC, r.rowid DESC LIMIT 1`
     // Its first step not begun: nothing of its review has.
     if (latest === undefined) return 'now' as const
-    // Its run over, its review is done, or was never to come.
-    if (latest.state !== 'running' && latest.state !== 'suspended') return 'never' as const
+    // A review that really ran, or is under way: not one skipped by the person (its attempt cancelled as skipped) or never planned.
+    const [ran] = yield* sql<{ one: number }>`
+      SELECT 1 AS one FROM node_attempts a JOIN nodes n ON n.id = a.node_id
+      WHERE n.execution_id = ${latest.executionId} AND n.node_key = 'review'
+        AND NOT (a.state = 'cancelled' AND coalesce(json_extract(a.output, '$.skipped'), 0) = 1)
+        AND a.state NOT IN ('ready', 'superseded') LIMIT 1`
+    if (latest.state !== 'running' && latest.state !== 'suspended') {
+      // Its run over: its review is done where one ran; a skipped one is still to add. The fast lane's reads only after the merge.
+      if (ran !== undefined) return 'never' as const
+      return JSON.parse(latest.parameters || '{}').reviewAfterMerge === true ? ('never' as const) : ('now' as const)
+    }
     // Its review passed, or its run went on to its ending without another round: done, though the run still publishes or waits.
     const [finished] = yield* sql<{ one: number }>`
-      SELECT 1 AS one FROM nodes n WHERE n.execution_id = ${latest.executionId} AND n.node_key = 'publish'
-      UNION ALL
       SELECT 1 AS one FROM node_attempts a JOIN nodes n ON n.id = a.node_id
       WHERE n.execution_id = ${latest.executionId} AND n.node_key = 'review' AND a.state = 'succeeded'
-        AND (json_extract(a.output, '$.verdict') = 'pass' OR json_extract(a.output, '$.findings') = 0) LIMIT 1`
+        AND (json_extract(a.output, '$.verdict') = 'pass' OR json_extract(a.output, '$.findings') = 0)
+      UNION ALL
+      SELECT 1 AS one FROM nodes n WHERE n.execution_id = ${latest.executionId} AND n.node_key = 'publish' AND ${ran === undefined ? 0 : 1} = 1
+      LIMIT 1`
     if (finished !== undefined) return 'never' as const
     const [under] = yield* sql<{ one: number }>`
       SELECT 1 AS one FROM node_attempts a JOIN nodes n ON n.id = a.node_id
@@ -770,6 +791,11 @@ export class Runs extends Context.Service<
      * round of work has its review again, as the plan says.
      */
     skipReview(input: { readonly envelope: CommandEnvelope; readonly taskId: string }): Effect.Effect<void, unknown>
+    /**
+     * Turns down the review a change was offered as its work turned real: it isn't offered again. Nothing where it was turned
+     * down already. NotFound for a task that isn't one.
+     */
+    declineReview(taskId: string, actorId: ActorId): Effect.Effect<void, unknown>
     /**
      * Ships what waits on the task's branch, on the person's word (a task is
      * a conversation plus parts, "A tweak waits for Ship"): its review first,
@@ -1552,9 +1578,10 @@ export class Runs extends Context.Service<
       const stuck = (run: RunRow, attempt: { readonly id: string } | null, asked: StuckInfo) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
-          // An agent that couldn't start because it is signed out is signed out: signing it in again is the way on.
-          const told: StuckInfo =
-            asked.why === 'failed_to_start' && asked.detail === signedOutWords ? { ...asked, why: 'signed_out' } : asked
+          // An agent that couldn't start because it is signed out, its sign-in ended or it isn't installed stops for that:
+          // signing it in again, or installing it, is the way on, which the call offers.
+          const startWhy = asked.why === 'failed_to_start' ? stuckWhyOf(asked.detail) : undefined
+          const told: StuckInfo = startWhy === undefined ? asked : { ...asked, why: startWhy }
           // The model it was on, so handing the step on can leave out the one that failed.
           const on =
             told.agentId === null || told.step === 'publish' || told.model !== undefined
@@ -2559,6 +2586,13 @@ export class Runs extends Context.Service<
           const several = worktrees.length > 1 && worktrees.some((one) => one.change !== null)
           // One change of several, named: the others ship apart, each after its own review.
           const one = only !== undefined && shown.length === 1 ? shown[0]?.name : undefined
+          // A review the person added after the work went up: all of the change where none ran before, else what came after.
+          if ((yield* stepsOf(run)).ships?.reviewOnly === true) {
+            const earlier = worktrees.some((worktree) => from[worktree.path] !== undefined && from[worktree.path] !== worktree.base)
+            return earlier
+              ? `The person added a review to this change after its work went up. Review what changed since the last review, ${how}. Look at the earlier work only where the new work touches it.`
+              : `The person added a review to this change after its work went up, and none has read it yet. Review all of it, as it stands on its branch now${shown.length === 1 ? `: \`git diff ${shown[0]?.head ?? ''}\` in your copy shows it` : `, change by change:${how}`}.`
+          }
           return `More to review. The person ships ${one === undefined ? 'what they and the lead did since the last review' : `${one}, one of the task’s changes: what they and the lead did on it since its last review`}${listed.length === 0 ? '' : `:\n\n${listed.join('\n')}`}\n\nReview what changed since, ${how}. Look at the earlier work only where the new work touches it.${several ? ' Each change ships as its own pull request: review each on its own, and say which change each finding is in.' : ''}`
         })
 
@@ -2938,6 +2972,7 @@ export class Runs extends Context.Service<
         merges = false,
         change?: string,
         queued?: ReadonlyArray<string>,
+        reviewOnly = false,
         admitted?: Deferred.Deferred<void, unknown>,
       ) =>
         oneRound(
@@ -2962,14 +2997,17 @@ export class Runs extends Context.Service<
             const held = yield* changes.holds(taskId)
             const unpushed = (yield* changes.aheadOfOpen(taskId)).length > 0
             const after = yield* changes.unshipped(taskId)
-            if (held.length === 0 && !unpushed && after.length === 0) return yield* new ShipRefused({ taskId, why: 'nothing' })
+            // A review added after the work went up reads the branch as it stands, whatever still waits for Ship: it is never left
+            // unread for want of a push, and what waits is reviewed with the rest.
+            if (!reviewOnly && held.length === 0 && !unpushed && after.length === 0)
+              return yield* new ShipRefused({ taskId, why: 'nothing' })
             // Several changes: each ships on its own, with its own review, the bottom of a stack first; one named, with what waits
             // beneath it. One change ships whole, as it always did.
             // A change is its workspaces of one name, one in each repository it changes: counted and shipped as one.
             const [several] = yield* sql<{ n: number }>`
               SELECT count(DISTINCT coalesce(name, '')) AS n FROM workspaces
               WHERE task_id = ${taskId} AND access = 'write' AND reviewing IS NULL AND state = 'ready'`
-            const apart = (several?.n ?? 0) > 1 || change !== undefined
+            const apart = !reviewOnly && ((several?.n ?? 0) > 1 || change !== undefined)
             const groups: ReadonlyArray<ReadonlyArray<string>> =
               queued !== undefined
                 ? queued.map((group) => group.split(','))
@@ -3004,6 +3042,7 @@ export class Runs extends Context.Service<
               ),
               ships: {
                 from,
+                ...(reviewOnly ? { reviewOnly: true } : {}),
                 ...(merges ? { merges: true } : {}),
                 ...(first === undefined ? {} : { only: [...first], next: rest.map((group) => group.join(',')) }),
               },
@@ -3133,8 +3172,11 @@ export class Runs extends Context.Service<
           const { nodeId, attemptId } = admitted
           yield* touchCard(run.taskId)
           const only = (yield* stepsOf(run)).ships?.only
+          // A review added after the work went up has nothing to send: it is over once settled.
+          const reviewOnly = (yield* stepsOf(run)).ships?.reviewOnly === true
           const shipped = yield* Effect.exit(
             Effect.gen(function* () {
+              if (reviewOnly) return { went: [] as Effect.Success<ReturnType<typeof changes.shipToOpen>>, published: undefined }
               const went = yield* changes.shipToOpen(run.taskId, only)
               const after = (yield* changes.unshipped(run.taskId)).filter((one) => only === undefined || only.includes(one.workspaceId))
               // A change of several with no pull request yet opens its first; one whose last merged or closed, its next.
@@ -3179,7 +3221,7 @@ export class Runs extends Context.Service<
             )
           }
           const { went, published } = shipped.value
-          yield* changes.releaseHolds(run.taskId, 'shipped', only)
+          if (!reviewOnly) yield* changes.releaseHolds(run.taskId, 'shipped', only)
           // Each change of several that shipped, a stamped row of the thread's: its name, and the pull request it went to.
           // With one change, the thread's line on its pull request says it.
           const [thread] = yield* sql<{ id: string }>`SELECT id FROM threads WHERE task_id = ${run.taskId} AND kind = 'task'`
@@ -3224,7 +3266,7 @@ export class Runs extends Context.Service<
               const said = {
                 step: 'publish',
                 round: 0,
-                summary: summary === '' ? 'Shipped.' : summary,
+                summary: summary === '' ? (reviewOnly ? 'Reviewed.' : 'Shipped.') : summary,
                 ...(published === undefined ? {} : openedOf(published)),
               }
               const [still] = yield* sql<{ state: string }>`SELECT state FROM node_attempts WHERE id = ${attemptId}`
@@ -7113,6 +7155,65 @@ export class Runs extends Context.Service<
           return underWay
         })
 
+      /** Turns down the review a lead or the coordinator offered a task (`offer_review`): kept once, so it isn't offered again. */
+      const declineReview = (taskId: string, actorId: ActorId) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const [task] = yield* sql<{ projectId: ProjectId; revision: number }>`SELECT project_id, revision FROM tasks WHERE id = ${taskId}`
+          if (task === undefined) return yield* new NotFound({ kind: 'task', id: taskId })
+          const [known] = yield* sql<{ one: number }>`
+            SELECT 1 AS one FROM record_events WHERE aggregate_type = 'task' AND aggregate_id = ${taskId}
+              AND type = 'task.review_offer_declined' LIMIT 1`
+          if (known !== undefined) return
+          yield* fact({
+            projectId: task.projectId,
+            aggregateType: 'task',
+            aggregateId: taskId,
+            revision: task.revision,
+            type: 'task.review_offer_declined',
+            actorId,
+          })
+          yield* touchCard(taskId)
+        })
+
+      /**
+       * A review added after the task's work went up (a skipped review can be added back until merge): once its lead's turn is
+       * over and the run that was ending is, a round of the review's own reads the task's head, from the last review or, with
+       * none, all of it, with whatever waits for Ship on the branch too (that stays held, and goes up with Ship). Nothing where
+       * nothing is built.
+       */
+      const reviewHead = (taskId: string, actorId: ActorId) =>
+        Effect.asVoid(
+          Effect.forkIn(
+            Effect.gen(function* () {
+              const sql = yield* SqlClient.SqlClient
+              const [thread] = yield* sql<{ id: string }>`SELECT id FROM threads WHERE task_id = ${taskId} AND kind = 'task'`
+              if (thread !== undefined) yield* sessions.untilIdle(thread.id, AFTER_TURN_WAIT)
+              for (let tries = 0; ; tries += 1) {
+                const sent = yield* Effect.exit(ship(taskId, actorId, false, undefined, undefined, true))
+                if (sent._tag === 'Success') return
+                const error = Cause.findErrorOption(sent.cause)
+                const working = Option.isSome(error) && error.value instanceof ShipRefused && error.value.why === 'working'
+                if (working && tries < NEXT_SHIP_TRIES) {
+                  yield* Effect.sleep(NEXT_SHIP_EVERY)
+                  continue
+                }
+                // Nothing to read, or it can't start: Ship reviews it as the plan says.
+                const nothing = Option.isSome(error) && error.value instanceof ShipRefused
+                return nothing ? undefined : yield* Effect.failCause(sent.cause)
+              }
+            }).pipe(
+              Effect.catchCause((cause) =>
+                Cause.hasInterruptsOnly(cause)
+                  ? Effect.interrupt
+                  : Effect.logWarning('Could not start the review added to the task', cause),
+              ),
+              provide,
+            ),
+            scope,
+          ),
+        )
+
       const changeTeam = (input: Parameters<Runs['Service']['changeTeam']>[0]) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
@@ -7179,6 +7280,22 @@ export class Runs extends Context.Service<
                 type: 'task_plan.changed',
                 actorId: input.actorId,
               })
+              // A review put on where one was offered answers the offer: taken off again later, it doesn't stand again.
+              if (reviewChanges && reviews && !reviewed) {
+                const [offered] = yield* sql<{ one: number }>`
+                  SELECT 1 AS one FROM record_events WHERE aggregate_type = 'task' AND aggregate_id = ${input.taskId}
+                    AND type = 'task.review_offered' LIMIT 1`
+                const [row] = yield* sql<{ revision: number }>`SELECT revision FROM tasks WHERE id = ${input.taskId}`
+                if (offered !== undefined)
+                  yield* fact({
+                    projectId: plan.projectId,
+                    aggregateType: 'task',
+                    aggregateId: input.taskId,
+                    revision: row?.revision ?? 1,
+                    type: 'task.review_offer_accepted',
+                    actorId: input.actorId,
+                  })
+              }
               // The plan's run, which the rounds after it copy, and the latest run, a round of it or the same.
               const rows = yield* sql<{
                 id: string
@@ -7238,6 +7355,15 @@ export class Runs extends Context.Service<
                 : ('now' as const)
               : ('now' as const)
           yield* touchCard(input.taskId)
+          // A review added where its run is over, or at its ending, has no round to come in it: it reads the head now.
+          if (reviewChanges && reviews && !reviewed && reviewWhen === 'now') {
+            const [last] = yield* sql<{ state: string; late: number }>`
+              SELECT r.state, EXISTS (SELECT 1 FROM nodes n WHERE n.execution_id = e.id AND n.node_key = 'publish') AS late
+              FROM runs r JOIN workflow_executions e ON e.run_id = r.id WHERE r.task_id = ${input.taskId}
+              ORDER BY r.created_at DESC, r.rowid DESC LIMIT 1`
+            if (last !== undefined && ((last.state !== 'running' && last.state !== 'suspended') || last.late === 1))
+              yield* reviewHead(input.taskId, input.actorId)
+          }
           const done: { lead?: TeamChanged['lead']; review?: TeamChanged['review'] } = {}
           if (leadChanges && wantedLead !== undefined)
             done.lead = { step: { ...wantedLead, key: 'implement', skipped: false }, was: lead, when: leadWhen }
@@ -7354,7 +7480,7 @@ export class Runs extends Context.Service<
           const admitted = yield* Deferred.make<void, unknown>()
           yield* Effect.forkIn(
             provide(
-              ship(taskId, actorId, false, change, undefined, admitted).pipe(
+              ship(taskId, actorId, false, change, undefined, false, admitted).pipe(
                 // Refused, or over before it was admitted: that is the press's answer, as it always was.
                 Effect.onExit((exit) =>
                   Exit.isSuccess(exit) ? Deferred.succeed(admitted, undefined) : Deferred.failCause(admitted, exit.cause),
@@ -7377,6 +7503,7 @@ export class Runs extends Context.Service<
       return Runs.of({
         run: (planId) => provide(run(planId)),
         skipReview: (input) => provide(skipReview(input)),
+        declineReview: (taskId, actorId) => provide(declineReview(taskId, actorId)),
         mergeWaiting: (input) => provide(mergeWaiting(input)),
         ship: (input) =>
           provide(

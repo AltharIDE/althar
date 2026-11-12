@@ -14,6 +14,7 @@ import {
   databaseIn,
   Failures,
   Folders,
+  MachineLoad,
   Nudges,
   Secrets,
   ToolServer,
@@ -426,6 +427,9 @@ const allowFolder = (requestId: string, path: string) =>
 /** Whether the computer is online, as the main process reads it (ADR-060): the last said, once the store is open. */
 const tellOnline = (online: boolean) => void ready.then((context) => Effect.runPromise(Context.get(context, Connectivity).set(online)))
 
+/** Whether the meter is on, as the main process keeps it (`showLoad`): only then does the runtime read the computer on its own, for the trace. */
+const tellLoad = (on: boolean) => void ready.then((context) => Effect.runPromise(Context.get(context, MachineLoad).meter(on)))
+
 parent.on('message', (message) => {
   const data = message.data as {
     readonly type?: string
@@ -438,6 +442,7 @@ parent.on('message', (message) => {
     readonly threadId?: string
     readonly shot?: unknown
     readonly online?: boolean
+    readonly on?: boolean
     readonly owners?: unknown
   } | null
   const port = message.ports[0]
@@ -458,6 +463,7 @@ parent.on('message', (message) => {
       (data.owners as ReadonlyArray<unknown>).filter((one): one is string => typeof one === 'string'),
     )
   if (data?.type === 'online' && typeof data.online === 'boolean') tellOnline(data.online)
+  if (data?.type === 'load' && typeof data.on === 'boolean') tellLoad(data.on)
   // Interrupting the program closes its scope: every session is stopped and recorded first.
   if (data?.type === 'shutdown') {
     Effect.runFork(Effect.logInfo('Runtime stopping').pipe(Effect.provide(Logger.layer([stdoutLogger]))))

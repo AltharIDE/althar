@@ -397,7 +397,7 @@ describe('a task’s course', () => {
       yield* standsAt(task.threadId, (now) => now.phase === 'waiting')
       assert.deepStrictEqual((yield* shown(task.threadId)).actions, ['stop', 'abandon'])
       yield* tasks.stop({ envelope: yield* command('task.stop'), taskId: task.taskId })
-      assert.deepStrictEqual(yield* callsOf(task.taskId), [{ kind: 'stuck', state: 'withdrawn', why: 'failed_to_start' }])
+      assert.deepStrictEqual(yield* callsOf(task.taskId), [{ kind: 'stuck', state: 'withdrawn', why: 'not_installed' }])
       assert.strictEqual((yield* shown(task.threadId)).phase, 'stopped')
       // Resumed on an agent that can't start either, it needs the person again, as a plan starting would.
       yield* tasks.resume({ envelope: yield* command('task.resume'), taskId: task.taskId })
