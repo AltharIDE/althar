@@ -8,7 +8,7 @@ import { assert, describe, it } from '@effect/vitest'
 import { Duration, Effect, Layer } from 'effect'
 import { SqlClient } from 'effect/sql'
 
-import { afterMergeFor, bringsBack } from '../src/afterMergeReview'
+import { afterMergeFor, afterMergeNow, bringsBack } from '../src/afterMergeReview'
 import { Changes } from '../src/Changes'
 import { Connections } from '../src/Connections'
 import { Coordinator } from '../src/Coordinator'
@@ -252,6 +252,36 @@ describe('what a small change’s review after its merge brings back', () => {
       assert.include(late, 'merged already')
     }).pipe(Effect.provide(runtimeWith(github)))
   })
+
+  it.live('by its lead’s tool, a small change drops its review under Everything, then goes back to the rule, saying what holds', () => {
+    const { working, github } = onGitHub()
+    return Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const task = yield* smallChange(working, '[review:findings]', 'all')
+      const [session] = yield* sql<{ id: string }>`
+        SELECT id FROM provider_sessions WHERE thread_id = ${task.threadId} ORDER BY started_at DESC LIMIT 1`
+      const lead: ToolAccess = {
+        role: 'lead',
+        projectId: task.projectId,
+        threadId: task.threadId,
+        sessionId: session?.id ?? '',
+        taskId: task.taskId,
+      }
+      const dropped = yield* callTool(lead, 'review_after_merge', { review: 'none' })
+      assert.include(dropped, 'it isn’t reviewed after it merges')
+      assert.notInclude(dropped, 'as the project’s rule says')
+      assert.deepStrictEqual((yield* smallCardOf(task.threadId)).afterMerge, { project: 'all', task: 'none', holds: 'none' })
+      const back = yield* callTool(lead, 'review_after_merge', { review: 'project' })
+      assert.include(back, 'it is reviewed after it merges, and any finding comes back, as the project’s rule says')
+      assert.deepStrictEqual((yield* smallCardOf(task.threadId)).afterMerge, { project: 'all', task: null, holds: 'all' })
+    }).pipe(Effect.provide(runtimeWith(github)))
+  })
+
+  it.effect('a task there is no record of goes by the rule new projects start with', () =>
+    Effect.gen(function* () {
+      assert.deepStrictEqual(yield* afterMergeNow('task_nobody'), { project: 'major', task: null, holds: 'major' })
+    }).pipe(Effect.provide(runtimeWith(onGitHub().github))),
+  )
 
   it.live('one small change drops its review where the rule has one; project goes back to the rule', () => {
     const { working, bare, github } = onGitHub()
