@@ -168,7 +168,11 @@ const runnerNow = (cap: number) => {
   })
   const gone = (why: string) => {
     if (runner === one) runner = undefined
-    if (!answered) here = true
+    if (!answered && !here) {
+      here = true
+      // In the runtime's log: where its commands start, and why.
+      console.warn(`Commands start on the runtime's thread from now on: ${why}`)
+    }
     for (const resolve of waiting.values())
       resolve({ code: null, signal: null, error: { message: why, code: null }, stdout: '', stderr: '', over: false })
     waiting.clear()
@@ -189,8 +193,9 @@ export const startApart = (command: Command, cap = AT_ONCE): Started => {
   let at: ReturnType<typeof runnerNow>
   try {
     at = runnerNow(cap)
-  } catch {
+  } catch (error) {
     here = true
+    console.warn(`Commands start on the runtime's thread: ${error instanceof Error ? error.message : String(error)}`)
     return startHere(command)
   }
   const id = (ids += 1)
