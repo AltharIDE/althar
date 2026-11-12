@@ -1,4 +1,4 @@
-import { type PointerEvent, type ReactNode, useEffect, useState } from 'react'
+import { type PointerEvent, type ReactNode, useEffect, useRef, useState } from 'react'
 
 import { Brand, BrandMark, Icon, Menu, MenuRadioGroup, MenuRadioItem, type ModelInfo, ModelPick, TaskEnd, taskEndText } from '@althar/ui'
 
@@ -102,14 +102,20 @@ function Who({ member }: { member: Member }) {
  */
 function useAtPointer() {
   const [x, setX] = useState<number | null>(null)
+  // Back to the whole row only once the menu has faded (the kit's --exit,
+  // 140ms): moving its anchor sooner drags the closing menu along with it.
+  const back = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+  useEffect(() => () => clearTimeout(back.current), [])
   return {
     coverStyle: x === null ? undefined : { left: x - 8, right: 'auto', width: 16 },
     onPointerDown: (e: PointerEvent<HTMLElement>) => {
+      clearTimeout(back.current)
       const row = e.currentTarget.parentElement?.getBoundingClientRect()
       if (row !== undefined) setX(e.clientX - row.left)
     },
     onOpenChange: (open: boolean) => {
-      if (!open) setX(null)
+      clearTimeout(back.current)
+      if (!open) back.current = setTimeout(() => setX(null), 200)
     },
   }
 }
