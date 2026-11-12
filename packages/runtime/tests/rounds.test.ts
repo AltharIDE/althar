@@ -867,7 +867,7 @@ describe('a round of work and a restart', () => {
           sql<{ heldAt: string | null }>`SELECT held_at FROM workspaces WHERE task_id = ${started.taskId}`,
           (rows) => rows[0]?.heldAt != null,
         )
-        const [card] = yield* until(cards(started.projectId), (all) => all[0]?.held !== undefined)
+        const [card] = yield* until(cards(started.projectId), (all) => all[0]?.held !== undefined && all[0].phase === 'ready')
         assert.deepStrictEqual([card?.phase, card?.held?.commits], ['ready', 1])
         assert.strictEqual(git(bare, 'rev-parse', 'althar/add-a-retry'), started.pushed)
         assert.lengthOf(yield* runsOf(started.taskId), 1)
