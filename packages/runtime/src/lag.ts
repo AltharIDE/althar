@@ -69,13 +69,21 @@ export const watchLag = (
     )
   })
 
+/** The window's calls that wait by design: `Watch` is its feed of changes, whose reads wait for the next. */
+const WAITING = new Set(['Watch'])
+
 /** A window's call that took longer than `SLOW_CALL`, said with its name and how long, where the lag log is on. */
 export const slowCall = <A, E, R>(name: Effect.Effect<string>, effect: Effect.Effect<A, E, R>): Effect.Effect<A, E, R> =>
   Effect.timed(effect).pipe(
     Effect.flatMap(([took, value]) =>
       Duration.isGreaterThan(took, SLOW_CALL)
         ? Effect.flatMap(name, (call) =>
-            Effect.logWarning('Slow call').pipe(Effect.annotateLogs({ call, ms: Math.round(Duration.toMillis(took)) }), Effect.as(value)),
+            WAITING.has(call)
+              ? Effect.succeed(value)
+              : Effect.logWarning('Slow call').pipe(
+                  Effect.annotateLogs({ call, ms: Math.round(Duration.toMillis(took)) }),
+                  Effect.as(value),
+                ),
           )
         : Effect.succeed(value),
     ),

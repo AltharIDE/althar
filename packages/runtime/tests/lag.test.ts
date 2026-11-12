@@ -60,6 +60,16 @@ describe('the log of a late loop', () => {
 })
 
 describe('a slow call', () => {
+  it.effect('is not said of the feed of changes, whose reads wait for the next by design', () => {
+    const { lines, layer } = logged()
+    return Effect.gen(function* () {
+      const waited = yield* Effect.forkChild(slowCall(Effect.succeed('Watch'), Effect.as(Effect.sleep(Duration.seconds(2)), 3)))
+      yield* TestClock.adjust(Duration.seconds(2))
+      assert.strictEqual(yield* Fiber.join(waited), 3)
+      assert.lengthOf(lines, 0)
+    }).pipe(Effect.provide(layer))
+  })
+
   it.effect('is said with its name and how long it took; a quick one is not', () => {
     const { lines, layer } = logged()
     return Effect.gen(function* () {
