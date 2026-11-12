@@ -2162,7 +2162,7 @@ describe('what stands between a ready change and merging', () => {
     // Cancelled: said in place of a pass, and nothing to do from here but open the task.
     expect(said('A check cancelled')).toContain('check 4 cancelled')
     expect(said('A check cancelled')).not.toMatch(/checks passed|Accept and merge/)
-    expect(said('A check skipped')).toMatch(/4 of 5 checks passed\s*Accept and merge/)
+    expect(said('A check skipped')).toMatch(/All 4 checks passed\s*Accept and merge/)
     expect(said('Closed since')).not.toMatch(/checks passed|Accept and merge/)
   })
 })
