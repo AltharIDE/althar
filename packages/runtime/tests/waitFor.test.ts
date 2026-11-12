@@ -398,6 +398,77 @@ describe('a lead waiting for an external condition', () => {
     )
   })
 
+  it.effect('watches checks on the default branch without needing a task-owned PR', () => {
+    const gate = holds()
+    const { working, bare } = hosted()
+    let passing = false
+    const github = makeFakeService({
+      pushUrl: () => bare,
+      checksOn: (ref) => (ref === 'main' ? [{ name: 'build', state: passing ? 'passed' : 'running' }] : []),
+    })
+    github.addRepository(['meridian', 'api'])
+    return onTestClock(
+      Effect.gen(function* () {
+        yield* (yield* Connections).connectToken({ product: 'github', token: 't', actorId: (yield* Instance).personId, webUrl: HOST })
+        const task = yield* planned(working)
+        yield* callTool(task.access, 'wait_for', {
+          reason: 'Main to go green',
+          conditions: [{ kind: 'checks', repository: 'meridian/api', ref: 'main', until: 'checks_passed' }],
+        })
+        gate.open('[lead:slowly]')
+        yield* idle(task.threadId)
+        yield* TestClock.adjust(Duration.seconds(2))
+        yield* until(held(task.taskId), (rows) => externalWaitOf(rows[0]?.output ?? null)?.lastCheck != null)
+        assert.lengthOf(yield* turns(task.threadId), 1)
+        passing = true
+        yield* TestClock.adjust(Duration.seconds(31))
+        yield* ready(task.projectId, task.taskId)
+        assert.lengthOf(yield* turns(task.threadId), 2)
+      }).pipe(
+        Effect.provide(
+          withQueries(':memory:', { holds: gate }, { connectors: fakeConnectors({ github }), listenEvery: Duration.hours(1) }),
+        ),
+      ),
+    )
+  })
+
+  it.effect('an alternative timer wakes on time without reading a rate-limited host early', () => {
+    const gate = holds()
+    const { working, bare } = hosted()
+    const github = makeFakeService({ pushUrl: () => bare })
+    github.addRepository(['meridian', 'api'])
+    github.addPullRequest({ path: ['meridian', 'api'], title: 'A change', author: 'ada' })
+    return onTestClock(
+      Effect.gen(function* () {
+        yield* (yield* Connections).connectToken({ product: 'github', token: 't', actorId: (yield* Instance).personId, webUrl: HOST })
+        const task = yield* planned(working)
+        const now = yield* Clock.currentTimeMillis
+        github.failNext('change', 'rate_limited', new Date(now + 90_000).toISOString())
+        yield* callTool(task.access, 'wait_for', {
+          reason: 'The PR or a reminder',
+          mode: 'any',
+          conditions: [
+            { kind: 'pull_request', repository: 'meridian/api', number: 1, until: 'merged' },
+            { kind: 'time', at: new Date(now + 10_000).toISOString() },
+          ],
+        })
+        gate.open('[lead:slowly]')
+        yield* idle(task.threadId)
+        yield* TestClock.adjust(Duration.seconds(2))
+        yield* until(held(task.taskId), (rows) => externalWaitOf(rows[0]?.output ?? null)?.error != null)
+        const reads = github.calls.filter((one) => one === 'change').length
+        yield* TestClock.adjust(Duration.seconds(10))
+        yield* ready(task.projectId, task.taskId)
+        assert.strictEqual(github.calls.filter((one) => one === 'change').length, reads)
+        assert.lengthOf(yield* turns(task.threadId), 2)
+      }).pipe(
+        Effect.provide(
+          withQueries(':memory:', { holds: gate }, { connectors: fakeConnectors({ github }), listenEvery: Duration.hours(1) }),
+        ),
+      ),
+    )
+  })
+
   it.effect('an unmet wait reaches its deadline without starting another model turn', () => {
     const gate = holds()
     const { working, bare } = hosted()

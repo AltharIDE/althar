@@ -1251,7 +1251,7 @@ const playRole = async (
         if (text.includes('[lead:wait-for-external]'))
           return await call('wait_for', {
             reason: 'The deployment to finish',
-            conditions: [{ kind: 'time', at: new Date(Date.now() + 60_000).toISOString() }],
+            conditions: [{ kind: 'time', at: new Date(Date.now() + 60 * 60_000).toISOString() }],
           })
         return await finish()
       }

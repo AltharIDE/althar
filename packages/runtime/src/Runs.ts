@@ -7044,8 +7044,11 @@ export class Runs extends Context.Service<
             return yield* needsPerson(
               `Wait expired: ${wait.reason}. Check what is blocking it, then tell the lead whether to keep waiting or change the task.${wait.error === null ? '' : ` Last check: ${wait.error}`}`,
             )
+          // An any-mode timer is independent of a code host's retry time. Once due, it needs no host read at all.
+          const timeReached =
+            wait.mode === 'any' && wait.conditions.some((one) => one.target.kind === 'time' && Date.parse(one.target.at) <= now)
           const observations = yield* Effect.forEach(wait.conditions, (one) =>
-            observeExternal(one).pipe(
+            (timeReached && one.target.kind !== 'time' ? Effect.succeed<Observation>({ met: false }) : observeExternal(one)).pipe(
               Effect.map((observed): Observation => observed),
               Effect.catch((error) =>
                 Effect.succeed<Observation>({
@@ -7072,10 +7075,15 @@ export class Runs extends Context.Service<
             const times = wait.conditions.flatMap((one) =>
               one.target.kind === 'time' && Date.parse(one.target.at) > now ? [Date.parse(one.target.at)] : [],
             )
-            const due = Math.min(Date.parse(wait.deadline), ...(remote ? [now + delay] : times))
             const retryAt = Math.max(
               0,
               ...observations.map((one) => (one.retryAt === undefined ? 0 : Date.parse(one.retryAt))).filter(Number.isFinite),
+            )
+            const remoteReady = wait.conditions.every((one, index) => one.target.kind === 'time' || observations[index]?.met === true)
+            const due = Math.min(
+              Date.parse(wait.deadline),
+              ...(remote ? [Math.max(now + delay, retryAt)] : []),
+              ...(wait.mode === 'any' || remoteReady ? times : []),
             )
             yield* keep({
               ...wait,
@@ -7085,7 +7093,7 @@ export class Runs extends Context.Service<
                 met: observations[index]?.met ?? false,
               })),
               lastCheck: waitTime(now),
-              nextCheck: waitTime(Math.min(Date.parse(wait.deadline), Math.max(due, retryAt))),
+              nextCheck: waitTime(due),
               failures,
               error: errors.length === 0 ? null : errors.join('; ').slice(0, 1000),
             })
