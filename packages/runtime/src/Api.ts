@@ -984,7 +984,7 @@ export const handlers = Api.toLayer(
             ...(fresh === true ? { fresh } : {}),
           }),
         ),
-      GetThreadItem: ({ threadId, itemId }) => api(queries.item(threadId, itemId)),
+      GetThreadItem: ({ threadId, itemId }) => api(queries.shown(threadId, itemId)),
       ReadOutput: ({ threadId, itemId }) => api(queries.output(threadId, itemId)),
       ReadDocument: ({ threadId, path }) => api(queries.document(threadId, path)),
       ListCanvases: ({ projectId, archived }) => api(canvases.list(projectId, archived === true)),
@@ -1378,7 +1378,10 @@ export const handlers = Api.toLayer(
           commandId,
           api(
             Effect.asVoid(
-              Effect.flatMap(envelope('task.mark_done', { taskId }, commandId), (said) => tasks.markDone({ envelope: said, taskId })),
+              // The person's own press: an aside settles as it stands, as its pill's × says (Tasks.markDone's `clear`).
+              Effect.flatMap(envelope('task.mark_done', { taskId }, commandId), (said) =>
+                tasks.markDone({ envelope: said, taskId, clear: true }),
+              ),
             ),
           ),
         ),
@@ -1456,12 +1459,13 @@ export const handlers = Api.toLayer(
         ),
       GetCoordinator: ({ projectId, before, limit }) =>
         api(queries.coordinator(projectId, { ...(before === undefined ? {} : { before }), ...(limit === undefined ? {} : { limit }) })),
-      StartTask: ({ commandId, projectId, title, description, steps, issue, end, repositories, chat }) =>
+      StartTask: ({ commandId, projectId, title, description, steps, issue, end, repositories, chat, taskId }) =>
         once(
           commandId,
           api(
             Effect.gen(function* () {
               const from = yield* issueFor(projectId, issue)
+              const aside = chat === true
               const created = yield* projects.createTask({
                 envelope: yield* envelope('task.create', { projectId, title, description, issue }, commandId),
                 projectId,
@@ -1470,14 +1474,16 @@ export const handlers = Api.toLayer(
                 draft: true,
                 ...(from === undefined ? {} : { issueKey: from.key }),
                 ...(repositories === undefined ? {} : { repositories }),
-                // An aside's words are the person's, whole: its thread opens with them.
-                ...(chat === true ? { plain: true, request: description ?? title } : requestOf(title, description, issue)),
+                ...(taskId === undefined ? {} : { taskId }),
+                // An aside is made on Scratch, beside the coordinator's conversation, never on the board even for a moment. Its words
+                // are the person's, whole, where it was started with them; started with +, they come as its first message.
+                ...(aside
+                  ? { plain: true, shelf: 'scratch' as const, ...(description?.trim() ? { request: description } : {}) }
+                  : requestOf(title, description, issue)),
               })
               if (issue !== undefined) yield* issues.attach({ projectId: projectId as ProjectId, taskId: created.taskId, issue })
-              // An aside sits on Scratch from the start, beside the coordinator's conversation rather than on the board.
-              if (chat === true) yield* Effect.provideContext(shelve(created.taskId, 'scratch', instance.personId), folderStore)
               // A task you start yourself is planned like any other, and starts at once; its card shows in the coordinator's thread.
-              const projectEnd = chat === true ? null : yield* pullRequests.endFor(projectId, created.taskId)
+              const projectEnd = aside ? null : yield* pullRequests.endFor(projectId, created.taskId)
               const planId = yield* plans.propose({
                 projectId: projectId as ProjectId,
                 taskId: created.taskId,
@@ -1485,9 +1491,10 @@ export const handlers = Api.toLayer(
                 reason: null,
                 actorId: instance.personId,
                 startsIn: Duration.zero,
-                // An aside, as a chat the coordinator starts: nothing of it goes outside the project when it is done.
-                ...(chat === true
-                  ? { end: null, here: true, card: false as const }
+                // An aside, as a chat the coordinator starts: nothing of it goes outside the project when it is done; it has its pill
+                // rather than a card, and the coordinator hears nothing of it.
+                ...(aside
+                  ? { end: null, here: true, aside: true }
                   : {
                       end: end === undefined ? projectEnd : end,
                       // The form sends the ending it shows: another than the project's is the person's choice.
@@ -1700,7 +1707,10 @@ export const handlers = Api.toLayer(
           commandId,
           api(
             Effect.flatMap(envelope('task.shelve', { taskId, shelf }, commandId), (said) =>
-              Effect.provideContext(shelve(taskId, shelf, said.actorId), folderStore),
+              Effect.provideContext(shelve(taskId, shelf, said.actorId), folderStore).pipe(
+                // An aside made a task is work now: its copy, never set up as an aside, is set up behind, before its next turn.
+                Effect.andThen(shelf === null ? setups.begin(taskId) : Effect.void),
+              ),
             ),
           ),
         ),

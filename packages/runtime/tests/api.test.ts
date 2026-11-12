@@ -378,7 +378,7 @@ describe('the API', () => {
         )
         assert.isEmpty((yield* client.GetThread({ threadId: task.threadId, limit: 0 })).items)
         const reply = yield* client.GetThreadItem({ threadId: task.threadId, itemId: newest.items[1]?.id ?? '' })
-        assert.deepStrictEqual(reply.content, { text: 'Hello', pictures: [], files: [] })
+        assert.deepStrictEqual(reply?.content, { text: 'Hello', pictures: [], files: [] })
 
         // A tool call keeps what the thread shows: the files it touched, not its raw input and output.
         yield* client.Send({ commandId: commandId(), threadId: task.threadId, body: scenarios.tool, disposition: 'after_current' })
@@ -1940,9 +1940,9 @@ describe('the coordinator, through the API', () => {
           end: 'none',
         })
         const held = yield* client.GetThreadItem({ threadId: planned.threadId, itemId: card?.id ?? '' })
-        assert.strictEqual(held.kind === 'task' ? held.content.plan?.end : undefined, 'none')
+        assert.strictEqual(held?.kind === 'task' ? held.content.plan?.end : undefined, 'none')
         assert.deepStrictEqual(
-          held.kind === 'task' ? [held.content.phase, held.content.plan?.steps.map((step) => [step.agentId, step.skipped])] : [],
+          held?.kind === 'task' ? [held.content.phase, held.content.plan?.steps.map((step) => [step.agentId, step.skipped])] : [],
           [
             'held',
             [
@@ -1954,9 +1954,9 @@ describe('the coordinator, through the API', () => {
         yield* client.StartPlan({ commandId: commandId(), planId })
         const started = yield* until(
           client.GetThreadItem({ threadId: planned.threadId, itemId: card?.id ?? '' }),
-          (item) => item.kind === 'task' && item.content.phase === 'running',
+          (item) => item?.kind === 'task' && item.content.phase === 'running',
         )
-        assert.isTrue(started.kind === 'task' && started.content.startedAt !== null)
+        assert.isTrue(started?.kind === 'task' && started.content.startedAt !== null)
         // The person's mistakes, in words.
         assert.strictEqual(
           (yield* Effect.flip(client.StartPlan({ commandId: commandId(), planId: 'pln_missing' }))).message,

@@ -958,6 +958,8 @@ export class Queries extends Context.Service<
       page?: { readonly before?: number; readonly limit?: number; readonly fresh?: boolean },
     ): Effect.Effect<ThreadSnapshot, SqlError.SqlError | NotFound>
     item(threadId: string, itemId: string): Effect.Effect<ThreadItem, SqlError.SqlError | NotFound>
+    /** One item as a window reads it, by id: null for one the thread keeps for Althar and never shows. */
+    shown(threadId: string, itemId: string): Effect.Effect<ThreadItem | null, SqlError.SqlError | NotFound>
     /** What a command in a thread printed, as kept when it ended. */
     output(threadId: string, itemId: string): Effect.Effect<OutputText, SqlError.SqlError | NotFound>
     /** A markdown document an agent in a thread wrote, as it is now in the task's worktrees. */
@@ -2422,6 +2424,16 @@ export class Queries extends Context.Service<
                   by: lastSaid.kind === 'user_message' ? ('person' as const) : ('lead' as const),
                   said: (lastSaid.text ?? '').trim().split('\n')[0]?.slice(0, 200) ?? '',
                 }
+          // An aside opened with + whose person hasn't said anything in it yet: its lead waits for their first words.
+          const [unsaid] =
+            task.shelf === 'scratch' && exchange === undefined
+              ? yield* sql<{ unsaid: number }>`
+                  SELECT (k.request IS NULL OR trim(k.request) = '')
+                    AND NOT EXISTS (SELECT 1 FROM user_inputs u WHERE u.thread_id = ${task.threadId})
+                    AND EXISTS (SELECT 1 FROM task_plans p WHERE p.task_id = k.id AND p.state != 'replaced'
+                      AND json_extract(p.parameters, '$.aside') = 1) AS unsaid
+                  FROM tasks k WHERE k.id = ${taskId}`
+              : []
           // Where each stands, by its latest pull request, for the card's one sentence and its marks: none yet, not shipped.
           const named = yield* sql<{ id: string; name: string | null; branch: string }>`
             SELECT id, name, branch FROM workspaces WHERE task_id = ${taskId} AND access = 'write' AND reviewing IS NULL
@@ -2677,6 +2689,7 @@ export class Queries extends Context.Service<
             ...(changeCount > 1 ? { changeCount, changeMarks: marks } : {}),
             ...(task.shelf === 'scratch' ? { scratch: true } : {}),
             ...(exchange === undefined ? {} : { latest: exchange }),
+            ...(unsaid?.unsaid === 1 ? { unsaid: true } : {}),
             // Resolving a conflict, or fixing the checks on the merge, is a step of its own while it lasts.
             step:
               task.step ??
@@ -3848,13 +3861,23 @@ export class Queries extends Context.Service<
           } satisfies CoordinatorSnapshot
         })
 
-      const item = (threadId: string, itemId: string) =>
+      /**
+       * One item, read by id, as a window does each one it hears changed: null for one the thread keeps for Althar and never
+       * shows (what a lead could see, say), which is there, only not for the window; not found, one that isn't.
+       */
+      const shown = (threadId: string, itemId: string) =>
         Effect.gen(function* () {
           const { items } = yield* itemRows(threadId, { itemId, limit: 1 })
           const row = items[0]
-          const found = row === undefined ? undefined : row.kind === 'task' ? yield* cardOf(row) : itemOf(row)
-          return found === undefined ? yield* new NotFound({ kind: 'thread item', id: itemId }) : found
+          if (row === undefined) return yield* new NotFound({ kind: 'thread item', id: itemId })
+          return (row.kind === 'task' ? yield* cardOf(row) : itemOf(row)) ?? null
         })
+
+      /** One item a page shows, by id; not found where the thread has none, or keeps it for Althar alone. */
+      const item = (threadId: string, itemId: string) =>
+        Effect.flatMap(shown(threadId, itemId), (found) =>
+          found === null ? Effect.fail(new NotFound({ kind: 'thread item', id: itemId })) : Effect.succeed(found),
+        )
 
       const changesSince = (after: number, limit: number) =>
         Effect.gen(function* () {
@@ -4032,6 +4055,7 @@ export class Queries extends Context.Service<
         olderSettled: (projectId, before, taskId) => run(olderSettled(projectId, before, taskId)),
         home: (since) => run(home(since)),
         item: (threadId, itemId) => run(item(threadId, itemId)),
+        shown: (threadId, itemId) => run(shown(threadId, itemId)),
         // A command still running is read from what it has printed so far; one that ended, from what was kept.
         output: (threadId, itemId) =>
           run(

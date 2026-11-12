@@ -215,10 +215,19 @@ export const useProject = (projectId: string): ProjectModel => {
         : Promise.all(
             [...ids].map((itemId) => {
               const version = viewVersion()
-              return newest(itemId, client.getThreadItem(threadId, itemId), (item) => arrived([item], version), fail)
+              // One the thread keeps for Althar alone is nothing to draw, and nothing wrong: it goes, if the window held it.
+              return newest(
+                itemId,
+                client.getThreadItem(threadId, itemId),
+                (item) =>
+                  item === null
+                    ? setCoordinator((current) => ({ ...current, items: current.items.filter((one) => one.id !== itemId) }))
+                    : arrived([item], version),
+                fail,
+              )
             }),
           ),
-    [client, threadId, newest, arrived, viewVersion, fail],
+    [client, threadId, newest, arrived, viewVersion, fail, setCoordinator],
   )
 
   // What the coordinator was last picked to, until the thread says it: a pick made before the last one was taken goes from there.

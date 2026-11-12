@@ -3,7 +3,8 @@ import { Ledger } from '@althar/persistence-sqlite'
 import { Effect } from 'effect'
 import { SqlClient } from 'effect/sql'
 
-import { change } from './records'
+import { Instance } from './Instance'
+import { change, fact } from './records'
 import { addItem } from './threads'
 
 /*
@@ -57,7 +58,22 @@ export const offScratch = (taskId: string) =>
         EXISTS (SELECT 1 FROM review_drafts d WHERE d.task_id = k.id AND d.created_at > shelved.at) AS drafted
       FROM tasks k, shelved WHERE k.id = ${taskId} AND k.shelf = 'scratch'`
     if (chat === undefined || (chat.branched === 0 && chat.linked === 0 && chat.drafted === 0)) return
-    yield* sql`UPDATE tasks SET shelf = NULL, revision = revision + 1 WHERE id = ${taskId}`
+    // Recorded as the person's move is (`shelve`), by Althar: the record and every window hear it left.
+    const instance = yield* Instance
+    yield* sql.withTransaction(
+      Effect.gen(function* () {
+        const revision = yield* change('tasks', taskId, { shelf: null })
+        yield* fact({
+          projectId: chat.projectId,
+          aggregateType: 'task',
+          aggregateId: taskId,
+          revision,
+          type: 'task.shelved',
+          payload: { shelf: null },
+          actorId: instance.systemId,
+        })
+      }),
+    )
     yield* leftAsides(chat.projectId, taskId)
     if (chat.threadId !== null)
       yield* addItem({ projectId: chat.projectId, threadId: chat.threadId }, 'notice', {

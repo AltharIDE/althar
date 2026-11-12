@@ -2496,6 +2496,11 @@ export const TaskCard = Schema.Struct({
    * it, and its first line. Absent for a task on the board, and for a chat with nothing said yet.
    */
   latest: Schema.optional(Schema.Struct({ at: Schema.String, by: Schema.Literals(['person', 'lead']), said: Schema.String })),
+  /**
+   * An aside the person opened with + and has said nothing in yet: its lead waits for their first words. Only its own pill
+   * shows it, while it is open, and + opens it again rather than another. Absent otherwise.
+   */
+  unsaid: Schema.optional(Schema.Boolean),
   /** A change ready that built nothing: no commits on its branch and no pull request open or merged. Absent otherwise. */
   nothingBuilt: Schema.optional(Schema.Boolean),
   /**
@@ -3167,6 +3172,12 @@ export const TurnTime = Schema.Struct({
   tools: Schema.Number,
   /** In a task of several changes, where its commits went: each change it committed to, by name, and how many. */
   changes: Schema.optional(Schema.Array(Schema.Struct({ name: Schema.String, commits: Schema.Number }))),
+  /** Getting the turn ready before its prompt went out: the coordinator's copies, its news, the turn's record. */
+  ready: Schema.optional(Schema.Number),
+  /** Of `ready`, bringing the coordinator's copies of the repositories up to date. */
+  copies: Schema.optional(Schema.Number),
+  /** From the prompt going out to the agent's first word, thought or call. */
+  first: Schema.optional(Schema.Number),
 })
 export type TurnTime = typeof TurnTime.Type
 
@@ -4600,7 +4611,8 @@ export const Api = RpcGroup.make(
     { taskId: Schema.optional(Schema.String), attentionId: Schema.optional(Schema.String), action: OnePressAction },
     Schema.Void,
   ),
-  call('GetThreadItem', { threadId: Schema.String, itemId: Schema.String }, ThreadItem),
+  /** One item of a thread, as its page has it: null for one the thread keeps for Althar and never shows, such as what a lead could see. */
+  call('GetThreadItem', { threadId: Schema.String, itemId: Schema.String }, Schema.NullOr(ThreadItem)),
   /** What a command in a thread printed, as kept once it ended. */
   call('ReadOutput', { threadId: Schema.String, itemId: Schema.String }, OutputText),
   /** What a command a thread's session left running has printed so far, while its session lives. */
@@ -4662,10 +4674,13 @@ export const Api = RpcGroup.make(
       /** The project's repositories it changes, by name: needed only in a project of several. */
       repositories: Schema.optional(Schema.Array(Schema.String)),
       /**
-       * An aside: a chat of the person's own beside the coordinator's conversation (a task is a conversation plus parts, "Chats
-       * and Scratch"). It is plain, sits on Scratch, and nothing of it leaves this computer; `end` is not read.
+       * An aside: a chat of the person's own beside the coordinator's conversation (docs/decisions/tasks.md, "Asides"). It is
+       * plain, made on Scratch, and nothing of it leaves this computer; `end` is not read. Started as + is pressed, with no
+       * `description`, its lead's brief waits for the person's first words, sent to its thread as any message is.
        */
       chat: Schema.optional(Schema.Boolean),
+      /** The id the window made for it, as a project's may be: an aside's pill is keyed by it from the moment + is pressed. */
+      taskId: Schema.optional(Schema.String),
     },
     TaskSummary,
   ),

@@ -370,8 +370,21 @@ export const useTask = (threadId: string): TaskModel => {
 
   const readItems = useCallback(
     (ids: Iterable<string>) =>
-      Promise.all([...ids].map((itemId) => newest(itemId, client.getThreadItem(threadId, itemId), (item) => arrived([item]), fail))),
-    [client, threadId, newest, arrived, fail],
+      Promise.all(
+        [...ids].map((itemId) =>
+          newest(
+            itemId,
+            client.getThreadItem(threadId, itemId),
+            // One the thread keeps for Althar alone, such as what its lead could see, is nothing to draw, and nothing wrong.
+            (item) =>
+              item === null
+                ? setSnapshot((current) => ({ ...current, items: current.items.filter((one) => one.id !== itemId) }))
+                : arrived([item]),
+            fail,
+          ),
+        ),
+      ),
+    [client, threadId, newest, arrived, fail, setSnapshot],
   )
 
   // What the lead was last picked to, until the thread says it: a pick made before the last one was taken goes from there.
