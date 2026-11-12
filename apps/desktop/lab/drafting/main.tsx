@@ -10,13 +10,14 @@ import { createRoot } from 'react-dom/client'
 
 import { TaskFace, Thread, Turn, You } from '@althar/ui'
 
-import { type DirectionProps, directions } from './Directions'
+import { type DirectionProps, Morph, OneCard } from './Directions'
+import { Columns, MapTake, Relay, Roster } from './Takes'
 import { AT, draftAt, type Spec, THREE, useElapsed, VAT } from './timeline'
 import s from './lab.module.css'
 
 /*
  * The drafting lab (README.md): a task's card from the moment the coordinator
- * starts drafting it. Keys 1–3 swap how C becomes the plan, R plays it again, S its
+ * starts drafting it. Keys 1–6 swap the take on C, R plays it again, S its
  * speed, N a narrow window, T three tasks from one message.
  */
 
@@ -24,6 +25,14 @@ const params = new URLSearchParams(location.search)
 document.documentElement.dataset.theme = 'light'
 
 type Key = (typeof directions)[number]['key']
+const directions = [
+  { key: '1', label: 'C1 · morph', Card: Morph },
+  { key: '2', label: 'C2 · as before', Card: OneCard },
+  { key: '3', label: 'Columns', Card: Columns },
+  { key: '4', label: 'Relay', Card: Relay },
+  { key: '5', label: 'Roster', Card: Roster },
+  { key: '6', label: 'Map', Card: MapTake },
+] as const
 const SPEEDS = [1, 2, 4] as const
 
 /** Three drafted one after another, as the coordinator does: each starts as the last's plan is proposed, less a little. */
@@ -42,7 +51,7 @@ function Drafting({ spec, ms, Card }: { spec: Spec; ms: number; Card: (props: Di
 }
 
 function Lab() {
-  const [key, setKey] = useState<Key>((params.get('d') as Key | null) ?? '2')
+  const [key, setKey] = useState<Key>((params.get('d') as Key | null) ?? '3')
   const [run, setRun] = useState(0)
   const [speed, setSpeed] = useState<(typeof SPEEDS)[number]>(Number(params.get('speed') ?? 2) as 1 | 2 | 4)
   const [narrow, setNarrow] = useState(params.get('narrow') === '1')

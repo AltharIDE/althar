@@ -48,11 +48,11 @@ export interface DirectionProps {
   readonly onHold: (held: boolean) => void
 }
 
-const cx = (...names: ReadonlyArray<string | false | undefined>) => names.filter(Boolean).join(' ')
+export const cx = (...names: ReadonlyArray<string | false | undefined>) => names.filter(Boolean).join(' ')
 
-const leadLabel = (spec: Spec) => (spec.preset === 'Prototype' ? 'Prototype' : 'Implement')
+export const leadLabel = (spec: Spec) => (spec.preset === 'Prototype' ? 'Prototype' : 'Implement')
 
-const ENDS = [TaskEnd.DraftPr, TaskEnd.ReadyPr, TaskEnd.PushOnly] as const
+export const ENDS = [TaskEnd.DraftPr, TaskEnd.ReadyPr, TaskEnd.PushOnly] as const
 
 /** The kit's plan card, once the plan is proposed. */
 function Plan({ spec, held }: { spec: Spec; held: boolean }) {
@@ -96,12 +96,12 @@ function Plan({ spec, held }: { spec: Spec; held: boolean }) {
 }
 
 /** What arrives fades in, dim to bright; it doesn't travel. */
-function Arrive({ children, className }: { children: ReactNode; className?: string }) {
+export function Arrive({ children, className }: { children: ReactNode; className?: string }) {
   return <span className={cx(s.arrive, className)}>{children}</span>
 }
 
 /** Streamed words: the newest fade in, as a thread's do. */
-function Streamed({ text }: { text: string }) {
+export function Streamed({ text }: { text: string }) {
   return (
     <>
       {text.split(' ').map((word, i) => (
@@ -115,7 +115,7 @@ function Streamed({ text }: { text: string }) {
   )
 }
 
-const SHUFFLE = [Brand.Anthropic, Brand.OpenAI, Brand.Google, Brand.Alibaba, Brand.Moonshot] as const
+export const SHUFFLE = [Brand.Anthropic, Brand.OpenAI, Brand.Google, Brand.Alibaba, Brand.Moonshot] as const
 
 /** A seat being filled: marks go round while it's chosen, then the one picked settles in. With `pick`, its model can be changed. */
 function Seat({
@@ -175,7 +175,7 @@ function Seat({
 }
 
 /** What C2's card holds once the plan is proposed: everything the plan card lets the person change. */
-interface Planned {
+export interface Planned {
   readonly lead: ModelInfo
   readonly leadEffort: string | null
   readonly review: ModelInfo | null
@@ -189,7 +189,7 @@ interface Planned {
 }
 
 /** The team card: assembling while drafted; with `planned`, the plan itself (C2). */
-function TeamCard({ draft, held, onHold, planned }: DirectionProps & { planned?: Planned }) {
+export function TeamCard({ draft, held, onHold, planned, body }: DirectionProps & { planned?: Planned; body?: ReactNode }) {
   const { spec } = draft
   const prefs = useModelPrefs()
   const live = planned !== undefined
@@ -241,70 +241,74 @@ function TeamCard({ draft, held, onHold, planned }: DirectionProps & { planned?:
           </div>
         )}
       </div>
-      <div className={s.seats}>
-        <Seat
-          seat="Lead"
-          morph="lead"
-          picked={draft.lead ? (planned?.lead ?? spec.lead) : null}
-          choosing={draft.size}
-          effort={spec.leadEffort}
-          {...(planned ? { pick: picker('lead', planned.lead, planned.leadEffort) } : {})}
-        />
-        {spec.review !== null && (
-          <Seat
-            seat="Reviewer"
-            morph="review"
-            picked={draft.review ? (planned?.review ?? spec.review) : null}
-            choosing={draft.lead}
-            {...(planned?.review
-              ? { pick: planned.reviewSkipped ? <span className={s.empty}>No review</span> : picker('review', planned.review, null) }
-              : {})}
-          />
-        )}
-        <p className={s.sizeLine} data-morph="size">
-          {draft.size ? <Arrive>{spec.size}</Arrive> : draft.briefDone ? null : <Arrive>Writing the brief…</Arrive>}
-        </p>
-      </div>
-      <ol className={s.track}>
-        {steps.map((step, i) => {
-          const skipped = step.key === 'review' && planned?.reviewSkipped === true
-          return (
-            <li key={step.key} className={cx(s.slot, step.in && s.dropped, skipped && s.slotSkipped)} data-morph={`step-${step.key}`}>
-              <span className={s.slotN}>{i + 1}</span>
-              {planned && step.key === 'end' && !spec.onBranch ? (
-                <Menu
-                  label="When the work is done"
-                  width={320}
-                  trigger={
-                    <ActionButton size="small" trailingIcon="chevronD" className={s.slotPick}>
-                      {step.label}
-                    </ActionButton>
-                  }
-                >
-                  <MenuRadioGroup
-                    label="When the work is done"
-                    value={planned.end}
-                    onChange={(v) => planned.set({ end: ENDS.find((x) => x === v) ?? planned.end })}
-                  >
-                    {ENDS.map((x) => (
-                      <MenuRadioItem key={x} value={x} hint={taskEndText[x].note}>
-                        {taskEndText[x].title}
-                      </MenuRadioItem>
-                    ))}
-                  </MenuRadioGroup>
-                </Menu>
-              ) : (
-                <span className={s.slotLabel}>{step.label}</span>
-              )}
-              {planned && step.key === 'review' && (
-                <LinkButton className={s.slotSkip} onClick={() => planned.set({ reviewSkipped: !planned.reviewSkipped })}>
-                  {planned.reviewSkipped ? 'Add back' : 'Skip'}
-                </LinkButton>
-              )}
-            </li>
-          )
-        })}
-      </ol>
+      {body ?? (
+        <>
+          <div className={s.seats}>
+            <Seat
+              seat="Lead"
+              morph="lead"
+              picked={draft.lead ? (planned?.lead ?? spec.lead) : null}
+              choosing={draft.size}
+              effort={spec.leadEffort}
+              {...(planned ? { pick: picker('lead', planned.lead, planned.leadEffort) } : {})}
+            />
+            {spec.review !== null && (
+              <Seat
+                seat="Reviewer"
+                morph="review"
+                picked={draft.review ? (planned?.review ?? spec.review) : null}
+                choosing={draft.lead}
+                {...(planned?.review
+                  ? { pick: planned.reviewSkipped ? <span className={s.empty}>No review</span> : picker('review', planned.review, null) }
+                  : {})}
+              />
+            )}
+            <p className={s.sizeLine} data-morph="size">
+              {draft.size ? <Arrive>{spec.size}</Arrive> : draft.briefDone ? null : <Arrive>Writing the brief…</Arrive>}
+            </p>
+          </div>
+          <ol className={s.track}>
+            {steps.map((step, i) => {
+              const skipped = step.key === 'review' && planned?.reviewSkipped === true
+              return (
+                <li key={step.key} className={cx(s.slot, step.in && s.dropped, skipped && s.slotSkipped)} data-morph={`step-${step.key}`}>
+                  <span className={s.slotN}>{i + 1}</span>
+                  {planned && step.key === 'end' && !spec.onBranch ? (
+                    <Menu
+                      label="When the work is done"
+                      width={320}
+                      trigger={
+                        <ActionButton size="small" trailingIcon="chevronD" className={s.slotPick}>
+                          {step.label}
+                        </ActionButton>
+                      }
+                    >
+                      <MenuRadioGroup
+                        label="When the work is done"
+                        value={planned.end}
+                        onChange={(v) => planned.set({ end: ENDS.find((x) => x === v) ?? planned.end })}
+                      >
+                        {ENDS.map((x) => (
+                          <MenuRadioItem key={x} value={x} hint={taskEndText[x].note}>
+                            {taskEndText[x].title}
+                          </MenuRadioItem>
+                        ))}
+                      </MenuRadioGroup>
+                    </Menu>
+                  ) : (
+                    <span className={s.slotLabel}>{step.label}</span>
+                  )}
+                  {planned && step.key === 'review' && (
+                    <LinkButton className={s.slotSkip} onClick={() => planned.set({ reviewSkipped: !planned.reviewSkipped })}>
+                      {planned.reviewSkipped ? 'Add back' : 'Skip'}
+                    </LinkButton>
+                  )}
+                </li>
+              )
+            })}
+          </ol>
+        </>
+      )}
       <div className={t.foot} data-morph="foot">
         <span className={t.estimate}>{draft.estimate ? <Arrive>{spec.estimate}</Arrive> : null}</span>
         {planned ? (
@@ -400,7 +404,8 @@ export function Morph(props: DirectionProps) {
 }
 
 /* C2. One card: the team card is the plan; once proposed its seats are the pickers, and the countdown takes the foot. */
-export function OneCard(props: DirectionProps) {
+/** C2's plan, once proposed: what the person can change, and its countdown; nothing while it drafts. */
+export function usePlanned(props: DirectionProps): Planned | undefined {
   const { spec, ready } = props.draft
   const [plan, setPlan] = useState({
     lead: spec.lead,
@@ -429,11 +434,10 @@ export function OneCard(props: DirectionProps) {
         },
       }
     : undefined
-  return <TeamCard {...props} {...(planned ? { planned } : {})} />
+  return planned
 }
 
-export const directions = [
-  { key: '1', label: 'C · swaps to the plan', Card: Swap },
-  { key: '2', label: 'C1 · morphs into the plan', Card: Morph },
-  { key: '3', label: 'C2 · is the plan', Card: OneCard },
-] as const
+export function OneCard(props: DirectionProps) {
+  const planned = usePlanned(props)
+  return <TeamCard {...props} {...(planned ? { planned } : {})} />
+}
