@@ -32,7 +32,7 @@ import { Instance } from './Instance'
 import { IssueDrafts, refusedDraft } from './IssueDrafts'
 import { AskedFields, fieldSchema, wantedFields } from './issueFields'
 import { findWords, foundLine, Issues, keysOf, READ_ISSUE, READ_ISSUE_INPUT, stoppedAt } from './Issues'
-import { quickIn } from './kinds'
+import { asideIn, quickIn } from './kinds'
 import { DRAFT_THEN_PRESET, PICK_A_PRESET } from './presetBrief'
 import { presetModels } from './presetModels'
 import { Limits } from './Limits'
@@ -62,7 +62,7 @@ import { Projects } from './Projects'
 import { Helpers } from './Helpers'
 import { ReviewRefused, Reviews } from './Reviews'
 import { shelve } from './scratch'
-import { findTasks, foundWords } from './Search'
+import { asidesAmong, asidesLine, findTasks, foundWords, openAsides } from './Search'
 import { changeOf, diffWords, touchedWords } from './otherTasks'
 import { taskFindingsOf } from './taskFindings'
 import { notesSection, projectOverview } from './handover'
@@ -627,6 +627,12 @@ export class Coordinator extends Context.Service<
           return said
         })
 
+      /** The tasks an agent is at work on now, as the sessions say: where a task stands reads it. */
+      const workingNow = Effect.map(
+        sessions.onTasks,
+        (on) => new Set(on.flatMap((session) => (session.turnRunning ? [session.taskId] : []))),
+      )
+
       const list = (access: ToolAccess) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
@@ -648,14 +654,18 @@ export class Coordinator extends Context.Service<
               EXISTS (SELECT 1 FROM workspaces w WHERE w.task_id = k.id AND w.access = 'write' AND w.branched_at IS NULL) AS unbranched,
               (SELECT s.agent_id FROM provider_sessions s JOIN threads t ON t.id = s.thread_id
                 WHERE t.task_id = k.id AND t.kind = 'task' ORDER BY s.started_at DESC LIMIT 1) AS lead
-            FROM tasks k WHERE k.project_id = ${access.projectId} ORDER BY k.created_at DESC LIMIT 50`
-          if (tasks.length === 0) return 'The project has no tasks yet.'
+            FROM tasks k WHERE k.project_id = ${access.projectId} AND NOT ${sql.unsafe(asideIn('k'))}
+            ORDER BY k.created_at DESC LIMIT 50`
+          // Asides are chats on Scratch, not tasks: the coordinator is told the open ones by name and where each stands, after them.
+          const working = access.role === 'coordinator' ? yield* workingNow : undefined
+          const besides = working === undefined ? [] : asidesLine(yield* openAsides(access.projectId, (aside) => working.has(aside.taskId)))
+          if (tasks.length === 0) return ['The project has no tasks yet.', ...besides].join('\n\n')
           const facts = yield* Effect.forEach(tasks, (task) => pullRequests(task.id), { concurrency: 4 })
           const seen = yield* seenByLead(
             access,
             tasks.map((task) => task.id),
           )
-          return tasks
+          const listed = tasks
             .map((task, at) => {
               const { found, state } = standingOf({ ...task, planned: task.planned === 1 }, facts[at])
               // A plain task that hasn't changed the repository has no branch, and nothing to ship.
@@ -668,19 +678,20 @@ export class Coordinator extends Context.Service<
               return more === undefined ? line : `${line}\n${more}`
             })
             .join('\n')
+          return [listed, ...besides].join('\n\n')
         })
 
       const find = (access: ToolAccess, input: unknown) =>
         Effect.gen(function* () {
           const { text } = yield* read(Sought, input)
           if (text.trim() === '') return yield* new ToolRefused({ message: 'Say what to look for. list_tasks lists the newest tasks.' })
-          const working = new Set((yield* sessions.onTasks).flatMap((session) => (session.turnRunning ? [session.taskId] : [])))
-          const found = yield* findTasks({ projectId: access.projectId, text, limit: 20 }, working)
+          const found = yield* findTasks({ projectId: access.projectId, text, limit: 20 }, yield* workingNow)
           const seen = yield* seenByLead(
             access,
             found.map((task) => task.taskId),
           )
-          return foundWords(text, found, (task) => seen.get(task.taskId))
+          const asides = yield* asidesAmong(found.map((task) => task.taskId))
+          return foundWords(text, found, (task) => seen.get(task.taskId), asides)
         })
 
       const readTask = (access: ToolAccess, input: unknown) =>
@@ -2261,13 +2272,13 @@ export class Coordinator extends Context.Service<
 
       const listTasksTool = tool(
         'list_tasks',
-        "The project's tasks, newest first: what each is, where it stands, who leads it, the branch it works toward where that isn't the default, and, after a dash, how its pull request stands as Althar last saw it: draft or ready for review, checks, commits not pushed yet, merged or closed. A merged pull request is finished: don't suggest merging it. A closed one is as last seen only, since Althar stops watching it and it may have been reopened: say so rather than calling the task finished. To a task's lead and its reviewer, under each: whether it is yours, where it works (Local, in the person's checkout, or a worktree of its own), its branch, and for an open one the files it changes now, what isn't committed included. Before changing code another open task changes, or where your brief names another task, read it with read_task, read_task_diff and read_thread. It only reads.",
+        "The project's tasks, newest first: what each is, where it stands, who leads it, the branch it works toward where that isn't the default, and, after a dash, how its pull request stands as Althar last saw it: draft or ready for review, checks, commits not pushed yet, merged or closed. A merged pull request is finished: don't suggest merging it. A closed one is as last seen only, since Althar stops watching it and it may have been reopened: say so rather than calling the task finished. To a task's lead and its reviewer, under each: whether it is yours, where it works (Local, in the person's checkout, or a worktree of its own), its branch, and for an open one the files it changes now, what isn't committed included. Asides, chats on Scratch, aren't tasks and aren't listed: the coordinator is told the open ones, by name and where each stands, on a line after. Before changing code another open task changes, or where your brief names another task, read it with read_task, read_task_diff and read_thread. It only reads.",
         nothing,
         (access) => list(access),
       )
       const findTasksTool = tool(
         'find_tasks',
-        "Finds the project's tasks by what they were about: words from a title, what the person asked, what a lead reported or built, a pull request's number (#143), an issue's key, a branch, or a file's name. Each word finds the words it begins, and a task must hold them all. Best first: each with where it stands, its pull request and its id, and the words that matched; to a task's lead and its reviewer, as list_tasks says, whether it is yours, where it works, its branch and the files it changes. For a task asked about by what it did rather than its name. It only reads.",
+        "Finds the project's tasks by what they were about: words from a title, what the person asked, what a lead reported or built, a pull request's number (#143), an issue's key, a branch, or a file's name. Each word finds the words it begins, and a task must hold them all. Best first: each with where it stands (an aside, a chat on Scratch, is said to be one), its pull request and its id, and the words that matched; to a task's lead and its reviewer, as list_tasks says, whether it is yours, where it works, its branch and the files it changes. For a task asked about by what it did rather than its name. It only reads.",
         {
           type: 'object',
           properties: { text: { type: 'string', description: 'What to look for, in a few words.' } },

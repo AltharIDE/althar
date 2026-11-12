@@ -29,7 +29,7 @@ describe('the model picked for a task with no lead on it', () => {
   // Finding (sanity pass): a model picked while no lead is held (`pick` in TaskView) is never cleared, so once the lead it
   // started is moved to another model and then stops, the picker snaps back to that old pick, and the next message starts
   // the lead on it rather than on the model it was last moved to. Flips to passing when fixed.
-  it.fails('isn’t picked again once the lead it started was moved to another model and stopped', async () => {
+  it('isn’t picked again once the lead it started was moved to another model and stopped', async () => {
     const base = snapshot()
     const stopped = (model: string): ThreadSnapshot => ({
       ...base,
@@ -65,11 +65,10 @@ describe('the model picked for a task with no lead on it', () => {
 })
 
 describe('a recorded setup that couldn’t copy a file it names, in a task’s thread', () => {
-  // Finding (sanity pass): rounds.ts folds a setup whose exit code is 0 into the round's work as "Installed dependencies in
-  // meridian", without looking at `missing`, so a recorded setup that couldn't copy `.env` (failed, as the lead is told) reads
-  // as gone through. ThreadBlocks' own line for it ("Couldn't copy .env into meridian's folder.") is never reached in a task.
-  // Flips to passing when fixed.
-  it.fails('says it couldn’t copy the file, rather than that it went through', async () => {
+  // Finding (sanity pass): rounds.ts folds only a setup that went through into the round's work as "Installed dependencies
+  // in meridian"; a recorded setup that couldn't copy `.env` (failed, as the lead is told), though its command exited 0,
+  // stands alone, with ThreadBlocks' line for it ("Couldn't copy .env into meridian's folder.").
+  it('says it couldn’t copy the file, rather than that it went through', async () => {
     const failed = items.setup({
       ended: { at: NOW, code: 0, timedOut: false, stopped: false, last: 'Not in the checkout: .env', missing: ['.env'] },
     })

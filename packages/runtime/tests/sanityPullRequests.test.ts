@@ -96,13 +96,12 @@ const opened = (working: string) =>
 
 describe('commits that wait on the branch for Ship, as the coordinator is told of them', () => {
   // Finding (sanity pass): what the person's turns with a lead commit is held for Ship, and only Ship sends it up: the person's
-  // Push is refused (ShipRefused), as is the lead's own. But read_task tells the coordinator they "are not on the pull request
-  // yet; the person pushes them" (pullRequestStanding.ts, pushedWords: the change's `pushing` is absent for a worktree held
-  // for Ship, Changes.pushingOf, which reads as "every push is the person's"), and says nothing of Ship, nor that Ship's
-  // review is under way. So on PR #820 the coordinator, reading the task while Ship's review read the two commits, told the
-  // person Ship had "left 2 commits unpushed", called it a bug, and that pressing "Push 2 commits" was safe. Flips to passing
-  // when fixed.
-  it.live.fails('read_task says commits held for Ship wait for Ship, not that the person pushes them', () => {
+  // Push is refused (ShipRefused), as is the lead's own. read_task told the coordinator they "are not on the pull request yet;
+  // the person pushes them" (the change's `pushing` was absent for a worktree held for Ship), and said nothing of Ship, nor
+  // that Ship's review was under way: on PR #820 the coordinator then told the person Ship had "left 2 commits unpushed" and
+  // that pressing "Push 2 commits" was safe. Now `pushing.ship` says they wait for Ship, and read_task says so, and that Ship
+  // is under way.
+  it.live('read_task says commits held for Ship wait for Ship, not that the person pushes them', () => {
     const { working, github } = onGitHub()
     return Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
@@ -128,18 +127,36 @@ describe('commits that wait on the branch for Ship, as the coordinator is told o
       const read = yield* callTool(task.coordinatorAccess, 'read_task', { task: task.taskId })
       assert.include(read, "1 commit on the task's branch is not on the pull request yet")
       assert.notMatch(read, /the person pushes them/)
+      assert.include(read, 'they wait for Ship, which is under way')
       assert.lengthOf(github.changes, 1)
     }).pipe(Effect.provide(runtimeWith(github)))
   })
 })
 
+describe('commits that wait on the branch for Ship, as the person merges', () => {
+  // Found beside the findings above: the Dock offered Accept for a pull request whose commits waited for Ship (held, they
+  // were neither the person's to push nor going up), and Changes.merge merged it without them, past Ship's review and the
+  // "Merge, with commits not shipped" choice. A plain merge is refused while they wait: Ship, Review and merge, or Merge
+  // now take them.
+  it.live('refuses a plain merge of a pull request whose commits wait for Ship', () => {
+    const { working, github } = onGitHub()
+    return Effect.gen(function* () {
+      const task = yield* opened(working)
+      yield* say(task.threadId, 'Make it retry twice. tidy pls [lead:commit]')
+      const [card] = yield* until(cards(task.projectId), (all) => all[0]?.held?.commits === 1 && all[0]?.phase === 'ready')
+      const refused = yield* Effect.flip((yield* Changes).merge(task.taskId, card?.change?.head ?? '', card?.change?.url))
+      assert.instanceOf(refused, ShipRefused)
+      assert.strictEqual(github.changes[0]?.state, 'open')
+    }).pipe(Effect.provide(runtimeWith(github)))
+  })
+})
+
 describe('commits that wait on the branch for Ship, while the lead works again', () => {
-  // Finding (sanity pass): while a task's lead is in a turn, Changes.pushingOf says every one of its pull requests' commits
+  // Finding (sanity pass): while a task's lead was in a turn, Changes.pushingOf said every one of its pull requests' commits
   // "go up as its lead's turn ends" (`pushing.held` null), without looking at the hold for Ship; but a worktree held for Ship
-  // goes up with Ship alone (pushLeftOn returns at `heldAt`). So while the person talks to the lead again, the card says the
-  // held commits are "going up to the PR" (standing.ts, its merge needs "1 commit going up"), and read_task tells the
-  // coordinator "Althar pushes them as the lead's turn ends": none of them goes up when it ends. Flips to passing when fixed.
-  it.live.fails('doesn’t say what waits for Ship goes up as the lead’s turn ends', () => {
+  // goes up with Ship alone (pushLeftOn returns at `heldAt`). So the card said the held commits were "going up to the PR",
+  // and read_task "Althar pushes them as the lead's turn ends". Now the hold for Ship is looked at first, in a turn or not.
+  it.live('doesn’t say what waits for Ship goes up as the lead’s turn ends', () => {
     const { working, bare, github } = onGitHub()
     // The lead's turns go at once, but where the test holds one with `[lead:slowly]`.
     const held: Holds = { open: () => undefined, opened: () => false }
@@ -160,6 +177,7 @@ describe('commits that wait on the branch for Ship, while the lead works again',
       assert.strictEqual(card?.change?.unpushed, 1)
       // Held for Ship, it doesn't go up as the turn ends.
       assert.notStrictEqual(card?.change?.pushing?.held, null)
+      assert.isTrue(card?.change?.pushing?.ship)
       const read = yield* callTool(task.coordinatorAccess, 'read_task', { task: task.taskId })
       assert.notMatch(read, /Althar pushes them as the lead's turn ends/)
       assert.strictEqual(git(bare, 'rev-parse', 'althar/add-a-retry'), pushed)

@@ -204,6 +204,9 @@ describe('GitHub as a code host', () => {
       // Update-branch lands in the background: the head read later is its own only where it is a merge whose first parent is the head it had.
       assert.isTrue(yield* host.madeFrom!(repository, { ...open, headSha: 'made' }, 'abc'))
       assert.isFalse(yield* host.madeFrom!(repository, { ...open, headSha: 'theirs' }, 'abc'))
+      // Given the target's head it merged in, that is its second parent: someone's merge of another branch at that head isn't it.
+      assert.isTrue(yield* host.madeFrom!(repository, { ...open, headSha: 'made' }, 'abc', 'tip'))
+      assert.isFalse(yield* host.madeFrom!(repository, { ...open, headSha: 'made' }, 'abc', 'elsewhere'))
     }),
   )
 

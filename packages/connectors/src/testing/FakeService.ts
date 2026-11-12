@@ -849,8 +849,10 @@ export const makeFakeService = (options: FakeServiceOptions = {}): FakeService =
     // As GitHub's alone, which merges in the background: whether a head is the merge its update made from another.
     ...(product === 'github'
       ? {
-          madeFrom: (_repository: Repository, change: ChangeRequest, from: string) =>
-            Effect.andThen(called('madeFrom'), () => Effect.succeed(change.headSha?.startsWith(`${from}+`) === true)),
+          madeFrom: (_repository: Repository, change: ChangeRequest, from: string, base?: string) =>
+            Effect.andThen(called('madeFrom'), () =>
+              Effect.succeed(base === undefined ? change.headSha?.startsWith(`${from}+`) === true : change.headSha === `${from}+${base}`),
+            ),
         }
       : {}),
     closeChange: (_repository, change) =>

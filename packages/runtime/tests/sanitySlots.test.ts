@@ -5,7 +5,7 @@ import { Effect, Layer, Option } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { Automations } from '../src/Automations'
-import { Busy } from '../src/Busy'
+import { Busy, type Waiter } from '../src/Busy'
 import { Coordinator } from '../src/Coordinator'
 import { Instance } from '../src/Instance'
 import { Models } from '../src/Models'
@@ -229,9 +229,10 @@ describe('what Althar tells a lead that runs out of usage', () => {
 
 describe('a model the person switched off', () => {
   // Finding (sanity pass): a lead named by its agent alone, as start_task takes one (review_pull_request and answer_stuck_step's
-  // hand_on resolve theirs the same way, through stepOf), runs on the agent's own default model though the person switched that
-  // model off ("A model switched off is never planned", agents.md). Flips to passing when fixed.
-  it.live.fails('is never what a lead named by its agent alone runs on', () =>
+  // hand_on resolve theirs the same way, through stepOf), ran on the agent's own default model though the person switched that
+  // model off ("A model switched off is never planned", agents.md). A session started with no model named is moved off a
+  // default the person switched off as it starts, whatever started it.
+  it.live('is never what a lead named by its agent alone runs on', () =>
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
       const models = yield* Models
@@ -255,13 +256,39 @@ describe('a model the person switched off', () => {
       assert.notStrictEqual(sessions[0]?.model ?? 'small', 'small')
     }).pipe(Effect.provide(atOnce(4))),
   )
+
+  it.live('keeps a lead from starting, saying why, where the agent has no other model left on', () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const models = yield* Models
+      const { projectId, threadId } = yield* opened
+      yield* models.setModelBlocked({ agentId: 'codex', model: 'small', blocked: true })
+      yield* models.setModelBlocked({ agentId: 'codex', model: 'large', blocked: true })
+      const coordinator: ToolAccess = { role: 'coordinator', projectId, threadId, sessionId: 'none', taskId: null }
+      yield* callTool(coordinator, 'start_task', { title: 'Sketch the retry', description: '[lead:finish]', lead: { agent: 'codex' } })
+      const [task] = yield* sql<{ threadId: string }>`
+        SELECT t.id AS thread_id FROM tasks k JOIN threads t ON t.task_id = k.id AND t.kind = 'task' WHERE k.title = 'Sketch the retry'`
+      const said = yield* until(
+        Effect.map(items(task?.threadId ?? ''), (all) =>
+          all.flatMap((item) => (item.kind === 'notice' ? [String(item.content.description ?? '')] : [])),
+        ),
+        (all) => all.some((one) => one.includes('switched off')),
+      )
+      assert.deepStrictEqual(said, [
+        'Small is switched off for Fake codex, and it has no other model on. Switch one on in Settings, or pick another agent.',
+      ])
+      const ran = yield* sql<{ model: string | null }>`
+        SELECT model FROM provider_sessions WHERE thread_id = ${task?.threadId ?? ''} AND state != 'failed'`
+      assert.deepStrictEqual(ran, [])
+    }).pipe(Effect.provide(atOnce(4))),
+  )
 })
 
 describe('Up next across projects', () => {
-  // Finding (sanity pass): putting one project's Up next in an order of its own lifts its new work ahead of another project's
+  // Finding (sanity pass): putting one project's Up next in an order of its own lifted its new work ahead of another project's
   // work under way, though the order is kept within a project and doesn't reorder other projects' work (scheduling.md,
-  // "Running and Up next"). Flips to passing when fixed.
-  it.live.fails('keeps another project’s work under way where it stood when the person reorders one project', () =>
+  // "Running and Up next"). The project's work now takes, in the person's order, the places it stood at.
+  it.live('keeps another project’s work under way where it stood when the person reorders one project', () =>
     Effect.gen(function* () {
       const busy = yield* Busy
       const mine = yield* opened
@@ -295,9 +322,9 @@ describe('Up next across projects', () => {
 
 describe('one automation’s run at work at a time', () => {
   // Finding (sanity pass): moving any row of a project's Up next puts every row of it where it stands, an automation's waiting
-  // run too, which then stands as the person's work does and starts beside another automation's run at work, past the one at
-  // a time automations get (scheduling.md, "What goes first"). Flips to passing when fixed.
-  it.live.fails('keeps a second automation’s run waiting when the person moves another row of Up next', () =>
+  // run too, which then stood as the person's work does and started beside another automation's run at work, past the one at
+  // a time automations get (scheduling.md, "What goes first"). Wherever it stands, an automation's run waits its turn.
+  it.live('keeps a second automation’s run waiting when the person moves another row of Up next', () =>
     Effect.gen(function* () {
       const busy = yield* Busy
       const { projectId } = yield* opened
@@ -322,13 +349,37 @@ describe('one automation’s run at work at a time', () => {
       assert.notInclude(atWork, second)
     }).pipe(Effect.provide(atOnce(2))),
   )
+
+  it.live('keeps a second automation’s run waiting when the person moves that run itself to the front', () =>
+    Effect.gen(function* () {
+      const busy = yield* Busy
+      const { projectId } = yield* opened
+      const holder = yield* started(projectId, 'Holder', 'Work on it. [lead:wait]')
+      yield* working(holder.taskId)
+      const first = yield* ranNow(projectId, { ...NOTES, name: 'Nightly', prompt: 'Bump the dependencies. [lead:wait]' })
+      yield* working(first)
+      const mine = yield* started(projectId, 'Mine', 'Work on it. [lead:wait]')
+      yield* heldFor(mine.taskId, 'machine_busy')
+      const second = yield* ranNow(projectId, { ...NOTES, name: 'Weekly', prompt: 'Write the notes. [lead:wait]' })
+      yield* heldFor(second, 'machine_busy')
+      // The person puts the second automation's run first, ahead of their own task: it stands there, and still waits its turn.
+      assert.isTrue(yield* busy.move(second, 0))
+      assert.deepStrictEqual((yield* busy.line(projectId)).order, [second, mine.taskId])
+      yield* busy.set(4)
+      yield* working(mine.taskId)
+      yield* busy.letGo(holder.taskId)
+      const atWork = (yield* busy.now).holders.map((one) => one.taskId)
+      assert.include(atWork, first)
+      assert.notInclude(atWork, second)
+    }).pipe(Effect.provide(atOnce(2))),
+  )
 })
 
 describe('Up next with an automation’s run in it', () => {
-  // Finding (sanity pass): an automation's run that waits, which goes after everything else, makes the project's Up next read
-  // as the person's own order ("Your order", Back to oldest first) though nobody moved anything; Back to oldest first changes
-  // nothing. Flips to passing when fixed.
-  it.live.fails('reads as the oldest first while the person hasn’t moved anything', () =>
+  // Finding (sanity pass): an automation's run that waits, which goes after everything else, made the project's Up next read
+  // as the person's own order ("Your order", Back to oldest first) though nobody moved anything; Back to oldest first changed
+  // nothing. The order nobody changed is the one places are given in by default.
+  it.live('reads as the oldest first while the person hasn’t moved anything', () =>
     Effect.gen(function* () {
       const busy = yield* Busy
       const { projectId } = yield* opened
@@ -345,5 +396,82 @@ describe('Up next with an automation’s run in it', () => {
       // Nobody put the line in an order of their own.
       assert.isFalse(line.reordered)
     }).pipe(Effect.provide(atOnce(1))),
+  )
+
+  it.live('keeps a run nobody moved after what joins once the person reorders the rest', () =>
+    Effect.gen(function* () {
+      const busy = yield* Busy
+      const { projectId } = yield* opened
+      const holder = yield* started(projectId, 'Holder', 'Work on it. [lead:wait]')
+      yield* working(holder.taskId)
+      const run = yield* ranNow(projectId, NOTES)
+      yield* heldFor(run, 'machine_busy')
+      const one = yield* started(projectId, 'One', 'Work on it. [lead:wait]')
+      const two = yield* started(projectId, 'Two', 'Work on it. [lead:wait]')
+      yield* heldFor(one.taskId, 'machine_busy')
+      yield* heldFor(two.taskId, 'machine_busy')
+      // The person puts Two first; the automation's run, which they didn't move, stays after everything else.
+      assert.isTrue(yield* busy.move(two.taskId, 0))
+      assert.deepStrictEqual((yield* busy.line(projectId)).order, [two.taskId, one.taskId, run])
+      // A task that joins later goes before it too.
+      const three = yield* started(projectId, 'Three', 'Work on it. [lead:wait]')
+      yield* heldFor(three.taskId, 'machine_busy')
+      assert.deepStrictEqual((yield* busy.line(projectId)).order, [two.taskId, one.taskId, three.taskId, run])
+    }).pipe(Effect.provide(atOnce(1))),
+  )
+
+  it.live('keeps no order of the person’s once a move leaves the default one', () =>
+    Effect.gen(function* () {
+      const busy = yield* Busy
+      const sql = yield* SqlClient.SqlClient
+      const { projectId } = yield* opened
+      const holder = yield* started(projectId, 'Holder', 'Work on it. [lead:wait]')
+      yield* working(holder.taskId)
+      const run = yield* ranNow(projectId, NOTES)
+      yield* heldFor(run, 'machine_busy')
+      const one = yield* started(projectId, 'One', 'Work on it. [lead:wait]')
+      const two = yield* started(projectId, 'Two', 'Work on it. [lead:wait]')
+      yield* heldFor(two.taskId, 'machine_busy')
+      const kept = sql<{ id: string }>`SELECT id FROM tasks WHERE project_id = ${projectId} AND line_at IS NOT NULL`
+      // Moved to the front where it stands already, and moved away and back: nothing of the person's order is kept.
+      assert.isTrue(yield* busy.move(one.taskId, 0))
+      assert.deepStrictEqual(yield* kept, [])
+      assert.isTrue(yield* busy.move(two.taskId, 0))
+      assert.isTrue((yield* busy.line(projectId)).reordered)
+      assert.isTrue(yield* busy.move(two.taskId, 1))
+      assert.deepStrictEqual(yield* kept, [])
+      assert.deepStrictEqual(yield* busy.line(projectId), {
+        continuing: [],
+        tasks: [one.taskId, two.taskId, run],
+        order: [one.taskId, two.taskId, run],
+        reordered: false,
+      })
+    }).pipe(Effect.provide(atOnce(1))),
+  )
+})
+
+describe('a place free beside work its limit holds back', () => {
+  // What can't take a new place, as a task's fifth helper can't, doesn't stand before new work asking for one that is free.
+  it.live('goes to the new work at once', () =>
+    Effect.gen(function* () {
+      const busy = yield* Busy
+      const { projectId } = yield* opened
+      // Four helpers of one task at work, whose starts never end, and a fifth waiting since before anything else.
+      const helper = (n: number): Waiter => ({
+        taskId: 'tsk_helped',
+        helper: `thr_helper${n}`,
+        order: 'underway',
+        since: '2026-01-01T00:00:00.000Z',
+        start: Effect.never,
+      })
+      yield* busy.queue(Effect.succeed([1, 2, 3, 4, 5].map(helper)))
+      yield* until(
+        Effect.map(busy.now, (now) => now.holders.filter((one) => one.helper !== undefined)),
+        (helpers) => helpers.length === 4,
+      )
+      // A place is free: new work takes it, though the fifth helper waited longer.
+      const task = yield* started(projectId, 'New', 'Work on it. [lead:wait]')
+      assert.strictEqual(task.outcome, 'running')
+    }).pipe(Effect.provide(atOnce(6))),
   )
 })

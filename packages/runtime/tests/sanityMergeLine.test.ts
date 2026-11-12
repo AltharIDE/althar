@@ -287,9 +287,9 @@ describe('sanity pass: what the coordinator is told of a task’s pull request',
     ...more,
   })
 
-  // Finding (sanity pass): read_task tells the coordinator a pull request's conflict is "not known (Althar does not ask the
-  // host)" even where its host said it conflicts and the task's card shows the conflict. Flips to passing when fixed.
-  it.fails('says a pull request its host says conflicts conflicts, not that it isn’t known', () => {
+  // Finding (sanity pass): read_task told the coordinator a pull request's conflict was "not known (Althar does not ask the
+  // host)" even where its host said it conflicts and the task's card showed the conflict. It says what the host said.
+  it('says a pull request its host says conflicts conflicts, not that it isn’t known', () => {
     const section = sectionWords({
       changes: [
         { change: change({ conflicts: true, target: 'main' }), seenAt: '2026-10-01T10:00:00Z', host: { name: 'GitHub', connected: true } },
@@ -298,31 +298,54 @@ describe('sanity pass: what the coordinator is told of a task’s pull request',
       unmerged: 0,
     })
     assert.notMatch(section, /Conflicts with the base: not known/)
+    assert.include(section, 'Conflicts with main, as its host says')
   })
 })
 
 describe('sanity pass: a task’s pull request Althar itself brought up to date', () => {
+  /** How the host answers each update-branch Althar asks of it, in turn. */
+  type Answer =
+    /** It merges main in and says the head it made. */
+    | 'said'
+    /** It merges main in and answers before it has, as GitHub's can. */
+    | 'background'
+    /** It answers before it has, and what lands is someone else's merge of another branch at that head. */
+    | 'theirs'
+
   /**
    * The fake GitHub over a bare repository, whose update-branch merges main into the pull request's branch there, as
-   * GitHub's does: a merge commit on the branch, made on the host, never pushed from this Mac.
+   * GitHub's does: a merge commit on the branch, made on the host, never pushed from this Mac. It tells a head its update
+   * made by its parents, as GitHub's does (`madeFrom`), and reads branches' heads from the bare repository.
    */
-  const onGitHub = () => {
+  const onGitHub = (answers: ReadonlyArray<Answer>) => {
     const { working, bare } = hosted()
     const fake = makeFakeService({ pushUrl: () => bare, headOf: tipOf(bare) })
     fake.addRepository(['meridian', 'api'])
     const byHost = (...args: Array<string>) => git(bare, '-c', 'user.name=GitHub', '-c', 'user.email=noreply@github.test', ...args)
-    const update = (_repository: Repository, change: ChangeRequest, asked: { readonly expectedHead: string }) =>
+    let asked = 0
+    const update = (_repository: Repository, change: ChangeRequest, ask: { readonly expectedHead: string }) =>
       Effect.sync((): BranchUpdate => {
+        const answer = answers[asked++] ?? 'said'
         const head = git(bare, 'rev-parse', `refs/heads/${change.source}`)
-        if (head !== asked.expectedHead) return { outcome: 'moved', head }
+        if (head !== ask.expectedHead) return { outcome: 'moved', head }
         const main = git(bare, 'rev-parse', 'refs/heads/main')
-        const made = byHost('commit-tree', `${head}^{tree}`, '-p', head, '-p', main, '-m', `Merge branch 'main' into ${change.source}`)
+        const other = byHost('commit-tree', `${main}^{tree}`, '-p', main, '-m', 'Other work')
+        const merged = answer === 'theirs' ? other : main
+        const made = byHost('commit-tree', `${head}^{tree}`, '-p', head, '-p', merged, '-m', `Merge into ${change.source}`)
         git(bare, 'update-ref', `refs/heads/${change.source}`, made)
-        return { outcome: 'updated', head: made }
+        return { outcome: 'updated', head: answer === 'said' ? made : null }
       })
-    // Everything as the fake answers it, but its update-branch, which writes to the bare repository.
+    const madeFrom = (_repository: Repository, change: ChangeRequest, from: string, base?: string) =>
+      Effect.sync(() => {
+        if (change.headSha === null) return false
+        const parents = git(bare, 'rev-list', '--parents', '-n', '1', change.headSha).split(' ').slice(1)
+        return parents.length === 2 && parents[0] === from && (base === undefined || parents[1] === base)
+      })
+    const branchHead = (_repository: Repository, name: string) => Effect.sync(() => git(bare, 'rev-parse', `refs/heads/${name}`))
+    // Everything as the fake answers it, but what reads and writes the bare repository.
+    const own: Record<string, unknown> = { updateBranch: update, madeFrom, branchHead }
     const github = new Proxy(fake, {
-      get: (target, key, receiver) => (key === 'updateBranch' ? update : Reflect.get(target, key, receiver)),
+      get: (target, key, receiver) => (typeof key === 'string' && key in own ? own[key] : Reflect.get(target, key, receiver)),
     }) as FakeService & CodeHost
     /** Someone else's commit lands on main, on the host. */
     const mainMoves = () => {
@@ -338,43 +361,64 @@ describe('sanity pass: a task’s pull request Althar itself brought up to date'
       yield* (yield* Sessions).send({ envelope: yield* Runtime.envelope('thread.send', { threadId, body }), threadId, body, quiet: true })
     })
 
-  // Finding (sanity pass): once Althar itself brings a task's pull request up to date (update_branch, as the merge line
-  // does for each pull request behind main), it takes the merge it made for someone else's push: the lead's next commits,
-  // the merge brought in, are held for the person's Push as "Someone else pushed to PR #1". Flips to passing when fixed.
-  it.live.fails('what the lead commits after Althar’s own update of its branch still goes up by itself', () => {
-    const { bare, working, github, mainMoves } = onGitHub()
-    return Effect.gen(function* () {
-      const sql = yield* SqlClient.SqlClient
-      yield* connect('github', HOST)
-      const projectId = yield* ask(
-        working,
-        'Add a retry. [coordinator:plan-no-review] [coordinator:plan] [lead:finish] [lead:edit] [lead:commit] [lead:push]',
-      )
-      const [ready] = yield* until(taskCards(projectId), (all) => all[0]?.phase === 'ready' && all[0]?.change != null)
-      const threadId = ready?.threadId ?? ''
-      const [workspace] = yield* sql<{
-        path: string
-        branch: string
-      }>`SELECT path, branch FROM workspaces WHERE task_id = ${ready?.taskId ?? ''}`
-      const path = workspace?.path ?? ''
-      const branch = workspace?.branch ?? ''
-      // Main moves on, and Althar brings the pull request up to date with it on the host: GitHub's update-branch.
-      mainMoves()
-      assert.match(yield* updateBranch(projectId, { pull_request: '#1' }), /^Merged main into PR #1's branch/)
-      const made = git(bare, 'rev-parse', branch)
-      // Once Althar has read the pull request at that head, the lead brings the merge into its branch here, and commits on
-      // top in its next turn.
-      yield* (yield* Changes).refresh(ready?.taskId ?? '')
-      yield* until(taskCards(projectId), (all) => all[0]?.change?.head === made)
-      git(path, 'fetch', '-q', bare, branch)
-      git(path, 'merge', '-q', '--ff-only', made)
-      yield* tell(threadId, 'tidy pls')
-      const [card] = yield* until(
-        Effect.all([taskCards(projectId), Effect.sync(() => git(bare, 'log', '--format=%s', branch).split('\n'))]),
-        ([all, log]) => all[0]?.change?.pushing?.held != null || log.includes('Tidy up'),
-      ).pipe(Effect.map(([all]) => all))
-      assert.isNull(card?.change?.pushing?.held ?? null)
-      assert.include(git(bare, 'log', '--format=%s', branch).split('\n'), 'Tidy up')
-    }).pipe(Effect.provide(runtimeWith({ github }, ':memory:', undefined, ['codex', 'opencode'])))
-  })
+  // Finding (sanity pass): once Althar itself brought a task's pull request up to date (update_branch, as the merge line
+  // does for each pull request behind main), it took the merge it made for someone else's push: the lead's next commits,
+  // the merge brought in, were held for the person's Push as "Someone else pushed to PR #1". Now each update Althar makes is
+  // kept, and read back once as the merge of main's head into the head it asked from (branchUpdates.ts), one after another;
+  // what the lead commits on top of it goes up by itself, and someone else's merge in its place is still theirs.
+  it.live.each([
+    { how: 'its host says the head it made', answers: ['said'], ours: true },
+    { how: 'its host makes it in the background', answers: ['background'], ours: true },
+    { how: 'twice, the first in the background', answers: ['background', 'said'], ours: true },
+    { how: 'someone else’s merge of another branch lands in its place', answers: ['theirs'], ours: false },
+  ] satisfies ReadonlyArray<{ how: string; answers: ReadonlyArray<Answer>; ours: boolean }>)(
+    'what the lead commits after Althar’s own update of its branch still goes up by itself: $how',
+    ({ answers, ours }) => {
+      const { bare, working, github, mainMoves } = onGitHub(answers)
+      return Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient
+        yield* connect('github', HOST)
+        const projectId = yield* ask(
+          working,
+          'Add a retry. [coordinator:plan-no-review] [coordinator:plan] [lead:finish] [lead:edit] [lead:commit] [lead:push]',
+        )
+        const [ready] = yield* until(taskCards(projectId), (all) => all[0]?.phase === 'ready' && all[0]?.change != null)
+        const threadId = ready?.threadId ?? ''
+        const [workspace] = yield* sql<{
+          path: string
+          branch: string
+        }>`SELECT path, branch FROM workspaces WHERE task_id = ${ready?.taskId ?? ''}`
+        const path = workspace?.path ?? ''
+        const branch = workspace?.branch ?? ''
+        // Main moves on, and Althar brings the pull request up to date with it on the host, as often as asked: GitHub's
+        // update-branch. Each time, Althar reads the pull request at the head it lands at.
+        for (const answer of answers) {
+          mainMoves()
+          assert.match(
+            yield* updateBranch(projectId, { pull_request: '#1' }),
+            answer === 'said' ? /^Merged main into PR #1's branch/ : /is merging main/,
+          )
+          const landed = git(bare, 'rev-parse', branch)
+          yield* (yield* Changes).refresh(ready?.taskId ?? '')
+          yield* until(taskCards(projectId), (all) => all[0]?.change?.head === landed)
+        }
+        // The lead brings what landed into its branch here, and commits on top in its next turn.
+        const made = git(bare, 'rev-parse', branch)
+        git(path, 'fetch', '-q', bare, branch)
+        git(path, 'merge', '-q', '--ff-only', made)
+        yield* tell(threadId, 'tidy pls')
+        const [card] = yield* until(
+          Effect.all([taskCards(projectId), Effect.sync(() => git(bare, 'log', '--format=%s', branch).split('\n'))]),
+          ([all, log]) => all[0]?.change?.pushing?.held != null || log.includes('Tidy up'),
+        ).pipe(Effect.map(([all]) => all))
+        if (ours) {
+          assert.isNull(card?.change?.pushing?.held ?? null)
+          assert.include(git(bare, 'log', '--format=%s', branch).split('\n'), 'Tidy up')
+        } else {
+          assert.strictEqual(card?.change?.pushing?.held, 'Someone else pushed to PR #1')
+          assert.notInclude(git(bare, 'log', '--format=%s', branch).split('\n'), 'Tidy up')
+        }
+      }).pipe(Effect.provide(runtimeWith({ github }, ':memory:', undefined, ['codex', 'opencode'])))
+    },
+  )
 })

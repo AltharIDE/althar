@@ -186,9 +186,10 @@ describe('skipping a review', () => {
 })
 
 describe('a pull request after the last merged', () => {
-  // Finding (sanity pass): a next pull request is titled and described from what the lead said since the last one *opened*,
-  // so words given while it was still open, which went on it, name and describe the next one too. Flips to passing when fixed.
-  it.live.fails('isn’t named or described by what the lead said of work that went in the merged one', () => {
+  // Finding (sanity pass): a next pull request was titled and described from what the lead said since the last one *opened*,
+  // so words given while it was still open, which went on it, named and described the next one too. Now it is from what the
+  // lead said since the last push to it.
+  it.live('isn’t named or described by what the lead said of work that went in the merged one', () => {
     const { working, bare, github } = onGitHub()
     return Effect.gen(function* () {
       const runs = yield* Runs

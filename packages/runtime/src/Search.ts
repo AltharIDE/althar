@@ -5,7 +5,7 @@ import { Clock, Duration, Effect, Layer } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { RuntimeConfig } from './Config'
-import { issueCardsWaiting } from './kinds'
+import { asideIn, issueCardsWaiting } from './kinds'
 import { DRAFTING_MS, stillDrafting } from './needsYou'
 
 /*
@@ -302,16 +302,49 @@ export interface SearchInput {
 }
 
 /**
+ * What `phaseOf` reads of the task `k`, as SQL: its columns, over the joins
+ * that go with them, of its coordinator's thread (`ch`), its plan (`p`) and
+ * its latest run (`n`).
+ */
+const phaseRead = (sql: SqlClient.SqlClient) => ({
+  columns: sql`
+    k.state, k.created_at, k.kept_at,
+    -- Only the coordinator's own turn, which is the one that drafts a task: a lead's turn on another says nothing of its plan.
+    EXISTS (SELECT 1 FROM turn_deliveries d
+      WHERE d.thread_id = ch.id AND d.requested_at <= k.created_at
+        AND coalesce(d.ended_at, '9999') >= k.created_at) AS made_in_turn,
+    EXISTS (SELECT 1 FROM turn_deliveries d
+      WHERE d.thread_id = ch.id AND d.requested_at <= k.created_at AND d.ended_at IS NULL) AS made_in_open_turn,
+    p.state AS plan_state, p.starts_at,
+    (SELECT count(*) FROM attention_requests x WHERE x.task_id = k.id AND x.state = 'open') + ${sql.unsafe(issueCardsWaiting('k'))} AS waiting,
+    (SELECT count(*) FROM review_drafts v WHERE v.task_id = k.id AND v.state IN ('pending', 'failed', 'uncertain')) AS drafted,
+    n.state AS run_state,
+    (SELECT count(*) FROM node_attempts a JOIN nodes d ON d.id = a.node_id JOIN workflow_executions e ON e.id = d.execution_id
+      WHERE e.run_id = n.id AND a.state = 'held') AS held`,
+  joins: sql`
+    LEFT JOIN threads ch ON ch.id = (SELECT h.id FROM threads h WHERE h.project_id = k.project_id AND h.kind = 'coordinator' LIMIT 1)
+    LEFT JOIN task_plans p ON p.id = (SELECT id FROM task_plans WHERE task_id = k.id AND state IN ('proposed', 'accepted') ORDER BY proposed_at DESC LIMIT 1)
+    LEFT JOIN runs n ON n.id = (SELECT id FROM runs WHERE task_id = k.id ORDER BY created_at DESC LIMIT 1)`,
+})
+
+/** `phaseOf` as of now, with how long a draft stays off the board: `working` is the tasks an agent is on. */
+const phasesNow = Effect.fn('Search.phasesNow')(function* () {
+  const config = yield* RuntimeConfig
+  const now = yield* Clock.currentTimeMillis
+  // How long a draft stays off the board, as its card reads it (DRAFTING_MS unless a test says otherwise).
+  const draftingMs = Duration.toMillis(config.drafting ?? Duration.millis(DRAFTING_MS))
+  return (task: Parameters<typeof phaseOf>[0], working: ReadonlySet<string>) => phaseOf(task, working, now, draftingMs)
+})
+
+/**
  * The tasks that hold what was typed, best first; with nothing typed, the
  * most recently changed. `working` is the tasks an agent is on now, as the
  * sessions say.
  */
 export const findTasks = Effect.fn('Search.findTasks')(function* (input: SearchInput, working: ReadonlySet<string>) {
   const sql = yield* SqlClient.SqlClient
-  const config = yield* RuntimeConfig
-  const now = yield* Clock.currentTimeMillis
-  // How long a draft stays off the board, as its card reads it (DRAFTING_MS unless a test says otherwise).
-  const draftingMs = Duration.toMillis(config.drafting ?? Duration.millis(DRAFTING_MS))
+  const phaseNow = yield* phasesNow()
+  const phase = phaseRead(sql)
   const limit = Math.max(1, Math.min(input.limit ?? 20, 50))
   const match = matchOf(input.text)
   if (match === null && input.text.trim() !== '') return []
@@ -336,27 +369,13 @@ export const findTasks = Effect.fn('Search.findTasks')(function* (input: SearchI
   const ids = ranked.map((row) => row.id)
   // Where each stands, read as its card does; its latest pull request; and what matched, marked.
   const standing = sql`
-    r.id AS row_id, t.id AS thread_id, k.id AS task_id, k.project_id, k.title, k.slug, k.state, k.created_at, k.kept_at, ${recency} AS changed_at,
-    -- Only the coordinator's own turn, which is the one that drafts a task: a lead's turn on another says nothing of its plan.
-    EXISTS (SELECT 1 FROM turn_deliveries d
-      WHERE d.thread_id = ch.id AND d.requested_at <= k.created_at
-        AND coalesce(d.ended_at, '9999') >= k.created_at) AS made_in_turn,
-    EXISTS (SELECT 1 FROM turn_deliveries d
-      WHERE d.thread_id = ch.id AND d.requested_at <= k.created_at AND d.ended_at IS NULL) AS made_in_open_turn,
-    p.state AS plan_state, p.starts_at,
-    (SELECT count(*) FROM attention_requests x WHERE x.task_id = k.id AND x.state = 'open') + ${sql.unsafe(issueCardsWaiting('k'))} AS waiting,
-    (SELECT count(*) FROM review_drafts v WHERE v.task_id = k.id AND v.state IN ('pending', 'failed', 'uncertain')) AS drafted,
-    n.state AS run_state,
-    (SELECT count(*) FROM node_attempts a JOIN nodes d ON d.id = a.node_id JOIN workflow_executions e ON e.id = d.execution_id
-      WHERE e.run_id = n.id AND a.state = 'held') AS held,
+    r.id AS row_id, t.id AS thread_id, k.id AS task_id, k.project_id, k.title, k.slug, ${recency} AS changed_at, ${phase.columns},
     (SELECT l.key FROM external_links l WHERE l.task_id = k.id AND l.kind = 'change' ORDER BY l.created_at DESC, l.rowid DESC LIMIT 1)
       AS pull_request`
   const joins = sql`
     ${live}
     JOIN threads t ON t.task_id = k.id AND t.kind = 'task'
-    LEFT JOIN threads ch ON ch.id = (SELECT h.id FROM threads h WHERE h.project_id = k.project_id AND h.kind = 'coordinator' LIMIT 1)
-    LEFT JOIN task_plans p ON p.id = (SELECT id FROM task_plans WHERE task_id = k.id AND state IN ('proposed', 'accepted') ORDER BY proposed_at DESC LIMIT 1)
-    LEFT JOIN runs n ON n.id = (SELECT id FROM runs WHERE task_id = k.id ORDER BY created_at DESC LIMIT 1)`
+    ${phase.joins}`
   const read =
     match === null
       ? yield* sql<Found>`
@@ -377,7 +396,7 @@ export const findTasks = Effect.fn('Search.findTasks')(function* (input: SearchI
     projectId: row.projectId,
     title: row.title,
     slug: row.slug,
-    phase: phaseOf(row, working, now, draftingMs),
+    phase: phaseNow(row, working),
     state: row.state,
     pullRequest: row.pullRequest,
     changedAt: row.changedAt,
@@ -420,17 +439,97 @@ const standingWords = (task: FoundTask) => {
   }
 }
 
-/** Found tasks as the coordinator's `find_tasks` says them: a line each, and what matched under it. */
+/** Which of these tasks are asides: chats on Scratch (`tasks.shelf`), not tasks, which `find_tasks` says they are. */
+export const asidesAmong = (taskIds: ReadonlyArray<string>) =>
+  Effect.gen(function* () {
+    if (taskIds.length === 0) return new Set<string>()
+    const sql = yield* SqlClient.SqlClient
+    const rows = yield* sql<{ id: string }>`
+      SELECT k.id FROM tasks k WHERE k.id IN ${sql.in(taskIds)} AND ${sql.unsafe(asideIn('k'))}`
+    return new Set(rows.map((row) => row.id))
+  })
+
+/** What more is said of an aside by where it stands: never ready or planned, as it waits on no one to be finished. */
+const ASIDE_STANDS: Partial<Record<TaskPhase, string>> = {
+  running: ', its agent at it',
+  waiting: ', waiting on the person',
+  kept: ', kept for later',
+  stopped: ', stopped',
+}
+
+/** Where a found aside stands. */
+const asideWords = (task: FoundTask) =>
+  task.phase === 'settled' ? 'an aside, cleared' : `an aside on Scratch, a chat rather than a task${ASIDE_STANDS[task.phase] ?? ''}`
+
+/** How many open asides the coordinator is told of by name; past them, how many more. */
+const ASIDES_NAMED = 10
+
+/** An open aside as the coordinator is told of it: by its slug and title, and where it stands as find_tasks says it. */
+export interface OpenAside {
+  readonly taskId: string
+  readonly threadId: string
+  readonly slug: string
+  readonly title: string
+  /** Where it stands, said after its title: ", waiting on the person", or nothing where nothing is to be said. */
+  readonly stands: string
+}
+
+/**
+ * The project's open asides, newest first, the newest ASIDES_NAMED of them,
+ * each with where it stands as find_tasks says it, and how many more there
+ * are. `working` says whether an agent is at work on one now.
+ */
+export const openAsides = Effect.fn('Search.openAsides')(function* (
+  projectId: string,
+  working: (aside: { readonly taskId: string; readonly threadId: string }) => boolean,
+) {
+  const sql = yield* SqlClient.SqlClient
+  const phaseNow = yield* phasesNow()
+  const phase = phaseRead(sql)
+  const rows = yield* sql<Parameters<typeof phaseOf>[0] & { threadId: string; slug: string; title: string; open: number }>`
+    SELECT k.id AS task_id, t.id AS thread_id, k.slug, k.title, count(*) OVER () AS open, ${phase.columns}
+    FROM tasks k JOIN threads t ON t.task_id = k.id AND t.kind = 'task' ${phase.joins}
+    WHERE k.project_id = ${projectId} AND ${sql.unsafe(asideIn('k'))} AND k.state IN ('draft', 'open')
+    ORDER BY k.created_at DESC, k.rowid DESC LIMIT ${ASIDES_NAMED}`
+  const atWork = new Set(rows.filter(working).map((row) => row.taskId))
+  return {
+    asides: rows.map((row): OpenAside => ({
+      taskId: row.taskId,
+      threadId: row.threadId,
+      slug: row.slug,
+      title: row.title,
+      stands: ASIDE_STANDS[phaseNow(row, atWork)] ?? '',
+    })),
+    more: Math.max(0, (rows[0]?.open ?? 0) - rows.length),
+  }
+})
+
+/** An open aside by name, with where it stands. */
+export const asideNamed = (aside: OpenAside) => `${aside.slug} (“${aside.title}”${aside.stands})`
+
+/** What the coordinator is told the open asides are called, before them: chats, not tasks, which none waits to be accepted as. */
+export const ASIDES_ARE = 'Asides on Scratch, chats beside your conversation rather than tasks'
+
+/** How many more asides are open past those named, in words. */
+export const asidesMore = (more: number) => (more === 0 ? '' : `, and ${more} more`)
+
+/** The open asides in a line, as list_tasks ends: nothing where there are none. */
+export const asidesLine = (open: { readonly asides: ReadonlyArray<OpenAside>; readonly more: number }) =>
+  open.asides.length === 0 ? [] : [`${ASIDES_ARE}: ${open.asides.map(asideNamed).join(', ')}${asidesMore(open.more)}.`]
+
+/** Found tasks as the coordinator's `find_tasks` says them: a line each, and what matched under it; an aside said to be one. */
 export const foundWords = (
   text: string,
   tasks: ReadonlyArray<FoundTask>,
   more: (task: FoundTask) => string | undefined = () => undefined,
+  asides: ReadonlySet<string> = new Set(),
 ) =>
   tasks.length === 0
     ? `No task in this project matches “${text.trim()}”.`
     : tasks
         .map((task) => {
-          const head = `- ${task.slug}: ${task.title} (${standingWords(task)}${task.pullRequest === null ? '' : `, PR ${task.pullRequest}`}; id ${task.taskId})`
+          const standing = asides.has(task.taskId) ? asideWords(task) : standingWords(task)
+          const head = `- ${task.slug}: ${task.title} (${standing}${task.pullRequest === null ? '' : `, PR ${task.pullRequest}`}; id ${task.taskId})`
           const matched = task.matched?.map((part) => part.text).join('')
           const lines = [head, ...(matched === undefined ? [] : [`  “${matched.replace(/\s+/g, ' ').trim()}”`]), more(task)]
           return lines.filter((line) => line !== undefined).join('\n')

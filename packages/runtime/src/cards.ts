@@ -57,7 +57,7 @@ export const offScratch = (taskId: string) =>
         EXISTS (SELECT 1 FROM review_drafts d WHERE d.task_id = k.id AND d.created_at > shelved.at) AS drafted
       FROM tasks k, shelved WHERE k.id = ${taskId} AND k.shelf = 'scratch'`
     if (chat === undefined || (chat.branched === 0 && chat.linked === 0 && chat.drafted === 0)) return
-    yield* sql`UPDATE tasks SET shelf = NULL, revision = revision + 1 WHERE id = ${taskId}`
+    yield* change('tasks', taskId, { shelf: null })
     yield* leftAsides(chat.projectId, taskId)
     if (chat.threadId !== null)
       yield* addItem({ projectId: chat.projectId, threadId: chat.threadId }, 'notice', {
@@ -71,6 +71,8 @@ export const offScratch = (taskId: string) =>
               : 'On the board now: it has a pull request.',
         role: 'aside',
       })
+    // Its card is worked out again, as when the person moves it (`shelve`): off Scratch, it waits on its board like any task.
+    yield* touchTask(taskId)
   })
 
 /**

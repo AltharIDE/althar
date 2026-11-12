@@ -154,9 +154,20 @@ leaves its conversation as it was.
   task: …"). Nothing moves back by itself; the person can from its menu.
 - **Cleared,** it settles, leaves the pills, and ⌘K finds it. Those left a
   week fold into one "N older" pill, which clears them together.
-- A call of its that waits on the person still shows in Needs you. With the
-  conversation closed, the board keeps the asides behind one chip at the
+- A call of its that waits on the person still shows in Needs you, and is
+  counted; the aside itself never is, answered or answering: the board, the
+  home, the edge, the tabs, the Dock's badge, the menu bar and the
+  notifications leave it out of what waits and of the work in progress.
+  With the conversation closed, the board keeps the asides behind one chip at the
   head of Up next (`ScratchShelf`), opened in place.
+- **Not a task to the coordinator** either: `project_overview` doesn't
+  count asides, and `list_tasks` doesn't list them; it names the open ones
+  after the tasks, on a line of their own, each with where it stands as
+  `find_tasks` says it (its agent at it, waiting on the person, kept for
+  later, stopped), never ready to accept. A fresh session's brief keeps them
+  apart from its open tasks and uncounted, each with what of it waits on the
+  person and what its agent last reported. `find_tasks` finds one and says
+  it is an aside.
 
 An aside's copy is made without setup: one that only talks never pays for
 an install. The setup replays the first time its agent runs a command, or
@@ -360,7 +371,9 @@ uncommitted changes that aren't evidence.
     commit is ([code-hosts.md](code-hosts.md)).
   - With its last pull request merged or closed, the round opens the next by
     itself, as a draft titled "After #N", where the project's rules would
-    have opened the first. A card with **Open a new pull request** appears
+    have opened the first. Its title and description come from what the
+    lead said since the last push to #N, never from words given for work
+    that went in it. A card with **Open a new pull request** appears
     only where the lead said it only answered a question (`answered`), or
     where the pull request couldn't open.
 

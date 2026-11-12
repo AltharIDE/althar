@@ -1,5 +1,3 @@
-import { existsSync } from 'node:fs'
-
 import {
   type CommandEnvelope,
   Ids,
@@ -19,15 +17,12 @@ import { SqlClient } from 'effect/sql'
 import { touchCard } from './cards'
 import { Changes } from './Changes'
 import { NotFound, TaskRefused } from './errors'
-import { makeScratch } from './firstWrite'
-import { branchExists, restoreDetachedWorktree, restoreWorktree } from './git'
 import { bringBack as bringFoldersBack } from './bringBack'
 import { Instance } from './Instance'
 import { makeKeyedLock } from './keyedLock'
 import { answeredIn, issueCardsWaiting, quickIn } from './kinds'
 import { Launches } from './Launches'
 import { Plans } from './Plans'
-import { copyReviewed, reviewOf } from './reviewing'
 import { touchQuestion } from './Questions'
 import { change, fact, timestamp } from './records'
 import { repliedAt } from './replied'
@@ -468,58 +463,10 @@ export class Tasks extends Context.Service<
           const [project] = yield* sql<{ id: string }>`
             SELECT id FROM projects WHERE id = ${standing.projectId} AND archived_at IS NULL`
           if (project === undefined) return yield* new NotFound({ kind: 'project', id: standing.projectId })
-          // Its folders, where they were removed to free the disk, come back first (ADR-056).
+          // Its folders, removed to free the disk or deleted by hand, come back first, each on its branch, a plain task's that
+          // never had one where it started (DEV-96), a review's copy at the head its lead read (ADR-056, bringBack.ts): git
+          // runs before the task is written. Each put back is set up again.
           const back = yield* bringFoldersBack(input.taskId, input.envelope.actorId)
-          // Its worktrees, each put back on its branch where its folder went: git runs before the task is written. A plain task's
-          // that never had one is put back with none, where it started, as it was made (DEV-96); a review's copy, at the head its
-          // lead read, never where the pull request's change starts, which it only compares with.
-          const worktrees = yield* sql<{
-            id: string
-            path: string
-            access: string
-            branch: string
-            branched: number
-            baseCommit: string | null
-            repository: string
-          }>`
-            SELECT w.id, w.path, w.access, w.branch, w.branched_at IS NOT NULL AS branched, w.base_commit, l.path AS repository FROM workspaces w
-            JOIN repository_bindings b ON b.id = w.binding_id
-            JOIN repository_locations l ON l.binding_id = w.binding_id AND l.device_id = ${instance.deviceId}
-            WHERE w.task_id = ${input.taskId} AND w.device_id = ${instance.deviceId} AND w.state = 'ready'
-            ORDER BY b.created_at, b.rowid`
-          let restored = false
-          for (const worktree of worktrees) {
-            if (existsSync(worktree.path)) continue
-            if (worktree.access === 'read') {
-              const review = yield* reviewOf(input.taskId)
-              if (review === null) return yield* new TaskRefused({ taskId: input.taskId, why: 'branch_gone' })
-              yield* copyReviewed(worktree.repository, worktree.path, review)
-            } else if (worktree.branched === 0 && worktree.baseCommit !== null) {
-              yield* restoreDetachedWorktree(worktree.repository, worktree.path, worktree.baseCommit)
-              yield* makeScratch(worktree.path)
-            } else {
-              if (!(yield* branchExists(worktree.repository, worktree.branch)))
-                return yield* new TaskRefused({ taskId: input.taskId, why: 'branch_gone' })
-              yield* restoreWorktree(worktree.repository, worktree.path, worktree.branch)
-            }
-            // Put back, it is a fresh one, with nothing installed: it is set up again. Said at once, so a later one that
-            // can't be put back doesn't leave this one taken for set up when the person tries again.
-            yield* sql.withTransaction(
-              Effect.gen(function* () {
-                const revision = yield* change('workspaces', worktree.id, { setup: null })
-                yield* fact({
-                  projectId: standing.projectId,
-                  aggregateType: 'workspace',
-                  aggregateId: worktree.id,
-                  revision,
-                  type: 'workspace.restored',
-                  actorId: input.envelope.actorId,
-                  commandId: input.envelope.commandId,
-                })
-              }),
-            )
-            restored = true
-          }
           // Local, its checkout gone back as it was settled: it carries on in a worktree of its own, on its branch (ADR-091).
           for (const spot of yield* spotsOf(input.taskId)) yield* reopenedSpot(spot)
           const reopened = yield* sql.withTransaction(
@@ -566,7 +513,7 @@ export class Tasks extends Context.Service<
               ...(plan.reads === true ? { reads: true } : {}),
             })
           }
-          if (restored || back) yield* setups.begin(input.taskId)
+          if (back) yield* setups.begin(input.taskId)
           yield* touchCard(input.taskId)
         })
 

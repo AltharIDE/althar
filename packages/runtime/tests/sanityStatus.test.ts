@@ -91,8 +91,9 @@ const countedNow = (events: ReadonlyArray<NudgeEvent>) =>
 describe('how many things wait, as the Dock, the menu bar and the notifications say it', () => {
   // Finding (sanity pass): a change whose checks still run is under way, in Running with "Checks running" on the board, and out of
   // Needs you everywhere in the window; but Nudges counts it as ready the moment its run succeeds, so the Dock's badge and the menu
-  // bar say it waits on the person, and its "Ready" notification goes out before its checks have passed. Flips to passing when fixed.
-  it.live.fails('leaves out a change whose checks still run, as its card does', () => {
+  // bar say it waits on the person, and its "Ready" notification goes out before its checks have passed.
+  // Fixed: Nudges goes by the cards the card watcher keeps (Queries.waiting).
+  it.live('leaves out a change whose checks still run, as its card does', () => {
     const { working, bare } = hosted()
     const github = makeFakeService({ pushUrl: () => bare, headOf: tipOf(bare), checksFor: () => [{ name: 'test', state: 'running' }] })
     github.addRepository(['meridian', 'api'])
@@ -111,9 +112,9 @@ describe('how many things wait, as the Dock, the menu bar and the notifications 
   // Finding (sanity pass): a settled task whose lead answered the person, unread, is back in Needs you on the board and the home
   // ("Replied"; docs: "counted as any ready task is: on the board, Home, the edge, the tabs and in notifications"); but Nudges reads
   // ready tasks only among those not done, so the Dock's badge and the menu bar leave it out and no notification says it. The same
-  // holds for a merged task whose review after merge found something, or with commits after its pull request. Flips to passing
-  // when fixed.
-  it.live.fails('counts a settled task whose lead answered the person, as its card puts it in Needs you', () =>
+  // holds for a merged task whose review after merge found something, or with commits after its pull request. Fixed: Nudges
+  // goes by the cards the card watcher keeps (Queries.waiting), the merged ones the home shows among them.
+  it.live('counts a settled task whose lead answered the person, as its card puts it in Needs you', () =>
     Effect.gen(function* () {
       const { events, stop } = yield* heard
       const sql = yield* SqlClient.SqlClient

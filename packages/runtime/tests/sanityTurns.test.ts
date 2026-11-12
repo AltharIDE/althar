@@ -273,10 +273,10 @@ describe('a stop', () => {
 })
 
 describe('what the person says first', () => {
-  // Finding (sanity pass): a fresh session's first prompt says the person's waiting message twice: once in its brief's "thread
-  // so far" (the transcript reads the queued message's thread item) and once as the message itself. The same on a handover's
-  // and a takeover's brief. Flips to passing when fixed.
-  it.live.fails('reaches the coordinator once in its first turn, not again in its brief’s “thread so far”', () =>
+  // Finding (sanity pass), fixed: a fresh session's first prompt said the person's waiting message twice: once in its brief's
+  // "thread so far" (the transcript read the queued message's thread item) and once as the message itself. The same on a
+  // handover's and a takeover's brief. A brief's transcript now leaves out what waits in the queue, which the turn says.
+  it.live('reaches the coordinator once in its first turn, not again in its brief’s “thread so far”', () =>
     Effect.gen(function* () {
       const { threadId } = yield* coordinatorProject
       const asked = 'Plan the checkout retry, and keep it small.'
@@ -290,8 +290,8 @@ describe('what the person says first', () => {
 
 describe('the coordinator’s news', () => {
   // Finding (sanity pass): news told only in a coordinator turn that failed (its service, a usage limit, a refused prompt) is
-  // never told again: coordinatorNews reads what is new since the last turn *requested*, failed or not. Flips to passing when fixed.
-  it.live.fails('is told again with Try again when the turn that carried it failed before the agent read it', () => {
+  // told again: coordinatorNews reads what is new since the last turn that didn't fail.
+  it.live('is told again with Try again when the turn that carried it failed before the agent read it', () => {
     const state: { down: 'offline' | undefined } = { down: undefined }
     return Effect.gen(function* () {
       const sessions = yield* Sessions
@@ -317,9 +317,9 @@ describe('the coordinator’s news', () => {
     }).pipe(Effect.provide(runtime(':memory:', { connection: () => state.down })))
   })
 
-  // Finding (sanity pass), the same cause on the person's own Compact: the compaction turn carries no news but is recorded as a
-  // turn requested, so what happened before it is never told. Flips to passing when fixed.
-  it.live.fails('is told after the person compacts its context, though the compaction turn carried none', () =>
+  // Finding (sanity pass), the same cause on the person's own Compact: the compaction turn carries no news, so it doesn't count
+  // as the turn the news is read since, and what happened before it is told after it.
+  it.live('is told after the person compacts its context, though the compaction turn carried none', () =>
     Effect.gen(function* () {
       const sessions = yield* Sessions
       const { projectId, threadId } = yield* coordinatorProject

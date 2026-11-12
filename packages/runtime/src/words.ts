@@ -104,6 +104,9 @@ export const signInEndedWords = 'Its sign-in has ended. Sign it in again in Sett
 /** An agent that couldn't reach its servers: nothing to sign in, the connection to look at. */
 export const unreachableWords = (device: string) => `Its servers can't be reached. Check ${device}'s connection, then try again.`
 
+/** An agent that couldn't start where the folder it starts in is gone: deleted by hand, or a Local task's checkout moved. */
+export const folderGoneWords = (path: string) => `Its folder isn't there any more: ${path}.`
+
 /** An agent that isn't there to start, by the command Althar ran: installing it is the way on. */
 const notInstalledWords = (command: string) =>
   `${command === '' ? 'The agent' : command} isn't installed, or isn't on ${thisDevice()}'s PATH.`
@@ -158,6 +161,7 @@ const own = (line: string): string => redact(line)
 export const agentSaid = (error: unknown): string | undefined => {
   switch (tagOf(error)) {
     case 'StartTimedOut':
+    case 'ModelSwitchedOff':
       return text(error, 'message')
     case 'AgentStartFailed': {
       const command = text(error, 'command')
@@ -717,6 +721,8 @@ const fileRefused = {
   unreadable: (name) => `Althar couldn't read ${name}.`,
   missing: (name) => `${name} isn't there any more. Add it again.`,
   nowhere: () => "The task's folder isn't ready yet.",
+  gone: () => 'The task’s worktree and branch are gone, so there is nowhere to put the file.',
+  in_way: () => 'Something else is where the task’s folder goes. Move it away, then send the file again.',
 } as const satisfies Record<FileRefused['reason'], (name: string) => string>
 
 /** Why a project can't be changed so, by reason. */

@@ -245,6 +245,8 @@ describe('handing the coordinator to a fresh session', () => {
       assert.strictEqual(turns[2]?.providerSessionId, fresh.id)
       assert.include(turns[2]?.prompt, 'You are taking over this conversation')
       assert.match(turns[2]?.prompt ?? '', /\n\nMeanwhile, one more thing\.$/)
+      // Said once: its brief's last messages leave out what waits for its first turn.
+      assert.strictEqual((turns[2]?.prompt ?? '').split('Meanwhile, one more thing.').length - 1, 1)
     }).pipe(Effect.provide(withQueries())),
   )
 
@@ -338,6 +340,8 @@ describe('handing the coordinator to a fresh session', () => {
           }),
           /^Started pick-a-cache/,
         )
+        // On the board: start_task leaves what it starts on Scratch, an aside, until it takes a worktree, and asides aren't tasks.
+        yield* sql`UPDATE tasks SET shelf = NULL WHERE slug = 'pick-a-cache'`
         const asked = yield* until(
           sql<{ taskId: string }>`SELECT task_id FROM attention_requests WHERE kind = 'question' AND state = 'open'`,
           (rows) => rows.length === 1,
@@ -649,6 +653,8 @@ describe("a handover brief's open tasks", () => {
           description: 'Do it. [lead:finish]',
           lead: { agent: 'claude-code', model: 'small' },
         })
+      // On the board: start_task leaves what it starts on Scratch, an aside, until it takes a worktree, and asides aren't tasks.
+      yield* sql`UPDATE tasks SET shelf = NULL`
       const [ready, stopped, again] = yield* until(
         sql<{ slug: string; threadId: string; runId: string; taskId: string }>`
           SELECT k.slug, t.id AS thread_id, r.id AS run_id, k.id AS task_id FROM tasks k
@@ -740,6 +746,68 @@ describe("a handover brief's open tasks", () => {
       assert.strictEqual(record.open, 3)
       assert.include(record.sections, 'The conversation has no messages yet.')
       assert.include(record.sections, 'The project has no notes yet.')
+    }).pipe(Effect.provide(withQueries())),
+  )
+
+  it.live('keeps what start_task started on Scratch apart, uncounted, with what waits on the person and its last report', () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const projects = yield* Projects
+      const { projectId, access } = yield* opened
+      // Three asides, as start_task starts them: one that asks the person, one done, and one whose run then stopped.
+      const start = (title: string, description: string) =>
+        callTool(access, 'start_task', { title, description, lead: { agent: 'claude-code', model: 'small' } })
+      yield* start('Pick a cache', 'Ask which database the cache should use. [lead:ask]')
+      yield* start('Which partners call v1', 'Look, and say. [lead:finish]')
+      yield* start('Count the callers', 'Count them. [lead:finish]')
+      yield* until(
+        sql<{ n: number }>`
+          SELECT (SELECT count(*) FROM attention_requests WHERE kind = 'question' AND state = 'open')
+            + (SELECT count(*) FROM runs WHERE state = 'succeeded') AS n`,
+        (rows) => rows[0]?.n === 3,
+      )
+      yield* sql`UPDATE runs SET state = 'failed' WHERE task_id = (SELECT id FROM tasks WHERE slug = 'count-the-callers')`
+      const tasks = yield* openTasks(
+        projectId,
+        (step) => step.model ?? step.agentId,
+        () => false,
+      )
+      assert.strictEqual(tasks.count, 0)
+      assert.strictEqual(
+        tasks.text,
+        [
+          'The project has no open tasks.',
+          [
+            'Asides on Scratch, chats beside your conversation rather than tasks, newest first:',
+            '- count-the-callers (“Count the callers”, stopped)',
+            '  Its lead last reported: Did the task.',
+            '- which-partners-call-v1 (“Which partners call v1”)',
+            '  Its lead last reported: Did the task.',
+            '- pick-a-cache (“Pick a cache”, waiting on the person)',
+            '  Waiting on the person: a question from its lead: Which database should the cache use?.',
+          ].join('\n'),
+        ].join('\n\n'),
+      )
+      // Past the newest ten, how many more.
+      for (let index = 1; index <= 9; index += 1) {
+        const made = yield* projects.createTask({
+          envelope: yield* Runtime.envelope('task.create', {}),
+          projectId,
+          title: `Chat ${index}`,
+          draft: true,
+        })
+        yield* sql`UPDATE tasks SET shelf = 'scratch' WHERE id = ${made.taskId}`
+      }
+      const more = yield* openTasks(
+        projectId,
+        (step) => step.agentId,
+        () => false,
+      )
+      assert.include(
+        more.text,
+        'Asides on Scratch, chats beside your conversation rather than tasks, newest first, and 2 more:\n- chat-9 (“Chat 9”)',
+      )
+      assert.include(yield* callTool(access, 'list_tasks'), ', count-the-callers (“Count the callers”, stopped), and 2 more.')
     }).pipe(Effect.provide(withQueries())),
   )
 })

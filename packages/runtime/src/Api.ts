@@ -47,7 +47,7 @@ import {
   uninstall,
 } from '@althar/skills'
 import { codeRootOf } from './code'
-import { NotFound, ProjectRefused, RetryRefused } from './errors'
+import { FileRefused, NotFound, ProjectRefused, RetryRefused } from './errors'
 import { contained, Failures, failuresLayer } from './Failures'
 import { type AgentEntry, Agents, RuntimeConfig } from './Config'
 import { modelNamer } from './coordinatorNews'
@@ -131,7 +131,7 @@ import { findTasks } from './Search'
 import { Tasks } from './Tasks'
 import { Sessions } from './Sessions'
 import { makeRepository, placeRepository } from './newRepository'
-import { type InputFile, keepFiles } from './sentFiles'
+import { checkFiles, copyFiles, type InputFile } from './sentFiles'
 import { type InputImage, keepSent } from './sentImages'
 import { anyOf, SignIns } from './SignIns'
 import { endingOf } from './signInEnding'
@@ -276,16 +276,25 @@ export const handlers = Api.toLayer(
     const cleanup = yield* FolderCleanup
     const setups = yield* Setups
     /**
-     * A task's folder about to open: brought back first, where it was removed
-     * to free the disk, and set up again; and kept as opened before anything
-     * can remove it again, which holds it back from removal for a day and
-     * restarts its wait (ADR-056).
+     * A task's folder about to open, or to take files sent to its lead:
+     * brought back first, where it was removed to free the disk or deleted by
+     * hand, and set up again; then `then`, and the task kept as opened, before
+     * anything can remove it again, which holds it back from removal for a day
+     * and restarts its wait (ADR-056).
      */
-    const openingFolder = (taskId: string) =>
+    const holdingFolder = <A, E>(taskId: string, then: Effect.Effect<A, E>) =>
       Effect.gen(function* () {
         const opened = Effect.flatMap(timestamp, (at) => sql`UPDATE tasks SET opened_at = ${at} WHERE id = ${taskId}`)
-        if (yield* Effect.provideContext(bringBackThen(taskId, instance.personId, opened), folderStore)) yield* setups.begin(taskId)
+        const held = bringBackThen(
+          taskId,
+          instance.personId,
+          Effect.tap(then, () => opened),
+        )
+        const { back, value } = yield* Effect.provideContext(held, folderStore)
+        if (back) yield* setups.begin(taskId)
+        return value
       })
+    const openingFolder = (taskId: string) => holdingFolder(taskId, Effect.void)
     const agents = yield* Agents
     const config = yield* RuntimeConfig
     const connections = yield* Connections
@@ -317,12 +326,27 @@ export const handlers = Api.toLayer(
     const filesFor = (threadId: string, files: ReadonlyArray<SentFile> | undefined) =>
       files === undefined || files.length === 0
         ? Effect.succeed([])
-        : keepFiles(threadId, files).pipe(
-            Effect.provideService(Folders, folders),
-            Effect.provideService(SqlClient.SqlClient, sql),
-            Effect.provideService(RuntimeConfig, config),
-            Effect.provideService(Instance, instance),
-          )
+        : Effect.gen(function* () {
+            const provided = <A, E>(effect: Effect.Effect<A, E, Folders | SqlClient.SqlClient | RuntimeConfig | Instance>) =>
+              effect.pipe(
+                Effect.provideService(Folders, folders),
+                Effect.provideService(SqlClient.SqlClient, sql),
+                Effect.provideService(RuntimeConfig, config),
+                Effect.provideService(Instance, instance),
+              )
+            // Checked first: a message refused for its files brings nothing back, and sets nothing up.
+            const checked = yield* provided(checkFiles(threadId, files))
+            const copied = provided(copyFiles(threadId, checked))
+            const [thread] = yield* sql<{ taskId: string | null }>`
+              SELECT task_id FROM threads WHERE id = ${threadId} AND kind <> 'coordinator'`
+            if (thread?.taskId == null) return yield* copied
+            // Its task's folder comes back first, as for its agent starting, and is held for its lead to read them (ADR-056).
+            return yield* holdingFolder(thread.taskId, copied).pipe(
+              Effect.catchTag('TaskRefused', (refused) =>
+                Effect.fail(new FileRefused({ reason: refused.why === 'folder_in_way' ? 'in_way' : 'gone', name: null })),
+              ),
+            )
+          })
     /** What a message's command says of its files: how many, never their names or paths; nothing where it has none. */
     const filesSaid = (kept: ReadonlyArray<InputFile>) => (kept.length === 0 ? {} : { files: kept.length })
 
@@ -801,9 +825,8 @@ export const handlers = Api.toLayer(
                 worktrees: null,
                 tasks: 0,
                 running: 0,
-                waiting: 0,
+                yours: 0,
                 working: 0,
-                ready: 0,
                 usageLimit: 'move' as const,
                 rotateAccounts: false,
                 onlyAccounts: null,

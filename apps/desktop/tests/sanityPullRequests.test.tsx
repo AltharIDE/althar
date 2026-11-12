@@ -70,12 +70,11 @@ const heldForShip = (phase: 'ready' | 'running', step: string | null): ThreadSna
 
 describe('commits held for Ship, as the task’s pull request card offers them', () => {
   // Finding (sanity pass): what the person's turns commit waits for Ship, and the runtime refuses the person's Push of it
-  // (ShipRefused) until Ship sends it up. Ready, the card offers Ship and no Push. But once the person presses Ship the task is
-  // under way (Ship's review reads the commits), and Outputs drops the hold (`held = ready ? task.held : undefined`): with
-  // no `pushing` on the pull request the commits read as the person's to push, so the card offers "Push 2 commits" beside
-  // the Ship under way, a push that would skip the review they just asked for and that Althar refuses. PR #820's card did
-  // (the person's screenshot at 18:03:28, Ship pressed at 18:03:20, shipped at 18:06:15). Flips to passing when fixed.
-  it.fails('offers no Push for the commits Ship’s review is reading', () => {
+  // (ShipRefused) until Ship sends it up. Ready, the card offers Ship and no Push. Once the person pressed Ship the task was
+  // under way (Ship's review reads the commits), and Outputs dropped the hold (`held = ready ? task.held : undefined`), so the
+  // card offered "Push 2 commits" beside the Ship under way, as PR #820's did. Now the hold holds whatever the phase: only
+  // Ship's button waits for the task to be ready.
+  it('offers no Push for the commits Ship’s review is reading', () => {
     show(heldForShip('ready', null))
     expect(screen.getByRole('button', { name: 'Ship 2 commits' })).toBeTruthy()
     expect(screen.queryByRole('button', { name: 'Push 2 commits' })).toBeNull()
@@ -83,5 +82,6 @@ describe('commits held for Ship, as the task’s pull request card offers them',
     // The person pressed Ship: its review reads the two commits.
     show(heldForShip('running', 'review'))
     expect(screen.queryByRole('button', { name: 'Push 2 commits' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Ship 2 commits' })).toBeNull()
   })
 })

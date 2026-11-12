@@ -35,8 +35,8 @@ describe('an aside, as the home and the edge count it, and as the board and the 
   // Finding (sanity pass): an aside its agent answered is phase `ready`; the board takes it off its lanes (lanesOf's `scratch`),
   // so the project's Needs you and its tab say nothing waits, but the home and the edge count ready tasks with no look at
   // `scratch` (homeGlanceOf: readyOf over every task): the home says 1 thing needs you, and lists the "Hi" in Needs you beside
-  // real work. Flips to passing when fixed.
-  it.fails('is not in the home’s Needs you, nor counted on the home and the edge, as it isn’t on the board or its tab', () => {
+  // real work. Fixed: the home and the edge go by the board's lanes (waitsOf).
+  it('is not in the home’s Needs you, nor counted on the home and the edge, as it isn’t on the board or its tab', () => {
     const hi = aside()
     const snapshot = home({ tasks: [hi] })
     expect(lanesOf({ cursor: 1, tasks: [hi], calls: [], settledTotal: 0 }).ready).toEqual([])
@@ -48,8 +48,8 @@ describe('an aside, as the home and the edge count it, and as the board and the 
   // Finding (sanity pass): an aside whose agent is answering is phase `running`; the board leaves it out of Running and its count
   // (lanesOf's `scratch` comes before `atWork`), but the home's In progress and the edge's count of work in progress take every
   // task that isn't ready (homeGlanceOf's `working`), so a chat with the coordinator shows as work in progress beside the tasks.
-  // Flips to passing when fixed.
-  it.fails('is not work in progress on the home and the edge, as it isn’t in the board’s Running', () => {
+  // Fixed: the home and the edge go by the board's lanes (waitsOf).
+  it('is not work in progress on the home and the edge, as it isn’t in the board’s Running', () => {
     const answering = aside({ phase: 'running', latest: { at: '2026-10-07T09:00:30.000Z', by: 'person', said: 'Hi' } })
     const lanes = lanesOf({ cursor: 1, tasks: [answering], calls: [], settledTotal: 0 })
     expect({ running: lanes.running.length, atWork: lanes.atWork }).toEqual({ running: 0, atWork: 0 })

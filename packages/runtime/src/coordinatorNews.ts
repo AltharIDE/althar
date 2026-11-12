@@ -3,6 +3,8 @@ import { knownModelName } from '@althar/contracts'
 import { Effect, Schema } from 'effect'
 import { SqlClient } from 'effect/sql'
 
+import { unreadJobs } from './checkLogs'
+import { COMPACT } from './compact'
 import { Agents } from './Config'
 import { Instance } from './Instance'
 import { changeWords, type Said } from './issueChangeWords'
@@ -25,7 +27,9 @@ import { PlanParameters, type PlanStep, type TaskEnd } from './Runs'
  * What it has been told is counted by the ledger's order, not by the clock:
  * the news is everything after the record of the turn before, read in the
  * same transaction that records this turn, so nothing lands between what it
- * is told now and where the next turn's news starts.
+ * is told now and where the next turn's news starts. A turn before that
+ * failed or compacted its context doesn't count: what it carried, if any, the
+ * agent may never have read.
  */
 
 /** The plan events the coordinator hears of, by what each did. */
@@ -89,10 +93,14 @@ export const coordinatorNews = (threadId: string, projectId: string, modelOf: Mo
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient
     const instance = yield* Instance
-    // Where the turn before was recorded, in the ledger's order.
+    // Where the turn before that carried its news was recorded, in the ledger's order. A turn that failed may never have
+    // reached the agent (its service, a usage limit, a refused prompt), so what it carried is told again; a compaction
+    // carries none. A failed turn the agent did read is told twice, which is better than not at all. One the person stopped
+    // was read: it counts, as one still under way does. A turn with no prompt kept (before migration 0003) counts too.
     const [last] = yield* sql<{ sequence: number | null }>`
       SELECT max(e.sequence) AS sequence FROM record_events e JOIN turn_deliveries d ON d.id = e.aggregate_id
-      WHERE e.aggregate_type = 'turn_delivery' AND e.type = 'turn_delivery.requested' AND d.thread_id = ${threadId}`
+      WHERE e.aggregate_type = 'turn_delivery' AND e.type = 'turn_delivery.requested' AND d.thread_id = ${threadId}
+        AND d.state <> 'failed' AND d.prompt IS NOT ${COMPACT}`
     if (last?.sequence === null || last?.sequence === undefined) return null
     const events = yield* sql<{ planId: string; type: (typeof HEARD)[number]; actorId: string }>`
       SELECT aggregate_id AS plan_id, type, actor_id FROM record_events
@@ -386,6 +394,8 @@ const pullRequestNews = (projectId: string, since: number) =>
         jobs?: ReadonlyArray<{ name?: string; url?: string | null; tail?: string | null; missing?: string | null }>
       }
       // A sendback's failed jobs with their log tails (data, never instructions), pages, and unreadable reasons, in the same message.
+      // Only a few jobs' logs are read (checkLogs' LOGS_TO_LEAD): how many more failed is said.
+      const unread = Math.max(0, (news.failed?.length ?? 0) - (news.jobs?.length ?? 0))
       const jobs =
         news.jobs === undefined || news.jobs.length === 0
           ? news.detail?.length
@@ -397,7 +407,7 @@ const pullRequestNews = (projectId: string, since: number) =>
                 const page = typeof job.url === 'string' && job.url !== '' ? ` (${job.url})` : ''
                 return `${name}${page}: ${job.missing ? `Althar couldn't read its log: ${job.missing}.` : (job.tail ?? '')}`
               })
-              .join('\n')}`
+              .join('\n')}${unread > 0 ? `\n${unreadJobs(unread)}` : ''}`
       const words =
         news.kind === 'checks'
           ? news.outcome === 'passed'
