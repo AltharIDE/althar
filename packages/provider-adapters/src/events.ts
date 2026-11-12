@@ -8,7 +8,7 @@ import type { Classified } from './failures'
 import { type SeenSkill, skillLoadedBy, skillsAmong } from './skills'
 import { serverOfCall, serverStatusOf, type ServerStatus } from './serverStatus'
 import { claudeRateLimitWindows, record, type UsageWindow } from './usage'
-import { type McpCall, mcpCallOf } from './mcpCalls'
+import { anyMcpCallOf, type McpCall, mcpCallOf } from './mcpCalls'
 import { parentOf, subAgentOf, type SubAgentCall, type WebCall, webCallOf } from './activity'
 
 /*
@@ -431,7 +431,13 @@ export const normalize = (update: acp.SessionUpdate): SessionEvent => {
         ...defined('skill', skillLoadedBy(update)),
         ...defined('mcp', mcpCallOf(update.title, update._meta)),
         ...defined('server', serverOfCall(update.title, update._meta)),
-        ...defined('web', webCallOf(asToolKind(update.kind), update.rawInput, update._meta)),
+        // A call to one of the person's servers, Althar's page tools too, stays theirs: never a web call, whatever it reads.
+        ...defined(
+          'web',
+          anyMcpCallOf(update.title, update._meta) === undefined
+            ? webCallOf(asToolKind(update.kind), update.rawInput, update._meta)
+            : undefined,
+        ),
         ...defined('subAgent', subAgentOf(update.title, update.rawInput, update._meta)),
         ...defined('parent', parentOf(update._meta)),
       }
@@ -449,7 +455,12 @@ export const normalize = (update: acp.SessionUpdate): SessionEvent => {
         ...defined('skill', skillLoadedBy(update)),
         ...defined('mcp', mcpCallOf(update.title ?? '', update._meta)),
         ...defined('server', serverOfCall(update.title ?? '', update._meta)),
-        ...defined('web', webCallOf(update.kind == null ? undefined : asToolKind(update.kind), update.rawInput, update._meta)),
+        ...defined(
+          'web',
+          anyMcpCallOf(update.title ?? '', update._meta) === undefined
+            ? webCallOf(update.kind == null ? undefined : asToolKind(update.kind), update.rawInput, update._meta)
+            : undefined,
+        ),
         ...defined('subAgent', subAgentOf(update.title ?? '', update.rawInput, update._meta)),
         ...defined('parent', parentOf(update._meta)),
       }

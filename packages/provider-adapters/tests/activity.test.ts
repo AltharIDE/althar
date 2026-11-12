@@ -166,6 +166,20 @@ describe('normalize', () => {
     ])
   })
 
+  it('says no web call of a call to an MCP server, Althar’s page tools too, though it reads an address', () => {
+    for (const title of ['mcp__althar__page_open', 'mcp.althar.page_open', 'mcp__docs__fetch']) {
+      const call = normalize({
+        sessionUpdate: 'tool_call',
+        toolCallId: 'toolu_3',
+        title,
+        kind: 'fetch',
+        status: 'pending',
+        rawInput: { url: 'https://example.com/a' },
+      })
+      assert.isUndefined(call._tag === 'ToolCall' ? call.web : 'not a call', title)
+    }
+  })
+
   it('says a compaction as it stands, with the summary it kept and why it failed', () => {
     const update = (fields: Record<string, unknown>) =>
       normalize({ sessionUpdate: 'compaction_update', compactionId: 'c1', ...fields } as unknown as acp.SessionUpdate)
