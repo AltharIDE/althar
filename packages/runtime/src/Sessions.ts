@@ -1855,18 +1855,14 @@ export class Sessions extends Context.Service<
        * its worktree stands now and what its sandbox lets through, but not the thread, which it has. Once; null while it is an
        * aside still.
        */
-      const workBrief = (running: Running) =>
+      const workBrief = (running: Running, was: TaskThread, told: NonNullable<Running['aside']>) =>
         Effect.gen(function* () {
-          const told = running.aside
-          if (told === undefined || running.thread.role !== 'task') return null
-          if ((yield* asideState(running.thread.taskId)).aside) return null
+          if ((yield* asideState(was.taskId)).aside) return null
           running.aside = undefined
-          const reread = yield* loadThread(running.thread.threadId).pipe(Effect.orElseSucceed(() => running.thread))
-          const thread = reread.role === 'task' ? reread : running.thread
-          if (thread.role !== 'task') return null
+          const reread = yield* loadThread(was.threadId).pipe(Effect.orElseSucceed(() => was))
           return [
             "This aside is a task now, on the board: what you do from here is a task's work, as a lead does it.",
-            yield* taskBrief(thread, { kind: 'start' }, false),
+            yield* taskBrief(reread.role === 'task' ? reread : was, { kind: 'start' }, false),
             ...(told.sandbox === null ? [] : [told.sandbox]),
           ].join('\n\n')
         }).pipe(Effect.catchCause((cause) => Effect.as(Effect.logWarning('Could not brief an aside that became work', cause), null)))
@@ -1986,7 +1982,7 @@ export class Sessions extends Context.Service<
           // An aside that became work since its last turn is told, once, what a task's lead does: the brief it started without.
           const becameWork =
             thread.role === 'task' && running.aside !== undefined && running.brief === undefined && !compacting
-              ? yield* workBrief(running)
+              ? yield* workBrief(running, thread, running.aside)
               : null
           const brief = briefOf
           // The lead is told how its worktrees were set up, in its brief.

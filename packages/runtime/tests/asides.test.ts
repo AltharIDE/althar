@@ -240,6 +240,74 @@ describe('an aside opened with +', () => {
       ),
   )
 
+  it.live(
+    'carries on lightly in a fresh session, lost or full, and made a task, its lead is told a lead’s whole brief once, with its sandbox',
+    () =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          const { client, store, project } = yield* connected
+          // A note the coordinator kept: an aside reads the project's notes, as the coordinator does.
+          const coordinator = { role: 'coordinator' as const, projectId: project.id, threadId: 'none', sessionId: 'none', taskId: null }
+          yield* store(callTool(coordinator, 'keep_note', { note: 'Retries live in the queue package.' }))
+          const taskId = `task_${randomBytes(16).toString('hex')}`
+          // On an agent with a sandbox it is told of up front, as Claude Code is.
+          const aside = yield* client.StartTask({
+            commandId: commandId(),
+            projectId: project.id,
+            title: '',
+            steps: [{ key: 'implement', agentId: 'claude-code', model: null, skipped: false }],
+            chat: true,
+            taskId,
+          })
+          const turns = () =>
+            store(
+              sqlOf(
+                (sql) => sql<{ prompt: string; state: string }>`
+                SELECT prompt, state FROM turn_deliveries WHERE thread_id = ${aside.threadId} ORDER BY requested_at`,
+              ),
+            )
+          const said = (body: string, count: number) =>
+            Effect.gen(function* () {
+              yield* client.Send({ commandId: commandId(), threadId: aside.threadId, body, disposition: 'after_current' })
+              const all = yield* until(turns(), (rows) => rows.length === count && rows[count - 1]?.state === 'completed')
+              return all[count - 1]?.prompt ?? ''
+            })
+          const SANDBOX = 'Your sandbox reaches any host without asking'
+          const WORK = 'This aside is a task now'
+
+          // Its first words go out with its light brief, the project's notes in it, but not what its sandbox lets through.
+          const hi = yield* said('Where is the retry?', 1)
+          assert.include(hi, "You are an aside of this project's coordinator")
+          assert.include(hi, 'Retries live in the queue package.')
+          assert.notInclude(hi, SANDBOX)
+
+          // Its session lost, a fresh one carries it on, lightly still, with its thread.
+          const lost = yield* said('And the backoff? [lead:lost-once]', 3)
+          assert.match(lost, /^You are carrying on an aside of this project's coordinator.+because the session before was lost\./)
+          assert.include(lost, 'The thread so far')
+          assert.notInclude(lost, 'gather evidence')
+          assert.isTrue(lost.endsWith('And the backoff? [lead:lost-once]'))
+
+          // Words to it while it is an aside still are only the words; its context full, the next goes to a fresh session.
+          const again = yield* said('Look again. [context:25/1000000]', 4)
+          assert.strictEqual(again, 'Look again. [context:25/1000000]')
+          const fresh = yield* said('And now?', 5)
+          assert.match(fresh, /^You are carrying on an aside of this project's coordinator.+to keep your context small\./)
+          assert.notInclude(fresh, WORK)
+
+          // Made a task, its next turn is told a lead's whole brief and its sandbox, but not the thread, which it has; once.
+          yield* client.ShelveTask({ commandId: commandId(), taskId, shelf: null })
+          const work = yield* said('Fix it then.', 6)
+          assert.isTrue(work.startsWith(WORK))
+          assert.include(work, 'gather evidence')
+          assert.include(work, SANDBOX)
+          assert.notInclude(work, 'The thread so far')
+          assert.isTrue(work.endsWith('Fix it then.'))
+          assert.strictEqual(yield* said('And the tests?', 7), 'And the tests?')
+        }),
+      ),
+  )
+
   it.live('clears whatever it stands at: one waiting on the person’s answer settles as Done, its question withdrawn', () =>
     Effect.scoped(
       Effect.gen(function* () {
