@@ -196,7 +196,7 @@ inside it, while the agents Althar bundles are.
   with the worktrees beside it. Projects reach the app through the document
   portal.
 - **Where task folders go can't be changed in the Flatpak.** Settings › Task
-  folders shows `<profile>/worktrees` with Change off and a line saying why.
+  folders shows `<profile>/worktrees` and one line saying why, with no Change.
   A folder picked there comes through the file portal as
   `/run/flatpak/doc/<id>/…`, which isn't the same path on the device, so the
   worktrees would no longer be at the same path on both sides; the check

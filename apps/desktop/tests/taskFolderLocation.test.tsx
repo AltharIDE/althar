@@ -12,7 +12,8 @@ import { withServices } from './render'
 /*
  * Where new tasks' folders go, under Work on this computer: Change opens a
  * picker, but not in the Flatpak, where every pick comes through the file
- * portal, which task folders can't use (ADR-027): there the row says why.
+ * portal, which task folders can't use (ADR-027): there the row has no
+ * Change, and one line says why.
  */
 
 function Settings() {
@@ -34,15 +35,15 @@ describe('the task folders row', () => {
     expect(within(page).queryByText(/file portal/)).toBeNull()
   })
 
-  it('turns Change off in the Flatpak, and says why', async () => {
+  it('has no Change in the Flatpak, and says why in one line', async () => {
     const page = shown({
       folder: '/home/ada/.var/app/dev.althar.app/data/althar/worktrees',
       from: 'default',
       defaultFolder: '/home/ada/.var/app/dev.althar.app/data/althar/worktrees',
       sandboxed: true,
     })
-    const change = await within(page).findByRole('button', { name: /Task folders Change/ })
-    expect((change as HTMLButtonElement).disabled).toBe(true)
-    expect(within(page).getByText(/only through its file portal, which task folders can’t use/)).toBeTruthy()
+    expect(await within(page).findByText(/arrives through the file portal, which task folders can’t use/)).toBeTruthy()
+    expect(within(page).queryByRole('button', { name: /Task folders Change/ })).toBeNull()
+    expect(within(page).queryByText(/inside the one you choose/)).toBeNull()
   })
 })
