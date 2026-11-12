@@ -1,7 +1,7 @@
 import { Ids, newId, now, type ProjectId } from '@althar/domain'
 import { holds } from '@althar/provider-adapters/testing'
 import { assert, describe, it } from '@effect/vitest'
-import { Duration, Effect, Fiber, Option } from 'effect'
+import { Deferred, Duration, Effect, Fiber, Option } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { Busy } from '../src/Busy'
@@ -153,7 +153,7 @@ describe('a lead handed to another agent', () => {
   // leaves the outgoing session taking turns until the new agent is up, unlike handOver and takeOver, which mark it
   // `under_way`: what the person says meanwhile becomes the old agent's turn, cut off as it stops, and the agent taking over
   // is told only to carry on. Flips to passing when fixed.
-  it.live.fails('gives what the person says while the new agent starts to the new agent, not the one being stopped', () => {
+  it.live.fails('gives what waits for the lead as the new agent starts to the new agent, not the one being stopped', () => {
     const held = holds()
     // The agent taking over is slow to make its session, as a real one starting is, until the test lets it.
     const starting: { gate: Promise<void> | undefined; open: () => void } = { gate: undefined, open: () => {} }
@@ -163,25 +163,50 @@ describe('a lead handed to another agent', () => {
       const { task: created } = yield* task()
       yield* sessions.start({ threadId: created.threadId, agentId: 'codex' })
       yield* until(turns(created.threadId), (rows) => rows.length >= 1 && rows.every(over))
-      starting.gate = new Promise<void>((resolve) => (starting.open = resolve))
-      // Althar hands the lead over, as at a usage limit that moves on, or a step handed on for want of a report.
-      const switched = yield* Effect.forkChild(sessions.switchAgent({ threadId: created.threadId, agentId: 'opencode' }))
       const sessionsOf = sql<{ id: string; agentId: string; state: string }>`
         SELECT id, agent_id, state FROM provider_sessions WHERE thread_id = ${created.threadId} ORDER BY started_at, rowid`
-      yield* until(sessionsOf, (rows) => rows.some((row) => row.agentId === 'opencode'))
-      // Meanwhile the person writes.
+      const [outgoing] = yield* sessionsOf
+      // The old session's next turn waits for its place among the agents at work, as one does when the Mac is full, until the
+      // test gives it one; the test then knows when it has taken the person's words, or left them, either way.
+      const placeAsked = yield* Deferred.make<void>()
+      const placeGiven = yield* Deferred.make<void>()
+      const placeDone = yield* Deferred.make<void>()
+      yield* sessions.gateTurns((lead, work) =>
+        lead.sessionId !== outgoing?.id
+          ? Effect.as(work(Effect.void), true)
+          : Effect.gen(function* () {
+              yield* Deferred.succeed(placeAsked, undefined)
+              yield* Deferred.await(placeGiven)
+              yield* work(Effect.void).pipe(Effect.ensuring(Deferred.succeed(placeDone, undefined)))
+              return true
+            }),
+      )
+      // The person writes, and their words wait for the lead's place.
       const asked = yield* say(created.threadId, 'Also check the refund path. [answers-after:5s]')
+      yield* Deferred.await(placeAsked)
+      // Althar hands the lead over, as at a usage limit that moves on, or a step handed on for want of a report.
+      starting.gate = new Promise<void>((resolve) => (starting.open = resolve))
+      const switched = yield* Effect.forkChild(sessions.switchAgent({ threadId: created.threadId, agentId: 'opencode' }))
+      yield* until(sessionsOf, (rows) => rows.some((row) => row.agentId === 'opencode'))
+      // While the new agent starts, the old session gets its place: it takes the words as its turn (the defect), or, its work
+      // handed on, leaves them for the agent taking over, and its turn's work returns.
       const given = sql<{ sessionId: string; state: string }>`
         SELECT d.provider_session_id AS session_id, d.state FROM turn_delivery_inputs i JOIN turn_deliveries d ON d.id = i.delivery_id
         WHERE i.user_input_id = ${asked.inputId} ORDER BY d.requested_at, d.rowid`
+      yield* Deferred.succeed(placeGiven, undefined)
+      yield* until(Effect.zip(given, Deferred.isDone(placeDone)), ([rows, done]) => rows.length > 0 || done)
       // The new agent is ready: the old one stops, and the new one takes the thread; then whatever has the words answers them.
-      yield* until(given, (rows) => rows.length > 0)
       starting.open()
       yield* Fiber.join(switched)
       held.open('[answers-after:5s]')
       const [old, fresh] = yield* until(sessionsOf, (rows) => rows[1]?.state === 'active')
       assert.strictEqual(old?.state, 'superseded')
-      yield* until(turns(created.threadId), (rows) => rows.some((row) => row.providerSessionId === fresh?.id) && rows.every(over))
+      const waiting = sql<{ state: string }>`SELECT state FROM user_inputs WHERE id = ${asked.inputId}`
+      yield* until(
+        Effect.zip(turns(created.threadId), waiting),
+        ([rows, [input]]) =>
+          rows.some((row) => row.providerSessionId === fresh?.id) && rows.every(over) && input !== undefined && input.state !== 'queued',
+      )
       assert.deepStrictEqual(
         (yield* given).map((turn) => [turn.sessionId === fresh?.id ? 'taking over' : 'stopped', turn.state]),
         [['taking over', 'completed']],
@@ -205,30 +230,45 @@ describe('a lead handed to another agent', () => {
 
 describe('a stop', () => {
   // Finding (sanity pass): stopRunning cancels the agent at once, though a turn being prepared hasn't sent its prompt yet, so
-  // the cancel lands on no turn; deliver never looks at `stopping` again, the prompt goes out after the stop, the agent works on
-  // it until the stop's grace is up, and its turn is recorded as the agent dying (failed, agent_exited). Flips to passing when fixed.
-  it.live.fails('that comes as a turn is being prepared stops it, rather than letting it out to run until the agent is killed', () => {
-    const held = holds()
+  // the cancel lands on no turn; deliver never looks at `stopping` again, the prompt goes out after the stop, and the agent works
+  // on it: to its end, or, a long one, until the stop's grace is up, when its turn is recorded as the agent dying (failed,
+  // agent_exited). Flips to passing when fixed.
+  it.live.fails('that comes as a turn is being prepared stops it, rather than letting its prompt out after the stop', () => {
+    const prompts = { asked: 0 }
     return Effect.gen(function* () {
-      const sql = yield* SqlClient.SqlClient
       const sessions = yield* Sessions
       const { task: created } = yield* task()
       yield* sessions.start({ threadId: created.threadId, agentId: 'codex' })
       yield* until(turns(created.threadId), (rows) => rows.length >= 1 && rows.every(over))
-      const asked = yield* say(created.threadId, 'Look at the refund path. [answers-after:5s]')
-      // The turn has taken the person's words, and is on its way to the agent: the person presses Stop.
-      yield* until(
-        sql<{ id: string }>`SELECT delivery_id AS id FROM turn_delivery_inputs WHERE user_input_id = ${asked.inputId}`,
-        (rows) => rows.length > 0,
+      // The next turn is held as it is prepared, once it has taken the person's words and been recorded as delivered, and before
+      // its prompt goes out: where its place among the agents at work is taken up (Busy's `begun`).
+      const prepared = yield* Deferred.make<void>()
+      const carryOn = yield* Deferred.make<void>()
+      yield* sessions.gateTurns((_lead, work) =>
+        Effect.as(work(Effect.andThen(Deferred.succeed(prepared, undefined), Deferred.await(carryOn))), true),
       )
-      yield* sessions.stop(created.threadId)
-      const ended = yield* until(turns(created.threadId), (rows) => rows.length >= 2 && rows.every(over))
+      yield* say(created.threadId, 'Look at the refund path.')
+      yield* Deferred.await(prepared)
+      const before = prompts.asked
+      // The person presses Stop. Seen stopping, it is past cancelling (there is no turn yet to cancel) and waits for the turn being
+      // prepared to let go; only then does that turn carry on. Whatever comes of the cancel, the turn must not send its prompt now.
+      const stopped = yield* Effect.forkChild(sessions.stop(created.threadId))
+      yield* until(sessions.running(created.threadId), (running) => Option.exists(running, (session) => session.stopping))
+      yield* Deferred.succeed(carryOn, undefined)
+      yield* Fiber.join(stopped)
+      assert.strictEqual(prompts.asked, before, 'no prompt goes out after the stop')
+      const ended = yield* turns(created.threadId)
       assert.deepStrictEqual(
-        [ended[1]?.state, ended[1]?.errorClass],
-        ['interrupted', null],
-        'the turn is stopped as asked, not cut off with its agent',
+        ended.slice(1).map((turn) => [turn.state, turn.errorClass]),
+        [['interrupted', null]],
+        'the turn is stopped as asked, not run or cut off with its agent',
       )
-    }).pipe(Effect.provide(runtime(':memory:', { holds: held }, { stopGrace: Duration.seconds(1) })))
+    }).pipe(
+      Effect.provide(
+        // The stop's grace is never reached: the turn either ends at once or never starts.
+        runtime(':memory:', { promptAsked: () => void (prompts.asked += 1) }, { stopGrace: Duration.seconds(30) }),
+      ),
+    )
   })
 })
 
