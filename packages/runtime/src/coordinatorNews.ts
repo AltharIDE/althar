@@ -97,25 +97,29 @@ export const coordinatorNews = (threadId: string, projectId: string, modelOf: Mo
     // reached the agent (its service, a usage limit, a refused prompt), so what it carried is told again; a compaction
     // carries none. A failed turn the agent did read is told twice, which is better than not at all. One the person stopped
     // was read: it counts, as one still under way does. A turn with no prompt kept (before migration 0003) counts too.
-    const [last] = yield* sql<{ sequence: number | null }>`
-      SELECT max(e.sequence) AS sequence FROM record_events e JOIN turn_deliveries d ON d.id = e.aggregate_id
-      WHERE e.aggregate_type = 'turn_delivery' AND e.type = 'turn_delivery.requested' AND d.thread_id = ${threadId}
-        AND d.state <> 'failed' AND d.prompt IS NOT ${COMPACT}`
-    if (last?.sequence === null || last?.sequence === undefined) return null
+    // Where every turn before failed or compacted, the news is told since its first: what came before, its brief says.
+    // Never having spoken, it has none: its brief says it all.
+    const [last] = yield* sql<{ read: number | null; first: number | null }>`
+      SELECT max(CASE WHEN d.state <> 'failed' AND d.prompt IS NOT ${COMPACT} THEN e.sequence END) AS read,
+        min(e.sequence) AS first
+      FROM record_events e JOIN turn_deliveries d ON d.id = e.aggregate_id
+      WHERE e.aggregate_type = 'turn_delivery' AND e.type = 'turn_delivery.requested' AND d.thread_id = ${threadId}`
+    const since = last?.read ?? last?.first ?? null
+    if (since === null) return null
     const events = yield* sql<{ planId: string; type: (typeof HEARD)[number]; actorId: string }>`
       SELECT aggregate_id AS plan_id, type, actor_id FROM record_events
-      WHERE project_id = ${projectId} AND aggregate_type = 'task_plan' AND sequence > ${last.sequence} AND type IN ${sql.in(HEARD)}
+      WHERE project_id = ${projectId} AND aggregate_type = 'task_plan' AND sequence > ${since} AND type IN ${sql.in(HEARD)}
       ORDER BY sequence`
     // What became of its issue drafts, and of changes to issues in its thread, are told together.
-    const drafts = [...(yield* draftNews(projectId, last.sequence)), ...(yield* changeNews(projectId, last.sequence))]
+    const drafts = [...(yield* draftNews(projectId, since)), ...(yield* changeNews(projectId, since))]
     // What the person answered on its cards asking to move a task on is told with the pull requests' news: a line each, nothing to close.
     const pulls = [
-      ...(yield* pullRequestNews(projectId, last.sequence)),
-      ...(yield* followedNews(projectId, last.sequence)),
-      ...(yield* askNews(projectId, last.sequence)),
+      ...(yield* pullRequestNews(projectId, since)),
+      ...(yield* followedNews(projectId, since)),
+      ...(yield* askNews(projectId, since)),
     ]
-    const started = yield* startedNews(projectId, last.sequence)
-    const made = yield* madeNews(projectId, last.sequence, modelOf)
+    const started = yield* startedNews(projectId, since)
+    const made = yield* madeNews(projectId, since, modelOf)
     if (events.length === 0 && drafts.length === 0 && started.length === 0 && made.length === 0 && pulls.length === 0) return null
 
     /** Who does a plan's steps; each step's effort too where it isn't what the other plan gives it, as its ending is said only where it changed. */

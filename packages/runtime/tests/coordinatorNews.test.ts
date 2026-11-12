@@ -205,6 +205,10 @@ describe('what the coordinator hears since it last spoke', () => {
           WHERE id = (SELECT id FROM turn_deliveries WHERE thread_id = ${threadId} ORDER BY requested_at DESC, rowid DESC LIMIT 1)`
         assert.isNull(yield* news(threadId, projectId), `after a turn ${was.state} with ${was.prompt === null ? 'no' : 'a'} prompt`)
       }
+      // Every turn before failed: what came after its first is told, never lost to the next turn that goes through.
+      yield* sql`UPDATE turn_deliveries SET state = 'failed' WHERE thread_id = ${threadId}`
+      yield* record({ kind: 'closed' })
+      assert.include(yield* news(threadId, projectId), 'Pull request #42: Closed.')
     }).pipe(Effect.provide(withQueries({}))),
   )
 

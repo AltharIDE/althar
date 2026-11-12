@@ -311,6 +311,8 @@ describe('sanity pass: a task’s pull request Althar itself brought up to date'
     | 'background'
     /** It answers before it has, and what lands is someone else's merge of another branch at that head. */
     | 'theirs'
+    /** It answers before it has, and main moves on again before it merges, so it merges main's newer head. */
+    | 'advanced'
 
   /**
    * The fake GitHub over a bare repository, whose update-branch merges main into the pull request's branch there, as
@@ -322,12 +324,18 @@ describe('sanity pass: a task’s pull request Althar itself brought up to date'
     const fake = makeFakeService({ pushUrl: () => bare, headOf: tipOf(bare) })
     fake.addRepository(['meridian', 'api'])
     const byHost = (...args: Array<string>) => git(bare, '-c', 'user.name=GitHub', '-c', 'user.email=noreply@github.test', ...args)
+    /** Someone else's commit lands on main, on the host. */
+    const mainMoves = () => {
+      const main = git(bare, 'rev-parse', 'refs/heads/main')
+      git(bare, 'update-ref', 'refs/heads/main', byHost('commit-tree', `${main}^{tree}`, '-p', main, '-m', 'Elsewhere on main'))
+    }
     let asked = 0
     const update = (_repository: Repository, change: ChangeRequest, ask: { readonly expectedHead: string }) =>
       Effect.sync((): BranchUpdate => {
         const answer = answers[asked++] ?? 'said'
         const head = git(bare, 'rev-parse', `refs/heads/${change.source}`)
         if (head !== ask.expectedHead) return { outcome: 'moved', head }
+        if (answer === 'advanced') mainMoves()
         const main = git(bare, 'rev-parse', 'refs/heads/main')
         const other = byHost('commit-tree', `${main}^{tree}`, '-p', main, '-m', 'Other work')
         const merged = answer === 'theirs' ? other : main
@@ -339,7 +347,18 @@ describe('sanity pass: a task’s pull request Althar itself brought up to date'
       Effect.sync(() => {
         if (change.headSha === null) return false
         const parents = git(bare, 'rev-list', '--parents', '-n', '1', change.headSha).split(' ').slice(1)
-        return parents.length === 2 && parents[0] === from && (base === undefined || parents[1] === base)
+        if (parents.length !== 2 || parents[0] !== from) return false
+        const merged = parents[1] ?? ''
+        // As GitHub's: main's head asked for, or a later one of main's, where it moved on before the merge.
+        const ancestor = (earlier: string, later: string) => {
+          try {
+            git(bare, 'merge-base', '--is-ancestor', earlier, later)
+            return true
+          } catch {
+            return false
+          }
+        }
+        return base === undefined || merged === base || (ancestor(base, merged) && ancestor(merged, `refs/heads/${change.target}`))
       })
     const branchHead = (_repository: Repository, name: string) => Effect.sync(() => git(bare, 'rev-parse', `refs/heads/${name}`))
     // Everything as the fake answers it, but what reads and writes the bare repository.
@@ -347,11 +366,6 @@ describe('sanity pass: a task’s pull request Althar itself brought up to date'
     const github = new Proxy(fake, {
       get: (target, key, receiver) => (typeof key === 'string' && key in own ? own[key] : Reflect.get(target, key, receiver)),
     }) as FakeService & CodeHost
-    /** Someone else's commit lands on main, on the host. */
-    const mainMoves = () => {
-      const main = git(bare, 'rev-parse', 'refs/heads/main')
-      git(bare, 'update-ref', 'refs/heads/main', byHost('commit-tree', `${main}^{tree}`, '-p', main, '-m', 'Elsewhere on main'))
-    }
     return { working, bare, github, mainMoves }
   }
 
@@ -371,6 +385,7 @@ describe('sanity pass: a task’s pull request Althar itself brought up to date'
     { how: 'its host makes it in the background', answers: ['background'], ours: true },
     { how: 'twice, the first in the background', answers: ['background', 'said'], ours: true },
     { how: 'someone else’s merge of another branch lands in its place', answers: ['theirs'], ours: false },
+    { how: 'main moves on again before its host merges it', answers: ['advanced'], ours: true },
   ] satisfies ReadonlyArray<{ how: string; answers: ReadonlyArray<Answer>; ours: boolean }>)(
     'what the lead commits after Althar’s own update of its branch still goes up by itself: $how',
     ({ answers, ours }) => {

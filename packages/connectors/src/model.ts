@@ -541,7 +541,8 @@ export interface CodeHost extends HostReleases {
   /**
    * Whether a change's head now is the merge `updateBranch` made from the
    * head `from`, a merge whose first parent is it, and whose second is
-   * `base`, the target's head it merged in, where that is known: GitHub's
+   * `base`, the target's head asked to merge in, where that is known, or a
+   * later head of the target, where it moved on before the merge: GitHub's
    * update-branch lands in the background, so the head it says may be null,
    * or someone else's push. Present on GitHub alone; the others know the
    * commit they pushed.
