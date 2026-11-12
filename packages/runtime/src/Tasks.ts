@@ -229,9 +229,16 @@ export class Tasks extends Context.Service<
      * a page, stops after, in the background, and its agents once their
      * turns end (LeftBehind.ts); what wouldn't is said in its thread, and the
      * task is done all the same. Writing to its lead later opens it again
-     * (ADR-034), and starts it again. Whether it settled.
+     * (ADR-034), and starts it again. With `clear`, the person's own press
+     * on an aside (its pill's ×, or Done on it): one on Scratch settles
+     * whatever it stands at, what waits on the person withdrawn. A lead's
+     * or the coordinator's `settle_task` never clears so. Whether it settled.
      */
-    markDone(input: { readonly envelope: CommandEnvelope; readonly taskId: string }): Effect.Effect<boolean, unknown>
+    markDone(input: {
+      readonly envelope: CommandEnvelope
+      readonly taskId: string
+      readonly clear?: boolean
+    }): Effect.Effect<boolean, unknown>
     /**
      * Keeps a finished task that isn't a change for later, as the person said:
      * out of Needs you as it is, with nothing stopped, not settled. A quick
@@ -386,6 +393,40 @@ export class Tasks extends Context.Service<
       const abandon = (input: { readonly envelope: CommandEnvelope; readonly taskId: string }) =>
         leftBehind.stoppingWhile(input.taskId, abandoning(input))
 
+      /**
+       * Everything of a task that waits on it, let go as it settles with nothing more to do: its plans that haven't started
+       * declined, its calls withdrawn, its run suspended. In the transaction that settles it.
+       */
+      const letGo = (taskId: string, projectId: ProjectId, envelope: CommandEnvelope, why: 'stopped' | 'abandoned') =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const at = yield* timestamp
+          const said = { actorId: envelope.actorId, commandId: envelope.commandId }
+          // Its plan doesn't start: declined, its countdown with it; and one its start had accepted, but made no run of yet.
+          const proposed = yield* sql<{ id: string }>`
+            SELECT id FROM task_plans p WHERE p.task_id = ${taskId}
+              AND (p.state = 'proposed' OR (p.state = 'accepted' AND NOT EXISTS (SELECT 1 FROM runs r WHERE r.plan_id = p.id)))`
+          for (const plan of proposed) {
+            const revision = yield* change('task_plans', plan.id, { state: 'declined', startsAt: null, decidedAt: at })
+            yield* fact({ projectId, aggregateType: 'task_plan', aggregateId: plan.id, revision, type: 'task_plan.declined', ...said })
+          }
+          // Its calls go: there is nothing left to answer them for.
+          const calls = yield* sql<{ id: string }>`SELECT id FROM attention_requests WHERE task_id = ${taskId} AND state = 'open'`
+          for (const call of calls) {
+            const revision = yield* change('attention_requests', call.id, { state: 'withdrawn' })
+            yield* fact({
+              projectId,
+              aggregateType: 'attention_request',
+              aggregateId: call.id,
+              revision,
+              type: 'attention_request.withdrawn',
+              ...said,
+            })
+            yield* touchQuestion(call.id)
+          }
+          yield* suspend(taskId, envelope, why)
+        })
+
       const abandoning = (input: { readonly envelope: CommandEnvelope; readonly taskId: string }) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
@@ -400,37 +441,7 @@ export class Tasks extends Context.Service<
               const state = yield* transition(taskLifecycle, now, 'abandoned')
               const at = yield* timestamp
               const said = { actorId: input.envelope.actorId, commandId: input.envelope.commandId }
-              // Its plan doesn't start: declined, its countdown with it; and one its start had accepted, but made no run of yet.
-              const proposed = yield* sql<{ id: string }>`
-                SELECT id FROM task_plans p WHERE p.task_id = ${input.taskId}
-                  AND (p.state = 'proposed' OR (p.state = 'accepted' AND NOT EXISTS (SELECT 1 FROM runs r WHERE r.plan_id = p.id)))`
-              for (const plan of proposed) {
-                const revision = yield* change('task_plans', plan.id, { state: 'declined', startsAt: null, decidedAt: at })
-                yield* fact({
-                  projectId: standing.projectId,
-                  aggregateType: 'task_plan',
-                  aggregateId: plan.id,
-                  revision,
-                  type: 'task_plan.declined',
-                  ...said,
-                })
-              }
-              // Its calls go: there is nothing left to answer them for.
-              const calls = yield* sql<{ id: string }>`
-                SELECT id FROM attention_requests WHERE task_id = ${input.taskId} AND state = 'open'`
-              for (const call of calls) {
-                const revision = yield* change('attention_requests', call.id, { state: 'withdrawn' })
-                yield* fact({
-                  projectId: standing.projectId,
-                  aggregateType: 'attention_request',
-                  aggregateId: call.id,
-                  revision,
-                  type: 'attention_request.withdrawn',
-                  ...said,
-                })
-                yield* touchQuestion(call.id)
-              }
-              yield* suspend(input.taskId, input.envelope, 'abandoned')
+              yield* letGo(input.taskId, standing.projectId, input.envelope, 'abandoned')
               const revision = yield* change('tasks', input.taskId, { state, settledAt: at })
               yield* fact({
                 projectId: standing.projectId,
@@ -614,10 +625,10 @@ export class Tasks extends Context.Service<
         })
 
       // As abandoning: counted as stopping until LeftBehind has it.
-      const markDone = (input: { readonly envelope: CommandEnvelope; readonly taskId: string }) =>
+      const markDone = (input: { readonly envelope: CommandEnvelope; readonly taskId: string; readonly clear?: boolean }) =>
         leftBehind.stoppingWhile(input.taskId, markingDone(input))
 
-      const markingDone = (input: { readonly envelope: CommandEnvelope; readonly taskId: string }) =>
+      const markingDone = (input: { readonly envelope: CommandEnvelope; readonly taskId: string; readonly clear?: boolean }) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
           // Settled already, in Needs you for a reply the person hadn't read: Done says they have, and it is settled again. Pressed
@@ -630,7 +641,8 @@ export class Tasks extends Context.Service<
             return true
           }
           const ready = yield* doneable(input.taskId)
-          if (ready === undefined) return false
+          // Only the person's own press clears an aside as it stands: an agent's Done waits for what waits on the person.
+          if (ready === undefined) return input.clear === true ? yield* clearing(input) : false
           const at = yield* timestamp
           const settled = yield* sql.withTransaction(
             Effect.gen(function* () {
@@ -660,6 +672,47 @@ export class Tasks extends Context.Service<
           // What it runs stops too: nothing is left to stop it from. What its agents left running stops in the background, then
           // they do once their turns end, and what wouldn't is said in its thread (LeftBehind.ts).
           yield* launches.stopAll(ready.projectId, input.taskId)
+          yield* leftBehind.settled(input.taskId)
+          yield* touchCard(input.taskId)
+          return true
+        })
+
+      /**
+       * An aside cleared (docs/decisions/tasks.md, "Asides"), where Done wouldn't settle it as it stands: its lead stuck or its run
+       * failed, a question, a call or a plan of its waiting on the person. It leaves the asides all the same, as the person's × said:
+       * what waits on it let go and its lead stopped, as an abandoned task's are, but settled as Done, so ⌘K finds it with the
+       * finished ones. Whether it settled: only an open task on Scratch does.
+       */
+      const clearing = (input: { readonly envelope: CommandEnvelope; readonly taskId: string }) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const at = yield* timestamp
+          const cleared = yield* sql.withTransaction(
+            Effect.gen(function* () {
+              const [task] = yield* sql<{ projectId: ProjectId; state: string; shelf: string | null }>`
+                SELECT project_id, state, shelf FROM tasks WHERE id = ${input.taskId}`
+              if (task === undefined || task.state !== 'open' || task.shelf !== 'scratch') return undefined
+              const state = yield* transition(taskLifecycle, 'open', 'done')
+              yield* letGo(input.taskId, task.projectId, input.envelope, 'stopped')
+              const revision = yield* change('tasks', input.taskId, { state, settledAt: at, keptAt: null })
+              yield* fact({
+                projectId: task.projectId,
+                aggregateType: 'task',
+                aggregateId: input.taskId,
+                revision,
+                type: 'task.done',
+                payload: { marked: true, cleared: true },
+                actorId: input.envelope.actorId,
+                commandId: input.envelope.commandId,
+              })
+              return task.projectId
+            }),
+          )
+          if (cleared === undefined) return false
+          yield* see({ taskId: input.taskId })
+          yield* changes.releaseHolds(input.taskId, 'left')
+          yield* stopAgents(input.taskId)
+          yield* launches.stopAll(cleared, input.taskId)
           yield* leftBehind.settled(input.taskId)
           yield* touchCard(input.taskId)
           return true

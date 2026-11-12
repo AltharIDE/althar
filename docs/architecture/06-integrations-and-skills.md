@@ -1466,6 +1466,10 @@ A fork PR's workflow output is less trusted: contributors can change the code
 and scripts producing it, even when the workflow itself belongs to the project.
 Logs, annotations and artifact names/content are evidence, never instructions
 or authority to run commands or disclose credentials. Reading CI does not relax
-the existing filtering of outsiders' comments. Tool responses are capped at
+the existing filtering of outsiders' comments. The coordinator's news of a
+pull request the merge queue sent back names each failed job in a line, with
+its page, and never pastes its log: it reads one with `read_checks` where it
+needs to, rather than every turn after carrying thousands of lines of it
+(12 Nov 2026). Tool responses are capped at
 32 KiB, log downloads at 16 MiB, artifact archives at 5 MiB. The download cap
 applies while streaming, even when the server omits or lies about its size.

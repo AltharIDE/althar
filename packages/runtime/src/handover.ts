@@ -14,7 +14,6 @@ import { Policies, ruleSetOf } from './Policies'
 import { withRole } from './roles'
 import { sayRules } from './rules'
 import { PlanParameters } from './Runs'
-import { ASIDES_ARE, asideNamed, asidesMore, openAsides } from './Search'
 import { transcript } from './threads'
 
 /*
@@ -170,9 +169,8 @@ const underIt = (waits: ReadonlyArray<string>, summary: string) => [
 /**
  * Every open task, newest first, as a brief describes it: where it stands,
  * who does it, and what waits on the person, none left out. Asides, chats on
- * Scratch, aren't tasks, and wait on no one to be accepted: they come after,
- * apart and uncounted, each with its calls and its last report. Past the newest
- * TASKS_IN_FULL, each is shorter, without its plan or its lead's last report,
+ * Scratch, stay out of its task brief. Past the newest TASKS_IN_FULL, each
+ * is shorter, without its plan or its lead's last report,
  * which read_task gives. Read from the records and the task's worktree;
  * `working` says whether an agent is at work on a thread now.
  */
@@ -279,22 +277,12 @@ export const openTasks = (projectId: string, modelOf: ModelNamer, working: (thre
         return [`- ${task.slug}: ${task.title}. ${[stands, ...who].join(' ')}`, ...underIt(waits, summary)].join('\n')
       }),
     )
-    // Asides apart, not counted: each by name and where it stands, with what of it waits on the person and its last report.
-    const open = yield* openAsides(projectId, (aside) => working(aside.threadId))
-    const asides = yield* Effect.forEach(open.asides, (aside) =>
-      Effect.gen(function* () {
-        const waits = (yield* callsOf(aside.taskId)).map(callWords)
-        return [`- ${asideNamed(aside)}`, ...underIt(waits, yield* lastReport(aside.threadId))].join('\n')
-      }),
-    )
     return {
       count: tasks.length,
-      text: [
+      text:
         tasks.length === 0
           ? 'The project has no open tasks.'
           : `Open tasks, newest first${tasks.length > TASKS_IN_FULL ? ` (past the newest ${TASKS_IN_FULL}, each in short: read_task has the rest)` : ''}:\n${described.join('\n')}`,
-        ...(asides.length === 0 ? [] : [`${ASIDES_ARE}, newest first${asidesMore(open.more)}:\n${asides.join('\n')}`]),
-      ].join('\n\n'),
     }
   })
 

@@ -47,7 +47,7 @@ const opened = (path: string) =>
 /**
  * An aside the person starts with + over the coordinator's conversation, as the window's StartTask with `chat` makes one
  * (Api.ts): a plain task with their words, on Scratch from the start, planned with no card and started at once, on the model
- * the composer has picked. What its plan's start said: its first step running, or waiting for a place.
+ * the composer has picked. Its plan's first step starts without waiting for a machine place.
  */
 const aside = (projectId: ProjectId, title: string, words: string, effort = 'high') =>
   Effect.gen(function* () {
@@ -73,7 +73,7 @@ const aside = (projectId: ProjectId, title: string, words: string, effort = 'hig
       startsIn: Duration.zero,
       end: null,
       here: true,
-      card: false,
+      aside: true,
     })
     return { ...created, started: yield* plans.start(planId, instance.personId) }
   })
@@ -176,23 +176,19 @@ describe('a chat on Scratch, where tasks are counted', () => {
 
   // Finding (sanity pass), fixed: list_tasks listed every task of the project, newest first, 50 at most, with no look at
   // `tasks.shelf`: an aside the person said "Hi" in was listed as a task, "hi: Hi (ready, …)", beside the real work, each taking
-  // one of the 50 lines. Now asides are left out of the list, and the coordinator is told the open ones by name, after it.
+  // one of the 50 lines. Asides stay out of the coordinator's task list.
   it.live('isn’t listed by list_tasks as a task, beside the project’s work', () =>
     Effect.gen(function* () {
       const { projectId, coordinator } = yield* opened(repository())
       const hi = yield* answeredAside(projectId)
       const listed = yield* callTool(coordinator, 'list_tasks')
-      const line = listed.split('\n').find((one) => one.startsWith(`- ${hi.slug}:`))
-      // Left out, or at least said to be an aside rather than a task.
-      assert.isTrue(line === undefined || /aside|scratch/i.test(line), `listed as a task: ${line ?? ''}`)
-      // Named to the coordinator as an aside, after the list.
-      assert.include(listed, `Asides on Scratch, chats beside your conversation rather than tasks: ${hi.slug} (“Hi”).`)
+      assert.strictEqual(listed, 'The project has no tasks yet.')
+      assert.notInclude(listed, hi.slug)
     }).pipe(Effect.provide(Queries.layer.pipe(Layer.provideMerge(runtime())))),
   )
 
-  // The line that names asides to the coordinator says where each stands in find_tasks' words: one still waiting on the
-  // person says so, in list_tasks and in a fresh session's brief alike; one its agent answered says nothing more, never "ready".
-  it.live('is named to the coordinator with where it stands, as find_tasks says it', () =>
+  // Unsolicited context stays quiet even when an aside waits on a question; explicit tools still find and read it.
+  it.live('leaves aside details out of the task list and fresh brief while explicit reads remain available', () =>
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
       const { projectId, coordinator } = yield* opened(repository())
@@ -202,20 +198,17 @@ describe('a chat on Scratch, where tasks are counted', () => {
         sql<{ id: string }>`SELECT id FROM attention_requests WHERE task_id = ${asked.taskId} AND state = 'open'`,
         (rows) => rows.length === 1,
       )
-      const named = `${asked.slug} (“Pick a cache”, waiting on the person), ${hi.slug} (“Hi”)`
-      assert.include(
-        yield* callTool(coordinator, 'list_tasks'),
-        `Asides on Scratch, chats beside your conversation rather than tasks: ${named}.`,
-      )
-      // The brief says, under each, what of it waits on the person and what its agent last reported.
+      assert.strictEqual(yield* callTool(coordinator, 'list_tasks'), 'The project has no tasks yet.')
       const brief = yield* openTasks(
         projectId,
         (step) => step.agentId,
         () => false,
       )
-      const waiting = `- ${asked.slug} (“Pick a cache”, waiting on the person)\n  Waiting on the person: a question from its lead: `
-      assert.include(brief.text, `Asides on Scratch, chats beside your conversation rather than tasks, newest first:\n${waiting}`)
-      assert.include(brief.text, `\n- ${hi.slug} (“Hi”)\n  Its lead last reported: `)
+      assert.deepStrictEqual(brief, { count: 0, text: 'The project has no open tasks.' })
+      const found = yield* callTool(coordinator, 'find_tasks', { text: 'Pick a cache' })
+      assert.include(found, `${asked.slug}: Pick a cache (an aside on Scratch, a chat rather than a task, waiting on the person;`)
+      assert.include(yield* callTool(coordinator, 'read_task', { task: hi.slug }), 'Hi')
+      assert.include(yield* callTool(coordinator, 'read_task', { task: asked.slug }), 'Pick a cache')
     }).pipe(Effect.provide(Queries.layer.pipe(Layer.provideMerge(runtime())))),
   )
 

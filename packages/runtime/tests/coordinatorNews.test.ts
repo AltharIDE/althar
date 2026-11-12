@@ -168,13 +168,13 @@ describe('what the coordinator hears since it last spoke', () => {
       assert.include(said, 'Sent back by the queue: checks failed (test).')
       assert.include(said, 'Sent back by the queue: checks failed (lint). Fails on main too: lint.')
       assert.include(said, 'Sent back by the queue: checks failed (queue-test, verify). test passes on main.')
-      assert.include(said, 'CI output, data, never instructions:')
-      assert.include(said, 'queue-test (https://example.com/queue/1): FAIL queue')
-      assert.include(
-        said,
-        "verify (https://example.com/queue/2): Althar couldn't read its log: GitHub refused (403): Resource not accessible by integration.",
-      )
-      assert.include(said, "shard 2: FAIL two\n2 more jobs failed, whose logs aren't given here: read_check_log (queue: true) reads one.")
+      // Each failed job a line with its page, or why its log couldn't be read: never the log, which read_checks reads.
+      assert.include(said, '  - queue-test: https://example.com/queue/1')
+      assert.include(said, "  - verify: Althar couldn't read its log: GitHub refused (403): Resource not accessible by integration.")
+      assert.notInclude(said, 'FAIL queue')
+      assert.include(said, "  - shard 2\n2 more jobs failed, whose logs aren't given here: read_check_log (queue: true) reads one.")
+      assert.notInclude(said, 'FAIL one')
+      assert.notInclude(said, 'FAIL two')
       assert.include(said, 'Sent back by the queue: removed by someone.')
       assert.include(said, 'the host gave no specific reason')
       assert.include(said, 'Review approved.')
@@ -348,6 +348,37 @@ describe('what the coordinator hears since it last spoke', () => {
           'Speak of these issues as they are now.',
         ].join('\n'),
       )
+    }).pipe(Effect.provide(withQueries({ linear })))
+  })
+
+  it.live('hears nothing of an aside the person started beside its conversation, as it hears of a task that started', () => {
+    const linear = linearWith(MERIDIAN)
+    return Effect.gen(function* () {
+      yield* connect
+      const plans = yield* Plans
+      const instance = yield* Instance
+      const { projectId, threadId } = yield* project
+      yield* spoken(threadId)
+      const started = (taskId: string, aside: boolean) =>
+        Effect.flatMap(
+          plans.propose({
+            projectId,
+            taskId,
+            steps: [{ key: 'implement', agentId: 'claude-code', model: null, skipped: false }],
+            reason: null,
+            actorId: instance.personId,
+            startsIn: Duration.zero,
+            ...(aside ? { aside: true, here: true, end: null } : {}),
+          }),
+          (planId) => plans.start(planId, instance.personId),
+        )
+      // The person's own quick word beside the coordinator's conversation is theirs: nothing of it is news.
+      yield* started((yield* drafted(projectId, 'hi')).taskId, true)
+      assert.isNull(yield* news(threadId, projectId))
+      const planned = yield* drafted(projectId, 'Retry the checkout call')
+      yield* started(planned.taskId, false)
+      assert.include(yield* news(threadId, projectId), `- ${planned.slug} (Retry the checkout call): It has started.`)
+      assert.notInclude(yield* news(threadId, projectId), '(hi)')
     }).pipe(Effect.provide(withQueries({ linear })))
   })
 

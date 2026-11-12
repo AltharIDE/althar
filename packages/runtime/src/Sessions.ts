@@ -33,6 +33,7 @@ import {
   Duration,
   Effect,
   Exit,
+  Fiber,
   Layer,
   Option,
   Queue,
@@ -116,7 +117,7 @@ import {
 } from './leftRunning'
 import { WORK, workOf } from './machine'
 import { holding, portFor, portsBelow } from './ports'
-import { LEAD_PLANS_FROM_PRESETS, PLAN_FROM_PRESETS } from './presetBrief'
+import { LEAD_PLANS_FROM_PRESETS, PARTS_CHANGE, PLAN_FROM_PRESETS } from './presetBrief'
 import { stopProcesses, treeOfCommand } from './stopping'
 import { outputText } from './reading'
 import { ToolServer } from './ToolServer'
@@ -353,7 +354,7 @@ const alongside = (taskId: string) => siblingsOf(taskId).pipe(Effect.map((others
 
 /** What a lead is told of the project's other tasks (otherTasks.ts, Overlaps.ts), and of starting and moving them (ADR-097). */
 export const OTHER_TASKS =
-  "Other tasks of this project may change the same code as yours. list_tasks and find_tasks show each with where it stands, its branch, where it works and the files it changes now; read_task (its brief, plan, report and review findings), read_task_diff (its change as it stands, what isn't committed included) and read_thread (what the person and its lead said) read one. Read them before you change code another open task changes, and where your brief names another task. Where Althar tells you another running task changes files you change, read its work before you go on there. You share the coordinator's tools: where the person asks for work your task shouldn't do itself, such as turning a prototype into the real build or a review's findings into a fix, draft it with draft_task and plan it with propose_plan (or start something small with start_task); it records your task as where it came from, waits the plan's countdown so the person can hold it, and you may start a few in a turn and ten in all. message_lead passes something to another task's lead, signed with your task. The task moves (stop_task, hold_task, restart_task, settle_task, skip_review, push_task and the rest of what the window's buttons do) act at once, with a line in both threads: use them on another task only when the person asks, or where its work plainly conflicts with yours, and say why. Accepting and merging stay on the person's own message. close_pull_request, reopen_pull_request, mark_ready, reply_on_pull_request and edit_pull_request act on any of the project's pull requests, whoever opened it: Althar's own and the person's own at once, anyone else's on the person's own message in your turn (message, from read_turn). read_settings and change_settings read and change the project's settings and Althar's, as the Settings screens do: a change that loosens what asks goes only on the person's own message in your turn, and is a card for them otherwise. Never change another task's files yourself."
+  "Other tasks of this project may change the same code as yours. list_tasks and find_tasks show each with where it stands, its branch, where it works and the files it changes now; read_task (its brief, plan, report and review findings), read_task_diff (its change as it stands, what isn't committed included) and read_thread (what the person and its lead said) read one. Read them before you change code another open task changes, and where your brief names another task. Where Althar tells you another running task changes files you change, read its work before you go on there. You share the coordinator's tools: where the person asks for work your task shouldn't do itself, such as a review's findings into a fix, draft it with draft_task and plan it with propose_plan (or start something small with start_task); it records your task as where it came from, waits the plan's countdown so the person can hold it, and you may start a few in a turn and ten in all. message_lead passes something to another task's lead, signed with your task. The task moves (stop_task, hold_task, restart_task, settle_task, skip_review, push_task and the rest of what the window's buttons do) act at once, with a line in both threads: use them on another task only when the person asks, or where its work plainly conflicts with yours, and say why. Accepting and merging stay on the person's own message. close_pull_request, reopen_pull_request, mark_ready, reply_on_pull_request and edit_pull_request act on any of the project's pull requests, whoever opened it: Althar's own and the person's own at once, anyone else's on the person's own message in your turn (message, from read_turn). read_settings and change_settings read and change the project's settings and Althar's, as the Settings screens do: a change that loosens what asks goes only on the person's own message in your turn, and is a card for them otherwise. Never change another task's files yourself."
 
 /**
  * How the code-host tools' sign-in reaches a session's commands: gh and glab
@@ -445,8 +446,13 @@ interface Running {
   handover: 'none' | 'under_way' | 'left'
   /** When its turn running started, in milliseconds: what the person's wait for its first word is counted from. */
   turnStartedAt: number | null
-  /** Its lead ran a command in this session: a chat's copy made without setup was set up then (`heardRun`). */
-  ranOnce?: boolean
+  /**
+   * Briefed as an aside (`asideBrief`): told a lead's whole brief with its next turn, once, when it becomes work, with what its
+   * sandbox lets through, which it wasn't told.
+   */
+  aside?: { readonly sandbox: string | null } | undefined
+  /** An aside opened with + with nothing said in it yet: its brief waits for the person's first words, as the coordinator's does. */
+  waitsForWords?: boolean | undefined
   /** In a task of several changes, where each change's branch stood as its turn started: what it committed to each is counted from. */
   turnHeads?: ReadonlyArray<{ readonly name: string; readonly path: string; readonly head: string }> | undefined
   /** When its last turn ended, in milliseconds; null before its first. */
@@ -550,6 +556,12 @@ type Failure = SqlError.SqlError | Schema.SchemaError | CommandIdReused | RowNot
 class TakenBack extends Schema.TaggedError<TakenBack>()('TakenBack', {}) {}
 
 const PROMPT_BUDGET = 60_000
+
+/**
+ * How long the coordinator's copies, made fresh as its last turn ended, stay fresh enough for its next: past it, the person
+ * came back after a while, and they are fetched again before the turn.
+ */
+const COPIES_FRESH = 15 * 60_000
 
 const optionValue = (options: ReadonlyArray<ConfigOption>, id: string | undefined) => {
   const value = id === undefined ? undefined : options.find((option) => option.id === id)?.currentValue
@@ -1302,17 +1314,6 @@ export class Sessions extends Context.Service<
           }
         })
 
-      /**
-       * A chat's copy is made without setup (a task is a conversation plus parts, "Asides"): the first command its
-       * lead runs sets it up, once per session, beside the command, as its thread shows. Nothing for one set up already.
-       */
-      const heardRun = (running: Running, event: SessionEvent) => {
-        const { thread } = running
-        if (thread.role !== 'task' || running.ranOnce === true || event._tag !== 'ToolCall' || event.kind !== 'execute') return Effect.void
-        running.ranOnce = true
-        return setups.begin(thread.taskId, true)
-      }
-
       /** Keeps what the agent says of what it left running, from an event it streamed, in a turn or between. */
       const heardBackground = (running: Running, event: SessionEvent) =>
         run(
@@ -1449,7 +1450,7 @@ export class Sessions extends Context.Service<
               threadId,
               projectId: kind.projectId,
               projectName: kind.projectName,
-              folder: yield* coordinatorFolder(kind.projectId),
+              folder: yield* freshCopies(kind.projectId),
             } satisfies ThreadContext as ThreadContext
           // The task's repositories, each in its worktree here, the first first.
           const repositories = yield* sql<TaskRepository>`
@@ -1833,6 +1834,80 @@ export class Sessions extends Context.Service<
           Effect.asVoid,
         )
 
+      /*
+       * Each project's coordinator copies (coordinatorFolder.ts), as a turn reads them: when they were last made fresh with no
+       * turn of the coordinator's since, which may have written in them (null where one may have), and the refresh under way as
+       * its last turn ended, which the next waits for rather than making its own. So a turn goes out at once where the person
+       * took longer to answer than the copies took to make, as they nearly always do; they are never older than COPIES_FRESH.
+       */
+      const copiesOf = new Map<string, { at: number | null; under: Fiber.Fiber<void> | undefined }>()
+      const copiesState = (projectId: string) => {
+        const known = copiesOf.get(projectId)
+        if (known !== undefined) return known
+        const made = { at: null, under: undefined }
+        copiesOf.set(projectId, made)
+        return made
+      }
+
+      /** The coordinator's copies made fresh, and known to be so. */
+      const freshCopies = (projectId: string) =>
+        Effect.gen(function* () {
+          const folder = yield* coordinatorFolder(projectId)
+          copiesState(projectId).at = yield* Clock.currentTimeMillis
+          return folder
+        })
+
+      /** Before a coordinator's turn: its copies as its last turn's end made them, or made fresh now; this turn may write in them. */
+      const copiesReady = (projectId: string) =>
+        Effect.gen(function* () {
+          const state = copiesState(projectId)
+          if (state.under !== undefined) yield* Fiber.await(state.under)
+          const now = yield* Clock.currentTimeMillis
+          if (state.at === null || now - state.at > COPIES_FRESH)
+            yield* freshCopies(projectId).pipe(
+              Effect.catchCause((cause) => Effect.logWarning('Could not refresh the coordinator folder', cause)),
+            )
+          state.at = null
+        })
+
+      /** As a coordinator's turn ends: its copies made fresh again for the next, in the background. */
+      const copiesAfter = (projectId: string) =>
+        Effect.gen(function* () {
+          const state = copiesState(projectId)
+          const refresh = freshCopies(projectId).pipe(
+            Effect.asVoid,
+            Effect.catchCause((cause) => Effect.logWarning('Could not refresh the coordinator folder', cause)),
+          )
+          const under = yield* Effect.forkIn(refresh, sessionsScope)
+          state.under = under
+          yield* Effect.forkIn(
+            Effect.andThen(
+              Fiber.await(under),
+              Effect.sync(() => {
+                if (state.under === under) state.under = undefined
+              }),
+            ),
+            sessionsScope,
+          )
+        })
+
+      /**
+       * What an aside's lead is told with its next turn once the aside became work and left Scratch: a lead's whole brief, where
+       * its worktree stands now and what its sandbox lets through, but not the thread, which it has. Once; null while it is an
+       * aside still.
+       */
+      const workBrief = (running: Running, was: TaskThread, told: NonNullable<Running['aside']>) =>
+        Effect.gen(function* () {
+          if ((yield* asideState(was.taskId)).aside) return null
+          running.aside = undefined
+          const reread = yield* loadThread(was.threadId).pipe(Effect.orElseSucceed(() => was))
+          return [
+            "This aside is a task now, on the board: what you do from here is a task's work, as a lead does it.",
+            yield* taskBrief(reread.role === 'task' ? reread : was, { kind: 'start' }, false),
+            ...(told.sandbox === null ? [] : [told.sandbox]),
+          ].join('\n\n')
+        }).pipe(Effect.catchCause((cause) => Effect.as(Effect.logWarning('Could not brief an aside that became work', cause), null)))
+
       /** Delivers the queued input as one turn, and records it to its end. */
       const deliver = (running: Running) =>
         Effect.gen(function* () {
@@ -1844,6 +1919,8 @@ export class Sessions extends Context.Service<
           // A model or effort chosen from here is kept for the turn after this one: it is the lead as it stands now that goes out.
           running.leadHeld = true
           yield* inputBatches.ready(thread.threadId)
+          // From here to its prompt going out is the turn getting ready, which its timings keep (turnTimes.ts).
+          const readying = yield* Clock.currentTimeMillis
           // A lead changed meanwhile takes up what is said to it now, between turns: another agent takes over with it.
           if (running.nextLead !== undefined && (yield* inputWaiting(thread.threadId))) {
             const next = running.nextLead
@@ -1934,15 +2011,20 @@ export class Sessions extends Context.Service<
           // Notes alone start no turn: they are read with the next one, whatever starts it.
           const asking = inputs.some((input) => input.state === 'queued')
           if (!asking && running.brief === undefined) return false
-          // The coordinator speaks when spoken to: its brief waits for the person's first message.
-          if (!asking && thread.role === 'coordinator') return false
+          // The coordinator speaks when spoken to: its brief waits for the person's first message. So does an aside opened with +.
+          if (!asking && (thread.role === 'coordinator' || running.waitsForWords === true)) return false
           // A compaction says nothing of the brief: that is read with the next turn.
           const briefOf = compacting ? undefined : running.brief
-          // Its copies of the repositories are brought up to date for each turn; offline, it reads what it has.
-          if (thread.role === 'coordinator')
-            yield* coordinatorFolder(thread.projectId).pipe(
-              Effect.catchCause((cause) => Effect.logWarning('Could not refresh the coordinator folder', cause)),
-            )
+          // Its copies of the repositories are fresh for each turn: made so as its last turn ended, while the person read and wrote,
+          // or now, where they weren't; offline, it reads what it has.
+          const copying = yield* Clock.currentTimeMillis
+          if (thread.role === 'coordinator') yield* copiesReady(thread.projectId)
+          const copies = thread.role === 'coordinator' ? (yield* Clock.currentTimeMillis) - copying : undefined
+          // An aside that became work since its last turn is told, once, what a task's lead does: the brief it started without.
+          const becameWork =
+            thread.role === 'task' && running.aside !== undefined && running.brief === undefined && !compacting
+              ? yield* workBrief(running, thread, running.aside)
+              : null
           const brief = briefOf
           // The lead is told how its worktrees were set up, in its brief.
           const setUp = thread.role === 'task' && brief !== undefined ? yield* setups.told(thread.taskId) : null
@@ -1966,7 +2048,7 @@ export class Sessions extends Context.Service<
                   ),
                 )
               : null
-          let prompt = compacting ? COMPACT : asTold(running.entry.definition, promptFor(inputs, briefed))
+          let prompt = compacting ? COMPACT : asTold(running.entry.definition, promptFor(inputs, briefed, becameWork))
           const turnId = yield* newId(Ids.turnDelivery)
           const [session] = yield* sql<{
             model: string | null
@@ -2071,9 +2153,15 @@ export class Sessions extends Context.Service<
               )
             }),
           )
-          if (!compacting) running.brief = undefined
+          if (!compacting) {
+            running.brief = undefined
+            running.waitsForWords = undefined
+          }
           running.turnRunning = true
           running.turnStartedAt = yield* Clock.currentTimeMillis
+          const ready = running.turnStartedAt - readying
+          // The agent's first word, thought or call: how long the model took before it said anything.
+          let first: number | undefined
           running.turnHeads = yield* changeHeads(thread.threadId)
           // What it did outside a turn before is over with: this turn is what it is at.
           running.callsOpen.clear()
@@ -2210,13 +2298,19 @@ export class Sessions extends Context.Service<
           const streamed = yield* Stream.runForEach(running.agent.prompt(prompt, parts, started), (event) =>
             Effect.gen(function* () {
               if (event._tag === 'TurnEnded') ended = event
-              tools.heard(event, yield* Clock.currentTimeMillis)
+              const heardAt = yield* Clock.currentTimeMillis
+              if (
+                first === undefined &&
+                (event._tag === 'AgentMessage' || event._tag === 'AgentThought' || event._tag === 'ToolCall') &&
+                running.turnStartedAt !== null
+              )
+                first = Math.max(0, heardAt - running.turnStartedAt)
+              tools.heard(event, heardAt)
               // An agent may say its compaction failed in a call of its own, and end its turn as usual (Claude Code).
               if (compacting && event._tag === 'ToolCallUpdate' && event.status === 'failed') compactFailed = true
               heardContext(running, event)
               yield* heardPlan(running, event)
               yield* record(event)
-              yield* heardRun(running, event)
               yield* heardBackground(running, event)
               yield* live.publish({ _tag: 'Agent', threadId: thread.threadId, event })
               if (event._tag === 'AgentMessage' || event._tag === 'AgentThought' || event._tag === 'ToolCallUpdate') yield* stream
@@ -2227,6 +2321,8 @@ export class Sessions extends Context.Service<
           running.turnRunning = false
           running.promptSent = null
           running.turnEndedAt = yield* Clock.currentTimeMillis
+          // Its copies made fresh again for its next turn now, while the person reads and writes, rather than as they wait.
+          if (thread.role === 'coordinator') yield* copiesAfter(thread.projectId)
           // A model or effort chosen while the turn ran is set on its agent now, rather than when something is said next.
           if (running.nextLead?.agentId === running.entry.definition.id) yield* Effect.forkIn(run(applyLead(running)), sessionsScope)
           // A session started for a step that waited for a place counts that wait in its first turn (Runs' `startPlaced`).
@@ -2255,6 +2351,9 @@ export class Sessions extends Context.Service<
             work: Math.max(0, running.turnEndedAt - (running.turnStartedAt ?? running.turnEndedAt)),
             tools: tools.total(running.turnEndedAt),
             ...(committed.length === 0 ? {} : { changes: committed }),
+            ready: Math.max(0, ready),
+            ...(copies === undefined ? {} : { copies: Math.max(0, copies) }),
+            ...(first === undefined ? {} : { first }),
           }
 
           const failure = Exit.isFailure(streamed) ? Cause.findErrorOption(streamed.cause) : Option.none()
@@ -2474,12 +2573,14 @@ export class Sessions extends Context.Service<
         Effect.forever(
           Effect.gen(function* () {
             yield* Queue.take(running.wake)
-            // A lead's first turn waits for its worktrees to be set up (Setups.ts), and so has what was said meanwhile. It
-            // waits before it holds the turn, so the lead can be stopped meanwhile. Its first turn counts the wait as its start.
-            if (running.thread.role === 'task' && running.brief !== undefined) {
+            // A lead's turn waits for its worktrees to be set up (Setups.ts), and so has what was said meanwhile: its first, and one
+            // after an aside became work, by the person's word or its lead's, whose copy was never set up as an aside (nothing to wait
+            // for, an aside's own, or one set up already). It waits before it holds the turn, so the lead can be stopped meanwhile.
+            // Its first turn counts the wait as its start.
+            if (running.thread.role === 'task') {
               const from = yield* Clock.currentTimeMillis
               yield* setups.ready(running.thread.taskId)
-              running.before.session += Math.max(0, (yield* Clock.currentTimeMillis) - from)
+              if (running.brief !== undefined) running.before.session += Math.max(0, (yield* Clock.currentTimeMillis) - from)
             }
             const { thread } = running
             // A turn that couldn't be delivered is kept to that turn: the next message wakes the loop again.
@@ -3092,6 +3193,8 @@ export class Sessions extends Context.Service<
           const opened = made === undefined ? 0 : Math.max(0, (yield* Clock.currentTimeMillis) - Date.parse(made.startedAt))
           const { definition } = entry
           const options = yield* agent.options
+          // An aside's lead, briefed lightly; started with + and nothing said yet, its brief waits for the person's first words.
+          const asideNow = thread.role === 'task' ? yield* asideState(thread.taskId) : { aside: false, unsaid: false }
           yield* sql.withTransaction(
             Effect.gen(function* () {
               const revision = yield* moveSession(sessionId, 'active', {
@@ -3122,11 +3225,12 @@ export class Sessions extends Context.Service<
             ended: yield* Deferred.make<void>(),
             // A lead is told what its sandbox lets through from the start, and how a command runs outside it, and of the
             // skills it was given.
+            // An aside is told what its sandbox lets through once it becomes work, with a lead's whole brief: a quick word needs none.
             brief: {
               ...brief,
               text: [
                 brief.text,
-                ...(upFront === undefined ? [] : [upFrontSaid(upFront)]),
+                ...(upFront === undefined || asideNow.aside ? [] : [upFrontSaid(upFront)]),
                 ...(skills === undefined || skills.given.length === 0 ? [] : [skillsSaid(skills.given)]),
               ].join('\n\n'),
             },
@@ -3154,6 +3258,8 @@ export class Sessions extends Context.Service<
             leadHeld: false,
             moved: false,
             before: { session: opened, starting: brief.starting ?? 'start', place: 0 },
+            ...(asideNow.aside ? { aside: { sandbox: upFront === undefined ? null : upFrontSaid(upFront) } } : {}),
+            ...(asideNow.unsaid ? { waitsForWords: true } : {}),
           }
           threads.set(thread.threadId, running)
           // Closed, it stops what it left running with all that started, before its agent ends their shells only (stopping.ts).
@@ -3583,6 +3689,23 @@ export class Sessions extends Context.Service<
           })
         })
 
+      /**
+       * Whether a task is an aside the person started (`PlanParameters.aside`) that is one still, on Scratch: what its lead is
+       * briefed lightly for. And whether they have said nothing in it yet: started with +, its lead waits for their first words.
+       */
+      const asideState = (taskId: string) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const [row] = yield* sql<{ aside: number | null; unsaid: number | null }>`
+            SELECT k.shelf IS 'scratch' AND EXISTS (SELECT 1 FROM task_plans p WHERE p.task_id = k.id AND p.state != 'replaced'
+                AND json_extract(p.parameters, '$.aside') = 1) AS aside,
+              (k.request IS NULL OR trim(k.request) = '') AND NOT EXISTS (SELECT 1 FROM user_inputs u
+                JOIN threads t ON t.id = u.thread_id AND t.kind = 'task' WHERE t.task_id = k.id) AS unsaid
+            FROM tasks k WHERE k.id = ${taskId}`
+          const aside = row?.aside === 1
+          return { aside, unsaid: aside && row?.unsaid === 1 }
+        })
+
       /** The thread so far, for a brief, oldest first, within the prompt's budget: what waits in its queue the turn says itself. */
       const threadSoFar = (threadId: string) =>
         Effect.map(transcript(threadId, PROMPT_BUDGET, { waiting: false }), (record) =>
@@ -3703,9 +3826,39 @@ export class Sessions extends Context.Service<
           ].join('\n\n')
         })
 
-      const taskBrief = (thread: TaskThread, why: Why) =>
+      /**
+       * An aside's brief (docs/decisions/tasks.md, "Asides"): light, as a quick word with the coordinator is. Who it is, that its
+       * reply is the answer with no step to report, where it reads, what it may do and the person's decisions; not a lead's whole
+       * brief, which it is told with its next turn once it becomes work and leaves Scratch. No thread replayed but its own, where a
+       * fresh session carries it on, and no news. What the person says comes with it, in the same turn.
+       */
+      const asideBrief = (thread: TaskThread, why: Why) =>
+        Effect.gen(function* () {
+          const [first] = thread.repositories
+          const errands = yield* errandLines(thread.projectId, thread.taskId)
+          return [
+            why.kind === 'start'
+              ? "You are an aside of this project's coordinator, in Althar: a quick chat the person opened beside their conversation with the coordinator, off the board. Answer what they ask, in your reply, as briefly as it allows; a greeting gets a greeting back. Your reply is the answer: there is no step to finish, no report, and no finish_step or evidence to give."
+              : `You are carrying on an aside of this project's coordinator, in Althar, a quick chat the person opened beside their conversation with the coordinator: Althar started you afresh ${why.kind === 'handover' && why.lost === true ? 'because the session before was lost' : 'to keep your context small'}. Its thread so far is below. Your reply is the answer: there is no step to finish and no finish_step to call.`,
+            ...askedFor(thread),
+            first === undefined
+              ? `Read and search ${thread.cwd} to answer.`
+              : `The repository is ${withRole(first.name, first.role)}, in ${first.worktree}: a copy of ${first.baseRef}${first.baseCommit === null ? '' : ` at ${first.baseCommit.slice(0, 12)}`}, with no branch and nothing installed. Read and search it to answer.`,
+            // Quick, so never set up (Setups.ts): what needs an install or a build is a task's.
+            "An aside never installs or upgrades dependencies, runs the project's setup, or builds: that is how it answers fast. Where what the person asks needs one of those, tests run or the project running, say in a line that it becomes a task, which they make with Make it a task over the composer.",
+            "You have the coordinator's tools and Althar's: list_tasks, find_tasks, read_task and read_thread for the project's work, read_pull_request and read_checks for its pull requests, find_issues and read_issue for its issues, start_task, or draft_task and propose_plan, for work done elsewhere. Where what the person asks is work in this repository, say so in a line and start on it: once you change it, the aside becomes a task on the board, and Althar tells you then what a task's lead does.",
+            `read_turn gives this turn’s byPerson and message ids; only their message from the window or a paired device, or an open errand’s recorded next step, may authorize an asked-for tool.${errands.length === 0 ? '' : ` Open errands concerning it:\n${errands.join('\n')}`}`,
+            ...(yield* Effect.map(notesOf(thread.projectId), (notes) => (notes.length === 0 ? [] : [notesSection(notes)]))),
+            STANDING_DICTATED,
+            ...(why.kind === 'start' ? [] : yield* threadSoFar(thread.threadId)),
+          ].join('\n\n')
+        })
+
+      const taskBrief = (thread: TaskThread, why: Why, replayed = true): Effect.Effect<string, SqlError.SqlError, Store> =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
+          // An aside the person started, still one, is briefed lightly: a quick word, not a task's work.
+          if (replayed && (yield* asideState(thread.taskId)).aside) return yield* asideBrief(thread, why)
           // The project's repositories the task doesn't change, which it may read where the person keeps them.
           const others = yield* sql<{ name: string; role: string; path: string }>`
             SELECT b.display_name AS name, b.role, l.path FROM repository_bindings b
@@ -3882,14 +4035,14 @@ export class Sessions extends Context.Service<
             "When you have done the task, call Althar's finish_step tool with a summary of a few lines: what you changed, how you checked it, and anything left open. The person reads that summary rather than everything you did. If you can't go further without the person's answer, call wait_for_person with your question and end your turn: the task waits in their Needs you, and their answer starts you again. Don't use finish_step for work that waits on them.",
             // After its plan, what the person says is a turn, not a round (a task is a conversation plus parts): its commits wait for Ship.
             'Once the plan\'s steps are done, what the person says to you is a turn of the conversation, not a step: do what they ask and answer; your last message is your answer, and there is no report to give and no finish_step to call. What you commit stays on the task\'s branch, where they can try it, and nothing pushes it: it waits for their Ship, which runs the review over everything since the last one and then sends it up (to the open pull request, or a new one after the last merged or closed). Where they ask you to ship it ("ship it", "push it"), call ship_task once your work for it is committed. Where what you commit goes in a new pull request (the last merged or closed, or there is none yet), call finish_step with its description once it\'s committed, so Ship opens it with yours.',
-            // A review offered, never added by a rule: where what the person says makes work with none a real change (a skipped review can be added back until merge).
-            "Where the person asks you to turn work that has no review into a real change, such as hardening a prototype, keeping a chat's work or opening a pull request for it, offer it a review with offer_review, once: a line in the thread they answer with Add or No thanks, and Add puts the reviewer on. Where they ask for a review outright, offer it the same way. Where they turned one down, leave it.",
+            // Every part changes either way on the person's word, at once: a prototype they ask to build is a Change in one move.
+            `${PARTS_CHANGE} Where they ask you to turn work into a real change, such as building a prototype, keeping a chat's work or opening a pull request for it, call change_part with preset Change: its reviewer and its pull request ending go on at once, and Ship runs the review and opens it (ship, or ship_task, where they asked for it to go up now). Where they turned a review down, leave it.`,
             // The thread reads in rounds: what was asked, the lead's word on it, its work folded into one line, and what it did.
             'When you pick up something to do, whether the task, a message from the person, what the coordinator passes on or the findings of a review, first say in a sentence or two what you understood and what you will do, then do it. Say little while you work: your words along the way are folded in with your work. When you are done, end with a message that says what you did, what to look at, and what is left.',
             // What stands open of a round is its last message, or its report where nothing follows it: it carries everything (ADR-099).
             LAST_MESSAGE_LEAD,
             // What the lead shows of its work: evidence that fits the task, and what it couldn't show.
-            "As you work, gather evidence that the change does what it should, and hand it with finish_step, each piece with a caption saying what it shows. Choose what fits the task: for a change someone sees, screenshots of the states you changed (the repository's docs may say how to take them; Althar's screenshot tool takes one of any HTTP page); otherwise the test run or command that shows it, with its exit code and output, a response, a log, or a before and after. Where nothing fits, as for a typo or a version bump, a single note saying so is enough. Don't say something works without showing it: what you changed but couldn't show working, and why, goes in `unverified`, which the person reads as what is still theirs to check. Take a screenshot at 1× (a device scale of 1, not a Retina 2×), of only the part that changed where you can, and look at each once: every picture you read stays in your context for the rest of the task, and a whole Retina screen costs as much as a few thousand words.",
+            "As you work, gather evidence that the change does what it should, and hand it with finish_step, each piece with a caption saying what it shows. Choose what fits the task: for a change someone sees, screenshots of the states you changed (the repository's docs may say how to take them; Althar's screenshot tool takes one of any HTTP page); otherwise the test run or command that shows it, with its exit code and output, a response, a log, or a before and after. Where nothing fits, as for a typo, a version bump or a question answered, hand none: a note only saying there is nothing to show is nothing to show. Don't say something works without showing it: what you changed but couldn't show working, and why, goes in `unverified`, which the person reads as what is still theirs to check. Take a screenshot at 1× (a device scale of 1, not a Retina 2×), of only the part that changed where you can, and look at each once: every picture you read stays in your context for the rest of the task, and a whole Retina screen costs as much as a few thousand words.",
             // Each screenshot shows once, with its caption.
             "Show each screenshot once. Don't hand over again, or take again, one you have already handed over, unless the screen has changed since. Never list your screenshots in a table or a list in a message: each one shows with its caption already.",
             // Althar draws a mermaid block as a diagram, in the thread and in a Markdown file the thread opens (packages/ui, Diagram).
@@ -3940,7 +4093,7 @@ export class Sessions extends Context.Service<
             ...(commits === '' ? [] : [`Commits so far:\n${cap(commits)}`]),
             ...(changed === '' ? [] : [`Changed since the start:\n${cap(changed)}`]),
             ...(status === '' ? [] : [`Not yet committed:\n${cap(status)}`]),
-            ...(yield* threadSoFar(thread.threadId)),
+            ...(replayed ? yield* threadSoFar(thread.threadId) : []),
           ].join('\n\n')
         })
 
@@ -3971,7 +4124,7 @@ export class Sessions extends Context.Service<
                 )
                 .join(
                   '\n',
-                )}\nRead and search them to answer questions and to plan. Commands that only look run there, such as git log, git tag and git grep, with $(…) too. Each copy's only remote is the person's repository, which Althar fetched before this turn: \`git fetch\` brings its branches and tags, the remote's as of then. Where your sandbox holds your commands to your working folder, anything that stays inside it runs, loops, \`$(…)\` and scripts included, such as a git tag or one unit test file that needs nothing installed (the copies have no packages installed); the network is open. With or without the sandbox, only a command that visibly writes outside your folder is refused, and anything that can't be undone asks the person. Anything you write there is thrown away. To build or run tests in a copy, set it up first with install_dependencies, which Althar runs outside your sandbox; to run the project, use run_project. You don't change code: a change is a task, for tidiness rather than safety, as a change in a copy has no branch, no review and no record.`,
+                )}\nRead and search them to answer questions and to plan. Commands that only look run there, such as git log, git tag and git grep, with $(…) too. Each copy's only remote is the person's repository, which Althar fetched since your last turn: \`git fetch\` brings its branches and tags, the remote's as of then. Where your sandbox holds your commands to your working folder, anything that stays inside it runs, loops, \`$(…)\` and scripts included, such as a git tag or one unit test file that needs nothing installed (the copies have no packages installed); the network is open. With or without the sandbox, only a command that visibly writes outside your folder is refused, and anything that can't be undone asks the person. Anything you write there is thrown away. To build or run tests in a copy, set it up first with install_dependencies, which Althar runs outside your sandbox; to run the project, use run_project. You don't change code: a change is a task, for tidiness rather than safety, as a change in a copy has no branch, no review and no record.`,
           [
             "To get a change made, use Althar's tools:",
             `- draft_task, with a title that says what should change in a few words, at most 60 characters, and a description with what the lead needs: the context, where to look, constraints, and what done looks like.${repositories.length > 1 ? ' Name the repositories it changes, as repositories; its lead can still read the others.' : ''}`,
@@ -4000,7 +4153,7 @@ export class Sessions extends Context.Service<
             "- rerun_check, read_default_branch_checks, mark_ready, close_pull_request, reopen_pull_request, update_branch, reply_on_pull_request and edit_pull_request, to act on the project's pull requests on the code host, by their number or link. They act on any of the project's pull requests, whoever opened it, and each can be undone in a step. Without asking: run a failed check again when it looks like chance (a flaky test, a runner that went away; on the default branch too), read the default branch's checks to tell whether a failure is the change's or broken already, mark a draft of Althar's or the person's own ready, close one of those that is plainly dead and reopen it if that was wrong, reply on one Althar opened or one by the person or the repository's own people, and give one of those another title or description when it no longer says what the change does (on one a task follows, the title keeps the project's naming and the task's card follows it; rename_task, for a task, retitles its pull request too). update_branch merges the default branch into a pull request's branch when it is behind and that holds it up (a merge commit, never a rebase or a forced push; a conflict is named, not settled, and a branch the account can't push to is left for its author, whom only the person asks). Say what you did in a line. On the person's word, their message in this turn that asks it (message, from read_turn), do the same to anyone's: close, reopen or mark ready one someone else opened, reply on or edit an outside author's. Do it at once, one call for each, without asking again. Closing on Bitbucket Cloud, where declining is final, goes on their word too, whoever opened it. Without their word, say what you would do and why, and they decide. A host that can't do one (Bitbucket Cloud can't reopen; Bitbucket Data Center's builds are another service's) says so in its own words: pass that on, with the link.",
             "- attach_pull_request, when a task should follow an open pull request it didn't open: one opened by hand, or upstream after the task's own went to the fork. The task then hears its reviews, comments, checks and conflicts, its lead's pull request tools act on it, and its work goes to that pull request's branch, never a new one. Where its branch isn't based on that pull request's head, it starts from the head at once in a turn the person's message started, keeping the task's commits on top; otherwise ask them before you call it again with start_from_head. A task drafted to work on an open pull request, such as to answer its review, takes it as draft_task's pull_request, and starts on its head.",
             "- message_lead, to pass something to a task's lead. Leads have your tools too (ADR-097): a lead may draft, plan and start tasks from its own, which its card says it was started by, and move other tasks; read_task_diff shows any task's change as it stands, and show_pictures shows the person pictures from your copies.",
-            "- offer_review, where what the person says makes a task's work with no review a real change (they ask its lead to harden a prototype, or for a pull request of a chat's work): a line in your thread they answer with Add or No thanks, once. Its lead offers it where they said it there. Where they plainly asked for a review, add it with change_lead instead.",
+            `- change_part and change_lead, for a task's parts: ${PARTS_CHANGE}`,
             "- The rest of what the window's buttons on a task do, each at once with a line in your thread and the task's: skip_review (Skip the review), push_task (the Change card's Push, up to the head you read, never forced), open_task_pull_request (open its pull request, or a new one for commits after it merged), push_task_branch, resolve_conflicts (now, or whether it resolves them automatically), move_to_front, stop_following, change_lead (another model, effort or agent on its lead from its next turn, or its reviewer; or a step held for a usage limit handed on), try_again, compact_lead, set_part_of_issue, mark_ready and rename_task.",
             "- read_settings and change_settings, for the project's settings and Althar's, everything the Settings screens show. A change that tightens, or changes nothing about what asks, goes at once with a line and Undo; one that loosens what asks goes only on the person's own message in this turn, and is a card for them otherwise.",
             // Release branches (ADR-093): made, and brought back, on the person's word, as a merge is.

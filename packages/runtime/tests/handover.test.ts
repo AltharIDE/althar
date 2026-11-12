@@ -749,7 +749,7 @@ describe("a handover brief's open tasks", () => {
     }).pipe(Effect.provide(withQueries())),
   )
 
-  it.live('keeps what start_task started on Scratch apart, uncounted, with what waits on the person and its last report', () =>
+  it.live('leaves what start_task started on Scratch out of the task brief, including its calls and reports', () =>
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
       const projects = yield* Projects
@@ -773,22 +773,8 @@ describe("a handover brief's open tasks", () => {
         () => false,
       )
       assert.strictEqual(tasks.count, 0)
-      assert.strictEqual(
-        tasks.text,
-        [
-          'The project has no open tasks.',
-          [
-            'Asides on Scratch, chats beside your conversation rather than tasks, newest first:',
-            '- count-the-callers (“Count the callers”, stopped)',
-            '  Its lead last reported: Did the task.',
-            '- which-partners-call-v1 (“Which partners call v1”)',
-            '  Its lead last reported: Did the task.',
-            '- pick-a-cache (“Pick a cache”, waiting on the person)',
-            '  Waiting on the person: a question from its lead: Which database should the cache use?.',
-          ].join('\n'),
-        ].join('\n\n'),
-      )
-      // Past the newest ten, how many more.
+      assert.strictEqual(tasks.text, 'The project has no open tasks.')
+      // More asides never add a list or a count to the brief.
       for (let index = 1; index <= 9; index += 1) {
         const made = yield* projects.createTask({
           envelope: yield* Runtime.envelope('task.create', {}),
@@ -803,11 +789,8 @@ describe("a handover brief's open tasks", () => {
         (step) => step.agentId,
         () => false,
       )
-      assert.include(
-        more.text,
-        'Asides on Scratch, chats beside your conversation rather than tasks, newest first, and 2 more:\n- chat-9 (“Chat 9”)',
-      )
-      assert.include(yield* callTool(access, 'list_tasks'), ', count-the-callers (“Count the callers”, stopped), and 2 more.')
+      assert.deepStrictEqual(more, { count: 0, text: 'The project has no open tasks.' })
+      assert.strictEqual(yield* callTool(access, 'list_tasks'), 'The project has no tasks yet.')
     }).pipe(Effect.provide(withQueries())),
   )
 })

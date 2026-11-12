@@ -1343,6 +1343,7 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
     postScreenshots: vi.fn(async () => {}),
     openChange: vi.fn(async () => {}),
     skipReview: vi.fn(async () => {}),
+    shapeTask: vi.fn(async () => {}),
     setReviewAfterMerge: vi.fn(async () => {}),
     refreshTask: vi.fn(async () => {}),
     stopListening: vi.fn(async () => {}),

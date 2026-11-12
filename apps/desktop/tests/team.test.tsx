@@ -84,11 +84,10 @@ describe('changing the team of a task that has begun', () => {
     expect(dialog.getByRole('button', { name: /^Review:/ })).toBeTruthy()
   })
 
-  it('shows the reviewer as it stays once the review is done, and says so', () => {
-    const dialog = opened({ reviewerChange: 'never', phase: 'ready' })
-    expect(dialog.queryByRole('button', { name: /^Review:/ })).toBeNull()
-    expect(dialog.getByText('The review is done, so the reviewer stays.')).toBeTruthy()
-    // The lead still changes.
+  it('changes the reviewer once the review is done too, for what ships next, and says so', () => {
+    const dialog = opened({ reviewerChange: 'next_ship', phase: 'ready' })
+    expect(dialog.getByRole('button', { name: /^Review:/ })).toBeTruthy()
+    expect(dialog.getByText('It reads what ships next.')).toBeTruthy()
     expect(dialog.getByRole('button', { name: /^Implement:/ })).toBeTruthy()
     expect(dialog.getByRole('button', { name: 'Save' })).toBeTruthy()
   })
@@ -145,18 +144,19 @@ describe('changing the team of a task that has begun', () => {
       ]),
     )
     cleanup()
-    // A plain task has no review to add, and a change whose review is done can't take one.
+    // A plain task has no review to add; a change whose review is done takes one for what ships next.
     const plain = opened(none('plain'))
     expect(plain.queryByRole('button', { name: 'Add a review' })).toBeNull()
     cleanup()
-    const done = opened({ ...none('change'), reviewerChange: 'never' })
-    expect(done.queryByRole('button', { name: 'Add a review' })).toBeNull()
+    const done = opened({ ...none('change'), reviewerChange: 'next_ship' })
+    expect(done.getByRole('button', { name: 'Add a review' })).toBeTruthy()
   })
 
-  it('refuses a merged task with a short reason, and cannot be saved', () => {
+  it('changes a merged task’s team too, for what it ships next', () => {
     const dialog = opened({ phase: 'ready', change: change({ state: 'merged' }) })
-    expect(dialog.getByRole('alert').textContent).toBe('It’s merged, so its team stays.')
-    expect(dialog.queryByRole('button', { name: 'Save' })).toBeNull()
+    expect(dialog.queryByRole('alert')).toBeNull()
+    expect(dialog.getByText('It reads what ships next.')).toBeTruthy()
+    expect(dialog.getByRole('button', { name: 'Save' })).toBeTruthy()
   })
 
   it('says it settled, rather than going with what was picked, once it settles meanwhile', async () => {

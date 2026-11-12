@@ -461,62 +461,6 @@ const ASIDE_STANDS: Partial<Record<TaskPhase, string>> = {
 const asideWords = (task: FoundTask) =>
   task.phase === 'settled' ? 'an aside, cleared' : `an aside on Scratch, a chat rather than a task${ASIDE_STANDS[task.phase] ?? ''}`
 
-/** How many open asides the coordinator is told of by name; past them, how many more. */
-const ASIDES_NAMED = 10
-
-/** An open aside as the coordinator is told of it: by its slug and title, and where it stands as find_tasks says it. */
-export interface OpenAside {
-  readonly taskId: string
-  readonly threadId: string
-  readonly slug: string
-  readonly title: string
-  /** Where it stands, said after its title: ", waiting on the person", or nothing where nothing is to be said. */
-  readonly stands: string
-}
-
-/**
- * The project's open asides, newest first, the newest ASIDES_NAMED of them,
- * each with where it stands as find_tasks says it, and how many more there
- * are. `working` says whether an agent is at work on one now.
- */
-export const openAsides = Effect.fn('Search.openAsides')(function* (
-  projectId: string,
-  working: (aside: { readonly taskId: string; readonly threadId: string }) => boolean,
-) {
-  const sql = yield* SqlClient.SqlClient
-  const phaseNow = yield* phasesNow()
-  const phase = phaseRead(sql)
-  const rows = yield* sql<Parameters<typeof phaseOf>[0] & { threadId: string; slug: string; title: string; open: number }>`
-    SELECT k.id AS task_id, t.id AS thread_id, k.slug, k.title, count(*) OVER () AS open, ${phase.columns}
-    FROM tasks k JOIN threads t ON t.task_id = k.id AND t.kind = 'task' ${phase.joins}
-    WHERE k.project_id = ${projectId} AND ${sql.unsafe(asideIn('k'))} AND k.state IN ('draft', 'open')
-    ORDER BY k.created_at DESC, k.rowid DESC LIMIT ${ASIDES_NAMED}`
-  const atWork = new Set(rows.filter(working).map((row) => row.taskId))
-  return {
-    asides: rows.map((row): OpenAside => ({
-      taskId: row.taskId,
-      threadId: row.threadId,
-      slug: row.slug,
-      title: row.title,
-      stands: ASIDE_STANDS[phaseNow(row, atWork)] ?? '',
-    })),
-    more: Math.max(0, (rows[0]?.open ?? 0) - rows.length),
-  }
-})
-
-/** An open aside by name, with where it stands. */
-export const asideNamed = (aside: OpenAside) => `${aside.slug} (“${aside.title}”${aside.stands})`
-
-/** What the coordinator is told the open asides are called, before them: chats, not tasks, which none waits to be accepted as. */
-export const ASIDES_ARE = 'Asides on Scratch, chats beside your conversation rather than tasks'
-
-/** How many more asides are open past those named, in words. */
-export const asidesMore = (more: number) => (more === 0 ? '' : `, and ${more} more`)
-
-/** The open asides in a line, as list_tasks ends: nothing where there are none. */
-export const asidesLine = (open: { readonly asides: ReadonlyArray<OpenAside>; readonly more: number }) =>
-  open.asides.length === 0 ? [] : [`${ASIDES_ARE}: ${open.asides.map(asideNamed).join(', ')}${asidesMore(open.more)}.`]
-
 /** Found tasks as the coordinator's `find_tasks` says them: a line each, and what matched under it; an aside said to be one. */
 export const foundWords = (
   text: string,
