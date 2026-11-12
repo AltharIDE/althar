@@ -407,6 +407,9 @@ export function ProjectView({
     moves: asideMoves,
   })
   const aside = asides.open
+  // What the composer's picker shows and sets: a new aside's own lead while one is open, else the coordinator's.
+  const picking: Choice | null =
+    asides.lead === null ? chosen : { agentId: asides.lead.agentId, model: asides.lead.model, effort: asides.lead.effort ?? null }
   const name = model.project?.name ?? coordinator?.project.name ?? text.project
   // The presets a plan can start from, this project's own with them: what the plan card's kicker lists.
   const { client } = useServices()
@@ -449,7 +452,7 @@ export function ProjectView({
   }
 
   // The agent what the person says goes to, and whether it takes images.
-  const receiver = { name: agentName(chosen?.agentId ?? null), takes: takesImages(models, chosen?.agentId ?? null) }
+  const receiver = { name: agentName(picking?.agentId ?? null), takes: takesImages(models, picking?.agentId ?? null) }
   const clearing = useClearChat(model)
   /** The person's first words in a new aside, sent to it, which opens; the words come back where they couldn't go. */
   const startAside = (body: string) => {
@@ -637,13 +640,14 @@ export function ProjectView({
             })}
         picker={
           model.agents.length > 0 &&
-          chosen !== null && (
+          picking !== null && (
             <ModelChoice
-              owner={text.coordinator}
+              owner={aside.kind === 'new' ? asidesText.lead : text.coordinator}
               agents={model.agents}
               {...(about === null ? {} : { projectId: about })}
-              value={chosen}
-              onChange={choose}
+              value={picking}
+              // A new aside's pick is its own: the coordinator's model, effort or agent stays as it was.
+              onChange={aside.kind === 'new' ? (next) => asides.choose({ key: 'implement', ...next, skipped: false }) : choose}
             />
           )
         }

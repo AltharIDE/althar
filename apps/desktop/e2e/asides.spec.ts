@@ -225,3 +225,48 @@ test('an aside’s × clears it in the frame it is pressed, for good, and Make i
     await electronApp.close()
   }
 })
+
+test('a new aside’s picker is its own: its first words go on what it shows, and the coordinator’s pick stays as it was', async () => {
+  const home = mkdtempSync(join(tmpdir(), 'althar-e2e-'))
+  const projects = join(home, 'Projects')
+  mkdirSync(projects)
+  const { electronApp, page } = await launch(home)
+  try {
+    await openFirstProject(electronApp, page, repository(projects))
+    const pills = page.getByRole('tablist', { name: 'Conversations' }).filter({ visible: true })
+    const coordinator = pills.getByRole('tab', { name: 'Coordinator', exact: true })
+    // The coordinator has a session of its own, held: what its picker sets goes to it.
+    await say(page, 'What does the checkout retry do?')
+    await expect(page.getByRole('article', { name: 'Coordinator' }).filter({ visible: true }).last()).toBeVisible()
+    const coordinatorPick = page.getByRole('button', { name: /^Coordinator:/ }).filter({ visible: true })
+    const before = (await coordinatorPick.getAttribute('aria-label')) ?? ''
+    expect(before).not.toMatch(/High$/)
+
+    // + over it: the composer's picker is the new aside's lead's, and the person picks High there.
+    await page.getByRole('button', { name: 'New aside' }).click()
+    await expect(pills.getByRole('tab', { name: 'New aside' })).toHaveAttribute('aria-selected', 'true')
+    const asidePick = page.getByRole('button', { name: /^Lead:/ }).filter({ visible: true })
+    await asidePick.click()
+    await page.getByRole('radio', { name: 'High' }).click()
+    await page.keyboard.press('Escape')
+    await expect(asidePick).toHaveAttribute('aria-label', /High$/)
+    const box = page.getByRole('textbox', { name: /^Ask on the side/ })
+    await box.click()
+    await box.fill('Hi')
+    await box.press('Enter')
+
+    // Its first words went on High: its lead says so in its own conversation, and its composer shows it.
+    await expect(pills.getByRole('tab', { name: 'Hi', exact: true })).toHaveAttribute('aria-selected', 'true')
+    await expect(shown(page, 'Effort changed to high.')).toBeVisible()
+    await expect(page.getByRole('button', { name: /^Lead:/ }).filter({ visible: true })).toHaveAttribute('aria-label', /High$/)
+
+    // The coordinator's own pick is as it was, and nothing changed in its conversation.
+    await coordinator.click()
+    await expect(coordinator).toHaveAttribute('aria-selected', 'true')
+    await expect(coordinatorPick).toHaveAttribute('aria-label', before)
+    await expect(shown(page, 'Effort changed to high.')).toHaveCount(0)
+    await expect(page.getByRole('alert').filter({ visible: true })).toHaveCount(0)
+  } finally {
+    await electronApp.close()
+  }
+})

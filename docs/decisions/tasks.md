@@ -148,7 +148,7 @@ leaves its conversation as it was.
   fetched, with no wait on the network) and its lead get ready while the
   person writes; the lead's brief waits for those words and goes out with
   them, as the coordinator's does, on the lead the composer has picked as
-  they are sent. One left unsaid takes no pill, and the next + opens it
+  they are sent. Its picker is its own, the coordinator's left as it was. One left unsaid takes no pill, and the next + opens it
   again rather than another; its × only closes it. Words the coordinator
   said, selected, start one about them, quoted over the composer and above
   the person's words. The coordinator still starts one at once with

@@ -165,6 +165,31 @@ describe('moves on asides', () => {
     expect(result.current.pills).toEqual([])
     expect(result.current.asides.first).toBeNull()
   })
+
+  it('never brings back a pill for one sent and answered, cleared or made a task, whatever the board reads after', async () => {
+    const { client } = fakeClient({ startTask: vi.fn(async () => ({ id: 'n1', threadId: 'th-n1' }) as never) })
+    const { result, rerender } = renderHook((props: { board: BoardSnapshot }) => useScreen(client, { ...props, lead: LEAD }), {
+      initialProps: { board: boardOf([]) },
+    })
+    const answered = async (move: (id: string) => void, after: BoardTask['phase']) => {
+      act(() => result.current.asides.begin(null))
+      const id = result.current.asides.open.kind === 'new' ? result.current.asides.open.taskId : ''
+      await act(async () => void (await result.current.asides.say('Hi')))
+      // Its lead answered: the board has its first exchange.
+      const task = boardTask({ taskId: id, title: 'Hi', phase: 'ready', latest: { at: ago(0), by: 'lead', said: 'Hello.' } })
+      rerender({ board: boardOf([task]) })
+      expect(result.current.pills.map((pill) => pill.id)).toEqual([id])
+      act(() => move(id))
+      expect(result.current.pills).toEqual([])
+      // The board catches up, then reads without it, as a board with only work does: no pill, titled or blank.
+      rerender({ board: boardOf([{ ...task, phase: after, scratch: after === 'settled' }]) })
+      rerender({ board: boardOf([]) })
+      expect(result.current.pills).toEqual([])
+      expect(result.current.asides.first).toBeNull()
+    }
+    await answered((id) => result.current.asides.clear([id]), 'settled')
+    await answered((id) => result.current.asides.makeTask(id), 'ready')
+  })
 })
 
 describe('an aside’s first words', () => {
@@ -192,5 +217,29 @@ describe('an aside’s first words', () => {
     rerender({ lead: { ...LEAD, agentId: 'codex', model: 'gpt', effort: null } })
     await act(async () => void (await result.current.asides.say('Codex, then')))
     expect(client.switchAgent).toHaveBeenCalledWith({ threadId: 'th-n1', agentId: 'codex', model: 'gpt', body: 'Codex, then' })
+  })
+
+  it('go on what its own picker shows, picked after +, while the coordinator’s pick is left as it was', async () => {
+    const { client } = fakeClient({ startTask: vi.fn(async () => ({ id: 'n1', threadId: 'th-n1' }) as never) })
+    const { result } = renderHook(() => useScreen(client, { board: boardOf([]), lead: LEAD }))
+    // Nothing new open: no lead of its own, so the composer's picker is the coordinator's.
+    expect(result.current.asides.lead).toBeNull()
+    act(() => result.current.asides.begin(null))
+    expect(client.startTask).toHaveBeenCalledWith(expect.objectContaining({ steps: [LEAD] }))
+    expect(result.current.asides.lead).toEqual(LEAD)
+    // Another effort, then another agent, in its picker: it shows the last, and its words go on it.
+    act(() => result.current.asides.choose({ ...LEAD, effort: 'low' }))
+    expect(result.current.asides.lead).toEqual({ ...LEAD, effort: 'low' })
+    const codex: PlanStep = { key: 'implement', agentId: 'codex', model: 'gpt', effort: null, skipped: false }
+    act(() => result.current.asides.choose(codex))
+    expect(result.current.asides.lead).toEqual(codex)
+    await act(async () => void (await result.current.asides.say('Hi')))
+    expect(client.switchAgent).toHaveBeenCalledWith({ threadId: 'th-n1', agentId: 'codex', model: 'gpt', body: 'Hi' })
+    expect(client.send).not.toHaveBeenCalled()
+    // Said, it is an aside, with a composer of its own: the picker is the coordinator's again, on its own lead.
+    expect(result.current.asides.lead).toBeNull()
+    // The next + starts on the coordinator's pick, not the last aside's.
+    act(() => result.current.asides.begin(null))
+    expect(result.current.asides.lead).toEqual(LEAD)
   })
 })

@@ -39,6 +39,8 @@ export const asidesText = {
   taskFailed: (title: string, why: string) => `Couldn’t make ${title} a task. ${why}`,
   startFailed: (why: string) => `Couldn’t start the aside. ${why}`,
   dismiss: 'Dismiss',
+  /** Whose pick the new aside's picker is: its lead's, as in an aside's own composer. */
+  lead: 'Lead',
 }
 
 /** An aside the person moved, before the board says so: cleared, or made a task. */
@@ -196,7 +198,8 @@ const sameLead = (a: PlanStep, b: PlanStep) => a.agentId === b.agentId && a.mode
  * `chat`), on the lead the composer has picked, by an id made here, so it is one pill from that moment, and its worktree and
  * lead get ready while the person writes. One opened and left unsaid is opened again by the next +, rather than another. The
  * person's first words go to its thread, under what it quotes, and name it, on the lead the composer has picked as they are
- * sent. Clearing one, or making it a task, gives the pane back to the coordinator at once (`useAsideMoves`).
+ * sent. A new one's picker is its own (`lead`, `choose`): what is picked there never changes the coordinator's. Clearing one, or
+ * making it a task, gives the pane back to the coordinator at once (`useAsideMoves`).
  */
 export function useAsides({
   client,
@@ -208,7 +211,7 @@ export function useAsides({
 }: {
   client: Client
   projectId: string | null
-  /** Who leads a new one: the composer's pick. */
+  /** Who leads a new one, unless the person picks another for it: the coordinator's composer's pick. */
   lead: PlanStep | null
   scratch: ReadonlyArray<BoardTask>
   /** Every task on the board, as the person's moves leave it, to tell one that left Scratch. */
@@ -221,6 +224,8 @@ export function useAsides({
   // Each one started here, as its start lands: its thread, or null where it couldn't start; and the lead it started on.
   const starts = useRef(new Map<string, Promise<string | null>>())
   const leads = useRef(new Map<string, PlanStep>())
+  // The lead the person picked for a new one, in its composer, after +: its own, never the coordinator's.
+  const [picked, setPicked] = useState<{ taskId: string; lead: PlanStep } | null>(null)
   const task = opened.kind === 'coordinator' ? undefined : tasks.find((one) => one.taskId === opened.taskId)
   // One that left Scratch, for the board or cleared, gives the pane back to the coordinator.
   const open: AsideOpen = task !== undefined && (task.scratch !== true || task.phase === 'settled') ? COORDINATOR : opened
@@ -233,6 +238,8 @@ export function useAsides({
       (sentTask !== undefined && (sentTask.scratch !== true || sentTask.phase === 'settled' || sentTask.latest !== undefined)))
   if (sentDone) setSent(null)
   const first = open.kind === 'new' ? open.taskId : sent !== null && !sentDone ? sent : null
+  // Who leads the new one open: the person's pick for it, or else the coordinator's composer's.
+  const own = open.kind === 'new' && picked?.taskId === open.taskId ? picked.lead : lead
 
   const start = (taskId: string, quote: string | null) => {
     if (projectId === null || lead === null) return
@@ -268,10 +275,9 @@ export function useAsides({
     )
   }
 
-  /** Words to a thread whose lead was `was`, on the lead picked now: another agent takes the thread, another model or effort it. */
-  const sendOn = async (threadId: string, body: string, was: PlanStep | undefined) => {
-    if (lead === null || was === undefined || sameLead(was, lead))
-      return await client.send({ threadId, body, disposition: 'after_current' })
+  /** Words to a thread whose lead was `was`, on `lead`, picked now: another agent takes the thread, another model or effort it. */
+  const sendOn = async (threadId: string, body: string, was: PlanStep | undefined, lead: PlanStep) => {
+    if (was === undefined || sameLead(was, lead)) return await client.send({ threadId, body, disposition: 'after_current' })
     if (was.agentId !== lead.agentId)
       return void (await client.switchAgent({
         threadId,
@@ -287,6 +293,7 @@ export function useAsides({
 
   /** The person's first words in the new aside: to its thread, under what it quotes, naming it; it opens. False for no words. */
   const say = async (body: string) => {
+    const lead = own
     if (open.kind !== 'new' || projectId === null || lead === null) return false
     const words = body.trim()
     if (words === '') return false
@@ -303,7 +310,7 @@ export function useAsides({
     // On the lead the composer has picked now: where it changed since +, the words go to that one, as a task's composer hands over.
     const was =
       leads.current.get(taskId) ?? scratch.find((one) => one.taskId === taskId)?.plan?.steps.find((step) => step.key === 'implement')
-    await Promise.all([client.renameTask(taskId, asideTitle(words)).catch(() => undefined), sendOn(threadId, said, was)])
+    await Promise.all([client.renameTask(taskId, asideTitle(words)).catch(() => undefined), sendOn(threadId, said, was, lead)])
     leads.current.set(taskId, lead)
     setSent(taskId)
     setOpened((current) => (current.kind === 'new' && current.taskId === taskId ? { kind: 'aside', taskId, threadId } : current))
@@ -330,6 +337,12 @@ export function useAsides({
   return {
     open,
     first,
+    /** Who leads the new one open, as its picker shows: null while none is. */
+    lead: open.kind === 'new' ? own : null,
+    /** A pick in the new one's composer: its lead, for its first words; the coordinator's is left as it was. */
+    choose: (next: PlanStep) => {
+      if (open.kind === 'new') setPicked({ taskId: open.taskId, lead: next })
+    },
     begin,
     pick,
     say,
