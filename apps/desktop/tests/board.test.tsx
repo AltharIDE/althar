@@ -11,7 +11,7 @@ import { DockView } from '../src/renderer/features/board/DockView'
 import { MERGE_QUEUE_STEP, MERGING_STEP } from '../src/renderer/data/merges'
 import { pictureUrl } from '../src/main/pictureAddress'
 import { clock, running } from '../src/renderer/shared/time'
-import { lanesOf, yoursOf } from '../src/renderer/features/board/lanes'
+import { lanesOf, movesInLine, yoursOf } from '../src/renderer/features/board/lanes'
 import { firstNeedOf, needsOf } from '../src/renderer/features/board/needs'
 import { readHeadsAhead, useBoard } from '../src/renderer/features/board/useBoard'
 import { useClosePullRequests } from '../src/renderer/features/board/useClosePullRequests'
@@ -518,7 +518,7 @@ describe('the board’s lanes', () => {
         ])
       })
 
-      it('puts a row moved past the plans at the back of what waits, where the runtime keeps it; a plan moves only among what waits', async () => {
+      it('starts the plans a row is put below, each at its place, so the line keeps the order put', async () => {
         const line = drawn(three)
         const grips = () =>
           within(screen.getByRole('region', { name: 'Up next' }))
@@ -529,26 +529,27 @@ describe('the board’s lanes', () => {
           await userEvent.keyboard('{Enter}')
           return within(await screen.findByRole('menu', { name: 'Move in the line' }))
         }
-        // The first of what waits, to the back: behind the line, ahead of the plans, which hold no place until they start.
-        await userEvent.click((await menuOf('Waiting a')).getByRole('menuitem', { name: 'Move to the back of the line' }))
-        expect(line.move).toHaveBeenCalledWith('a', 2)
-        expect(grips()).toEqual([
-          'Move Waiting b in the line',
-          'Move Waiting c in the line',
-          'Move Waiting a in the line',
-          'Move Add a retry in the line',
-          'Move Hold off in the line',
-        ])
-        // The last of what waits can't go further down; nor a plan down among the plans: it holds no place there to move.
-        const last = await menuOf('Waiting a')
-        expect(last.getByRole('menuitem', { name: 'Move down' }).getAttribute('aria-disabled')).toBe('true')
-        expect(last.getByRole('menuitem', { name: 'Move to the back of the line' }).getAttribute('aria-disabled')).toBe('true')
-        await userEvent.keyboard('{Escape}')
+        // A plan can't move down among the plans: they stand by when they start, and hold no place until then.
         const plan = await menuOf('Add a retry')
         expect(plan.getByRole('menuitem', { name: 'Move down' }).getAttribute('aria-disabled')).toBe('true')
         expect(plan.getByRole('menuitem', { name: 'Move up' }).getAttribute('aria-disabled')).toBeNull()
         await userEvent.keyboard('{Escape}')
-        expect(line.move).toHaveBeenCalledTimes(1)
+        // The first of what waits, to the back, below both plans: it goes to the back of what waits, then each plan starts
+        // ahead of it, top down, and the line shows the order put meanwhile.
+        await userEvent.click((await menuOf('Waiting a')).getByRole('menuitem', { name: 'Move to the back of the line' }))
+        await waitFor(() => expect(line.move).toHaveBeenCalledTimes(3))
+        expect(line.move.mock.calls).toEqual([
+          ['a', 2],
+          ['p', 2],
+          ['h', 3],
+        ])
+        expect(grips()).toEqual([
+          'Move Waiting b in the line',
+          'Move Waiting c in the line',
+          'Move Add a retry in the line',
+          'Move Hold off in the line',
+          'Move Waiting a in the line',
+        ])
       })
 
       it('offers to cancel a turn Althar asked that waits for a place, from its row’s menu', async () => {
@@ -2641,5 +2642,33 @@ describe('a ready task’s head, read ahead', () => {
       ),
     })
     await waitFor(() => expect(getThread).toHaveBeenCalledTimes(3))
+  })
+})
+
+describe('the moves a row put in Up next asks of the runtime', () => {
+  it('moves what waits among what waits, and starts a plan put there or at the head of the plans', () => {
+    expect(movesInLine(['a', 'b'], ['p', 'q'], 'b', 0)).toEqual([['b', 0]])
+    expect(movesInLine(['a', 'b'], ['p', 'q'], 'q', 0)).toEqual([['q', 0]])
+    expect(movesInLine(['a', 'b'], ['p', 'q'], 'q', 2)).toEqual([['q', 2]])
+    // Further down among the plans, nothing: they stand by when they start.
+    expect(movesInLine(['a', 'b'], ['p', 'q'], 'p', 3)).toEqual([])
+  })
+
+  it('starts the plans a row is put below, top down, each ahead of it, after it goes to the back of what waits', () => {
+    // What continues, below a plan that hasn't started: the plan starts ahead of it.
+    expect(movesInLine(['a'], ['p'], 'a', 1)).toEqual([
+      ['a', 0],
+      ['p', 0],
+    ])
+    // Between two plans: the first starts, the second stays a plan.
+    expect(movesInLine(['a', 'b'], ['p', 'q'], 'a', 2)).toEqual([
+      ['a', 1],
+      ['p', 1],
+    ])
+    expect(movesInLine(['a', 'b'], ['p', 'q'], 'a', 3)).toEqual([
+      ['a', 1],
+      ['p', 1],
+      ['q', 2],
+    ])
   })
 })

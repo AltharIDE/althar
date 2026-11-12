@@ -13,9 +13,9 @@ import { launch, openFirstProject, planTask, shown, startTask, still } from './s
  * had an agent. With one agent at a time, held by a server a finished task
  * left running, three tasks wait, one plan is held and one counts down. Up
  * next is one order: the person drags the held plan to the top, which starts
- * it there, and the first that waited past the plans, which puts it at the
- * back of what waits, ahead of the plans. When the server is stopped, the
- * plan put first moves to Running by itself. Shots: test-results/upnext-*.png.
+ * it there, and the first that waited past the plan counting down, which
+ * starts that plan ahead of it. When the server is stopped, the plan put
+ * first moves to Running by itself. Shots: test-results/upnext-*.png.
  */
 
 test('lists the tasks that wait for a free agent in Up next, in the order they start, above the plans', async () => {
@@ -107,14 +107,16 @@ test('lists the tasks that wait for a free agent in Up next, in the order they s
     await expect(rows.nth(1)).toContainText('Add a retry')
     await expect(rows.nth(4)).toContainText('Plan the release')
     await expect(rows).toHaveCount(5)
-    // The first that waited, past the plan at the bottom: it goes to the back of what waits, ahead of the plan, which holds
-    // no place until it starts, and stays there once the runtime has it.
+    // The first that waited, past the plan at the bottom: the plan starts ahead of it, so the line keeps the order put, and
+    // nothing is planned now.
     const bottom = await rows.nth(4).boundingBox()
     if (bottom === null) throw new Error('Up next isn’t laid out')
     await drag('Add a retry', { x: bottom.x + 20, y: bottom.y + bottom.height + 20 })
-    await expect(rows.nth(3)).toContainText('Add a retry')
+    await expect(rows.nth(4)).toContainText('Add a retry')
+    await expect(rows.nth(4)).toContainText('5th in line', { timeout: 15000 })
+    await expect(rows.nth(3)).toContainText('Plan the release')
     await expect(rows.nth(3)).toContainText('4th in line')
-    await expect(rows.nth(4)).toContainText('Plan the release')
+    await expect(next.getByText('Planned', { exact: true })).toHaveCount(0)
     await expect(next.getByText('In your order')).toBeVisible()
     await still(page)
     await next.screenshot({ path: 'test-results/upnext-reordered.png', scale: 'css', animations: 'disabled' })
@@ -124,8 +126,8 @@ test('lists the tasks that wait for a free agent in Up next, in the order they s
     await expect(rows.nth(0)).toContainText('Hold this plan')
     await expect(rows.nth(1)).toContainText('Tidy the docs')
     await expect(rows.nth(2)).toContainText('Rename the helper')
-    await expect(rows.nth(3)).toContainText('Add a retry')
-    await expect(rows.nth(4)).toContainText('Plan the release')
+    await expect(rows.nth(3)).toContainText('Plan the release')
+    await expect(rows.nth(4)).toContainText('Add a retry')
 
     // The place frees: the plan put first starts by itself, and moves to Running.
     await page.getByRole('radio', { name: /^Conversation/ }).click()
@@ -137,6 +139,8 @@ test('lists the tasks that wait for a free agent in Up next, in the order they s
     await page.getByRole('radio', { name: /^Board/ }).click()
     await expect(running.getByRole('button', { name: 'Hold this plan' })).toBeVisible()
     await expect(rows.nth(0)).toContainText('Tidy the docs')
+    await expect(rows.nth(2)).toContainText('Plan the release')
+    await expect(rows.nth(3)).toContainText('Add a retry')
     await still(page)
     await page.screenshot({ path: 'test-results/upnext-started.png', animations: 'disabled' })
   } finally {

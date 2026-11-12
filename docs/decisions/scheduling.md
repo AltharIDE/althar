@@ -151,9 +151,11 @@ that goes on by itself, in the order it will.
   2. **The line:** new work no agent has worked on yet, oldest first.
   3. **Plans** on their countdown, then plans held, under Planned. A plan moved
      among what waits, or to the head of the plans, starts there, as its Start
-     would, at the place it was put. A plan holds no place until it starts, so
-     nothing that waits stands below one: a row moved past the plans goes to
-     the back of what waits, and a plan isn't moved down among the plans.
+     would, at the place it was put. Every row above one that waits waits
+     too: a row put below plans starts them, each at its place ahead of it, so
+     the order shown is the one places are given in. A plan isn't moved down
+     among the plans: they stand by when they start, and hold no place until
+     then.
   4. **What is paused:** a step held for a usage limit or for the connection,
      under its own divider, saying what it waits for ("Codex is out of usage
      until 13:40", "Waiting for the connection"). It waits for no place now,

@@ -254,3 +254,34 @@ export const yoursByProject = (home: HomeSnapshot, merging: ReadonlySet<string> 
     ]),
   )
 }
+
+/**
+ * The moves the runtime is asked for, in turn, as the person puts a row of Up next at `to`, from 0, among the others: what
+ * waits for a place first, then the plans. Every row above one that waits waits too, so a plan left above a row put below it
+ * starts, at its place, the row going first to its place among what waits and each such plan then before it, top down. A plan
+ * put among what waits, or at the head of the plans, starts there; one put further down among the plans moves nothing: they
+ * stand by when they start, and hold no place until then.
+ */
+export const movesInLine = (
+  waiting: ReadonlyArray<string>,
+  plans: ReadonlyArray<string>,
+  id: string,
+  to: number,
+): ReadonlyArray<readonly [string, number]> => {
+  const others = [...waiting, ...plans].filter((one) => one !== id)
+  const at = Math.max(0, Math.min(others.length, Math.floor(to)))
+  const waits = new Set(waiting.filter((one) => one !== id))
+  if (!waiting.includes(id)) return at <= waits.size ? [[id, at]] : []
+  const order = [...others.slice(0, at), id, ...others.slice(at)]
+  const starting = order.slice(0, at).filter((one) => !waits.has(one))
+  if (starting.length === 0) return [[id, at]]
+  // Its place among what waits now, then each plan above it at its own, counting what waits and what started before it.
+  const lined = new Set(waits)
+  const moves: Array<readonly [string, number]> = [[id, order.slice(0, at).filter((one) => waits.has(one)).length]]
+  lined.add(id)
+  for (const plan of starting) {
+    moves.push([plan, order.slice(0, order.indexOf(plan)).filter((one) => lined.has(one) && one !== id).length])
+    lined.add(plan)
+  }
+  return moves
+}
