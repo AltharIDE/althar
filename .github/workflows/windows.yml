@@ -5,7 +5,8 @@ name: windows
 on:
   workflow_call:
   pull_request:
-    types: [opened, synchronize, reopened, ready_for_review]
+    # Unit tests run on drafts too, so marking the same head ready must not cancel and rerun them.
+    types: [opened, synchronize, reopened]
     paths:
       - 'apps/desktop/**'
       - 'apps/cli/**'

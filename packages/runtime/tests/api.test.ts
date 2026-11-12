@@ -833,7 +833,7 @@ describe('the API', () => {
         const folder = realpathSync(mkdtempSync(join(tmpdir(), 'althar-folder-')))
         for (const name of ['api', 'web']) {
           const made = repository()
-          execFileSync('git', ['clone', '-q', made, join(folder, name)])
+          execFileSync('git', ['clone', '-q', '--', made, join(folder, name)])
         }
         const chosen = yield* grant(folder)
         const reading = yield* client.ReadFolder({ grant: chosen })
