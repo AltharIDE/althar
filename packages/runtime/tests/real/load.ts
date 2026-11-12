@@ -5,7 +5,6 @@ import { cpus, setPriority, tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { monitorEventLoopDelay } from 'node:perf_hooks'
 
-import { BACKGROUND } from '@althar/provider-adapters'
 import { Tracer } from 'effect'
 
 /*
@@ -46,8 +45,8 @@ export const stress = (priority: Priority, cores = cpus().length, disks = 2) => 
   }
 }
 
-/** Puts a process in the background, as Althar starts agents (provider-adapters' process.ts). */
-const setBackground = (pid: number) => setPriority(pid, BACKGROUND)
+/** Puts a process in the background, as Althar starts agents (provider-adapters' process.ts, `BACKGROUND`): niceness 10. */
+const setBackground = (pid: number) => setPriority(pid, 10)
 
 /** How late the event loop ran, while it was watched: its mean, p50, p99 and worst, in milliseconds. */
 export const lag = () => {
