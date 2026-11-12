@@ -168,7 +168,6 @@ describe('presets, through the API', () => {
         assert.deepStrictEqual(own[0]?.parts, {
           workspace: 'worktree',
           checked: 'none',
-          end: 'none',
           shelf: 'board',
           lead: null,
           reviewer: null,
@@ -337,7 +336,7 @@ describe('a preset the coordinator offers', () => {
         )
         assert.strictEqual(
           card?.kind === 'notice' ? card.content.description : undefined,
-          'large unchecked: a worktree, no review, ends here, led by large.',
+          'large unchecked: a worktree, no review, ends as the project says, led by large.',
         )
       }),
     ),

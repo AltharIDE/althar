@@ -156,7 +156,20 @@ export const editPreset = (input: {
       WHERE id = ${input.id}`
   })
 
-/** The parts of a plan, as a preset holds them. */
+/** How the project's "How a task ends" stands now: its rule, or a draft pull request where it says nothing. */
+export const projectEndOf = (projectId: string) =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient
+    const [row] = yield* sql<{ end: string | null }>`
+      SELECT json_extract(rules, '$.end') AS end FROM policies WHERE project_id = ${projectId} ORDER BY revision DESC LIMIT 1`
+    return row?.end === 'ready' || row?.end === 'none' ? row.end : ('draft' as const)
+  })
+
+/**
+ * The parts of a plan, as a preset holds them. With `projectEnd`, the project's ending now, a plan that ends as it does (or
+ * has no ending of its own) leaves the preset's unset, so it follows the project later: only an ending that differs was the
+ * person's choice.
+ */
 export const partsOfPlan = (
   parameters: {
     readonly steps: ReadonlyArray<{
@@ -173,6 +186,7 @@ export const partsOfPlan = (
   },
   shelf: string | null,
   brief: string,
+  projectEnd?: 'draft' | 'ready' | 'none',
 ): PresetParts => {
   const lead = parameters.steps.find((step) => step.key === 'implement')
   const review = parameters.steps.find((step) => step.key === 'review')
@@ -185,7 +199,9 @@ export const partsOfPlan = (
         : parameters.reviewAfterMerge === true
           ? 'after'
           : 'before',
-    end: parameters.end === 'draft' || parameters.end === 'ready' ? parameters.end : 'none',
+    ...(projectEnd !== undefined && (parameters.end == null || parameters.end === projectEnd)
+      ? {}
+      : { end: parameters.end === 'draft' || parameters.end === 'ready' ? parameters.end : ('none' as const) }),
     shelf: shelf === 'scratch' ? 'scratch' : 'board',
     lead: named(lead),
     reviewer: review === undefined ? null : named(review),
@@ -253,7 +269,8 @@ export const partsOfTask = (taskId: string) =>
       FROM tasks k WHERE k.id = ${taskId}`
     if (task === undefined) return yield* new NotFound({ kind: 'task', id: taskId })
     const parameters = JSON.parse(task.parameters ?? '{"steps":[]}') as Parameters<typeof partsOfPlan>[0]
-    return { projectId: task.projectId, title: task.title, parts: partsOfPlan(parameters, task.shelf, task.description) }
+    const projectEnd = yield* projectEndOf(task.projectId)
+    return { projectId: task.projectId, title: task.title, parts: partsOfPlan(parameters, task.shelf, task.description, projectEnd) }
   })
 
 /** Removes one of the person's presets; a built-in one stays. */
@@ -277,7 +294,10 @@ export const offerPreset = (projectId: ProjectId, actorId: ActorId) =>
       WHERE p.project_id = ${projectId} AND p.state IN ('accepted', 'proposed')
       ORDER BY p.proposed_at DESC LIMIT 2`
     if (recent.length < 2) return
-    const [a, b] = recent.map((row) => partsOfPlan(JSON.parse(row.parameters) as Parameters<typeof partsOfPlan>[0], row.shelf, ''))
+    const projectEnd = yield* projectEndOf(projectId)
+    const [a, b] = recent.map((row) =>
+      partsOfPlan(JSON.parse(row.parameters) as Parameters<typeof partsOfPlan>[0], row.shelf, '', projectEnd),
+    )
     if (a === undefined || b === undefined || !alike(a, b) || a.lead === null || a.lead !== b.lead) return
     const presets = yield* presetsIn(projectId)
     if (presets.some((one) => !one.builtin && alike(one.parts, a) && one.parts.lead === a.lead)) return

@@ -151,7 +151,9 @@ describe('presets', () => {
       // Saved from the task: its parts, team and the start of its brief.
       const instance = yield* Instance
       const { parts } = yield* partsOfTask(first?.taskId ?? '')
-      assert.deepInclude(parts, { workspace: 'worktree', checked: 'none', end: 'draft', shelf: 'board' })
+      // It ended as the project does (a draft, where it says nothing), so its preset leaves its ending to the project.
+      assert.deepInclude(parts, { workspace: 'worktree', checked: 'none', shelf: 'board' })
+      assert.isUndefined(parts.end)
       yield* savePreset({ name: 'Quick change', parts, projectId: null, fromTaskId: first?.taskId ?? null, actorId: instance.personId })
       assert.include(
         (yield* presetsIn(projectId)).map((one) => one.name),
@@ -294,6 +296,18 @@ describe('presets', () => {
         actorId: instance.personId,
       })
       assert.strictEqual((yield* planned('Change four', 'change-four', 'Always draft')).parameters.end, 'draft')
+      // Saved from a task that ended as the project says, a preset follows the project when it changes; one saved from a task
+      // whose ending the person changed keeps that ending.
+      yield* policies.set(projectId, { end: 'draft' }, instance.personId)
+      const five = yield* planned('Change five', 'change-five', 'Change')
+      const [fiveTask] = yield* sql<{ taskId: string }>`SELECT task_id FROM task_plans WHERE id = ${five.id}`
+      const followed = yield* partsOfTask(fiveTask?.taskId ?? '')
+      assert.isUndefined(followed.parts.end)
+      yield* savePreset({ name: 'Saved change', parts: followed.parts, projectId: null, fromTaskId: null, actorId: instance.personId })
+      yield* plans.change(five.id, five.parameters.steps, instance.personId, 'none')
+      assert.strictEqual((yield* partsOfTask(fiveTask?.taskId ?? '')).parts.end, 'none')
+      yield* policies.set(projectId, { end: 'ready' }, instance.personId)
+      assert.strictEqual((yield* planned('Change six', 'change-six', 'Saved change')).parameters.end, 'ready')
     }).pipe(Effect.provide(runtimeWith(github)))
   })
 })
