@@ -1,4 +1,4 @@
-import { act, cleanup, screen, waitFor, within } from '@testing-library/react'
+import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { Activity, useState } from 'react'
@@ -21,7 +21,9 @@ import { makeQueryClient } from '../src/renderer/data/reads'
 import { useMerge } from '../src/renderer/data/merges'
 import { useProject } from '../src/renderer/features/project/useProject'
 import { agents, card, change, changed, fakeClient, snapshot } from './fixtures'
-import { useSettingsOf, withServices } from './render'
+import { ServicesProvider } from '../src/renderer/data/services'
+import { forgetArrived, hasArrived, markArrived } from '../src/renderer/features/board/arrived'
+import { servicesFor, useSettingsOf, withServices } from './render'
 
 function Project({ onTask = vi.fn() }: { onTask?: (threadId: string) => void }) {
   return (
@@ -2674,3 +2676,63 @@ describe('the moves a row put in Up next asks of the runtime', () => {
     ])
   })
 })
+
+describe('A settled card moves into Settled once', () => {
+  const NOW = '2026-10-01T10:00:00.000Z'
+  const moves = (title: string) =>
+    (screen.getByRole('button', { name: title }).closest('article') as HTMLElement).closest('[data-move]') as HTMLElement
+  const quiet = (title: string) => moves(title).hasAttribute('data-move-seen')
+  const services = () => servicesFor(fakeClient().client)
+  const shownBy = (value: ReturnType<typeof servicesFor>) => (tasks: BoardSnapshot['tasks']) => (
+    <ServicesProvider value={value}>
+      <BoardView lanes={lanesOf(board({ tasks, calls: [] }))} agents={agents} now={NOW} onOpen={vi.fn()} />
+    </ServicesProvider>
+  )
+  const all = board().tasks
+  const old = all.find((one) => one.taskId === 't6')!
+  const without = (id: string) => all.filter((one) => one.taskId !== id)
+  const as = (id: string, phase: BoardTask['phase']) => all.map((one) => (one.taskId === id ? { ...one, phase } : one))
+
+  it('moves in when this window watched it settle, and is drawn there as it is after: a lane change back and forth', () => {
+    const shown = shownBy(services())
+    const { rerender } = render(shown(as('t6', 'ready')))
+    rerender(shown(all))
+    expect(quiet('Old work')).toBe(false)
+    // Its lead works on it again, and it settles again: it is in Settled as before.
+    rerender(shown(as('t6', 'running')))
+    rerender(shown(all))
+    expect(quiet('Old work')).toBe(true)
+  })
+
+  it('draws what settled before this window looked as it is: first drawn, or brought by a later snapshot', () => {
+    const shown = shownBy(services())
+    const { rerender } = render(shown(without('t6')))
+    // No history kept, and a snapshot brings a task settled long ago: it doesn't move in.
+    rerender(shown(all))
+    expect(quiet('Old work')).toBe(true)
+    expect(quiet('Given up')).toBe(true)
+  })
+
+  it('remembers what moved in across a reload or restart, and every task it has drawn however many there are', () => {
+    const shown = shownBy(services())
+    const first = render(shown(as('t6', 'ready')))
+    first.rerender(shown(all))
+    first.unmount()
+    // A window reloaded: the task is at work when it is first drawn, and settles again.
+    forgetArrivedMemory()
+    const again = render(shown(as('t6', 'running')))
+    again.rerender(shown(all))
+    expect(quiet('Old work')).toBe(true)
+    again.unmount()
+    // Thousands of settled tasks later, the first is still known.
+    markArrived(Array.from({ length: 5000 }, (_, i) => `many${i}`))
+    expect(hasArrived('t6')).toBe(true)
+    expect(hasArrived('many0')).toBe(true)
+    forgetArrivedMemory()
+    expect(hasArrived('t6')).toBe(true)
+    expect(hasArrived('many4999')).toBe(true)
+  })
+})
+
+/** A window reloaded: what it held in memory is gone, what it kept in storage is read again. */
+const forgetArrivedMemory = () => forgetArrived()
