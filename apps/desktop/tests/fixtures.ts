@@ -1014,7 +1014,7 @@ export const githubGuide: ConnectGuide = {
   tokenPages: [{ product: 'github', webUrl: 'https://github.com', url: GITHUB_TOKEN_PAGE }],
 }
 
-/** Everything a GitHub connection needs, which it can do; its token runs out on 8 January 2027. */
+/** Everything a GitHub connection needs, which it can do; its token has another 30 days to run. */
 export const githubCheck: ConnectionCheck = {
   connectionId: 'conn1',
   lines: [
