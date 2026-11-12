@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import type { AgentDefinition } from '@althar/provider-adapters'
 import { fakeAgent, fakeAgentMain, type FakeAgentOptions } from '@althar/provider-adapters/testing'
 import { assert, describe, it } from '@effect/vitest'
-import { Effect, Fiber, Layer } from 'effect'
+import { Duration, Effect, Fiber, Layer } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { type AgentEntry, Agents } from '../src/Config'
@@ -15,6 +15,7 @@ import { Projects } from '../src/Projects'
 import * as Runtime from '../src/Runtime'
 import { Secrets } from '../src/Secrets'
 import { Sessions } from '../src/Sessions'
+import { SignIns } from '../src/SignIns'
 import { definition, fakeConnectors, items, repository, runtime, until } from './support'
 
 const EFFORTS = [
@@ -88,6 +89,38 @@ const withAgents = (
     secrets: Secrets.memory(),
     connectors: fakeConnectors({}),
   })
+
+/**
+ * A runtime with one agent, `grok`, that can't be started the first time it is asked (as one that isn't signed in yet
+ * refuses), and starts as the fake agent every time after; its sign-in says what `signIn` holds.
+ */
+const failsFirst = (signIn: { says: boolean | undefined }, extra: Partial<Runtime.RuntimeLayerOptions> = {}) => {
+  let started = 0
+  const agent = definition('grok')
+  return Runtime.layer({
+    database: ':memory:',
+    worktreeRoot: mkdtempSync(join(tmpdir(), 'althar-worktrees-')),
+    appVersion: '0.0.0-test',
+    deviceName: 'Test Mac',
+    ...extra,
+    agents: Layer.succeed(
+      Agents,
+      Agents.from([
+        {
+          definition: { ...agent, signIn: { ...agent.signIn, read: () => signIn.says } },
+          transport: (cwd) =>
+            started++ === 0
+              ? { _tag: 'Process', spec: { command: 'althar-no-such-agent', args: [] }, cwd }
+              : { _tag: 'InProcess', agent: fakeAgent() },
+        },
+      ]),
+    ),
+    secrets: Secrets.memory(),
+    connectors: fakeConnectors({}),
+  })
+}
+
+const grokOf = (models: Models['Service']) => Effect.map(models.catalog, (all) => all.find((agent) => agent.agentId === 'grok'))
 
 /** OpenCode's entry, as far as effort goes: it names the level that leaves a model at its own. */
 const openCodeLike = (agentId: string): AgentDefinition => {
@@ -256,6 +289,40 @@ describe('the models each agent offers', () => {
       // Asked once a launch: the one that couldn't start isn't asked again.
       assert.isFalse((yield* models.catalog).some((agent) => agent.probing))
     }).pipe(Effect.provide(withAgents(['claude-code', 'codex', 'missing'], (agentId) => definition(agentId, ['codex'])))),
+  )
+
+  it.live('are asked again of an agent that couldn’t say, once it is found signed in', () => {
+    const signIn: { says: boolean | undefined } = { says: undefined }
+    return Effect.gen(function* () {
+      const models = yield* Models
+      // Its sign-in can't tell yet, so it is asked, and refuses.
+      yield* models.catalog
+      const refused = yield* until(grokOf(models), (agent) => agent?.probing === false)
+      assert.lengthOf(refused?.models ?? [], 0)
+      assert.isFalse((yield* grokOf(models))?.probing)
+      // The person signs in: found signed in, it is asked again at the next read, and says.
+      signIn.says = true
+      yield* (yield* SignIns).of('grok', true)
+      const known = yield* until(grokOf(models), (agent) => agent?.probing === false && agent.models.length > 0)
+      assert.deepStrictEqual(
+        known?.models.map((model) => model.id),
+        ['small', 'large'],
+      )
+    }).pipe(Effect.provide(failsFirst(signIn)))
+  })
+
+  it.live('are asked again of an agent that couldn’t say, a while on', () =>
+    Effect.gen(function* () {
+      const models = yield* Models
+      yield* models.catalog
+      const refused = yield* until(grokOf(models), (agent) => agent?.probing === false)
+      assert.lengthOf(refused?.models ?? [], 0)
+      // Not at once: a read straight after doesn't start it again.
+      assert.isFalse((yield* grokOf(models))?.probing)
+      yield* Effect.sleep(Duration.millis(400))
+      const known = yield* until(grokOf(models), (agent) => agent?.probing === false && agent.models.length > 0)
+      assert.lengthOf(known?.models ?? [], 2)
+    }).pipe(Effect.provide(failsFirst({ says: true }, { modelsAgain: Duration.millis(300) }))),
   )
 
   it.live('starts one probe while several model catalogs are read at once', () =>
