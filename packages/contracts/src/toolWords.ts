@@ -273,8 +273,8 @@ export const inTense = (phrase: string, tense: ToolTense): string => {
 export const toolWordsOf = (name: string, tense: ToolTense = 'plain'): string | undefined => {
   const named = mcpNameOf(name)
   if (named !== undefined) return inTense(phraseOf(named.server, named.tool), tense)
-  // Codex says Althar's own tools by the server, `althar.propose_plan`, or by the bare tool.
-  const own = /^althar[.:/](.+)$/i.exec(name.trim())
+  // Codex says Althar's own tools by the server, `althar.propose_plan`; OpenCode as `althar_propose_plan`.
+  const own = /^althar(?:[.:/]|_)(.+)$/i.exec(name.trim())
   return own === null ? undefined : inTense(phraseOf('althar', own[1]!), tense)
 }
 

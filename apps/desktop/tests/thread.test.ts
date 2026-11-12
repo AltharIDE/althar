@@ -154,11 +154,13 @@ describe('a thread as blocks', () => {
   })
 
   it('says one of Althar’s own tools in plain words, never by its raw name', () => {
-    const call = (status: string) => items.tool({ title: 'mcp__althar__propose_plan', toolKind: 'other', status })
-    const part = (status: string, running: boolean) => {
-      const [turn] = blocksOf(source([call(status)], running), new Map(), at)
+    const call = (status: string, title = 'mcp__althar__propose_plan') => items.tool({ title, toolKind: 'other', status })
+    const part = (status: string, running: boolean, title?: string) => {
+      const [turn] = blocksOf(source([call(status, title)], running), new Map(), at)
       return turn?.kind === 'turn' ? turn.parts[0] : undefined
     }
+    // OpenCode names them althar_<tool>.
+    expect(part('completed', false, 'althar_propose_plan')).toMatchObject({ verb: 'Planned', target: 'the task' })
     expect(part('in_progress', true)).toMatchObject({ verb: 'Planning', target: 'the task' })
     expect(part('completed', false)).toMatchObject({ verb: 'Planned', target: 'the task' })
     expect(part('failed', false)).toMatchObject({ verb: 'Plan', target: 'the task' })
