@@ -342,6 +342,7 @@ describe('the client', () => {
           HoldPlan: () => Effect.die('unused'),
           ChangePlan: () => Effect.die('unused'),
           ChangeTeam: () => Effect.die('unused'),
+          DeclineReview: () => Effect.die('unused'),
           ChangeIssueDraft: () => Effect.die('unused'),
           FileIssueDraft: () => Effect.die('unused'),
           DiscardIssueDraft: () => Effect.die('unused'),

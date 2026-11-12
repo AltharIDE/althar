@@ -45,6 +45,7 @@ import {
   QuestionField,
   type ThreadItem,
   ModelMoveItem,
+  NoticeItem,
   type ThreadSnapshot,
   type TurnTime,
   type ScreenshotsOnChange,
@@ -75,6 +76,7 @@ import { graphOf, type RunRows, type StepRow } from './graph'
 import { taskFindingsOf } from './taskFindings'
 import { filesOf, outputOf, picturesOf } from './handed'
 import { answeredIn, handedOf, issueCardsWaiting, kindOf } from './kinds'
+import { reviewOfferOf } from './reviewOffer'
 import { repliedAt } from './replied'
 import { BETWEEN_AGENTS_MS, betweenAgents, byItself, DRAFTING_MS, isMergeable, stillAsked, stillDrafting } from './needsYou'
 import { mergeNeedsOf, withPushed } from './mergeNeeds'
@@ -534,6 +536,8 @@ const decodeModelMove = Schema.decodeUnknownOption(ModelMoveItem.fields.content)
 const decodeNoticeTask = Schema.decodeUnknownOption(
   Schema.Struct({ taskId: Schema.String, slug: Schema.String, title: Schema.String, threadId: Schema.String }),
 )
+/** What a notice offers: parts kept as a preset, or a review a lead or the coordinator offered a task, which its buttons answer. */
+const decodeNoticeOffer = Schema.decodeUnknownOption(NoticeItem.fields.content.fields.offer)
 const decodeChecks = Schema.decodeUnknownOption(ChecksSummary.fields.list)
 const decodeRules = Schema.decodeUnknownOption(MergeRules)
 
@@ -663,6 +667,10 @@ export const itemOf = (row: ItemRow): ThreadItem | undefined => {
           ...(role === 'aside' || role === 'relayed' || role === 'folder' ? { role } : {}),
           ...(failure === undefined || failure === '' ? {} : { failure }),
           ...Option.match(decodeNoticeTask(field(content, 'task')), { onNone: () => ({}), onSome: (task) => ({ task }) }),
+          ...Option.match(decodeNoticeOffer(field(content, 'offer')), {
+            onNone: () => ({}),
+            onSome: (offer) => (offer === undefined ? {} : { offer }),
+          }),
         },
       }
     }
@@ -2574,6 +2582,18 @@ export class Queries extends Context.Service<
             reviewing,
             // Once its plan has begun, when a change of its reviewer would take effect: the person's dialog reads it.
             ...(task.planState === 'accepted' && task.state === 'open' ? { reviewerChange: yield* reviewerChange(taskId) } : {}),
+            // The review its lead or the coordinator offered it, while the offer stands: its line in the thread reads it.
+            ...(yield* Effect.map(
+              reviewOfferOf({
+                taskId,
+                open: task.planState === 'accepted' && task.state === 'open',
+                steps: planned,
+                reviewsAfterMerge: field(parameters, 'reviewAfterMerge') === true,
+                reads: field(parameters, 'reads') === true,
+                pulls: changes,
+              }),
+              (offer) => (offer === undefined ? {} : { reviewOffer: offer }),
+            )),
             plan:
               task.planId === null
                 ? null
