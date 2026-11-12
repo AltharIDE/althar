@@ -64,8 +64,9 @@ export const keepUpdate = (projectId: string, url: string, update: BranchUpdate)
  * from there, one update after another. An update not read back yet is read
  * once and kept: the head it made is the head its host said, else the head
  * the next update started from, else `there`; where the host can tell, it is
- * Althar's only where it is the merge of `base` into `from`. `read` is the
- * pull request as its host has it now, asked only where an update needs it.
+ * Althar's only where it is the merge of `base` into the head it started
+ * from (`from`); `read` is the pull request as its host has it now, asked
+ * only where an update needs it.
  */
 export const leftByAlthar = (input: {
   readonly link: Link
