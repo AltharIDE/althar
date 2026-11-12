@@ -48,13 +48,27 @@ person can change a task's team at any time.
 
 - **The person** changes parts from the parts row and the task's menu:
   moving, pointing elsewhere, Run it, Save as preset, Move to Scratch.
-- **The lead and the coordinator** change them at once, with a reason, with
-  `add_part`, `change_part` and `remove_part`, which they share: a worktree
-  taken where a copy stands (its branch made where it stands, so nothing is
-  lost on a detached head), another change, a review, a pull request
-  followed; a workspace moved or pointed at another branch; Scratch or the
-  board; Checked by removed for the round; a review dropped; a pull request
-  no longer followed.
+- **The lead and the coordinator** change them at once, on the person's word,
+  any task's, the lead's own included (the person's note of 12 November:
+  every part changes at any time, up or down, by telling the lead or the
+  coordinator, in plain words or by voice, and is never refused or detoured),
+  with a reason, with `add_part`, `change_part` and `remove_part`, which they
+  share: a worktree taken where a copy stands (its branch made where it
+  stands, so nothing is lost on a detached head), another change, a review, a
+  pull request followed; a workspace moved or pointed at another branch;
+  Scratch or the board; Checked by put on, changed or taken off (`checked_by`,
+  a review under way stopping); the ending (`ending`: here, its branch, a
+  draft or a ready pull request; an open draft is marked ready, and one open
+  where it goes back to its branch is closed, its branch staying; no host
+  turns a ready one back into a draft, so the next opens as one; an ending
+  asked for is the person's own, `endChosen`, which a preset saved from the
+  task keeps); another preset's parts at once (`preset`), its lead staying,
+  its ending set before its review changes, so a review it stops never sends
+  the work up as the task ended before, and a Ship under way as it comes to
+  stay here sends nothing (`ships.stays`); a review dropped; a
+  pull request no longer followed. `change_lead` changes its lead's model
+  and effort, and its reviewer, on a lead's own task too. Each says what it
+  did in a line of the task's thread.
 - **Two moves are the person's word alone:** running an outside author's
   code (Run it, and Stop running it, [reviews](reviews.md#run-it)), and
   removing a review whose draft was never posted, which would lose it.
@@ -67,7 +81,15 @@ person can change a task's team at any time.
   runs](workspaces-and-runs.md#moving-a-running-task)), and a rebase onto a
   new target. Every other change is made at once.
 - `make_it_a_change` stays, for a quick task: adding a worktree, Checked by
-  and an ending at once.
+  and an ending at once. On any other task (a prototype, a chat planned as
+  one) it gives the same review and ending in place, as `change_part` with
+  preset Change does, and Ship then reviews it and opens its pull request.
+  Where no repository of it is on a code host Althar knows, both leave it on
+  its branch with nothing going up (the plan's ending null), as a plan made
+  there from Change ends, never pushing a branch with nowhere to go.
+- **The task menu's Make it a change** does that in one press for a task
+  that ends with no pull request: a prototype, a chat, a quick task
+  (`ShapeTask`).
 
 ## A task holds as many changes as it needs
 
@@ -132,35 +154,74 @@ An aside is a chat: a task with a conversation and a copy of the default
 branch, and nothing else, kept off the board (`tasks.shelf`, "Scratch" in
 the code). It sits beside the coordinator's conversation, as a pill over it:
 **Coordinator** first, with Althar's mark, then each aside, the latest
-exchange first, a live dot while its agent is at it (`AsideTabs`). Its agent
+exchange first, a live dot while its agent is at it, and an × that clears
+it (`AsideTabs`). Its agent
 has the coordinator's tools, and its turns are signed Coordinator too, as
 the coordinator's are: an aside is a quick word with the coordinator that
 leaves its conversation as it was.
 
-- **Started** with + over the conversation, which turns the coordinator's
-  composer to a new aside (`StartTask` with `chat`): the person's words open
-  its thread, on the model the composer has picked, with no card in the
-  coordinator's conversation. Words the coordinator said, selected, start one
-  about them, quoted over the composer and above the person's words. The
-  coordinator still starts one at once with `start_task`.
+- **Started** as + over the conversation is pressed (`StartTask` with
+  `chat`), on the model the composer has picked, by an id the window makes:
+  made on Scratch, never on the board even for a moment, with no card in the
+  coordinator's conversation and nothing of it in the coordinator's news. Its
+  one pill is keyed by that id from the first frame, and says New aside
+  until the person's first words, which the coordinator's composer sends to
+  its thread, name it. Its copy (made from the default branch as last
+  fetched, with no wait on the network) and its lead get ready while the
+  person writes; the lead's brief waits for those words and goes out with
+  them, as the coordinator's does, on the lead the composer has picked as
+  they are sent. Its picker is its own, the coordinator's left as it was. One left unsaid takes no pill, and the next + opens it
+  again rather than another; its × only closes it. Words the coordinator
+  said, selected, start one about them, quoted over the composer and above
+  the person's words. The coordinator still starts one at once with
+  `start_task`, made on Scratch as + makes one.
+- **Answered** in its lead's reply: an aside's brief is light (who it is,
+  where it reads, its tools, the person's decisions), with no step to report,
+  no finish_step and no evidence, and the turn that answers ends its first
+  step, with no reminder. Once it becomes work and leaves Scratch, its lead
+  is told a task lead's whole brief with its next turn. A plain "hi" took 16
+  to 26 seconds through a lead's whole brief, its finish_step and the copy's
+  fetch, and takes 4 to 7 now (12 Nov 2026).
 - **Open,** it takes the coordinator's place in the pane: its conversation,
-  and the composer every task has, with its own runs over it and its own
-  moves, Make it a task and Clear (`AsideMoves`).
+  and the composer every task has, with its own runs over it and Make it a
+  task (`AsideMoves`).
 - **Made a task,** it moves to the board: by the person's Make it a task,
   from its menu, or by itself once it takes a worktree or an output (a
   branch of its own, a pull request, a drafted review) after it was put
   there, said in its thread. Its pill flies to its card on the board, and
   the coordinator's conversation keeps a line of it ("An aside became a
   task: …"). Nothing moves back by itself; the person can from its menu.
-- **Cleared,** it settles, leaves the pills, and ⌘K finds it. Those left a
-  week fold into one "N older" pill, which clears them together.
-- A call of its that waits on the person still shows in Needs you. With the
-  conversation closed, the board keeps the asides behind one chip at the
+- **Cleared,** by its pill's × (Delete on the pill too), it settles as Done,
+  leaves the pills, and ⌘K finds it, whatever it stands at: its lead at
+  work, stuck, or waiting on the person, whose question is withdrawn. Those
+  left a week fold into one "N older" pill, which clears them together.
+- **Both moves show at once:** the pill goes, and a card made a task is on
+  the board, in the frame the press is painted in. The window keeps the
+  move over the board's reads until they say so, and one the runtime
+  refuses comes back with a line over the composer saying why. Clear waited
+  on the runtime and then on the board's next read, so the pill went late
+  and came back for a moment (12 Nov 2026).
+- A call of its that waits on the person still shows in Needs you, and is
+  counted; the aside itself never is, answered or answering: the board, the
+  home, the edge, the tabs, the Dock's badge, the menu bar and the
+  notifications leave it out of what waits and of the work in progress.
+  With the conversation closed, the board keeps the asides behind one chip at the
   head of Up next (`ScratchShelf`), opened in place.
+- **Not a task to the coordinator** either: `project_overview` doesn't
+  count asides, and `list_tasks` and a fresh session's brief leave them out.
+  `find_tasks` finds one when asked for it and says it is an aside.
 
-An aside's copy is made without setup: one that only talks never pays for
-an install. The setup replays the first time its agent runs a command, or
-`run_project`.
+An aside never installs or upgrades dependencies, runs the repository's
+setup, or builds, before it answers or after: it reads its copy as it was
+made, and that is how it answers in seconds. Its copy is never set up while
+it is on Scratch, whatever its agent runs; `install_dependencies` and
+`run_project` tell its agent so, and that work needing a build, tests or the
+project running becomes a task, which the person makes with Make it a task.
+The person's own Run of its copy says the same. Made a task, by the person
+or its agent's work, its copy is set up as any task's, behind the press and
+before its next turn. Until 12 Nov 2026 the first command its agent ran
+started the setup beside the answer, and an aside the coordinator started
+was set up in full before it was put on Scratch.
 
 ## Presets
 
@@ -172,9 +233,12 @@ brief (`presets`). Only a start: changing a task's parts never changes it.
   by Claude Opus 5.5, with no review, ending with its branch. A prototype may
   later go on as a change in the same task, its pull request ending and its
   review added then, or never: the person decides, so the coordinator and the
-  leads never assume either way. Today the pull request can be opened from the
-  task's card or by the coordinator, but a review can't be added once its run
-  is over, so the conversation-plus-parts work (phase 5) owns the rest.
+  leads never assume either way. On their word it is one move: `change_part`
+  with preset Change, or the menu's Make it a change, puts its reviewer on
+  and sets its ending as the project's How a task ends says, and Ship then
+  runs the review and opens the pull request. A change goes back the same
+  way: preset Prototype or Chat takes its review off and its pull request
+  away, back to its branch.
 - **The plan card's kicker names the preset** its parts are, first: "Change
   · Task board-still". A press on it lists the others, each with what it
   holds; picking one changes the plan's parts to match (`ApplyPreset`): its
@@ -219,9 +283,11 @@ disagree with it.
 - **Change.** Everything else: every planned task, whatever its ending, a
   quick task made a change, and any task with a pull request.
 
-**A task only moves toward change, when the person says so.** When they like
-what a quick task made, they ask its lead to make it a real thing, and the
-lead calls `make_it_a_change`. The task is renamed for what it does now, gets
+**A task moves toward change, and back, when the person says so.** When they
+like what a quick task made, they ask its lead to make it a real thing, and
+the lead calls `make_it_a_change` (or `change_part` with preset Change); a
+change they want only as its branch, or as a chat, goes back with preset
+Prototype or Chat. The task is renamed for what it does now, gets
 a review by the model the lead names, and gets an ending: a draft pull
 request, or one that is ready for review. A review the person takes over
 becomes a change that builds on it. It stays one task, one thread and one
@@ -360,7 +426,9 @@ uncommitted changes that aren't evidence.
     commit is ([code-hosts.md](code-hosts.md)).
   - With its last pull request merged or closed, the round opens the next by
     itself, as a draft titled "After #N", where the project's rules would
-    have opened the first. A card with **Open a new pull request** appears
+    have opened the first. Its title and description come from what the
+    lead said since the last push to #N, never from words given for work
+    that went in it. A card with **Open a new pull request** appears
     only where the lead said it only answered a question (`answered`), or
     where the pull request couldn't open.
 
@@ -615,4 +683,7 @@ optionally a model, an agent, an effort and the change.
 - 10 Nov 2026: a task is a conversation plus parts, built (#739) and folded in from its proposal: the five parts and changing them, several changes in a task and stacks, chats on Scratch, presets, and helpers handed a change (ADR-087's tasks 1 to 5); what it decided and didn't build is under Not built yet.
 - 10 Nov 2026: the rest of it built (#739): each change shipped in a Ship of its own with its own review, the card's sentence and marks across changes, the header's row for each, stamped Shipped and Merged rows, where a turn's commits went; Keep them together, Drop it, a change that waits for another, removing a running task's workspace; Stop running it; picking another preset on the plan card, the coordinator planning from presets, editing them in Settings; Scratch's own shelf and a chat's copy made without setup. ADR-087 folded in whole and removed from `proposed/`: helpers in copies of their own, writing ones' commits, places, limits, retries, the hour, restarts, agents' own helpers switched off, and the thread, Graph face and usage by model.
 - 11 Nov 2026: chats are asides, pills over the coordinator's conversation with a composer and moves of their own, started there or from the coordinator's words; one made a task flies to the board and the coordinator's conversation notes it; the coordinator's turns are signed with Althar's mark ([Asides](#asides)).
+- 12 Nov 2026: an aside starts as + is pressed, one pill from then, its lead ready while the person writes; its brief is light, its reply ends its step, and the coordinator hears nothing of it ([Asides](#asides)).
+- 12 Nov 2026: an aside is cleared by its pill's ×, whatever it stands at, and clearing it or making it a task shows at once; an aside never installs, builds or runs the setup ([Asides](#asides)).
 - 12 Nov 2026: commits that only bring the base branch in, as a clean merge of main, are never the task's work: no hold for Ship, no review, no round; they go up to the open pull request (#773's merge of main had started a second Review and Pull request).
+- 12 Nov 2026: every part changes either way on the person's word to the lead or the coordinator, the lead's own task included: `change_part` sets Checked by, the ending and another preset's parts at once, `change_lead` acts on a lead's own task, Ship honours an ending of its branch alone, and the task menu has Make it a change; a prototype becomes a change in one move, and a change goes back.

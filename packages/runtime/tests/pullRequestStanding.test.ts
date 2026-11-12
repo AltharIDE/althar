@@ -120,6 +120,19 @@ describe('how a task’s pull request is told to the coordinator', () => {
     assert.match(section, /Conflicts with the base: not known/)
   })
 
+  it('says commits held for Ship wait for it, and when it is under way; and what the host says of a conflict', () => {
+    const held = change({ unpushed: 2, pushing: { held: 'Held for Ship', ship: true } })
+    assert.strictEqual(listWords(facts([held])), 'PR #113 draft, checks passing, 2 waiting for Ship')
+    assert.match(
+      sectionWords(facts([held])),
+      /2 commits on the task's branch are not on the pull request yet; they wait for Ship, which sends them up/,
+    )
+    assert.match(sectionWords(facts([held], { shipping: true })), /they wait for Ship, which is under way: they go up as it ends/)
+    assert.notMatch(sectionWords(facts([held])), /the person pushes them/)
+    assert.match(sectionWords(facts([change({ conflicts: true, target: 'main' })])), /Conflicts with main, as its host says/)
+    assert.match(sectionWords(facts([change({ conflicts: false, target: 'main' })])), /Conflicts with main: none, as its host says\./)
+  })
+
   it('says a branch that parted from its pull request, rewritten here or moved on there, and what the person can do', () => {
     const rewritten = facts([change({ diverged: { kind: 'rewritten', local: 5, onPullRequest: 4 } })])
     assert.strictEqual(listWords(rewritten), 'PR #113 draft, checks passing, diverged from PR')
@@ -177,7 +190,7 @@ describe('how a task’s pull request is told to the coordinator', () => {
           'URL: https://github.com/acme/app/pull/113',
           'Checks: passing (2 of 2).',
           "2 commits on the task's branch are not on the pull request yet; the person pushes them.",
-          'Conflicts with the base: not known (Althar does not ask the host).',
+          "Conflicts with the base: not known (its host hasn't said).",
           'Possibly out of date: its host is not known, so this is as last seen.',
         ].join('\n'),
         'docs: merged locally into main, no pull request',

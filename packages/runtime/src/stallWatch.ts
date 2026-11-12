@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto'
 
+import { plainTitle } from '@althar/contracts'
 import type { SessionEvent, ToolContent } from '@althar/provider-adapters'
 
 import type { LiveEvent } from './Live'
@@ -232,7 +233,7 @@ export const makeStallWatch = (limits: StallLimits) => {
     const output = event._tag === 'ToolCallUpdate' ? outputOf(event.rawOutput) : ''
     watch.finished = [
       ...watch.finished,
-      { key: keyOf(call), shown: call.command ?? call.title, failed: event.status === 'failed', output },
+      { key: keyOf(call), shown: call.command ?? plainTitle(call.title), failed: event.status === 'failed', output },
     ].slice(-KEPT)
     const loop = repeated(watch.finished)
     if (loop === null) return []

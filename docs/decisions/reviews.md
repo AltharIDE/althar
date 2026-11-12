@@ -32,35 +32,43 @@ by the models' scores ([agents](agents.md)):
   Zen is only the backup for Go.
 - **Never GPT Luna.**
 
-The person can change who reviews at any time before the task merges, as
-Change the team does; a review under way finishes with the reviewer it
-started with, and the next round takes the new one.
+The person can change who reviews at any time, either way, as Change the
+team does, or by telling the task's lead or the coordinator (a task is a
+conversation plus parts: the person's note of 12 November). A review under
+way finishes with the reviewer it started with, and the next round takes the
+new one. Once a review of the task **ran to its end** (it passed, or went on
+to the run's ending), or the task merged, the reviewer named reads what ships
+next (`reviewerChange` says `next_ship`): nothing locks it.
 
 ### A skipped review is not a done review
 
-A reviewer can't change once a review of the task **ran to its end** (it
-passed, or went on to the run's ending). A review that was **skipped**,
-taken off or never planned (a prototype's plan has none) is not that: until
-the task merges, the person adds a reviewer from Change the team, and picks
-its model; the coordinator's `change_lead` does the same, as one path
-(`Runs.changeTeam`, `reviewerChange`). A review that really ran keeps its
-rule: it can't change, though Review again stays.
+A review that was **skipped**, taken off, never planned (a prototype's plan
+has none), or planned for after a merge that hasn't come (the fast lane's, or
+a plan made before Prototype lost its review) is not a done one: the person
+adds a reviewer from Change the team, and picks its model; a lead on its own
+task and the coordinator do the same with `change_part` (`checked_by`) and
+`change_lead`, as one path (`Runs.changeTeam`, `reviewerChange`). Added
+before the work ships where the plan read it only after the merge, it reads
+it before now, and nothing reads it after the merge.
 
-Adding one after the work is pushed starts a review round on the task's
-current head (`reviewHead`, a Ship run that only reviews: `ships.reviewOnly`),
-once the lead's turn is over: it reads only what changed since the last
-review where one ran, else the whole change. Its findings go to the lead to
-settle as any round's, before merge or Ship. Work that still waits for Ship
-doesn't hold it back: the round reads the branch as it stands, that work too,
-and sends nothing up. The fast lane's review
-reads after the merge, and isn't added to.
+Adding one where the work is up in an open pull request starts a review
+round on the task's current head (`reviewHead`, a Ship run that only
+reviews: `ships.reviewOnly`), once the lead's turn is over: it reads only
+what changed since the last review where one ran, else the whole change. Its
+findings go to the lead to settle as any round's, before merge or Ship. Work
+that still waits for Ship doesn't hold it back: the round reads the branch as
+it stands, that work too, and sends nothing up. Where the work isn't up in a
+pull request yet, as a prototype's branch, Ship runs the review before it
+sends the work up.
 
 ### An agent offers the review, as the work turns real
 
-No rule offers a review. A lead or the coordinator does, with
-`offer_review`, when what the person says turns work with no review into a
-real change: they ask a prototype's lead to harden it, or ask for a pull
-request of a chat's work. The offer is a quiet line in the thread where they
+No rule offers a review. Where the person asked for the change, a review or
+a pull request, the lead or the coordinator puts it on at once
+(`change_part`, preset Change or `checked_by`): nothing asks them twice. A
+lead or the coordinator offers one, with `offer_review`, only where what the
+person said may turn work with no review into a real change without saying
+whether they want it reviewed. The offer is a quiet line in the thread where they
 said it ("Add a review?", or "Add a review of “…”?" in the coordinator's),
 with Add and No thanks. Its reviewer is the one the project's rules would
 pick, the strongest free model and another maker's than the lead's
@@ -74,8 +82,8 @@ ending to a pull request from the plan controls, or Althar opening one,
 offers nothing by itself: the person said it there without a word to an
 agent, and Change the team has the reviewer beside it. The line reads the task's card (`reviewOffer`,
 while the offer stands) and, once answered, says who reviews it or that
-there's no review. A task with a review, one that's merged, or one whose plan
-reads no review of its own isn't offered one.
+there's no review. A task with a review, one that's merged, or a review of
+someone else's pull request isn't offered one.
 
 ## How a review round runs
 
@@ -369,3 +377,4 @@ A round that forgets `kept_views` shows less, never something stale.
 - 10 Nov 2026: Run it, safely or trusted, with its setting; any task can review a related pull request beside its own work (a task is a conversation plus parts).
 - 10 Nov 2026: Stop running it; Run safely names the lockfile's entries from a git host or a tarball that didn't install.
 - 11 Nov 2026: any model leads a review of someone else's pull request; the refusal of agents that "can't be held to reading only" is gone.
+- 12 Nov 2026: a reviewer changes at any time, either way: one changed after a review ran, or on a merged task, reads what ships next; a review never run, the fast lane's before its merge included, isn't a done one; a lead changes its own task's reviewer; where the person asked for a review or a change, it goes on at once rather than as an offer.

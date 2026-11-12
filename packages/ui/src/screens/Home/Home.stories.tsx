@@ -329,7 +329,7 @@ const MANY_PROJECTS: HomeProject[] = [
     note: i % 3 === 0 ? 'Last task last week' : 'Last task 11 days ago',
   })),
 ]
-/** Two tasks or so in most of the busy projects, a few held or stopped. */
+/** Two tasks or so in most of the busy projects, a few held or waiting for a free agent. */
 const MANY_RUNNING: HomeRun[] = MANY_PROJECTS.slice(0, 12).flatMap((p, i) =>
   Array.from({ length: (i % 3) + 1 }, (_, k) => {
     const base = RUNNING[(i + k) % RUNNING.length]!
@@ -338,7 +338,7 @@ const MANY_RUNNING: HomeRun[] = MANY_PROJECTS.slice(0, 12).flatMap((p, i) =>
       id: `${p.id}-${k}`,
       project: p.project,
       ...(i === 6 && k === 0 ? { status: TaskStatus.Paused } : {}),
-      ...(i === 9 && k === 1 ? { status: TaskStatus.Stopped } : {}),
+      ...(i === 9 && k === 1 ? { status: TaskStatus.Queued } : {}),
     }
   }),
 )
