@@ -43,140 +43,154 @@
   cursor: default;
 }
 
-/* solid: an icon's size, no glyphs; a pane that shows is a block of ink, one hidden an outline */
-.solid {
-  align-items: center;
-  width: 44px;
-  height: 26px;
-  padding: 0 4px;
+/* words: the panes named in the map, on a segmented track; a pane that shows is raised paper */
+.words {
+  width: auto;
   gap: 2px;
-  border-radius: var(--r);
+  padding: 2px;
+  border-radius: 8px;
+  background: var(--segment-track);
 }
-.solid .half {
-  height: 14px;
+.words .half {
+  flex: none;
+  gap: 5px;
+  padding: 0 8px;
+  border-radius: 6px;
+  font-size: 12px;
 }
-.solid .block {
-  width: 100%;
-  height: 100%;
-  border: 1.5px solid var(--t-3);
-  border-radius: 2.5px;
-  transition:
-    background var(--fast) var(--ease),
-    border-color var(--fast) var(--ease);
+.words .half[aria-pressed='true'] {
+  background: var(--segment-on);
+  box-shadow: var(--lift);
 }
-.solid .half[aria-pressed='true'] .block {
-  border-color: var(--t-2);
-  background: var(--t-2);
-}
-.solid .half:hover:not([aria-disabled='true']) .block {
-  border-color: var(--t-1);
-}
-.solid .half[aria-pressed='true']:hover:not([aria-disabled='true']) .block {
-  background: var(--t-1);
+.word {
+  white-space: nowrap;
 }
 
-/* wash: the header's buttons joined; a pane that shows has their pressed wash */
-.wash {
-  gap: 1px;
-}
-.wash .half {
-  color: var(--t-4);
-}
-.wash .half:first-child {
-  border-radius: var(--r) 2px 2px var(--r);
-}
-.wash .half:last-child {
-  border-radius: 2px var(--r) var(--r) 2px;
-}
-.wash .half:hover:not([aria-disabled='true']) {
-  background: var(--line);
-}
-.wash .half[aria-pressed='true'] {
-  background: var(--line-2);
-  color: var(--t-1);
-}
-
-/* filled: a pane that shows is ink, its glyph paper; one hidden is an outline */
-.filled {
-  gap: 2px;
-  height: 22px;
-}
-.filled .half {
-  border: 1.25px solid var(--line-3);
-  border-radius: 5px;
-}
-.filled .half[aria-pressed='true'] {
-  border-color: var(--ink-fill);
-  background: var(--ink-fill);
-  color: var(--on-ink);
-}
-.filled .half:hover:not([aria-disabled='true'], [aria-pressed='true']) {
-  border-color: var(--t-3);
-  color: var(--t-2);
-}
-.filled .half[aria-pressed='true']:hover:not([aria-disabled='true']) {
-  background: var(--ink-hover);
-}
-
-/* bar: glyphs always drawn, in a frame; a pane that shows has a bar of ink along its foot */
-.bar {
+/* hinge: swap is the seam between the two halves */
+.hinge {
+  width: 72px;
+  align-items: stretch;
   overflow: hidden;
   border: 1px solid var(--line-3);
   border-radius: 6px;
 }
-.bar .half {
-  position: relative;
-  color: var(--t-4);
+.hinge .half:hover:not([aria-disabled='true']) {
+  background: var(--line);
 }
-.bar .half + .half {
-  border-inline-start: 1px solid var(--line-2);
+.hinge .half[aria-pressed='true'] {
+  background: var(--segment-on);
 }
-.bar .half::after {
-  content: '';
-  position: absolute;
-  inset: auto 5px 2px;
-  height: 2px;
-  border-radius: 1px;
-  background: transparent;
-  transition: background var(--fast) var(--ease);
+.hinge .talkHalf {
+  flex-basis: 30%;
 }
-.bar .half[aria-pressed='true'] {
+.hingeButton {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  border-inline: 1px solid var(--line-3);
+  background: var(--line);
+  color: var(--t-3);
+}
+.hingeButton:hover:not([aria-disabled='true']) {
+  background: var(--line-2);
   color: var(--t-1);
 }
-.bar .half[aria-pressed='true']::after {
-  background: var(--t-1);
+.hingeButton[aria-disabled='true'] {
+  cursor: default;
+  color: transparent;
 }
-.bar .half:hover:not([aria-disabled='true']) {
+
+/* live: a pane that shows is washed in the app's blue */
+.live {
+  gap: 2px;
+}
+.live .half {
+  border: 1px solid var(--line-3);
+  border-radius: 5px;
+}
+.live .half[aria-pressed='true'] {
+  border-color: color-mix(in srgb, var(--live) 45%, transparent);
+  background: var(--live-dim);
+  color: var(--live);
+}
+.live .half:hover:not([aria-disabled='true'], [aria-pressed='true']) {
   background: var(--line);
 }
 
-/* slot: on the chrome, a pane that shows is a sheet of paper; one hidden, a dashed slot where it goes */
-.slot {
+/* thumb: a thumbnail of the window, a title bar over its panes, each drawn with what it holds while it shows */
+.thumb {
+  position: relative;
+  width: 62px;
+  height: 26px;
   gap: 2px;
-  padding: 2px;
-  border-radius: 7px;
+  padding: 6px 2px 2px;
+  border: 1px solid var(--line-3);
+  border-radius: 5px;
   background: var(--line);
 }
-.slot .half {
-  border: 1px dashed var(--line-3);
-  border-radius: 5px;
-  color: var(--t-4);
+.thumb::before {
+  content: '';
+  position: absolute;
+  top: 2px;
+  left: 3px;
+  width: 9px;
+  height: 2px;
+  border-radius: 1px;
+  background: var(--line-3);
 }
-.slot .half[aria-pressed='true'] {
-  border: 1px solid var(--line-2);
-  background: var(--paper);
-  box-shadow: var(--lift);
+.thumb .half {
+  border-radius: 2px;
+  color: var(--t-3);
+}
+.thumb .half[aria-pressed='true'] {
+  background: var(--segment-on);
+}
+.thumb .half[aria-pressed='false'] {
+  outline: 1px dashed var(--line-3);
+  outline-offset: -1px;
+}
+.thumb .half[aria-pressed='false'] .miniature {
+  opacity: 0;
+}
+.thumb .half:hover:not([aria-disabled='true']) .miniature {
+  opacity: 1;
   color: var(--t-1);
 }
-.slot .half:hover:not([aria-disabled='true'], [aria-pressed='true']) {
-  border-color: var(--t-4);
-  color: var(--t-2);
+.miniature {
+  display: block;
+  transition: opacity var(--fast) var(--ease);
+}
+
+/* seam: no frame, no fill; the glyphs, ink while they show and faint while hidden, split by a hairline */
+.seam {
+  width: auto;
+  align-items: center;
+}
+.seam .half {
+  flex: none;
+  width: 24px;
+  height: 24px;
+  border-radius: var(--r);
+  color: var(--t-4);
+}
+.seam .half[aria-pressed='true'] {
+  color: var(--t-1);
+}
+.seam .half:hover:not([aria-disabled='true']) {
+  background: var(--line);
+}
+.seamLine {
+  width: 1px;
+  height: 14px;
+  margin: 0 1px;
+  background: var(--line-3);
 }
 
 @media (prefers-reduced-motion: reduce) {
   .half,
-  .block,
-  .bar .half::after {
+  .miniature {
     transition: none;
   }
 }
