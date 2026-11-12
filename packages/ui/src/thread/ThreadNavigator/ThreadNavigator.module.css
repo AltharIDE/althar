@@ -46,6 +46,21 @@
 .stop[aria-current] .tick {
   opacity: 0.7;
 }
+/* Nearby marks follow the pointer or keyboard focus, without moving their hit areas. */
+.navigator
+  .stop:where(:has(+ .stop + .stop + .stop:is(:hover, :focus-visible)), .stop:is(:hover, :focus-visible) + .stop + .stop + .stop)
+  .tick {
+  transform: scaleX(0.4);
+  opacity: 0.4;
+}
+.navigator .stop:where(:has(+ .stop + .stop:is(:hover, :focus-visible)), .stop:is(:hover, :focus-visible) + .stop + .stop) .tick {
+  transform: scaleX(0.6);
+  opacity: 0.6;
+}
+.navigator .stop:where(:has(+ .stop:is(:hover, :focus-visible)), .stop:is(:hover, :focus-visible) + .stop) .tick {
+  transform: scaleX(0.8);
+  opacity: 0.8;
+}
 .stop:hover .tick,
 .stop:focus-visible .tick {
   transform: scaleX(1);
