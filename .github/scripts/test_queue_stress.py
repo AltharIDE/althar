@@ -30,6 +30,7 @@ class Tests(unittest.TestCase):
         gate.pages = pages
         gate.api = Mock(return_value={'head': {'sha': 'abc'}})
         gate.applies = lambda name, files: name in applies
+        gate.smoke_applies = Mock(return_value=True)
         return gate
 
     def test_empty_queued_shadow_does_not_hide_actual_run(self):
@@ -64,10 +65,18 @@ class Tests(unittest.TestCase):
         self.gate(applies=()).check('773')
 
     def test_windows_plan_may_explicitly_skip_smoke(self):
-        self.gate([run(1)], {1: [job('windows-e2e', conclusion='skipped')]}, ('desktop',)).check('774')
+        gate = self.gate([run(1)], {1: [job('windows-e2e', conclusion='skipped')]}, ('desktop',))
+        gate.smoke_applies.return_value = False
+        gate.check('774')
+
+    def test_a_draft_smoke_skip_cannot_admit_a_ready_pr_on_the_same_sha(self):
+        gate = self.gate([run(2, 'queued', None), run(1)],
+                         {2: [], 1: [job('plan'), job('windows-e2e', conclusion='skipped')]}, ('desktop',))
+        gate.deadline = module.time.monotonic() + 1
+        with self.assertRaisesRegex(RuntimeError, 'deadline'): gate.check('774')
 
     def test_unsuccessful_windows_smoke_blocks(self):
-        for conclusion in ('failure', 'cancelled', 'timed_out', 'neutral', 'action_required'):
+        for conclusion in ('failure', 'cancelled', 'timed_out', 'neutral', 'action_required', 'skipped'):
             with self.subTest(conclusion=conclusion):
                 gate = self.gate([run(1)], {1: [job('windows-e2e', conclusion=conclusion)]}, ('desktop',))
                 with self.assertRaisesRegex(RuntimeError, 'Windows smoke failed'): gate.check('774')
@@ -113,6 +122,12 @@ class Tests(unittest.TestCase):
         self.assertFalse(module.Gate.applies(gate, 'stress', ['packages/runtime/src/Sessions.ts']))
         self.assertTrue(module.Gate.applies(gate, 'stress', ['packages/runtime/tests/sessions.test.ts']))
         self.assertTrue(module.Gate.applies(gate, 'desktop', ['packages/runtime/src/Sessions.ts']))
+
+    def test_smoke_decision_uses_the_pr_heads_files(self):
+        gate = self.gate()
+        head = module.subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip()
+        self.assertFalse(module.Gate.smoke_applies(gate, head, ['README.md']))
+        self.assertTrue(module.Gate.smoke_applies(gate, head, ['packages/runtime/src/Sessions.ts']))
 
 
 if __name__ == '__main__': unittest.main()
