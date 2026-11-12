@@ -3145,7 +3145,10 @@ describe('a task', () => {
           ? items.says('Found it, and a second call. Done.', 'claude-code', 'reply')
           : items.says('A new line.', 'codex', itemId),
       )
-      vi.mocked(client.getThread).mockImplementation(async () => ({ ...thread({ items: [] }), attention: [], session: null }))
+      vi.mocked(client.getThread).mockImplementation(async () => {
+        const stopped = thread({ items: [] })
+        return { ...stopped, task: { ...stopped.task, phase: 'stopped' as const }, attention: [], session: null }
+      })
       act(() => {
         emit(changed('thread_item', 'reply'))
         emit(changed('thread_item', 'reply'))
@@ -3423,7 +3426,8 @@ describe('a task', () => {
       'Waiting: 6 agents busy on this Mac, 2 at a time',
     )
     expect(statusOf(running())).toEqual({ status: TaskStatus.Running, state: 'Working' })
-    expect(statusOf({ ...base, session: null })).toEqual({ status: TaskStatus.Stopped, state: 'Stopped' })
+    // Under way with no session yet, between agents or on its way, as its card on the board says: working, not stopped.
+    expect(statusOf({ ...base, session: null })).toEqual({ status: TaskStatus.Running, state: 'Working' })
     // Its lead's session starting, as it does for a merged task given something to fix: the agent is on its way, not gone.
     expect(statusOf({ ...base, session: { ...base.session!, state: 'starting', held: false, turnRunning: false } })).toEqual({
       status: TaskStatus.Running,
@@ -3453,7 +3457,11 @@ describe('a task', () => {
       status: TaskStatus.Done,
       state: 'Abandoned',
     })
-    expect(statusOf({ ...running(), task: { ...base.task, phase: 'ready' } })).toEqual({ status: TaskStatus.Running, state: 'Working' })
+    // Ready as its card on the board is, whatever its lead's session says: a turn running makes its card running first (`taskStatusOf`).
+    expect(statusOf({ ...running(), task: { ...base.task, phase: 'ready' } })).toEqual({
+      status: TaskStatus.Yours,
+      state: 'Ready to accept',
+    })
     expect(
       statusOf({
         ...base,

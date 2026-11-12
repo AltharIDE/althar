@@ -647,7 +647,7 @@ const FOLDS = new Set(['checks', 'merged', 'closed', 'ready'])
 
 /**
  * Where the news repeats the line just before it (same kind, outcome, pull
- * request and sender, nothing between), one line with the latest time and a
+ * request by its address and sender, and the same failures, nothing between), one line with the latest time and a
  * count. The records keep both.
  */
 export const foldArrival = (last: Block | undefined, next: Extract<Block, { kind: 'arrival' }>): Block => {
@@ -658,8 +658,11 @@ export const foldArrival = (last: Block | undefined, next: Extract<Block, { kind
     FOLDS.has(b.kind) &&
     a.kind === b.kind &&
     a.where === b.where &&
+    a.url === b.url &&
     a.from === b.from &&
-    ((a.failed ?? 0) === 0) === ((b.failed ?? 0) === 0)
+    ((a.failed ?? 0) === 0) === ((b.failed ?? 0) === 0) &&
+    // A failure is read by its details, so only runs that show the same ones fold.
+    JSON.stringify([a.failing, a.logs]) === JSON.stringify([b.failing, b.logs])
   return same ? { ...next, id: last.id, count: last.count + 1 } : next
 }
 

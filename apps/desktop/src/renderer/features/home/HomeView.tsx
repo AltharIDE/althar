@@ -1,9 +1,10 @@
 import { type DragEvent, useEffect, useState } from 'react'
 
 import type { HomeCall, HomeEvent, HomeTask } from '@althar/contracts'
-import { type IconName, modKey, PermissionAnswers, type ProjectRef, TaskStatus } from '@althar/ui'
+import { type IconName, modKey, PermissionAnswers, type ProjectRef } from '@althar/ui'
 import { Home, type HomeEvent as HomeLine, type HomeNeed, type HomeProject, type HomeRun } from '@althar/ui/screens'
 
+import { taskStatusOf } from '../../shared/taskStatus'
 import { queuedOfWords } from '../../shared/agents'
 import { permissionOf, type Reply, replyOf } from '../../shared/permissions'
 import type { DoneHere } from '../../shared/standing'
@@ -54,10 +55,6 @@ export const text = {
 }
 
 export { refOf }
-
-/** How a task that isn't ready stands: running, waiting on a call, or stopped with no agent on it. */
-const statusOf = (phase: HomeTask['phase']) =>
-  phase === 'waiting' ? TaskStatus.Yours : phase === 'stopped' ? TaskStatus.Stopped : TaskStatus.Running
 
 /** The first line of what a step reported. */
 const firstLine = (summary: string) => summary.split('\n')[0] ?? ''
@@ -178,9 +175,8 @@ export function HomeView({
 
   const runs: ReadonlyArray<HomeRun> = working.flatMap((task) => {
     const project = refs.get(task.projectId)
-    // Waiting for a free agent, or held for a reset, it stands still though its phase is running.
-    const status =
-      task.queued !== null ? TaskStatus.Queued : task.waits !== null || task.reconnects != null ? TaskStatus.Paused : statusOf(task.phase)
+    // Where it stands, as its card on the board and its header say it: held, waiting its turn, or by its phase.
+    const status = taskStatusOf(task)
     return project === undefined ? [] : [{ id: task.taskId, project, title: task.title, status }]
   })
   // What waiting tasks wait for is this computer's, the same for each: its project says it, with how many wait there.

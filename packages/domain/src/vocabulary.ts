@@ -390,5 +390,7 @@ export const AggregateType = Schema.Literals([
   'skill',
   'setting',
   'canvas',
+  /** A task's card, as its board shows it, came out different as a change of the task was recorded (Queries' `cards`). */
+  'card',
 ])
 export type AggregateType = typeof AggregateType.Type
