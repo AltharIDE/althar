@@ -13,6 +13,7 @@ import {
   leftQueueNote,
   leftQueueNoteForLead,
   leftQueueUnclaimed,
+  passingOnBase,
   nameInLine,
   outsidersLine,
   queuedNote,
@@ -188,13 +189,11 @@ describe('this computer, in the words the runtime writes', () => {
 })
 
 describe('a merge queue send-back, and whose it is', () => {
-  const detail = (failing: ReadonlyArray<string>, onBaseToo: ReadonlyArray<string> = []) => ({
-    queueSha: 'group-sha',
-    failing,
-    logs: [],
-    main: null,
-    onBaseToo,
-  })
+  const detail = (
+    failing: ReadonlyArray<string>,
+    onBaseToo: ReadonlyArray<string> = [],
+    passedOnBase = failing.filter((job) => !onBaseToo.includes(job)),
+  ) => ({ queueSha: 'group-sha', failing, logs: [], main: null, onBaseToo, passedOnBase })
 
   it('names the pull request only by a job its build failed that the default branch passes', () => {
     assert.deepStrictEqual(queueOwnFailures('checks', detail(['test', 'lint'], ['lint'])), ['test'])
@@ -203,16 +202,25 @@ describe('a merge queue send-back, and whose it is', () => {
     assert.deepStrictEqual(queueOwnFailures('checks', detail(['test'], ['test'])), [])
     assert.deepStrictEqual(queueOwnFailures('checks', detail([])), [])
     assert.deepStrictEqual(queueOwnFailures('other', null), [])
+    // The default branch hasn't reported the job, still runs it, or couldn't be read: nothing says it passes there.
+    assert.deepStrictEqual(queueOwnFailures('checks', detail(['test'], [], [])), [])
+    assert.deepStrictEqual(queueOwnFailures('checks', { queueSha: null, failing: ['test'], logs: [], main: null }), [])
     // Someone took it out, or it conflicts: no job is why.
     assert.deepStrictEqual(queueOwnFailures('removed', detail(['test'])), [])
     assert.deepStrictEqual(queueOwnFailures('conflict', detail(['test'])), [])
   })
 
-  it('reads which failing jobs fail on the default branch too, by what its latest commit reports', () => {
-    assert.deepStrictEqual(
-      failingOnBase(['test', 'lint', 'e2e'], [check('test', 'failed'), check('lint', 'passed'), check('e2e', 'running')]),
-      ['test'],
-    )
+  it('reads which failing jobs fail and which pass on the default branch, by what its latest commit reports', () => {
+    const base = [
+      check('test', 'failed'),
+      check('lint', 'passed'),
+      check('e2e', 'running'),
+      check('types', 'passed'),
+      check('types', 'running'),
+    ]
+    assert.deepStrictEqual(failingOnBase(['test', 'lint', 'e2e', 'types', 'docs'], base), ['test'])
+    // A job still running there, run again and not done, or not reported at all, doesn't pass.
+    assert.deepStrictEqual(passingOnBase(['test', 'lint', 'e2e', 'types', 'docs'], base), ['lint'])
   })
 
   it('tells the person why nothing names it, and its lead, for its next turn, to change nothing for it', () => {
@@ -222,7 +230,11 @@ describe('a merge queue send-back, and whose it is', () => {
     )
     assert.include(
       leftQueueUnclaimed('PR #4', 'checks', detail(['test'], ['test'])),
-      'the jobs its build failed (test) fail on the default branch too',
+      'as why it was taken out: test fails on the default branch too.',
+    )
+    assert.include(
+      leftQueueUnclaimed('PR #4', 'checks', detail(['test', 'e2e'], ['test'], [])),
+      'test fails on the default branch too, and the default branch hasn’t reported e2e passing, so Althar can’t tell it from a failure of its own.',
     )
     const note = leftQueueNoteForLead('PR #4', 'checks', detail(['test'], ['test']))
     assert.include(note, 'The merge queue took PR #4 out: its checks failed.')

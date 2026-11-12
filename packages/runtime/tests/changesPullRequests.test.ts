@@ -196,15 +196,17 @@ describe('a pull request, by the person and the lead', () => {
   }
 
   // News that needs nothing of the lead now starts no turn: it is noted, and read with the lead's next turn.
-  for (const news of ['merged-comment', 'queue-unnamed', 'queue-on-main'] as const) {
+  for (const news of ['merged-comment', 'queue-unnamed', 'queue-on-main', 'queue-main-unknown'] as const) {
     it.live(`notes ${news} news for its lead's next turn, waking nothing`, () => {
       const { working, bare } = hosted()
       const github = makeFakeService({
         pushUrl: () => bare,
         headOf: tipOf(bare),
         // The queue's build fails a job the default branch fails too: nothing names the pull request.
+        // Or a job the default branch hasn't reported on: nothing says it passes there.
         checksOn: (sha) =>
-          news === 'queue-on-main' && (sha === 'group-sha' || sha === 'main-0' || sha === 'main')
+          (news === 'queue-on-main' && (sha === 'group-sha' || sha === 'main-0' || sha === 'main')) ||
+          (news === 'queue-main-unknown' && sha === 'group-sha')
             ? [{ name: 'test', state: 'failed', log: 'boom' }]
             : undefined,
       })
@@ -230,8 +232,8 @@ describe('a pull request, by the person and the lead', () => {
           github.commentAs(1, 'lee', said)
           github.mergeByHand(1)
         } else {
-          if (news === 'queue-on-main') github.queueCommit(1, 'group-sha')
-          github.dequeue(1, news === 'queue-on-main' ? 'checks' : 'other')
+          if (news !== 'queue-unnamed') github.queueCommit(1, 'group-sha')
+          github.dequeue(1, news === 'queue-unnamed' ? 'other' : 'checks')
         }
         yield* changes.refresh(taskId)
         const noted = yield* until(

@@ -1,7 +1,7 @@
 import { type Check, type CodeHost, type ConnectorFailed, products, type Repository } from '@althar/connectors'
 import { Effect } from 'effect'
 
-import { failingOnBase, queueMainLine, type QueueDetail } from './pullRequestWords'
+import { failingOnBase, passingOnBase, queueMainLine, type QueueDetail } from './pullRequestWords'
 
 /*
  * A failed check's log, as Althar reads it for the thread's card and for
@@ -168,12 +168,13 @@ export const queueDetailOf = (host: CodeHost, repository: Repository, queueSha: 
       { concurrency: 3 },
     )
     const failing = failed.map((check) => check.name)
-    const { main, onBaseToo } = yield* host.branchHead(repository, base).pipe(
+    const { main, onBaseToo, passedOnBase } = yield* host.branchHead(repository, base).pipe(
       Effect.flatMap((tip) =>
         host.checks(repository, tip, { strict: true }).pipe(
           Effect.map((checks) => ({
             main: queueMainLine(`${base} (${tip.slice(0, 7)})`, failing, checks),
             onBaseToo: failingOnBase(failing, checks),
+            passedOnBase: passingOnBase(failing, checks),
           })),
         ),
       ),
@@ -181,6 +182,7 @@ export const queueDetailOf = (host: CodeHost, repository: Repository, queueSha: 
         Effect.succeed({
           main: `Couldn't compare with ${base}'s latest commit: ${lookupFailure(host, error)}.`,
           onBaseToo: [] as ReadonlyArray<string>,
+          passedOnBase: [] as ReadonlyArray<string>,
         }),
       ),
     )
@@ -191,5 +193,6 @@ export const queueDetailOf = (host: CodeHost, repository: Repository, queueSha: 
       main,
       jobs: reads.map((read) => ({ name: read.name, url: read.url, tail: read.log, missing: read.missing })),
       onBaseToo,
+      passedOnBase,
     } satisfies QueueDetail
   })

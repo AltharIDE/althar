@@ -81,6 +81,8 @@ export interface QueueDetail {
   readonly jobs?: ReadonlyArray<QueueJob>
   /** Of the jobs it failed, those that fail on the default branch's latest commit too: not the pull request's own doing. */
   readonly onBaseToo?: ReadonlyArray<string>
+  /** Of the jobs it failed, those the default branch's latest commit reports passing: only these name the pull request. */
+  readonly passedOnBase?: ReadonlyArray<string>
 }
 
 /** Of the jobs the queue's build failed, those its default branch's latest commit fails too, as that commit reports them. */
@@ -90,14 +92,28 @@ export const failingOnBase = (
 ) => failing.filter((name) => baseChecks.some((check) => check.name === name && check.state === 'failed'))
 
 /**
- * The jobs that name the pull request as why the merge queue took it out: those its build failed that the default branch
- * doesn't fail too. None where the host gave no reason, or the build's jobs couldn't be read: Althar doesn't know it is the
- * pull request's own doing, so its lead isn't put to work guessing.
+ * Of the jobs the queue's build failed, those its default branch's latest commit reports passing, every run of it: a job it
+ * hasn't reported on, or still runs, neither passes nor fails.
+ */
+export const passingOnBase = (
+  failing: ReadonlyArray<string>,
+  baseChecks: ReadonlyArray<{ readonly name: string; readonly state: Check['state'] }>,
+) =>
+  failing.filter(
+    (name) =>
+      baseChecks.some((check) => check.name === name) && baseChecks.every((check) => check.name !== name || check.state === 'passed'),
+  )
+
+/**
+ * The jobs that name the pull request as why the merge queue took it out: those its build failed that the default branch's
+ * latest commit reports passing. None where the host gave no reason, the build's jobs couldn't be read, or the default branch
+ * fails them too, hasn't reported on them or couldn't be read: Althar doesn't know it is the pull request's own doing, so its
+ * lead isn't put to work guessing.
  */
 export const queueOwnFailures = (why: ChangeRequest['leftQueue'], detail: QueueDetail | null | undefined) =>
   detail === null || detail === undefined || (why !== 'checks' && why !== 'other' && why !== null && why !== undefined)
     ? []
-    : detail.failing.filter((name) => !(detail.onBaseToo ?? []).includes(name))
+    : detail.failing.filter((name) => (detail.passedOnBase ?? []).includes(name))
 
 /**
  * Said to the person, in the task's thread, as the merge queue takes a pull request out with nothing in its build that names
@@ -105,9 +121,18 @@ export const queueOwnFailures = (why: ChangeRequest['leftQueue'], detail: QueueD
  */
 export const leftQueueUnclaimed = (name: string, why: ChangeRequest['leftQueue'], detail: QueueDetail | null | undefined) => {
   const failing = detail?.failing ?? []
+  const too = failing.filter((job) => (detail?.onBaseToo ?? []).includes(job))
+  const unknown = failing.filter((job) => !too.includes(job))
   const because =
     failing.length > 0
-      ? `the jobs its build failed (${failing.join(', ')}) fail on the default branch too`
+      ? [
+          ...(too.length > 0 ? [`${too.join(', ')} fail${too.length === 1 ? 's' : ''} on the default branch too`] : []),
+          ...(unknown.length > 0
+            ? [
+                `the default branch hasn’t reported ${unknown.join(', ')} passing, so Althar can’t tell ${unknown.length === 1 ? 'it' : 'them'} from a failure of its own`,
+              ]
+            : []),
+        ].join(', and ')
       : why === 'checks'
         ? 'Althar couldn’t read which of its build’s jobs failed'
         : 'the host gave no specific reason, and its build names no job that failed'
@@ -130,12 +155,8 @@ export const queueMainLine = (
   baseChecks: ReadonlyArray<{ readonly name: string; readonly state: Check['state'] }>,
 ) => {
   if (baseChecks.length === 0) return `No checks have run on ${base}, so this says nothing of whether ${base} is broken.`
-  const failed = new Set(baseChecks.filter((check) => check.state === 'failed').map((check) => check.name))
-  const passed = new Set(
-    baseChecks
-      .filter((check) => check.state === 'passed' && baseChecks.every((other) => other.name !== check.name || other.state === 'passed'))
-      .map((check) => check.name),
-  )
+  const failed = new Set(failingOnBase(failing, baseChecks))
+  const passed = new Set(passingOnBase(failing, baseChecks))
   const too = failing.filter((name) => failed.has(name))
   const there = failing.filter((name) => !failed.has(name) && passed.has(name))
   const unreported = failing.filter((name) => !failed.has(name) && !passed.has(name))
