@@ -1,14 +1,15 @@
-import { copyFileSync, existsSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
-import { readFile, stat } from 'node:fs/promises'
+import { existsSync, mkdirSync, writeFileSync } from 'node:fs'
+import { copyFile, mkdtemp, readFile, stat } from 'node:fs/promises'
 import { homedir, tmpdir } from 'node:os'
 import { dirname, join, posix, resolve } from 'node:path'
 
 import type { ChangeTarget } from '@althar/domain'
 import { cleanUp } from '@althar/provider-adapters'
-import { Context, Duration, Effect } from 'effect'
+import { Context, Deferred, Duration, Effect } from 'effect'
 
 import { afterOpen, startup } from './startup'
 import { GitFailed } from './errors'
+import { refStamp } from './refStamps'
 import { Foreground, startApart } from './spawner'
 import { forkOf } from './forks'
 
@@ -261,10 +262,14 @@ const runProcess = (
 const indexCopy = (cwd: string, args: ReadonlyArray<string>) =>
   Effect.gen(function* () {
     const index = resolve(cwd, yield* git(cwd, 'rev-parse', '--git-path', 'index'))
-    return yield* Effect.try({
-      try: () => {
-        const copy = join(mkdtempSync(join(tmpdir(), 'althar-index-')), 'index')
-        if (existsSync(index)) copyFileSync(index, copy)
+    // Copied off the runtime's thread: an index can be megabytes, and the disk busy.
+    return yield* Effect.tryPromise({
+      try: async () => {
+        const copy = join(await mkdtemp(join(tmpdir(), 'althar-index-')), 'index')
+        await copyFile(index, copy).catch((error: { readonly code?: string }) => {
+          // No index yet, as in a repository nothing was ever staged in: git reads none.
+          if (error.code !== 'ENOENT') throw error
+        })
         return copy
       },
       catch: (error) => new GitFailed({ args: [...args], cwd, stderr: String(error) }),
@@ -499,7 +504,7 @@ export const commitOf = (cwd: string, ref: string) => git(cwd, 'rev-parse', '--v
 export const commitsOf = (cwd: string, revisions: ReadonlyArray<string>): Effect.Effect<ReadonlyArray<string | null>> => {
   const named = revisions.filter((revision) => /^[^\s^:]+$/.test(revision))
   if (named.length === 0) return Effect.succeed(revisions.map(() => null))
-  return run(
+  const ask = run(
     60_000,
     cwd,
     ['cat-file', '--batch-check=%(objectname)'],
@@ -518,7 +523,46 @@ export const commitsOf = (cwd: string, revisions: ReadonlyArray<string>): Effect
     }),
     Effect.orElseSucceed(() => revisions.map(() => null)),
   )
+  return keptByStamp(`${cwd}\0${revisions.join('\0')}`, () => refStamp(cwd, named), ask)
 }
+
+/** Answers `commitsOf` gave, by what they stood on (refStamps.ts), the newest 2,000: most reads find their refs unmoved. */
+const commitsKept = new Map<string, { readonly stamp: string; readonly value: ReadonlyArray<string | null> }>()
+/** Those being answered now, by their stamp: the board and the home asking for the same at once start git once. */
+const commitsGoing = new Map<string, Deferred.Deferred<ReadonlyArray<string | null>>>()
+
+const keptByStamp = (
+  key: string,
+  stampOf: () => Promise<string | undefined>,
+  ask: Effect.Effect<ReadonlyArray<string | null>>,
+): Effect.Effect<ReadonlyArray<string | null>> =>
+  Effect.gen(function* () {
+    const stamp = yield* Effect.promise(stampOf)
+    if (stamp === undefined) return yield* ask
+    const was = commitsKept.get(key)
+    if (was !== undefined && was.stamp === stamp) return was.value
+    const asking = `${key}\n${stamp}`
+    const under = commitsGoing.get(asking)
+    // Asked again while it is being answered: that answer, or, where it never came, its own.
+    if (under !== undefined) return yield* Deferred.await(under).pipe(Effect.catchCause(() => ask))
+    const answer = Deferred.makeUnsafe<ReadonlyArray<string | null>>()
+    commitsGoing.set(asking, answer)
+    return yield* ask.pipe(
+      Effect.tap((value) =>
+        Effect.sync(() => {
+          commitsKept.delete(key)
+          commitsKept.set(key, { stamp, value })
+          if (commitsKept.size > 2_000) commitsKept.delete(commitsKept.keys().next().value ?? '')
+        }),
+      ),
+      Effect.onExit((exit) =>
+        Effect.andThen(
+          Effect.sync(() => commitsGoing.delete(asking)),
+          Deferred.done(answer, exit),
+        ),
+      ),
+    )
+  })
 
 /**
  * A worktree's index file as the file system has it now: where it is, its
