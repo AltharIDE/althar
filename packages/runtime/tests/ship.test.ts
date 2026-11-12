@@ -49,9 +49,9 @@ const squashMerge = (bare: string, branch: string) => {
 }
 
 /** A repository on the fake GitHub, its lead committing as the person does. */
-const onGitHub = () => {
+const onGitHub = (more: Omit<Parameters<typeof makeFakeService>[0] & object, 'pushUrl'> = {}) => {
   const { working, bare } = hosted()
-  const github = makeFakeService({ pushUrl: () => bare })
+  const github = makeFakeService({ pushUrl: () => bare, ...more })
   github.addRepository(['meridian', 'api'])
   git(working, 'config', 'user.name', 'Fake')
   git(working, 'config', 'user.email', 'fake@althar.test')
@@ -760,7 +760,15 @@ describe('a merge of main into the task’s branch after its pull request opened
   })
 
   it.live('sent back by the merge queue for its checks, its lead brings main in with update_branch: no new steps, no round', () => {
-    const { working, bare, github } = onGitHub()
+    // As #773 was: the queue's build failed a job main passes, so the send-back is the pull request's own and wakes its lead.
+    const { working, bare, github } = onGitHub({
+      checksOn: (sha) =>
+        sha === 'group-sha'
+          ? [{ name: 'test', state: 'failed', log: 'FAIL retry.test.ts' }]
+          : sha.startsWith('main')
+            ? [{ name: 'test', state: 'passed' }]
+            : undefined,
+    })
     return Effect.gen(function* () {
       const changes = yield* Changes
       github.mergeQueue()
@@ -771,6 +779,7 @@ describe('a merge of main into the task’s branch after its pull request opened
       yield* changes.refresh(task.taskId)
       // As #773 was: behind main, and out of the queue for its checks, not for a conflict.
       github.fallBehind(1)
+      github.queueCommit(1, 'group-sha')
       github.dequeue(1, 'checks')
       yield* changes.refresh(task.taskId)
       yield* until(
