@@ -53,6 +53,7 @@ import {
   factsOf,
   labelWords,
   nextWords,
+  ranChecks,
   readyWordOf,
   afterMergeText,
   shipText,
@@ -356,20 +357,21 @@ const theirs = (reviewing: ReviewBrief) => (
 
 /** How a running change's checks stand, in one fact: all passed, some failed, or how many so far. None where it has none to say. */
 const checksFact = (checks: ChangeSummary['checks']): ReactNode => {
-  if (checks === null || checks.total === 0) return null
+  const ran = checks === null ? null : ranChecks(checks)
+  if (checks === null || ran === null || ran.total === 0) return null
   if (checks.failed > 0)
     return (
       <Fact icon="close" tone="danger">
         {text.checks.failed(checks.failed)}
       </Fact>
     )
-  if (checks.passed === checks.total)
+  if (ran.passed === ran.total)
     return (
       <Fact icon="check" tone="ok">
-        {text.checks.passed(checks.passed)}
+        {text.checks.passed(ran.passed)}
       </Fact>
     )
-  return <Fact>{text.checks.soFar(checks.passed, checks.total)}</Fact>
+  return <Fact>{text.checks.soFar(ran.passed, ran.total)}</Fact>
 }
 
 /** A branch with nothing changed (+0 −0) says nothing, so no card shows its chip; one whose size isn't known still does. */
