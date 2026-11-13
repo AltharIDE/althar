@@ -40,3 +40,14 @@ export const NoVersionSaid: Story = {
     await expect(within(canvasElement).getByRole('alert')).toHaveTextContent('didn’t say which API version')
   },
 }
+
+/** Opening the window again meets the same runtime, so where the app can quit, Quit Althar comes first: the next open starts both from one version. */
+export const CanQuit: Story = {
+  args: { onQuit: fn() },
+  play: async ({ args, canvasElement }) => {
+    const page = within(canvasElement)
+    await userEvent.click(page.getByRole('button', { name: 'Quit Althar' }))
+    await expect(args.onQuit).toHaveBeenCalledOnce()
+    await expect(page.getByRole('button', { name: 'Try again' })).toBeInTheDocument()
+  },
+}

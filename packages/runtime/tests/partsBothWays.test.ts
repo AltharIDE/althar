@@ -9,11 +9,13 @@ import { SqlClient } from 'effect/sql'
 import { Connections } from '../src/Connections'
 import { Coordinator } from '../src/Coordinator'
 import { Instance } from '../src/Instance'
+import { Models } from '../src/Models'
 import { Projects } from '../src/Projects'
 import { Queries } from '../src/Queries'
 import { partsOfTask, savePreset } from '../src/presets'
 import { offerable } from '../src/reviewOffer'
 import { PlanParameters, Runs } from '../src/Runs'
+import { Sessions } from '../src/Sessions'
 import * as Runtime from '../src/Runtime'
 import type { ToolAccess } from '../src/ToolServer'
 import { callTool, fakeConnectors, HOST, hosted, items, notices, runtime, until } from './support'
@@ -25,9 +27,9 @@ import { callTool, fakeConnectors, HOST, hosted, items, notices, runtime, until 
  * closed, its branch staying; the ending, the reviewer and the lead change on the lead's own task, with nothing refused.
  */
 
-const runtimeWith = (github: FakeService) =>
+const runtimeWith = (github: FakeService, fake: Parameters<typeof runtime>[1] = {}) =>
   Queries.layer.pipe(
-    Layer.provideMerge(runtime(':memory:', {}, { connectors: fakeConnectors({ github }), listenEvery: Duration.hours(1) })),
+    Layer.provideMerge(runtime(':memory:', fake, { connectors: fakeConnectors({ github }), listenEvery: Duration.hours(1) })),
   )
 
 const git = (cwd: string, ...args: Array<string>) => execFileSync('git', args, { cwd }).toString().trim()
@@ -98,6 +100,140 @@ const finished = (working: string, prototype: boolean, reviewing = false) =>
   })
 
 describe('a task’s parts, both ways, on its lead’s word', () => {
+  it.live('preserves a composer-selected lead when make_it_a_change configures its review and ending', () => {
+    const { working, github } = onGitHub()
+    return Effect.gen(function* () {
+      const task = yield* finished(working, true)
+      yield* (yield* Sessions).switchAgent({ threadId: task.threadId, agentId: 'codex', model: 'large', effort: 'low' })
+      const said = yield* callTool(task.lead, 'make_it_a_change', {
+        title: 'Add a retry',
+        output: 'draft',
+        review: { agent: 'claude-code', model: 'large', effort: 'high' },
+      })
+      assert.notInclude(said, 'Error', said)
+      const shown = yield* (yield* Queries).thread(task.threadId)
+      assert.strictEqual(shown.session?.agentId, 'codex')
+      assert.isNull(shown.session?.nextLead)
+      assert.deepInclude(
+        (yield* planOf(task.taskId)).steps.find((step) => step.key === 'review'),
+        {
+          agentId: 'claude-code',
+          model: 'large',
+          effort: 'high',
+          skipped: false,
+        },
+      )
+    }).pipe(Effect.provide(runtimeWith(github)))
+  })
+
+  for (const tool of ['change_part', 'change_lead'] as const) {
+    it.live(`changes only the reviewer through ${tool} after the composer switched its lead`, () => {
+      const { working, github } = onGitHub()
+      return Effect.gen(function* () {
+        const task = yield* finished(working, true)
+        const sessions = yield* Sessions
+        yield* sessions.switchAgent({ threadId: task.threadId, agentId: 'codex', model: 'large', effort: 'low' })
+        const access: ToolAccess = {
+          role: 'coordinator',
+          projectId: task.projectId,
+          threadId: yield* (yield* Coordinator).thread(task.projectId),
+          sessionId: 'none',
+          taskId: null,
+        }
+        const review = { agent: 'claude-code', model: 'large', effort: 'high' }
+        const said = yield* callTool(access, tool, {
+          task: 'add-a-retry',
+          ...(tool === 'change_part' ? { part: 'checked_by' } : {}),
+          review,
+        })
+        assert.notInclude(said, 'Error', said)
+        const shown = yield* (yield* Queries).thread(task.threadId)
+        assert.strictEqual(shown.session?.agentId, 'codex')
+        assert.isNotNull(shown.session)
+        assert.isNull(shown.session?.nextLead)
+        assert.deepInclude(
+          (yield* planOf(task.taskId)).steps.find((step) => step.key === 'review'),
+          {
+            agentId: 'claude-code',
+            model: 'large',
+            effort: 'high',
+            skipped: false,
+          },
+        )
+      }).pipe(Effect.provide(runtimeWith(github)))
+    })
+  }
+
+  it.live('sets the requested reviewer and effort while becoming a Change, with one configuration line before review runs', () => {
+    const { working, github } = onGitHub()
+    return Effect.gen(function* () {
+      const task = yield* finished(working, true)
+      const models = yield* Models
+      yield* until(models.catalog, (catalog) =>
+        catalog.some(
+          (agent) =>
+            agent.agentId === 'codex' &&
+            agent.models.some((model) => model.id === 'gpt-6-1-sol' && model.efforts.some((effort) => effort.id === 'medium')),
+        ),
+      )
+      const before = (yield* notices(task.threadId)).length
+      const said = yield* callTool(task.lead, 'change_part', {
+        part: 'preset',
+        preset: 'Change',
+        review: { agent: 'codex', model: 'gpt-6-1-sol', effort: 'medium' },
+        why: 'the person asked for Sol at medium',
+      })
+      const plan = yield* planOf(task.taskId)
+      assert.deepInclude(
+        plan.steps.find((step) => step.key === 'review'),
+        {
+          agentId: 'codex',
+          model: 'gpt-6-1-sol',
+          effort: 'medium',
+          skipped: false,
+        },
+      )
+      assert.match(said, /reviewer set to GPT-6.1 Sol \(effort medium\)/)
+      assert.notInclude(said, 'reviewed by')
+      const changed = (yield* notices(task.threadId))
+        .slice(before)
+        .filter((one) => String(one['title']).startsWith('Its lead made it a Change:'))
+      assert.lengthOf(changed, 1)
+      assert.include(String(changed[0]?.['title']), 'reviewer set to GPT-6.1 Sol (effort medium)')
+      assert.isUndefined(yield* reviewOf(task.taskId))
+      assert.lengthOf(github.changes, 0)
+    }).pipe(
+      Effect.provide(
+        runtimeWith(github, {
+          models: [
+            { id: 'small', name: 'Small' },
+            { id: 'large', name: 'Large' },
+            { id: 'gpt-6-1-sol', name: 'GPT-6.1 Sol' },
+          ],
+        }),
+      ),
+    )
+  })
+
+  it.live('rejects an invalid preset reviewer before changing the task’s ending or parts', () => {
+    const { working, github } = onGitHub()
+    return Effect.gen(function* () {
+      const task = yield* finished(working, true)
+      const before = yield* planOf(task.taskId)
+      const noticesBefore = (yield* notices(task.threadId)).length
+      const refused = yield* callTool(task.lead, 'change_part', {
+        part: 'preset',
+        preset: 'Change',
+        review: { model: 'No such reviewer' },
+        why: 'the person asked',
+      })
+      assert.include(refused, 'No model called')
+      assert.deepStrictEqual(yield* planOf(task.taskId), before)
+      assert.lengthOf(yield* notices(task.threadId), noticesBefore)
+      assert.lengthOf(github.changes, 0)
+    }).pipe(Effect.provide(runtimeWith(github)))
+  })
+
   it.live('makes a prototype a change in one move, and Ship then runs the review and opens its pull request', () => {
     const { working, bare, github } = onGitHub()
     return Effect.gen(function* () {
@@ -107,10 +243,16 @@ describe('a task’s parts, both ways, on its lead’s word', () => {
       assert.include(git(bare, 'branch', '--list'), 'althar/add-a-retry')
       assert.isTrue((yield* cards(task.projectId))[0]?.reviewerChange === 'now')
 
+      yield* callTool(task.lead, 'rename_task', { task_id: task.taskId, title: 'Prototype retry behavior' })
       // "Make it a real change": one call, on the lead's own task, with nothing asked of the person.
       const said = yield* callTool(task.lead, 'change_part', { part: 'preset', preset: 'Change', why: 'the person asked' })
-      assert.match(said, /^add-a-retry: made it a Change: reviewed by .+, ending in a draft pull request\./)
+      assert.match(said, /^add-a-retry: made it a Change: reviewer set to .+, ending in a draft pull request\./)
       assert.match(said, /Ship runs its review, then opens its pull request/)
+      assert.include(said, "Review add-a-retry's current title, “Prototype retry behavior”")
+      assert.include(said, 'call rename_task')
+      // The agent chooses the words; reshaping alone never rewrites a title that might still fit.
+      assert.strictEqual((yield* cards(task.projectId))[0]?.title, 'Prototype retry behavior')
+      yield* callTool(task.lead, 'rename_task', { task_id: task.taskId, title: 'Add configurable retries' })
       const plan = yield* planOf(task.taskId)
       assert.deepStrictEqual(
         plan.steps.map((step) => [step.key, step.skipped]),
@@ -121,7 +263,7 @@ describe('a task’s parts, both ways, on its lead’s word', () => {
       )
       assert.strictEqual(plan.end, 'draft')
       assert.isTrue(
-        (yield* notices(task.threadId)).some((one) => String(one['title']).startsWith('Its lead made it a Change: reviewed by ')),
+        (yield* notices(task.threadId)).some((one) => String(one['title']).startsWith('Its lead made it a Change: reviewer set to ')),
       )
       // Nothing is up as a pull request, so no review runs before Ship.
       assert.lengthOf(github.changes, 0)
@@ -133,6 +275,7 @@ describe('a task’s parts, both ways, on its lead’s word', () => {
         (all) => all.length === 1,
       )
       assert.deepStrictEqual([opened?.source, opened?.draft], ['althar/add-a-retry', true])
+      assert.strictEqual(opened?.title, 'Add configurable retries')
       // Its review ran first, over everything since the task started.
       const reviewed = (yield* items(task.threadId)).find((item) => item.kind === 'step_result' && item.content.step === 'review')
       assert.strictEqual(reviewed?.kind === 'step_result' ? reviewed.content.verdict : undefined, 'pass')
@@ -162,7 +305,7 @@ describe('a task’s parts, both ways, on its lead’s word', () => {
       assert.isFalse(github.changes[0]?.draft)
       assert.match(
         yield* callTool(task.lead, 'change_part', { part: 'checked_by', review: { agent: 'claude-code' }, why: 'the person asked' }),
-        /reviewed by .+, reading what ships next/,
+        /reviewer set to .+, reading what ships next/,
       )
       const said = yield* callTool(task.lead, 'change_part', { part: 'preset', preset: 'Prototype', why: 'the person asked' })
       assert.match(said, /made it a Prototype: no review, ending with its branch, PR #1 closed, its branch staying/)
@@ -185,7 +328,7 @@ describe('a task’s parts, both ways, on its lead’s word', () => {
       const task = yield* finished(working, true)
       assert.match(
         yield* callTool(task.lead, 'add_part', { part: 'checked_by', why: 'the person asked for a review' }),
-        /changed its parts: reviewed by /,
+        /changed its parts: reviewer set to /,
       )
       assert.match(yield* callTool(task.lead, 'remove_part', { part: 'checked_by', why: 'the person said no review' }), /no review/)
       assert.isTrue((yield* planOf(task.taskId)).steps.every((step) => step.key !== 'review' || step.skipped))
@@ -196,7 +339,7 @@ describe('a task’s parts, both ways, on its lead’s word', () => {
       // And back to a change, from a chat.
       assert.match(
         yield* callTool(task.lead, 'change_part', { part: 'preset', preset: 'Change', why: 'the person asked' }),
-        /made it a Change: reviewed by .+, ending in a draft pull request, on the board/,
+        /made it a Change: reviewer set to .+, ending in a draft pull request, on the board/,
       )
     }).pipe(Effect.provide(runtimeWith(github)))
   })

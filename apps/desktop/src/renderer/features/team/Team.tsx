@@ -220,8 +220,11 @@ export function ChangeTeam({
     setBusy(true)
     setError(null)
     try {
-      if (begun) await client.changeTeam(now.taskId, steps)
-      else {
+      if (begun) {
+        // A live session may have moved since this dialog opened. Only the steps the person touched are a new choice.
+        const changed = steps.filter((step) => edits[step.key] !== undefined)
+        if (changed.length > 0) await client.changeTeam(now.taskId, changed)
+      } else {
         await client.changePlan(plan.id, steps, ending)
         if (andStart) await client.startPlan(plan.id)
       }
@@ -284,7 +287,8 @@ export function ChangeTeam({
       {...(!gone && how === 'starts' ? { onStart: () => void save(true) } : {})}
       onClose={onClose}
       busy={busy}
-      error={how === null ? (begun ? text.settled : text.begun) : error}
+      // Why it can't change any more is a fact, said quietly; what failed as it saved is a problem.
+      {...(how === null ? { settled: begun ? text.settled : text.begun } : { error })}
     />
   )
 }

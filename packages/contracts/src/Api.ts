@@ -3096,6 +3096,8 @@ export const SmallChangeItem = Schema.Struct({
     }),
     /** What the path leaves out, in a short line each: "no plan", "reviewed after it merges". */
     skips: Schema.Array(Schema.String),
+    /** Explicit after-merge timing; false for new size-only Small changes. Absent on older cards. */
+    reviewAfterMerge: Schema.optional(Schema.Boolean),
     steps: Schema.Array(SmallChangeStep),
     /** Its pull request as last seen, where it has one: Merge acts on it, and the card says when it is merged. */
     change: Schema.NullOr(ChangeSummary),
@@ -3879,6 +3881,8 @@ export const ThreadSnapshot = Schema.Struct({
     front: Schema.optional(Schema.Boolean),
     /** Its plan's steps, as its header's track shows them; empty without a plan. */
     steps: Schema.Array(PlanStep),
+    /** Its plan's ending: a first or new pull request goes through Ship and its review, even before a hold was recorded. */
+    end: Schema.optional(Schema.NullOr(TaskEnd)),
     /** Its rounds of work as its graph had them, oldest first: what its Graph face draws. Absent from a runtime before it. */
     graph: Schema.optional(Schema.Array(GraphRound)),
     /** Who leads it, running or not: the last agent on its thread, on its model and account, else the one its plan names. */
@@ -4141,6 +4145,38 @@ export const PAGE = 100
  * how full the context of the agent on a thread is, as it last said. Neither
  * is in the feed, so they have no cursor.
  */
+/** Who does a step of a plan being drafted, once the coordinator has written it and Althar knows the model. */
+export const DraftStep = Schema.Struct({
+  agentId: Schema.String,
+  model: Schema.NullOr(Schema.String),
+  effort: Schema.NullOr(Schema.String),
+})
+export type DraftStep = typeof DraftStep.Type
+
+/**
+ * A task the coordinator is drafting now, as far as it has written it, so its
+ * card shows from the moment the draft begins: its title, whether its
+ * description is written, the task it became once drafted, and its plan as
+ * that is written. It lasts the coordinator's turn; once planned, its card is
+ * in the thread.
+ */
+export const Draft = Schema.Struct({
+  key: Schema.String,
+  title: Schema.NullOr(Schema.String),
+  brief: Schema.Boolean,
+  taskId: Schema.NullOr(Schema.String),
+  slug: Schema.NullOr(Schema.String),
+  planning: Schema.Boolean,
+  lead: Schema.NullOr(DraftStep),
+  review: Schema.NullOr(DraftStep),
+  noReview: Schema.Boolean,
+  preset: Schema.NullOr(Schema.String),
+  planned: Schema.Boolean,
+  /** The person held it while it was drafted: its plan comes held. */
+  held: Schema.Boolean,
+})
+export type Draft = typeof Draft.Type
+
 export const WatchEvent = Schema.Union([
   Schema.Struct({
     _tag: Schema.Literal('Changed'),
@@ -4168,6 +4204,8 @@ export const WatchEvent = Schema.Union([
   Schema.Struct({ _tag: Schema.Literal('Launches'), projectId: Schema.String, launches: Schema.Array(Launch) }),
   /** Every account's plan usage, whole each time it changes. */
   Schema.Struct({ _tag: Schema.Literal('PlanUsage'), usage: PlanUsage }),
+  /** The tasks a coordinator thread is drafting now, as far as written, whole each time they change. */
+  Schema.Struct({ _tag: Schema.Literal('Drafting'), threadId: Schema.String, drafts: Schema.Array(Draft) }),
   /** A command's output as far as it has come, while it runs: its last lines, whole each time, and how many came before them. */
   Schema.Struct({
     _tag: Schema.Literal('Output'),
@@ -4306,6 +4344,25 @@ export const FOUND_MOST = 50
 /** What a search found, best first. */
 export const FoundTasks = Schema.Struct({ tasks: Schema.Array(FoundTask) })
 export type FoundTasks = typeof FoundTasks.Type
+
+/** Local search documents, read in pages independently of what is typed. */
+export const SearchDocument = Schema.Struct({
+  id: Schema.String,
+  kind: Schema.Literals(['task', 'pull', 'issue', 'conversation', 'said', 'note']),
+  projectId: Schema.String,
+  threadId: Schema.NullOr(Schema.String),
+  taskId: Schema.NullOr(Schema.String),
+  itemId: Schema.NullOr(Schema.String),
+  title: Schema.String,
+  body: Schema.String,
+  ref: Schema.String,
+  url: Schema.NullOr(Schema.String),
+  changedAt: Schema.String,
+  state: Schema.String,
+})
+export type SearchDocument = typeof SearchDocument.Type
+export const SearchDocuments = Schema.Struct({ documents: Schema.Array(SearchDocument), next: Schema.NullOr(Schema.String) })
+export type SearchDocuments = typeof SearchDocuments.Type
 
 /** A part of the whole, 0 to 1. */
 const Part = Schema.Number.check(Schema.isBetween({ minimum: 0, maximum: 1 }))
@@ -4499,6 +4556,8 @@ const socketCalls = new Set<string>([
   'GetSettings',
   'GetLoad',
   'SearchTasks',
+  'GetSearchDocuments',
+  'GetSearchFiles',
   'Watch',
   'Send',
   'TakeBack',
@@ -4638,6 +4697,8 @@ export const Api = RpcGroup.make(
     },
     FoundTasks,
   ),
+  call('GetSearchDocuments', { after: Schema.optional(Schema.String) }, SearchDocuments),
+  call('GetSearchFiles', { threadId: Schema.String }, Schema.Struct({ files: Schema.Array(Schema.String) })),
   command(
     'CreateTask',
     {
@@ -4780,6 +4841,8 @@ export const Api = RpcGroup.make(
   command('StartPlan', { planId: Schema.String }, Schema.Void),
   /** Holds a planned task: it waits until you start it. */
   command('HoldPlan', { planId: Schema.String }, Schema.Void),
+  /** Holds a task the coordinator is drafting, by its draft's key: its plan comes held, even one that would start at once. */
+  command('HoldDraft', { threadId: Schema.String, key: Schema.String }, Schema.Void),
   /** Changes who does a planned task's steps, or skips one, before it starts. */
   command(
     'ChangePlan',
@@ -4798,6 +4861,7 @@ export const Api = RpcGroup.make(
    * Changes who leads and who reviews a task at any time before it merges. Its lead changes from its next turn, never in the one it
    * is in; its reviewer until its review round starts, and from the next round during one, not once a review of it ran to its
    * end. A review skipped or never planned can be added until the task merges; where its work is up already, it starts a round.
+   * Only supplied steps change; omit untouched steps, and explicitly skip the review step to remove its reviewer.
    */
   command('ChangeTeam', { taskId: Schema.String, steps: Schema.Array(PlanStep) }, Schema.Void),
   /** Changes what an issue the coordinator drafted says, before it is filed. */
@@ -5650,6 +5714,8 @@ export const Api = RpcGroup.make(
   command('StopLaunch', { id: Schema.String }, Schema.Void),
   /** Clears a run that ended by itself from the list. */
   command('ClearLaunch', { id: Schema.String }, Schema.Void),
+  /** What a run of the project has printed so far, the end of it; readable a while after it leaves the list, while Althar runs. */
+  call('ReadLaunchOutput', { id: Schema.String }, OutputText),
   /** The skills a task's lead is given: what the person added from GitHub and turned on. */
   call('ListSkills', {}, SkillList),
   /** The skill folders in a GitHub repository (a URL or `owner/name`), at the ref given or its default branch. */

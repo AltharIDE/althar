@@ -39,6 +39,9 @@ const says = (piece: EvidencePiece) =>
   (piece.form === 'output' && (piece.command !== undefined || piece.lines.some((line) => line.trim() !== ''))) ||
   (piece.form === 'note' && (piece.text ?? '').trim() !== '')
 
+/** A run that ended in a failure. */
+const failing = (piece: EvidencePiece) => piece.form === 'output' && piece.exit !== undefined && piece.exit !== 0
+
 /**
  * What a lead checked, other than by looking, under its result: a quiet line
  * each, ticked or crossed, opening to what it printed; then what it couldn't
@@ -47,7 +50,8 @@ const says = (piece: EvidencePiece) =>
  */
 export function Checked({ pieces, unverified = [], text, className, ...rest }: CheckedProps) {
   const t = { ...checkedText, ...text }
-  const checks = pieces.filter((piece) => piece.form !== 'picture' && says(piece))
+  // what failed first: a problem is what the person reads before what is fine
+  const checks = pieces.filter((piece) => piece.form !== 'picture' && says(piece)).sort((a, b) => Number(failing(b)) - Number(failing(a)))
   const unchecked = unverified.filter((line) => line.trim() !== '')
   if (checks.length === 0 && unchecked.length === 0) return null
   return (
@@ -56,7 +60,7 @@ export function Checked({ pieces, unverified = [], text, className, ...rest }: C
         <div className={s.part}>
           <p className={s.head}>{t.checked}</p>
           {checks.map((piece) => {
-            const failed = piece.form === 'output' && piece.exit !== undefined && piece.exit !== 0
+            const failed = failing(piece)
             const printed =
               piece.form === 'output' ? [...(piece.command === undefined ? [] : [`$ ${piece.command}`]), ...piece.lines.slice(-SHOWN)] : []
             const said = piece.form === 'note' ? (piece.text ?? '') : ''

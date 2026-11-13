@@ -571,13 +571,34 @@ describe('the coordinator’s merge line', () => {
       // The merge went at the head the person saw, untested with the write beside it: main going red is heard.
       assert.deepStrictEqual(service.merged.at(-1)?.head, `head-${number}`)
       assert.deepStrictEqual(service.updated, [])
-      assert.isTrue((yield* lines(access)).some((title) => title.includes(`main is red at ${landed}: post-merge failed after #1 merged`)))
+      assert.isTrue((yield* lines(access)).some((title) => title.includes(`main is red at ${landed}: post-merge failed`)))
       assert.include((yield* news(access)).at(-1), 'Main is red')
       // Heard once for a head.
       yield* sweep(access)
       assert.strictEqual((yield* news(access)).filter((body) => body.includes('Main is red')).length, 1)
     }).pipe(Effect.provide(layer(service)))
   })
+
+  for (const state of ['failed', 'cancelled'] as const) {
+    it.live(`reports main's ${state} checks without attributing their cause to its latest merge`, () => {
+      const { service, checks, pull } = host()
+      const { working } = hosted(['meridian', 'api'])
+      return Effect.gen(function* () {
+        const access = yield* opened(working)
+        checks.set(service.branchHeadOf('main'), state)
+        const number = pull('Retry refunds')
+        const message = yield* turn(access, 'person')
+        yield* merge(access, { pull_request: `#${number}`, head: `head-${number}`, message })
+        checks.set(service.branchHeadOf('main'), state)
+        yield* sweep(access)
+        yield* sweep(access)
+        const alerts = (yield* news(access)).filter((body) => body.includes('Main is red'))
+        assert.lengthOf(alerts, state === 'failed' ? 1 : 0)
+        assert.isFalse(alerts.some((body) => body.includes('landed untested together') || body.includes('after #1 merged')))
+        if (state === 'failed') assert.include(alerts[0], 'investigate the cause')
+      }).pipe(Effect.provide(layer(service)))
+    })
+  }
 
   it.live(
     'someone else writing to the branch while it holds the slot: brought up to date three times at most, then it waits for the person',

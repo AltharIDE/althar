@@ -279,7 +279,7 @@ describe('a task’s review of a related pull request, at its edges', () => {
       const own = yield* ownTask(projectId, 'Retry checkout')
       assert.strictEqual(
         yield* refusal((yield* Reviews).reviewIn({ taskId: own.taskId, pullRequest: '#1', actorId: (yield* Instance).personId })),
-        'Althar reviews GitHub pull requests only, for now; this pull request is elsewhere.',
+        'This host does not support reviews through its adapter.',
       )
     }).pipe(Effect.provide(withQueries(github)))
   })

@@ -39,6 +39,7 @@ import {
   TitleBar,
   SettleWays,
   TaskParts,
+  Problem,
 } from '@althar/ui'
 
 import { isAnswered, isSettleable, kindWords, takesDone } from '../../shared/calls'
@@ -119,7 +120,9 @@ import {
 import { REQUEST, taskGraphOf } from './graph'
 import { GraphFace } from './GraphFace'
 import { reveal } from './reveal'
+import { useSearchReveal } from '../finder/revealSearch'
 import { turnsById } from '../../shared/turnTime'
+import { ReadFailed } from '../../shared/ReadFailed'
 
 /*
  * A task, with its faces under its header, as in the prototype: the
@@ -616,6 +619,7 @@ export function TaskView({
     },
     [setFace],
   )
+  useSearchReveal(model.snapshot?.threadId, showInThread)
   // The tasks its lead started, as the board has them: a chip where each was started, and a part of its own.
   const board = useStartedBoard(model.snapshot?.project.id)
   const started = startedBy(board, model.snapshot?.task.id)
@@ -645,7 +649,7 @@ export function TaskView({
           </div>
         ) : (
           <div className={s.loading}>
-            <p role="alert">{model.error}</p>
+            <ReadFailed error={model.error} />
           </div>
         )}
       </div>
@@ -1084,13 +1088,20 @@ export function TaskView({
             <>
               {aside?.notice}
               {model.error !== null && (
-                <div className={s.failure} role="alert">
-                  {model.error}{' '}
-                  {model.hostSignedOut && onConnections !== undefined && (
-                    <LinkButton onClick={onConnections}>{wayOutText.signIn}</LinkButton>
-                  )}{' '}
-                  <LinkButton onClick={model.dismissError}>{text.dismiss}</LinkButton>
-                </div>
+                <Problem
+                  as="div"
+                  className={s.failure}
+                  action={
+                    <>
+                      {model.hostSignedOut && onConnections !== undefined && (
+                        <LinkButton onClick={onConnections}>{wayOutText.signIn}</LinkButton>
+                      )}
+                      <LinkButton onClick={model.dismissError}>{text.dismiss}</LinkButton>
+                    </>
+                  }
+                >
+                  {model.error}
+                </Problem>
               )}
               {conflict !== null && (
                 <div>
@@ -1341,6 +1352,7 @@ export function TaskView({
                   refused={model.refused}
                   onReplace={(head, replaces, url) => void model.replace(head, replaces, url)}
                   // Bringing a pull request's commits in is the lead's: Althar fetches them, and the note says how to merge them.
+                  // oxlint-disable-next-line althar/press-at-once -- What the note says is what the fetch found; the card is busy from the press.
                   onBringIn={(url) =>
                     void model.mergeNote(url).then((note) => {
                       if (note !== null) void send(note, false)
@@ -1456,7 +1468,7 @@ export function TaskView({
                       run={(run) => (
                         <RunOf
                           run={run}
-                          now={now}
+                          threadTask={snapshot.task.id}
                           onStop={(id) => void model.stopLaunch(id)}
                           onRunAgain={(_taskId, runnableId) => void model.runProject(runnableId)}
                         />
@@ -1604,6 +1616,7 @@ export function TaskView({
                   })}
               busy={model.pending}
               {...(model.error === null ? {} : { error: model.error })}
+              // oxlint-disable-next-line althar/press-at-once -- A dialog the host answers (closing pull requests): it stays open, busy, so a refusal lands in it.
               onAbandon={(choices) =>
                 void model
                   .abandon(
@@ -1640,6 +1653,7 @@ export function TaskView({
                   })}
               busy={model.pending}
               {...(model.error === null ? {} : { error: model.error })}
+              // oxlint-disable-next-line althar/press-at-once -- A dialog the host answers: it stays open, busy, so a refusal lands in it.
               onAttach={(pullRequest, start) =>
                 void model.attach(pullRequest, start).then((done) => {
                   if (done === null) return

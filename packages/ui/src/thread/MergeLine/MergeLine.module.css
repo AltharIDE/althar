@@ -93,31 +93,24 @@
 :is(.sentBack, .conflict) .reason {
   color: var(--danger);
 }
-/* a status in a fixed measure, so the rows' words keep their place as it changes */
+/* a status in a fixed measure, so the rows' words keep their place as it changes: a word in its colour, not a pill */
 .state {
   flex: none;
   min-width: 88px;
-  padding: 1px 8px;
-  border-radius: 99px;
-  background: var(--chip);
   font-size: 11.5px;
-  line-height: 16px;
-  text-align: center;
+  line-height: 18px;
+  text-align: right;
   white-space: nowrap;
-  color: var(--t-2);
-  transition:
-    background var(--enter) var(--ease-out),
-    color var(--enter) var(--ease-out);
+  color: var(--t-3);
+  transition: color var(--enter) var(--ease-out);
 }
 :is(.checks, .merging) .state {
-  background: var(--live-dim);
   color: var(--live);
 }
 .merged .state {
   color: var(--ok-ink);
 }
 :is(.sentBack, .conflict) .state {
-  background: var(--danger-dim);
   color: var(--danger);
 }
 /* all merged: one quiet line */

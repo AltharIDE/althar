@@ -77,6 +77,11 @@ export interface RuntimeOptions {
    * Without it, the system's temporary folder (`Models.ts`).
    */
   readonly probeRoot?: string
+  /**
+   * How long after an agent couldn't say its models (it wasn't signed in yet, or didn't start in time) the next read of
+   * them asks it again: a minute unless a test says otherwise (`Models.ts`). An agent found signed in is asked again at once.
+   */
+  readonly modelsAgain?: Duration.Duration
   /** Opens a line in a terminal for the person to run, such as an agent's own sign-in; whether it could. Without it, the person runs it. */
   readonly openTerminal?: (line: string) => Effect.Effect<boolean>
   /**

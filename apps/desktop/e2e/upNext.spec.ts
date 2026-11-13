@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { expect, test } from '@playwright/test'
 
 import { repository } from '../tests/repository'
-import { launch, openFirstProject, planTask, shown, startTask, still } from './support'
+import { launch, openFirstProject, planTask, showPanes, shown, startTask, still } from './support'
 
 /*
  * Tasks started while every place is taken wait in the board's Up next, in the
@@ -62,7 +62,7 @@ test('lists the tasks that wait for a free agent in Up next, in the order they s
     await expect(page.getByRole('region', { name: 'Conversation' }).getByText('Held', { exact: true })).toBeVisible()
     await planTask(page, 'Plan the release')
 
-    await page.getByRole('radio', { name: /^Board/ }).click()
+    await showPanes(page, { conversation: false, board: true })
     const work = page.getByRole('region', { name: 'The project’s work' })
     const next = work.getByRole('region', { name: 'Up next' })
     const running = work.getByRole('region', { name: 'Running' })
@@ -121,8 +121,8 @@ test('lists the tasks that wait for a free agent in Up next, in the order they s
     await still(page)
     await next.screenshot({ path: 'test-results/upnext-reordered.png', scale: 'css', animations: 'disabled' })
     // It is the runtime's order, not the drop's: the board, drawn again from it, says the same.
-    await page.getByRole('radio', { name: /^Conversation/ }).click()
-    await page.getByRole('radio', { name: /^Board/ }).click()
+    await showPanes(page, { conversation: true, board: false })
+    await showPanes(page, { conversation: false, board: true })
     await expect(rows.nth(0)).toContainText('Hold this plan')
     await expect(rows.nth(1)).toContainText('Tidy the docs')
     await expect(rows.nth(2)).toContainText('Rename the helper')
@@ -131,13 +131,13 @@ test('lists the tasks that wait for a free agent in Up next, in the order they s
 
     // The place frees: the plan put first starts by itself, and moves to Running, where it keeps the place; the rest wait on
     // in the order put.
-    await page.getByRole('radio', { name: /^Conversation/ }).click()
+    await showPanes(page, { conversation: true, board: false })
     await page
       .getByRole('button', { name: /^Keeping a place/ })
       .first()
       .click()
     await page.getByRole('dialog', { name: 'Keeping a place' }).getByRole('button', { name: /^Stop/ }).click()
-    await page.getByRole('radio', { name: /^Board/ }).click()
+    await showPanes(page, { conversation: false, board: true })
     await expect(running.getByRole('button', { name: 'Hold this plan' })).toBeVisible()
     await expect(rows.nth(0)).toContainText('Tidy the docs')
     await expect(rows.nth(2)).toContainText('Plan the release')

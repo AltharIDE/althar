@@ -8,7 +8,7 @@ import type { Classified } from './failures'
 import { type SeenSkill, skillLoadedBy, skillsAmong } from './skills'
 import { serverOfCall, serverStatusOf, type ServerStatus } from './serverStatus'
 import { claudeRateLimitWindows, record, type UsageWindow } from './usage'
-import { anyMcpCallOf, type McpCall, mcpCallOf } from './mcpCalls'
+import { altharToolOf, anyMcpCallOf, type McpCall, mcpCallOf } from './mcpCalls'
 import { parentOf, subAgentOf, type SubAgentCall, type WebCall, webCallOf } from './activity'
 
 /*
@@ -136,6 +136,8 @@ export type SessionEvent =
       readonly subAgent?: SubAgentCall
       /** The call of the sub-agent that makes it, by its id, where it is a sub-agent's (Claude Code). */
       readonly parent?: string
+      /** The tool of Althar's own server it calls, by its name there, where it is one: draft_task. */
+      readonly althar?: string
     }
   | {
       readonly _tag: 'ToolCallUpdate'
@@ -440,6 +442,7 @@ export const normalize = (update: acp.SessionUpdate): SessionEvent => {
         ),
         ...defined('subAgent', subAgentOf(update.title, update.rawInput, update._meta)),
         ...defined('parent', parentOf(update._meta)),
+        ...defined('althar', altharToolOf(update.title, update._meta)),
       }
     case 'tool_call_update':
       return {

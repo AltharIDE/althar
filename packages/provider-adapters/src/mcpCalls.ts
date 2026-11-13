@@ -41,6 +41,22 @@ const record = (value: unknown): Readonly<Record<string, unknown>> | undefined =
   typeof value === 'object' && value !== null && !Array.isArray(value) ? (value as Record<string, unknown>) : undefined
 
 /**
+ * The tool of Althar's own server a tool call is, by its name there
+ * (draft_task, propose_plan), from its title and what its `_meta` says;
+ * undefined for any other call. Althar follows some of its own tools as they
+ * are written (`drafts.ts` in the runtime).
+ */
+export const altharToolOf = (title: string, meta?: unknown): string | undefined => {
+  const claude = record(record(meta)?.['claudeCode'])
+  const toolName = typeof claude?.['toolName'] === 'string' ? claude['toolName'] : undefined
+  const named = fromName(toolName ?? title) ?? (toolName === undefined ? undefined : fromName(title))
+  if (named !== undefined) return ALTHAR.test(named.server) ? named.tool : undefined
+  // Codex names some calls by server and tool alone: althar.draft_task, or althar/draft_task.
+  return BARE.exec((toolName ?? title).trim())?.[1]
+}
+const BARE = /^althar[./:]([A-Za-z0-9_-]+)$/i
+
+/**
  * The MCP call a tool call is, from its title and what its `_meta` says;
  * undefined for anything else, and for Althar's own server.
  */

@@ -25,6 +25,7 @@ import { Sessions } from '../src/Sessions'
 import { piecesOf } from '../src/threads'
 import type { ToolAccess } from '../src/ToolServer'
 import { callTool, items, notices, repository, runtime, until } from './support'
+import { knownModels } from './knownModels'
 
 /*
  * Althar hands the coordinator to a fresh session before its context fills
@@ -36,6 +37,7 @@ import { callTool, items, notices, repository, runtime, until } from './support'
 const withQueries = (...args: Parameters<typeof runtime>) => Queries.layer.pipe(Layer.provideMerge(runtime(...args)))
 
 const opened = Effect.gen(function* () {
+  yield* knownModels
   const projects = yield* Projects
   const coordinator = yield* Coordinator
   const project = yield* projects.open({ envelope: yield* Runtime.envelope('project.open', {}), path: repository() })

@@ -4,6 +4,7 @@ import type { CoordinatorSnapshot, ThreadSnapshot } from '@althar/contracts'
 
 import { mergeItems, settled } from '../shared/items'
 import type { Client } from './client'
+import { readModelsAgain } from './models'
 
 /*
  * What the window reads from the runtime, each by a key, kept in one cache
@@ -215,10 +216,14 @@ export const reads = (client: Client) => ({
 
 export type Reads = ReturnType<typeof reads>
 
-/** Asks every agent again rather than trust the runtime's last answer, and keeps what they say. */
+/**
+ * Asks every agent again rather than trust the runtime's last answer, and keeps what they say; then their models, which
+ * one just found signed in or installed may only now say.
+ */
 export const recheckStatus = (client: Client, cache: QueryClient) =>
   client.status({ recheck: true }).then((status) => {
     cache.setQueryData(keys.status, status)
+    readModelsAgain(client)
     return status
   })
 

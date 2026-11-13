@@ -18,6 +18,7 @@ import { shelve } from '../src/scratch'
 import { Sessions } from '../src/Sessions'
 import { ToolServer, type ToolAccess } from '../src/ToolServer'
 import { callTool, fakeConnectors, HOST, hosted, items, runtime, until } from './support'
+import { knownModels } from './knownModels'
 
 /*
  * Chats on Scratch, the parts tools and presets (a task is a conversation
@@ -195,7 +196,7 @@ describe('presets', () => {
       const { projectId, coordinator } = yield* opened(working)
       const sql = yield* SqlClient.SqlClient
       // The coordinator lists them, and plans from the one that fits.
-      assert.include(yield* callTool(coordinator, 'list_presets', {}), '- Small change: a worktree, reviewed after it merges')
+      assert.include(yield* callTool(coordinator, 'list_presets', {}), '- Small change: a worktree, reviewed before it ships')
       yield* callTool(coordinator, 'draft_task', { title: 'Fix a typo' })
       const said = yield* callTool(coordinator, 'propose_plan', {
         task: 'fix-a-typo',
@@ -216,12 +217,13 @@ describe('presets', () => {
       const first = yield* plan()
       yield* (yield* Plans).hold(first.id, (yield* Instance).personId)
       // Small change has no ending of its own: it ends as the project says (a draft where the project says nothing).
-      assert.deepInclude(first.parameters, { end: 'draft', reviewAfterMerge: true })
+      assert.deepInclude(first.parameters, { end: 'draft', smallChange: true })
+      assert.isUndefined(first.parameters.reviewAfterMerge)
       assert.deepStrictEqual(
         first.parameters.steps.map((step: { key: string; skipped: boolean }) => [step.key, step.skipped]),
         [
           ['implement', false],
-          ['review', true],
+          ['review', false],
         ],
       )
       const [card] = yield* until(cards(projectId), (all) => all[0]?.plan?.preset === 'Small change')
@@ -270,6 +272,7 @@ describe('presets', () => {
         }))
       const planned = (title: string, slug: string, preset: string, small?: boolean) =>
         Effect.gen(function* () {
+          yield* knownModels
           yield* callTool(coordinator, 'draft_task', { title })
           yield* callTool(coordinator, 'propose_plan', {
             task: slug,
@@ -387,6 +390,9 @@ describe('what the coordinator and a lead are told of presets', () => {
       assert.include(brief, 'A prototype ends with its branch')
       assert.include(brief, 'the same task goes on as a change, rather than a new task by default: change_part with preset Change')
       assert.include(brief, 'never assume either way')
+      assert.include(brief, 'Whenever a task’s scope or shape changes, check whether its title still says what it does now')
+      assert.include(brief, 'call rename_task with its id or slug')
+      assert.include(brief, 'Keep a title that still fits')
 
       const tools = yield* toolDescriptions(coordinator)
       for (const words of PICKS) assert.include(tools.get('propose_plan'), words)
@@ -394,6 +400,8 @@ describe('what the coordinator and a lead are told of presets', () => {
       assert.include(tools.get('draft_task'), 'Prototype for a prototype or design directions')
       assert.include(tools.get('list_presets'), 'Prototype is for a prototype or design directions')
       assert.include(tools.get('list_presets'), 'Change for the rest')
+      assert.include(tools.get('change_part'), 'Whenever a task’s scope or shape changes')
+      assert.include(tools.get('rename_task'), 'An open pull request Althar opened for it takes the new title too')
     }).pipe(Effect.provide(runtimeWith(github)))
   })
 
@@ -419,6 +427,9 @@ describe('what the coordinator and a lead are told of presets', () => {
       for (const words of PICKS) assert.include(brief, words)
       assert.include(brief, 'A prototype ends with its branch')
       assert.include(brief, 'never assume either way')
+      assert.include(brief, 'Whenever a task’s scope or shape changes, check whether its title still says what it does now')
+      assert.include(brief, 'call rename_task with its id or slug')
+      assert.include(brief, 'Keep a title that still fits')
       const tools = yield* toolDescriptions({
         role: 'lead',
         projectId: projectId as never,
@@ -428,6 +439,8 @@ describe('what the coordinator and a lead are told of presets', () => {
       } as ToolAccess)
       assert.include(tools.get('draft_task'), 'list_presets')
       assert.include(tools.get('propose_plan'), 'Prototype for a prototype or design directions')
+      assert.include(tools.get('change_part'), 'Whenever a task’s scope or shape changes')
+      assert.include(tools.get('rename_task'), 'An open pull request Althar opened for it takes the new title too')
     }).pipe(Effect.provide(runtimeWith(github)))
   })
 })

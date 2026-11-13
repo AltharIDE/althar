@@ -231,7 +231,7 @@ that merges once what waited is up, unless the lead set a finding of its
 review aside, which a line says, leaving the merge to the person. Merge now
 sends them up past the hold and merges at once, and they are reviewed after
 the merge, in the same task, where it has a reviewer
-([reviews](reviews.md#a-small-change-is-reviewed-after-it-merges)). A plain
+([reviews](reviews.md#an-explicit-review-after-merge)). A plain
 Accept, from the Dock or anywhere, is refused while they wait: it would
 merge the pull request without them, unreviewed. The Dock offers Ship.
 
@@ -507,7 +507,10 @@ nobody saw; an errand's merge takes the head that went green.
 
 - **Where the branch has the host's own queue** (GitHub's and Bitbucket
   Cloud's merge queues, GitLab's merge trains), the merge goes there, at its head, and the host
-  merges once the queue's checks pass.
+  merges once the queue's checks pass. A build the queue sent back is not cleared by
+  the pull request head's own green checks: the rejected head stays out until
+  the person asks to put it back. This survives a restart and a host forgetting
+  the rejection reason; ordinary sweeps never retry that head.
 - **Everywhere else Althar stands in for a queue:** one slot for each
   repository and branch, taken in the order the person asked. Two pull
   requests green against the same main can each merge without being tested
@@ -516,9 +519,19 @@ nobody saw; an errand's merge takes the head that went green.
   the branch's head, by a merge, and waits for green there. Then it merges,
   with auto-merge as its merge where the host has it (GitLab, Bitbucket
   Data Center). It holds the slot until a read shows the merge landed, and
-  the next starts again from the new head. Where someone else writes to the
-  target meanwhile, it brings its branch up to date again, three times at
-  most, then waits for the person.
+  the next starts again from the new head. An accepted merge keeps its slot
+  even when its row moves or its errand is paused. A pause starts nothing
+  more, but the accepted operation is read until it ends. If its result is
+  still uncertain after the normal wait, the slot stays held: a timeout is
+  not proof that a remote merge stopped. A red head gives its slot up and
+  is not brought up to date just because main moved. Where someone else
+  writes to the target meanwhile, it brings its branch up to date again,
+  three times at most, then waits for the person.
+- Cancelled checks are not green. They are run again where Althar can, but
+  until they run and pass they cannot authorize a merge. A recorded push,
+  whoever pushed it, gets the same bounded wait for checks to register in a
+  repository that has CI. Commits held for Ship block the merge line as they
+  block the task's own Merge.
 - **The person's "merge it now"** (`now: true`), and their press in the app,
   wait only for a merge already in flight, not for the line.
 - **A merge that lands later** (Bitbucket's 202, GitLab working out whether
@@ -641,14 +654,10 @@ The decisions above are current. These parts of them aren't built on main:
 
 - **Noticing an agent's own push,** and adopting a pull request it opened
   with `gh`.
-- **A gated call to the host's API** (`code_host_api`) and to a tracker's
-  (`tracker_api`), for whatever no typed tool covers: reads in any turn,
-  writes asked-for, with the never list, the repository's content and what
-  stands in for a check refused by family of paths. Until then, what no
-  tool covers is the person's on the host.
-- **`post_review` and `delete_branch` for agents:** posting a review the
-  person asked for, and deleting a branch on their word. A review task's
-  draft is posted by the person, and so is a branch deleted on Close.
+- **`delete_branch` for agents:** deleting a branch on the person's word.
+  A branch can still be deleted on Close. `post_review` now posts an
+  explicitly requested review at the commit read; `draft_review` keeps its
+  existing card.
 - **A lead's tag on the person's word in its thread:** a lead's `push_tag`
   still asks every time. A lead's merge goes through the same tool and line
   as the coordinator's.
@@ -668,6 +677,12 @@ The decisions above are current. These parts of them aren't built on main:
 
 ## Changes
 
+- 12 Nov 2026: the lead and coordinator gain complete discussion pages,
+  Linear resources, relationships and attachments, review controls and
+  broader PR search. `code_host_api` and `tracker_api` provide authenticated
+  fallbacks with asked-for writes and receipts; [architecture
+  06](../architecture/06-integrations-and-skills.md#authenticated-api-fallbacks)
+  records their bounds and protected families.
 - 8 Nov 2026: written from the ADRs under Replaces.
 - 8 Nov 2026: the limits sweep (#696) built: agents carry the person's own sign-in, and `gh` and `glab` are read as git is.
 - 9 Nov 2026: what a turn the person's words began after the plan commits holds the branch for Ship (a task is a conversation plus parts, [tasks](tasks.md#changing-parts)).

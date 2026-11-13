@@ -1,9 +1,10 @@
 import { execFileSync } from 'node:child_process'
-import { mkdtempSync } from 'node:fs'
+import { mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import { type FakeService, makeFakeService } from '@althar/connectors/testing'
+import type { ProjectId } from '@althar/domain'
 import { assert, describe, it } from '@effect/vitest'
 import { Duration, Effect, Layer } from 'effect'
 import { SqlClient } from 'effect/sql'
@@ -16,8 +17,10 @@ import { FastLane } from '../src/fastLane'
 import { Instance } from '../src/Instance'
 import { MergeReviews } from '../src/MergeReviews'
 import { Policies } from '../src/Policies'
+import { Plans } from '../src/Plans'
 import { Projects } from '../src/Projects'
 import { Queries } from '../src/Queries'
+import { Runs } from '../src/Runs'
 import * as Runtime from '../src/Runtime'
 import type { ToolAccess } from '../src/ToolServer'
 import { callTool, fakeConnectors, HOST, hosted, items, runtime, turns, until } from './support'
@@ -71,10 +74,16 @@ const smallChange = (working: string, markers: string, rule?: 'major' | 'all' | 
     const project = yield* (yield* Projects).open({ envelope: yield* Runtime.envelope('project.open', {}), path: working })
     if (rule !== undefined) yield* (yield* Policies).set(project.projectId, { afterMergeReview: rule }, instance.personId)
     const threadId = yield* coordinator.thread(project.projectId)
-    const body = `Add a retry. [coordinator:plan] [coordinator:plan-small] [lead:finish] [lead:edit] ${markers}`
+    const body = `Add a retry. [coordinator:plan] [coordinator:plan-small] [coordinator:plan-no-review] [lead:finish] [lead:edit] ${markers}`
     yield* coordinator.say({ envelope: yield* Runtime.envelope('thread.send', { body }), threadId, body, disposition: 'after_current' })
     const [ready] = yield* until(cards(project.projectId), (all) => all[0]?.change != null && all[0].change.state === 'open')
     const card = ready ?? assert.fail('no card')
+    // This fixture deliberately requests after-merge timing; size alone now keeps the normal before-Ship review.
+    yield* (yield* Runs).reshape({
+      taskId: card.taskId,
+      afterMerge: { key: 'review', agentId: 'codex', model: null, skipped: true },
+      actorId: instance.personId,
+    })
     return { projectId: project.projectId, taskId: card.taskId, threadId: card.threadId, url: card.change?.url ?? '' }
   })
 
@@ -234,6 +243,10 @@ describe('what a small change’s review after its merge brings back', () => {
       yield* (yield* FastLane).retryPendingReviews()
       assert.isUndefined(yield* reviewOf(task.url))
       assert.isUndefined((yield* cards(task.projectId))[0]?.afterMerge)
+      // Dropping saved pre-merge debt is a settled decision too: later policy changes must not recreate it.
+      yield* (yield* Policies).set(task.projectId, { afterMergeReview: 'major' }, instance.personId)
+      yield* (yield* FastLane).retryPendingReviews()
+      assert.isUndefined(yield* reviewOf(task.url))
     }).pipe(Effect.provide(runtimeWith(github)))
   })
 
@@ -263,6 +276,245 @@ describe('what a small change’s review after its merge brings back', () => {
     }).pipe(Effect.provide(runtimeWith(github)))
   })
 
+  it.live('lets an open follow-up choose its review without changing the review saved for an earlier merge', () => {
+    const { working, bare, github } = onGitHub()
+    return Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const instance = yield* Instance
+      const mergeReviews = yield* MergeReviews
+      const runs = yield* Runs
+      const task = yield* smallChange(working, '[review:pass]')
+      yield* mergeIt(bare, github, task.taskId)
+      yield* until(reviewOf(task.url), (row) => row?.state === 'clear')
+      const saved = yield* sql`SELECT * FROM merge_reviews WHERE url = ${task.url}`
+      // A choice cannot rewrite the completed current change.
+      assert.include(String(yield* Effect.flip(mergeReviews.choose(task.taskId, 'none', instance.personId))), 'merged already')
+
+      const [workspace] = yield* sql<{ path: string }>`SELECT path FROM workspaces WHERE task_id = ${task.taskId}`
+      const path = workspace?.path ?? assert.fail('no worktree')
+      writeFileSync(join(path, 'follow-up.txt'), 'The next change.\n')
+      git(path, 'add', 'follow-up.txt')
+      git(path, 'commit', '-q', '-m', 'The next change')
+      yield* until(cards(task.projectId), (all) => all[0]?.unshipped != null)
+      yield* runs.publish(task.taskId)
+      yield* until(
+        Effect.sync(() => github.changes),
+        (all) => all.length === 2,
+      )
+      const next = github.changes[1] ?? assert.fail('no follow-up')
+      assert.strictEqual(next.state, 'open')
+      assert.deepStrictEqual(yield* runs.setReviewAfterMerge({ taskId: task.taskId, review: 'none', actorId: instance.personId }), {
+        project: 'major',
+        task: 'none',
+        holds: 'none',
+      })
+      assert.deepStrictEqual(yield* sql`SELECT * FROM merge_reviews WHERE url = ${task.url}`, saved)
+
+      squashMerge(bare, next.source)
+      github.mergeByHand(next.number)
+      yield* until(
+        Effect.gen(function* () {
+          yield* (yield* Changes).refresh(task.taskId)
+          return yield* sql<{
+            state: string
+          }>`SELECT json_extract(snapshot, '$.state') AS state FROM external_links WHERE url = ${next.url}`
+        }),
+        (rows) => rows[0]?.state === 'merged',
+      )
+      yield* (yield* FastLane).retryPendingReviews()
+      assert.deepStrictEqual(yield* sql`SELECT * FROM merge_reviews WHERE task_id = ${task.taskId}`, saved)
+      assert.include(String(yield* Effect.flip(mergeReviews.choose(task.taskId, 'review', instance.personId))), 'merged already')
+    }).pipe(Effect.provide(runtimeWith(github)))
+  })
+
+  for (const timing of ['choice', 'preset'] as const) {
+    it.live(`keeps an earlier no-review merge decided while a real follow-up requests review through ${timing}`, () => {
+      const { working, bare, github } = onGitHub()
+      return Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient
+        const instance = yield* Instance
+        const runs = yield* Runs
+        const task = yield* smallChange(working, '[review:pass]', 'none')
+        yield* mergeIt(bare, github, task.taskId)
+        yield* settled(task.taskId)
+        assert.isUndefined(yield* reviewOf(task.url))
+        // An older launch knew this merge but had not persisted its no-debt decision. A future choice must reconcile it first.
+        yield* sql`DELETE FROM record_events WHERE aggregate_type = 'external_link' AND type = 'external_link.merge_review_not_owed'
+        AND aggregate_id IN (SELECT id FROM external_links WHERE task_id = ${task.taskId} AND url = ${task.url})`
+        const [workspace] = yield* sql<{ path: string }>`SELECT path FROM workspaces WHERE task_id = ${task.taskId}`
+        const path = workspace?.path ?? assert.fail('no worktree')
+        writeFileSync(join(path, 'follow-up.txt'), 'A separately reviewed change.\n')
+        git(path, 'add', 'follow-up.txt')
+        git(path, 'commit', '-q', '-m', 'A separately reviewed change')
+        yield* until(cards(task.projectId), (all) => all[0]?.unshipped != null)
+        yield* runs.publish(task.taskId)
+        yield* until(
+          Effect.sync(() => github.changes),
+          (all) => all.length === 2,
+        )
+        if (timing === 'choice')
+          assert.strictEqual(
+            (yield* runs.setReviewAfterMerge({ taskId: task.taskId, review: 'review', actorId: instance.personId })).holds,
+            'major',
+          )
+        else {
+          yield* runs.reshape({
+            taskId: task.taskId,
+            afterMerge: { key: 'review', agentId: 'codex', model: null, skipped: true },
+            actorId: instance.personId,
+          })
+          yield* (yield* Policies).set(task.projectId, { afterMergeReview: 'major' }, instance.personId)
+        }
+        const decision = yield* sql<{ reason: string }>`SELECT json_extract(e.payload, '$.reason') AS reason
+        FROM record_events e JOIN external_links l ON l.id = e.aggregate_id
+        WHERE e.aggregate_type = 'external_link' AND e.type = 'external_link.merge_review_not_owed' AND l.url = ${task.url}`
+        assert.deepStrictEqual(decision, [{ reason: 'rule_none' }])
+        // Recovery rereads old merged links after policy changes and after a restart; the durable decision keeps this one quiet.
+        yield* (yield* FastLane).retryPendingReviews()
+        assert.isUndefined(yield* reviewOf(task.url))
+        const next = github.changes[1] ?? assert.fail('no follow-up')
+        squashMerge(bare, next.source)
+        github.mergeByHand(next.number)
+        yield* until(
+          Effect.gen(function* () {
+            yield* (yield* Changes).refresh(task.taskId)
+            yield* (yield* FastLane).retryPendingReviews()
+            return yield* reviewOf(next.url)
+          }),
+          (row) => row?.state === 'clear',
+        )
+        assert.isUndefined(yield* reviewOf(task.url))
+        assert.strictEqual(
+          (yield* sql<{ count: number }>`SELECT count(*) AS count FROM merge_reviews WHERE task_id = ${task.taskId}`)[0]?.count,
+          1,
+        )
+      }).pipe(Effect.provide(runtimeWith(github)))
+    })
+  }
+
+  it.live('chooses for an open repository beside a newer merged sibling, and freezes a saved current review', () => {
+    const api = hosted(['meridian', 'api'])
+    const web = hosted(['meridian', 'web'])
+    const github = makeFakeService({ pushUrl: (path) => (path[1] === 'web' ? web.bare : api.bare) })
+    for (const [name, place] of [
+      ['api', api],
+      ['web', web],
+    ] as const) {
+      github.addRepository(['meridian', name])
+      git(place.working, 'checkout', '-q', '-b', 'fix-it')
+      writeFileSync(join(place.working, 'fix.txt'), 'The change.\n')
+      git(place.working, 'add', 'fix.txt')
+      git(place.working, '-c', 'user.name=Fake', '-c', 'user.email=fake@althar.test', 'commit', '-q', '-m', 'The change')
+      git(place.working, 'push', '-q', place.bare, 'fix-it')
+      github.addPullRequest({
+        path: ['meridian', name],
+        title: 'Fix it',
+        author: 'you',
+        source: 'fix-it',
+        headSha: git(place.working, 'rev-parse', 'HEAD'),
+      })
+      git(place.working, 'checkout', '-q', 'main')
+    }
+    return Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const instance = yield* Instance
+      const projects = yield* Projects
+      const changes = yield* Changes
+      const mergeReviews = yield* MergeReviews
+      yield* (yield* Connections).connectToken({ product: 'github', token: 't', actorId: instance.personId, webUrl: HOST })
+      const project = yield* projects.open({
+        envelope: yield* Runtime.envelope('project.open', {}),
+        path: api.working,
+        repositories: [api.working, web.working],
+      })
+      const task = yield* projects.createTask({
+        envelope: yield* Runtime.envelope('task.create', {}),
+        projectId: project.projectId,
+        title: 'Fix both',
+        repositories: (yield* projects.repositories(project.projectId)).map((one) => one.name),
+      })
+      yield* (yield* Plans).propose({
+        projectId: project.projectId as ProjectId,
+        taskId: task.taskId,
+        steps: [
+          { key: 'implement', agentId: 'codex', model: null, skipped: false },
+          { key: 'review', agentId: 'codex', model: null, skipped: true },
+        ],
+        reviewAfterMerge: true,
+        reason: null,
+        actorId: instance.personId,
+        held: true,
+      })
+      for (const pull of github.changes)
+        yield* changes.attach({
+          taskId: task.taskId,
+          pullRequest: pull.url.replace('https://github.com', HOST),
+          start: true,
+          actorId: instance.personId,
+        })
+      // The most recently attached repository merged; api still has an open current change.
+      github.mergeByHand(2)
+      const mergedSibling = github.changes[1] ?? assert.fail('no web pull request')
+      yield* until(
+        Effect.gen(function* () {
+          yield* changes.refresh(task.taskId)
+          return yield* sql<{ state: string }>`SELECT json_extract(snapshot, '$.state') AS state
+            FROM external_links WHERE task_id = ${task.taskId} AND url = ${mergedSibling.url}`
+        }),
+        (rows) => rows[0]?.state === 'merged',
+      )
+      yield* mergeReviews.merged(task.taskId, mergedSibling.url)
+      const oldDebts = yield* sql<{ head: string | null; reviewer: string | null }>`
+        SELECT head, reviewer FROM merge_reviews WHERE url = ${mergedSibling.url}`
+      const oldDebt = oldDebts[0] ?? assert.fail('no saved sibling review')
+      assert.isNotNull(oldDebt.head)
+      // The older owed review already saved its merged head and rule; a future choice cannot rewrite it.
+      assert.strictEqual((yield* mergeReviews.choose(task.taskId, 'none', instance.personId)).holds, 'none')
+      assert.deepStrictEqual(yield* sql`SELECT head, reviewer FROM merge_reviews WHERE url = ${mergedSibling.url}`, [oldDebt])
+      // A new open web sibling is mutable, but changing the task-wide rule must not alter api's pre-merge debt.
+      git(web.working, 'checkout', '-q', '-b', 'fix-more')
+      writeFileSync(join(web.working, 'more.txt'), 'Another change.\n')
+      git(web.working, 'add', 'more.txt')
+      git(web.working, '-c', 'user.name=Fake', '-c', 'user.email=fake@althar.test', 'commit', '-q', '-m', 'Another change')
+      git(web.working, 'push', '-q', web.bare, 'fix-more')
+      const next = github.addPullRequest({
+        path: ['meridian', 'web'],
+        title: 'Fix more',
+        author: 'you',
+        source: 'fix-more',
+        headSha: git(web.working, 'rev-parse', 'HEAD'),
+      })
+      yield* changes.attach({
+        taskId: task.taskId,
+        pullRequest: next.url.replace('https://github.com', HOST),
+        start: true,
+        actorId: instance.personId,
+      })
+      assert.strictEqual((yield* mergeReviews.choose(task.taskId, 'review', instance.personId)).holds, 'major')
+      const apiPull = github.changes[0] ?? assert.fail('no api pull request')
+      // Merge now saves debt even while the host is still processing its merge. That current choice stays fixed.
+      yield* mergeReviews.owe(task.taskId, apiPull.url, {})
+      const saved = yield* sql`SELECT * FROM merge_reviews WHERE url = ${apiPull.url}`
+      assert.strictEqual(saved[0]?.state, 'owed')
+      assert.include(String(yield* Effect.flip(mergeReviews.choose(task.taskId, 'none', instance.personId))), 'waiting to merge')
+      const beforeTiming = yield* sql`SELECT parameters FROM task_plans WHERE task_id = ${task.taskId}`
+      assert.include(
+        String(
+          yield* Effect.flip(
+            (yield* Runs).reshape({
+              taskId: task.taskId,
+              afterMerge: { key: 'review', agentId: 'codex', model: null, skipped: true },
+              actorId: instance.personId,
+            }),
+          ),
+        ),
+        'waiting to merge',
+      )
+      assert.deepStrictEqual(yield* sql`SELECT parameters FROM task_plans WHERE task_id = ${task.taskId}`, beforeTiming)
+      assert.deepStrictEqual(yield* sql`SELECT * FROM merge_reviews WHERE url = ${apiPull.url}`, saved)
+    }).pipe(Effect.provide(runtimeWith(github)))
+  })
+
   it.live('by its lead’s tool, a small change drops its review under Everything, then goes back to the rule, saying what holds', () => {
     const { working, github } = onGitHub()
     return Effect.gen(function* () {
@@ -282,7 +534,7 @@ describe('what a small change’s review after its merge brings back', () => {
       assert.notInclude(dropped, 'as the project’s rule says')
       assert.deepStrictEqual((yield* smallCardOf(task.threadId)).afterMerge, { project: 'all', task: 'none', holds: 'none' })
       const back = yield* callTool(lead, 'review_after_merge', { review: 'project' })
-      assert.include(back, 'it is reviewed after it merges, and any finding comes back, as the project’s rule says')
+      assert.include(back, 'requested after-merge reviews follow the project’s rule: any finding comes back')
       assert.deepStrictEqual((yield* smallCardOf(task.threadId)).afterMerge, { project: 'all', task: null, holds: 'all' })
     }).pipe(Effect.provide(runtimeWith(github)))
   })

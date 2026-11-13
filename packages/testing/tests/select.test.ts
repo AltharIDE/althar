@@ -160,6 +160,31 @@ describe('the selection', () => {
     expect([desktop.e2e, desktop.windowsE2e]).toEqual([true, false])
   })
 
+  it('runs the affected Windows unit tests, on drafts too, with runtime sharding and no duplicate type checks', () => {
+    const windows = plan(['packages/runtime/src/git.ts'], REPO, 'windows', { draft: true })
+    expect(windows.jobs.filter((job) => job.name.startsWith('packages/runtime')).map((job) => job.name)).toEqual(RUNTIME_PARTS)
+    expect(windows.jobs.every((job) => job.parts.every((part) => !part.check))).toBe(true)
+    expect(runs(windows.jobs).desktop).toEqual(['apps/desktop: tests/runtime.test.ts'])
+    expect([windows.e2e, windows.windowsE2e]).toEqual([false, false])
+    expect(runs(plan(['packages/runtime/tests/words1.test.ts'], REPO, 'windows').jobs)).toEqual({
+      'packages/runtime': ['packages/runtime: tests/words1.test.ts'],
+    })
+  })
+
+  it('runs Windows for main-process changes and shared tooling, leaving renderer-only work and docs out', () => {
+    expect(runs(plan(['apps/desktop/src/main/keyring.ts'], REPO, 'windows').jobs)).toEqual({
+      desktop: ['apps/desktop: tests/keyring.test.ts'],
+    })
+    for (const changed of [
+      ['apps/desktop/src/renderer/features/plan.ts'],
+      ['packages/ui/src/chrome/TaskHeader/TaskHeader.tsx'],
+      ['README.md'],
+    ])
+      expect(plan(changed, REPO, 'windows').jobs).toEqual([])
+    for (const changed of [['bun.lock'], ['.github/workflows/windows.yml'], ['packages/testing/src/files.ts'], ['*']])
+      expect(plan(changed, REPO, 'windows').jobs.length).toBeGreaterThan(0)
+  })
+
   it('runs nothing for docs, a README or release notes no test reads', () => {
     const changed = ['docs/plans/tests-that-hold.md', 'README.md', 'packages/ui/README.md', 'apps/desktop/release-notes/0.6.0.md']
     for (const workflow of ['harness', 'desktop', 'ui'] as const)
@@ -269,7 +294,14 @@ describe('what a file names', () => {
 })
 
 describe('this repository', () => {
-  const known = graph(repository(join(import.meta.dirname, '../../..')))
+  const repo = repository(join(import.meta.dirname, '../../..'))
+  const known = graph(repo)
+
+  it('runs the future-date guard when another package changes a test', () => {
+    const selected = plan(['packages/runtime/tests/fastLane.test.ts'], repo, 'harness')
+    const testing = selected.jobs.flatMap((job) => job.parts).find((part) => part.dir === 'packages/testing')
+    expect(testing?.tests === 'all' || testing?.tests.includes('tests/dates.test.ts')).toBe(true)
+  })
   /**
    * Illustrative code isn't part of the import graph: samples a story shows, a file a spec
    * writes into a test repository, prototypes, and this file's own small repository.

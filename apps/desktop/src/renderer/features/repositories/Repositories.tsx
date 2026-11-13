@@ -1,5 +1,5 @@
 import type { ConnectionList, ProjectRepository, RepositoryHost } from '@althar/contracts'
-import { ChangeTarget, HostReach, type MapHost, type MapRepository, RepositoryRole } from '@althar/ui'
+import { ChangeTarget, HostReach, type MapHost, type MapRepository, RepositoryRole, Problem } from '@althar/ui'
 import { ProjectRepositories } from '@althar/ui/screens'
 
 import { device } from '../../shared/device'
@@ -117,13 +117,7 @@ export function Repositories({
 }) {
   const repositories = model.repositories
   if (repositories === null)
-    return model.error === null ? (
-      <PartPending label={pendingText.page} />
-    ) : (
-      <p className={s.error} role="alert">
-        {model.error}
-      </p>
-    )
+    return model.error === null ? <PartPending label={pendingText.page} /> : <Problem className={s.error}>{model.error}</Problem>
   return (
     <ProjectRepositories
       project={model.project ?? text.project}

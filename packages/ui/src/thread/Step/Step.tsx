@@ -142,7 +142,7 @@ export function Step({
         <b className={s.label}>{label}</b>
         {model && <Model model={model} short />}
         {outcome && <span className={s.outcome}>· {outcome}</span>}
-        {took && <span className={s.note}>· {took}</span>}
+        {took && <span className={s.took}>· {took}</span>}
         {why && (
           <HoverCard card={why} width={260} placement="above">
             <button type="button" className={s.why}>

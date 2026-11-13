@@ -1,5 +1,5 @@
 import { Dialog } from '../../primitives/Dialog/Dialog'
-import s from './ToolTiles.module.css'
+import { Problem } from '../../primitives/Problem/Problem'
 import {
   SkillInstall,
   type SkillInstallProps,
@@ -69,11 +69,7 @@ export function AddSkillDialog({
         />
       ) : (
         <>
-          {error !== null && (
-            <p className={s.error} role="alert">
-              {error}
-            </p>
-          )}
+          {error !== null && <Problem>{error}</Problem>}
           <SkillReview
             card={card}
             busy={busy}

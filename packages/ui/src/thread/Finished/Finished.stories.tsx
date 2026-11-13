@@ -65,7 +65,6 @@ export const AllStates: Story = {
       cells={[
         { state: 'shown', node: <Finished {...args} /> },
         { state: 'only built', node: <Finished built={args.built} pieces={[]} /> },
-        { state: 'dark', node: <Finished {...args} />, dark: true },
       ]}
     />
   ),

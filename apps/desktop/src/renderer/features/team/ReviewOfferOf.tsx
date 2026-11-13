@@ -47,7 +47,7 @@ export function ReviewOfferOf({ offer, ask }: { offer: Extract<Offer, { kind: 'r
       setBusy(false)
     }
   }
-  const steps = [...work.plan.steps.filter((step) => step.key !== 'review'), standing]
+  const steps = [standing]
   return (
     <ReviewOffer
       who={named(standing.agentId, standing.model).name}

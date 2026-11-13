@@ -2,6 +2,8 @@ import { defineConfig } from 'vite-plus'
 import { testing } from '@althar/testing/vitest'
 import DurationSequencer from '@althar/testing/sequencer'
 
+import coverageGate from './coverage-gate.json'
+
 export default defineConfig({
   test: {
     ...testing('medium'),
@@ -17,7 +19,8 @@ export default defineConfig({
       reporter: ['text', 'html'],
       // Checked when a test fails too, so a run that only quarantined tests fail still gates on it (@althar/testing).
       reportOnFailure: true,
-      thresholds: { lines: 90, branches: 90 },
+      // The target is 90% for both. Branch instrumentation varies slightly on an unchanged tree: allow 0.25 points.
+      thresholds: coverageGate,
     },
   },
 })

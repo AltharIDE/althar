@@ -345,7 +345,7 @@ export function GraphProposal({
       }
       what={what}
     >
-      <div className={s.proposed}>
+      <div className={s.proposal}>
         <GraphStrip nodes={nodes} />
       </div>
       <KeyValues

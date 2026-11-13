@@ -13,6 +13,7 @@ import { Button } from '../../primitives/Button/Button'
 import { Field } from '../../primitives/Field/Field'
 import { Tooltip } from '../../primitives/HoverCard/HoverCard'
 import { LinkButton } from '../../primitives/LinkButton/LinkButton'
+import { Problem } from '../../primitives/Problem/Problem'
 import { Skeleton } from '../../primitives/Skeleton/Skeleton'
 import { StepTrack, trackOf } from '../../primitives/StepTrack/StepTrack'
 import { VisuallyHidden } from '../../primitives/VisuallyHidden/VisuallyHidden'
@@ -94,6 +95,8 @@ export interface WelcomeText {
     noneHere: string
     /** None at all: none here, and none offered. */
     noneAtAll: string
+    /** Asks the agents again, after their list couldn't be read. */
+    retry: string
     go: string
     without: string
   }
@@ -153,6 +156,7 @@ export const welcomeText: WelcomeText = {
     asking: 'Asking the agents',
     noneHere: 'None yet: download one below, or install one yourself.',
     noneAtAll: 'None found.',
+    retry: 'Check again',
     go: 'Continue',
     without: 'Continue without one',
   },
@@ -218,6 +222,8 @@ export interface WelcomeProps extends Pick<RuntimesProps, 'onSignIn' | 'onCancel
   made?: boolean
   /** What went wrong, said on the step it belongs to: the agents', or the project's. */
   error?: { readonly step: 'agents' | 'project'; readonly said: ReactNode }
+  /** Asks the agents again, after their list couldn't be read: beside the agents' error. */
+  onRecheck?: () => void
   /** The code hosts, to connect one: the consumer's list, and its walk in. */
   hosts: ReactNode
   /** A code host is connected: the code's step goes on with Continue, not Not now. */
@@ -256,6 +262,7 @@ export function Welcome({
   creating = false,
   made = false,
   error,
+  onRecheck,
   hosts,
   hostConnected = false,
   trackers,
@@ -330,6 +337,26 @@ export function Welcome({
   const isAway = (r: RuntimeEntry) => r.state === RuntimeState.Missing || r.state === RuntimeState.Installing
   const here = runtimes?.filter((r) => !isAway(r)) ?? []
   const away = runtimes?.filter(isAway) ?? []
+  const said = error !== undefined && error.step === step ? error.said : null
+  // With none here and an error, it isn't that none were found: the error stands where they would be, with the way to ask again.
+  const unread = said !== null && step === 'agents' && runtimes !== null && here.length === 0
+  const problem = (banner: boolean) => (
+    <Problem
+      as="div"
+      banner={banner}
+      {...(step === 'agents' && onRecheck !== undefined
+        ? {
+            action: (
+              <Button size="small" onClick={onRecheck}>
+                {t.agents.retry}
+              </Button>
+            ),
+          }
+        : {})}
+    >
+      {said}
+    </Problem>
+  )
   const make = () => {
     if (picked.length === 0) return setNothing(true)
     setNothing(false)
@@ -394,6 +421,8 @@ export function Welcome({
                       {...rows}
                       {...(runtimesText === undefined ? {} : { text: runtimesText })}
                     />
+                  ) : unread ? (
+                    problem(true)
                   ) : (
                     <p className={s.none}>{away.length > 0 ? t.agents.noneHere : t.agents.noneAtAll}</p>
                   )}
@@ -418,11 +447,7 @@ export function Welcome({
                 onAdd={onAdd}
                 {...(repositoryText === undefined ? {} : { text: repositoryText })}
               />
-              {nothing && (
-                <p className={s.error} role="alert">
-                  {t.project.nothing}
-                </p>
-              )}
+              {nothing && <Problem>{t.project.nothing}</Problem>}
               {picked.length > 0 && (
                 <div className={s.named}>
                   <label htmlFor={nameId} className={s.namedLabel}>
@@ -435,11 +460,7 @@ export function Welcome({
           )}
           {step === 'code' && hosts}
           {step === 'issues' && trackers}
-          {error !== undefined && error.step === step && (
-            <div className={s.error} role="alert">
-              {error.said}
-            </div>
-          )}
+          {said !== null && !unread && problem(false)}
         </div>
 
         <footer className={s.foot}>

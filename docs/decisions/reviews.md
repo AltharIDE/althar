@@ -1,6 +1,6 @@
 # Reviews
 
-Who reviews a task's change and how the rounds go, the review after a small
+Who reviews a task's change and how the rounds go, an explicitly chosen review after a
 change merges, reviews of other people's pull requests, and what a pull
 request shows of the review and of the work: the seal, the screenshots
 comment, and Outputs. How review steps run is in
@@ -119,7 +119,10 @@ someone else's pull request isn't offered one.
 - **The person can skip a round's review** from the task's menu: a review
   under way stops, and a round whose lead is done concludes. The next round
   has its review again, and a skipped review can be added back until the
-  task merges ([above](#a-skipped-review-is-not-a-done-review)).
+  task merges ([above](#a-skipped-review-is-not-a-done-review)). Skipping a
+  check of fixes accepts those fixes without reviewing them: the pull request
+  says the last fixes weren't reviewed and carries no seal. Skipping the
+  first pass creates no review record.
 - **Ship is reviewed as the plan says,** where it has a reviewer before the
   work ships: one pass over what came after the commit the last review read,
   found by its tree, as pushing may have credited it since. What the person's
@@ -129,14 +132,17 @@ someone else's pull request isn't offered one.
   making a commit status or a check run, and dismissing a review are refused
   to agents ([what agents may do](what-agents-may-do.md)).
 
-## A small change is reviewed after it merges
+## An explicit review after merge
 
-A change of a few lines takes the fast lane ([tasks](tasks.md)): one step on
-a light model, no countdown, and a review step that names its reviewer but is
-skipped. Its pull request merges on the person's word, and the merge ends
-that change: the task settles where it was its last. Then **the task's own
-reviewer reads what merged, in the same task** (`MergeReviews.ts`, a
-decision of a task is a conversation plus parts, [tasks](tasks.md#a-task-holds-as-many-changes-as-it-needs)):
+A Small change keeps its configured review before Ship. Its size only
+removes the countdown: it never schedules or proposes a review after merge.
+The built-in Small change preset follows that same rule.
+
+The person can explicitly choose after-merge timing, by changing Checked by,
+with `review_after_merge`, or through a custom preset that says `after`.
+That review remains available, as does the review owed by Merge now. When
+such a pull request merges, **the task's own reviewer reads what merged, in
+the same task** (`MergeReviews.ts`):
 
 - It is owed as the merge is heard, kept before it is tried
   (`merge_reviews`), and started in a thread of the task's own
@@ -169,22 +175,31 @@ Tasks, under How they go; `read_settings` and `change_settings` reach it as
   so it doesn't pad the review with small things.
 - **Bring back every finding:** any finding brings it back, as before the
   rule.
-- **Don't review it:** no review is owed after the merge. The small change's
-  card says "no review" in place of "reviewed after it merges". "Make it a
-  full task" still moves a review before the merge.
+- **Don't review it:** no configured review is owed after the merge. A
+  review configured before Ship is unaffected.
 
 New projects start from a default in Althar's Settings › Tasks (`althar/tasks`,
 `new_project_after_merge_review`), as the other new-project rules do.
 
-**One small change may say otherwise**, until it merges: keep a review after
+**An explicit task choice may say otherwise** for its current unmerged change: keep a review after
 its merge where the rule has none (it brings back what Major only does), or
 drop it where the rule has one (`review_after_merge` on the person's word,
 `SetReviewAfterMerge` from the window, kept as `task.after_merge_review_set`).
-Its card reads what holds (`afterMerge` on the small change's card), and
-its Review stop is the control: Before it merges, After it merges, or No
-review. The card says the review's state and how many it found
-(`reviewAfter`), with the report's item in the thread, which See findings
-opens.
+Asking for that review also sets its configured reviewer to after-merge
+timing before stopping any pass already running before Ship. Its card reads
+what holds (`afterMerge`). A later open pull request may choose differently.
+Earlier merges keep their saved decisions, including a decision that no review
+was owed; a later choice cannot create retrospective debt for them. Older
+known merges without a saved decision are reconciled under the old timing and
+rule before the new choice is recorded. The task's choice is shared by its
+repositories, so it cannot change while a review owed before a merge still
+waits for its merged head; that debt keeps the existing rule-at-merge behavior.
+For an explicitly deferred review, the redesigned card's Review stop lets the
+person choose Before it merges, After it merges, or No review. It shows the
+review's state and finding count (`reviewAfter`); See findings opens its report
+in the thread. A new size-only Small change keeps its configured before-Ship
+review and offers no after-merge timing menu.
+
 
 The rule and the task's word are **read when the merge is heard**, not when
 Althar starts, and what the review brings back is kept on it then
@@ -193,7 +208,7 @@ report read the same rule, whatever changes meanwhile.
 
 What Merge now merges with commits not shipped is reviewed after the merge
 the same way, where the task has a reviewer, and brings back what the rule
-says; only a small change's is dropped by Don't review it.
+says; an explicitly after-merge plan's review is dropped by Don't review it.
 
 The review after a merge isn't owed where the plan named no reviewer, where
 the rule or the task's word says none, or where the pull request closed
@@ -201,15 +216,14 @@ without merging. "Before it merges", from the Review stop on the small
 change's card (Make it a full task), moves its review back before the
 merge.
 
-Why: the review was a fifth of a small task's time, and the person wants
-small changes fast. Reviewing after the merge keeps a second reader without
-holding the merge. The trade is that a finding then needs a fix of its own,
-so only what is worth one comes back by default: a nit brought the person
-back to a change that had merged, which they didn't want (11 November). They
-asked for the choice of skipping it too, per project and as a default.
+Size is not review policy (the person's note of 13 November). Older stored
+timing and already-recorded debt cannot always be attributed to size or an
+explicit request, so they are preserved; new plans record size separately
+from timing. No prose or tool-history inference changes an old task.
 
-Because nothing reviewed it before its pull request opened, **a fast-lane
-pull request carries no seal**, and its description has no review section.
+A pull request opened without a review before it has no review seal or
+review section; an explicitly deferred pass does not claim to have read it
+before publication.
 
 ## Reviewing someone else's pull request
 

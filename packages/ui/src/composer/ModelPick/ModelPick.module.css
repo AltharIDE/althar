@@ -98,6 +98,10 @@
   overflow-wrap: anywhere;
   text-align: left;
 }
+/* under a model drawn with its mark, the line starts where the name does: the mark and its gap in */
+.roomMarked {
+  padding-left: calc(14px + 5px);
+}
 
 /* A pick that asks first: what it would do, and the answer. */
 .ask {

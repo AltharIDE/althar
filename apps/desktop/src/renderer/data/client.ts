@@ -1,3 +1,5 @@
+import type { SearchDocuments } from '@althar/contracts'
+
 import {
   type CanvasDetail,
   type CanvasSummary,
@@ -156,6 +158,8 @@ export interface Client {
   ) => Promise<ProjectSummary>
   readonly listTasks: (projectId: string) => Promise<TaskList>
   /** Tasks found by what they were about, best first: in one project, or every one; with no words, the ones changed last. */
+  readonly getSearchDocuments: (after?: string) => Promise<SearchDocuments>
+  readonly getSearchFiles: (threadId: string) => Promise<{ readonly files: ReadonlyArray<string> }>
   readonly searchTasks: (input: { readonly projectId?: string; readonly text: string; readonly limit?: number }) => Promise<FoundTasks>
   readonly createTask: (input: {
     readonly projectId: string
@@ -175,6 +179,8 @@ export interface Client {
   readonly readOutput: (threadId: string, itemId: string) => Promise<OutputText>
   /** What a command a thread's session left running has printed so far. */
   readonly readBackgroundOutput: (threadId: string, id: string) => Promise<OutputText>
+  /** What a run of the project has printed so far: the end of it. */
+  readonly readLaunchOutput: (id: string) => Promise<OutputText>
   /** A markdown document an agent in a thread wrote, as it is now in the task's worktree. */
   readonly readDocument: (threadId: string, path: string) => Promise<DocumentText>
   /** A project's canvases (ADR-104), newest first; archived ones too where asked. */
@@ -462,6 +468,8 @@ export interface Client {
   }) => Promise<TaskSummary>
   readonly startPlan: (planId: string) => Promise<void>
   readonly holdPlan: (planId: string) => Promise<void>
+  /** Holds a task the coordinator is drafting, by its draft's key: its plan comes held. */
+  readonly holdDraft: (threadId: string, key: string) => Promise<void>
   /** Changes a plan before its first step starts: who does its steps, how it ends, and where it works (ADR-091). */
   readonly changePlan: (
     planId: string,
@@ -602,8 +610,8 @@ export interface Client {
   /** Gives a task another preset's parts at once, as Make it a change does with Change: its review, ending and worktree. */
   readonly shapeTask: (taskId: string, preset: string) => Promise<void>
   /**
-   * One small change's own word on its review after the merge, over its project's rule, until it merges: `review`, `none`,
-   * or null for the rule. Its card reads what holds (`afterMerge` on the small change's card).
+   * The person's explicit choice of review after merge, over its project's rule, until it merges: `review`, `none`,
+   * or null for the rule. Its card reads what holds (`afterMerge` on the explicitly configured after-merge card).
    */
   readonly setReviewAfterMerge: (taskId: string, review: 'review' | 'none' | null) => Promise<void>
   /** Merges the task's pull request at the head the person saw, as they said to; a draft is marked ready first. */
@@ -831,12 +839,15 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
         }),
       ),
     listTasks: (projectId) => settle(api.ListTasks({ projectId })),
+    getSearchDocuments: (after) => settle(api.GetSearchDocuments(after === undefined ? {} : { after })),
+    getSearchFiles: (threadId) => settle(api.GetSearchFiles({ threadId })),
     searchTasks: (input) => settle(api.SearchTasks(input)),
     createTask: (input) => command((commandId) => api.CreateTask({ commandId, ...input })),
     getThread: (threadId, page = {}) => settle(api.GetThread({ threadId, ...page })),
     getThreadItem: (threadId, itemId) => settle(api.GetThreadItem({ threadId, itemId })),
     readOutput: (threadId, itemId) => settle(api.ReadOutput({ threadId, itemId })),
     readBackgroundOutput: (threadId, id) => settle(api.ReadBackgroundOutput({ threadId, id })),
+    readLaunchOutput: (id) => settle(api.ReadLaunchOutput({ id })),
     readDocument: (threadId, path) => settle(api.ReadDocument({ threadId, path })),
     listCanvases: (projectId, archived) => settle(api.ListCanvases({ projectId, ...(archived === true ? { archived } : {}) })),
     getCanvas: (canvasId) => settle(api.GetCanvas({ canvasId })),
@@ -970,6 +981,7 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
     startTask: (input) => command((commandId) => api.StartTask({ commandId, ...input })),
     startPlan: (planId) => command((commandId) => api.StartPlan({ commandId, planId })),
     holdPlan: (planId) => command((commandId) => api.HoldPlan({ commandId, planId })),
+    holdDraft: (threadId, key) => command((commandId) => api.HoldDraft({ commandId, threadId, key })),
     changePlan: (planId, steps, end, worksIn, toward) =>
       command((commandId) =>
         api.ChangePlan({

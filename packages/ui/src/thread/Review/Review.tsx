@@ -317,9 +317,14 @@ export function Review({
           <>
             {/* once every finding is settled, how they were settled says more than the verdict did */}
             {verdict && (unsettled > 0 || !items.length) && <span className={s.said}>· {t.verdict[verdict]}</span>}
-            {items.length > 0 && <span className={mine ? s.forYou : unsettled ? s.note : s.said}>· {said}</span>}
-            {!unsettled && !toLead && items.length > 0 && <span className={s.note}>· {t.byLead}</span>}
-            {took && <span className={s.note}>· {took}</span>}
+            {/* settled by the lead, it says so in the same words, so a narrow row cuts one phrase rather than two */}
+            {items.length > 0 && (
+              <span className={mine ? s.forYou : unsettled ? s.note : s.said}>
+                · {said}
+                {!unsettled && !toLead && <> {t.byLead}</>}
+              </span>
+            )}
+            {took && <span className={s.took}>· {took}</span>}
           </>
         )}
       </StepRow>

@@ -1,3 +1,4 @@
+import { removeTreeSync } from '@althar/testing'
 import { execFileSync } from 'node:child_process'
 import { appendFileSync, existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -185,7 +186,7 @@ describe('a task’s next pull request, from its worktree as it is', () => {
       commitIn(task.path, 'slider.txt', 'Slider')
       yield* until(cards(task.projectId), (all) => all[0]?.phase === 'ready' && all[0].unshipped != null)
       assert.lengthOf(yield* (yield* Changes).unshipped(task.taskId), 1)
-      rmSync(task.path, { recursive: true, force: true })
+      removeTreeSync(task.path)
       assert.deepStrictEqual(yield* (yield* Changes).unshipped(task.taskId), [])
     }).pipe(Effect.provide(runtimeWith(github)))
   })
@@ -253,7 +254,7 @@ describe('a settled task’s card, its worktree kept', () => {
       failing: (on: boolean) => (on ? writeFileSync(flag, '') : rmSync(flag, { force: true })),
       done: Effect.sync(() => {
         process.env.PATH = path
-        rmSync(shim, { recursive: true, force: true })
+        removeTreeSync(shim)
       }),
     }
   }

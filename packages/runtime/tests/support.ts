@@ -1,5 +1,6 @@
+import { realPath, removeTreeSync, slashPath } from '@althar/testing'
 import { execFileSync } from 'node:child_process'
-import { cpSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { cpSync, existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { basename, join } from 'node:path'
 
@@ -69,7 +70,7 @@ export const repository = () => {
   }
   const path = mkdtempSync(join(tmpdir(), 'althar-repo-'))
   cpSync(template, path, { recursive: true })
-  return path
+  return realPath(path)
 }
 
 /** Where the fake agents' usual folders are: each agent's own, under one made for the test run. */
@@ -124,7 +125,7 @@ const launchedEnv = (agentId: string, cwd: string, env: Readonly<Record<string, 
       if (value === undefined) delete process.env[name]
       else process.env[name] = value
     }
-    rmSync(aside, { recursive: true, force: true })
+    removeTreeSync(aside)
   }
 }
 
@@ -459,7 +460,7 @@ export const hosted = (path: ReadonlyArray<string> = ['meridian', 'api']) => {
   execFileSync('git', ['remote', 'add', 'origin', `${HOST}/${path.join('/')}.git`], { cwd: working })
   const bare = mkdtempSync(join(tmpdir(), 'althar-remote-'))
   // Seed the local remote without a push to the protected default branch.
-  execFileSync('git', ['clone', '-q', '--bare', working, bare])
+  execFileSync('git', ['clone', '-q', '--bare', '--', working, bare])
   return { working, bare }
 }
 
@@ -704,7 +705,7 @@ export const callToolAtOnce = (access: ToolAccess, name: string, calls: Readonly
  * writes it down as it takes one. A host's push target alone doesn't say, as Althar fetches from it too.
  */
 export const pushLog = () => {
-  const file = join(mkdtempSync(join(tmpdir(), 'althar-pushes-')), 'pushes').replaceAll('\\', '/')
+  const file = slashPath(join(mkdtempSync(join(tmpdir(), 'althar-pushes-')), 'pushes'))
   return {
     /** Writes `name` down each time `bare` takes a push. */
     watch: (bare: string, name: string) =>
