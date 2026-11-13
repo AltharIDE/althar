@@ -1349,6 +1349,26 @@ describe('a task', () => {
     await act(async () => accept())
   })
 
+  it('draws a message whose turn is claimed but not started in the thread, not the queue', async () => {
+    const base = thread()
+    const queued = {
+      ...items.you('Then the changelog.', { state: 'queued', interrupting: false }),
+      sequence: (base.items.at(-1)?.sequence ?? 0) + 1,
+    }
+    // The runtime has claimed its turn but not begun reading it, which is what `accepting` says mid-turn.
+    const claimed: ThreadSnapshot = {
+      ...base,
+      accepting: 'queued',
+      session: base.session === null ? null : { ...base.session, turnRunning: false, accepting: 'queued' },
+      items: [...base.items, queued],
+    }
+    const { client } = fakeClient({ getThread: vi.fn(async () => claimed) })
+    withServices(<Task />, client)
+    expect(await screen.findByText('Then the changelog.')).toBeTruthy()
+    expect(screen.queryByRole('region', { name: /queued/i })).toBeNull()
+    expect(screen.getAllByText('Then the changelog.')).toHaveLength(1)
+  })
+
   it('draws a send while the agent starts in the thread, not the queue: nothing is ahead of it', async () => {
     const base = thread()
     const queued = {

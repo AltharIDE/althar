@@ -181,16 +181,13 @@ export const waiting = (items: ReadonlyArray<ThreadItem>): ReadonlyArray<string>
 /**
  * Whether what waits its turn shows in the composer's queue: behind a turn
  * running, or with no agent on the thread to take it, where it could wait
- * for long. The runtime's `accepting` is the same answer the window uses for
- * an optimistic send, so a mid-turn message is drawn in the queue from the
- * first frame. Sending never hides an existing queue. With an agent idle
- * there is nothing to wait behind.
+ * for long. The person's own send shows there from its first frame when the
+ * runtime says it will wait (`accepting`), so a mid-turn message never shows
+ * in the thread first. A message the runtime has claimed but not begun
+ * reading yet is not shown as waiting: the agent is reading it now.
  */
-export const queueShown = (
-  session: { readonly turnRunning: boolean; readonly accepting?: 'now' | 'queued' } | null,
-  sending: boolean,
-  accepting?: 'now' | 'queued',
-): boolean => accepting === 'queued' || session?.accepting === 'queued' || session?.turnRunning === true || (!sending && session === null)
+export const queueShown = (session: { readonly turnRunning: boolean } | null, sending: boolean, accepting?: 'now' | 'queued'): boolean =>
+  (sending && accepting === 'queued') || session?.turnRunning === true || (!sending && session === null)
 
 /**
  * Whether what waits after the agent's last reply is being read now, with

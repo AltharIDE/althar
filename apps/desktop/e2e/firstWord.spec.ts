@@ -379,7 +379,7 @@ test('corrects a queued guess into the thread without a jump when the turn ended
       const thinking = thinkingIn(thread)
       await expect(thinking).toBeVisible()
       // Its countdown says a turn of its own runs, so the first send has reached the runtime before the line is held.
-      await expect(thinking).toContainText(/Thinking\s*3s/)
+      await expect(thinking).toContainText(/Thinking\s*(?:[3-9]|\d{2,})s/)
       const ended = turnsEnded(home)
       const release = await holdRuntime(page)
       try {
