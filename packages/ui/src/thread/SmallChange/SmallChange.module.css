@@ -171,7 +171,8 @@
   color: var(--danger);
 }
 /* The review's name, where pressing it moves its review or takes it off */
-.choose {
+/* over LinkButton's own look: a word of the route, dotted, at its size */
+button.choose {
   display: inline-flex;
   align-items: center;
   gap: 3px;

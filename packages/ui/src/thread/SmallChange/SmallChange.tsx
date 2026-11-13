@@ -231,11 +231,7 @@ export function SmallChange({
             : at(null, 'todo')),
   }
   const reviewName = choosing ? (
-    menu(
-      <button type="button" className={s.choose}>
-        {t.review}
-      </button>,
-    )
+    menu(<LinkButton className={s.choose}>{t.review}</LinkButton>)
   ) : full && onOpenReview !== undefined ? (
     <LinkButton className={s.choose} onClick={onOpenReview}>
       {t.review}
@@ -324,10 +320,10 @@ export function SmallChange({
         {adding && (
           <li className={s.add}>
             {menu(
-              <button type="button" className={s.choose}>
+              <LinkButton className={s.choose}>
                 <Icon name="plus" size={10} />
                 {t.addReview}
-              </button>,
+              </LinkButton>,
             )}
           </li>
         )}
