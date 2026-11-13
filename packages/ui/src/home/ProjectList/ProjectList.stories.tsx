@@ -39,7 +39,7 @@ const MANY: ProjectListItem[] = SEEDS.map((seed, i) => ({
   project: ref(seed, i),
   yours: i === 0 ? 3 : i === 2 ? 1 : 0,
   tasks:
-    i < 11 ? Array.from({ length: (i % 4) + 1 }, (_, k) => task(`${seed}-${k}`, i === 5 && k === 0 ? TaskStatus.Stopped : undefined)) : [],
+    i < 11 ? Array.from({ length: (i % 4) + 1 }, (_, k) => task(`${seed}-${k}`, i === 5 && k === 0 ? TaskStatus.Queued : undefined)) : [],
   ...(i >= 11 ? { note: 'Last task last week' } : {}),
 }))
 

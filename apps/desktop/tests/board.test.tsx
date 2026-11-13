@@ -648,7 +648,8 @@ describe('the board’s lanes', () => {
     expect(yoursOf(lanes)).toBe(2)
     expect(needsOf(lanes, () => '', vi.fn()).map((need) => [need.kind, need.title])).toEqual([
       ['Finished', 'Which partners call v1?'],
-      ['Ready to accept', 'Rate-limit refunds'],
+      // In its card's word: a check of its failed.
+      ['Not ready to accept', 'Rate-limit refunds'],
     ])
     expect(firstNeedOf(lanes)).toBe('thp1')
     // Kept for later, it is out of Needs you, with what else was kept, the latest first.
@@ -866,21 +867,36 @@ describe('the board’s lanes', () => {
     expect(trackItems(round.steps, round.at, round.at, round.done).map((item) => item.state)).toEqual([TrackStep.Done, TrackStep.Now])
   })
 
-  it('lists work its lead couldn’t resolve a conflict for as stuck, with why, among what needs the person', () => {
+  it('lists work its lead couldn’t resolve a conflict for as a merge conflict, with why, among what needs the person', () => {
     const why = 'The lead couldn’t resolve the conflict with main, in README.md. The merge of origin/main isn’t committed.'
     const lanes = lanesOf(
       board({ tasks: [task({ taskId: 't8', threadId: 'th8', title: 'Add a limit', phase: 'ready', handedBack: why })], calls: [] }),
     )
     expect(lanes.ready.map((work) => work.taskId)).toEqual(['t8'])
-    expect(needsOf(lanes, () => '', vi.fn()).map((need) => [need.kind, need.title, need.meta])).toEqual([['Stuck', 'Add a limit', why]])
+    // In its card's word, as every place says it.
+    expect(needsOf(lanes, () => '', vi.fn()).map((need) => [need.kind, need.title, need.meta])).toEqual([
+      ['Merge conflict', 'Add a limit', why],
+    ])
   })
 
-  it('lists work whose failing checks its lead brought to the person as stuck, with its line', () => {
+  it('puts a task that waits only on issues its lead drafted in Needs you, counted once, not in Running', () => {
+    const drafted = task({ taskId: 't7', threadId: 'th7', title: 'File the gaps', phase: 'waiting', issues: { drafts: 2, changes: 0 } })
+    const lanes = lanesOf(board({ tasks: [drafted], calls: [] }))
+    expect({ issues: lanes.issues.map((work) => work.taskId), running: lanes.running.length, yours: yoursOf(lanes) }).toEqual({
+      issues: ['t7'],
+      running: 0,
+      yours: 1,
+    })
+    expect(needsOf(lanes, () => '', vi.fn()).map((need) => [need.kind, need.title])).toEqual([['Issues to file', 'File the gaps']])
+  })
+
+  it('lists work whose failing checks its lead brought to the person as not ready to accept, with its line', () => {
     const why = 'Fails on main too: test times out in limit.test.ts.'
-    const lanes = lanesOf(
-      board({ tasks: [task({ taskId: 't9', threadId: 'th9', title: 'Add a limit', phase: 'ready', checksBack: why })], calls: [] }),
-    )
-    expect(needsOf(lanes, () => '', vi.fn()).map((need) => [need.kind, need.title, need.meta])).toEqual([['Stuck', 'Add a limit', why]])
+    const back = task({ taskId: 't9', threadId: 'th9', title: 'Add a limit', phase: 'ready', change: change(), checksBack: why })
+    const lanes = lanesOf(board({ tasks: [back], calls: [] }))
+    expect(needsOf(lanes, () => '', vi.fn()).map((need) => [need.kind, need.title, need.meta])).toEqual([
+      ['Not ready to accept', 'Add a limit', why],
+    ])
   })
 })
 

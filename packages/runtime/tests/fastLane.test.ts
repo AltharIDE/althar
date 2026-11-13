@@ -526,6 +526,31 @@ describe('the fast lane at its edges', () => {
       const [made] = yield* sql<{ n: number }>`
         SELECT count(*) AS n FROM external_links WHERE kind = 'review' AND url = ${url}`
       assert.strictEqual(made?.n, 1)
+      // As the host keeps it, for the card to read.
+      const kept = (state: string) => JSON.stringify({ state, number: 641, url, title: 'Reviewed' })
+      yield* sql`UPDATE external_links SET snapshot = ${kept('open')} WHERE kind = 'change' AND url = ${url}`
+
+      // Its card reads the full task's review: reading, then what its draft says, kept once the change merges.
+      const cardOf = Effect.gen(function* () {
+        const thread = yield* (yield* Queries).thread(reviewed.threadId, { limit: 50 })
+        const card = thread.items.find((item) => item.kind === 'small_change')
+        return card?.kind === 'small_change' ? card.content : assert.fail('no small change card')
+      })
+      assert.strictEqual((yield* cardOf).fullTask?.taskId, reviewed.taskId)
+      assert.deepInclude((yield* cardOf).reviewBefore, { state: 'running', findings: 0 })
+      const drafted = (suggested: string, comments: number, sequence: number) =>
+        sql`
+          INSERT INTO thread_items (id, project_id, thread_id, sequence, kind, content, created_at)
+          VALUES (${`item_${String(sequence).padStart(32, '0')}`}, ${project.projectId}, ${reviewed.threadId}, ${sequence}, 'review_draft',
+            ${JSON.stringify({ suggested, comments: Array.from({ length: comments }, (_, i) => ({ id: `c${i}` })) })}, ${when})`
+      yield* drafted('changes_requested', 2, 900)
+      assert.deepInclude((yield* cardOf).reviewBefore, { state: 'found', findings: 2 })
+      yield* drafted('approved', 0, 901)
+      assert.deepInclude((yield* cardOf).reviewBefore, { state: 'clear', findings: 0 })
+      yield* sql`UPDATE external_links SET snapshot = ${kept('merged')} WHERE kind = 'change' AND url = ${url}`
+      const merged = yield* cardOf
+      assert.strictEqual(merged.fullTask?.taskId, reviewed.taskId)
+      assert.deepInclude(merged.reviewBefore, { state: 'clear' })
     }).pipe(Effect.provide(layer)),
   )
 
