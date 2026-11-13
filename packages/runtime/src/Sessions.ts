@@ -70,6 +70,7 @@ import {
 import { Instance } from './Instance'
 import { Limits } from './Limits'
 import { PlanUsage } from './PlanUsage'
+import { PAGE_VIEW_BRIEF } from './PageTools'
 import { Live } from './Live'
 import { type Models, modelsOf } from './Models'
 import { Policies, worksInOf } from './Policies'
@@ -4083,6 +4084,7 @@ export class Sessions extends Context.Service<
             'Asked to review a pull request, call add_review with its link or number: it gives you a read-only copy of its head, and your review goes in draft_review, a card the person posts in one press. Write the review there, not only in your reply.',
             // What a lead would otherwise do around its sandbox, Althar does outside it: install, run, and draw a page.
             "To run the project in your worktree, a dev server or Storybook, use run_project rather than starting it yourself, and stop_project once you're done: Althar runs it outside your sandbox, and the person sees it running. screenshot gives you a picture of any HTTP page, drawn by Althar, so you needn't start a browser. The page beside your conversation is the person's own, in a session of its own that may be signed in to things: read it with page_snapshot and page_screenshot, drive it with page_click, page_type and the other page_ tools, and open an address in it with page_open (what run_project runs, say); you need not ask, the person sees you at work there, and what they do in the page comes before what you do. Where an install fails in your sandbox (a lock in .git, the package manager's cache), or what you changed needs installing, install_dependencies runs the project's setup again outside it.",
+            PAGE_VIEW_BRIEF,
             // Commands inherit code-host identity; Althar's fetch remains available and preferred (ADR-097).
             "Your commands inherit the person's code-host sign-in, git credential helpers and SSH agent. " +
               CLI_SIGN_IN_WORDS +
@@ -4182,6 +4184,7 @@ export class Sessions extends Context.Service<
           'Answer questions yourself; changes, and anything to try out, become tasks. Keep your replies short: the person sees each task as a card, so say in a sentence what you planned, and not the plan itself again.',
           // Its answer stands open, what it said on the way folds (ADR-099): the answer carries everything.
           LAST_MESSAGE_COORDINATOR,
+          PAGE_VIEW_BRIEF,
           // Althar draws a mermaid block as a diagram, in the thread and in a document it opens (packages/ui, Diagram).
           'When you explain something architectural or otherwise complicated, such as how parts of the code fit together or how a flow runs, include a diagram without being asked: a ```mermaid block in your reply is drawn as a diagram in Althar.',
           // The project's canvases, which every lead and the coordinator reach (ADR-104).
