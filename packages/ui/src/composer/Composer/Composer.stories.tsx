@@ -314,7 +314,7 @@ export const Suggesting: Story = {
     await expect(field).toHaveValue('Mark this as done')
   },
 }
-/** A model nearly out, beside its chip: one muted run, warmer as it runs down. */
+/** Legacy quota props leave the composer quiet, at every remaining share. */
 export const NearlyOut: Story = {
   render: () => (
     <div style={{ display: 'grid', gap: 16, width: 520 }}>
@@ -324,7 +324,7 @@ export const NearlyOut: Story = {
     </div>
   ),
 }
-/** The same at the narrowest feet: the note is cut, never wrapped, and send stays put. */
+/** The same at the narrowest feet: models and effort only, and send stays put. */
 export const NearlyOutNarrow: Story = {
   render: () => (
     <div style={{ display: 'grid', gap: 16 }}>

@@ -4101,11 +4101,13 @@ export class Runs extends Context.Service<
             planModel !== null && Option.isSome(live) && !spent && (yield* modelOf(live.value.sessionId)) === planModel
               ? yield* lighterModel(run, live.value.agentId, planModel)
               : undefined
+          const nextAccountId = accountId ?? moved?.accountId
+          const nextModel = moved?.model ?? model
           if (
             Option.isSome(live) &&
             !spent &&
             (agentId === undefined || live.value.agentId === agentId) &&
-            (accountId === undefined || live.value.accountId === accountId)
+            (nextAccountId === undefined || live.value.accountId === nextAccountId)
           ) {
             // Kept, it moves to a model asked for now, or the lighter one Auto picked; the plan's, or one the person set on it since, stays.
             // One that won't move starts afresh.
@@ -4118,15 +4120,23 @@ export class Runs extends Context.Service<
               ...(wantedModel == null ? {} : { model: wantedModel }),
             })
           }
-          if (Option.isSome(live))
+          if (Option.isSome(live)) {
+            // Moving the same model to another account also keeps the person's effort choice.
+            const sql = yield* SqlClient.SqlClient
+            const [current] =
+              moved?.accountId !== undefined && effort == null
+                ? yield* sql<{ effort: string | null }>`SELECT effort FROM provider_sessions WHERE id = ${live.value.sessionId}`
+                : []
+            const nextEffort = effort ?? current?.effort
             return yield* sessions.switchAgent({
               threadId: run.threadId,
               agentId: wanted,
-              ...(model == null ? {} : { model }),
-              ...(effort == null ? {} : { effort }),
+              ...(nextModel == null ? {} : { model: nextModel }),
+              ...(nextEffort == null ? {} : { effort: nextEffort }),
               ...(said === undefined ? {} : { said, about }),
-              ...(accountId === undefined ? {} : { accountId }),
+              ...(nextAccountId === undefined ? {} : { accountId: nextAccountId }),
             })
+          }
           if (said !== undefined) yield* sayOut(run.threadId, run.projectId, said, about)
           // The plan's lead, unless it is out of usage and the project moves on: the next free agent instead.
           const instead = agentId === undefined && implement !== undefined ? yield* insteadOf(run, implement) : undefined
@@ -4137,12 +4147,13 @@ export class Runs extends Context.Service<
           const chosenAccount = accountId ?? instead?.accountId
           // Nearly out, the lead's next step moves to a lighter model of its agent, and the thread says why (README 7).
           const auto = planned ? yield* lighterModel(run, wanted, chosen) : undefined
+          const startingAccountId = chosenAccount ?? auto?.accountId
           return yield* sessions.start({
             threadId: run.threadId,
             agentId: instead?.agentId ?? auto?.agentId ?? wanted,
             ...((auto?.model ?? chosen) === null ? {} : { model: (auto?.model ?? chosen) as string }),
             ...(thinks === null ? {} : { effort: thinks }),
-            ...(chosenAccount === undefined ? {} : { accountId: chosenAccount }),
+            ...(startingAccountId === undefined ? {} : { accountId: startingAccountId }),
           })
         })
 

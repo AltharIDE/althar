@@ -7,6 +7,7 @@ import { isAbsolute, join, resolve, sep } from 'node:path'
 
 import {
   type AfterMergeRule,
+  NEW_PROJECT_DEFAULTS,
   CheckoutAsk,
   AllowedBy,
   AttachedFile,
@@ -659,6 +660,8 @@ export const itemOf = (row: ItemRow): ThreadItem | undefined => {
       }
     }
     case 'notice': {
+      // Quota belongs in Plan usage. Blocking work keeps its actionable task state.
+      if (text(content, 'source') === 'runtime' && text(content, 'about') === 'limit') return undefined
       const severity = text(content, 'severity')
       const description = text(content, 'description')
       const role = text(content, 'role')
@@ -1090,7 +1093,7 @@ export class Queries extends Context.Service<
                 AND EXISTS (SELECT 1 FROM node_attempts a JOIN nodes n ON n.id = a.node_id JOIN workflow_executions e ON e.id = n.execution_id
                   WHERE e.run_id = r.id AND a.state IN ('admitted', 'running', 'held'))) AS working,
             coalesce((SELECT json_extract(r.rules, '$.usageLimit') FROM policies r WHERE r.project_id = p.id ORDER BY r.revision DESC LIMIT 1), 'move') AS usage_limit,
-            coalesce((SELECT json_extract(r.rules, '$.accounts.rotate') FROM policies r WHERE r.project_id = p.id ORDER BY r.revision DESC LIMIT 1), 0) AS rotate_accounts,
+            coalesce((SELECT json_extract(r.rules, '$.accounts.rotate') FROM policies r WHERE r.project_id = p.id ORDER BY r.revision DESC LIMIT 1), ${NEW_PROJECT_DEFAULTS.rotateAccounts ? 1 : 0}) AS rotate_accounts,
             (SELECT json_extract(r.rules, '$.accounts.only') FROM policies r WHERE r.project_id = p.id ORDER BY r.revision DESC LIMIT 1) AS only_accounts,
             (SELECT t.id FROM threads t WHERE t.project_id = p.id AND t.kind = 'coordinator' AND t.owner_actor_id = ${instance.personId}) AS coordinator_thread_id
           FROM projects p WHERE p.archived_at IS NULL ORDER BY p.created_at DESC, p.id DESC`
@@ -3136,7 +3139,7 @@ export class Queries extends Context.Service<
             FROM thread_items i JOIN threads t ON t.id = i.thread_id AND t.kind = 'task' JOIN tasks k ON k.id = t.task_id
             JOIN projects p ON p.id = i.project_id
             WHERE p.archived_at IS NULL AND i.created_at > ${from}
-              AND (i.kind = 'step_result' OR (i.kind = 'notice' AND json_extract(i.content, '$.about') IN ('limit', 'stall')))
+              AND (i.kind = 'step_result' OR (i.kind = 'notice' AND json_extract(i.content, '$.about') = 'stall'))
             ORDER BY i.created_at DESC, i.sequence DESC LIMIT ${EVENTS}`
           const events: Array<HomeEvent> = items.flatMap((row): ReadonlyArray<HomeEvent> => {
             const base = {

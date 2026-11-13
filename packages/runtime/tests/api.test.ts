@@ -945,7 +945,7 @@ describe('accounts, through the API', () => {
           assert.deepStrictEqual(yield* client.FindAccounts({ agentId: 'opencode' }), { found: [] })
           // A project's rule for accounts: rotation, off until turned on, and which accounts each agent may use there.
           const project = yield* client.OpenProject({ commandId: commandId(), grant: yield* grant(repository()) })
-          assert.deepStrictEqual([project.rotateAccounts, project.onlyAccounts], [false, null])
+          assert.deepStrictEqual([project.rotateAccounts, project.onlyAccounts], [true, null])
           yield* client.SetProjectAccounts({ commandId: commandId(), projectId: project.id, rotate: true, only: { codex: [work.id] } })
           const listed = (yield* client.ListProjects()).projects.find((each) => each.id === project.id)
           assert.deepStrictEqual([listed?.rotateAccounts, listed?.onlyAccounts], [true, { codex: [work.id] }])
@@ -1102,7 +1102,8 @@ describe('finished tasks’ folders, through the API', () => {
         assert.deepStrictEqual(before.plansAndReviews, { countdown: 25, rounds: 3, roundsOut: 'settled' })
         assert.deepStrictEqual(before.newProjects, {
           usageLimit: 'move',
-          rotateAccounts: false,
+          rotateAccounts: true,
+          accountStrategy: 'most_room',
           end: 'draft',
           pushCommits: true,
           postScreenshots: false,
@@ -1117,6 +1118,7 @@ describe('finished tasks’ folders, through the API', () => {
         assert.deepStrictEqual(after.newProjects, {
           usageLimit: 'wait',
           rotateAccounts: true,
+          accountStrategy: 'most_room',
           end: 'draft',
           pushCommits: true,
           postScreenshots: false,
@@ -1228,7 +1230,8 @@ describe('project rules, through the API', () => {
           postScreenshots: false,
           leadsReachWeb: true,
           usageLimit: 'move',
-          rotateAccounts: false,
+          rotateAccounts: true,
+          accountStrategy: 'most_room',
           onlyAccounts: null,
           branchPattern: null,
           titlePattern: null,
@@ -2987,6 +2990,14 @@ describe('thread items', () => {
     const about = { source: 'runtime', severity: 'info', title: 'Other changes `A.ts` too. Both leads were told.' }
     assert.strictEqual(itemOf(row('notice', { ...about, situation: { kind: 'overlap', files: ['A.ts'] } })), undefined)
     assert.strictEqual(itemOf(row('notice', about))?.kind, 'notice')
+  })
+
+  it('keeps passive quota notices out of the thread while retaining other notices', () => {
+    const notice = { source: 'runtime', severity: 'info', title: 'Codex has 6% left.', description: null }
+    assert.isUndefined(itemOf(row('notice', { ...notice, about: 'limit' })))
+    assert.strictEqual(itemOf(row('notice', { ...notice, about: 'stall' }))?.kind, 'notice')
+    assert.strictEqual(itemOf(row('notice', { ...notice, about: 'permission' }))?.kind, 'notice')
+    assert.strictEqual(itemOf(row('notice', { ...notice, source: 'agent', failure: 'auth_required' }))?.kind, 'notice')
   })
 
   it('gives each kind its own content, and leaves out kinds the window has no use for yet', () => {

@@ -1,8 +1,8 @@
 import { useQuery } from '@tanstack/react-query'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 
 import type { AgentStatus, BoardTask, PlanStep, TaskEnd as End } from '@althar/contracts'
-import { IconButton, Menu, MenuItem, modelRoomText, TeamDialog, UsageTone, usageTone } from '@althar/ui'
+import { IconButton, Menu, MenuItem, TeamDialog } from '@althar/ui'
 
 import { messageOf } from '../../data/client'
 import { keys, reads } from '../../data/reads'
@@ -11,7 +11,6 @@ import { useEffortNames, useModelNames } from '../../shared/modelNames'
 import { ModelChoice } from '../../shared/ModelChoice'
 import type { Choice } from '../../shared/models'
 import { stepText } from '../../shared/steps'
-import { useModelRooms } from '../usage/usePlan'
 import { ENDS, endOf } from '../project/Card'
 
 /*
@@ -39,8 +38,8 @@ export const text = {
   team: (lead: string, review: string | null) => (review === null ? lead : `${lead}, ${review}`),
   reviews: (name: string) => `${name} reviews`,
   noReview: 'no review',
-  /** Its team can't change any more: it started with the team it had. */
-  begun: 'It started with the team it had.',
+  /** The task is no longer available to change. */
+  begun: 'This task is no longer available to change.',
   /** A task that has begun: when each change takes effect. */
   nextTurn: 'From its next turn.',
   nextRound: 'From the next round.',
@@ -88,26 +87,16 @@ export const useTeamed = (projectId: string | null, taskId: string | null): Team
   return task === undefined || teamChangeOf(task) === null ? null : task
 }
 
-/** Its team in a line: who leads, how hard, with how much is left of its plan where that is nearly out, and who reviews. */
-const useTeamLine = (plan: Plan, projectId: string) => {
+/** Its team in a line: who leads, how hard, and who reviews. */
+const useTeamLine = (plan: Plan) => {
   const named = useModelNames()
   const effortOf = useEffortNames()
-  const roomOf = useModelRooms(projectId)
   const lead = plan.steps.find((step) => step.key === 'implement')
   const review = plan.steps.find((step) => step.key === 'review')
   if (lead === undefined) return null
   const leadInfo = named(lead.agentId, lead.model)
   const effort = effortOf(lead.agentId, lead.model, lead.effort ?? null)
-  const room = roomOf(leadInfo)
-  // Said as the picker's chip says it, once nearly out: 9% left · until 17:10, Out · until 18:00.
-  const low =
-    room == null ||
-    usageTone(room.left) === UsageTone.Plenty ||
-    usageTone(room.left) === UsageTone.Half ||
-    usageTone(room.left) === UsageTone.Low
-      ? null
-      : `${room.left === 0 ? modelRoomText.chipOut : modelRoomText.chipLeft(room.left)}${room.until === null ? '' : ` · ${modelRoomText.until(room.until)}`}`
-  const leadWords = `${leadInfo.name}${effort === null ? '' : ` · ${effort}`}${low === null ? '' : ` (${low})`}`
+  const leadWords = `${leadInfo.name}${effort === null ? '' : ` · ${effort}`}`
   return text.team(
     leadWords,
     review === undefined ? null : review.skipped ? text.noReview : text.reviews(named(review.agentId, review.model).name),
@@ -116,7 +105,6 @@ const useTeamLine = (plan: Plan, projectId: string) => {
 
 /** A row's menu, up next: who's on it, then Start where it starts now, Hold where it can be held, and Change the team…. */
 export function TeamMenu({
-  projectId,
   task,
   onStart,
   onHold,
@@ -128,7 +116,7 @@ export function TeamMenu({
   onHold?: () => void
   onChange: () => void
 }) {
-  const line = useTeamLine(task.plan!, projectId)
+  const line = useTeamLine(task.plan!)
   return (
     <Menu
       trigger={<IconButton icon="more" size="small" label={text.more} />}
@@ -182,19 +170,24 @@ export function ChangeTeam({
   const [first] = useState(task)
   const [edits, setEdits] = useState<Edits>({})
   const [end, setEnd] = useState<End | null | undefined>(undefined)
-  const [busy, setBusy] = useState(false)
+  const [busy, setBusy] = useState<'save' | 'start' | null>(null)
+  const saving = useRef(false)
+  const holding = useRef<Promise<void> | null>(null)
   const [error, setError] = useState<string | null>(null)
   const firstPlan = first?.plan ?? null
   useEffect(() => {
     // Its countdown stops while its team is changed: held, it starts when the person says.
-    if (first?.phase === 'planned' && firstPlan !== null) void client.holdPlan(firstPlan.id).catch(() => undefined)
+    if (first?.phase === 'planned' && firstPlan !== null && holding.current === null) {
+      holding.current = client.holdPlan(firstPlan.id)
+      void holding.current.catch((failure: unknown) => setError(messageOf(failure)))
+    }
   }, [client, first, firstPlan])
   if (first === null || firstPlan === null) return null
   const now = task ?? first
   const plan = now.plan ?? firstPlan
   const how = task === null ? null : teamChangeOf(task)
   // A task that has begun changes through ChangeTeam, until it is merged or settled.
-  const begun = teamChangeOf(first) === 'begun'
+  const begun = how === 'begun' || teamChangeOf(first) === 'begun'
   const gone = how === null
   // A plan made with no review has no review step: a change that can still have one shows it, off, for the person to add.
   const lead = plan.steps.find((step) => step.key === 'implement')
@@ -217,9 +210,13 @@ export function ChangeTeam({
   const ending = end === undefined ? plan.end : end
   const put = (key: PlanStep['key'], patch: Partial<PlanStep>) => setEdits((was) => ({ ...was, [key]: { ...was[key], ...patch } }))
   const save = async (andStart: boolean) => {
-    setBusy(true)
+    if (saving.current) return
+    saving.current = true
+    setBusy(andStart ? 'start' : 'save')
     setError(null)
     try {
+      // Opening the dialog pauses its countdown. That hold must finish before this Start can run.
+      await holding.current
       if (begun) {
         // A live session may have moved since this dialog opened. Only the steps the person touched are a new choice.
         const changed = steps.filter((step) => edits[step.key] !== undefined)
@@ -232,7 +229,9 @@ export function ChangeTeam({
       onClose()
     } catch (failure) {
       setError(messageOf(failure))
-      setBusy(false)
+      setBusy(null)
+    } finally {
+      saving.current = false
     }
   }
   // A review its task has, or a change that can still have one; a plain task or a review shows only what it has.
@@ -283,12 +282,12 @@ export function ChangeTeam({
       // Where the repository's host isn't connected, the task ends on its branch, and there is no ending to pick; a task
       // that has begun keeps the ending it has.
       {...(ending === null || begun ? {} : { end: { value: ENDS[ending], onChange: (next) => setEnd(endOf(next)) } })}
-      {...(gone ? {} : { onSave: () => void save(false) })}
-      {...(!gone && how === 'starts' ? { onStart: () => void save(true) } : {})}
+      {...(gone && busy === null ? {} : { onSave: () => void save(false) })}
+      {...((!gone && how === 'starts') || busy === 'start' ? { onStart: () => void save(true) } : {})}
       onClose={onClose}
       busy={busy}
-      // Why it can't change any more is a fact, said quietly; what failed as it saved is a problem.
-      {...(how === null ? { settled: begun ? text.settled : text.begun } : { error })}
+      // A task no longer available is said quietly; starting it ourselves is still in progress.
+      {...(how === null && busy === null ? { settled: begun ? text.settled : text.begun } : { error })}
     />
   )
 }

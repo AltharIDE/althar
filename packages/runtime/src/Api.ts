@@ -6,6 +6,7 @@ import { basename, dirname, isAbsolute, join, type posix, relative, resolve, sep
 import {
   type AccountStatus,
   API_VERSION,
+  NEW_PROJECT_DEFAULTS,
   apiVersionRefusal,
   ClientAuthority,
   SocketAllowed,
@@ -77,6 +78,7 @@ import { missedReports } from './missedReports'
 import { PullRequestScreenshots } from './PullRequestScreenshots'
 import {
   accountsOf,
+  accountStrategyOf,
   allowsEverything,
   modeOf,
   movesIssues,
@@ -589,6 +591,7 @@ export const handlers = Api.toLayer(
         leadsReachWeb: rules.leadsReachWeb ?? true,
         usageLimit: usageLimitOf(rules),
         rotateAccounts: accounts.rotate,
+        accountStrategy: accountStrategyOf(rules),
         onlyAccounts: accounts.only ?? null,
         branchPattern: rules.branchPattern ?? null,
         titlePattern: rules.titlePattern ?? null,
@@ -832,7 +835,7 @@ export const handlers = Api.toLayer(
                 yours: 0,
                 working: 0,
                 usageLimit: 'move' as const,
-                rotateAccounts: false,
+                rotateAccounts: NEW_PROJECT_DEFAULTS.rotateAccounts,
                 onlyAccounts: null,
               }
             )

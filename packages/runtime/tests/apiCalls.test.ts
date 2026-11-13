@@ -278,6 +278,10 @@ describe('a project’s accounts, from the window', () => {
         // Every account again: none named.
         const all = yield* client.SetProjectRules({ commandId: commandId(), projectId, onlyAccounts: null })
         assert.deepStrictEqual([all.rotateAccounts, all.onlyAccounts], [false, null])
+        const strategy = yield* client.SetProjectRules({ commandId: commandId(), projectId, accountStrategy: 'least_room' })
+        assert.deepStrictEqual([strategy.accountStrategy, strategy.rotateAccounts], ['least_room', true])
+        const restricted = yield* client.SetProjectRules({ commandId: commandId(), projectId, onlyAccounts: { codex: ['acct_work'] } })
+        assert.strictEqual(restricted.accountStrategy, 'least_room')
       }),
     ),
   )

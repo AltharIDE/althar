@@ -22,6 +22,8 @@ const worded = (key: DefaultKey, value: unknown): string => {
   if (key === 'afterMergeReview')
     return newProjectDefaultsText.afterMergeReview.options[value as NewProjectDefaultsValue['afterMergeReview']].label
   if (key === 'usageLimit') return newProjectDefaultsText.usageLimit.options[value as NewProjectDefaultsValue['usageLimit']].label
+  if (key === 'accountStrategy')
+    return newProjectDefaultsText.accountStrategy.options[value as NewProjectDefaultsValue['accountStrategy']].label
   return String(value)
 }
 
