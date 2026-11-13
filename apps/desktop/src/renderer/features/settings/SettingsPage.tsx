@@ -281,6 +281,12 @@ const tabOf = (agent: AgentStatus): AgentTab => {
 /** The agents, one at a time by their tabs: each one's accounts, and the models its work may use; or downloading one that isn't here. */
 function AgentsSection({ start, accounts, asked }: { start: StartModel; accounts: AccountSignInModel; asked?: string }) {
   const [agentId, setAgentId] = useState<string | null>(null)
+  // Looking for an agent again, after the person installed it themselves: the agents are read afresh, sign-ins too.
+  const [checking, setChecking] = useState(false)
+  const checkAgain = () => {
+    setChecking(true)
+    void start.recheck().finally(() => setChecking(false))
+  }
   // Those on this computer first, then the others Althar runs, each in the registry's order.
   const all = start.status?.agents ?? []
   const agents = [...all.filter((agent) => agent.installed), ...all.filter((agent) => !agent.installed)]
@@ -329,6 +335,8 @@ function AgentsSection({ start, accounts, asked }: { start: StartModel; accounts
             }
             onInstall={() => void start.install(chosen.id)}
             {...(chosen.guide === null ? {} : { onHelp: () => openGuide(start, chosen.id) })}
+            onCheck={checkAgain}
+            checking={checking}
           />
         )}
       </AgentTabPanel>

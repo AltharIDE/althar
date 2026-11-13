@@ -14,7 +14,8 @@ import s from './AgentInstall.module.css'
  * missing, and, where Althar can fetch it, the way to have it, said plainly:
  * from where, about how big, checked, and kept apart from the person's own
  * tools. While it downloads it says so; if it didn't finish, why, and the
- * way to try again. The agent's own instructions are beside it either way.
+ * way to try again. The agent's own instructions are beside it either way,
+ * and, for one installed by hand, a way to look for it again at once.
  */
 
 export interface AgentInstallText {
@@ -26,6 +27,7 @@ export interface AgentInstallText {
   downloading: (name: string, size: string) => string
   tryAgain: string
   yourself: string
+  check: string
 }
 
 export const agentInstallText: AgentInstallText = {
@@ -37,6 +39,7 @@ export const agentInstallText: AgentInstallText = {
   downloading: (name, size) => `Downloading ${name}, about ${size}, and checking it…`,
   tryAgain: 'Try again',
   yourself: 'Install it yourself',
+  check: 'Check again',
 }
 
 /** Where a download stands: not started, under way, or stopped with a reason. */
@@ -59,6 +62,10 @@ export type AgentInstallProps = RootProps<
     onInstall?: () => void
     /** Opens the agent's own instructions. Without it, no such link. */
     onHelp?: () => void
+    /** Looks for it again, for one the person installed themselves. Without it, no such button. */
+    onCheck?: () => void
+    /** Looking for it again now. */
+    checking?: boolean
     text?: Partial<AgentInstallText>
   }
 >
@@ -71,12 +78,20 @@ export function AgentInstall({
   state = { kind: 'idle' },
   onInstall,
   onHelp,
+  onCheck,
+  checking = false,
   className,
   text,
   ...rest
 }: AgentInstallProps) {
   const t = { ...agentInstallText, ...text }
   const can = size !== undefined && onInstall !== undefined
+  // Looking again leads where there is nothing to download, and follows the download where there is.
+  const check = onCheck && (
+    <Button variant={can ? 'quiet' : 'default'} busy={checking} onClick={onCheck}>
+      {t.check}
+    </Button>
+  )
   return (
     <section aria-label={t.missing(name)} className={cx(s.install, className)} {...rest}>
       <BrandChip {...(brand === undefined ? {} : { brand })} size={44} className={s.chip} />
@@ -96,16 +111,19 @@ export function AgentInstall({
             )}
             <p className={s.note}>{can ? (pinned === undefined ? t.can(name, size) : t.canPinned(name, size, pinned)) : t.cannot(name)}</p>
             <div className={s.ways}>
-              {can && (
+              {can ? (
                 <Button variant="default" onClick={onInstall}>
                   {state.kind === 'failed' ? t.tryAgain : t.download(name)}
                 </Button>
+              ) : (
+                check
               )}
               {onHelp && (
                 <ActionButton icon="external" onClick={onHelp}>
                   {t.yourself}
                 </ActionButton>
               )}
+              {can && check}
             </div>
           </>
         )}
