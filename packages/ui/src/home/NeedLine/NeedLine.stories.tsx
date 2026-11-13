@@ -307,7 +307,6 @@ export const AllStates: Story = {
       size="wide"
       cells={[
         { state: 'every kind', node: <NeedList style={{ width: 820 }}>{lines}</NeedList> },
-        { state: 'narrow', node: <NeedList style={{ width: 480 }}>{lines}</NeedList> },
         {
           state: 'allowed always',
           node: <NeedList style={{ width: 760 }}>{settled({ said: 'Always', note: 'kept in Halyard’s rules' })}</NeedList>,

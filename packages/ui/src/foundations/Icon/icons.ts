@@ -65,6 +65,7 @@ import {
   TaskList,
   Terminal,
   Tools,
+  WarningCircle,
   WifiOff,
   Xmark,
 } from 'iconoir-react'
@@ -197,6 +198,8 @@ export const ICONS = {
   canvas: Palette,
   /** What something is, explained where it is pointed at. */
   info: InfoCircle,
+  /** Something failed: the mark before the words that say what, in the danger colour. */
+  problem: WarningCircle,
 } satisfies Record<string, ComponentType<SVGProps<SVGSVGElement> & { strokeWidth?: number | string }>>
 
 export type IconName = keyof typeof ICONS

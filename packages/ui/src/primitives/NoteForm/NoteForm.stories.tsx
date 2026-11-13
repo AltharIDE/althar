@@ -17,9 +17,6 @@ const meta = {
 export default meta
 type Story = StoryObj<typeof meta>
 
-/** It takes focus. */
-export const Empty: Story = {}
-
 /** Sent empty, it says what is missing and keeps focus in the field. */
 export const Missing: Story = {
   play: async ({ args, canvasElement }) => {
@@ -31,9 +28,6 @@ export const Missing: Story = {
     await expect(c.getByRole('textbox')).toHaveFocus()
   },
 }
-
-/** While it sends, the button says so and ignores presses. */
-export const Pending: Story = { args: { pending: true } }
 
 export const Sending: Story = {
   play: async ({ args, canvasElement }) => {
@@ -55,6 +49,7 @@ export const Cancelling: Story = {
   },
 }
 
+/** Busy: while it sends, the button says so and ignores presses. Narrow: the two buttons move under the field together. */
 export const AllStates: Story = {
   render: (args) => (
     <States
@@ -63,6 +58,14 @@ export const AllStates: Story = {
         { state: 'empty', node: <NoteForm {...args} /> },
         { state: 'with a note', node: <NoteForm {...args} defaultValue="Keep the old cache" /> },
         { state: 'busy', node: <NoteForm {...args} defaultValue="Keep the old cache" pending /> },
+        {
+          state: 'narrow',
+          node: (
+            <div style={{ width: 300, display: 'flex' }}>
+              <NoteForm {...args} defaultValue="Keep the old cache" />
+            </div>
+          ),
+        },
       ]}
     />
   ),

@@ -597,14 +597,14 @@ export const QuickFoot: Story = {
   ),
 }
 
-/** Open at rest, and the parts on their own: modules placed and not, the lines, a link on and off, a long foot wrapping, and the Dock the icon shows in. */
+/** The parts on their own: modules placed and not, the lines, a link on and off, a long foot wrapping, and the Dock the icon shows in. Open, it is AtRest; a card, ConnectingAService. */
 export const AllStates: Story = {
+  // Across the page, not at its end as the panel opens.
+  decorators: [(Story) => <div style={{ flex: 1 }}>{Story()}</div>],
   render: () => (
     <States
       size="wide"
       cells={[
-        { state: 'open', node: <Settings /> },
-        { state: 'a card', node: <Settings start="connect" /> },
         {
           state: 'modules, not placed',
           node: frame(

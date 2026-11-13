@@ -17,19 +17,24 @@
   color: var(--danger);
 }
 
+/* A failed turn: the problem, with its ways out beside it. */
+.failed {
+  margin: 4px 0;
+}
+
 /* What the agent said went wrong, in its own words, under Althar's plain line for it. */
 .detail {
-  margin: 0 0 4px;
+  display: block;
+  margin-top: 2px;
   color: var(--t-3);
   font-size: 12px;
 }
 
-/* The ways out of a failed turn, side by side under it. */
+/* The ways out of a failed turn, side by side, beside it. */
 .ways {
-  display: flex;
+  display: inline-flex;
   flex-wrap: wrap;
-  gap: 16px;
-  margin: 4px 0;
+  gap: 4px 14px;
 }
 
 /* A review's summary, under its row, where a step's summary opens. */

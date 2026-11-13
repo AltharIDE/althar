@@ -140,8 +140,6 @@ export const OnlyByPrefix: Story = {
   },
 }
 
-export const Stacked: Story = { render: () => <Permissions items={REQUESTS} project={PROJECT} onAnswer={fn()} /> }
-
 /** Allow all allows each once; the card in front beats for all of them, then the stack folds to one line. */
 export const AllowAll: Story = {
   render: (args) => <Permissions items={REQUESTS} project={PROJECT} onAnswer={args.onAnswer} />,
@@ -153,9 +151,6 @@ export const AllowAll: Story = {
   },
 }
 
-/** Many at once: never more than two behind the front card. */
-export const ManyAtOnce: Story = { render: () => <Permissions items={MANY} project={PROJECT} onAnswer={fn()} /> }
-
 /** A stack of one is a card, and folds as one. */
 export const StackOfOne: Story = {
   render: (args) => <Permissions items={[STAGING]} project={PROJECT} onAnswer={args.onAnswer} />,
@@ -166,14 +161,6 @@ export const StackOfOne: Story = {
     await waitFor(() => expect(document.activeElement).toHaveTextContent('Allowed once'))
   },
 }
-/** Without a kind, "always" offers only the prefix and the exact command. */
-export const NoKind: Story = { args: { kind: undefined } }
-
-export const AllowedWithoutYou: Story = { render: () => <Allowed items={ALLOWED} project={PROJECT} /> }
-export const AllowedWithoutYouOpen: Story = { render: () => <Allowed items={ALLOWED} project={PROJECT} defaultOpen /> }
-
-/** A rule answered, in a thread with no steps to tell apart: the command and the rule. */
-export const AllowedByRule: Story = { render: () => <Allowed items={BY_RULE} project={PROJECT} defaultOpen /> }
 
 /* Each answer picked, an option hovered and focused, the submit pressed, the stack, answered, and what was allowed without you. */
 export const AllStates: Story = {

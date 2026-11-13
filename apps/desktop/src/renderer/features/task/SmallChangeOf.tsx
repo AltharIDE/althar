@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 
-import { Model, SmallChange, type SmallChangeChecks, type SmallChangeReview, type SmallChangeReviewWhen } from '@althar/ui'
+import { Model, SmallChange, type SmallChangeChecks, type SmallChangeReview, type SmallChangeReviewWhen, Problem } from '@althar/ui'
 
 import { messageOf } from '../../data/client'
 import { useServices } from '../../data/services'
@@ -194,11 +194,7 @@ export function SmallChangeOf({
             ? {}
             : { onFindings: () => onShow(item) })}
       />
-      {error !== null && (
-        <p className={s.failure} role="alert">
-          {text.failed(error)}
-        </p>
-      )}
+      {error !== null && <Problem className={s.failure}>{text.failed(error)}</Problem>}
     </>
   )
 }

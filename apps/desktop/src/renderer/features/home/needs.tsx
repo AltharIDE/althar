@@ -56,6 +56,8 @@ export const needText = {
   deny: 'Deny',
   look: 'Open',
   review: 'Review',
+  /** A stuck step whose agent is signed out: Settings, at its sign-in, started. */
+  signIn: 'Sign in again',
   /** An agent's question, opened where it was asked to answer it. */
   answer: 'Answer',
   /** A change on its branch alone, by its size. */
@@ -85,6 +87,8 @@ export interface Need {
   readonly permission?: HomeCall
   /** What its button says where it only opens its task, where that isn't Open: Review, for work to look over and accept. */
   readonly opens?: string
+  /** A step stuck on its agent's sign-in, by the agent's id: its line signs it in again, as the task's card does. */
+  readonly signIn?: string
   /** A ready change: the task, and the one next thing its pull request needs, done from its line where the place offers it. */
   readonly ready?: { readonly task: HomeTask; readonly next: Next }
   /** Answered here: which way, what was said, and where it was kept or what to do instead. */
@@ -266,6 +270,7 @@ export const needsOf = ({
               stuck.step === 'publish' && stuck.why !== 'not_connected'
                 ? stuckText.publishing(stuck)
                 : stuckText.what(stuck, agentName(stuck.agentId) || 'The agent'),
+            ...((stuck.why === 'signed_out' || stuck.why === 'sign_in_ended') && stuck.agentId !== null ? { signIn: stuck.agentId } : {}),
           },
     ]
   }),
@@ -345,6 +350,7 @@ export function needLineOf(
     onNext,
     doing,
     failed,
+    onSignIn,
   }: {
     onOpen: (threadId: string) => void
     onAnswer: (call: HomeCall, project: ProjectRef, decision: 'allow' | 'reject') => void
@@ -356,6 +362,8 @@ export function needLineOf(
     doing?: (taskId: string) => boolean
     /** What last failed for a task's push or merge, to say in its line and offer to try again. */
     failed?: (taskId: string) => ActionFailure | undefined
+    /** Opens Settings at an agent's sign-in, started: a stuck step's line whose agent is signed out offers it. */
+    onSignIn?: (agentId: string) => void
   },
 ): ReactNode {
   const open = () => onOpen(need.threadId)
@@ -422,6 +430,11 @@ export function needLineOf(
               {doing?.(ready.task.taskId) === true ? doingWords(here) : why === null ? nextWords(here) : standingText.nextFailed.again}
             </Button>
           )
+        ) : need.signIn !== undefined && onSignIn !== undefined ? (
+          // What puts it right, as the task's card offers first; once signed in, its task's Try again picks up where it stopped.
+          <Button size="small" onClick={() => onSignIn(need.signIn ?? '')}>
+            {needText.signIn}
+          </Button>
         ) : permission === undefined ? (
           <Button size="small" {...(need.kind === kindWords.question ? { variant: 'signal' as const } : {})} onClick={open}>
             {need.opens ?? (need.kind === kindWords.question ? needText.answer : needText.look)}

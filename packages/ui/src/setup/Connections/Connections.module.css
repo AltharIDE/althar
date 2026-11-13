@@ -1,5 +1,7 @@
+/* as a container it can't take its width from its rows, so it fills what it is in */
 .list {
   container-type: inline-size;
+  width: 100%;
   margin: 0;
   padding: 0;
   list-style: none;

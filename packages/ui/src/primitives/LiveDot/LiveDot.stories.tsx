@@ -7,10 +7,6 @@ const meta = { title: 'Primitives/LiveDot', component: LiveDot } satisfies Meta<
 export default meta
 type Story = StoryObj<typeof meta>
 
-export const Still: Story = {}
-export const Listening: Story = { args: { ping: true } }
-export const JustArrived: Story = { args: { ping: true, urgent: true } }
-
 export const AllStates: Story = {
   render: () => (
     <States

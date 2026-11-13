@@ -1589,7 +1589,7 @@ describe('a task', () => {
     withServices(<Task />, client)
     const busy = await screen.findByRole('textbox', { name: 'Add to the queue, or interrupt the lead' })
     // The queue says what went with it.
-    expect(screen.getByText('1 image')).toBeTruthy()
+    expect(screen.getByText(/1 image$/)).toBeTruthy()
     await userEvent.click(await screen.findByRole('button', { name: 'Edit' }))
     expect(await screen.findByRole('img', { name: 'shot.png' })).toHaveProperty('src', `althar-picture://shot/${'f'.repeat(64)}?w=1120`)
     await userEvent.type(busy, ' too{Enter}')

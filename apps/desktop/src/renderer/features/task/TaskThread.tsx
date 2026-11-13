@@ -34,7 +34,7 @@ import type { Block, StepResult } from '../../shared/thread'
 import { RuleReceipt } from '../../shared/RuleReceipt'
 import { SaidIn } from '../../shared/code/CodeHost'
 import { CanvasLines, McpActs, PartView, ThreadBlocks } from '../../shared/ThreadBlocks'
-import { WayOut } from '../../shared/WayOut'
+import { FailedTurn } from '../../shared/WayOut'
 import { PublishedReport, reportText, ReviewReport } from './Reports'
 import { HelperWork } from './HelperWork'
 import s from './TaskThread.module.css'
@@ -354,18 +354,14 @@ const RoundView = memo(function RoundView({
       {pictures(block.shown.after)}
       <CanvasLines drawn={block.drawn} />
       {block.failed !== null && (
-        <>
-          <AltharLine tone="warning">{block.failed.text}</AltharLine>
-          {block.failed.detail !== undefined && <p className={s.detail}>{block.failed.detail}</p>}
-          {out !== null && (
-            <WayOut
-              failure={block.failed.failure}
-              {...(out.again ? { onTryAgain } : {})}
-              {...(out.compact ? { onCompact } : {})}
-              {...(out.signIn === null ? {} : { onSignIn: () => onSignIn(out.signIn ?? '') })}
-            />
-          )}
-        </>
+        <FailedTurn
+          text={block.failed.text}
+          detail={block.failed.detail}
+          failure={block.failed.failure}
+          {...(out?.again === true ? { onTryAgain } : {})}
+          {...(out?.compact === true ? { onCompact } : {})}
+          {...(out == null || out.signIn === null ? {} : { onSignIn: () => onSignIn(out.signIn ?? '') })}
+        />
       )}
     </Round>
   )

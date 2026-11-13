@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
-import { useState } from 'react'
+import { type CSSProperties, useState } from 'react'
 import { expect, fn, userEvent, waitFor, within } from 'storybook/test'
 
 import { CODEX, OPUS } from '../../fixtures/models'
@@ -220,19 +220,24 @@ export const SwitchingFaces: Story = {
   },
 }
 
+/* The bar needs a window's width, not a thread's: each cell takes the whole row. */
+const WINDOW_WIDE = { '--measure': '100vw' } as CSSProperties
+
 export const AllStates: Story = {
   render: () => (
-    <States
-      size="wide"
-      cells={[
-        { state: 'reviewing', node: <Header /> },
-        { state: 'implementing', node: <Header {...Implementing.args} /> },
-        { state: 'ready for you', node: <Header {...ReadyForYou.args} /> },
-        { state: 'finished, not a change', node: <Header {...FinishedNotAChange.args} /> },
-        { state: 'stopped', node: <Header {...Stopped.args} /> },
-        { state: 'nothing built', node: <Header {...NothingBuilt.args} /> },
-        { state: 'long title', node: <Header {...LongTitle.args} /> },
-      ]}
-    />
+    <div style={WINDOW_WIDE}>
+      <States
+        size="thread"
+        cells={[
+          { state: 'reviewing', node: <Header /> },
+          { state: 'implementing', node: <Header {...Implementing.args} /> },
+          { state: 'ready for you', node: <Header {...ReadyForYou.args} /> },
+          { state: 'finished, not a change', node: <Header {...FinishedNotAChange.args} /> },
+          { state: 'stopped', node: <Header {...Stopped.args} /> },
+          { state: 'nothing built', node: <Header {...NothingBuilt.args} /> },
+          { state: 'long title', node: <Header {...LongTitle.args} /> },
+        ]}
+      />
+    </div>
   ),
 }

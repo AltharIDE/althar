@@ -26,6 +26,7 @@ import { useRefocus } from '../../lib/refocus'
 import { LinkButton } from '../../primitives/LinkButton/LinkButton'
 import { Spinner } from '../../primitives/Spinner/Spinner'
 import { Menu, MenuRadioGroup, MenuRadioItem } from '../../primitives/Menu/Menu'
+import { Problem } from '../../primitives/Problem/Problem'
 import { CommentChip, type ComposerComment } from '../Comments/Comments'
 import s from './Composer.module.css'
 
@@ -499,7 +500,12 @@ export function Composer({
                 <li key={q.id} className={s.queued}>
                   <span className={s.queuedText}>
                     {q.text}
-                    {q.attached && <span className={s.queuedAttached}>{q.attached}</span>}
+                    {q.attached && (
+                      <span className={s.queuedAttached}>
+                        {q.text ? ' · ' : ''}
+                        {q.attached}
+                      </span>
+                    )}
                   </span>
                   {onEditQueued && (
                     <LinkButton className={s.queuedEdit} onClick={() => onEditQueued(q.id)}>
@@ -517,16 +523,21 @@ export function Composer({
             </ol>
           </section>
         )}
-        {onAddFiles && (
-          /* what the consumer says of what is added, announced as it changes; empty, it takes no room */
-          <output className={s.imageNote}>{fileNote}</output>
+        {/* what the consumer says of what is added: one it refused, and why; announced as it appears */}
+        {onAddFiles && fileNote && (
+          <Problem size="small" className={s.problem}>
+            {fileNote}
+          </Problem>
         )}
         {dictation?.arrived && <p className={s.imageNote}>{t.dictatedAway}</p>}
         {notSent && (
-          <div className={s.notSent} role="alert">
-            <span>{t.notSent}</span>
-            <IconButton icon="close" size="small" label={t.dismissNotSent} onClick={() => setNotSent(false)} />
-          </div>
+          <Problem
+            size="small"
+            className={s.problem}
+            action={<IconButton icon="close" size="small" label={t.dismissNotSent} onClick={() => setNotSent(false)} />}
+          >
+            {t.notSent}
+          </Problem>
         )}
         {/* what is attached grows in, and fades once taken off */}
         <ListMotion within={form} enter="grow">

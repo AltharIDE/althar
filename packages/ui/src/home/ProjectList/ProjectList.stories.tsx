@@ -71,6 +71,7 @@ export const OpensProject: Story = {
 export const AllStates: Story = {
   render: (args) => (
     <States
+      size="wide"
       cells={[
         {
           state: 'few',

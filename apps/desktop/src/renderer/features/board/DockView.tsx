@@ -2,7 +2,7 @@ import { useQuery } from '@tanstack/react-query'
 import { useEffect } from 'react'
 
 import type { AgentStatus, BoardTask, ThreadSnapshot } from '@althar/contracts'
-import { AcceptPeek, ActionButton, Dock, type PeekStep, TaskStatus, TrackStep, WorkPeek } from '@althar/ui'
+import { AcceptPeek, ActionButton, Dock, type PeekStep, TaskStatus, TrackStep, WorkPeek, Problem } from '@althar/ui'
 
 import { keys, reads } from '../../data/reads'
 import { useServices } from '../../data/services'
@@ -251,11 +251,7 @@ export function DockView({
         steps={stepsOf(task)}
         lead={lead}
       />
-      {model.error !== null && (
-        <p className={s.failure} role="alert">
-          {model.error}
-        </p>
-      )}
+      {model.error !== null && <Problem className={s.failure}>{model.error}</Problem>}
       <div className={s.actions}>
         {task.phase === 'ready' && task.nothingBuilt !== true && (
           <ActionButton icon="file" onClick={() => onChanges(task)}>

@@ -8,9 +8,6 @@ const meta = { title: 'Primitives/TaskGlyph', component: TaskGlyph, args: { stat
 export default meta
 type Story = StoryObj<typeof meta>
 
-export const Running: Story = {}
-export const WaitingOnYou: Story = { args: { status: TaskStatus.Yours } }
-
 export const AllStates: Story = {
   render: () => <States cells={Object.values(TaskStatus).map((status) => ({ state: status, node: <TaskGlyph status={status} /> }))} />,
 }

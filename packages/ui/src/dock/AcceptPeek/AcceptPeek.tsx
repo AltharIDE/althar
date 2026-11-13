@@ -12,6 +12,7 @@ import { Checks, type ChangeCheck } from '../../primitives/Checks/Checks'
 import { CheckState } from '../../foundations/vocabulary'
 import { Delta, FileChanges, type ChangedFile } from '../../primitives/FileChanges/FileChanges'
 import { NoteForm } from '../../primitives/NoteForm/NoteForm'
+import { Problem } from '../../primitives/Problem/Problem'
 import { PeekFoot, PeekHead, PeekSection } from '../Dock/Dock'
 import s from './AcceptPeek.module.css'
 
@@ -229,9 +230,9 @@ export function AcceptPeek({
           </>
         )}
         {error && (
-          <span className={s.error} role="alert">
+          <Problem as="span" size="small" className={s.problem}>
             {error}
-          </span>
+          </Problem>
         )}
       </PeekFoot>
     </>

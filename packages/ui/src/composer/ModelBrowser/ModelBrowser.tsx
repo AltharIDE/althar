@@ -196,6 +196,8 @@ export function ModelBrowser({
     )
   }, [q, filter, pins, blocked, models, runtimes])
 
+  /* where some models have a mark, one without keeps its name in line with theirs */
+  const marked = rows.some((m) => m.mark !== undefined)
   /* a column shows only where a row has something in it */
   const readings = useMemo(() => new Map(rows.map((m) => [m.id, room?.(m) ?? null])), [rows, room])
   const hasRoom = rows.some((m) => readings.get(m.id) != null)
@@ -345,7 +347,7 @@ export function ModelBrowser({
                         <button
                           type="button"
                           data-use
-                          className={s.use}
+                          className={cx(s.use, marked && m.mark === undefined && s.unmarked)}
                           disabled={off}
                           onClick={() => onPick(m.id)}
                           aria-label={t.use(m.name, inUse)}

@@ -1,7 +1,7 @@
 import { type DragEvent, useEffect, useState } from 'react'
 
 import type { HomeCall, HomeEvent, HomeTask } from '@althar/contracts'
-import { type IconName, modKey, PermissionAnswers, type ProjectRef } from '@althar/ui'
+import { type IconName, modKey, PermissionAnswers, type ProjectRef, Problem } from '@althar/ui'
 import { Home, type HomeEvent as HomeLine, type HomeNeed, type HomeProject, type HomeRun } from '@althar/ui/screens'
 
 import { taskStatusOf } from '../../shared/taskStatus'
@@ -101,6 +101,7 @@ export function HomeView({
   onProject,
   onTalk,
   onTask,
+  onSignIn,
 }: {
   model: HomeModel
   start: StartModel
@@ -108,6 +109,8 @@ export function HomeView({
   /** Open a project's conversation with its coordinator. */
   onTalk: (projectId: string) => void
   onTask: (threadId: string) => void
+  /** Opens Settings at an agent's sign-in, started: a stuck step's line whose agent is signed out offers it. */
+  onSignIn?: (agentId: string) => void
 }) {
   const home = model.home
   const now = useNow(true)
@@ -167,6 +170,7 @@ export function HomeView({
       onNext: doNext,
       doing,
       failed: (taskId) => model.failed[taskId],
+      ...(onSignIn === undefined ? {} : { onSignIn }),
     }),
   }))
 
@@ -208,11 +212,7 @@ export function HomeView({
 
   return (
     <div className={s.window} {...drop}>
-      {error !== null && (
-        <p className={s.failure} role="alert">
-          {error}
-        </p>
-      )}
+      {error !== null && <Problem className={s.failure}>{error}</Problem>}
       <div className={s.body}>
         {/* Unread is not empty: nothing shows until the home is read. */}
         {home !== null && (

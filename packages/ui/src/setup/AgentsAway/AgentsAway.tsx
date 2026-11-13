@@ -8,6 +8,7 @@ import { cx } from '../../lib/cx'
 import { ActionButton } from '../../primitives/ActionButton/ActionButton'
 import { Button } from '../../primitives/Button/Button'
 import { Tooltip } from '../../primitives/HoverCard/HoverCard'
+import { Problem } from '../../primitives/Problem/Problem'
 import { Spinner } from '../../primitives/Spinner/Spinner'
 import type { PinnedDownload, RuntimeEntry, RuntimesProps } from '../Runtimes/Runtimes'
 import s from './AgentsAway.module.css'
@@ -79,9 +80,9 @@ export function AgentsAway({ agents, onInstall, onHelp, className, text }: Agent
             </span>
             <span className={s.way}>{wayOf(r, t, onInstall, onHelp)}</span>
             {r.state === RuntimeState.Missing && r.failed !== undefined && (
-              <span className={s.failed} role="alert">
+              <Problem as="span" size="small" className={s.failed}>
                 {r.failed}
-              </span>
+              </Problem>
             )}
           </li>
         ))}

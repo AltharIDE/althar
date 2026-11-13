@@ -113,6 +113,23 @@
   opacity: 0;
   cursor: pointer;
 }
+/*
+ * What the picker says beside itself, a model nearly out, sits under who it is at the row's end; not while the picker is
+ * moved to the pointer and open, where its list says it, nor where the row already says the step waits.
+ */
+.cover > :not(button, :has(button)) {
+  position: absolute;
+  right: 26px;
+  bottom: 4px;
+  max-width: 50%;
+  margin: 0;
+  padding: 0;
+  text-align: end;
+}
+.cover[style] > :not(button, :has(button)),
+.out .cover > :not(button, :has(button)) {
+  display: none;
+}
 /* A branch picker in the row stays its own control, over the row's. */
 .who .branch,
 .who :global(button) {

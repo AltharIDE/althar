@@ -3,6 +3,7 @@ import { BrandChip } from '../../foundations/Marks/Marks'
 import type { Brand } from '../../foundations/brands/brands'
 import { cx } from '../../lib/cx'
 import type { RootProps } from '../../lib/props'
+import { Problem } from '../../primitives/Problem/Problem'
 import type { PinnedDownload } from '../Runtimes/Runtimes'
 import { ActionButton } from '../../primitives/ActionButton/ActionButton'
 import { Button } from '../../primitives/Button/Button'
@@ -104,11 +105,7 @@ export function AgentInstall({
           </p>
         ) : (
           <>
-            {state.kind === 'failed' && (
-              <p className={s.failed} role="alert">
-                {state.why}
-              </p>
-            )}
+            {state.kind === 'failed' && <Problem>{state.why}</Problem>}
             <p className={s.note}>{can ? (pinned === undefined ? t.can(name, size) : t.canPinned(name, size, pinned)) : t.cannot(name)}</p>
             <div className={s.ways}>
               {can ? (
@@ -119,7 +116,8 @@ export function AgentInstall({
                 check
               )}
               {onHelp && (
-                <ActionButton icon="external" onClick={onHelp}>
+                // First in its row, where there is nothing to download or check, its glyph lines up with the words over it.
+                <ActionButton icon="external" {...(can || check ? {} : { flush: 'start' as const })} onClick={onHelp}>
                   {t.yourself}
                 </ActionButton>
               )}

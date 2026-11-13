@@ -22,7 +22,7 @@ function Example({ options = OPTIONS }: { options?: ChoiceOption<Limit>[] }) {
   )
 }
 
-/* Pictures for tiles: the mark on three grounds, standing in for the app's icons. */
+/* Pictures for tiles: the mark on three grounds, standing in for the app's icons, which are the same in every theme. */
 type Ground = 'cobalt' | 'paper' | 'ink'
 const ground = (background: string, color: string) => (
   <span style={{ display: 'grid', placeItems: 'center', width: 48, height: 48, borderRadius: 11, background, color }}>
@@ -30,9 +30,9 @@ const ground = (background: string, color: string) => (
   </span>
 )
 const TILES: ChoiceOption<Ground>[] = [
-  { value: 'cobalt', title: 'Cobalt', picture: ground('var(--live)', '#f4f1e8') },
-  { value: 'paper', title: 'Paper', picture: ground('#f4f1e8', 'var(--t-1)') },
-  { value: 'ink', title: 'Ink', picture: ground('var(--t-1)', '#f4f1e8') },
+  { value: 'cobalt', title: 'Cobalt', picture: ground('#2b3bff', '#f4f1e8') },
+  { value: 'paper', title: 'Paper', picture: ground('#f4f1e8', '#141417') },
+  { value: 'ink', title: 'Ink', picture: ground('#141417', '#f4f1e8') },
 ]
 
 function TileExample() {
@@ -47,10 +47,6 @@ const meta = {
 } satisfies Meta<typeof Choices<Limit>>
 export default meta
 type Story = StoryObj<typeof meta>
-
-export const Default: Story = {
-  render: () => <Example />,
-}
 
 /** Choosing by pointer, then by arrow key. */
 export const Choosing: Story = {
@@ -79,8 +75,6 @@ export const Tiles: Story = {
     await waitFor(() => expect(c.getByRole('radio', { name: 'Ink' })).toBeChecked())
   },
 }
-
-export const WithDisabled: Story = { render: () => <Example options={OPTIONS.map((o) => ({ ...o, disabled: o.value === 'ask' }))} /> }
 
 export const AllStates: Story = {
   parameters: statesOn({ hover: '[role="radio"]:nth-child(2)', focus: '[aria-checked="true"]', pressed: '[role="radio"]:nth-child(2)' }),

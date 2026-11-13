@@ -2,7 +2,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useId, useState } from 'react'
 
 import type { Preset } from '@althar/contracts'
-import { Button, Field, FieldArea, FormRow, Icon, Segmented, SettingList, SettingRow, Switch } from '@althar/ui'
+import { Button, Field, FieldArea, FormRow, Icon, Segmented, SettingList, SettingRow, Switch, Problem } from '@althar/ui'
 
 import { useGoneAtOnce } from '../../data/goneAtOnce'
 import { useServices } from '../../data/services'
@@ -102,7 +102,7 @@ function PresetEditor({ preset, onDone }: { preset: Preset; onDone: () => void }
           <Switch checked={only} onChange={setOnly} label={presetsText.onlyIn(preset.from)} />
         </FormRow>
       )}
-      {failed !== null && <p role="alert">{failed}</p>}
+      {failed !== null && <Problem>{failed}</Problem>}
       <Button size="small" onClick={() => void save()}>
         {presetsText.save}
       </Button>{' '}
@@ -125,7 +125,7 @@ export function PresetsSection() {
   const own = presets.filter((one) => !one.builtin)
   return (
     <SettingList>
-      {failed !== null && <p role="alert">{failed}</p>}
+      {failed !== null && <Problem>{failed}</Problem>}
       {presets.map((preset) => (
         <SettingRow
           key={preset.id}

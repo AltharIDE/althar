@@ -136,8 +136,6 @@
 
 .failure {
   margin: 0;
-  color: var(--danger);
-  font-size: 13px;
 }
 
 /* A new project's card for its code host and a tracker, at the head of its empty conversation. */

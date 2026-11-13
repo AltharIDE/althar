@@ -4,6 +4,7 @@ import { cx } from '../../lib/cx'
 import type { RootProps } from '../../lib/props'
 import { LinkButton } from '../../primitives/LinkButton/LinkButton'
 import { LiveDot } from '../../primitives/LiveDot/LiveDot'
+import { Problem } from '../../primitives/Problem/Problem'
 import { NeedList } from '../NeedLine/NeedLine'
 import s from './EdgeSheet.module.css'
 
@@ -77,9 +78,9 @@ export function EdgeSheet({ waiting, needs, work, tone = 'paper', onOpenApp, fai
         )}
       </header>
       {failure && (
-        <p role="alert" className={s.failure}>
+        <Problem size="small" className={s.failure}>
           {failure}
-        </p>
+        </Problem>
       )}
       {hasNeeds && (
         <NeedList bare className={s.calls}>

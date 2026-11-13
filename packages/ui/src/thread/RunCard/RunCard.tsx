@@ -3,6 +3,7 @@ import { Fragment, useLayoutEffect, useRef, type RefObject } from 'react'
 import { Icon } from '../../foundations/Icon/Icon'
 import { useControlled } from '../../lib/controlled'
 import { cx } from '../../lib/cx'
+import { Rhythm } from '../../lib/rhythm'
 import { commandAtGlance, type CommandOption, readCommand } from '../../lib/runCommand'
 import { useStickToBottom } from '../../lib/stick'
 import { Button } from '../../primitives/Button/Button'
@@ -122,7 +123,7 @@ export function RunCard({
   const called = name ?? commandAtGlance(command)
   const why = phase === 'failed' ? ended?.last : undefined
   return (
-    <article className={cx(s.card, ended !== undefined && s.ended, className)} aria-label={t.label(where)}>
+    <article className={cx(s.card, ended !== undefined && s.ended, className)} data-rhythm={Rhythm.Card} aria-label={t.label(where)}>
       <span className={s.mark} aria-hidden="true">
         {phase === 'starting' && <Spinner size="small" />}
         {phase === 'up' && <LiveDot />}
@@ -263,6 +264,7 @@ function Printed({ output, running, exit }: { output: RunOutput; running: boolea
     <div className={s.printed}>
       <div ref={box} className={s.scroll}>
         <Terminal
+          flush
           lines={lines}
           {...(running && !reading ? { live: writing } : {})}
           {...(reading ? { loading: true } : {})}

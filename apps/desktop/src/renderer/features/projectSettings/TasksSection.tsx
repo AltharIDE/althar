@@ -16,6 +16,7 @@ import {
   SettingRow,
   SettingSwitch,
   TaskEnd,
+  Problem,
 } from '@althar/ui'
 
 import { device } from '../../shared/device'
@@ -130,9 +131,9 @@ function SwitchNote({ line, now, failed }: { line?: string; now?: ReactNode; fai
         </>
       )}
       {failed !== null && (
-        <span className={s.failedLine} role="alert">
+        <Problem as="span" size="small" className={s.failedLine}>
           {failed}
-        </span>
+        </Problem>
       )}
     </>
   )

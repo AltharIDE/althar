@@ -23,23 +23,6 @@ export default meta
 type Story = StoryObj<typeof meta>
 
 export const InProgress: Story = {}
-export const NotStarted: Story = {
-  args: {
-    updated: undefined,
-    steps: [
-      { id: 'p5', label: 'Read the refund router', state: PlanState.Queued },
-      { id: 'p6', label: 'Write the test', state: PlanState.Queued },
-    ],
-  },
-}
-export const Finished: Story = {
-  args: {
-    steps: [
-      { id: 'p7', label: 'Read the refund router', state: PlanState.Done },
-      { id: 'p8', label: 'Write the test', state: PlanState.Done },
-    ],
-  },
-}
 
 export const AllStates: Story = {
   render: (args) => (

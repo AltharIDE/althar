@@ -26,9 +26,6 @@ const meta = {
 export default meta
 type Story = StoryObj<typeof meta>
 
-/** A question and its buttons. */
-export const Question: Story = {}
-
 /** With more under the description: a list of what happens. */
 export const WithBody: Story = {
   args: {

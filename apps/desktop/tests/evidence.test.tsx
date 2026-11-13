@@ -263,7 +263,7 @@ describe('evidence, as the window draws it', () => {
     withServices(<Task />, client)
     // Ready, it opens on its Outputs: what it is at the top, as it now stands, then how it looks; what couldn't be checked before what was.
     await screen.findByRole('heading', { name: 'What changed', level: 2 })
-    expect(screen.getAllByRole('heading', { level: 2 }).map((one) => one.textContent)).toEqual(['What changed', 'What it looks like1'])
+    expect(screen.getAllByRole('heading', { level: 2 }).map((one) => one.textContent)).toEqual(['What changed', 'What it looks like'])
     expect(screen.getByText('Checkout retries once when the payment call fails.')).toBeTruthy()
     expect(screen.queryByText('A first go.')).toBeNull()
     const unchecked = screen.getByText('Not checked')
@@ -332,7 +332,7 @@ describe('evidence, as the window draws it', () => {
     })
     withServices(<Task />, client)
     await userEvent.click(await screen.findByRole('radio', { name: /Outputs/ }))
-    expect(await screen.findByRole('heading', { name: /^What it looks like\s*76$/, level: 2 })).toBeTruthy()
+    expect(await screen.findByRole('heading', { name: 'What it looks like', level: 2 })).toBeTruthy()
     expect(screen.getAllByRole('button', { name: /^View View \d+ full size$/ })).toHaveLength(6)
     // The ones folded away are a key away from the first, full size.
     await userEvent.click(screen.getByRole('button', { name: 'View View 1 full size' }))

@@ -470,8 +470,9 @@ describe('a new automation', () => {
     // Each field says what it lacks under itself, and the first of them takes focus.
     const name = screen.getByRole('textbox', { name: 'Name' })
     await userEvent.click(screen.getByRole('button', { name: 'Turn on' }))
-    const nameError = await screen.findByText('Give it a name first')
-    const promptError = screen.getByText('Say what each run should do first.')
+    // The problem under each field, as a whole: its words sit beside its mark.
+    const nameError = (await screen.findByText('Give it a name first')).closest('[role="alert"]') as HTMLElement
+    const promptError = screen.getByText('Say what each run should do first.').closest('[role="alert"]') as HTMLElement
     expect(name.getAttribute('aria-invalid')).toBe('true')
     expect(name.getAttribute('aria-describedby')).toBe(nameError.id)
     expect(prompt.getAttribute('aria-invalid')).toBe('true')

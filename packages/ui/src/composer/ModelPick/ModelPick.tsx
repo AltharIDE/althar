@@ -185,7 +185,7 @@ export function ModelPick({
             return (
               <RadioGroup.Item key={x.id} value={x.id} className={cx(s.option, x.id === model.id && s.current)}>
                 <Model model={x} />
-                {left != null && <RoomNote room={left} text={roomText} className={s.room} />}
+                {left != null && <RoomNote room={left} text={roomText} className={cx(s.room, x.mark !== undefined && s.roomMarked)} />}
                 <Icon name="check" size={11} className={s.check} />
               </RadioGroup.Item>
             )

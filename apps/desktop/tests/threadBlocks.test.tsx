@@ -260,14 +260,26 @@ describe('a coordinator that is signed out', () => {
     const onTryAgain = vi.fn()
     show([items.you('What is left on the checkout?'), signedOut], { onSignIn, onTryAgain })
     expect(screen.getByText('Claude Code is signed out.')).toBeTruthy()
-    // The agent's own words stand under it, not as its headline.
-    expect(screen.getByText('Authentication required')).toBeTruthy()
+    // The agent's words only restate it, so they aren't said again under it.
+    expect(screen.queryByText('Authentication required')).toBeNull()
+    expect(screen.getByRole('alert').textContent).toContain('Claude Code is signed out.')
     const ways = screen.getAllByRole('button').filter((button) => ['Sign in again', 'Try again'].includes(button.textContent ?? ''))
     expect(ways.map((button) => button.textContent)).toEqual(['Sign in again', 'Try again'])
     await userEvent.click(screen.getByRole('button', { name: 'Sign in again' }))
     expect(onSignIn).toHaveBeenCalledWith('claude-code')
     await userEvent.click(screen.getByRole('button', { name: 'Try again' }))
     expect(onTryAgain).toHaveBeenCalledOnce()
+  })
+
+  it('keeps the agent’s own words under it where they say more', () => {
+    const revoked = items.notice({
+      severity: 'error',
+      title: 'Claude Code is signed out.',
+      description: 'The key for the work account was revoked.',
+      failure: 'auth_required',
+    })
+    show([items.you('Hi'), revoked], { onSignIn: vi.fn() })
+    expect(screen.getByText('The key for the work account was revoked.')).toBeTruthy()
   })
 
   it('offers no Sign in again for a turn that failed for another reason', () => {

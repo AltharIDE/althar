@@ -21,6 +21,7 @@ import {
   type Pane,
   keys,
   modKey,
+  Problem,
 } from '@althar/ui'
 
 import { contextMeter } from '../../shared/ContextMeter'
@@ -100,6 +101,7 @@ import { type HomeRoom, isHome, shownOf, toggled } from './rooms'
 import s from './Project.module.css'
 import type { ProjectModel } from './useProject'
 import { turnsById } from '../../shared/turnTime'
+import { ReadFailed } from '../../shared/ReadFailed'
 
 /*
  * A project: its header across the top, the bar a task has, then its home:
@@ -644,9 +646,9 @@ export function ProjectView({
             <>
               <AsideMoveFailed moves={asideMoves} className={s.failure} />
               {model.error !== null && (
-                <div className={s.failure} role="alert">
-                  {model.error} <LinkButton onClick={model.dismissError}>{text.dismiss}</LinkButton>
-                </div>
+                <Problem as="div" className={s.failure} action={<LinkButton onClick={model.dismissError}>{text.dismiss}</LinkButton>}>
+                  {model.error}
+                </Problem>
               )}
               {line !== null && <div>{line}</div>}
             </>
@@ -871,7 +873,7 @@ export function ProjectView({
                     </div>
                   ) : (
                     <div className={s.loading}>
-                      <p role="alert">{model.error}</p>
+                      <ReadFailed error={model.error} />
                     </div>
                   )
                 ) : (
@@ -1014,9 +1016,9 @@ export function ProjectView({
                 {lanes !== null ? (
                   <>
                     {board.olderError !== null && (
-                      <p className={s.failure} role="alert">
+                      <Problem className={s.failure}>
                         {text.olderFailed} {board.olderError}
-                      </p>
+                      </Problem>
                     )}
                     {!panes.talk && <AsideMoveFailed moves={asideMoves} className={s.failure} />}
                     <BoardView
@@ -1039,6 +1041,7 @@ export function ProjectView({
                       folds={folds}
                       onFoldsChange={setFolds}
                       onTalk={talkToCoordinator}
+                      {...(ways === undefined ? {} : { onSignIn: ways.signIn })}
                       team={{
                         projectId,
                         start: (planId) => model.startPlan(planId),
@@ -1060,9 +1063,9 @@ export function ProjectView({
                 ) : board.error === null ? (
                   <PartPending label={text.boardReading} />
                 ) : (
-                  <p className={s.failure} role="alert">
+                  <Problem className={s.failure}>
                     {text.boardFailed} {board.error}
-                  </p>
+                  </Problem>
                 )}
                 {/* The conversation hidden, its composer stays under the board. */}
                 {!panes.talk && <div className={s.dock}>{composer}</div>}

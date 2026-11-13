@@ -38,8 +38,6 @@
 
 .error {
   margin: -12px 0 24px 2px;
-  font-size: 12.5px;
-  color: var(--danger);
 }
 
 /* a calm line about all of them: paused, or where they run */
@@ -410,7 +408,8 @@
   flex: none;
   border-radius: 50%;
   color: var(--t-2);
-  background: var(--n-2);
+  /* a round tile that holds a glyph: a page shade by day, a lighter wash at night, never a hole */
+  background: var(--tile);
   box-shadow: inset 0 0 0 1px var(--line);
 }
 
