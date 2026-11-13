@@ -3,7 +3,7 @@ import { join } from 'node:path'
 
 import { describe, expect, it } from 'vite-plus/test'
 
-import { graph, names, plan, type Plan, type Repository, repository } from '../src/select'
+import { coveredRuntime, graph, names, plan, type Plan, type Repository, repository } from '../src/select'
 
 const json = (value: unknown) => JSON.stringify(value)
 
@@ -100,6 +100,21 @@ const runs = (jobs: Plan['jobs']) =>
 const RUNTIME_PARTS = ['packages/runtime 1/4', 'packages/runtime 2/4', 'packages/runtime 3/4', 'packages/runtime 4/4']
 
 describe('the selection', () => {
+  it('keeps checks and other packages when full runtime coverage replaces the selected tests', () => {
+    const selected = plan(['packages/runtime/src/git.ts'], REPO, 'harness').jobs
+    const jobs = coveredRuntime(selected)
+    expect(jobs.filter((job) => job.name === 'packages/runtime checks')).toHaveLength(1)
+    expect(jobs.flatMap((job) => job.parts).filter((part) => part.dir === 'packages/runtime')).toEqual([
+      { dir: 'packages/runtime', check: true, tests: [] },
+    ])
+    expect(jobs.flatMap((job) => job.parts).filter((part) => part.dir !== 'packages/runtime')).toEqual(
+      selected.flatMap((job) => job.parts).filter((part) => part.dir !== 'packages/runtime'),
+    )
+    // A test-only dependency can reach runtime tests without requiring a runtime check.
+    expect(coveredRuntime([{ name: 'runtime', parts: [{ dir: 'packages/runtime', check: false, tests: ['tests/x.test.ts'] }] }])).toEqual(
+      [],
+    )
+  })
   it('runs a UI copy change in the tests that reach it and the app’s end-to-end run, but not Windows’ smoke test', () => {
     const changed = ['packages/ui/src/chrome/TaskHeader/TaskHeader.tsx']
     expect(runs(plan(changed, REPO, 'ui').jobs)).toEqual({

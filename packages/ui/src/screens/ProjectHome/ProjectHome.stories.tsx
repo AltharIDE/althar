@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
-import { useState } from 'react'
+import { Fragment, useState } from 'react'
 import { fn } from 'storybook/test'
 
 import { Board, BoardColumn, BoardList, type BoardFolds } from '../../board/Board/Board'
@@ -19,6 +19,7 @@ import { GITHUB } from '../../fixtures/outputs'
 import { Brand } from '../../foundations/brands/brands'
 import { ProjectInk } from '../../foundations/ProjectMark/drawing'
 import { BoardLane, Room, TaskKind, TaskStatus, Wait } from '../../foundations/vocabulary'
+import { ResizeHandle } from '../../primitives/ResizeHandle/ResizeHandle'
 import { IconButton } from '../../primitives/IconButton/IconButton'
 import { trackOf } from '../../primitives/StepTrack/StepTrack'
 import { Thread } from '../../thread/Thread/Thread'
@@ -118,7 +119,42 @@ function usePicker() {
 /* Up next and Running keep their room beside the conversation; Settled is folded to its rail. */
 const FOLDS: BoardFolds = { collapsed: [BoardLane.Settled], opened: [] }
 
-function ProjectHome() {
+const COORDINATOR_CHAT = [
+  [
+    'What needs attention before the next release?',
+    'The rate-limit task needs your choice about the budget. The Safari fix and invoice export are still running, and the customer pagination change is under review.',
+  ],
+  [
+    'Which work can continue while I review that?',
+    'The login fix and invoice export can continue in parallel. Their agents have the repositories and test commands they need, so no changes to project settings are needed.',
+  ],
+  [
+    'How will I see the next steps?',
+    'Updates stay in this conversation. A task that needs a decision appears under Needs you, and finished work moves to Settled with its result and the checks that ran.',
+  ],
+  [
+    'Can I change the scope of a task from here?',
+    'Describe the change here and I’ll pass it to the relevant lead. The task keeps its existing conversation and branch, with the new scope recorded alongside the work.',
+  ],
+]
+
+function CoordinatorMessages() {
+  return (
+    <>
+      {Array.from({ length: 8 }, (_, i) => (
+        <Fragment key={i}>
+          <You>{COORDINATOR_CHAT[i % COORDINATOR_CHAT.length]?.[0]}</You>
+          <Turn voice="Coordinator">
+            <Prose>{COORDINATOR_CHAT[i % COORDINATOR_CHAT.length]?.[1]}</Prose>
+          </Turn>
+        </Fragment>
+      ))}
+    </>
+  )
+}
+
+function ProjectHome({ conversationWidth }: { conversationWidth?: number }) {
+  const [width, setWidth] = useState(conversationWidth)
   const [steps, setSteps] = useState<readonly LaunchStep[]>(PLAN)
   const [draft, setDraft] = useState('')
   const picker = usePicker()
@@ -152,59 +188,76 @@ function ProjectHome() {
         parts={PARTS}
       />
       <div className={s.rooms}>
-        <div className={s.talk}>
+        <div className={s.talk} style={width === undefined ? undefined : { width }} data-testid="coordinator-column">
           <TaskFace
             className={s.face}
+            data-testid="coordinator-face"
             composer={
               <Composer value={draft} onChange={setDraft} onSubmit={() => setDraft('')} placeholder="Tell the coordinator something" />
             }
           >
             <Thread label="Conversation">
-              <You at="10:12">Fix the Safari login loop, and add CSV export to invoices.</You>
-              <Turn voice="Coordinator" at="10:13">
-                <Prose>Two tasks, side by side.</Prose>
-              </Turn>
-              {/* Each task it started, folded to the line it posted then: who leads it. */}
-              <TaskMark
-                task="418"
-                verb="started"
-                detail={`${OPUS.short} leads`}
-                at="10:13"
-                steps={['Implement', 'Review']}
-                step={0}
-                now="Review"
-                onJump={fn()}
-              />
-              <TaskMark
-                task="429"
-                verb="started"
-                detail={`${SONNET.short} leads`}
-                at="10:13"
-                steps={['Implement', 'Review']}
-                step={0}
-                now="Implement"
-                last
-                onJump={fn()}
-              />
-              <You at="10:51">EU customers are seeing the wrong VAT rate on their invoice PDFs since Monday. Can you fix it?</You>
-              <Turn voice="Coordinator" at="10:51">
-                <WorkedFor took="14s" />
-                <Prose>One task. Opus 5 fixes the rate lookup and adds a test for each EU country, and Codex reviews it.</Prose>
-              </Turn>
-              <TaskLaunch
-                task="432"
-                title="Fix the VAT rate on EU invoice PDFs"
-                from={FROM_231}
-                project="Meridian"
-                estimate="About 25 min · about $1 on your subscriptions"
-                steps={steps}
-                onStepsChange={setSteps}
-                picker={picker}
-                wait={24}
-                onStart={fn()}
-              />
+              {conversationWidth === undefined ? (
+                <>
+                  <You at="10:12">Fix the Safari login loop, and add CSV export to invoices.</You>
+                  <Turn voice="Coordinator" at="10:13">
+                    <Prose>Two tasks, side by side.</Prose>
+                  </Turn>
+                  {/* Each task it started, folded to the line it posted then: who leads it. */}
+                  <TaskMark
+                    task="418"
+                    verb="started"
+                    detail={`${OPUS.short} leads`}
+                    at="10:13"
+                    steps={['Implement', 'Review']}
+                    step={0}
+                    now="Review"
+                    onJump={fn()}
+                  />
+                  <TaskMark
+                    task="429"
+                    verb="started"
+                    detail={`${SONNET.short} leads`}
+                    at="10:13"
+                    steps={['Implement', 'Review']}
+                    step={0}
+                    now="Implement"
+                    last
+                    onJump={fn()}
+                  />
+                  <You at="10:51">EU customers are seeing the wrong VAT rate on their invoice PDFs since Monday. Can you fix it?</You>
+                  <Turn voice="Coordinator" at="10:51">
+                    <WorkedFor took="14s" />
+                    <Prose>One task. Opus 5 fixes the rate lookup and adds a test for each EU country, and Codex reviews it.</Prose>
+                  </Turn>
+                  <TaskLaunch
+                    task="432"
+                    title="Fix the VAT rate on EU invoice PDFs"
+                    from={FROM_231}
+                    project="Meridian"
+                    estimate="About 25 min · about $1 on your subscriptions"
+                    steps={steps}
+                    onStepsChange={setSteps}
+                    picker={picker}
+                    wait={24}
+                    onStart={fn()}
+                  />
+                </>
+              ) : (
+                <CoordinatorMessages />
+              )}
             </Thread>
           </TaskFace>
+          {width !== undefined && (
+            <ResizeHandle
+              value={width}
+              min={340}
+              max={1120}
+              onChange={setWidth}
+              onReset={() => setWidth(conversationWidth)}
+              label="Width of the conversation"
+            />
+          )}
         </div>
         <div className={s.board}>
           <Board label="Meridian’s work" defaultFolds={FOLDS}>
@@ -250,3 +303,7 @@ type Story = StoryObj<typeof meta>
 
 /** Meridian at work: the coordinator's plan counting down, three tasks running, one question for you, two up next. */
 export const Busy: Story = {}
+
+/** A narrow coordinator and a widened one, with the real divider to check where navigation follows. */
+export const NarrowCoordinator: Story = { args: { conversationWidth: 360 } }
+export const ExpandedCoordinator: Story = { args: { conversationWidth: 1000 } }
