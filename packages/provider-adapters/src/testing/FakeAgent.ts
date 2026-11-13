@@ -384,6 +384,8 @@ export interface FakeAgentOptions {
 
 /** The holds a test opens, by marker, for an agent to go on from (`FakeAgentOptions.holds`). */
 export interface Holds {
+  /** A file-backed hold may name only some markers; other markers keep their usual behaviour. */
+  readonly has?: (marker: string) => boolean
   /** Lets what waits on the marker go on, now and from now on. */
   readonly open: (marker: string) => void
   readonly opened: (marker: string) => boolean
@@ -906,7 +908,7 @@ const leaveTests = async (
  * (`FakeAgentOptions.holds`); either way only until the turn is stopped.
  */
 const takesAWhile = async (session: SessionState, marker: string, milliseconds: number) => {
-  const held = session.holds
+  const held = session.holds?.has?.(marker) === false ? undefined : session.holds
   if (held === undefined) for (let waited = 0; !session.cancelled && waited < milliseconds; waited += 10) await pause(10)
   else while (!session.cancelled && !held.opened(marker)) await pause(10)
 }
@@ -1247,6 +1249,14 @@ const playRole = async (
       }
       // Asked to wait on the person's answer (`[lead:wait-for-person]`), it asks in a line and ends its turn; told the
       // answer, it carries on and finishes as it would have.
+      if (available.has('wait_for') && session.markers.has('[lead:wait-for-external]')) {
+        if (text.includes('[lead:wait-for-external]'))
+          return await call('wait_for', {
+            reason: 'The deployment to finish',
+            conditions: [{ kind: 'time', at: new Date(Date.now() + 60 * 60_000).toISOString() }],
+          })
+        return await finish()
+      }
       if (available.has('wait_for_person') && session.markers.has('[lead:wait-for-person]')) {
         if (text.includes('[lead:wait-for-person]'))
           return await call('wait_for_person', { question: 'Which ADRs should the compaction keep?' })
@@ -1862,7 +1872,7 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
       // holds it (`holds`), each wait lasts until the test opens the marker as written (`[answers-after:5s]`) instead.
       const slowly = [...text.matchAll(/\[(answers|thinks|reads|fails|ends)-after:(\d+)s\]/g)].at(-1)
       if (slowly?.[2] !== undefined) {
-        const held = session.holds
+        const held = session.holds?.has?.(slowly[0]) === false ? undefined : session.holds
         const waitOut = async (ms: number) => {
           if (ms > 0 && held !== undefined) while (!session.cancelled && !session.closed && !held.opened(slowly[0])) await pause(10)
           else for (let waited = 0; !session.cancelled && waited < ms; waited += 10) await pause(10)
@@ -2331,7 +2341,7 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
           return ended()
         case scenarios.keepsGoing: {
           await say('Done')
-          const held = session.holds
+          const held = session.holds?.has?.(scenarios.keepsGoing) === false ? undefined : session.holds
           void (async () => {
             while (held !== undefined && !session.closed && !held.opened(scenarios.keepsGoing)) await pause(10)
             await say('Checking it once more.')
