@@ -65,7 +65,7 @@ jobs:
       # What the change is: against the pull request's base, or in the merge queue against main, since the build at a
       # group's head merges the whole group when it passes, and so must cover every entry in it.
       - env:
-          BASE: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_ref }}
+          BASE: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha }}
         run: |
           if [ -n "$BASE" ] && git fetch --no-tags --depth=1 origin "$BASE"; then
             git diff --name-only --no-renames FETCH_HEAD HEAD > "$RUNNER_TEMP/changed"
@@ -125,11 +125,6 @@ jobs:
       - uses: actions/setup-node@v5
         with:
           node-version-file: .node-version
-      - uses: actions/cache@v4
-        with:
-          path: ~/.bun/install/cache
-          key: windows-bun-${{ hashFiles('bun.lock') }}
-          restore-keys: windows-bun-
       - uses: ./.github/actions/electron
       # Tests with an open flaky issue run, but don't fail this job (packages/testing).
       - uses: ./.github/actions/flaky/quarantine

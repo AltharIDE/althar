@@ -32,6 +32,20 @@ A test with an open issue labelled `flaky`, titled as `src/report.ts` titles one
 
 Vitest checks coverage only on a run with no failed test, unless the coverage config sets `reportOnFailure`; without it, the reporter doesn't let a quarantined failure pass a coverage run, since its coverage would go unchecked. A job that doesn't read the issues, or one with `QUARANTINE` unset, as on a computer, quarantines nothing.
 
+### Durations and shards
+
+`@althar/testing/sequencer` distributes the runtime's selected files across Vitest shards; `playwrightShard` from `@althar/testing/shards` assigns the app's full specs when `E2E_SHARD` is set. Both use `durations.json`, separately by OS, and assign every discovered file exactly once. Missing or invalid measurements fall back to a normal cost; timings never decide whether a test runs or passes. Playwright's worker count stays one, and Vitest's normal sorting and isolation remain.
+
+The CI install action names `TEST_TIMINGS`. Both existing reporters append measurements there, and `.github/actions/flaky` uploads each job's `test-timings-*` artifact. Vitest report merging records no duplicate measurements. To refresh the checked-in history, download those artifacts from a chosen full post-merge run into a directory and run from the repository root:
+
+```sh
+bun packages/testing/src/timingHistory.ts work/timings 'post-merge run <id>'
+```
+
+The refresh sums each spec's test attempts per job and uses median durations across the supplied jobs. Review the resulting JSON like other source changes. Keep Windows and Linux data separate and use full runs, rather than stress runs with extra repetitions. A timing artifact is optional diagnostics; losing it cannot turn a failed test or coverage gate green.
+
+Windows uses a fresh Bun package-cache directory and an exact OS, architecture, Bun-version and lockfile key. `post-merge`'s manual `bun-cache` input compares `isolated`, `off` and the old `legacy` cache with the same tests. Install durations are recorded on the summary; cache restoration time is the cache step's duration. Jobs that do not execute Electron skip its binary caches.
+
 ## Work on it
 
 ```sh

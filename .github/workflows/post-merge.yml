@@ -17,6 +17,12 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      bun-cache:
+        description: Windows dependency cache comparison (same tests in every mode)
+        type: choice
+        default: isolated
+        options: [isolated, off, legacy]
 
 permissions:
   contents: read
@@ -24,6 +30,7 @@ permissions:
 
 # Where the test reporters write which tests were flaky, for the Flaky tests step (.github/actions/flaky).
 env:
+  BUN_CACHE_MODE: ${{ inputs.bun-cache || 'isolated' }}
   FLAKY_REPORT: ${{ github.workspace }}/flaky.jsonl
 
 concurrency:
@@ -267,11 +274,6 @@ jobs:
       - uses: actions/setup-node@v5
         with:
           node-version-file: .node-version
-      - uses: actions/cache@v4
-        with:
-          path: ~/.bun/install/cache
-          key: windows-bun-${{ hashFiles('bun.lock') }}
-          restore-keys: windows-bun-
       - uses: ./.github/actions/electron
       # Tests with an open flaky issue run, but don't fail this job (packages/testing).
       - uses: ./.github/actions/flaky/quarantine
@@ -311,11 +313,6 @@ jobs:
       - uses: actions/setup-node@v5
         with:
           node-version-file: .node-version
-      - uses: actions/cache@v4
-        with:
-          path: ~/.bun/install/cache
-          key: windows-bun-${{ hashFiles('bun.lock') }}
-          restore-keys: windows-bun-
       - uses: ./.github/actions/electron
       # Tests with an open flaky issue run, but don't fail this job (packages/testing).
       - uses: ./.github/actions/flaky/quarantine

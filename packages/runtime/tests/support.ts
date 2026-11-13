@@ -332,6 +332,7 @@ export const runtime = (
     readonly drafting?: Duration.Duration
     readonly connectors?: Layer.Layer<Connectors>
     readonly listenEvery?: Duration.Duration
+    readonly externalWaitEvery?: Duration.Duration
     /** How often the merge line is swept by itself; never, with an infinite one, where a test sweeps it. */
     readonly mergeLineEvery?: Duration.Duration
     /** How long a pull request may show no checks before it counts as having none; none at all unless a test says. */
@@ -408,6 +409,7 @@ export const runtime = (
     secrets: Secrets.memory(more.keychain),
     connectors: more.connectors ?? fakeConnectors({}),
     ...(more.listenEvery === undefined ? {} : { listenEvery: more.listenEvery }),
+    ...(more.externalWaitEvery === undefined ? {} : { externalWaitEvery: more.externalWaitEvery }),
     ...(more.mergeLineEvery === undefined ? {} : { mergeLineEvery: more.mergeLineEvery }),
     checksAppear: more.checksAppear ?? Duration.zero,
     ...(more.checksStuck === undefined ? {} : { checksStuck: more.checksStuck }),

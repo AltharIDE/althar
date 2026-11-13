@@ -43,7 +43,7 @@ jobs:
         with:
           bun-version-file: .bun-version
       - env:
-          BASE: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_ref }}
+          BASE: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha }}
         run: |
           if [ -n "$BASE" ] && git fetch --no-tags --depth=1 origin "$BASE"; then
             git diff --name-only --no-renames FETCH_HEAD HEAD > "$RUNNER_TEMP/changed"
@@ -82,11 +82,6 @@ jobs:
       - uses: actions/setup-node@v5
         with:
           node-version-file: .node-version
-      - uses: actions/cache@v4
-        with:
-          path: ~/.bun/install/cache
-          key: windows-bun-${{ hashFiles('bun.lock') }}
-          restore-keys: windows-bun-
       - uses: ./.github/actions/electron
       - uses: ./.github/actions/flaky/quarantine
       - env:

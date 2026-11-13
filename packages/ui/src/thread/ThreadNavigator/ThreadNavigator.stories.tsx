@@ -1,6 +1,9 @@
 import { Fragment, useState } from 'react'
 import type { Meta, StoryObj } from '@storybook/react-vite'
+import { expect, waitFor, within } from 'storybook/test'
 
+import { SHOT_AFTER, SHOT_BEFORE } from '../../fixtures/shots'
+import { Gallery } from '../Gallery/Gallery'
 import { Composer } from '../../composer/Composer/Composer'
 import { TaskFace } from '../TaskFace/TaskFace'
 import { Thread } from '../Thread/Thread'
@@ -45,10 +48,10 @@ const messages = [
   ['Show me the final result.', 'The rate limit is shared, retries are safe, and the backfill resumes from its last completed batch.'],
 ]
 
-function Example({ crowded = false }: { crowded?: boolean }) {
+function Example({ crowded = false, pictures, width }: { crowded?: boolean; pictures?: 'one' | 'pair'; width?: number }) {
   const [draft, setDraft] = useState('')
   return (
-    <div style={{ height: '100vh', ...(crowded ? { width: 380, maxWidth: '100%' } : {}) }}>
+    <div style={{ height: '100vh', ...(crowded || width !== undefined ? { width: width ?? 380, maxWidth: '100%' } : {}) }}>
       <TaskFace composer={<Composer value={draft} onChange={setDraft} onSubmit={() => {}} placeholder="Tell the lead" />}>
         <Thread label="Conversation">
           {Array.from({ length: crowded ? 48 : 8 }, (_, i) => (
@@ -56,6 +59,15 @@ function Example({ crowded = false }: { crowded?: boolean }) {
               <You>{messages[i % messages.length]?.[0]}</You>
               <Turn voice="Althar">
                 <Prose>{messages[i % messages.length]?.[1]}</Prose>
+                {pictures !== undefined && i === 3 && (
+                  <Gallery
+                    data-testid="wide-gallery"
+                    shots={(pictures === 'one' ? [SHOT_AFTER] : [SHOT_BEFORE, SHOT_AFTER]).map((shot) => ({
+                      ...shot,
+                      caption: shot.label ?? shot.name,
+                    }))}
+                  />
+                )}
               </Turn>
             </Fragment>
           ))}
@@ -67,3 +79,20 @@ function Example({ crowded = false }: { crowded?: boolean }) {
 
 export const Conversation: Story = { render: () => <Example /> }
 export const Crowded: Story = { render: () => <Example crowded /> }
+
+/** Wide media never runs beneath the navigation marks. Layout needs a real browser. */
+const clearOfPictures: NonNullable<Story['play']> = async ({ canvasElement }) => {
+  const c = within(canvasElement)
+  const gallery = c.getByTestId('wide-gallery')
+  const images = Array.from(gallery.querySelectorAll('img'))
+  const nav = await c.findByRole('navigation', { name: 'Conversation navigation' })
+  gallery.scrollIntoView({ block: 'center' })
+  await waitFor(async () => {
+    await expect(images.length).toBeGreaterThan(0)
+    for (const image of images) await expect(image.getBoundingClientRect().right).toBeLessThan(nav.getBoundingClientRect().left)
+  })
+}
+
+export const WithScreenshot: Story = { render: () => <Example pictures="one" />, play: clearOfPictures }
+export const WithScreenshots: Story = { render: () => <Example pictures="pair" />, play: clearOfPictures }
+export const WithScreenshotsInNarrowPane: Story = { render: () => <Example pictures="pair" width={520} />, play: clearOfPictures }
