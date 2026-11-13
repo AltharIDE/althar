@@ -77,6 +77,7 @@ import { ForkOffer, useForkOffer } from '../repositories/ForkOffer'
 import type { ProjectSettingsModel } from '../projectSettings/useProjectSettings'
 import { kitInk } from '../../shared/inks'
 import { Card, type CardActions } from './Card'
+import { DraftingCard, useDraftingCards } from './DraftingCard'
 import { useClearChat } from './ClearChat'
 import { TaskAskOf } from './TaskAskOf'
 import { FirstConnectionsView } from './FirstConnectionsView'
@@ -285,6 +286,8 @@ const newestWaiting = (items: ReadonlyArray<ThreadItem>): string | null => {
   return newest?.kind === 'task' ? newest.content.threadId : null
 }
 
+/** No items, the same each time, while the coordinator's thread isn't read yet. */
+const NO_DRAFTED_ITEMS: ReadonlyArray<ThreadItem> = []
 export function ProjectView({
   model,
   board,
@@ -418,6 +421,8 @@ export function ProjectView({
   // Another agent's model, picked while the coordinator runs: it takes over with what the person says next.
   const [handover, setHandover] = useState<Choice | null>(null)
   const coordinator = model.coordinator
+  // The tasks the coordinator is drafting, each as its card fills in, until the thread's card takes its place.
+  const drafting = useDraftingCards(coordinator?.threadId ?? null, model.drafts, coordinator?.items ?? NO_DRAFTED_ITEMS, model.holdDraft)
   // Every run in the project, the tasks' too: Run's list and its switcher say them.
   const launches = coordinator?.launches ?? []
   // Those of no task are the project's own; a task's show over its own composer.
@@ -983,6 +988,15 @@ export function ProjectView({
                                 onAnswerQuestion={model.answerQuestion}
                                 signed={coordinatorSigned}
                               />
+                              {drafting.shown.map((draft) => (
+                                <DraftingCard
+                                  key={draft.key}
+                                  draft={draft}
+                                  project={name}
+                                  held={drafting.held(draft)}
+                                  onHold={() => drafting.hold(draft)}
+                                />
+                              ))}
                             </ThreadShellProvider>
                           </Thread>
                         </TaskFace>

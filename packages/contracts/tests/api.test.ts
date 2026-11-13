@@ -603,6 +603,7 @@ describe('the API', () => {
               StartTask: () => Effect.die('unused'),
               StartPlan: () => Effect.void,
               HoldPlan: () => Effect.void,
+              HoldDraft: () => Effect.void,
               ChangePlan: () => Effect.void,
               ChangeTeam: () => Effect.void,
               DeclineReview: () => Effect.void,

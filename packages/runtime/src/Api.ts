@@ -745,7 +745,9 @@ export const handlers = Api.toLayer(
                       ? Stream.make({ _tag: 'Launches', projectId: event.projectId, launches: event.launches })
                       : event._tag === 'PlanUsage'
                         ? Stream.make({ _tag: 'PlanUsage', usage: event.usage })
-                        : Stream.empty,
+                        : event._tag === 'Drafting'
+                          ? Stream.make({ _tag: 'Drafting', threadId: event.threadId, drafts: event.drafts })
+                          : Stream.empty,
           ),
         ),
       ),
@@ -1531,6 +1533,7 @@ export const handlers = Api.toLayer(
         ),
       StartPlan: ({ commandId, planId }) => once(commandId, api(Effect.asVoid(plans.start(planId, instance.personId)))),
       HoldPlan: ({ commandId, planId }) => once(commandId, api(Effect.asVoid(plans.hold(planId, instance.personId)))),
+      HoldDraft: ({ commandId, threadId, key }) => once(commandId, api(coordinator.holdDraft(threadId, key, instance.personId))),
       ChangePlan: ({ commandId, planId, steps, end, worksIn, toward }) =>
         once(commandId, api(plans.change(planId, steps, instance.personId, end, worksIn, toward))),
       ApplyPreset: ({ commandId, planId, preset }) =>

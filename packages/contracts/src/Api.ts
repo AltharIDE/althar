@@ -4110,6 +4110,38 @@ export const PAGE = 100
  * how full the context of the agent on a thread is, as it last said. Neither
  * is in the feed, so they have no cursor.
  */
+/** Who does a step of a plan being drafted, once the coordinator has written it and Althar knows the model. */
+export const DraftStep = Schema.Struct({
+  agentId: Schema.String,
+  model: Schema.NullOr(Schema.String),
+  effort: Schema.NullOr(Schema.String),
+})
+export type DraftStep = typeof DraftStep.Type
+
+/**
+ * A task the coordinator is drafting now, as far as it has written it, so its
+ * card shows from the moment the draft begins: its title, whether its
+ * description is written, the task it became once drafted, and its plan as
+ * that is written. It lasts the coordinator's turn; once planned, its card is
+ * in the thread.
+ */
+export const Draft = Schema.Struct({
+  key: Schema.String,
+  title: Schema.NullOr(Schema.String),
+  brief: Schema.Boolean,
+  taskId: Schema.NullOr(Schema.String),
+  slug: Schema.NullOr(Schema.String),
+  planning: Schema.Boolean,
+  lead: Schema.NullOr(DraftStep),
+  review: Schema.NullOr(DraftStep),
+  noReview: Schema.Boolean,
+  preset: Schema.NullOr(Schema.String),
+  planned: Schema.Boolean,
+  /** The person held it while it was drafted: its plan comes held. */
+  held: Schema.Boolean,
+})
+export type Draft = typeof Draft.Type
+
 export const WatchEvent = Schema.Union([
   Schema.Struct({
     _tag: Schema.Literal('Changed'),
@@ -4137,6 +4169,8 @@ export const WatchEvent = Schema.Union([
   Schema.Struct({ _tag: Schema.Literal('Launches'), projectId: Schema.String, launches: Schema.Array(Launch) }),
   /** Every account's plan usage, whole each time it changes. */
   Schema.Struct({ _tag: Schema.Literal('PlanUsage'), usage: PlanUsage }),
+  /** The tasks a coordinator thread is drafting now, as far as written, whole each time they change. */
+  Schema.Struct({ _tag: Schema.Literal('Drafting'), threadId: Schema.String, drafts: Schema.Array(Draft) }),
   /** A command's output as far as it has come, while it runs: its last lines, whole each time, and how many came before them. */
   Schema.Struct({
     _tag: Schema.Literal('Output'),
@@ -4749,6 +4783,8 @@ export const Api = RpcGroup.make(
   command('StartPlan', { planId: Schema.String }, Schema.Void),
   /** Holds a planned task: it waits until you start it. */
   command('HoldPlan', { planId: Schema.String }, Schema.Void),
+  /** Holds a task the coordinator is drafting, by its draft's key: its plan comes held, even one that would start at once. */
+  command('HoldDraft', { threadId: Schema.String, key: Schema.String }, Schema.Void),
   /** Changes who does a planned task's steps, or skips one, before it starts. */
   command(
     'ChangePlan',
