@@ -50,6 +50,8 @@ export interface Draft {
   readonly preset: string | null
   /** Its plan is in: its card is in the thread now. */
   readonly planned: boolean
+  /** The person held it while it was drafted: its plan comes held. */
+  readonly held: boolean
 }
 
 /** A call being followed: which draft it writes. */
@@ -80,6 +82,7 @@ const blank = (key: string): Draft => ({
   noReview: false,
   preset: null,
   planned: false,
+  held: false,
 })
 
 const record = (value: unknown): Readonly<Record<string, unknown>> | undefined =>
@@ -217,6 +220,10 @@ export const drafted = (state: Drafts, task: { readonly taskId: string; readonly
   if (draft === undefined) return { ...state, drafts: [...state.drafts, made(blank(`task:${task.taskId}`))] }
   return change(state, draft.key, made)
 }
+
+/** The person held a draft: it is held from now on, and its plan comes held. Unchanged where it is gone already. */
+export const heldDraft = (state: Drafts, key: string): Drafts =>
+  state.drafts.some((draft) => draft.key === key && !draft.held) ? change(state, key, (draft) => ({ ...draft, held: true })) : state
 
 /** The turn ended: drafts that never got their plan go (the board shows them as stopped); planned ones are in their cards. */
 export const turnEnded = (): Drafts => noDrafts

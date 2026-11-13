@@ -100,6 +100,7 @@ export interface ProjectModel {
   readonly answerQuestion: (attentionId: string, answers: Readonly<Record<string, FieldAnswer>>) => Promise<string | null>
   readonly startPlan: (planId: string) => Promise<void>
   readonly holdPlan: (planId: string) => Promise<void>
+  readonly holdDraft: (threadId: string, key: string) => Promise<void>
   /** Stops a command a task's lead left running, which keeps a place the waiting plans wait for. */
   readonly stopBackground: (threadId: string, id: string) => Promise<void>
   readonly changePlan: (
@@ -540,6 +541,12 @@ export const useProject = (projectId: string): ProjectModel => {
       ),
     startPlan: (planId) => act(() => client.startPlan(planId)),
     holdPlan: (planId) => act(() => client.holdPlan(planId)),
+    // Shown held at once by its card, which shows it as it was again where this fails, with the line saying why.
+    holdDraft: (threadId, key) =>
+      client.holdDraft(threadId, key).catch((failure: unknown) => {
+        fail(failure)
+        throw failure
+      }),
     stopBackground: (threadId, id) => act(() => client.stopBackground(threadId, id)),
     changePlan: (planId, steps, end, worksIn, toward) =>
       act(() =>

@@ -10,6 +10,7 @@ import { useControlled } from '../../lib/controlled'
 import { useOnScreen } from '../../lib/onScreen'
 import { cssVars } from '../../lib/cssVars'
 import { cx } from '../../lib/cx'
+import { useReducedMotion } from '../../lib/motion'
 import { Button } from '../../primitives/Button/Button'
 import { CountdownRing } from '../../primitives/CountdownRing/CountdownRing'
 import { LiveDot } from '../../primitives/LiveDot/LiveDot'
@@ -224,10 +225,14 @@ const Going = ({ children }: { children: string }) => (
 
 type NodeState = 'idle' | 'next' | 'choosing' | 'filled'
 
-/** A row's node on the line: an empty seat, turning while it's next; an arc going round it while it's chosen; then who it is. */
+/**
+ * A row's node on the line: an empty seat, turning while it's next; an arc going round it while it's chosen, makers' marks
+ * rolling through; then who it is. With reduced motion, the arc stands still and no marks roll.
+ */
 function Node({ state, mark }: { state: NodeState; mark?: ReactNode }) {
   const [turn, setTurn] = useState(0)
-  const rolling = state === 'choosing' && mark === undefined
+  const still = useReducedMotion()
+  const rolling = state === 'choosing' && mark === undefined && !still
   useEffect(() => {
     if (!rolling) return
     const id = window.setInterval(() => setTurn((n) => n + 1), 130)
@@ -268,23 +273,52 @@ function Link({ state }: { state: 'idle' | 'flow' | 'done' }) {
  * A whole row as one dropdown: the trigger of what's put in it lies unseen
  * over the row, and moves under the pointer as it is pressed, so its menu
  * opens there rather than at the row's start; back over the whole row once
- * the menu has gone. The keyboard opens it from the row's start.
+ * the menu has gone, or once a press ends with no menu opening (a direct
+ * action, such as Add back, or a press dragged off and let go). The keyboard
+ * opens it from the row's start.
  */
 function useAtPointer() {
   const [x, setX] = useState<number | null>(null)
   const back = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
-  useEffect(() => () => clearTimeout(back.current), [])
+  const open = useRef(false)
+  const ended = useRef<(() => void) | undefined>(undefined)
+  const unlisten = () => {
+    if (ended.current === undefined) return
+    window.removeEventListener('pointerup', ended.current)
+    window.removeEventListener('pointercancel', ended.current)
+    ended.current = undefined
+  }
+  useEffect(
+    () => () => {
+      clearTimeout(back.current)
+      unlisten()
+    },
+    [],
+  )
   return {
     style: x === null ? undefined : { left: x - 8, right: 'auto', width: 16 },
     onPointerDown: (e: PointerEvent<HTMLElement>) => {
       clearTimeout(back.current)
       const row = e.currentTarget.parentElement?.getBoundingClientRect()
-      if (row !== undefined) setX(e.clientX - row.left)
+      if (row === undefined) return
+      setX(e.clientX - row.left)
+      // A menu opens on the press's click, which comes after it lets go: no menu by then, and it's back over the whole row.
+      unlisten()
+      const end = () => {
+        unlisten()
+        back.current = setTimeout(() => {
+          if (!open.current) setX(null)
+        }, 0)
+      }
+      ended.current = end
+      window.addEventListener('pointerup', end)
+      window.addEventListener('pointercancel', end)
     },
     // Back only once the menu has faded (--exit): moving its anchor sooner drags the closing menu along.
-    onOpenChange: (open: boolean) => {
+    onOpenChange: (next: boolean) => {
+      open.current = next
       clearTimeout(back.current)
-      if (!open) back.current = setTimeout(() => setX(null), 200)
+      if (!next) back.current = setTimeout(() => setX(null), 200)
     },
   }
 }

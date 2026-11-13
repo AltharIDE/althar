@@ -1,7 +1,7 @@
 import type { MessageSender, SentCanvasComment } from '@althar/contracts'
 import { createHash } from 'node:crypto'
 
-import { type CommandEnvelope, type ProjectId, type WorksIn } from '@althar/domain'
+import { type ActorId, type CommandEnvelope, type ProjectId, type WorksIn } from '@althar/domain'
 import type { Commands, Ledger } from '@althar/persistence-sqlite'
 import { AUTOMATION_DEFAULTS, type AutomationDefinition, Schedule, scheduleInLine } from '@althar/contracts'
 import { Priority, StatusCategory } from '@althar/connectors'
@@ -89,6 +89,7 @@ import {
   callBegan,
   callEnded,
   drafted as draftMade,
+  heldDraft,
   type Drafts,
   inputWritten,
   noDrafts,
@@ -376,6 +377,8 @@ export class Coordinator extends Context.Service<
       /** Written by Althar for the person, such as an answer to a question the coordinator asked before it went: not shown as their message. */
       readonly quiet?: boolean
     }): Effect.Effect<void, unknown>
+    /** The person held a task while it was drafted, by its draft's key: its plan comes held, or is held where it came already. */
+    holdDraft(threadId: string, key: string, actorId: ActorId): Effect.Effect<void, unknown>
   }
 >()('@althar/runtime/Coordinator') {
   static readonly layer: Layer.Layer<Coordinator, never, Store> = Layer.effect(
@@ -1142,6 +1145,26 @@ export class Coordinator extends Context.Service<
         }).pipe(Effect.catchCause((cause) => Effect.logWarning('Could not follow a task as it was drafted', cause)))
       yield* Effect.forkScoped(Stream.runForEach(yield* live.subscribe, (event) => provide(followDrafts(event))))
 
+      /*
+       * Tasks the person held while they were drafted, by task: propose_plan makes their plan held from the start, so
+       * it never starts on its own, whatever the window is doing then. A draft held before its task exists is added
+       * here as draft_task makes it; one whose plan came already is held there and then.
+       */
+      const heldTasks = new Set<string>()
+      const holdDraft = (threadId: string, key: string, actorId: ActorId) =>
+        Effect.gen(function* () {
+          yield* redraft(threadId, (drafts) => heldDraft(drafts, key))
+          const taskId =
+            draftsBy.get(threadId)?.drafts.find((draft) => draft.key === key)?.taskId ?? (key.startsWith('task:') ? key.slice(5) : null)
+          if (taskId === null) return
+          heldTasks.add(taskId)
+          const sql = yield* SqlClient.SqlClient
+          const proposed = yield* sql<{ id: string }>`
+            SELECT id FROM task_plans WHERE task_id = ${taskId} AND state = 'proposed' AND starts_at IS NOT NULL`
+          for (const plan of proposed) yield* plans.hold(plan.id, actorId)
+          if (proposed.length > 0) heldTasks.delete(taskId)
+        })
+
       /**
        * The person asked, in the words that started this turn, for a pull request to be reviewed: that is review_pull_request's,
        * whose lead reads it read only and drafts a review the person posts from its card. A task of work, started or drafted
@@ -1168,6 +1191,9 @@ export class Coordinator extends Context.Service<
             yield* redraft(access.threadId, (drafts) =>
               draftMade(drafts, { taskId: created.taskId, slug: created.slug, title: drafted.title }),
             )
+            // Held while it was written: its plan comes held.
+            if (draftsBy.get(access.threadId)?.drafts.some((one) => one.taskId === created.taskId && one.held) === true)
+              heldTasks.add(created.taskId)
           }
           // Its plan comes in this turn. If it never does, every open board is told when its moment ends, so the draft
           // shows in Needs you then: a board reads again only when the feed says something changed.
@@ -1653,6 +1679,8 @@ export class Coordinator extends Context.Service<
           const sql = yield* SqlClient.SqlClient
           const [held] = yield* sql<{ id: string }>`
             SELECT id FROM task_plans WHERE task_id = ${task.id} AND state = 'proposed' AND starts_at IS NULL`
+          // The person held it while it was drafted: it comes held, a small change too, whatever the window is doing.
+          const heldWhileDrafted = heldTasks.delete(task.id)
           const planId = yield* plans.propose({
             projectId: access.projectId as ProjectId,
             taskId: task.id,
@@ -1664,8 +1692,11 @@ export class Coordinator extends Context.Service<
             proposal,
             ...(proposed.works_in_why === undefined ? {} : { worksInWhy: proposed.works_in_why }),
             // A plan the person held stays held; otherwise a small change starts at once.
-            ...(small ? { reviewAfterMerge: true, ...(held === undefined ? { startsIn: Duration.zero } : {}) } : {}),
+            ...(small ? { reviewAfterMerge: true, ...(held === undefined && !heldWhileDrafted ? { startsIn: Duration.zero } : {}) } : {}),
+            ...(heldWhileDrafted ? { held: true } : {}),
           })
+          // Held as it was being proposed: held now.
+          if (!heldWhileDrafted && heldTasks.delete(task.id)) yield* plans.hold(planId, instance.personId)
           // Planned from a preset: its parts replace the plan's, and its card names it.
           const preset =
             proposed.preset === undefined || proposed.preset.trim() === ''
@@ -3199,6 +3230,7 @@ export class Coordinator extends Context.Service<
         thread: (projectId) => provide(thread(projectId)),
         suggested: (projectId) => provide(suggested(projectId)),
         say: (input) => provide(say(input)),
+        holdDraft: (threadId, key, actorId) => provide(holdDraft(threadId, key, actorId)),
         reading: (read) =>
           Effect.sync(() => {
             pullRequests = read

@@ -367,7 +367,7 @@ export function ProjectView({
   const [handover, setHandover] = useState<Choice | null>(null)
   const coordinator = model.coordinator
   // The tasks the coordinator is drafting, each as its card fills in, until the thread's card takes its place.
-  const drafting = useDraftingCards(model.drafts, coordinator?.items ?? NO_DRAFTED_ITEMS, (planId) => void model.holdPlan(planId))
+  const drafting = useDraftingCards(coordinator?.threadId ?? null, model.drafts, coordinator?.items ?? NO_DRAFTED_ITEMS, model.holdDraft)
   // Every run in the project, the tasks' too: Run's list and its switcher say them.
   const launches = coordinator?.launches ?? []
   // Those of no task are the project's own; a task's show over its own composer.

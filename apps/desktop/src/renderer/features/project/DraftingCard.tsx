@@ -1,4 +1,4 @@
-import { useEffect, useEffectEvent, useRef, useState } from 'react'
+import { useState } from 'react'
 
 import type { Draft, ThreadItem } from '@althar/contracts'
 import { type LaunchPhase, type LaunchStep, TaskLaunch } from '@althar/ui'
@@ -10,7 +10,7 @@ import { stepText } from '../../shared/steps'
  * A task's card while the coordinator drafts it (`useDrafts`): the plan
  * card's own, filling in as the draft is written, from the moment it begins,
  * rather than the whole card after a long wait. Hold is its one action: a
- * draft held here is held as its plan comes. The thread's card takes its
+ * draft held here comes as a held plan. The thread's card takes its
  * place once the plan is in.
  */
 
@@ -54,32 +54,33 @@ export function DraftingCard({ draft, project, held, onHold }: { draft: Draft; p
 
 /**
  * The drafts to show on a thread, and Hold for them: a draft whose card is in
- * the thread is that card from then on, and one held while it was drafted is
- * held as its plan comes. What was held is kept by task, as the draft itself
- * goes when the turn ends.
+ * the thread is that card from then on. Hold goes to the runtime at once,
+ * which makes the draft's plan held as it comes, whether this screen is still
+ * open then or not; it shows held here at once, and stays so where the
+ * runtime turns it down only until the draft says otherwise.
  */
 export function useDraftingCards(
+  threadId: string | null,
   drafts: ReadonlyArray<Draft>,
   items: ReadonlyArray<ThreadItem>,
-  onHold: (planId: string) => void,
+  onHold: (threadId: string, key: string) => Promise<void>,
 ): { readonly shown: ReadonlyArray<Draft>; readonly held: (draft: Draft) => boolean; readonly hold: (draft: Draft) => void } {
-  const [heldKeys, setHeldKeys] = useState<ReadonlySet<string>>(() => new Set())
-  const tasks = useRef(new Map<string, string>())
-  const applied = useRef(new Set<string>())
+  const [pressed, setPressed] = useState<ReadonlySet<string>>(() => new Set())
   const cards = items.flatMap((item) => (item.kind === 'task' ? [item.content] : []))
-  const holdNow = useEffectEvent(onHold)
-  useEffect(() => {
-    for (const draft of drafts) if (draft.taskId !== null && heldKeys.has(draft.key)) tasks.current.set(draft.key, draft.taskId)
-    for (const [key, taskId] of tasks.current) {
-      const card = cards.find((one) => one.taskId === taskId)
-      if (card === undefined || card.plan === null || applied.current.has(key)) continue
-      applied.current.add(key)
-      if (card.phase === 'planned') holdNow(card.plan.id)
-    }
-  })
   return {
     shown: drafts.filter((draft) => draft.taskId === null || !cards.some((card) => card.taskId === draft.taskId)),
-    held: (draft) => heldKeys.has(draft.key),
-    hold: (draft) => setHeldKeys((current) => new Set(current).add(draft.key)),
+    held: (draft) => draft.held || pressed.has(draft.key),
+    hold: (draft) => {
+      if (threadId === null) return
+      setPressed((current) => new Set(current).add(draft.key))
+      // Turned down: it shows as the runtime has it again.
+      void onHold(threadId, draft.key).catch(() =>
+        setPressed((current) => {
+          const next = new Set(current)
+          next.delete(draft.key)
+          return next
+        }),
+      )
+    },
   }
 }

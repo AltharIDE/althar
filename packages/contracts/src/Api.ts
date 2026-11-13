@@ -4094,6 +4094,8 @@ export const Draft = Schema.Struct({
   noReview: Schema.Boolean,
   preset: Schema.NullOr(Schema.String),
   planned: Schema.Boolean,
+  /** The person held it while it was drafted: its plan comes held. */
+  held: Schema.Boolean,
 })
 export type Draft = typeof Draft.Type
 
@@ -4738,6 +4740,8 @@ export const Api = RpcGroup.make(
   command('StartPlan', { planId: Schema.String }, Schema.Void),
   /** Holds a planned task: it waits until you start it. */
   command('HoldPlan', { planId: Schema.String }, Schema.Void),
+  /** Holds a task the coordinator is drafting, by its draft's key: its plan comes held, even one that would start at once. */
+  command('HoldDraft', { threadId: Schema.String, key: Schema.String }, Schema.Void),
   /** Changes who does a planned task's steps, or skips one, before it starts. */
   command(
     'ChangePlan',

@@ -1,6 +1,6 @@
-import { act, render, screen } from '@testing-library/react'
+import { act, fireEvent, render, screen } from '@testing-library/react'
 import { userEvent } from 'storybook/test'
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { CODEX, OPUS } from '../src/fixtures/models'
 import { TaskLaunch, type LaunchStep, type TaskLaunchProps } from '../src/coordinator/TaskLaunch/TaskLaunch'
@@ -83,5 +83,68 @@ describe('a plan as a roster', () => {
       expect.objectContaining({ id: 'implement' }),
       expect.objectContaining({ id: 'review', skipped: true }),
     ])
+  })
+
+  it('covers the whole row again once a press opens no menu: skipped, added back, its picker is the whole row', async () => {
+    const picker = vi.fn((pick: Parameters<TaskLaunchProps['picker']>[0]) => (
+      <button type="button" onClick={() => pick.onOpenChange(true)}>
+        {pick.owner}
+      </button>
+    ))
+    card({ title: 'Fix the VAT rate', defaultSteps: [lead(true), { ...review(true), skipped: true }], picker })
+    await act(async () => {})
+    const addBack = screen.getByRole('button', { name: 'Add back: Review' })
+    // Pressed, its cover moves under the pointer; let go, with no menu, and Add back done.
+    fireEvent.pointerDown(addBack, { clientX: 40 })
+    expect(addBack.parentElement?.style.width).toBe('16px')
+    fireEvent.pointerUp(window)
+    fireEvent.click(addBack)
+    await act(async () => {
+      await new Promise((done) => setTimeout(done, 10))
+    })
+    // Its picker is back, over the whole row: a press anywhere on it opens it.
+    const restored = screen.getByRole('button', { name: 'Review' })
+    expect(restored.parentElement?.style.width).toBe('')
+    // A press dragged off and let go, no menu opening, leaves it whole too.
+    fireEvent.pointerDown(restored, { clientX: 120 })
+    fireEvent.pointerCancel(window)
+    await act(async () => {
+      await new Promise((done) => setTimeout(done, 10))
+    })
+    expect(restored.parentElement?.style.width).toBe('')
+  })
+})
+
+describe('a node being chosen', () => {
+  const matchMedia = window.matchMedia
+  afterEach(() => {
+    window.matchMedia = matchMedia
+    vi.useRealTimers()
+  })
+  const reduce = (on: boolean) => {
+    window.matchMedia = ((query: string) => ({
+      matches: on && query.includes('reduce'),
+      media: query,
+      addEventListener() {},
+      removeEventListener() {},
+    })) as never
+  }
+  const choosing = () => document.querySelector('[data-state="choosing"]')?.innerHTML
+
+  it("rolls makers' marks through, and with reduced motion stands still", () => {
+    vi.useFakeTimers()
+    reduce(false)
+    const { unmount } = card({ title: 'Fix the VAT rate', steps: [lead(false)], drafting: { phase: 'lead' } })
+    const first = choosing()
+    act(() => vi.advanceTimersByTime(300))
+    expect(choosing()).not.toBe(first)
+    unmount()
+
+    reduce(true)
+    card({ title: 'Fix the VAT rate', steps: [lead(false)], drafting: { phase: 'lead' } })
+    const still = choosing()
+    expect(still).toBeDefined()
+    act(() => vi.advanceTimersByTime(1000))
+    expect(choosing()).toBe(still)
   })
 })
