@@ -3188,6 +3188,29 @@ export class Queries extends Context.Service<
             SELECT state, json_array_length(findings) AS findings, verdict, json_extract(reviewer, '$.bringsBack') AS bringsBack,
               updated_at AS updatedAt FROM merge_reviews
             WHERE url = ${change?.url ?? ''}`
+          // Where the full task's review stands: its draft, where it drafted one, else whether its run is still going.
+          const [draft] =
+            reviewed === undefined
+              ? []
+              : yield* sql<{ suggested: string; comments: number; at: string }>`
+            SELECT json_extract(content, '$.suggested') AS suggested, json_array_length(content, '$.comments') AS comments,
+              created_at AS at
+            FROM thread_items WHERE thread_id = ${reviewed.threadId} AND kind = 'review_draft' ORDER BY sequence DESC LIMIT 1`
+          const [reviewRun] =
+            reviewed === undefined || draft !== undefined
+              ? []
+              : yield* sql<{ state: string }>`
+            SELECT state FROM runs WHERE task_id = ${reviewed.taskId} ORDER BY created_at DESC LIMIT 1`
+          const reviewBefore =
+            reviewed === undefined
+              ? undefined
+              : draft !== undefined
+                ? draft.suggested !== 'approved' && draft.comments > 0
+                  ? { state: 'found' as const, findings: draft.comments, at: draft.at }
+                  : { state: 'clear' as const, findings: 0, at: draft.at }
+                : reviewRun === undefined || reviewRun.state === 'running'
+                  ? { state: 'running' as const, findings: 0, at: null }
+                  : { state: 'stopped' as const, findings: 0, at: null }
           // What its review after the merge brings back: as the rule and its own word say now, and once owed, as it was kept then.
           const rule = yield* afterMergeNow(task.id)
           const holds: AfterMergeRule = review === undefined ? rule.holds : review.bringsBack === 'all' ? 'all' : 'major'
@@ -3228,7 +3251,8 @@ export class Queries extends Context.Service<
           const failed = change?.checks !== null && change?.checks !== undefined && change.checks.outcome === 'failed'
           const afterMerge = change !== null && change.state === 'merged'
           const at = task.startedAt ?? plan?.proposedAt ?? task.createdAt
-          const reviewBefore = reviewed !== undefined && !afterMerge
+          // Only Make it a full task gives a small change a review task of its own (FastLane.makeFullTask).
+          const reviewsBefore = reviewed !== undefined && !afterMerge
           const card: ThreadItem = {
             id: `small-change:${task.id}`,
             sequence: 0,
@@ -3245,7 +3269,7 @@ export class Queries extends Context.Service<
                 model: small.implement.model,
                 ...(small.implement.effort === undefined ? {} : { effort: small.implement.effort }),
               },
-              skips: smallChangeSkips(reviewBefore ? null : small.review, holds),
+              skips: smallChangeSkips(reviewsBefore ? null : small.review, holds),
               steps: [
                 { key: 'started', what: 'Started', at, done: true },
                 {
@@ -3286,9 +3310,12 @@ export class Queries extends Context.Service<
               ...(reviewed === undefined || !afterMerge
                 ? {}
                 : { review: { taskId: reviewed.taskId, slug: reviewed.slug, threadId: reviewed.threadId, title: reviewed.title } }),
-              ...(reviewBefore
-                ? { fullTask: { taskId: reviewed.taskId, slug: reviewed.slug, threadId: reviewed.threadId, title: reviewed.title } }
-                : {}),
+              ...(reviewed === undefined || reviewBefore === undefined
+                ? {}
+                : {
+                    fullTask: { taskId: reviewed.taskId, slug: reviewed.slug, threadId: reviewed.threadId, title: reviewed.title },
+                    reviewBefore,
+                  }),
               afterMerge: { project: rule.project, task: rule.task, holds },
               reviewer: small.review === null ? null : { agentId: small.review.agentId, model: small.review.model ?? null },
               ...(review === undefined

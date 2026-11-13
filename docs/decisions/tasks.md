@@ -527,7 +527,10 @@ few lines is the exception to the usual course of a change:
   drawn dashed while it waits for the merge. Merge, which still asks, sits
   under its stop once checks pass. Pressing Review moves it before the
   merge (**Make it a full task**), keeps it after, or takes it off; with
-  none, the route ends at Merge. What a small change is waits behind its
+  none, the route ends at Merge. Made a full task, its Review stop reads
+  the review task it was given (reading, nothing found, how many found,
+  stopped) before and after the merge; Merge waits until that review comes
+  back clear, and See findings opens that task. What a small change is waits behind its
   name, as a hover. What its review after the merge found isn't listed on
   the card: it says how many, and See findings opens the review's report in
   the thread. The card is read from the task as it stands, never stored, so

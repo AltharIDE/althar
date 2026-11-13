@@ -3046,9 +3046,21 @@ export const SmallChangeItem = Schema.Struct({
     review: Schema.optional(
       Schema.NullOr(Schema.Struct({ taskId: Schema.String, slug: Schema.String, threadId: Schema.String, title: Schema.String })),
     ),
-    /** The person made it a full task, reviewed before it merges: the card folds to the line saying what was made. */
+    /** The person made it a full task, reviewed before it merges: the review task it was given, before and after it merges. */
     fullTask: Schema.optional(
       Schema.NullOr(Schema.Struct({ taskId: Schema.String, slug: Schema.String, threadId: Schema.String, title: Schema.String })),
+    ),
+    /**
+     * Where that full task's review stands: reading, its draft approving or with nothing on its lines (`clear`), with
+     * findings on lines (`found`, how many), or its run over with no draft (`stopped`); when it drafted. Absent where it
+     * isn't a full task, and from a runtime before it.
+     */
+    reviewBefore: Schema.optional(
+      Schema.Struct({
+        state: Schema.Literals(['running', 'clear', 'found', 'stopped']),
+        findings: Schema.Number,
+        at: Schema.NullOr(Schema.String),
+      }),
     ),
     /**
      * What its review after the merge brings back: the project's rule (`afterMergeReview`), the task's own word over it (null

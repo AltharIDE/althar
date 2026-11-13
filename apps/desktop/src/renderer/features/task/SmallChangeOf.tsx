@@ -14,7 +14,8 @@ import s from './FastLaneOf.module.css'
  * Merge does what the task's own Merge does, and still asks. Its review stop
  * moves the review before the merge (Make it a full task), keeps it after,
  * or takes it off, at once, and goes back with a line where that fails. See
- * findings takes the person to the review's report in this thread.
+ * findings takes the person to the review's report in this thread; for a full
+ * task, to its review task, whose review holds Merge until it comes back clear.
  */
 
 export const text = {
@@ -71,14 +72,28 @@ export function SmallChangeOf({
   const changed = stepOf(card, 'changed')
   const reported = changed?.done === true
   const after = card.reviewAfter
+  const full = card.fullTask ?? null
+  // A full task's review is its own task's, read before the merge and kept after it; else the review after the merge.
+  const before = full === null ? undefined : card.reviewBefore
   const when = chosen ?? kept
-  const review: SmallChangeReview = {
-    when,
-    state: after === undefined ? 'waiting' : after.state,
-    findings: after?.findings ?? 0,
-    at: after?.at ?? null,
-  }
-  const ready = change !== null && change.state === 'open' && head !== null && (checks.state === 'passed' || checks.state === 'none')
+  const review: SmallChangeReview =
+    full !== null
+      ? {
+          when,
+          state: before === undefined ? 'running' : before.state,
+          findings: before?.findings ?? 0,
+          at: before?.at ?? null,
+        }
+      : {
+          when,
+          state: after === undefined ? 'waiting' : after.state,
+          findings: after?.findings ?? 0,
+          at: after?.at ?? null,
+        }
+  // A full task merges once its review comes back clear, as its own task's review holds it.
+  const reviewed = when !== 'before' || before?.state === 'clear'
+  const ready =
+    change !== null && change.state === 'open' && head !== null && reviewed && (checks.state === 'passed' || checks.state === 'none')
   const choose = (next: SmallChangeReviewWhen) => {
     if (next === when) return
     setError(null)
@@ -110,8 +125,7 @@ export function SmallChangeOf({
         and {holds === 'all' ? 'what it finds comes back here' : 'only something major comes back here'}.
       </>
     )
-  const item = after?.item ?? null
-  const full = card.fullTask
+  const item = full === null ? (after?.item ?? null) : null
   return (
     <>
       <SmallChange
@@ -130,9 +144,14 @@ export function SmallChangeOf({
         explain={explain}
         busy={busy}
         {...(ready ? { onMerge: () => onMerge({ head, url: change.url }) } : {})}
-        {...(merged || card.fullTask != null ? {} : { onReview: choose })}
-        {...(item === null || onShow === undefined ? {} : { onFindings: () => onShow(item) })}
-        {...(full == null || onOpen === undefined ? {} : { onOpenReview: () => onOpen(full.threadId) })}
+        {...(merged || full !== null ? {} : { onReview: choose })}
+        {...(full !== null
+          ? onOpen === undefined
+            ? {}
+            : { onFindings: () => onOpen(full.threadId), onOpenReview: () => onOpen(full.threadId) }
+          : item === null || onShow === undefined
+            ? {}
+            : { onFindings: () => onShow(item) })}
       />
       {error !== null && (
         <p className={s.failure} role="alert">
