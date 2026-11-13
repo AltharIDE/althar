@@ -371,7 +371,10 @@ export const projectSettings = async (page: Page, section: 'General' | 'Code and
 /** From the project's settings back to its work: home, with the conversation with its coordinator showing. */
 export const backToWork = async (page: Page) => {
   await pickLayout(page, 'Conversation')
-  await expect(page.getByRole('region', { name: 'Conversation' })).toBeVisible()
+  // A new project's conversation is empty, so it says it shows as ⋯ does, not by what it draws.
+  await openLayout(page)
+  await expect(layoutItem(page, 'Conversation')).toHaveAttribute('aria-checked', 'true')
+  await closeLayout(page)
 }
 
 /**
