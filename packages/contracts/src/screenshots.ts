@@ -1,17 +1,11 @@
-import type { Evidence, Picture } from './Api'
+import type { Evidence, GalleryUpdate, Picture } from './Api'
 
 /*
- * The screenshots a task's Outputs show as it is now (What it looks like),
- * worked out in one place: the window draws them, and the runtime puts the
- * same ones in a comment on the task's pull request (ADR-077), so what the
- * person sees is what goes there. Each picture is of a view: the one its
- * lead named it by, else the name its caption starts with (A1), else a view
- * of its own. A round that pictures the work again replaces what came
- * before, so pictures that no longer hold drop out rather than pile up: but
- * for the views it names again, which it takes anew, and those it says
- * still hold. A round that only takes known views again keeps the rest. In
- * a change, the options the person chose between, and explorations, never
- * count: they stay in the thread, where the person saw them (ADR-079).
+ * A task's visual collection: new handoffs patch views by stable identity.
+ * Older reports replay the original selection policy as a migration
+ * baseline, so discarded prototype directions do not suddenly reappear.
+ * The runtime checkpoints this reducer and serves the same result to the
+ * window and PR posting, independently of conversation pagination.
  */
 
 /** A lead's report, as far as its pictures go: what it showed, in order, and the views from before it said still hold. */
@@ -21,6 +15,7 @@ export interface PictureReport {
   readonly createdAt: string
   readonly evidence: ReadonlyArray<Evidence>
   readonly keptViews?: ReadonlyArray<string> | undefined
+  readonly gallery?: GalleryUpdate | undefined
 }
 
 /** A screenshot as it is now: its view, by which it is kept or left out, and the picture last taken of it. */
@@ -31,6 +26,11 @@ export interface ScreenshotNow {
   readonly id: string
   readonly caption: string
   readonly picture: Picture
+  /** When the evidence was reported, not a claim about when its bytes were captured. */
+  readonly sequence?: number | undefined
+  readonly reportedAt?: string | undefined
+  readonly needsRefresh?: boolean | undefined
+  readonly earlier?: boolean | undefined
 }
 
 /** "A1 · One quiet line: the first message lands", or "T1 Today: …": a picture's name, where its caption starts with one. */
@@ -54,44 +54,61 @@ export const viewOf = (caption: string): string | null => {
   return null
 }
 
-/**
- * The screenshots as the task is now, from its lead's reports: a change's
- * since it became one (`since`), so a prototype's rounds before don't
- * count, and never an option or exploration; any other task's, a
- * prototype's, its directions too. Each round that pictures it replaces the
- * rounds before, but for the views it takes again or says still hold; one
- * that only takes known views again keeps the rest. Each view once, as last
- * taken, where it was first shown in the round that set it.
- */
+/** Replays immutable reports in order. `updateScreenshots` also advances a saved checkpoint. */
 export const screenshotsNow = (
   reports: ReadonlyArray<PictureReport>,
   options: { readonly change: boolean; readonly since: string | null },
 ): ReadonlyArray<ScreenshotNow> => {
-  const shown = new Map<string, ScreenshotNow>()
-  for (const report of reports.toSorted((one, other) => one.sequence - other.sequence)) {
-    if (options.change && options.since !== null && report.createdAt < options.since) continue
-    const shots = report.evidence.flatMap((piece, index): ScreenshotNow[] =>
-      piece.picture === null || (options.change && piece.option === true)
-        ? []
-        : [
-            {
-              key: keyOf(piece) ?? `${report.id}:${index}`,
-              id: `${report.id}:${index}`,
-              caption: piece.caption,
-              picture: piece.picture,
-            },
-          ],
-    )
-    const kept = (report.keptViews ?? []).map((view) => view.trim())
-    if (shots.length === 0 && kept.length === 0) continue
-    // Only views taken again: a follow-up that leaves the others as they were.
-    // A view counts by its name, so a before added to a view, or a view's own picture, is a retake too.
-    const known = new Set([...shown.keys()].map(viewOfKey))
-    const retaken = shots.length > 0 && shots.every((shot) => known.has(viewOfKey(shot.key)))
-    // A view kept by name keeps both its picture and its before.
-    if (!retaken) for (const key of shown.keys()) if (!kept.includes(viewOfKey(key))) shown.delete(key)
-    for (const shot of shots) shown.set(shot.key, shot)
+  let shown: ReadonlyArray<ScreenshotNow> = []
+  for (const report of reports.toSorted((one, other) => one.sequence - other.sequence)) shown = updateScreenshots(shown, report, options)
+  return shown
+}
+
+/** Incremental projection. Legacy reports keep their old selection; new reports explicitly patch it. */
+export const updateScreenshots = (
+  previous: ReadonlyArray<ScreenshotNow>,
+  report: PictureReport,
+  options: { readonly change: boolean; readonly since: string | null },
+): ReadonlyArray<ScreenshotNow> => {
+  const shown = new Map(previous.map((shot) => [shot.key, shot]))
+  if (options.change && options.since !== null && report.createdAt < options.since) return previous
+  const shots = report.evidence.flatMap((piece, index): ScreenshotNow[] =>
+    piece.picture === null || (options.change && piece.option === true)
+      ? []
+      : [
+          {
+            key: pictureViewKey(piece) ?? `${report.id}:${index}`,
+            id: `${report.id}:${index}`,
+            caption: piece.caption,
+            picture: piece.picture,
+            sequence: report.sequence,
+            reportedAt: report.createdAt,
+          },
+        ],
+  )
+  const kept = (report.keptViews ?? []).map((view) => view.trim())
+  if (report.gallery !== undefined) {
+    // A failed capture never takes away a usable earlier one, even in a replacement report.
+    const usable = shots.filter((shot) => shot.picture.digest !== null)
+    if (report.gallery.mode === 'replace' && (shots.length === 0 || usable.length > 0)) shown.clear()
+    for (const view of report.gallery.remove ?? []) for (const key of shown.keys()) if (viewOfKey(key) === view) shown.delete(key)
+    for (const view of report.gallery.invalidate ?? [])
+      for (const [key, shot] of shown) if (viewOfKey(key) === view) shown.set(key, { ...shot, needsRefresh: true })
+    for (const failed of shots.filter((shot) => shot.picture.digest === null)) {
+      const earlier = shown.get(failed.key) ?? previous.find((shot) => shot.key === failed.key)
+      shown.set(failed.key, { ...(earlier ?? failed), needsRefresh: true })
+    }
+    for (const shot of usable) shown.set(shot.key, shot)
+    return [...shown.values()]
   }
+  if (shots.length === 0 && kept.length === 0) return previous
+  // Only views taken again: a follow-up that leaves the others as they were.
+  // A view counts by its name, so a before added to a view, or a view's own picture, is a retake too.
+  const known = new Set([...shown.keys()].map(viewOfKey))
+  const retaken = shots.length > 0 && shots.every((shot) => known.has(viewOfKey(shot.key)))
+  // A view kept by name keeps both its picture and its before.
+  if (!retaken) for (const key of shown.keys()) if (!kept.includes(viewOfKey(key))) shown.delete(key)
+  for (const shot of shots) shown.set(shot.key, shot)
   return [...shown.values()]
 }
 
@@ -107,8 +124,12 @@ export const viewOfKey = (key: string): string => (key.endsWith(BEFORE_SUFFIX) ?
  * from the view's own picture; one with no name to say which view it is the
  * before of is only a picture.
  */
-const keyOf = (piece: Evidence): string | null => {
+export const pictureViewKey = (piece: Evidence): string | null => {
   const given = piece.view?.trim()
   const named = given !== undefined && given !== '' ? given : viewOf(piece.caption)
   return named !== null && piece.before === true ? `${named}${BEFORE_SUFFIX}` : named
 }
+
+/** Provenance is separate from a view's identity and its caption. */
+export const screenshotNote = (shot: ScreenshotNow): string | undefined =>
+  shot.needsRefresh ? 'Needs a new capture' : shot.earlier ? 'From an earlier update' : undefined

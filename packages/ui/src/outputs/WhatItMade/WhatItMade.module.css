@@ -92,3 +92,9 @@
   color: var(--t-3);
   text-wrap: pretty;
 }
+
+.note {
+  display: block;
+  color: var(--t-3);
+  font-size: 12px;
+}
