@@ -4,7 +4,7 @@ import type { AgentStatus } from '@althar/contracts'
 import { type ModelInfo, ModelBrowser, modelBrowserText, ModelPick, type ModelPickText, modKey } from '@althar/ui'
 
 import { useModels, useSetDefaultEffort, useSetModelBlocked } from '../data/models'
-import { useMissedReports, useModelRooms } from '../features/usage/usePlan'
+import { useModelRooms } from '../features/usage/usePlan'
 import {
   catalogOf,
   type Choice,
@@ -78,7 +78,6 @@ export function ModelChoice({
 }: ModelChoiceProps) {
   const known = useModels()
   const room = useModelRooms(projectId)
-  const missed = useMissedReports()
   const setDefault = useSetDefaultEffort()
   const prefs = useModelPrefs()
   const [open, setOpen] = useState(false)
@@ -123,7 +122,6 @@ export function ModelChoice({
         {...(onTeam === undefined ? {} : { onTeam })}
         {...(confirm === undefined ? {} : { confirm })}
         room={room}
-        missed={missed}
         asking={asking}
         onAskingChange={setAsking}
         open={open}

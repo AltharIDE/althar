@@ -1,5 +1,6 @@
 import { errandRecords } from './Errands'
 import { errandCardLines } from './errandWords'
+import { externalWaitOf } from './externalWaits'
 import { HOSTED, MergeRules, newPullRequestLink } from '@althar/connectors'
 import { existsSync, readFileSync, realpathSync, statSync } from 'node:fs'
 import { isAbsolute, join, resolve, sep } from 'node:path'
@@ -2346,6 +2347,7 @@ export class Queries extends Context.Service<
           const line = queued && task.state !== 'abandoned' ? yield* placeOf(taskId) : null
           // Local, its first step held for its checkout: what it waits for, where it isn't the person's answer (ADR-091).
           const waitsForCheckout = task.heldFor === 'checkout' ? checkoutWaitOf(task.held) : null
+          const externalWait = task.heldFor === 'external' ? externalWaitOf(task.held) : undefined
           // Held for a usage limit or the connection, or for its checkout, none of its agents in a turn, it goes on by itself:
           // up next too.
           const paused =
@@ -2709,6 +2711,17 @@ export class Queries extends Context.Service<
             ...(task.toward === null ? {} : { toward: task.toward }),
             waits: task.heldFor === 'usage_limit' ? waitsOf(task.held) : null,
             ...(task.heldFor === 'agent_unavailable' ? { reconnects: reconnectsOf(task.held) } : {}),
+            ...(externalWait === undefined
+              ? {}
+              : {
+                  externalWait: {
+                    reason: externalWait.reason,
+                    deadline: externalWait.deadline,
+                    lastCheck: externalWait.lastCheck,
+                    nextCheck: externalWait.nextCheck,
+                    error: externalWait.error,
+                  },
+                }),
             // A merged task whose lead goes back to work waits its turn too (ADR-034).
             queued: queued && task.state !== 'abandoned' ? yield* queuedNow(taskId) : null,
             // Its plan's first step waits for a place, or Local for its checkout, nothing of it begun: its plan can still change.
@@ -3711,6 +3724,7 @@ export class Queries extends Context.Service<
               madeChangeAt: head.madeChangeAt,
               waits: card?.waits ?? null,
               ...(card?.reconnects == null ? {} : { reconnects: card.reconnects }),
+              ...(card?.externalWait == null ? {} : { externalWait: card.externalWait }),
               queued: card?.queued ?? null,
               ...(card?.place === undefined ? {} : { place: card.place }),
               // In Up next behind another of its tasks, continuing or in the line, or a plan waiting to start, the person can put it

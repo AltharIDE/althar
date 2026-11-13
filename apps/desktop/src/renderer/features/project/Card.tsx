@@ -3,7 +3,7 @@ import { useState } from 'react'
 import type { AgentStatus, ChangeSummary, PlanStep, TaskEnd as End, WorksIn as Where } from '@althar/contracts'
 import { type IssueRefProps, type LaunchStep, TaskCard, TaskEnd, TaskLaunch, TaskStatus, WorksIn } from '@althar/ui'
 
-import { queuedWords, reconnectsWords, waitsWords } from '../../shared/agents'
+import { externalWaitWords, queuedWords, reconnectsWords, waitsWords } from '../../shared/agents'
 import { type NameEffort, type NameModel, useEffortNames, useModelNames } from '../../shared/modelNames'
 import { Holders } from '../../shared/Holders'
 import { localText } from '../../shared/local'
@@ -279,15 +279,17 @@ function Shown({ card, actions }: { card: TaskCardContent; actions: CardActions 
       ? handedBack
       : status === TaskStatus.Done
         ? card.summary?.split('\n')[0]
-        : card.queued !== null
-          ? queuedWords(card.queued)
-          : card.waits !== null
-            ? waitsWords(actions.agentName(card.waits.agentId), clock(card.waits.until), undefined, card.waits.left)
-            : card.reconnects != null
-              ? reconnectsWords(card.reconnects, clock)
-              : card.step === null
-                ? undefined
-                : text.now[card.step]
+        : card.externalWait !== undefined
+          ? externalWaitWords(card.externalWait, clock)
+          : card.queued !== null
+            ? queuedWords(card.queued)
+            : card.waits !== null
+              ? waitsWords(actions.agentName(card.waits.agentId), clock(card.waits.until), undefined, card.waits.left)
+              : card.reconnects != null
+                ? reconnectsWords(card.reconnects, clock)
+                : card.step === null
+                  ? undefined
+                  : text.now[card.step]
   const from = fromOf(card)
   // How hard its lead thinks, whoever chose it: what its session is on, or the plan's until it has started.
   const effort = effortOf(card.lead, card.leadModel, card.leadEffort)
@@ -300,7 +302,7 @@ function Shown({ card, actions }: { card: TaskCardContent; actions: CardActions 
       steps={steps}
       at={status === TaskStatus.Done || handedBack !== null ? steps.length - 1 : at}
       {...(now === undefined ? {} : { now })}
-      started={card.startedAt === null ? '' : ago(card.startedAt)}
+      started={card.startedAt === null || card.externalWait !== undefined ? '' : ago(card.startedAt)}
       lead={named(card.lead, card.leadModel)}
       {...(effort === null ? {} : { effort })}
       {...(from === undefined ? {} : { from })}

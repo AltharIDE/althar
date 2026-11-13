@@ -31,6 +31,7 @@ const OWN = [
   'run_it',
   'start_helper',
   'stop_helper',
+  'wait_for',
   'wait_for_person',
 ]
 
