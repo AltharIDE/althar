@@ -236,10 +236,13 @@ test('holds the reply’s place, thinking, until its first words take it: in the
     const clip = { x: to.x - 20, y: from.y - 16, width: to.width + 40, height: to.y + to.height + 16 - (from.y - 16) }
     await page.screenshot({ path: 'test-results/first-word-coordinator-queued.png', clip, scale: 'css', animations: 'disabled' })
     gates.open('[answers-after:5s]')
-    gates.open('[answers-after:1s]')
     await expect(queue).toHaveCount(0)
+    await expect.poll(() => gates.waiting('[answers-after:1s]')).toBe(true)
     await expect(conversation.getByRole('article', { name: /^You/ }).last()).toContainText('Then the changelog.')
-    await expect(conversation.getByText(ANSWER)).toHaveCount(3)
+    gates.open('[answers-after:1s]')
+    // Four turns answered: the first, the thought, the docs and the queued
+    // changelog. Three counted only the docs, while the next turn was starting.
+    await expect(conversation.getByText(ANSWER)).toHaveCount(4)
     await expect(conversation).not.toHaveAttribute('aria-busy')
 
     // A task's lead, asked again once it's done; and with a call ahead of its words.
