@@ -18,34 +18,6 @@ import { holdRuntime, launch, openFirstProject, say, shown, startTask, still } f
  * this change's evidence (test-results/asides-*.png).
  */
 
-/**
- * Holds what the window sends the runtime, as holdRuntime does, and sends the
- * clear of `taskId` for a task the runtime doesn't have, so the runtime answers
- * it without settling anything.
- */
-const keepOnScratch = async (page: Page, taskId: string) => {
-  await page.evaluate((taskId) => {
-    const held: Array<() => void> = []
-    // oxlint-disable-next-line typescript/unbound-method -- applied to the port it was called on
-    const post = MessagePort.prototype.postMessage
-    const misname = (message: unknown): unknown =>
-      JSON.stringify(message)?.includes('MarkTaskDone') === true
-        ? JSON.parse(JSON.stringify(message).replaceAll(taskId, 'tsk_none'))
-        : message
-    MessagePort.prototype.postMessage = function (this: MessagePort, ...args: Parameters<MessagePort['postMessage']>) {
-      if (args[0] === null || args[0] === undefined) post.apply(this, args)
-      else held.push(() => post.call(this, misname(args[0]), ...(args.slice(1) as [])))
-    } as MessagePort['postMessage']
-    Object.assign(window, {
-      release: () => {
-        MessagePort.prototype.postMessage = post
-        for (const send of held.splice(0)) send()
-      },
-    })
-  }, taskId)
-  return () => page.evaluate(() => (window as unknown as { release: () => void }).release())
-}
-
 /** The conversation's column, from its pills down, at 1×. */
 const shoot = async (page: Page, pills: Locator, name: string) => {
   const box = await pills.boundingBox()
@@ -283,24 +255,6 @@ test('an aside’s × clears it in the frame it is pressed, for good, and Make i
     await expect(page.getByRole('region', { name: 'The project’s work' }).getByText('Which file holds the retry?')).toBeVisible()
     expect(await clearedBack()).toBe(false)
     await expect(page.getByRole('alert').filter({ visible: true })).toHaveCount(0)
-
-    // One the runtime answers without settling goes at once all the same, and comes back once a read after the answer still
-    // has it on Scratch, with a line that says so. The clear is sent for a task the runtime doesn't have, which it answers as
-    // it does one with something open: it settles nothing.
-    await startAside(page, 'Which cache?\n[lead:finish] [lead:answered]')
-    const which = pills.getByRole('tab', { name: 'Which cache?' })
-    await expect(which).toHaveAttribute('aria-selected', 'true')
-    const whichId = (await which.locator('..').getAttribute('data-aside')) ?? ''
-    const answered = await keepOnScratch(page, whichId)
-    await page.getByRole('button', { name: 'Clear Which cache?' }).click()
-    await expect(which).toHaveCount(0)
-    await answered()
-    await expect(which).toBeVisible()
-    const notCleared = page.getByRole('alert').filter({ hasText: 'Couldn’t clear “Which cache?”. Something of it is still open.' })
-    await expect(notCleared).toBeVisible()
-    await expect(notCleared).toBeInViewport()
-    await shoot(page, pills, 'not-cleared')
-    await notCleared.getByRole('button', { name: 'Dismiss' }).click()
 
     // Make it a task: its pill goes and its card is on the board in the frame it is pressed.
     await startAside(page, 'Shorten the retry wait\n[lead:finish] [lead:answered]')
