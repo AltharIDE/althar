@@ -95,4 +95,28 @@ describe('clearing an aside', () => {
     expect(result.current.scratch).toEqual([])
     expect(result.current.failed).toBeNull()
   })
+
+  it('leaves two cleared whose board reads overlap: neither comes back, and no line says so', async () => {
+    // Each clear's read of the board answers only when the test says, the second before the first.
+    const reads: Array<(board: BoardSnapshot) => void> = []
+    const getBoard = vi.fn(() => new Promise<BoardSnapshot>((answer) => reads.push(answer)))
+    const { client } = fakeClient({ markTaskDone: vi.fn(async () => undefined), getBoard })
+    const { wrapper } = setup(client)
+    const both = [aside('a1'), aside('a2')]
+    const { result, rerender } = renderHook(({ scratch }) => useAsideClears('p1', scratch), { wrapper, initialProps: { scratch: both } })
+
+    act(() => result.current.clear(['a1']))
+    act(() => result.current.clear(['a2']))
+    expect(result.current.scratch).toEqual([])
+    await waitFor(() => expect(reads).toHaveLength(2))
+
+    const settled = boardOf([aside('a1', { phase: 'settled' }), aside('a2', { phase: 'settled' })])
+    await act(async () => reads[1]!(settled))
+    // A read of the board from before either clear lands meanwhile.
+    rerender({ scratch: both })
+    expect(result.current.scratch).toEqual([])
+    await act(async () => reads[0]!(settled))
+    expect(result.current.scratch).toEqual([])
+    expect(result.current.failed).toBeNull()
+  })
 })

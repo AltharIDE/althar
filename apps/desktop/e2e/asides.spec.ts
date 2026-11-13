@@ -18,6 +18,34 @@ import { holdRuntime, launch, openFirstProject, say, shown, still } from './supp
  * this change's evidence (test-results/asides-*.png).
  */
 
+/**
+ * Holds what the window sends the runtime, as holdRuntime does, and sends the
+ * clear of `taskId` for a task the runtime doesn't have, so the runtime answers
+ * it without settling anything.
+ */
+const keepOnScratch = async (page: Page, taskId: string) => {
+  await page.evaluate((taskId) => {
+    const held: Array<() => void> = []
+    // oxlint-disable-next-line typescript/unbound-method -- applied to the port it was called on
+    const post = MessagePort.prototype.postMessage
+    const misname = (message: unknown): unknown =>
+      JSON.stringify(message)?.includes('MarkTaskDone') === true
+        ? JSON.parse(JSON.stringify(message).replaceAll(taskId, 'tsk_none'))
+        : message
+    MessagePort.prototype.postMessage = function (this: MessagePort, ...args: Parameters<MessagePort['postMessage']>) {
+      if (args[0] === null || args[0] === undefined) post.apply(this, args)
+      else held.push(() => post.call(this, misname(args[0]), ...(args.slice(1) as [])))
+    } as MessagePort['postMessage']
+    Object.assign(window, {
+      release: () => {
+        MessagePort.prototype.postMessage = post
+        for (const send of held.splice(0)) send()
+      },
+    })
+  }, taskId)
+  return () => page.evaluate(() => (window as unknown as { release: () => void }).release())
+}
+
 /** The conversation's column, from its pills down, at 1×. */
 const shoot = async (page: Page, pills: Locator, name: string) => {
   const box = await pills.boundingBox()
@@ -102,6 +130,28 @@ test('asides: started beside the coordinator, opened in its place with a compose
     await expect(capped).toHaveCount(0)
     await expect(shown(page, /wasn’t cleared/)).toHaveCount(0)
     await shoot(page, pills, 'cleared')
+
+    // One the runtime answers without settling goes at once all the same, and comes back once the runtime has answered,
+    // with a line under the pills that says so. The clear is sent for a task the runtime doesn't have, which it answers
+    // as it does one with something open: it settles nothing, and the aside is still on Scratch.
+    await startAside(page, 'Which cache?\n[lead:finish] [lead:answered]')
+    const which = pills.getByRole('tab', { name: 'Which cache?' })
+    await expect(which).toHaveAttribute('aria-selected', 'true')
+    await expect(page.locator('[data-aside] [class*="dot"]')).toHaveCount(0)
+    const id = await pills
+      .locator('[data-aside]')
+      .filter({ has: page.getByRole('tab', { name: 'Which cache?' }) })
+      .getAttribute('data-aside')
+    const answered = await keepOnScratch(page, id ?? '')
+    await pills.getByRole('button', { name: 'Clear “Which cache?”' }).click()
+    await expect(which).toHaveCount(0)
+    await answered()
+    await expect(which).toBeVisible()
+    const notCleared = page.getByRole('alert').filter({ hasText: '“Which cache?” wasn’t cleared' })
+    await expect(notCleared).toBeVisible()
+    await expect(which).toBeInViewport()
+    await expect(notCleared).toBeInViewport()
+    await shoot(page, pills, 'not-cleared')
 
     // Words the coordinator said, selected, start an aside about them, quoted over the composer.
     await answer.locator('p').first().click({ clickCount: 3 })

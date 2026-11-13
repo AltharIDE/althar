@@ -4,6 +4,7 @@ import { useId, useState } from 'react'
 import type { Preset } from '@althar/contracts'
 import { Button, Field, FieldArea, FormRow, Icon, Segmented, SettingList, SettingRow, Switch } from '@althar/ui'
 
+import { useGoneAtOnce } from '../../data/goneAtOnce'
 import { useServices } from '../../data/services'
 
 /*
@@ -107,7 +108,9 @@ function PresetEditor({ preset, onDone }: { preset: Preset; onDone: () => void }
 export function PresetsSection() {
   const { client } = useServices()
   const cache = useQueryClient()
-  const presets = useQuery({ queryKey: PRESETS, queryFn: () => client.listPresets() }).data
+  const read = useQuery({ queryKey: PRESETS, queryFn: () => client.listPresets() }).data
+  const gone = useGoneAtOnce(read, (preset) => preset.id)
+  const presets = gone.shown
   const [editing, setEditing] = useState<string | null>(null)
   const [failed, setFailed] = useState<string | null>(null)
   if (presets === undefined) return null
@@ -135,12 +138,15 @@ export function PresetsSection() {
                   size="small"
                   variant="quiet"
                   onClick={() => {
-                    // It goes at once; one the runtime kept comes back as the list is read again, with a line.
+                    // It goes at once and stays gone until a list without it is read; one the runtime kept comes back, with a line.
                     setFailed(null)
-                    cache.setQueryData<typeof presets>(PRESETS, (was) => was?.filter((one) => one.id !== preset.id))
+                    gone.hide([preset.id])
                     void client
                       .removePreset(preset.id)
-                      .catch((error: unknown) => setFailed(error instanceof Error ? error.message : String(error)))
+                      .catch((error: unknown) => {
+                        gone.back(preset.id)
+                        setFailed(error instanceof Error ? error.message : String(error))
+                      })
                       .finally(() => void cache.invalidateQueries({ queryKey: PRESETS }))
                   }}
                 >

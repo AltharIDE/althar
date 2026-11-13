@@ -1,9 +1,10 @@
 import { type RefObject, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 
-import type { BoardSnapshot, BoardTask } from '@althar/contracts'
+import type { BoardTask } from '@althar/contracts'
 import { type Aside, AsideMoves, AsideTabs, Button, Icon, IconButton } from '@althar/ui'
 
+import { useGoneAtOnce } from '../../data/goneAtOnce'
 import { keys } from '../../data/reads'
 import { useServices } from '../../data/services'
 import { coordinatorSigned } from '../../shared/signed'
@@ -82,49 +83,37 @@ const onScratch = (task: BoardTask | undefined) => task !== undefined && task.sc
  * Clearing asides at once (docs/decisions/foundations.md, "The UI is instant"): a cleared
  * one leaves the pills in the frame it is pressed, and the runtime settles it
  * behind. It stays hidden until a read of the board no longer has it on
- * Scratch, so a read from before the clear never brings it back for a moment;
- * once the runtime has answered, the board is read again, and one it left on
- * Scratch (still at work, or waiting on the person) comes back with a line.
+ * Scratch (useGoneAtOnce), so a read from before the clear never brings it
+ * back for a moment. Once the runtime has answered, each clear reads the board
+ * itself, a read that can only be from after it, whatever other reads overlap;
+ * one the runtime left on Scratch (still at work, or waiting on the person)
+ * comes back with a line.
  */
 export function useAsideClears(projectId: string | null, scratch: ReadonlyArray<BoardTask>) {
   const { client, cache } = useServices()
-  const [clearing, setClearing] = useState<ReadonlySet<string>>(() => new Set())
+  const gone = useGoneAtOnce(scratch, (task) => task.taskId)
   const [failed, setFailed] = useState<string | null>(null)
-  // A read without it says it is cleared: from then on it is the board's to show.
-  const held = [...clearing].filter((id) => scratch.some((task) => task.taskId === id))
-  if (held.length !== clearing.size) setClearing(new Set(held))
-  const unhold = (id: string) =>
-    setClearing((was) => {
-      const next = new Set(was)
-      next.delete(id)
-      return next
-    })
   const clear = (ids: ReadonlyArray<string>) => {
     setFailed(null)
-    setClearing((was) => new Set([...was, ...ids]))
+    gone.hide(ids)
     for (const id of ids) {
       const title = scratch.find((task) => task.taskId === id)?.title ?? ''
       const back = () => {
-        unhold(id)
+        gone.back(id)
         setFailed(asidesText.notCleared(title))
       }
       void client
         .markTaskDone(id)
         .then(async () => {
           if (projectId === null) return
-          await cache.refetchQueries({ queryKey: keys.board(projectId), exact: true })
-          const board = cache.getQueryData<BoardSnapshot>(keys.board(projectId))
-          if (onScratch(board?.tasks.find((task) => task.taskId === id))) back()
+          const board = await client.getBoard(projectId)
+          if (onScratch(board.tasks.find((task) => task.taskId === id))) back()
+          void cache.invalidateQueries({ queryKey: keys.board(projectId), exact: true })
         })
         .catch(back)
     }
   }
-  return {
-    scratch: clearing.size === 0 ? scratch : scratch.filter((task) => !clearing.has(task.taskId)),
-    clear,
-    failed,
-    dismiss: () => setFailed(null),
-  }
+  return { scratch: gone.shown ?? scratch, clear, failed, dismiss: () => setFailed(null) }
 }
 
 /** The pills over the coordinator's conversation, flying one that left for the board to its card there. */
