@@ -64,9 +64,11 @@ export function RunOf({
 function useRunOutput(launchId: string, open: boolean, running: boolean): RunOutput {
   const { client } = useServices()
   const read = useQuery({
-    queryKey: ['launch-output', launchId],
+    // Ending needs its own snapshot even if a running read is still in flight.
+    queryKey: ['launch-output', launchId, running],
     queryFn: () => client.readLaunchOutput(launchId),
     enabled: open,
+    placeholderData: (previous, query) => (query?.queryKey[1] === launchId ? previous : undefined),
     staleTime: 0,
     refetchInterval: open && running ? EVERY : false,
   })
