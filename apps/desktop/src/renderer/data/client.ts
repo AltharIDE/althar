@@ -1,3 +1,5 @@
+import type { SearchDocuments } from '@althar/contracts'
+
 import {
   type CanvasDetail,
   type CanvasSummary,
@@ -156,6 +158,8 @@ export interface Client {
   ) => Promise<ProjectSummary>
   readonly listTasks: (projectId: string) => Promise<TaskList>
   /** Tasks found by what they were about, best first: in one project, or every one; with no words, the ones changed last. */
+  readonly getSearchDocuments: (after?: string) => Promise<SearchDocuments>
+  readonly getSearchFiles: (threadId: string) => Promise<{ readonly files: ReadonlyArray<string> }>
   readonly searchTasks: (input: { readonly projectId?: string; readonly text: string; readonly limit?: number }) => Promise<FoundTasks>
   readonly createTask: (input: {
     readonly projectId: string
@@ -827,6 +831,8 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
         }),
       ),
     listTasks: (projectId) => settle(api.ListTasks({ projectId })),
+    getSearchDocuments: (after) => settle(api.GetSearchDocuments(after === undefined ? {} : { after })),
+    getSearchFiles: (threadId) => settle(api.GetSearchFiles({ threadId })),
     searchTasks: (input) => settle(api.SearchTasks(input)),
     createTask: (input) => command((commandId) => api.CreateTask({ commandId, ...input })),
     getThread: (threadId, page = {}) => settle(api.GetThread({ threadId, ...page })),

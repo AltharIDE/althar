@@ -2,37 +2,32 @@ import './morph.css'
 
 import { type KeyboardEvent, type ReactNode, useLayoutEffect, useMemo, useRef, useState } from 'react'
 
-import { Icon, type IconName, Kbd } from '@althar/ui'
+import { Button, Icon, type IconName, Kbd } from '@althar/ui'
 
-// The kit's own list motion (not exported from @althar/ui yet).
-import { ListMotion } from '../../../../packages/ui/src/lib/ListMotion'
-import { run } from './go'
+import type { Go } from './model'
 import {
   type Act,
   actionsHere,
   asksSomething,
   type Context,
   type Entry,
-  entriesFor,
   type Found,
   type Kind,
   KINDS_NAMED,
   needsYou,
-  projectName,
   recent,
-  search,
-} from './index'
+} from './model'
 import { fold, wordsOf } from './match'
-import { arrive, chipOf, drop, into, intoField, leave, lift, measure, MOTION, moving, slideFrom } from './morph'
+import { arrive, chipOf, drop, into, intoField, leave, lift, measure, MOTION, slideFrom } from './morph'
 import o from './one.module.css'
 import { Box, cx, EntryRow, ENTER, Field, type Item, Label, type List, Row, useList } from './parts'
-import { motion, useStore, words } from './state'
+import { useRanked } from './useRanked'
 
 /*
- * A · One box, shaped after Linear's ⌘K. One field finds every kind and does
+ * The search palette. One field finds every kind and does
  * every action: the best match on top, then the rest grouped by kind, every
  * row acting (Enter does the obvious thing, → lists the rest). A first
- * character narrows it to one kind (> # / " !), as B's prefixes, and Tab
+ * character narrows it to one kind (> # / " !), as typed scopes, and Tab
  * asks the coordinator, as Linear's "Ask Linear". With nothing typed: this
  * task's actions, what needs you, what you opened lately, the actions with
  * their keys, and the kinds to narrow to.
@@ -40,9 +35,9 @@ import { motion, useStore, words } from './state'
  * It morphs as it goes (morph.ts): what is chosen keeps its identity as it
  * moves, the chosen row's name lifting into the field as a chip and
  * dropping back, the Tab hint becoming the chip, the box gliding to each
- * height, the highlight sliding between rows, rows sliding to their new
- * places as the words change, and Enter carrying the row's name into the
- * page it opens.
+ * height, the highlight sliding between rows, and Enter carrying the row's
+ * name into the page it opens. The rows themselves are still: a key changes
+ * the list, and the new list is there at once (DESIGN.md).
  */
 
 const ORDER: ReadonlyArray<Kind> = ['task', 'pull', 'issue', 'said', 'note', 'place', 'action', 'conversation', 'file']
@@ -58,7 +53,7 @@ interface Scope {
   readonly inside: number
 }
 
-/** What a first character narrows to, as B's prefixes. */
+/** What a first character narrows to, as typed scopes. */
 const SCOPES: ReadonlyArray<Scope> = [
   { id: 'numbers', prefix: '#', name: 'Pull requests and issues', icon: 'pr', kinds: ['pull', 'issue'], inside: 0.3 },
   { id: 'files', prefix: '/', name: 'Files', icon: 'file', kinds: ['file'], inside: 0 },
@@ -76,26 +71,38 @@ interface Section {
 
 const ASK = 'Ask the coordinator'
 
-export function OneBox({ context, onClose }: { context: Context; onClose: () => void }) {
-  const typed = useStore(words)
-  useStore(motion)
-  const moves = moving()
+export function OneBox({
+  context,
+  entries,
+  onClose,
+  run,
+  status,
+  onDrill,
+}: {
+  context: Context
+  entries: ReadonlyArray<Entry>
+  onClose: () => void
+  run: (go: Go, entry?: Entry) => void
+  status?: ReactNode
+  onDrill?: (entry: Entry) => void
+}) {
+  const [typed, setTyped] = useState('')
+  const words = { set: setTyped }
   const [scope, setScope] = useState<{ scope: Scope; from: string | null } | null>(null)
   const [asking, setAsking] = useState(false)
   const [acting, setActing] = useState<{ entry: Entry; found?: Found } | null>(null)
   const [filter, setFilter] = useState('')
   const field = useRef<HTMLInputElement>(null)
   const results = useRef<HTMLDivElement>(null)
-  const entries = useMemo(() => entriesFor(context), [context])
   const crossing = context.project ?? true
   const query = typed.trim()
-  const project = context.project ?? 'p_althar'
+  const project = context.project ?? context.projects[0]?.id ?? ''
 
   /* ——— What happens after the next draw: a morph needs where things stood before it and where they stand after ——— */
   const after = useRef<(() => void) | null>(null)
   const fieldWas = useRef<number | null>(null)
   const backTo = useRef<string | null>(null)
-  const rowWords = (key: string) => results.current?.querySelector<HTMLElement>(`[data-move="${CSS.escape(key)}"] [data-title]`) ?? null
+  const rowWords = (key: string) => results.current?.querySelector<HTMLElement>(`[data-row="${CSS.escape(key)}"] [data-title]`) ?? null
   const chipEl = () => field.current?.parentElement?.querySelector<HTMLElement>('[data-chip]') ?? null
   const hintWords = () => field.current?.parentElement?.querySelector<HTMLElement>('[data-hint] [data-chip-text]') ?? null
   const slide = () => slideFrom(field.current, fieldWas.current)
@@ -178,8 +185,9 @@ export function OneBox({ context, onClose }: { context: Context; onClose: () => 
     setAsking(false)
   }
   const drill = (entry: Entry) => {
+    onDrill?.(entry)
     const was = measure(rowWords(entry.id))
-    const found = query === '' ? undefined : search(entries, query, context).find((one) => one.entry.id === entry.id)
+    const found = query === '' ? undefined : ranked.find((one) => one.entry.id === entry.id)
     after.current = () => {
       lift(was, chipEl())
       slide()
@@ -200,7 +208,7 @@ export function OneBox({ context, onClose }: { context: Context; onClose: () => 
     setFilter('')
   }
 
-  // A first character that narrows, typed or put there by the lab's bar: the chip, and the words after it.
+  // A first character that narrows, typed or put there by outside: the chip, and the words after it.
   const take = (value: string): boolean => {
     const prefixed = scope === null && !asking && acting === null ? BY_PREFIX.get(value.slice(0, 1)) : undefined
     if (prefixed === undefined) return false
@@ -214,6 +222,19 @@ export function OneBox({ context, onClose }: { context: Context; onClose: () => 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [typed])
 
+  const ranking = useRanked(
+    entries,
+    query,
+    context,
+    asking
+      ? { kinds: ['said', 'note', 'issue', 'pull', 'task'], inside: 1, fuzzy: false, any: true }
+      : scope === null
+        ? {}
+        : { kinds: scope.scope.kinds, inside: scope.scope.inside, fuzzy: scope.scope.id !== 'said' && scope.scope.id !== 'notes' },
+  )
+  // The last results stay while the next are ranked, but not the empty box's: the first key shows its own rows at once.
+  const ranked = ranking.pending && ranking.query === '' ? [] : ranking.results
+  const enterWhenReady = useRef(false)
   /* ——— What it lists ——— */
   const sections = useMemo((): ReadonlyArray<Section> => {
     const more = (entry: Entry) =>
@@ -229,7 +250,6 @@ export function OneBox({ context, onClose }: { context: Context; onClose: () => 
         node: (list: List) => (
           <EntryRow
             key={entry.id}
-            move
             list={list}
             item={item}
             entry={entry}
@@ -248,7 +268,6 @@ export function OneBox({ context, onClose }: { context: Context; onClose: () => 
         node: (list: List) => (
           <Row
             key="ask"
-            move
             list={list}
             item={item}
             icon={<Icon name="comment" size={14} />}
@@ -266,30 +285,21 @@ export function OneBox({ context, onClose }: { context: Context; onClose: () => 
 
     if (asking) {
       if (query === '') return []
-      const read = search(entries, query, context, {
-        kinds: ['said', 'note', 'issue', 'pull', 'task'],
-        inside: 1,
-        fuzzy: false,
-        any: true,
-      }).slice(0, 5)
+      const read = ranked.slice(0, 5)
       return [
         { key: 'ask', label: null, rows: [askRow(query, <Kbd>{ENTER}</Kbd>)] },
-        ...(read.length === 0 ? [] : [{ key: 'reads', label: 'What it will read first', rows: read.map((one) => rowOf(one.entry, one)) }]),
+        ...(read.length === 0 ? [] : [{ key: 'reads', label: 'Related passages', rows: read.map((one) => rowOf(one.entry, one)) }]),
       ]
     }
 
     if (scope !== null) {
-      const found = search(entries, query, context, {
-        kinds: scope.scope.kinds,
-        inside: scope.scope.inside,
-        fuzzy: scope.scope.id !== 'said' && scope.scope.id !== 'notes',
-      })
+      const found = ranked
       return [{ key: `scope:${scope.scope.id}`, label: scope.scope.name, rows: found.slice(0, 40).map((one) => rowOf(one.entry, one)) }]
     }
 
     if (query === '') {
       const here = actionsHere(entries, context)
-      const needs = needsYou(context).filter((one) => one.place !== context.task)
+      const needs = needsYou(entries, context).filter((one) => one.place !== context.task)
       // What shows above isn't repeated: a task waiting on you, its pull request, an action listed here.
       const shown = new Set([...needs.map((one) => one.place), ...(context.task === null ? [] : [context.task])])
       const lately = recent(entries, context, 8)
@@ -302,7 +312,6 @@ export function OneBox({ context, onClose }: { context: Context; onClose: () => 
           node: (list: List) => (
             <Row
               key={item.key}
-              move
               list={list}
               item={item}
               icon={<Icon name={one.icon} size={14} />}
@@ -321,7 +330,7 @@ export function OneBox({ context, onClose }: { context: Context; onClose: () => 
       ]
     }
 
-    const all = search(entries, query, context)
+    const all = ranked
     // One thing, one row: a task stands for its pull request and its issue, whose keys it shows.
     const tasks = new Set(all.filter((one) => one.entry.kind === 'task').map((one) => one.entry.place))
     const found = all.filter((one) => !((one.entry.kind === 'pull' || one.entry.kind === 'issue') && tasks.has(one.entry.place)))
@@ -343,7 +352,6 @@ export function OneBox({ context, onClose }: { context: Context; onClose: () => 
           node: (list: List) => (
             <Row
               key="start"
-              move
               list={list}
               item={startItem}
               icon={<Icon name="plus" size={14} />}
@@ -352,7 +360,7 @@ export function OneBox({ context, onClose }: { context: Context; onClose: () => 
                   Start a task <span className={o.quoted}>“{query}”</span>
                 </>
               }
-              facts={<span>{projectName(project)}</span>}
+              facts={<span>{context.projects.find((one) => one.id === project)?.name}</span>}
             />
           ),
         },
@@ -372,15 +380,16 @@ export function OneBox({ context, onClose }: { context: Context; onClose: () => 
     ]
     // choose and ask read the latest at the moment they run.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [entries, query, scope, asking, acting, context, crossing])
+  }, [entries, query, scope, asking, acting, context, crossing, ranked])
 
   // What the chosen row can do, for →.
   const acts = useMemo((): ReadonlyArray<Act> => {
     if (acting === null) return []
-    const all = acting.entry.acts ?? [{ id: 'open', title: 'Open', icon: 'arrow' as const, go: acting.entry.go }]
+    const current = entries.find((one) => one.id === acting.entry.id) ?? acting.entry
+    const all = current.acts ?? [{ id: 'open', title: 'Open', icon: 'arrow' as const, go: acting.entry.go }]
     const by = wordsOf(filter)
     return all.filter((one) => by.every((word) => fold(one.title).includes(word)))
-  }, [acting, filter])
+  }, [acting, filter, entries])
 
   const items: ReadonlyArray<Item> =
     acting === null
@@ -400,19 +409,38 @@ export function OneBox({ context, onClose }: { context: Context; onClose: () => 
             }
           },
         }))
-  const list = useList(items, `${query}|${scope?.scope.id}|${asking}|${acting?.entry.id}|${filter}`, backTo.current)
+  // The selection starts over at the top as each new list of results shows, not as words are typed over the list still shown.
+  const list = useList(
+    items,
+    `${query === '' ? '' : ranking.shown}|${scope?.scope.id}|${asking}|${acting?.entry.id}|${filter}`,
+    backTo.current,
+  )
 
   useLayoutEffect(() => {
     const job = after.current
     after.current = null
-    backTo.current = null
+    // The row to go back to waits for the results it is in.
+    if (!ranking.pending) backTo.current = null
     job?.()
     fieldWas.current = field.current?.offsetLeft ?? null
+  })
+
+  useLayoutEffect(() => {
+    if (!ranking.pending && enterWhenReady.current) {
+      enterWhenReady.current = false
+      list.selected?.run()
+    }
   })
 
   const selectedEntry = acting === null ? entries.find((one) => one.id === list.selected?.key) : undefined
 
   const onKey = (event: KeyboardEvent<HTMLInputElement>) => {
+    if (event.nativeEvent.isComposing) return
+    if (event.key === 'Enter' && acting === null && ranking.pending && (query !== '' || scope !== null)) {
+      event.preventDefault()
+      enterWhenReady.current = true
+      return
+    }
     const input = event.currentTarget
     const empty = input.value === ''
     const atEnd = input.selectionStart === input.value.length
@@ -433,7 +461,7 @@ export function OneBox({ context, onClose }: { context: Context; onClose: () => 
       return
     }
     // Tab asks the coordinator with the words, and Tab again goes back to searching.
-    if (event.key === 'Tab') {
+    if (event.key === 'Tab' && !event.shiftKey) {
       event.preventDefault()
       if (asking) fromAsk()
       else toAsk()
@@ -445,6 +473,7 @@ export function OneBox({ context, onClose }: { context: Context; onClose: () => 
       selectedEntry !== undefined
     ) {
       event.preventDefault()
+      event.stopPropagation()
       drill(selectedEntry)
       return
     }
@@ -470,13 +499,14 @@ export function OneBox({ context, onClose }: { context: Context; onClose: () => 
     ) : undefined
 
   return (
-    <Box label="Search" onClose={onClose} fit moves={moves} width={660} height={540} className={o.box}>
+    <Box label="Search" onClose={onClose} fit width={660} height={540} className={o.box}>
       <Field
         bare
         className={o.field}
         inputRef={field}
         value={acting === null ? typed : filter}
         onChange={(value) => {
+          enterWhenReady.current = false
           if (acting !== null) setFilter(value)
           else if (!take(value)) words.set(value)
         }}
@@ -504,31 +534,37 @@ export function OneBox({ context, onClose }: { context: Context; onClose: () => 
       />
       <div ref={list.list} className={o.results} id={list.listId} role="listbox" aria-label="Results">
         <div ref={results} className={o.within}>
+          {status}
+          {ranking.failed && (
+            <output>
+              Search could not start.{' '}
+              <Button size="small" variant="quiet" onClick={ranking.again}>
+                Try again
+              </Button>
+            </output>
+          )}
           <Glide />
-          <ListMotion within={results} still={!moves}>
-            {asking && query === '' && (
-              <p className={o.quiet}>It answers from your projects’ conversations, notes, issues and pull requests.</p>
-            )}
-            {acting !== null
-              ? acts.map((act, n) => (
-                  <Row
-                    key={act.id}
-                    move
-                    list={list}
-                    item={items[n] as Item}
-                    danger={act.danger === true}
-                    icon={<Icon name={act.icon} size={14} />}
-                    title={act.title}
-                    {...(act.shortcut === undefined ? {} : { end: <Kbd>{act.shortcut}</Kbd> })}
-                  />
-                ))
-              : sections.map((section) => (
-                  <div key={section.key} role="group">
-                    {section.label !== null && <Label move={`label:${section.key}`}>{section.label}</Label>}
-                    {section.rows.map((row) => row.node(list))}
-                  </div>
-                ))}
-          </ListMotion>
+          {asking && query === '' && (
+            <p className={o.quiet}>Write a question for the coordinator. Enter opens its composer for you to send.</p>
+          )}
+          {acting !== null
+            ? acts.map((act, n) => (
+                <Row
+                  key={act.id}
+                  list={list}
+                  item={items[n] as Item}
+                  danger={act.danger === true}
+                  icon={<Icon name={act.icon} size={14} />}
+                  title={act.title}
+                  {...(act.shortcut === undefined ? {} : { end: <Kbd>{act.shortcut}</Kbd> })}
+                />
+              ))
+            : sections.map((section) => (
+                <div key={section.key} role="group">
+                  {section.label !== null && <Label>{section.label}</Label>}
+                  {section.rows.map((row) => row.node(list))}
+                </div>
+              ))}
         </div>
       </div>
     </Box>
@@ -550,7 +586,7 @@ function Glide() {
       placed.current = false
       return
     }
-    const smooth = placed.current && moving()
+    const smooth = placed.current
     if (!smooth) el.style.transition = 'none'
     el.style.transform = `translateY(${row.offsetTop}px)`
     el.style.height = `${row.offsetHeight}px`
@@ -558,7 +594,7 @@ function Glide() {
     if (!smooth) {
       // Placed where it starts, then free to slide from there.
       void el.offsetHeight
-      if (moving()) el.style.removeProperty('transition')
+      el.style.removeProperty('transition')
     }
     placed.current = true
   })

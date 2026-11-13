@@ -52,6 +52,7 @@ const merge = (ranges: Array<[number, number]>): Ranges => {
 
 /** Each text folded and its words' starts, worked out once: a search reads the same texts on every key. */
 const prepared = new Map<string, { readonly text: string; readonly starts: ReadonlyArray<number> }>()
+export const clearPrepared = () => prepared.clear()
 const prepare = (raw: string) => {
   let one = prepared.get(raw)
   if (one === undefined) {
