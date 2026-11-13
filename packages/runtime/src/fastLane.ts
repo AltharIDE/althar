@@ -210,7 +210,7 @@ export class FastLane extends Context.Service<
         })
 
       /**
-       * Every review after a merge still owed, and one a restart cut short (MergeReviews.ts); and every merged small change with
+       * Every review after a merge still owed, and one a restart cut short (MergeReviews.ts); and every merged task configured for after-merge review with
        * no review owed and none made, which a stop between the merge's snapshot and its owing leaves: the merge is read again
        * and the review is owed from there.
        */

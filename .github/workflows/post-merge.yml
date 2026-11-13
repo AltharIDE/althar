@@ -2,8 +2,9 @@ name: post-merge
 
 # Everything desktop, harness and ui run, after merge, in full: their checks again, every unit test with the coverage
 # gates, the Storybook build, the desktop app's end-to-end run and its packages, and on Windows every unit test and
-# the smoke test. A pull request and the merge queue run only what a change reaches, and on Linux; this is where
-# Windows' unit tests run, within the hour of a merge. site and brand are quick, and still run in full on their own.
+# the smoke test. A pull request and the merge queue run what a change reaches on Linux and, for OS-sensitive work,
+# Windows (windows.yml); this is where
+# the full Windows unit suites run, within the hour of a merge. site and brand are quick, and still run in full on their own.
 # Main may go red for a while; a release can't: release.yml cuts only a commit this workflow passed on, Windows too.
 #
 # Merges in quick succession share a run: one runs, the newest waits, and those between are skipped. When main goes

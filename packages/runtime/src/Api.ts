@@ -120,7 +120,7 @@ import { IssueDrafts } from './IssueDrafts'
 import { postTeamReviews, Reviews, runOutside, setPostTeamReviews, setRunOutside } from './Reviews'
 import { shelve } from './scratch'
 import { Helpers } from './Helpers'
-import { describe as describePreset, editPreset, partsOfTask, presetsIn, removePreset, savePreset } from './presets'
+import { declinePresetOffer, describe as describePreset, editPreset, partsOfTask, presetsIn, removePreset, savePreset } from './presets'
 import { FastLane } from './fastLane'
 import { MergeReviews } from './MergeReviews'
 import { Plans } from './Plans'
@@ -1702,7 +1702,7 @@ export const handlers = Api.toLayer(
             ),
           ),
         ),
-      SavePreset: ({ commandId, name, taskId, parts, projectOnly }) =>
+      SavePreset: ({ commandId, name, taskId, parts, projectOnly, asNew }) =>
         once(
           commandId,
           api(
@@ -1718,13 +1718,16 @@ export const handlers = Api.toLayer(
                   projectId: projectOnly === true ? (from?.projectId ?? null) : null,
                   fromTaskId: taskId ?? null,
                   actorId: instance.personId,
+                  asNew,
                 })
               }),
               folderStore,
             ),
           ),
         ),
-      RemovePreset: ({ commandId, id }) => once(commandId, api(removePreset(id).pipe(Effect.provideService(SqlClient.SqlClient, sql)))),
+      RemovePreset: ({ commandId, id }) => once(commandId, api(Effect.provideContext(removePreset(id), folderStore))),
+      DeclinePresetOffer: ({ commandId, taskId }) =>
+        once(commandId, api(Effect.provideContext(declinePresetOffer(taskId, instance.personId), folderStore))),
       ShelveTask: ({ commandId, taskId, shelf }) =>
         once(
           commandId,
@@ -2024,7 +2027,7 @@ export const handlers = Api.toLayer(
         once(commandId, api(policies.setUsageLimit(projectId, policy, instance.personId))),
       OpenChange: ({ commandId, taskId }) => once(commandId, api(runs.publish(taskId))),
       SetReviewAfterMerge: ({ commandId, taskId, review }) =>
-        once(commandId, api(Effect.asVoid(mergeReviews.choose(taskId, review, instance.personId)))),
+        once(commandId, api(Effect.asVoid(runs.setReviewAfterMerge({ taskId, review, actorId: instance.personId })))),
       ShapeTask: ({ commandId, taskId, preset }) => once(commandId, api(taskActions.shape(taskId, preset, instance.personId))),
       SkipReview: ({ commandId, taskId }) =>
         once(
@@ -2287,6 +2290,7 @@ export const handlers = Api.toLayer(
         ),
       StopLaunch: ({ commandId, id }) => once(commandId, api(launches.stop(id))),
       ClearLaunch: ({ commandId, id }) => once(commandId, api(launches.clear(id))),
+      ReadLaunchOutput: ({ id }) => api(launches.output(id)),
       Watch: ({ since }) => Stream.merge(changes(since), streaming),
     })
   }),

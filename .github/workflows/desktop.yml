@@ -3,7 +3,7 @@ name: desktop
 # On a pull request, and for its entry in the merge queue: the desktop app's checks and the unit tests its change
 # reaches, and the app's whole end-to-end run (e2e.yml) when it reaches the app (packages/testing/src/select.ts). On a
 # pull request, Windows' smoke test too, when what reaches the app is code that behaves differently there. Windows'
-# unit tests, the coverage gate and the packages run after merge, in post-merge.yml.
+# affected unit tests run separately in windows.yml; full suites, coverage and packages run after merge in post-merge.yml.
 on:
   # From queue.yml, for a pull request in the merge queue.
   workflow_call:

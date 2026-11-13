@@ -111,7 +111,8 @@ describe('connections', () => {
     const can = screen.getByRole('list', { name: 'What GitHub lets Althar do' })
     expect(within(can).getByText('Reaches meridian-api').closest('li')?.textContent).toContain('northwind')
     expect(within(can).getByText('Open, update and merge pull requests')).toBeTruthy()
-    expect(screen.getByText('The token runs out on 8 January 2027.')).toBeTruthy()
+    const expiry = new Date(githubCheck.expiresAt ?? '').toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })
+    expect(screen.getByText(`The token runs out on ${expiry}.`)).toBeTruthy()
     expect(screen.getByText('Connected')).toBeTruthy()
     await userEvent.click(screen.getByRole('button', { name: 'Done' }))
     expect(await screen.findByText('Not connected · meridian’s code is here')).toBeTruthy()
@@ -816,6 +817,13 @@ describe('running what a task built, with no agent', () => {
     await userEvent.click(shown.getByRole('button', { name: 'Stop bun run dev' }))
     expect(client.stopLaunch).toHaveBeenCalledWith('proc_1')
     expect(shown.queryByRole('button', { name: 'Run bun run dev again' })).toBeNull()
+    // Its console reads what it printed only once it is opened, and shows it under the command.
+    expect(client.readLaunchOutput).not.toHaveBeenCalled()
+    await userEvent.click(shown.getByRole('button', { name: 'Output' }))
+    expect(client.readLaunchOutput).toHaveBeenCalledWith('proc_1')
+    const output = await screen.findByRole('dialog', { name: 'Output of bun run dev' })
+    expect(await within(output).findByText('VITE ready in 312 ms')).toBeTruthy()
+    await userEvent.keyboard('{Escape}')
     // It ended by itself: it says how, with its last line, and runs again here.
     const ended = {
       ...card,

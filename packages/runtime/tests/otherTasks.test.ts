@@ -1,5 +1,6 @@
+import { removeTreeSync } from '@althar/testing'
 import { execFileSync } from 'node:child_process'
-import { existsSync, mkdirSync, readFileSync, rmSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs'
 import { basename, join } from 'node:path'
 
 import type { ProjectId, WorksIn } from '@althar/domain'
@@ -260,7 +261,7 @@ describe('a lead reading a task whose folder was removed', () => {
       git(theirs.path, 'add', 'notes.md')
       git(theirs.path, 'commit', '-q', '-m', 'Notes')
       writeFileSync(join(theirs.path, 'draft.md'), 'Not committed\n')
-      rmSync(theirs.path, { recursive: true, force: true, maxRetries: 5 })
+      removeTreeSync(theirs.path)
       const diff = yield* callTool(leadOf(projectId, mine), 'read_task_diff', { task: theirs.slug })
       assert.include(diff, 'as committed')
       assert.include(diff, 'its folder was removed, so nothing uncommitted is read')

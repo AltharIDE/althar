@@ -1341,6 +1341,7 @@ export function TaskView({
                   refused={model.refused}
                   onReplace={(head, replaces, url) => void model.replace(head, replaces, url)}
                   // Bringing a pull request's commits in is the lead's: Althar fetches them, and the note says how to merge them.
+                  // oxlint-disable-next-line althar/press-at-once -- What the note says is what the fetch found; the card is busy from the press.
                   onBringIn={(url) =>
                     void model.mergeNote(url).then((note) => {
                       if (note !== null) void send(note, false)
@@ -1456,7 +1457,7 @@ export function TaskView({
                       run={(run) => (
                         <RunOf
                           run={run}
-                          now={now}
+                          threadTask={snapshot.task.id}
                           onStop={(id) => void model.stopLaunch(id)}
                           onRunAgain={(_taskId, runnableId) => void model.runProject(runnableId)}
                         />
@@ -1604,6 +1605,7 @@ export function TaskView({
                   })}
               busy={model.pending}
               {...(model.error === null ? {} : { error: model.error })}
+              // oxlint-disable-next-line althar/press-at-once -- A dialog the host answers (closing pull requests): it stays open, busy, so a refusal lands in it.
               onAbandon={(choices) =>
                 void model
                   .abandon(
@@ -1640,6 +1642,7 @@ export function TaskView({
                   })}
               busy={model.pending}
               {...(model.error === null ? {} : { error: model.error })}
+              // oxlint-disable-next-line althar/press-at-once -- A dialog the host answers: it stays open, busy, so a refusal lands in it.
               onAttach={(pullRequest, start) =>
                 void model.attach(pullRequest, start).then((done) => {
                   if (done === null) return

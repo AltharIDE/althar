@@ -4,6 +4,7 @@ import { useId, useState } from 'react'
 import type { Preset } from '@althar/contracts'
 import { Button, Field, FieldArea, FormRow, Icon, Segmented, SettingList, SettingRow, Switch } from '@althar/ui'
 
+import { useGoneAtOnce } from '../../data/goneAtOnce'
 import { useServices } from '../../data/services'
 
 /*
@@ -115,12 +116,16 @@ function PresetEditor({ preset, onDone }: { preset: Preset; onDone: () => void }
 export function PresetsSection() {
   const { client } = useServices()
   const cache = useQueryClient()
-  const presets = useQuery({ queryKey: PRESETS, queryFn: () => client.listPresets() }).data
+  const read = useQuery({ queryKey: PRESETS, queryFn: () => client.listPresets() }).data
+  const gone = useGoneAtOnce(read, (preset) => preset.id)
+  const presets = gone.shown
   const [editing, setEditing] = useState<string | null>(null)
+  const [failed, setFailed] = useState<string | null>(null)
   if (presets === undefined) return null
   const own = presets.filter((one) => !one.builtin)
   return (
     <SettingList>
+      {failed !== null && <p role="alert">{failed}</p>}
       {presets.map((preset) => (
         <SettingRow
           key={preset.id}
@@ -140,7 +145,18 @@ export function PresetsSection() {
                 <Button
                   size="small"
                   variant="quiet"
-                  onClick={() => void client.removePreset(preset.id).then(() => cache.invalidateQueries({ queryKey: PRESETS }))}
+                  onClick={() => {
+                    // It goes at once and stays gone until a list without it is read; one the runtime kept comes back, with a line.
+                    setFailed(null)
+                    gone.hide([preset.id])
+                    void client
+                      .removePreset(preset.id)
+                      .catch((error: unknown) => {
+                        gone.back(preset.id)
+                        setFailed(error instanceof Error ? error.message : String(error))
+                      })
+                      .finally(() => void cache.invalidateQueries({ queryKey: PRESETS }))
+                  }}
                 >
                   {presetsText.remove}
                 </Button>

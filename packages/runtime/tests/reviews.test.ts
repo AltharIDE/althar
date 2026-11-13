@@ -1,5 +1,6 @@
+import { removeTreeSync } from '@althar/testing'
 import { execFileSync } from 'node:child_process'
-import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, readdirSync, readFileSync, statSync, utimesSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -1374,7 +1375,7 @@ describe('reviewing someone else’s pull request', () => {
       const copy = workspace?.path ?? ''
       const tasks = yield* Tasks
       yield* tasks.abandon({ envelope: yield* Runtime.envelope('task.abandon', {}), taskId: task?.id ?? '' })
-      rmSync(copy, { recursive: true, force: true })
+      removeTreeSync(copy)
       yield* tasks.reopen({ envelope: yield* Runtime.envelope('task.reopen', {}), taskId: task?.id ?? '' })
       assert.strictEqual((yield* reviewTask(projectId)).task?.state, 'open')
       // The pull request's code, as the lead read it, in a copy of its own again; where its change starts, kept for comparing.
@@ -1389,7 +1390,7 @@ describe('reviewing someone else’s pull request', () => {
       assert.strictEqual(git(copy, 'status', '--porcelain'), '')
       // With no head kept for it, it isn't put back at all.
       yield* tasks.abandon({ envelope: yield* Runtime.envelope('task.abandon', {}), taskId: task?.id ?? '' })
-      rmSync(copy, { recursive: true, force: true })
+      removeTreeSync(copy)
       const sql = yield* SqlClient.SqlClient
       yield* sql`UPDATE external_links SET snapshot = '{}' WHERE task_id = ${task?.id ?? ''}`
       const refused = yield* Effect.flip(tasks.reopen({ envelope: yield* Runtime.envelope('task.reopen', {}), taskId: task?.id ?? '' }))

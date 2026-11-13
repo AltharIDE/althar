@@ -1249,7 +1249,7 @@ describe('the coordinator', () => {
       const sql = yield* SqlClient.SqlClient
       const origin = repository()
       const clone = join(mkdtempSync(join(tmpdir(), 'althar-clone-')), 'meridian')
-      execFileSync('git', ['clone', '-q', origin, clone])
+      execFileSync('git', ['clone', '-q', '--', origin, clone])
       // The remote moves on after the clone.
       writeFileSync(join(origin, 'README.md'), '# Meridian, later\n')
       execFileSync('git', ['-c', 'user.name=Test', '-c', 'user.email=test@althar.test', 'commit', '-qam', 'Later'], { cwd: origin })

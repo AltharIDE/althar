@@ -407,13 +407,13 @@ describe('a project’s settings', () => {
     const { client } = windowAt('/projects/p1')
     await openSettings('Tasks')
     const region = within(screen.getByRole('region', { name: 'Tasks' }))
-    const select = region.getByRole('combobox', { name: 'Review after a small change merges' })
+    const select = region.getByRole('combobox', { name: 'When a review is set after merge' })
     expect(select.textContent).toBe('Bring back major findings')
     expect(region.getByText('Minor findings and nits stay in the task’s thread.')).toBeTruthy()
     await userEvent.click(select)
     await userEvent.click(screen.getByRole('option', { name: 'Don’t review it' }))
     await waitFor(() => expect(client.setProjectRules).toHaveBeenCalledWith({ projectId: 'p1', afterMergeReview: 'none' }))
-    expect(region.getByText('Make it a full task to have it reviewed before it merges.')).toBeTruthy()
+    expect(region.getByText('A review configured before Ship is unaffected.')).toBeTruthy()
   })
 
   it('moves a task’s issue to In Progress as it starts, on every tracker that has one, unless switched off', async () => {
