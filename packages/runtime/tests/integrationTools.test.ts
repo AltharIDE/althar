@@ -1,9 +1,11 @@
-import { mkdirSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import type { Fetch } from '@althar/connectors'
 import { makeFakeService } from '@althar/connectors/testing'
 import { Ids, newId } from '@althar/domain'
+import { removeTreeSync } from '@althar/testing'
 import { assert, describe, it } from '@effect/vitest'
 import { Effect, Schema } from 'effect'
 import { SqlClient } from 'effect/sql'
@@ -316,6 +318,7 @@ describe('the lead and coordinator’s integrations over MCP', () => {
 
   it.live('rejects uploading files outside the caller’s folder before preparing a remote upload', () => {
     const h = harness()
+    const outside = mkdtempSync(join(tmpdir(), 'althar-attachment-outside-'))
     return Effect.gen(function* () {
       const { access, turn } = yield* coordinator
       const { folder } = yield* agentFolderOf(access.threadId)
@@ -323,10 +326,12 @@ describe('the lead and coordinator’s integrations over MCP', () => {
       if (folder === null) return
       mkdirSync(folder, { recursive: true })
       writeFileSync(join(folder, 'report.txt'), 'Report')
+      const file = join(outside, 'report.txt')
+      writeFileSync(file, 'Outside report')
       const message = yield* turn('Attach the report')
-      const denied = yield* callTool(access, 'upload_issue_attachment', { issue: 'MER-1', path: '/etc/passwd', message })
+      const denied = yield* callTool(access, 'upload_issue_attachment', { issue: 'MER-1', path: file, message })
       assert.include(denied, 'working folder')
       assert.lengthOf(h.sent, 0)
-    }).pipe(Effect.provide(h.layer))
+    }).pipe(Effect.provide(h.layer), Effect.ensuring(Effect.sync(() => removeTreeSync(outside))))
   })
 })
