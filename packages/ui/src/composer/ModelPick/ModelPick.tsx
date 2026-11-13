@@ -194,12 +194,16 @@ export function ModelPick({
             return (
               <RadioGroup.Item key={x.id} value={x.id} className={cx(s.option, x.id === model.id && s.current)}>
                 <Model model={x} />
-                {misses > 0 && (
-                  <span className={s.missed} title={t.missedFull(misses)}>
-                    {t.missed(misses)}
+                {(misses > 0 || left != null) && (
+                  <span className={s.notes}>
+                    {misses > 0 && (
+                      <span className={s.missed} title={t.missedFull(misses)}>
+                        {t.missed(misses)}
+                      </span>
+                    )}
+                    {left != null && <RoomNote room={left} text={roomText} />}
                   </span>
                 )}
-                {left !== undefined && <RoomNote room={left} text={roomText} className={s.room} />}
                 <Icon name="check" size={11} className={s.check} />
               </RadioGroup.Item>
             )

@@ -35,6 +35,7 @@ const BROWSER_ONLY = new Set<string>([
   'primitives/CheckList/CheckList.stories.tsx#Default',
   'composer/Composer/Composer.stories.tsx#EnterEndsDictationAtItsSize',
   'composer/Composer/Composer.stories.tsx#LongDictation',
+  'composer/ModelPick/ModelPick.stories.tsx#CrowdedRow',
   'chrome/ProjectTabs/ProjectTabs.stories.tsx#Reordering',
   'chrome/ProjectTabs/ProjectTabs.stories.tsx#MissedRelease',
   'board/NextLine/NextLine.stories.tsx#Dragging',
