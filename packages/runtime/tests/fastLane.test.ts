@@ -4,6 +4,7 @@ import { join } from 'node:path'
 
 import { assert, describe, it } from '@effect/vitest'
 import type { ProjectId } from '@althar/domain'
+import { isoAfter } from '@althar/testing'
 import { Duration, Effect, Layer } from 'effect'
 import { SqlClient } from 'effect/sql'
 
@@ -300,7 +301,7 @@ describe('Auto’s lighter model', () => {
 
   it.live('moves a lead whose session is still running when its plan crosses the mark, and says why once', () => {
     // A day from now, whenever it runs: a reset already past is a plan with its week back, and nothing moves.
-    const resetsAt = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString()
+    const resetsAt = isoAfter(24 * 60 * 60 * 1000)
     const cache = join(mkdtempSync(join(tmpdir(), 'althar-facts-')), 'models.json')
     writeFileSync(
       cache,

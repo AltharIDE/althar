@@ -1,3 +1,4 @@
+import { removeTreeSync } from '@althar/testing'
 import { execFileSync } from 'node:child_process'
 import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -209,7 +210,7 @@ describe("the coordinator's copies", () => {
     // Where XDG_CONFIG_HOME is set, outside the home folder, as git reads it.
     const elsewhere = realpathSync(mkdtempSync(join(tmpdir(), 'althar-xdg-')))
     holds(join(elsewhere, 'git'), elsewhere)
-    rmSync(home, { recursive: true, force: true })
-    rmSync(elsewhere, { recursive: true, force: true })
+    removeTreeSync(home)
+    removeTreeSync(elsewhere)
   })
 })

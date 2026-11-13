@@ -1,3 +1,4 @@
+import { removeTreeSync } from '@althar/testing'
 import { execFileSync } from 'node:child_process'
 import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -256,7 +257,7 @@ const watching = (threadId: string) =>
         }),
       ),
     )
-    return { stop: Effect.as(Fiber.interrupt(reading), phases) }
+    return { stop: Effect.as(Fiber.interrupt(reading), phases), seen: Effect.sync(() => [...phases]) }
   })
 
 describe('the review after a merge, at its edges', () => {
@@ -340,6 +341,8 @@ describe('the review after a merge, at its edges', () => {
   it.live('is under way from Fix it to the end of its lead’s turn: never Done, nor Stopped, in between', () => {
     const { working, bare, github } = onGitHub()
     const place = holds()
+    let holdFix = false
+    let fixAsked = false
     return Effect.gen(function* () {
       const task = yield* found(working, bare, github)
       const mergeReviews = yield* MergeReviews
@@ -347,10 +350,18 @@ describe('the review after a merge, at its edges', () => {
       yield* gone(task.threadId)
       assert.deepInclude(yield* standingOf(task.threadId), { phase: 'ready', afterMerge: 'found' })
 
+      // Hold only the new turn, even when the resumed fake reads just the prompt's final paragraph.
+      holdFix = true
       const watched = yield* watching(task.threadId)
       const sent = yield* mergeReviews.fix(task.taskId, task.url)
       // The instant it is answered: its lead held, the turn begun or not: under way, not Done, not Stopped.
       assert.strictEqual((yield* standingOf(task.threadId)).phase, 'running')
+      yield* until(
+        Effect.sync(() => fixAsked),
+        Boolean,
+      )
+      yield* until(watched.seen, (phases) => phases.includes('running'))
+      holdFix = false
       yield* mergeReviews.afterTurnOf(sent.threadId, sent.inputId)
       const phases = yield* watched.stop
       assert.notInclude(phases, 'settled', `Done showed while Fix it was taken: ${phases.join(' > ')}`)
@@ -359,7 +370,18 @@ describe('the review after a merge, at its edges', () => {
       // Its lead answered the person since they last had the task open: that is theirs, as a reply is.
       assert.strictEqual((yield* until(standingOf(task.threadId), (now) => now.phase !== 'running')).phase, 'ready')
       place.open('[review:wait]')
-    }).pipe(Effect.provide(runtimeWith(github, { holds: place })))
+    }).pipe(
+      Effect.provide(
+        runtimeWith(github, {
+          holds: place,
+          connection: () => {
+            if (!holdFix) return undefined
+            fixAsked = true
+            return 'waits'
+          },
+        }),
+      ),
+    )
   })
 
   it.live('is under way in the moment Fix it is answered, before its lead is back, and not for ever where it never is', () => {
@@ -591,7 +613,7 @@ describe('the review after a merge, at its edges', () => {
       // Its lead stopped first: on Windows no folder an agent works in can be removed.
       yield* Effect.ignore((yield* Sessions).stop(task.threadId))
       yield* gone(task.threadId)
-      rmSync(task.path, { recursive: true, force: true })
+      removeTreeSync(task.path)
       yield* mergeIt(bare, github, task.taskId)
       yield* until(reviewOf(task.url), (row) => row?.state === 'running')
       yield* reviewing(yield* reviewerThread(task.taskId))

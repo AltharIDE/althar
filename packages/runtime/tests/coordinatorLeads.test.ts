@@ -1,4 +1,5 @@
-import { rmSync } from 'node:fs'
+import { removeTreeSync } from '@althar/testing'
+import {} from 'node:fs'
 
 import { assert, describe, it } from '@effect/vitest'
 import { Effect } from 'effect'
@@ -65,7 +66,7 @@ describe('a quick task’s lead making it a change', () => {
       // Its agent stopped first, as Windows won't remove the folder a process works in, and tried again while what ended
       // there still holds it a moment.
       yield* (yield* Sessions).stop(task?.threadId ?? '')
-      rmSync(task?.path ?? '', { recursive: true, force: true, maxRetries: 5 })
+      removeTreeSync(task?.path ?? '')
       const lead: ToolAccess = {
         role: 'lead',
         projectId: project.projectId,

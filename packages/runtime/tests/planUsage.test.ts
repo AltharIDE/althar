@@ -7,7 +7,9 @@ import type { PlanUsage as PlanUsageView } from '@althar/contracts'
 import { Ids, newId } from '@althar/domain'
 import type { CredentialsRead, EndpointRead, UsageAccount, UsageRead, UsageWindow } from '@althar/provider-adapters'
 import { agents as registry } from '@althar/provider-adapters'
-import { Clock, Duration, Effect, Fiber, Layer, Option, Stream } from 'effect'
+import { isoAfter } from '@althar/testing'
+import { readClock } from '@althar/testing/effect'
+import { Duration, Effect, Fiber, Layer, Option, Stream } from 'effect'
 import { TestClock } from 'effect/testing'
 import { SqlClient } from 'effect/sql'
 
@@ -894,7 +896,7 @@ describe('OpenCode Go, a plan with limits on an OpenCode account', () => {
     // On the live clock: a reset that hasn't passed.
     const { layer, turnOnGo } = refusing({
       readCredentials: goAndZen,
-      readGoUsage: async () => go(used(20, { resetsAt: '2099-01-01T00:00:00.000Z' })),
+      readGoUsage: async () => go(used(20, { resetsAt: isoAfter(24 * 3_600_000) })),
     })
     return Effect.gen(function* () {
       const turn = yield* turnOnGo
@@ -1094,16 +1096,7 @@ describe('a sign-in that ends soon (DEV-196)', () => {
       const [account] = yield* (yield* Accounts).of('claude-code')
       // Days pass for what the test asks, not for the runtime's own clock: moved on by days, every loop it runs on a timer
       // wakes at each of its steps on the way, some hundred thousand times, which took this test past its minute.
-      let later = 0
-      const base = yield* Clock.Clock
-      const moved: Clock.Clock = Object.create(base, {
-        currentTimeMillisUnsafe: { value: () => base.currentTimeMillisUnsafe() + later },
-        currentTimeMillis: { value: Effect.sync(() => base.currentTimeMillisUnsafe() + later) },
-        currentTimeNanosUnsafe: { value: () => base.currentTimeNanosUnsafe() + BigInt(later) * 1_000_000n },
-        currentTimeNanos: { value: Effect.sync(() => base.currentTimeNanosUnsafe() + BigInt(later) * 1_000_000n) },
-      })
-      const then = <A, E, R>(effect: Effect.Effect<A, E, R>) => Effect.provideService(effect, Clock.Clock, moved)
-      const pass = (duration: Duration.Duration) => Effect.sync(() => (later += Duration.toMillis(duration)))
+      const { run: then, advance: pass } = yield* readClock
       const raised = (yield* then(usage.now(true))).endings ?? []
       assert.deepStrictEqual(raised, [
         {
