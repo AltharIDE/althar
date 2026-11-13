@@ -30,7 +30,7 @@ import {
   programName,
   removeFully,
 } from '@althar/provider-adapters'
-import { Context, Effect, Layer, Ref, Schema } from 'effect'
+import { Context, Duration, Effect, Layer, Option, Ref, Schema } from 'effect'
 import { Unzip, UnzipInflate } from 'fflate'
 
 /*
@@ -56,6 +56,12 @@ export class InstallFailed extends Schema.TaggedError<InstallFailed>()('InstallF
   /** What went wrong, in a sentence a person reads. */
   summary: Schema.String,
 }) {}
+
+/** A release's metadata, including its response body, must arrive within this time. */
+export const RELEASE_WITHIN = Duration.seconds(30)
+
+/** Large archives, including the pinned server, have longer; a stalled body still ends the download. */
+export const DOWNLOAD_WITHIN = Duration.minutes(10)
 
 /** Where an agent stands on this device, for Settings: where its command is, and whether Althar can fetch it. */
 export interface InstallState {
@@ -173,6 +179,12 @@ const unzipInto = (bytes: Uint8Array, folder: string, names: ReadonlySet<string>
 const fail = (agentId: string, summary: string, reason: unknown = summary) =>
   new InstallFailed({ agentId, summary, reason: reason instanceof Error ? reason.message : String(reason) })
 
+/** Uses the runtime's clock: timing out interrupts the request and aborts its signal before the install is cleaned up. */
+const within = <A>(effect: Effect.Effect<A, InstallFailed>, bound: Duration.Duration, error: InstallFailed) =>
+  Effect.flatMap(Effect.timeoutOption(effect, bound), (result) =>
+    Option.isSome(result) ? Effect.succeed(result.value) : Effect.fail(error),
+  )
+
 /** The bsdtar this computer has. */
 const tarHere = process.platform === 'win32' ? join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'tar.exe') : 'tar'
 
@@ -269,19 +281,28 @@ export class Installs extends Context.Service<
             const asset = assetOf(install.assets)
             if (asset === undefined) return yield* fail(definition.id, `There's no ${definition.name} for this computer to download.`)
             const line = install.line
-            const response = yield* Effect.tryPromise({
-              try: () =>
-                fetch(`https://api.github.com/repos/${install.repository}/releases${line === undefined ? '/latest' : '?per_page=30'}`, {
-                  headers: { Accept: 'application/vnd.github+json', 'User-Agent': 'Althar' },
-                }),
-              catch: (error) => fail(definition.id, `GitHub couldn't be reached to find ${definition.name}.`, error),
-            })
-            if (!response.ok)
-              return yield* fail(definition.id, `GitHub didn't say where ${definition.name}'s latest release is.`, response.status)
-            const answer = yield* Effect.tryPromise({
-              try: () => response.json() as Promise<unknown>,
-              catch: (error) => fail(definition.id, `GitHub's answer about ${definition.name} couldn't be read.`, error),
-            })
+            // One abort signal spans headers and body: ending the headers' effect must not cancel the body still being read.
+            const answer = yield* within(
+              Effect.tryPromise({
+                try: async (signal): Promise<unknown> => {
+                  const response = await fetch(
+                    `https://api.github.com/repos/${install.repository}/releases${line === undefined ? '/latest' : '?per_page=30'}`,
+                    { headers: { Accept: 'application/vnd.github+json', 'User-Agent': 'Althar' }, signal },
+                  )
+                  if (!response.ok)
+                    throw fail(definition.id, `GitHub didn't say where ${definition.name}'s latest release is.`, response.status)
+                  return await response.json().catch((error: unknown) => {
+                    throw fail(definition.id, `GitHub's answer about ${definition.name} couldn't be read.`, error)
+                  })
+                },
+                catch: (error) =>
+                  error instanceof InstallFailed
+                    ? error
+                    : fail(definition.id, `GitHub couldn't be reached to find ${definition.name}.`, error),
+              }),
+              RELEASE_WITHIN,
+              fail(definition.id, `GitHub took too long to find ${definition.name}. Try again.`),
+            )
             type Answer = {
               readonly tag_name?: unknown
               readonly draft?: unknown
@@ -323,16 +344,21 @@ export class Installs extends Context.Service<
         const download = (definition: AgentDefinition, name: string, install: AgentDownload, folder: string) =>
           Effect.gen(function* () {
             const release = pinned(install) ? yield* pinnedRelease(definition, install) : yield* latest(definition, install)
-            const response = yield* Effect.tryPromise({
-              try: () => fetch(release.url, { headers: { 'User-Agent': 'Althar' } }),
-              catch: (error) => fail(definition.id, `${definition.name} couldn't be downloaded.`, error),
-            })
-            if (!response.ok) return yield* fail(definition.id, `${definition.name} couldn't be downloaded.`, response.status)
-            const bytes = Buffer.from(
-              yield* Effect.tryPromise({
-                try: () => response.arrayBuffer(),
-                catch: (error) => fail(definition.id, `${definition.name}'s download stopped part-way.`, error),
+            const bytes = yield* within(
+              Effect.tryPromise({
+                try: async (signal) => {
+                  const response = await fetch(release.url, { headers: { 'User-Agent': 'Althar' }, signal })
+                  if (!response.ok) throw fail(definition.id, `${definition.name} couldn't be downloaded.`, response.status)
+                  const body = await response.arrayBuffer().catch((error: unknown) => {
+                    throw fail(definition.id, `${definition.name}'s download stopped part-way.`, error)
+                  })
+                  return Buffer.from(body)
+                },
+                catch: (error) =>
+                  error instanceof InstallFailed ? error : fail(definition.id, `${definition.name} couldn't be downloaded.`, error),
               }),
+              DOWNLOAD_WITHIN,
+              fail(definition.id, `Downloading ${definition.name} took too long. Try again.`),
             )
             // Nothing in it runs unless it is exactly the file GitHub says the release has, or the one it was pinned by.
             if (sha256(bytes) !== release.digest)

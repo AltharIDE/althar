@@ -32,6 +32,23 @@ const meta = {
 export default meta
 type Story = StoryObj<typeof meta>
 
+/** Its configured reviewer reads before Ship; size offers no extra after-merge review. */
+export const BeforeShip: Story = {
+  args: {
+    review: { when: 'before', state: 'clear', findings: 0, at: at('14:08') },
+    onReview: undefined,
+    text: { fullTask: 'Small change', clear: 'Reviewed before Ship' },
+    explain: 'Starts at once on Sonnet 5.5. GPT-6.1 Sol reads the change before Ship.',
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await expect(canvas.getByText('Small change')).toBeInTheDocument()
+    await expect(canvas.getByText('Reviewed before Ship')).toBeInTheDocument()
+    await expect(canvas.queryByRole('button', { name: 'Review' })).toBeNull()
+    await expect(canvas.queryByText('After merge')).toBeNull()
+  },
+}
+
 /** Just started: its lead is at the change. */
 export const Started: Story = {
   args: { changed: { at: null, words: null }, checks: { ...PASSED, state: 'waiting', at: null }, merge: WAITING },

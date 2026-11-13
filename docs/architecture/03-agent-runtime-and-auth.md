@@ -47,6 +47,8 @@ can move between them.
 | Qwen Code | `qwen --acp --approval-mode default`, native | Alibaba Cloud's Coding Plan key or any provider's; no status command | Starts in `auto`, a model judging what is safe, unless told. Commands it reads as only reading run unasked. A repository's `.qwen/settings.json` can add allow rules |
 | Google Antigravity | `agy_acp_server.par`, Google's own ACP server, apart from the `agy` CLI; Althar downloads 1.3.0 from Google at the person's asking, pinned by sha256, as Orca does. No Windows build | A Google account, signed in only inside Althar over ACP's `authenticate`; no status command | Every role runs in `default`, held there, as `auto_edit` and `yolo` approve unasked; no read-only mode, so Althar's rules deny a reader's writes. The model's questions come as permission requests on `interaction_` tool calls and go to the person. Its sign-in is the home's own file, not the keychain. Google's terms may count a sign-in from another app a breach |
 
+An agent download has a deadline for the whole response, including its body: 30 seconds for release metadata and ten minutes for the archive. A timeout or interrupted install aborts its network request, removes the temporary download and frees the install reservation so the person can try again. A working installed version stays in place until its replacement has been checked.
+
 What each agent reports was read from the agents themselves on 28 September
 2026, with `scripts/probe.ts` in `@althar/provider-adapters`: claude-agent-acp
 0.84.0, codex-acp 2.0.0 and OpenCode 1.18.31. codex-acp 2.1.1, probed on
@@ -399,6 +401,22 @@ new lead's first turn, after its brief, and is never queued for the old one,
 which stops as the new one takes over. A model of the same agent is set at
 once, for the next turn, since that starts nothing. A switch Althar makes, at
 a usage limit or a stall, starts the new agent with "carry on" as before.
+
+Starting a replacement fences the outgoing session from future input before
+the replacement connects. A failed startup returns that ownership to the same
+outgoing session, if it still owns the thread. Stop checks ownership again at
+prompt dispatch, so a turn stopped while preparing never reaches the agent.
+The durable delivery record precedes dispatch; a separate prompt receipt is
+positive evidence, and a missing receipt never makes a dispatched turn safe
+to replay.
+
+An explicit Stop records its intent before cancellation. Quitting records a
+different shutdown intent: on the next launch, never-dispatched queued input
+can resume on its previous agent, model and effort. Explicitly stopped,
+abandoned, archived and suspended work stays stopped. Workflow attempts own
+their recovery. A failed turn keeps all its input, including quiet news and
+notes, for retry or the account's usage reset; that waiting input holds no
+place among the agents at work.
 
 This will be tuned. Candidates include a fresh take that leaves out the
 previous agent's reasoning (research in 2026 suggests a stronger model does

@@ -54,15 +54,12 @@ describe('a review offered in the thread', () => {
     expect(client.declineReview).not.toHaveBeenCalled()
   })
 
-  it('adds the reviewer it names through the team’s own command, keeping the lead', async () => {
+  it('adds the reviewer it names without resubmitting the lead', async () => {
     const { client } = fakeClient()
     shown(offered(), client)
     await userEvent.click(await screen.findByRole('button', { name: /^Add / }))
     await waitFor(() =>
-      expect(client.changeTeam).toHaveBeenCalledWith('r', [
-        { key: 'implement', agentId: 'claude-code', model: null, skipped: false },
-        { key: 'review', agentId: 'codex', model: null, skipped: false },
-      ]),
+      expect(client.changeTeam).toHaveBeenCalledWith('r', [{ key: 'review', agentId: 'codex', model: null, skipped: false }]),
     )
   })
 

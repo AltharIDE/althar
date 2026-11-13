@@ -34,6 +34,7 @@ import { Queries } from '../src/Queries'
 import { mergeCopyOf } from '../src/reviewCopy'
 import { reviewBrief } from '../src/reviewing'
 import * as Runtime from '../src/Runtime'
+import { Runs } from '../src/Runs'
 import { Secrets } from '../src/Secrets'
 import { Sessions } from '../src/Sessions'
 import type { ToolAccess } from '../src/ToolServer'
@@ -877,13 +878,20 @@ describe('a review after a merge, between its turns', () => {
         const project = yield* (yield* Projects).open({ envelope: yield* Runtime.envelope('project.open', {}), path: working })
         const coordinator = yield* Coordinator
         const threadId = yield* coordinator.thread(project.projectId)
-        const body = 'Add a retry. [coordinator:plan] [coordinator:plan-small] [lead:finish] [lead:edit] [review:wait]'
+        const body =
+          'Add a retry. [coordinator:plan] [coordinator:plan-small] [coordinator:plan-no-review] [lead:finish] [lead:edit] [review:wait]'
         yield* coordinator.say({ envelope: yield* Runtime.envelope('thread.send', { body }), threadId, body, disposition: 'after_current' })
         const cards = Effect.map(Effect.orDie((yield* Queries).coordinator(project.projectId)), (snapshot) =>
           snapshot.items.flatMap((item) => (item.kind === 'task' ? [item.content] : [])),
         )
         const [card] = yield* until(cards, (all) => all[0]?.change != null && all[0].change.state === 'open')
         const taskId = card?.taskId ?? assert.fail('no card')
+        // Its timing is explicit; size alone keeps the normal before-Ship review.
+        yield* (yield* Runs).reshape({
+          taskId,
+          afterMerge: { key: 'review', agentId: 'codex', model: null, skipped: true },
+          actorId: instance.personId,
+        })
         // The host squashes it into main, and Althar hears it merged: the task settles, and its reviewer reads what merged.
         const clone = mkdtempSync(join(tmpdir(), 'althar-merge-'))
         execFileSync('git', ['clone', '-q', bare, clone])

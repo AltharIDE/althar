@@ -106,8 +106,7 @@ export const ProjectRules = Schema.Struct({
   ),
   moveIssues: Schema.optional(Schema.Boolean),
   /**
-   * What a small change's review after it merges brings back (docs/decisions/reviews.md, "A small change is reviewed after it
-   * merges"): `major`, only blocking and major findings put the task in Needs you, the rest stay in the thread; `all`, any
+   * What an explicitly configured review after merge brings back (docs/decisions/reviews.md, "An explicit review after merge"): `major`, only blocking and major findings put the task in Needs you, the rest stay in the thread; `all`, any
    * finding does; `none`, no review is owed after the merge. `major` without it, a project made before it included.
    */
   afterMergeReview: Schema.optional(Schema.Literals(['major', 'all', 'none'])),
@@ -213,7 +212,7 @@ export const usageLimitOf = (rules: ProjectRules): UsageLimit => rules.usageLimi
 /** Whether a revision's rules move a task's issue to In Progress as the task starts: they do unless the person turned it off. */
 export const movesIssues = (rules: ProjectRules): boolean => rules.moveIssues ?? true
 
-/** What a revision's rules have a small change's review after its merge bring back: only major findings, unless the person chose. */
+/** What a revision's rules have an explicitly requested review after merge bring back: only major findings, unless the person chose. */
 export const afterMergeReviewOf = (rules: ProjectRules): AfterMergeRule => rules.afterMergeReview ?? 'major'
 
 /** Where a revision's rules start new tasks (ADR-091): in a worktree of their own unless the person chose Local. */

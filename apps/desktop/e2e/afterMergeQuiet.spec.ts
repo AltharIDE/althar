@@ -6,7 +6,7 @@ import { join } from 'node:path'
 import { expect, test } from '@playwright/test'
 
 import { repository } from '../tests/repository'
-import { connectGitHub, launch, openFirstProject, say } from './support'
+import { connectGitHub, launch, openFirstProject, say, shown, toConversation } from './support'
 
 /*
  * A small change's review after it merges, under Major only (the default), in a real window: its reviewer reports a minor
@@ -32,10 +32,26 @@ test('a small change’s review after its merge with only minor findings ends as
     await expect(page.getByRole('heading', { name: 'meridian', level: 1 })).toBeVisible()
     await connectGitHub(page)
 
-    // A small change: it starts at once, and its pull request opens.
-    await say(page, 'Add a retry. [coordinator:plan] [coordinator:plan-small] [lead:finish] [lead:edit] [review:always]')
+    // A small change starts at once. Its after-merge review is an explicit request below, independent of its size.
+    await say(
+      page,
+      'Add a retry. [coordinator:plan] [coordinator:plan-small] [coordinator:plan-no-review] [lead:finish] [lead:edit] [review:always]',
+    )
     await expect(page.getByText('PR #1')).toBeVisible()
     await page.getByRole('button', { name: /Open task/ }).click()
+    await toConversation(page)
+    const composer = page.getByRole('textbox', { name: /^(Tell .* something|Add to the queue)/ })
+    const reviewer = JSON.stringify({ part: 'checked_by', review: { agent: 'codex' }, why: 'the person asked' })
+    const after = JSON.stringify({ review: 'review', why: 'the person asked' })
+    await composer.fill(
+      `Have Codex review this after it merges. [lead:call change_part ${reviewer}] [lead:call review_after_merge ${after}]`,
+    )
+    await composer.press('Enter')
+    await expect(shown(page, /Its lead kept a review after the merge/).first()).toBeVisible()
+    await page
+      .getByRole('radiogroup', { name: 'Face' })
+      .getByRole('radio', { name: /Outputs/ })
+      .click()
     await page.getByRole('button', { name: 'Mark ready for review' }).click()
     await page.getByRole('button', { name: 'Accept and merge' }).click()
     const clone = mkdtempSync(join(tmpdir(), 'althar-e2e-merge-'))

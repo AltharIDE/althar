@@ -4,8 +4,9 @@ import { join } from 'node:path'
 
 import type { ActorId, ProjectId } from '@althar/domain'
 import { assert, describe, it } from '@effect/vitest'
-import { Duration, Effect, Layer } from 'effect'
+import { Duration, Effect, Exit, Layer } from 'effect'
 import { SqlClient } from 'effect/sql'
+import { vi } from 'vitest'
 
 import { Instance } from '../src/Instance'
 import { Launches } from '../src/Launches'
@@ -17,6 +18,23 @@ import * as Runtime from '../src/Runtime'
 import { findTasks } from '../src/Search'
 import type { ToolAccess } from '../src/ToolServer'
 import { callTool, repository, runtime, until } from './support'
+
+const pendingCommands = vi.hoisted(() => new Map<number, { action: string; cwd: string | undefined }>())
+vi.mock('../src/spawner', async (original) => {
+  const actual = await original<typeof import('../src/spawner')>()
+  let id = 0
+  return {
+    ...actual,
+    startApart: (...args: Parameters<typeof actual.startApart>) => {
+      const running = actual.startApart(...args)
+      const key = ++id
+      const [command] = args
+      pendingCommands.set(key, { action: command.command === 'git' ? (command.args[2] ?? 'git') : command.command, cwd: command.cwd })
+      void running.result.then(() => pendingCommands.delete(key))
+      return running
+    },
+  }
+})
 
 /*
  * A task whose plan has just started is under way, or up next, until its lead
@@ -44,13 +62,18 @@ const machine = (n: number, drafting?: Duration.Duration, database = ':memory:')
   )
 
 /** A setup that finishes only once the test opens its gate. */
-const gated = () => {
-  const gate = join(mkdtempSync(join(tmpdir(), 'althar-gate-')), 'open').replaceAll('\\', '/')
-  return {
-    setup: `node -e "const fs = require('fs'); const t = setInterval(() => fs.existsSync('${gate}') && (clearInterval(t), process.exit(0)), 20)"`,
-    open: () => writeFileSync(gate, ''),
-  }
-}
+const gated = () =>
+  Effect.acquireRelease(
+    Effect.sync(() => {
+      const gate = join(mkdtempSync(join(tmpdir(), 'althar-gate-')), 'open').replaceAll('\\', '/')
+      return {
+        setup: `node -e "const fs = require('fs'); const t = setInterval(() => fs.existsSync('${gate}') && (clearInterval(t), process.exit(0)), 20)"`,
+        open: () => writeFileSync(gate, ''),
+      }
+    }),
+    // Release before the runtime's layer: a failure must not leave setup waiting while its machine shuts down.
+    (gate) => Effect.sync(gate.open),
+  )
 
 const person = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient
@@ -140,7 +163,7 @@ describe('a task not yet started', () => {
 
   it.live('is under way while its folder is set up before its lead’s first turn, and says so', () =>
     Effect.gen(function* () {
-      const gate = gated()
+      const gate = yield* gated()
       const projectId = yield* project(gate.setup)
       const task = yield* started(projectId, 'Local merge')
       // Its folder's setup still runs, and its lead's first turn waits for it.
@@ -156,25 +179,40 @@ describe('a task not yet started', () => {
       const after = yield* cardOf(projectId, task.taskId)
       assert.strictEqual(after?.phase, 'running')
       assert.isUndefined(after?.settingUp)
-    }).pipe(Effect.provide(machine(4))),
+    }).pipe(Effect.scoped, Effect.provide(machine(4))),
   )
 
   it.live('is up next while every place is taken and its folder is set up, never Stopped', () =>
     Effect.gen(function* () {
-      const gate = gated()
+      const gate = yield* gated()
       const projectId = yield* project(gate.setup)
       const first = yield* started(projectId, 'First')
+      yield* Effect.logInfo('Queued startup fixture: first task started')
       const second = yield* started(projectId, 'Local merge')
+      yield* Effect.logInfo('Queued startup fixture: second task started')
       const card = yield* cardOf(projectId, second.taskId)
+      yield* Effect.logInfo('Queued startup fixture: queued card read')
       assert.strictEqual(card?.phase, 'running')
+      assert.isDefined(card?.queued)
       assert.isNotNull(card?.queued)
       assert.isUndefined(card?.stopped)
       // The first's lead, waiting on its folder's setup, is under way too.
       const working = yield* cardOf(projectId, first.taskId)
+      yield* Effect.logInfo('Queued startup fixture: working card read')
       assert.strictEqual(working?.phase, 'running')
       assert.isUndefined(working?.stopped)
       gate.open()
-    }).pipe(Effect.provide(machine(1))),
+      yield* Effect.logInfo('Queued startup fixture: gate opened')
+    }).pipe(
+      // Log before opening the setup gate or closing the runtime, so a stalled board read keeps its original evidence.
+      Effect.onExit((exit) =>
+        Exit.isFailure(exit)
+          ? Effect.logInfo('Queued startup fixture: pending commands', { commands: [...pendingCommands.values()] })
+          : Effect.void,
+      ),
+      Effect.scoped,
+      Effect.provide(machine(1)),
+    ),
   )
 
   it.live('whose folder’s setup failed is under way all the same, its lead told why, not Stopped', () =>
