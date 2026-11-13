@@ -1,3 +1,4 @@
+import { isoAfter } from '@althar/testing'
 import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -5,7 +6,7 @@ import { join } from 'node:path'
 import type { ProjectId } from '@althar/domain'
 import type { FakeAgentOptions } from '@althar/provider-adapters/testing'
 import { assert, describe, it } from '@effect/vitest'
-import { Clock, Duration, Effect, Layer, Option, Stream } from 'effect'
+import { Clock, Context, Duration, Effect, Layer, Option, Stream } from 'effect'
 import { TestClock } from 'effect/testing'
 import { SqlClient } from 'effect/sql'
 
@@ -15,6 +16,7 @@ import { Coordinator } from '../src/Coordinator'
 import { NotFound } from '../src/errors'
 import { type Failure, failureOf, Failures } from '../src/Failures'
 import { Instance } from '../src/Instance'
+import { Live } from '../src/Live'
 import { Limits, outWords, whenWords } from '../src/Limits'
 import { Models } from '../src/Models'
 import { Policies, usageLimitOf } from '../src/Policies'
@@ -25,7 +27,7 @@ import { type PlanStep, Runs, type StuckAnswer } from '../src/Runs'
 import * as Runtime from '../src/Runtime'
 import { RULES } from '../src/rules'
 import { Sessions } from '../src/Sessions'
-import { atReset, callTool, fakeAgents, items, later, onTestClock, repository, runtime, until } from './support'
+import { atReset, callTool, fakeAgents, items, later, onTestClock, repository, runtime, until, withWork } from './support'
 import type { ToolAccess } from '../src/ToolServer'
 
 /*
@@ -36,6 +38,50 @@ import type { ToolAccess } from '../src/ToolServer'
  */
 
 const HOUR = 60 * 60 * 1000
+
+describe('automatic model selection', () => {
+  it.live('does not reuse a failed session’s model while the available models are unknown', () =>
+    Effect.gen(function* () {
+      const projects = yield* Projects
+      const coordinator = yield* Coordinator
+      const sessions = yield* Sessions
+      const sql = yield* SqlClient.SqlClient
+      const models = yield* Models
+      const catalog = yield* models.catalog
+      const limits = Context.get(
+        yield* Layer.build(Layer.fresh(Limits.layer)).pipe(
+          Effect.provideService(
+            Models,
+            Models.of({ ...models, catalog: Effect.succeed(catalog.map((agent) => ({ ...agent, models: [], probing: true }))) }),
+          ),
+        ),
+        Limits,
+      )
+      const project = yield* projects.open({ envelope: yield* Runtime.envelope('project.open', {}), path: repository() })
+      const threadId = yield* coordinator.thread(project.projectId)
+      // This id can come from an earlier automatic pick, without the person ever selecting it.
+      yield* sessions.start({ threadId, agentId: 'claude-code', model: 'claude-fable-5-1' }).pipe(Effect.ignore)
+      const failed = yield* sql`
+        UPDATE provider_sessions SET model = 'claude-fable-5-1'
+        WHERE thread_id = ${threadId} AND state = 'failed' RETURNING id`
+      assert.lengthOf(failed, 1)
+      const choice = yield* limits.free({ projectId: project.projectId, besides: ['codex', 'opencode'] })
+      assert.deepInclude(choice, { agentId: 'claude-code', model: null })
+      assert.strictEqual(yield* limits.modelFor({ projectId: project.projectId, agentId: 'claude-code' }), null)
+      const offered = yield* limits.choices({ projectId: project.projectId, accountId: null })
+      assert.isTrue(offered.filter((one) => one.agentId === 'claude-code').every((one) => one.model === null))
+      // Rotating accounts within the agent still preserves an explicitly planned model.
+      assert.strictEqual(
+        yield* limits.modelFor({
+          projectId: project.projectId,
+          agentId: 'claude-code',
+          planned: { agentId: 'claude-code', model: 'large' },
+        }),
+        'large',
+      )
+    }).pipe(Effect.scoped, Effect.provide(runtime())),
+  )
+})
 
 /** A runtime whose agents are out as given, with the project's queries. */
 const withAgents = (each: Readonly<Record<string, FakeAgentOptions>>, signedOut: ReadonlyArray<string> = []) =>
@@ -52,6 +98,10 @@ const planned = (steps: ReadonlyArray<PlanStep>, title = 'Retry the checkout [le
       envelope: yield* Runtime.envelope('task.create', {}),
       projectId: project.projectId,
       title,
+      description: withWork(
+        title,
+        steps.some((step) => step.key === 'review'),
+      ),
       draft: true,
     })
     const planId = yield* plans.propose({
@@ -186,6 +236,37 @@ describe('an agent out of usage', () => {
     }).pipe(Effect.provide(withAgents({ 'claude-code': { outOfUsage: { until: back } } })), onTestClock)
   })
 
+  it.effect('runs a held step again at once when a fresh reading shows its account has room, before the reset it waited for', () => {
+    const back = later()
+    return Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const live = yield* Live
+      const { projectId, task, start } = yield* planned([lead('claude-code')])
+      yield* waits(projectId)
+      yield* start
+      const [held] = yield* until(cardOf(projectId), (cards) => cards[0]?.waits != null)
+      assert.strictEqual(held?.waits?.agentId, 'claude-code')
+      // The person resets their usage: a reading of the plan, taken after it ran out, shows room. The clock stays before the reset.
+      const [account] = yield* (yield* Accounts).of('claude-code')
+      const observedAt = new Date(Date.now() + 1000).toISOString()
+      const windows = [{ kind: 'weekly', usedPercent: 3, resetsAt: new Date(back + 7 * 24 * HOUR).toISOString(), observedAt }]
+      yield* sql`
+        INSERT INTO plan_usage_readings ${sql.insert({ accountId: account!.id, agentId: 'claude-code', source: 'agent', plan: 'max', windows: JSON.stringify(windows), observedAt })}
+        ON CONFLICT (account_id) DO UPDATE SET windows = excluded.windows, observed_at = excluded.observed_at`
+      yield* TestClock.adjust(Duration.seconds(2))
+      yield* live.publish({ _tag: 'PlanUsage', usage: { accounts: [] } })
+      // It goes on at once, with the clock still before the reset (its agent, out for the fake's own reasons, may stop it again).
+      yield* until(
+        sql<{ one: number }>`
+          SELECT 1 AS one FROM record_events f JOIN node_attempts a ON a.id = f.aggregate_id JOIN nodes n ON n.id = a.node_id
+          JOIN workflow_executions e ON e.id = n.execution_id JOIN runs r ON r.id = e.run_id
+          WHERE f.aggregate_type = 'node_attempt' AND f.type = 'node_attempt.resumed' AND r.task_id = ${task.taskId}`,
+        (rows) => rows.length > 0,
+      )
+      assert.isBelow(yield* Clock.currentTimeMillis, back)
+    }).pipe(Effect.provide(withAgents({ 'claude-code': { outOfUsage: { until: back } } })), onTestClock)
+  })
+
   it.effect('runs a held step again at its reset after Althar restarts', () => {
     const back = later()
     const database = join(mkdtempSync(join(tmpdir(), 'althar-limits-')), 'profile.sqlite')
@@ -298,7 +379,7 @@ describe('an agent out of usage', () => {
       const queries = yield* Queries
       assert.deepInclude(
         (yield* queries.projects).projects.find((project) => project.id === projectId),
-        { working: 1, ready: 0 },
+        { working: 1, yours: 0 },
       )
     }).pipe(
       Effect.provide(withAgents({ 'claude-code': { outOfUsage: { until: back } }, codex: { outOfUsage: { until: back } } }, ['opencode'])),
@@ -808,7 +889,8 @@ describe('a held step handed over while every place is taken, across a restart',
             WHERE task_id = ${task.taskId} AND kind = 'stuck' AND state = 'open'`,
           (rows) => rows.length === 1,
         )
-        assert.strictEqual(call?.why, 'failed_to_start')
+        // An agent that is no longer there stops for that: installing it is the way on.
+        assert.strictEqual(call?.why, 'not_installed')
         const states = yield* sql<{ state: string }>`
           SELECT a.state FROM node_attempts a JOIN nodes n ON n.id = a.node_id JOIN workflow_executions e ON e.id = n.execution_id
           JOIN runs r ON r.id = e.run_id WHERE r.task_id = ${task.taskId} AND n.node_key = 'implement' ORDER BY a.rowid DESC LIMIT 1`
@@ -901,16 +983,19 @@ describe('limits', () => {
       assert.instanceOf(yield* Effect.flip(policies.setUsageLimit('proj_none', 'move', instance.personId)), NotFound)
       assert.instanceOf(yield* Effect.flip(policies.rulesOf('pol_none')), NotFound)
 
+      // The models on offer are asked of each agent in the background: what follows reads them once they have been.
+      const models = yield* Models
+      yield* until(models.catalog, (catalog) => catalog.every((one) => !one.probing))
       // The plan's model for its own agent, else the last the agent ran in the project, else its own.
       assert.strictEqual(
         yield* limits.modelFor({ agentId: 'codex', projectId: project.projectId, planned: { agentId: 'codex', model: 'large' } }),
         'large',
       )
       assert.strictEqual(yield* limits.modelFor({ agentId: 'codex', projectId: project.projectId }), 'small')
-      assert.isNull(yield* limits.modelFor({ agentId: 'opencode', projectId: project.projectId }))
+      assert.strictEqual(yield* limits.modelFor({ agentId: 'opencode', projectId: project.projectId }), 'small')
       assert.deepStrictEqual(yield* limits.named('codex', 'large'), { agent: 'Fake codex', model: 'Large' })
       assert.deepStrictEqual(yield* limits.named('codex', 'huge'), { agent: 'Fake codex', model: 'huge' })
-      assert.deepStrictEqual(yield* limits.named('opencode', 'large'), { agent: 'Fake opencode', model: 'large' })
+      assert.deepStrictEqual(yield* limits.named('opencode', 'large'), { agent: 'Fake opencode', model: 'Large' })
       // An account given is the agent's own, or none.
       assert.instanceOf(yield* Effect.flip(limits.pick({ agentId: 'opencode', accountId: yield* usual('codex') })), NotFound)
     }).pipe(Effect.provide(withAgents({ codex: { outOfUsage: {} } }))),
@@ -922,7 +1007,7 @@ describe('limits', () => {
     const time = new Intl.DateTimeFormat(undefined, { hour: 'numeric', minute: '2-digit' }).format(later)
     assert.strictEqual(whenWords(later.toISOString(), now), time)
     assert.match(whenWords(new Date('2026-10-05T09:00:00').toISOString(), now), /, /)
-    assert.match(whenWords(new Date('2026-11-20T09:00:00').toISOString(), now), /20/)
+    assert.match(whenWords(new Date(isoAfter(48 * 86_400_000 - 3 * 3_600_000, +now)).toISOString(), now), /20/)
     assert.strictEqual(outWords({ from: 'Codex', resetsAt: null, now }), 'Codex ran out of usage.')
     assert.strictEqual(
       outWords({ from: 'Codex', resetsAt: null, now, step: 'review', waits: 'step' }),

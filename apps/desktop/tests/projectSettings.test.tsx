@@ -33,7 +33,7 @@ import {
   repositories,
   runnables,
 } from './fixtures'
-import { servicesFor } from './render'
+import { pickLayout, servicesFor } from './render'
 
 /*
  * A project's settings, a view of the project from Settings in the window's
@@ -159,6 +159,7 @@ describe('a project’s settings', () => {
     expect(side.getAllByRole('button').map((button) => button.textContent)).toEqual([
       'General',
       'Code and issues',
+      'Tasks',
       'Rules',
       'Running',
       'Notes',
@@ -166,7 +167,7 @@ describe('a project’s settings', () => {
     ])
     expect(side.getByRole('button', { name: 'General' }).getAttribute('aria-current')).toBe('page')
     // Back to its work, the conversation is where it was.
-    await userEvent.click((await views()).getByRole('radio', { name: 'Conversation' }))
+    await pickLayout('Board')
     expect(screen.queryByRole('navigation', { name: 'Project settings' })).toBeNull()
   })
 
@@ -220,7 +221,7 @@ describe('a project’s settings', () => {
         throw new ApiError({ reason: 'BranchNotFound', message: 'meridian-web has no branch release/0.8.0, on its remote or here.' })
       kept = kept.map((each) => (each.id === input.repositoryId ? { ...each, workToward: input.workToward ?? null } : each))
     })
-    windowAt('/projects/p1?room=settings&section=general', { setRepository, getRepositories: vi.fn(async () => kept) })
+    windowAt('/projects/p1?room=settings&section=tasks', { setRepository, getRepositories: vi.fn(async () => kept) })
     await userEvent.click(await screen.findByRole('button', { name: 'Work toward in meridian-api: main' }))
     expect(screen.getByRole('option', { name: 'main default' }).getAttribute('aria-selected')).toBe('true')
     await userEvent.click(screen.getByRole('option', { name: 'release/0.8.0' }))
@@ -247,7 +248,7 @@ describe('a project’s settings', () => {
     const setRepository = vi.fn(async (input: { repositoryId: string; workToward?: string | null }) => {
       kept = kept.map((each) => (each.id === input.repositoryId ? { ...each, workToward: input.workToward ?? null } : each))
     })
-    windowAt('/projects/p1?room=settings&section=general', { createBranch, setRepository, getRepositories: vi.fn(async () => kept) })
+    windowAt('/projects/p1?room=settings&section=tasks', { createBranch, setRepository, getRepositories: vi.fn(async () => kept) })
     await userEvent.click(await screen.findByRole('button', { name: 'Work toward: main' }))
     await userEvent.type(screen.getByRole('combobox', { name: 'Find or name a branch' }), 'release/0.9.0{Enter}')
     // Shown at once, while it is made.
@@ -398,7 +399,7 @@ describe('a project’s settings', () => {
 
   it('says when each switch acts, and has its leads resolve conflicts unasked once turned on', async () => {
     const { client } = windowAt('/projects/p1')
-    await openSettings()
+    await openSettings('Tasks')
     const tasks = within(screen.getByRole('region', { name: 'Tasks' }))
     const conflicts = tasks.getByRole('switch', { name: 'Resolve merge conflicts automatically' })
     expect(conflicts.getAttribute('aria-checked')).toBe('false')
@@ -416,9 +417,22 @@ describe('a project’s settings', () => {
     expect(conflicts.getAttribute('aria-checked')).toBe('false')
   })
 
+  it('says what a small change’s review after it merges brings back, Major only to start with, and keeps another choice', async () => {
+    const { client } = windowAt('/projects/p1')
+    await openSettings('Tasks')
+    const region = within(screen.getByRole('region', { name: 'Tasks' }))
+    const select = region.getByRole('combobox', { name: 'When a review is set after merge' })
+    expect(select.textContent).toBe('Bring back major findings')
+    expect(region.getByText('Minor findings and nits stay in the task’s thread.')).toBeTruthy()
+    await userEvent.click(select)
+    await userEvent.click(screen.getByRole('option', { name: 'Don’t review it' }))
+    await waitFor(() => expect(client.setProjectRules).toHaveBeenCalledWith({ projectId: 'p1', afterMergeReview: 'none' }))
+    expect(region.getByText('A review configured before Ship is unaffected.')).toBeTruthy()
+  })
+
   it('moves a task’s issue to In Progress as it starts, on every tracker that has one, unless switched off', async () => {
     const { client } = windowAt('/projects/p1')
-    await openSettings()
+    await openSettings('Tasks')
     const move = within(screen.getByRole('region', { name: 'Tasks' })).getByRole('switch', {
       name: 'Move issues along with their tasks',
     })
@@ -433,7 +447,7 @@ describe('a project’s settings', () => {
 
   it('pushes the lead’s commits by itself unless switched off', async () => {
     const { client } = windowAt('/projects/p1')
-    await openSettings()
+    await openSettings('Tasks')
     const push = within(screen.getByRole('region', { name: 'Tasks' })).getByRole('switch', {
       name: 'Push the lead’s commits automatically',
     })
@@ -448,7 +462,7 @@ describe('a project’s settings', () => {
 
   it('starts new tasks in a worktree until the person chooses Local, saying what each gives up (ADR-091)', async () => {
     const { client } = windowAt('/projects/p1')
-    await openSettings()
+    await openSettings('Tasks')
     const tasks = within(screen.getByRole('region', { name: 'Tasks' }))
     const where = tasks.getByRole('radiogroup', { name: 'New tasks start in' })
     expect(within(where).getByRole('radio', { name: 'Worktree' }).getAttribute('aria-checked')).toBe('true')
@@ -464,7 +478,7 @@ describe('a project’s settings', () => {
 
   it('posts a task’s screenshots to its pull request by itself once switched on, off until then', async () => {
     const { client } = windowAt('/projects/p1')
-    await openSettings()
+    await openSettings('Tasks')
     const post = within(screen.getByRole('region', { name: 'Tasks' })).getByRole('switch', {
       name: 'Post screenshots to pull requests automatically',
     })
@@ -492,7 +506,7 @@ describe('a project’s settings', () => {
         throw new ApiError({ reason: 'RulesChanged', message: 'The rules changed meanwhile.' })
       }),
     })
-    await openSettings()
+    await openSettings('Tasks')
     const tasks = within(screen.getByRole('region', { name: 'Tasks' }))
     const move = tasks.getByRole('switch', { name: 'Move issues along with their tasks' })
     await userEvent.click(move)
@@ -504,7 +518,7 @@ describe('a project’s settings', () => {
 
   it('keeps skill and OpenSpec files a task commits on this Mac until each is allowed, each switch a revision of its rules', async () => {
     const { client } = windowAt('/projects/p1')
-    await openSettings()
+    await openSettings('Tasks')
     const files = within(screen.getByRole('region', { name: 'Repository files' }))
     // The device by the name the rest of the window gives it; and Althar never says it writes skills into the repository.
     expect(files.getByText(/stay on this Mac unless you allow them here/)).toBeTruthy()
@@ -543,7 +557,7 @@ describe('a project’s settings', () => {
         repositoryFiles: { writeSkills: true, writeOpenSpec: false, pushProtected: true },
       })),
     })
-    await openSettings()
+    await openSettings('Tasks')
     const files = within(await screen.findByRole('region', { name: 'Repository files' }))
     expect(files.getByRole('switch', { name: 'Write Althar-managed skills' }).getAttribute('aria-checked')).toBe('true')
     expect(files.getByRole('switch', { name: 'Write OpenSpec artifacts' }).getAttribute('aria-checked')).toBe('false')
@@ -556,14 +570,14 @@ describe('a project’s settings', () => {
         throw new ApiError({ reason: 'RulesChanged', message: 'The rules changed meanwhile.' })
       }),
     })
-    await openSettings()
+    await openSettings('Tasks')
     const files = within(screen.getByRole('region', { name: 'Repository files' }))
     const push = files.getByRole('switch', { name: 'Push skill/OpenSpec files' })
     await userEvent.click(push)
     expect(await files.findByText('The rules changed meanwhile.')).toBeTruthy()
     await waitFor(() => expect(push.getAttribute('aria-checked')).toBe('false'))
     // The task switches say nothing of it.
-    expect(within(screen.getByRole('region', { name: 'Tasks' })).queryByText(/changed meanwhile/)).toBeNull()
+    expect(within(screen.getByRole('region', { name: 'Pull requests and issues' })).queryByText(/changed meanwhile/)).toBeNull()
   })
 
   it('shows the notes its coordinator keeps, newest first, who kept each, and drops one that no longer holds', async () => {
@@ -953,8 +967,8 @@ describe('a project’s trackers, in its settings', () => {
     it('shows the bound tracker in the project’s header, opening its workspace', async () => {
       const opened = vi.spyOn(window, 'open').mockReturnValue(null)
       windowAt('/projects/p1', withBoard([], fnt, binding))
-      await userEvent.click(await screen.findByRole('button', { name: 'Made of' }))
-      const made = await screen.findByRole('menu', { name: 'Made of' })
+      await userEvent.click(await screen.findByRole('button', { name: 'More' }))
+      const made = await screen.findByRole('menu', { name: 'More' })
       await userEvent.click(within(made).getByRole('menuitem', { name: 'Linear issues' }))
       expect(opened).toHaveBeenCalledWith('https://linear.app/fnt', '_blank')
       opened.mockRestore()
@@ -1117,27 +1131,14 @@ describe('what a project runs, in its settings', () => {
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
   })
 
-  it('says where its tasks’ work goes, and leads to the rules to change how', async () => {
+  it('says where its tasks’ work goes', async () => {
     windowAt('/projects/p1', running)
     await openSettings('Running')
     const where = within(screen.getByRole('region', { name: 'Where its work goes' }))
     expect(where.getByText('~/Althar/meridian')).toBeTruthy()
-    expect(where.getByText('Open a draft pull request. Checks run on it; you mark it ready.')).toBeTruthy()
-    await userEvent.click(where.getAllByRole('button', { name: 'Change in Rules' })[0]!)
-    expect(await screen.findByRole('heading', { level: 2, name: 'Rules' })).toBeTruthy()
-  })
-
-  it('says a task stays on its branch while its host isn’t connected, as the runtime does, and leads to connecting it', async () => {
-    const unconnected = repositories.map((repository) =>
-      repository.host === null ? repository : { ...repository, host: { ...repository.host, account: null } },
-    )
-    windowAt('/projects/p1', { ...running, getRepositories: vi.fn(async () => unconnected) })
-    await openSettings('Running')
-    const where = within(screen.getByRole('region', { name: 'Where its work goes' }))
-    expect(await where.findByText('Leave it on its branch. GitHub isn’t connected.')).toBeTruthy()
-    expect(where.queryByText(/^Open a draft pull request/)).toBeNull()
-    await userEvent.click(where.getByRole('button', { name: 'Connect GitHub' }))
-    expect(await screen.findByRole('heading', { level: 2, name: 'Code and issues' })).toBeTruthy()
+    // How a task ends and how its branches are named are the Tasks', not Running's.
+    expect(where.queryByText(/pull request/)).toBeNull()
+    expect(screen.queryByText('Branch names')).toBeNull()
   })
 })
 

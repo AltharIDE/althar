@@ -1,7 +1,7 @@
 name: e2e
 
 # The desktop app's end-to-end run: the built app, with the fake agent, in four parts by file, each on a machine of its
-# own (about seven minutes each, against twenty-five as one). desktop.yml runs it for a change that reaches the app, on
+# own, balanced by recorded file durations. desktop.yml runs it for a change that reaches the app, on
 # the pull request, so a change that breaks a spec fails there, and again in the merge queue, on main as it will be;
 # post-merge.yml once more, for the release.
 on:
@@ -37,8 +37,7 @@ jobs:
       - uses: actions/setup-node@v5
         with:
           node-version-file: .node-version
-      - run: bun install --frozen-lockfile
-        working-directory: .
+      - uses: ./.github/actions/electron
       # Ubuntu 24.04 keeps unprivileged user namespaces from apps, and Chromium's sandbox needs them.
       - run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
       # The end-to-end tests run the built app, with the fake agent, on a virtual display, with a keyring:
@@ -48,8 +47,8 @@ jobs:
       # Tests with an open flaky issue run, but don't fail this job (packages/testing).
       - uses: ./.github/actions/flaky/quarantine
       - env:
-          SHARD: ${{ matrix.shard }}
-        run: dbus-run-session -- bash -c 'printf "althar\n" | gnome-keyring-daemon --unlock --components=secrets >/dev/null 2>&1; xvfb-run --auto-servernum bun run test:e2e --shard="$SHARD"'
+          E2E_SHARD: ${{ matrix.shard }}
+        run: dbus-run-session -- bash -c 'printf "althar\n" | gnome-keyring-daemon --unlock --components=secrets >/dev/null 2>&1; xvfb-run --auto-servernum bun run test:e2e'
       - uses: actions/upload-artifact@v6
         if: failure()
         with:

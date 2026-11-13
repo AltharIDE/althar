@@ -7,6 +7,7 @@ import { type ElectronApplication, expect, test } from '@playwright/test'
 
 import { repository } from '../tests/repository'
 import {
+  askAboutMore,
   backToWork,
   launch,
   openFirstProject,
@@ -18,6 +19,8 @@ import {
   startTask,
   still,
   toConversation,
+  expectPanes,
+  showPanes,
 } from './support'
 
 /*
@@ -58,6 +61,9 @@ test('makes the first project of a repository it found, starts a task, and talks
 
     await expect(page.getByRole('heading', { name: 'meridian', level: 1 })).toBeVisible()
     await page.screenshot({ path: 'test-results/project.png' })
+    // Asking about more than what can't be undone, as a person may: a deploy is kept for them, as the call below shows.
+    // Allowing everything, which lets a deploy run unasked, is its own test.
+    await askAboutMore(page)
     // Told what should change, the coordinator plans it. Its lead reports Implement done at once, with no review, so what follows is talking to it.
     await startTask(page, 'Add a retry to the checkout call')
     await expect(page.getByText('Ready', { exact: true })).toBeVisible()
@@ -95,8 +101,9 @@ test('makes the first project of a repository it found, starts a task, and talks
       .click()
     await expect(page.getByText('hello.txt', { exact: true })).toBeVisible()
 
-    // A deploy is kept for the person: it waits in the thread as a call until it is answered.
-    await say(page, 'command-choices')
+    // A deploy needs the network, so it asks to run outside the lead's sandbox; the project asks about it, and it waits in the
+    // thread as a call until it is answered.
+    await say(page, 'run env -i make deploy')
     await expect(shown(page, 'Needs you', { exact: true })).toBeVisible()
     await expect(shown(page, 'Needs your permission')).toBeVisible()
     await page.screenshot({ path: 'test-results/call.png' })
@@ -172,7 +179,7 @@ test('asks the coordinator, which plans a task that is implemented, reviewed, se
     await expect(page.getByRole('heading', { name: 'meridian', level: 1 })).toBeVisible()
 
     const box = page.getByRole('textbox', { name: /^(Tell the coordinator something|Add to the queue)/ })
-    await box.fill('Add a retry to the checkout call. [coordinator:plan] [lead:finish] [review:findings]')
+    await box.fill('Add a retry to the checkout call. [coordinator:plan] [lead:edit] [lead:finish] [review:findings]')
     await box.press('Enter')
 
     // The plan, with the time it starts on its own; held, it waits. Up next on the board beside says the same.
@@ -181,7 +188,7 @@ test('asks the coordinator, which plans a task that is implemented, reviewed, se
     await expect(page.getByText('It knows the code.')).toHaveCount(0)
     await page.screenshot({ path: 'test-results/plan.png' })
     await page.getByRole('button', { name: 'Hold' }).click()
-    await expect(conversation.getByText('Held. Starts when you say')).toBeVisible()
+    await expect(conversation.getByText('Held', { exact: true })).toBeVisible()
     await page.getByRole('button', { name: 'Start', exact: true }).click()
 
     // Implement, a review with a finding, settling it, and a review that passes: the card says it is ready.
@@ -226,8 +233,8 @@ test('connects GitHub, and a planned task ends in a draft pull request', async (
 
     // Its remote is on GitHub, which isn't connected yet: nothing says so up front, and the project's settings connect it.
     await expect(page.getByText(/isn't connected to GitHub/)).toHaveCount(0)
-    await page.getByRole('button', { name: 'Made of' }).click()
-    await expect(page.getByRole('menu', { name: 'Made of' }).getByRole('menuitem')).toHaveText([/^meridian/])
+    await page.getByRole('button', { name: 'More', exact: true }).click()
+    await expect(page.getByRole('menu', { name: 'More' }).getByRole('menuitem')).toHaveText([/^meridian/])
     await page.keyboard.press('Escape')
     await projectSettings(page, 'Code and issues')
     const github = page.getByRole('region', { name: 'GitHub' })
@@ -304,7 +311,7 @@ test('connects GitHub, and a planned task ends in a draft pull request', async (
 
     // The task's bar goes back to the project: its board has it ready to accept, and so does the bar.
     await page.getByRole('button', { name: 'Back to meridian' }).click()
-    await page.getByRole('radio', { name: /^Board/ }).click()
+    await showPanes(page, { conversation: false, board: true })
     const work = page.getByRole('region', { name: 'The project’s work' })
     await expect(work.getByText('Ready to accept')).toBeVisible()
     await page.getByRole('button', { name: '1 needs you' }).hover()
@@ -321,7 +328,7 @@ test('connects GitHub, and a planned task ends in a draft pull request', async (
     await page.getByRole('button', { name: /Accept and merge/ }).click()
     // Back goes to the view it came from, the board.
     await page.getByRole('button', { name: 'Back to meridian' }).click()
-    await expect(page.getByRole('radio', { name: 'Board', checked: true })).toBeVisible()
+    await expectPanes(page, { conversation: false, board: true })
     await expect(work.getByText('PR #1 merged')).toBeVisible()
     await page.screenshot({ path: 'test-results/settled.png', animations: 'disabled' })
   } finally {
@@ -380,7 +387,7 @@ const catchWhatReachesThem = (electronApp: ElectronApplication) =>
 /** Where the system carries an app's count, as Settings names it: the Dock, Linux's launcher. */
 const COUNT = process.platform === 'darwin' ? 'Count them on the Dock icon' : 'Count them on the launcher icon'
 
-test('notifies the person of a ready task while they look elsewhere, counts it on the Dock, and opens it on a click', async () => {
+test('notifies the person of a finished task in its card’s words, counts it on the Dock, and opens it on a click', async () => {
   const home = mkdtempSync(join(tmpdir(), 'althar-e2e-'))
   const repo = repository(home)
   const { electronApp, page } = await launch(home)
@@ -392,12 +399,13 @@ test('notifies the person of a ready task while they look elsewhere, counts it o
 
     await expect
       .poll(() => electronApp.evaluate(() => globalThis.shown))
-      .toEqual([{ title: 'Add a retry to the checkout call', body: 'Ready: Did the task.', silent: true }])
+      .toEqual([{ title: 'Add a retry to the checkout call', body: 'Nothing built', silent: true }])
     await expect.poll(() => electronApp.evaluate(() => globalThis.badge)).toBe(1)
 
     // Clicked, it opens the task.
     await electronApp.evaluate(() => globalThis.clickLast?.())
     await expect(page.getByRole('heading', { name: 'Add a retry to the checkout call', level: 1 })).toBeVisible()
+    await expect(shown(page, 'Nothing built', { exact: true })).toBeVisible()
   } finally {
     await electronApp.close()
   }

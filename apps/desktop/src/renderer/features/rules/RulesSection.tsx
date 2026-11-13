@@ -1,3 +1,5 @@
+import type { ComponentProps } from 'react'
+
 import {
   type AgentStatus,
   type CommandRule,
@@ -20,12 +22,14 @@ import {
   SettingSwitch,
   TaskEnd,
   unreachable,
+  Problem,
 } from '@althar/ui'
 import {
   type CommandPlace,
   type AskKind,
   type AskPlace,
   ProjectRules,
+  ProjectTaskRules,
   type RestMode,
   type RuleCommand,
   type SandboxList,
@@ -348,14 +352,9 @@ export const agentAccountsOf = (agents: ReadonlyArray<AgentStatus>) =>
 export function RulesSection({ model }: { model: RulesModel }) {
   const { rules } = model
   const project = model.project ?? ''
-  const example = text.example(project)
   return (
     <>
-      {model.error !== null && (
-        <p className={s.error} role="alert">
-          {model.error}
-        </p>
-      )}
+      {model.error !== null && <Problem className={s.error}>{model.error}</Problem>}
       {rules === null ? (
         <PartPending label={pendingText.page} />
       ) : (
@@ -396,45 +395,6 @@ export function RulesSection({ model }: { model: RulesModel }) {
                 return again === null || 'problem' in again ? null : { commands: again.commands }
               })
               return undefined
-            }}
-            end={endOf(rules.end)}
-            onEndChange={(end) => model.change({ end: endsAs(end) })}
-            branches={{
-              value: rules.branchPattern,
-              onChange: (pattern) => model.setPattern('branch', pattern),
-              error: model.patternErrors.branch,
-              exampleOf: (pattern) => fillPattern(pattern, example),
-              fallback: OWN.branch,
-              repositories: namingOf(rules, 'branch'),
-            }}
-            titles={{
-              value: rules.titlePattern,
-              onChange: (pattern) => model.setPattern('title', pattern),
-              error: model.patternErrors.title,
-              exampleOf: (pattern) => fillPattern(pattern, example),
-              fallback: OWN.title,
-              repositories: namingOf(rules, 'title'),
-            }}
-            templates={rules.conventions.map((repository) => ({
-              id: repository.repository,
-              name: repository.repository,
-              path: repository.template,
-            }))}
-            limit={limitOf(rules.usageLimit)}
-            onLimitChange={(limit) => model.change({ usageLimit: usageLimitOf(limit) })}
-            agentAccounts={agentAccountsOf(model.agents)}
-            rotate={rules.rotateAccounts}
-            onRotateChange={(rotateAccounts) => model.change({ rotateAccounts })}
-            allowed={rules.onlyAccounts ?? {}}
-            onAllowedChange={(agentId, ids) => {
-              const every = model.agents.find((agent) => agent.id === agentId)?.accounts.length ?? 0
-              model.change((now) => {
-                const { [agentId]: _, ...others } = now.onlyAccounts ?? {}
-                const only = ids.length === every ? others : { ...others, [agentId]: ids }
-                return {
-                  onlyAccounts: Object.keys(only).length === 0 ? null : only,
-                }
-              })
             }}
             sandbox={{
               commands: rules.sandbox.commands,
@@ -479,5 +439,68 @@ export function RulesSection({ model }: { model: RulesModel }) {
         </>
       )}
     </>
+  )
+}
+
+/**
+ * What a project's task does when it is finished and when an agent's usage runs out, as its rules say it: the Finished and
+ * Limits sentences, which sit in its Tasks.
+ */
+export function TaskRules({
+  model,
+  headingLevel,
+  show,
+}: {
+  model: RulesModel
+  headingLevel: ComponentProps<typeof ProjectTaskRules>['headingLevel']
+  show?: ComponentProps<typeof ProjectTaskRules>['show']
+}) {
+  const { rules } = model
+  const example = text.example(model.project ?? '')
+  if (rules === null) return null
+  return (
+    <ProjectTaskRules
+      headingLevel={headingLevel}
+      {...(show === undefined ? {} : { show })}
+      end={endOf(rules.end)}
+      onEndChange={(end) => model.change({ end: endsAs(end) })}
+      branches={{
+        value: rules.branchPattern,
+        onChange: (pattern) => model.setPattern('branch', pattern),
+        error: model.patternErrors.branch,
+        exampleOf: (pattern) => fillPattern(pattern, example),
+        fallback: OWN.branch,
+        repositories: namingOf(rules, 'branch'),
+      }}
+      titles={{
+        value: rules.titlePattern,
+        onChange: (pattern) => model.setPattern('title', pattern),
+        error: model.patternErrors.title,
+        exampleOf: (pattern) => fillPattern(pattern, example),
+        fallback: OWN.title,
+        repositories: namingOf(rules, 'title'),
+      }}
+      templates={rules.conventions.map((repository) => ({
+        id: repository.repository,
+        name: repository.repository,
+        path: repository.template,
+      }))}
+      limit={limitOf(rules.usageLimit)}
+      onLimitChange={(limit) => model.change({ usageLimit: usageLimitOf(limit) })}
+      agentAccounts={agentAccountsOf(model.agents)}
+      rotate={rules.rotateAccounts}
+      onRotateChange={(rotateAccounts) => model.change({ rotateAccounts })}
+      allowed={rules.onlyAccounts ?? {}}
+      onAllowedChange={(agentId, ids) => {
+        const every = model.agents.find((agent) => agent.id === agentId)?.accounts.length ?? 0
+        model.change((now) => {
+          const { [agentId]: _, ...others } = now.onlyAccounts ?? {}
+          const only = ids.length === every ? others : { ...others, [agentId]: ids }
+          return {
+            onlyAccounts: Object.keys(only).length === 0 ? null : only,
+          }
+        })
+      }}
+    />
   )
 }

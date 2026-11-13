@@ -1,0 +1,44 @@
+/* What Althar works with: a console, its cells seamed by one hairline, as Flow's is (DesktopBody.module.css). */
+.wall {
+  position: relative;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1px;
+  margin: 80px 0 0;
+  padding: 1px;
+  border-radius: 16px;
+  list-style: none;
+  background: var(--frame);
+  box-shadow: 0 50px 90px -50px rgba(0, 0, 0, 0.95);
+}
+/* Its light, thrown on the wall round it. */
+.wall::before {
+  content: '';
+  position: absolute;
+  inset: -22% -16%;
+  z-index: -1;
+  pointer-events: none;
+  background: radial-gradient(closest-side, rgba(60, 76, 255, 0.11), rgba(60, 76, 255, 0.035) 55%, transparent);
+}
+.cell { display: grid; align-content: start; gap: 22px; min-width: 0; padding: 24px 28px 30px; background: #0b0a08; }
+.wide { grid-column: 1 / -1; border-radius: 15px 15px 0 0; }
+.cell:nth-child(2) { border-bottom-left-radius: 15px; }
+.cell:last-child { border-bottom-right-radius: 15px; }
+.plate { margin: 0; font: 500 11px/1 var(--mono); letter-spacing: 0.12em; text-transform: uppercase; color: var(--ink-3); }
+.plate b { margin-right: 8px; font-weight: 500; color: var(--lit); }
+.marks { display: flex; flex-wrap: wrap; gap: 14px 30px; margin: 0; padding: 0; list-style: none; }
+.wide .marks { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 18px 24px; }
+.marks li { display: inline-flex; align-items: center; gap: 11px; min-width: 0; font-size: 17px; font-weight: 550; letter-spacing: -0.012em; color: rgba(255, 248, 240, 0.86); white-space: nowrap; }
+.marks svg { flex: none; color: #fff; }
+
+@media (max-width: 1099px) {
+  .wall { grid-template-columns: minmax(0, 1fr); }
+  .wide .marks { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .cell:nth-child(2) { border-bottom-left-radius: 0; }
+  .cell:last-child { border-bottom-left-radius: 15px; }
+}
+@media (max-width: 700px) {
+  .wall { margin-top: 56px; border-radius: 12px; }
+  .cell { padding: 20px; }
+  .marks li { font-size: 15px; }
+}

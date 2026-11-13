@@ -61,12 +61,23 @@ export const LeavingItOpen: Story = {
 export const TwoPullRequests: Story = {
   args: { changes: [PR, { id: 'mr-12', name: 'merge request !12', host: 'GitLab' }] },
 }
-/** Abandoned, but the host wouldn't close it: it says so, and offers to try again. */
+/** Abandoned, but the host couldn't be reached to close it: it says so, and offers to try again. */
 export const CloseFailed: Story = {
+  args: { changes: [PR], abandoned: true, error: 'Althar couldn’t reach GitHub. Check this computer is online.' },
+}
+/** Abandoned, but the host won't let this account close it: trying again can't change that, so Leave it open is the one way left. */
+export const CloseRefused: Story = {
   args: {
     changes: [PR],
     abandoned: true,
-    error: 'Pull request #1206 is still open. GitHub won’t let this account do that: Resource not accessible by integration.',
+    error: 'GitHub won’t let this account do that: Resource not accessible by integration.',
+    final: true,
+  },
+  play: async ({ args }) => {
+    const dialog = within(await within(document.body).findByRole('dialog', { name: 'Task abandoned' }))
+    await expect(dialog.queryByRole('button', { name: 'Try again' })).toBeNull()
+    await userEvent.click(dialog.getByRole('button', { name: 'Leave it open' }))
+    await expect(args.onClose).toHaveBeenCalled()
   },
 }
 /** Merged, with commits after its pull request: those are left out, and it stays merged. */
@@ -104,8 +115,22 @@ export const LongNames: Story = {
 }
 /** Abandoning it. */
 export const Busy: Story = { args: { busy: true } }
-/** The runtime said no. */
-export const Failed: Story = { args: { error: 'The task is merged, so it stays done.' } }
+/** It didn't go, for a reason pressing again can get past: Abandon task stays, as the way to try again. */
+export const Failed: Story = { args: { error: 'Althar couldn’t reach the task’s worktree. Check the disk it’s on is connected.' } }
+
+/** Refused for good: nothing here can change it, so Close is the one way left, and no choice or button offers to fail again. */
+export const Refused: Story = {
+  args: { changes: [PR], error: 'The task is merged, so it stays done.', final: true },
+  play: async ({ args }) => {
+    const dialog = within(await within(document.body).findByRole('dialog', { name: 'Abandon this task?' }))
+    await expect(dialog.getByRole('alert')).toHaveTextContent('The task is merged, so it stays done.')
+    await expect(dialog.queryByRole('button', { name: 'Abandon task' })).toBeNull()
+    await expect(dialog.queryByRole('checkbox')).toBeNull()
+    await userEvent.click(dialog.getByRole('button', { name: 'Close' }))
+    await expect(args.onClose).toHaveBeenCalled()
+    await expect(args.onAbandon).not.toHaveBeenCalled()
+  },
+}
 
 /** Cancel has focus: Enter alone abandons nothing. */
 export const SafeByDefault: Story = {
@@ -136,5 +161,16 @@ export const Abandoning: Story = {
     await expect(dialog).toHaveTextContent('Its branch and worktree stay.')
     await userEvent.click(within(dialog).getByRole('button', { name: 'Abandon task' }))
     await expect(args.onAbandon).toHaveBeenCalledOnce()
+  },
+}
+
+/** Commits that wait for Ship: shipping them is offered first, and settling leaves them on the branch (a task is a conversation plus parts). */
+export const WithCommitsNotShipped: Story = {
+  args: { changes: [PR], held: { commits: 3, onShip: fn() } },
+  play: async ({ args }) => {
+    const dialog = within(document.body)
+    await expect(dialog.getByText('Its 3 commits not shipped stay on its branch.')).toBeInTheDocument()
+    await userEvent.click(dialog.getByRole('button', { name: 'Ship 3 commits' }))
+    await expect(args.held?.onShip).toHaveBeenCalled()
   },
 }

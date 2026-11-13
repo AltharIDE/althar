@@ -7,7 +7,7 @@ import { SqlClient, type SqlError } from 'effect/sql'
 import { type Account, Accounts } from './Accounts'
 import { Agents } from './Config'
 import { NotFound } from './errors'
-import { accountsOf, Policies } from './Policies'
+import { accountsOf, Policies, usageLimitOf } from './Policies'
 import { timestamp } from './records'
 import { SignIns } from './SignIns'
 import { Models } from './Models'
@@ -30,20 +30,38 @@ import { Installs, isInstalled } from './Installs'
  * and an agent whose accounts are all nearly out (under NEARLY_OUT percent of
  * their tightest window) is treated by the same rule for new steps. A step
  * already running is never stopped for it.
+ *
+ * An account marked out is back before its reset when it shows it works: a
+ * reading of its plan taken after, with room in every window, or a turn that
+ * completed on it after (`recovered`). That is the one rule every caller goes
+ * by, through `outOf`.
  */
+
+/** Why an agent can't take work now. */
+export interface Unable {
+  /** The agent's name. */
+  readonly agent: string
+  readonly why: 'signed_out' | 'out' | 'refused'
+  /** For `out`: when it is tried again. */
+  readonly until?: string
+  /** For `refused`: the provider whose sign-in the agent was refused, as the person knows it. */
+  readonly provider?: string
+}
 
 /**
- * An automation's run, which nobody watches, runs only on an account its
- * agent's own status says a plan pays for: never per use, nor where the
- * status can't tell, as Mistral Vibe's can't (docs/plans/automations.md).
+ * Where work planned for an agent stands: it can run there, another agent on a plan takes it instead (and why the planned one
+ * can't), or none can.
  */
-export class PlanOnly extends Schema.TaggedError<PlanOnly>()('PlanOnly', { message: Schema.String }) {}
-
-/** Why an automation's run can't run on these accounts, as its history and its task's thread say it. */
-export const planOnlyWords = (paidBy: ReadonlyArray<'plan' | 'key' | 'unknown'>) =>
-  paidBy.includes('unknown') || paidBy.length === 0
-    ? 'Automations run only on a plan for now, and its agent’s plan isn’t known.'
-    : 'Automations run only on a plan for now, and its agent pays per use.'
+export type Standing =
+  | { readonly kind: 'ok' }
+  | {
+      readonly kind: 'instead'
+      readonly agentId: string
+      readonly model: string | null
+      readonly accountId: string
+      readonly because: Unable
+    }
+  | { readonly kind: 'unable'; readonly unable: Unable }
 
 /** How long an agent whose limit gave no reset time counts as out. */
 const UNKNOWN_RESET = Duration.hours(1)
@@ -156,6 +174,24 @@ export const outWords = (input: {
   return input.nothingFree === true ? `${out}. No other model is free: ${waits} ${until}.` : `${out}. ${capitalized(waits)} ${until}.`
 }
 
+/**
+ * What a thread says when a step's agent ended twice without its report (once
+ * after it was reminded), and Althar handed the step on: who failed, and who
+ * takes the work over. Each named by its model where known; by its agent too
+ * where the two are the same model, as through two of OpenCode's providers.
+ */
+export const noReportWords = (input: {
+  readonly from: { readonly agent: string; readonly model: string | null }
+  readonly to: { readonly agent: string; readonly model: string | null }
+  readonly step?: keyof typeof outStep
+}): string => {
+  const same = input.from.model !== null && input.from.model === input.to.model
+  const name = (who: { readonly agent: string; readonly model: string | null }) =>
+    who.model === null ? who.agent : same ? `${who.model} on ${who.agent}` : who.model
+  const work = input.step === undefined ? 'the step' : outStep[input.step].work
+  return `${name(input.from)} ended twice without a report. ${name(input.to)} takes ${work} over.`
+}
+
 /** Words that open a sentence. */
 export const capitalized = (words: string) => `${words.charAt(0).toUpperCase()}${words.slice(1)}`
 
@@ -175,12 +211,22 @@ export class Limits extends Context.Service<
   Limits,
   {
     /**
+     * Where work planned for the agent, on the model given (or its default), stands now: its accounts are signed out or
+     * out of usage, or its model's provider refused the sign-in, and another agent on a plan can take it, as for any
+     * step (`free`), or none can. `other` is the other step's, as `free` takes it.
+     */
+    standing(input: {
+      readonly agentId: string
+      readonly model: string | null
+      readonly projectId: string
+      readonly other?: ModelChoice
+    }): Effect.Effect<Standing, Failure>
+    /**
      * Whether the agent is out now, and until when: every account work could
-     * run on (in the project, where given: its first, unless it rotates;
-     * on the thread, where given: of an automation's run, those on a plan),
+     * run on (in the project, where given: its first, unless it rotates),
      * the soonest back.
      */
-    out(agentId: string, projectId?: string, threadId?: string, model?: string): Effect.Effect<Option.Option<Out>, Failure>
+    out(agentId: string, projectId?: string): Effect.Effect<Option.Option<Out>, Failure>
     /** Whether the project moves work on to the agent's next account when one runs out: the person's to turn on (ADR-012). */
     rotates(projectId: string): Effect.Effect<boolean, Failure>
     /** Whether an account is out now, and until when. */
@@ -192,9 +238,8 @@ export class Limits extends Context.Service<
      * account work could run on here is out or nearly out, and one is only
      * nearly out (one that is all out is `out`'s). The one with the most
      * room left, to say how little; none where any has room, or isn't read.
-     * On the thread of an automation's run, only those on a plan count, as for `out`.
      */
-    nearlyOut(agentId: string, projectId?: string, model?: string, threadId?: string): Effect.Effect<Option.Option<Room>, Failure>
+    nearlyOut(agentId: string, projectId?: string, model?: string): Effect.Effect<Option.Option<Room>, Failure>
     /**
      * The account a session on the agent runs on, of those the project
      * allows: the one given; else the thread's own, while it can and isn't
@@ -205,8 +250,6 @@ export class Limits extends Context.Service<
      * (Opus's week) counts. Where it doesn't
      * rotate, an account out of usage is still the one work runs on: its
      * limit is handled as the project says (move to another agent, or wait).
-     * A thread of an automation's run, or `planOnly`, runs only on an account
-     * on a plan, given or picked: none is PlanOnly.
      */
     pick(input: {
       readonly agentId: string
@@ -214,8 +257,7 @@ export class Limits extends Context.Service<
       readonly threadId?: string
       readonly accountId?: string
       readonly model?: string
-      readonly planOnly?: boolean
-    }): Effect.Effect<Account, Failure | NotFound | PlanOnly>
+    }): Effect.Effect<Account, Failure | NotFound>
     /**
      * The strongest free model on a plan, besides the agents given. Models
      * from the other step's maker come last, even on another agent. Room
@@ -309,9 +351,38 @@ export class Limits extends Context.Service<
           const windows = JSON.parse(latest.windows) as ReadonlyArray<{ readonly resetsAt?: string }>
           const resetsAt = windows.find((window) => window.resetsAt !== undefined)?.resetsAt ?? null
           const until = resetsAt ?? new Date(Date.parse(latest.observedAt) + Duration.toMillis(UNKNOWN_RESET)).toISOString()
-          return until > (yield* timestamp)
-            ? Option.some<Out>({ agentId: account.agentId, accountId: account.id, resetsAt, until })
-            : Option.none<Out>()
+          if (until <= (yield* timestamp)) return Option.none<Out>()
+          // Marked out, and not yet back by its reset: unless the account has shown since that it works again.
+          return (yield* recovered(account, latest.observedAt))
+            ? Option.none<Out>()
+            : Option.some<Out>({ agentId: account.agentId, accountId: account.id, resetsAt, until })
+        })
+
+      /**
+       * Whether an account has shown that it works again since it was marked out at `since`, before its reset: the person reset
+       * their usage, topped up or changed plan. Either a reading of its plan taken after, whose every window that counts (plan-wide
+       * or a model's own, not past its reset) was read after and has room, or a turn that completed on it after.
+       * The one rule `outOf` ends an out state by, so the model list, picking an account, the pickers and the cards agree.
+       */
+      const recovered = (account: Account, since: string) =>
+        Effect.gen(function* () {
+          const [turn] = yield* sql<{ one: number }>`
+            SELECT 1 AS one FROM turn_deliveries d JOIN provider_sessions s ON s.id = d.provider_session_id
+            WHERE s.account_id = ${account.id} AND d.state = 'completed' AND d.ended_at > ${since} LIMIT 1`
+          if (turn !== undefined) return true
+          const [reading] = yield* sql<{ windows: string; observedAt: string }>`
+            SELECT windows, observed_at FROM plan_usage_readings WHERE account_id = ${account.id}`
+          if (reading === undefined) return false
+          const now = yield* Clock.currentTimeMillis
+          const after = Date.parse(since)
+          // Every window that limits anything counts, a model's own (Opus's week) too: one still full keeps the account out,
+          // as the model it limits can't be offered. Money spent past the plan and a window past its reset count for nothing.
+          const counted = (JSON.parse(reading.windows) as ReadonlyArray<UsageWindow & { observedAt?: string }>)
+            .filter((window) => window.spend !== true)
+            .filter((window) => window.resetsAt === undefined || Date.parse(window.resetsAt) > now)
+            .map((window) => ({ window, readAt: Date.parse(window.observedAt ?? reading.observedAt) }))
+          // A window read before the limit says nothing of whether it still holds; none read since says nothing at all.
+          return counted.length > 0 && counted.every((one) => one.readAt > after && leftOf(one.window) > 0)
         })
 
       /** An account's room, from the windows PlanUsage last kept for it: a window past its reset has started again. */
@@ -376,16 +447,6 @@ export class Limits extends Context.Service<
           ? Effect.succeed(true)
           : Effect.map(policies.current(projectId as ProjectId), ({ rules }) => accountsOf(rules).rotate)
 
-      /** Whether a thread is one of an automation's run's, whose sessions run on a plan only. */
-      const automated = (threadId: string | undefined) =>
-        threadId === undefined
-          ? Effect.succeed(false)
-          : Effect.map(
-              sql<{ one: number }>`
-                SELECT 1 AS one FROM threads h JOIN automation_occurrences o ON o.task_id = h.task_id WHERE h.id = ${threadId} LIMIT 1`,
-              (rows) => rows.length > 0,
-            )
-
       /** A subscription pays for this model, whether on the account or its model's provider. */
       const planPays = (account: Account, model?: string) =>
         Effect.gen(function* () {
@@ -397,31 +458,18 @@ export class Limits extends Context.Service<
           return ((yield* signIns.providers(account, status)) ?? []).some((one) => one.id === through && one.refusedAt === null)
         })
 
-      /** Accounts a plan pays for on this model; none is PlanOnly, saying why. */
-      const onPlan = (list: ReadonlyArray<Account>, model?: string) =>
-        Effect.gen(function* () {
-          const kept: Array<Account> = []
-          const paidBy: Array<'plan' | 'key' | 'unknown'> = []
-          for (const account of list) {
-            paidBy.push((yield* signIns.account(account)).paidBy)
-            if (yield* planPays(account, model)) kept.push(account)
-          }
-          return kept.length > 0 ? kept : yield* new PlanOnly({ message: planOnlyWords(paidBy) })
-        })
-
       /**
        * The accounts work on the agent can run on here: those the project
-       * allows that aren't signed out, and, for an automation's run, are on a
-       * plan. Where the project doesn't rotate, only the first of them, whose
+       * allows that aren't signed out. Where the project doesn't rotate, only the first of them, whose
        * being out of usage puts the agent out.
        */
-      const runnable = (agentId: string, projectId?: string, planOnly = false, model?: string) =>
+      const runnable = (agentId: string, projectId?: string) =>
         Effect.gen(function* () {
           const rotate = yield* rotating(projectId)
           const found: Array<Account> = []
           for (const account of yield* allowed(agentId, projectId)) {
             const check = yield* signIns.account(account)
-            if (check.status === 'signed_out' || (planOnly && !(yield* planPays(account, model)))) continue
+            if (check.status === 'signed_out') continue
             found.push(account)
             if (!rotate) break
           }
@@ -437,8 +485,14 @@ export class Limits extends Context.Service<
           if (input.planned?.agentId === input.agentId && input.planned.model !== null) return input.planned.model
           const [last] = yield* sql<{ model: string }>`
             SELECT model FROM provider_sessions WHERE project_id = ${input.projectId} AND agent_id = ${input.agentId} AND model IS NOT NULL
-            ORDER BY started_at DESC LIMIT 1`
-          return last?.model ?? null
+              AND config IS NOT NULL AND state <> 'failed'
+            ORDER BY started_at DESC, rowid DESC LIMIT 1`
+          if (last === undefined) return null
+          // History includes automatic picks too. Reuse one only while the agent still offers it; otherwise use its own default.
+          const offered = (yield* models.catalog).find((one) => one.agentId === input.agentId)
+          return offered?.models.some((one) => one.id === last.model && !isAgentDefault(one)) && !offered.blocked.includes(last.model)
+            ? last.model
+            : null
         })
 
       /** One ranking for both picking an agent and picking its model. */
@@ -509,10 +563,12 @@ export class Limits extends Context.Service<
               for (const account of yield* byRoom(yield* runnable(agentId, input.projectId), model.id ?? undefined)) {
                 if (Option.isSome(yield* outOf(account))) continue
                 const status = yield* signIns.account(account)
-                const through = model.id === null ? undefined : entry.definition.signIn.providers?.of(model.id)
+                // A model the agent picks itself goes through the provider of its default.
+                const named = model.id ?? offered?.model ?? undefined
+                const through = named === undefined ? undefined : entry.definition.signIn.providers?.of(named)
                 const providers = through === undefined ? [] : ((yield* signIns.providers(account, status)) ?? [])
                 if (providers.some((one) => one.id === through && one.refusedAt !== null)) continue
-                if (!(yield* planPays(account, model.id ?? undefined))) continue
+                if (!(yield* planPays(account, named))) continue
                 const reading = yield* roomOf(account, model.id === null ? undefined : `${model.id} ${model.name}`)
                 if (Option.isSome(reading) && reading.value.leftPercent <= 0) continue
                 const low = nearly(reading)
@@ -558,10 +614,10 @@ export class Limits extends Context.Service<
           return (yield* ranked({ ...input, only: input.agentId }))[0]?.model ?? (yield* preferredModel(input))
         })
 
-      const out = (agentId: string, projectId?: string, threadId?: string, model?: string) =>
+      const out = (agentId: string, projectId?: string) =>
         Effect.gen(function* () {
           const outs: Array<Out> = []
-          for (const account of yield* runnable(agentId, projectId, yield* automated(threadId), model)) {
+          for (const account of yield* runnable(agentId, projectId)) {
             const found = yield* outOf(account)
             if (Option.isNone(found)) return Option.none<Out>()
             outs.push(found.value)
@@ -569,10 +625,10 @@ export class Limits extends Context.Service<
           return Option.fromUndefinedOr(outs.toSorted((a, b) => a.until.localeCompare(b.until))[0])
         })
 
-      const nearlyOut = (agentId: string, projectId?: string, model?: string, threadId?: string) =>
+      const nearlyOut = (agentId: string, projectId?: string, model?: string) =>
         Effect.gen(function* () {
           const low: Array<Room> = []
-          for (const account of yield* runnable(agentId, projectId, yield* automated(threadId), model)) {
+          for (const account of yield* runnable(agentId, projectId)) {
             if (Option.isSome(yield* outOf(account))) continue
             const room = yield* roomOf(account, model)
             if (!nearly(room)) return Option.none<Room>()
@@ -581,8 +637,87 @@ export class Limits extends Context.Service<
           return Option.fromUndefinedOr(low.toSorted((a, b) => b.leftPercent - a.leftPercent)[0])
         })
 
+      const choices = (input: {
+        readonly accountId: string | null
+        readonly projectId: string
+        readonly rather?: ReadonlyArray<string>
+        readonly planned?: { readonly agentId: string; readonly model: string | null }
+      }) =>
+        Effect.gen(function* () {
+          const ids = agents.list.map((entry) => entry.definition.id)
+          const rather = input.rather ?? []
+          const found: Array<{ readonly agentId: string; readonly accountId: string; readonly model: string | null }> = []
+          for (const agentId of [...ids.filter((id) => !rather.includes(id)), ...ids.filter((id) => rather.includes(id))]) {
+            const model = yield* preferredModel({
+              agentId,
+              projectId: input.projectId,
+              ...(input.planned === undefined ? {} : { planned: input.planned }),
+            })
+            for (const account of yield* allowed(agentId, input.projectId))
+              if (account.id !== input.accountId) found.push({ agentId, accountId: account.id, model })
+          }
+          return found
+        })
+
+      const canTakeOver = (list: ReadonlyArray<{ readonly agentId: string; readonly accountId: string }>) =>
+        Effect.gen(function* () {
+          for (const choice of list) {
+            const account = (yield* accounts.of(choice.agentId)).find((each) => each.id === choice.accountId)
+            if (account === undefined || (yield* signIns.account(account)).status === 'signed_out') continue
+            if (Option.isNone(yield* outOf(account))) return true
+          }
+          return false
+        })
+
+      /** Why the agent can't take work on the model now; undefined where it can, or has no account to say. */
+      const trouble = (agentId: string, projectId: string, model: string | null) =>
+        Effect.gen(function* () {
+          const definition = agents.list.find((entry) => entry.definition.id === agentId)?.definition
+          const agent = definition?.name ?? agentId
+          if ((yield* allowed(agentId, projectId)).length === 0) return undefined
+          const open = yield* runnable(agentId, projectId)
+          if (open.length === 0) return { agent, why: 'signed_out' } as Unable
+          const found = yield* out(agentId, projectId)
+          if (Option.isSome(found)) return { agent, why: 'out', until: found.value.until } as Unable
+          const named = model ?? (yield* models.catalog).find((one) => one.agentId === agentId)?.model ?? null
+          const through = named === null ? undefined : definition?.signIn.providers?.of(named)
+          if (through === undefined) return undefined
+          let provider: string | undefined
+          for (const account of open) {
+            const row = ((yield* signIns.providers(account, yield* signIns.account(account))) ?? []).find((one) => one.id === through)
+            if (row === undefined || row.refusedAt === null) return undefined
+            provider = row.name
+          }
+          return provider === undefined ? undefined : ({ agent, why: 'refused', provider } as Unable)
+        })
+
+      const standing = (input: {
+        readonly agentId: string
+        readonly model: string | null
+        readonly projectId: string
+        readonly other?: ModelChoice
+      }) =>
+        Effect.gen(function* () {
+          const stuck = yield* trouble(input.agentId, input.projectId, input.model)
+          if (stuck === undefined) return { kind: 'ok' } as Standing
+          // Out of usage, the project's rule says what happens: only `move` takes the work elsewhere; `wait` and `ask` leave it
+          // to the run, which holds for the reset or asks the person, as for any task.
+          if (stuck.why === 'out' && usageLimitOf((yield* policies.current(input.projectId as ProjectId)).rules) !== 'move')
+            return { kind: 'ok' } as Standing
+          const [first] = yield* ranked({
+            besides: [input.agentId],
+            projectId: input.projectId,
+            planned: { agentId: input.agentId, model: input.model },
+            ...(input.other === undefined ? {} : { other: input.other }),
+          })
+          return first === undefined
+            ? ({ kind: 'unable', unable: stuck } as Standing)
+            : ({ kind: 'instead', agentId: first.agentId, model: first.model, accountId: first.accountId, because: stuck } as Standing)
+        })
+
       return Limits.of({
         out,
+        standing,
         nearlyOut,
         room: (accountId, model) =>
           accounts.get(accountId).pipe(
@@ -597,16 +732,14 @@ export class Limits extends Context.Service<
           ),
         pick: (input) =>
           Effect.gen(function* () {
-            const planOnly = input.planOnly === true || (yield* automated(input.threadId))
             // One given is the agent's own: another agent's would sign it in as someone else.
             if (input.accountId !== undefined) {
               const given = yield* accounts.get(input.accountId)
               if (given.agentId !== input.agentId) return yield* new NotFound({ kind: 'account', id: input.accountId })
-              if (planOnly) yield* onPlan([given], input.model)
               return given
             }
             const all = yield* allowed(input.agentId, input.projectId)
-            const list = planOnly ? yield* onPlan(all, input.model) : all
+            const list = all
             const rotate = yield* rotating(input.projectId)
             // One it can run on: not signed out, and, where the project rotates, not out of usage.
             const runs = (account: Account) =>
@@ -642,31 +775,8 @@ export class Limits extends Context.Service<
               ? undefined
               : { agentId: first.agentId, model: first.model, ownWork: first.ownWork, accountId: first.accountId }
           }),
-        choices: (input) =>
-          Effect.gen(function* () {
-            const ids = agents.list.map((entry) => entry.definition.id)
-            const rather = input.rather ?? []
-            const found: Array<{ readonly agentId: string; readonly accountId: string; readonly model: string | null }> = []
-            for (const agentId of [...ids.filter((id) => !rather.includes(id)), ...ids.filter((id) => rather.includes(id))]) {
-              const model = yield* preferredModel({
-                agentId,
-                projectId: input.projectId,
-                ...(input.planned === undefined ? {} : { planned: input.planned }),
-              })
-              for (const account of yield* allowed(agentId, input.projectId))
-                if (account.id !== input.accountId) found.push({ agentId, accountId: account.id, model })
-            }
-            return found
-          }),
-        canTakeOver: (choices) =>
-          Effect.gen(function* () {
-            for (const choice of choices) {
-              const account = (yield* accounts.of(choice.agentId)).find((each) => each.id === choice.accountId)
-              if (account === undefined || (yield* signIns.account(account)).status === 'signed_out') continue
-              if (Option.isNone(yield* outOf(account))) return true
-            }
-            return false
-          }),
+        choices: (input) => choices(input),
+        canTakeOver: (list) => canTakeOver(list),
         modelFor,
         named: (agentId, model, accountId = null) =>
           Effect.gen(function* () {

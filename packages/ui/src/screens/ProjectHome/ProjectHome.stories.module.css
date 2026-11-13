@@ -1,0 +1,43 @@
+/* The project's window, as the desktop draws it (apps/desktop's Project.module.css): its tabs, its header, then the conversation beside the board. */
+.window {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--n-2);
+}
+
+.rooms {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+
+/* The conversation, raised off the page: the width it opens at, drawn a little wider in a wide window, as a person would. */
+.talk {
+  position: relative;
+  --face-surface: var(--n-1);
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  width: clamp(560px, 38vw, 660px);
+  min-width: 0;
+  background: var(--n-1);
+  border-right: 1px solid var(--line);
+}
+
+.face {
+  flex: 1;
+  min-height: 0;
+}
+
+/* The board takes the rest, its lanes narrowing beside the conversation. */
+.board {
+  --lane-min: 186px;
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+  overflow: clip;
+  padding: 0 0 0 16px;
+}

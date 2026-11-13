@@ -36,12 +36,15 @@
 
   /* ---- Lines: the paper's warm white at low alpha ---- */
   --line: rgba(255, 240, 215, 0.075);
+  --field-edge: var(--line-2);
+  --field-edge-hover: var(--line-3);
   --line-2: rgba(255, 240, 215, 0.115);
   --line-3: rgba(255, 240, 215, 0.19);
 
   /* ---- Signal: lighter, to read as words; its fill deeper, so its words stay white ---- */
   --signal: #a68aff;
   --signal-bright: #b9a1ff;
+  --signal-ink: var(--signal);
   --signal-dim: rgba(166, 138, 255, 0.13);
   --selection: rgba(166, 138, 255, 0.34);
   --signal-line: rgba(166, 138, 255, 0.42);
@@ -63,6 +66,7 @@
   --danger-dim: rgba(242, 129, 111, 0.11);
   --danger-hover: rgba(242, 129, 111, 0.18);
   --ok: #5fc47e;
+  --ok-ink: var(--ok);
 
   /* ---- Roles on paper: on dark each is a lighter wash, as a hover lightens here ---- */
   --hover-paper: color-mix(in oklab, var(--paper), var(--t-1) 6%);

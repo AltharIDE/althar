@@ -9,7 +9,7 @@ import { RoomSwitch } from './RoomSwitch'
 const meta = {
   title: 'Chrome/RoomSwitch',
   component: RoomSwitch,
-  args: { value: Room.Talk, onChange: () => {} },
+  args: { value: Room.Both, onChange: () => {} },
   render: function Render(args) {
     const [room, setRoom] = useState(args.value)
     return <RoomSwitch {...args} value={room} onChange={setRoom} />
@@ -18,10 +18,14 @@ const meta = {
 export default meta
 type Story = StoryObj<typeof meta>
 
-export const Conversation: Story = {}
-/** On the board: the conversation has news. */
-export const BoardWithNews: Story = { args: { value: Room.Board, news: true } }
-export const Home: Story = { args: { value: Room.Both } }
+export const Home: Story = {}
+/** The board alone is still the home: Home is on, and says the conversation has news. */
+export const BoardAloneWithNews: Story = {
+  args: { value: Room.Board, news: true },
+  play: async ({ canvasElement }) => {
+    await expect(within(canvasElement).getByRole('radio', { name: 'Home, new messages' })).toBeChecked()
+  },
+}
 /** The project's settings in place of its work. */
 export const Settings: Story = { args: { value: Room.Settings } }
 /** A connection to sign in again: Settings carries the violet dot, and says so to a screen reader. */
@@ -48,15 +52,15 @@ export const InOrder: Story = {
     const names = within(canvasElement)
       .getAllByRole('radio')
       .map((radio) => radio.textContent)
-    await expect(names).toEqual(['Home', 'Conversation', 'Board', 'Automations', 'Settings'])
+    await expect(names).toEqual(['Home', 'Automations', 'Artifacts', 'Settings'])
   },
 }
 /** What waits on you in the work is the bar's to say: no view carries a dot for it. */
 export const Switching: Story = {
   play: async ({ canvasElement }) => {
     const c = within(canvasElement)
-    await userEvent.click(c.getByRole('radio', { name: /Board/ }))
-    await expect(c.getByRole('radio', { name: 'Board' })).toBeChecked()
+    await userEvent.click(c.getByRole('radio', { name: /Artifacts/ }))
+    await expect(c.getByRole('radio', { name: 'Artifacts' })).toBeChecked()
   },
 }
 
@@ -64,7 +68,7 @@ export const Switching: Story = {
 export const NoShortcuts: Story = {
   args: { text: { key: () => '' } },
   play: async ({ canvasElement }) => {
-    await userEvent.hover(within(canvasElement).getByRole('radio', { name: 'Board' }))
+    await userEvent.hover(within(canvasElement).getByRole('radio', { name: 'Artifacts' }))
     await new Promise((resolve) => setTimeout(resolve, 900))
     await expect(within(document.body).queryByRole('tooltip')).toBeNull()
   },
@@ -80,14 +84,13 @@ export const AllStates: Story = {
     <States
       size="wide"
       cells={[
-        { state: 'conversation', node: <RoomSwitch value={Room.Talk} onChange={() => {}} /> },
-        { state: 'board, news', node: <RoomSwitch value={Room.Board} onChange={() => {}} news /> },
         { state: 'home', node: <RoomSwitch value={Room.Both} onChange={() => {}} /> },
+        { state: 'home, news', node: <RoomSwitch value={Room.Board} onChange={() => {}} news /> },
         { state: 'automations, needs you', node: <RoomSwitch value={Room.Automations} onChange={() => {}} automationsNeedYou /> },
         { state: 'settings, needs you', node: <RoomSwitch value={Room.Settings} onChange={() => {}} needsYou /> },
-        { state: 'hover', node: <RoomSwitch value={Room.Talk} onChange={() => {}} /> },
-        { state: 'focus', node: <RoomSwitch value={Room.Talk} onChange={() => {}} /> },
-        { state: 'pressed', node: <RoomSwitch value={Room.Talk} onChange={() => {}} /> },
+        { state: 'hover', node: <RoomSwitch value={Room.Both} onChange={() => {}} /> },
+        { state: 'focus', node: <RoomSwitch value={Room.Both} onChange={() => {}} /> },
+        { state: 'pressed', node: <RoomSwitch value={Room.Both} onChange={() => {}} /> },
       ]}
     />
   ),

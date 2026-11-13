@@ -76,7 +76,7 @@ export interface ModelPickProps {
   variant?: 'quiet' | 'field'
   /** Where the list opens: above in a composer, below in a plan. */
   placement?: 'above' | 'below'
-  /** How much room a model has where work on it would start, at its row's end; null where its plan is read by nothing, undefined where there is nothing to say. Once the model in use is nearly out, the chip says so beside itself. */
+  /** How much room a model has where work on it would start, beneath its name; null where its plan is read by nothing, undefined where there is nothing to say. Once the model in use is nearly out, the chip says so beside itself. */
   room?: (model: ModelInfo) => ModelRoom | null | undefined
   roomText?: Partial<ModelRoomText>
   /** What picking a model would do that needs a yes first, in a sentence. Picking such a model asks, in the list, before `onChange`. */
@@ -185,7 +185,7 @@ export function ModelPick({
             return (
               <RadioGroup.Item key={x.id} value={x.id} className={cx(s.option, x.id === model.id && s.current)}>
                 <Model model={x} />
-                {left !== undefined && <RoomNote room={left} text={roomText} className={s.room} />}
+                {left != null && <RoomNote room={left} text={roomText} className={cx(s.room, x.mark !== undefined && s.roomMarked)} />}
                 <Icon name="check" size={11} className={s.check} />
               </RadioGroup.Item>
             )

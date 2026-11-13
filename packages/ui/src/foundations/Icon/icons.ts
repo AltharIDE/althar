@@ -24,11 +24,14 @@ import {
   Expand,
   Folder,
   Frame,
+  InfoCircle,
   GitBranch,
+  GitCompare,
   GitMerge,
   GitPullRequest,
   Globe,
   HalfMoon,
+  KanbanBoard,
   LightBulb,
   List,
   Lock,
@@ -41,6 +44,7 @@ import {
   NavArrowUp,
   OpenNewWindow,
   Page,
+  Palette,
   PageMinus,
   PagePlus,
   PageRight,
@@ -61,6 +65,7 @@ import {
   TaskList,
   Terminal,
   Tools,
+  WarningCircle,
   WifiOff,
   Xmark,
 } from 'iconoir-react'
@@ -171,6 +176,10 @@ export const ICONS = {
   /** Fetches something to this computer: an agent Althar can download. */
   download: Download,
   pr: GitPullRequest,
+  /** Two changes that touch the same lines, and resolving them: merge conflicts. */
+  conflict: GitCompare,
+  /** A tracker's issues, moving through its statuses as their tasks go. */
+  issues: KanbanBoard,
   /** Loads a page again. */
   reload: Refresh,
   /** Points at something on a page, to comment on it for the lead. */
@@ -185,6 +194,12 @@ export const ICONS = {
   beside: SidebarExpand,
   /** What sites keep: cookies and storage. */
   cookie: Cookie,
+  /** One of the project's canvases: what its agents drew for the person to look at and iterate on (ADR-104). */
+  canvas: Palette,
+  /** What something is, explained where it is pointed at. */
+  info: InfoCircle,
+  /** Something failed: the mark before the words that say what, in the danger colour. */
+  problem: WarningCircle,
 } satisfies Record<string, ComponentType<SVGProps<SVGSVGElement> & { strokeWidth?: number | string }>>
 
 export type IconName = keyof typeof ICONS

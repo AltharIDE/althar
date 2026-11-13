@@ -6,7 +6,7 @@ import { join } from 'node:path'
 import { expect, test } from '@playwright/test'
 
 import { repository } from '../tests/repository'
-import { backToWork, launch, openFirstProject, projectSettings, startTask, still, toConversation } from './support'
+import { backToWork, launch, openFirstProject, projectSettings, startTask, still, toConversation, showPanes } from './support'
 
 /*
  * A conflict is never left without a word (ADR-030), in a real window with
@@ -40,7 +40,7 @@ test('a conflict its lead couldn’t resolve says why on its card and in its tas
     git(repo, 'commit', '-q', '-m', 'Main moves on')
 
     // On unless the person turned it off (ADR-092), every open task can be looked at again from there.
-    await projectSettings(page, 'General')
+    await projectSettings(page, 'Tasks')
     const conflicts = page.getByRole('switch', { name: 'Resolve merge conflicts automatically' })
     await expect(conflicts).toBeChecked()
     await page.getByRole('button', { name: 'Look for conflicts now' }).click()
@@ -53,7 +53,7 @@ test('a conflict its lead couldn’t resolve says why on its card and in its tas
     await backToWork(page)
 
     // The lead couldn't resolve it: the card says why, and opens its task, as asking again from it asks what the lead couldn't do.
-    await page.getByRole('radio', { name: /^Board/ }).click()
+    await showPanes(page, { conversation: false, board: true })
     const work = page.getByRole('region', { name: 'The project’s work' })
     const card = work.getByRole('article').filter({ hasText: 'Add a retry' })
     await expect(card.getByText('Merge conflict')).toBeVisible()

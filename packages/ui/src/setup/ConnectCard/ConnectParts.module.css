@@ -36,7 +36,7 @@
   font-size: 12px;
 }
 
-/* something found, or what is wrong with it */
+/* something found, with a tick (what is wrong is a Problem) */
 .found {
   display: flex;
   align-items: center;
@@ -47,11 +47,7 @@
 }
 .found > svg {
   flex: none;
-  color: var(--ok);
-}
-.foundNo,
-.foundNo > svg {
-  color: var(--danger);
+  color: var(--ok-ink);
 }
 
 /* ---- presses ---- */
@@ -304,7 +300,7 @@
   height: 18px;
 }
 .isCan .glyph {
-  color: var(--ok);
+  color: var(--ok-ink);
 }
 .todo,
 .unknown {

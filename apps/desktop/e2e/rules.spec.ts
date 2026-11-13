@@ -54,9 +54,13 @@ test('changes a project’s rules from its settings, and keeps them', async () =
     await page.getByRole('textbox', { name: 'A command, as it starts' }).fill('terraform *')
     await page.keyboard.press('Enter')
     await expect(sentence(page, 'Ask me').getByText('terraform *', { exact: true })).toBeVisible()
+    await page.screenshot({ path: 'test-results/rules.png', animations: 'disabled', fullPage: true })
+
+    // How a task ends is the project's Tasks, not its rules: the sentence is there, with the pull request it makes.
+    await expect(sentence(page, 'Finished')).toHaveCount(0)
+    await projectSettings(page, 'Tasks')
     await choose(page, 'a draft pull request', 'Push the branch only')
     await expect(sentence(page, 'Finished')).toContainText('A finished task pushes its branch alone')
-    await page.screenshot({ path: 'test-results/rules.png', animations: 'disabled', fullPage: true })
 
     // Back to the project's work, and in again: as it was left.
     await backToWork(page)
@@ -66,6 +70,7 @@ test('changes a project’s rules from its settings, and keeps them', async () =
     await expect(sentence(page, 'Never').getByRole('button', { name: 'force push', exact: true })).toBeVisible()
     await expect(sentence(page, 'Ask me').getByRole('button', { name: 'force pushing' })).toHaveCount(0)
     await expect(sentence(page, 'Ask me').getByText('terraform *', { exact: true })).toBeVisible()
+    await projectSettings(page, 'Tasks')
     await expect(sentence(page, 'Finished')).toContainText('A finished task pushes its branch alone')
   } finally {
     await electronApp.close()

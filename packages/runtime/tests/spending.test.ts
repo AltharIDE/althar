@@ -1,3 +1,4 @@
+import { isoAfter } from '@althar/testing'
 import { randomUUID } from 'node:crypto'
 import { mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -50,15 +51,18 @@ describe('a week’s share', () => {
   })
 
   it('counts all a week says once it started again', () => {
-    assert.strictEqual(tookOf([week(0, 90, THU), week(10 * MINUTE, 2, '2026-11-16T11:00:00.000Z')], [turn(0, 10 * MINUTE, 500)]), 2)
+    assert.strictEqual(
+      tookOf([week(0, 90, THU), week(10 * MINUTE, 2, isoAfter(7 * 24 * 60 * MINUTE, Date.parse(THU)))], [turn(0, 10 * MINUTE, 500)]),
+      2,
+    )
   })
 
   it('counts a week that started again mid-task as all the new one says, never more than the week now says', () => {
     const readings = [
       week(0, 80),
       week(10 * MINUTE, 85),
-      week(20 * MINUTE, 3, '2026-11-16T11:00:00.000Z'),
-      week(30 * MINUTE, 6, '2026-11-16T11:00:00.000Z'),
+      week(20 * MINUTE, 3, isoAfter(7 * 24 * 60 * MINUTE, Date.parse(THU))),
+      week(30 * MINUTE, 6, isoAfter(7 * 24 * 60 * MINUTE, Date.parse(THU))),
     ]
     assert.strictEqual(tookOf(readings, [turn(0, 30 * MINUTE, 500)]), 6)
   })
@@ -97,7 +101,7 @@ describe('a week’s share', () => {
   })
 
   it('starts a new week once when its first reading has no reset time and a later one has', () => {
-    const readings = [week(0, 80), week(10 * MINUTE, 2, null), week(20 * MINUTE, 5, '2026-11-16T11:00:00.000Z')]
+    const readings = [week(0, 80), week(10 * MINUTE, 2, null), week(20 * MINUTE, 5, isoAfter(7 * 24 * 60 * MINUTE, Date.parse(THU)))]
     assert.strictEqual(tookOf(readings, [turn(0, 20 * MINUTE, 500)]), 5)
   })
 
@@ -108,7 +112,7 @@ describe('a week’s share', () => {
 
   it('never puts on a task more than the week now says', () => {
     // The old week's 10 points and the new week's 3 were all this task's, but the week it's read against says 3.
-    const readings = [week(0, 80), week(10 * MINUTE, 90), week(20 * MINUTE, 3, '2026-11-16T11:00:00.000Z')]
+    const readings = [week(0, 80), week(10 * MINUTE, 90), week(20 * MINUTE, 3, isoAfter(7 * 24 * 60 * MINUTE, Date.parse(THU)))]
     assert.strictEqual(tookOf(readings, [turn(0, 20 * MINUTE, 500)]), 3)
     // Within a week too, where the last reading rounded down.
     assert.strictEqual(tookOf([week(0, 0), week(MINUTE, 10), week(2 * MINUTE, 9)], [turn(0, 2 * MINUTE, 500)]), 9)
@@ -492,6 +496,23 @@ describe('an OpenCode account’s usage, by the provider each turn ran on', () =
       // Half of Codex's three points, as Codex's own turn had as many tokens.
       assert.deepInclude(chatGpt, { paidBy: 'plan', spent: null, estimated: true, models: ['openai/gpt-6-sol'] })
       assert.closeTo(chatGpt?.took ?? 0, 1.5, 1e-9)
+    }).pipe(Effect.provide(withMixed())),
+  )
+
+  it.live('counts each model’s tokens on a line where several ran, as a lead’s helpers do', () =>
+    Effect.gen(function* () {
+      const { openCode, created, here } = yield* mixedTask()
+      // A helper on another model through the same provider: one line, its tokens by model.
+      yield* ran(here, 'opencode', openCode, 'opencode/claude-haiku-5', 7, 8, { inputTokens: 15_000, outputTokens: 5_000 })
+      const zen = (yield* usageOf(created.threadId)).find((line) => line.provider === 'opencode')
+      assert.deepStrictEqual(zen?.models, ['opencode/gpt-6-astra', 'opencode/claude-haiku-5'])
+      assert.deepStrictEqual(zen?.byModel, [
+        { model: 'opencode/gpt-6-astra', tokens: 110_000 },
+        { model: 'opencode/claude-haiku-5', tokens: 20_000 },
+      ])
+      // One model on a line says no more than it did.
+      const go = (yield* usageOf(created.threadId)).find((line) => line.provider === 'opencode-go')
+      assert.isUndefined(go?.byModel)
     }).pipe(Effect.provide(withMixed())),
   )
 

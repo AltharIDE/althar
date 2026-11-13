@@ -164,7 +164,7 @@ export function Markdown({
   const names = useMemo(() => (finds ? codeNamesIn(blocksOf(named).slice(from, to)) : []), [finds, named, from, to])
   const drawn = blocks.slice(from, to).map((b, i) => <Block key={i} token={b} defs={doc.defs} base={headingLevel} t={t} />)
   return (
-    <div className={cx(s.md, size === 'panel' && s.panel, className)} aria-busy={streaming || undefined} {...rest}>
+    <div data-thread-preview="" className={cx(s.md, size === 'panel' && s.panel, className)} aria-busy={streaming || undefined} {...rest}>
       <Fresh.Provider value={fresh}>
         {code !== undefined && names.length > 0 ? (
           <WithCode code={code} names={names}>

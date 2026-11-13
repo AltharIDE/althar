@@ -166,7 +166,7 @@
   white-space: nowrap;
 }
 .good .mark {
-  color: var(--ok);
+  color: var(--ok-ink);
 }
 .bad,
 .bad .mark {
@@ -216,20 +216,6 @@ span.you {
   flex: 1 1 0;
   justify-content: center;
   min-width: max-content;
-}
-.error {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 4px 10px;
-  margin: 0;
-  min-width: 0;
-  font-size: 12.5px;
-  line-height: 1.5;
-  color: var(--t-2);
-  text-wrap: pretty;
-  /* a long ref, hash or address breaks rather than running off the card */
-  overflow-wrap: anywhere;
 }
 
 /* how big it is, the way into the diff, and its files */
@@ -349,7 +335,8 @@ span.you {
   .actions > * {
     flex: none;
   }
-  .error {
+  /* why the last action didn't go: across the card, under the facts and the buttons */
+  .problem {
     grid-column: 1 / -1;
   }
   .files {

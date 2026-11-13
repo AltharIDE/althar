@@ -1,8 +1,9 @@
 import { existsSync, readdirSync, realpathSync } from 'node:fs'
-import { basename, join, relative, sep } from 'node:path'
+import { basename, dirname, join, relative, sep } from 'node:path'
 
 import { inkFor, type ProjectInk } from '@althar/contracts'
 import {
+  type ActorId,
   ChangeTarget,
   type CommandEnvelope,
   type CommandId,
@@ -21,7 +22,7 @@ import { SqlClient, type SqlError } from 'effect/sql'
 import { postCard } from './cards'
 import { RuntimeConfig } from './Config'
 import { branchFor, conventionsOnBase, ruleOf } from './conventions'
-import { BranchNotFound, type GitFailed, NotARepository, NotFound, ProjectRefused, RepositoriesNeeded } from './errors'
+import { BranchNotFound, ChangeRefused, type GitFailed, NotARepository, NotFound, ProjectRefused, RepositoriesNeeded } from './errors'
 import { type Fork, forkOf } from './forks'
 import { makeScratch } from './firstWrite'
 import {
@@ -347,11 +348,12 @@ export const towardHere = (repository: string, branch: string, remote = 'origin'
  * it now, fetched first, falling back to the local branch when the remote
  * can't be reached.
  */
-export const startCommitOf = (repository: string, base: string, from = 'origin') =>
+export const startCommitOf = (repository: string, base: string, from = 'origin', fetch = true) =>
   Effect.gen(function* () {
-    const fetched = yield* fetchBranch(repository, base, from)
+    const fetched = fetch ? yield* fetchBranch(repository, base, from) : false
     const remote = `${from}/${base}`
-    const fromRemote = fetched ? yield* commitOf(repository, remote).pipe(Effect.option) : Option.none()
+    // Not fetched now, the remote's as last fetched, else the branch here.
+    const fromRemote = fetched || !fetch ? yield* commitOf(repository, remote).pipe(Effect.option) : Option.none()
     const baseRef = Option.isSome(fromRemote) ? remote : base
     const baseCommit = Option.isSome(fromRemote)
       ? fromRemote.value
@@ -375,9 +377,11 @@ export const prepareWorktree = (
   planned: { readonly worktree: string; readonly branch: string },
   from = 'origin',
   plain = false,
+  /** Fetched first; an aside's copy is made from the remote as last fetched, which the coordinator's copies fetch after each turn. */
+  fetch = true,
 ) =>
   Effect.gen(function* () {
-    const { baseRef, baseCommit, fetched } = yield* startCommitOf(repository, base, from)
+    const { baseRef, baseCommit, fetched } = yield* startCommitOf(repository, base, from, fetch)
     let branch = planned.branch
     let worktree = planned.worktree
     for (let n = 2; (yield* branchExists(repository, branch)) || existsSync(worktree); n += 1) {
@@ -392,6 +396,19 @@ export const prepareWorktree = (
   })
 
 type Store = SqlClient.SqlClient | Ledger | Commands | Crypto.Crypto | Instance | RuntimeConfig | Setups
+
+/** A change started in a task: its name, branch, worktree, and what it works toward. */
+export interface StartedChange {
+  readonly workspaceId: string
+  readonly name: string
+  readonly branch: string
+  readonly path: string
+  readonly toward: string
+  /** Another change of the task's it stacks on, by its name, where it does. */
+  readonly on: string | null
+  /** It works toward something other than what the task's first change does: stacked, or toward a branch of its own. */
+  readonly elsewhere: boolean
+}
 type Failure = SqlError.SqlError | Schema.SchemaError | CommandIdReused | RowNotFound | RevisionConflict
 
 /** A repository's own way to run, last in its project's list of what it runs (ADR-044), as the repository is bound. */
@@ -467,7 +484,32 @@ export class Projects extends Context.Service<
       readonly plain?: boolean
       /** The automation's occurrence it is the run of, named in the transaction that makes it, so a restart never makes a second. */
       readonly occurrence?: string
+      /** The id the window made for it (an aside's, keyed by it from the moment + is pressed); refused where it is taken. */
+      readonly taskId?: string
+      /** Made on Scratch, an aside, in the transaction that makes it: never on the board, even for a moment. */
+      readonly shelf?: 'scratch'
     }): Effect.Effect<CreatedTask, NotFound | RepositoriesNeeded | BranchNotFound | GitFailed | Failure>
+    /**
+     * Starts another change in a task (a task is a conversation plus parts,
+     * "A task holds as many changes as it needs"): a branch of its own, in a
+     * worktree of its own beside the task's others, set up as they were. It
+     * branches from what the task works toward, or another of its changes'
+     * branch where it stacks on that one (`on`), and its pull request goes
+     * there; or toward a branch of its own (`toward`). The thread marks it as
+     * a step in the work. Refused where a change of the task has that name
+     * or branch already.
+     */
+    startChange(input: {
+      readonly taskId: string
+      readonly name: string
+      readonly branch?: string
+      readonly on?: string
+      readonly toward?: string
+      readonly repository?: string
+      /** Another change of the task's this one waits for to merge, without building on its code: both go into the same branch. */
+      readonly waitsFor?: string
+      readonly actorId: ActorId
+    }): Effect.Effect<StartedChange, NotFound | ChangeRefused | BranchNotFound | GitFailed | Failure>
     /** A project's repositories, as this device has them: each one's branch, remote, role, and the fork it is. */
     repositories(projectId: string): Effect.Effect<ReadonlyArray<ProjectRepository>, NotFound | Failure>
     /** Renames a project. Its slug, and so its worktrees' folders, stay as they were made; its mark stays too. */
@@ -700,6 +742,153 @@ export class Projects extends Context.Service<
           })
         })
 
+      const startChange = (input: {
+        readonly taskId: string
+        readonly name: string
+        readonly branch?: string
+        readonly on?: string
+        readonly toward?: string
+        readonly repository?: string
+        readonly waitsFor?: string
+        readonly actorId: ActorId
+      }) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const name = input.name.trim()
+          if (name === '') return yield* new ChangeRefused({ message: 'A change needs a name: a few words for what it does.' })
+          // The task's own worktrees here, each the change it works on there, the first first.
+          const own = yield* sql<{
+            id: string
+            projectId: ProjectId
+            projectSlug: string
+            taskSlug: string
+            bindingId: string
+            slug: string
+            repositoryName: string
+            path: string
+            branch: string
+            name: string | null
+            toward: string | null
+            base: string | null
+            changeTarget: string | null
+            repository: string
+            kind: string | null
+          }>`
+            SELECT w.id, w.project_id, p.slug AS project_slug, k.slug AS task_slug, w.binding_id, b.slug, b.display_name AS repository_name,
+              w.path, w.branch, w.name, w.toward, b.default_base_ref AS base, b.change_target, l.path AS repository, w.kind
+            FROM workspaces w JOIN tasks k ON k.id = w.task_id JOIN projects p ON p.id = k.project_id
+            JOIN repository_bindings b ON b.id = w.binding_id
+            JOIN repository_locations l ON l.binding_id = b.id AND l.device_id = ${instance.deviceId}
+            WHERE w.task_id = ${input.taskId} AND w.device_id = ${instance.deviceId} AND w.access = 'write' AND w.reviewing IS NULL
+            ORDER BY w.created_at, w.rowid`
+          const [first] = own
+          // A review reads a copy, and a plain task has its worktree once its lead writes: neither has one to start a change beside.
+          if (first === undefined)
+            return yield* new ChangeRefused({ message: 'The task has no worktree of its own here to start a change beside.' })
+          const asked = input.repository?.trim().toLowerCase()
+          const where =
+            asked === undefined || asked === ''
+              ? first
+              : own.find((one) => one.slug === asked || one.repositoryName.toLowerCase() === asked)
+          if (where === undefined)
+            return yield* new ChangeRefused({
+              message: `The task has no repository called ${input.repository ?? ''}: ${[...new Set(own.map((one) => one.repositoryName))].join(', ')}.`,
+            })
+          const named = (one: (typeof own)[number]) => one.name ?? (one === first ? null : one.branch)
+          if (own.some((one) => one.name?.toLowerCase() === name.toLowerCase()))
+            return yield* new ChangeRefused({ message: `The task has a change called “${name}” already.` })
+          // Stacked on another change of the task's: it branches from that one's branch, and its pull request goes into it.
+          const below =
+            input.on === undefined || input.on.trim() === ''
+              ? undefined
+              : own.find(
+                  (one) =>
+                    one.bindingId === where.bindingId &&
+                    (one.branch === input.on?.trim() || (named(one) ?? '').toLowerCase() === input.on?.trim().toLowerCase()),
+                )
+          if (input.on !== undefined && input.on.trim() !== '' && below === undefined)
+            return yield* new ChangeRefused({ message: `The task has no change “${input.on}” in ${where.repositoryName} to stack on.` })
+          // Waiting for another to merge, without its code: both go into the same branch, the one it waits for's.
+          const waited =
+            input.waitsFor === undefined || input.waitsFor.trim() === ''
+              ? undefined
+              : own.find(
+                  (one) =>
+                    one.bindingId === where.bindingId &&
+                    (one.branch === input.waitsFor?.trim() || (named(one) ?? '').toLowerCase() === input.waitsFor?.trim().toLowerCase()),
+                )
+          if (input.waitsFor !== undefined && input.waitsFor.trim() !== '' && waited === undefined)
+            return yield* new ChangeRefused({
+              message: `The task has no change “${input.waitsFor}” in ${where.repositoryName} to wait for.`,
+            })
+          if (below !== undefined && waited !== undefined)
+            return yield* new ChangeRefused({ message: 'A change either stacks on another or waits for it: not both.' })
+          const toward = below?.branch ?? (input.toward?.trim() || null) ?? waited?.toward ?? where.toward
+          const { remote, base } =
+            below === undefined
+              ? yield* startOf({ repository: where.repository, base: where.base, changeTarget: where.changeTarget, toward })
+              : { remote: 'origin', base: below.branch }
+          if (below === undefined && toward !== null && toward !== where.toward && !(yield* hasBranch(where.repository, toward, remote)))
+            return yield* new BranchNotFound({ branch: toward, repository: where.repositoryName })
+          // Named by the project's rule for branches, as the task's first was, for the change's own words.
+          const [rules] = yield* sql<{ pattern: string | null }>`
+            SELECT json_extract(rules, '$.branchPattern') AS pattern FROM policies WHERE project_id = ${where.projectId}
+            ORDER BY revision DESC LIMIT 1`
+          const planned =
+            input.branch?.trim() || branchFor(ruleOf('branch', rules?.pattern ?? undefined), { key: null, slug: slugify(name, 'change') })
+          if (own.some((one) => one.branch === planned))
+            return yield* new ChangeRefused({ message: `A change of the task is on ${planned} already.` })
+          // Beside the task's others, in its folder, named for the change.
+          const folder = join(dirname(first.path), `${where.slug}-${slugify(name, 'change')}`)
+          const made = yield* prepareWorktree(where.repository, base, { worktree: folder, branch: planned }, remote)
+          const workspaceId = yield* newId(Ids.workspace)
+          const at = yield* timestamp
+          yield* sql.withTransaction(
+            Effect.gen(function* () {
+              yield* sql`INSERT INTO workspaces ${sql.insert({
+                id: workspaceId,
+                projectId: where.projectId,
+                taskId: input.taskId,
+                bindingId: where.bindingId,
+                deviceId: instance.deviceId,
+                access: 'write',
+                path: made.worktree,
+                baseRef: below === undefined ? made.baseRef : below.branch,
+                baseCommit: made.baseCommit,
+                branch: made.branch,
+                state: 'ready',
+                createdAt: at,
+                branchedAt: at,
+                // A worktree as the task's first is (kind null): set up, cleaned and moved as any.
+                name,
+                ...(toward === null ? {} : { toward }),
+                ...(waited === undefined ? {} : { waitsFor: waited.id }),
+              })}`
+              yield* fact({
+                projectId: where.projectId,
+                aggregateType: 'workspace',
+                aggregateId: workspaceId,
+                revision: 1,
+                type: 'workspace.change_started',
+                payload: { name, branch: made.branch, toward, on: below?.id ?? null, waitsFor: waited?.id ?? null },
+                actorId: input.actorId,
+              })
+            }),
+          )
+          // Set up as the task's first worktree was, with the setup its repository keeps.
+          yield* (yield* Setups).begin(input.taskId)
+          const into = toward === null ? (base ?? 'main') : toward
+          return {
+            workspaceId,
+            name,
+            branch: made.branch,
+            path: made.worktree,
+            toward: into,
+            on: below === undefined ? null : (named(below) ?? below.branch),
+            elsewhere: below !== undefined || toward !== first.toward,
+          } satisfies StartedChange
+        })
+
       const createTask = (input: {
         readonly envelope: CommandEnvelope
         readonly projectId: string
@@ -714,12 +903,17 @@ export class Projects extends Context.Service<
         readonly occurrence?: string
         readonly worksIn?: WorksIn
         readonly toward?: string | null
+        /** The id the window made for it, so what it drew of it before it was made is what it gets: refused where it is taken. */
+        readonly taskId?: string
+        /** Made on Scratch, an aside, in the transaction that makes it: never on the board, even for a moment. */
+        readonly shelf?: 'scratch'
       }) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
           const commands = yield* Commands
           const { envelope } = input
           const plain = input.plain === true
+          const asked = input.taskId === undefined ? undefined : yield* Schema.decodeUnknownEffect(Ids.task.schema)(input.taskId)
           const local = input.worksIn === 'checkout'
           const bindings = yield* sql<{
             projectId: ProjectId
@@ -778,7 +972,8 @@ export class Projects extends Context.Service<
               const [live] = yield* sql<{ id: string }>`SELECT id FROM projects WHERE id = ${first.projectId} AND archived_at IS NULL`
               if (live === undefined) return yield* new NotFound({ kind: 'project', id: first.projectId })
               const createdAt = yield* timestamp
-              const taskId: TaskId = yield* newId(Ids.task)
+              // One the window made is new, as a project's is; taken, its row's key refuses it.
+              const taskId: TaskId = asked ?? (yield* newId(Ids.task))
               const taken = yield* sql<{ slug: string }>`SELECT slug FROM tasks WHERE project_id = ${first.projectId}`
               const slug = freeSlug(
                 slugify(input.title, 'task'),
@@ -793,6 +988,7 @@ export class Projects extends Context.Service<
                 ...(input.request === undefined || input.request.trim() === '' ? {} : { request: input.request.trim() }),
                 slug,
                 state: input.draft === true ? 'draft' : 'open',
+                ...(input.shelf === undefined ? {} : { shelf: input.shelf }),
                 createdByActorId: envelope.actorId,
                 createdAt,
               })}`
@@ -846,6 +1042,17 @@ export class Projects extends Context.Service<
                 actorId: envelope.actorId,
                 commandId: envelope.commandId,
               })
+              // Where it was put, as `shelve` records it: what moves it off Scratch later counts from here.
+              if (input.shelf !== undefined)
+                yield* fact({
+                  projectId: first.projectId,
+                  aggregateType: 'task',
+                  aggregateId: taskId,
+                  revision: 1,
+                  type: 'task.shelved',
+                  payload: { shelf: input.shelf },
+                  actorId: envelope.actorId,
+                })
               yield* indexTask(taskId)
               if (input.occurrence !== undefined) yield* linkTask(input.occurrence, taskId, envelope.actorId)
               // A task started by hand shows in the coordinator's thread as its card; a draft's card comes with its plan.
@@ -887,7 +1094,8 @@ export class Projects extends Context.Service<
               continue
             }
             const prepared = yield* Effect.exit(
-              prepareWorktree(binding.repository, base, { worktree: workspace.path, branch }, remote, plain),
+              // An aside's, made as + is pressed, doesn't wait on the network: it is a copy to read, from the remote as last fetched.
+              prepareWorktree(binding.repository, base, { worktree: workspace.path, branch }, remote, plain, input.shelf !== 'scratch'),
             )
             yield* sql.withTransaction(
               Effect.gen(function* () {
@@ -1368,6 +1576,7 @@ export class Projects extends Context.Service<
         read: (path) => run(read(path)),
         open: (input) => run(open(input)),
         createTask: (input) => run(createTask(input)),
+        startChange: (input) => run(startChange(input)),
         repositories: (projectId) => run(repositories(projectId)),
         rename: (projectId, name, commandId) => run(rename(projectId, name, commandId)),
         setInk: (projectId, ink, commandId) => run(setInk(projectId, ink, commandId)),

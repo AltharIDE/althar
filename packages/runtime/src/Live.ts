@@ -1,6 +1,7 @@
 import type { PlanUsage as PlanUsageView } from '@althar/contracts'
 import type { SessionEvent } from '@althar/provider-adapters'
 
+import type { Draft } from './drafts'
 import type { ShownLaunch } from './Launches'
 import type { ShownLeftRunning } from './leftRunning'
 import { Context, Effect, Layer, PubSub, type Scope, Stream } from 'effect'
@@ -31,6 +32,8 @@ export type LiveEvent =
   | { readonly _tag: 'Background'; readonly threadId: string; readonly background: ReadonlyArray<ShownLeftRunning> }
   /** What Althar runs of a project itself, whole each time it changes (Launches.ts). */
   | { readonly _tag: 'Launches'; readonly projectId: string; readonly launches: ReadonlyArray<ShownLaunch> }
+  /** The tasks a coordinator is drafting now, as far as written, whole each time they change (drafts.ts). */
+  | { readonly _tag: 'Drafting'; readonly threadId: string; readonly drafts: ReadonlyArray<Draft> }
   /** Every account's plan usage and the warnings not yet seen, whole each time either changes (PlanUsage.ts). */
   | { readonly _tag: 'PlanUsage'; readonly usage: PlanUsageView }
   | {
@@ -43,6 +46,12 @@ export type LiveEvent =
   | { readonly _tag: 'SessionEnded'; readonly threadId: string; readonly sessionId: string; readonly state: string }
   /** The computer came online, or went offline, as the app says (`Connectivity.ts`). */
   | { readonly _tag: 'Connection'; readonly online: boolean }
+  /**
+   * The person's own message to a thread was accepted (from the window or a paired device), whichever way it is delivered:
+   * into a turn running, queued behind one, kept for a place among the agents at work, or as the turn that starts its lead
+   * again. It is the person's word at the moment they send it, not when a turn picks it up.
+   */
+  | { readonly _tag: 'PersonSaid'; readonly threadId: string }
   /** A turn began; `byPerson` when it carries something the person said, not only what Althar wrote. */
   | { readonly _tag: 'TurnStarted'; readonly threadId: string; readonly turnId: string; readonly byPerson?: boolean }
   | {

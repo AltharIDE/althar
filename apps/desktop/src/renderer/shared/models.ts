@@ -85,11 +85,27 @@ const SAID: Readonly<Record<string, string>> = {
   xai: 'xAI',
 }
 
-/** A model's id as people read it, where nothing else names it: `opencode-go/deepseek-v4.1-flash` is "DeepSeek V4.1 Flash". */
-const readableModelName = (id: string): string =>
-  bareModel(id)
+/**
+ * The words of a model's id, with a version an id writes with dashes read as people write it: `claude-opus-5-5` has the
+ * version 5.5, `claude-3-5-sonnet` 3.5. Only two short numbers make one; a date (`20250514`, `2025-01-31`) isn't.
+ */
+const wordsOf = (id: string): ReadonlyArray<string> => {
+  const words = bareModel(id)
     .split(/[-_\s:]+/)
     .filter((word) => word !== '')
+  const version = (word: string | undefined) => word !== undefined && /^(0|[1-9]\d?)$/.test(word)
+  return words.reduce<string[]>((read, word) => {
+    const last = read.at(-1)
+    // A number after a number that is no part of a date: its decimals.
+    if (version(word) && version(last) && !(read.length > 1 && /^\d{4}$/.test(read.at(-2) ?? ''))) read[read.length - 1] = `${last}.${word}`
+    else read.push(word)
+    return read
+  }, [])
+}
+
+/** A model's id as people read it, where nothing else names it: `opencode-go/deepseek-v4.1-flash` is "DeepSeek V4.1 Flash", `claude-opus-5-5` "Claude Opus 5.5". */
+const readableModelName = (id: string): string =>
+  wordsOf(id)
     .map((word) => SAID[word.toLowerCase()] ?? capital(word))
     .join(' ')
 
@@ -473,6 +489,26 @@ export const runningOn = (session: {
   model: session.model,
   effort: session.effort,
 })
+
+/**
+ * Who a held session leads as from its next turn, where its lead was changed and the agent isn't set to it yet: a model or
+ * effort the person just picked, or another agent a tool chose. Null where nothing waits.
+ */
+export const upcomingOn = (session: {
+  readonly agentId: string
+  readonly model: string | null
+  readonly effort: string | null
+  readonly nextLead?: { readonly agentId: string; readonly model: string | null; readonly effort: string | null } | null
+}): Choice | null => {
+  const next = session.nextLead
+  if (next == null) return null
+  const same = next.agentId === session.agentId
+  return {
+    agentId: next.agentId,
+    model: next.model ?? (same ? session.model : null),
+    effort: next.effort ?? (same ? session.effort : null),
+  }
+}
 
 /** Puts a running thread on what the person chose: its model and effort, or another agent taking over with them. */
 export const moveTo = async (client: Client, threadId: string, current: Choice, next: Choice): Promise<void> => {

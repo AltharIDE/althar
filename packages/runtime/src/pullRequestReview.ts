@@ -1,4 +1,4 @@
-import { Effect } from 'effect'
+import { Effect, Option, Schema } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { git, gitOutcome } from './git'
@@ -51,6 +51,12 @@ export interface ReviewRecord {
    * Absent where the last pass read the change as it stands.
    */
   readonly unreviewed?: boolean
+  /**
+   * Fixes after the last pass so small no check read them (a task is a conversation plus parts, "Fixes are checked by the same
+   * reviewer, only where they need it"): the files, and how many lines. The seal stands for them; the folded review names them.
+   * Absent where there were none.
+   */
+  readonly tiny?: { readonly files: ReadonlyArray<string>; readonly lines: number }
 }
 
 /** How many times the change was reviewed, in words: once, twice, 3 times. */
@@ -123,6 +129,10 @@ export const detailsOf = (record: ReviewRecord) => {
   const at = record.sha === null || record.unreviewed === true ? '' : `, at <code>${short(record.sha)}</code>`
   const summary = record.unreviewed !== true ? reviewedLine(record) : `${reviewedLine(record)}; the last fixes weren’t reviewed`
   const parts = [`<details>\n<summary>${lineOf(summary)}${at}</summary>`]
+  if (record.tiny !== undefined)
+    parts.push(
+      `**Fixed after it, too small to read again**\n\n${record.tiny.files.map((file) => `- <code>${lineOf(file)}</code>`).join('\n')}\n\n${record.tiny.lines === 1 ? '1 line' : `${record.tiny.lines} lines`} in all.`,
+    )
   if (record.changed.length > 0)
     parts.push(
       `**What changed after review**\n\n${record.changed
@@ -287,6 +297,7 @@ export const reviewRecordOf = (input: {
       changed: changed.map((one) => ({ what: one.what, commits: one.commits.map(asSent) })),
       kept,
       unreviewed: yield* unreviewedOf(input.runId),
+      ...(yield* tinyOf(input.runId)),
     } satisfies ReviewRecord
   })
 
@@ -301,11 +312,36 @@ const carriedOn = (runId: string) =>
     return carried?.id ?? null
   })
 
+/** The tiny fixes the run's last settle made, which no check read (Runs.ts marks the settle): none where there were none. */
+const tinyOf = (runId: string) =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient
+    const [settled] = yield* sql<{ tiny: string | null }>`
+      SELECT json_extract(a.output, '$.tiny') AS tiny FROM workflow_executions e
+      JOIN nodes n ON n.execution_id = e.id AND n.node_key = 'settle' JOIN node_attempts a ON a.node_id = n.id
+      WHERE e.run_id = ${runId} AND a.state = 'succeeded' ORDER BY a.ended_at DESC, a.rowid DESC LIMIT 1`
+    if (settled?.tiny == null) return {}
+    const read = Schema.decodeUnknownOption(
+      Schema.fromJsonString(Schema.Struct({ files: Schema.Array(Schema.String), lines: Schema.Number })),
+    )(settled.tiny)
+    return Option.isSome(read) ? { tiny: read.value } : {}
+  })
+
 /**
  * Whether the run went on after its rounds of review ran out, the lead's last fixes never read (Runs.ts marks the settle that
  * made them).
  */
-export const unreviewedOf = (runId: string) => Effect.map(carriedOn(runId), (carried) => carried !== null)
+export const unreviewedOf = (runId: string) =>
+  Effect.gen(function* () {
+    if ((yield* carriedOn(runId)) !== null) return true
+    const sql = yield* SqlClient.SqlClient
+    // Skipping a later check accepts the fixes without reading them. A first pass skipped before its verdict made no review record.
+    const [skipped] = yield* sql<{ id: string }>`
+      SELECT a.id FROM workflow_executions e JOIN nodes n ON n.execution_id = e.id AND n.node_key = 'review'
+      JOIN node_attempts a ON a.node_id = n.id
+      WHERE e.run_id = ${runId} AND n.iteration > 0 AND a.state = 'cancelled' AND json_extract(a.output, '$.skipped') = 1 LIMIT 1`
+    return skipped !== undefined
+  })
 
 /**
  * The commit that holds exactly what a review pass read, or null. A pass

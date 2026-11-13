@@ -1,11 +1,12 @@
+import { removeTreeSync } from '@althar/testing'
 import { randomBytes } from 'node:crypto'
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import { makeFakeService } from '@althar/connectors/testing'
 import { assert, describe, it } from '@effect/vitest'
-import { Effect, Layer } from 'effect'
+import { Effect, Layer, Option } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { Changes } from '../src/Changes'
@@ -379,8 +380,15 @@ describe('a branch merging here, with no pull request', () => {
         Effect.map(unsentOf(projectId), (one) => [one]),
         ([one]) => one === 'It’s stopped.',
       )
-      // Its folder gone, Resolve now can't merge anything: it says so, and no longer that it conflicts.
-      rmSync((yield* worktreeOf(taskId)).path, { recursive: true, force: true })
+      // Its folder gone, Resolve now can't merge anything: it says so, and no longer that it conflicts. Its lead stopped first,
+      // as on Windows no folder an agent works in can be removed.
+      const sessions = yield* Sessions
+      yield* Effect.ignore(sessions.stop(task?.threadId ?? ''))
+      yield* until(
+        Effect.map(sessions.running(task?.threadId ?? ''), (live) => [Option.isNone(live)]),
+        ([stopped]) => stopped === true,
+      )
+      removeTreeSync((yield* worktreeOf(taskId)).path)
       yield* (yield* Changes).resolveNow({ taskId }, true)
       assert.strictEqual(yield* uncheckedOf(projectId), 'Its folder isn’t on this computer, so Althar can’t merge main into it here.')
       assert.isNull(yield* unsentOf(projectId))

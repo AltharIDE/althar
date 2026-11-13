@@ -6,10 +6,13 @@ import { cx } from '../../lib/cx'
 import type { RootProps } from '../../lib/props'
 import { useRefocus } from '../../lib/refocus'
 import { ActionButton } from '../../primitives/ActionButton/ActionButton'
+import { Button } from '../../primitives/Button/Button'
 import { Field, FieldError } from '../../primitives/Field/Field'
+import type { HeadingLevel } from '../../primitives/Heading/Heading'
 import { IconButton } from '../../primitives/IconButton/IconButton'
 import { Menu, MenuItem, MenuSeparator } from '../../primitives/Menu/Menu'
 import { Spinner } from '../../primitives/Spinner/Spinner'
+import { EmptyState } from '../EmptyState/EmptyState'
 import s from './Accounts.module.css'
 
 /*
@@ -49,6 +52,11 @@ export interface AccountEntry {
   who?: string
   /** The plan that pays for it, when the agent says: Claude Max. */
   plan?: string
+  /**
+   * When its sign-in ends, where the agent says, as the person reads it: Mon 09:30. Given only within its last days, and
+   * said then in the signal's colour, before its plan's word; nothing is said of an end further off.
+   */
+  ends?: { at: string }
   /**
    * For an agent with a sign-in for each provider it reaches (OpenCode): those to say, each with how it is paid for, and
    * whether it refused work lately though the account is signed in. Said in place of the account's one word.
@@ -92,6 +100,8 @@ export interface AccountsText {
   signedOut: string
   checking: string
   out: (back: string) => string
+  /** When its sign-in ends, at the latest: the date its agent gives. */
+  ends: (at: string) => string
   signIn: string
   signInAgain: string
   /** A provider within the agent that refused its sign-in, as the button that signs it in. */
@@ -109,6 +119,11 @@ export interface AccountsText {
   nameField: string
   emptyName: string
   add: string
+  /** With none yet: what will be here, and how one gets here. */
+  none: string
+  noneLine: (agent: string) => string
+  /** What signs the first one in, where it can start from here. */
+  firstSignIn: string
 }
 
 export const accountsText: AccountsText = {
@@ -120,6 +135,7 @@ export const accountsText: AccountsText = {
   signedOut: 'Signed out',
   checking: 'Checking…',
   out: (back) => `until ${back}`,
+  ends: (at) => `sign-in ends by ${at}`,
   signIn: 'Sign in',
   signInAgain: 'Sign in again',
   providerSignIn: (provider) => `${provider}: sign in again`,
@@ -134,6 +150,9 @@ export const accountsText: AccountsText = {
   nameField: 'Name',
   emptyName: 'Give it a name',
   add: 'Add an account',
+  none: 'No accounts yet',
+  noneLine: (agent) => `Sign in to ${agent}, and its work runs on that account.`,
+  firstSignIn: 'Sign in',
 }
 
 export type AccountsProps = RootProps<
@@ -152,6 +171,8 @@ export type AccountsProps = RootProps<
     onAdd?: () => void
     /** A sign-in under way, drawn in the list. While one is, there is no way to start another. */
     signIn?: AccountsSignIn
+    /** The rank of the heading that says there are none yet. */
+    headingLevel?: HeadingLevel
     text?: Partial<AccountsText>
   }
 >
@@ -166,6 +187,7 @@ export function Accounts({
   onRemove,
   onAdd,
   signIn,
+  headingLevel = 3,
   className,
   text,
   ...rest
@@ -179,6 +201,28 @@ export function Accounts({
       {signIn?.node}
     </li>
   )
+  // None yet, and none signing in: what will be here, and the press that signs the first one in, in place of the list.
+  if (accounts.length === 0 && signIn === undefined)
+    return (
+      <div className={cx(s.accounts, className)} {...rest}>
+        <EmptyState
+          variant="flush"
+          icon="agents"
+          title={t.none}
+          line={t.noneLine(agent)}
+          headingLevel={headingLevel}
+          {...(onAdd === undefined
+            ? {}
+            : {
+                actions: (
+                  <Button ref={add} size="small" onClick={onAdd}>
+                    {t.firstSignIn}
+                  </Button>
+                ),
+              })}
+        />
+      </div>
+    )
   return (
     <div className={cx(s.accounts, className)} {...rest}>
       <div className={s.top}>
@@ -233,6 +277,16 @@ function Row({ account, number, first, last, busy, t, onSignIn, onRename, onMove
   const { state, place } = account
   // Who it is when the agent says; a folder another tool made, by where it is.
   const who = account.who ?? (place.kind === 'adopted' ? [place.folder, place.from].filter(Boolean).join(' · ') : null)
+  // When its sign-in ends, before its one word, where it ends soon.
+  const withEnds = (word: ReactNode): ReactNode =>
+    account.ends === undefined ? (
+      word
+    ) : (
+      <span className={s.endsWith}>
+        <span className={s.ends}>{t.ends(account.ends.at)}</span>
+        {word}
+      </span>
+    )
   const end = ((): ReactNode => {
     switch (state.kind) {
       case 'ready':
@@ -242,7 +296,14 @@ function Row({ account, number, first, last, busy, t, onSignIn, onRename, onMove
               {account.providers.map((provider) =>
                 provider.refused === true ? (
                   onSignIn && !busy ? (
-                    <ActionButton key={provider.name} tone="strong" size="small" flush="end" onClick={() => onSignIn(account.id)}>
+                    <ActionButton
+                      key={provider.name}
+                      tone="strong"
+                      size="small"
+                      flush="start"
+                      className={s.endAction}
+                      onClick={() => onSignIn(account.id)}
+                    >
                       {t.providerSignIn(provider.name)}
                     </ActionButton>
                   ) : (
@@ -259,7 +320,7 @@ function Row({ account, number, first, last, busy, t, onSignIn, onRename, onMove
               )}
             </span>
           )
-        return account.plan ?? (state.paid === 'key' ? t.key : state.paid === 'plan' ? t.plan : null)
+        return withEnds(account.plan ?? (state.paid === 'key' ? t.key : state.paid === 'plan' ? t.plan : null))
       case 'out':
         return (
           <span className={s.until}>
@@ -276,7 +337,7 @@ function Row({ account, number, first, last, busy, t, onSignIn, onRename, onMove
         )
       case 'signedOut':
         return onSignIn && !busy ? (
-          <ActionButton tone="strong" size="small" flush="end" onClick={() => onSignIn(account.id)}>
+          <ActionButton tone="strong" size="small" flush="start" className={s.endAction} onClick={() => onSignIn(account.id)}>
             {t.signIn}
           </ActionButton>
         ) : (

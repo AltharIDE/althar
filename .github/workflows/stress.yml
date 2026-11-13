@@ -1,11 +1,18 @@
 name: stress
 
-# A pull request's new and changed tests, run many times over with no retry, on Linux: twenty times each for a few,
-# fewer for many (packages/testing/src/stress.ts), and its changed end-to-end specs up to five times. A race that shows
-# one run in ten fails here, on the pull request that brought it, rather than on main later, where the retry would only
-# hide it. Not on a draft, which runs it once it is ready for review; and not in the merge queue, since the pull
-# request ran it on the same tests. On Windows, nightly.yml runs the tests main changed that day many times over.
+# New and changed tests, run many times over with no retry, on Linux (packages/testing/src/stress.ts). On a pull
+# request, three times each and a changed end-to-end spec twice, a few minutes: a race that shows one run in three
+# fails here, on the pull request that brought it, rather than on everyone's after it lands. The pull request's
+# required `merge queue` check waits for it (queue.yml). Not on a draft, which runs it once it is ready for review; and
+# not in the merge queue, since the pull request ran it on the same tests. Called by nightly.yml with `nightly`, on the
+# tests main changed that day, twenty times for a few and a spec up to five: what shows one run in ten, found within a
+# day. On Windows, nightly.yml runs those tests many times over too.
 on:
+  workflow_call:
+    inputs:
+      nightly:
+        type: boolean
+        default: false
   pull_request:
     # And when a draft is ready for review.
     types: [opened, synchronize, reopened, ready_for_review]
@@ -23,7 +30,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: stress-${{ github.ref }}
+  group: stress-${{ inputs.nightly && 'nightly' || github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -38,23 +45,37 @@ jobs:
       any-specs: ${{ steps.plan.outputs.any-specs }}
     steps:
       - uses: actions/checkout@v5
+        with:
+          # At night, the day's history, to tell what it changed.
+          fetch-depth: ${{ inputs.nightly && '0' || '1' }}
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version-file: .bun-version
       # What the pull request changes, against its base.
-      - env:
+      - if: ${{ !inputs.nightly }}
+        env:
           BASE: ${{ github.event.pull_request.base.sha }}
         run: |
           git fetch --no-tags --depth=1 origin "$BASE"
           git diff --name-only --diff-filter=AMR "$BASE" HEAD > "$RUNNER_TEMP/changed"
+      # What main changed in the last day (a little more, as a night's run may start late).
+      - if: ${{ inputs.nightly }}
+        run: |
+          since="$(git rev-list -1 --before='26 hours ago' HEAD)"
+          git diff --name-only --diff-filter=AMR "${since:-HEAD}" HEAD > "$RUNNER_TEMP/changed"
+          cat "$RUNNER_TEMP/changed"
       - id: plan
-        run: bun packages/testing/src/stress.ts plan "$RUNNER_TEMP/changed"
+        env:
+          WHEN: ${{ inputs.nightly && 'nightly' || 'pull-request' }}
+        run: bun packages/testing/src/stress.ts plan "$RUNNER_TEMP/changed" "$WHEN"
 
   linux:
     needs: plan
     if: needs.plan.outputs.any-linux == 'true'
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    # Each package's tests run as many times as fit in their share of fifteen minutes, or forty at night, three at least
+    # (packages/testing/src/stress.ts).
+    timeout-minutes: ${{ inputs.nightly && 60 || 30 }}
     steps:
       - uses: actions/checkout@v5
       - uses: oven-sh/setup-bun@v2
@@ -63,7 +84,9 @@ jobs:
       - uses: actions/setup-node@v5
         with:
           node-version-file: .node-version
-      - run: bun install --frozen-lockfile
+      - uses: ./.github/actions/electron
+        with:
+          binary: 'false'
       # Ubuntu 24.04 keeps unprivileged user namespaces from apps, and Chromium's sandbox needs them.
       - run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
       - env:
@@ -91,8 +114,7 @@ jobs:
       - uses: actions/setup-node@v5
         with:
           node-version-file: .node-version
-      - run: bun install --frozen-lockfile
-        working-directory: .
+      - uses: ./.github/actions/electron
       # As in e2e.yml: Chromium's sandbox, and a keyring on a virtual display.
       - run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
       - run: sudo apt-get update && sudo apt-get install -y gnome-keyring libsecret-1-0

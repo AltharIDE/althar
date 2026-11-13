@@ -3,25 +3,29 @@ import { mkdirSync, mkdtempSync, realpathSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
+import { type FakeService, makeFakeService } from '@althar/connectors/testing'
 import type { ProjectId } from '@althar/domain'
 import { type FakeAgentOptions, holds } from '@althar/provider-adapters/testing'
 import { assert, describe, it } from '@effect/vitest'
 import { Effect, Layer } from 'effect'
 import { SqlClient } from 'effect/sql'
 
+import { Connections } from '../src/Connections'
+import { Instance } from '../src/Instance'
 import { Plans } from '../src/Plans'
 import { Projects } from '../src/Projects'
 import { Queries } from '../src/Queries'
+import { Runs } from '../src/Runs'
 import { type TaskEnd } from '../src/Runs'
 import * as Runtime from '../src/Runtime'
 import { Sessions } from '../src/Sessions'
 import type { ToolAccess } from '../src/ToolServer'
-import { callTool, runtime, until } from './support'
+import { callTool, fakeConnectors, HOST, runtime, until } from './support'
 
 /*
  * A task of several repositories through its steps, where repositories.test.ts
  * doesn't go: a lead that leaves work uncommitted in more than one, and a
- * round of work after the plan that changes one of them, reviewed by what
+ * turn after the plan that changes one of them, shipped and reviewed by what
  * changed in each.
  */
 
@@ -42,15 +46,33 @@ const folderOf = (...names: ReadonlyArray<string>) => {
   return folder
 }
 
-const withQueries = (agents: FakeAgentOptions = {}) => Queries.layer.pipe(Layer.provideMerge(runtime(':memory:', agents)))
+/** Each of the folder's repositories on the fake GitHub, as meridian/<name>, with a remote of its own to push to: each by name. */
+const onGitHub = (folder: string, ...names: ReadonlyArray<string>) => {
+  const bares: Record<string, string> = {}
+  for (const name of names) {
+    const path = join(folder, name)
+    git(path, 'remote', 'add', 'origin', `${HOST}/meridian/${name}.git`)
+    const bare = mkdtempSync(join(tmpdir(), 'althar-remote-'))
+    git(path, 'clone', '-q', '--bare', path, bare)
+    bares[name] = bare
+  }
+  const github = makeFakeService({ pushUrl: (path) => bares[path[1] ?? ''] ?? '' })
+  for (const name of names) github.addRepository(['meridian', name])
+  return github
+}
+
+const withQueries = (agents: FakeAgentOptions = {}, github?: FakeService) =>
+  Queries.layer.pipe(
+    Layer.provideMerge(runtime(':memory:', agents, github === undefined ? {} : { connectors: fakeConnectors({ github }) })),
+  )
 
 /** A task changing both repositories, planned as given and started at once: its ids, and each worktree by repository. */
-const across = (description: string, review: boolean, end: TaskEnd | null) =>
+const across = (description: string, review: boolean, end: TaskEnd | null, folder = folderOf('api', 'web')) =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient
     const projects = yield* Projects
     const plans = yield* Plans
-    const opened = yield* projects.open({ envelope: yield* Runtime.envelope('project.open', {}), path: folderOf('api', 'web') })
+    const opened = yield* projects.open({ envelope: yield* Runtime.envelope('project.open', {}), path: folder })
     const [person] = yield* sql<{ id: string }>`SELECT id FROM actors WHERE kind = 'person'`
     const actor = (person?.id ?? '') as Parameters<typeof plans.hold>[1]
     const created = yield* projects.createTask({
@@ -72,9 +94,16 @@ const across = (description: string, review: boolean, end: TaskEnd | null) =>
       actorId: actor,
       end,
     })
-    yield* plans.start(planId, actor)
     const rows = yield* sql<{ name: string; path: string }>`
       SELECT b.display_name AS name, w.path FROM workspaces w JOIN repository_bindings b ON b.id = w.binding_id WHERE w.task_id = ${created.taskId}`
+    // A task with a review builds something first: nothing built runs no review.
+    if (review)
+      for (const row of rows) {
+        writeFileSync(join(row.path, 'retry.txt'), 'retry\n')
+        git(row.path, 'add', '.')
+        git(row.path, 'commit', '-q', '-m', 'Retry')
+      }
+    yield* plans.start(planId, actor)
     return {
       projectId: opened.projectId,
       ...created,
@@ -113,29 +142,46 @@ describe('a task of several repositories', () => {
     }).pipe(Effect.provide(withQueries())),
   )
 
-  it.live('reviews a round of work after its plan by what changed in each repository since', () => {
+  it.live('reviews a Ship after its plan by what changed in each repository since its last review', () => {
     const lead = holds()
+    // On a code host, where its pull requests open: Ship sends a turn's commits to them, its review first.
+    const folder = folderOf('api', 'web')
+    const github = onGitHub(folder, 'api', 'web')
     return Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
       const sessions = yield* Sessions
-      const task = yield* across('Do it. [lead:finish] [review:pass]', true, null)
+      const runs = yield* Runs
+      yield* (yield* Connections).connectToken({ product: 'github', token: 't', actorId: (yield* Instance).personId, webUrl: HOST })
+      const task = yield* across('Do it. [lead:finish] [review:pass]', true, 'draft', folder)
       yield* until(runsOf(task.taskId), (rows) => rows[0]?.state === 'succeeded')
       const heads = Object.fromEntries(
         Object.entries(task.worktree).map(([name, path]) => [name, git(path, 'rev-parse', 'HEAD').toString().trim().slice(0, 12)]),
       )
-      // The person asks for more; while its lead works on it, it changes the web app only.
-      const body = 'Add the docs. [lead:slowly] [lead:finish]'
+      // The person asks for more; while its lead works on it, it changes the web app only, and commits that.
+      const body = 'Add the docs. [lead:slowly]'
       yield* sessions.send({ envelope: yield* Runtime.envelope('thread.send', { body }), threadId: task.threadId, body })
-      yield* until(runsOf(task.taskId), (rows) => rows[1]?.state === 'running')
-      writeFileSync(join(task.worktree.web ?? '', 'docs.md'), '# Retry\n')
+      yield* until(
+        sql<{ heads: string | null }>`SELECT heads FROM turn_deliveries WHERE thread_id = ${task.threadId} AND heads IS NOT NULL`,
+        (rows) => rows.length === 1,
+      )
+      const web = task.worktree.web ?? ''
+      writeFileSync(join(web, 'docs.md'), '# Retry\n')
+      git(web, 'add', '-A')
+      git(web, '-c', 'user.name=Fake', '-c', 'user.email=fake@althar.test', 'commit', '-q', '-m', 'Add the docs')
       lead.open('[lead:slowly]')
+      yield* until(
+        sql<{ heldAt: string | null }>`SELECT held_at FROM workspaces WHERE task_id = ${task.taskId} AND held_at IS NOT NULL`,
+        (rows) => rows.length === 1,
+      )
+      // Shipped, its review reads each repository from where the last review left it.
+      yield* runs.ship({ envelope: yield* Runtime.envelope('task.ship', {}), taskId: task.taskId })
       const [told] = yield* until(
         sql<{ body: string }>`
           SELECT i.body FROM user_inputs i JOIN threads t ON t.id = i.thread_id
-          WHERE t.task_id = ${task.taskId} AND t.kind = 'step' AND i.body LIKE 'More to review%'`,
+          WHERE t.task_id = ${task.taskId} AND t.kind = 'step' AND i.body LIKE 'More to review. The person ships%'`,
         (rows) => rows.length === 1,
       )
       assert.include(told?.body, `Review what changed since, \n- api: \`git diff ${heads.api}\`\n- web: \`git diff ${heads.web}\`.`)
-    }).pipe(Effect.provide(withQueries({ holds: lead })))
+    }).pipe(Effect.provide(withQueries({ holds: lead }, github)))
   })
 })

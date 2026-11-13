@@ -2,7 +2,7 @@ import { execFileSync } from 'node:child_process'
 import { writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
-import { type FakeService, makeFakeService } from '@althar/connectors/testing'
+import { type FakeCheck, type FakeService, makeFakeService } from '@althar/connectors/testing'
 import { Duration, Effect, Layer, Option } from 'effect'
 import { SqlClient } from 'effect/sql'
 
@@ -149,7 +149,7 @@ export const taskSays = (taskId: string, resolveConflicts: boolean | null) =>
     yield* (yield* Changes).setResolveConflicts({ envelope, taskId, resolveConflicts })
   })
 
-export type Checks = ReadonlyArray<{ readonly name: string; readonly state: 'passed' | 'failed' | 'running'; readonly log?: string }>
+export type Checks = ReadonlyArray<FakeCheck>
 export const PASSED: Checks = [{ name: 'test', state: 'passed' }]
 export const RUNNING: Checks = [{ name: 'test', state: 'running' }]
 export const FAILED: Checks = [{ name: 'test', state: 'failed', log: 'FAIL limit.test.ts' }]
@@ -270,13 +270,24 @@ export const given = (threadId: string) =>
     (rows) => rows.map((row) => row.body),
   )
 
-/** Until the lead has committed the merge in the task's worktree: it is working still, as `[lead:resolve-hold]` does. */
+/**
+ * Until the lead has committed the merge in the task's worktree: it is working still, as `[lead:resolve-hold]` does. Committed
+ * means git is done with it: the merge commit is HEAD and git no longer has a merge under way, which it says a moment after.
+ */
 export const mergedHere = (taskId: string) =>
   Effect.gen(function* () {
     const { path } = yield* worktreeOf(taskId)
+    const merging = () => {
+      try {
+        git(path, 'rev-parse', '-q', '--verify', 'MERGE_HEAD')
+        return true
+      } catch {
+        return false
+      }
+    }
     yield* until(
-      Effect.sync(() => [git(path, 'rev-list', '--parents', '-n', '1', 'HEAD').split(' ').length]),
-      ([parts]) => parts === 3,
+      Effect.sync(() => [git(path, 'rev-list', '--parents', '-n', '1', 'HEAD').split(' ').length === 3 && !merging()]),
+      ([done]) => done === true,
     )
   })
 

@@ -1,0 +1,242 @@
+/* ---- A canvas's line in a thread: quiet, its title the way in ---------- */
+.line {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--t-3);
+}
+.lineTile {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 22px;
+  height: 22px;
+  margin-top: -1px;
+  border-radius: 6px;
+  background: var(--tile);
+  color: var(--t-2);
+}
+.lineMain {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.lineHead {
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+.lineVerb {
+  flex: none;
+}
+.lineName {
+  min-width: 0;
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  overflow: hidden;
+}
+.lineButton {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  border-radius: 4px;
+}
+.lineTitle {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 550;
+  color: var(--t-1);
+}
+.lineButton:hover .lineTitle {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.lineButton[aria-pressed='true'] .lineTitle {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.lineFacts {
+  flex: none;
+  font: 11px var(--mono);
+  color: var(--t-3);
+  font-variant-numeric: tabular-nums;
+}
+.lineNote {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ---- The canvas beside the conversation -------------------------------- */
+.panel {
+  min-height: 0;
+}
+.panelTile {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 24px;
+  height: 24px;
+  border-radius: 7px;
+  background: var(--tile);
+  color: var(--t-2);
+}
+.panelHead {
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+.panelName {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font: 11px var(--mono);
+  color: var(--t-3);
+}
+.versions {
+  display: inline-flex;
+  align-items: center;
+  gap: 0;
+  margin-right: 4px;
+}
+.versionWord {
+  min-width: 52px;
+  text-align: center;
+  font: 11px var(--mono);
+  color: var(--t-2);
+  font-variant-numeric: tabular-nums;
+}
+.facts {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 12px;
+  padding: 8px 18px;
+  border-bottom: 1px solid var(--line);
+  font-size: 12px;
+  color: var(--t-3);
+}
+.fact {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.note {
+  min-width: 0;
+  color: var(--t-2);
+}
+.behind {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  color: var(--t-2);
+}
+.body {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+}
+/* a document or a diagram, scrolling at reading width */
+.reading {
+  overflow: auto;
+  padding: 20px 22px 28px;
+}
+/* a page or a picture, edge to edge */
+.fill {
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+.loading {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  max-width: 620px;
+}
+.foot {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-height: 40%;
+  overflow: auto;
+  padding: 12px 18px 14px;
+  border-top: 1px solid var(--line);
+  background: var(--n-1);
+}
+.write {
+  width: 100%;
+}
+.comments {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.comment {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 12.5px;
+  line-height: 1.45;
+  color: var(--t-1);
+}
+.commentBody {
+  white-space: pre-wrap;
+}
+.commentFacts {
+  font-size: 11.5px;
+  color: var(--t-3);
+}
+.answered .commentBody {
+  color: var(--t-3);
+}
+.answer {
+  margin-top: 2px;
+  padding-left: 10px;
+  border-left: 2px solid var(--line-2);
+  font-size: 12px;
+  color: var(--t-2);
+}
+
+/* ---- What is on a canvas, as the host draws it ------------------------ */
+/* a picture, at its own size or the panel's, whichever is smaller, on the page's own ground */
+.picture {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  overflow: auto;
+  background: var(--n-2);
+}
+.picture img {
+  max-width: 100%;
+  max-height: 100%;
+  border-radius: 6px;
+  box-shadow: var(--lift-2);
+  background: var(--paper);
+}
+/* where a page canvas is drawn, by a view the window lays over it */
+.page {
+  flex: 1;
+  min-height: 0;
+  background: var(--paper);
+}

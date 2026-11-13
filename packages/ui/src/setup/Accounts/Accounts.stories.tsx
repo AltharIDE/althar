@@ -91,6 +91,43 @@ export const AProviderRefused: Story = {
   },
 }
 
+/**
+ * Claude Code says when a claude.ai sign-in ends; the row says it only within its last days, in the signal's colour before
+ * the plan's word. An end further off isn't said: all is well there.
+ */
+export const SignInEnds: Story = {
+  args: {
+    agent: 'Claude Code',
+    accounts: [
+      {
+        id: 'acc_usual',
+        name: 'Personal',
+        place: { kind: 'usual' },
+        state: { kind: 'ready', paid: 'plan' },
+        who: 'you@meridian.dev',
+        plan: 'Claude Max',
+      },
+      {
+        id: 'acc_work',
+        name: 'Work',
+        place: { kind: 'own' },
+        state: { kind: 'ready', paid: 'plan' },
+        who: 'you@halyard.co',
+        plan: 'Claude Team',
+        ends: { at: 'Mon 09:30' },
+      },
+      { id: 'acc_key', name: 'API', place: { kind: 'own' }, state: { kind: 'ready', paid: 'key' } },
+    ],
+  },
+  play: async ({ canvasElement }) => {
+    const c = within(canvasElement)
+    await expect(c.getByText('sign-in ends by Mon 09:30')).toBeInTheDocument()
+    await expect(c.getByText('Claude Max')).toBeInTheDocument()
+    // Only the one that ends soon says so: Personal's far-off end, and a key, which has none, say nothing.
+    await expect(c.getAllByText(/sign-in ends/)).toHaveLength(1)
+  },
+}
+
 /** The agent's usual sign-in alone: no word on the order, which only matters with two. */
 export const OnlyTheUsual: Story = {
   args: { accounts: ACCOUNTS.slice(0, 1) },
@@ -139,6 +176,33 @@ export const JustTheList: Story = {
     const c = within(canvasElement)
     await expect(c.queryByRole('button')).toBeNull()
     await expect(c.getByText('Signed out')).toBeInTheDocument()
+  },
+}
+
+/** None yet: what will be here, how one gets here, and Sign in, which starts the first, in place of the list and its Add an account. */
+export const NoneYet: Story = {
+  args: { accounts: [] },
+  play: async ({ args, canvasElement }) => {
+    const c = within(canvasElement)
+    await expect(c.getByRole('heading', { level: 3, name: 'No accounts yet' })).toBeVisible()
+    await expect(c.getByText('Sign in to Codex, and its work runs on that account.')).toBeVisible()
+    await expect(c.queryByRole('list')).toBeNull()
+    await expect(c.queryByRole('button', { name: 'Add an account' })).toBeNull()
+    await userEvent.click(c.getByRole('button', { name: 'Sign in' }))
+    await expect(args.onAdd).toHaveBeenCalled()
+  },
+}
+
+/** The same at night. */
+export const NoneYetDark: Story = { ...NoneYet, globals: { theme: 'dark' } }
+
+/** None yet, where no sign-in starts from here: what and how, and nothing to press. */
+export const NoneYetNoWayIn: Story = {
+  args: { accounts: [], onAdd: undefined },
+  play: async ({ canvasElement }) => {
+    const c = within(canvasElement)
+    await expect(c.getByRole('heading', { name: 'No accounts yet' })).toBeVisible()
+    await expect(c.queryByRole('button')).toBeNull()
   },
 }
 

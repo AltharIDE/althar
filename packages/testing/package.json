@@ -13,7 +13,9 @@
     "./effect": "./src/effect.ts",
     "./performance": "./src/performance.ts",
     "./reporter": "./src/reporter.ts",
-    "./playwright": "./src/playwright.ts"
+    "./playwright": "./src/playwright.ts",
+    "./shards": "./src/shards.ts",
+    "./sequencer": "./src/sequencer.ts"
   },
   "scripts": {
     "check": "vp check",
@@ -25,13 +27,13 @@
     "effect": "4.0.7"
   },
   "devDependencies": {
-    "@playwright/test": "^1.64.1",
+    "@playwright/test": "^1.65.0",
     "@types/node": "^24.0.0",
     "oxc-parser": "0.157.0",
     "typescript": "^7.0.2",
-    "vite": "npm:@voidzero-dev/vite-plus-core@1.4.0",
-    "vite-plus": "1.4.0",
-    "vitest": "5.0.5"
+    "vite": "npm:@voidzero-dev/vite-plus-core@1.5.0",
+    "vite-plus": "1.5.0",
+    "vitest": "5.1.0"
   },
   "engines": {
     "node": "^22.18.0 || ^24.11.0 || >=26.0.0"

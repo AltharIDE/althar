@@ -6,10 +6,12 @@ import { commandDown, LoadMeter, modKey, Offline, primaryDown, ProjectTabs, Room
 import { useServices } from '../../data/services'
 import { shownAddress } from '../../../main/browser/addresses'
 import { pages, usePageTabs } from '../browser/pages'
-import { FinderView } from '../finder/FinderView'
+import { SearchNotice } from '../finder/SearchNotice'
+import { FinderView, useWarmSearch } from '../finder/FinderView'
 import { QuickSettings } from '../settings/QuickSettings'
 import { CarriedAtFoot, CarriedBack } from '../../shared/dictation/Carried'
 import { PlanBar } from '../usage/PlanBar'
+import { SignInEnding } from '../usage/SignInEnding'
 import { useWindowChrome } from '../../shared/useWindowChrome'
 import { useOnline } from '../../shared/useOnline'
 import { useUpdate } from '../../shared/useUpdate'
@@ -150,6 +152,7 @@ function TabsBar({
           <PlanBar open={usage.open} onOpenChange={usage.set} />
           {!online && <Offline />}
           {update.ready !== null && <UpdateReady {...update.ready} />}
+          <SignInEnding />
           <QuickSettings open={quick} onOpenChange={onQuick} onSettings={tabs.openSettings} />
         </>
       }
@@ -188,6 +191,7 @@ function BareTitleBar({ className }: { className?: string }) {
 
 export function TabsFrame({ children }: { children: ReactNode }) {
   const tabs = useTabs()
+  useWarmSearch()
   // Finding a task, in the project with the window or on the home in every one; from a composer too.
   const [finding, setFinding] = useState(false)
   // The plan gauge's peek, from any screen with the bar.
@@ -211,6 +215,7 @@ export function TabsFrame({ children }: { children: ReactNode }) {
   useEffect(() => {
     const ids = order === '' ? [] : order.split(' ')
     const onKey = (event: KeyboardEvent) => {
+      if (event.defaultPrevented) return
       const command = primaryDown(event)
       // ⌘, opens and closes the quick settings; ⌘⇧, goes to the settings' tab. Once there is a project, and its bar.
       if (command && !event.altKey && event.code === 'Comma' && !none) {
@@ -271,7 +276,8 @@ export function TabsFrame({ children }: { children: ReactNode }) {
               {!tabs.none && <TabsBar tabs={tabs} usage={{ open: usage, set: setUsage }} quick={quick} onQuick={setQuick} />}
               <div className={s.screen}>{children}</div>
             </div>
-            {finding && <FinderView projectId={current} onClose={() => setFinding(false)} />}
+            {finding && <FinderView projectId={current} onClose={() => setFinding(false)} onUsage={() => setUsage(true)} />}
+            <SearchNotice />
             {/* Dictation carried from its composer, at the window's foot where no composer shows. */}
             <CarriedAtFoot />
           </TabBarContext.Provider>

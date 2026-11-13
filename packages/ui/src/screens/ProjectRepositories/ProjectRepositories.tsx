@@ -3,6 +3,8 @@ import { useDragOver } from '../../lib/dragOver'
 import type { RootProps } from '../../lib/props'
 import { Button } from '../../primitives/Button/Button'
 import { below, type HeadingLevel } from '../../primitives/Heading/Heading'
+import { Problem } from '../../primitives/Problem/Problem'
+import { EmptyState } from '../../setup/EmptyState/EmptyState'
 import { SettingGroup } from '../../setup/Preferences/Preferences'
 import { RepositoryMap, type RepositoryMapProps } from '../../setup/RepositoryMap/RepositoryMap'
 import s from './ProjectRepositories.module.css'
@@ -14,6 +16,8 @@ import s from './ProjectRepositories.module.css'
  * a folder; one is picked, or dropped anywhere on them. One left out stays
  * with the tasks made with it, and nothing in its folder changes; the last
  * one stays, as tasks need somewhere to work. Each change is kept at once.
+ * With none, and none being read, what will be here and how one gets here
+ * stand in the map's place, under the way to add one.
  */
 
 export interface ProjectRepositoriesText {
@@ -25,6 +29,9 @@ export interface ProjectRepositoriesText {
   dropping: string
   add: string
   leaveOut: (project: string) => string
+  /** With none: what will be here, and how one gets here. */
+  none: string
+  noneLine: string
 }
 
 export const projectRepositoriesText: ProjectRepositoriesText = {
@@ -33,6 +40,8 @@ export const projectRepositoriesText: ProjectRepositoriesText = {
   dropping: 'Let go to add it',
   add: 'Add a folder',
   leaveOut: (project) => `Leave out of ${project}`,
+  none: 'No repositories yet',
+  noneLine: 'Add the folder its code is in, and its tasks work there.',
 }
 
 export type ProjectRepositoriesProps = RootProps<
@@ -105,25 +114,25 @@ export function ProjectRepositories({
       {...handlers}
       {...rest}
     >
-      {error !== undefined && (
-        <p className={s.error} role="alert">
-          {error}
-        </p>
+      {error !== undefined && <Problem>{error}</Problem>}
+      {repositories.length === 0 && (reading === undefined || reading.length === 0) ? (
+        <EmptyState icon="folder" title={t.none} line={t.noneLine} headingLevel={below(headingLevel)} />
+      ) : (
+        <RepositoryMap
+          repositories={repositories}
+          hosts={hosts}
+          onRoleChange={onRoleChange}
+          onTargetChange={onTargetChange}
+          headingLevel={below(headingLevel)}
+          text={{ leaveOut: t.leaveOut(project), ...mapText }}
+          className={s.map}
+          {...(reading === undefined ? {} : { reading })}
+          {...(worktrees === undefined ? {} : { worktrees })}
+          {...(onLeaveOut === undefined ? {} : { onLeaveOut })}
+          {...(onOpen === undefined ? {} : { onOpen })}
+          {...(onConnect === undefined ? {} : { onConnect })}
+        />
       )}
-      <RepositoryMap
-        repositories={repositories}
-        hosts={hosts}
-        onRoleChange={onRoleChange}
-        onTargetChange={onTargetChange}
-        headingLevel={below(headingLevel)}
-        text={{ leaveOut: t.leaveOut(project), ...mapText }}
-        className={s.map}
-        {...(reading === undefined ? {} : { reading })}
-        {...(worktrees === undefined ? {} : { worktrees })}
-        {...(onLeaveOut === undefined ? {} : { onLeaveOut })}
-        {...(onOpen === undefined ? {} : { onOpen })}
-        {...(onConnect === undefined ? {} : { onConnect })}
-      />
     </SettingGroup>
   )
 }

@@ -1,5 +1,6 @@
+import { removeTreeSync } from '@althar/testing'
 import { execFileSync } from 'node:child_process'
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { basename, join } from 'node:path'
 
@@ -386,7 +387,7 @@ describe('setting up a task’s worktree', () => {
       const { task } = yield* taskIn(withPackages())
       yield* setUp(task.taskId)
       // As Althar quitting while Bun installs leaves it: the folder made, the package not yet in it, and nothing kept.
-      rmSync(join(task.worktree, 'node_modules', 'greet'), { recursive: true, force: true })
+      removeTreeSync(join(task.worktree, 'node_modules', 'greet'))
       assert.isTrue(existsSync(join(task.worktree, 'node_modules')))
       yield* sql`UPDATE workspaces SET setup = NULL WHERE task_id = ${task.taskId}`
       const brief = yield* lead(task.threadId)
@@ -554,7 +555,7 @@ describe('setting up a task’s worktree', () => {
       assert.deepStrictEqual([setups(api?.path), setups(web?.path)], ['x', 'x'])
       yield* tasks.abandon({ envelope: yield* Runtime.envelope('task.abandon', {}), taskId: task.taskId })
       // Both folders went, and web's branch too: reopening puts api back, then can't put web back.
-      for (const path of [api?.path, web?.path]) rmSync(path ?? '', { recursive: true, force: true })
+      for (const path of [api?.path, web?.path]) removeTreeSync(path ?? '')
       git(join(folder, 'web'), 'worktree', 'prune')
       git(join(folder, 'web'), 'branch', '-D', task.branch)
       const refused = yield* Effect.flip(tasks.reopen({ envelope: yield* Runtime.envelope('task.reopen', {}), taskId: task.taskId }))
@@ -585,7 +586,7 @@ describe('setting up a task’s worktree', () => {
       // Abandoned, its folder deleted, and reopened: the worktree is put back, fresh, and set up again.
       yield* sessions.stop(task.threadId)
       yield* tasks.abandon({ envelope: yield* Runtime.envelope('task.abandon', {}), taskId: task.taskId })
-      rmSync(task.worktree, { recursive: true, force: true })
+      removeTreeSync(task.worktree)
       yield* tasks.reopen({ envelope: yield* Runtime.envelope('task.reopen', {}), taskId: task.taskId })
       yield* until(setupItems(task.threadId), (all) => all.length === 2 && all[1]?.ended != null)
       assert.strictEqual(readFileSync(join(task.worktree, 'setups.txt'), 'utf8'), 'x')

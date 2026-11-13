@@ -6,7 +6,7 @@ import { join } from 'node:path'
 import { expect, type Locator, type Page, test } from '@playwright/test'
 
 import { repository } from '../tests/repository'
-import { backToWork, launch, openFirstProject, planTask, projectSettings, shown, still } from './support'
+import { backToWork, launch, openFirstProject, planTask, projectSettings, shown, still, showPanes } from './support'
 
 /*
  * A task that works Local, in the person's own checkout (ADR-091), in a real
@@ -60,9 +60,8 @@ test('works Local: asks before it takes the checkout, waits for it, and gives it
     await openFirstProject(electronApp, page, root)
 
     // The project starts new tasks Local.
-    await projectSettings(page, 'General')
-    const tasks = page.getByRole('region', { name: 'Tasks' })
-    const startIn = tasks.getByRole('radiogroup', { name: 'New tasks start in' })
+    await projectSettings(page, 'Tasks')
+    const startIn = page.getByRole('main').getByRole('radiogroup', { name: 'New tasks start in' })
     await startIn.getByRole('radio', { name: 'Local' }).click()
     await expect(startIn.getByRole('radio', { name: 'Local' })).toHaveAttribute('aria-checked', 'true')
     await shoot(page, blockWith(page, startIn, page.getByText(/^Local works in your own checkout/)), 'settings')
@@ -109,7 +108,7 @@ test('works Local: asks before it takes the checkout, waits for it, and gives it
     await expect(taken).toBeVisible()
     await shoot(page, blockWith(page, page.getByRole('radiogroup', { name: 'Works in' }), taken), 'plan-taken')
     await page.getByRole('button', { name: 'Start now' }).last().click()
-    await page.getByRole('radio', { name: /^Board/ }).click()
+    await showPanes(page, { conversation: false, board: true })
     const work = page.getByRole('region', { name: 'The project’s work' })
     const next = work.getByRole('region', { name: 'Up next' })
     await expect(next.getByText('After Fix the login')).toBeVisible()
@@ -128,7 +127,7 @@ test('works Local: asks before it takes the checkout, waits for it, and gives it
 
     // The second abandoned too: back on main, with the person's commit, and nothing of theirs stashed.
     await page.getByRole('button', { name: 'Back to meridian' }).click()
-    await page.getByRole('radio', { name: /^Board/ }).click()
+    await showPanes(page, { conversation: false, board: true })
     await work.getByText('Dark mode for Settings', { exact: true }).click()
     await abandon(page)
     await expect.poll(() => git(root, 'branch', '--show-current')).toBe('main')

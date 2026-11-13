@@ -3,7 +3,6 @@ import { existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { parseCatalog } from '../src/catalog'
 import { treeHash } from '../src/hash'
 import { projectRun, releaseRun } from '../src/projection'
 import { EMPTY_INSTALLS, putObject, readInstalls, readObject, withInstall, writeInstalls } from '../src/store'
@@ -89,28 +88,9 @@ describe('installs.json', () => {
   it('refuses to write an install that does not fit the schema', async () => {
     await expect(
       run(
-        writeInstalls(root, { version: 1, installs: [{ id: 'x', source: 'github', treeHash: 'short', review: 'default', active: true }] }),
+        writeInstalls(root, { version: 1, installs: [{ id: 'x', source: 'github', treeHash: 'short', review: 'reviewed', active: true }] }),
       ),
     ).rejects.toThrow()
-  })
-})
-
-describe('parseCatalog', () => {
-  const entry = { id: 'tdd', source: { kind: 'github', repo: 'o/r', sha: SHA, subpath: 'skills/tdd' }, treeHash: HASH, license: 'MIT' }
-  const text = (entries: unknown[]) => JSON.stringify({ version: 1, revision: '2026.10.1', entries })
-
-  it('reads entries and fills defaults', async () => {
-    const parsed = await run(parseCatalog(text([entry, { ...entry, id: 'own', source: { kind: 'althar' } }])))
-    expect(parsed.entries[0]).toMatchObject({ needs: [], note: '' })
-  })
-
-  it.each([
-    ['not json', 'not JSON'],
-    [text([{ ...entry, source: { kind: 'github', repo: 'o/r', sha: 'main', subpath: 's' } }]), 'sha'],
-    [text([{ ...entry, extra: 1 }]), 'extra'],
-    [text([entry, entry]), 'appears twice'],
-  ])('refuses %#', async (input, why) => {
-    expect((await failure(parseCatalog(input))).message).toContain(why)
   })
 })
 

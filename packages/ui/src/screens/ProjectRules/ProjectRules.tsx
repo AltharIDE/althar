@@ -214,6 +214,7 @@ export interface ProjectRulesText {
   sandbox: {
     runs: string
     outside: string
+    anyWay: string
     noCommands: string
     reach: string
     withoutAsking: string
@@ -396,6 +397,8 @@ export const projectRulesText: ProjectRulesText = {
   sandbox: {
     runs: 'Leads run ',
     outside: ' outside their sandbox from the start',
+    /** After the commands, where some are run more than one way: npx vite as vite. */
+    anyWay: ', however they’re run',
     noCommands: 'Leads run every command in their sandbox first.',
     reach: ' They reach ',
     withoutAsking: ' without asking',
@@ -532,24 +535,6 @@ export type ProjectRulesProps = RootProps<
     onRemoveCommand: (id: string) => void
     /** Adds a command to a sentence; returns why it can't be, said under it, where the field stays. */
     onAddCommand: (place: CommandPlace, pattern: string, match: CommandMatch) => string | undefined
-    end: TaskEnd
-    onEndChange: (end: TaskEnd) => void
-    /** How branches are named: the person's pattern over each repository's. */
-    branches: Omit<NamingRuleProps, 'text'>
-    /** How pull requests are titled, the same way. */
-    titles: Omit<NamingRuleProps, 'text'>
-    /** Each repository's pull request template. */
-    templates: readonly RepositoryTemplate[]
-    limit: LimitPolicy
-    onLimitChange: (limit: LimitPolicy) => void
-    /** The agents with more than one account. Without any, the accounts aren't said. */
-    agentAccounts?: readonly AgentAccounts[]
-    /** Whether work goes on with an agent's next account when one runs out. */
-    rotate: boolean
-    onRotateChange: (rotate: boolean) => void
-    /** The accounts the project may use, by agent; an agent not named may use every one. */
-    allowed: Readonly<Record<string, readonly string[]>>
-    onAllowedChange: (agentId: string, accountIds: readonly string[]) => void
     /**
      * What leads' sandboxes let through from the start: commands they run
      * outside them and hosts they reach without asking, each list in its
@@ -635,6 +620,41 @@ function DraftHint({ typed, ...rest }: Omit<NewCommandHintProps, 'pattern'> & { 
 }
 
 /** Things in a list, as a sentence has them: a, b and c; with how the sentence ends kept on the line of the last. */
+/* How a command is run through a package manager or runner: npx vite is vite. */
+const RUNNER = /^(?:npx|bunx|bun x|pnpm exec|pnpm dlx|yarn exec|yarn dlx) /
+/* A package's script, by whichever manager: npm run dev, pnpm dev, yarn dev. */
+const SCRIPT = /^(?:npm|pnpm|yarn|bun)(?: run)? (\S+)$/
+
+/** One of the commands leads run outside their sandbox, as the sentence says it: the tool, and every way it is run. */
+export interface SandboxGroup {
+  readonly label: string
+  readonly members: readonly string[]
+}
+
+/**
+ * The commands leads run outside their sandbox, one per tool however it is run, so the sentence names each once: vite for
+ * vite, npx vite, bunx vite, pnpm exec vite and yarn vite; npm run dev for a package's dev script by any manager. A
+ * command run only one way keeps its own words. In the order they first come.
+ */
+export const sandboxGroups = (commands: readonly string[]): readonly SandboxGroup[] => {
+  const bare = new Set(commands.map((command) => command.replace(RUNNER, '')))
+  const keyOf = (command: string): string => {
+    const run = command.replace(RUNNER, '')
+    if (run !== command) return run
+    // yarn vite runs the vite a package has, as npx does; yarn dev runs its script.
+    const yarn = /^yarn (.+)$/.exec(command)?.[1]
+    if (yarn !== undefined && bare.has(yarn) && yarn !== command && !SCRIPT.test(yarn)) return yarn
+    const script = SCRIPT.exec(command)?.[1]
+    return script === undefined ? command : `npm run ${script}`
+  }
+  const groups = new Map<string, string[]>()
+  for (const command of commands) {
+    const key = keyOf(command)
+    groups.set(key, [...(groups.get(key) ?? []), command])
+  }
+  return [...groups].map(([key, members]) => ({ label: members.length === 1 ? (members[0] ?? key) : key, members }))
+}
+
 const join = (items: readonly ReactNode[], last: string, end?: ReactNode) =>
   items.map((item, index) => (
     <Fragment key={index}>
@@ -749,18 +769,6 @@ export function ProjectRules({
   commands,
   onRemoveCommand,
   onAddCommand,
-  end,
-  onEndChange,
-  branches,
-  titles,
-  templates,
-  limit,
-  onLimitChange,
-  agentAccounts = [],
-  rotate,
-  onRotateChange,
-  allowed,
-  onAllowedChange,
   sandbox,
   tally,
   whatAsks,
@@ -887,18 +895,21 @@ export function ProjectRules({
           />
         )),
     )
-  /** One of the sandbox's lists, with what is being added at its end. */
+  /** One of the sandbox's lists, with what is being added at its end: commands one per tool, however they are run. */
   const listed = (list: SandboxList) =>
     withDraft(
       list,
-      (sandbox?.[list] ?? []).map((value, index) => (
+      (list === 'commands'
+        ? sandboxGroups(sandbox?.commands ?? [])
+        : (sandbox?.hosts ?? []).map((host) => ({ label: host, members: [host] }))
+      ).map((group, index) => (
         <CommandToken
-          key={value}
-          pattern={value}
+          key={group.label}
+          pattern={group.label}
           text={t.token}
           onRemove={() => {
             refocus.current = { place: list, index }
-            sandbox?.onRemove(list, value)
+            for (const value of group.members) sandbox?.onRemove(list, value)
           }}
         />
       )),
@@ -983,13 +994,6 @@ export function ProjectRules({
   const reachedHosts = listed('hosts')
   // Hosts go in only while the rules let the rest through: with everything allowed, or allowed as the rest.
   const hostsHeld = !allowAll && mode !== PermissionPolicy.Rules
-  const branchName = nameShown(branches)
-  const titleName = nameShown(titles)
-  const withTemplate = templates.filter((repository) => repository.path !== null).length
-  const templateWord = withTemplate === 0 ? t.templates.none : withTemplate === templates.length ? t.templates.every : t.templates.some
-  const endWords = t.finished.end[end]
-  const pushOnly = end === TaskEnd.PushOnly
-  const rotating = rotate && agentAccounts.length > 0
 
   return (
     <div className={cx(s.rules, className)} {...rest}>
@@ -1170,7 +1174,9 @@ export function ProjectRules({
                     outsideCommands,
                     t.and,
                     <>
-                      {t.sandbox.outside}.{adding('commands')}
+                      {t.sandbox.outside}
+                      {sandboxGroups(sandbox.commands).some((group) => group.members.length > 1) ? t.sandbox.anyWay : ''}.
+                      {adding('commands')}
                     </>,
                   )}
                 </>
@@ -1219,97 +1225,170 @@ export function ProjectRules({
                 ))}
           </Clause>
         )}
+      </Charter>
+    </div>
+  )
+}
 
-        <Clause label={t.label.finished} headingLevel={sub} apart>
-          {pushOnly ? t.finished.pushes : t.finished.opens}
-          <ChoiceWord
-            word={endWords.word}
-            label={t.finished.label}
-            value={end}
-            onChange={onEndChange}
-            note={t.finished.note}
-            options={ENDS.map((value) => ({ value, title: t.finished.end[value].title, note: t.finished.end[value].note }))}
-          />
-          {pushOnly ? t.finished.named : t.finished.onBranch}
-          <NameWord rule={branches} shown={branchName} each={t.branches.each} label={t.branches.label} note={t.branches.note} />
-          {pushOnly ? t.finished.prTitled : t.finished.titled}
-          <NameWord rule={titles} shown={titleName} each={t.titles.each} label={t.titles.label} note={t.titles.note} />
-          {t.finished.described}
-          <Popover label={t.templates.label} width={380} trigger={<RuleWord>{templateWord}</RuleWord>}>
-            <span className={s.popLabel}>{t.templates.label}</span>
-            <span className={s.popNote}>{t.templates.note}</span>
-            <TemplateSources repositories={templates} />
-          </Popover>
-          .
-        </Clause>
+export type ProjectTaskRulesProps = RootProps<
+  'div',
+  {
+    /** The heading rank of each sentence's label, under the section's own title. */
+    headingLevel?: HeadingLevel
+    /** Which sentences: both, or one of them where the page puts them apart (Finished under the pull request, Limits under how tasks go). */
+    show?: 'both' | 'finished' | 'limits'
+    /** How a task ends: a draft or ready pull request, or its branch alone. */
+    end: TaskEnd
+    onEndChange: (end: TaskEnd) => void
+    /** How branches are named: the person's pattern over each repository's. */
+    branches: Omit<NamingRuleProps, 'text'>
+    /** How pull requests are titled, the same way. */
+    titles: Omit<NamingRuleProps, 'text'>
+    /** Each repository's pull request template. */
+    templates: readonly RepositoryTemplate[]
+    limit: LimitPolicy
+    onLimitChange: (limit: LimitPolicy) => void
+    /** The agents with more than one account. Without any, the accounts aren't said. */
+    agentAccounts?: readonly AgentAccounts[]
+    /** Whether work goes on with an agent's next account when one runs out. */
+    rotate: boolean
+    onRotateChange: (rotate: boolean) => void
+    /** The accounts the project may use, by agent; an agent not named may use every one. */
+    allowed: Readonly<Record<string, readonly string[]>>
+    onAllowedChange: (agentId: string, accountIds: readonly string[]) => void
+    text?: Partial<ProjectRulesText>
+  }
+>
 
-        <Clause label={t.label.limits} headingLevel={sub}>
-          {rotating ? t.limits.rotating : t.limits.when}
-          <ChoiceWord
-            word={t.limits.limit[limit].word}
-            label={t.limits.label}
-            value={limit}
-            onChange={onLimitChange}
-            options={LIMITS.map((value) => ({ value, title: t.limits.limit[value].title, note: t.limits.limit[value].note }))}
-          />
-          {t.limits.limit[limit].after}.
-          {agentAccounts.map((agent) => {
-            const every = agent.accounts.map((account) => account.id)
-            // Those named that are still there; with none, as when the one named was removed, every one, as work runs.
-            const named = (allowed[agent.id] ?? every).filter((id) => every.includes(id))
-            const on = named.length === 0 ? every : named
-            const used = agent.accounts.filter((account) => on.includes(account.id))
-            const shown = rotate ? used : used.slice(0, 1)
-            return (
-              <Fragment key={agent.id}>
-                {t.accounts.works(agent.name)}
-                <Menu
-                  label={t.accounts.label(agent.name)}
-                  width={300}
-                  note={t.accounts.note}
-                  trigger={<RuleWord>{shown.map((account) => account.label).join(t.accounts.andThen)}</RuleWord>}
-                >
-                  <MenuGroup label={t.accounts.uses}>
-                    {agent.accounts.map((account) => {
-                      const checked = on.includes(account.id)
-                      return (
-                        <MenuCheckboxItem
-                          key={account.id}
-                          checked={checked}
-                          // The last one on stays on: work has to run on something.
-                          disabled={checked && on.length === 1}
-                          keepOpen
-                          onCheckedChange={(now) =>
-                            onAllowedChange(
-                              agent.id,
-                              every.filter((id) => (id === account.id ? now : on.includes(id))),
-                            )
-                          }
-                        >
-                          {account.label}
-                        </MenuCheckboxItem>
-                      )
-                    })}
-                  </MenuGroup>
-                  <MenuSeparator />
-                  <MenuRadioGroup
-                    label={t.accounts.rotation}
-                    value={rotate ? 'next' : 'first'}
-                    onChange={(value) => onRotateChange(value === 'next')}
+/**
+ * What a project's task does when it is finished and when an agent's usage runs out: the Finished and Limits sentences
+ * of its rules, which sit in its Tasks (docs/plans, direction A), said as the rules say them and changed in place.
+ */
+export function ProjectTaskRules({
+  headingLevel = 2,
+  show = 'both',
+  end,
+  onEndChange,
+  branches,
+  titles,
+  templates,
+  limit,
+  onLimitChange,
+  agentAccounts = [],
+  rotate,
+  onRotateChange,
+  allowed,
+  onAllowedChange,
+  text,
+  className,
+  ...rest
+}: ProjectTaskRulesProps) {
+  const t = { ...projectRulesText, ...text }
+  const sub: HeadingLevel = headingLevel
+  const branchName = nameShown(branches)
+  const titleName = nameShown(titles)
+  const withTemplate = templates.filter((repository) => repository.path !== null).length
+  const templateWord = withTemplate === 0 ? t.templates.none : withTemplate === templates.length ? t.templates.every : t.templates.some
+  const endWords = t.finished.end[end]
+  const pushOnly = end === TaskEnd.PushOnly
+  const rotating = rotate && agentAccounts.length > 0
+  return (
+    <div className={cx(s.rules, className)} {...rest}>
+      <Charter>
+        {show !== 'limits' && (
+          <Clause label={t.label.finished} headingLevel={sub} apart>
+            {pushOnly ? t.finished.pushes : t.finished.opens}
+            <ChoiceWord
+              word={endWords.word}
+              label={t.finished.label}
+              value={end}
+              onChange={onEndChange}
+              note={t.finished.note}
+              options={ENDS.map((value) => ({ value, title: t.finished.end[value].title, note: t.finished.end[value].note }))}
+            />
+            {pushOnly ? t.finished.named : t.finished.onBranch}
+            <NameWord rule={branches} shown={branchName} each={t.branches.each} label={t.branches.label} note={t.branches.note} />
+            {pushOnly ? t.finished.prTitled : t.finished.titled}
+            <NameWord rule={titles} shown={titleName} each={t.titles.each} label={t.titles.label} note={t.titles.note} />
+            {t.finished.described}
+            <Popover label={t.templates.label} width={380} trigger={<RuleWord>{templateWord}</RuleWord>}>
+              <span className={s.popLabel}>{t.templates.label}</span>
+              <span className={s.popNote}>{t.templates.note}</span>
+              <TemplateSources repositories={templates} />
+            </Popover>
+            .
+          </Clause>
+        )}
+
+        {show !== 'finished' && (
+          <Clause label={t.label.limits} headingLevel={sub}>
+            {rotating ? t.limits.rotating : t.limits.when}
+            <ChoiceWord
+              word={t.limits.limit[limit].word}
+              label={t.limits.label}
+              value={limit}
+              onChange={onLimitChange}
+              options={LIMITS.map((value) => ({ value, title: t.limits.limit[value].title, note: t.limits.limit[value].note }))}
+            />
+            {t.limits.limit[limit].after}.
+            {agentAccounts.map((agent) => {
+              const every = agent.accounts.map((account) => account.id)
+              // Those named that are still there; with none, as when the one named was removed, every one, as work runs.
+              const named = (allowed[agent.id] ?? every).filter((id) => every.includes(id))
+              const on = named.length === 0 ? every : named
+              const used = agent.accounts.filter((account) => on.includes(account.id))
+              const shown = rotate ? used : used.slice(0, 1)
+              return (
+                <Fragment key={agent.id}>
+                  {t.accounts.works(agent.name)}
+                  <Menu
+                    label={t.accounts.label(agent.name)}
+                    width={300}
+                    note={t.accounts.note}
+                    trigger={<RuleWord>{shown.map((account) => account.label).join(t.accounts.andThen)}</RuleWord>}
                   >
-                    <MenuRadioItem value="first" description={t.accounts.rotate.first.note}>
-                      {t.accounts.rotate.first.title}
-                    </MenuRadioItem>
-                    <MenuRadioItem value="next" description={t.accounts.rotate.next.note}>
-                      {t.accounts.rotate.next.title}
-                    </MenuRadioItem>
-                  </MenuRadioGroup>
-                </Menu>
-                .
-              </Fragment>
-            )
-          })}
-        </Clause>
+                    <MenuGroup label={t.accounts.uses}>
+                      {agent.accounts.map((account) => {
+                        const checked = on.includes(account.id)
+                        return (
+                          <MenuCheckboxItem
+                            key={account.id}
+                            checked={checked}
+                            // The last one on stays on: work has to run on something.
+                            disabled={checked && on.length === 1}
+                            keepOpen
+                            onCheckedChange={(now) =>
+                              onAllowedChange(
+                                agent.id,
+                                every.filter((id) => (id === account.id ? now : on.includes(id))),
+                              )
+                            }
+                          >
+                            {account.label}
+                          </MenuCheckboxItem>
+                        )
+                      })}
+                    </MenuGroup>
+                    <MenuSeparator />
+                    <MenuRadioGroup
+                      label={t.accounts.rotation}
+                      value={rotate ? 'next' : 'first'}
+                      onChange={(value) => onRotateChange(value === 'next')}
+                    >
+                      <MenuRadioItem value="first" description={t.accounts.rotate.first.note}>
+                        {t.accounts.rotate.first.title}
+                      </MenuRadioItem>
+                      <MenuRadioItem value="next" description={t.accounts.rotate.next.note}>
+                        {t.accounts.rotate.next.title}
+                      </MenuRadioItem>
+                    </MenuRadioGroup>
+                  </Menu>
+                  .
+                </Fragment>
+              )
+            })}
+          </Clause>
+        )}
       </Charter>
     </div>
   )

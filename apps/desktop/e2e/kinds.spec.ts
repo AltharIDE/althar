@@ -5,14 +5,14 @@ import { join } from 'node:path'
 import { expect, test } from '@playwright/test'
 
 import { repository } from '../tests/repository'
-import { launch, openFirstProject, planTask, say } from './support'
+import { launch, openFirstProject, planTask, say, toBoard, showPanes } from './support'
 
 /*
  * A board of every kind of task, in a real window with the fake agent
  * (DEV-96, ADR-035): a change ready to accept, its branch on its card; a
  * task whose lead asks the person, its question its card's why; a change at
- * work, its steps on its card; and a plain task, started with no plan, that
- * finished and waits in Needs you as Finished, opened or not, until the
+ * work, its steps on its card; and a plain task, started with no plan and
+ * moved off Scratch to the board, that finished and waits in Needs you as Finished, opened or not, until the
  * person presses Done or Keep for later (ADR-051). No other card has
  * anything to press but itself. Kept, it waits under Kept, named beside
  * Settled in its head; Done, it settles; written to again, its round ends
@@ -27,7 +27,7 @@ test('shows each kind of task on the board, with nothing to press, and finds one
   try {
     await openFirstProject(electronApp, page, repository(projects))
     await expect(page.getByRole('heading', { name: 'meridian', level: 1 })).toBeVisible()
-    await page.getByRole('radio', { name: 'Home' }).click()
+    await showPanes(page, { conversation: true, board: true })
     const work = page.getByRole('region', { name: 'The project’s work' })
 
     // A change, done and ready to accept, on its branch: no pull request without a host.
@@ -35,8 +35,10 @@ test('shows each kind of task on the board, with nothing to press, and finds one
     await page.getByRole('button', { name: 'Start now' }).last().click()
     await expect(work.getByText('Ready to accept')).toBeVisible()
 
-    // A plain task, started with no plan: it finishes, and waits as Finished.
+    // A plain task, started with no plan: a chat, on Scratch until the person moves it to the board, where it finishes and
+    // waits as Finished.
     await say(page, 'Which partners still call the v1 endpoint? [coordinator:start] [lead:finish]')
+    await toBoard(page, 'Which partners still call the v1 endpoint')
     await expect(work.getByText('Finished', { exact: true })).toBeVisible()
 
     // A task whose lead asks the person: one card, in Needs you, that says so.
@@ -97,8 +99,9 @@ test('shows each kind of task on the board, with nothing to press, and finds one
     await page.keyboard.press(process.platform === 'darwin' ? 'Meta+k' : 'Control+k')
     const finder = page.getByRole('dialog')
     await finder.getByRole('combobox').fill('webhook')
-    await expect(finder.getByRole('option')).toHaveCount(1)
-    await expect(finder.getByRole('option', { name: /Retry webhook deliveries/ })).toContainText('Ready')
+    // The task is the top hit, with where it stands; the words' own rows follow it.
+    await expect(finder.getByRole('option').first()).toContainText('Retry webhook deliveries')
+    await expect(finder.getByRole('option').first()).toContainText('Ready')
     await page.screenshot({ path: 'test-results/kinds-finder.png', animations: 'disabled' })
     await page.keyboard.press('Enter')
     await expect(page.getByRole('heading', { name: 'Retry webhook deliveries with backoff', level: 1 })).toBeVisible()

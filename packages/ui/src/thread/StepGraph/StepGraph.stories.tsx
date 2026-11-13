@@ -51,13 +51,14 @@ const LOOP: StepGraphStep[] = [
 
 const report = (id: string) => <p style={{ margin: 0 }}>{`The report of ${id}: what it found, what it did, and its summary.`}</p>
 
-const frame: CSSProperties = { height: 460, border: '1px solid var(--line)', borderRadius: 10, overflow: 'hidden' }
+const frame: CSSProperties = { width: '100%', height: 460, border: '1px solid var(--line)', borderRadius: 10, overflow: 'hidden' }
 
 const meta = {
   title: 'Thread/StepGraph',
   component: StepGraph,
   args: { lanes: LANES, rounds: [ASKED], steps: SIMPLE, detail: report, onRound: fn() },
-  decorators: [(Story) => <div style={frame}>{Story()}</div>],
+  // each story in a graph's frame; a grid frames each of its cells itself
+  decorators: [(Story, { parameters }) => (parameters.grid === true ? Story() : <div style={frame}>{Story()}</div>)],
   parameters: { layout: 'padded' },
 } satisfies Meta<typeof StepGraph>
 export default meta
@@ -68,6 +69,22 @@ export const Simple: Story = {}
 
 /** The review loop: the lead and the reviewer hand the work back and forth; the lead settles the second review. */
 export const ReviewLoop: Story = { args: { steps: LOOP } }
+
+/** A whole task as the README shows it: implemented, reviewed, settled, reviewed again until it passes, then its draft pull request. */
+export const RoundUntilClean: Story = {
+  args: {
+    rounds: [
+      { id: 'r1', by: 'You asked', said: 'EU customers are seeing the wrong VAT rate on their invoice PDFs since Monday. Can you fix it?' },
+    ],
+    steps: [
+      step('implement', 'lead', 'Implement', GraphNodeState.Done, { corner: '21m' }),
+      step('review-1', 'reviewer', 'Review 1', GraphNodeState.Done, { corner: '3m', outcome: '2 findings', warn: true }),
+      step('settle-1', 'lead', 'Settle', GraphNodeState.Done, { corner: '8m', outcome: '2 settled' }),
+      step('review-2', 'reviewer', 'Review 2', GraphNodeState.Done, { corner: '2m', outcome: 'Passed' }),
+      step('publish', 'althar', 'Pull request', GraphNodeState.Done, { corner: '9s', outcome: 'Draft #1214' }),
+    ],
+  },
+}
 
 /** A command waits for the person to allow it, mid-step: the step, and the line into it, in their colour. */
 export const AsksYou: Story = {
@@ -325,5 +342,5 @@ export const AllStates: Story = {
       ]}
     />
   ),
-  decorators: [(Story) => <>{Story()}</>],
+  parameters: { grid: true },
 }

@@ -26,3 +26,6 @@ apps/desktop/.flatpak-builder/
 
 # CI scratch exports (logs and unextracted artifacts)
 .althar/ci/
+
+# A database a test or a run left in the working folder
+/althar.sqlite*

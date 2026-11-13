@@ -1,4 +1,5 @@
 import { assert, describe, it } from '@effect/vitest'
+import { AgentExited, AgentRequestFailed, AgentStartFailed } from '@althar/provider-adapters'
 import { Cause, Duration } from 'effect'
 
 import { CliSignedOut } from '../src/Connections'
@@ -6,7 +7,7 @@ import { CoordinatorUnavailable } from '../src/Coordinator'
 import { AlreadyDelivered, ChangedSinceSeen, ImageRefused, RuleOnAnotherList, RulesChanged } from '../src/errors'
 import { ReviewDraftClosed, ReviewDraftIncomplete } from '../src/Reviews'
 import { StartTimedOut } from '../src/Sessions'
-import { agentSaid, expected, summarize, words } from '../src/words'
+import { agentSaid, expected, signedOutWords, signInEndedWords, stuckWhyOf, summarize, unreachableWords, words } from '../src/words'
 import { thisDevice } from '../src/device'
 
 /*
@@ -136,7 +137,7 @@ describe('the words for what went wrong, for the refusals the API’s tests don�
     // No command to name: git alone.
     assert.strictEqual(
       said({ _tag: 'GitFailed', args: ['-c', 'a=b'], stderr: '', timedOut: true }),
-      'git  got no answer in its time, so Althar stopped it. Try again.',
+      'git  got no answer in its time, so Althar stopped waiting. Try again.',
     )
     assert.strictEqual(
       said({ _tag: 'GitFailed', stderr: '', signal: 'SIGTERM' }),
@@ -153,7 +154,7 @@ describe('the words for what went wrong, for the refusals the API’s tests don�
       detail: 'fatal: no\nExit code 128.',
     })
     assert.strictEqual(failed({ signal: 'SIGKILL' }).detail, 'fatal: no\nStopped by SIGKILL.')
-    assert.strictEqual(failed({ timedOut: true, timeout: 30_000 }).detail, 'fatal: no\nStopped after 30 seconds with no answer.')
+    assert.strictEqual(failed({ timedOut: true, timeout: 30_000 }).detail, 'fatal: no\nStopped waiting after 30 seconds with no answer.')
     assert.isUndefined(words({ _tag: 'GitFailed', args: ['fetch'], stderr: ' ', code: 1 }, name).detail)
   })
 
@@ -189,5 +190,170 @@ describe('the words for what went wrong, for the refusals the API’s tests don�
       'Submodule vendor/lib has uncommitted changes, or isn’t at the commit recorded for it.',
     )
     assert.strictEqual(merge('submodule'), 'Submodule the merge stopped has uncommitted changes, or isn’t at the commit recorded for it.')
+  })
+})
+
+describe('why an agent couldn’t start or be reached (DEV-196)', () => {
+  const exited = (stderr: string) => new AgentExited({ code: 1, signal: null, stderr })
+  const refused = (failure: AgentRequestFailed['failure'], message: string) =>
+    new AgentRequestFailed({ method: 'session/new', failure, message })
+
+  it('says it isn’t installed, by its command', () => {
+    assert.strictEqual(
+      summarize(Cause.fail(new AgentStartFailed({ command: 'claude', reason: 'spawn claude ENOENT' }))),
+      `claude isn't installed, or isn't on ${thisDevice()}'s PATH.`,
+    )
+    // An agent that started and then couldn't run its own CLI: the adapter's spawn of it, as claude-agent-acp's is.
+    assert.strictEqual(
+      agentSaid(
+        exited('Error: spawn /usr/local/bin/claude ENOENT\n    at ChildProcess._handle.onexit (node:internal/child_process:286:19)'),
+      ),
+      `The agent isn't installed, or isn't on ${thisDevice()}'s PATH.`,
+    )
+  })
+
+  it('takes no class from what an agent that started wrote further up, or of an MCP server, a hook or a tool', () => {
+    // An MCP server refused at start-up, far above why the agent stopped.
+    assert.strictEqual(
+      agentSaid(
+        exited(
+          [
+            'MCP client for `linear` failed to start: HTTP error: 401 Unauthorized',
+            'Loaded 12 skills',
+            'Resuming session 0198…',
+            'Indexing workspace',
+            'Error: Cannot find module "./auth"',
+          ].join('\n'),
+        ),
+      ),
+      'The agent stopped: Error: Cannot find module "./auth".',
+    )
+    // The same, just above the last line: still the MCP server's, not the agent's sign-in.
+    assert.strictEqual(
+      agentSaid(exited('MCP server "github" failed: 401 Unauthorized\nError: config.toml is not valid TOML')),
+      'The agent stopped: Error: config.toml is not valid TOML.',
+    )
+    // A hook's shell, which can't find its own command: the agent is there.
+    assert.strictEqual(
+      agentSaid(exited('PreToolUse hook: sh: 1: prettier: command not found\nError: session/prompt was cancelled')),
+      'The agent stopped: Error: session/prompt was cancelled.',
+    )
+    assert.strictEqual(agentSaid(exited('sh: 1: prettier: command not found')), 'The agent stopped: sh: 1: prettier: command not found.')
+    // A tool's request that timed out, retried, before the agent stopped for another reason.
+    assert.strictEqual(
+      agentSaid(
+        exited('fetch https://registry.npmjs.org/foo failed: ETIMEDOUT, retrying\nLoaded 3 tools\nIndexing\nfatal: not a git repository'),
+      ),
+      'The agent stopped: fatal: not a git repository.',
+    )
+    // A bare 401 isn't a sign-in: only a status the agent's own request got.
+    assert.strictEqual(agentSaid(exited('Error: expected 401 rows, read 400')), 'The agent stopped: Error: expected 401 rows, read 400.')
+  })
+
+  it('takes out a credential the agent’s own line carried', () => {
+    assert.strictEqual(
+      agentSaid(
+        exited(
+          'Error: request to https://generativelanguage.googleapis.com/v1beta/models?key=AIzaSyA1b2C3d4E5f6G7h8I9j0KlMnOpQrStUvW failed',
+        ),
+      ),
+      'The agent stopped: Error: request to https://generativelanguage.googleapis.com/v1beta/models?key=[REDACTED] failed.',
+    )
+    assert.strictEqual(
+      agentSaid(
+        refused('unknown', 'Error: upstream refused the request with Authorization: Bearer eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.abc'),
+      ),
+      'Error: upstream refused the request with Authorization: [REDACTED] [REDACTED].',
+    )
+    // A key in a URL's query that isn't shaped as Google's: its name says it.
+    assert.strictEqual(
+      agentSaid(exited('Error: GET https://api.example.com/v1/models?api_key=c0ffee-1234-beef&limit=5 failed: 403')),
+      'The agent stopped: Error: GET https://api.example.com/v1/models?api_key=[REDACTED]&limit=5 failed: 403.',
+    )
+    assert.strictEqual(
+      summarize(
+        Cause.fail(new AgentStartFailed({ command: 'codex', reason: 'invalid environment: OPENAI_API_KEY=sk-proj-abcdef123456 refused' })),
+      ),
+      "codex wouldn't start: invalid environment: OPENAI_API_KEY=[REDACTED] refused.",
+    )
+  })
+
+  it('says it isn’t signed in, with the way back in', () => {
+    assert.strictEqual(agentSaid(refused('auth_required', 'Authentication required')), signedOutWords)
+    assert.strictEqual(agentSaid(exited('Not logged in · Please run /login')), signedOutWords)
+  })
+
+  it('says its sign-in ended, which a step’s call offers to sign in again as it does one signed out', () => {
+    assert.strictEqual(agentSaid(refused('auth_required', 'Login expired · Please run /login')), signInEndedWords)
+    assert.strictEqual(
+      agentSaid(
+        refused(
+          'unknown',
+          'Your access token could not be refreshed because your refresh token has expired. Please log out and sign in again.',
+        ),
+      ),
+      signInEndedWords,
+    )
+    assert.strictEqual(agentSaid(exited('Failed to authenticate: OAuth session expired and could not be refreshed')), signInEndedWords)
+  })
+
+  it('gives a step that stopped on it the reason whose call offers its fix: signing in again, or installing it', () => {
+    assert.strictEqual(stuckWhyOf(signedOutWords), 'signed_out')
+    assert.strictEqual(stuckWhyOf(signInEndedWords), 'sign_in_ended')
+    assert.strictEqual(stuckWhyOf(agentSaid(new AgentStartFailed({ command: 'codex', reason: 'spawn codex ENOENT' }))), 'not_installed')
+    assert.strictEqual(stuckWhyOf(agentSaid(exited('/bin/sh: 1: claude: not found\nspawn claude ENOENT'))), 'not_installed')
+    assert.isUndefined(stuckWhyOf(unreachableWords(thisDevice())))
+    assert.isUndefined(stuckWhyOf('The agent stopped.'))
+    assert.isUndefined(stuckWhyOf(null))
+  })
+
+  it('says its classes in straight apostrophes, as the line it follows does, and never names "the agent" after its name', () => {
+    for (const line of [signInEndedWords, unreachableWords(thisDevice())]) {
+      assert.notInclude(line, '’')
+      assert.notMatch(line, /^The agent/)
+    }
+  })
+
+  it('says the network is in the way, for a connection that failed, not a server’s own trouble', () => {
+    assert.strictEqual(
+      agentSaid(refused('transient', "API Error: Can't reach the API server — check your internet or DNS (ENOTFOUND)")),
+      unreachableWords(thisDevice()),
+    )
+    assert.strictEqual(
+      agentSaid(refused('transient', 'API Error: 529 Overloaded. This is a server-side issue, usually temporary — try again in a moment.')),
+      'API Error: 529 Overloaded. This is a server-side issue, usually temporary — try again in a moment.',
+    )
+  })
+
+  it('says a refusal’s first error line alone, where it gave several, with the line under it that says what to fix', () => {
+    assert.strictEqual(
+      agentSaid(refused('unknown', 'Loading MCP servers…\nError: invalid config at ~/.codex/config.toml\n  line 4: unknown key "modle"')),
+      'Error: invalid config at ~/.codex/config.toml: line 4: unknown key "modle".',
+    )
+    assert.strictEqual(
+      agentSaid(refused('unknown', 'Error: could not parse settings.json:\nUnexpected token } in JSON at position 212\nat JSON.parse')),
+      'Error: could not parse settings.json: Unexpected token } in JSON at position 212.',
+    )
+    assert.strictEqual(
+      agentSaid(exited('Error: invalid config at ~/.codex/config.toml\nline 4: unknown key "modle"')),
+      'The agent stopped: Error: invalid config at ~/.codex/config.toml: line 4: unknown key "modle".',
+    )
+    assert.strictEqual(
+      agentSaid(refused('transient', 'stream disconnected before completion\nerror: 502 Bad Gateway\n<html>…</html>')),
+      'error: 502 Bad Gateway.',
+    )
+    assert.strictEqual(
+      summarize(
+        Cause.fail(new AgentStartFailed({ command: 'codex', reason: 'spawn codex EACCES\n    at ChildProcess._handle (node:internal)' })),
+      ),
+      "codex wouldn't start: spawn codex EACCES.",
+    )
+  })
+
+  it('else says the agent’s own first error line', () => {
+    assert.strictEqual(
+      agentSaid(exited('Loading plugins…\nError: Cannot find module "./auth"\n    at Module._resolveFilename (node:internal)\n')),
+      'The agent stopped: Error: Cannot find module "./auth".',
+    )
   })
 })

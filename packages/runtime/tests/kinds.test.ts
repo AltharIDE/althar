@@ -80,7 +80,12 @@ const plain = (projectId: string, title: string, description: string) =>
 /** The task's card once it stands where `check` wants it. */
 const cardOnce = (
   taskId: string,
-  check: (card: { readonly phase: string; readonly kind: string; readonly keptAt?: string | null | undefined }) => boolean,
+  check: (card: {
+    readonly phase: string
+    readonly kind: string
+    readonly keptAt?: string | null | undefined
+    readonly replied?: string | undefined
+  }) => boolean,
 ) =>
   Effect.gen(function* () {
     const queries = yield* Queries
@@ -209,19 +214,21 @@ describe("a task's kind", () => {
         home.tasks.map((task) => task.title),
         ['Which partners still call v1?', 'Sketch the settings', 'Retry the checkout', 'Keep the old checkout'],
       )
-      const readyIn = Effect.map(queries.projects, (all) => all.projects.find((one) => one.id === project.projectId)?.ready)
-      assert.strictEqual(yield* readyIn, 4)
-      assert.lengthOf([...(yield* queries.kept)], 0)
+      // The project counts what its board's Needs you shows: not the question, an aside its coordinator started on Scratch,
+      // but the sketch, which went to the board as its lead committed (cards.ts, offScratch).
+      assert.isTrue((yield* queries.card(question.taskId)).scratch)
+      assert.isUndefined((yield* queries.card(sketch.taskId)).scratch)
+      const yoursIn = Effect.map(queries.projects, (all) => all.projects.find((one) => one.id === project.projectId)?.yours)
+      yield* until(yoursIn, (n) => n === 3)
       // Kept for later, it is out of Needs you: kept on its board, and nothing else counts it.
-      assert.isTrue(yield* keep(question.taskId))
-      const shelved = yield* cardOnce(question.taskId, (card) => card.phase === 'kept')
+      assert.isTrue(yield* keep(sketch.taskId))
+      const shelved = yield* cardOnce(sketch.taskId, (card) => card.phase === 'kept')
       assert.isNotNull(shelved.keptAt)
       assert.notInclude(
         (yield* queries.home()).tasks.map((task) => task.title),
-        'Which partners still call v1?',
+        'Sketch the settings',
       )
-      assert.strictEqual(yield* readyIn, 3)
-      assert.sameMembers([...(yield* queries.kept)], [question.taskId])
+      yield* until(yoursIn, (n) => n === 2)
     }).pipe(Effect.provide(withQueries())),
   )
 
@@ -482,7 +489,8 @@ describe('settling a task that isn’t a change', () => {
           })
         })
 
-      // Told to keep it, its lead keeps it for later; told it is done, settles it, in the round the person's words opened.
+      // Told to keep it, its lead keeps it for later; told it is done, settles it, in the turn the person's words began: what it
+      // answers with that leaves nothing to read in Needs you.
       yield* write(question, 'Keep this for later. [lead:task-keep]')
       yield* cardOnce(question.taskId, (card) => card.phase === 'kept')
       yield* write(question, 'Mark this as done. [lead:task-done]')
@@ -501,7 +509,7 @@ describe('settling a task that isn’t a change', () => {
     }).pipe(Effect.provide(withQueries())),
   )
 
-  it.live('ends a round after Done, or after Keep for later, in Needs you, never straight back in Settled', () => {
+  it.live('ends a turn after Done, or after Keep for later, in Needs you, never straight back in Settled', () => {
     const lead = holds()
     return Effect.gen(function* () {
       const tasks = yield* Tasks
@@ -509,53 +517,49 @@ describe('settling a task that isn’t a change', () => {
       const sql = yield* SqlClient.SqlClient
       const project = yield* open
       const question = yield* plain(project.projectId, 'Which partners still call v1?', '[lead:finish]')
-      yield* cardOnce(question.taskId, (card) => card.phase === 'ready')
+      const sketch = yield* plain(project.projectId, 'Sketch the settings', '[lead:finish]')
+      for (const task of [question, sketch]) yield* cardOnce(task.taskId, (card) => card.phase === 'ready')
       // What the window does as the person writes to it: with no agent on the thread, as once the task is done, it starts its lead.
-      const write = (body: string) =>
+      const write = (task: { readonly taskId: string; readonly threadId: string }, body: string) =>
         Effect.gen(function* () {
-          yield* tasks.bringBack(question.taskId)
-          const held = Option.isSome(yield* sessions.running(question.threadId))
+          yield* tasks.bringBack(task.taskId)
+          const held = Option.isSome(yield* sessions.running(task.threadId))
           yield* sessions.send({
-            envelope: yield* Runtime.envelope('thread.send', { threadId: question.threadId, body }),
-            threadId: question.threadId,
+            envelope: yield* Runtime.envelope('thread.send', { threadId: task.threadId, body }),
+            threadId: task.threadId,
             body,
           })
-          if (!held) yield* sessions.startLast(question.threadId)
+          if (!held) yield* sessions.startLast(task.threadId)
         })
-      const roundsEnded = (n: number) =>
-        until(
-          sql<{
-            n: number
-          }>`SELECT count(*) AS n FROM runs WHERE task_id = ${question.taskId} AND plan_id IS NULL AND state <> 'running'`,
-          (rows) => (rows[0]?.n ?? 0) === n,
-        )
+      const rounds = (taskId: string) =>
+        Effect.map(sql<{ n: number }>`SELECT count(*) AS n FROM runs WHERE task_id = ${taskId} AND plan_id IS NULL`, (rows) => rows[0]?.n)
 
-      // Done, then written to: it goes back to work as a round, which makes nothing, and it waits in Needs you.
+      // Done, then written to: its lead answers in a turn, not a round. The task stays done, and its answer waits in Needs you.
       assert.isTrue(yield* markDone(question.taskId))
+      const done = yield* row(question.taskId)
       // Settled, its lead stops.
       yield* until(
         Effect.map(sessions.running(question.threadId), (running) => (Option.isNone(running) ? [true] : [])),
         (gone) => gone.length === 1,
       )
-      yield* write('And the v2 ones? [lead:slowly]')
-      // At work on it, as a round: then it goes on, and the round ends.
-      yield* until(
-        sql<{ n: number }>`SELECT count(*) AS n FROM runs WHERE task_id = ${question.taskId} AND plan_id IS NULL AND state = 'running'`,
-        (rows) => (rows[0]?.n ?? 0) === 1,
-      )
+      yield* write(question, 'And the v2 ones? [lead:slowly]')
+      yield* cardOnce(question.taskId, (card) => card.phase === 'running')
       lead.open('[lead:slowly]')
-      yield* roundsEnded(1)
-      yield* cardOnce(question.taskId, (card) => card.phase === 'ready')
-      assert.deepInclude(yield* row(question.taskId), { state: 'open', settledAt: null })
+      yield* cardOnce(question.taskId, (card) => card.phase === 'ready' && card.replied !== undefined)
+      assert.deepInclude(yield* row(question.taskId), { state: 'done', settledAt: done.settledAt })
+      assert.strictEqual(yield* rounds(question.taskId), 0)
+      // Done again, it is read and settled, where it was.
+      assert.isTrue(yield* markDone(question.taskId))
+      yield* cardOnce(question.taskId, (card) => card.phase === 'settled')
 
-      // Kept for later, then written to: it is back, and its round ends in Needs you too.
-      assert.isTrue(yield* keep(question.taskId))
-      yield* cardOnce(question.taskId, (card) => card.phase === 'kept')
-      yield* write('And the v3 ones? [lead:slowly]')
-      yield* roundsEnded(2)
-      const back = yield* cardOnce(question.taskId, (card) => card.phase === 'ready')
+      // Kept for later, then written to: it is back, and its turn ends in Needs you too.
+      assert.isTrue(yield* keep(sketch.taskId))
+      yield* cardOnce(sketch.taskId, (card) => card.phase === 'kept')
+      yield* write(sketch, 'And the v3 ones?')
+      const back = yield* cardOnce(sketch.taskId, (card) => card.phase === 'ready' && card.replied !== undefined)
       assert.isUndefined(back.keptAt)
-      assert.strictEqual((yield* row(question.taskId)).state, 'open')
+      assert.strictEqual((yield* row(sketch.taskId)).state, 'open')
+      assert.strictEqual(yield* rounds(sketch.taskId), 0)
     }).pipe(Effect.provide(withQueries({ holds: lead })))
   })
 })

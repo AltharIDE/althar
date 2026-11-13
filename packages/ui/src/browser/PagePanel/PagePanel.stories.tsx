@@ -57,7 +57,6 @@ const beside: Decorator = (Story) => (
 
 /** A task's run beside its conversation: back, forward, reload, the address in the task's session, Viewport, Comment, out, a tab, Close. */
 export const Beside: Story = { decorators: [beside] }
-export const BesideDark: Story = { ...Beside, globals: { theme: 'dark' } }
 
 /** Loading: reload becomes stop. */
 export const Loading: Story = { args: { loading: true }, decorators: [beside] }
@@ -73,7 +72,6 @@ export const AtAPhone: Story = {
   },
   decorators: [beside],
 }
-export const AtAPhoneDark: Story = { ...AtAPhone, globals: { theme: 'dark' } }
 
 /** Viewport, opened: the panel's own size, or a desktop's, a laptop's, a tablet's or a phone's. */
 export const ViewportMenu: Story = {
@@ -118,7 +116,14 @@ export const PermissionRefused: Story = {
   },
   decorators: [beside],
 }
-export const PermissionRefusedDark: Story = { ...PermissionRefused, globals: { theme: 'dark' } }
+
+/** The lead acting on the page: who, and that the person's own press in the page stops it. No way to dismiss it: it goes when the lead is done. */
+export const LeadAtWork: Story = {
+  args: {
+    line: <PageLine icon="agents">The lead is at work on this page. A click or key press from you stops the lead.</PageLine>,
+  },
+  decorators: [beside],
+}
 
 /** In a tab of its own, with the way back beside the conversation. */
 export const InATab: Story = { args: { docked: 'tab' }, decorators: [(Story) => <div style={{ height: '100vh' }}>{Story()}</div>] }

@@ -39,7 +39,7 @@ inferred; where a file says otherwise than the docs, the file's is given.
 | Modes | Per agent: its own, Ask, Accept edits, Approve for me (Auto), Full access (its docs still say Yolo and Manual) | Supervised, Auto-accept edits, Auto, Full access, per thread; an admin can cap it (`maxRuntimeMode`) | Rules, judge, Allow everything |
 | Sandbox | None: "a worktree is an isolated checkout, not a security sandbox". Docker is experimental | None. A Docker pull request is open | OS sandbox for Claude leads: writes only the worktree, reads everything but secrets |
 | The person's MCP servers | Yes: Claude's user, project and local settings; Codex's `~/.codex` copied, its servers with it. The app can start an empty `.mcp.json`, not add a server | Yes, and its own server beside them. Claude threads set neither `settingSources` nor `strictMcpConfig` (`ClaudeAdapterV2.ts`, `makeClaudeQueryOptions`), and the Agent SDK it locks (0.3.316) loads every source when `settingSources` is omitted, in `~/.claude` unless the person picks another home; only its capabilities probe and its text generation run strict. Codex keeps its own config. Antigravity's are kept out | None, for every role (`strictMcpConfig`; switched off by name for Codex and OpenCode). Copilot, Kimi Code and Mistral Vibe load them already |
-| The person's skills and plugins | Yes | Yes, offered in the composer | Althar's catalog, task leads only, every catalog skill off until turned on |
+| The person's skills and plugins | Yes | Yes, offered in the composer | What the person added from GitHub, task leads only, each off until turned on |
 | Code host | The app pushes, opens, stacks and merges pull requests; agents inherit the person's environment, `gh` and git's cached credentials included | The same: agents inherit the host's environment and open pull requests with `gh` themselves, which the app spots and links | No sign-in for agents; Althar's tools, reaching only the task's own pull request |
 | Someone else's PR | A worktree at its head, forks included | "Work on PR" (in its mobile app): a thread on its branch, at the thread's mode | Read-only copy, runs nothing, no skills or MCP, draft only |
 | A task's shape | A workspace links many pull requests and issues | A thread holds several pull requests and can move to a new worktree mid-thread | Three kinds with one-way paths between them |
@@ -173,8 +173,8 @@ the code at `6fa8c335e`; file and line references were checked there.
   out per agent which calls reach Althar (Codex sends MCP approvals to
   `request_permission` only as a fallback), and write the rest into each
   entry's `knownGaps`.
-- Skills: the catalog on by default (`skills` `local.ts`), for every role
-  (`Sessions.ts`'s `!reads`); the person's own skills and plugins load as
+- Skills: what the person added on by default, for every role
+  (`Sessions.ts`'s `!reads`); Althar ships none of its own; the person's own skills and plugins load as
   their agent loads them (they already do for leads, through the agents'
   own folders); `allowed-tools` no longer refused at install, `hooks` still
   is (`validate.ts`).
@@ -263,7 +263,7 @@ lasted of it).
   (ADR-071's review steps). *Moved to phase 4* when phase 2 was built: its
   copy becomes a worktree it can install in, as a team pull request's
   review's does, and both are one change to how a review's copy is made.
-- **Helpers** (ADR-087, when built) get their lead's MCP servers and skills.
+- **Helpers** ([tasks § Helpers](../decisions/tasks.md#helpers)) get their lead's MCP servers and skills.
 
 **As built.** One tool set: each tool is defined once and served to both
 roles (`ToolServer.serve(POOL, …)`); the coordinator has every tool but a
@@ -339,6 +339,12 @@ The remaining host-tool changes below build on it.
 
 ### 4. Reviews that run things
 
+> **Taken into phase 5** by
+> [a task is a conversation plus parts](../decisions/tasks.md#changing-parts),
+> which supersedes this list where they differ. There, "run it" asks how
+> far to trust the code: Run safely, offline in the sandbox as below, or
+> Trust fully, with the recorded setup and the network on.
+
 - **A task's own review step** (ADR-071), moved here from phase 2: its
   reviewer gets a copy it can install in, with the project's setup
   replayed, and `install_dependencies` and `run_project`, to run the task's
@@ -366,6 +372,15 @@ The remaining host-tool changes below build on it.
 
 ### 5. The task as parts
 
+> **Superseded** by
+> [a task is a conversation plus parts](../decisions/tasks.md#changing-parts)
+> where they differ. It has five parts, not three: Workspace, Checked by
+> (who reviews the task's own work), Reviewing (the pull requests it
+> reviews, which this list puts in Outputs), Outputs and Access. Each
+> changes at any time, by the person, the lead or the coordinator, and
+> only running an outside author's code and a removal that would lose
+> something wait for the person's word.
+
 ADR-035 already reads a task's kind from what it has. The next step is
 letting it have any mix of parts, each added or dropped on the person's
 word. Then no kind needs a hand-written path to another.
@@ -386,8 +401,14 @@ word. Then no kind needs a hand-written path to another.
 - Merging two tasks into one stays out (6 Nov).
 
 This phase is the largest. It changes ADR-035, ADR-052 and the change sets
-model (`change_sets`, `repository_changes`), so it gets an ADR of its own
-once phases 1 to 4 have shown what it needs.
+model (`change_sets`, `repository_changes`), so it gets an ADR of its own:
+[a task is a conversation plus parts](../decisions/tasks.md#changing-parts),
+proposed on 8 November. It takes in phase 4: a review that runs code is a
+review whose workspace moved up. It also makes talking to a lead quick: a
+message is a turn with no review, and a tweak is reviewed once, when the
+person ships it. And a task holds as many changes as it needs, each with
+its own branch, worktree and pull request. Once that ADR is accepted, all
+of it is built together.
 
 ## What stays, and why
 

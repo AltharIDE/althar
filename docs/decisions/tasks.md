@@ -11,10 +11,9 @@ ADR-021,
 ADR-034,
 ADR-035,
 ADR-051,
+ADR-087,
 ADR-088,
 ADR-102.
-Proposed and not built:
-[ADR-087](proposed/087-a-lead-starts-helpers-on-any-agent-in-copies-of-their-own.md) (helpers).
 
 ## What a task is
 
@@ -24,32 +23,256 @@ temporary chat, prototype or document type. A task is long-lived: the person
 keeps talking to it after its plan ends, and nothing it can reach leaves its
 lead's work unshippable.
 
-**The direction (the person's note of 13 October).** A task is a loose
-container: a conversation, plus parts that attach and change at any time.
-The parts are a workspace, a review, outputs and access. The lightest form is
-a temporary chat, kept on a Scratch shelf off the board, and common uses
-become presets.
+**The direction (the person's note of 13 October), built in November.** A
+task is a loose container: a conversation, plus parts that attach and change
+at any time. Each part has one job, so removing one means one thing:
 
-**As built**, a task's header shows its parts in a row:
+| Part | What it holds | In the parts row |
+|---|---|---|
+| **Workspace** | Where the work happens: a copy, a worktree or Local, with its branch and what it works toward. One for each of the task's changes in each repository, and one at each pull request it reviews | Always, with what runs there |
+| **Checked by** | Who reviews the task's own work, and when: before it ships, or after it merges | Where there is a reviewer |
+| **Reviewing** | Pull requests the task reviews, each with its drafted review | Each pull request reviewed |
+| **Outputs** | Pull requests it opened or attached, its issue, its pictures and files | Each one |
+| **Access** | What the lead may run in that code, read from who wrote it: Read only, Runs safely or Trusted | Only for an outside author's code |
 
-- its worktree;
-- its pull requests;
-- a review it drafted;
-- its issue;
-- what it runs;
-- what it made.
+A task's header shows its parts in a row. Each acts through what the window
+already does: Merge accepts (on a stacked change, "Merge PR #714, then PR
+#715"), Post it posts a draft, a failing check asks the lead to fix it,
+Remove takes a settled task's folder, a folder's row moves a running task
+between a worktree and Local or points it at another branch, and each
+helper at work has Stop. Add takes on a pull request, opened or attached;
+what only the lead can take on is asked of it in the person's words. The
+person can change a task's team at any time.
 
-Each part acts through what the window already does: Merge accepts, Post it
-posts a draft, a failing check asks the lead to fix it, and Remove takes the
-folder. Add takes on a pull request, opened or attached. A part only the lead
-can take on, such as a worktree, a review, an issue or a page, is asked of it
-in the person's words. The person can change a task's team, its lead and its
-reviewer, at any time, not only before it starts.
+## Changing parts
 
-**Not built yet:** the Scratch shelf, presets, and moving a running task to
-another place or target branch, which can only change until its first step
-([workspaces-and-runs.md](workspaces-and-runs.md)). These are in
-[open questions](../open-questions.md).
+- **The person** changes parts from the parts row and the task's menu:
+  moving, pointing elsewhere, Run it, Save as preset, Move to Scratch.
+- **The lead and the coordinator** change them at once, on the person's word,
+  any task's, the lead's own included (the person's note of 12 November:
+  every part changes at any time, up or down, by telling the lead or the
+  coordinator, in plain words or by voice, and is never refused or detoured),
+  with a reason, with `add_part`, `change_part` and `remove_part`, which they
+  share: a worktree taken where a copy stands (its branch made where it
+  stands, so nothing is lost on a detached head), another change, a review, a
+  pull request followed; a workspace moved or pointed at another branch;
+  Scratch or the board; Checked by put on, changed or taken off (`checked_by`,
+  a review under way stopping); the ending (`ending`: here, its branch, a
+  draft or a ready pull request; an open draft is marked ready, and one open
+  where it goes back to its branch is closed, its branch staying; no host
+  turns a ready one back into a draft, so the next opens as one; an ending
+  asked for is the person's own, `endChosen`, which a preset saved from the
+  task keeps); another preset's parts at once (`preset`), its lead staying,
+  its ending set before its review changes, so a review it stops never sends
+  the work up as the task ended before, and a Ship under way as it comes to
+  stay here sends nothing (`ships.stays`); a review dropped; a
+  pull request no longer followed. `change_lead` changes its lead's model
+  and effort, and its reviewer, on a lead's own task too. Each says what it
+  did in a line of the task's thread.
+- **Two moves are the person's word alone:** running an outside author's
+  code (Run it, and Stop running it, [reviews](reviews.md#run-it)), and
+  removing a review whose draft was never posted, which would lose it.
+- **Removing a running task's workspace** drops that change: what it hadn't
+  committed is committed first ("Work in progress, as its change was
+  dropped"), its folder goes and its branch stays. A task's only worktree
+  moves down to a copy, its branch keeping its work.
+- **A move that changes the lead's folder waits for its turn to end:**
+  between a worktree and Local ([workspaces and
+  runs](workspaces-and-runs.md#moving-a-running-task)), and a rebase onto a
+  new target. Every other change is made at once.
+- `make_it_a_change` stays, for a quick task: adding a worktree, Checked by
+  and an ending at once. On any other task (a prototype, a chat planned as
+  one) it gives the same review and ending in place, as `change_part` with
+  preset Change does, and Ship then reviews it and opens its pull request.
+  Where no repository of it is on a code host Althar knows, both leave it on
+  its branch with nothing going up (the plan's ending null), as a plan made
+  there from Change ends, never pushing a branch with nowhere to go.
+- **The task menu's Make it a change** does that in one press for a task
+  that ends with no pull request: a prototype, a chat, a quick task
+  (`ShapeTask`).
+
+## A task holds as many changes as it needs
+
+A change is one line of work with its own branch, worktree and pull request,
+which ships and is reviewed on its own (`workspaces.name`, one row per
+change in each repository, unique per branch). Whether work is one change
+or several is the lead's call where the person hasn't said.
+
+- **`start_change`**, for the lead and the coordinator, starts one at once,
+  on a branch and worktree of its own beside the first's, from what the task
+  works toward, toward another branch, or **stacked** on another change:
+  branching from its branch, its pull request going into it. The thread
+  marks it as a step of the work ("New change · Lane heights, on
+  althar/lane-heights."), and the lead's brief lists every change's folder.
+- **Ship ships each change waiting in a Ship of its own,** the bottom of a
+  stack first, the next starting once the one before is over: each reviewed
+  on its own, its review reading and marking only that change's worktree, so
+  the others' marks stay where their last review left them. A change's own
+  Ship (its row's, or `ship_task` with `change`) ships it with what waits
+  beneath it in its stack. A change whose branch carries commits that wait
+  for Ship on the change below is held with them, worked out from git before
+  each push.
+- **The thread stamps a row** for each change of several as it ships
+  ("Shipped · Lane heights, 2 commits to PR #714") and merges ("Merged ·
+  Lane heights into main"), as it does for one started. A turn's line says
+  where its commits went once the task has several ("Worked for 4m · 2
+  commits to Lane heights"): each change's head is read as the turn starts.
+- **The card says one sentence across them:** what's alike counted ("Both
+  ready to merge", "Waiting for checks on all 3"), else the most pressing
+  named ("Lane heights: checks failing"), merged and closed ones left out
+  while any is open; a mark for each at its foot, beside "3 changes", in the
+  colour of what it means (violet waits on the person, cobalt checks
+  running, red failing, green merged, grey the rest).
+- **The header's parts list every change:** its name, branch, the change it
+  stacks on or waits for, its pull request, whether commits wait for Ship on
+  it, and the helper at work on it, with its own Ship.
+- **Keep them together** (`join_changes`, and the button on a change's row
+  that its lead or the coordinator split) joins two changes before either
+  ships: one's own commits are picked onto the other, and its folder goes.
+  **Drop it**, on a change the lead's git made, drops it, its branch staying.
+- **A change can wait for another to merge** without stacking on it
+  (`start_change`'s `waits_for`): both go into the same branch, its row says
+  "Waits for Fix main to merge", and once that one merges, what merged is
+  brought into it, said in the thread.
+- **Merge on a stacked change** merges the one below first, as it stands.
+  Once a change merges, each change stacked on it goes into what it went
+  into, on the host and in its workspace, said in the thread.
+- **The lead's git is followed, not forbidden:** a branch it makes in a
+  change's folder becomes a change of the task's, the change that folder
+  left keeping its branch and pull request (`away`) until it is worked on
+  again; one left detached, or on what it works toward, gets a line. A pull
+  request opened outside Althar (`gh pr create`, an MCP server, the
+  website) from a change's own branch into what it works toward is that
+  change's; one into another base is named in a line and not taken.
+- **The task settles once all its changes are done.** "Not done yet" is
+  said only once something of it has merged. Outputs groups its pull
+  requests by change, and the card counts them ("3 changes").
+
+## Asides
+
+An aside is a chat: a task with a conversation and a copy of the default
+branch, and nothing else, kept off the board (`tasks.shelf`, "Scratch" in
+the code). It sits beside the coordinator's conversation, as a pill over it:
+**Coordinator** first, with Althar's mark, then each aside, the latest
+exchange first, a live dot while its agent is at it, and an × that clears
+it (`AsideTabs`). Its agent
+has the coordinator's tools, and its turns are signed Coordinator too, as
+the coordinator's are: an aside is a quick word with the coordinator that
+leaves its conversation as it was.
+
+- **Started** as + over the conversation is pressed (`StartTask` with
+  `chat`), on the model the composer has picked, by an id the window makes:
+  made on Scratch, never on the board even for a moment, with no card in the
+  coordinator's conversation and nothing of it in the coordinator's news. Its
+  one pill is keyed by that id from the first frame, and says New aside
+  until the person's first words, which the coordinator's composer sends to
+  its thread, name it. Its copy (made from the default branch as last
+  fetched, with no wait on the network) and its lead get ready while the
+  person writes; the lead's brief waits for those words and goes out with
+  them, as the coordinator's does, on the lead the composer has picked as
+  they are sent. Its picker is its own, the coordinator's left as it was. One left unsaid takes no pill, and the next + opens it
+  again rather than another; its × only closes it. Words the coordinator
+  said, selected, start one about them, quoted over the composer and above
+  the person's words. The coordinator still starts one at once with
+  `start_task`, made on Scratch as + makes one.
+  An aside's lead never waits for a task slot and takes none: its start and
+  every turn go at once, even with a full task queue. A saved aside held for
+  a place by an older build starts on reopening too. Once made a task, it
+  counts among the task agents again. Its first words and title show as
+  Enter is pressed, and its thread is read while the person writes, so
+  opening the conversation flashes no loading skeleton.
+- **Answered** in its lead's reply: an aside's brief is light (who it is,
+  where it reads, its tools, the person's decisions), with no step to report,
+  no finish_step and no evidence, and the turn that answers ends its first
+  step, with no reminder. Once it becomes work and leaves Scratch, its lead
+  is told a task lead's whole brief with its next turn. A plain "hi" took 16
+  to 26 seconds through a lead's whole brief, its finish_step and the copy's
+  fetch, and takes 4 to 7 now (12 Nov 2026).
+- **Open,** it takes the coordinator's place in the pane: its conversation,
+  and the composer every task has, with its own runs over it and Make it a
+  task (`AsideMoves`).
+- **Made a task,** it moves to the board: by the person's Make it a task,
+  from its menu, or by itself once it takes a worktree or an output (a
+  branch of its own, a pull request, a drafted review) after it was put
+  there, said in its thread. Its pill flies to its card on the board, and
+  the coordinator's conversation keeps a line of it ("An aside became a
+  task: …"). Nothing moves back by itself; the person can from its menu.
+- **Cleared,** by its pill's × (Delete on the pill too), it settles as Done,
+  leaves the pills, and ⌘K finds it, whatever it stands at: its lead at
+  work, stuck, or waiting on the person, whose question is withdrawn. Those
+  left a week fold into one "N older" pill, which clears them together.
+- **Both moves show at once:** the pill goes, and a card made a task is on
+  the board, in the frame the press is painted in. The window keeps the
+  move over the board's reads until they say so, and one the runtime
+  refuses, or answers but leaves on Scratch (a read of the board after its
+  answer says so), comes back with a line over the composer saying why
+  ([foundations](foundations.md#the-ui-is-instant)). Clear waited
+  on the runtime and then on the board's next read, so the pill went late
+  and came back for a moment (12 Nov 2026).
+- A call of its that waits on the person still shows in Needs you, and is
+  counted; the aside itself never is, answered or answering: the board, the
+  home, the edge, the tabs, the Dock's badge, the menu bar and the
+  notifications leave it out of what waits and of the work in progress.
+  With the conversation closed, the board keeps the asides behind one chip at the
+  head of Up next (`ScratchShelf`), opened in place.
+- **Not a task to the coordinator** either: `project_overview` doesn't
+  count asides, and `list_tasks` and a fresh session's brief leave them out.
+  `find_tasks` finds one when asked for it and says it is an aside.
+
+An aside never installs or upgrades dependencies, runs the repository's
+setup, or builds, before it answers or after: it reads its copy as it was
+made, and that is how it answers in seconds. Its copy is never set up while
+it is on Scratch, whatever its agent runs; `install_dependencies` and
+`run_project` tell its agent so, and that work needing a build, tests or the
+project running becomes a task, which the person makes with Make it a task.
+The person's own Run of its copy says the same. Made a task, by the person
+or its agent's work, its copy is set up as any task's, behind the press and
+before its next turn. Until 12 Nov 2026 the first command its agent ran
+started the setup beside the answer, and an aside the coordinator started
+was set up in full before it was put on Scratch.
+
+## Presets
+
+A preset is a named set of starting parts: where it works, Checked by and
+when, its ending, where it sits, its lead and reviewer, and a few lines of
+brief (`presets`). Only a start: changing a task's parts never changes it.
+
+- **Built in:** Chat, Change, Small change, Review a PR, and Prototype, led
+  by Claude Opus 5.5, with no review, ending with its branch. A prototype may
+  later go on as a change in the same task, its pull request ending and its
+  review added then, or never: the person decides, so the coordinator and the
+  leads never assume either way. On their word it is one move: `change_part`
+  with preset Change, or the menu's Make it a change, puts its reviewer on
+  and sets its ending as the project's How a task ends says, and Ship then
+  runs the review and opens the pull request. A change goes back the same
+  way: preset Prototype or Chat takes its review off and its pull request
+  away, back to its branch.
+- **The plan card's kicker names the preset** its parts are, first: "Change
+  · Task board-still". A press on it lists the others, each with what it
+  holds; picking one changes the plan's parts to match (`ApplyPreset`): its
+  lead and reviewer where the preset names them, Checked by and when, its
+  ending, where it works and sits, and its brief added to the task's
+  description. A review is offered only the presets that review, and work
+  never becomes one. Nothing names the preset once the task starts.
+- **The coordinator plans from them:** its brief says to call `list_presets`
+  and plan, with `propose_plan`'s `preset`, from the one that fits what the
+  person asked: Prototype for a prototype or design directions, Small change
+  for a few lines, Chat for a question or a look, Review a PR for a review,
+  and Change for the rest; the person's own count too. A lead that drafts tasks
+  is told the same. A preset that needs a review and names no reviewer gets
+  the plan's own where it is another maker's than the lead's, else the
+  strongest model of another maker that can be used, never the lead's own
+  model. Leads are named as the agents list their models (Claude Opus 5.5).
+- **Save as preset**, in every task's menu, keeps its parts, team and the
+  start of its brief.
+- **The coordinator offers one:** once the person set up the same parts,
+  with the same lead, for two tasks running and no preset has them, its
+  thread offers to keep them, once, with a button.
+- **Settings** lists them under Tasks, every one of the person's, those kept
+  to a project too, with Edit and Remove for their own. Edit opens its row to
+  its name, where it works, Checked by, its ending, where it sits, its
+  brief, and whether it is kept to the project of the task it was saved
+  from; its lead and reviewer come from a task saved again.
 
 ## Kinds, read from what a task has
 
@@ -68,9 +291,11 @@ disagree with it.
 - **Change.** Everything else: every planned task, whatever its ending, a
   quick task made a change, and any task with a pull request.
 
-**A task only moves toward change, when the person says so.** When they like
-what a quick task made, they ask its lead to make it a real thing, and the
-lead calls `make_it_a_change`. The task is renamed for what it does now, gets
+**A task moves toward change, and back, when the person says so.** When they
+like what a quick task made, they ask its lead to make it a real thing, and
+the lead calls `make_it_a_change` (or `change_part` with preset Change); a
+change they want only as its branch, or as a chat, goes back with preset
+Prototype or Chat. The task is renamed for what it does now, gets
 a review by the model the lead names, and gets an ending: a draft pull
 request, or one that is ready for review. A review the person takes over
 becomes a change that builds on it. It stays one task, one thread and one
@@ -100,7 +325,8 @@ The tools' `find_tasks` searches the same.
 A card opens its task. It says:
 
 - where the task stands, in a word and in its lane's colour;
-- its kind: Change, Review, or nothing for a plain task;
+- its kind where it isn't the usual: Review; nothing for a change, the usual
+  kind, or for a plain task;
 - its title;
 - one fact: a change's branch, pull request, checks or conflict; a review's
   pull request and findings; or a plain task's pictures or files.
@@ -143,19 +369,75 @@ in a turn, starting, or waiting for a place among the agents at work
 waits on the person still comes first, as Needs you. Once nothing is at
 work, the card says what fits what is there now.
 
-**What the person says to a lead after its plan opens a round.** When the
-person's own words reach a lead whose latest run is over, Althar opens a
-round. A round is a run of its own, with no plan, and with the plan's steps
-and ending, so a reviewed task's round has a review. A merged task opens
-again for it. A stopped run is resumed, as before. Althar's own messages to
-the lead open no round, because they have their own course: what people said
-on the pull request, its checks, a conflict to resolve. A lead that calls
-`finish_step` after its plan, with no step open, opens a round and finishes
-it in the same call.
+**What the person says to a lead after its plan is a turn, not a round**
+(a task is a conversation plus parts, below).
+It goes to the same session and opens no step: there is no report to give,
+no reminder to give one, and no review. The turn's last message is its
+answer. What the coordinator passes on from the person counts as theirs. A
+lead that calls `finish_step` in such a turn has its summary, evidence and
+descriptions kept, and nothing opens. A lead still at its plan's steps takes
+the message into the step under way, as before.
 
-**Where a round ends depends on what it made.** New work means new commits
-in any of the task's repositories, or uncommitted changes that aren't
-evidence.
+**What the turn commits waits for Ship.** As each such turn ends, a worktree
+whose head the turn moved is held for Ship (`workspaces.held_at`). The head
+each worktree had as the turn began is kept with the turn
+(`turn_deliveries.heads`), so this holds after a restart too. From then
+until Ship, nothing pushes the branch:
+
+- the person's Push, a lead's `push_to_pull_request` and pushing as the
+  lead's turn ends (ADR-072) all refuse it, with ShipRefused;
+- failing checks of the pushed head aren't put to the lead, as Ship replaces
+  that head, and a conflict waits for Ship's push;
+- what people say on the pull request still reaches the lead at once.
+
+The card, the header and Needs you say how much waits, "2 commits not
+shipped", with **Ship**, and the task is in Needs you whatever its pushed
+head's checks say. Ship (the button, or `ship_task` on the person's word) is
+a run of its own with no Implement step. Where the plan has a reviewer before
+the work ships, that review runs first and reads only what came after the
+commit the last review read, found by its tree, as pushing may have credited
+it since. The lead settles what it finds as in any review. Then Ship's ending
+sends the commits up: to the open pull request; after the last merged or
+closed, in the next ("After #N", on a new branch); where there was none, in
+the first, as the plan ends. The hold goes once they're up. A plan with no
+reviewer, or whose review runs after the merge, ships at once. A lead that
+calls `ship_task` in its own turn ships once that turn ends. Its thread records
+that request as a request; the ending records what actually shipped.
+
+An explicit Ship press can accept committed work from an interrupted or stopped
+task once its agents and pending turns are idle. Its stopped workflow is retired
+in the same transaction that admits Ship, so Implement cannot resume alongside
+it. The configured review still runs. Deferred requests and automatic follow-on
+Ships cannot override Stop; the person must press Ship again.
+
+**A Ship keeps the code it accepted.** Each worktree's committed endpoint is
+saved with the Ship before publication. A review replaces that endpoint with
+exactly the committed tree its copy read; tiny fixes, deliberately unchecked
+fixes and the person's Skip review accept their own endpoints. Later commits
+stay local and held for the next Ship, even when they arrive while the host
+answers. The same endpoints survive a restart or a publication retry, and
+apply to an existing, first, next or attached pull request and to a branch
+pushed without one. A next pull request's new branch keeps the later local
+commits too, while its remote receives only the accepted prefix.
+
+**Bringing the base branch in is never the task's work** (`baseOnly.ts`).
+New work is measured by the task's change against its base, from where its
+branch forks off it, not by counting commits since the pull request's head. A
+merge of main that settled no conflict brings main's commits, which no one
+wrote in the task's turns, yet changes nothing of the task's: such commits
+are never held for Ship, as a turn's or the person's by hand, and go up to
+the open pull request as the lead's turn ends, with no review and no round;
+Ship on a hold of only those sends them up the same way. A merge that
+settled a conflict, or any commit of the task's own, is new work, as before,
+and Ship's review is told how each merge settled with `git show
+--remerge-diff`. Sent back by the merge queue for anything but a conflict,
+the lead is told an update from main is `update_branch` or the queue, never
+the plan's steps again.
+
+**The rounds that are left** are those Althar's own course and
+`make_it_a_change` open, and Ship's run. Where a round ends depends on what
+it made. New work means new commits in any of the task's repositories, or
+uncommitted changes that aren't evidence.
 
 - **Nothing new.** The round closes and the task goes back to where it was.
   A merged task is done again and keeps its settled time.
@@ -170,12 +452,16 @@ evidence.
     commit is ([code-hosts.md](code-hosts.md)).
   - With its last pull request merged or closed, the round opens the next by
     itself, as a draft titled "After #N", where the project's rules would
-    have opened the first. A card with **Open a new pull request** appears
+    have opened the first. Its title and description come from what the
+    lead said since the last push to #N, never from words given for work
+    that went in it. A card with **Open a new pull request** appears
     only where the lead said it only answered a question (`answered`), or
     where the pull request couldn't open.
 
-The person can skip a round's review from the task's menu. Only that round
-loses its review; the next has it again.
+The person can skip a round's review from the task's menu, Ship's included.
+Only that round loses its review; the next has it again. New rounds read the
+task's current plan parts, including a deliberate reviewer change, rather
+than inheriting a previous round's Skip review.
 
 **A task has as many pull requests as it needs**, one per repository at a
 time.
@@ -230,34 +516,45 @@ The person can also tell the lead, which has `settle_task` (done, keep or
 discard). The composer suggests "Mark this as done". The coordinator settles
 with the same tool ([coordinator.md](coordinator.md#moving-a-task)).
 
-**Another round ends in Needs you.** Writing to a kept task brings it back.
-A round on a settled task that makes nothing new no longer drops silently
-back into Settled. Only a merged change goes back to done by itself.
+**Another turn ends in Needs you.** Writing to a kept task brings it back.
+A turn on a settled task stays a turn: the task stays settled, and its
+lead's answer waits in Needs you, as below. Only a merged change goes back
+to done by itself.
+
+**A reply the person hasn't seen waits in Needs you** (a task is a
+conversation plus parts). Where a settled task's lead answers a turn the
+person's words began, after they last had it open, its card says "Replied"
+(a quick task's, Finished) until they open it, or press Done, which says
+they read it. One they watched arrive doesn't: the window marks a task seen
+as it becomes ready in front of them. Settling it, by Done, posting its
+review or merging, reads what came before; and a lead that settles it as
+they told it to answers with that, so nothing waits to be read.
 
 ## The small-change lane
 
-Small changes must be fast (the person's note of 6 November). A change of a
-few lines is the exception to the usual course of a change:
+Small changes start quickly, without changing their review policy. A plan
+marked `small_change`, or made from the built-in Small change preset,
+starts without a countdown, with a light lead where that fits the work.
+The configured reviewer reads before Ship, as for Change. Size never skips
+that reviewer, schedules a review after merge, or proposes an extra one.
+A light lead keeps the quick lane's extra place; its review uses the normal
+review places.
 
-- **One step, no countdown.** Its plan holds one step, with the lead on a
-  light, quick model (Sonnet at low effort, where the agent lists it). It
-  names a reviewer, but the review step is skipped before merge. It starts
-  at once, with no countdown to read.
-- **Reviewed after it merges.** Its pull request merges on the person's word,
-  as every merge does. The merge starts a review task of its own, on the
-  merged pull request, which posts what it finds as any review does
-  ([reviews.md](reviews.md)). Nothing blocks the merge. A plan that named no
-  reviewer gets no review after merge, and neither does a pull request that
-  was closed unmerged.
-- **One card in its thread says what it skipped.** It lists each step with
-  its time (Started, Changed a line in …, Checks pass, Merged). It offers
-  Merge, which still asks, and **Make it a full task**, which starts the
-  review before the merge instead. The card is read from the task as it
-  stands, never stored, so it can't go stale.
+The thread's Small change card shows its steps and configured review before
+Ship. It offers no Make it a full task detour for that ordinary timing.
+The person may explicitly choose after-merge timing, including in a custom
+preset such as Quick fix; that choice and Merge now's recorded review debt
+still work ([reviews.md](reviews.md#an-explicit-review-after-merge)). Older
+stored timing and debt whose origin cannot be proved are preserved.
 
-The trade-off is that a small change merges unreviewed. A finding after the
-merge needs a fix of its own. Make it a full task is there for anything the
-person wants read first.
+The card opens its thread with a route: Change, Checks, Review, and Merge
+for the normal before-Ship timing. Each stop says where it stands; Merge
+still asks and appears once its review and checks permit it. An explicitly
+deferred review moves after Merge, drawn dashed while it waits, and keeps
+the Review timing control. What the review found stays in its report;
+See findings opens it. The card is read from the task as it stands, never
+stored, so it cannot go stale.
+
 
 **Auto moves a lead's next step to a lighter model of the same agent** when
 the plan's tightest window is 90% used or more. A line in the thread says
@@ -267,14 +564,30 @@ are picked is in [agents.md](agents.md).
 
 ## Plan and review settings
 
-Two settings, under Plans and reviews:
+The Team dialog, task cards, thread and composer use the same runtime projection
+of the team. The agent doing the current work remains distinct from the choice
+for the next turn. A pending choice wins until it is applied, refused or
+cancelled; a failed replacement does not become the current lead. Durable
+records order choices, including changes made on the same clock tick, and keep
+an accepted next-turn choice through Stop and restart.
+
+Accepting or resolving a pending model or effort publishes the session and task
+change feeds immediately. Commands use the same projection as the views, so
+choosing an original lead again still changes a task that switched since its
+plan was made. Team saves contain only the steps the person edited. Pristine
+fields follow incoming updates while unsaved edits stay in the open dialog.
+
+Two settings, under Settings › Tasks › Every task:
 
 - **The countdown before a plan starts on its own:** right away, 10 s, 25 s
   (the default) or 1 minute.
-- **Rounds of review:** 1, 2, 3 (the default) or 5. A further setting says
-  what happens when the rounds run out with fixes no review has seen. By
-  default the task goes on to its ending once the lead has settled every
-  finding; the other choice asks the person.
+- **When a check finds more:** what happens when the check of a fix reopens
+  a finding and the lead settles it again, a fix no review reads
+  ([reviews](reviews.md#how-a-review-round-runs)). By default the task goes
+  on to its ending once the lead has settled every finding; the other
+  choice asks the person. The old "Rounds of review" setting is gone from
+  the screen: a fix is checked once at most. What it kept is kept, and read
+  by nothing.
 
 Each is read where it applies, not when Althar starts, so a change holds
 from the next plan or round without a restart. A plan already counting down
@@ -293,6 +606,9 @@ made:
 - **Whether work tries an agent's next account first.**
 - **How a task ends:** a draft pull request (the default), one ready for
   review, or nothing.
+- **What an explicitly configured review after merge brings back:** only major
+  findings (the default), every finding, or no review
+  ([reviews.md](reviews.md#what-the-review-after-a-merge-brings-back)).
 
 Only what differs from the built-in defaults is written. A project made
 earlier keeps its own rules, and its rules screen is where they change. The
@@ -334,19 +650,72 @@ each agent for command output and normalizes what each one sends.
 pictures and logs, stay until mark-and-sweep is built
 ([07](../architecture/07-persistence-security-and-cloud.md)).
 
-## Helpers (proposed)
+## Helpers
 
-Proposed: [ADR-087](proposed/087-a-lead-starts-helpers-on-any-agent-in-copies-of-their-own.md)
-would let a task's lead start helpers in the background, on any agent and
-model, each in a copy of its own. The lead would keep talking with the
-person and hear each helper's result as a new turn. When accepted, it folds
-into this document as a section on a task's helpers, and into
-[scheduling.md](scheduling.md) for the place each helper takes. Two of its
-rules are kept already in [what-agents-may-do.md](what-agents-may-do.md):
-a helper pushes nothing (for tidiness, so the lead stays the one who
-pushes), and its counts are cost caps. Built so far: leads have
-`list_models`.
+A task's lead starts helpers (`start_helper`, `stop_helper`): another
+agent, on any agent and model, its own without one, that works in the
+background while the person keeps talking to the lead, and whose result
+comes back as a new turn, the same on every agent (ADR-087). It takes a
+brief, whole, since a helper reads nothing of the conversation, a name, and
+optionally a model, an agent, an effort and the change.
+
+- **Handed a change, it works in that change's worktree,** the only one
+  writing there until it reports, so its commits are on the change's branch
+  when it's done and nothing needs bringing back.
+- **Given `in_copy`, it works in a copy of its own** of that worktree as it
+  stands, untracked files too, under `.helpers/` beside the task's folder.
+  What it changes there is thrown away with the copy, unless it `writes`:
+  then it is committed on its snapshot and kept on
+  `refs/althar/helpers/<task>/<helper>`, never pushed, and its result says
+  how to bring it in (`git cherry-pick --no-commit`), the lead settling any
+  conflict as it does with main. The ref goes once its task settles.
+- **It is a session of its own** in a step thread of the task's
+  (`helpers`). It reads and works in its folder; it ships, asks and starts
+  nothing, and pushes nothing.
+- **It takes a place of its own** among the agents at work, apart from its
+  lead's and its reviewer's: four of a task's at once, the rest waiting, ten
+  at work or waiting, fifty in the task's life, one level deep.
+- **Its last message is its result,** once its turn ends and it is done:
+  kept on its thread and in the lead's scratch folder, then queued to the
+  lead as quiet news, never the person's word, which starts a lead that
+  stopped.
+- **What goes wrong is its lead's to hear:** a turn that fails on its
+  service is tried again after each of a step's pauses (15 s, 1 min, 4 min),
+  said on its thread, then the lead hears it couldn't go on, with the models
+  it may use now; so does one out of usage, one past its hour, and one whose
+  agent stops before it's done. The stall watch stops one that stalls. After
+  a restart, one at work carries on, told why. Settling the task stops its
+  helpers quietly.
+- **The lead's report waits for it:** while one works, the step's watch
+  counts it as a turn to come, `finish_step` is refused naming it, and the
+  lead's brief lists it. The person stops one from its row in the header's
+  parts.
+- **The thread shows each as a row of the work,** "Helper · Split the
+  migration, on the task's change", which opens in place to what it said
+  and ran. The Graph face draws helpers on lanes of their models, in the
+  round each started in, and a usage line where several models ran says
+  each one's tokens.
+- **Each agent's own helpers that would work in the background are off,**
+  at its launch, as they hold the lead's turn, lose their result or start
+  turns over ACP: Claude Code (`CLAUDE_CODE_DISABLE_BACKGROUND_TASKS`),
+  OpenCode, Codex (`features.multi_agent`), Copilot (`--excluded-tools
+  task`), Grok, Mistral Vibe and Antigravity (`start_subagent`). Kimi's
+  switch is in the person's own config, and Qwen Code's and Junie's have
+  none, so theirs stay, each said in its registry entry (`ownHelpers`). A
+  lead's brief says to use its agent's own only within its turn, and
+  `start_helper` for the rest.
+- **Proven on every agent the tests run,** each as a helper, launched in
+  its copy and never its lead's folder, its result coming to the lead; on
+  real accounts with `bun run test:agents` before a release.
 
 ## Changes
 
 - 8 Nov 2026: written from the ADRs under Replaces.
+- 9 Nov 2026: what the person says to a lead after its plan is a turn, not a round, and what it commits waits for Ship, which reviews only what came since the last review (a task is a conversation plus parts).
+- 10 Nov 2026: a task is a conversation plus parts, built (#739) and folded in from its proposal: the five parts and changing them, several changes in a task and stacks, chats on Scratch, presets, and helpers handed a change (ADR-087's tasks 1 to 5); what it decided and didn't build is under Not built yet.
+- 10 Nov 2026: the rest of it built (#739): each change shipped in a Ship of its own with its own review, the card's sentence and marks across changes, the header's row for each, stamped Shipped and Merged rows, where a turn's commits went; Keep them together, Drop it, a change that waits for another, removing a running task's workspace; Stop running it; picking another preset on the plan card, the coordinator planning from presets, editing them in Settings; Scratch's own shelf and a chat's copy made without setup. ADR-087 folded in whole and removed from `proposed/`: helpers in copies of their own, writing ones' commits, places, limits, retries, the hour, restarts, agents' own helpers switched off, and the thread, Graph face and usage by model.
+- 11 Nov 2026: chats are asides, pills over the coordinator's conversation with a composer and moves of their own, started there or from the coordinator's words; one made a task flies to the board and the coordinator's conversation notes it; the coordinator's turns are signed with Althar's mark ([Asides](#asides)).
+- 12 Nov 2026: an aside starts as + is pressed, one pill from then, its lead ready while the person writes; its brief is light, its reply ends its step, and the coordinator hears nothing of it ([Asides](#asides)).
+- 12 Nov 2026: an aside is cleared by its pill's ×, whatever it stands at, and clearing it or making it a task shows at once; an aside never installs, builds or runs the setup ([Asides](#asides)).
+- 12 Nov 2026: commits that only bring the base branch in, as a clean merge of main, are never the task's work: no hold for Ship, no review, no round; they go up to the open pull request (#773's merge of main had started a second Review and Pull request).
+- 12 Nov 2026: every part changes either way on the person's word to the lead or the coordinator, the lead's own task included: `change_part` sets Checked by, the ending and another preset's parts at once, `change_lead` acts on a lead's own task, Ship honours an ending of its branch alone, and the task menu has Make it a change; a prototype becomes a change in one move, and a change goes back.

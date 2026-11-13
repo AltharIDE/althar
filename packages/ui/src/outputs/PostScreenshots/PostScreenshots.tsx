@@ -12,6 +12,7 @@ import type { Disclosable } from '../../primitives/Fold/Fold'
 import { Tooltip } from '../../primitives/HoverCard/HoverCard'
 import { LinkButton } from '../../primitives/LinkButton/LinkButton'
 import { Popover } from '../../primitives/Popover/Popover'
+import { Problem } from '../../primitives/Problem/Problem'
 import { VisuallyHidden } from '../../primitives/VisuallyHidden/VisuallyHidden'
 import type { GalleryShot } from '../../thread/Gallery/Gallery'
 import { ImageView, type ImageViewText } from '../../thread/Lightbox/Lightbox'
@@ -241,11 +242,7 @@ export function PostScreenshots({
             )
           })}
         </div>
-        {error !== undefined && error !== null && error !== false && (
-          <p className={s.error} role="alert">
-            {error}
-          </p>
-        )}
+        {error !== undefined && error !== null && error !== false && <Problem size="small">{error}</Problem>}
         {(onPost || href) && (
           <div className={s.foot}>
             {href && (
@@ -257,9 +254,9 @@ export function PostScreenshots({
             {onPost && (
               <span className={s.end}>
                 {missing && (
-                  <span id={missingId} className={s.missing} role="alert">
+                  <Problem as="span" size="small" id={missingId} className={s.missing}>
                     {t.none}
-                  </span>
+                  </Problem>
                 )}
                 <Button size="small" busy={posting} aria-describedby={missing ? missingId : undefined} onClick={confirm}>
                   {standing === 'unposted' ? t.confirmPost(going, pullRequest) : t.confirmUpdate(pullRequest)}

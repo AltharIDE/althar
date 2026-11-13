@@ -151,11 +151,11 @@ describe('the client', () => {
     await client.holdPlan(planId)
     await client.changePlan(planId, [{ key: 'implement', agentId: 'codex', model: null, skipped: false }])
     const held = await client.getThreadItem(coordinator.threadId, card?.id ?? '')
-    expect(held.kind === 'task' && [held.content.phase, held.content.plan?.steps.map((step) => step.agentId)]).toEqual(['held', ['codex']])
+    expect(held?.kind === 'task' && [held.content.phase, held.content.plan?.steps.map((step) => step.agentId)]).toEqual(['held', ['codex']])
     await client.startPlan(planId)
     await waitFor(
       () => client.getThreadItem(coordinator.threadId, card?.id ?? ''),
-      (item) => item.kind === 'task' && item.content.phase === 'running',
+      (item) => item?.kind === 'task' && item.content.phase === 'running',
     )
 
     const task = await client.startTask({
@@ -228,12 +228,16 @@ describe('the client', () => {
           ListEditors: () => Effect.die('unused'),
           GetLoad: () => Effect.die('unused'),
           GetPlanUsage: () => Effect.die('unused'),
+          DismissSignInEnding: () => Effect.die('unused'),
           GetModelRooms: () => Effect.die('unused'),
+          GetMissedReports: () => Effect.die('unused'),
           InstallAgent: () => Effect.die('unused'),
           OpenInEditor: () => Effect.die('unused'),
           ListProjects: () => Effect.die('unused'),
           OpenProject: () => Effect.die('unused'),
           ListTasks: () => Effect.die('unused'),
+          GetSearchDocuments: () => Effect.succeed({ documents: [], next: null }),
+          GetSearchFiles: () => Effect.succeed({ files: [] }),
           SearchTasks: () => Effect.die('unused'),
           CreateTask: () => Effect.die('unused'),
           GetThread: () => Effect.die('unused'),
@@ -241,6 +245,9 @@ describe('the client', () => {
           ReadOutput: () => Effect.die('unused'),
           ReadBackgroundOutput: () => Effect.die('unused'),
           ReadDocument: () => Effect.die('unused'),
+          ListCanvases: () => Effect.die('unused'),
+          GetCanvas: () => Effect.die('unused'),
+          ReadCanvasText: () => Effect.die('unused'),
           FindCode: () => Effect.die('unused'),
           ReadCode: () => Effect.die('unused'),
           OpenCode: () => Effect.die('unused'),
@@ -258,6 +265,11 @@ describe('the client', () => {
           GetSettings: () => Effect.die('unused'),
           GetAgentTools: () => Effect.die('unused'),
           SetToolRoles: () => Effect.die('unused'),
+          SetToolInProject: () => Effect.die('unused'),
+          GetServerDetail: () => Effect.die('unused'),
+          CheckServers: () => Effect.die('unused'),
+          AddServer: () => Effect.die('unused'),
+          RemoveServer: () => Effect.die('unused'),
           SetToolSync: () => Effect.die('unused'),
           SetToolKeptOut: () => Effect.die('unused'),
           PickToolWay: () => Effect.die('unused'),
@@ -331,8 +343,10 @@ describe('the client', () => {
           StartTask: () => Effect.die('unused'),
           StartPlan: () => Effect.die('unused'),
           HoldPlan: () => Effect.die('unused'),
+          HoldDraft: () => Effect.die('unused'),
           ChangePlan: () => Effect.die('unused'),
           ChangeTeam: () => Effect.die('unused'),
+          DeclineReview: () => Effect.die('unused'),
           ChangeIssueDraft: () => Effect.die('unused'),
           FileIssueDraft: () => Effect.die('unused'),
           DiscardIssueDraft: () => Effect.die('unused'),
@@ -350,9 +364,24 @@ describe('the client', () => {
           ApproveSkill: () => Effect.die('unused'),
           CheckSkillUpdates: () => Effect.die('unused'),
           RollBackSkill: () => Effect.die('unused'),
-          SetSkillActive: () => Effect.die('unused'),
           UninstallSkill: () => Effect.die('unused'),
           AnswerCheckout: () => Effect.die('unused'),
+          MoveTask: () => Effect.die('unused'),
+          DropMove: () => Effect.die('unused'),
+          WorkToward: () => Effect.die('unused'),
+          ShelveTask: () => Effect.die('unused'),
+          StopHelper: () => Effect.die('unused'),
+          JoinChanges: () => Effect.die('unused'),
+          DropChange: () => Effect.die('unused'),
+          ListPresets: () => Effect.die('unused'),
+          SavePreset: () => Effect.die('unused'),
+          RemovePreset: () => Effect.die('unused'),
+          DeclinePresetOffer: () => Effect.die('unused'),
+          RunIt: () => Effect.die('unused'),
+          StopRunning: () => Effect.die('unused'),
+          ApplyPreset: () => Effect.die('unused'),
+          EditPreset: () => Effect.die('unused'),
+          SetRunOutside: () => Effect.die('unused'),
           HandOverHeld: () => Effect.die('unused'),
           ListConnections: () => Effect.die('unused'),
           StartSignIn: () => Effect.die('unused'),
@@ -394,6 +423,11 @@ describe('the client', () => {
           SignInAccount: () => Effect.die('unused'),
           OpenChange: () => Effect.die('unused'),
           SkipReview: () => Effect.die('unused'),
+          ShapeTask: () => Effect.die('unused'),
+          SetReviewAfterMerge: () => Effect.die('unused'),
+          Ship: () => Effect.die('unused'),
+          FixAfterMerge: () => Effect.die('unused'),
+          LeaveAfterMerge: () => Effect.die('unused'),
           RefreshTask: () => Effect.die('unused'),
           StopListening: () => Effect.die('unused'),
           AttachPullRequest: () => Effect.die('unused'),
@@ -402,6 +436,7 @@ describe('the client', () => {
           ClearBackground: () => Effect.die('unused'),
           RunProject: () => Effect.die('unused'),
           StopLaunch: () => Effect.die('unused'),
+          ReadLaunchOutput: () => Effect.die('unused'),
           KeepRunnable: () => Effect.die('unused'),
           DropRunnable: () => Effect.die('unused'),
           OrderRunnables: () => Effect.die('unused'),
@@ -458,9 +493,9 @@ describe('the client', () => {
   })
 })
 
-describe('automations', () => {
+describe('the client’s calls', () => {
   /** A stand-in runtime that keeps what each call was sent, and answers it as the runtime would. */
-  const recording = async () => {
+  const recording = async (moreAnswers: Readonly<Record<string, unknown>> = {}) => {
     const channel = new MessageChannel()
     const sent: Array<readonly [string, unknown]> = []
     const automation = {
@@ -491,6 +526,7 @@ describe('automations', () => {
       GetAutomations: { cursor: 4, automations: [automation], allPaused: false },
       GetAutomation: { cursor: 4, automation: { ...automation, definition, postsReviews: false, runs: [], allPaused: false } },
       MakeAutomation: { automationId: 'auto2' },
+      ...moreAnswers,
     }
     // Every call it is sent is answered here: the ones a test uses by what they were sent, the rest never.
     const handlers = new Proxy(
@@ -520,6 +556,94 @@ describe('automations', () => {
     const { commandId: _id, ...rest } = payload as { commandId?: string }
     return rest
   }
+
+  it('preserves explicit query filters and leaves omitted ones to the runtime', async () => {
+    const { client, sent } = await recording({
+      ListCanvases: [],
+      ListPresets: [],
+      GetTaskFindings: { findings: [], review: null },
+      ReadCode: { path: 'src/retry.ts', text: 'const tries = 3', from: 1, total: 1, cut: false },
+      GetFileDiff: {
+        file: { path: 'src/retry.ts', from: null, status: 'modified', add: 1, del: 0, binary: false, uncommitted: false },
+        lines: [],
+        truncated: false,
+      },
+      GetPlanUsage: { accounts: [] },
+      GetModelRooms: [],
+      GetRunnableRefs: [],
+    })
+    expect(await client.listCanvases('p1')).toEqual([])
+    await client.listCanvases('p1', true)
+    await client.listPresets()
+    await client.listPresets('p1')
+    await client.getTaskFindings('t1')
+    await client.getTaskFindings('t1', 'review1')
+    expect((await client.readCode('th1', 'src/retry.ts')).text).toBe('const tries = 3')
+    await client.readCode('th1', 'src/retry.ts', { commit: 'abc123', line: 7 })
+    await client.getFileDiff('t1', 'src/retry.ts')
+    await client.getFileDiff('t1', 'src/retry.ts', true)
+    await client.getPlanUsage()
+    await client.getPlanUsage({ refresh: true })
+    await client.getModelRooms(null)
+    await client.getModelRooms('p1')
+    await client.getRunnableRefs('p1')
+    await client.getRunnableRefs('p1', 'retry')
+    expect(sent.map(([tag, payload]) => [tag, without(payload)])).toEqual([
+      ['ListCanvases', { projectId: 'p1' }],
+      ['ListCanvases', { projectId: 'p1', archived: true }],
+      ['ListPresets', {}],
+      ['ListPresets', { projectId: 'p1' }],
+      ['GetTaskFindings', { taskId: 't1' }],
+      ['GetTaskFindings', { taskId: 't1', review: 'review1' }],
+      ['ReadCode', { threadId: 'th1', path: 'src/retry.ts' }],
+      ['ReadCode', { threadId: 'th1', path: 'src/retry.ts', commit: 'abc123', line: 7 }],
+      ['GetFileDiff', { taskId: 't1', path: 'src/retry.ts' }],
+      ['GetFileDiff', { taskId: 't1', path: 'src/retry.ts', untouched: true }],
+      ['GetPlanUsage', {}],
+      ['GetPlanUsage', { refresh: true }],
+      ['GetModelRooms', {}],
+      ['GetModelRooms', { projectId: 'p1' }],
+      ['GetRunnableRefs', { projectId: 'p1' }],
+      ['GetRunnableRefs', { projectId: 'p1', text: 'retry' }],
+    ])
+    await client.close()
+  })
+
+  it('targets Ship, findings, tool roles and joined changes, with a distinct receipt id for each action', async () => {
+    const { client, sent } = await recording({ RunIt: { kind: 'asks' } })
+    await client.ship('t1')
+    await client.ship('t1', 'API')
+    await client.fixAfterMerge('t1')
+    await client.fixAfterMerge('t1', 'https://github.com/meridian/api/pull/12')
+    await client.leaveAfterMerge('t1')
+    await client.leaveAfterMerge('t1', 'https://github.com/meridian/api/pull/12')
+    await client.joinChanges('t1', 'API')
+    await client.joinChanges('t1', 'API', 'Web')
+    await client.setToolRoles('skill', 'release-notes', ['lead'], null)
+    await client.setToolRoles('skill', 'release-notes', ['reviewer'], 'p1', 'api')
+    expect(await client.runIt('t1')).toEqual({ kind: 'asks' })
+    await client.runIt('t1', 'safe')
+    await client.merge('t1', 'abc123', undefined, 'review')
+    expect(sent.map(([tag, payload]) => [tag, without(payload)])).toEqual([
+      ['Ship', { taskId: 't1' }],
+      ['Ship', { taskId: 't1', change: 'API' }],
+      ['FixAfterMerge', { taskId: 't1' }],
+      ['FixAfterMerge', { taskId: 't1', url: 'https://github.com/meridian/api/pull/12' }],
+      ['LeaveAfterMerge', { taskId: 't1' }],
+      ['LeaveAfterMerge', { taskId: 't1', url: 'https://github.com/meridian/api/pull/12' }],
+      ['JoinChanges', { taskId: 't1', change: 'API' }],
+      ['JoinChanges', { taskId: 't1', change: 'API', into: 'Web' }],
+      ['SetToolRoles', { kind: 'skill', name: 'release-notes', roles: ['lead'], projectId: null }],
+      ['SetToolRoles', { kind: 'skill', name: 'release-notes', roles: ['reviewer'], projectId: 'p1', repository: 'api' }],
+      ['RunIt', { taskId: 't1' }],
+      ['RunIt', { taskId: 't1', how: 'safe' }],
+      ['Merge', { taskId: 't1', head: 'abc123', how: 'review' }],
+    ])
+    const ids = sent.map(([, payload]) => (payload as { commandId: string }).commandId)
+    expect(ids.every((id) => /^cmd_[0-9a-f]{32}$/.test(id))).toBe(true)
+    expect(new Set(ids).size).toBe(ids.length)
+    await client.close()
+  })
 
   it('reads a project’s automations and one of them, and sends each change by its id, with the card’s item where one asks', async () => {
     const { client, sent, definition } = await recording()

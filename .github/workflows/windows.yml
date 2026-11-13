@@ -1,0 +1,91 @@
+name: windows
+
+# Check the affected unit tests on Windows before merge when files, paths or processes may behave differently.
+# Checks still run on Linux. post-merge.yml retains the full Windows run for every merge.
+on:
+  workflow_call:
+  pull_request:
+    # Unit tests run on drafts too, so marking the same head ready must not cancel and rerun them.
+    types: [opened, synchronize, reopened]
+    paths:
+      - 'apps/desktop/**'
+      - 'apps/cli/**'
+      - 'packages/**'
+      - 'package.json'
+      - 'bun.lock'
+      - 'vite.config.ts'
+      - '.bun-version'
+      - '.node-version'
+      - '.gitattributes'
+      - 'lint/**'
+      - 'patches/**'
+      - '.github/actions/**'
+      - '.github/workflows/**'
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: windows-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  plan:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      jobs: ${{ steps.plan.outputs.jobs }}
+      any: ${{ steps.plan.outputs.any }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: .bun-version
+      - env:
+          BASE: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha }}
+        run: |
+          if [ -n "$BASE" ] && git fetch --no-tags --depth=1 origin "$BASE"; then
+            git diff --name-only --no-renames FETCH_HEAD HEAD > "$RUNNER_TEMP/changed"
+          else
+            echo '*' > "$RUNNER_TEMP/changed"
+          fi
+      - id: plan
+        run: bun packages/testing/src/select.ts plan windows "$RUNNER_TEMP/changed"
+
+  verify:
+    name: unit (${{ matrix.name }})
+    needs: plan
+    if: needs.plan.outputs.any == 'true'
+    runs-on: windows-2025
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.plan.outputs.jobs) }}
+    defaults:
+      run:
+        shell: bash
+    env:
+      FLAKY_REPORT: ${{ github.workspace }}/flaky.jsonl
+      GIT_CONFIG_COUNT: '1'
+      GIT_CONFIG_KEY_0: core.autocrlf
+      GIT_CONFIG_VALUE_0: 'false'
+    steps:
+      - run: |
+          echo "TEMP=$RUNNER_TEMP" >> "$GITHUB_ENV"
+          echo "TMP=$RUNNER_TEMP" >> "$GITHUB_ENV"
+      - uses: actions/checkout@v5
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: .bun-version
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .node-version
+      - uses: ./.github/actions/electron
+      - uses: ./.github/actions/flaky/quarantine
+      - env:
+          PLAN: ${{ toJSON(matrix) }}
+        run: bun packages/testing/src/select.ts run
+      - if: always()
+        uses: ./.github/actions/flaky

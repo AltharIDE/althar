@@ -12,6 +12,7 @@ import { Sessions } from '../src/Sessions'
 import { Tasks } from '../src/Tasks'
 import type { ToolAccess } from '../src/ToolServer'
 import { callTool, items, repository, runtime, turns, until } from './support'
+import { knownModels } from './knownModels'
 
 /*
  * How a step's turn or session ending is read, where coordinator.test.ts,
@@ -122,12 +123,13 @@ describe('a lead whose turn did nothing', () => {
   )
 })
 
-describe("a quick task's round of work", () => {
-  it.live('that changed nothing in the repository ends with its summary, the task back where it was', () =>
+describe("a quick task's turn after its plan", () => {
+  it.live('that changed nothing in the repository ends with its summary, opening nothing', () =>
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
       const projectId = yield* opened
       const threadId = yield* (yield* Coordinator).thread(projectId)
+      yield* knownModels
       const access: ToolAccess = { role: 'coordinator', projectId, threadId, sessionId: 'none', taskId: null }
       yield* callTool(access, 'start_task', {
         title: 'Look around',
@@ -142,16 +144,21 @@ describe("a quick task's round of work", () => {
       if (task === undefined) return yield* Effect.die(new Error('No task'))
       yield* until(runsOf(task.taskId), (rows) => rows[0]?.state === 'succeeded')
       yield* say(task.threadId, 'And the docs? [lead:finish]')
+      // A turn, not a round: its summary is kept as it is, and no run opens for it.
+      yield* until(
+        sql<{ summary: string | null }>`
+          SELECT json_extract(i.content, '$.summary') AS summary FROM thread_items i
+          WHERE i.thread_id = ${task.threadId} AND i.kind = 'step_result' ORDER BY i.sequence`,
+        (rows) => rows.length === 2,
+      )
       const said = yield* until(
         Effect.map(items(task.threadId), (rows) =>
-          rows.filter((row) => row.kind === 'agent_message' && String(row.content.text).includes('changed this round')),
+          rows.filter((row) => row.kind === 'agent_message' && String(row.content.text) === 'Althar has your summary.'),
         ),
         (rows) => rows.length === 1,
       )
-      assert.strictEqual(
-        said[0]?.content.text,
-        'Althar has your summary. Nothing in the repository changed this round, so the task is back where it was.',
-      )
+      assert.lengthOf(said, 1)
+      assert.lengthOf(yield* runsOf(task.taskId), 1)
     }).pipe(Effect.provide(withQueries())),
   )
 })

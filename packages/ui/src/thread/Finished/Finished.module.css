@@ -1,9 +1,8 @@
-/* In the task card's language: a quiet card at the end of the thread. */
+/* In the task card's language: a quiet card at the end of the thread; the thread spaces it (data-rhythm). */
 .card {
   display: flex;
   flex-direction: column;
   gap: 6px;
-  margin: 12px 0 14px;
   padding: 12px 16px 14px;
   border-radius: var(--r-lg);
   background: var(--n-1);
@@ -18,5 +17,5 @@
 }
 .done {
   flex: none;
-  color: var(--ok);
+  color: var(--ok-ink);
 }

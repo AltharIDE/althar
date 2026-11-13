@@ -5,9 +5,3 @@
   gap: 8px;
 }
 
-/* What the agent said went wrong, in its own words, under Althar's line for it. */
-.detail {
-  margin: 0;
-  color: var(--t-3);
-  font-size: 12px;
-}

@@ -1,5 +1,6 @@
+import { removeTreeSync } from '@althar/testing'
 import { execFileSync } from 'node:child_process'
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -21,7 +22,7 @@ import { type PlanStep, Runs } from '../src/Runs'
 import * as Runtime from '../src/Runtime'
 import { Sessions } from '../src/Sessions'
 import { actionsOf, Tasks } from '../src/Tasks'
-import { fakeConnectors, HOST, hosted, repository, runtime, turns, until } from './support'
+import { fakeConnectors, HOST, hosted, repository, runtime, turns, until, withWork } from './support'
 
 /** Windows, where what some tests stand on isn't (each says what). */
 const windows = process.platform === 'win32'
@@ -62,6 +63,10 @@ const planned = (
       envelope: yield* Runtime.envelope('task.create', {}),
       projectId: project.projectId,
       title,
+      description: withWork(
+        title,
+        steps.some((step) => step.key === 'review'),
+      ),
       draft: true,
     })
     const [person] = yield* sql<{ id: string }>`SELECT id FROM actors WHERE kind = 'person'`
@@ -362,15 +367,23 @@ describe('a task’s course', () => {
       yield* tasks.stop({ envelope: yield* command('task.stop'), taskId: task.taskId })
       yield* tasks.resume({ envelope: yield* command('task.resume'), taskId: task.taskId })
       // The round runs again, on a fresh reviewer told what the lead settled.
-      yield* until(secondRound, (rows) => rows.length === 2 && rows.some((row) => row.state === 'running'))
-      const [review] = yield* sql<{ id: string }>`SELECT id FROM threads WHERE task_id = ${task.taskId} AND kind = 'step'`
-      const told = yield* until(
-        Effect.map(turns(review?.id ?? ''), (all) =>
-          all.filter((turn) => turn.prompt?.includes('The lead settled your findings') === true),
-        ),
-        (rows) => rows.length >= 2,
+      const [again] = yield* until(
+        sql<{ sessionId: string | null }>`
+          SELECT a.provider_session_id AS session_id FROM node_attempts a JOIN nodes n ON n.id = a.node_id
+          WHERE n.node_key = 'review' AND n.iteration = 1 AND a.state = 'running'`,
+        (rows) => rows.length === 1 && rows[0]?.sessionId != null,
       )
-      assert.include(told.at(-1)?.prompt, 'Fixed the heading.')
+      const [review] = yield* sql<{ id: string }>`SELECT id FROM threads WHERE task_id = ${task.taskId} AND kind = 'step'`
+      // Told so in its first turn, whether or not the round it takes up had been told before it stopped.
+      const [told] = yield* until(
+        Effect.map(turns(review?.id ?? ''), (all) =>
+          all.filter(
+            (turn) => turn.providerSessionId === again?.sessionId && turn.prompt?.includes('The lead settled your findings') === true,
+          ),
+        ),
+        (rows) => rows.length >= 1,
+      )
+      assert.include(told?.prompt, 'Fixed the heading.')
     }).pipe(Effect.provide(withQueries())),
   )
 
@@ -385,7 +398,7 @@ describe('a task’s course', () => {
       yield* standsAt(task.threadId, (now) => now.phase === 'waiting')
       assert.deepStrictEqual((yield* shown(task.threadId)).actions, ['stop', 'abandon'])
       yield* tasks.stop({ envelope: yield* command('task.stop'), taskId: task.taskId })
-      assert.deepStrictEqual(yield* callsOf(task.taskId), [{ kind: 'stuck', state: 'withdrawn', why: 'failed_to_start' }])
+      assert.deepStrictEqual(yield* callsOf(task.taskId), [{ kind: 'stuck', state: 'withdrawn', why: 'not_installed' }])
       assert.strictEqual((yield* shown(task.threadId)).phase, 'stopped')
       // Resumed on an agent that can't start either, it needs the person again, as a plan starting would.
       yield* tasks.resume({ envelope: yield* command('task.resume'), taskId: task.taskId })
@@ -418,7 +431,7 @@ describe('a task’s course', () => {
       const plans = yield* Plans
       const tasks = yield* Tasks
       yield* setPlansAndReviews({ roundsOut: 'ask' })
-      // Out of rounds with settled changes no review has seen: the run waits on the person with no step under way.
+      // Checked once, then settled again with changes no check reads: the run waits on the person with no step under way.
       const { task, planId, actor } = yield* planned('Tighten the types [lead:finish] [review:always]', [implement(), reviewBy()])
       yield* plans.start(planId, actor)
       yield* standsAt(task.threadId, (now) => now.phase === 'waiting')
@@ -427,13 +440,13 @@ describe('a task’s course', () => {
         ['round_limit'],
       )
       yield* tasks.stop({ envelope: yield* command('task.stop'), taskId: task.taskId })
-      assert.deepStrictEqual((yield* attempts(task.taskId)).at(-1), ['settle', 2, 'succeeded', false])
-      // Resumed, the lead settles what is open again; with still more to see and no rounds left, the person decides again.
+      assert.deepStrictEqual((yield* attempts(task.taskId)).at(-1), ['settle', 1, 'succeeded', false])
+      // Resumed, the lead settles what is open again; with still more to see and no check left, the person decides again.
       yield* tasks.resume({ envelope: yield* command('task.resume'), taskId: task.taskId })
       yield* until(callsOf(task.taskId), (calls) => calls.filter((call) => call.state === 'open').length === 1)
       assert.deepStrictEqual((yield* attempts(task.taskId)).slice(-2), [
-        ['settle', 2, 'succeeded', false],
-        ['settle', 2, 'succeeded', false],
+        ['settle', 1, 'succeeded', false],
+        ['settle', 1, 'succeeded', false],
       ])
     }).pipe(Effect.provide(withQueries())),
   )
@@ -468,7 +481,7 @@ describe('a task’s course', () => {
       writeFileSync(join(before.worktree ?? '', 'note.txt'), 'kept\n')
       git(before.worktree ?? '', 'add', '.')
       git(before.worktree ?? '', 'commit', '-q', '-m', 'Keep a note')
-      rmSync(before.worktree ?? '', { recursive: true, force: true })
+      removeTreeSync(before.worktree ?? '')
       yield* tasks.reopen({ envelope: yield* command('task.reopen'), taskId: task.taskId })
       assert.strictEqual(git(before.worktree ?? '', 'rev-parse', '--abbrev-ref', 'HEAD'), before.branch)
       assert.isTrue(existsSync(join(before.worktree ?? '', 'note.txt')))
@@ -482,7 +495,7 @@ describe('a task’s course', () => {
 
       // Abandoned with its branch gone too, it can't be reopened on it, and stays as it was.
       yield* tasks.abandon({ envelope: yield* command('task.abandon'), taskId: task.taskId })
-      rmSync(before.worktree ?? '', { recursive: true, force: true })
+      removeTreeSync(before.worktree ?? '')
       git(root, 'worktree', 'prune')
       git(root, 'branch', '-D', before.branch ?? '')
       const refused = yield* Effect.flip(tasks.reopen({ envelope: yield* command('task.reopen'), taskId: task.taskId }))

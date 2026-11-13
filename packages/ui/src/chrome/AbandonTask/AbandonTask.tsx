@@ -3,6 +3,7 @@ import { useState } from 'react'
 import { Button } from '../../primitives/Button/Button'
 import { CheckList } from '../../primitives/CheckList/CheckList'
 import { Dialog } from '../../primitives/Dialog/Dialog'
+import { Problem } from '../../primitives/Problem/Problem'
 import s from './AbandonTask.module.css'
 
 /*
@@ -14,7 +15,9 @@ import s from './AbandonTask.module.css'
  * carries on when the person writes to it. It is the one step; nothing
  * happens until it is pressed, and Cancel, first, has focus as it opens.
  * Abandoned, but a pull request it was to close still open (the host said
- * no), it says so, and offers to close what is left again.
+ * no), it says so, and offers to close what is left again. A refusal that
+ * pressing again can't change (`final`) leaves Close alone, so the dialog
+ * offers no step that can only fail again.
  */
 
 export interface AbandonTaskText {
@@ -31,8 +34,13 @@ export interface AbandonTaskText {
   /** For a merged task: its pull request, which stays merged, and the commits after it, left out. */
   mergedDescription: (change: string) => string
   mergedCommits: (count: number) => string
+  /** Commits that wait for Ship (a task is a conversation plus parts): settling leaves them on its branch, unless they ship first. */
+  unshipped: (count: number) => string
+  ship: (count: number) => string
   abandon: string
   cancel: string
+  /** In place of Cancel, after a refusal that is final: the one way left (Leave it open, where it was abandoned). */
+  dismiss: string
   /** Abandoned, with a pull request it was to close still open. */
   abandonedTitle: string
   abandonedDescription: string
@@ -50,8 +58,12 @@ export const abandonTaskText: AbandonTaskText = {
   mergedDescription: (change) => `${change} stays merged.`,
   mergedCommits: (count) =>
     count === 1 ? 'The commit after it goes in no pull request.' : `The ${count} commits after it go in no pull request.`,
+  unshipped: (count) =>
+    count === 1 ? 'Its commit not shipped stays on its branch.' : `Its ${count} commits not shipped stay on its branch.`,
+  ship: (count) => (count === 1 ? 'Ship 1 commit' : `Ship ${count} commits`),
   abandon: 'Abandon task',
   cancel: 'Cancel',
+  dismiss: 'Close',
   abandonedTitle: 'Task abandoned',
   abandonedDescription: 'Its pull request is still open.',
   closeAgain: 'Try again',
@@ -82,10 +94,15 @@ export interface AbandonTaskProps {
   abandoned?: boolean
   /** Its change merged: its last pull request, by name, and how many commits after it are left out. */
   merged?: { readonly name: string; readonly commits: number }
+  /** Commits that wait for Ship: shipping them is offered first, beside settling without them. */
+  held?: { readonly commits: number; readonly onShip: () => void }
   onAbandon: (choices: AbandonChoices) => void
   onClose: () => void
   busy?: boolean
+  /** Why it wasn't abandoned, or a pull request wasn't closed, in plain words. */
   error?: string
+  /** The error is for good (the task is merged, or the host won't let this account close it): pressing again can't change it, so only Close, or Leave it open, is offered. */
+  final?: boolean
   text?: Partial<AbandonTaskText>
 }
 
@@ -99,13 +116,17 @@ export function AbandonTask({
   changes = [],
   abandoned = false,
   merged,
+  held,
   onAbandon,
   onClose,
   busy = false,
   error,
+  final = false,
   text,
 }: AbandonTaskProps) {
   const t = { ...abandonTaskText, ...text }
+  // Refused for good: nothing here can change it, so Close is the one way left.
+  const over = error !== undefined && final
   // Each pull request closed unless the person says not; no branch deleted unless they say.
   const [on, setOn] = useState<ReadonlyArray<string>>(() => changes.map((change) => closeId(change.id)))
   const closing = changes.filter((change) => on.includes(closeId(change.id)))
@@ -123,42 +144,49 @@ export function AbandonTask({
       onClose={onClose}
       width={460}
       actions={
-        <>
-          <Button variant="quiet" onClick={onClose}>
-            {abandoned ? t.leaveOpen : t.cancel}
-          </Button>
-          <Button
-            variant={abandoned ? 'default' : 'danger'}
-            busy={busy}
-            disabled={abandoned && closing.length === 0}
-            onClick={() => onAbandon(choices)}
-          >
-            {abandoned ? t.closeAgain : t.abandon}
-          </Button>
-        </>
+        over ? (
+          <Button onClick={onClose}>{abandoned ? t.leaveOpen : t.dismiss}</Button>
+        ) : (
+          <>
+            <Button variant="quiet" onClick={onClose}>
+              {abandoned ? t.leaveOpen : t.cancel}
+            </Button>
+            {!abandoned && held !== undefined && (
+              <Button disabled={busy} onClick={held.onShip}>
+                {t.ship(held.commits)}
+              </Button>
+            )}
+            <Button
+              variant={abandoned ? 'default' : 'danger'}
+              busy={busy}
+              disabled={abandoned && closing.length === 0}
+              onClick={() => onAbandon(choices)}
+            >
+              {abandoned ? t.closeAgain : t.abandon}
+            </Button>
+          </>
+        )
       }
     >
-      {!abandoned && (merged !== undefined || worktree !== null) && (
-        <ul className={s.list}>
-          {merged !== undefined && <li>{t.mergedCommits(merged.commits)}</li>}
-          {worktree !== null && <li>{branch === null ? t.keptWorktree : t.kept}</li>}
-        </ul>
-      )}
-      {changes.length > 0 && (
-        <CheckList
-          className={s.changes}
-          label={t.changes}
-          items={items}
-          value={on}
-          onChange={(next) => setOn(next.filter((id) => !id.startsWith('branch:') || next.includes(closeId(id.slice('branch:'.length)))))}
-          disabled={busy}
-        />
-      )}
-      {error !== undefined && (
-        <p className={s.error} role="alert">
-          {error}
-        </p>
-      )}
+      <div className={s.body}>
+        {!abandoned && (merged !== undefined || worktree !== null || held !== undefined) && (
+          <ul className={s.list}>
+            {held !== undefined && <li>{t.unshipped(held.commits)}</li>}
+            {merged !== undefined && held === undefined && <li>{t.mergedCommits(merged.commits)}</li>}
+            {worktree !== null && <li>{branch === null ? t.keptWorktree : t.kept}</li>}
+          </ul>
+        )}
+        {changes.length > 0 && !over && (
+          <CheckList
+            label={t.changes}
+            items={items}
+            value={on}
+            onChange={(next) => setOn(next.filter((id) => !id.startsWith('branch:') || next.includes(closeId(id.slice('branch:'.length)))))}
+            disabled={busy}
+          />
+        )}
+        {error !== undefined && <Problem>{error}</Problem>}
+      </div>
     </Dialog>
   )
 }

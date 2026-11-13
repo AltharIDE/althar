@@ -25,7 +25,7 @@ import {
   streamed,
 } from './fixtures'
 import { clock } from '../src/renderer/shared/time'
-import { useSettingsOf, withServices } from './render'
+import { useSettingsOf, withServices, pickLayout } from './render'
 
 function Project({
   onTask = vi.fn(),
@@ -97,6 +97,22 @@ function WithSettings() {
       settings={useSettingsOf('p1')}
     />
   )
+}
+
+/**
+ * The home's layout as ⋯ says it, the menu opened and closed again: the conversation, the board, and the conversation on
+ * the right, each on or off, and fixed where it can't be changed.
+ */
+const layout = async () => {
+  await userEvent.click(await screen.findByRole('button', { name: 'More' }))
+  const menu = await screen.findByRole('menu', { name: 'More' })
+  const state = ['Conversation', 'Board', 'Conversation on the right'].map((name) => {
+    const item = within(menu).getByRole('menuitemcheckbox', { name })
+    return `${item.getAttribute('aria-checked') === 'true' ? 'on' : 'off'}${item.getAttribute('aria-disabled') === 'true' ? ', fixed' : ''}`
+  })
+  await userEvent.keyboard('{Escape}')
+  await waitFor(() => expect(screen.queryByRole('menu', { name: 'More' })).toBeNull())
+  return state
 }
 
 describe('running the project, with no agent', () => {
@@ -205,25 +221,194 @@ describe('running the project, with no agent', () => {
 })
 
 describe('the project’s bar', () => {
-  it('steps through the views by b, never while typing, and has no button to start a task', async () => {
+  it('offers a task’s parts as a preset on its card: kept by the name given, or not offered again', async () => {
+    const parts = {
+      workspace: 'worktree' as const,
+      checked: 'none' as const,
+      end: 'none' as const,
+      shelf: 'board' as const,
+      lead: 'codex/large',
+      reviewer: null,
+      brief: '',
+    }
+    const offered = items.card(card({ presetOffer: { name: 'No review, no PR', parts } }), 'c1')
+    const { client } = fakeClient({ getCoordinator: vi.fn(async () => coordinatorSnapshot({ items: [offered] })) })
+    withServices(<WithSettings />, client)
+    await userEvent.click(await screen.findByRole('button', { name: 'Keep as a preset' }))
+    const name = await screen.findByLabelText('Preset name')
+    expect(name).toHaveProperty('value', 'No review, no PR')
+    await userEvent.clear(name)
+    await userEvent.type(name, 'Codex alone')
+    await userEvent.click(screen.getByRole('button', { name: 'Keep' }))
+    await waitFor(() => expect(client.savePreset).toHaveBeenCalledWith({ name: 'Codex alone', parts, taskId: 't1', asNew: true }))
+
+    await userEvent.click(screen.getByRole('button', { name: 'Keep as a preset' }))
+    await userEvent.click(await screen.findByRole('button', { name: 'Don’t offer again' }))
+    await waitFor(() => expect(client.declinePresetOffer).toHaveBeenCalledWith('t1'))
+  })
+
+  it('says what a task’s card kept as a preset, and Undo removes it', async () => {
+    const kept = items.card(
+      card({
+        presetOffer: {
+          name: 'No review, no PR',
+          parts: { workspace: 'worktree', checked: 'none', end: 'none', shelf: 'board', lead: 'codex/large', reviewer: null, brief: '' },
+          kept: { id: 'pst_1', name: 'Codex alone' },
+        },
+      }),
+      'c1',
+    )
+    const { client } = fakeClient({ getCoordinator: vi.fn(async () => coordinatorSnapshot({ items: [kept] })) })
+    withServices(<WithSettings />, client)
+    expect(await screen.findByText('Kept as Codex alone')).toBeTruthy()
+    await userEvent.click(screen.getByRole('button', { name: 'Undo' }))
+    await waitFor(() => expect(client.removePreset).toHaveBeenCalledWith('pst_1'))
+  })
+
+  it('draws a review the coordinator offered as its line, naming the task, and Add puts its reviewer on', async () => {
+    const offer = items.notice(
+      {
+        source: 'runtime',
+        title: 'Add a review of “Harden the prototype”?',
+        offer: { kind: 'review', projectId: 'p1', taskId: 'r', agentId: 'codex', model: null },
+      },
+      null,
+    )
+    const task = {
+      ...card(),
+      state: 'open' as const,
+      createdAt: '2026-10-01T09:00:00.000Z',
+      settledAt: null,
+      changed: null,
+      here: [],
+      taskId: 'r',
+      title: 'Harden the prototype',
+      reviewOffer: { key: 'review' as const, agentId: 'codex', model: null, skipped: false },
+      plan: { ...card().plan!, steps: card().plan!.steps.filter((step) => step.key !== 'review') },
+    }
+    const { client } = fakeClient({
+      getCoordinator: vi.fn(async () => coordinatorSnapshot({ items: [offer] })),
+      getBoard: vi.fn(async () => ({ cursor: 1, tasks: [task], calls: [], settledTotal: 0 })),
+    })
+    withServices(<WithSettings />, client)
+    await screen.findByText('Add a review of “Harden the prototype”?')
+    await userEvent.click(await screen.findByRole('button', { name: 'Add gpt-5.2-codex' }))
+    await waitFor(() =>
+      expect(client.changeTeam).toHaveBeenCalledWith('r', [{ key: 'review', agentId: 'codex', model: null, skipped: false }]),
+    )
+  })
+
+  it('hides and shows the conversation by c and the board by b, keeps one showing, never while typing, and has no button to start a task', async () => {
     const { client } = fakeClient({ getCoordinator: vi.fn(async () => coordinatorSnapshot()) })
     const view = withServices(<Project />, client)
-    const checked = () => screen.getAllByRole('radio').find((radio) => radio.getAttribute('aria-checked') === 'true')?.textContent
-    await waitFor(() => expect(checked()).toMatch(/^Home/))
-    ;(document.activeElement as HTMLElement | null)?.blur()
+    expect(await layout()).toEqual(['on', 'on', 'off'])
     await userEvent.keyboard('b')
-    expect(checked()).toMatch(/^Conversation/)
+    expect(await layout()).toEqual(['on, fixed', 'off', 'off, fixed'])
+    // The only pane showing stays.
+    await userEvent.keyboard('c')
+    expect(await layout()).toEqual(['on, fixed', 'off', 'off, fixed'])
     await userEvent.keyboard('b')
-    expect(checked()).toMatch(/^Board/)
-    await userEvent.keyboard('b')
-    expect(checked()).toMatch(/^Home/)
-    await userEvent.keyboard('b')
-    expect(checked()).toMatch(/^Conversation/)
-    await userEvent.type(screen.getByRole('textbox', { name: /Tell the coordinator/ }), 'b')
-    expect(checked()).toMatch(/^Conversation/)
+    expect(await layout()).toEqual(['on', 'on', 'off'])
+    await userEvent.keyboard('c')
+    expect(await layout()).toEqual(['off', 'on, fixed', 'off, fixed'])
+    // Home stays on whichever panes show.
+    expect(screen.getByRole('radio', { name: 'Home' }).getAttribute('aria-checked')).toBe('true')
+    // Hidden, the conversation leaves its composer under the board, where a c is only a letter.
+    await userEvent.type(screen.getByRole('textbox', { name: /Tell the coordinator/ }), 'c')
+    expect(await layout()).toEqual(['off', 'on, fixed', 'off, fixed'])
     // A task starts by telling the coordinator; nothing else starts one.
     expect(screen.queryByRole('button', { name: 'New task' })).toBeNull()
     view.unmount()
+  })
+
+  it('puts the conversation on the board’s right from ⋯ while both show, kept for the window', async () => {
+    const { client } = fakeClient({ getCoordinator: vi.fn(async () => coordinatorSnapshot()) })
+    const view = withServices(<Project />, client)
+    await pickLayout('Conversation on the right')
+    expect(window.localStorage.getItem('althar.swapped')).toBe('true')
+    // The divider is the conversation's left edge now.
+    expect(screen.getByRole('separator', { name: 'Width of the conversation' }).className).toMatch(/start/)
+    expect(await layout()).toEqual(['on', 'on', 'on'])
+    // One pane alone has no sides: the choice stays as it was, and can't be changed.
+    await pickLayout('Board')
+    expect(await layout()).toEqual(['on, fixed', 'off', 'on, fixed'])
+    expect(window.localStorage.getItem('althar.swapped')).toBe('true')
+    window.localStorage.removeItem('althar.swapped')
+    view.unmount()
+  })
+
+  it('sends from the composer under the board, and brings the conversation back for the answer', async () => {
+    const { client } = fakeClient({ getCoordinator: vi.fn(async () => coordinatorSnapshot()) })
+    withServices(<Project room={Room.Board} />, client)
+    const composer = await screen.findByRole('textbox', { name: /Tell the coordinator/ })
+    expect(screen.queryByRole('region', { name: 'Conversation' })).toBeNull()
+    await userEvent.type(composer, 'What needs me?{Enter}')
+    await waitFor(() => expect(client.send).toHaveBeenCalled())
+    expect(await screen.findByRole('region', { name: 'Conversation' })).toBeTruthy()
+    expect(await layout()).toEqual(['on', 'on', 'off'])
+  })
+
+  it('tells the coordinator from under the board while a new aside is open, and brings the coordinator back for the answer', async () => {
+    const { client } = fakeClient({ getCoordinator: vi.fn(async () => coordinatorSnapshot()) })
+    withServices(<Project />, client)
+    await userEvent.click(await screen.findByRole('button', { name: 'New aside' }))
+    expect(await screen.findByRole('textbox', { name: /Ask on the side/ })).toBeTruthy()
+    await userEvent.keyboard('{Escape}')
+    ;(document.activeElement as HTMLElement | null)?.blur()
+    await userEvent.keyboard('c')
+    const composer = await screen.findByRole('textbox', { name: /Tell the coordinator/ })
+    await userEvent.type(composer, 'What needs me?{Enter}')
+    await waitFor(() => expect(client.send).toHaveBeenCalledWith(expect.objectContaining({ threadId: coordinatorSnapshot().threadId })))
+    expect(client.send).toHaveBeenCalledTimes(1)
+    expect(await layout()).toEqual(['on', 'on', 'off'])
+    expect(screen.queryByRole('textbox', { name: /Ask on the side/ })).toBeNull()
+    expect(screen.getByRole('textbox', { name: /Tell the coordinator/ })).toBeTruthy()
+  })
+
+  it('tells the coordinator from under the board while an aside is open, and brings the coordinator back, not the aside', async () => {
+    const aside = {
+      ...card(),
+      state: 'open' as const,
+      createdAt: '2026-11-11T11:00:00.000Z',
+      settledAt: null,
+      changed: null,
+      here: [],
+      taskId: 'a1',
+      threadId: 'th-a1',
+      title: 'A quick question',
+      phase: 'ready' as const,
+      scratch: true,
+    }
+    const { client } = fakeClient({
+      getCoordinator: vi.fn(async () => coordinatorSnapshot()),
+      getBoard: vi.fn(async () => ({ cursor: 1, tasks: [aside], calls: [], settledTotal: 0 })),
+    })
+    withServices(<Project />, client)
+    await userEvent.click(await screen.findByRole('tab', { name: /A quick question/ }))
+    await waitFor(() => expect(screen.queryByRole('textbox', { name: /Tell the coordinator/ })).toBeNull())
+    ;(document.activeElement as HTMLElement | null)?.blur()
+    await userEvent.keyboard('c')
+    const composer = await screen.findByRole('textbox', { name: /Tell the coordinator/ })
+    await userEvent.type(composer, 'What needs me?{Enter}')
+    await waitFor(() => expect(client.send).toHaveBeenCalledWith(expect.objectContaining({ threadId: coordinatorSnapshot().threadId })))
+    expect(client.send).not.toHaveBeenCalledWith(expect.objectContaining({ threadId: 'th-a1' }))
+    expect(await screen.findByRole('region', { name: 'Conversation' })).toBeTruthy()
+    // The coordinator's own conversation is back, with its composer, not the aside's.
+    expect(await screen.findByRole('tab', { name: 'Coordinator', selected: true })).toBeTruthy()
+    expect(screen.getByRole('textbox', { name: /Tell the coordinator/ })).toBeTruthy()
+  })
+
+  it('goes back to the home as it was left, from another view, or by showing a pane from ⋯', async () => {
+    const { client } = fakeClient({ getCoordinator: vi.fn(async () => coordinatorSnapshot()) })
+    withServices(<Project room={Room.Board} />, client)
+    const views = await screen.findByRole('radiogroup', { name: 'View' })
+    await userEvent.click(within(views).getByRole('radio', { name: 'Settings' }))
+    expect(await layout()).toEqual(['off', 'off', 'off, fixed'])
+    await userEvent.click(within(views).getByRole('radio', { name: 'Home' }))
+    expect(await layout()).toEqual(['off', 'on, fixed', 'off, fixed'])
+    await userEvent.click(within(views).getByRole('radio', { name: 'Settings' }))
+    await pickLayout('Conversation')
+    expect(await layout()).toEqual(['on', 'on', 'off'])
   })
 
   it('opens on Home where no view was named or kept', async () => {
@@ -233,7 +418,7 @@ describe('the project’s bar', () => {
     expect(within(views).getByRole('radio', { checked: true }).textContent).toMatch(/^Home/)
   })
 
-  it('says which view it is on, to open on it again, and has only its views, its automations and its settings to choose from', async () => {
+  it('says which view it is on, to open on it again, and has only its views, its automations, its artifacts and its settings to choose from', async () => {
     const onRoomChange = vi.fn()
     const { client } = fakeClient({ getCoordinator: vi.fn(async () => coordinatorSnapshot()) })
     withServices(<Project room={Room.Both} onRoomChange={onRoomChange} />, client)
@@ -243,8 +428,9 @@ describe('the project’s bar', () => {
       within(views)
         .getAllByRole('radio')
         .map((radio) => radio.textContent),
-    ).toEqual(['Home', 'Conversation', 'Board', 'Automations', 'Settings'])
-    await userEvent.click(within(views).getByRole('radio', { name: 'Board' }))
+    ).toEqual(['Home', 'Automations', 'Artifacts', 'Settings'])
+    // The conversation hidden, the board alone is the home's layout, kept too.
+    await pickLayout('Conversation')
     expect(onRoomChange).toHaveBeenLastCalledWith(Room.Board)
     // Its settings are a view too, kept like the others to open on again.
     await userEvent.click(within(views).getByRole('radio', { name: 'Settings' }))
@@ -275,8 +461,8 @@ describe('the Talk room', () => {
     withServices(<Project room={Room.Talk} onTask={onTask} />, client)
     await screen.findByRole('heading', { name: 'meridian', level: 1 })
     // Its header's ⋯ says what it is made of, never where it is on this computer.
-    await userEvent.click(await screen.findByRole('button', { name: 'Made of' }))
-    const made = await screen.findByRole('menu', { name: 'Made of' })
+    await userEvent.click(await screen.findByRole('button', { name: 'More' }))
+    const made = await screen.findByRole('menu', { name: 'More' })
     expect(
       within(made)
         .getAllByRole('menuitem')
@@ -284,7 +470,7 @@ describe('the Talk room', () => {
     ).toEqual([expect.stringMatching(/^meridian-api/), expect.stringMatching(/^meridian-web/), expect.stringMatching(/^meridian-infra/)])
     expect(screen.queryByText(/\/code\/meridian/)).toBeNull()
     await userEvent.keyboard('{Escape}')
-    await waitFor(() => expect(screen.queryByRole('menu', { name: 'Made of' })).toBeNull())
+    await waitFor(() => expect(screen.queryByRole('menu', { name: 'More' })).toBeNull())
     expect(screen.getByText('The call has no retry. I planned a task.')).toBeTruthy()
     expect(screen.queryByText('checkout.ts')).toBeNull()
     expect(screen.getByRole('button', { name: /^Worked for/ })).toBeTruthy()
@@ -329,7 +515,7 @@ describe('the Talk room', () => {
     expect(screen.getByText('Needs you')).toBeTruthy()
     expect(screen.getByText('Implementing')).toBeTruthy()
     expect(screen.getByText('Stopped')).toBeTruthy()
-    expect(screen.getByText('Held. Starts when you say')).toBeTruthy()
+    expect(screen.getByText('Held', { exact: true })).toBeTruthy()
     expect(screen.getByText(`Claude Code is out of usage until ${clock('2026-10-03T15:40:00.000Z')}`)).toBeTruthy()
     // Held for the reset, it is paused, as on the board, not running.
     expect(screen.getByText('Paused')).toBeTruthy()
@@ -438,7 +624,8 @@ describe('the Talk room', () => {
         null,
       ),
     )
-    await userEvent.click(screen.getByRole('button', { name: 'Skip' }))
+    // Skipping the review is in its dropdown, the whole row, still open.
+    await userEvent.click(await screen.findByRole('button', { name: 'Skip the review' }))
     await waitFor(() =>
       expect(client.changePlan).toHaveBeenLastCalledWith(
         'pln1',
@@ -455,7 +642,7 @@ describe('the Talk room', () => {
     expect(client.startPlan).toHaveBeenCalledWith('pln1')
   })
 
-  it('plans a review of someone else’s pull request with its one lead, offering only agents held to reading', async () => {
+  it('plans a review of someone else’s pull request with its one lead, offering every agent', async () => {
     const review = card({
       slug: 'review-1199-send-back',
       title: 'Review #1199: Send back won’t restart a dead lead session',
@@ -479,7 +666,6 @@ describe('the Talk room', () => {
         ...card().plan!,
         steps: [{ key: 'implement', agentId: 'claude-code', model: null, skipped: false }],
         reason: 'Strong at reading.',
-        agents: ['claude-code'],
       },
     })
     const { client } = fakeClient({ getCoordinator: vi.fn(async () => coordinatorSnapshot({ items: [items.card(review)] })) })
@@ -490,10 +676,10 @@ describe('the Talk room', () => {
     expect(screen.queryByText('Strong at reading.')).toBeNull()
     expect(screen.queryByRole('button', { name: 'Skip' })).toBeNull()
     expect(screen.queryByText('When the work is done')).toBeNull()
-    // Codex can't be held to reading only, so it isn't offered.
+    // Any agent may lead it: Codex is offered too.
     await userEvent.click(lead)
     expect(await screen.findByRole('radio', { name: /Claude Code default/ })).toBeTruthy()
-    expect(screen.queryByRole('radio', { name: /gpt-5\.2-codex/ })).toBeNull()
+    expect(screen.getByRole('radio', { name: /gpt-5\.2-codex/ })).toBeTruthy()
     await userEvent.click(screen.getByRole('radio', { name: 'High' }))
     await waitFor(() =>
       expect(client.changePlan).toHaveBeenLastCalledWith(
@@ -550,15 +736,35 @@ describe('the Talk room', () => {
     expect(client.changePlan).not.toHaveBeenCalled()
   })
 
+  it('lets the person hold a started Local plan that waits for its checkout, saying what it waits for', async () => {
+    const waitingCard = card({
+      phase: 'running',
+      step: 'implement',
+      queued: null,
+      planWaits: true,
+      holdable: true,
+      waitsForCheckout: { why: 'taken', by: { taskId: 'x', title: 'Dark mode' } },
+    })
+    const { client } = fakeClient({ getCoordinator: vi.fn(async () => coordinatorSnapshot({ items: [items.card(waitingCard)] })) })
+    withServices(<Project room={Room.Talk} />, client)
+    expect(await screen.findByText(/Dark mode/)).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Start now' })).toBeNull()
+    await userEvent.click(screen.getByRole('button', { name: 'Hold' }))
+    expect(client.holdPlan).toHaveBeenCalledWith('pln1')
+  })
+
   it('lets the person change a started plan while its first step waits for a free agent, saying what it waits for', async () => {
     const waitingCard = card({ phase: 'running', step: 'implement', queued: { busy: 4, atOnce: 4 }, planWaits: true })
     const { client } = fakeClient({ getCoordinator: vi.fn(async () => coordinatorSnapshot({ items: [items.card(waitingCard)] })) })
     withServices(<Project room={Room.Talk} />, client)
     expect(await screen.findByText('Waiting: 4 of 4 agents busy on this Mac')).toBeTruthy()
-    // Nothing to start or hold: it starts on its own once an agent is free.
+    // Nothing to start: it starts on its own once an agent is free. It can still be held, which takes it out of the line.
     expect(screen.queryByRole('button', { name: 'Start now' })).toBeNull()
-    expect(screen.queryByRole('button', { name: 'Hold' })).toBeNull()
-    await userEvent.click(screen.getByRole('button', { name: 'Skip' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Hold' }))
+    expect(client.holdPlan).toHaveBeenCalledWith('pln1')
+    // Skipping the review is in its dropdown, the whole row.
+    await userEvent.click(screen.getByRole('button', { name: /^Review: / }))
+    await userEvent.click(await screen.findByRole('button', { name: 'Skip the review' }))
     await waitFor(() =>
       expect(client.changePlan).toHaveBeenLastCalledWith(
         'pln1',
@@ -596,7 +802,9 @@ describe('the Talk room', () => {
     expect(await screen.findByRole('button', { name: 'Lead for this task: Claude Opus High' })).toBeTruthy()
     expect(screen.getByRole('button', { name: 'Review: gpt-5.2-codex Medium' })).toBeTruthy()
     // Skipping the review keeps it.
-    await userEvent.click(screen.getByRole('button', { name: 'Skip' }))
+    // Skipping the review is in its dropdown, the whole row.
+    await userEvent.click(screen.getByRole('button', { name: /^Review: / }))
+    await userEvent.click(await screen.findByRole('button', { name: 'Skip the review' }))
     await waitFor(() =>
       expect(client.changePlan).toHaveBeenLastCalledWith(
         'pln1',
@@ -924,7 +1132,8 @@ describe('the Talk room', () => {
       act(() => emit({ _tag: 'Context', threadId: 'thc', used: 100_000, size: 1_000_000 }))
       expect(await screen.findByRole('button', { name: 'Context 10% used' })).toBeTruthy()
       act(() => {
-        emit(changed('thread_item', 'i9', 'thc'))
+        // An id of its own, which the fixtures' counted ids (i1, i2…) never meet.
+        emit(changed('thread_item', 'changed-item', 'thc'))
         emit(changed('provider_session', 's1', 'thc'))
         emit(changed('user_input', 'u1', 'thc'))
         emit(changed('run', 'r1', 'th1'))
@@ -933,13 +1142,14 @@ describe('the Talk room', () => {
         emit(streamed('x', 'Not here', 'th1'))
       })
       await vi.advanceTimersByTimeAsync(50)
-      await waitFor(() => expect(client.getThreadItem).toHaveBeenCalledTimes(3))
-      expect(
-        vi
-          .mocked(client.getThreadItem)
-          .mock.calls.map(([, itemId]) => itemId)
-          .toSorted(),
-      ).toEqual(['c1', 'i9', queued.id].toSorted())
+      await waitFor(() =>
+        expect(
+          vi
+            .mocked(client.getThreadItem)
+            .mock.calls.map(([, itemId]) => itemId)
+            .toSorted(),
+        ).toEqual(['c1', 'changed-item', queued.id].toSorted()),
+      )
       expect(client.getCoordinator).toHaveBeenLastCalledWith('p1', { limit: 0 })
       await waitFor(() => expect(screen.queryByText('Queued')).toBeNull())
     } finally {

@@ -14,8 +14,6 @@ export default defineConfig({
       '**/playwright-report/**',
       '**/test-results/**',
       '**/storybook-static/**',
-      // Vendored skills, kept byte for byte as their pins hash them.
-      'packages/skills/catalog/**',
     ],
     plugins: ['typescript', 'unicorn', 'oxc', 'react', 'jsx-a11y', 'import'],
     jsPlugins: ['./lint/althar.js'],
@@ -46,19 +44,28 @@ export default defineConfig({
         files: ['packages/provider-adapters/src/removal.ts', 'packages/provider-adapters/src/testing/**'],
         rules: { 'althar/one-removal': 'off' },
       },
+      /* The runtime, what it runs, and the app's main process start no process and copy no folder synchronously (lint/thread.js). */
+      {
+        files: [
+          'packages/{runtime,domain,contracts,persistence-sqlite,provider-adapters,connectors,skills}/src/**',
+          'apps/desktop/src/{main,preload,runtime,speech,logs}/**',
+        ],
+        rules: { 'althar/off-the-thread': 'error' },
+      },
+      /* But the fake agent and the fake services, which run beside a test, never in the app. */
+      {
+        files: ['packages/{provider-adapters,connectors}/src/testing/**'],
+        rules: { 'althar/off-the-thread': 'off' },
+      },
+      /* A press in the window or the kit shows its result at once, never after a call answers (lint/press.js). */
+      {
+        files: ['apps/desktop/src/renderer/**/*.tsx', 'packages/ui/src/**/*.tsx'],
+        rules: { 'althar/press-at-once': 'error' },
+      },
     ],
   },
   fmt: {
-    ignorePatterns: [
-      '**/dist/**',
-      '**/.ssr/**',
-      '**/coverage/**',
-      '**/*.html',
-      'apps/**/*.css',
-      '**/*.md',
-      'bun.lock',
-      'packages/skills/catalog/**',
-    ],
+    ignorePatterns: ['**/dist/**', '**/.ssr/**', '**/coverage/**', '**/*.html', 'apps/**/*.css', '**/*.md', 'bun.lock'],
     semi: false,
     singleQuote: true,
     printWidth: 140,

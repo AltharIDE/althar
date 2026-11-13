@@ -70,16 +70,22 @@ checkout or a task's folder.
 
 - **One copy for each of the project's repositories**, in a folder Althar
   owns, detached at the default branch. Each copy is a repository of its
-  own, and Althar makes its git folder again before every turn. The copy
+  own, and Althar makes its git folder again for every turn. The copy
   borrows the person's repository's objects to read, and its only remote is
   a bare mirror of the person's refs, which Althar keeps beside the folder
-  and only Althar writes.
-- **Before each turn, Althar fetches the project's remote** into the
-  person's repository, then mirrors those refs. So the coordinator's own
-  `git fetch` brings the remote as of the turn, and its `git fetch`,
-  `git tag` and anything else it writes stay in the copy, which is thrown
-  away. Althar's own git never reads what it leaves there: links left in a
-  copy's place are removed, never followed.
+  and only Althar writes, with the index the copy was last checked out
+  with, so checking it out again compares rather than rewrites every file.
+- **As each turn ends, Althar fetches the project's remote** into the
+  person's repository, mirrors those refs and makes the copies fresh, while
+  the person reads and writes, so the next turn goes out at once. A turn
+  that comes before that is done waits for it; one with copies older than
+  15 minutes, or that a turn may have written in since, has them made fresh
+  first. So the coordinator's own `git fetch` brings the remote as of its
+  last turn, and its `git fetch`, `git tag` and anything else it writes stay
+  in the copy, which is thrown away. Althar's own git never reads what it
+  leaves there: links left in a copy's place are removed, never followed.
+  Making them before each turn cost 4 to 7 seconds in a large repository,
+  before the model saw the person's words (12 Nov 2026).
 - A project with no repositories gets an empty folder.
 
 **Its commands go by the project's rules,** the person's Never and Ask
@@ -134,7 +140,7 @@ Althar hands the coordinator over itself.
   itself, and Althar doesn't try again for that session. Neither does it hand
   over where the brief would take 40% or more of a fresh context.
 
-A task's lead is handed over the same way, at a break ([agents.md](agents.md)).
+A task's lead is handed over the same way, once its context is full ([agents.md](agents.md)).
 
 ## The project's notes
 

@@ -507,7 +507,12 @@ export function RepositoryMap({
                 <div className={s.off}>
                   <p className={s.what}>{t.what[host.reach]}</p>
                   {button !== null && (
-                    <Button size="small" onClick={() => onConnect?.(host.id)}>
+                    // Signing in again waits on the person, in violet, as it does everywhere; connecting one is theirs to choose.
+                    <Button
+                      size="small"
+                      variant={host.reach === HostReach.SignInAgain ? 'signal' : 'default'}
+                      onClick={() => onConnect?.(host.id)}
+                    >
                       {button}
                     </Button>
                   )}
@@ -552,7 +557,7 @@ function HostGroup({ host, level, t, children }: { host: MapHost; level: Heading
           {host.name}
         </Heading>
         {host.instance !== undefined && <span className={s.instance}>{host.instance}</span>}
-        <span className={s.reach}>{reachWords(host, t)}</span>
+        <span className={cx(s.reach, host.reach === HostReach.SignInAgain && s.yours)}>{reachWords(host, t)}</span>
       </div>
       {children}
     </section>

@@ -38,7 +38,7 @@ button.row:hover {
   min-width: 0;
 }
 .good {
-  color: var(--ok);
+  color: var(--ok-ink);
 }
 .bad {
   color: var(--danger);

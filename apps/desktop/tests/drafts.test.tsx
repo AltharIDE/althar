@@ -57,7 +57,7 @@ const READY: DictationState = {
   platform: 'darwin',
   microphone: 'granted',
   settings: true,
-  model: { ready: true, got: 1, size: 1, downloading: false },
+  model: { name: 'Parakeet', ready: true, got: 1, size: 1, downloading: false },
 }
 
 /** A dictation host whose writing down waits until the test says what was heard, or that it failed. */
@@ -68,6 +68,7 @@ const slowDictation = () => {
     allow: vi.fn(async () => true),
     download: vi.fn(async () => {}),
     cancel: vi.fn(async () => {}),
+    remove: vi.fn(async () => {}),
     prepare: vi.fn(async () => {}),
     transcribe: vi.fn(() => new Promise<string>((resolve, reject) => void waiting.push({ resolve, reject }))),
     openSettings: vi.fn(async () => true),
@@ -288,7 +289,7 @@ describe('dictation, once the person leaves', () => {
 })
 
 describe('dictation, once its composer goes from the screen while the view stays', () => {
-  it('goes on listening as the project shows its board, and is still listening back in the conversation', async () => {
+  it('goes on listening as the project shows its settings, and is still listening back home', async () => {
     const speech = slowDictation()
     const host = fakeHost({ dictation: speech.dictation })
     const { client } = fakeClient()
@@ -297,10 +298,10 @@ describe('dictation, once its composer goes from the screen while the view stays
     await userEvent.click(screen.getByRole('button', { name: 'Dictate' }))
     await screen.findByRole('button', { name: /^Stop dictating/ })
     const views = screen.getByRole('radiogroup', { name: 'View' })
-    await userEvent.click(within(views).getByRole('radio', { name: 'Board' }))
+    await userEvent.click(within(views).getByRole('radio', { name: 'Settings' }))
     await waitFor(() => expect(screen.queryByRole('textbox', { name: 'Tell the coordinator something' })).toBeNull())
     expect(speech.dictation.transcribe).not.toHaveBeenCalled()
-    await userEvent.click(within(views).getByRole('radio', { name: 'Conversation' }))
+    await userEvent.click(within(views).getByRole('radio', { name: 'Home' }))
     await userEvent.click(await screen.findByRole('button', { name: /^Stop dictating/ }))
     await speech.heard('Why is checkout slow?')
     expect((await coordinatorBox()).value).toBe('Why is checkout slow?')

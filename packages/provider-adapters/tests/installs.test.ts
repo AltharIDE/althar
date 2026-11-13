@@ -2,7 +2,7 @@ import { existsSync } from 'node:fs'
 
 import { describe, expect, it } from 'vitest'
 
-import { locate, namesOf, programName, quoted, usingLocated, usualDirs } from '../src/installs'
+import { type Located, locate, namesOf, programName, quoted, usingLocated, usualDirs } from '../src/installs'
 import { agents, bundledClaude, bundledCodex, isMusl, type LaunchSpec, type OutOnDevice } from '../src/registry'
 
 /* Finding an agent's command, on a Mac, Windows or Linux: the person's own first, then Althar's copies. */
@@ -132,6 +132,26 @@ describe('finding an agent’s command', () => {
     expect(codex.version?.('node')).toMatchObject({ command: '/device/codex', args: ['--version'] })
     expect(codex.usage?.run('node')).toMatchObject({ command: '/device/codex', args: ['app-server'] })
     expect(codex.signIn.login).toBe('/device/codex login')
+  })
+
+  it('has Codex’s adapter drive the person’s own Codex where they have one, and its own copy where they don’t', () => {
+    let found: Located | null = { command: '/home/me/.local/bin/codex', whose: 'theirs' }
+    const codex = usingLocated(agents.codex, () => found)
+    expect(codex.launch('node')).toMatchObject({ command: 'node', env: { CODEX_PATH: '/home/me/.local/bin/codex' } })
+    found = { command: 'codex', whose: 'theirs' }
+    expect(codex.launch('node').env?.CODEX_PATH).toBe('codex')
+    // Not theirs: the adapter's own Codex, as before.
+    found = { command: '/bundled/codex', whose: 'bundled' }
+    expect(codex.launch('node').env?.CODEX_PATH).toBeUndefined()
+    found = { command: '/kept/codex', whose: 'althar' }
+    expect(codex.launch('node').env?.CODEX_PATH).toBeUndefined()
+    found = null
+    expect(codex.launch('node').env?.CODEX_PATH).toBeUndefined()
+    // Out on the device (a Flatpak's host), it is reached its own way.
+    found = { command: '/device/codex', whose: 'theirs', out: (spec) => () => spec }
+    expect(codex.launch('node').env?.CODEX_PATH).toBeUndefined()
+    // An agent without such a variable is launched as it was.
+    expect(usingLocated(agents.grok, () => ({ command: '/x/grok', whose: 'theirs' })).launch('node').env?.CODEX_PATH).toBeUndefined()
   })
 
   it('carries a copy that lives out on the device with the spec that names it, so an executor runs it there', () => {

@@ -1,14 +1,15 @@
 .field {
   width: 100%;
 }
+/* what starting from its head does, then why it didn't */
+.body {
+  display: grid;
+  gap: 14px;
+}
 .list {
   display: grid;
   gap: 6px;
   margin: 0;
   padding-left: 18px;
   overflow-wrap: anywhere;
-}
-.error {
-  margin: 12px 0 0;
-  color: var(--danger);
 }

@@ -171,8 +171,17 @@ const cardOf = (
 const installedFiles = (root: string, install: Install | undefined): Effect.Effect<Files, SkillStoreFailed> =>
   install === undefined ? Effect.succeed(new Map()) : readObject(root, install.treeHash)
 
+/** A repository path with no slash at either end, read a character at a time so no path can make the read slow. */
+const withoutEdgeSlashes = (path: string): string => {
+  let start = 0
+  let end = path.length
+  while (start < end && path[start] === '/') start += 1
+  while (end > start && path[end - 1] === '/') end -= 1
+  return path.slice(start, end)
+}
+
 /** The name a skill installs under: its directory's, as Agent Skills requires `name` to match. */
-const idOf = (subpath: string): string => basename(subpath.replace(/\/+$/, '')) || ''
+const idOf = (subpath: string): string => basename(withoutEdgeSlashes(subpath)) || ''
 
 const refused = (message: string) => new SkillRefused({ message })
 
@@ -191,7 +200,7 @@ const installOf = (
 export const stageFromGitHub = (root: string, access: GitHubAccess, source: GitHubSkillSource): Effect.Effect<ReviewCard, SkillError> =>
   Effect.gen(function* () {
     const sha = yield* resolveRef(access, source.repo, source.ref)
-    const subpath = source.subpath.replace(/^\/+|\/+$/g, '')
+    const subpath = withoutEdgeSlashes(source.subpath)
     const id = idOf(subpath) || (source.repo.split('/')[1] ?? source.repo)
     const files = yield* fetchSkill(access, source.repo, sha, subpath)
     const treeHash = yield* putObject(root, files)
@@ -368,8 +377,7 @@ export const setActive = (root: string, id: string, active: boolean): Effect.Eff
   )
 
 /**
- * Removes a person's own install from later runs, and says what it was; nothing where none is installed. A default
- * can only be turned off: the catalog would put it back. Its stored versions are kept.
+ * Removes an install from later runs, and says what it was; nothing where none is installed. Its stored versions are kept.
  */
 export const uninstall = (root: string, id: string): Effect.Effect<Install | undefined, SkillError> =>
   serialized(
@@ -377,7 +385,6 @@ export const uninstall = (root: string, id: string): Effect.Effect<Install | und
     Effect.gen(function* () {
       const { all, was } = yield* installOf(root, id)
       if (was === undefined) return undefined
-      if (was.source === 'althar-default') return yield* refused(`${id} comes with Althar; turn it off instead`)
       yield* writeInstalls(root, { ...all, installs: all.installs.filter((install) => install.id !== id) })
       return was
     }),

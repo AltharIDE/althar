@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { expect, type Page, test } from '@playwright/test'
 
 import { repository } from '../tests/repository'
-import { backToWork, launch, openFirstProject, planTask, projectSettings, shown } from './support'
+import { backToWork, launch, openFirstProject, planTask, projectSettings, shown, showPanes } from './support'
 
 /*
  * An agent out of usage, as the person sees it. The fake agents are out as
@@ -33,7 +33,7 @@ const startWhileOut = async (out: string, { asks = false, waits = false }: { rea
     await expect(planning.page.getByRole('heading', { name: 'meridian', level: 1 })).toBeVisible()
     await planTask(planning.page, 'Add a retry to the checkout call')
     await planning.page.getByRole('button', { name: 'Hold' }).click()
-    await expect(planning.page.getByRole('region', { name: 'Conversation' }).getByText('Held. Starts when you say')).toBeVisible()
+    await expect(planning.page.getByRole('region', { name: 'Conversation' }).getByText('Held', { exact: true })).toBeVisible()
   } finally {
     await planning.electronApp.close()
   }
@@ -45,14 +45,14 @@ const startWhileOut = async (out: string, { asks = false, waits = false }: { rea
     .click()
   await expect(page.getByRole('heading', { name: 'meridian', level: 1 })).toBeVisible()
   if (waits) {
-    await projectSettings(page, 'Rules')
+    await projectSettings(page, 'Tasks')
     await page.getByRole('button', { name: 'moves to the strongest model with usage left', exact: true }).click()
     await page.getByRole('menuitemradio', { name: 'Wait for the reset' }).click()
     await expect(page.getByRole('listitem', { name: 'Limits' })).toContainText('When an account runs out, the work waits for the reset')
     await backToWork(page)
   }
   if (asks) {
-    await projectSettings(page, 'Rules')
+    await projectSettings(page, 'Tasks')
     await page.getByRole('button', { name: 'moves to the strongest model with usage left', exact: true }).click()
     await page.getByRole('menuitemradio', { name: 'Ask me' }).click()
     const limits = page.getByRole('listitem', { name: 'Limits' })
@@ -97,7 +97,7 @@ test('waits for the reset where no other agent is free, and says so on its card,
     const held = /Codex is out of usage until /
     await expect(page.getByRole('region', { name: 'Conversation' }).getByText(held)).toBeVisible()
     await page.screenshot({ path: 'test-results/limit-waits-card.png', animations: 'disabled' })
-    await page.getByRole('radio', { name: /^Board/ }).click()
+    await showPanes(page, { conversation: false, board: true })
     await expect(page.getByRole('region', { name: 'The project’s work' }).getByText(held)).toBeVisible()
     await page.screenshot({ path: 'test-results/limit-waits-board.png', animations: 'disabled' })
     await page.getByRole('button', { name: 'Add a retry to the checkout call' }).click()

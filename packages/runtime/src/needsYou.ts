@@ -1,5 +1,7 @@
 import type { ChangeSummary } from '@althar/contracts'
 
+import { heldBack } from './mergeNeeds'
+
 /*
  * A card is in Needs you only where the person has a decision to make, never
  * for a moment while Althar or the lead is on its way to the next thing
@@ -24,25 +26,33 @@ export type ByItself = 'pushing' | 'checks_running'
  * once the checks end (`failuresGo`), some failed while the rest still run
  * are on their way too: nothing is the person's yet.
  */
-export const byItself = (change: ChangeSummary | null, how: { readonly failuresGo?: boolean } = {}): ByItself | null => {
+export const byItself = (
+  change: ChangeSummary | null,
+  how: { readonly failuresGo?: boolean; readonly checksAppearing?: boolean } = {},
+): ByItself | null => {
   if (change === null || change.state !== 'open' || change.diverged !== null) return null
   const unpushed = change.localHead !== null && change.unpushed > 0
   if (unpushed) return change.pushing !== undefined && change.pushing.held === null ? 'pushing' : null
   const checks = change.checks
-  if (change.conflicts === true || checks === null || (checks.failed > 0 && how.failuresGo !== true)) return null
+  if (change.conflicts === true || (checks !== null && checks.failed > 0 && how.failuresGo !== true)) return null
+  // A recorded push in a repository with CI may have no check read at all yet, or an empty first read. Permission failures
+  // never set this flag: their recovery remains the person's rather than waiting for checks that Althar cannot read.
+  if ((checks === null || checks.outcome === 'none') && how.checksAppearing === true) return 'checks_running'
+  if (checks === null) return null
   // Run again by Althar (a cancelled check), they are running before its host shows them so.
   return checks.running > 0 || checks.outcome === 'running' ? 'checks_running' : null
 }
 
 /**
- * Whether an open pull request can be merged as it stands: not a draft, nothing of the lead's still to push, no conflict and
- * checks that all passed. A stopped task with one is no less the person's to merge: stopped never hides the way to it.
+ * Whether an open pull request can be merged as it stands: not a draft, nothing of the lead's still to push, no conflict,
+ * checks that all passed, and nothing its host requires still missing or waited on, as far as it says (DEV-204). A stopped
+ * task with one is no less the person's to merge: stopped never hides the way to it.
  */
 export const isMergeable = (change: ChangeSummary | null): boolean => {
   if (change === null || change.state !== 'open' || change.draft || change.queued === true) return false
   if (change.diverged !== null || change.conflicts === true || (change.localHead !== null && change.unpushed > 0)) return false
   const checks = change.checks
-  return checks !== null && checks.outcome === 'passed' && checks.failed === 0 && checks.running === 0
+  return checks !== null && checks.outcome === 'passed' && checks.failed === 0 && checks.running === 0 && !heldBack(change.needs)
 }
 
 /** How long a task no agent is on, with nothing that says why, is taken to be between agents rather than stopped. */
@@ -58,6 +68,17 @@ export const betweenAgents = (since: string | null, now: number, within: number 
  * ends); this is the fallback, for a draft made outside a turn, or a turn that never ended.
  */
 export const DRAFTING_MS = 5 * 60_000
+
+/**
+ * How long what the person asked of a merged task's lead (Fix it, or a message) is taken to be on its way, its turn not
+ * begun: its folder coming back, its lead starting. The turn that takes it is the better sign; this is the fallback, for a
+ * lead that never starts, so the task isn't under way for ever.
+ */
+export const ASKED_MS = 10 * 60_000
+
+/** Whether what was asked of a task's lead at `since` is still on its way at `now`, for `within` ms. */
+export const stillAsked = (since: string | null, now: number, within: number = ASKED_MS): boolean =>
+  since !== null && now - Date.parse(since) < within
 
 /** Whether a task made at `createdAt` is still within `within` ms of being drafted, at `now`. */
 export const stillDrafting = (createdAt: string | null, now: number, within: number = DRAFTING_MS): boolean =>

@@ -7,11 +7,14 @@ import { CheckList } from '../../primitives/CheckList/CheckList'
 import { Dialog } from '../../primitives/Dialog/Dialog'
 import { Field } from '../../primitives/Field/Field'
 import { FormRow } from '../../primitives/FormRow/FormRow'
+import type { HeadingLevel } from '../../primitives/Heading/Heading'
 import { IconButton } from '../../primitives/IconButton/IconButton'
 import { LinkButton } from '../../primitives/LinkButton/LinkButton'
+import { Problem } from '../../primitives/Problem/Problem'
 import { Segmented } from '../../primitives/Segmented/Segmented'
 import { Select } from '../../primitives/Select/Select'
 import { Spinner } from '../../primitives/Spinner/Spinner'
+import { EmptyState } from '../EmptyState/EmptyState'
 import s from './Runnables.module.css'
 
 /*
@@ -217,11 +220,7 @@ export function AddRunnable({
             </>
           ))}
         {way === 'ask' && <p className={s.quiet}>{t.askAbout}</p>}
-        {error !== undefined && (
-          <p className={s.error} role="alert">
-            {error}
-          </p>
-        )}
+        {error !== undefined && <Problem>{error}</Problem>}
       </div>
     </Dialog>
   )
@@ -347,11 +346,7 @@ export function EditRunnable({
           </FormRow>
         )}
       </div>
-      {error !== undefined && (
-        <p className={s.error} role="alert">
-          {error}
-        </p>
-      )}
+      {error !== undefined && <Problem>{error}</Problem>}
     </Dialog>
   )
 }
@@ -375,7 +370,10 @@ export interface RunnableListText {
   moveKeys: string
   edit: (label: string) => string
   remove: (label: string) => string
+  /** With nothing in it: what will be here. */
   empty: string
+  /** Under it: how something gets here. */
+  emptyLine: string
 }
 
 export const runnableListText: RunnableListText = {
@@ -385,7 +383,8 @@ export const runnableListText: RunnableListText = {
   moveKeys: '↑ ↓',
   edit: (label) => `Edit ${label}`,
   remove: (label) => `Remove ${label}`,
-  empty: 'Nothing to run yet.',
+  empty: 'Nothing to run yet',
+  emptyLine: 'Add a command you start by hand, such as a dev server or the tests, and Run starts it without an agent.',
 }
 
 export interface RunnablesText extends RunnableListText {
@@ -414,6 +413,8 @@ export interface RunnableListProps {
   onRemove: (id: string) => void
   /** What went wrong ordering or removing one. */
   error?: string
+  /** The rank of the heading that says there is nothing yet. */
+  headingLevel?: HeadingLevel
   text?: Partial<RunnableListText>
 }
 
@@ -471,7 +472,7 @@ const placeOf = (at: number, { from, to }: Dragged) =>
  * arrow keys on its grip; made the default, changed or removed from its row.
  * On a page of the project's settings, or in the dialog with the whole list.
  */
-export function RunnableList({ runnables, onOrder, onDefault, onEdit, onRemove, error, text }: RunnableListProps) {
+export function RunnableList({ runnables, onOrder, onDefault, onEdit, onRemove, error, headingLevel = 3, text }: RunnableListProps) {
   const t = { ...runnableListText, ...text }
   const list = useRef<HTMLOListElement>(null)
   const [dragged, setDragged] = useState<Dragged | null>(null)
@@ -548,7 +549,7 @@ export function RunnableList({ runnables, onOrder, onDefault, onEdit, onRemove, 
   return (
     <>
       {shown.length === 0 ? (
-        <p className={s.quiet}>{t.empty}</p>
+        <EmptyState icon="play" title={t.empty} line={t.emptyLine} headingLevel={headingLevel} />
       ) : (
         <ol ref={list} className={cx(s.list, moving !== null && s.sorting)}>
           {shown.map((one, at) => {
@@ -600,11 +601,7 @@ export function RunnableList({ runnables, onOrder, onDefault, onEdit, onRemove, 
           })}
         </ol>
       )}
-      {error !== undefined && (
-        <p className={s.error} role="alert">
-          {error}
-        </p>
-      )}
+      {error !== undefined && <Problem>{error}</Problem>}
     </>
   )
 }

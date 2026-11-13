@@ -129,7 +129,8 @@ const keep = () => {
  * Main's word on every page, heard once a window, from the first that asks:
  * how each stands, and that one closed of itself, its task done. A window
  * reloaded or opened after its pages asks how those stand, and shows each
- * main still has where its storage said it showed.
+ * main still has where its storage said it showed. A page a lead opens is
+ * put beside its conversation where this window has no place for it.
  */
 let heard: PagesHost | null = null
 const hear = (host: PagesHost | undefined) => {
@@ -141,6 +142,10 @@ const hear = (host: PagesHost | undefined) => {
     changed()
   })
   host.onClosed((owner) => pages.forget(owner))
+  // A page a lead opened that nothing shows yet goes beside its conversation, as a run's card would put it: the person's own place for it, or the one their storage kept, is left alone.
+  host.onOpened((owner) => {
+    if (!placed.has(owner) && !waking.has(owner)) pages.place(owner, 'beside')
+  })
   void host
     .states()
     .then((open) => {

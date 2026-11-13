@@ -5,8 +5,10 @@ import { type AdapterOptions, authorizationOf } from './credential'
 import { updateInCopy } from './branchUpdate'
 import { ConnectorFailed } from './errors'
 import { tail } from './github'
-import { makeHttp } from './http'
+import { CloudParticipants, CloudRestrictions, cloudRulesOf } from './bitbucketRules'
+import { makeHttp, withoutTrailingSlashes } from './http'
 import { makeBitbucketCloudReleases } from './bitbucketCloudReleases'
+import { postHostReview } from './hostReviews'
 import type {
   Account,
   Activity,
@@ -25,7 +27,7 @@ import type {
   Review,
   Verdict,
 } from './model'
-import { branchPath, lacking, noReopen, noReviews, stillOpen } from './model'
+import { branchPath, lacking, noReopen, stillOpen } from './model'
 import {
   type Answer,
   answered,
@@ -93,7 +95,10 @@ const PullAnswer = Schema.Struct({
     // The repository the branch is on: a fork's, for a branch from one; null where the fork is gone.
     repository: Schema.optional(Schema.NullOr(Schema.Struct({ full_name: Schema.String }))),
   }),
-  destination: Schema.Struct({ branch: Schema.Struct({ name: Schema.String }) }),
+  destination: Schema.Struct({
+    branch: Schema.Struct({ name: Schema.String }),
+    commit: Schema.optional(Schema.Struct({ hash: Schema.String })),
+  }),
   author: Schema.optional(Schema.NullOr(User)),
   reviewers: Schema.optional(Schema.Array(User)),
   // Who took part, and how each left it: given in a list only when asked for.
@@ -311,15 +316,15 @@ const listedOf = (repository: Repository, pull: PullAnswer): ListedChange => {
 
 /** Where a commit status points at a Pipelines run of this repository: its build number. */
 const pipelineOf = (repository: Repository, url: string | null | undefined) => {
-  const home = repository.webUrl.replace(/\/+$/, '').toLowerCase()
+  const home = withoutTrailingSlashes(repository.webUrl).toLowerCase()
   if (url == null || !url.toLowerCase().startsWith(`${home}/`)) return undefined
   return /^\/(?:pipelines\/results|addon\/pipelines\/home#!\/results)\/(\d+)/.exec(url.slice(home.length))?.[1]
 }
 
 export const makeBitbucketCloud = (options: AdapterOptions): CodeHost => {
   const product = 'bitbucket_cloud' as const
-  const api = options.apiUrl.replace(/\/+$/, '')
-  const web = options.webUrl.replace(/\/+$/, '')
+  const api = withoutTrailingSlashes(options.apiUrl)
+  const web = withoutTrailingSlashes(options.webUrl)
   const http = makeHttp({ product, fetch: options.fetch, authorization: Effect.map(options.credential, authorizationOf) })
   const repo = (path: ReadonlyArray<string>) => `${api}/repositories/${path.map(encodeURIComponent).join('/')}`
   const pull = (repository: Repository, number: number) => `${repo(repository.path)}/pullrequests/${number}`
@@ -533,7 +538,7 @@ export const makeBitbucketCloud = (options: AdapterOptions): CodeHost => {
   return {
     product,
     words: { noun: 'pull request', short: 'PR', prefix: '#' },
-    capabilities: { drafts: true, checkLogs: true, threads: true, reviews: false, pictures: false, reopen: false, rerun: true },
+    capabilities: { drafts: true, checkLogs: true, threads: true, reviews: true, pictures: false, reopen: false, rerun: true },
     ...makeBitbucketCloudReleases({ http, repo }),
     account,
     repository: (path) =>
@@ -592,6 +597,20 @@ export const makeBitbucketCloud = (options: AdapterOptions): CodeHost => {
       }),
     listChanges,
     allowance: () => http.allowance(),
+    mergeRules: (repository, change) =>
+      Effect.gen(function* () {
+        // Branch restrictions only an admin may list: for anyone else, what they require stays unknown.
+        const [now, restrictions] = yield* Effect.all(
+          [
+            http.cached(CloudParticipants, pull(repository, change.number)),
+            http
+              .cached(CloudRestrictions, `${repo(repository.path)}/branch-restrictions?pagelen=100`)
+              .pipe(Effect.orElseSucceed(() => null)),
+          ],
+          { concurrency: 'unbounded' },
+        )
+        return cloudRulesOf({ target: change.target, pull: now, restrictions })
+      }),
     change: (repository, number, ask) =>
       Effect.gen(function* () {
         const answer = yield* http.cached(PullAnswer, pull(repository, number))
@@ -681,6 +700,7 @@ export const makeBitbucketCloud = (options: AdapterOptions): CodeHost => {
           reviewers: (now.reviewers ?? []).flatMap((reviewer) => (reviewer.uuid === undefined ? [] : [{ uuid: reviewer.uuid }])),
           ...(now.close_source_branch === undefined ? {} : { close_source_branch: now.close_source_branch }),
           ...(now.draft === undefined ? {} : { draft: now.draft }),
+          ...(edit.base === undefined ? {} : { destination: { branch: { name: edit.base } } }),
         })
         return changeOf(repository, edited)
       }),
@@ -799,9 +819,18 @@ export const makeBitbucketCloud = (options: AdapterOptions): CodeHost => {
         // Althar's own reply: whether it counts as a member's doesn't matter, it is known by its receipt.
         (comment) => commentOf(comment, reply.threadId ?? String(comment.id), true),
       ),
-    // Reviews of a change Althar didn't open are GitHub's alone, for now.
-    changeToReview: () => Effect.fail(noReviews(product, { noun: 'pull request', short: 'PR', prefix: '#' })),
-    postReview: () => Effect.fail(noReviews(product, { noun: 'pull request', short: 'PR', prefix: '#' })),
+    changeToReview: (repository, number) =>
+      Effect.gen(function* () {
+        const one = yield* http.json(PullAnswer, 'GET', pull(repository, number))
+        const source = one.source.repository?.full_name
+        return {
+          ...changeOf(repository, one),
+          fork: source === undefined || source === repository.path.join('/') ? null : source.split('/'),
+          baseSha: one.destination.commit?.hash ?? null,
+          member: source === undefined || one.author?.uuid === undefined ? false : yield* memberOf(repository, one.author.uuid),
+        }
+      }),
+    postReview: (repository, number, review) => postHostReview(product, http, pull(repository, number), review, account),
     pushTarget,
   }
 }
@@ -838,7 +867,7 @@ interface Found {
 
 export const accessBitbucketCloud: Access = (input) =>
   Effect.gen(function* () {
-    const api = input.apiUrl.replace(/\/+$/, '')
+    const api = withoutTrailingSlashes(input.apiUrl)
     const ask = (url: string) => probe(input, url)
     const repo = (path: ReadonlyArray<string>) => `${api}/repositories/${path.map(encodeURIComponent).join('/')}`
     /** The scopes the token was given, once a refusal says. */

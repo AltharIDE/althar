@@ -13,7 +13,9 @@ import { type RulesModel, useRules } from '../rules/useRules'
 import { CodeSection } from './CodeSection'
 import { GeneralSection } from './GeneralSection'
 import { NotesSection } from './NotesSection'
+import { ProjectQuickCards } from './ProjectQuickCards'
 import { RunningSection } from './RunningSection'
+import { TasksSection } from './TasksSection'
 import { HEADING, PROJECT_GROUPS, type ProjectSection, projectSectionText } from './sections'
 import type { ProjectSettingsModel } from './useProjectSettings'
 
@@ -77,20 +79,23 @@ export function ProjectSettingsPage({
         title={open.title}
         headingLevel={HEADING.title}
         side={
-          <SettingsNav
-            label={text.label}
-            groups={PROJECT_GROUPS.map((group) =>
-              group.map((id) => ({
-                id,
-                title: projectSectionText[id].title,
-                icon: projectSectionText[id].icon,
-                ...(id === 'code' && connectionsNeedYou ? { yours: true } : {}),
-              })),
-            )}
-            value={section}
-            onChange={onSection}
-            action={{ title: text.remove, icon: 'close', danger: true, onSelect: model.askRemove }}
-          />
+          <>
+            <ProjectQuickCards model={model} onOpen={() => onSection('tasks')} />
+            <SettingsNav
+              label={text.label}
+              groups={PROJECT_GROUPS.map((group) =>
+                group.map((id) => ({
+                  id,
+                  title: projectSectionText[id].title,
+                  icon: projectSectionText[id].icon,
+                  ...(id === 'code' && connectionsNeedYou ? { yours: true } : {}),
+                })),
+              )}
+              value={section}
+              onChange={onSection}
+              action={{ title: text.remove, icon: 'close', danger: true, onSelect: model.askRemove }}
+            />
+          </>
         }
       >
         <ChangedBy projectId={projectId} section={`project/${section}`} />
@@ -147,7 +152,9 @@ function SectionBody({
 }) {
   switch (section) {
     case 'general':
-      return <GeneralSection model={model} seed={projectId} repositories={repositories} />
+      return <GeneralSection model={model} seed={projectId} />
+    case 'tasks':
+      return <TasksSection model={model} seed={projectId} rulesModel={rules} repositories={repositories} onCode={() => onSection('code')} />
     case 'code':
       return <CodeSection projectId={projectId} trackers={trackers} list={list} onConnect={onConnect} onManage={onConnections} />
     case 'rules':
@@ -158,11 +165,8 @@ function SectionBody({
           projectId={projectId}
           project={model.name ?? ''}
           runnables={runnables}
-          rules={model.rules}
           repositories={repositories}
           worktrees={model.project?.worktrees ?? null}
-          onRules={() => onSection('rules')}
-          onCode={() => onSection('code')}
         />
       )
     case 'notes':

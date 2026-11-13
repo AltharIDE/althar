@@ -1,5 +1,6 @@
+import { removeTreeSync } from '@althar/testing'
 import { execFileSync } from 'node:child_process'
-import { rmSync, writeFileSync } from 'node:fs'
+import { writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 import { type FakeService, makeFakeService } from '@althar/connectors/testing'
@@ -71,7 +72,7 @@ describe('a pull request a task follows, against its branch here', () => {
       assert.deepStrictEqual(yield* shown, [{ localHead: null, unpushed: 0, diverged: null }])
 
       // The worktree is gone: the pull request is as its host has it, with nothing of the branch here.
-      rmSync(task.worktree, { recursive: true, force: true })
+      removeTreeSync(task.worktree)
       assert.deepStrictEqual(yield* shown, [{ localHead: null, unpushed: 0, diverged: null }])
       assert.strictEqual((yield* queries.thread(task.threadId, {})).task.changes[0]?.url, 'https://github.com/meridian/api/pull/1')
     }).pipe(Effect.provide(Queries.layer.pipe(Layer.provideMerge(runtime(':memory:', {}, { connectors: fakeConnectors({ github }) })))))

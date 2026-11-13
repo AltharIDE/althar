@@ -19,9 +19,23 @@
   flex: none;
   font-variant-numeric: tabular-nums;
 }
+/* the part of its time that took most, quieter than the time it took: smaller, in the same readable grey */
+.most {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  color: var(--t-3);
+  font-variant-numeric: tabular-nums;
+}
 button.head:hover,
 .worked[data-state='open'] > .head {
   color: var(--t-1);
+}
+/* the ring rounds its corners, as every other row's does */
+button.head:focus-visible {
+  border-radius: var(--r-sm);
 }
 .chevron {
   flex: none;
@@ -52,6 +66,14 @@ button.head:hover,
 }
 .trail > * + * {
   margin-top: 4px;
+}
+/* where its time went, first in the trail */
+.spent {
+  margin: 0;
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--t-3);
+  font-variant-numeric: tabular-nums;
 }
 
 /* at work: what it said on the way, then what it is doing now, a breath apart as the answer will be */

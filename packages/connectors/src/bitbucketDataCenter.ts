@@ -4,8 +4,10 @@ import { type Access, type AccessReason, line } from './access'
 import { type AdapterOptions, authorizationOf } from './credential'
 import { updateInCopy } from './branchUpdate'
 import { ConnectorFailed } from './errors'
-import { type Http, makeHttp } from './http'
+import { DataCenterMerge, dataCenterRulesOf } from './bitbucketRules'
+import { type Http, makeHttp, withoutTrailingSlashes } from './http'
 import { makeBitbucketDataCenterReleases } from './bitbucketDataCenterReleases'
+import { postHostReview } from './hostReviews'
 import type {
   Account,
   Activity,
@@ -23,7 +25,7 @@ import type {
   Review,
   Verdict,
 } from './model'
-import { lacking, mergedForGood, noReviews, notOurBuild, stillOpen } from './model'
+import { lacking, mergedForGood, notOurBuild, stillOpen } from './model'
 import {
   answered,
   failedOf,
@@ -279,8 +281,8 @@ const iso = (at: number) => new Date(at).toISOString()
 
 export const makeBitbucketDataCenter = (options: AdapterOptions): CodeHost => {
   const product = 'bitbucket_dc' as const
-  const api = options.apiUrl.replace(/\/+$/, '')
-  const web = options.webUrl.replace(/\/+$/, '')
+  const api = withoutTrailingSlashes(options.apiUrl)
+  const web = withoutTrailingSlashes(options.webUrl)
   // Build statuses have their own API, beside the main one.
   const rest = api.replace(/\/api\/[^/]+$/, '')
   const raw = makeHttp({ product, fetch: options.fetch, authorization: Effect.map(options.credential, authorizationOf) })
@@ -530,7 +532,7 @@ export const makeBitbucketDataCenter = (options: AdapterOptions): CodeHost => {
   return {
     product,
     words: { noun: 'pull request', short: 'PR', prefix: '#' },
-    capabilities: { drafts: true, checkLogs: false, threads: true, reviews: false, pictures: false, reopen: true, rerun: false },
+    capabilities: { drafts: true, checkLogs: false, threads: true, reviews: true, pictures: false, reopen: true, rerun: false },
     ...makeBitbucketDataCenterReleases({
       http,
       base,
@@ -599,6 +601,14 @@ export const makeBitbucketDataCenter = (options: AdapterOptions): CodeHost => {
         // Whether it is set to merge by itself: asked only where the server has auto-merge; unsaid where it couldn't say.
         const set = yield* autoMergeOf(repository, number)
         return set === null ? change : { ...change, autoMerge: set }
+      }),
+    mergeRules: (repository, change) =>
+      Effect.gen(function* () {
+        const url = pull(repository, change.number)
+        const [now, merge] = yield* Effect.all([http.cached(PullAnswer, url), http.json(DataCenterMerge, 'GET', `${url}/merge`)], {
+          concurrency: 'unbounded',
+        })
+        return dataCenterRulesOf({ reviewers: now.reviewers ?? [], merge })
       }),
     markReady: (repository, change) =>
       Effect.gen(function* () {
@@ -734,6 +744,7 @@ export const makeBitbucketDataCenter = (options: AdapterOptions): CodeHost => {
           description: edit.body ?? now.description ?? '',
           reviewers: (now.reviewers ?? []).map((reviewer) => ({ user: { name: reviewer.user.name } })),
           ...(now.draft === undefined ? {} : { draft: now.draft }),
+          ...(edit.base === undefined ? {} : { toRef: { id: `refs/heads/${edit.base}`, repository: now.toRef.repository } }),
         })
         return changeOf(repository, edited)
       }),
@@ -846,9 +857,18 @@ export const makeBitbucketDataCenter = (options: AdapterOptions): CodeHost => {
         // Althar's own reply: whether it counts as a member's doesn't matter, it is known by its receipt.
         (comment) => commentOf(repository, number, comment, { id: reply.threadId ?? String(comment.id), path: null, line: null }, true),
       ),
-    // Reviews of a change Althar didn't open are GitHub's alone, for now.
-    changeToReview: () => Effect.fail(noReviews(product, { noun: 'pull request', short: 'PR', prefix: '#' })),
-    postReview: () => Effect.fail(noReviews(product, { noun: 'pull request', short: 'PR', prefix: '#' })),
+    changeToReview: (repository, number) =>
+      Effect.gen(function* () {
+        const one = yield* http.json(PullAnswer, 'GET', pull(repository, number))
+        const source = [one.fromRef.repository.project.key, one.fromRef.repository.slug]
+        return {
+          ...changeOf(repository, one),
+          fork: source.join('/').toLowerCase() === repository.path.join('/').toLowerCase() ? null : source,
+          baseSha: one.toRef.latestCommit ?? null,
+          member: one.author == null ? false : yield* memberOf(repository, one.author.user),
+        }
+      }),
+    postReview: (repository, number, review) => postHostReview(product, http, pull(repository, number), review, account),
     pushTarget,
   }
 }
@@ -862,7 +882,7 @@ export const makeBitbucketDataCenter = (options: AdapterOptions): CodeHost => {
 
 export const accessBitbucketDataCenter: Access = (input) =>
   Effect.gen(function* () {
-    const api = input.apiUrl.replace(/\/+$/, '')
+    const api = withoutTrailingSlashes(input.apiUrl)
     const ask = (url: string) => probe(input, url)
 
     const properties = yield* ask(`${api}/application-properties`)

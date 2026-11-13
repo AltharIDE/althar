@@ -1,5 +1,6 @@
+import { removeTreeSync } from '@althar/testing'
 import { execFileSync } from 'node:child_process'
-import { existsSync, mkdirSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs'
 import { basename, join } from 'node:path'
 
 import type { ProjectId, WorksIn } from '@althar/domain'
@@ -208,6 +209,47 @@ describe('a lead reading another task', () => {
   })
 })
 
+describe('a lead reading the files of another task', () => {
+  it.live('reads a renamed file under both its names, and says what it can’t show of new files: binary, empty, a link', () => {
+    const root = repository()
+    return Effect.gen(function* () {
+      const projectId = yield* opened(root)
+      const mine = yield* made(projectId, 'Retry the checkout')
+      const theirs = yield* made(projectId, 'Tidy the docs')
+      git(theirs.path, 'mv', 'README.md', 'ABOUT.md')
+      git(theirs.path, 'commit', '-q', '-m', 'Rename')
+      writeFileSync(join(theirs.path, 'logo.png'), Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0x0d]))
+      writeFileSync(join(theirs.path, 'empty.txt'), '')
+      if (process.platform !== 'win32') symlinkSync('ABOUT.md', join(theirs.path, 'readme'))
+      const lead = leadOf(projectId, mine)
+      const diff = yield* callTool(lead, 'read_task_diff', { task: theirs.slug })
+      assert.include(diff, '- ABOUT.md: renamed from README.md, +0 −0')
+      assert.include(diff, 'diff --git a/README.md b/ABOUT.md\nsimilarity index 100%\nrename from README.md\nrename to ABOUT.md')
+      assert.include(diff, '- empty.txt: added, +0 −0, not committed yet')
+      assert.include(diff, '- logo.png: added, binary, not committed yet')
+      assert.include(diff, 'diff --git a/logo.png b/logo.png\nnew file, not added to git yet\nBinary file, not shown.')
+      if (process.platform !== 'win32') assert.include(diff, '+++ b/readme\n@@ -0,0 +1,1 @@ (a link, to)\n+ABOUT.md')
+      // Asked for alone, by the name it has now, the renamed file is read.
+      const renamed = yield* callTool(lead, 'read_task_diff', { task: theirs.slug, paths: ['ABOUT.md'] })
+      assert.include(renamed, 'rename to ABOUT.md')
+      assert.notInclude(renamed, 'Binary file, not shown.')
+    }).pipe(Effect.provide(runtime()))
+  })
+
+  it.live('says a task changed nothing yet, whatever files are asked for', () => {
+    const root = repository()
+    return Effect.gen(function* () {
+      const projectId = yield* opened(root)
+      const lead = leadOf(projectId, yield* made(projectId, 'Retry the checkout'))
+      const fresh = yield* made(projectId, 'Nothing yet')
+      for (const paths of [undefined, ['README.md']]) {
+        const read = yield* callTool(lead, 'read_task_diff', { task: fresh.slug, ...(paths === undefined ? {} : { paths }) })
+        assert.match(read, /what isn't committed included\.\n\nIt has changed no files yet\.$/)
+      }
+    }).pipe(Effect.provide(runtime()))
+  })
+})
+
 describe('a lead reading a task whose folder was removed', () => {
   it.live('reads its branch’s commits alone', () => {
     const root = repository()
@@ -219,7 +261,7 @@ describe('a lead reading a task whose folder was removed', () => {
       git(theirs.path, 'add', 'notes.md')
       git(theirs.path, 'commit', '-q', '-m', 'Notes')
       writeFileSync(join(theirs.path, 'draft.md'), 'Not committed\n')
-      rmSync(theirs.path, { recursive: true, force: true, maxRetries: 5 })
+      removeTreeSync(theirs.path)
       const diff = yield* callTool(leadOf(projectId, mine), 'read_task_diff', { task: theirs.slug })
       assert.include(diff, 'as committed')
       assert.include(diff, 'its folder was removed, so nothing uncommitted is read')
@@ -292,18 +334,13 @@ describe('a heads-up of another task changing the same files', () => {
       assert.lengthOf(yield* told(first.threadId), 1)
       assert.lengthOf(yield* told(second.threadId), 1)
       assert.lengthOf(yield* told(idle.threadId), 0)
-      // Each thread says it too, as Althar's line naming the other task: once, and nothing on the idle one.
+      // Neither chat says it: it is about another task, so only the leads hear of it (above), quietly.
       const lines = (threadId: string) =>
-        sql<{ title: string; situation: string }>`
-          SELECT json_extract(content, '$.title') AS title, json_extract(content, '$.situation.kind') AS situation
-          FROM thread_items WHERE thread_id = ${threadId} AND kind = 'notice' AND json_extract(content, '$.situation') IS NOT NULL`
-      assert.deepStrictEqual(yield* lines(first.threadId), [
-        { title: 'Go service for payments changes `README.md` too. Both leads were told.', situation: 'overlap' },
-      ])
-      assert.deepStrictEqual(yield* lines(second.threadId), [
-        { title: 'Retry the checkout changes `README.md` too. Both leads were told.', situation: 'overlap' },
-      ])
-      assert.deepStrictEqual(yield* lines(idle.threadId), [])
+        sql<{ title: string }>`
+          SELECT json_extract(content, '$.title') AS title
+          FROM thread_items WHERE thread_id = ${threadId} AND kind = 'notice'
+            AND (json_extract(content, '$.situation') IS NOT NULL OR json_extract(content, '$.task') IS NOT NULL)`
+      for (const threadId of [first.threadId, second.threadId, idle.threadId]) assert.deepStrictEqual(yield* lines(threadId), [])
       const kept = yield* sql<{ taskId: string }>`
         SELECT aggregate_id AS task_id FROM record_events WHERE type = 'task.overlap_noticed' ORDER BY sequence`
       assert.sameMembers(
@@ -341,7 +378,7 @@ describe('two tasks changing the same file', () => {
 })
 
 describe('a heads-up to a lead between turns', () => {
-  it.live('isn’t woken for it, and hears of it as its next turn starts, though it changed the file only with a command', () => {
+  it.live('isn’t woken for it, nor queued a turn, and reads it with its next turn, though it changed the file only with a command', () => {
     const root = repository()
     return Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
@@ -394,13 +431,32 @@ describe('a heads-up to a lead between turns', () => {
       })
       const [heard] = yield* until(told(resting.threadId), (rows) => rows.length === 1)
       assert.strictEqual(heard?.body, overlapWords({ slug: working.slug, title: 'Retry the checkout' }, ['README.md']))
-      // It reads it as that turn ends, in the next, and nothing more is said as those turns start and end.
+      // A heads-up is a note: as that turn ends, no turn starts for it, nor waits for a place.
+      const noted = sql<{ state: string }>`SELECT state FROM user_inputs WHERE thread_id = ${resting.threadId} AND body LIKE 'Heads-up:%'`
+      assert.deepStrictEqual(yield* noted, [{ state: 'noted' }])
       yield* sessions.interrupt(resting.threadId)
+      yield* until(turns(resting.threadId), (rows) => rows.every((row) => !['pending', 'delivered'].includes(row.state)))
+      assert.lengthOf(yield* turns(resting.threadId), before + 1)
+      assert.deepStrictEqual(yield* noted, [{ state: 'noted' }])
+      assert.isNull(
+        (yield* sql<{ waits: string | null }>`SELECT waits_for_place AS waits FROM threads WHERE id = ${resting.threadId}`)[0]?.waits ??
+          null,
+      )
+      // It reads it with its next turn, whatever starts that, and nothing more is said as those turns start and end.
+      const again = 'And the docs.'
+      yield* sessions.send({
+        envelope: yield* Runtime.envelope('thread.send', { threadId: resting.threadId, body: again }),
+        threadId: resting.threadId,
+        body: again,
+        sender: { kind: 'window' },
+      })
       const delivered = yield* until(
         turns(resting.threadId),
         (rows) => rows.length >= before + 2 && rows.every((row) => !['pending', 'delivered'].includes(row.state)),
       )
       assert.include(delivered.at(-1)?.prompt ?? '', 'Heads-up: another running task, Retry the checkout')
+      assert.include(delivered.at(-1)?.prompt ?? '', again)
+      assert.deepStrictEqual(yield* noted, [{ state: 'delivered' }])
       yield* (yield* Overlaps).look(resting.taskId)
       assert.lengthOf(yield* told(resting.threadId), 1)
       assert.lengthOf(yield* told(working.threadId), 1)

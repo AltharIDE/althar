@@ -20,10 +20,12 @@ import { envelope } from './envelope'
 import { NotFound } from './errors'
 import { contained, keptGoing } from './Failures'
 import { Instance } from './Instance'
-import { Limits } from './Limits'
+import { Live } from './Live'
+import { Limits, type Unable, whenWords } from './Limits'
 import { Plans } from './Plans'
 import { Projects } from './Projects'
 import { failureWords } from './pullRequestList'
+import { touchQuestion } from './Questions'
 import { change, fact, timestamp } from './records'
 import { ReviewRefused, Reviews } from './Reviews'
 import { type PlanStep, Runs } from './Runs'
@@ -73,12 +75,23 @@ const TITLE_LENGTH = 60
 /** How far past its time, and its stagger, a run counts as late: one the computer slept through, or Althar was closed for. */
 const LATE = Duration.minutes(5)
 
+/** What a skipped run says where no agent could take it: the reason's end, which says it was this and not another skip. */
+const NO_OTHER = 'no other plan had room'
+
+/** Where a run's steps stand: why it can't start (and what stops its agent), the definition it starts as on another plan, or neither. */
+type Placed =
+  | { readonly why: string; readonly unable?: Unable; readonly instead?: undefined; readonly line?: undefined }
+  | { readonly why?: undefined; readonly unable?: undefined; readonly instead: AutomationDefinition; readonly line: string }
+  | null
+const stop = (why: string, unable?: Unable): Placed => ({ why, ...(unable === undefined ? {} : { unable }) })
+
 /** A refusal in words the person or the coordinator reads: why an automation can't do that now. */
 export class AutomationRefused extends Schema.TaggedError<AutomationRefused>()('AutomationRefused', { message: Schema.String }) {}
 
 type Store =
   | SqlClient.SqlClient
   | Instance
+  | Live
   | Ledger
   | Crypto.Crypto
   | Commands
@@ -121,6 +134,7 @@ interface OccurrenceRow {
   readonly taskId: string | null
   readonly threadId: string | null
   readonly title: string | null
+  readonly waiting: number
 }
 
 /** What an automation's run found to do: a pull request to review, as its listing gave it, and how a review names it. */
@@ -246,6 +260,7 @@ export class Automations extends Context.Service<
       const context = yield* Effect.context<Store>()
       const provide = <A, E>(effect: Effect.Effect<A, E, Store>) => Effect.provideContext(effect, context)
       const instance = yield* Instance
+      const live = yield* Live
       const projects = yield* Projects
       const plans = yield* Plans
       const reviews = yield* Reviews
@@ -509,48 +524,109 @@ export class Automations extends Context.Service<
 
       /* ---- Running ---- */
 
-      /**
-       * Why a run's lead or reviewer can't run unwatched: none of its accounts
-       * is paid by a plan for its model; null where one is. Each
-       * session of the run is held to the same (`Limits.pick`).
-       */
-      const offPlan = (agentId: string, projectId: string, model: string | null) =>
-        limits.pick({ agentId, projectId, planOnly: true, ...(model === null ? {} : { model }) }).pipe(
-          Effect.as(null),
-          Effect.catchTag('PlanOnly', (error) => Effect.succeed(error.message)),
-          // An agent with no account at all is the run's to fail on, where its thread says why.
-          Effect.catchTag('NotFound', () => Effect.succeed(null)),
-        )
+      /** What stops an agent, as the line says it. */
+      const reasonOf = (found: Unable) =>
+        found.why === 'signed_out'
+          ? `${found.agent} is signed out`
+          : found.why === 'out'
+            ? `${found.agent} is out of usage until ${whenWords(found.until ?? '', nowOf())}`
+            : `${found.provider ?? found.agent} refused its sign-in`
 
-      /** Why a run can't start now, in a sentence; null where it can. */
+      /** What a skipped run says when no plan could take it: why, and what would make it run. */
+      const unableWords = (found: Unable) =>
+        `${reasonOf(found)}, and ${NO_OTHER}. ${
+          found.why === 'out' ? 'It runs again once a plan has room.' : `Sign in to ${found.provider ?? found.agent} in Settings.`
+        }`
+
+      /** A run's step: where it stands, and the step as it runs, on another plan where its own agent can't take it. */
+      const stepStands = (
+        projectId: ProjectId,
+        step: AutomationDefinition['lead'],
+        word: 'lead' | 'review',
+        other?: { readonly agentId: string; readonly model: string | null },
+      ) =>
+        Effect.gen(function* () {
+          const stands = yield* limits.standing({
+            agentId: step.agentId,
+            model: step.model,
+            projectId,
+            ...(other === undefined ? {} : { other }),
+          })
+          if (stands.kind !== 'instead') return stands
+          const to = yield* limits.named(stands.agentId, stands.model)
+          const line = `${reasonOf(stands.because)}, so its ${word} ran on ${to.agent}${to.model === null ? '' : ` with ${to.model}`}.`
+          return { ...stands, step: { agentId: stands.agentId, model: stands.model, effort: null }, line }
+        })
+
+      /**
+       * Why a run can't start now, in a sentence, and what would make it run where no plan could take its agent's place; or, where
+       * it can, the definition it runs as (its lead or reviewer on another plan where theirs can't take it) and a line saying so.
+       */
       const blocked = (row: Row, definition: AutomationDefinition, cause: 'schedule' | 'now') =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
           const [going] = yield* sql<{ one: number }>`
             SELECT 1 AS one FROM automation_occurrences WHERE automation_id = ${row.id} AND state IN ('starting', 'running') LIMIT 1`
-          if (going !== undefined) return 'Its last run was still going.'
-          if (cause === 'schedule' && (yield* allPaused)) return 'Every automation was paused.'
+          if (going !== undefined) return stop('Its last run was still going.')
+          if (cause === 'schedule' && (yield* allPaused)) return stop('Every automation was paused.')
           if (definition.work.kind === 'task' && definition.work.end !== null) {
             const [open] = yield* sql<{ count: number }>`
               SELECT count(DISTINCT x.id) AS count FROM automation_occurrences o
               JOIN tasks k ON k.id = o.task_id JOIN external_links x ON x.task_id = k.id AND x.kind = 'change'
               WHERE o.automation_id = ${row.id} AND k.state = 'open' AND json_extract(x.snapshot, '$.state') = 'open'`
-            if ((open?.count ?? 0) >= OPEN_AT_ONCE) return `${OPEN_AT_ONCE} of its pull requests were open.`
+            if ((open?.count ?? 0) >= OPEN_AT_ONCE) return stop(`${OPEN_AT_ONCE} of its pull requests were open.`)
           }
           const midnight = new Date(instantOf(`${localOf(nowOf(), zoneOf()).slice(0, 10)}T00:00`, zoneOf())).toISOString()
           const [today] = yield* sql<{ count: number }>`
             SELECT count(*) AS count FROM automation_occurrences
             WHERE subject = '' AND fired_at >= ${midnight} AND state NOT IN ('skipped', 'missed')`
-          if ((today?.count ?? 0) >= RUNS_A_DAY) return `Automations had run ${RUNS_A_DAY} times today.`
-          for (const step of [
-            definition.lead,
-            ...(definition.work.kind === 'task' && definition.work.review !== null ? [definition.work.review] : []),
-          ]) {
-            const why = yield* offPlan(step.agentId, row.projectId, step.model)
-            if (why !== null) return why
-          }
-          return null
+          if ((today?.count ?? 0) >= RUNS_A_DAY) return stop(`Automations had run ${RUNS_A_DAY} times today.`)
+          return yield* placed(row, definition)
         })
+
+      /**
+       * Where a run's lead and reviewer stand: why no plan could take the run and what would make it run; or, where another
+       * plan takes a step, the definition it runs as and a line saying so; or null where both run as planned.
+       */
+      const placed = (row: Row, definition: AutomationDefinition) =>
+        Effect.gen(function* () {
+          const lead = yield* stepStands(row.projectId, definition.lead, 'lead')
+          if (lead.kind === 'unable') return stop(unableWords(lead.unable), lead.unable)
+          const leading = lead.kind === 'instead' ? lead.step : definition.lead
+          const reviewing = definition.work.kind === 'task' ? definition.work.review : null
+          const review =
+            reviewing === null
+              ? ({ kind: 'ok' } as const)
+              : yield* stepStands(row.projectId, reviewing, 'review', { agentId: leading.agentId, model: leading.model })
+          if (review.kind === 'unable') return stop(unableWords(review.unable), review.unable)
+          const lines = [lead, review].flatMap((one) => (one.kind === 'instead' ? [one.line] : []))
+          if (lines.length === 0) return null
+          return {
+            instead: {
+              ...definition,
+              lead: leading,
+              work:
+                definition.work.kind === 'task' && review.kind === 'instead'
+                  ? { ...definition.work, review: review.step }
+                  : definition.work,
+            } satisfies AutomationDefinition,
+            line: lines.join(' '),
+          }
+        })
+
+      /** Keeps the line saying a run went to another plan, which its ending adds to. */
+      const keepLine = (occurrenceId: string, line: string) =>
+        Effect.flatMap(SqlClient.SqlClient, (sql) =>
+          sql.withTransaction(
+            Effect.gen(function* () {
+              const [row] = yield* sql<{ reason: string | null }>`SELECT reason FROM automation_occurrences WHERE id = ${occurrenceId}`
+              if (row !== undefined && row.reason !== line)
+                yield* change('automation_occurrences', occurrenceId, {
+                  reason: [row.reason, line].filter((one) => one !== null).join(' '),
+                })
+            }),
+          ),
+        )
 
       /** Ends an occurrence: how it went, and why, in a sentence. */
       const end = (occurrenceId: string, state: 'made' | 'nothing' | 'failed' | 'skipped' | 'missed', reason: string | null) =>
@@ -558,10 +634,15 @@ export class Automations extends Context.Service<
           const sql = yield* SqlClient.SqlClient
           const ended = yield* sql.withTransaction(
             Effect.gen(function* () {
-              const [row] = yield* sql<{ projectId: ProjectId; automationId: string; state: string }>`
-                SELECT project_id, automation_id, state FROM automation_occurrences WHERE id = ${occurrenceId}`
+              const [row] = yield* sql<{ projectId: ProjectId; automationId: string; state: string; reason: string | null }>`
+                SELECT project_id, automation_id, state, reason FROM automation_occurrences WHERE id = ${occurrenceId}`
               if (row === undefined || (row.state !== 'starting' && row.state !== 'running')) return undefined
-              const revision = yield* change('automation_occurrences', occurrenceId, { state, reason, endedAt: yield* timestamp })
+              // A run that went to another plan keeps the line saying so, however it ends.
+              const revision = yield* change('automation_occurrences', occurrenceId, {
+                state,
+                reason: [row.reason, reason].filter((one) => one !== null).join(' ') || null,
+                endedAt: yield* timestamp,
+              })
               yield* fact({
                 projectId: row.projectId,
                 aggregateType: 'automation_occurrence',
@@ -696,7 +777,7 @@ export class Automations extends Context.Service<
        * One whose plan was kept, held, but Althar stopped before it started,
        * or before its run was made, starts that plan.
        */
-      const planned = (projectId: ProjectId, taskId: string, definition: AutomationDefinition) =>
+      const planned = (projectId: ProjectId, taskId: string, definition: AutomationDefinition, fresh = false) =>
         Effect.gen(function* () {
           if (definition.work.kind !== 'task') return
           const sql = yield* SqlClient.SqlClient
@@ -705,7 +786,8 @@ export class Automations extends Context.Service<
             LEFT JOIN task_plans p ON p.id = (SELECT id FROM task_plans WHERE task_id = k.id ORDER BY proposed_at DESC, rowid DESC LIMIT 1)
             WHERE k.id = ${taskId}`
           if (task === undefined || task.state !== 'draft') return
-          if (task.planId !== null) {
+          // A kept plan's steps were chosen before; where the run was placed again since (`fresh`), a new plan replaces it.
+          if (task.planId !== null && !fresh) {
             if (task.planState === 'proposed' || task.planState === 'accepted') yield* plans.start(task.planId, instance.systemId)
             return
           }
@@ -899,8 +981,10 @@ export class Automations extends Context.Service<
       const fire = (row: Row, definition: AutomationDefinition, cause: 'schedule' | 'now', slot: string | null, due: number) =>
         admitted(
           Effect.gen(function* () {
-            const why = yield* blocked(row, definition, cause)
-            if (why !== null && cause === 'now') return yield* refused(why)
+            const found = yield* blocked(row, definition, cause)
+            const stopped = found?.why === undefined ? null : { why: found.why, unable: found.unable }
+            const instead = found?.instead === undefined ? null : { instead: found.instead, line: found.line }
+            if (stopped !== null && cause === 'now') return yield* refused(stopped.why)
             const id = yield* newId(Ids.automationOccurrence)
             const at = slot ?? `now:${id}`
             const recorded = yield* record({
@@ -908,16 +992,124 @@ export class Automations extends Context.Service<
               cause,
               slot: at,
               dueAt: due,
-              state: why === null ? 'starting' : 'skipped',
-              reason: why,
+              state: stopped === null ? 'starting' : 'skipped',
+              reason: stopped?.why ?? instead?.line ?? null,
               id,
             })
-            if (recorded === null || why !== null) return
-            yield* work(row, definition, id, cause, at, due)
+            if (recorded === null) return
+            if (stopped !== null) return yield* askAfterTwoSkips(row, definition, stopped.unable)
+            yield* work(row, instead?.instead ?? definition, id, cause, at, due)
+            // A call its skips made is taken back once the run is under way, not where its task couldn't start.
+            const [now] = yield* (yield* SqlClient.SqlClient)<{ state: string }>`
+              SELECT state FROM automation_occurrences WHERE id = ${id}`
+            if (now !== undefined && now.state !== 'failed') yield* withdrawAsk(row.id)
             // Its cards' next time has moved on.
             yield* refreshCards(row.id)
           }),
         )
+
+      /**
+       * A run that no agent could take, skipped twice in a row, is one call in Needs you, the same for each night after: a question
+       * in the coordinator's conversation saying why and what would make it run. Never one per skip.
+       */
+      const askAfterTwoSkips = (row: Row, definition: AutomationDefinition, unable: Unable | undefined) =>
+        Effect.gen(function* () {
+          if (unable === undefined) return
+          const sql = yield* SqlClient.SqlClient
+          const lately = yield* sql<{ state: string; reason: string | null }>`
+            SELECT state, reason FROM automation_occurrences WHERE automation_id = ${row.id} AND subject = ''
+            ORDER BY fired_at DESC, rowid DESC LIMIT 2`
+          if (lately.length < 2 || !lately.every((one) => one.state === 'skipped' && one.reason?.includes(NO_OTHER) === true)) return
+          const [open] = yield* sql<{ id: string }>`
+            SELECT id FROM attention_requests WHERE kind = 'question' AND state = 'open' AND json_extract(payload, '$.automationId') = ${row.id}`
+          if (open !== undefined) return
+          const [thread] = yield* sql<{ id: string }>`
+            SELECT id FROM threads WHERE project_id = ${row.projectId} AND kind = 'coordinator' AND owner_actor_id = ${instance.personId}`
+          if (thread === undefined) return
+          const question =
+            unable.why === 'out'
+              ? `“${definition.name}” skipped its last two runs: ${reasonOf(unable)}. Run it again?`
+              : `Sign in to ${unable.provider ?? unable.agent}, then run “${definition.name}” again?`
+          const field = {
+            id: 'next',
+            question,
+            type: 'choice' as const,
+            options: [
+              { value: 'run', label: 'Run it now' },
+              { value: 'leave', label: 'Leave it' },
+            ],
+            multiple: false,
+            required: true,
+          }
+          const message = `${definition.name} skipped its last two runs: ${unableWords(unable)}`
+          yield* sql.withTransaction(
+            Effect.gen(function* () {
+              const attentionId = yield* newId(Ids.attentionRequest)
+              const itemId = yield* addItem({ projectId: row.projectId, threadId: thread.id }, 'question', {
+                attentionId,
+                message,
+                toolCallId: null,
+                fields: [field],
+              })
+              yield* sql`INSERT INTO attention_requests ${sql.insert({
+                id: attentionId,
+                projectId: row.projectId,
+                taskId: null,
+                kind: 'question',
+                addresseeActorId: instance.personId,
+                payload: JSON.stringify({
+                  threadId: thread.id,
+                  sessionId: '',
+                  itemId,
+                  toolCallId: null,
+                  message,
+                  fields: [field],
+                  automationId: row.id,
+                }),
+                state: 'open',
+                createdAt: yield* timestamp,
+              })}`
+              yield* fact({
+                projectId: row.projectId,
+                aggregateType: 'attention_request',
+                aggregateId: attentionId,
+                revision: 1,
+                type: 'attention_request.opened',
+                payload: { question: field.question },
+                actorId: instance.systemId,
+              })
+            }),
+          )
+        })
+
+      /** A run that started takes back the call its skips made: nothing waits on the person any more. */
+      const withdrawAsk = (automationId: string) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const open = yield* sql<{ id: string; projectId: ProjectId; payload: string; threadId: string }>`
+            SELECT id, project_id, payload, json_extract(payload, '$.threadId') AS thread_id FROM attention_requests
+            WHERE kind = 'question' AND state = 'open' AND json_extract(payload, '$.automationId') = ${automationId}`
+          for (const call of open) {
+            const taken = yield* sql.withTransaction(
+              Effect.gen(function* () {
+                const [still] = yield* sql<{ state: string }>`SELECT state FROM attention_requests WHERE id = ${call.id}`
+                if (still?.state !== 'open') return false
+                const revision = yield* change('attention_requests', call.id, { state: 'withdrawn' })
+                yield* fact({
+                  projectId: call.projectId,
+                  aggregateType: 'attention_request',
+                  aggregateId: call.id,
+                  revision,
+                  type: 'attention_request.withdrawn',
+                  actorId: instance.systemId,
+                })
+                yield* touchQuestion(call.id)
+                return true
+              }),
+            )
+            if (taken) yield* live.publish({ _tag: 'AttentionClosed', threadId: call.threadId, attentionId: call.id, outcome: 'withdrawn' })
+          }
+        })
 
       /** An occurrence's work, started; where it fails, the occurrence says why. */
       const work = (
@@ -1092,7 +1284,21 @@ export class Automations extends Context.Service<
                 // Made, but stopped before its plan started: it starts now.
                 const definition = Option.getOrUndefined(definitionOf(one))
                 const [task] = yield* sql<{ projectId: ProjectId }>`SELECT project_id FROM tasks WHERE id = ${one.taskId}`
-                if (definition !== undefined && task !== undefined) yield* admitted(planned(task.projectId, one.taskId, definition))
+                const row = yield* load(one.automationId).pipe(Effect.option)
+                if (definition !== undefined && task !== undefined && Option.isSome(row)) {
+                  const found = yield* placed(row.value, definition)
+                  if (found?.why !== undefined) {
+                    yield* tasks
+                      .stop({
+                        envelope: yield* envelope('task.stop', { taskId: one.taskId }, undefined, instance.systemId),
+                        taskId: one.taskId,
+                      })
+                      .pipe(Effect.ignore)
+                    return yield* end(one.id, 'skipped', found.why)
+                  }
+                  if (found?.instead !== undefined) yield* keepLine(one.id, found.line)
+                  yield* admitted(planned(task.projectId, one.taskId, found?.instead ?? definition, found?.instead !== undefined))
+                } else if (definition !== undefined && task !== undefined) yield* admitted(planned(task.projectId, one.taskId, definition))
                 return
               }
             }
@@ -1140,7 +1346,11 @@ export class Automations extends Context.Service<
             if (Option.isNone(row) || row.value.state !== 'on' || one.subject !== '')
               return yield* end(one.id, 'failed', 'Althar stopped before its task started.')
             const definition = yield* definitionIn(row.value)
-            yield* admitted(work(row.value, definition, one.id, one.cause, one.slot, Date.parse(one.dueAt)))
+            // Where its agent can't take it now, it starts on another plan, or is skipped, as when it fired.
+            const found = yield* placed(row.value, definition)
+            if (found?.why !== undefined) return yield* end(one.id, 'skipped', found.why)
+            if (found?.instead !== undefined) yield* keepLine(one.id, found.line)
+            yield* admitted(work(row.value, found?.instead ?? definition, one.id, one.cause, one.slot, Date.parse(one.dueAt)))
           }).pipe(contained('Automations.recover', () => undefined))
       })
 
@@ -1165,7 +1375,10 @@ export class Automations extends Context.Service<
         at: row.firedAt,
         subject: row.subjectTitle,
         reason: row.reason,
-        task: row.taskId === null || row.threadId === null ? null : { id: row.taskId, threadId: row.threadId, title: row.title ?? '' },
+        task:
+          row.taskId === null || row.threadId === null
+            ? null
+            : { id: row.taskId, threadId: row.threadId, title: row.title ?? '', needsYou: row.waiting > 0 },
       })
 
       /** An automation's runs, newest first: a slot that started reviews shows its reviews, and itself only where it has more to say. */
@@ -1174,7 +1387,8 @@ export class Automations extends Context.Service<
           const sql = yield* SqlClient.SqlClient
           const rows = yield* sql<OccurrenceRow>`
             SELECT o.id, o.cause, o.slot, o.subject, o.subject_title, o.state, o.reason, o.due_at, o.fired_at, o.task_id,
-              h.id AS thread_id, k.title
+              h.id AS thread_id, k.title,
+              EXISTS (SELECT 1 FROM attention_requests a WHERE a.task_id = k.id AND a.state = 'open') AS waiting
             FROM automation_occurrences o
             LEFT JOIN tasks k ON k.id = o.task_id LEFT JOIN threads h ON h.task_id = o.task_id AND h.kind = 'task'
             WHERE o.automation_id = ${automationId}

@@ -108,13 +108,11 @@ export function WhatItMade({
           {looksAction === undefined || looksAction === null ? (
             <Heading level={headingLevel} className={s.label}>
               {t.looks}
-              <span className={s.count}>{shots.length}</span>
             </Heading>
           ) : (
             <div className={s.head}>
               <Heading level={headingLevel} className={s.label}>
                 {t.looks}
-                <span className={s.count}>{shots.length}</span>
               </Heading>
               {looksAction}
             </div>

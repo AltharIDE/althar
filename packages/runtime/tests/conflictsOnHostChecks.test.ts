@@ -28,6 +28,29 @@ import {
 } from './conflictsSupport'
 
 describe('a conflict its pull request’s host reports, and the checks on its merge', () => {
+  for (const reruns of [true, false]) {
+    it.live(`leaves cancelled merge checks to the person without asking for a code fix (reruns: ${reruns})`, () => {
+      const { working, bare } = hosted()
+      const github = hostOf(bare, (sha) =>
+        holdsMain(bare, sha) ? [{ name: 'test', state: 'cancelled', ...(reruns ? {} : { rerun: false as const }) }] : PASSED,
+      )
+      return Effect.gen(function* () {
+        const { projectId, taskId, threadId } = yield* opened(working, '[lead:resolve]')
+        moveHostMainOn(working, bare)
+        yield* titled(threadId, 'The checks on PR #1 were cancelled.')
+        yield* (yield* Changes).refresh(taskId)
+        const [round] = yield* rounds(taskId)
+        assert.deepStrictEqual([round?.state, round?.attempt], ['resolved', 1])
+        assert.lengthOf(github.reruns, reruns ? 1 : 0)
+        assert.isFalse((yield* given(threadId)).some((body) => body.startsWith('Checks failed on the merge')))
+        assert.isFalse((yield* notices(threadId)).some((note) => note.title?.startsWith('0 checks failed')))
+        const [card] = yield* cards(projectId)
+        assert.strictEqual(card?.change?.checks?.outcome, 'failed')
+        assert.strictEqual(card?.change?.checks?.failed, 0)
+      }).pipe(Effect.provide(runtimeWith({ github })))
+    })
+  }
+
   it.live('leaves a fix the lead made to the person when they interrupt it before its turn ends, and pushes nothing', () => {
     const { working, bare } = hosted()
     const github = hostOf(bare, (sha) => (holdsMain(bare, sha) && !holdsFix(bare, sha) ? FAILED : PASSED))

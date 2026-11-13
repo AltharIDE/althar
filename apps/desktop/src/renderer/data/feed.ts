@@ -17,6 +17,16 @@ import { keys } from './reads'
  *   permission the rules answered, which moves nothing but the home's count
  *   of them and comes with every edit an agent makes, reads the home again
  *   only while it shows; off screen it is marked, for its next visit;
+ * - what moves a board, the home and the cards in a coordinator's thread is
+ *   one change, `card`: the runtime works a task's card out again as
+ *   anything of the task changes, whatever kind of record it is (its
+ *   `TASK_OF`), and says `card` only where it came out different, its calls
+ *   included, or where a read since gave out a card it never saw (a commit
+ *   made by hand moves one with nothing recorded); and a project's own calls, its coordinator's questions, as a
+ *   `card` of the project. So no change a card shows is missed, and what is said in a
+ *   thread, most of what changes, reads one card there rather than a board
+ *   here. A task's view hears the same `card` on its thread, and reads its
+ *   head from the same card;
  * - plan usage, which the runtime sends whole whenever it changes, is put in
  *   the cache as it comes;
  * - a thread (a task's, or a project's coordinator) is only marked out of
@@ -25,7 +35,10 @@ import { keys } from './reads'
  *   opened.
  *
  * A read that was under way when a change touched it may not hold it, so
- * it is read once more. Screens hear every change through `listen`, from
+ * it is read once more as it ends. It is let finish, never cut short to
+ * begin again: changes that keep coming would never let a slow read land,
+ * and the screen would show the one before them for as long as they came.
+ * Screens hear every change through `listen`, from
  * the moment they listen, and nothing in between is missed: what they show
  * was read after the last change that touched it.
  */
@@ -34,33 +47,21 @@ import { keys } from './reads'
 export const GATHER = 60
 
 /**
- * What changes what a board shows: a task, its plan, run, steps and
- * sessions, an agent's turn starting or ending, a call, a pull request, a
- * worktree. Not what is said in a thread, which changes far more often and
- * none of this.
+ * What changes what a board shows: a task's card, which the runtime works
+ * out again as anything of the task changes and says changed only where it
+ * came out different, its calls included; the calls of no task, its
+ * coordinator's questions, said as a card of the project; and the project itself.
  */
-export const BOARD = new Set([
-  'task',
-  'task_plan',
-  'run',
-  'node_attempt',
-  'provider_session',
-  'turn_delivery',
-  'attention_request',
-  'external_link',
-  'workspace',
-  // A conflict round started, ended or handed back: its card's word and why.
-  'conflict_resolution',
-])
+export const BOARD = new Set(['card', 'project'])
 
-/** What changes the home: what changes a board, the projects themselves, and a permission the rules answered. */
-export const HOME = new Set([...BOARD, 'project', 'decision'])
+/** What changes the home: what changes a board, and a permission the rules answered. */
+export const HOME = new Set([...BOARD, 'decision'])
 
 /** What changes the home only while it shows: the count of permissions the rules answered. */
 export const HOME_SHOWN = new Set(['decision'])
 
 /** What changes the projects as listed: a name, their tasks and runs, who is working, what waits on you. */
-export const PROJECTS = new Set(['project', 'task', 'run', 'provider_session', 'attention_request'])
+export const PROJECTS = new Set(['project', 'card', 'task', 'run', 'provider_session', 'attention_request'])
 
 /** What changes a project's repositories as listed: the project itself, and its tasks, which count the ones they change; and, for every project, a connection. */
 export const REPOSITORIES = new Set(['project', 'task'])
@@ -74,15 +75,15 @@ export const SKILLS = new Set(['skill'])
 /** The reads a setting an agent changed may end (ADR-097): who changed what, and the screens a project's settings are on. */
 const SETTING_READS = new Set(['settingChanges', 'rules', 'repositories', 'projectTracker'])
 
-/** Changes elsewhere in a project that move what a card in its coordinator's thread shows. */
-export const CARDS = new Set(['provider_session', 'attention_request', 'task_plan', 'run', 'task', 'workspace'])
+/** Changes elsewhere in a project that move what a card in its coordinator's thread shows: a task's card, and what moves its head. */
+export const CARDS = new Set(['card', 'provider_session', 'attention_request', 'task_plan', 'run', 'task', 'workspace'])
 
 /**
  * What changes a project's automations: one of them, or one of its runs.
  * Each moves the Automations tab, the page of the automation it is of, and
  * the automation's cards in the coordinator's thread, which say where it stands.
  */
-export const AUTOMATIONS = new Set(['automation', 'automation_occurrence'])
+export const AUTOMATIONS = new Set(['automation', 'automation_occurrence', 'attention_request'])
 
 export interface Feed {
   /** Calls `listener` with every change from now on, until the returned function is called. */
@@ -164,6 +165,13 @@ const wholeReads = (cache: QueryClient, event: Changed): ReadonlyArray<Due> => [
           .map((query) => ({ key: query.queryKey, offScreen: false })),
       ]
     : []),
+  // The project's canvases and the one that changed (ADR-104): a version published, a comment sent or answered, one archived.
+  ...(event.projectId !== null && event.aggregateType === 'canvas'
+    ? [
+        { key: keys.canvases(event.projectId), offScreen: false },
+        { key: keys.canvas(event.aggregateId), offScreen: false },
+      ]
+    : []),
   // Finished tasks' folders, which go and come back with their worktrees and with tasks settling, only while they show (ADR-056).
   ...(event.aggregateType === 'workspace' || event.aggregateType === 'task' ? [{ key: keys.folders, offScreen: false }] : []),
 ]
@@ -225,8 +233,10 @@ export const follow = (client: Client, cache: QueryClient, since?: number): Feed
     timer = undefined
     const reads = [...due.values()]
     due.clear()
+    // A read under way is let finish, not cut short and begun again: changes that keep coming would never let a slow one
+    // land. It is read once more as it ends, for what came while it ran.
     for (const { key, offScreen } of reads)
-      void cache.invalidateQueries({ queryKey: key, exact: true, refetchType: offScreen ? 'all' : 'active' })
+      void cache.invalidateQueries({ queryKey: key, exact: true, refetchType: offScreen ? 'all' : 'active' }, { cancelRefetch: false })
   }
 
   // A read under way when a change touched it is read once more; one begun after the change holds it. A read the cache let go is forgotten.
@@ -246,7 +256,7 @@ export const follow = (client: Client, cache: QueryClient, since?: number): Feed
     begun.set(queryHash, heardSoFar)
     // Read now, so not again when the gathered changes are read.
     due.delete(queryHash)
-    void cache.invalidateQueries({ queryKey, exact: true, refetchType: isThread(queryKey) ? 'active' : 'all' })
+    void cache.invalidateQueries({ queryKey, exact: true, refetchType: isThread(queryKey) ? 'active' : 'all' }, { cancelRefetch: false })
   })
 
   const heard = (event: WatchEvent) => {

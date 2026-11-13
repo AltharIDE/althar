@@ -4,8 +4,9 @@ import { type Access, type AccessInput, type AccessLine, type AccessNeed, type A
 import { type AdapterOptions, authorizationOf } from './credential'
 import { mergeInCopy } from './branchCopy'
 import { ConnectorFailed } from './errors'
-import { makeHttp, paged } from './http'
+import { makeHttp, paged, withoutTrailingSlashes } from './http'
 import { makeGitHubReleases } from './githubReleases'
+import { mergeRulesOf, mergeRulesQuery, NEWER_FIELDS, NO_RULESETS, PullRulesAnswer, RulesetsAnswer, rulesetsOf } from './githubRules'
 import type {
   Account,
   Activity,
@@ -26,6 +27,7 @@ import type {
   IssuePage,
   IssueQuery,
   ListedChange,
+  MergeRules,
   Person,
   BranchUpdate,
   Repository,
@@ -422,13 +424,14 @@ const EVENTS: Readonly<Record<ReviewEvent, string>> = { approve: 'APPROVE', requ
 /** What GitHub answers a merge: whether it merged, and its commit. */
 const MergeAnswer = Schema.Struct({ merged: Schema.optional(Schema.Boolean), sha: Schema.optional(Schema.NullOr(Schema.String)) })
 
-/** Whether a pull request's target branch merges through a merge queue, whether it is in it, and why the queue last took it out. */
+/** Queue membership, the removal reason, and candidate commits. A removal's beforeCommit is not necessarily a merge-group build. */
 const QUEUE = `query($owner: String!, $name: String!, $number: Int!) {
   repository(owner: $owner, name: $name) {
     pullRequest(number: $number) {
       isMergeQueueEnabled
       isInMergeQueue
-      timelineItems(last: 1, itemTypes: [REMOVED_FROM_MERGE_QUEUE_EVENT]) { nodes { ... on RemovedFromMergeQueueEvent { reason } } }
+      mergeQueueEntry { enqueuedAt headCommit { oid } }
+      timelineItems(last: 1, itemTypes: [REMOVED_FROM_MERGE_QUEUE_EVENT]) { nodes { ... on RemovedFromMergeQueueEvent { reason createdAt beforeCommit { oid } } } }
     }
   }
 }`
@@ -440,8 +443,24 @@ const QueueAnswer = Schema.Struct({
         Schema.Struct({
           isMergeQueueEnabled: Schema.Boolean,
           isInMergeQueue: Schema.Boolean,
+          mergeQueueEntry: Schema.optional(
+            Schema.NullOr(
+              Schema.Struct({
+                enqueuedAt: Schema.optional(Schema.String),
+                headCommit: Schema.optional(Schema.NullOr(Schema.Struct({ oid: Schema.optional(Schema.NullOr(Schema.String)) }))),
+              }),
+            ),
+          ),
           timelineItems: Schema.Struct({
-            nodes: Schema.Array(Schema.NullOr(Schema.Struct({ reason: Schema.optional(Schema.NullOr(Schema.String)) }))),
+            nodes: Schema.Array(
+              Schema.NullOr(
+                Schema.Struct({
+                  reason: Schema.optional(Schema.NullOr(Schema.String)),
+                  createdAt: Schema.optional(Schema.String),
+                  beforeCommit: Schema.optional(Schema.NullOr(Schema.Struct({ oid: Schema.optional(Schema.NullOr(Schema.String)) }))),
+                }),
+              ),
+            ),
           }),
         }),
       ),
@@ -762,9 +781,12 @@ export const LISTING_KEPT_MS = 60_000
  */
 export const NO_QUEUE_KEPT_MS = 60 * 60_000
 
+/** How long whether a branch's classic protection requires it up to date is kept: an admin's setting, read once an hour. */
+export const STRICT_KEPT_MS = 60 * 60_000
+
 export const makeGitHub = (options: AdapterOptions): CodeHost & Tracker => {
   const product = 'github' as const
-  const api = options.apiUrl.replace(/\/+$/, '')
+  const api = withoutTrailingSlashes(options.apiUrl)
   /** Enterprise Server: its API is under its own address, at /api/v3. */
   const server = api.endsWith('/api/v3')
   const graphqlUrl = server ? `${api.slice(0, -'/v3'.length)}/graphql` : `${api}/graphql`
@@ -778,6 +800,8 @@ export const makeGitHub = (options: AdapterOptions): CodeHost & Tracker => {
   const listings = new Map<string, { readonly at: number; readonly list: ChangeList }>()
   /** Whether each `owner/name branch` merges through a merge queue, as GitHub last said, and when. */
   const queues = new Map<string, { readonly at: number; readonly enabled: boolean }>()
+  // Successful removal lookups are immutable, scoped to this connection, and bounded.
+  const removedBuilds = new Map<string, string>()
   const http = makeHttp({
     product,
     fetch: options.fetch,
@@ -844,17 +868,118 @@ export const makeGitHub = (options: AdapterOptions): CodeHost & Tracker => {
       queues.set(queueKey(repository, target), { at: yield* Clock.currentTimeMillis, enabled: pull.isMergeQueueEnabled })
       return pull
     })
-  /** Whether a commit is the merge GitHub's update-branch made from `from`: two parents, the first of them `from`. */
-  const madeFrom = (repository: Repository, sha: string, from: string) =>
-    Effect.map(
-      http.json(
+  /**
+   * Validate a removal's candidate against merge-group workflow runs for this
+   * PR's queue branch. Otherwise use the newest such build containing the PR
+   * head as a parent, no later than the removal. Never mistake its PR checks
+   * for the queue build. Bounded to the latest 100 merge-group workflow runs;
+   * a missing build or refused lookup is reported explicitly by the caller.
+   */
+  const mergeGroupShaOf = (
+    repository: Repository,
+    number: number,
+    target: string,
+    headSha: string | null,
+    candidate: string | null,
+    removedAt?: string,
+    enqueuedAt?: string,
+  ) =>
+    Effect.gen(function* () {
+      const runs = yield* http.json(
+        Schema.Struct({
+          workflow_runs: Schema.Array(
+            Schema.Struct({
+              head_sha: Schema.String,
+              head_branch: Schema.NullOr(Schema.String),
+              event: Schema.String,
+              created_at: Schema.String,
+            }),
+          ),
+        }),
+        'GET',
+        `${repo(repository)}/actions/runs?event=merge_group&per_page=100`,
+      )
+      const matching = runs.workflow_runs.filter(
+        (run) =>
+          run.event === 'merge_group' &&
+          run.head_branch?.replace(/^refs\/heads\//, '').startsWith(`gh-readonly-queue/${target}/pr-${number}-`) &&
+          (removedAt === undefined || run.created_at <= removedAt) &&
+          (enqueuedAt === undefined || run.created_at >= enqueuedAt) &&
+          run.head_sha !== headSha,
+      )
+      if (candidate !== null && matching.some((run) => run.head_sha === candidate)) return candidate
+      const seen = new Set<string>()
+      for (const run of matching.toSorted((a, b) => b.created_at.localeCompare(a.created_at))) {
+        if (seen.has(run.head_sha)) continue
+        seen.add(run.head_sha)
+        const parents = yield* http.json(
+          Schema.Struct({ parents: Schema.Array(Schema.Struct({ sha: Schema.String })) }),
+          'GET',
+          `${repo(repository)}/commits/${encodeURIComponent(run.head_sha)}`,
+        )
+        if (parents.parents.some((parent) => parent.sha === headSha || parent.sha === candidate)) return run.head_sha
+      }
+      return null as string | null
+    })
+
+  /** Whether a commit is the merge GitHub's update-branch made from `from`: two parents, the first of them `from`, the second `base` where given. */
+  /** Whether `later` is `earlier` or comes after it (each a commit or a branch, as a path): `compare` counts what `earlier` has that `later` hasn't. */
+  const after = (repository: Repository, earlier: string, later: string) =>
+    Effect.map(http.json(Behind, 'GET', `${repo(repository)}/compare/${earlier}...${later}`), (compared) => compared.behind_by === 0)
+  const madeFrom = (repository: Repository, change: ChangeRequest & { readonly headSha: string }, from: string, base?: string) =>
+    Effect.gen(function* () {
+      const made = yield* http.json(
         Schema.Struct({ parents: Schema.Array(Schema.Struct({ sha: Schema.String })) }),
         'GET',
-        `${repo(repository)}/commits/${encodeURIComponent(sha)}`,
-      ),
-      (made) => made.parents.length === 2 && made.parents[0]?.sha === from,
-    )
+        `${repo(repository)}/commits/${encodeURIComponent(change.headSha)}`,
+      )
+      const [first, merged] = made.parents.map((parent) => parent.sha)
+      if (made.parents.length !== 2 || first !== from || merged === undefined) return false
+      if (base === undefined || merged === base) return true
+      // The target moved on before GitHub merged it in the background: it merged the target's newer head, which comes after
+      // the one asked for and is on the target still. A merge of another branch is neither.
+      return (
+        (yield* after(repository, encodeURIComponent(base), encodeURIComponent(merged))) &&
+        (yield* after(repository, encodeURIComponent(merged), branchPath(change.target)))
+      )
+    })
   const queueKey = (repository: Repository, target: string) => `${repository.path.join('/')} ${target}`
+
+  /** Whether this server knows `refUpdateRule`: false once it said it doesn't, as an older Enterprise Server does. */
+  let readsRule = true
+  /** Whether each `owner/name branch` must be up to date before merging, as its classic protection last said, and when. */
+  const stricts = new Map<string, { readonly at: number; readonly strict: boolean | null }>()
+  /**
+   * Whether a branch's classic protection requires it up to date before a
+   * merge: only an admin may read it, so for anyone else it is null, unknown.
+   * Kept an hour per branch, so it costs one call an hour, whoever reads it.
+   */
+  const strictOf = (repository: Repository, target: string) =>
+    Effect.gen(function* () {
+      const key = queueKey(repository, target)
+      const now = yield* Clock.currentTimeMillis
+      const kept = stricts.get(key)
+      if (kept !== undefined && now - kept.at < STRICT_KEPT_MS) return kept.strict
+      const said = yield* http
+        .json(
+          Schema.Struct({ strict: Schema.optional(Schema.Boolean) }),
+          'GET',
+          `${repo(repository)}/branches/${branchPath(target)}/protection/required_status_checks`,
+        )
+        .pipe(
+          Effect.map((checks) => ({ strict: checks.strict ?? null, kept: true })),
+          // To an admin, a branch with no required checks says so; to anyone else, GitHub says only Not Found, or Forbidden:
+          // either is kept. A failure on the way (limited, unreachable, a server's error) isn't, so the next read asks again.
+          Effect.catch((error) =>
+            Effect.succeed({
+              strict: error.status === 404 && /not enabled|not protected/i.test(error.message) ? false : null,
+              kept: error.reason === 'not_found' || error.reason === 'forbidden',
+            }),
+          ),
+        )
+      if (said.kept) stricts.set(key, { at: now, strict: said.strict })
+      return said.strict
+    })
 
   /** A branch as a pull request's head names it: with its owner, the fork's where it is on one. */
   const headOf = (repository: Repository, source: string, from?: Repository) => `${(from ?? repository).path[0]}:${source}`
@@ -1341,7 +1466,43 @@ export const makeGitHub = (options: AdapterOptions): CodeHost & Tracker => {
         )
         if (queue === null) return change
         if (!queue.isMergeQueueEnabled) return outside
-        return { ...change, queued: queue.isInMergeQueue, leftQueue: leftQueueOf(queue.timelineItems.nodes.at(-1)?.reason) }
+        // The merge-group commit the queue judged: while in the queue, its current entry's head; after it left, the removal's before commit.
+        const removed = queue.timelineItems.nodes.at(-1)
+        const candidate = queue.isInMergeQueue ? (queue.mergeQueueEntry?.headCommit?.oid ?? null) : (removed?.beforeCommit?.oid ?? null)
+        // A candidate that is the pull request's own head isn't a queue build: fall back to the merge-group workflow runs, else none.
+        const key = `${repo(repository)} ${number} ${removed?.createdAt ?? ''} ${candidate ?? ''}`
+        const knownBuild = queue.isInMergeQueue ? undefined : removedBuilds.get(key)
+        const build =
+          knownBuild !== undefined
+            ? { queueSha: knownBuild, queueError: null }
+            : (queue.isInMergeQueue && candidate !== change.headSha) || (!queue.isInMergeQueue && leftQueueOf(removed?.reason) !== 'checks')
+              ? { queueSha: queue.isInMergeQueue ? candidate : null, queueError: null }
+              : yield* mergeGroupShaOf(
+                  repository,
+                  number,
+                  change.target,
+                  change.headSha,
+                  candidate,
+                  queue.isInMergeQueue ? undefined : removed?.createdAt,
+                  queue.isInMergeQueue ? queue.mergeQueueEntry?.enqueuedAt : undefined,
+                ).pipe(
+                  Effect.map((queueSha) => ({
+                    queueSha,
+                    queueError:
+                      queueSha === null ? 'No matching merge-group build was found among the latest 100 merge-group workflow runs.' : null,
+                  })),
+                  Effect.catch((error) =>
+                    Effect.succeed({
+                      queueSha: null,
+                      queueError: `GitHub couldn't identify the merge-group build (${error.reason}${error.status === undefined ? '' : `, ${error.status}`}): ${error.message}`,
+                    }),
+                  ),
+                )
+        if (!queue.isInMergeQueue && build.queueSha !== null) {
+          removedBuilds.set(key, build.queueSha)
+          if (removedBuilds.size > 100) removedBuilds.delete(removedBuilds.keys().next().value!)
+        }
+        return { ...change, queued: queue.isInMergeQueue, leftQueue: leftQueueOf(removed?.reason), ...build }
       }),
     listChanges: (repository, query) =>
       Effect.gen(function* () {
@@ -1365,6 +1526,62 @@ export const makeGitHub = (options: AdapterOptions): CodeHost & Tracker => {
         for (const [asked, listing] of listings) if (now - listing.at >= LISTING_KEPT_MS) listings.delete(asked)
         listings.set(key, { at: now, list })
         return list
+      }),
+    mergeRules: (repository, change) =>
+      Effect.gen(function* () {
+        const variables = { owner: repository.path[0], name: repository.path[1], number: change.number }
+        const ask = (full: boolean) => http.graphql(PullRulesAnswer, graphqlUrl, mergeRulesQuery(full), variables)
+        // An Enterprise Server too old to know the newer fields is asked without them from then on. Its branch's rulesets, by
+        // ETag, alongside: one a server has none of, or won't say, adds nothing; GitHub's BLOCKED still shows.
+        const [answer, rulesets] = yield* Effect.all(
+          [
+            readsRule
+              ? ask(true).pipe(
+                  Effect.catchIf(
+                    (error) => error.reason === 'rejected' && NEWER_FIELDS.test(error.message),
+                    () => {
+                      readsRule = false
+                      return ask(false)
+                    },
+                  ),
+                )
+              : ask(false),
+            http.cached(RulesetsAnswer, `${repo(repository)}/rules/branches/${branchPath(change.target)}`).pipe(
+              Effect.map(rulesetsOf),
+              Effect.catchIf(
+                (error) => error.reason === 'not_found' || error.reason === 'forbidden' || error.reason === 'rejected',
+                () => Effect.succeed(NO_RULESETS),
+              ),
+            ),
+          ],
+          { concurrency: 'unbounded' },
+        )
+        const pull = answer.repository?.pullRequest
+        if (pull == null)
+          return yield* new ConnectorFailed({
+            product,
+            reason: 'not_found',
+            message: `No pull request #${change.number} in ${repository.path.join('/')}`,
+          })
+        const rule = pull.baseRef?.refUpdateRule ?? null
+        // Required up to date where its rulesets or GitHub say; else as classic protection says, which only an admin reads, and
+        // where there are no required checks, or no protection, it needs nothing.
+        const said = rulesets.strict || pull.mergeStateStatus === 'BEHIND'
+        const classic =
+          said || (readsRule && (rule === null || (rule.requiredStatusCheckContexts ?? []).length === 0))
+            ? false
+            : yield* strictOf(repository, change.target)
+        const strict = said ? true : classic
+        const behind =
+          strict === false || change.headSha === null
+            ? null
+            : yield* http
+                .cached(CompareAnswer, `${repo(repository)}/compare/${branchPath(change.target)}...${encodeURIComponent(change.headSha)}`)
+                .pipe(
+                  Effect.map((compared) => compared.behind_by),
+                  Effect.orElseSucceed(() => null),
+                )
+        return mergeRulesOf({ pull, rulesets, behind, strict: classic, merges: repository.merges }) satisfies MergeRules
       }),
     // REST, not the search: its list has an ETag, so a quiet repository answers 304 for nothing.
     openChanges: (repository) =>
@@ -1469,7 +1686,8 @@ export const makeGitHub = (options: AdapterOptions): CodeHost & Tracker => {
             ),
             (answer) => answer.behind_by === 0,
           ),
-    madeFrom: (repository, change, from) => (change.headSha === null ? Effect.succeed(false) : madeFrom(repository, change.headSha, from)),
+    madeFrom: (repository, change, from, base) =>
+      change.headSha === null ? Effect.succeed(false) : madeFrom(repository, { ...change, headSha: change.headSha }, from, base),
     closeChange: (repository, change) =>
       Effect.gen(function* () {
         const now = yield* http.json(PullAnswer, 'GET', `${repo(repository)}/pulls/${change.number}`)
@@ -1490,6 +1708,7 @@ export const makeGitHub = (options: AdapterOptions): CodeHost & Tracker => {
         http.json(PullAnswer, 'PATCH', `${repo(repository)}/pulls/${change.number}`, {
           ...(edit.title === undefined ? {} : { title: edit.title }),
           ...(edit.body === undefined ? {} : { body: edit.body }),
+          ...(edit.base === undefined ? {} : { base: edit.base }),
         }),
         changeOf,
       ),
@@ -1557,7 +1776,7 @@ export const makeGitHub = (options: AdapterOptions): CodeHost & Tracker => {
         const after = yield* http.json(PullAnswer, 'GET', at)
         return { outcome: 'updated', head: after.head.sha === now.head.sha ? null : after.head.sha } satisfies BranchUpdate
       }),
-    checks: (repository, sha) =>
+    checks: (repository, sha, ask) =>
       Effect.gen(function* () {
         const at = `${repo(repository)}/commits/${encodeURIComponent(sha)}`
         // A fine-grained token is given no check runs, and GitHub refuses them: the commit's statuses are read alone.
@@ -1568,7 +1787,7 @@ export const makeGitHub = (options: AdapterOptions): CodeHost & Tracker => {
           })),
         ).pipe(
           Effect.catchIf(
-            (error) => error.reason === 'forbidden',
+            (error) => error.reason === 'forbidden' && ask?.strict !== true,
             () => Effect.succeed<ReadonlyArray<CheckRun>>([]),
           ),
         )
@@ -1848,7 +2067,7 @@ export const makeGitHub = (options: AdapterOptions): CodeHost & Tracker => {
 
 /** GitHub's page for a classic token, filled in: what it is for, and the scopes Althar uses, check runs included. */
 export const classicTokenPage = (webUrl: string): string =>
-  `${webUrl.replace(/\/+$/, '')}/settings/tokens/new?${new URLSearchParams({ description: 'Althar', scopes: 'repo,workflow' }).toString()}`
+  `${withoutTrailingSlashes(webUrl)}/settings/tokens/new?${new URLSearchParams({ description: 'Althar', scopes: 'repo,workflow' }).toString()}`
 
 /** Where a person's tokens are listed: fine-grained ones on github.com; on a company's own server, which may predate them, classic ones. */
 const tokensPage = (web: string) => (web === 'https://github.com' ? `${web}/settings/personal-access-tokens` : `${web}/settings/tokens`)
@@ -1872,8 +2091,8 @@ interface Found {
 
 export const accessGitHub: Access = (input: AccessInput) =>
   Effect.gen(function* () {
-    const api = input.apiUrl.replace(/\/+$/, '')
-    const web = input.webUrl.replace(/\/+$/, '')
+    const api = withoutTrailingSlashes(input.apiUrl)
+    const web = withoutTrailingSlashes(input.webUrl)
     const ask = (url: string) => probe(input, url, { headers: HEADERS })
     const repo = (path: ReadonlyArray<string>) => `${api}/repos/${path.map(encodeURIComponent).join('/')}`
 

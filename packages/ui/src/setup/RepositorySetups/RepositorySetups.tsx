@@ -2,6 +2,7 @@ import { type KeyboardEvent, type ReactNode, useId, useRef, useState } from 'rea
 
 import { Icon } from '../../foundations/Icon/Icon'
 import { Button } from '../../primitives/Button/Button'
+import { Problem } from '../../primitives/Problem/Problem'
 import s from './RepositorySetups.module.css'
 
 /*
@@ -294,11 +295,7 @@ export function RepositorySetups({ repositories, onChange, onClear, error }: Rep
           </div>
         )}
       </section>
-      {error !== undefined && (
-        <p className={s.error} role="alert">
-          {error}
-        </p>
-      )}
+      {error !== undefined && <Problem>{error}</Problem>}
     </div>
   )
 }

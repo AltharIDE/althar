@@ -34,7 +34,7 @@ import {
   runnables,
   snapshot,
 } from './fixtures'
-import { useSettingsOf, withServices } from './render'
+import { pickLayout, useSettingsOf, withServices } from './render'
 
 /*
  * What reaches outside, in the window: connecting code hosts and trackers,
@@ -111,7 +111,8 @@ describe('connections', () => {
     const can = screen.getByRole('list', { name: 'What GitHub lets Althar do' })
     expect(within(can).getByText('Reaches meridian-api').closest('li')?.textContent).toContain('northwind')
     expect(within(can).getByText('Open, update and merge pull requests')).toBeTruthy()
-    expect(screen.getByText('The token runs out on 8 January 2027.')).toBeTruthy()
+    const expiry = new Date(githubCheck.expiresAt ?? '').toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })
+    expect(screen.getByText(`The token runs out on ${expiry}.`)).toBeTruthy()
     expect(screen.getByText('Connected')).toBeTruthy()
     await userEvent.click(screen.getByRole('button', { name: 'Done' }))
     expect(await screen.findByText('Not connected · meridian’s code is here')).toBeTruthy()
@@ -816,6 +817,13 @@ describe('running what a task built, with no agent', () => {
     await userEvent.click(shown.getByRole('button', { name: 'Stop bun run dev' }))
     expect(client.stopLaunch).toHaveBeenCalledWith('proc_1')
     expect(shown.queryByRole('button', { name: 'Run bun run dev again' })).toBeNull()
+    // Its console reads what it printed only once it is opened, and shows it under the command.
+    expect(client.readLaunchOutput).not.toHaveBeenCalled()
+    await userEvent.click(shown.getByRole('button', { name: 'Output' }))
+    expect(client.readLaunchOutput).toHaveBeenCalledWith('proc_1')
+    const output = await screen.findByRole('dialog', { name: 'Output of bun run dev' })
+    expect(await within(output).findByText('VITE ready in 312 ms')).toBeTruthy()
+    await userEvent.keyboard('{Escape}')
     // It ended by itself: it says how, with its last line, and runs again here.
     const ended = {
       ...card,
@@ -1456,7 +1464,7 @@ describe('a project, reaching outside', () => {
     await userEvent.click(dialog.getByRole('button', { name: 'Done' }))
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
     // From the board too: the settings are a view of their own, whichever the project was on.
-    await userEvent.click(screen.getByRole('radio', { name: 'Board' }))
+    await pickLayout('Conversation')
     await connectFromSettings()
     expect(await screen.findByRole('dialog', { name: 'GitHub' })).toBeTruthy()
   })
@@ -1722,6 +1730,37 @@ describe('a project, reaching outside', () => {
     await userEvent.click(await screen.findByRole('menuitemradio', { name: /Push the branch only/ }))
     expect(screen.queryByText('this task only')).toBeNull()
     await waitFor(() => expect(client.changePlan).toHaveBeenLastCalledWith('pln1', expect.any(Array), 'none'))
+  })
+
+  it('starts a plan from another preset, picked from its kicker, and offers a review only the presets that review', async () => {
+    const preset = (name: string, reviews = false) => ({
+      id: `builtin:${name}`,
+      name,
+      builtin: true,
+      projectId: null,
+      about: `${name}'s parts`,
+      parts: {
+        workspace: 'worktree' as const,
+        checked: 'before' as const,
+        end: 'draft' as const,
+        shelf: 'board' as const,
+        lead: null,
+        reviewer: null,
+        brief: '',
+        ...(reviews ? { reviews: true } : {}),
+      },
+    })
+    const { client } = fakeClient({
+      getCoordinator: vi.fn(async () =>
+        coordinatorSnapshot({ items: [items.card(card({ plan: { ...card().plan!, preset: 'Change' } }), 'c1')] }),
+      ),
+      listPresets: vi.fn(async () => [preset('Chat'), preset('Change'), preset('Prototype'), preset('Review a PR', true)]),
+    })
+    withServices(<Project />, client)
+    await userEvent.click(await screen.findByRole('button', { name: 'Change' }))
+    expect(screen.queryByRole('menuitemradio', { name: /Review a PR/ })).toBeNull()
+    await userEvent.click(await screen.findByRole('menuitemradio', { name: /Prototype/ }))
+    await waitFor(() => expect(client.applyPreset).toHaveBeenCalledWith('pln1', 'Prototype'))
   })
 })
 

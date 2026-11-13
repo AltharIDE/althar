@@ -24,19 +24,41 @@
   stroke-linecap: round;
 }
 
-.top {
+/* the detail: one large figure with its actions beside it, the bar and the tokens under it, then a quiet line per account */
+.card {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
   font-size: 12px;
+  line-height: 1.45;
   color: var(--t-2);
 }
-.top b {
+.head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.share {
+  font-size: 22px;
+  line-height: 28px;
   font-weight: 600;
+  letter-spacing: -0.01em;
   color: var(--t-1);
+  font-variant-numeric: tabular-nums;
+}
+/* the actions' labels end where the bar does */
+.acts {
+  display: flex;
+  gap: 2px;
+  margin-right: -6px;
 }
 .bar {
   display: block;
   height: 4px;
   border-radius: 99px;
-  background: var(--n-4);
+  /* the empty part of a progress bar, which reads on a popover at night too */
+  background: var(--track);
   overflow: hidden;
 }
 .bar i {
@@ -58,29 +80,48 @@
   color: var(--t-3);
 }
 
-/* the detail: the numbers, then what can be done about them */
-.card {
+/* whose usage, as a key; each account's line beside it */
+.usage {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  column-gap: 12px;
+  margin-top: 6px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+  line-height: 18px;
+}
+.whose {
+  font-size: 11.5px;
+  color: var(--t-3);
+}
+ul.lines {
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  font-size: 12px;
-  line-height: 1.45;
-  color: var(--t-2);
+  gap: 4px;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
 }
-.foot {
+.lines li {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding-top: 6px;
-  border-top: 1px solid var(--line);
+  gap: 6px;
+  min-width: 0;
 }
-/* Compact stays at the end whether or not Clear chat… stands before it */
-.foot > :last-child {
-  margin-left: auto;
+.lines li > svg {
+  flex: none;
 }
-/* what the task, or the day, used of each account: its own part, under the context */
-.usage {
-  margin-top: 6px;
-  padding-top: 12px;
-  border-top: 1px solid var(--line);
+.account {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.figure {
+  font-weight: 600;
+  color: var(--t-1);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }

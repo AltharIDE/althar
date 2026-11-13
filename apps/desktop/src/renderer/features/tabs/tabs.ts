@@ -2,7 +2,7 @@ import type { ProjectSummary } from '@althar/contracts'
 import { type ProjectTab, Room } from '@althar/ui'
 
 import { refOf } from '../home/glance'
-import { isSection, type Section } from '../settings/sections'
+import { sectionOf, type Section } from '../settings/sections'
 
 /*
  * The window's tabs, worked out: which projects have one, where in each the
@@ -50,7 +50,7 @@ export const whereOf = (pathname: string): Where => {
   const settings = /^\/settings\/([^/]+)\/?$/.exec(pathname)
   if (settings?.[1] !== undefined) {
     const section = decodeURIComponent(settings[1])
-    return { kind: 'settings', section: isSection(section) ? section : 'agents' }
+    return { kind: 'settings', section: sectionOf(section) ?? 'agents' }
   }
   return { kind: 'home' }
 }
@@ -60,7 +60,7 @@ export const whereOf = (pathname: string): Where => {
  * a window opens with before the home is read. A tab's dot is the board's own
  * count (`yoursByProject`), never this: it is a quick reading, not the rule.
  */
-export const yoursIn = (project: ProjectSummary): number => project.waiting + project.ready
+export const yoursIn = (project: ProjectSummary): number => project.yours
 
 /**
  * The tabs a window opens with before it has kept any: the projects where
@@ -128,7 +128,9 @@ export const keptFrom = (raw: string | null): Kept | null => {
     const rooms: Record<string, Room> = {}
     if ('rooms' in parsed && typeof parsed.rooms === 'object' && parsed.rooms !== null)
       for (const [id, room] of Object.entries(parsed.rooms)) if (isRoom(room)) rooms[id] = room
-    const settings = 'settings' in parsed && isSection(parsed.settings) ? { settings: parsed.settings } : {}
+    // A section that was moved or merged (Plans and reviews, Reviews, Editor, Browser, Dictation) is kept as where its settings went.
+    const section = 'settings' in parsed ? sectionOf(parsed.settings) : undefined
+    const settings = section === undefined ? {} : { settings: section }
     const home = 'home' in parsed && typeof parsed.home === 'boolean' ? { home: parsed.home } : {}
     return { open, places, ...home, ...(Object.keys(rooms).length === 0 ? {} : { rooms }), ...settings }
   } catch {

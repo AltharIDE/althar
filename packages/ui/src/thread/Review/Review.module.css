@@ -25,13 +25,16 @@
   text-overflow: ellipsis;
   color: var(--t-3);
 }
+/* what waits on you, and how long it took, stay whole: the longer words give way first */
 .forYou {
-  flex: 0 1 auto;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  flex: none;
   color: var(--signal);
   font-weight: 550;
+}
+.took {
+  flex: none;
+  color: var(--t-3);
+  font-variant-numeric: tabular-nums;
 }
 /* something waits on you: the same violet as any ask */
 .you {

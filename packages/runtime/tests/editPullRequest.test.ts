@@ -15,7 +15,7 @@ import { Queries } from '../src/Queries'
 import * as Runtime from '../src/Runtime'
 import { Tasks } from '../src/Tasks'
 import type { ToolAccess } from '../src/ToolServer'
-import { callTool, fakeConnectors, HOST, hosted, items, runtime, until } from './support'
+import { callTool, fakeConnectors, HOST, hosted, items, runtime, turnsFor, until } from './support'
 
 /*
  * A task's pull request and its title and description after it opened: the
@@ -191,24 +191,77 @@ describe('a lead’s edit_pull_request', () => {
     }).pipe(Effect.provide(runtimeWith(github)))
   })
 
-  it.live('edits only its own pull request: one it names that isn’t its own is refused, with one as with several', () => {
-    const { working, github } = seeded()
-    return Effect.gen(function* () {
-      const { lead } = yield* withPullRequest(working)
-      const edits = github.calls.filter((call) => call === 'editChange').length
-      const said = yield* callTool(lead, 'edit_pull_request', { pull_request: 'web#4', title: 'Elsewhere' })
-      assert.include(said, "This task's pull request is PR #1, and it edits only its own.")
-      assert.strictEqual(github.calls.filter((call) => call === 'editChange').length, edits)
-      // Named as its own, it goes ahead.
-      assert.include(
-        yield* callTool(lead, 'edit_pull_request', { pull_request: '#1', title: 'Retry twice' }),
-        'is called “Retry twice” now',
-      )
-    }).pipe(Effect.provide(runtimeWith(github)))
-  })
+  it.live(
+    'edits any of the project’s pull requests it names, an outside author’s on the person’s word, and leaves another’s task as it is',
+    () => {
+      const { working, github } = seeded()
+      return Effect.gen(function* () {
+        const { lead: bare, taskId } = yield* withPullRequest(working)
+        const { access: lead, turn } = yield* turnsFor(bare)
+        const before = yield* titleOf(taskId)
+        // One of the repository's people's, no task's: as given, the task's own card as it was.
+        const member = github.addPullRequest({ path: ['meridian', 'api'], title: 'Their fix', author: 'dana' })
+        assert.include(
+          yield* callTool(lead, 'edit_pull_request', { pull_request: `#${member.number}`, title: 'Fix the retry' }),
+          `PR #${member.number} is called “Fix the retry” now, where it was “Their fix”.`,
+        )
+        assert.strictEqual(yield* titleOf(taskId), before)
+        // An outside author's: on the person's word only.
+        const outside = github.addPullRequest({ path: ['meridian', 'api'], title: 'Drive-by', author: 'stranger', member: false })
+        assert.include(
+          yield* callTool(lead, 'edit_pull_request', { pull_request: `#${outside.number}`, title: 'Renamed' }),
+          'an outside author’s, so it goes on the person’s word',
+        )
+        assert.strictEqual(github.changes.find((change) => change.number === outside.number)?.title, 'Drive-by')
+        const asked = yield* turn(`Retitle #${outside.number} to Renamed.`)
+        assert.include(
+          yield* callTool(lead, 'edit_pull_request', { pull_request: `#${outside.number}`, title: 'Renamed', message: asked }),
+          'is called “Renamed” now',
+        )
+        // And it replies on any, as the coordinator does.
+        assert.include(
+          yield* callTool(lead, 'reply_on_pull_request', { pull_request: `#${member.number}`, body: 'Looks right.' }),
+          `Replied on PR #${member.number}`,
+        )
+        // Named as its own, it goes ahead as its own.
+        assert.include(
+          yield* callTool(lead, 'edit_pull_request', { pull_request: '#1', title: 'Retry twice' }),
+          'is called “Retry twice” now',
+        )
+      }).pipe(Effect.provide(runtimeWith(github)))
+    },
+  )
 })
 
 describe('a task renamed, its pull request following', () => {
+  for (const role of ['lead', 'coordinator'] as const) {
+    it.live(`reminds the ${role} to retitle reshaped work, and its rename updates the open pull request by the project's naming`, () => {
+      const { working, github } = seeded()
+      return Effect.gen(function* () {
+        const made = yield* withPullRequest(working)
+        const access = made[role]
+        yield* fromIssue(made.projectId, made.taskId)
+        yield* callTool(access, 'rename_task', { task_id: made.taskId, title: 'Prototype retry behavior' })
+        const shaped = yield* callTool(access, 'change_part', {
+          task: made.taskId,
+          part: 'ending',
+          end: 'ready',
+          why: 'the person asked',
+        })
+        assert.include(shaped, 'current title, “Prototype retry behavior”')
+        assert.include(shaped, 'call rename_task')
+        assert.include(shaped, 'Keep it if it still fits')
+        assert.strictEqual(yield* titleOf(made.taskId), 'Prototype retry behavior')
+        const renamed = yield* callTool(access, 'rename_task', { task_id: made.taskId, title: 'Add configurable retries' })
+        assert.include(renamed, 'PR #1 is called “MER-231: Add configurable retries” now.')
+        assert.strictEqual(yield* titleOf(made.taskId), 'Add configurable retries')
+        assert.strictEqual(github.changes[0]?.title, 'MER-231: Add configurable retries')
+        assert.strictEqual(github.changes[0]?.source, 'althar/add-a-retry')
+        assert.isFalse(github.changes[0]?.draft)
+      }).pipe(Effect.provide(runtimeWith(github)))
+    })
+  }
+
   it.live('follows the person’s rename in the background, and the coordinator’s at once, saying so', () => {
     const { working, github } = seeded()
     return Effect.gen(function* () {
@@ -286,7 +339,7 @@ describe('a lead’s later description', () => {
     const { working, github } = seeded()
     return Effect.gen(function* () {
       const { lead, leadThread } = yield* withSlug(working)
-      // A later round, as the lead's own session finishes a step after its pull request opened.
+      // A turn after its plan, as the lead's own session gives a summary after its pull request opened: kept, opening nothing.
       const sql = yield* SqlClient.SqlClient
       const [session] = yield* sql<{ id: string }>`
         SELECT id FROM provider_sessions WHERE thread_id = ${leadThread} ORDER BY started_at DESC LIMIT 1`
@@ -295,54 +348,61 @@ describe('a lead’s later description', () => {
         built: 'Retries twice.',
         descriptions: [{ text: 'Retries twice now, and no more.' }],
       })
-      assert.strictEqual(
-        said,
-        'Althar has your summary. Nothing on the branch changed this round, so the task is back where it was. PR #1 has your new description.',
-      )
+      assert.strictEqual(said, 'Althar has your summary. PR #1 has your new description.')
       assert.strictEqual(github.changes[0]?.body, `Retries twice now, and no more.\n\n${CREDIT}`)
     }).pipe(Effect.provide(runtimeWith(github)))
   })
 })
 
 describe('the coordinator’s edit_pull_request', () => {
-  it.live('edits a task’s pull request as its lead would, one a member opened as given, and an outside author’s waits', () => {
-    const { working, github } = seeded()
-    return Effect.gen(function* () {
-      const { coordinator, taskId, projectId } = yield* withPullRequest(working)
-      yield* fromIssue(projectId, taskId)
-      // The task's: by the project's naming, the task's card following.
-      const said = yield* callTool(coordinator, 'edit_pull_request', { pull_request: '#1', title: 'The homepage opens on the orrery' })
-      assert.include(said, 'PR #1 is called “MER-231: The homepage opens on the orrery” now.')
-      assert.strictEqual(yield* titleOf(taskId), 'The homepage opens on the orrery')
-      // One of the repository's people's, no task's: as given, its own description replaced whole.
-      const member = github.addPullRequest({ path: ['meridian', 'api'], title: 'Their fix', author: 'dana', body: 'Old words.' })
-      assert.strictEqual(
-        yield* callTool(coordinator, 'edit_pull_request', {
-          pull_request: `#${member.number}`,
-          title: 'Fix the retry',
-          description: 'New words.',
-        }),
-        `PR #${member.number} is called “Fix the retry” now, where it was “Their fix”. PR #${member.number} has the new description.`,
-      )
-      assert.deepInclude(
-        github.changes.find((change) => change.number === member.number),
-        { title: 'Fix the retry', body: 'New words.' },
-      )
-      // An outside author's waits for the person's word: nothing changes.
-      const outside = github.addPullRequest({ path: ['meridian', 'api'], title: 'Drive-by', author: 'stranger', member: false })
-      assert.include(
-        yield* callTool(coordinator, 'edit_pull_request', { pull_request: `#${outside.number}`, title: 'Renamed' }),
-        'waits for the person’s word',
-      )
-      assert.strictEqual(github.changes.find((change) => change.number === outside.number)?.title, 'Drive-by')
-      // A host that says no is passed on in its words.
-      github.failNext('editChange', 'forbidden', undefined, 403)
-      assert.include(
-        yield* callTool(coordinator, 'edit_pull_request', { pull_request: `#${member.number}`, title: 'Again' }),
-        "GitHub wouldn't change PR",
-      )
-    }).pipe(Effect.provide(runtimeWith(github)))
-  })
+  it.live(
+    'edits a task’s pull request as its lead would, one a member opened as given, and an outside author’s on the person’s word',
+    () => {
+      const { working, github } = seeded()
+      return Effect.gen(function* () {
+        const { coordinator: bare, taskId, projectId } = yield* withPullRequest(working)
+        const { access: coordinator, turn } = yield* turnsFor(bare)
+        yield* fromIssue(projectId, taskId)
+        // The task's: by the project's naming, the task's card following.
+        const said = yield* callTool(coordinator, 'edit_pull_request', { pull_request: '#1', title: 'The homepage opens on the orrery' })
+        assert.include(said, 'PR #1 is called “MER-231: The homepage opens on the orrery” now.')
+        assert.strictEqual(yield* titleOf(taskId), 'The homepage opens on the orrery')
+        // One of the repository's people's, no task's: as given, its own description replaced whole.
+        const member = github.addPullRequest({ path: ['meridian', 'api'], title: 'Their fix', author: 'dana', body: 'Old words.' })
+        assert.strictEqual(
+          yield* callTool(coordinator, 'edit_pull_request', {
+            pull_request: `#${member.number}`,
+            title: 'Fix the retry',
+            description: 'New words.',
+          }),
+          `PR #${member.number} is called “Fix the retry” now, where it was “Their fix”. PR #${member.number} has the new description.`,
+        )
+        assert.deepInclude(
+          github.changes.find((change) => change.number === member.number),
+          { title: 'Fix the retry', body: 'New words.' },
+        )
+        // An outside author's goes on the person's word: unasked, nothing changes.
+        const outside = github.addPullRequest({ path: ['meridian', 'api'], title: 'Drive-by', author: 'stranger', member: false })
+        assert.include(
+          yield* callTool(coordinator, 'edit_pull_request', { pull_request: `#${outside.number}`, title: 'Renamed' }),
+          'an outside author’s, so it goes on the person’s word',
+        )
+        assert.strictEqual(github.changes.find((change) => change.number === outside.number)?.title, 'Drive-by')
+        const asked = yield* turn(`Rename #${outside.number} to Renamed.`)
+        assert.include(
+          yield* callTool(coordinator, 'edit_pull_request', { pull_request: `#${outside.number}`, title: 'Renamed', message: asked }),
+          'is called “Renamed” now',
+        )
+        assert.strictEqual(github.changes.find((change) => change.number === outside.number)?.title, 'Renamed')
+        // A host that says no is passed on in its words.
+        github.failNext('editChange', 'forbidden', undefined, 403)
+        assert.include(
+          yield* callTool(coordinator, 'edit_pull_request', { pull_request: `#${member.number}`, title: 'Again' }),
+          "GitHub wouldn't change PR",
+        )
+      }).pipe(Effect.provide(runtimeWith(github)))
+    },
+  )
 
   it.live(
     'leaves a closed one as it is, refuses a title that is only credit or a blank description, and says what it couldn’t tell',

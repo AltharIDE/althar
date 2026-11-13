@@ -21,6 +21,7 @@ import { Installs, type OnDevice } from './Installs'
 import type { LoadOptions } from './MachineLoad'
 import type { PlanUsageOptions } from './PlanUsage'
 import type { ModelFactsOptions } from './ModelFacts'
+import type { PageAnswer, PageCall } from './pageBridge'
 import type { SkillsConfig } from './Skills'
 
 /** A screenshot an agent asks for: the page, the viewport it is drawn at, and what of it, all of it or one element. */
@@ -76,6 +77,11 @@ export interface RuntimeOptions {
    * Without it, the system's temporary folder (`Models.ts`).
    */
   readonly probeRoot?: string
+  /**
+   * How long after an agent couldn't say its models (it wasn't signed in yet, or didn't start in time) the next read of
+   * them asks it again: a minute unless a test says otherwise (`Models.ts`). An agent found signed in is asked again at once.
+   */
+  readonly modelsAgain?: Duration.Duration
   /** Opens a line in a terminal for the person to run, such as an agent's own sign-in; whether it could. Without it, the person runs it. */
   readonly openTerminal?: (line: string) => Effect.Effect<boolean>
   /**
@@ -84,6 +90,13 @@ export interface RuntimeOptions {
    * for the agent. Without it, the screenshot tool says this Althar can't.
    */
   readonly screenshot?: (shot: Shot) => Effect.Effect<Screenshot, string>
+  /**
+   * Carries what a lead or the coordinator asks of the page beside its conversation to where the page is: the desktop app's main
+   * process, with Chromium (ADR-100). `owner` is the session's own task or project, never the agent's say. It answers in words
+   * for the agent, a picture beside them for a screenshot, or fails with why it can't (no window, no page, a guard refusing).
+   * Without it, the page tools say this Althar can't drive pages.
+   */
+  readonly page?: (owner: string, call: PageCall) => Effect.Effect<PageAnswer, string>
   /** Opens a page in the person's browser, for an agent's sign-in that doesn't itself; whether it could. Without it, the window offers the link. */
   readonly openUrl?: (url: string) => Effect.Effect<boolean>
   /** The editors on this device a task's files open in, and opening one on a folder, at a file and line where it can; without it, none. */
@@ -118,6 +131,8 @@ export interface RuntimeOptions {
   readonly drafting?: Duration.Duration
   /** How often a task's pull requests are asked for news while it listens: 30 seconds unless a test says otherwise. */
   readonly listenEvery?: Duration.Duration
+  /** How often durable external waits read their code hosts; 30 seconds by default. Time waits wake at their time. */
+  readonly externalWaitEvery?: Duration.Duration
   /** How often the merge line is swept, and whether at all (not with an infinite one): 30 seconds unless a test says otherwise (MergeLine.ts). */
   readonly mergeLineEvery?: Duration.Duration
   /** When finished tasks' folders are first swept after Althar starts, and how often after: 2 minutes and an hour unless a test says otherwise (ADR-056). */

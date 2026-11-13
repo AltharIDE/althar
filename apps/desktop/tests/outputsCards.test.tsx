@@ -55,6 +55,8 @@ const show = (
     onConnect: vi.fn(),
     onReplace: vi.fn(),
     onBringIn: vi.fn(),
+    onShip: vi.fn(),
+    onMergeWaiting: vi.fn(),
   }
   withServices(
     <Outputs
@@ -72,6 +74,119 @@ const show = (
 }
 
 describe('what a task changed, card by card', () => {
+  it.each(['draft', 'ready'] as const)('offers Ship for committed work ending in a %s pull request before any hold exists', async (end) => {
+    const here = [
+      {
+        repository: 'meridian',
+        name: 'meridian',
+        branch: 'main',
+        head: 'abc111',
+        remote: { name: 'origin', branch: 'althar/add-a-retry', pushed: false, ahead: 9, newPullRequest: null },
+      },
+    ]
+    const { onShip, onOpenChange, onPushBranch, onMergeHere } = show(
+      task({ end, commits: 9, files: [FILE], here, steps: [{ key: 'review', agentId: 'codex', model: null, skipped: false }] }),
+    )
+    await userEvent.click(screen.getByRole('button', { name: 'Ship 9 commits' }))
+    expect(onShip).toHaveBeenCalledOnce()
+    expect(screen.queryByRole('button', { name: /Open a .*pull request/ })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Push to origin' })).toBeNull()
+    expect(screen.queryByRole('button', { name: /Merge into/ })).toBeNull()
+    expect(onOpenChange).not.toHaveBeenCalled()
+    expect(onPushBranch).not.toHaveBeenCalled()
+    expect(onMergeHere).not.toHaveBeenCalled()
+  })
+
+  it('ships committed work on an explicitly stopped task without offering a raw publication bypass', async () => {
+    const stopped = task({ end: 'draft', phase: 'stopped', stopped: { by: 'interrupted', at: null }, commits: 2, files: [FILE] })
+    const { onShip } = show(stopped)
+    await userEvent.click(screen.getByRole('button', { name: 'Ship 2 commits' }))
+    expect(onShip).toHaveBeenCalledOnce()
+    expect(screen.queryByRole('button', { name: 'Open a draft pull request' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Push to origin' })).toBeNull()
+    cleanup()
+    show({ ...stopped, session: { ...snapshot().session!, turnRunning: true } })
+    expect(screen.queryByRole('button', { name: 'Ship 2 commits' })).toBeNull()
+  })
+
+  it('ships a next pull request through its ending, and offers no Ship when no committed work remains', async () => {
+    const changes = [pr('api', 1, { state: 'merged' })]
+    const { onShip } = show(task({ end: 'draft', changes, commits: 12, unshipped: { commits: 2, add: 5, del: 0 } }))
+    await userEvent.click(screen.getByRole('button', { name: 'Ship 2 commits' }))
+    expect(onShip).toHaveBeenCalledOnce()
+    expect(screen.queryByRole('button', { name: 'Open a new draft pull request' })).toBeNull()
+    cleanup()
+    show(task({ end: 'draft', changes, commits: 12, unshipped: null }))
+    expect(screen.queryByRole('button', { name: /^Ship/ })).toBeNull()
+    cleanup()
+    show(task({ end: 'draft', commits: 0, files: [{ ...FILE, uncommitted: true }] }))
+    expect(screen.queryByRole('button', { name: /^Ship/ })).toBeNull()
+  })
+
+  it('ships a new repository’s pull request even while a sibling pull request is open', async () => {
+    const { onShip } = show(task({ end: 'draft', changes: [pr('api', 1)], unshipped: { commits: 2, add: 5, del: 0 } }))
+    await userEvent.click(screen.getByRole('button', { name: 'Ship 2 commits' }))
+    expect(onShip).toHaveBeenCalledOnce()
+    expect(screen.queryByRole('button', { name: 'Open a new draft pull request' })).toBeNull()
+  })
+
+  it.each([
+    ['merged', false],
+    ['merged', true],
+    ['open', false],
+    ['open', true],
+  ] as const)('offers reconnecting before shipping beside a %s pull request (held: %s)', async (state, held) => {
+    const { onConnect, onShip, onOpenChange } = show(
+      task(
+        {
+          end: 'draft',
+          changes: [pr('api', 1, { state })],
+          unshipped: { commits: 2, add: 5, del: 0 },
+          here: [{ repository: 'meridian/web', name: 'web', branch: 'main', head: 'abc111' }],
+          ...(held ? { held: { since: '2026-11-10T09:00:00.000Z', commits: 2 } } : {}),
+        },
+        { host: { product: 'github', name: 'GitHub', webUrl: 'https://github.com', connected: false } },
+      ),
+    )
+    await userEvent.click(screen.getByRole('button', { name: 'Connect GitHub' }))
+    expect(onConnect).toHaveBeenCalledOnce()
+    expect(screen.queryByRole('button', { name: /^Ship|Open a .*pull request/ })).toBeNull()
+    expect(onShip).not.toHaveBeenCalled()
+    expect(onOpenChange).not.toHaveBeenCalled()
+  })
+
+  it('keeps first-pull-request commits behind Ship while work runs, and offers connecting an unconnected host', () => {
+    const here = [{ repository: 'meridian', name: 'meridian', branch: 'main', head: 'abc111' }]
+    show(task({ end: 'draft', phase: 'running', commits: 9, files: [FILE], here }))
+    expect(screen.queryByRole('button', { name: /^Ship/ })).toBeNull()
+    expect(screen.queryByRole('button', { name: /Open a .*pull request|Merge into|Push to/ })).toBeNull()
+    cleanup()
+    show(task({ end: 'draft', commits: 9, files: [FILE], here }, { session: { ...snapshot().session!, turnRunning: true } }))
+    expect(screen.queryByRole('button', { name: /^Ship/ })).toBeNull()
+    expect(screen.queryByRole('button', { name: /Open a .*pull request|Merge into|Push to/ })).toBeNull()
+    cleanup()
+    show(
+      task(
+        { end: 'draft', commits: 9, files: [FILE], here },
+        { host: { product: 'github', name: 'GitHub', webUrl: 'https://github.com', connected: false } },
+      ),
+    )
+    expect(screen.getByRole('button', { name: 'Connect GitHub' })).toBeTruthy()
+    expect(screen.queryByRole('button', { name: /^Ship|Merge into|Push to/ })).toBeNull()
+  })
+
+  it('offers Review and merge, or Merge now, beside Ship where commits wait for it', async () => {
+    const changes = [pr('api', 1, { localHead: 'def456', unpushed: 2 })]
+    const { onMergeWaiting, onShip } = show(task({ changes, held: { since: '2026-11-10T09:00:00.000Z', commits: 2 } }))
+    await userEvent.click(screen.getByRole('button', { name: 'Ship 2 commits' }))
+    expect(onShip).toHaveBeenCalled()
+    await userEvent.click(screen.getByRole('button', { name: 'Review and merge' }))
+    expect(onMergeWaiting).toHaveBeenLastCalledWith('review')
+    await userEvent.click(screen.getByRole('button', { name: 'Other ways to merge' }))
+    await userEvent.click(await screen.findByRole('menuitem', { name: 'Merge now' }))
+    expect(onMergeWaiting).toHaveBeenLastCalledWith('now')
+  })
+
   it('accepts every pull request still open in a task of several, at the head each showed, and not one merged already', async () => {
     const changes = [
       pr('api', 1),
@@ -191,6 +306,29 @@ describe('what a task changed, card by card', () => {
     show(task({ changes: [pr('engine', 52, { queued: true }), pr('frontend', 27)] }))
     expect(screen.getByText('In the merge queue')).toBeTruthy()
     expect(screen.queryByRole('button', { name: /^Accept and merge/ })).toBeNull()
+  })
+
+  it('lists what its host needs before it merges in place of its checks’ line, the missing first, with what to do (DEV-204)', () => {
+    show(
+      task({
+        changes: [
+          pr('api', 1, {
+            target: 'main',
+            needs: [
+              { kind: 'checks', state: 'met', have: 1, need: 1, required: ['test'] },
+              { kind: 'approvals', state: 'unmet', have: 0, need: 1 },
+              { kind: 'up_to_date', state: 'unmet', have: 2 },
+              { kind: 'conflicts', state: 'met' },
+            ],
+          }),
+        ],
+      }),
+    )
+    const list = screen.getByRole('list', { name: 'What merging needs' })
+    expect(within(list).getByText('Needs an approval')).toBeTruthy()
+    expect(within(list).getByText('Ask for a review')).toBeTruthy()
+    expect(within(list).getByText('2 commits behind main')).toBeTruthy()
+    expect(within(list).getByRole('button', { name: /The required check passed/ })).toBeTruthy()
   })
 
   it('offers Accept and merge on a stopped task whose pull request is ready as it is, and not on one stopped without', async () => {

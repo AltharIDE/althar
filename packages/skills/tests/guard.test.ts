@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { blockedBeforeCommit, blockedBeforePush, DEFAULT_REPOSITORY_FILES, protectedKind } from '../src/guard'
+import { blockedBeforeCommit, blockedBeforePush, DEFAULT_REPOSITORY_FILES, parseNulPaths, protectedKind } from '../src/guard'
 
 describe('protectedKind', () => {
   it.each([
@@ -51,5 +51,12 @@ describe('the push check', () => {
 
   it('passes them only with the separate push switch', () => {
     expect(blockedBeforePush(paths, { ...DEFAULT_REPOSITORY_FILES, pushProtected: true })).toEqual([])
+  })
+})
+
+describe('parseNulPaths', () => {
+  it('splits NUL-separated paths, keeping spaces and quotes as they are', () => {
+    expect(parseNulPaths('a b.md\0"q".md\0\0')).toEqual(['a b.md', '"q".md'])
+    expect(parseNulPaths('')).toEqual([])
   })
 })

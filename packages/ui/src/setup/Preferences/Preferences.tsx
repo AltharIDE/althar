@@ -12,6 +12,7 @@ import { LinkButton } from '../../primitives/LinkButton/LinkButton'
 import { Segmented } from '../../primitives/Segmented/Segmented'
 import { Select } from '../../primitives/Select/Select'
 import { Switch } from '../../primitives/Switch/Switch'
+import { EmptyState } from '../EmptyState/EmptyState'
 import s from './Preferences.module.css'
 
 /*
@@ -384,9 +385,19 @@ export function AgentsAtOnce({ count, own: kept, machine, most = 16, onChange, c
 
 export interface OpenFilesInText {
   title: string
+  /** With no editor found: what will be here, and how one gets here. */
+  none: string
+  noneLine: string
+  /** Looks for editors again, once one is installed. */
+  lookAgain: string
 }
 
-export const openFilesInText: OpenFilesInText = { title: 'Open files in' }
+export const openFilesInText: OpenFilesInText = {
+  title: 'Open files in',
+  none: 'No editor found',
+  noneLine: `Install an editor such as VS Code, Cursor or Zed, and it shows here. Until then, files open in ${device.files}.`,
+  lookAgain: 'Look again',
+}
 
 export interface EditorOption<V extends string> {
   value: V
@@ -400,13 +411,45 @@ export interface OpenFilesInProps<V extends string> {
   editors: readonly EditorOption<V>[]
   value: V | null
   onChange: (editor: V) => void
+  /** Looks for editors again; offered only with none found. Without it, nothing to press. */
+  onLookAgain?: () => void
+  /** Looking for them again is under way. */
+  looking?: boolean
+  /** The rank of the heading that says none was found. */
+  headingLevel?: HeadingLevel
   text?: Partial<OpenFilesInText>
 }
 
-/** Which editor a task's files and folder open in, each by its own icon. */
-export function OpenFilesIn<V extends string>({ editors, value, onChange, text }: OpenFilesInProps<V>) {
+/** Which editor a task's files and folder open in, each by its own icon; with none found, what will be here and how one gets here. */
+export function OpenFilesIn<V extends string>({
+  editors,
+  value,
+  onChange,
+  onLookAgain,
+  looking = false,
+  headingLevel = 3,
+  text,
+}: OpenFilesInProps<V>) {
   const t = { ...openFilesInText, ...text }
   const id = useId()
+  if (editors.length === 0)
+    return (
+      <EmptyState
+        icon="file"
+        title={t.none}
+        line={t.noneLine}
+        headingLevel={headingLevel}
+        {...(onLookAgain === undefined
+          ? {}
+          : {
+              actions: (
+                <Button size="small" icon="reload" busy={looking} onClick={onLookAgain}>
+                  {t.lookAgain}
+                </Button>
+              ),
+            })}
+      />
+    )
   return (
     <div className={s.block}>
       <span id={id} className={s.title}>
@@ -425,6 +468,155 @@ export function OpenFilesIn<V extends string>({ editors, value, onChange, text }
         onChange={onChange}
       />
     </div>
+  )
+}
+
+/* ---- dictation -------------------------------------------------------------------- */
+
+export interface DictationSettingsText {
+  microphone: string
+  microphoneNote: string
+  systemDefault: string
+  permission: string
+  allowed: string
+  denied: string
+  /** Where the system asks the first time (macOS). */
+  ask: string
+  /** Where Althar can't tell (Linux). */
+  unknown: string
+  openSettings: string
+  /** The word at the row's end, for each. */
+  states: Record<DictationPermission, string>
+  model: string
+  remove: string
+  /** Under Remove, once the model is here. */
+  removeNote: string
+  /** Where the model isn't on the computer: what dictating does. */
+  absent: (name: string, size: string) => string
+  present: (name: string, onDisk: string) => string
+  /** A download that stopped part-way left some of it on disk. */
+  partial: (name: string, onDisk: string, size: string) => string
+  downloading: (name: string, got: string, size: string) => string
+}
+
+export const dictationSettingsText: DictationSettingsText = {
+  microphone: 'Microphone',
+  microphoneNote: 'Which input dictation listens to.',
+  systemDefault: 'System default',
+  permission: 'Permission',
+  allowed: 'Dictation is allowed to use the microphone.',
+  denied: 'The microphone is turned off for Althar, so dictation can’t hear you.',
+  ask: 'The system asks the first time you dictate.',
+  unknown: 'Althar can’t check this on your system. Dictation tells you if the microphone can’t be used.',
+  openSettings: 'Open System Settings',
+  states: { allowed: 'Allowed', denied: 'Not allowed', ask: 'Not asked yet', unknown: 'Not checked' },
+  model: 'Speech model',
+  remove: 'Remove',
+  removeNote: 'Removing it frees the space. The next time you dictate, Althar downloads it again.',
+  absent: (name, size) => `${name} isn’t on this computer. Dictating downloads it first (${size}).`,
+  present: (name, onDisk) => `${name}, ${onDisk} on disk.`,
+  partial: (name, onDisk, size) => `${name} is only partly here: ${onDisk} of ${size} on disk.`,
+  downloading: (name, got, size) => `Downloading ${name}: ${got} of ${size}.`,
+}
+
+export type DictationPermission = 'allowed' | 'denied' | 'ask' | 'unknown'
+
+export interface DictationSettingsProps {
+  /** The inputs the system names; none until it lets Althar hear one. */
+  microphones: readonly { id: string; label: string }[]
+  /** The chosen input's id, or null for the system's default. */
+  microphone: string | null
+  onMicrophone: (id: string | null) => void
+  permission: DictationPermission
+  /** Opens the system's microphone settings; absent where there are none to open. */
+  onOpenSettings?: () => void
+  model: {
+    name: string
+    state: 'present' | 'partial' | 'absent' | 'downloading'
+    /** What it takes on disk, as words: 670 MB. */
+    onDisk: string
+    /** What the whole model is, as words. */
+    size: string
+    /** What has come down so far, as words, while it downloads. */
+    got?: string
+  }
+  onRemove: () => void
+  /** Removing is under way. */
+  removing?: boolean
+  text?: Partial<DictationSettingsText>
+}
+
+const DEFAULT_INPUT = 'default'
+
+/** Dictation's settings: the microphone it hears, whether the system lets it, and the speech model on disk, with Remove to free it. */
+export function DictationSettings({
+  microphones,
+  microphone,
+  onMicrophone,
+  permission,
+  onOpenSettings,
+  model,
+  onRemove,
+  removing = false,
+  text,
+}: DictationSettingsProps) {
+  const t = { ...dictationSettingsText, ...text }
+  const there = microphone !== null && microphones.some((m) => m.id === microphone)
+  const modelNote =
+    model.state === 'present'
+      ? t.present(model.name, model.onDisk)
+      : model.state === 'partial'
+        ? t.partial(model.name, model.onDisk, model.size)
+        : model.state === 'downloading'
+          ? t.downloading(model.name, model.got ?? model.onDisk, model.size)
+          : t.absent(model.name, model.size)
+  return (
+    <SettingList>
+      <SettingRow title={t.microphone} note={t.microphoneNote} glyph={<Icon name="mic" size={15} />}>
+        {() => (
+          <Select
+            variant="filled"
+            width={200}
+            label={t.microphone}
+            options={[{ value: DEFAULT_INPUT, label: t.systemDefault }, ...microphones.map((m) => ({ value: m.id, label: m.label }))]}
+            value={there ? microphone : DEFAULT_INPUT}
+            onChange={(id) => onMicrophone(id === DEFAULT_INPUT ? null : id)}
+          />
+        )}
+      </SettingRow>
+      <SettingRow
+        title={t.permission}
+        note={
+          <>
+            {permission === 'allowed' ? t.allowed : permission === 'denied' ? t.denied : permission === 'ask' ? t.ask : t.unknown}
+            {permission === 'denied' && onOpenSettings !== undefined && (
+              <>
+                {' '}
+                <LinkButton onClick={onOpenSettings}>{t.openSettings}</LinkButton>
+              </>
+            )}
+          </>
+        }
+      >
+        {() => (
+          <span className={s.state} data-state={permission}>
+            {t.states[permission]}
+          </span>
+        )}
+      </SettingRow>
+      <SettingRow
+        title={t.model}
+        note={model.state === 'present' || model.state === 'partial' ? `${modelNote} ${t.removeNote}` : modelNote}
+      >
+        {() =>
+          model.state === 'present' || model.state === 'partial' ? (
+            <Button size="small" variant="danger" busy={removing} onClick={onRemove}>
+              {t.remove}
+            </Button>
+          ) : null
+        }
+      </SettingRow>
+    </SettingList>
   )
 }
 
@@ -651,48 +843,6 @@ export function CrashReportsLine({ on, onChange, doNotTrack = false, text, class
         <span id={`${id}-n`}>{doNotTrack ? t.doNotTrack : t.note}</span>
       </span>
       <Switch checked={on && !doNotTrack} onChange={onChange} disabled={doNotTrack} labelledBy={`${id}-t`} describedBy={`${id}-n`} />
-    </p>
-  )
-}
-
-/* ---- agent skills ---------------------------------------------------------------- */
-
-export interface SkillsLineText {
-  title: string
-  note: string
-}
-
-export const skillsLineText: SkillsLineText = {
-  title: 'Agent skills',
-  note: 'from Althar give each task’s lead ways to work, such as debugging, planning and review. Choose which in Settings, under Skills, any time.',
-}
-
-export interface SkillsLineProps {
-  /** Whether any skill is on. */
-  on: boolean
-  /** Turns every skill on, or every one off. */
-  onChange: (on: boolean) => void
-  text?: Partial<SkillsLineText>
-  className?: string
-}
-
-/**
- * Whether the leads are given Althar's skills, asked once as one quiet line
- * with its switch at the end, as crash reports are, for a first screen to
- * carry at its foot. It says where to choose them one by one later: Settings.
- */
-export function SkillsLine({ on, onChange, text, className }: SkillsLineProps) {
-  const t = { ...skillsLineText, ...text }
-  const id = useId()
-  return (
-    <p className={cx(s.line, className)}>
-      <span className={s.lineWords}>
-        <span id={`${id}-t`} className={s.lineTitle}>
-          {t.title}
-        </span>{' '}
-        <span id={`${id}-n`}>{t.note}</span>
-      </span>
-      <Switch checked={on} onChange={onChange} labelledBy={`${id}-t`} describedBy={`${id}-n`} />
     </p>
   )
 }

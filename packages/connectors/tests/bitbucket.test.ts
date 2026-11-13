@@ -99,15 +99,18 @@ describe('Bitbucket Cloud as a code host', () => {
     }),
   )
 
-  it.effect('refuses to review a pull request it didn’t open, without asking Bitbucket', () =>
+  it.effect('reads a pull request for review and refuses self-approval before posting', () =>
     Effect.gen(function* () {
-      const { host, sent } = cloud([])
-      assert.isFalse(host.capabilities.reviews)
-      const read = yield* Effect.flip(host.changeToReview(ace, 552))
-      assert.deepInclude(read, { reason: 'rejected', message: 'Althar can’t review a pull request on this host yet.' })
-      const posted = yield* Effect.flip(host.postReview(ace, 552, { event: 'comment', body: 'b', commit: null, comments: [] }))
+      const { host, sent } = cloud([
+        ['GET', PR, { json: pull() }],
+        ['GET', `${CLOUD}/workspaces/atlassian/members/${encodeURIComponent(vincent.uuid)}`, { json: {} }],
+        ['GET', `${CLOUD}/user`, { json: vincent }],
+      ])
+      assert.isTrue(host.capabilities.reviews)
+      assert.deepInclude(yield* host.changeToReview(ace, 552), { member: true, fork: null, baseSha: 'd00fcf783635' })
+      const posted = yield* Effect.flip(host.postReview(ace, 552, { event: 'approve', body: 'b', commit: null, comments: [] }))
       assert.strictEqual(posted.reason, 'rejected')
-      assert.lengthOf(sent, 0)
+      assert.isTrue(sent.every((one) => one.method === 'GET'))
     }),
   )
 
@@ -424,6 +427,13 @@ describe('Bitbucket Cloud as a code host', () => {
         description: '## Notes for Atlassian Maintainers:\n\nThis is a public repo.',
         reviewers: [],
       })
+      // A stacked change goes into another branch once the one below merges.
+      const based = cloud([
+        ['GET', PR, { json: pull({ draft: undefined, close_source_branch: undefined, reviewers: undefined }) }],
+        ['PUT', PR, { json: pull() }],
+      ])
+      yield* based.host.editChange(ace, yield* host.change(ace, 552), { base: 'main' })
+      assert.deepInclude(based.sent.find((request) => request.method === 'PUT')?.body, { destination: { branch: { name: 'main' } } })
       // A repository the account can only read refuses it, in Bitbucket's words.
       const refusing = cloud([
         ['GET', PR, { json: pull() }],
@@ -1159,7 +1169,7 @@ describe('Bitbucket Data Center as a code host', () => {
         drafts: true,
         checkLogs: false,
         threads: true,
-        reviews: false,
+        reviews: true,
         pictures: false,
         reopen: true,
         rerun: false,
@@ -1174,16 +1184,22 @@ describe('Bitbucket Data Center as a code host', () => {
     }),
   )
 
-  it.effect('refuses to review a pull request it didn’t open, without asking Data Center', () =>
+  it.effect('reads Data Center review metadata, membership and the target commit', () =>
     Effect.gen(function* () {
-      const { host, sent } = center([])
-      const repository = { id: '1', path: ['PRJ', 'my-repo'], defaultBranch: 'main', webUrl: '', canPush: true, merges: [] }
-      assert.strictEqual((yield* Effect.flip(host.changeToReview(repository, 1))).reason, 'rejected')
-      assert.strictEqual(
-        (yield* Effect.flip(host.postReview(repository, 1, { event: 'approve', body: 'b', commit: null, comments: [] }))).reason,
-        'rejected',
-      )
-      assert.lengthOf(sent, 0)
+      const { host } = center([
+        ['GET', `${DC}/projects/PRJ/repos/my-repo/pull-requests/101`, { json: pr() }],
+        [
+          'GET',
+          `${DC}/users?filter=tom&permission=REPO_WRITE&permission.projectKey=PRJ&permission.repositorySlug=my-repo&limit=100`,
+          { json: page([tom]) },
+        ],
+      ])
+      assert.isTrue(host.capabilities.reviews)
+      assert.deepInclude(yield* host.changeToReview(prj, 101), {
+        member: true,
+        fork: null,
+        baseSha: 'deadbeefdeadbeefdeadbeefdeadbeefdeadbeef',
+      })
     }),
   )
 
@@ -1459,6 +1475,18 @@ describe('Bitbucket Data Center as a code host', () => {
         title: 'Talking Nerdy',
         description: 'Only this',
         reviewers: [],
+      })
+      // A stacked change goes into another branch once the one below merges, in the repository it went into.
+      const based = center([
+        ['GET', PULL, { json: pr({ draft: undefined, reviewers: undefined }) }],
+        ['PUT', PULL, { json: pr({ version: 4 }) }],
+      ])
+      yield* based.host.editChange(prj, yield* host.change(prj, 101), { base: 'main' })
+      assert.deepInclude(based.sent.find((request) => request.method === 'PUT')?.body, {
+        toRef: {
+          id: 'refs/heads/main',
+          repository: { slug: pr().toRef.repository.slug, project: { key: pr().toRef.repository.project.key } },
+        },
       })
       // An account that may not edit it hears Data Center's words, as forbidden.
       const refusing = center([

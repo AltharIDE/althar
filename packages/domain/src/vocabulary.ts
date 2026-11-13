@@ -44,7 +44,7 @@ export type RunState = typeof RunState.Type
 export const RunAttemptState = Schema.Literals(['active', 'succeeded', 'failed', 'cancelled', 'interrupted'])
 export type RunAttemptState = typeof RunAttemptState.Type
 
-export const WorkspaceState = Schema.Literals(['preparing', 'ready', 'published', 'cleaned', 'failed'])
+export const WorkspaceState = Schema.Literals(['preparing', 'ready', 'published', 'cleaned', 'failed', 'away'])
 export type WorkspaceState = typeof WorkspaceState.Type
 
 /**
@@ -53,6 +53,13 @@ export type WorkspaceState = typeof WorkspaceState.Type
  */
 export const WorksIn = Schema.Literals(['worktree', 'checkout'])
 export type WorksIn = typeof WorksIn.Type
+
+/**
+ * What a workspace is (a task is a conversation plus parts, "The workspace moves up"): a worktree, its own branch, kept; the
+ * person's checkout (Local); or a copy, a checkout detached at a commit that keeps nothing.
+ */
+export const WorkspaceKind = Schema.Literals(['worktree', 'checkout', 'copy'])
+export type WorkspaceKind = typeof WorkspaceKind.Type
 
 export const ExecutionState = Schema.Literals(['running', 'succeeded', 'failed', 'cancelled'])
 export type ExecutionState = typeof ExecutionState.Type
@@ -125,6 +132,10 @@ export const ThreadItemKind = Schema.Literals([
   'small_change',
   /** Auto moving a task's lead to a lighter model because the plan is nearly out, with the way back. Althar posts it and keeps it current. */
   'model_move',
+  /** A version of one of the project's canvases an agent published (ADR-104): its name, title and version, which open it beside the conversation. Althar posts it. */
+  'canvas',
+  /** The merge line for a branch, in the thread of whoever asked for the merges: one card listing each pull request with where it stands. Althar posts it and keeps it current. */
+  'merge_line',
 ])
 export type ThreadItemKind = typeof ThreadItemKind.Type
 
@@ -133,7 +144,7 @@ export const InputDisposition = Schema.Literals(['after_current', 'interrupt_and
 export type InputDisposition = typeof InputDisposition.Type
 
 /** Where something the person said stands: waiting its turn, given to the agent, replaced, or taken back before it went. */
-export const UserInputState = Schema.Literals(['queued', 'delivered', 'superseded', 'withdrawn'])
+export const UserInputState = Schema.Literals(['queued', 'delivered', 'superseded', 'withdrawn', 'noted'])
 export type UserInputState = typeof UserInputState.Type
 
 export const TurnDeliveryState = Schema.Literals(['pending', 'delivered', 'completed', 'interrupted', 'interruption_uncertain', 'failed'])
@@ -195,7 +206,7 @@ export type SnapshotReason = typeof SnapshotReason.Type
  * Why a node attempt is held without needing a person: `machine_busy` waits for a place among the agents this machine runs at
  * once; `checkout`, a Local task's first step, for its repository's checkout (ADR-091).
  */
-export const HoldReason = Schema.Literals(['usage_limit', 'agent_unavailable', 'machine_busy', 'checkout'])
+export const HoldReason = Schema.Literals(['usage_limit', 'agent_unavailable', 'machine_busy', 'checkout', 'external'])
 export type HoldReason = typeof HoldReason.Type
 
 export const AttentionKind = Schema.Literals([
@@ -331,6 +342,8 @@ export const ArtifactKind = Schema.Literals([
   'summary',
   'other',
   'image',
+  /** A file of a canvas's version, or the manifest that lists them (ADR-104): kept until the person deletes the canvas. */
+  'canvas',
 ])
 export type ArtifactKind = typeof ArtifactKind.Type
 
@@ -376,5 +389,8 @@ export const AggregateType = Schema.Literals([
   'automation_occurrence',
   'skill',
   'setting',
+  'canvas',
+  /** A task's card, as its board shows it, came out different as a change of the task was recorded (Queries' `cards`). */
+  'card',
 ])
 export type AggregateType = typeof AggregateType.Type

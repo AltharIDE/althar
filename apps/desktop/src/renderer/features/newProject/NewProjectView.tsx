@@ -66,6 +66,7 @@ export function NewProjectView({
           const product = codeHostOf({ host, path: '' }, connections.list).product
           setConnecting(product === null ? 'all' : openingFor(connections.list, product, host))
         }}
+        // oxlint-disable-next-line althar/press-at-once -- A form the runtime checks (its folders, its id): it stays, busy, until made, so a refusal lands in it.
         onCreate={() =>
           void model.create().then((made) => {
             if (made !== null) onCreated(made.id)

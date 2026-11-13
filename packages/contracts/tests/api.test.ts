@@ -9,6 +9,10 @@ import {
   Api,
   ApiError,
   ClientAuthority,
+  API_VERSION,
+  API_VERSION_HEADER,
+  API_VERSION_MISMATCH,
+  apiVersionRefusal,
   AtOnceCount,
   CommandId,
   FOUND_MOST,
@@ -463,6 +467,8 @@ describe('the API', () => {
               PlaceRepository: () => Effect.die('unused'),
               MakeRepository: () => Effect.die('unused'),
               ListTasks: () => Effect.succeed({ cursor: 0, tasks: [] }),
+              GetSearchDocuments: () => Effect.succeed({ documents: [], next: null }),
+              GetSearchFiles: () => Effect.succeed({ files: [] }),
               SearchTasks: ({ text, projectId }) =>
                 Effect.succeed({
                   tasks: [
@@ -512,7 +518,9 @@ describe('the API', () => {
                   history: [{ cpu: 0.4, work: 0.1 }],
                 }),
               GetPlanUsage: () => Effect.succeed({ accounts: [] }),
+              DismissSignInEnding: () => Effect.void,
               GetModelRooms: () => Effect.succeed([]),
+              GetMissedReports: () => Effect.succeed([]),
               InstallAgent: () => Effect.die('unused'),
               OpenInEditor: () => Effect.die('unused'),
               SetEffort: () => Effect.die('unused'),
@@ -522,6 +530,11 @@ describe('the API', () => {
               GetSettings: () => Effect.die('unused'),
               GetAgentTools: () => Effect.die('unused'),
               SetToolRoles: () => Effect.die('unused'),
+              SetToolInProject: () => Effect.die('unused'),
+              GetServerDetail: () => Effect.die('unused'),
+              CheckServers: () => Effect.die('unused'),
+              AddServer: () => Effect.die('unused'),
+              RemoveServer: () => Effect.die('unused'),
               SetToolSync: () => Effect.die('unused'),
               SetToolKeptOut: () => Effect.die('unused'),
               PickToolWay: () => Effect.die('unused'),
@@ -544,6 +557,22 @@ describe('the API', () => {
               KeepTheModel: () => Effect.die('unused'),
               UndoTheModelMove: () => Effect.die('unused'),
               AnswerCheckout: () => Effect.die('unused'),
+              MoveTask: () => Effect.die('unused'),
+              DropMove: () => Effect.die('unused'),
+              WorkToward: () => Effect.die('unused'),
+              ShelveTask: () => Effect.die('unused'),
+              StopHelper: () => Effect.die('unused'),
+              JoinChanges: () => Effect.die('unused'),
+              DropChange: () => Effect.die('unused'),
+              ListPresets: () => Effect.die('unused'),
+              SavePreset: () => Effect.die('unused'),
+              RemovePreset: () => Effect.die('unused'),
+              DeclinePresetOffer: () => Effect.die('unused'),
+              RunIt: () => Effect.die('unused'),
+              StopRunning: () => Effect.die('unused'),
+              ApplyPreset: () => Effect.die('unused'),
+              EditPreset: () => Effect.die('unused'),
+              SetRunOutside: () => Effect.die('unused'),
               UndoAutomationChange: () => Effect.die('unused'),
               AnswerSettingChange: () => Effect.die('unused'),
               UndoSettingChange: () => Effect.die('unused'),
@@ -566,6 +595,9 @@ describe('the API', () => {
               GetThreadItem: () => Effect.die('unused'),
               ReadOutput: () => Effect.die('unused'),
               ReadDocument: () => Effect.die('unused'),
+              ListCanvases: () => Effect.succeed([]),
+              GetCanvas: () => Effect.die('unused'),
+              ReadCanvasText: () => Effect.die('unused'),
               FindCode: () => Effect.die('unused'),
               ReadCode: () => Effect.die('unused'),
               OpenCode: () => Effect.die('unused'),
@@ -573,8 +605,10 @@ describe('the API', () => {
               StartTask: () => Effect.die('unused'),
               StartPlan: () => Effect.void,
               HoldPlan: () => Effect.void,
+              HoldDraft: () => Effect.void,
               ChangePlan: () => Effect.void,
               ChangeTeam: () => Effect.void,
+              DeclineReview: () => Effect.void,
               ChangeIssueDraft: () => Effect.void,
               FileIssueDraft: () => Effect.void,
               DiscardIssueDraft: () => Effect.void,
@@ -623,7 +657,6 @@ describe('the API', () => {
               ApproveSkill: () => Effect.die('unused'),
               CheckSkillUpdates: () => Effect.die('unused'),
               RollBackSkill: () => Effect.die('unused'),
-              SetSkillActive: () => Effect.die('unused'),
               UninstallSkill: () => Effect.die('unused'),
               ListConnections: () => Effect.succeed({ cursor: 0, connections: [], products: [], places: [] }),
               StartSignIn: ({ commandId: id }) =>
@@ -675,6 +708,11 @@ describe('the API', () => {
               SignInAccount: () => Effect.succeed({ line: 'codex login', opened: false }),
               OpenChange: () => Effect.void,
               SkipReview: () => Effect.void,
+              ShapeTask: () => Effect.void,
+              SetReviewAfterMerge: () => Effect.void,
+              Ship: () => Effect.void,
+              FixAfterMerge: () => Effect.die('unused'),
+              LeaveAfterMerge: () => Effect.die('unused'),
               RefreshTask: () => Effect.void,
               StopListening: () => Effect.void,
               AttachPullRequest: () =>
@@ -689,6 +727,7 @@ describe('the API', () => {
               GetRepositoryScripts: () => Effect.succeed([]),
               GetRunnableRefs: () => Effect.succeed([]),
               StopLaunch: () => Effect.void,
+              ReadLaunchOutput: () => Effect.succeed({ text: '', dropped: 0 }),
               ClearLaunch: () => Effect.void,
               PreferIssueCards: () => Effect.void,
               SetTaskIssuePart: () => Effect.void,
@@ -752,6 +791,63 @@ describe('the API', () => {
         // A command without its id doesn't leave the client.
         const bad = yield* Effect.exit(client.Send({ commandId: 'cmd_nope', threadId: 'th1', body: 'Hi', disposition: 'after_current' }))
         assert.strictEqual(bad._tag, 'Failure')
+      }),
+    ),
+  )
+
+  it.live('refuses a client of another API version, or one that says none, naming both versions', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const serveStatus = (version: number) =>
+          Effect.gen(function* () {
+            const channel = new MessageChannel()
+            yield* Effect.addFinalizer(() => Effect.sync(() => channel.port1.close()))
+            const handlers = Api.toLayer({
+              Status: () => Effect.succeed({ apiVersion: API_VERSION, appVersion: 'x', agents: [] }),
+            } as never)
+            yield* Effect.forkScoped(
+              Layer.launch(
+                RpcServer.layer(Api).pipe(
+                  Layer.provide(
+                    Layer.succeed(ClientAuthority, (effect, { headers }) => {
+                      const refusal = apiVersionRefusal(headers)
+                      return refusal === undefined ? effect : Effect.fail(refusal)
+                    }),
+                  ),
+                  Layer.provide(handlers),
+                  Layer.provide(serverProtocol(emitterPort(channel.port1, (data) => data))),
+                ),
+              ),
+            )
+            const protocol = yield* Layer.build(
+              clientProtocol(
+                emitterPort(channel.port2, (data) => data),
+                version,
+              ),
+            )
+            return yield* RpcClient.make(Api).pipe(Effect.provideContext(protocol))
+          })
+
+        // The version it serves is let in.
+        const same = yield* serveStatus(API_VERSION)
+        assert.strictEqual((yield* same.Status({})).apiVersion, API_VERSION)
+
+        // Another is refused, with an error naming both.
+        const other = yield* serveStatus(API_VERSION + 1)
+        const refused = yield* Effect.flip(other.Status({}))
+        assert.instanceOf(refused, ApiError)
+        assert.strictEqual(refused.reason, API_VERSION_MISMATCH)
+        assert.strictEqual(refused.clientVersion, API_VERSION + 1)
+        assert.strictEqual(refused.runtimeVersion, API_VERSION)
+        assert.include(refused.message, `version ${API_VERSION + 1}`)
+
+        // Not saying is refused too, and the same for every call.
+        assert.strictEqual(apiVersionRefusal({})?.reason, API_VERSION_MISMATCH)
+        assert.isUndefined(apiVersionRefusal({})?.clientVersion)
+        assert.strictEqual(apiVersionRefusal({ [API_VERSION_HEADER]: 'abc' })?.reason, API_VERSION_MISMATCH)
+        assert.isUndefined(apiVersionRefusal({ [API_VERSION_HEADER]: String(API_VERSION) }))
+        const watching = yield* Effect.exit(Stream.runCollect(other.Watch({})))
+        assert.strictEqual(watching._tag, 'Failure')
       }),
     ),
   )

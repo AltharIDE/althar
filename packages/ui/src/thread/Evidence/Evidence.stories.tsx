@@ -91,15 +91,6 @@ export const Shown: Story = {
   },
 }
 
-/** A run that failed says so on its row, in red. */
-export const FailedRun: Story = { args: { pieces: [FAILED, TESTS], unverified: [] } }
-
-/** Behind the screen: a response and a run, no pictures. */
-export const NoPictures: Story = { args: { pieces: [RESPONSE, TESTS], unverified: [] } }
-
-/** Where nothing fits, a single note says so. */
-export const NothingToShow: Story = { args: { pieces: [BUMP], unverified: [] } }
-
 /** It couldn't show anything working: the list of what is still the person's to check stands alone. */
 export const OnlyUnverified: Story = {
   args: { pieces: [], unverified: UNVERIFIED },
@@ -109,9 +100,6 @@ export const OnlyUnverified: Story = {
     await expect(c.getAllByRole('listitem')).toHaveLength(2)
   },
 }
-
-/** A screenshot Althar couldn't keep says why, and doesn't open. */
-export const PictureNotKept: Story = { args: { pieces: [NOT_KEPT], unverified: [] } }
 
 /** A long run shows its end; what came before is a click away, and what wasn't kept is counted. */
 export const LongOutput: Story = {
@@ -156,7 +144,6 @@ export const AllStates: Story = {
         { state: 'hover', node: <Evidence pieces={[TESTS, LINT]} /> },
         { state: 'focus', node: <Evidence pieces={[TESTS, LINT]} /> },
         { state: 'pressed', node: <Evidence pieces={[TESTS, LINT]} /> },
-        { state: 'dark', node: <Evidence {...args} />, dark: true },
       ]}
     />
   ),

@@ -79,10 +79,6 @@ const meta = {
 export default meta
 type Story = StoryObj<typeof meta>
 
-export const Closed: Story = {
-  render: () => <Example />,
-}
-
 /** Changing the effort, making it the default, and switching model. */
 export const ChoosingAnother: Story = {
   render: () => <Example />,
@@ -150,6 +146,25 @@ export const Room: Story = {
     await expect(page.getByText('3% · until 14:00')).toBeInTheDocument()
     await expect(page.queryByText('no reading')).toBeNull()
     await expect(within(canvasElement).getByText('3% left · until 14:00')).toBeInTheDocument()
+  },
+}
+
+/** A low plan balance and account leave the model's full name readable. */
+export const CrowdedRow: Story = {
+  args: {
+    model: OPUS,
+    pinned: [OPUS, model('gpt-5.2-codex')],
+    defaultOpen: true,
+    room: (x) => (x.runtime === 'codex' ? { left: 17, until: 'Sat 23:39', account: 'Main' } : undefined),
+  },
+  play: async () => {
+    const row = within(document.body).getByRole('radio', { name: /GPT-5.2 Codex/ })
+    const name = within(row).getByText('GPT-5.2 Codex')
+    const room = within(row).getByText('Main · 17% · until Sat 23:39')
+    await expect(name.clientWidth).toBeGreaterThan(0)
+    await expect(name.scrollWidth).toBeLessThanOrEqual(name.clientWidth)
+    await expect(room.getBoundingClientRect().top).toBeGreaterThanOrEqual(name.getBoundingClientRect().bottom)
+    await expect(room.getBoundingClientRect().right).toBeLessThanOrEqual(row.getBoundingClientRect().right)
   },
 }
 

@@ -106,6 +106,20 @@ export const NoAdding: Story = {
   },
 }
 
+/** None: what will be here and how one gets here, in the map's place, under Add a folder. */
+export const NoneYet: Story = {
+  args: { repositories: [], worktrees: undefined },
+  play: async ({ canvasElement }) => {
+    const page = within(canvasElement)
+    await expect(page.getByRole('heading', { level: 3, name: 'No repositories yet' })).toBeVisible()
+    await expect(page.queryByRole('heading', { name: `On ${device.this}` })).toBeNull()
+    await expect(page.getByRole('button', { name: 'Add a folder' })).toBeVisible()
+  },
+}
+
+/** The same at night. */
+export const NoneYetDark: Story = { ...NoneYet, globals: { theme: 'dark' } }
+
 /** The last change didn't happen, and says why. */
 export const Failed: Story = { args: { error: 'There’s no git repository in Downloads.' } }
 
@@ -114,16 +128,18 @@ export const Narrow: Story = {
   decorators: [(Story) => <div style={{ width: 640 }}>{Story()}</div>],
 }
 
+/** Each at the narrowest a project's settings give it, so the map's two sides and its wires show. */
 export const AllStates: Story = {
   render: (args) => (
     <States
-      size="wide"
+      size="thread"
       cells={[
         { state: 'three repositories', node: <ProjectRepositories {...args} /> },
         { state: 'one, a fork', node: <ProjectRepositories {...args} {...OneFork.args} /> },
         { state: 'adding', node: <ProjectRepositories {...args} {...Adding.args} /> },
         { state: 'failed', node: <ProjectRepositories {...args} {...Failed.args} /> },
         { state: 'no adding', node: <ProjectRepositories {...args} {...NoAdding.args} /> },
+        { state: 'none yet', node: <ProjectRepositories {...args} {...NoneYet.args} /> },
       ]}
     />
   ),

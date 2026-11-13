@@ -51,6 +51,8 @@ export interface BoardText {
   expand: (lane: string, count: number) => string
   /** The chevron on Needs you's head while something waits in it. */
   stays: string
+  /** What an empty lane says, where its consumer doesn't say more: what will be here, then how it gets here. */
+  empty: Record<BoardLane, { title: string; how: string }>
 }
 
 export const boardText: BoardText = {
@@ -63,6 +65,12 @@ export const boardText: BoardText = {
   collapse: (lane) => `Collapse ${lane}`,
   expand: (lane, count) => `Expand ${lane}, ${count}`,
   stays: 'Needs you stays open while something waits on you',
+  empty: {
+    [BoardLane.Next]: { title: 'Nothing queued', how: 'The tasks the coordinator plans line up here.' },
+    [BoardLane.Running]: { title: 'Nothing running', how: 'A task shows here while an agent works on it.' },
+    [BoardLane.Yours]: { title: 'Nothing needs you', how: 'Questions, permissions and finished work wait here.' },
+    [BoardLane.Settled]: { title: 'Nothing settled yet', how: 'Merged and finished tasks are kept here.' },
+  },
 }
 
 /** What the person chose about the lanes: those they collapsed, and those they opened from a rail, kept open while another collapses instead. */
@@ -308,7 +316,12 @@ export interface BoardColumnProps {
     readonly onChange: (value: string) => void
   }
   children?: ReactNode
-  /** What it says while it holds nothing, in its empty box: what will be here and how it gets here (BoardEmpty). Without it, the box is bare and its count, 0, says so. */
+  /** What comes first in it, before its cards or its empty box, whether it holds any: Up next's Scratch chip. */
+  lead?: ReactNode
+  /**
+   * What it says while it holds nothing, in its empty box: what will be here and how it gets here, and what starts it
+   * (BoardEmpty). Without it, the lane's own words (`text.empty`).
+   */
   empty?: ReactNode
   /** The lane's name's rank in the page's outline. */
   headingLevel?: HeadingLevel
@@ -316,13 +329,14 @@ export interface BoardColumnProps {
 }
 
 /**
- * One lane: its name and count, then its cards or rows. Empty, it says so.
+ * One lane: its name and count, then its cards or rows. Empty, it says so,
+ * in a box that says what will be here, and no count.
  * On a board, its head shows a chevron on hover that collapses it to a rail:
  * its glyph, its count and its name written down it, the whole of it the
  * button that opens it again. The focus goes with it either way, and where
  * the board collapses or opens it by itself from under the focus, too.
  */
-export function BoardColumn({ lane, count, filled = count > 0, shelves, children, empty, headingLevel = 2, text }: BoardColumnProps) {
+export function BoardColumn({ lane, count, filled = count > 0, shelves, children, lead, empty, headingLevel = 2, text }: BoardColumnProps) {
   const t = { ...boardText, ...text }
   const id = useId()
   const bodyId = useId()
@@ -403,7 +417,11 @@ export function BoardColumn({ lane, count, filled = count > 0, shelves, children
             <Heading level={headingLevel} id={id} className={s.title}>
               {name}
             </Heading>
-            <span className={cx(s.count, count === 0 && s.none)}>{count}</span>
+            {/* Counted where the number says more than the cards: what waits on the person, and everything settled, older
+                ones not yet loaded too. Up next and Running are there to see. Empty, its box says so, and a 0 would say it again. */}
+            {filled && (lane === BoardLane.Yours || lane === BoardLane.Settled) && (
+              <span className={cx(s.count, count === 0 && s.none)}>{count}</span>
+            )}
           </>
         ) : (
           <>
@@ -446,13 +464,12 @@ export function BoardColumn({ lane, count, filled = count > 0, shelves, children
         )}
       </header>
       <div className={s.body} id={bodyId}>
-        {/* An empty lane is an empty box: its count, 0, says so, unless it says what will be here. */}
+        {lead}
+        {/* An empty lane is a box that says what will be here: the consumer's words, or the lane's own. */}
         {filled ? (
           children
-        ) : empty === undefined || empty === null ? (
-          <div className={s.empty} aria-hidden="true" />
         ) : (
-          <div className={cx(s.empty, s.says)}>{empty}</div>
+          <div className={cx(s.empty, s.says)}>{empty ?? <BoardEmpty title={t.empty[lane].title}>{t.empty[lane].how}</BoardEmpty>}</div>
         )}
       </div>
     </section>

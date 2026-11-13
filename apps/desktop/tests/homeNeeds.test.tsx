@@ -58,6 +58,14 @@ describe('a ready task’s line', () => {
     expect(briefOf(task({ change: merged, unshipped: { commits: 3, add: 9, del: 2 } }))).toBe('3 commits in no pull request · +9 −2')
   })
 
+  it('says what waits for Ship, by the pull request it goes to, and offers Ship', () => {
+    const held = task({ change: change({ draft: false }), held: { since: '2026-10-01T10:00:00.000Z', commits: 2 } })
+    expect(briefOf(held)).toBe('api #12 · 2 commits not shipped')
+    expect(briefOf(task({ change: change({ state: 'merged' }), held: { since: '2026-10-01T10:00:00.000Z', commits: 1 } }))).toBe(
+      '1 commit not shipped',
+    )
+  })
+
   it('says nothing changed on a branch with no files, and only which pull request one merged or closed was', () => {
     expect(briefOf(task({ changed: { files: 0, add: 0, del: 0 } }))).toBe('Nothing changed on its branch')
     expect(briefOf(task({ change: change({ state: 'closed' }) }))).toBe('api #12')
@@ -120,6 +128,33 @@ describe('calls answered here', () => {
   })
 })
 
+describe('a stuck step’s line', () => {
+  const stuck = (why: 'signed_out' | 'stalled') =>
+    call('s', '2026-10-07T09:10:00.000Z', {
+      kind: 'stuck',
+      stuck: { step: 'implement', why, detail: null, agentId: 'claude-code', round: 0, open: 0 },
+    })
+
+  it('signs its agent in again where it is signed out, as its task’s card does first', async () => {
+    const [need] = needsOf({ calls: [stuck('signed_out')], answered: [], ready: [], refs, agentName })
+    const onSignIn = vi.fn()
+    const onOpen = vi.fn()
+    render(<>{needLineOf(need!, { onOpen, onAnswer: vi.fn(), onSignIn })}</>)
+    await userEvent.click(screen.getByRole('button', { name: 'Sign in again' }))
+    expect(onSignIn).toHaveBeenCalledWith('claude-code')
+    expect(onOpen).not.toHaveBeenCalled()
+  })
+
+  it('opens its task for any other reason, or where the place can’t sign in', () => {
+    const [stalled] = needsOf({ calls: [stuck('stalled')], answered: [], ready: [], refs, agentName })
+    render(<>{needLineOf(stalled!, { onOpen: vi.fn(), onAnswer: vi.fn(), onSignIn: vi.fn() })}</>)
+    expect(screen.getByRole('button', { name: 'Open' })).toBeTruthy()
+    const [signedOut] = needsOf({ calls: [stuck('signed_out')], answered: [], ready: [], refs, agentName })
+    render(<>{needLineOf(signedOut!, { onOpen: vi.fn(), onAnswer: vi.fn() })}</>)
+    expect(screen.getAllByRole('button', { name: 'Open' })).toHaveLength(2)
+  })
+})
+
 function Home({ onTask = vi.fn() }: { onTask?: (threadId: string) => void }) {
   return <HomeView model={useHome()} start={useStart()} onProject={vi.fn()} onTalk={vi.fn()} onTask={onTask} />
 }
@@ -136,6 +171,37 @@ describe('the home', () => {
     withServices(<Home />, client)
     await userEvent.click(await screen.findByRole('button', { name: 'Accept and merge #12' }))
     await waitFor(() => expect(client.merge).toHaveBeenCalledWith('t5', '', 'https://github.com/meridian/api/pull/12'))
+  })
+
+  it('ships what waits on a task’s branch from its line', async () => {
+    const held = task({
+      taskId: 't6',
+      threadId: 'th6',
+      title: 'Retry twice',
+      change: change({ draft: false, localHead: 'def456', unpushed: 2 }),
+      held: { since: '2026-10-01T10:00:00.000Z', commits: 2 },
+    })
+    const { client } = fakeClient({ getHome: vi.fn(async () => home({ tasks: [held] })) })
+    withServices(<Home />, client)
+    await userEvent.click(await screen.findByRole('button', { name: 'Ship 2 commits' }))
+    await waitFor(() => expect(client.ship).toHaveBeenCalledWith('t6'))
+    expect(client.push).not.toHaveBeenCalled()
+  })
+
+  it('says what a review after a merge found, and hands it to the lead with Fix it from its line', async () => {
+    const found = task({
+      taskId: 't7',
+      threadId: 'th7',
+      title: 'Rename the setting',
+      state: 'done',
+      change: change({ state: 'merged', draft: false }),
+      afterMerge: { url: 'https://github.com/meridian/api/pull/12', words: '#12', state: 'found', findings: 2 },
+    })
+    const { client } = fakeClient({ getHome: vi.fn(async () => home({ tasks: [found] })) })
+    withServices(<Home />, client)
+    expect(await screen.findByText('After #12 merged')).toBeTruthy()
+    await userEvent.click(await screen.findByRole('button', { name: /new pull request after #12/ }))
+    await waitFor(() => expect(client.fixAfterMerge).toHaveBeenCalledWith('t7'))
   })
 
   it('takes a change out of what waits on the person while it merges, and puts it back with why where it didn’t', async () => {

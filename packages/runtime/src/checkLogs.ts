@@ -1,6 +1,8 @@
 import { type Check, type CodeHost, type ConnectorFailed, products, type Repository } from '@althar/connectors'
 import { Effect } from 'effect'
 
+import { failingOnBase, passingOnBase, queueMainLine, type QueueDetail } from './pullRequestWords'
+
 /*
  * A failed check's log, as Althar reads it for the thread's card and for
  * the lead: its end, or all of it, or, where there is none to read, why in
@@ -54,6 +56,10 @@ export const whyUnread = (host: string, error: ConnectorFailed): string => {
 /** The host's name, as people say it: GitHub, GitLab. */
 export const hostName = (host: Pick<CodeHost, 'product'>) => products[host.product].name
 
+/** A failed queue/check/branch lookup, without a log-specific explanation for an unrelated API call. */
+const lookupFailure = (host: CodeHost, error: ConnectorFailed) =>
+  `${hostName(host)} (${error.reason}${error.status === undefined ? '' : `, ${error.status}`}): ${error.message}${error.retryAt === undefined ? '' : `; retry after ${error.retryAt}`}`
+
 /**
  * A failed check's log, its end or with `whole` all of it, or why there is
  * none: the host refused it, no longer keeps it, or keeps no log of a check
@@ -91,6 +97,13 @@ export const readLog = (host: CodeHost, repository: Repository, check: Check, wh
   )
 }
 
+/** How many failed checks' logs are read for a lead, or for the coordinator, at once: the rest it reads with read_check_log. */
+export const LOGS_TO_LEAD = 2
+
+/** What is said of the failed jobs of a queue build whose logs weren't read: how many, and how to read one. */
+export const unreadJobs = (more: number) =>
+  `${more === 1 ? 'One more job' : `${more} more jobs`} failed, whose ${more === 1 ? "log isn't" : "logs aren't"} given here: read_check_log (queue: true) reads one.`
+
 /** How many lines of a check's log `read_check_log` gives at a time. */
 const LOG_PAGE = 300
 
@@ -127,3 +140,75 @@ export const logForLead = (read: LogRead): string => {
   const report = read.report === null ? '' : `\nWhat it reported of itself:\n\`\`\`\n${read.report}\n\`\`\``
   return `Althar couldn't read ${read.name}'s log: ${read.missing ?? 'its host keeps none'}.${again}${page}${report}`
 }
+
+/**
+ * What the queue's build failed: its jobs on its merge-group commit, the ends
+ * of a few of their logs (LOGS_TO_LEAD) and how many more failed, and the
+ * repository's default branch at its latest commit on the same jobs (not the
+ * pull request's target). A failed lookup retains its exact reason; it never
+ * turns into an empty or successful check listing.
+ */
+export const queueDetailOf = (host: CodeHost, repository: Repository, queueSha: string | null | undefined, unread?: string | null) =>
+  Effect.gen(function* () {
+    const base = repository.defaultBranch
+    const unavailable = (why: string): QueueDetail => ({ queueSha: queueSha ?? null, failing: [], logs: [why], main: null, jobs: [] })
+    if (queueSha == null) return unavailable(unread ?? "The host didn't identify the merge-queue build, so its failed jobs can't be read.")
+    const built = yield* host.checks(repository, queueSha, { strict: true }).pipe(
+      Effect.map((checks) => ({ checks, error: null })),
+      Effect.catch((error) =>
+        Effect.succeed({
+          checks: [] as ReadonlyArray<Check>,
+          error: `Couldn't read the queue build's checks: ${lookupFailure(host, error)}.`,
+        }),
+      ),
+    )
+    if (built.error !== null) return unavailable(built.error)
+    const failed = built.checks.filter((check) => check.state === 'failed')
+    const failing = failed.map((check) => check.name)
+    const { main, onBaseToo, passedOnBase } = yield* host.branchHead(repository, base).pipe(
+      Effect.flatMap((tip) =>
+        host.checks(repository, tip, { strict: true }).pipe(
+          Effect.map((checks) => ({
+            main: queueMainLine(`${base} (${tip.slice(0, 7)})`, failing, checks),
+            onBaseToo: failingOnBase(failing, checks),
+            passedOnBase: passingOnBase(failing, checks),
+          })),
+        ),
+      ),
+      Effect.catch((error) =>
+        Effect.succeed({
+          main: `Couldn't compare with ${base}'s latest commit: ${lookupFailure(host, error)}.`,
+          onBaseToo: [] as ReadonlyArray<string>,
+          passedOnBase: [] as ReadonlyArray<string>,
+        }),
+      ),
+    )
+    // Only a few logs are read, as on every other path that tells of failed checks: first those of jobs the default branch
+    // passes, which name the pull request, then those it hasn't reported on, then those it fails too.
+    const rank = (check: Check) => (passedOnBase.includes(check.name) ? 0 : onBaseToo.includes(check.name) ? 2 : 1)
+    const toRead = failed.toSorted((a, b) => rank(a) - rank(b)).slice(0, LOGS_TO_LEAD)
+    const reads = yield* Effect.forEach(
+      toRead,
+      (check) =>
+        readLog(host, repository, check).pipe(
+          Effect.map((read) => ({
+            ...read,
+            log: read.log === null ? null : read.log.trimEnd().split('\n').slice(-150).join('\n').slice(-12_000),
+          })),
+        ),
+      { concurrency: LOGS_TO_LEAD },
+    )
+    const more = failed.length - reads.length
+    return {
+      queueSha,
+      failing,
+      logs: [
+        ...reads.map((read) => (read.log !== null && read.url !== null ? `${logForLead(read)} Its page: ${read.url}` : logForLead(read))),
+        ...(more === 0 ? [] : [unreadJobs(more)]),
+      ],
+      main,
+      jobs: reads.map((read) => ({ name: read.name, url: read.url, tail: read.log, missing: read.missing })),
+      onBaseToo,
+      passedOnBase,
+    } satisfies QueueDetail
+  })

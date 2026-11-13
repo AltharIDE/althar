@@ -1,3 +1,4 @@
+import { plainTitle } from '@althar/contracts'
 import type { LiveEvent } from '@althar/runtime'
 
 /*
@@ -32,12 +33,16 @@ export const printer = (threadId: string): Printer => {
   const print = (event: LiveEvent): string => {
     // What Althar runs of the project itself, what the plans have left, and the computer's connection, are the window's to show, not a thread's.
     if (event._tag === 'Launches' || event._tag === 'PlanUsage' || event._tag === 'Connection' || event.threadId !== threadId) return ''
+    // A task the coordinator is drafting is its card's to show, in the window; the plan it comes to is said here as its tool call.
+    if (event._tag === 'Drafting') return ''
     switch (event._tag) {
       case 'SessionStarted':
         return line(`● ${event.agentId}${event.model === undefined ? '' : ` (${event.model})`} started.`)
       case 'SessionEnded':
         return line(`● The session ended: ${event.state}.`)
       case 'TurnStarted':
+      // What the person said is theirs already, on their own screen.
+      case 'PersonSaid':
       // The agent's own events already stream the message here; a command's output is the window's to show.
       case 'Streaming':
       case 'Output':
@@ -81,11 +86,11 @@ export const printer = (threadId: string): Printer => {
             return '\n· thinking'
           case 'ToolCall':
             tools.set(agent.toolCallId, agent.title)
-            return line(`→ ${agent.title}`)
+            return line(`→ ${plainTitle(agent.title)}`)
           case 'ToolCallUpdate': {
             if (agent.title !== undefined) tools.set(agent.toolCallId, agent.title)
             if (agent.status !== 'completed' && agent.status !== 'failed') return ''
-            return line(`  ${agent.status === 'completed' ? '✓' : '✗'} ${tools.get(agent.toolCallId) ?? ''}`.trimEnd())
+            return line(`  ${agent.status === 'completed' ? '✓' : '✗'} ${plainTitle(tools.get(agent.toolCallId) ?? '')}`.trimEnd())
           }
           case 'Plan':
             return line(

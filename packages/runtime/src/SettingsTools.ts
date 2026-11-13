@@ -2,6 +2,7 @@ import {
   AtOnceCount,
   CommandRule,
   FolderWait,
+  AfterMergeRule,
   NewProjectDefaults,
   PlansAndReviews,
   PROJECT_SETTINGS_SECTIONS,
@@ -13,6 +14,7 @@ import {
   RuleKind,
   SealStyle,
   SETTINGS_SECTIONS,
+  settingsSectionOf,
   type SettingChangeCard,
   type SettingChanged,
   type SettingChanger,
@@ -50,6 +52,7 @@ import {
   resolvesConflicts,
   ruleSetOf,
   usageLimitOf,
+  afterMergeReviewOf,
   worksInOf,
 } from './Policies'
 import { Projects } from './Projects'
@@ -301,6 +304,7 @@ export class SettingsTools extends Context.Service<
               pushCommits: pushesCommits(rules),
               postScreenshots: postsScreenshots(rules),
               moveIssues: movesIssues(rules),
+              afterMergeReview: afterMergeReviewOf(rules),
               branchPattern: rules.branchPattern ?? null,
               titlePattern: rules.titlePattern ?? null,
             } as Values,
@@ -324,6 +328,7 @@ export class SettingsTools extends Context.Service<
         'pushCommits',
         'postScreenshots',
         'moveIssues',
+        'afterMergeReview',
         'branchPattern',
         'titlePattern',
       ])
@@ -376,52 +381,18 @@ export class SettingsTools extends Context.Service<
           fields: {
             name: field('Name', 'a few words', Schema.String),
             ink: field('Colour', `the ink of the project's mark: ${ProjectInk.literals.join(', ')}`, ProjectInk),
-            worksIn: field('New tasks start', 'worktree (a folder of their own) or checkout (Local, in the person’s checkout)', WorksIn),
-            workToward: field(
-              'Work toward',
-              'by repository name, the branch new tasks work toward there, or null for its default branch: { "app": "release/0.8.0" }',
-              Schema.Record(Schema.String, Schema.NullOr(Schema.String)),
-            ),
-            resolveConflicts: field('Resolve conflicts automatically', SWITCH, Schema.Boolean),
-            pushCommits: field('Push the lead’s commits automatically', SWITCH, Schema.Boolean),
-            postScreenshots: field('Post screenshots automatically', SWITCH, Schema.Boolean),
-            moveIssues: field('Move issues automatically', SWITCH, Schema.Boolean),
           },
           read: (projectId) =>
             Effect.gen(function* () {
               const sql = yield* SqlClient.SqlClient
               const [project] = yield* sql<{ name: string; ink: string | null }>`SELECT name, ink FROM projects WHERE id = ${projectId}`
-              const { view } = yield* rulesOf(projectId)
-              const repositories = yield* repositoriesOf(projectId)
-              return {
-                name: project?.name ?? '',
-                ink: project?.ink ?? null,
-                ...pick(view, ['worksIn', 'resolveConflicts', 'pushCommits', 'postScreenshots', 'moveIssues']),
-                workToward: Object.fromEntries(repositories.map((one) => [one.name, one.workToward])),
-              }
+              return { name: project?.name ?? '', ink: project?.ink ?? null }
             }),
-          write: (projectId, change, actorId) =>
+          write: (projectId, change) =>
             Effect.gen(function* () {
               const projects = yield* Projects
               if (typeof change['name'] === 'string') yield* projects.rename(projectId, change['name'])
               if (typeof change['ink'] === 'string') yield* projects.setInk(projectId, change['ink'] as ProjectInk)
-              if (change['workToward'] !== undefined)
-                for (const { repository, value } of yield* byName(projectId, change['workToward'] as Values))
-                  yield* projects.setRepository({ projectId, repositoryId: repository.id, workToward: value as string | null }).pipe(
-                    // As the screen says it: a branch new tasks work toward is one the repository has.
-                    Effect.catchIf(
-                      (error) => error instanceof BranchNotFound,
-                      () =>
-                        Effect.fail(
-                          new ToolRefused({
-                            message: `${repository.name} has no branch ${String(value)}: new tasks work toward one it has.`,
-                          }),
-                        ),
-                    ),
-                  )
-              const rules = pick(change, ['worksIn', 'resolveConflicts', 'pushCommits', 'postScreenshots', 'moveIssues'])
-              const given = Object.fromEntries(Object.entries(rules).filter(([, value]) => value !== undefined))
-              if (Object.keys(given).length > 0) yield* writeRules(projectId, given, actorId)
             }),
         },
         {
@@ -484,6 +455,114 @@ export class SettingsTools extends Context.Service<
             }),
         },
         {
+          id: 'project/tasks',
+          title: 'Tasks',
+          scope: 'project',
+          note: 'Where its tasks start, how they go, and what a finished task makes: its pull request and its issue. What new projects start with is althar/tasks.',
+          fields: {
+            worksIn: field('New tasks start', 'worktree (a folder of their own) or checkout (Local, in the person’s checkout)', WorksIn),
+            workToward: field(
+              'Work toward',
+              'by repository name, the branch new tasks work toward there, or null for its default branch: { "app": "release/0.8.0" }',
+              Schema.Record(Schema.String, Schema.NullOr(Schema.String)),
+            ),
+            usageLimit: field('At an agent’s usage limit', 'move (to another), wait, or ask', UsageLimit),
+            rotateAccounts: field('Move to an agent’s next account', SWITCH, Schema.Boolean),
+            onlyAccounts: field(
+              'Accounts its work runs on',
+              'by agent id, the account ids it may use, or null for every account',
+              Schema.NullOr(Schema.Record(Schema.String, Schema.Array(Schema.String))),
+            ),
+            branchPattern: field('Branch names', 'a pattern, or null for what each repository says', Schema.NullOr(Schema.String)),
+            titlePattern: field('Pull request titles', 'a pattern, or null for what each repository says', Schema.NullOr(Schema.String)),
+            end: field(
+              'How a task ends',
+              'draft, ready (a pull request), none (its branch), or null for a draft where Althar is connected',
+              Schema.NullOr(Schema.Literals(['draft', 'ready', 'none'])),
+            ),
+            pushCommits: field('Push the lead’s commits automatically', SWITCH, Schema.Boolean),
+            postScreenshots: field('Post screenshots automatically', SWITCH, Schema.Boolean),
+            resolveConflicts: field('Resolve conflicts automatically', SWITCH, Schema.Boolean),
+            moveIssues: field('Move issues automatically', SWITCH, Schema.Boolean),
+            afterMergeReview: field(
+              'After a small change merges',
+              'major (reviewed; only blocking and major findings come back to the person), all (any finding comes back), or none (no review after the merge)',
+              AfterMergeRule,
+            ),
+            repositoryFiles: field(
+              'Skill and OpenSpec files',
+              '{ "writeSkills", "writeOpenSpec", "pushProtected" }, each true or false',
+              RepositoryFilesSetting,
+              {
+                loosens: (before, after) => {
+                  const was = before as Record<string, boolean>
+                  const now = after as Record<string, boolean>
+                  return Object.keys(now).some((key) => now[key] === true && was[key] !== true)
+                },
+                loosening: 'any of them turned on',
+              },
+            ),
+          },
+          read: (projectId) =>
+            Effect.gen(function* () {
+              const { view } = yield* rulesOf(projectId)
+              const repositories = yield* repositoriesOf(projectId)
+              return {
+                ...pick(view, [
+                  'worksIn',
+                  'usageLimit',
+                  'rotateAccounts',
+                  'onlyAccounts',
+                  'branchPattern',
+                  'titlePattern',
+                  'end',
+                  'pushCommits',
+                  'postScreenshots',
+                  'resolveConflicts',
+                  'moveIssues',
+                  'afterMergeReview',
+                  'repositoryFiles',
+                ]),
+                workToward: Object.fromEntries(repositories.map((one) => [one.name, one.workToward])),
+              }
+            }),
+          write: (projectId, change, actorId) =>
+            Effect.gen(function* () {
+              const projects = yield* Projects
+              if (change['workToward'] !== undefined)
+                for (const { repository, value } of yield* byName(projectId, change['workToward'] as Values))
+                  yield* projects.setRepository({ projectId, repositoryId: repository.id, workToward: value as string | null }).pipe(
+                    // As the screen says it: a branch new tasks work toward is one the repository has.
+                    Effect.catchIf(
+                      (error) => error instanceof BranchNotFound,
+                      () =>
+                        Effect.fail(
+                          new ToolRefused({
+                            message: `${repository.name} has no branch ${String(value)}: new tasks work toward one it has.`,
+                          }),
+                        ),
+                    ),
+                  )
+              const rules = pick(change, [
+                'worksIn',
+                'usageLimit',
+                'rotateAccounts',
+                'onlyAccounts',
+                'branchPattern',
+                'titlePattern',
+                'end',
+                'pushCommits',
+                'postScreenshots',
+                'resolveConflicts',
+                'moveIssues',
+                'afterMergeReview',
+                'repositoryFiles',
+              ])
+              const given = Object.fromEntries(Object.entries(rules).filter(([, value]) => value !== undefined))
+              if (Object.keys(given).length > 0) yield* writeRules(projectId, given, actorId)
+            }),
+        },
+        {
           id: 'project/rules',
           title: 'Rules',
           scope: 'project',
@@ -516,31 +595,6 @@ export class SettingsTools extends Context.Service<
               loosening: 'a host added',
             }),
             leadsReachWeb: field('Leads can reach the web', SWITCH, Schema.Boolean, { loosens: turnedOn, loosening: 'turned on' }),
-            usageLimit: field('At an agent’s usage limit', 'move (to another), wait, or ask', UsageLimit),
-            rotateAccounts: field('Move to an agent’s next account', SWITCH, Schema.Boolean),
-            onlyAccounts: field(
-              'Accounts its work runs on',
-              'by agent id, the account ids it may use, or null for every account',
-              Schema.NullOr(Schema.Record(Schema.String, Schema.Array(Schema.String))),
-            ),
-            end: field(
-              'How a task ends',
-              'draft, ready (a pull request), none (its branch), or null for a draft where Althar is connected',
-              Schema.NullOr(Schema.Literals(['draft', 'ready', 'none'])),
-            ),
-            repositoryFiles: field(
-              'Skill and OpenSpec files',
-              '{ "writeSkills", "writeOpenSpec", "pushProtected" }, each true or false',
-              RepositoryFilesSetting,
-              {
-                loosens: (before, after) => {
-                  const was = before as Record<string, boolean>
-                  const now = after as Record<string, boolean>
-                  return Object.keys(now).some((key) => now[key] === true && was[key] !== true)
-                },
-                loosening: 'any of them turned on',
-              },
-            ),
           },
           read: (projectId) =>
             Effect.map(rulesOf(projectId), ({ view }) =>
@@ -554,11 +608,6 @@ export class SettingsTools extends Context.Service<
                 'sandboxCommands',
                 'sandboxHosts',
                 'leadsReachWeb',
-                'usageLimit',
-                'rotateAccounts',
-                'onlyAccounts',
-                'end',
-                'repositoryFiles',
               ]),
             ),
           write: writeRules,
@@ -575,19 +624,13 @@ export class SettingsTools extends Context.Service<
               'by repository name, { "copy": [files from its checkout], "commands": [lines run in each new worktree] }, or null for what Althar works out',
               Schema.Record(Schema.String, Schema.NullOr(RepositorySetup)),
             ),
-            branchPattern: field('Branch names', 'a pattern, or null for what each repository says', Schema.NullOr(Schema.String)),
-            titlePattern: field('Pull request titles', 'a pattern, or null for what each repository says', Schema.NullOr(Schema.String)),
           },
           read: (projectId) =>
             Effect.gen(function* () {
-              const { view } = yield* rulesOf(projectId)
               const repositories = yield* repositoriesOf(projectId)
-              return {
-                setup: Object.fromEntries(repositories.map((one) => [one.name, one.setup])),
-                ...pick(view, ['branchPattern', 'titlePattern']),
-              }
+              return { setup: Object.fromEntries(repositories.map((one) => [one.name, one.setup])) }
             }),
-          write: (projectId, change, actorId) =>
+          write: (projectId, change) =>
             Effect.gen(function* () {
               const projects = yield* Projects
               if (change['setup'] !== undefined)
@@ -597,10 +640,6 @@ export class SettingsTools extends Context.Service<
                     repositoryId: repository.id,
                     setup: value as { copy: ReadonlyArray<string>; commands: ReadonlyArray<string> } | null,
                   })
-              const patterns = Object.fromEntries(
-                Object.entries(pick(change, ['branchPattern', 'titlePattern'])).filter(([, value]) => value !== undefined),
-              )
-              if (Object.keys(patterns).length > 0) yield* writeRules(projectId, patterns, actorId)
             }),
         },
         {
@@ -735,7 +774,7 @@ export class SettingsTools extends Context.Service<
           id: 'althar/this-mac',
           title: 'Work on this computer',
           scope: 'althar',
-          note: 'Keeping awake, CPU and memory in the bar and opening at login are kept in the window; the person sets them there.',
+          note: 'Keeping awake, CPU and memory in the bar, opening at login, and dictation (the microphone and the speech model) are kept in the window; the person sets them there.',
           fields: {
             agentsAtOnce: field('Agents at once', 'a number from 1 to 16, or null for what Althar works out', Schema.NullOr(AtOnceCount)),
             folderWait: field('When finished tasks’ folders go', FolderWait.literals.join(', '), FolderWait),
@@ -762,36 +801,50 @@ export class SettingsTools extends Context.Service<
             }),
         },
         {
-          id: 'althar/plans-and-reviews',
-          title: 'Plans and reviews',
+          id: 'althar/tasks',
+          title: 'Tasks',
           scope: 'althar',
+          note: 'How every task goes (the first three), and what the rules of a new project start with (the rest): changing one of those leaves the projects there already as they are; a project’s own is project/tasks. Allow everything is the default for every project.',
           fields: {
             countdown: field('Plan countdown', 'seconds: 0, 10, 25 or 60', PlansAndReviews.fields.countdown),
             rounds: field('Review rounds', '1, 2, 3 or 5', PlansAndReviews.fields.rounds),
             roundsOut: field('When rounds run out', 'settled (go on once findings are settled) or ask', PlansAndReviews.fields.roundsOut),
+            end: field('New projects: when a task is done', 'draft, ready or none', NewProjectDefaults.fields.end),
+            pushCommits: field('New projects: push the lead’s commits automatically', SWITCH, NewProjectDefaults.fields.pushCommits),
+            postScreenshots: field(
+              'New projects: post screenshots to pull requests automatically',
+              SWITCH,
+              NewProjectDefaults.fields.postScreenshots,
+            ),
+            resolveConflicts: field(
+              'New projects: resolve merge conflicts automatically',
+              SWITCH,
+              NewProjectDefaults.fields.resolveConflicts,
+            ),
+            moveIssues: field('New projects: move issues along with their tasks', SWITCH, NewProjectDefaults.fields.moveIssues),
+            afterMergeReview: field(
+              'New projects: after a small change merges',
+              'major (only blocking and major findings come back), all, or none (no review after the merge)',
+              NewProjectDefaults.fields.afterMergeReview,
+            ),
+            usageLimit: field('New projects: at an agent’s usage limit', 'move, wait or ask', NewProjectDefaults.fields.usageLimit),
+            rotateAccounts: field('New projects: try an agent’s other accounts first', SWITCH, NewProjectDefaults.fields.rotateAccounts),
           },
-          read: () => Effect.map(plansAndReviewsOf, (kept) => ({ ...kept })),
-          write: (_projectId, change) => setPlansAndReviews(change as Partial<typeof PlansAndReviews.Type>),
-        },
-        {
-          id: 'althar/new-projects',
-          title: 'New projects',
-          scope: 'althar',
-          fields: {
-            permissions: field('What no rule keeps', 'ask, coordinator or rules', NewProjectDefaults.fields.permissions, {
-              loosens: toward(MODES),
-              loosening: 'toward fewer asks: ask, then coordinator, then rules',
+          read: () =>
+            Effect.gen(function* () {
+              return { ...(yield* plansAndReviewsOf), ...(yield* newProjectDefaultsOf) }
             }),
-            usageLimit: field('At an agent’s usage limit', 'move, wait or ask', NewProjectDefaults.fields.usageLimit),
-            rotateAccounts: field('Move to an agent’s next account', SWITCH, NewProjectDefaults.fields.rotateAccounts),
-            end: field('How a task ends', 'draft, ready or none', NewProjectDefaults.fields.end),
-          },
-          read: () => Effect.map(newProjectDefaultsOf, (kept) => ({ ...kept })),
-          write: (_projectId, change) => setNewProjectDefaults(change as Partial<typeof NewProjectDefaults.Type>),
+          write: (_projectId, change) =>
+            Effect.gen(function* () {
+              const { countdown, rounds, roundsOut, ...defaults } = change
+              const plans = Object.fromEntries(Object.entries({ countdown, rounds, roundsOut }).filter(([, value]) => value !== undefined))
+              if (Object.keys(plans).length > 0) yield* setPlansAndReviews(plans as Partial<typeof PlansAndReviews.Type>)
+              if (Object.keys(defaults).length > 0) yield* setNewProjectDefaults(defaults as Partial<typeof NewProjectDefaults.Type>)
+            }),
         },
         {
-          id: 'althar/reviews',
-          title: 'Reviews and pull requests',
+          id: 'althar/pull-requests',
+          title: 'Pull requests',
           scope: 'althar',
           fields: {
             postTeamReviews: field('Post reviews of the team’s pull requests without asking', SWITCH, Schema.Boolean, {
@@ -820,9 +873,9 @@ export class SettingsTools extends Context.Service<
               if (change['reviewSealStyle'] !== undefined) yield* setReviewSealStyle(change['reviewSealStyle'] as typeof SealStyle.Type)
             }),
         },
-        ...(['notifications', 'appearance', 'editor', 'browser'] as const).map((id): Section => ({
+        ...(['notifications', 'appearance', 'editor-and-browser'] as const).map((id): Section => ({
           id: `althar/${id}`,
-          title: { notifications: 'Notifications', appearance: 'Appearance', editor: 'Editor', browser: 'Browser' }[id],
+          title: { notifications: 'Notifications', appearance: 'Appearance', 'editor-and-browser': 'Editor and browser' }[id],
           scope: 'althar',
           note: 'Kept in the window on this computer: the person sets these there.',
           fields: {},
@@ -840,7 +893,11 @@ export class SettingsTools extends Context.Service<
 
       const sectionOf = (id: string | undefined) => {
         const wanted = (id ?? '').trim().toLowerCase().replace(/^\//, '')
-        return SECTIONS.find((one) => one.id === wanted || one.id.endsWith(`/${wanted}`))
+        const found = SECTIONS.find((one) => one.id === wanted || one.id.endsWith(`/${wanted}`))
+        if (found !== undefined || wanted.startsWith('project/')) return found
+        // An old address of Althar's own, from a change recorded before the sections moved: where its settings went.
+        const moved = settingsSectionOf(wanted.replace(/^althar\//, ''))
+        return moved === undefined ? undefined : SECTIONS.find((one) => one.id === `althar/${moved}`)
       }
       const unknownSection = (id: string) =>
         new ToolRefused({ message: `There is no section ${id}. The sections: ${SECTIONS.map((one) => one.id).join(', ')}.` })
@@ -1216,7 +1273,8 @@ export class SettingsTools extends Context.Service<
               // Shown only while it stays as the agent left it: changed since, by anyone, it is theirs now.
               if (!same(currents.get(row.section)?.[key], after[key])) continue
               found.push({
-                section: row.section,
+                // Where the setting is now, not where it was when the change was recorded (the sections moved on 8 Nov 2026).
+                section: section.id,
                 key,
                 label: section.fields[key]?.label ?? key,
                 by: yield* changerOfRow(row),
@@ -1253,11 +1311,11 @@ export class SettingsTools extends Context.Service<
       yield* (yield* ToolServer).serve(POOL, [
         tool(
           'read_settings',
-          `The settings the Settings screens show, as the person sees them: this project's (project/general, project/code, project/rules, project/running, project/notes) and Althar's own (althar/agents, althar/skills, althar/this-mac, althar/plans-and-reviews, althar/new-projects, althar/reviews and the rest). One section by its name, or every one: each setting with its key, its words on the screen, its value, what it takes, and whether a change to it loosens what asks. Read a section before you change it.`,
+          `The settings the Settings screens show, as the person sees them: this project's (project/general, project/code, project/tasks, project/rules, project/running, project/notes) and Althar's own (althar/agents, althar/skills, althar/tasks, althar/pull-requests, althar/this-mac and the rest). One section by its name, or every one: each setting with its key, its words on the screen, its value, what it takes, and whether a change to it loosens what asks. Read a section before you change it.`,
           {
             type: 'object',
             properties: {
-              section: { type: 'string', description: 'A section, as project/rules or althar/plans-and-reviews; every one without it.' },
+              section: { type: 'string', description: 'A section, as project/rules or althar/tasks; every one without it.' },
             },
           },
           readSettings,
@@ -1268,7 +1326,7 @@ export class SettingsTools extends Context.Service<
           {
             type: 'object',
             properties: {
-              section: { type: 'string', description: 'The section, as read_settings names it: project/rules, althar/plans-and-reviews.' },
+              section: { type: 'string', description: 'The section, as read_settings names it: project/rules, althar/tasks.' },
               change: { type: 'object', description: 'Each setting that changes, by its key, in the shape read_settings says it takes.' },
               undo: { type: 'string', description: 'A change to put back, by the id its answer gave, instead of section and change.' },
               why: { type: 'string', description: 'Why, in a line, shown on the card where it waits for the person.' },
@@ -1306,6 +1364,9 @@ export const SETTINGS_ADDRESSES: ReadonlyArray<string> = [
 export const SCREEN_CHANGES: Readonly<Record<string, string>> = {
   // althar/mcp-servers and althar/skills: the person's own agents' settings (ADR-097)
   setToolRoles: "person: which roles get the person's own servers and skills is theirs (althar/mcp-servers says so)",
+  setToolInProject: "person: which projects get the person's own servers and skills is theirs (althar/mcp-servers says so)",
+  addServer: "person: adding a server writes into the person's own agents' files",
+  removeServer: "person: removing a server takes it out of the person's own agents' files",
   setToolSync: "person: keeping their agents the same writes into the person's own files",
   setToolKeptOut: "person: what sync keeps out of the person's own agents is theirs",
   pickToolWay: "person: how a server set up two ways runs everywhere is the person's",
@@ -1339,7 +1400,6 @@ export const SCREEN_CHANGES: Readonly<Record<string, string>> = {
   orderAccounts: 'person: an agent’s accounts and their sign-ins',
   removeAccount: 'person: an agent’s accounts and their sign-ins',
   // althar/skills
-  setSkillActive: 'althar/skills.skills',
   stageSkill: 'person: installing a skill is the person’s',
   approveSkill: 'person: installing a skill is the person’s',
   rollBackSkill: 'person: installing a skill is the person’s',
@@ -1356,14 +1416,18 @@ export const SCREEN_CHANGES: Readonly<Record<string, string>> = {
   awakeOnBattery: 'window: kept in the window on this computer',
   openAtLogin: 'window: kept in the window on this computer',
   showLoad: 'window: kept in the window on this computer',
-  // althar/plans-and-reviews, althar/new-projects, althar/reviews
-  setPlansAndReviews: 'althar/plans-and-reviews.countdown',
-  setNewProjectDefaults: 'althar/new-projects.permissions',
-  setPostTeamReviews: 'althar/reviews.postTeamReviews',
-  setCoAuthor: 'althar/reviews.coAuthor',
-  setReviewSeal: 'althar/reviews.reviewSeal',
-  setReviewSealStyle: 'althar/reviews.reviewSealStyle',
-  // althar/notifications, althar/appearance, althar/editor, althar/browser, althar/about
+  // althar/tasks, althar/pull-requests
+  setPlansAndReviews: 'althar/tasks.countdown',
+  setNewProjectDefaults: 'althar/tasks.end',
+  setPostTeamReviews: 'althar/pull-requests.postTeamReviews',
+  setCoAuthor: 'althar/pull-requests.coAuthor',
+  setReviewSeal: 'althar/pull-requests.reviewSeal',
+  setRunOutside: 'person: how far an outside author’s code is trusted without asking is the person’s word alone, as Run it is',
+  setReviewSealStyle: 'althar/pull-requests.reviewSealStyle',
+  // althar/tasks: presets (a task is a conversation plus parts)
+  editPreset: 'person: a preset is the person’s own: the coordinator offers one to keep, and only they keep, change or remove it',
+  removePreset: 'person: a preset is the person’s own: the coordinator offers one to keep, and only they keep, change or remove it',
+  // althar/notifications, althar/appearance, althar/editor-and-browser, althar/about
   notifyCalls: 'window: kept in the window on this computer',
   notifyReady: 'window: kept in the window on this computer',
   notifyStopped: 'window: kept in the window on this computer',

@@ -155,6 +155,16 @@ something to read.
   03 and 05.
 - **Left for later**: an operating-system notification, if the gauge proves
   too quiet.
+- **A sign-in that ends soon** (DEV-196) rides this feed too, though it is a
+  sign-in fact, not usage: the view carries `endings`, built from the same
+  `SignIns.account` check the account row reads, because plan usage is
+  already told every five minutes and the bar already listens to it. That is
+  why `AccountSignIns` asks `PlanUsage.retell` once a sign-in in Althar
+  finishes, and why "ends soon" is worked out in two places (the row's
+  `endsSoon` in `Api.ts`, the bar's `endings` here), both from `endingOf`
+  in `signInEnding.ts`, so they can't drift. Should a second sign-in fact
+  want the bar, move the endings to a `Live` event `SignIns` owns, which the
+  row and the bar both read.
 
 ## Steering new work
 
@@ -164,7 +174,7 @@ under 5% it is nearly out. Work starts on the account with the most room
 where the project rotates, for the model it runs where that model has a
 window of its own; a new step on an agent nearly out on every account goes
 by the project's rule as if out (moved to an agent with room, or started on
-what is left; held until the reset; or asked, with the agent itself a way
+what is left; held until the reset, or until a fresh reading shows room; or asked, with the agent itself a way
 on), and the thread says why. The lead's fixes after a review are a new
 step, and so are a review that waited for a place and a later round of
 review: a lead or reviewer kept from before goes on on another of its

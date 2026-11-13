@@ -8,6 +8,7 @@ import { CODEX, effortFor, model, OPUS, useModelPrefs } from '../../fixtures/mod
 import { ModelPick } from '../../composer/ModelPick/ModelPick'
 import { States } from '../../storybook/States'
 import { threadDecorator } from '../../storybook/ThreadFrame'
+import { Thread } from '../../thread/Thread/Thread'
 import { Turn } from '../../thread/Turn/Turn'
 import { You } from '../../thread/You/You'
 import { TaskEnd, WorksIn } from '../../foundations/vocabulary'
@@ -21,7 +22,7 @@ function usePicker(
 ) {
   const prefs = useModelPrefs()
   const [efforts, setEfforts] = useState<Record<string, string>>({})
-  return ({ step, agent, k, owner }: LaunchPick) => {
+  return ({ step, agent, k, owner, onOpenChange, skip }: LaunchPick) => {
     const key = `${step.id}:${k}`
     return (
       <ModelPick
@@ -37,12 +38,14 @@ function usePicker(
           setSteps(steps.map((st) => (st.id === step.id ? { ...st, agents: st.agents.map((a, i) => (i === k ? model(id) : a)) } : st)))
         }
         onEffort={(level) => setEfforts({ ...efforts, [key]: level })}
-        /* a step with several agents can go down to one; its reason was about the pair, so it goes too */
+        onOpenChange={onOpenChange}
+        /* a step with several agents can go down to one; one that can be skipped is skipped from here, as the app does */
         onRemove={
           step.agents.length > 1
             ? () => setSteps(steps.map((st) => (st.id === step.id ? { ...st, agents: st.agents.filter((_, i) => i !== k) } : st)))
-            : undefined
+            : skip?.onSkip
         }
+        {...(step.agents.length === 1 && skip !== undefined ? { text: { remove: skip.label } } : {})}
       />
     )
   }
@@ -86,6 +89,49 @@ type Story = StoryObj<typeof meta>
 /** The plan, counting down once you can see it. Change an agent, skip an optional step, or pick what happens when it is done. */
 export const AboutToStart: Story = { render: () => <Launch /> }
 
+/** Its kicker names the preset its parts are first (a task is a conversation plus parts), in the kicker's own type. */
+export const NamesItsPreset: Story = { render: () => <Launch preset="Change" /> }
+
+const PRESETS = [
+  { name: 'Chat', about: 'a copy, no review, ends here, the coordinator picks its lead' },
+  { name: 'Change', about: 'a worktree, reviewed before it ships, a draft pull request, the coordinator picks its lead' },
+  { name: 'Small change', about: 'a worktree, reviewed after it merges, ends as the project says, the coordinator picks its lead' },
+  { name: 'Prototype', about: 'a worktree, no review, ends here, led by Claude Opus 5.5' },
+]
+
+/** A press on the preset lists the others, each with what it holds: picking one changes the plan's parts to match. */
+export const PicksAnotherPreset: Story = {
+  render: function Render() {
+    const [preset, setPreset] = useState('Change')
+    return <Launch preset={preset} presets={PRESETS} onPresetChange={setPreset} />
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await userEvent.click(canvas.getByRole('button', { name: 'Change' }))
+    const body = within(canvasElement.ownerDocument.body)
+    await expect(await body.findByRole('menuitemradio', { name: /Prototype/ })).toBeVisible()
+  },
+}
+
+/** Planned from Prototype: its lead and its ending, the branch, and no review row, skipped or not. */
+export const APrototype: Story = {
+  render: () => (
+    <Launch
+      plan={[{ id: 'implement', label: 'Implement', agents: [OPUS], fixed: 'the lead' }]}
+      preset="Prototype"
+      presets={PRESETS}
+      hideEnd
+      estimate={undefined}
+    />
+  ),
+  play: async ({ canvasElement }) => {
+    const c = within(canvasElement)
+    await expect(c.getByText('Implement')).toBeVisible()
+    await expect(c.queryByText('Review')).not.toBeInTheDocument()
+    await expect(c.queryByText('Add back')).not.toBeInTheDocument()
+  },
+}
+
 /** A review proposed with two agents can go down to one: the second's picker has Remove from this step. */
 export const OneReviewerInsteadOfTwo: Story = {
   render: () => <Launch />,
@@ -98,17 +144,18 @@ export const OneReviewerInsteadOfTwo: Story = {
   },
 }
 
-/** Hold stops the clock; it starts when you say. Skipping a step strikes it through, and Add back undoes it. */
+/** Hold stops the clock; it starts when you say. Skipping a step, from its dropdown, strikes it through, and Add back undoes it. */
 export const Held: Story = {
   render: () => <Launch />,
   play: async ({ canvasElement }) => {
     const c = within(canvasElement)
     await userEvent.click(c.getByRole('button', { name: 'Hold' }))
-    await expect(c.getByText('Held. Starts when you say')).toBeInTheDocument()
-    const [skip] = c.getAllByRole('button', { name: 'Skip' })
-    if (!skip) throw new Error('no Skip')
-    await userEvent.click(skip)
-    await expect(c.getByText('skipped')).toBeInTheDocument()
+    await expect(c.getByText('Held')).toBeInTheDocument()
+    await userEvent.click(c.getByRole('button', { name: /Dry run on a copy/ }))
+    await userEvent.click(await within(document.body).findByRole('button', { name: 'Skip the dry run on a copy' }))
+    await expect(await c.findByText('skipped')).toBeInTheDocument()
+    await userEvent.click(c.getByRole('button', { name: 'Add back: Dry run on a copy' }))
+    await waitFor(() => expect(c.queryByText('skipped')).not.toBeInTheDocument())
   },
 }
 
@@ -204,20 +251,49 @@ export const HeldByTheRuntime: Story = {
     const c = within(canvasElement)
     await userEvent.click(c.getByRole('button', { name: 'Hold' }))
     await expect(heldChanged).toHaveBeenCalledWith(true)
-    await expect(c.getByText('Held. Starts when you say')).toBeInTheDocument()
+    await expect(c.getByText('Held')).toBeInTheDocument()
     await userEvent.click(c.getByRole('button', { name: 'Start' }))
     await expect(startedHeld).toHaveBeenCalled()
   },
 }
 
-/** Started, it waits for a free agent: it says so where the clock was, with nothing to start or hold, and its steps can still change. */
+/** Started, it waits for a free agent: it says so where the clock was, its steps can still change, and Hold takes it out of the line until you start it. */
 export const WaitingForAFreeAgent: Story = {
   render: () => <Launch queued="Waiting: 4 of 4 agents busy on this Mac" />,
   play: async ({ canvasElement }) => {
     const c = within(canvasElement)
     await expect(c.getByRole('status')).toHaveTextContent('Waiting: 4 of 4 agents busy on this Mac')
     await expect(c.queryByRole('button', { name: /Start/ })).toBeNull()
-    await expect(c.queryByRole('button', { name: 'Hold' })).toBeNull()
+    await expect(c.getByRole('button', { name: 'Hold' })).toBeInTheDocument()
+  },
+}
+
+const heldQueued = fn()
+
+/** A queued plan held where the plan is kept: Hold says so, and the card shows held, with Start. */
+function HeldWhileQueued() {
+  const [held, setHeld] = useState(false)
+  return (
+    <Launch
+      {...(held ? {} : { queued: 'Waiting: 4 of 4 agents busy on this Mac' })}
+      held={held}
+      onHeldChange={(next) => {
+        heldQueued(next)
+        setHeld(next)
+      }}
+    />
+  )
+}
+
+export const HeldWhileWaitingForAFreeAgent: Story = {
+  render: () => <HeldWhileQueued />,
+  play: async ({ canvasElement }) => {
+    const c = within(canvasElement)
+    await userEvent.click(c.getByRole('button', { name: 'Hold' }))
+    await expect(heldQueued).toHaveBeenCalledWith(true)
+    await expect(c.getByText('Held')).toBeInTheDocument()
+    await expect(c.getByRole('button', { name: 'Start' })).toBeInTheDocument()
+    await expect(c.queryByRole('status')).toBeNull()
   },
 }
 
@@ -227,15 +303,15 @@ function Placed({ worksIn: start = WorksIn.Local, ...rest }: Partial<Parameters<
   return <Launch worksIn={worksIn} onWorksInChange={setWorksIn} {...rest} />
 }
 
-/** Planned Local, the project's default: one line on what it gives up. */
+/** Planned Local, the project's default: the switch says where it works, and what each gives up is in its tooltip, not a line under it. */
 export const Local: Story = {
   render: () => <Placed />,
   play: async ({ canvasElement }) => {
     const c = within(canvasElement)
     await expect(c.getByRole('radio', { name: 'Local' })).toBeChecked()
-    await expect(c.getByText('One task at a time; your own edits share it.')).toBeVisible()
+    await expect(c.queryByText('One task at a time; your own edits share it.')).toBeNull()
     await userEvent.click(c.getByRole('radio', { name: 'Worktree' }))
-    await expect(c.getByText('Side by side with other tasks. Builds from cold.')).toBeVisible()
+    await expect(c.queryByText('Side by side with other tasks. Builds from cold.')).toBeNull()
     await userEvent.click(c.getByRole('radio', { name: 'Local' }))
   },
 }
@@ -245,7 +321,7 @@ export const LocalTaken: Story = {
   render: () => <Placed worksIn={WorksIn.Worktree} localTaken="Dark mode for Settings" />,
   play: async ({ canvasElement }) => {
     const c = within(canvasElement)
-    await expect(c.getByText('Local is taken by Dark mode for Settings. Side by side with other tasks. Builds from cold.')).toBeVisible()
+    await expect(c.getByText('Local is taken by Dark mode for Settings.')).toBeVisible()
     await userEvent.click(c.getByRole('radio', { name: 'Local' }))
     await expect(c.getByText('Waits for Dark mode for Settings.')).toBeVisible()
     await userEvent.click(c.getByRole('radio', { name: 'Worktree' }))
@@ -366,16 +442,18 @@ const PLAN_ASKED: LaunchStep[] = [
 /** Where a plan comes from: what you asked, the coordinator's answer, and the plan under it. */
 export const InTheConversation: Story = {
   render: () => (
-    <>
-      <You at="11:01">
-        Refunds created before PR 1184 have no idempotency key. Backfill them, and dry-run it on a copy before anything writes.
-      </You>
+    <Thread label="Conversation">
+      <You at="11:01">EU customers are seeing the wrong VAT rate on their invoice PDFs since Monday. Can you fix it?</You>
       <Turn voice="Coordinator" at="11:01">
-        One task. Opus 5 writes the backfill and its dry run, and Codex reviews it, since it writes to money records. It starts on its own
-        unless you change it.
+        One task. Opus 5 fixes the rate lookup and adds a test for each EU country, and Codex reviews it.
       </Turn>
-      <Launch plan={PLAN_ASKED} from={undefined} estimate="About 30 min · about $1 on your subscriptions" />
-    </>
+      <Launch
+        plan={PLAN_ASKED}
+        from={undefined}
+        title="Fix the VAT rate on EU invoice PDFs"
+        estimate="About 25 min · about $1 on your subscriptions"
+      />
+    </Thread>
   ),
 }
 

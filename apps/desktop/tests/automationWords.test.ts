@@ -113,6 +113,10 @@ describe('what came of a run', () => {
     expect(runWords(automationRun())).toBe('Review #264')
     expect(runWords(automationRun({ subject: null }))).toBe('Review #264')
     expect(runWords(automationRun({ subject: null, task: null }))).toBe('Made something')
+    // A run that went to another plan says so after what it made, and whatever its ending.
+    expect(runWords(automationRun({ reason: 'OpenCode Go refused its sign-in, so its lead ran on Claude Code.' }))).toBe(
+      'Review #264 · OpenCode Go refused its sign-in, so its lead ran on Claude Code.',
+    )
     expect(runWords(automationRun({ subject: null, task: null, reason: 'Found 2 new pull requests; 1 more waits' }))).toBe(
       'Found 2 new pull requests; 1 more waits',
     )
@@ -150,6 +154,17 @@ describe('what came of a run', () => {
 
 describe('where an automation stands', () => {
   const next = local(30, 9).toISOString()
+  it('shows a blocked task as needing the person, even after a newer slot was skipped', () => {
+    const run = automationRun({ state: 'running' })
+    const waiting = { ...run, task: { ...run.task!, needsYou: true } }
+    const one = automationSummary({ latest: [automationRun({ state: 'skipped', task: null }), waiting] })
+    expect(standingOf(one, false, NOON)).toMatchObject({ tone: 'yours', paused: false, words: 'Needs you', dot: 'yours' })
+    expect(markOf(waiting, NOON).state).toBe(AutomationRunState.NeedsYou)
+    expect(runWords(waiting)).toBe(`Needs you · ${waiting.task.title}`)
+    expect(needsYou([one])).toBe(true)
+    expect(standingOf({ ...one, latest: [{ ...waiting, task: { ...waiting.task, needsYou: false } }] }, false, NOON).tone).toBe('live')
+  })
+
   it('is off until turned on, paused by itself or the person or with every other, running, or on with when it runs next', () => {
     const one = automationSummary({ nextAt: next })
     expect(standingOf({ ...one, state: 'proposed' }, false, NOON)).toEqual({

@@ -3,10 +3,13 @@ import { expect, fn, userEvent, within } from 'storybook/test'
 
 import { TaskKind, TaskStatus } from '../../foundations/vocabulary'
 import {
+  CHANGE_BRANCH_PICTURES,
   CHANGE_CONFLICT,
   CHANGE_CHECKS_RUNNING,
   CHANGE_IN_MERGE_QUEUE,
   CHANGE_PERMISSION,
+  CHANGE_PR_PICTURES,
+  CHANGE_REPLIED_PICTURES,
   CHANGE_QUESTION,
   CHANGE_QUEUED,
   CHANGE_QUEUED_MIDWAY,
@@ -78,7 +81,8 @@ export const ChangeRunning: Story = {
     const card = within(canvasElement)
     // Its step's word, on top and under its bar.
     await expect(card.getAllByText('Implement')).toHaveLength(2)
-    await expect(card.getByText('Change')).toBeInTheDocument()
+    // A change is the usual kind, so it isn't said.
+    await expect(card.queryByText('Change')).toBeNull()
     await expect(card.getByRole('list', { name: 'Steps' })).toBeInTheDocument()
     await expect(card.getByText('meridian/return-409-on-reused-idempotency-key')).toBeInTheDocument()
     // Nothing on it is pressed but the card itself.
@@ -91,7 +95,7 @@ export const ChangeRunningWithItsPullRequest: Story = { args: CHANGE_RUNNING_PR 
 export const ChangeRunningLocal: Story = {
   args: { ...CHANGE_RUNNING, local: true },
   play: async ({ canvasElement }) => {
-    await expect(within(canvasElement).getByText('Change · Local')).toBeInTheDocument()
+    await expect(within(canvasElement).getByText('Local')).toBeInTheDocument()
   },
 }
 export const ChangeRunningLocalDark: Story = { ...ChangeRunningLocal, globals: { theme: 'dark' } }
@@ -100,6 +104,27 @@ export const ChangeTowardARelease: Story = {
   args: { ...CHANGE_RUNNING, toward: 'release/0.8.0' },
   play: async ({ canvasElement }) => {
     await expect(within(canvasElement).getByText('Toward release/0.8.0')).toBeInTheDocument()
+  },
+}
+
+/** Several changes in one task (a task is a conversation plus parts): how many, quietly at its foot, apart from where it stands. */
+export const SeveralChanges: Story = { args: { ...CHANGE_RUNNING_PR, changes: 3 } }
+
+/** Several changes, each with its mark: one sentence for them all, naming only the exception, and a mark for each at the foot. */
+export const SeveralChangesMarked: Story = {
+  args: {
+    ...CHANGE_READY,
+    foot: (
+      <FactLine>
+        <Fact tone="danger">Lane heights: checks failing</Fact>
+      </FactLine>
+    ),
+    changes: 3,
+    marks: [
+      { name: 'Add a retry', says: 'Add a retry: ready to merge', tone: 'signal' },
+      { name: 'Lane heights', says: 'Lane heights: checks failing', tone: 'danger' },
+      { name: 'Card sizes', says: 'Card sizes: ready to merge', tone: 'signal' },
+    ],
   },
 }
 export const ChangeTowardAReleaseDark: Story = { ...ChangeTowardARelease, globals: { theme: 'dark' } }
@@ -152,6 +177,63 @@ const readyFoot = (
     </div>
   ),
 })
+/**
+ * The follow-up pull request a fix opened after the first merged, its checks running: the card says so, as a first pull request's does,
+ * not "Ready to accept". One row for the pull request, and none for the branch that holds the same lines.
+ */
+const followUp = (running: boolean) => ({
+  render: () => (
+    <div style={{ width: 360 }}>
+      <BoardCard
+        status={TaskStatus.Yours}
+        word={running ? 'Checks running' : 'Ready to accept'}
+        kind={TaskKind.Change}
+        at="2m"
+        title="Usage card drops the time breakdown"
+        object={<PullChip host={GITHUB} repo="althar" number={767} add={1} del={42} />}
+        foot={
+          <FactLine>
+            {running ? (
+              <Fact tone="live">Checks running, 7 of 12 passed</Fact>
+            ) : (
+              <Fact icon="check" tone="ok">
+                All 12 checks passed
+              </Fact>
+            )}
+          </FactLine>
+        }
+        next={
+          !running && (
+            <NextStep signal onPress={fn()} label="Accept and merge #767">
+              Accept and merge
+            </NextStep>
+          )
+        }
+      />
+    </div>
+  ),
+})
+export const FollowUpChecksRunning: Story = {
+  ...followUp(true),
+  play: async ({ canvasElement }) => {
+    const card = within(canvasElement)
+    await expect(card.getByText('Checks running')).toBeInTheDocument()
+    await expect(card.getByText('Checks running, 7 of 12 passed')).toBeInTheDocument()
+    await expect(card.queryByText('Ready to accept')).not.toBeInTheDocument()
+    await expect(card.queryByText('Accept and merge')).not.toBeInTheDocument()
+    await expect(card.getAllByText('+1')).toHaveLength(1)
+  },
+}
+export const FollowUpChecksRunningDark: Story = { ...FollowUpChecksRunning, globals: { theme: 'dark' } }
+export const FollowUpChecksPassed: Story = {
+  ...followUp(false),
+  play: async ({ canvasElement }) => {
+    const card = within(canvasElement)
+    await expect(card.getByText('Ready to accept')).toBeInTheDocument()
+    await expect(card.getByText('All 12 checks passed')).toBeInTheDocument()
+  },
+}
+export const FollowUpChecksPassedDark: Story = { ...FollowUpChecksPassed, globals: { theme: 'dark' } }
 /** No line of facts starts with a middot, wherever it wraps. */
 const noStrayDots = async (canvasElement: HTMLElement) => {
   for (const part of canvasElement.querySelectorAll('[class*="factLinePart"]'))
@@ -423,6 +505,41 @@ export const QuestionNoOptions: Story = {
   },
 }
 export const Stuck: Story = { args: CHANGE_STUCK }
+
+/** Its step stuck on something that failed: said as a problem, and its strip offers what fixes it, from the card. */
+const SIGNED_OUT = {
+  ...CHANGE_STUCK,
+  problem: 'Claude Code is signed out.',
+  next: (
+    <NextStep signal onPress={() => undefined}>
+      Sign in again
+    </NextStep>
+  ),
+}
+export const StuckSignedOut: Story = {
+  args: SIGNED_OUT,
+  play: async ({ canvasElement }) => {
+    const card = within(canvasElement)
+    await expect(card.getByRole('alert')).toHaveTextContent('Claude Code is signed out.')
+    await expect(card.getByRole('button', { name: 'Sign in again' })).toBeVisible()
+    await mainActionPlace(canvasElement)
+  },
+}
+
+/** In a lane as narrow as beside the conversation: its top stays one line, the kind giving way first, then the word. */
+export const NarrowTop: Story = {
+  args: { ...CHANGE_READY, local: true },
+  decorators: [(Story) => <div style={{ width: 186 }}>{Story()}</div>],
+  play: async ({ canvasElement }) => {
+    const top = canvasElement.querySelector('article > div')!
+    const at = within(canvasElement).getByText(CHANGE_READY.at!)
+    await expect(within(canvasElement).getByText('Ready to accept')).toBeInTheDocument()
+    // Where there is layout to measure (a browser, not jsdom): one line, as tall as how long is, and how long whole.
+    if (top.getBoundingClientRect().width === 0) return
+    await expect(top.getBoundingClientRect().height).toBeLessThan(at.getBoundingClientRect().height * 2)
+    await expect(at.scrollWidth).toBeLessThanOrEqual(at.clientWidth)
+  },
+}
 export const ReviewRunning: Story = {
   args: REVIEW_RUNNING,
   play: async ({ canvasElement }) => {
@@ -625,10 +742,23 @@ export const AllStates: Story = {
       size="wide"
       cells={[
         ...KIND_CARDS.map(({ id, card }) => ({ state: id, node: <BoardCard {...card} onOpen={args.onOpen} /> })),
+        { state: 'stuck, signed out', node: <BoardCard {...SIGNED_OUT} onOpen={args.onOpen} /> },
+        {
+          state: 'narrow',
+          node: (
+            <div style={{ width: 186 }}>
+              <BoardCard {...CHANGE_READY} local onOpen={args.onOpen} />
+            </div>
+          ),
+        },
         { state: 'done', node: <BoardCard {...args} status={TaskStatus.Done} word="Done" /> },
         { state: 'current', node: <BoardCard {...args} current /> },
         { state: 'from an automation', node: <BoardCard {...args} from="Nightly bump" /> },
         { state: 'started by a lead', node: <BoardCard {...args} startedBy="Prototype the browser" /> },
+        {
+          state: 'started by a lead, opens it',
+          node: <BoardCard {...args} startedBy="Prototype the browser" onOpenStartedBy={() => undefined} />,
+        },
         { state: 'nothing opens it', node: <BoardCard {...args} onOpen={undefined} /> },
         { state: 'hover', node: <BoardCard {...args} /> },
         { state: 'focus', node: <BoardCard {...args} /> },
@@ -653,5 +783,45 @@ export const StartedByALead: Story = {
   },
 }
 
-export const ErrandWaiting: Story = { args: { ...CHANGE_READY, errands: ['Waiting for #1187: checks at 9b50d2c.'] } }
-export const ErrandPaused: Story = { args: { ...CHANGE_READY, errands: ['Paused for #1187: changes requested.'] } }
+/** Where the parent's title opens the parent, apart from the card's own press: it is a link, not part of the card's button. */
+export const StartedByALeadOpensIt: Story = {
+  args: { ...StartedByALead.args, onOpen: fn(), onOpenStartedBy: fn() },
+  play: async ({ canvasElement, args }) => {
+    await userEvent.click(within(canvasElement).getByRole('button', { name: 'Prototype the browser' }))
+    await expect(args.onOpenStartedBy).toHaveBeenCalledOnce()
+    await expect(args.onOpen).not.toHaveBeenCalled()
+  },
+}
+
+/*
+ * A merge the person asked for, in a few plain words under its title (the runtime's errandWords): never an address, a
+ * repository or a branch, nor what the chip, its checks or the word say already, on one line.
+ */
+/** Its checks running, the merge asked for: it merges once they pass. */
+export const ErrandChecksRunning: Story = {
+  args: { ...CHANGE_CHECKS_RUNNING, errands: ['Merges once checks pass'] },
+  play: async ({ canvasElement }) => {
+    const line = within(canvasElement).getByText('Merges once checks pass')
+    await expect(line).toBeVisible()
+    await expect(canvasElement.textContent).not.toMatch(/https?:|AltharIDE/)
+  },
+}
+/** In the merge queue while its lead still works on it: the word says the step, the line the queue. */
+export const ErrandInMergeQueue: Story = { args: { ...CHANGE_RUNNING_PR, errands: ['In the merge queue'] } }
+/** In the merge queue, its steps done: the word says it, so the line says nothing. */
+export const ErrandInMergeQueueSaid: Story = { args: { ...CHANGE_IN_MERGE_QUEUE, errands: [] } }
+/** At work, a merge asked for once its checks pass. */
+export const ErrandWorking: Story = { args: { ...CHANGE_RUNNING_PR, errands: ['Merges once checks pass'] } }
+export const ErrandPaused: Story = { args: { ...CHANGE_READY, errands: ['Merge on hold'] } }
+
+/** A branch and no pull request: its lead's pictures above the branch chip, not instead of it. */
+export const BranchWithPictures: Story = {
+  args: CHANGE_BRANCH_PICTURES,
+  play: async ({ canvasElement }) => {
+    const card = within(canvasElement)
+    await expect(card.getByLabelText('Pictures')).toBeVisible()
+    await expect(card.getByText(/\+1126/)).toBeVisible()
+  },
+}
+export const PullRequestWithPictures: Story = { args: CHANGE_PR_PICTURES }
+export const RepliedWithPictures: Story = { args: CHANGE_REPLIED_PICTURES }

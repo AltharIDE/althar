@@ -115,11 +115,12 @@ describe('a sign-in a provider within the agent refused', () => {
     provider: 'opencode-go',
   })
 
-  it('names the provider and the model, with the agent’s own words under it, and signs in to that provider', async () => {
+  it('names the provider and the model, and signs in to that provider', async () => {
     const onSignIn = vi.fn()
     show(refused, undefined, onSignIn)
     expect(await screen.findByText('OpenCode Go refused the sign-in for DeepSeek V4.1 Flash.')).toBeTruthy()
-    expect(screen.getByText('Authentication required: provider authentication required')).toBeTruthy()
+    // Its words only restate the headline, so they aren't said again.
+    expect(screen.queryByText('Authentication required: provider authentication required')).toBeNull()
     expect(screen.queryByText(/is signed out/)).toBeNull()
     await userEvent.click(screen.getByRole('button', { name: 'Sign in to OpenCode Go' }))
     expect(onSignIn).toHaveBeenCalledWith('codex')
@@ -130,10 +131,10 @@ describe('a sign-in a provider within the agent refused', () => {
     expect(await screen.findByRole('button', { name: 'Sign in to opencode-go' })).toBeTruthy()
   })
 
-  it('says the agent is signed out where no provider is named, still with its words under it', async () => {
-    show({ ...refused, model: undefined, provider: undefined }, undefined, vi.fn())
+  it('says the agent is signed out where no provider is named, with its words under it where they say more', async () => {
+    show({ ...refused, model: undefined, provider: undefined, detail: 'The key for the work account was revoked.' }, undefined, vi.fn())
     expect(await screen.findByText('Codex is signed out.')).toBeTruthy()
-    expect(screen.getByText('Authentication required: provider authentication required')).toBeTruthy()
+    expect(screen.getByText('The key for the work account was revoked.')).toBeTruthy()
     expect(screen.getByRole('button', { name: 'Sign in again' })).toBeTruthy()
   })
 })
@@ -173,6 +174,19 @@ const buttonsOf = async (step: StuckStep) => {
   document.body.innerHTML = ''
   return names
 }
+
+describe('a lead waiting on the person', () => {
+  it('says it is waiting, with its question, and only takes the answer', async () => {
+    const onAnswer = show(stuck({ why: 'waiting_on_person', detail: 'Which ADRs should the compaction keep?' }))
+    expect(await screen.findByText('Waiting on you')).toBeTruthy()
+    expect(screen.getByText('Which ADRs should the compaction keep?')).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Tell the lead' })).toBeNull()
+    await userEvent.click(screen.getByRole('button', { name: 'Answer the lead' }))
+    await userEvent.type(screen.getByRole('textbox', { name: 'What should it do?' }), 'Keep the dozen current-state decisions.')
+    await userEvent.click(screen.getByRole('button', { name: 'Send the answer' }))
+    expect(onAnswer).toHaveBeenCalledWith('st1', { kind: 'tell', note: 'Keep the dozen current-state decisions.' })
+  })
+})
 
 describe('the ways on each card offers', () => {
   const report = 'Report this'
@@ -261,6 +275,46 @@ describe('the ways on each card offers', () => {
     ])
   })
 
+  it('says a sign-in that ended as such, not signed out, and offers its sign-in first all the same', async () => {
+    const onSignIn = vi.fn()
+    const { client } = fakeClient()
+    const step = stuck({ why: 'sign_in_ended', detail: 'Its sign-in has ended. Sign it in again in Settings, then try again.' })
+    withServices(
+      <StuckCall
+        request={request(step)}
+        stuck={step}
+        agents={agents}
+        agentName={() => 'Claude Code'}
+        onAnswer={vi.fn()}
+        onSignIn={onSignIn}
+      />,
+      client,
+    )
+    expect(await screen.findByText("Claude Code's sign-in has ended.")).toBeTruthy()
+    expect(screen.queryByText(/is signed out/)).toBeNull()
+    await userEvent.click(screen.getByRole('button', { name: 'Sign in again' }))
+    expect(onSignIn).toHaveBeenCalledWith('codex')
+  })
+
+  it('offers an agent that isn’t installed its install in Settings first, then trying again', async () => {
+    const onInstall = vi.fn()
+    const { client } = fakeClient()
+    const step = stuck({ why: 'not_installed', detail: "codex isn't installed, or isn't on this Mac's PATH." })
+    withServices(
+      <StuckCall request={request(step)} stuck={step} agents={agents} agentName={() => 'Codex'} onAnswer={vi.fn()} onInstall={onInstall} />,
+      client,
+    )
+    expect((await screen.findAllByRole('button')).map((button) => button.textContent)).toEqual([
+      'Install',
+      'Try again',
+      'Continue with another model',
+      'Abandon this step',
+    ])
+    expect(screen.getByText(/^Codex isn't installed, or isn't on .+'s PATH\.$/)).toBeTruthy()
+    await userEvent.click(screen.getByRole('button', { name: 'Install' }))
+    expect(onInstall).toHaveBeenCalledWith('codex')
+  })
+
   it('offers the pull request only trying again or going on without it', async () => {
     expect(await buttonsOf(stuck({ step: 'publish', why: 'failed_to_start', agentId: null }))).toEqual([
       'Try again',
@@ -283,6 +337,12 @@ describe('trying a step again', () => {
     expect(await screen.findByText(/Tried again 3 times/)).toBeTruthy()
     expect(screen.queryByText(/Tried again after/)).toBeNull()
     expect(screen.getByText('Implement, after 3 tries')).toBeTruthy()
+  })
+
+  it('says Althar handed a step without its report on before it asked, where it did', async () => {
+    show(stuck({ why: 'no_report', tried: ['handed_on'] }))
+    expect(await screen.findByText(/Reminded it to report/)).toBeTruthy()
+    expect(screen.getByText(/Handed it to another model/)).toBeTruthy()
   })
 
   it('runs a review again on its reviewer, or hands it to another', async () => {

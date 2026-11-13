@@ -37,7 +37,7 @@ const now = (key: string, digest: string | null, caption = `${key} · A view`): 
 
 const posted = (key: string, digest: string, head: string | null = 'abcdef1234'): PostedShot => ({
   key,
-  caption: `${key} · A view`,
+  caption: `${key.replace(':before', '')} · A view`,
   digest,
   url: `https://example.test/${digest}.png`,
   head,
@@ -177,7 +177,10 @@ describe('the comment', () => {
   it('shows each screenshot under its caption, as of its commit, marked and signed', () => {
     const body = commentBody({ shown: [posted('A1', 'a'), posted('A2', 'b')], earlier: [], head: 'abcdef1234' })
     assert.isTrue(body.startsWith(`${SCREENSHOTS_MARK}\n\n**Screenshots** as of \`abcdef1\``))
-    assert.include(body, 'A1 · A view\n\n<img src="https://example.test/a.png" alt="A1 · A view" width="720">')
+    assert.include(
+      body,
+      '#### A1 · A view\n\n<img src="https://example.test/a.png" alt="A1 · A view" width="720">\n\n---\n\n#### A2 · A view',
+    )
     assert.notInclude(body, '<details>')
     assert.isTrue(fromAlthar(body))
     assert.isTrue(isScreenshotsComment(body))
@@ -192,16 +195,69 @@ describe('the comment', () => {
     })
     assert.include(body, '**Screenshots**\n\n')
     assert.include(body, '<details>\n<summary>Earlier screenshots (2)</summary>')
-    assert.include(body, 'A1 · A view, at `1234567`')
-    assert.include(body, 'A2 · A view\n\n<img src="https://example.test/b.png"')
+    assert.include(body, '#### A1 · A view, at `1234567`')
+    assert.include(body, '---\n\n#### A2 · A view')
+    assert.include(body, '#### A2 · A view\n\n<img src="https://example.test/b.png"')
   })
 
   it('reads nothing in a caption as markup, nor lets it out of its attribute', () => {
     const shot = { ...posted('A1', 'a'), caption: 'A1 · <script>"x"</script> *bold* [link](y)\n# h', url: 'https://e.test/a.png?x="1"&y=2' }
     const body = commentBody({ shown: [shot], earlier: [], head: null })
-    assert.include(body, 'A1 · \\<script\\>"x"\\</script\\> \\*bold\\* \\[link\\](y) \\# h')
+    assert.include(body, '#### A1 · \\<script\\>"x"\\</script\\> \\*bold\\* \\[link\\](y) \\# h')
     assert.include(body, 'alt="A1 · &lt;script&gt;&quot;x&quot;&lt;/script&gt; *bold* [link](y) # h"')
     assert.include(body, 'src="https://e.test/a.png?x=&quot;1&quot;&amp;y=2"')
+  })
+
+  it('shows a view with a before as a Before | After table, side by side', () => {
+    const body = commentBody({ shown: [posted('A1:before', 'b'), posted('A1', 'a')], earlier: [], head: null })
+    assert.include(
+      body,
+      '#### A1 · A view\n\n| Before | After |\n| :---: | :---: |\n| <img src="https://example.test/b.png" alt="A1 · A view" width="356"> | <img src="https://example.test/a.png" alt="A1 · A view" width="356"> |',
+    )
+    assert.lengthOf(body.match(/<img /g) ?? [], 2)
+    assert.notInclude(body, '\n---\n')
+  })
+
+  it('keeps a pipe in a caption or address from splitting the table', () => {
+    const shot = { ...posted('A1', 'a'), caption: 'Page | details', url: 'https://e.test/a|b.png' }
+    const body = commentBody({ shown: [posted('A1:before', 'b'), shot], earlier: [], head: null })
+    const row = body.split('\n').find((line) => line.startsWith('| <img'))!
+    assert.lengthOf(
+      row.split('|').filter((cell) => cell.trim() !== ''),
+      2,
+    )
+    assert.include(row, 'alt="Page &#124; details"')
+  })
+
+  it('mixes tables and single pictures, a divider between each', () => {
+    const body = commentBody({
+      shown: [posted('A1', 'a'), posted('B1', 'c'), posted('B1:before', 'd'), posted('C1', 'e')],
+      earlier: [],
+      head: null,
+    })
+    const blocks = body.split('\n\n---\n\n')
+    assert.lengthOf(blocks, 3)
+    assert.include(blocks[0], '#### A1 · A view')
+    assert.include(blocks[1], '| Before | After |')
+    assert.include(blocks[1], 'd.png')
+    assert.include(blocks[2], '#### C1 · A view')
+  })
+
+  it('shows a pair missing one side as a single picture', () => {
+    const only = commentBody({ shown: [posted('A1', 'a')], earlier: [], head: null })
+    assert.notInclude(only, '| Before |')
+    const before = commentBody({ shown: [posted('A1:before', 'b')], earlier: [], head: null })
+    assert.notInclude(before, '| Before |')
+    assert.include(before, '#### A1 · A view · Before\n\n<img src="https://example.test/b.png"')
+  })
+
+  it('keeps a before apart from the view taken again in what it folds away', () => {
+    const body = commentBody({
+      shown: [posted('A1', 'z')],
+      earlier: [posted('A1:before', 'b', '1234567aaa')],
+      head: null,
+    })
+    assert.include(body, '#### A1 · A view · Before, at `1234567`')
   })
 
   it('tells reviewers how many changed, and where', () => {

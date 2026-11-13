@@ -47,6 +47,8 @@ can move between them.
 | Qwen Code | `qwen --acp --approval-mode default`, native | Alibaba Cloud's Coding Plan key or any provider's; no status command | Starts in `auto`, a model judging what is safe, unless told. Commands it reads as only reading run unasked. A repository's `.qwen/settings.json` can add allow rules |
 | Google Antigravity | `agy_acp_server.par`, Google's own ACP server, apart from the `agy` CLI; Althar downloads 1.3.0 from Google at the person's asking, pinned by sha256, as Orca does. No Windows build | A Google account, signed in only inside Althar over ACP's `authenticate`; no status command | Every role runs in `default`, held there, as `auto_edit` and `yolo` approve unasked; no read-only mode, so Althar's rules deny a reader's writes. The model's questions come as permission requests on `interaction_` tool calls and go to the person. Its sign-in is the home's own file, not the keychain. Google's terms may count a sign-in from another app a breach |
 
+An agent download has a deadline for the whole response, including its body: 30 seconds for release metadata and ten minutes for the archive. A timeout or interrupted install aborts its network request, removes the temporary download and frees the install reservation so the person can try again. A working installed version stays in place until its replacement has been checked.
+
 What each agent reports was read from the agents themselves on 28 September
 2026, with `scripts/probe.ts` in `@althar/provider-adapters`: claude-agent-acp
 0.84.0, codex-acp 2.0.0 and OpenCode 1.18.31. codex-acp 2.1.1, probed on
@@ -400,6 +402,22 @@ which stops as the new one takes over. A model of the same agent is set at
 once, for the next turn, since that starts nothing. A switch Althar makes, at
 a usage limit or a stall, starts the new agent with "carry on" as before.
 
+Starting a replacement fences the outgoing session from future input before
+the replacement connects. A failed startup returns that ownership to the same
+outgoing session, if it still owns the thread. Stop checks ownership again at
+prompt dispatch, so a turn stopped while preparing never reaches the agent.
+The durable delivery record precedes dispatch; a separate prompt receipt is
+positive evidence, and a missing receipt never makes a dispatched turn safe
+to replay.
+
+An explicit Stop records its intent before cancellation. Quitting records a
+different shutdown intent: on the next launch, never-dispatched queued input
+can resume on its previous agent, model and effort. Explicitly stopped,
+abandoned, archived and suspended work stays stopped. Workflow attempts own
+their recovery. A failed turn keeps all its input, including quiet news and
+notes, for retry or the account's usage reset; that waiting input holds no
+place among the agents at work.
+
 This will be tuned. Candidates include a fresh take that leaves out the
 previous agent's reasoning (research in 2026 suggests a stronger model does
 better without a weaker model's trajectory), starting again from base rather
@@ -459,9 +477,11 @@ in two layers:
    Today (`usageSources.ts` declares each pair's sources, or why it has none):
    - Claude Code: live, `claude-agent-acp` forwards the Agent SDK's
      `rate_limit_event` in `usage_update` `_meta["_claude/rateLimit"]`, and
-     drops it if it arrives before a turn's first usage figure
+     dropped an event that arrived before a turn's first usage figure
+     until 0.106.0
      ([#1127](https://github.com/agentclientprotocol/claude-agent-acp/issues/1127)),
-     so Althar carries a patch for that (`patches/`, on the pinned version).
+     where upstream sends it with the next update; Althar's patch (`patches/`)
+     no longer carries that.
      The event's own window has a use only near its limit; each window the
      CLI tracks is in its `unifiedWindows`, sent whenever one's rounded
      percentage moves. Where no session has said for a quarter of an hour, as
@@ -1226,8 +1246,11 @@ the rules keep for them does ([ADR-021](../decisions/tasks.md#questions-to-the-p
 
 As of 10 October 2026, Claude Code asks in a form. Codex offers
 request_user_input only in its Plan mode, which a lead isn't in, and OpenCode
-keeps its question tool off over ACP; both ask in their own words, and a lead
-that stops to wait is reminded to report its step (05).
+keeps its question tool off over ACP. A lead whose agent has no way to ask
+still needn't guess or report its step done: it calls `wait_for_person` with
+its question and ends its turn. Its step waits in Needs you, with the question,
+and the person's answer starts it again where it stopped (05). `finish_step`
+says not to be used for work that waits on the person.
 
 ## Approval boundary
 

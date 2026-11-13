@@ -18,11 +18,11 @@
   background: var(--paper);
   box-shadow: inset 0 0 0 1px var(--line-2);
 }
-/* the mark, printed faint in its corner */
+/* the mark, printed faint in its corner, low enough to stay clear of the words */
 .mark {
   position: absolute;
   right: 10px;
-  bottom: -6px;
+  bottom: -14px;
   opacity: 0.3;
   pointer-events: none;
 }
@@ -47,8 +47,14 @@
 .clamp {
   max-height: calc(13.5px * 1.62 * 3);
   overflow: hidden;
+}
+/* only where the three lines cut it short does the last of them fade */
+.cut {
   mask-image: linear-gradient(to bottom, #000 55%, transparent);
 }
-.more {
+.foot {
+  display: flex;
+  align-items: center;
+  min-height: 18px;
   margin-top: 4px;
 }

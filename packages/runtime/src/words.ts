@@ -2,11 +2,22 @@ import { basename } from 'node:path'
 
 import { MESSAGE_FILES } from '@althar/contracts'
 import { products } from '@althar/connectors'
+import { closingErrorLine, closingFailureOf, firstErrorLine, type StartFailure, startFailureOf } from '@althar/provider-adapters'
 import { Cause, Option } from 'effect'
 
 import { thisDevice } from './device'
+import { redact } from './diagnostics'
 import type { AccountRefused } from './Accounts'
-import type { CantMerge, DocumentRefused, FileRefused, ImageRefused, NoChangeToOpen, ProjectRefused, TaskRefused } from './errors'
+import type {
+  CantMerge,
+  DocumentRefused,
+  FileRefused,
+  ImageRefused,
+  NoChangeToOpen,
+  ProjectRefused,
+  ShipRefused,
+  TaskRefused,
+} from './errors'
 import { NOTE_LENGTH, type NoteRefused, NOTES_KEPT } from './notes'
 import { MESSAGE_IMAGES } from './pictures'
 import { pushDetailOf, secondsOf } from './pushFailure'
@@ -87,31 +98,96 @@ export const startedAfreshWords = (agent: string) => `${agent} had lost this con
 /** An agent whose account is signed out, as a step's call says it: the call itself offers signing in again. */
 export const signedOutWords = 'The agent is signed out. Sign it in again in Settings, then try again.'
 
+/** An agent whose sign-in was there and has ended: the same way on, signing in again, as a step's call offers. After "<agent> couldn't start.", so its agent isn't named again. */
+export const signInEndedWords = 'Its sign-in has ended. Sign it in again in Settings, then try again.'
+
+/** An agent that couldn't reach its servers: nothing to sign in, the connection to look at. */
+export const unreachableWords = (device: string) => `Its servers can't be reached. Check ${device}'s connection, then try again.`
+
+/** An agent that couldn't start where the folder it starts in is gone: deleted by hand, or a Local task's checkout moved. */
+export const folderGoneWords = (path: string) => `Its folder isn't there any more: ${path}.`
+
+/** An agent that isn't there to start, by the command Althar ran: installing it is the way on. */
+const notInstalledWords = (command: string) =>
+  `${command === '' ? 'The agent' : command} isn't installed, or isn't on ${thisDevice()}'s PATH.`
+const notInstalledLine = / isn't installed, or isn't on .+'s PATH\.$/
+
+/**
+ * The reason a step stopped where its agent couldn't start, as the step's call
+ * offers its way on: signing in again, for one signed out or whose sign-in
+ * ended; installing it, for one that isn't there. Undefined for any other words.
+ */
+export const stuckWhyOf = (words: string | null | undefined): 'signed_out' | 'sign_in_ended' | 'not_installed' | undefined =>
+  words === signedOutWords
+    ? 'signed_out'
+    : words === signInEndedWords
+      ? 'sign_in_ended'
+      : words != null && notInstalledLine.test(words)
+        ? 'not_installed'
+        : undefined
+
+/**
+ * Why an agent couldn't start or be reached, in one plain line, where it is a
+ * class the person can act on: not installed, not signed in, its sign-in
+ * ended, or the network in the way (DEV-196). Undefined for anything else,
+ * which the agent's own first error line says.
+ */
+const classWords = (failure: StartFailure | undefined, command: string): string | undefined => {
+  switch (failure) {
+    case 'not_installed':
+      return notInstalledWords(command)
+    case 'signed_out':
+      return signedOutWords
+    case 'sign_in_ended':
+      return signInEndedWords
+    case 'unreachable':
+      return unreachableWords(thisDevice())
+    case undefined:
+      return undefined
+  }
+}
+
+/** The class of one answer an agent gave, such as a spawn's error or a refused request, in words. */
+const classed = (said: string, command: string, authRequired = false): string | undefined =>
+  classWords(startFailureOf(said, authRequired), command)
+
+/**
+ * A line of an agent's own, as the window and the step's call show it and the
+ * record keeps it: a credential it carried taken out, as far as `redact` knows one.
+ */
+const own = (line: string): string => redact(line)
+
 /** What an agent's own error says, when the runtime can put it in words. */
 export const agentSaid = (error: unknown): string | undefined => {
   switch (tagOf(error)) {
     case 'StartTimedOut':
+    case 'ModelSwitchedOff':
       return text(error, 'message')
     case 'AgentStartFailed': {
       const command = text(error, 'command')
       const reason = text(error, 'reason')
       // The person's own command, where the sandbox cannot reach the device: say what to put right, never "isn't installed".
       if (command === 'flatpak-spawn' || /flatpak|org\.freedesktop\.Flatpak/i.test(reason)) return hostDenied
-      return /ENOENT/.test(reason)
-        ? `${command} isn't installed, or isn't on ${thisDevice()}'s PATH.`
-        : sentence(`${command} wouldn't start: ${reason}`)
+      if (/ENOENT/.test(reason)) return notInstalledWords(command)
+      return classed(reason, command) ?? sentence(`${command} wouldn't start: ${own(firstErrorLine(reason))}`)
     }
     case 'AgentExited': {
-      const said = lastLine(text(error, 'stderr'))
+      const stderr = text(error, 'stderr')
       // A bridge that started and then could not take the command out to the device says so; keep its sentence, not "the agent stopped".
-      if (/flatpak-spawn|org\.freedesktop\.Flatpak/i.test(said)) return hostDenied
-      if (olderOpenCode.test(said)) return olderOpenCodeWords
-      return said === '' ? 'The agent stopped.' : sentence(`The agent stopped: ${said}`)
+      if (/flatpak-spawn|org\.freedesktop\.Flatpak/i.test(lastLine(stderr))) return hostDenied
+      if (olderOpenCode.test(stderr)) return olderOpenCodeWords
+      // Its class from its last lines alone, and the line said from them: what it wrote further up, an MCP server's 401 or a
+      // hook's "command not found", is no reason it stopped.
+      const said = own(closingErrorLine(stderr))
+      return classWords(closingFailureOf(stderr), '') ?? (said === '' ? 'The agent stopped.' : sentence(`The agent stopped: ${said}`))
     }
     case 'AgentRequestFailed':
       switch (fieldOf(error, 'failure')) {
         case 'auth_required':
-          return signedOutWords
+          return classed(text(error, 'message'), '', true) ?? signedOutWords
+        // A connection that failed, said as what to look at; a server's own trouble stays in its words.
+        case 'transient':
+          return classed(text(error, 'message'), '') ?? sentence(own(firstErrorLine(text(error, 'message'))))
         case 'usage_limit': {
           const until = text(error, 'resetsAt')
           return until === '' ? "The agent's usage limit is reached." : `The agent's usage limit is reached until ${until}.`
@@ -121,7 +197,7 @@ export const agentSaid = (error: unknown): string | undefined => {
         case 'session_lost':
           return lostWords('The agent')
         default:
-          return sentence(text(error, 'message'))
+          return classed(text(error, 'message'), '') ?? sentence(own(firstErrorLine(text(error, 'message'))))
       }
     case 'OptionUnavailable':
       return `The agent doesn't offer ${text(error, 'value')}.`
@@ -132,6 +208,8 @@ export const agentSaid = (error: unknown): string | undefined => {
       return text(error, 'summary')
     // What the fast lane couldn't do, as it was written for the person.
     case 'FastLaneRefused':
+    case 'MergeReviewRefused':
+    case 'ChangeRefused':
       return text(error, 'message')
     default:
       return undefined
@@ -165,6 +243,9 @@ const kinds: Readonly<Record<string, string>> = {
   document: 'document',
   file: 'file',
   note: 'note',
+  preset: 'preset',
+  helper: 'helper',
+  change: 'change',
 }
 
 /** What went wrong, for the window: the error's tag as its reason, and words for the person. */
@@ -270,7 +351,7 @@ export const words = (
         // git said nothing: what Althar knows of how it ended.
         if (fieldOf(error, 'timedOut') === true) {
           const timeout = fieldOf(error, 'timeout')
-          return `${command} got no answer in ${secondsOf(typeof timeout === 'number' ? timeout : undefined)}, so Althar stopped it. Try again.`
+          return `${command} got no answer in ${secondsOf(typeof timeout === 'number' ? timeout : undefined)}, so Althar stopped waiting. Try again.`
         }
         const signal = text(error, 'signal')
         if (signal !== '') return `${command} was stopped (${signal}) before it was done. Try again.`
@@ -321,7 +402,7 @@ export const words = (
         if (why === 'unreachable')
           return `Althar couldn’t reach ${where}, so nothing was pushed. Check this computer’s connection, then try again.`
         if (why === 'unanswered')
-          return `${where} didn’t answer in time, so the push was stopped. git may have been waiting for a sign-in it couldn’t ask for here: sign git in to ${where} from a terminal, then try again.`
+          return `${where} didn’t answer in time, so Althar stopped waiting for the push. git may have been waiting for a sign-in it couldn’t ask for here: sign git in to ${where} from a terminal, then try again.`
         if (why === 'failed') return `Althar couldn’t push to ${where}. What git said is under Details.`
         // The person's own git pushed: signing git in is what puts it right, as connecting doesn't change how it pushes.
         if (host !== '')
@@ -340,10 +421,16 @@ export const words = (
       }
       case 'NoChangeToOpen':
         return (noChangeToOpen[text(error, 'why') as NoChangeToOpen['why']] ?? noChangeToOpen.working)(text(error, 'detail'))
+      case 'ShipRefused':
+        return shipRefused[text(error, 'why') as ShipRefused['why']] ?? shipRefused.working
       case 'LaunchRefused':
       case 'AttachRefused':
       case 'ReviewRefused':
       case 'FastLaneRefused':
+      case 'MergeReviewRefused':
+      case 'ChangeRefused':
+      // A tool's refusal, said as the agents' tools say it: Keep them together and Drop it, from the window, are those tools'.
+      case 'ToolRefused':
       case 'ScreenshotsRefused':
         return text(error, 'message')
       case 'AutomationRefused':
@@ -384,6 +471,7 @@ export const words = (
         return fieldOf(error, 'keyring') === true && reason !== '' ? reason : "Althar's runtime couldn't do that. Its log has the details."
       }
       case 'SkillRefused':
+      case 'ServerRefused':
         return sentence(text(error, 'message'))
       case 'CliSignedOut':
         return `${text(error, 'tool')} isn't signed in to ${text(error, 'host')} on ${thisDevice()}.`
@@ -485,6 +573,7 @@ const cantMerge = {
     `Your ${into} checkout has ${files.length === 1 ? 'an untracked file' : 'untracked files'} in the way: ${fewOf(files)}.`,
   moved: ({ detail }) => `${detail} moved meanwhile. Merge again.`,
   missing: ({ detail }) => `${thisDevice().replace(/^t/, 'T')} has no ${detail} branch to merge into.`,
+  nothing: ({ into }) => `Its work is already in ${into}: there's nothing to merge.`,
 } as const satisfies Record<CantMerge['why'], (said: MergeSaid) => string>
 
 /** Why a task has no pull request to open, by reason, with the files it concerns where it says them. */
@@ -499,6 +588,13 @@ const noChangeToOpen = {
     `It conflicts with the default branch${files === '' ? '' : `, in ${files}`}. Ask the lead to merge the default branch in, then open the pull request again.`,
 } as const satisfies Record<NoChangeToOpen['why'], (detail: string) => string>
 
+/** Why a task can't ship as asked, by reason (a task is a conversation plus parts, "A tweak waits for Ship"). */
+const shipRefused = {
+  held: 'These commits wait for Ship, which runs the review first.',
+  working: 'The task is at work. Ship once it’s done.',
+  nothing: 'Nothing waits to ship.',
+} as const satisfies Record<ShipRefused['why'], string>
+
 /** Why a task can't be abandoned, reopened or renamed, by reason. */
 const taskRefused = {
   merged: 'The task is merged.',
@@ -508,7 +604,6 @@ const taskRefused = {
   title_too_long: 'Keep the title to a few words.',
   folder_in_use: 'Something is running in the task’s folder. Stop it, then remove the folder.',
   folder_in_way: 'Something else is where the task’s folder goes. Move it away, then try again.',
-  review_done: 'Its review is done, so its reviewer can’t change.',
   no_lead: 'The task has no lead to change.',
 } as const satisfies Record<TaskRefused['why'], string>
 
@@ -542,7 +637,11 @@ const reviewIncomplete = {
 
 /** Errors the person caused or can put right; anything else is worth the log. */
 export const expected = new Set([
+  'ChangeRefused',
+  'MergeReviewRefused',
+  'ToolRefused',
   'SkillRefused',
+  'ServerRefused',
   'LaunchRefused',
   'AttachRefused',
   'ScreenshotsRefused',
@@ -621,6 +720,8 @@ const fileRefused = {
   unreadable: (name) => `Althar couldn't read ${name}.`,
   missing: (name) => `${name} isn't there any more. Add it again.`,
   nowhere: () => "The task's folder isn't ready yet.",
+  gone: () => 'The task’s worktree and branch are gone, so there is nowhere to put the file.',
+  in_way: () => 'Something else is where the task’s folder goes. Move it away, then send the file again.',
 } as const satisfies Record<FileRefused['reason'], (name: string) => string>
 
 /** Why a project can't be changed so, by reason. */

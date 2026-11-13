@@ -17,6 +17,8 @@ import { Projects } from '../src/Projects'
 import { Queries } from '../src/Queries'
 import * as Runtime from '../src/Runtime'
 import type { ToolAccess } from '../src/ToolServer'
+import { stepOf } from '../src/stepPick'
+import { ToolRefused } from '../src/toolErrors'
 import { whenWords } from '../src/Limits'
 import { bestFirst, describeModels, onPlanProvider, type Route, routeTo } from '../src/usableModels'
 import { callTool, repository, runtime, until } from './support'
@@ -212,6 +214,18 @@ describe('the models as the coordinator reads them', () => {
     )
   })
 
+  it('says how often a way to a model ended steps without their report this week, and through which agent', () => {
+    const go = route({ agentId: 'opencode', agentName: 'OpenCode', model: 'opencode-go/deepseek-v4.1-flash', plan: true, missed: 3 })
+    const zen = route({ agentId: 'codex', agentName: 'Codex', model: 'deepseek-v4.1-flash' })
+    const said = describeModels([{ name: 'DeepSeek V4.1 Flash', maker: 'DeepSeek', fact: null, routes: [go, zen] }], 0)
+    assert.include(said, 'Where a model ended steps without their report this week')
+    assert.include(said, '; through OpenCode, ended 3 steps without a report this week')
+    assert.notInclude(said, 'through Codex')
+    const alone = describeModels([{ name: 'GLM-5.3', maker: 'Z.ai', fact: null, routes: [route({ model: 'glm-5.3', missed: 1 })] }], 0)
+    assert.include(alone, '- GLM-5.3: no scores known; per use; no effort to set; ended a step without a report this week')
+    assert.notInclude(describeModels([{ name: 'GLM-5.3', maker: 'Z.ai', fact: null, routes: [zen] }], 0), 'without their report')
+  })
+
   it('takes a model the way the agent named goes, else the best way, and nothing where it has none', () => {
     const usable = [
       {
@@ -390,6 +404,29 @@ const cardOf = (projectId: string, slug: string) => Effect.map(cardsOf(projectId
 
 describe('every tool that names an agent or a model', () => {
   const unknown = /^Fake codex doesn't offer GPT-9\. It offers: Small \(small\), Large \(large\)\./
+
+  it.live('refuses an unverified model while the catalog is empty, rather than keeping a coordinator-invented id', () =>
+    Effect.gen(function* () {
+      const { projectId } = yield* opened
+      const models = yield* Models
+      const catalog = yield* models.catalog
+      for (const probing of [true, false]) {
+        const unavailable = Models.of({
+          ...models,
+          catalog: Effect.succeed(catalog.map((agent) => ({ ...agent, models: [], probing }))),
+        })
+        const refused = yield* Effect.flip(
+          stepOf(projectId, { agent: 'claude-code', model: 'claude-fable-5-1' }).pipe(Effect.provideService(Models, unavailable)),
+        )
+        assert.instanceOf(refused, ToolRefused)
+        assert.match(refused.message, /available models aren't known/)
+        assert.deepStrictEqual(yield* stepOf(projectId, { agent: 'claude-code' }).pipe(Effect.provideService(Models, unavailable)), {
+          agentId: 'claude-code',
+          model: null,
+        })
+      }
+    }).pipe(Effect.provide(runtime())),
+  )
 
   it.live('takes a model by its name or its id, and an agent by its name or its id, and refuses an unknown one at the call', () =>
     Effect.gen(function* () {

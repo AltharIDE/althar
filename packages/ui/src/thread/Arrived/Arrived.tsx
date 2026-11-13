@@ -25,12 +25,16 @@ export interface ArrivedProps {
   /** Where: PR 1206. */
   where: string
   at?: string
+  /** How many like it this one stands for, where it folds several: 2 shows 2×. */
+  count?: number
   /** The service it came from. Without one, a generic glyph. */
   mark?: Brand
   children?: ReactNode
   /** A quiet line under it: what became of it, and what the person can do. */
   foot?: ReactNode
   text?: Partial<ArrivedText>
+  /** The id of the item it shows, which a place in the conversation is found by. */
+  'data-item'?: string
 }
 
 /**
@@ -38,11 +42,11 @@ export interface ArrivedProps {
  * its pull request, a change to its issue. Written by someone else, so it
  * reads as a quoted note, not as either side of the conversation.
  */
-export function Arrived({ from, verb, where, at, mark, children, foot, text }: ArrivedProps) {
+export function Arrived({ from, verb, where, at, count, mark, children, foot, text, ...rest }: ArrivedProps) {
   const t = { ...arrivedText, ...text }
   const did = verb ?? t.verb
   return (
-    <article className={s.arrived} aria-label={t.label(from, did, where)}>
+    <article className={s.arrived} aria-label={t.label(from, did, where)} {...rest}>
       <div className={s.head}>
         <span className={s.glyph}>{mark ? <BrandMark brand={mark} size={12} /> : <Icon name="globe" size={12} />}</span>
         {from && <b>{from}</b>}
@@ -50,6 +54,7 @@ export function Arrived({ from, verb, where, at, mark, children, foot, text }: A
           {did} {where}
         </span>
         {at && <span className={s.at}>{at}</span>}
+        {count !== undefined && count > 1 && <span className={s.at}>{count}×</span>}
       </div>
       {Children.toArray(children).length > 0 && <blockquote className={s.body}>{children}</blockquote>}
       {foot && <div className={s.foot}>{foot}</div>}

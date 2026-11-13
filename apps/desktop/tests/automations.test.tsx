@@ -200,6 +200,26 @@ describe('the Automations tab', () => {
 })
 
 describe('an automation’s page', () => {
+  it('opens the blocked run directly, keeping its future configuration separate from the task that needs attention', async () => {
+    const onTask = vi.fn()
+    const run = automationRun({ state: 'running' })
+    const waiting = { ...run, task: { ...run.task!, needsYou: true } }
+    const { client } = fakeClient({
+      getAutomation: vi.fn(async () => ({
+        cursor: 6,
+        automation: automationView({ latest: [waiting], runs: [waiting] }),
+      })),
+    })
+    withServices(<Room opening="auto1" onTask={onTask} />, client)
+    expect(await screen.findByText('Needs you', { exact: true })).toBeTruthy()
+    expect(screen.getByText('Changes apply to future runs.')).toBeTruthy()
+    expect(screen.queryByText('It paused itself.')).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Run now' })).toBeNull()
+    await userEvent.click(screen.getByRole('button', { name: 'Open run' }))
+    expect(onTask).toHaveBeenCalledWith(waiting.task.threadId)
+    expect(client.runAutomationNow).not.toHaveBeenCalled()
+  })
+
   it('says where it stands, runs it now, turns it off and on, and opens a run’s task', async () => {
     const onTask = vi.fn()
     const { client } = fakeClient({
@@ -414,7 +434,7 @@ describe('an automation’s page', () => {
     expect(await screen.findByText('Off until you turn it on')).toBeTruthy()
     expect(screen.getByText('No runs yet.')).toBeTruthy()
     // It runs next as its schedule says, though the runtime hasn't said.
-    expect(screen.getByText('next tomorrow at 9:00')).toBeTruthy()
+    expect(screen.getByText('next tomorrow')).toBeTruthy()
     await userEvent.click(screen.getByRole('button', { name: 'Try it once now' }))
     expect(client.runAutomationNow).toHaveBeenCalledWith('auto1')
     await userEvent.click(screen.getByRole('button', { name: 'Turn on' }))
@@ -470,8 +490,9 @@ describe('a new automation', () => {
     // Each field says what it lacks under itself, and the first of them takes focus.
     const name = screen.getByRole('textbox', { name: 'Name' })
     await userEvent.click(screen.getByRole('button', { name: 'Turn on' }))
-    const nameError = await screen.findByText('Give it a name first')
-    const promptError = screen.getByText('Say what each run should do first.')
+    // The problem under each field, as a whole: its words sit beside its mark.
+    const nameError = (await screen.findByText('Give it a name first')).closest('[role="alert"]') as HTMLElement
+    const promptError = screen.getByText('Say what each run should do first.').closest('[role="alert"]') as HTMLElement
     expect(name.getAttribute('aria-invalid')).toBe('true')
     expect(name.getAttribute('aria-describedby')).toBe(nameError.id)
     expect(prompt.getAttribute('aria-invalid')).toBe('true')

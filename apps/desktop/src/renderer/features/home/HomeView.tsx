@@ -1,17 +1,17 @@
 import { type DragEvent, useEffect, useState } from 'react'
 
 import type { HomeCall, HomeEvent, HomeTask } from '@althar/contracts'
-import { type IconName, modKey, PermissionAnswers, type ProjectRef, TaskStatus } from '@althar/ui'
+import { type IconName, modKey, PermissionAnswers, type ProjectRef, Problem } from '@althar/ui'
 import { Home, type HomeEvent as HomeLine, type HomeNeed, type HomeProject, type HomeRun } from '@althar/ui/screens'
 
+import { taskStatusOf } from '../../shared/taskStatus'
 import { queuedOfWords } from '../../shared/agents'
 import { permissionOf, type Reply, replyOf } from '../../shared/permissions'
 import type { DoneHere } from '../../shared/standing'
 import { ago, clock, useNow } from '../../shared/time'
 import { useNewTab } from '../tabs/TabsFrame'
 import type { StartModel } from '../start/useStart'
-import { readyOf } from '../../shared/calls'
-import { asMerging } from '../../data/merges'
+import { yoursByProject } from '../board/lanes'
 import { homeGlanceOf, refOf } from './glance'
 import s from './Home.module.css'
 import type { HomeModel } from './useHome'
@@ -54,10 +54,6 @@ export const text = {
 }
 
 export { refOf }
-
-/** How a task that isn't ready stands: running, waiting on a call, or stopped with no agent on it. */
-const statusOf = (phase: HomeTask['phase']) =>
-  phase === 'waiting' ? TaskStatus.Yours : phase === 'stopped' ? TaskStatus.Stopped : TaskStatus.Running
 
 /** The first line of what a step reported. */
 const firstLine = (summary: string) => summary.split('\n')[0] ?? ''
@@ -105,6 +101,7 @@ export function HomeView({
   onProject,
   onTalk,
   onTask,
+  onSignIn,
 }: {
   model: HomeModel
   start: StartModel
@@ -112,6 +109,8 @@ export function HomeView({
   /** Open a project's conversation with its coordinator. */
   onTalk: (projectId: string) => void
   onTask: (threadId: string) => void
+  /** Opens Settings at an agent's sign-in, started: a stuck step's line whose agent is signed out offers it. */
+  onSignIn?: (agentId: string) => void
 }) {
   const home = model.home
   const now = useNow(true)
@@ -124,11 +123,9 @@ export function HomeView({
   const name = (id: string | null) => agents.find((agent) => agent.id === id)?.name ?? id ?? ''
 
   const projects = home?.projects ?? []
-  // One being merged is in progress, not waiting on the person, until it settles.
-  const tasks = asMerging(home?.tasks ?? [], model.merging)
   const refs = new Map(projects.map((project) => [project.id, refOf(project)]))
-  // Only tasks with an agent on them, or held for a reset, are running; one kept for later waits on its board.
-  const { calls, working, waiting, needs } = homeGlanceOf(home, {
+  // Each task where its board puts it: one being merged is in progress until it settles; one kept for later waits on its board.
+  const { working, waiting, needs } = homeGlanceOf(home, {
     answered,
     merging: model.merging,
     agentName: name,
@@ -147,13 +144,16 @@ export function HomeView({
 
   // A ready change's next thing, done from its line when it is the person's own (merge, push), at once, at the heads they saw; the lead's it leaves to the task.
   const doNext = (task: HomeTask, next: DoneHere) => {
+    if (next.kind === 'ship') return void model.ship(task.taskId)
+    if (next.kind === 'fix_after_merge') return void model.fixAfterMerge(task.taskId)
     const change = task.change
     if (change === null) return
     return void (next.kind === 'merge'
       ? model.merge(task.taskId, change.head ?? '', change.url)
       : model.push(task.taskId, change.localHead ?? '', change.url))
   }
-  const doing = (taskId: string) => model.merging.has(taskId) || model.pushing.has(taskId)
+  const doing = (taskId: string) =>
+    model.merging.has(taskId) || model.pushing.has(taskId) || model.shipping.has(taskId) || model.answeringAfterMerge.has(taskId)
 
   // What waits, each gathered under its project; a call answered here stays its line, quiet, until the person leaves.
   const waits: ReadonlyArray<HomeNeed> = needs.map((need) => ({
@@ -170,14 +170,14 @@ export function HomeView({
       onNext: doNext,
       doing,
       failed: (taskId) => model.failed[taskId],
+      ...(onSignIn === undefined ? {} : { onSignIn }),
     }),
   }))
 
   const runs: ReadonlyArray<HomeRun> = working.flatMap((task) => {
     const project = refs.get(task.projectId)
-    // Waiting for a free agent, or held for a reset, it stands still though its phase is running.
-    const status =
-      task.queued !== null ? TaskStatus.Queued : task.waits !== null || task.reconnects != null ? TaskStatus.Paused : statusOf(task.phase)
+    // Where it stands, as its card on the board and its header say it: held, waiting its turn, or by its phase.
+    const status = taskStatusOf(task)
     return project === undefined ? [] : [{ id: task.taskId, project, title: task.title, status }]
   })
   // What waiting tasks wait for is this computer's, the same for each: its project says it, with how many wait there.
@@ -188,13 +188,13 @@ export function HomeView({
     return line === undefined ? [] : [{ ...line, id: event.id }]
   })
 
+  // What waits in each, as its board and its tab count it.
+  const yours = home === null ? new Map<string, number>() : yoursByProject(home, model.merging)
   const list: ReadonlyArray<HomeProject> = projects.map((project) => {
     return {
       id: project.id,
       project: refOf(project),
-      yours:
-        calls.filter((call) => call.projectId === project.id).length +
-        readyOf(tasks).filter((task) => task.projectId === project.id).length,
+      yours: yours.get(project.id) ?? 0,
       note: project.lastWorkAt === null ? text.noWork : text.lastWork(ago(project.lastWorkAt, new Date(now))),
       fresh: project.lastWorkAt === null,
     }
@@ -212,11 +212,7 @@ export function HomeView({
 
   return (
     <div className={s.window} {...drop}>
-      {error !== null && (
-        <p className={s.failure} role="alert">
-          {error}
-        </p>
-      )}
+      {error !== null && <Problem className={s.failure}>{error}</Problem>}
       <div className={s.body}>
         {/* Unread is not empty: nothing shows until the home is read. */}
         {home !== null && (

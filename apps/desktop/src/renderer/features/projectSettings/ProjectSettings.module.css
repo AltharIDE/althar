@@ -1,8 +1,6 @@
 /* why a switch didn't hold, under what it does */
 .failedLine {
-  display: block;
   margin-top: 3px;
-  color: var(--danger);
 }
 
 /* a line on the section as a whole, after its parts: lighter than anything in them */
@@ -10,7 +8,7 @@
   margin: 0;
   font-size: 11.5px;
   line-height: 1.45;
-  color: var(--t-4);
+  color: var(--t-3);
 }
 
 /* a row's icon, quieter than its name */
@@ -30,4 +28,12 @@
 .branch {
   min-width: 140px;
   max-width: 240px;
+}
+
+/* Under the pull request a finished task would open: why it stays on its branch, where it does. */
+.finishNote {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--t-3);
 }
