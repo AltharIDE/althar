@@ -34,7 +34,7 @@ import {
   runnables,
   snapshot,
 } from './fixtures'
-import { useSettingsOf, withServices } from './render'
+import { pickLayout, useSettingsOf, withServices } from './render'
 
 /*
  * What reaches outside, in the window: connecting code hosts and trackers,
@@ -1464,7 +1464,7 @@ describe('a project, reaching outside', () => {
     await userEvent.click(dialog.getByRole('button', { name: 'Done' }))
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
     // From the board too: the settings are a view of their own, whichever the project was on.
-    await userEvent.click(screen.getByRole('radio', { name: 'Board' }))
+    await pickLayout('Conversation')
     await connectFromSettings()
     expect(await screen.findByRole('dialog', { name: 'GitHub' })).toBeTruthy()
   })

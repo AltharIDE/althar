@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { expect, test } from '@playwright/test'
 
 import { repository } from '../tests/repository'
-import { launch, openFirstProject, planTask, say, toBoard } from './support'
+import { launch, openFirstProject, planTask, say, toBoard, showPanes } from './support'
 
 /*
  * A board of every kind of task, in a real window with the fake agent
@@ -27,7 +27,7 @@ test('shows each kind of task on the board, with nothing to press, and finds one
   try {
     await openFirstProject(electronApp, page, repository(projects))
     await expect(page.getByRole('heading', { name: 'meridian', level: 1 })).toBeVisible()
-    await page.getByRole('radio', { name: 'Home' }).click()
+    await showPanes(page, { conversation: true, board: true })
     const work = page.getByRole('region', { name: 'The project’s work' })
 
     // A change, done and ready to accept, on its branch: no pull request without a host.

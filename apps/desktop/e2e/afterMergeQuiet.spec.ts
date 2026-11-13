@@ -6,7 +6,7 @@ import { join } from 'node:path'
 import { expect, test } from '@playwright/test'
 
 import { repository } from '../tests/repository'
-import { connectGitHub, launch, openFirstProject, say, shown, toConversation } from './support'
+import { connectGitHub, launch, openFirstProject, say, showPanes, shown, toConversation } from './support'
 
 /*
  * A small change's review after it merges, under Major only (the default), in a real window: its reviewer reports a minor
@@ -83,7 +83,7 @@ test('a small change’s review after its merge with only minor findings ends as
 
     // On the board it waits on nobody: settled, not in Needs you.
     await page.getByRole('button', { name: 'Back to meridian' }).click()
-    await page.getByRole('radio', { name: /^Board/ }).click()
+    await showPanes(page, { conversation: false, board: true })
     const work = page.getByRole('region', { name: 'The project’s work' })
     await expect(work.getByText('PR #1 merged')).toBeVisible()
     await expect(work.getByText(/Review found/)).toHaveCount(0)

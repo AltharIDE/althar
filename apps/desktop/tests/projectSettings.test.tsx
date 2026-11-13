@@ -33,7 +33,7 @@ import {
   repositories,
   runnables,
 } from './fixtures'
-import { servicesFor } from './render'
+import { pickLayout, servicesFor } from './render'
 
 /*
  * A project's settings, a view of the project from Settings in the window's
@@ -167,7 +167,7 @@ describe('a project’s settings', () => {
     ])
     expect(side.getByRole('button', { name: 'General' }).getAttribute('aria-current')).toBe('page')
     // Back to its work, the conversation is where it was.
-    await userEvent.click((await views()).getByRole('radio', { name: 'Conversation' }))
+    await pickLayout('Board')
     expect(screen.queryByRole('navigation', { name: 'Project settings' })).toBeNull()
   })
 
@@ -953,8 +953,8 @@ describe('a project’s trackers, in its settings', () => {
     it('shows the bound tracker in the project’s header, opening its workspace', async () => {
       const opened = vi.spyOn(window, 'open').mockReturnValue(null)
       windowAt('/projects/p1', withBoard([], fnt, binding))
-      await userEvent.click(await screen.findByRole('button', { name: 'Made of' }))
-      const made = await screen.findByRole('menu', { name: 'Made of' })
+      await userEvent.click(await screen.findByRole('button', { name: 'More' }))
+      const made = await screen.findByRole('menu', { name: 'More' })
       await userEvent.click(within(made).getByRole('menuitem', { name: 'Linear issues' }))
       expect(opened).toHaveBeenCalledWith('https://linear.app/fnt', '_blank')
       opened.mockRestore()

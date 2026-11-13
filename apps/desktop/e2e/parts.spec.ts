@@ -6,7 +6,7 @@ import { join } from 'node:path'
 import { expect, type Locator, type Page, test } from '@playwright/test'
 
 import { repository } from '../tests/repository'
-import { connectGitHub, launch, openFirstProject, say, shown, still, toConversation } from './support'
+import { connectGitHub, launch, openFirstProject, say, showPanes, shown, still, toConversation } from './support'
 
 /*
  * Every part of a task changes either way, just by the person telling its lead (a task is a conversation plus parts; the
@@ -154,6 +154,7 @@ test('a chat becomes a change on the person’s word, ships as one, and becomes 
   const { electronApp, page } = await setup()
   try {
     await page.getByRole('radio', { name: 'Home' }).click()
+    await showPanes(page, { conversation: true, board: true })
     const work = page.getByRole('region', { name: 'The project’s work' })
     await say(page, 'Sketch the refunds export [coordinator:start] [lead:finish] [lead:edit] [review:pass]')
     await expect(work.getByText('Finished', { exact: true })).toBeVisible()

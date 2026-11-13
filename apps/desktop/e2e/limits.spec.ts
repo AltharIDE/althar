@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { expect, type Page, test } from '@playwright/test'
 
 import { repository } from '../tests/repository'
-import { backToWork, launch, openFirstProject, planTask, projectSettings, shown } from './support'
+import { backToWork, launch, openFirstProject, planTask, projectSettings, shown, showPanes } from './support'
 
 /*
  * An agent out of usage, as the person sees it. The fake agents are out as
@@ -97,7 +97,7 @@ test('waits for the reset where no other agent is free, and says so on its card,
     const held = /Codex is out of usage until /
     await expect(page.getByRole('region', { name: 'Conversation' }).getByText(held)).toBeVisible()
     await page.screenshot({ path: 'test-results/limit-waits-card.png', animations: 'disabled' })
-    await page.getByRole('radio', { name: /^Board/ }).click()
+    await showPanes(page, { conversation: false, board: true })
     await expect(page.getByRole('region', { name: 'The project’s work' }).getByText(held)).toBeVisible()
     await page.screenshot({ path: 'test-results/limit-waits-board.png', animations: 'disabled' })
     await page.getByRole('button', { name: 'Add a retry to the checkout call' }).click()
