@@ -745,7 +745,9 @@ export const handlers = Api.toLayer(
                       ? Stream.make({ _tag: 'Launches', projectId: event.projectId, launches: event.launches })
                       : event._tag === 'PlanUsage'
                         ? Stream.make({ _tag: 'PlanUsage', usage: event.usage })
-                        : Stream.empty,
+                        : event._tag === 'Drafting'
+                          ? Stream.make({ _tag: 'Drafting', threadId: event.threadId, drafts: event.drafts })
+                          : Stream.empty,
           ),
         ),
       ),

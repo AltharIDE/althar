@@ -934,7 +934,12 @@ const playRole = async (
     readonly again?: boolean
   }) => Promise<void> = () => Promise.resolve(),
   /** What it says on the way, and a step of work between, each in the thread as the turn goes. */
-  aloud: { readonly say: (said: string) => Promise<void>; readonly step: (title: string) => Promise<void> } = {
+  aloud: {
+    readonly say: (said: string) => Promise<void>
+    readonly step: (title: string) => Promise<void>
+    /** A session update of its own, such as a tool call it streams. */
+    readonly update?: (update: Record<string, unknown>) => Promise<void>
+  } = {
     say: () => Promise.resolve(),
     step: () => Promise.resolve(),
   },
@@ -963,6 +968,44 @@ const playRole = async (
       const result = await client.callTool({ name, arguments: args })
       const content = Array.isArray(result.content) ? result.content : []
       return content.map((part) => (typeof part === 'object' && part !== null && 'text' in part ? String(part.text) : '')).join('')
+    }
+    /*
+     * One of Althar's tools called as Claude Code calls it, its input streamed: the call first with nothing in it, then its
+     * input again each time a field is written, then its answer. `[coordinator:slowly]` writes each field over a while, as a
+     * model does, so the card drafting shows; otherwise it goes quickly.
+     */
+    let streamed = 0
+    const callStreamed = async (name: string, args: Record<string, unknown>) => {
+      const notify = aloud.update
+      if (notify === undefined) return await call(name, args)
+      const toolCallId = `althar-${name}-${++streamed}`
+      const meta = { claudeCode: { toolName: `mcp__althar__${name}` } }
+      const pace = text.includes('[coordinator:slowly]') ? 1200 : 15
+      await notify({
+        sessionUpdate: 'tool_call',
+        toolCallId,
+        title: `mcp__althar__${name}`,
+        kind: 'other',
+        status: 'pending',
+        rawInput: {},
+        _meta: meta,
+      })
+      const fields = Object.entries(args)
+      for (let i = 1; i < fields.length; i++) {
+        await pause(pace)
+        await notify({ sessionUpdate: 'tool_call_update', toolCallId, rawInput: Object.fromEntries(fields.slice(0, i)), _meta: meta })
+      }
+      await pause(pace)
+      await notify({ sessionUpdate: 'tool_call_update', toolCallId, status: 'in_progress', rawInput: args, _meta: meta })
+      const answer = await call(name, args)
+      await notify({
+        sessionUpdate: 'tool_call_update',
+        toolCallId,
+        status: 'completed',
+        content: [{ type: 'content', content: { type: 'text', text: answer } }],
+        _meta: meta,
+      })
+      return answer
     }
     // A lead's helper (ADR-087) has no step to finish: it does what its brief's markers say in its folder, slowly
     // (`[lead:slowly]`), writing a file (`[lead:write]`) or committing one (`[lead:commit]`), and its last words are its result.
@@ -1486,11 +1529,11 @@ const playRole = async (
         ...(link === undefined ? {} : { issue: link }),
       }
       // In a project of several repositories, asked which it changes, it names every one it is told of.
-      const first = await call('draft_task', draft)
+      const first = await callStreamed('draft_task', draft)
       const which = /as repositories: (.+)\.$/.exec(first)?.[1]
-      const drafted = which === undefined ? first : await call('draft_task', { ...draft, repositories: which.split(', ') })
+      const drafted = which === undefined ? first : await callStreamed('draft_task', { ...draft, repositories: which.split(', ') })
       const slug = /Drafted ([^\s,.]+)/.exec(drafted)?.[1] ?? ''
-      const planned = await call('propose_plan', {
+      const planned = await callStreamed('propose_plan', {
         task: slug,
         lead: {
           agent: 'claude-code',
@@ -1848,6 +1891,7 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
           await update({ sessionUpdate: 'tool_call', toolCallId, title, kind: 'read', status: 'in_progress' })
           await update({ sessionUpdate: 'tool_call_update', toolCallId, status: 'completed' })
         },
+        update: (value: Record<string, unknown>) => update(value as unknown as acp.SessionUpdate),
       }
       const ended = (usage?: acp.Usage): acp.PromptResponse => ({ stopReason: 'end_turn', ...(usage === undefined ? {} : { usage }) })
       // Signed out, as its account no longer is, where the prompt says `[signed-out]`.

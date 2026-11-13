@@ -85,6 +85,17 @@ import { addItem, transcript } from './threads'
 import { hearsOf, personsWords, quoted, threadsSaying } from './TaskActions'
 import { ToolRefused, ToolServer, type Tool, type ToolAccess } from './ToolServer'
 import { describe as describePreset, presetsIn } from './presets'
+import {
+  callBegan,
+  callEnded,
+  drafted as draftMade,
+  type Drafts,
+  inputWritten,
+  noDrafts,
+  resolved,
+  turnEnded,
+  type WrittenPick,
+} from './drafts'
 import { stepOf, StepPick } from './stepPick'
 import { describeModels, usableModels } from './usableModels'
 
@@ -1059,6 +1070,78 @@ export class Coordinator extends Context.Service<
         }).pipe(Effect.catchCause((cause) => Effect.logWarning('Could not tell the coordinator its draft has no plan', cause)))
       yield* Effect.forkScoped(Stream.runForEach(yield* live.subscribe, (event) => provide(unplannedNews(event))))
 
+      /*
+       * The tasks each coordinator is drafting now, as far as it has written them (`drafts.ts`), told to the window each
+       * time they change, so a task's card shows from the moment its draft begins. Each change reads what is there now, so
+       * the draft_task handler and the calls' events, on fibers of their own, never undo each other's.
+       */
+      const draftsBy = new Map<string, Drafts>()
+      const coordinatorProjects = new Map<string, string | null>()
+      const coordinatorProject = (threadId: string) =>
+        Effect.gen(function* () {
+          const known = coordinatorProjects.get(threadId)
+          if (known !== undefined) return known
+          const sql = yield* SqlClient.SqlClient
+          const [row] = yield* sql<{ projectId: string }>`SELECT project_id FROM threads WHERE id = ${threadId} AND kind = 'coordinator'`
+          const projectId = row?.projectId ?? null
+          coordinatorProjects.set(threadId, projectId)
+          return projectId
+        })
+      const redraft = (threadId: string, next: (drafts: Drafts) => Drafts) =>
+        Effect.gen(function* () {
+          const before = draftsBy.get(threadId) ?? noDrafts
+          const after = next(before)
+          if (after.drafts.length === 0 && after.calls.size === 0) draftsBy.delete(threadId)
+          else draftsBy.set(threadId, after)
+          if (after.drafts !== before.drafts) yield* live.publish({ _tag: 'Drafting', threadId, drafts: after.drafts })
+        })
+      const followDrafts = (event: LiveEvent) =>
+        Effect.gen(function* () {
+          if (event._tag === 'TurnEnded') {
+            if (draftsBy.has(event.threadId)) yield* redraft(event.threadId, turnEnded)
+            return
+          }
+          if (event._tag !== 'Agent') return
+          const call = event.event
+          if (call._tag !== 'ToolCall' && call._tag !== 'ToolCallUpdate') return
+          const { threadId } = event
+          if (call._tag === 'ToolCall') {
+            const tool = call.althar
+            if (tool !== 'draft_task' && tool !== 'propose_plan') return
+            if ((yield* coordinatorProject(threadId)) === null) return
+            yield* redraft(threadId, (drafts) => callBegan(drafts, call.toolCallId, tool))
+          } else if (draftsBy.get(threadId)?.calls.has(call.toolCallId) !== true) return
+          const projectId = yield* coordinatorProject(threadId)
+          if (projectId === null) return
+          if (call.rawInput !== undefined) {
+            let picks: { lead?: WrittenPick; review?: WrittenPick } = {}
+            yield* redraft(threadId, (drafts) => {
+              const written = inputWritten(drafts, call.toolCallId, call.rawInput)
+              picks = written
+              return written.state
+            })
+            // Who does each step, once written: as the plan will name them, each once.
+            for (const step of ['lead', 'review'] as const) {
+              const pick = picks[step]
+              if (pick === undefined) continue
+              const key = draftsBy.get(threadId)?.calls.get(call.toolCallId)?.draft
+              if (draftsBy.get(threadId)?.drafts.find((draft) => draft.key === key)?.[step] != null) continue
+              const who = yield* Effect.option(stepOf(projectId, pick, undefined))
+              if (Option.isSome(who))
+                yield* redraft(threadId, (drafts) =>
+                  resolved(drafts, call.toolCallId, step, {
+                    agentId: who.value.agentId,
+                    model: who.value.model ?? null,
+                    effort: who.value.effort ?? null,
+                  }),
+                )
+            }
+          }
+          if (call.status === 'completed' || call.status === 'failed')
+            yield* redraft(threadId, (drafts) => callEnded(drafts, call.toolCallId, call.status === 'completed'))
+        }).pipe(Effect.catchCause((cause) => Effect.logWarning('Could not follow a task as it was drafted', cause)))
+      yield* Effect.forkScoped(Stream.runForEach(yield* live.subscribe, (event) => provide(followDrafts(event))))
+
       /**
        * The person asked, in the words that started this turn, for a pull request to be reviewed: that is review_pull_request's,
        * whose lead reads it read only and drafts a review the person posts from its card. A task of work, started or drafted
@@ -1080,8 +1163,12 @@ export class Coordinator extends Context.Service<
           // Work on a pull request names it; asked only to review one, the person gets a review task.
           if (pullRequest === undefined) yield* notAReview(access)
           const { created, issue } = yield* drafting(access, drafted)
-          if (access.role === 'coordinator')
+          if (access.role === 'coordinator') {
             draftedThisTurn.set(access.threadId, (draftedThisTurn.get(access.threadId) ?? new Map()).set(created.taskId, created.slug))
+            yield* redraft(access.threadId, (drafts) =>
+              draftMade(drafts, { taskId: created.taskId, slug: created.slug, title: drafted.title }),
+            )
+          }
           // Its plan comes in this turn. If it never does, every open board is told when its moment ends, so the draft
           // shows in Needs you then: a board reads again only when the feed says something changed.
           yield* Effect.forkIn(
