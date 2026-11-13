@@ -236,7 +236,7 @@ export const needsYou = (entries: ReadonlyArray<Entry>, context: Context) =>
   entries.filter(
     (one) => one.kind === 'task' && one.stand?.tone === 'signal' && (context.project === null || one.project === context.project),
   )
-/** What was opened from search lately, most-used and latest first. */
+/** What was opened from search lately, most-used first; then the tasks changed last, each by its latest word. */
 export const recent = (entries: ReadonlyArray<Entry>, context: Context, most = 6): ReadonlyArray<Entry> => {
   const uses = context.usage
   return entries
@@ -245,7 +245,7 @@ export const recent = (entries: ReadonlyArray<Entry>, context: Context, most = 6
         (uses[entry.id] !== undefined || entry.kind === 'task') &&
         (context.project === null || entry.project === undefined || entry.project === context.project),
     )
-    .sort((a, b) => habitOf(uses[b.id]) - habitOf(uses[a.id]))
+    .sort((a, b) => habitOf(uses[b.id]) - habitOf(uses[a.id]) || (a.ago ?? Infinity) - (b.ago ?? Infinity))
     .slice(0, most)
 }
 

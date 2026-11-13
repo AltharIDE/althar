@@ -96,7 +96,6 @@ export function OneBox({
   const results = useRef<HTMLDivElement>(null)
   const crossing = context.project ?? true
   const query = typed.trim()
-  const project = context.project ?? context.projects[0]?.id ?? ''
 
   /* ——— What happens after the next draw: a morph needs where things stood before it and where they stand after ——— */
   const after = useRef<(() => void) | null>(null)
@@ -128,8 +127,14 @@ export function OneBox({
     }
     into(rowWords(entry.id), titleFor(entry), onClose, () => run(entry.go, entry))
   }
-  const ask = (text: string, start = false): Item => ({
-    key: start ? 'start' : 'ask',
+  // Which coordinator takes the words: the open project's, else the project the best hit is in; with neither, each project's, to choose.
+  const askable = (hits: ReadonlyArray<Found>) => {
+    const named = context.project ?? hits.find((one) => one.entry.project !== undefined)?.entry.project
+    const one = context.projects.find((project) => project.id === named)
+    return one !== undefined ? [one] : context.projects.slice(0, 4)
+  }
+  const ask = (text: string, project: string, start = false): Item => ({
+    key: `${start ? 'start' : 'ask'}:${project}`,
     run: () =>
       intoField(field.current?.parentElement ?? null, onClose, () =>
         run({ to: 'ask', project, text: start ? `Start a task: ${text}` : text }),
@@ -261,13 +266,14 @@ export function OneBox({
         ),
       }
     }
-    const askRow = (text: string, end: ReactNode) => {
-      const item = ask(text)
+    const askRows = (text: string, end: ReactNode) => askable(ranked).map((one) => askRow(text, one, end))
+    const askRow = (text: string, project: { id: string; name: string }, end: ReactNode) => {
+      const item = ask(text, project.id)
       return {
         item,
         node: (list: List) => (
           <Row
-            key="ask"
+            key={item.key}
             list={list}
             item={item}
             icon={<Icon name="comment" size={14} />}
@@ -276,6 +282,7 @@ export function OneBox({
                 {ASK} <span className={o.quoted}>“{text}”</span>
               </>
             }
+            {...(context.projects.length > 1 ? { facts: <span>{project.name}</span> } : {})}
             end={end}
           />
         ),
@@ -287,7 +294,7 @@ export function OneBox({
       if (query === '') return []
       const read = ranked.slice(0, 5)
       return [
-        { key: 'ask', label: null, rows: [askRow(query, <Kbd>{ENTER}</Kbd>)] },
+        { key: 'ask', label: null, rows: askRows(query, <Kbd>{ENTER}</Kbd>) },
         ...(read.length === 0 ? [] : [{ key: 'reads', label: 'Related passages', rows: read.map((one) => rowOf(one.entry, one)) }]),
       ]
     }
@@ -341,30 +348,30 @@ export function OneBox({
     const groups = [...byKind.entries()].sort(
       ([a, one], [b, other]) => (other[0]?.score ?? 0) - (one[0]?.score ?? 0) || ORDER.indexOf(a) - ORDER.indexOf(b),
     )
-    const startItem = ask(query, true)
+    const starts = askable(ranked).map((project) => {
+      const item = ask(query, project.id, true)
+      return {
+        item,
+        node: (list: List) => (
+          <Row
+            key={item.key}
+            list={list}
+            item={item}
+            icon={<Icon name="plus" size={14} />}
+            title={
+              <>
+                Start a task <span className={o.quoted}>“{query}”</span>
+              </>
+            }
+            facts={<span>{project.name}</span>}
+          />
+        ),
+      }
+    })
     const words_: Section = {
       key: 'words',
       label: 'Use the words',
-      rows: [
-        askRow(query, <Kbd>Tab</Kbd>),
-        {
-          item: startItem,
-          node: (list: List) => (
-            <Row
-              key="start"
-              list={list}
-              item={startItem}
-              icon={<Icon name="plus" size={14} />}
-              title={
-                <>
-                  Start a task <span className={o.quoted}>“{query}”</span>
-                </>
-              }
-              facts={<span>{context.projects.find((one) => one.id === project)?.name}</span>}
-            />
-          ),
-        },
-      ],
+      rows: [...askRows(query, <Kbd>Tab</Kbd>), ...starts],
     }
     if (top === undefined) return [words_]
     const question = asksSomething(query)

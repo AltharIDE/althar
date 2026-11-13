@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest'
-import { search, type Context, type Entry } from '../src/renderer/features/finder/model'
+import { recent, search, type Context, type Entry } from '../src/renderer/features/finder/model'
 import { passageOf } from '../src/renderer/features/finder/match'
+import { entriesFor } from '../src/renderer/features/finder/entries'
+import type { SearchDocument } from '@althar/contracts'
 const context: Context = { project: 'p1', task: null, projects: [], usage: {} }
 const entry = (id: string, title: string, over: Partial<Entry> = {}): Entry => ({
   id,
@@ -26,5 +28,43 @@ describe('search ranking', () => {
     const found = passageOf(text, ['rebase'], 60)!
     expect(found.some((one) => one.hit && one.text.includes('rebase'))).toBe(true)
     expect(found.map((one) => one.text).join('').length).toBeLessThan(text.length)
+  })
+  it('lists the tasks changed last under Recent, and says where a pull request or an issue stands', () => {
+    const entries = [entry('old', 'Old', { ago: 9000 }), entry('new', 'New', { ago: 5 }), entry('mid', 'Mid', { ago: 300 })]
+    expect(recent(entries, context, 2).map((one) => one.id)).toEqual(['new', 'mid'])
+    const doc = (id: string, kind: SearchDocument['kind'], state: string): SearchDocument => ({
+      id,
+      kind,
+      projectId: 'p1',
+      threadId: 't',
+      taskId: null,
+      itemId: null,
+      title: id,
+      body: '',
+      ref: id,
+      url: null,
+      changedAt: new Date().toISOString(),
+      state,
+    })
+    const stands = entriesFor(
+      [
+        doc('a', 'pull', 'merged'),
+        doc('b', 'pull', 'draft'),
+        doc('c', 'pull', 'closed'),
+        doc('d', 'issue', 'In Progress'),
+        doc('e', 'issue', ''),
+      ],
+      [],
+      context,
+      [],
+      null,
+    )
+    expect(stands.filter((one) => one.id.length === 1).map((one) => one.stand?.word)).toEqual([
+      'Merged',
+      'Draft',
+      'Closed',
+      'In Progress',
+      undefined,
+    ])
   })
 })

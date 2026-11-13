@@ -744,6 +744,8 @@ export function ThreadBlocks({
             {...speaker(block.agentId, block.model)}
             at={block.at}
             {...(said === '' || block.live ? {} : { copy: said })}
+            // Every message it shows, so a search can bring the person to the one it found.
+            data-items={block.parts.flatMap((part) => (part.kind === 'message' ? [part.id] : [])).join(' ')}
           >
             {block.work.length > 0 && (
               <WorkedFor
