@@ -5,7 +5,6 @@ import { expect, fn, userEvent, within } from 'storybook/test'
 import { PLAN_432, T432 } from '../../fixtures/coordinator'
 import { PROJECT } from '../../fixtures/meridian'
 import { TaskStatus } from '../../foundations/vocabulary'
-import { Model } from '../../primitives/Model/Model'
 import { threadDecorator } from '../../storybook/ThreadFrame'
 import { TaskCard } from '../TaskCard/TaskCard'
 import { TaskLaunch } from '../TaskLaunch/TaskLaunch'
@@ -20,7 +19,8 @@ function OnPlan(props: PresetOfferProps) {
       title="Fix the typo in the onboarding copy"
       project={PROJECT}
       steps={PLAN_432}
-      picker={({ agent }) => <Model model={agent} short />}
+      /* the row draws who it is; the picker lies unseen over it, as the app's does */
+      picker={({ owner }) => <button type="button" aria-label={owner} />}
       held
       onStart={() => {}}
       footNote={<PresetOffer {...props} />}

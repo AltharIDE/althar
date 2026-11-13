@@ -1,6 +1,9 @@
+import type { ReactNode } from 'react'
+
 import { cx } from '../../lib/cx'
 import type { RootProps } from '../../lib/props'
 import { NextStep, NextSteps } from '../../primitives/NextStep/NextStep'
+import { Problem } from '../../primitives/Problem/Problem'
 import b from '../Board/Board.module.css'
 import { CardTitle } from '../Board/CardTitle'
 import s from './CallCard.module.css'
@@ -10,7 +13,9 @@ import s from './CallCard.module.css'
  * contradiction the project can't settle alone. Its choices are on the card,
  * so you can see what you are being asked before you open it, and so can
  * anyone glancing at the lane. It says which tasks it holds, and ends, as
- * every card does, in a strip that says what to do: Decide, in violet.
+ * every card does, in a strip that says what to do: Decide, in violet. A
+ * stuck step says what went wrong as a problem, and its strip offers what
+ * fixes it, where a press can.
  */
 
 export interface CallCardText {
@@ -34,6 +39,8 @@ export type CallCardProps = RootProps<
     title: string
     /** Why it came to you. */
     because?: string
+    /** What went wrong, for a step that is stuck (Claude Code is signed out.): said as a problem, in place of `because`. */
+    problem?: string
     /** The choices, as they will be offered. A stuck task has none here: what you can do is in the task. */
     options: readonly string[]
     /** The tasks it holds until you answer, by number. */
@@ -45,11 +52,28 @@ export type CallCardProps = RootProps<
     /** Open beside the board. */
     current?: boolean
     onOpen?: () => void
+    /** What its strip offers in place of Decide: one NextStep, or two, the violet one last; a stuck step's Sign in again. */
+    next?: ReactNode
     text?: Partial<CallCardText>
   }
 >
 
-export function CallCard({ kind, title, because, options, holds, from, at, current, onOpen, text, className, ...rest }: CallCardProps) {
+export function CallCard({
+  kind,
+  title,
+  because,
+  problem,
+  options,
+  holds,
+  from,
+  at,
+  current,
+  onOpen,
+  next,
+  text,
+  className,
+  ...rest
+}: CallCardProps) {
   const t = { ...callCardText, ...text }
   return (
     <article className={cx(b.card, s.call, className)} aria-current={current || undefined} {...rest}>
@@ -60,10 +84,18 @@ export function CallCard({ kind, title, because, options, holds, from, at, curre
       <CardTitle className={s.title} onOpen={onOpen}>
         {title}
       </CardTitle>
-      {because && (
-        <p className={s.because} title={because}>
-          {because}
-        </p>
+      {problem ? (
+        <Problem size="small">
+          <span className={s.clamp} title={problem}>
+            {problem}
+          </span>
+        </Problem>
+      ) : (
+        because && (
+          <p className={s.because} title={because}>
+            {because}
+          </p>
+        )
       )}
       {options.length > 0 && (
         <ol className={s.options}>
@@ -95,9 +127,13 @@ export function CallCard({ kind, title, because, options, holds, from, at, curre
           </div>
         )
       )}
-      <NextSteps className={b.strip} aria-hidden="true">
-        <NextStep signal>{t.decide}</NextStep>
-      </NextSteps>
+      {next === undefined || next === null ? (
+        <NextSteps className={b.strip} aria-hidden="true">
+          <NextStep signal>{t.decide}</NextStep>
+        </NextSteps>
+      ) : (
+        <NextSteps className={b.strip}>{next}</NextSteps>
+      )}
     </article>
   )
 }

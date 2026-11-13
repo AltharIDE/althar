@@ -8,6 +8,7 @@ import { CopyButton } from '../../primitives/CopyButton/CopyButton'
 import { Field, FieldError } from '../../primitives/Field/Field'
 import { IconButton } from '../../primitives/IconButton/IconButton'
 import { LinkButton } from '../../primitives/LinkButton/LinkButton'
+import { Problem } from '../../primitives/Problem/Problem'
 import a from './Accounts.module.css'
 import type { FoundFolder } from './Accounts'
 import s from './AccountSignIn.module.css'
@@ -483,10 +484,9 @@ function Under({
     case 'failed':
       return (
         <div className={s.under}>
-          <p className={s.failed}>
+          <Problem action={onBack && <LinkButton onClick={onBack}>{t.tryAgain}</LinkButton>}>
             {t.stopped(agent)} <span className={s.said}>{step.said}</span>
-          </p>
-          <div className={s.row}>{onBack && <LinkButton onClick={onBack}>{t.tryAgain}</LinkButton>}</div>
+          </Problem>
         </div>
       )
     default:

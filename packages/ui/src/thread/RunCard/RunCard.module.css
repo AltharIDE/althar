@@ -4,7 +4,6 @@
   align-items: center;
   gap: 8px;
   width: 100%;
-  margin: 12px 0 14px;
   padding: 10px 10px 10px 14px;
   border-radius: var(--r-lg);
   background: var(--n-1);
@@ -133,7 +132,8 @@
 .scroll {
   flex: 1;
   min-height: 0;
-  padding: 8px;
+  /* what it printed sits flush under the command, its lines in line with it */
+  padding: 2px 0 4px;
   overflow-y: auto;
   overscroll-behavior: contain;
 }

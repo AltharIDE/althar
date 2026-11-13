@@ -1,6 +1,6 @@
 import { useState } from 'react'
 
-import { SettingChange } from '@althar/ui'
+import { SettingChange, Problem } from '@althar/ui'
 
 import { messageOf } from '../data/client'
 import { useServices } from '../data/services'
@@ -47,7 +47,7 @@ export function SettingChangeOf({ change, itemId }: { change: SettingChangeConte
         onAnswer={(yes) => run(client.answerSettingChange(itemId, yes))}
         {...(busy === change ? {} : { onUndo: () => run(client.undoSettingChange(itemId)) })}
       />
-      {error !== null && <p role="alert">{text.failed(error)}</p>}
+      {error !== null && <Problem size="small">{text.failed(error)}</Problem>}
     </>
   )
 }

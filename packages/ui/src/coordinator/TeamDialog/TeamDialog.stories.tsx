@@ -46,6 +46,9 @@ interface AtWork {
   done?: string
   /** Its review was skipped: it starts with none, and can be added back. */
   skipped?: boolean
+  /** It can't change any more, and why: no Save. */
+  settled?: string
+  /** The last save failed, and why: Save tries again. */
   error?: string
 }
 
@@ -85,7 +88,8 @@ function Team({
         },
       ]}
       {...(ends && atWork === undefined ? { end: { value: end, onChange: setEnd } } : {})}
-      {...(atWork?.error === undefined ? { onSave: rest.onSave } : { error: atWork.error })}
+      {...(atWork?.settled === undefined ? { onSave: rest.onSave } : { settled: atWork.settled })}
+      {...(atWork?.error === undefined ? {} : { error: atWork.error })}
       {...(held && atWork === undefined ? { onStart: rest.onStart } : {})}
       onClose={() => {}}
     />
@@ -147,11 +151,19 @@ export const SkippedReviewAddedBack: Story = {
   },
 }
 
-export const ReviewDoneDark: Story = { ...ReviewDone, globals: { theme: 'dark' } }
-
-/** Merged: nothing changes, and it says why. */
+/** Merged: nothing changes, and it says why, quietly: nothing failed. */
 export const Merged: Story = {
-  args: { held: false, atWork: { ...AT_WORK, error: 'It’s merged, so its team stays.' } },
+  args: { held: false, atWork: { ...AT_WORK, settled: 'It’s merged, so its team stays.' } },
+}
+
+/** The last save didn't go: why, under the steps, and Save to try again. */
+export const SaveFailed: Story = {
+  args: { held: false, atWork: { ...AT_WORK, error: 'Couldn’t save the team: the runtime didn’t answer.' } },
+  play: async () => {
+    const page = within(document.body)
+    await expect(page.getByRole('alert')).toHaveTextContent('Couldn’t save the team: the runtime didn’t answer.')
+    await expect(page.getByRole('button', { name: 'Save' })).toBeEnabled()
+  },
 }
 
 /** Started, waiting for a free agent: it starts by itself, so only Save. */

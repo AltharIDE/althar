@@ -39,6 +39,7 @@ import {
   TaskFolders,
   UpdateReady,
   UsageData,
+  Problem,
 } from '@althar/ui'
 
 import altharFace from '../../../../resources/faces/althar-ai.svg'
@@ -254,11 +255,7 @@ function SectionBody({
 /** What couldn't be kept, said where it was made. */
 function Failed({ when, children = text.failed }: { when: boolean; children?: string }) {
   if (!when) return null
-  return (
-    <p role="alert" className={s.failed}>
-      {children}
-    </p>
-  )
+  return <Problem className={s.failed}>{children}</Problem>
 }
 
 /* ---- the agents ------------------------------------------------------------------- */

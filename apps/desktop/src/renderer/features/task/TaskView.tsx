@@ -39,6 +39,7 @@ import {
   TitleBar,
   SettleWays,
   TaskParts,
+  Problem,
 } from '@althar/ui'
 
 import { isAnswered, isSettleable, kindWords, takesDone } from '../../shared/calls'
@@ -120,6 +121,7 @@ import { REQUEST, taskGraphOf } from './graph'
 import { GraphFace } from './GraphFace'
 import { reveal } from './reveal'
 import { turnsById } from '../../shared/turnTime'
+import { ReadFailed } from '../../shared/ReadFailed'
 
 /*
  * A task, with its faces under its header, as in the prototype: the
@@ -645,7 +647,7 @@ export function TaskView({
           </div>
         ) : (
           <div className={s.loading}>
-            <p role="alert">{model.error}</p>
+            <ReadFailed error={model.error} />
           </div>
         )}
       </div>
@@ -1084,13 +1086,20 @@ export function TaskView({
             <>
               {aside?.notice}
               {model.error !== null && (
-                <div className={s.failure} role="alert">
-                  {model.error}{' '}
-                  {model.hostSignedOut && onConnections !== undefined && (
-                    <LinkButton onClick={onConnections}>{wayOutText.signIn}</LinkButton>
-                  )}{' '}
-                  <LinkButton onClick={model.dismissError}>{text.dismiss}</LinkButton>
-                </div>
+                <Problem
+                  as="div"
+                  className={s.failure}
+                  action={
+                    <>
+                      {model.hostSignedOut && onConnections !== undefined && (
+                        <LinkButton onClick={onConnections}>{wayOutText.signIn}</LinkButton>
+                      )}
+                      <LinkButton onClick={model.dismissError}>{text.dismiss}</LinkButton>
+                    </>
+                  }
+                >
+                  {model.error}
+                </Problem>
               )}
               {conflict !== null && (
                 <div>

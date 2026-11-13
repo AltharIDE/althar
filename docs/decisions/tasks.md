@@ -325,7 +325,8 @@ The tools' `find_tasks` searches the same.
 A card opens its task. It says:
 
 - where the task stands, in a word and in its lane's colour;
-- its kind: Change, Review, or nothing for a plain task;
+- its kind where it isn't the usual: Review; nothing for a change, the usual
+  kind, or for a plain task;
 - its title;
 - one fact: a change's branch, pull request, checks or conflict; a review's
   pull request and findings; or a plain task's pictures or files.

@@ -9,14 +9,40 @@
   composes: title from '../AcceptCard/AcceptCard.module.css';
 }
 
+/*
+ * Its top, on one line however narrow the lane: its kind gives way first, with "…", and goes where there is no room
+ * for more than a stub of it; its word gives way only past the room how long takes; how long stays whole.
+ */
+.top {
+  flex-wrap: nowrap;
+  container-type: inline-size;
+}
+@container (max-width: 180px) {
+  .kind {
+    display: none;
+  }
+}
+.cut {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* where it stands, in a word: cobalt while it runs, violet when it needs you, ink when it is still */
 .word {
   display: inline-flex;
   align-items: center;
   gap: 6px;
+  flex-shrink: 0;
+  min-width: 0;
+  max-width: calc(100% - 48px);
   font-size: 11.5px;
   font-weight: 600;
   color: var(--t-2);
+}
+.word > :not(.cut) {
+  flex: none;
 }
 .running .word {
   color: var(--live);
@@ -25,6 +51,7 @@
   color: var(--signal);
 }
 .kind {
+  flex-shrink: 100;
   color: var(--t-3);
 }
 
@@ -36,6 +63,15 @@
   text-wrap: pretty;
   overflow-wrap: anywhere;
   /* as much as two lines; a question's whole text is in its task */
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+}
+
+/* what went wrong, as much as two lines; the whole of it is in its task */
+.clamp {
   display: -webkit-box;
   overflow: hidden;
   -webkit-box-orient: vertical;

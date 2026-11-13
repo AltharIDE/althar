@@ -385,7 +385,7 @@ describe('the board’s lanes', () => {
         withServices(<BoardView lanes={lanes} agents={agents} now={NOW} onOpen={vi.fn()} />, fakeClient().client)
         const next = within(screen.getByRole('region', { name: 'Up next' }))
         expect(next.getByText('After Dark mode for Settings')).toBeTruthy()
-        expect(next.getByText('Change · Local')).toBeTruthy()
+        expect(next.getByText('Local')).toBeTruthy()
         // Under a divider of its own: it isn't paused for a limit or the connection.
         expect(next.getByText('Waits for Local')).toBeTruthy()
         expect(next.queryByText('Paused')).toBeNull()
@@ -2035,10 +2035,10 @@ describe('each kind’s card', () => {
 
   it('says where each stands in a word, its kind’s word, and at most one card in the card and one fact', () => {
     withServices(<BoardView lanes={lanesOf(kinds)} agents={agents} now={NOW} onOpen={vi.fn()} />, fakeClient().client)
-    // A change at work: its step, its kind, its track, its branch with how big it is so far.
+    // A change at work: its step, its track, its branch with how big it is so far; a change is the usual kind, so unsaid.
     const branch = within(cardOf('On its branch'))
     expect(branch.getAllByText('Implement')).toHaveLength(2)
-    expect(branch.getByText('Change')).toBeTruthy()
+    expect(branch.queryByText('Change')).toBeNull()
     expect(branch.getByText('althar/add-a-retry')).toBeTruthy()
     expect(branch.getByText('+84')).toBeTruthy()
     // With its pull request open: the pull request, and its checks so far.
@@ -2115,7 +2115,7 @@ describe('each kind’s card', () => {
     // Its branch, where it has one, as any task's.
     expect(within(settled).getByText('althar/add-a-retry')).toBeTruthy()
     const next = screen.getByRole('button', { name: 'Up next, a change' }).closest('li') as HTMLElement
-    expect(within(next).getByText('Change')).toBeTruthy()
+    expect(within(next).queryByText('Change')).toBeNull()
   })
 })
 

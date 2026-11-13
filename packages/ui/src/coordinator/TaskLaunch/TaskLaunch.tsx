@@ -118,7 +118,6 @@ export interface TaskLaunchText {
   endLabel: string
   /** The note of the ending your rule picks, in the menu. */
   ruleNote: (project: string, note: string) => string
-  alsoWaits: (steps: string, until: string) => string
   held: string
   startsIn: (seconds: number) => string
   /** Its time has come, and what keeps its clock is starting it. */
@@ -172,12 +171,11 @@ export const taskLaunchText: TaskLaunchText = {
   end: taskEndText,
   endLabel: 'When the work is done',
   ruleNote: (project, note) => `${project}’s rule. ${note}`,
-  alsoWaits: (steps, until) => `${steps} waits until ${until}`,
   held: 'Held',
-  startsIn: (n) => `Starts in ${n}s`,
+  startsIn: (n) => `Starts in ${shortWait(n)}`,
   starting: 'Starting…',
-  startsAfterSeen: (n) => `Starts ${n}s after you’ve seen it`,
-  announce: (n) => `Starts in ${n} seconds`,
+  startsAfterSeen: (n) => `Starts ${shortWait(n)} after you’ve seen it`,
+  announce: (n) => `Starts in ${n < 100 ? `${n} seconds` : `${Math.ceil(n / 60)} minutes`}`,
   hold: 'Hold',
   start: 'Start',
   startNow: 'Start now',
@@ -198,6 +196,11 @@ export const taskLaunchText: TaskLaunchText = {
   deciding: 'Deciding…',
   heldDrafting: 'Held · starts when you say',
   skipStep: (step) => `Skip the ${step.label.toLowerCase()}`,
+}
+
+/** A wait in seconds while it is short, two figures at most so the clock keeps its width; in minutes past that: 30s, 10 min. */
+function shortWait(seconds: number) {
+  return seconds < 100 ? `${seconds}s` : `${Math.ceil(seconds / 60)} min`
 }
 
 const ENDS = [TaskEnd.DraftPr, TaskEnd.ReadyPr, TaskEnd.PushOnly] as const
@@ -556,7 +559,6 @@ export function TaskLaunch({
     />
   )
   const set = (id: string, patch: Partial<LaunchStep>) => setSteps(steps.map((st) => (st.id === id ? { ...st, ...patch } : st)))
-  const waiting = steps.filter((st) => st.waits && !st.skipped)
   const where = worksIn === undefined || drafting !== undefined ? null : whereLine(worksIn, worksInWhy, localTaken ?? null, t)
 
   // A row for each of each step's agents, or one for a step whose agent isn't chosen yet; then how the work ends.
@@ -802,10 +804,10 @@ export function TaskLaunch({
           </div>
         ) : (
           <div className={s.foot}>
+            {/* what waits for a runtime is said on its own row, not again here */}
             <span className={s.estimate}>
               {estimate}
-              {waiting.length > 0 && limited && <> · {t.alsoWaits(waiting.map((st) => st.label).join(', '), limited.until)}</>}
-              {(estimate !== undefined || (waiting.length > 0 && limited)) && footNote !== undefined && ' · '}
+              {estimate !== undefined && footNote !== undefined && ' · '}
               {footNote}
             </span>
             {!held && <CountdownRing left={share} />}

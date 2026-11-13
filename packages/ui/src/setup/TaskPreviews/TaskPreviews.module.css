@@ -264,10 +264,11 @@
 
 /* ---- where projects differ from what new projects start with ------------------- */
 
+/* centred, not on a baseline: a problem's mark would set its baseline */
 .differs {
   display: flex;
   flex-wrap: wrap;
-  align-items: baseline;
+  align-items: center;
   gap: 2px 8px;
   min-width: 0;
   max-width: 100%;
@@ -283,10 +284,6 @@
 }
 .use {
   flex: none;
-}
-.failed {
-  min-width: 0;
-  color: var(--danger);
 }
 .list {
   display: grid;

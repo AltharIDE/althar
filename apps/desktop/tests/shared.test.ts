@@ -20,7 +20,7 @@ import { keyOf, pastedIn } from '../src/renderer/shared/pasted'
 import { change, items } from './fixtures'
 import { latestOf } from '../src/renderer/features/task/Outputs'
 import { stepIndex, stepNames, trackFor } from '../src/renderer/shared/steps'
-import { ago, clock, took, useNow } from '../src/renderer/shared/time'
+import { ago, clock, runningCalmly, took, useNow } from '../src/renderer/shared/time'
 
 describe('agents', () => {
   it('draws each agent with its maker’s mark, when it has one', () => {
@@ -119,6 +119,14 @@ describe('times', () => {
     expect(took('2026-09-29T12:00:00Z', '2026-09-29T12:03:05Z')).toBe('3m 5s')
     expect(took('2026-09-29T12:00:00Z', '2026-09-29T13:04:00Z')).toBe('1h 4m')
     expect(took('2026-09-29T12:00:00Z', '2026-09-29T11:00:00Z')).toBe('0s')
+  })
+
+  it('says how long something has run calmly, for the board: no seconds counting up', () => {
+    expect(runningCalmly('2026-09-29T12:00:00Z', '2026-09-29T12:00:03Z')).toBe('just now')
+    expect(runningCalmly('2026-09-29T12:00:00Z', '2026-09-29T12:00:59Z')).toBe('just now')
+    expect(runningCalmly('2026-09-29T12:00:00Z', '2026-09-29T12:06:30Z')).toBe('6m')
+    expect(runningCalmly('2026-09-29T12:00:00Z', '2026-09-29T13:04:00Z')).toBe('1h 4m')
+    expect(runningCalmly('', '2026-09-29T13:04:00Z')).toBe('')
   })
 })
 

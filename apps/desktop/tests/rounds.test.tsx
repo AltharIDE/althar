@@ -442,7 +442,7 @@ describe('a task’s lead that is signed out', () => {
   const signedOut = items.notice({
     severity: 'error',
     title: 'Claude Code is signed out.',
-    description: 'Authentication required',
+    description: 'The key for the work account was revoked.',
     failure: 'auth_required',
   })
   const show = (overrides: Partial<ThreadSnapshot> = {}) => {
@@ -457,8 +457,8 @@ describe('a task’s lead that is signed out', () => {
   it('says so plainly, with the agent’s words under it, and offers Sign in again first, for that agent', async () => {
     const { onSignIn } = show()
     expect(await screen.findByText('Claude Code is signed out.')).toBeTruthy()
-    expect(screen.getByText('Authentication required')).toBeTruthy()
-    const [first, second] = within(screen.getByText('Sign in again').closest('p') as HTMLElement).getAllByRole('button')
+    expect(screen.getByText('The key for the work account was revoked.')).toBeTruthy()
+    const [first, second] = within(screen.getByText('Sign in again').closest('[role=alert]') as HTMLElement).getAllByRole('button')
     expect(first?.textContent).toBe('Sign in again')
     expect(second?.textContent).toBe('Try again')
     await userEvent.click(screen.getByRole('button', { name: 'Sign in again' }))

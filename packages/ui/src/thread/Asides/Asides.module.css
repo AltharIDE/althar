@@ -36,11 +36,12 @@
 }
 .pill:hover {
   color: var(--t-1);
-  background: var(--n-2);
+  background: var(--chip);
 }
+/* chosen: a strong fill, darker than the page on paper and lighter on dark, never a hole */
 .pill[aria-selected='true'] {
   color: var(--t-1);
-  background: var(--n-0);
+  background: var(--n-5);
   box-shadow: 0 0 0 1px var(--line-2);
 }
 .coordinator {
@@ -54,11 +55,11 @@
 }
 .aside:hover {
   color: var(--t-1);
-  background: var(--n-2);
+  background: var(--chip);
 }
 .aside[data-current] {
   color: var(--t-1);
-  background: var(--n-0);
+  background: var(--n-5);
   box-shadow: 0 0 0 1px var(--line-2);
 }
 .tab {
@@ -90,10 +91,10 @@
 }
 .clear:hover {
   color: var(--t-1);
-  background: var(--n-4);
+  background: var(--n-5);
 }
 .aside[data-current] .clear:hover {
-  background: var(--n-5);
+  background: var(--n-5-hover);
 }
 .title {
   overflow: hidden;
@@ -103,14 +104,14 @@
 .older {
   flex-shrink: 0;
   padding: 4px 8px;
-  border-radius: 6px;
+  border-radius: var(--r);
   color: var(--t-3);
   font-size: 12px;
 }
 .older:hover,
 .older[aria-expanded='true'] {
   color: var(--t-1);
-  background: var(--n-2);
+  background: var(--chip);
 }
 
 /* It floats over the conversation's end, as the run chips beside it do: on paper of its own, so what scrolls under it never shows through. */
@@ -134,5 +135,5 @@
   white-space: nowrap;
   text-overflow: ellipsis;
   font-size: 11.5px;
-  color: var(--t-4);
+  color: var(--t-3);
 }

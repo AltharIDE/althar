@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom'
 import type { QueryClient } from '@tanstack/react-query'
 
 import type { BoardSnapshot, BoardTask, PlanStep, ThreadItem, ThreadSnapshot } from '@althar/contracts'
-import { type Aside, AsideMoves, AsideTabs, Button, Icon, IconButton, LinkButton } from '@althar/ui'
+import { type Aside, AsideMoves, AsideTabs, Button, Icon, IconButton, LinkButton, Problem } from '@althar/ui'
 
 import { type Client, messageOf, newTaskId } from '../../data/client'
 import { keys, reads } from '../../data/reads'
@@ -140,9 +140,13 @@ export type AsideMoveState = ReturnType<typeof useAsideMoves>
 export function AsideMoveFailed({ moves, className }: { moves: AsideMoveState; className?: string }) {
   if (moves.failed === null) return null
   return (
-    <div className={className} role="alert">
-      {moves.failed} <LinkButton onClick={moves.dismiss}>{asidesText.dismiss}</LinkButton>
-    </div>
+    <Problem
+      as="div"
+      {...(className === undefined ? {} : { className })}
+      action={<LinkButton onClick={moves.dismiss}>{asidesText.dismiss}</LinkButton>}
+    >
+      {moves.failed}
+    </Problem>
   )
 }
 

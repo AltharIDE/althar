@@ -79,13 +79,15 @@ export function RoomNote({
 
 /**
  * Beside a picker's chip, once its model is nearly out: 3% left · until 14:00,
- * Out · until 14:00. One quiet run a step smaller than the chip, with a gap
+ * Out · until 14:00; for an agent with several accounts, only Out. One quiet run a step smaller than the chip, with a gap
  * of its own from it, in ink only, a step deeper as it runs down; cut with an
  * ellipsis on a narrow row, its whole words on hover. Nothing before.
  */
 export function RoomSaid({ room, text }: { room: ModelRoom | null | undefined; text?: Partial<ModelRoomText> }) {
   const t = { ...modelRoomText, ...text }
   if (room == null || room.left > SAY_UNDER) return null
+  // With several accounts, one account's share left says little of what the work can use: only Out, when none can, is said.
+  if (room.account !== null && room.left > 0) return null
   const said = room.left === 0 ? t.chipOut : t.chipLeft(room.left)
   const words = room.until === null ? said : `${said} · ${t.until(room.until)}`
   return (

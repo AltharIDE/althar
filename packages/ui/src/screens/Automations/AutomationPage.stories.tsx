@@ -191,9 +191,6 @@ const meta = {
 export default meta
 type Story = StoryObj<typeof meta>
 
-/** The morning review, on: as its page opens. */
-export const MorningReview: Story = { render: () => <Page /> }
-
 /** Where it stands and what can be done to it; what it does, its limits, and its runs, each with a task opening it. */
 export const On: Story = {
   render: () => <Page />,
@@ -343,7 +340,18 @@ export const LongFormScrolled: Story = {
 }
 
 /** What went wrong with the last thing asked of it, under its head. */
-export const Failed: Story = { args: { error: 'Althar couldn’t turn it on. Try again.' } }
+/** Turning it on failed: it says so under the head, still off, with the switch there to try again. */
+export const Failed: Story = {
+  args: {
+    error: 'Althar couldn’t turn it on. Try again.',
+    status: 'Paused',
+    statusTone: 'off',
+    paused: true,
+    on: false,
+    onRunNow: fn(),
+    onSwitch: fn(),
+  },
+}
 
 export const AllStates: Story = {
   render: (args) => (

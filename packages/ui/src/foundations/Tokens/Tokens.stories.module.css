@@ -23,6 +23,8 @@
   grid-template-rows: auto auto;
   gap: 2px 10px;
   align-items: center;
+  /* a name and its note stay together when a neighbour's note runs to two lines */
+  align-content: center;
   padding: 10px;
   border-radius: var(--r-lg);
   background: var(--n-1);
@@ -58,6 +60,9 @@
   margin: 0;
   padding: 0;
   list-style: none;
+}
+.material code {
+  font-family: var(--mono);
 }
 .material {
   display: grid;

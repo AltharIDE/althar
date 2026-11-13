@@ -287,7 +287,8 @@ export function ChangeTeam({
       {...(!gone && how === 'starts' ? { onStart: () => void save(true) } : {})}
       onClose={onClose}
       busy={busy}
-      error={how === null ? (begun ? text.settled : text.begun) : error}
+      // Why it can't change any more is a fact, said quietly; what failed as it saved is a problem.
+      {...(how === null ? { settled: begun ? text.settled : text.begun } : { error })}
     />
   )
 }

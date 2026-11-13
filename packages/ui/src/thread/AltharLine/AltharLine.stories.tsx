@@ -22,15 +22,6 @@ export const Said: Story = {
   },
 }
 
-/** Something that is now the person's. */
-export const Warning: Story = {
-  args: {
-    tone: 'warning',
-    children:
-      'The lead couldn’t resolve the conflict with main, in 4 files. The merge isn’t committed: it’s yours to settle, or to ask the lead again.',
-  },
-}
-
 /** A task this task's lead started (ADR-097): its title opens it. */
 export const StartedATask: Story = {
   args: {
@@ -60,7 +51,23 @@ export const AllStates: Story = {
           ),
         },
         { state: 'warning', node: <AltharLine tone="warning">The lead couldn’t resolve the conflict with main, in 4 files.</AltharLine> },
-        { state: 'dark', node: <AltharLine {...args} />, dark: true },
+        {
+          state: 'warning, with its fix',
+          node: (
+            <AltharLine tone="warning">
+              Claude Code is signed out. <LinkButton onClick={() => undefined}>Sign in</LinkButton>
+            </AltharLine>
+          ),
+        },
+        {
+          state: 'warning, wrapping',
+          node: (
+            <AltharLine tone="warning">
+              The lead couldn’t resolve the conflict with main, in 4 files. The merge isn’t committed: it’s yours to settle, or to ask the
+              lead again.
+            </AltharLine>
+          ),
+        },
       ]}
     />
   ),

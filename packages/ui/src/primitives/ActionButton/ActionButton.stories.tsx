@@ -12,22 +12,6 @@ const meta = {
 export default meta
 type Story = StoryObj<typeof meta>
 
-export const Default: Story = {}
-export const IconOnly: Story = { args: { icon: 'close', children: undefined, 'aria-label': 'Close' } }
-/** The one action on a row that matters most. */
-export const Strong: Story = { args: { tone: 'strong', icon: undefined, children: 'Have it fixed' } }
-export const OnDark: Story = {
-  args: { tone: 'onDark', icon: 'close', children: 'Close', kbd: 'esc' },
-  render: (args) => (
-    <div style={{ padding: 10, borderRadius: 10, background: '#1d1c21' }}>
-      <ActionButton {...args} />
-    </div>
-  ),
-}
-/** Inside a line of 11–12px text, such as a step's row. */
-export const Small: Story = { args: { size: 'small', icon: undefined, children: 'Thread' } }
-/** Opens a menu: the chevron comes after the label. */
-export const WithTrailingIcon: Story = { args: { size: 'small', icon: undefined, trailingIcon: 'chevronD', children: 'This task' } }
 /** Pulled out by its padding, so the label lines up with the right edge of the text above it. */
 export const FlushEnd: Story = {
   args: { size: 'small', flush: 'end', icon: undefined, children: 'Thread' },

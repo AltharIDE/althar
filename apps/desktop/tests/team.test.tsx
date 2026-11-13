@@ -233,7 +233,7 @@ describe('changing the team of a task that has begun', () => {
       </ServicesProvider>,
     )
     const dialog = within(await screen.findByRole('dialog'))
-    expect(dialog.getByRole('alert').textContent).toBe('It’s settled, so its team stays.')
+    expect(dialog.getByRole('status').textContent).toBe('It’s settled, so its team stays.')
     expect(dialog.queryByRole('button', { name: 'Save' })).toBeNull()
   })
 
@@ -461,7 +461,7 @@ describe('changing a plan’s team before it begins', () => {
       </ServicesProvider>,
     )
     const dialog = within(await screen.findByRole('dialog'))
-    expect(dialog.getByRole('alert').textContent).toBe('It started with the team it had.')
+    expect(dialog.getByRole('status').textContent).toBe('It started with the team it had.')
     expect(dialog.queryByRole('button', { name: 'Start' })).toBeNull()
     expect(dialog.queryByRole('button', { name: 'Save' })).toBeNull()
     expect(onClose).not.toHaveBeenCalled()

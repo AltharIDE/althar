@@ -113,7 +113,7 @@ export interface LightboxText {
 }
 
 export const lightboxText: LightboxText = {
-  open: 'Open in Preview',
+  open: 'Open in viewer',
   close: 'Close',
   closeKey: 'esc',
   previous: 'Previous image',

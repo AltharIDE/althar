@@ -13,6 +13,7 @@ import { Caret, Disclosure, DisclosureTrigger, Fold } from '../../primitives/Fol
 import { LinkButton } from '../../primitives/LinkButton/LinkButton'
 import { LiveDot } from '../../primitives/LiveDot/LiveDot'
 import { ModelList, type ModelInfo } from '../../primitives/Model/Model'
+import { Problem } from '../../primitives/Problem/Problem'
 import s from './ChangeSet.module.css'
 import { type MergeNeed, MergeNeeds, type MergeNeedsText } from './MergeNeeds'
 
@@ -140,7 +141,7 @@ export interface ChangeSetProps {
   review?: ChangeReview
   /** What can be done with it now: one button, or two where it's a choice; the first is the one to press. */
   actions?: ReactNode
-  /** Why the last action did not go through: a note in a line or two, with a quiet button where one puts it right. */
+  /** Why the last action did not go through, as a problem under the buttons: a line or two, with a quiet button where one puts it right. */
   error?: ReactNode
   /** Open the whole diff. */
   onReviewDiff?: () => void
@@ -215,9 +216,9 @@ export function ChangeSet({
         </div>
         {acting && <div className={s.actions}>{actions}</div>}
         {error && (
-          <p className={s.error} role="alert">
+          <Problem size="small" className={s.problem}>
             {error}
-          </p>
+          </Problem>
         )}
       </div>
       {files.length > 0 && (

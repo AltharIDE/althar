@@ -3,6 +3,7 @@ import { useState } from 'react'
 import { expect, fn, userEvent, waitFor, within } from 'storybook/test'
 
 import { threadDecorator } from '../../storybook/ThreadFrame'
+import { Turn } from '../../thread/Turn/Turn'
 import { TaskAsk, type TaskAskProps, type TaskMove } from './TaskAsk'
 
 const meta = {
@@ -80,8 +81,9 @@ const TO: Partial<Record<TaskMove, string>> = { merge_here: 'main', hand_on: 'GP
 
 /** Every move it can ask, and each way it ends: done, not now, or nothing to do any more. */
 export const Every: Story = {
+  /* in a turn, spaced as the conversation spaces them */
   render: () => (
-    <>
+    <Turn voice="Coordinator" bare>
       {MOVES.map((move) => (
         <TaskAsk
           key={move}
@@ -94,7 +96,7 @@ export const Every: Story = {
       <TaskAsk title="Sketch the settings" move="keep" state="done" />
       <TaskAsk title="Sketch the settings" move="discard" state="declined" />
       <TaskAsk title="Sketch the settings" move="stop" state="moot" said="sketch-the-settings isn’t running: there is nothing to stop." />
-    </>
+    </Turn>
   ),
   play: async ({ canvasElement }) => {
     const c = within(canvasElement)
