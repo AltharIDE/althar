@@ -1093,6 +1093,8 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
       path: `/Users/ada/code/${name.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`,
     })),
     listTasks: vi.fn(async () => ({ cursor: 4, tasks: [task] })),
+    getSearchDocuments: vi.fn(async () => ({ documents: [], next: null })),
+    getSearchFiles: vi.fn(async () => ({ files: [] })),
     searchTasks: vi.fn(async () => ({ tasks: [] })),
     createTask: vi.fn(async () => task),
     getThread: vi.fn(async () => snapshot()),

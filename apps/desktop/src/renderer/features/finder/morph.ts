@@ -1,39 +1,19 @@
 import { type RefObject, useLayoutEffect } from 'react'
-import { flushSync } from 'react-dom'
 
-// The kit's own springs and timings (not exported from @althar/ui yet).
-import { MOTION, reducedMotion, SCALE } from '../../../../packages/ui/src/lib/motion'
-import { motion } from './state'
-
+import { MOTION, reducedMotion, SCALE } from '@althar/ui'
 /*
- * A's morphs, on the kit's motion: what is chosen keeps its identity as it
- * goes somewhere else. A row's name lifts into the field as a chip, and
- * drops back into its row; the Tab hint slides over to become the field's
- * chip; the box's height glides; Enter carries the row's name into the
- * page it opens (the browser's view transitions). Each can turn back
- * mid-way, moves only transform and opacity (but the box's height, as the
- * kit's SizeMotion does), and with reduced motion only fades. The lab's
- * Motion switch slows them all five times, or stills them as DESIGN.md has
- * the command menu today.
+ * The palette's morphs, on the kit's motion: what is chosen keeps its
+ * identity as it goes somewhere else. A row's name lifts into the field as a
+ * chip, and drops back into its row; the Tab hint slides over to become the
+ * field's chip; the box's height glides; Enter carries the row's name into
+ * the page it opens. Each can turn back mid-way, moves only transform and
+ * opacity (but the box's height, as the kit's SizeMotion does), and with
+ * reduced motion only fades. Nothing real is ever hidden for a morph: the
+ * copies that fly are decorative, and what they fly to is legible throughout.
  */
 
-export const moving = () => motion.get() !== 'still'
-const travels = () => moving() && !reducedMotion()
-
+const travels = () => !reducedMotion()
 export { MOTION }
-
-/* Slow: every animation on the page at a fifth of its pace, CSS transitions and view transitions too. */
-let slowing = 0
-const slowDown = () => {
-  for (const one of document.getAnimations()) if (one.playbackRate === 1) one.playbackRate = 0.2
-  slowing = requestAnimationFrame(slowDown)
-}
-const pace = () => {
-  cancelAnimationFrame(slowing)
-  if (motion.get() === 'slow') slowing = requestAnimationFrame(slowDown)
-}
-motion.subscribe(pace)
-pace()
 
 /* ——— Copies in flight, over the box ——— */
 
@@ -109,9 +89,28 @@ const ghost = (chip: Chip) => {
   return { shell, pill }
 }
 
-const hide = (el: HTMLElement) => {
-  el.style.opacity = '0'
-  return () => el.style.removeProperty('opacity')
+// A destination stays legible throughout a morph. Nothing hides a real row
+// for the length of a spring; copies are decorative, inert and cancellable.
+const flights = new Set<() => void>()
+export const clearFlights = () => {
+  for (const stop of flights) stop()
+  flights.clear()
+}
+const journey = (shell: HTMLElement, animation: Animation) => {
+  const done = () => {
+    shell.remove()
+    flights.delete(stop)
+  }
+  const stop = () => {
+    animation.cancel()
+    done()
+  }
+  flights.add(stop)
+  animation.addEventListener('finish', done)
+  animation.addEventListener('cancel', done)
+}
+const seen = (to: HTMLElement) => {
+  to.animate([{ opacity: 0.5 }, { opacity: 1 }], MOTION.exit)
 }
 
 /**
@@ -125,15 +124,17 @@ export const lift = (from: Words | null, to: HTMLElement | null) => {
   if (chip === null) return
   if (from === null || !travels()) return arrive(to)
   const { shell, pill } = ghost(chip)
-  const show = hide(to)
-  const flight = shell.animate([{ transform: over(chip, from) }, { transform: 'none' }], MOTION.move)
+  clearFlights()
+  seen(to)
+  const flight = shell.animate(
+    [
+      { transform: over(chip, from), opacity: 1 },
+      { transform: 'none', opacity: 0 },
+    ],
+    MOTION.move,
+  )
   pill.animate([{ opacity: 0 }, { opacity: 1 }], { ...MOTION.move, duration: MOTION.move.duration * 0.6 })
-  const done = () => {
-    show()
-    shell.remove()
-  }
-  flight.addEventListener('finish', done)
-  flight.addEventListener('cancel', done)
+  journey(shell, flight)
 }
 
 /** The chip goes back where it came from (taken before it went): its pill fades as it lands in the words now drawn there. */
@@ -142,15 +143,17 @@ export const drop = (chip: Chip | null, to: Element | null) => {
   const words = to instanceof HTMLElement ? measure(to) : null
   if (words === null || !travels()) return leave(chip)
   const { shell, pill } = ghost(chip)
-  const show = hide(to as HTMLElement)
-  const flight = shell.animate([{ transform: 'none' }, { transform: over(chip, words) }], MOTION.move)
+  clearFlights()
+  seen(to as HTMLElement)
+  const flight = shell.animate(
+    [
+      { transform: 'none', opacity: 1 },
+      { transform: over(chip, words), opacity: 0 },
+    ],
+    MOTION.move,
+  )
   pill.animate([{ opacity: 1 }, { opacity: 0 }], { ...MOTION.move, duration: MOTION.move.duration * 0.5 })
-  const done = () => {
-    show()
-    shell.remove()
-  }
-  flight.addEventListener('finish', done)
-  flight.addEventListener('cancel', done)
+  journey(shell, flight)
 }
 
 const GROWS_FROM = 0.86
@@ -161,7 +164,7 @@ const GROWS_FROM = 0.86
  * grows, rather than sliding under it.
  */
 export const arrive = (el: HTMLElement | null, next?: HTMLElement | null) => {
-  if (el === null || !moving()) return
+  if (el === null || typeof el.animate !== 'function') return
   const grows = !reducedMotion()
   el.animate(
     [
@@ -176,7 +179,7 @@ export const arrive = (el: HTMLElement | null, next?: HTMLElement | null) => {
 
 /** A chip with nowhere to go back to: it shrinks away where it stood. */
 export const leave = (chip: Chip | null) => {
-  if (chip === null || !moving()) return
+  if (chip === null) return
   const { shell } = ghost(chip)
   const grows = !reducedMotion()
   const out = shell.animate(
@@ -203,11 +206,11 @@ export const slideFrom = (el: HTMLElement | null, was: number | null, timing: Ke
 
 /** The box grows open from just under its full size, and fades. */
 export const open = (box: HTMLElement | null, scrim: HTMLElement | null) => {
-  if (box === null || !moving()) return
+  if (box === null || typeof box.animate !== 'function') return
   const grows = !reducedMotion()
   box.animate(
     [
-      { opacity: 0, scale: grows ? `${SCALE.pop}` : '1' },
+      { opacity: 0.65, scale: grows ? `${SCALE.pop}` : '1' },
       { opacity: 1, scale: '1' },
     ],
     MOTION.enter,
@@ -215,15 +218,12 @@ export const open = (box: HTMLElement | null, scrim: HTMLElement | null) => {
   scrim?.animate([{ opacity: 0 }, { opacity: 1 }], MOTION.enter)
 }
 
-/** Whether the box is leaving by a view transition, which draws its going itself. */
-const handing = { now: false }
-
 /**
  * Closed, the box is gone from the page at once (the app unmounts it): the
  * same elements are put back for a moment to fade out, quicker than they came.
  */
 export const close = (box: HTMLElement | null, scrim: HTMLElement | null) => {
-  if (box === null || !moving() || handing.now) return
+  if (box === null || typeof box.animate !== 'function') return
   const parent = box.parentElement
   queueMicrotask(() => {
     // Still there (React's strict mode trying the effect again): nothing went.
@@ -306,52 +306,40 @@ const named = (wanted: string, within: number) =>
  * such title, the box only fades and the page crossfades.
  */
 export const into = (from: HTMLElement | null, title: string | null, closeBox: () => void, go: () => void) => {
-  const box = from?.closest<HTMLElement>('[role="dialog"]') ?? null
-  if (from === null || box === null || !travels() || typeof document.startViewTransition !== 'function') {
-    closeBox()
-    go()
-    return
-  }
-  handing.now = true
-  from.style.setProperty('view-transition-name', 'search-hit')
-  box.style.setProperty('view-transition-name', 'search-box')
-  let landed: HTMLElement | null = null
-  const transition = document.startViewTransition(async () => {
-    flushSync(closeBox)
-    go()
-    landed = title === null ? null : await named(title, 360)
-    landed?.style.setProperty('view-transition-name', 'search-hit')
-  })
-  void transition.finished.finally(() => {
-    landed?.style.removeProperty('view-transition-name')
-    handing.now = false
+  // Navigation is never inside a view-transition callback: that freezes the
+  // old picture while loaders run. Move a decorative copy after the page
+  // has drawn, without holding input, routing or any real text invisible.
+  const copy = from?.cloneNode(true) as HTMLElement | undefined
+  const was = measure(from)
+  closeBox()
+  go()
+  if (copy === undefined || was === null || title === null || !travels()) return
+  void named(title, 500).then((target) => {
+    if (target === null) return
+    const to = target.getBoundingClientRect()
+    Object.assign(copy.style, {
+      position: 'absolute',
+      left: `${was.rect.left}px`,
+      top: `${was.rect.top}px`,
+      width: `${was.rect.width}px`,
+      height: `${was.rect.height}px`,
+      margin: '0',
+      pointerEvents: 'none',
+    })
+    copy.removeAttribute('id')
+    layer().append(copy)
+    const animation = copy.animate(
+      [
+        { transform: 'none', opacity: 0.7 },
+        { transform: `translate(${to.left - was.rect.left}px, ${to.top - was.rect.top}px)`, opacity: 0 },
+      ],
+      MOTION.slide,
+    )
+    journey(copy, animation)
   })
 }
 
-/** The field becomes where the words go next (the coordinator's composer), the words carried. */
-export const intoField = (field: HTMLElement | null, closeBox: () => void, go: () => void) => {
-  const box = field?.closest<HTMLElement>('[role="dialog"]') ?? null
-  if (field === null || box === null || !travels() || typeof document.startViewTransition !== 'function') {
-    closeBox()
-    go()
-    return
-  }
-  handing.now = true
-  field.style.setProperty('view-transition-name', 'search-field')
-  box.style.setProperty('view-transition-name', 'search-box')
-  let landed: HTMLElement | null = null
-  const transition = document.startViewTransition(async () => {
-    flushSync(closeBox)
-    go()
-    const began = performance.now()
-    while (landed === null && performance.now() - began < 360) {
-      landed = document.querySelector<HTMLElement>('[role="textbox"][contenteditable="true"], textarea')
-      if (landed === null) await new Promise((resolve) => setTimeout(resolve, 16))
-    }
-    landed?.style.setProperty('view-transition-name', 'search-field')
-  })
-  void transition.finished.finally(() => {
-    landed?.style.removeProperty('view-transition-name')
-    handing.now = false
-  })
+export const intoField = (_field: HTMLElement | null, closeBox: () => void, go: () => void) => {
+  closeBox()
+  go()
 }
