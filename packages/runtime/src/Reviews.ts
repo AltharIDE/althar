@@ -323,6 +323,28 @@ export const setRunOutside = (to: RunOutside) =>
       ON CONFLICT (key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`
   })
 
+/** The settings key for what sending does while an agent is mid-turn; no row is its default, queue. */
+const SEND_MID_TURN = 'send_mid_turn'
+
+/** What sending a message does while an agent is mid-turn: wait in the queue, its default, or steer the agent at once. */
+export type SendMidTurn = 'queue' | 'steer'
+
+export const sendMidTurn = Effect.gen(function* () {
+  const sql = yield* SqlClient.SqlClient
+  const [row] = yield* sql<{ value: string }>`SELECT value FROM settings WHERE key = ${SEND_MID_TURN}`
+  return (row?.value === 'steer' ? 'steer' : 'queue') as SendMidTurn
+})
+
+export const setSendMidTurn = (to: SendMidTurn) =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient
+    if (to === 'queue') return yield* sql`DELETE FROM settings WHERE key = ${SEND_MID_TURN}`.pipe(Effect.asVoid)
+    const at = yield* timestamp
+    yield* sql`
+      INSERT INTO settings ${sql.insert({ key: SEND_MID_TURN, value: to, updatedAt: at })}
+      ON CONFLICT (key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`
+  })
+
 /** Each package manager's lockfile, and its install from it with no install scripts, as Run safely installs. */
 const SAFE_INSTALLS: ReadonlyArray<readonly [string, string]> = [
   ['bun.lock', 'bun install --frozen-lockfile --ignore-scripts'],

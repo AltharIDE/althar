@@ -282,6 +282,7 @@ export interface Client {
   readonly setPostTeamReviews: (on: boolean) => Promise<void>
   /** What "Run it" on code from outside the team does without asking. */
   readonly setRunOutside: (to: 'ask' | 'safe' | 'full') => Promise<void>
+  readonly setSendMidTurn: (to: 'queue' | 'steer') => Promise<void>
   /** Puts a task on Scratch, or on the board with null. */
   readonly shelveTask: (taskId: string, shelf: 'scratch' | null) => Promise<void>
   /** Stops a helper the task's lead started. */
@@ -897,6 +898,7 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
     setCoAuthor: (on) => command((commandId) => api.SetCoAuthor({ commandId, on })),
     setPostTeamReviews: (on) => command((commandId) => api.SetPostTeamReviews({ commandId, on })),
     setRunOutside: (to) => command((commandId) => api.SetRunOutside({ commandId, to })),
+    setSendMidTurn: (to) => command((commandId) => api.SetSendMidTurn({ commandId, to })),
     shelveTask: (taskId, shelf) => command((commandId) => api.ShelveTask({ commandId, taskId, shelf })),
     stopHelper: (taskId, helper) => command((commandId) => api.StopHelper({ commandId, taskId, helper })),
     joinChanges: (taskId, change, into) =>

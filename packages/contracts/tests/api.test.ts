@@ -542,6 +542,7 @@ describe('the API', () => {
               SignInToolServer: () => Effect.die('unused'),
               SetCoAuthor: () => Effect.die('unused'),
               SetPostTeamReviews: () => Effect.die('unused'),
+              SetSendMidTurn: () => Effect.die('unused'),
               SetReviewSeal: () => Effect.die('unused'),
               SetReviewSealStyle: () => Effect.die('unused'),
               GetAutomations: () => Effect.die('unused'),

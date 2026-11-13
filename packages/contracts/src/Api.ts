@@ -730,6 +730,8 @@ export const AppSettings = Schema.Struct({
   postTeamReviews: Schema.Boolean,
   /** What "Run it" on code from outside the team does without asking: `ask` each time, its default, run `safe`ly, or trust it `full`y. */
   runOutside: Schema.optional(Schema.Literals(['ask', 'safe', 'full'])),
+  /** What sending does while an agent is mid-turn: `queue` it for the turn's end, its default, or `steer` it to the agent at once. */
+  sendMidTurn: Schema.optional(Schema.Literals(['queue', 'steer'])),
   /** Every automation is paused: none starts until the person resumes them. Runs under way finish. */
   automationsPaused: Schema.Boolean,
   /** When finished tasks' folders go: `smart` unless the person chose otherwise. */
@@ -5001,6 +5003,8 @@ export const Api = RpcGroup.make(
   command('SetPostTeamReviews', { on: Schema.Boolean }, Schema.Void),
   /** What "Run it" on code from outside the team does without asking: ask each time, run safely, or trust it fully. */
   command('SetRunOutside', { to: Schema.Literals(['ask', 'safe', 'full']) }, Schema.Void),
+  /** What sending a message does while an agent is mid-turn: queue it, or steer the agent with it at once. */
+  command('SetSendMidTurn', { to: Schema.Literals(['queue', 'steer']) }, Schema.Void),
   /**
    * Saves a preset: a task's parts, team and first lines of its brief (Save as preset), or the parts the coordinator offered;
    * kept to the task's project with `projectOnly`. Its name, as kept.
