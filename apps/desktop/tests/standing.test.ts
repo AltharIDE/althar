@@ -1,7 +1,7 @@
 import type { ChecksSummary } from '@althar/contracts'
 import { describe, expect, it } from 'vitest'
 
-import { doingWords, factsOf, isBlocked, labelWords, nextWords, standingOf } from '../src/renderer/shared/standing'
+import { doneHere, doingWords, factsOf, isBlocked, labelWords, nextWords, shipText, standingOf } from '../src/renderer/shared/standing'
 import { change } from './fixtures'
 
 /*
@@ -161,6 +161,29 @@ describe('what stands in a change’s way', () => {
 })
 
 describe('the next thing, in words', () => {
+  it('keeps Ship and the fix after a merge actionable in place, with their own progress and retry words', () => {
+    const ship = { kind: 'ship', commits: 2 } as const
+    expect(doneHere(ship)).toBe(true)
+    expect(nextWords(ship)).toBe('Ship')
+    expect(doingWords(ship)).toBe('Shipping')
+    expect(labelWords(ship, 'PR #12')).toBe('Ship 2 commits')
+    expect(labelWords(ship, 'PR #12', true)).toBe('Try shipping 2 commits again')
+    const fix = { kind: 'fix_after_merge', words: 'PR #12' } as const
+    expect(doneHere(fix)).toBe(true)
+    expect(nextWords(fix)).toBe('Fix it')
+    expect(doingWords(fix)).toBe('Fixing')
+    expect(labelWords(fix, 'PR #12')).toBe('The lead fixes them, and its fix goes up as a new pull request after PR #12')
+    expect(doneHere({ kind: 'merge' })).toBe(true)
+    expect(doneHere({ kind: 'push', commits: 1 })).toBe(true)
+    expect(doneHere({ kind: 'resolve' })).toBe(false)
+    expect(doneHere({ kind: 'fix', failing: ['test'] })).toBe(false)
+  })
+
+  it('promises a review before Ship only where its plan actually has one', () => {
+    expect(shipText.hint(1, true)).toBe('Its review reads 1 commit first, then they go up')
+    expect(shipText.hint(2, false)).toBe('2 commits go up')
+  })
+
   it('says each next thing as its button does', () => {
     expect(nextWords({ kind: 'merge' })).toBe('Accept and merge')
     expect(nextWords({ kind: 'push', commits: 1 })).toBe('Push 1 commit')

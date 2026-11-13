@@ -3061,6 +3061,8 @@ export const SmallChangeItem = Schema.Struct({
     }),
     /** What the path leaves out, in a short line each: "no plan", "reviewed after it merges". */
     skips: Schema.Array(Schema.String),
+    /** Explicit after-merge timing; false for new size-only Small changes. Absent on older cards. */
+    reviewAfterMerge: Schema.optional(Schema.Boolean),
     steps: Schema.Array(SmallChangeStep),
     /** Its pull request as last seen, where it has one: Merge acts on it, and the card says when it is merged. */
     change: Schema.NullOr(ChangeSummary),
@@ -3844,6 +3846,8 @@ export const ThreadSnapshot = Schema.Struct({
     front: Schema.optional(Schema.Boolean),
     /** Its plan's steps, as its header's track shows them; empty without a plan. */
     steps: Schema.Array(PlanStep),
+    /** Its plan's ending: a first or new pull request goes through Ship and its review, even before a hold was recorded. */
+    end: Schema.optional(Schema.NullOr(TaskEnd)),
     /** Its rounds of work as its graph had them, oldest first: what its Graph face draws. Absent from a runtime before it. */
     graph: Schema.optional(Schema.Array(GraphRound)),
     /** Who leads it, running or not: the last agent on its thread, on its model and account, else the one its plan names. */
@@ -4799,6 +4803,7 @@ export const Api = RpcGroup.make(
    * Changes who leads and who reviews a task at any time before it merges. Its lead changes from its next turn, never in the one it
    * is in; its reviewer until its review round starts, and from the next round during one, not once a review of it ran to its
    * end. A review skipped or never planned can be added until the task merges; where its work is up already, it starts a round.
+   * Only supplied steps change; omit untouched steps, and explicitly skip the review step to remove its reviewer.
    */
   command('ChangeTeam', { taskId: Schema.String, steps: Schema.Array(PlanStep) }, Schema.Void),
   /** Changes what an issue the coordinator drafted says, before it is filed. */
@@ -5651,6 +5656,8 @@ export const Api = RpcGroup.make(
   command('StopLaunch', { id: Schema.String }, Schema.Void),
   /** Clears a run that ended by itself from the list. */
   command('ClearLaunch', { id: Schema.String }, Schema.Void),
+  /** What a run of the project has printed so far, the end of it; readable a while after it leaves the list, while Althar runs. */
+  call('ReadLaunchOutput', { id: Schema.String }, OutputText),
   /** The skills a task's lead is given: what the person added from GitHub and turned on. */
   call('ListSkills', {}, SkillList),
   /** The skill folders in a GitHub repository (a URL or `owner/name`), at the ref given or its default branch. */

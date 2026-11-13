@@ -211,8 +211,7 @@ export const useProject = (projectId: string): ProjectModel => {
   )
 
   /** What the window holds of the thread now, for a read that lands later. */
-  const held = useRef<ReadonlyArray<ThreadItem>>([])
-  held.current = coordinator?.items ?? []
+  const held = useCallback(() => cache.getQueryData<CoordinatorSnapshot>(keys.coordinator(projectId))?.items ?? [], [cache, projectId])
 
   const readItems = useCallback(
     (ids: Iterable<string>) =>
@@ -250,7 +249,7 @@ export const useProject = (projectId: string): ProjectModel => {
     (also: Iterable<string> = []) =>
       newest(
         'head',
-        client.getCoordinator(projectId, { limit: 0 }).finally(() => readItems(new Set([...also, ...waiting(held.current)]))),
+        client.getCoordinator(projectId, { limit: 0 }).finally(() => readItems(new Set([...also, ...waiting(held())]))),
         (head) =>
           cache.setQueryData<CoordinatorSnapshot>(keys.coordinator(projectId), (current) =>
             current === undefined
@@ -265,7 +264,7 @@ export const useProject = (projectId: string): ProjectModel => {
           ),
         fail,
       ),
-    [client, cache, projectId, newest, readItems, fail],
+    [client, cache, projectId, newest, readItems, held, fail],
   )
 
   /** The thread read whole again, as a clear or a forgotten conversation rewrote it: what is held of it before is not kept. */
@@ -281,11 +280,11 @@ export const useProject = (projectId: string): ProjectModel => {
     changed.current = { head: false, cards: false, automations: false, items: new Set() }
     if (threadId === null) return
     const read = new Set(items)
-    if (cards) for (const item of coordinator?.items ?? []) if (item.kind === 'task') read.add(item.id)
+    if (cards) for (const item of held()) if (item.kind === 'task') read.add(item.id)
     // An automation's cards say where it stands, as it changes or runs.
-    if (automations) for (const item of coordinator?.items ?? []) if (item.kind === 'automation') read.add(item.id)
+    if (automations) for (const item of held()) if (item.kind === 'automation') read.add(item.id)
     void (head ? readHead(read) : readItems(read))
-  }, [threadId, coordinator, readHead, readItems])
+  }, [threadId, held, readHead, readItems])
 
   useWatch((event) => {
     // A command's output as far as it has come is useOutputs'; the coordinator leaves nothing running; plan usage is the plan gauge's and the pickers'.
@@ -318,7 +317,7 @@ export const useProject = (projectId: string): ProjectModel => {
       if (event.aggregateType === 'thread_item') changed.current.items.add(event.aggregateId)
       else changed.current.head = true
       // A message delivered changes its input, not its item: read again what still shows as queued.
-      if (event.aggregateType === 'user_input') for (const id of waiting(coordinator?.items ?? [])) changed.current.items.add(id)
+      if (event.aggregateType === 'user_input') for (const id of waiting(held())) changed.current.items.add(id)
     } else if (event.aggregateType === 'connection') changed.current.head = true
     else if (event.projectId === projectId && CARDS.has(event.aggregateType)) changed.current.cards = true
     else if (event.projectId === projectId && AUTOMATIONS.has(event.aggregateType)) changed.current.automations = true

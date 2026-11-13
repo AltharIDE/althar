@@ -2030,7 +2030,7 @@ export const handlers = Api.toLayer(
         once(commandId, api(policies.setUsageLimit(projectId, policy, instance.personId))),
       OpenChange: ({ commandId, taskId }) => once(commandId, api(runs.publish(taskId))),
       SetReviewAfterMerge: ({ commandId, taskId, review }) =>
-        once(commandId, api(Effect.asVoid(mergeReviews.choose(taskId, review, instance.personId)))),
+        once(commandId, api(Effect.asVoid(runs.setReviewAfterMerge({ taskId, review, actorId: instance.personId })))),
       ShapeTask: ({ commandId, taskId, preset }) => once(commandId, api(taskActions.shape(taskId, preset, instance.personId))),
       SkipReview: ({ commandId, taskId }) =>
         once(
@@ -2293,6 +2293,7 @@ export const handlers = Api.toLayer(
         ),
       StopLaunch: ({ commandId, id }) => once(commandId, api(launches.stop(id))),
       ClearLaunch: ({ commandId, id }) => once(commandId, api(launches.clear(id))),
+      ReadLaunchOutput: ({ id }) => api(launches.output(id)),
       Watch: ({ since }) => Stream.merge(changes(since), streaming),
     })
   }),

@@ -278,10 +278,7 @@ describe('the project’s bar', () => {
     await screen.findByText('Add a review of “Harden the prototype”?')
     await userEvent.click(await screen.findByRole('button', { name: 'Add gpt-5.2-codex' }))
     await waitFor(() =>
-      expect(client.changeTeam).toHaveBeenCalledWith('r', [
-        ...task.plan.steps,
-        { key: 'review', agentId: 'codex', model: null, skipped: false },
-      ]),
+      expect(client.changeTeam).toHaveBeenCalledWith('r', [{ key: 'review', agentId: 'codex', model: null, skipped: false }]),
     )
   })
 
@@ -1035,13 +1032,14 @@ describe('the Talk room', () => {
         emit(streamed('x', 'Not here', 'th1'))
       })
       await vi.advanceTimersByTimeAsync(50)
-      await waitFor(() => expect(client.getThreadItem).toHaveBeenCalledTimes(3))
-      expect(
-        vi
-          .mocked(client.getThreadItem)
-          .mock.calls.map(([, itemId]) => itemId)
-          .toSorted(),
-      ).toEqual(['c1', 'i9', queued.id].toSorted())
+      await waitFor(() =>
+        expect(
+          vi
+            .mocked(client.getThreadItem)
+            .mock.calls.map(([, itemId]) => itemId)
+            .toSorted(),
+        ).toEqual(['c1', 'i9', queued.id].toSorted()),
+      )
       expect(client.getCoordinator).toHaveBeenLastCalledWith('p1', { limit: 0 })
       await waitFor(() => expect(screen.queryByText('Queued')).toBeNull())
     } finally {

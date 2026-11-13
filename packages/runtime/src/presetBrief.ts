@@ -6,7 +6,7 @@
 
 /** Which preset fits what, as list_presets names them. */
 const WHICH =
-  'Prototype for a prototype or design directions, Small change for a few lines (with small_change), Chat for a question or a look, Review a PR for a review of a pull request (review_pull_request starts that one), and Change for the rest. The person’s own presets count too: where one of theirs fits what they asked, plan from it.'
+  'Prototype for a prototype or design directions, Small change for a few lines (with small_change: starts at once and keeps its configured review before Ship), Chat for a question or a look, Review a PR for a review of a pull request (review_pull_request starts that one), and Change for the rest. The person’s own presets count too: where one of theirs fits what they asked, plan from it.'
 
 /** The prototype's way: it ends with its branch, and may later be built; the person decides then. */
 const PROTOTYPES =

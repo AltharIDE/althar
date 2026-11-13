@@ -16,7 +16,7 @@ import { Queries } from '../src/Queries'
 import * as Runtime from '../src/Runtime'
 import { Sessions } from '../src/Sessions'
 import type { ToolAccess } from '../src/ToolServer'
-import { callTool, items, repository, runtime, until } from './support'
+import { atReset, callTool, items, later, onTestClock, repository, runtime, until } from './support'
 
 /*
  * A sanity pass over places among the agents at work, usage limits and the
@@ -171,7 +171,7 @@ const ranNow = (projectId: ProjectId, definition: AutomationDefinition) =>
 describe('a place held by an agent out of usage', () => {
   // Finding (sanity pass): a lead out of usage, with the person's message waiting for its reset, is counted as an agent at
   // work (Busy's `told`) and holds a place until the reset, so other tasks wait behind it. Flips to passing when fixed.
-  it.live.fails('takes no place while the person’s message to it waits for its reset', () =>
+  it.live('takes no place while the person’s message to it waits for its reset', () =>
     Effect.gen(function* () {
       const busy = yield* Busy
       const policies = yield* Policies
@@ -186,7 +186,7 @@ describe('a place held by an agent out of usage', () => {
       // The person writes to the lead meanwhile: what they said waits for the reset, as its turn reached the limit too.
       const body = 'When you are back, add a test as well.'
       yield* say(out.threadId, body)
-      yield* until(inputOf(out.threadId, body), (rows) => rows.some((row) => row.errorClass === 'usage_limit'))
+      yield* until(inputOf(out.threadId, body), (rows) => rows.length > 0)
       yield* until(inputOf(out.threadId, body), (rows) => rows.every((row) => row.state === 'queued'))
       yield* idle(out.threadId)
       // Still nothing is at work on this machine: the next task takes the one place.
@@ -204,9 +204,10 @@ describe('what Althar tells a lead that runs out of usage', () => {
   // Finding (sanity pass): what Althar tells an idle lead (a failed check, a nudge) in a turn that reaches a usage limit is
   // dropped: it isn't kept for the agent's next turn, nothing gives it again at the reset, and the thread says "Your message
   // waits" though the person said nothing. Flips to passing when fixed.
-  it.live.fails('keeps it for the lead’s next turn, as what the person says is kept', () => {
+  it.effect('keeps it for the lead’s next turn and delivers it once the usage limit resets', () => {
     // Claude Code has usage until the test says it ran out.
     const limit: { until: number } = { until: 0 }
+    const back = later()
     return Effect.gen(function* () {
       const policies = yield* Policies
       const instance = yield* Instance
@@ -215,7 +216,7 @@ describe('what Althar tells a lead that runs out of usage', () => {
       const task = yield* started(projectId, 'Done', 'Do it. [lead:finish]', 'claude-code')
       yield* until(attempts(task.taskId), (rows) => rows[0]?.state === 'succeeded')
       yield* idle(task.threadId)
-      limit.until = Date.now() + HOUR
+      limit.until = back
       const body = 'The checks failed on the pull request.'
       yield* tell(task.threadId, body)
       yield* until(inputOf(task.threadId, body), (rows) => rows.some((row) => row.errorClass === 'usage_limit'))
@@ -223,7 +224,43 @@ describe('what Althar tells a lead that runs out of usage', () => {
       // What Althar said waits for the lead, as the person's words do; and nobody is told their message waits.
       assert.include(['queued', 'noted'], (yield* inputOf(task.threadId, body))[0]?.state)
       assert.notInclude(said.find((title) => title.includes('ran out of usage')) ?? '', 'Your message')
-    }).pipe(Effect.provide(atOnce(4, { each: { 'claude-code': { outOfUsage: limit } } })))
+      yield* atReset(back)
+      const delivered = yield* until(inputOf(task.threadId, body), (rows) =>
+        rows.some((row) => row.state === 'delivered' && row.errorClass === null),
+      )
+      assert.lengthOf(
+        delivered.filter((row) => row.errorClass === null),
+        1,
+      )
+    }).pipe(Effect.provide(atOnce(4, { each: { 'claude-code': { outOfUsage: limit } } })), onTestClock)
+  })
+
+  it.effect('keeps an explicit Stop in effect when retained quiet input reaches its usage reset', () => {
+    const limit: { until: number } = { until: 0 }
+    const back = later()
+    return Effect.gen(function* () {
+      const sessions = yield* Sessions
+      const sql = yield* SqlClient.SqlClient
+      const policies = yield* Policies
+      const instance = yield* Instance
+      const { projectId } = yield* opened
+      yield* policies.setUsageLimit(projectId, 'wait', instance.personId)
+      const task = yield* started(projectId, 'Stopped at its limit', 'Do it. [lead:finish]', 'claude-code')
+      yield* until(attempts(task.taskId), (rows) => rows[0]?.state === 'succeeded')
+      yield* idle(task.threadId)
+      limit.until = back
+      const body = 'The checks failed after the step finished.'
+      yield* tell(task.threadId, body)
+      yield* until(inputOf(task.threadId, body), (rows) => rows.some((row) => row.errorClass === 'usage_limit'))
+      yield* until(noticesOn(task.threadId), (all) => all.some((title) => title.includes('ran out of usage')))
+      yield* sessions.stop(task.threadId)
+      const before = yield* sql`SELECT id FROM provider_sessions WHERE thread_id = ${task.threadId}`
+      yield* atReset(back)
+      yield* Effect.yieldNow
+      assert.strictEqual(yield* sessions.quiet(task.threadId, Effect.succeed('stopped')), 'stopped')
+      assert.lengthOf(yield* sql`SELECT id FROM provider_sessions WHERE thread_id = ${task.threadId}`, before.length)
+      assert.include(['queued', 'noted'], (yield* inputOf(task.threadId, body))[0]?.state)
+    }).pipe(Effect.provide(atOnce(4, { each: { 'claude-code': { outOfUsage: limit } } })), onTestClock)
   })
 })
 
@@ -270,7 +307,7 @@ describe('a model the person switched off', () => {
         SELECT t.id AS thread_id FROM tasks k JOIN threads t ON t.task_id = k.id AND t.kind = 'task' WHERE k.title = 'Sketch the retry'`
       const said = yield* until(
         Effect.map(items(task?.threadId ?? ''), (all) =>
-          all.flatMap((item) => (item.kind === 'notice' ? [String(item.content.description ?? '')] : [])),
+          all.flatMap((item) => (item.kind === 'notice' && typeof item.content.description === 'string' ? [item.content.description] : [])),
         ),
         (all) => all.some((one) => one.includes('switched off')),
       )

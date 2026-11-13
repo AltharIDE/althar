@@ -47,6 +47,7 @@ jobs:
       site: ${{ steps.paths.outputs.site }}
       brand: ${{ steps.paths.outputs.brand }}
       report: ${{ steps.paths.outputs.report }}
+      windows: ${{ steps.paths.outputs.windows }}
     steps:
       - uses: actions/checkout@v5
       - uses: oven-sh/setup-bun@v2
@@ -62,7 +63,7 @@ jobs:
         run: |
           bun -e '
             const changed = (await Bun.file(`${process.env.RUNNER_TEMP}/changed`).text()).split("\n").filter(Boolean)
-            for (const name of ["desktop", "harness", "ui", "site", "brand", "report"]) {
+            for (const name of ["desktop", "harness", "ui", "site", "brand", "report", "windows"]) {
               const workflow = Bun.YAML.parse(await Bun.file(`.github/workflows/${name}.yml`).text())
               const globs = workflow.on.pull_request.paths.map((path) => new Bun.Glob(path))
               console.log(`${name}=${changed.some((file) => globs.some((glob) => glob.match(file)))}`)
@@ -78,6 +79,11 @@ jobs:
     needs: changes
     if: needs.changes.outputs.harness == 'true'
     uses: ./.github/workflows/harness.yml
+
+  windows:
+    needs: changes
+    if: needs.changes.outputs.windows == 'true'
+    uses: ./.github/workflows/windows.yml
 
   ui:
     needs: changes
@@ -102,7 +108,7 @@ jobs:
   # The one check main's rules require: passes when nothing that ran failed. On a pull request, nothing above runs.
   merge-queue:
     name: merge queue
-    needs: [changes, desktop, harness, ui, site, brand, report]
+    needs: [changes, desktop, harness, ui, site, brand, report, windows]
     if: ${{ !cancelled() }}
     runs-on: ubuntu-24.04
     # Long enough to wait out a stress run still going, whose own jobs take 75 minutes at most.

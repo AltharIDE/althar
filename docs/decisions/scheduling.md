@@ -119,15 +119,16 @@ A task planned small has one place beyond the number, so a one-line fix never
 waits behind long tasks. Before this lane, waiting for a place was the largest
 part of a small task's time ([small-task-timeline.md](../research/small-task-timeline.md)).
 
-- **Planned small is read from the plan, never written:** the lead runs at a
-  light effort (`low`, or Codex's `minimal`), and every review step is
-  skipped. A person who adds a review, or a harder effort, takes the task out
-  of the lane. `quickLane.ts` holds the rule.
+- **Planned small is read from the plan:** the lead runs at a light effort
+  (`low`, or Codex's `minimal`), with the Small change marker or no active
+  review. The marker keeps review timing independent of size; reviewers use
+  ordinary places. A harder lead effort takes the task out of the lane.
+  `quickLane.ts` holds the rule.
 - **The lead takes a place of the number where one is free, and the lane's
   otherwise.** Past both, it waits as any task does. Only other small tasks
   stand before it in the lane.
-- The fast lane for small changes, with its review after merge, plans tasks
-  this way. It is described in [tasks.md](tasks.md).
+- The fast lane for small changes starts its lead this way; its configured
+  review runs before Ship unless another timing is explicitly chosen. It is described in [tasks.md](tasks.md).
 
 ## Running and Up next
 

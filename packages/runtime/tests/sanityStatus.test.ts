@@ -156,7 +156,7 @@ describe('a ready change the person pushed to, before its host shows the new hea
   // (Changes.handsOf), and the person's own Push takes it out of them: so right after it the card is Ready, "Ready to accept · No
   // checks ran · Accept and merge" on the board, the header and the home, while its host starts the checks. Flips to passing when
   // fixed.
-  it.live.fails('is under way, its checks running, not ready with no checks ran', () => {
+  it.live('is under way, its checks running, not ready with no checks ran', () => {
     const { working, bare } = hosted()
     const tip = tipOf(bare)
     // The host has checks for what the plan's run pushed; for a head pushed after, none yet, as GitHub for a moment after a push.

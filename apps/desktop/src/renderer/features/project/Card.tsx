@@ -131,6 +131,7 @@ function Offer({ card }: { card: TaskCardContent }) {
       {...(offer.kept === undefined
         ? {}
         : { kept: offer.kept.name, onUndo: () => void client.removePreset(offer.kept?.id ?? '').then(listed) })}
+      // oxlint-disable-next-line althar/press-at-once -- A form the runtime checks (a name another preset has): it stays, busy, until kept, so a refusal lands at its field.
       onKeep={(name) => client.savePreset({ name, parts: offer.parts, taskId: card.taskId, asNew: true }).then(listed)}
       onDecline={() => void client.declinePresetOffer(card.taskId)}
     />

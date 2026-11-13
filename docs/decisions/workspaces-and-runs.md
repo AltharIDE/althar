@@ -358,11 +358,16 @@ A run is said in three places that share one state, so they agree:
   main", a branch or a pull request). A run and a process a lead left running
   are never merged into one row, even on the same address. The running time
   is the whole reminder; the pill doesn't nag.
-- **The run's card** in the thread it was asked for in: where it runs, the
-  command, its address as a link, its uptime and Stop, and, once over, how it
-  ended, with Run again. A run that Althar's restart ended is marked stopped.
-  Its output lives here. `run_project` waits up to 30 seconds for the
-  address, so the coordinator's reply can link it, or say how it ended.
+- **The run's card** in the thread it was asked for in: what runs, its
+  address as a link, and Stop, with where it runs only outside its own task's
+  thread, whose header says it; once over, how it ended, with the line that
+  says why, and Run again. A run that Althar's restart ended is marked
+  stopped. Its output lives here, a press away: a console over the card, the
+  command at its head, read for a person, and what it printed under it,
+  following the end. Althar keeps what a run printed while it runs and for its
+  last few runs after, never past a restart. `run_project` waits up to 30
+  seconds for the address, so the coordinator's reply can link it, or say how
+  it ended.
 
 Where a run answers is read from the first local address it prints. One that
 answers nowhere (an app's window, a watcher) is taken as starting for ten

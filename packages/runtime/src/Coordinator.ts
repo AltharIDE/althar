@@ -1490,7 +1490,7 @@ export class Coordinator extends Context.Service<
             })
           yield* runs.changeTeam({
             taskId: task.id,
-            steps: [lead, ...(review === null ? (own === undefined ? [] : [{ ...own, skipped: true }]) : [review])],
+            steps: review === null ? (own === undefined ? [] : [{ ...own, skipped: true }]) : [review],
             actorId: instance.systemId,
           })
           yield* runs.reshape({ taskId: task.id, end, ...(review === null ? {} : { afterMerge: null }), actorId: instance.systemId })
@@ -1653,8 +1653,7 @@ export class Coordinator extends Context.Service<
           const steps: Array<PlanStep> = [{ key: 'implement', ...(yield* stepOf(access.projectId, proposed.lead)), skipped: false }]
           if (proposed.review !== null && proposed.review !== undefined)
             steps.push({ key: 'review', ...(yield* stepOf(access.projectId, proposed.review)), skipped: false })
-          // The fast lane: one step, its review named and skipped so nothing waits on it, and no countdown. It is reviewed
-          // after it merges, and the card in its thread says what it skipped (README section 6).
+          // Size changes the countdown, not review timing. The configured reviewer reads before Ship unless explicitly set otherwise.
           const small = proposed.small_change === true
           const smallSteps = small
             ? smallChangeSteps({
@@ -1692,7 +1691,7 @@ export class Coordinator extends Context.Service<
             proposal,
             ...(proposed.works_in_why === undefined ? {} : { worksInWhy: proposed.works_in_why }),
             // A plan the person held stays held; otherwise a small change starts at once.
-            ...(small ? { reviewAfterMerge: true, ...(held === undefined && !heldWhileDrafted ? { startsIn: Duration.zero } : {}) } : {}),
+            ...(small ? { smallChange: true, ...(held === undefined && !heldWhileDrafted ? { startsIn: Duration.zero } : {}) } : {}),
             ...(heldWhileDrafted ? { held: true } : {}),
           })
           // Held as it was being proposed: held now.
@@ -1719,14 +1718,26 @@ export class Coordinator extends Context.Service<
           if (held !== undefined)
             return `Changed ${task.slug}'s plan.${where} It stays held until the person starts it; they see it as a card, so there's no need to describe the plan again.`
           if (small) {
+            // A preset may replace these parts, and a small plan can explicitly have no reviewer.
+            const sql = yield* SqlClient.SqlClient
+            const [effective] = yield* sql<{ parameters: string }>`SELECT parameters FROM task_plans WHERE id = ${planId}`
+            const actual =
+              effective === undefined
+                ? undefined
+                : yield* Schema.decodeUnknownEffect(Schema.fromJsonString(PlanParameters))(effective.parameters)
+            const reviewer = actual?.steps.find((step) => step.key === 'review' && (!step.skipped || actual.reviewAfterMerge === true))
             const after = (yield* afterMergeNow(task.id)).holds
             const reviewed =
-              after === 'none'
-                ? "The project's rule has no review after it merges (review_after_merge keeps one for it, on the person's word)"
-                : after === 'all'
-                  ? 'It is reviewed after it merges, and any finding comes back to the person'
-                  : 'It is reviewed after it merges, and only blocking and major findings come back to the person'
-            return `Planned ${task.slug} as a small change: ${where} It starts at once, on ${smallSteps?.[0]?.model ?? 'its lightest model'}, with no plan to read and one step. ${reviewed}; the card in its thread says what it skipped, so there's no need to repeat it.`
+              reviewer === undefined
+                ? 'This task has no reviewer'
+                : actual?.reviewAfterMerge !== true
+                  ? 'Its reviewer reads the work before it ships'
+                  : after === 'none'
+                    ? "The project's rule has no review after it merges"
+                    : after === 'all'
+                      ? 'It is reviewed after it merges, and any finding comes back to the person'
+                      : 'It is reviewed after it merges, and only blocking and major findings come back to the person'
+            return `Planned ${task.slug} as a small change: ${where} It starts at once, on ${smallSteps?.[0]?.model ?? 'its lightest model'}, with no countdown. ${reviewed}; the card in its thread says what it skipped, so there's no need to repeat it.`
           }
           return `Planned ${task.slug}.${where} It starts in 25 seconds unless the person holds or changes it; they see it as a card, so there's no need to describe the plan again.`
         })
@@ -1819,22 +1830,17 @@ export class Coordinator extends Context.Service<
             if (plan === undefined)
               return yield* new ToolRefused({ message: `${task.slug} has no plan yet: propose_plan plans it, with its team.` })
             const before = yield* Schema.decodeUnknownEffect(Schema.fromJsonString(PlanParameters))(plan.parameters)
-            const rest = before.steps.filter((step) => step.key !== 'implement' && step.key !== 'review')
-            const ownLead = before.steps.find((step) => step.key === 'implement')
             const ownReview = before.steps.find((step) => step.key === 'review')
             const steps: Array<PlanStep> = [
-              ...rest,
-              lead !== undefined && held === undefined ? { key: 'implement' as const, ...lead, skipped: false } : (ownLead ?? []),
+              ...(lead !== undefined && held === undefined ? [{ key: 'implement' as const, ...lead, skipped: false }] : []),
               ...(asked.review === undefined
-                ? ownReview === undefined
-                  ? []
-                  : [ownReview]
+                ? []
                 : reviewer == null
                   ? ownReview === undefined
                     ? []
                     : [{ ...ownReview, skipped: true }]
                   : [{ key: 'review' as const, ...reviewer, skipped: false }]),
-            ].flat()
+            ]
             const changed = yield* (yield* Runs)
               .changeTeam({ taskId: task.id, steps, actorId: instance.coordinatorId })
               .pipe(
@@ -2768,7 +2774,7 @@ export class Coordinator extends Context.Service<
         ),
         tool(
           'propose_plan',
-          `Proposes a drafted task's plan: the model that implements it (its lead), with why in a sentence; and the model that reviews it, which only reads, or null for something trivial. A change of a few lines is planned small: pass small_change, keep the review (it runs after the merge, as the project's afterMergeReview rule says: only major findings come back, any, or none at all), and put its lead on a light, quick model (Sonnet, at low effort where that is the lowest it lists). It then has one step and no countdown: it starts at once in a place kept for small tasks, however many long ones are at work, and its card in the thread says what it skipped. Without small_change it starts on its own after 25 seconds unless the person holds or changes it. Name each model as list_models writes it, and, where it matters, one of the efforts it lists for that model. Proposing again for a task the person holds replaces the plan but keeps it held: it starts only when the person starts it. A task's lead plans only the tasks it drafted. ${PICK_A_PRESET}`,
+          `Proposes a drafted task's plan: the model that implements it (its lead), with why in a sentence; and the model that reviews it, which only reads, or null for something trivial. A change of a few lines can be planned small: pass small_change and keep its configured review before Ship. Size never schedules a review after merge, and you must not propose an extra one there. Only an explicit requested review timing or a custom preset can do that. Put its lead on a light, quick model (Sonnet, at low effort where that is the lowest it lists). It then has no countdown: it starts at once in a place kept for small tasks, however many long ones are at work, and its card in the thread says what it skipped. Without small_change it starts on its own after 25 seconds unless the person holds or changes it. Name each model as list_models writes it, and, where it matters, one of the efforts it lists for that model. Proposing again for a task the person holds replaces the plan but keeps it held: it starts only when the person starts it. A task's lead plans only the tasks it drafted. ${PICK_A_PRESET}`,
           {
             type: 'object',
             properties: {
@@ -2781,7 +2787,7 @@ export class Coordinator extends Context.Service<
               small_change: {
                 type: 'boolean',
                 description:
-                  "For a change of a few lines, such as a one-line fix: one step, no countdown, and a review after it merges instead of before, where the project's rule has one. Its review names who reads it once it merged. Say what it skips in a sentence.",
+                  'For a change of a few lines, such as a one-line fix: no countdown. Its review keeps the configured timing, normally before Ship; size never adds a review after merge. Say that it starts at once.',
               },
               review: {
                 type: ['object', 'null'],

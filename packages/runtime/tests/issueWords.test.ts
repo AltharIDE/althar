@@ -31,7 +31,7 @@ const ISSUE: Issue = {
   cycle: 'Cycle 4',
   parent: { key: 'MER-0', title: 'Reliability' },
   type: 'Bug',
-  due: '2026-11-30',
+  due: '2025-11-30',
   estimate: 3,
   components: ['api'],
 }
@@ -76,7 +76,7 @@ describe('an issue in words', () => {
     assert.include(words, 'In Progress, High priority, in Meridian. https://linear.app/meridian/issue/MER-1')
     assert.include(
       words,
-      'Assigned to Ada, grace; labels bug, ui; project Uploads; milestone Beta; cycle Cycle 4; part of MER-0 (Reliability); type Bug; components api; estimate 3; due 2026-11-30.',
+      'Assigned to Ada, grace; labels bug, ui; project Uploads; milestone Beta; cycle Cycle 4; part of MER-0 (Reliability); type Bug; components api; estimate 3; due 2025-11-30.',
     )
     assert.include(words, '- Ada, 2026-11-01: Seen again')
     assert.include(words, `- grace, 2026-11-02: ${'x'.repeat(800)}…`)

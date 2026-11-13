@@ -92,6 +92,28 @@ const runsOf = (taskId: string) =>
       SELECT state, plan_id, end_reason, parameters FROM runs WHERE task_id = ${taskId} ORDER BY created_at, rowid`
   })
 
+/** A reviewed opener answers once Ship is admitted; a later publication failure is the task's recoverable stuck call. */
+const publicationStuck = (taskId: string) =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient
+    const [call] = yield* until(
+      sql<{ id: string; detail: string | null }>`
+        SELECT id, json_extract(payload, '$.detail') AS detail FROM attention_requests
+        WHERE task_id = ${taskId} AND kind = 'stuck' AND state = 'open' AND json_extract(payload, '$.step') = 'publish'`,
+      (rows) => rows.length === 1,
+    )
+    return call ?? assert.fail('no publication failure')
+  })
+
+const retryPublication = (attentionId: string) =>
+  Effect.gen(function* () {
+    yield* (yield* Runs).answerStuck({
+      envelope: yield* Runtime.envelope('attention.answer_stuck', {}),
+      attentionId,
+      answer: { kind: 'retry', agentId: 'codex' },
+    })
+  })
+
 /**
  * What the person says to the task's lead, as the task's screen says it: with no agent on the thread, as once its task
  * settled, it starts its lead after queuing what they said.
@@ -179,19 +201,26 @@ describe('a task that goes back to work', () => {
 
       // Where main can't be fetched, nothing moves: as this Mac last saw it, main hasn't what merged.
       pushes.to = join(bare, 'nowhere')
-      yield* Effect.flip(runs.publish(task.taskId))
+      yield* runs.publish(task.taskId)
+      const unavailable = yield* publicationStuck(task.taskId)
+      assert.isNotEmpty(unavailable.detail ?? '')
       assert.strictEqual(git(task.path, 'rev-parse', '--abbrev-ref', 'HEAD'), 'althar/add-a-retry')
+      assert.lengthOf(github.changes, 1)
       pushes.to = bare
       // A push the host refuses leaves the worktree on the new branch, its commit still offered, and the next try takes that branch.
       const refuse = join(bare, 'hooks', 'pre-receive')
       writeFileSync(refuse, '#!/bin/sh\nexit 1\n', { mode: 0o755 })
-      yield* Effect.flip(runs.publish(task.taskId))
+      yield* retryPublication(unavailable.id)
+      const rejected = yield* publicationStuck(task.taskId)
+      assert.isNotEmpty(rejected.detail ?? '')
       assert.strictEqual(git(task.path, 'rev-parse', '--abbrev-ref', 'HEAD'), 'althar/add-a-retry-2')
       assert.deepStrictEqual((yield* cards(task.projectId))[0]?.unshipped, { commits: 1, add: 1, del: 0 })
+      assert.lengthOf(github.changes, 1)
       rmSync(refuse)
 
       // Opened from the task: a new branch from main as the host merged it, with the commit alone on it, pushed plainly.
-      yield* runs.publish(task.taskId)
+      yield* retryPublication(rejected.id)
+      yield* until(cards(task.projectId), (all) => all[0]?.phase === 'ready' && all[0].change?.number === 2)
       assert.lengthOf(github.changes, 2)
       const second = github.changes[1]
       assert.deepStrictEqual([second?.source, second?.target, second?.draft], ['althar/add-a-retry-2', 'main', true])
@@ -473,8 +502,9 @@ describe('a task that goes back to work', () => {
       // Its lead changes that line again after the merge, as a commit of its own, in no pull request yet.
       commitIn(task.path, 'change.txt', 'Once more')
       yield* until(cards(task.projectId), (all) => all[0]?.phase === 'ready' && all[0].unshipped != null)
-      const refused = (yield* Effect.flip(runs.publish(task.taskId))) as NoChangeToOpen
-      assert.deepStrictEqual([refused.why, refused.detail], ['conflicts', 'change.txt'])
+      yield* runs.publish(task.taskId)
+      const refused = yield* publicationStuck(task.taskId)
+      assert.match(refused.detail ?? '', /conflicts with the default branch, in change\.txt/)
       assert.strictEqual(git(task.path, 'rev-parse', '--abbrev-ref', 'HEAD'), 'althar/add-a-retry')
       assert.strictEqual(git(task.path, 'status', '--porcelain'), '')
       assert.lengthOf(github.changes, 1)
@@ -974,6 +1004,7 @@ describe('a merged task with commits after its pull request', () => {
 
       // The pull request has what the card said, and nothing the person left out.
       yield* runs.publish(task.taskId)
+      yield* until(cards(task.projectId), (all) => all[0]?.phase === 'ready' && all[0].change?.number === 2)
       assert.strictEqual(github.changes[1]?.source, 'althar/add-a-retry-2')
       assert.strictEqual(git(bare, 'log', '--format=%s', 'main..althar/add-a-retry-2'), 'Kept')
       assert.strictEqual(git(bare, 'diff', '--name-only', 'main', 'althar/add-a-retry-2'), 'kept.txt')
@@ -991,6 +1022,7 @@ describe('a merged task with commits after its pull request', () => {
       yield* tasks.leaveOut({ envelope: yield* Runtime.envelope('task.leave_out', {}), taskId: task.taskId })
       yield* until(cards(task.projectId), (all) => all[0]?.unshipped?.commits === 1)
       yield* runs.publish(task.taskId)
+      yield* until(cards(task.projectId), (all) => all[0]?.phase === 'ready' && all[0].change?.number === 3)
       assert.strictEqual(github.changes[2]?.source, 'althar/add-a-retry-3')
       // Its next has all of the closed one, and what came after it, and still nothing left out before.
       assert.strictEqual(git(bare, 'log', '--format=%s', 'main..althar/add-a-retry-3'), 'Kept again\nKept')
@@ -1158,7 +1190,7 @@ describe('changing the team of a task that has begun', () => {
         (all) => all[0]?.turnRunning === true,
       )
       const changed = yield* changeTeam(task.taskId, [step('implement', 'claude-code', null, false, 'high'), step('review', 'codex')])
-      assert.deepStrictEqual([changed.lead?.step.effort, changed.lead?.was.effort ?? null], ['high', null])
+      assert.deepStrictEqual([changed.lead?.step.effort, changed.lead?.was.effort ?? null], ['high', 'medium'])
       slow.open('[lead:slowly]')
       yield* until(cards(task.projectId), (all) => all[0]?.phase === 'ready')
       yield* say(task.threadId, 'More. [lead:finish]')
@@ -1493,7 +1525,7 @@ describe('changing the team of a task that has begun', () => {
       yield* changeTeam(task.taskId, [step('implement', 'claude-code'), step('review', offered?.agentId ?? '', offered?.model ?? null)])
       assert.strictEqual(yield* offer(), undefined)
       // Taken off again before it ran: the offer was answered, and its line keeps no buttons.
-      yield* changeTeam(task.taskId, [step('implement', 'claude-code')])
+      yield* changeTeam(task.taskId, [step('review', offered?.agentId ?? '', offered?.model ?? null, true)])
       assert.deepStrictEqual(
         (yield* planOf(task.taskId)).steps.filter((one) => one.key === 'review' && !one.skipped),
         [],

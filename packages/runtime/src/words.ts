@@ -351,7 +351,7 @@ export const words = (
         // git said nothing: what Althar knows of how it ended.
         if (fieldOf(error, 'timedOut') === true) {
           const timeout = fieldOf(error, 'timeout')
-          return `${command} got no answer in ${secondsOf(typeof timeout === 'number' ? timeout : undefined)}, so Althar stopped it. Try again.`
+          return `${command} got no answer in ${secondsOf(typeof timeout === 'number' ? timeout : undefined)}, so Althar stopped waiting. Try again.`
         }
         const signal = text(error, 'signal')
         if (signal !== '') return `${command} was stopped (${signal}) before it was done. Try again.`
@@ -402,7 +402,7 @@ export const words = (
         if (why === 'unreachable')
           return `Althar couldn’t reach ${where}, so nothing was pushed. Check this computer’s connection, then try again.`
         if (why === 'unanswered')
-          return `${where} didn’t answer in time, so the push was stopped. git may have been waiting for a sign-in it couldn’t ask for here: sign git in to ${where} from a terminal, then try again.`
+          return `${where} didn’t answer in time, so Althar stopped waiting for the push. git may have been waiting for a sign-in it couldn’t ask for here: sign git in to ${where} from a terminal, then try again.`
         if (why === 'failed') return `Althar couldn’t push to ${where}. What git said is under Details.`
         // The person's own git pushed: signing git in is what puts it right, as connecting doesn't change how it pushes.
         if (host !== '')

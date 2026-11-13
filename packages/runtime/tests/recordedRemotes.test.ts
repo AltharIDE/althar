@@ -42,7 +42,7 @@ const recorded = (projectId: string) =>
 const withOrigin = (working: string, origin: string) => {
   execFileSync('git', ['remote', 'add', 'origin', origin], { cwd: working })
   const bare = mkdtempSync(join(tmpdir(), 'althar-remote-'))
-  execFileSync('git', ['clone', '-q', '--bare', working, bare])
+  execFileSync('git', ['clone', '-q', '--bare', '--', working, bare])
   return bare
 }
 
