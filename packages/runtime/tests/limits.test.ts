@@ -6,7 +6,7 @@ import { join } from 'node:path'
 import type { ProjectId } from '@althar/domain'
 import type { FakeAgentOptions } from '@althar/provider-adapters/testing'
 import { assert, describe, it } from '@effect/vitest'
-import { Clock, Duration, Effect, Layer, Option, Stream } from 'effect'
+import { Clock, Context, Duration, Effect, Layer, Option, Stream } from 'effect'
 import { TestClock } from 'effect/testing'
 import { SqlClient } from 'effect/sql'
 
@@ -38,6 +38,50 @@ import type { ToolAccess } from '../src/ToolServer'
  */
 
 const HOUR = 60 * 60 * 1000
+
+describe('automatic model selection', () => {
+  it.live('does not reuse a failed session’s model while the available models are unknown', () =>
+    Effect.gen(function* () {
+      const projects = yield* Projects
+      const coordinator = yield* Coordinator
+      const sessions = yield* Sessions
+      const sql = yield* SqlClient.SqlClient
+      const models = yield* Models
+      const catalog = yield* models.catalog
+      const limits = Context.get(
+        yield* Layer.build(Layer.fresh(Limits.layer)).pipe(
+          Effect.provideService(
+            Models,
+            Models.of({ ...models, catalog: Effect.succeed(catalog.map((agent) => ({ ...agent, models: [], probing: true }))) }),
+          ),
+        ),
+        Limits,
+      )
+      const project = yield* projects.open({ envelope: yield* Runtime.envelope('project.open', {}), path: repository() })
+      const threadId = yield* coordinator.thread(project.projectId)
+      // This id can come from an earlier automatic pick, without the person ever selecting it.
+      yield* sessions.start({ threadId, agentId: 'claude-code', model: 'claude-fable-5-1' }).pipe(Effect.ignore)
+      const failed = yield* sql`
+        UPDATE provider_sessions SET model = 'claude-fable-5-1'
+        WHERE thread_id = ${threadId} AND state = 'failed' RETURNING id`
+      assert.lengthOf(failed, 1)
+      const choice = yield* limits.free({ projectId: project.projectId, besides: ['codex', 'opencode'] })
+      assert.deepInclude(choice, { agentId: 'claude-code', model: null })
+      assert.strictEqual(yield* limits.modelFor({ projectId: project.projectId, agentId: 'claude-code' }), null)
+      const offered = yield* limits.choices({ projectId: project.projectId, accountId: null })
+      assert.isTrue(offered.filter((one) => one.agentId === 'claude-code').every((one) => one.model === null))
+      // Rotating accounts within the agent still preserves an explicitly planned model.
+      assert.strictEqual(
+        yield* limits.modelFor({
+          projectId: project.projectId,
+          agentId: 'claude-code',
+          planned: { agentId: 'claude-code', model: 'large' },
+        }),
+        'large',
+      )
+    }).pipe(Effect.scoped, Effect.provide(runtime())),
+  )
+})
 
 /** A runtime whose agents are out as given, with the project's queries. */
 const withAgents = (each: Readonly<Record<string, FakeAgentOptions>>, signedOut: ReadonlyArray<string> = []) =>

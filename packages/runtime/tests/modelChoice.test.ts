@@ -17,6 +17,8 @@ import { Projects } from '../src/Projects'
 import { Queries } from '../src/Queries'
 import * as Runtime from '../src/Runtime'
 import type { ToolAccess } from '../src/ToolServer'
+import { stepOf } from '../src/stepPick'
+import { ToolRefused } from '../src/toolErrors'
 import { whenWords } from '../src/Limits'
 import { bestFirst, describeModels, onPlanProvider, type Route, routeTo } from '../src/usableModels'
 import { callTool, repository, runtime, until } from './support'
@@ -402,6 +404,29 @@ const cardOf = (projectId: string, slug: string) => Effect.map(cardsOf(projectId
 
 describe('every tool that names an agent or a model', () => {
   const unknown = /^Fake codex doesn't offer GPT-9\. It offers: Small \(small\), Large \(large\)\./
+
+  it.live('refuses an unverified model while the catalog is empty, rather than keeping a coordinator-invented id', () =>
+    Effect.gen(function* () {
+      const { projectId } = yield* opened
+      const models = yield* Models
+      const catalog = yield* models.catalog
+      for (const probing of [true, false]) {
+        const unavailable = Models.of({
+          ...models,
+          catalog: Effect.succeed(catalog.map((agent) => ({ ...agent, models: [], probing }))),
+        })
+        const refused = yield* Effect.flip(
+          stepOf(projectId, { agent: 'claude-code', model: 'claude-fable-5-1' }).pipe(Effect.provideService(Models, unavailable)),
+        )
+        assert.instanceOf(refused, ToolRefused)
+        assert.match(refused.message, /available models aren't known/)
+        assert.deepStrictEqual(yield* stepOf(projectId, { agent: 'claude-code' }).pipe(Effect.provideService(Models, unavailable)), {
+          agentId: 'claude-code',
+          model: null,
+        })
+      }
+    }).pipe(Effect.provide(runtime())),
+  )
 
   it.live('takes a model by its name or its id, and an agent by its name or its id, and refuses an unknown one at the call', () =>
     Effect.gen(function* () {
