@@ -80,7 +80,17 @@ import { Card, type CardActions } from './Card'
 import { useClearChat } from './ClearChat'
 import { TaskAskOf } from './TaskAskOf'
 import { FirstConnectionsView } from './FirstConnectionsView'
-import { AsideConversation, AsideMoveFailed, AsideQuote, AsidesBar, AskInAside, asidesText, useAsideMoves, useAsides } from './Asides'
+import {
+  AsideConversation,
+  AsideMoveFailed,
+  AsideQuote,
+  AsidesBar,
+  AskInAside,
+  asidesText,
+  COORDINATOR,
+  useAsideMoves,
+  useAsides,
+} from './Asides'
 import { coordinatorSigned } from '../../shared/signed'
 import { ChangesCard, type ChangesActions } from '../../shared/ChangesCard'
 import { DraftCard, type DraftActions } from '../../shared/DraftCard'
@@ -452,9 +462,13 @@ export function ProjectView({
     moves: asideMoves,
   })
   const aside = asides.open
+  // Who the composer tells: the conversation open, or, under the board with the conversation hidden, the coordinator always,
+  // whatever aside was open; sending from there brings the coordinator's conversation back for the answer.
+  const docked = !panes.talk
+  const talkingTo = docked ? COORDINATOR : aside
   // What the composer's picker shows and sets: a new aside's own lead while one is open, else the coordinator's.
   const picking: Choice | null =
-    asides.lead === null ? chosen : { agentId: asides.lead.agentId, model: asides.lead.model, effort: asides.lead.effort ?? null }
+    docked || asides.lead === null ? chosen : { agentId: asides.lead.agentId, model: asides.lead.model, effort: asides.lead.effort ?? null }
   const name = model.project?.name ?? coordinator?.project.name ?? text.project
   // The presets a plan can start from, this project's own with them: what the plan card's kicker lists.
   const { client } = useServices()
@@ -521,7 +535,7 @@ export function ProjectView({
       return
     }
     // A new aside: the coordinator's composer starts it, with what it quotes, and it opens.
-    if (aside.kind === 'new') {
+    if (talkingTo.kind === 'new') {
       startAside(body)
       return
     }
@@ -546,8 +560,11 @@ export function ProjectView({
     if (picked !== null) setHandover(null)
     const said =
       picked !== null ? model.handOver(picked, words, outgoing) : now ? model.sayNow(words, outgoing) : model.say(words, chosen, outgoing)
-    // Sent from under the board, the conversation comes back for the answer.
-    if (!panes.talk) togglePane('talk')
+    // Sent from under the board, the coordinator's conversation comes back for the answer.
+    if (docked) {
+      asides.back()
+      togglePane('talk')
+    }
     // One Althar doesn't take goes back in the composer: its words, its images and comments, and the agent picked to take over.
     void said.then((accepted) => {
       if (accepted) return
@@ -631,8 +648,8 @@ export function ProjectView({
         }
         // The project's own runs, the ones of no task, as the task's chip says its own (ADR-096).
         above={
-          aside.kind === 'new'
-            ? aside.quote !== null && <AsideQuote quote={aside.quote} onDrop={asides.dropQuote} />
+          talkingTo.kind === 'new'
+            ? talkingTo.quote !== null && <AsideQuote quote={talkingTo.quote} onDrop={asides.dropQuote} />
             : (offer.offering !== null || projectRuns.some((launch) => launch.ended === null)) && (
                 <>
                   {offer.offering !== null && <ForkOffer offer={offer} />}
@@ -663,16 +680,16 @@ export function ProjectView({
           pages.reopen(about, id)
         }}
         onRemoveComment={(id) => drop(draftOf, id)}
-        {...(busy && aside.kind !== 'new' ? { onStopAgent: () => void model.interrupt() } : {})}
-        busy={busy && aside.kind !== 'new'}
-        queued={aside.kind === 'new' ? [] : queuedOf(coordinator?.items ?? [], queue)}
+        {...(busy && talkingTo.kind !== 'new' ? { onStopAgent: () => void model.interrupt() } : {})}
+        busy={busy && talkingTo.kind !== 'new'}
+        queued={talkingTo.kind === 'new' ? [] : queuedOf(coordinator?.items ?? [], queue)}
         onEditQueued={(id) => void edit(id)}
         onSendQueuedNow={(id) => void sendQueuedNow(id)}
         onUnqueue={(id) => void model.takeBack(id)}
         text={{ queued: text.queue, sendNowKey: modKey(keys.return) }}
         placeholder={
-          aside.kind === 'new'
-            ? aside.quote === null
+          talkingTo.kind === 'new'
+            ? talkingTo.quote === null
               ? asidesText.newPlaceholder
               : asidesText.quotePlaceholder
             : busy
@@ -680,7 +697,7 @@ export function ProjectView({
               : text.placeholder
         }
         // A new aside has used nothing of the coordinator's context.
-        {...(aside.kind === 'new'
+        {...(talkingTo.kind === 'new'
           ? {}
           : {
               meter: contextMeter(session, named, model.compact, { usage: coordinator?.usage, heading: text.usageHeading }, clearing.ring),
@@ -689,12 +706,12 @@ export function ProjectView({
           model.agents.length > 0 &&
           picking !== null && (
             <ModelChoice
-              owner={aside.kind === 'new' ? asidesText.lead : text.coordinator}
+              owner={talkingTo.kind === 'new' ? asidesText.lead : text.coordinator}
               agents={model.agents}
               {...(about === null ? {} : { projectId: about })}
               value={picking}
               // A new aside's pick is its own: the coordinator's model, effort or agent stays as it was.
-              onChange={aside.kind === 'new' ? (next) => asides.choose({ key: 'implement', ...next, skipped: false }) : choose}
+              onChange={talkingTo.kind === 'new' ? (next) => asides.choose({ key: 'implement', ...next, skipped: false }) : choose}
             />
           )
         }

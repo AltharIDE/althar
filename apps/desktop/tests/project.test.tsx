@@ -334,6 +334,56 @@ describe('the project’s bar', () => {
     expect(await layout()).toEqual(['on', 'on', 'off'])
   })
 
+  it('tells the coordinator from under the board while a new aside is open, and brings the coordinator back for the answer', async () => {
+    const { client } = fakeClient({ getCoordinator: vi.fn(async () => coordinatorSnapshot()) })
+    withServices(<Project />, client)
+    await userEvent.click(await screen.findByRole('button', { name: 'New aside' }))
+    expect(await screen.findByRole('textbox', { name: /Ask on the side/ })).toBeTruthy()
+    await userEvent.keyboard('{Escape}')
+    ;(document.activeElement as HTMLElement | null)?.blur()
+    await userEvent.keyboard('c')
+    const composer = await screen.findByRole('textbox', { name: /Tell the coordinator/ })
+    await userEvent.type(composer, 'What needs me?{Enter}')
+    await waitFor(() => expect(client.send).toHaveBeenCalledWith(expect.objectContaining({ threadId: coordinatorSnapshot().threadId })))
+    expect(client.send).toHaveBeenCalledTimes(1)
+    expect(await layout()).toEqual(['on', 'on', 'off'])
+    expect(screen.queryByRole('textbox', { name: /Ask on the side/ })).toBeNull()
+    expect(screen.getByRole('textbox', { name: /Tell the coordinator/ })).toBeTruthy()
+  })
+
+  it('tells the coordinator from under the board while an aside is open, and brings the coordinator back, not the aside', async () => {
+    const aside = {
+      ...card(),
+      state: 'open' as const,
+      createdAt: '2026-11-11T11:00:00.000Z',
+      settledAt: null,
+      changed: null,
+      here: [],
+      taskId: 'a1',
+      threadId: 'th-a1',
+      title: 'A quick question',
+      phase: 'ready' as const,
+      scratch: true,
+    }
+    const { client } = fakeClient({
+      getCoordinator: vi.fn(async () => coordinatorSnapshot()),
+      getBoard: vi.fn(async () => ({ cursor: 1, tasks: [aside], calls: [], settledTotal: 0 })),
+    })
+    withServices(<Project />, client)
+    await userEvent.click(await screen.findByRole('tab', { name: /A quick question/ }))
+    await waitFor(() => expect(screen.queryByRole('textbox', { name: /Tell the coordinator/ })).toBeNull())
+    ;(document.activeElement as HTMLElement | null)?.blur()
+    await userEvent.keyboard('c')
+    const composer = await screen.findByRole('textbox', { name: /Tell the coordinator/ })
+    await userEvent.type(composer, 'What needs me?{Enter}')
+    await waitFor(() => expect(client.send).toHaveBeenCalledWith(expect.objectContaining({ threadId: coordinatorSnapshot().threadId })))
+    expect(client.send).not.toHaveBeenCalledWith(expect.objectContaining({ threadId: 'th-a1' }))
+    expect(await screen.findByRole('region', { name: 'Conversation' })).toBeTruthy()
+    // The coordinator's own conversation is back, with its composer, not the aside's.
+    expect(await screen.findByRole('tab', { name: 'Coordinator', selected: true })).toBeTruthy()
+    expect(screen.getByRole('textbox', { name: /Tell the coordinator/ })).toBeTruthy()
+  })
+
   it('goes back to the home as it was left, from another view, or by showing a pane from ⋯', async () => {
     const { client } = fakeClient({ getCoordinator: vi.fn(async () => coordinatorSnapshot()) })
     withServices(<Project room={Room.Board} />, client)
