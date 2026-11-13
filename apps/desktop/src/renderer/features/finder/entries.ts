@@ -14,7 +14,14 @@ const STANDS: Readonly<Record<string, Stand>> = {
   done: { word: 'Done', tone: 'quiet' },
   abandoned: { word: 'Abandoned', tone: 'quiet' },
   open: { word: 'Open', tone: 'quiet' },
+  draft: { word: 'Draft', tone: 'quiet' },
+  merged: { word: 'Merged', tone: 'quiet' },
+  closed: { word: 'Closed', tone: 'quiet' },
 }
+
+/** Where a row stands: a task's or pull request's state in the app's words, an issue's in its tracker's own. */
+const standOf = (doc: SearchDocument): Stand | undefined =>
+  doc.kind === 'issue' ? (doc.state === '' ? undefined : { word: doc.state, tone: 'quiet' }) : STANDS[doc.state]
 
 /** Stable identities for opening, folding a linked item into its task, and usage. */
 const documentEntry = (doc: SearchDocument, projects: ReadonlyArray<ProjectSummary>): Entry => {
@@ -59,7 +66,7 @@ const documentEntry = (doc: SearchDocument, projects: ReadonlyArray<ProjectSumma
     also: doc.ref,
     facts: doc.kind === 'said' || doc.kind === 'pull' || doc.kind === 'issue' ? [doc.ref] : [],
     ago: Math.max(0, (Date.now() - Date.parse(doc.changedAt)) / 60000),
-    ...(STANDS[doc.state] === undefined ? {} : { stand: STANDS[doc.state] }),
+    ...(standOf(doc) === undefined ? {} : { stand: standOf(doc)! }),
     go,
     acts,
   }

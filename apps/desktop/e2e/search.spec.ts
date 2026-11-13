@@ -32,6 +32,8 @@ test('searches real task text and files, morphs into actions without emptying, a
     await field.press('Enter')
     await expect(dialog).toHaveCount(0)
     await expect(page.getByRole('button', { name: 'Rename: Add a retry to checkout', exact: true })).toBeVisible()
+    // What a lead said is found by the id search carries: its round names every message it shows.
+    await expect(page.locator('article[data-items]:not([data-items=""])').first()).toBeAttached()
     await page.keyboard.press('Meta+k')
     await field.fill('/README')
     await expect(dialog.getByRole('option', { name: /README/ }).first()).toBeVisible()
