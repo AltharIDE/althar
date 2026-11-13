@@ -1,7 +1,8 @@
 import type { ChecksSummary } from '@althar/contracts'
 import { describe, expect, it } from 'vitest'
 
-import { doingWords, factsOf, isBlocked, labelWords, nextWords, standingOf } from '../src/renderer/shared/standing'
+import { callKindOf, whereOf } from '../src/renderer/shared/calls'
+import { doingWords, factsOf, isBlocked, labelWords, nextWords, shipText, standingOf } from '../src/renderer/shared/standing'
 import { change } from './fixtures'
 
 /*
@@ -182,5 +183,34 @@ describe('the next thing, in words', () => {
     expect(labelWords({ kind: 'push', commits: 5 }, 'PR #12')).toBe('Push 5 commits to PR #12')
     expect(labelWords({ kind: 'push', commits: 1 }, 'PR #12', true)).toBe('Try pushing 1 commit to PR #12 again')
     expect(labelWords({ kind: 'push', commits: 5 }, 'PR #12', true)).toBe('Try pushing 5 commits to PR #12 again')
+  })
+})
+
+describe('Ship, in words', () => {
+  it('says what it ships, while it ships, what its review reads first, and that it tries again', () => {
+    expect(doingWords({ kind: 'ship', commits: 2 })).toBe('Shipping')
+    expect(labelWords({ kind: 'ship', commits: 1 }, 'PR #12')).toBe('Ship 1 commit')
+    expect(labelWords({ kind: 'ship', commits: 2 }, 'PR #12', true)).toBe('Try shipping 2 commits again')
+    expect(shipText.hint(2, true)).toBe('Its review reads 2 commits first, then they go up')
+    expect(shipText.hint(1, false)).toBe('1 commit go up')
+  })
+})
+
+describe('a call, in its word', () => {
+  const asked = (kind: string, why: string | null = null) => ({ kind, stuck: why === null ? null : { why } })
+
+  it('says each kind of call one way, and where it waits', () => {
+    expect(
+      [
+        asked('question'),
+        asked('checkout'),
+        asked('permission'),
+        asked('stuck', 'usage_limit'),
+        asked('stuck', 'waiting_on_person'),
+        asked('stuck', 'session_ended'),
+      ].map(callKindOf),
+    ).toEqual(['Question', 'Local', 'Permission', 'Out of usage', 'Waiting on you', 'Stuck'])
+    expect(whereOf({ taskTitle: 'Ship it' })).toBe('Ship it')
+    expect(whereOf({ taskTitle: null })).toBe('Coordinator')
   })
 })
