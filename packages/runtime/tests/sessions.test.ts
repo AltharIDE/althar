@@ -1,5 +1,6 @@
+import { removeTreeSync } from '@althar/testing'
 import { execFileSync } from 'node:child_process'
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -401,6 +402,164 @@ describe('sessions', () => {
     }).pipe(Effect.provide(runtime())),
   )
 
+  describe('the person choosing the lead’s model', () => {
+    const lead = (threadId: string) =>
+      Effect.map(
+        Effect.flatMap(Queries, (queries) => queries.thread(threadId)),
+        (read) => read.session,
+      )
+
+    it.live('takes it at once, before the agent has answered, and sets it on the agent after', () => {
+      let silent = false
+      const asked: Array<string> = []
+      return Effect.gen(function* () {
+        const sessions = yield* Sessions
+        const { task: created } = yield* task()
+        const sessionId = yield* begin(created.threadId, 'codex', 'large')
+        silent = true
+        asked.length = 0
+        assert.strictEqual(yield* sessions.chooseLead({ threadId: created.threadId, model: 'small' }), 'later')
+        // The agent has not answered, and may never: the thread already says who leads from here.
+        const shown = yield* lead(created.threadId)
+        assert.deepStrictEqual([shown?.model, shown?.nextLead?.model], ['large', 'small'])
+        // It is asked in the background, and the thread's own model is what the agent says it is on, until it answers.
+        yield* until(
+          Effect.sync(() => asked),
+          (calls) => calls.length > 0,
+        )
+        assert.deepStrictEqual(asked, ['model=small'])
+        assert.strictEqual((yield* session(sessionId))?.model, 'large')
+        // Still what the person chose, while it waits.
+        assert.strictEqual((yield* lead(created.threadId))?.nextLead?.model, 'small')
+        silent = false
+        yield* until(session(sessionId), (row) => row?.model === 'small')
+        const done = yield* lead(created.threadId)
+        assert.deepStrictEqual([done?.model, done?.nextLead ?? null], ['small', null])
+      }).pipe(
+        Effect.provide(
+          Queries.layer.pipe(
+            Layer.provideMerge(
+              runtime(':memory:', { holdsSets: () => silent, optionAsked: (id, value) => void asked.push(`${id}=${value}`) }),
+            ),
+          ),
+        ),
+      )
+    })
+
+    it.live('keeps it for the next turn while one runs, and sets it on the agent when that turn ends', () => {
+      const going = holds()
+      const asked: Array<string> = []
+      return Effect.gen(function* () {
+        const sessions = yield* Sessions
+        const { task: created } = yield* task()
+        const sessionId = yield* begin(created.threadId, 'codex', 'large')
+        yield* say(created.threadId, '[answers-after:5s] Look at it')
+        yield* until(
+          Effect.map(lead(created.threadId), (shown) => shown?.turnRunning),
+          (running) => running === true,
+        )
+        asked.length = 0
+        yield* sessions.chooseLead({ threadId: created.threadId, model: 'small' })
+        assert.strictEqual((yield* lead(created.threadId))?.nextLead?.model, 'small')
+        // Nothing is asked of an agent at its turn: it would answer when the turn was over, not before.
+        yield* Effect.sleep(Duration.millis(300))
+        assert.deepStrictEqual(asked, [])
+        assert.strictEqual((yield* session(sessionId))?.model, 'large')
+        going.open('[answers-after:5s]')
+        yield* until(session(sessionId), (row) => row?.model === 'small')
+        assert.strictEqual(asked[0], 'model=small')
+        assert.strictEqual((yield* lead(created.threadId))?.nextLead, null)
+      }).pipe(
+        Effect.provide(
+          Queries.layer.pipe(
+            Layer.provideMerge(runtime(':memory:', { holds: going, optionAsked: (id, value) => void asked.push(`${id}=${value}`) })),
+          ),
+        ),
+      )
+    })
+
+    it.live('begins the turn on the last choice, where one was made while an earlier was being set', () => {
+      let silent = false
+      const log: Array<string> = []
+      return Effect.gen(function* () {
+        const sessions = yield* Sessions
+        const { task: created } = yield* task()
+        yield* begin(created.threadId, 'codex', 'large')
+        log.length = 0
+        silent = true
+        yield* sessions.chooseLead({ threadId: created.threadId, model: 'small' })
+        yield* until(
+          Effect.sync(() => log),
+          (calls) => calls.length > 0,
+        )
+        // The agent hasn't answered the first; a turn is said, and another choice made.
+        yield* say(created.threadId, 'Look at it')
+        yield* sessions.chooseLead({ threadId: created.threadId, effort: 'low' })
+        yield* Effect.sleep(Duration.millis(300))
+        assert.deepStrictEqual(log, ['model=small'])
+        silent = false
+        yield* until(
+          Effect.sync(() => log),
+          (calls) => calls.includes('prompt'),
+        )
+        // The model brings the effort of its own with it, set by the runtime; what the person chose of it comes last, before the turn.
+        assert.deepStrictEqual(log.slice(-2), ['effort=low', 'prompt'])
+        const row = yield* lead(created.threadId)
+        assert.deepStrictEqual([row?.model, row?.effort], ['small', 'low'])
+      }).pipe(
+        Effect.provide(
+          Queries.layer.pipe(
+            Layer.provideMerge(
+              runtime(':memory:', {
+                holdsSets: () => silent,
+                optionAsked: (id, value) => void log.push(`${id}=${value}`),
+                promptAsked: () => void log.push('prompt'),
+              }),
+            ),
+          ),
+        ),
+      )
+    })
+
+    it.live('goes back to what it was on, saying why, where the agent won’t take it', () =>
+      Effect.gen(function* () {
+        const sessions = yield* Sessions
+        const { task: created } = yield* task()
+        const sessionId = yield* begin(created.threadId, 'codex', 'large')
+        assert.strictEqual(yield* sessions.chooseLead({ threadId: created.threadId, model: 'nowhere' }), 'later')
+        const said = yield* until(
+          Effect.map(threadItems(created.threadId), (rows) => rows.filter((item) => item.kind === 'notice')),
+          (notices) => notices.some((notice) => String(notice.content.title).includes('stays on its model')),
+        )
+        const refusal = said.find((notice) => String(notice.content.title).includes('stays on its model'))
+        // The agent's own words are in it, and it is a warning.
+        assert.strictEqual(String(refusal?.content.title), "Fake codex stays on its model as it is: The agent doesn't offer nowhere.")
+        assert.strictEqual(refusal?.content.severity, 'warning')
+        const after = yield* lead(created.threadId)
+        assert.deepStrictEqual([after?.model, after?.nextLead ?? null], ['large', null])
+        assert.strictEqual((yield* session(sessionId))?.model, 'large')
+      }).pipe(Effect.provide(Queries.layer.pipe(Layer.provideMerge(runtime())))),
+    )
+
+    it.live('puts the model and the effort chosen one after the other together, and the later pick of each wins', () => {
+      let silent = false
+      return Effect.gen(function* () {
+        const sessions = yield* Sessions
+        const { task: created } = yield* task()
+        const sessionId = yield* begin(created.threadId, 'codex', 'large')
+        silent = true
+        yield* sessions.chooseLead({ threadId: created.threadId, model: 'small' })
+        yield* sessions.chooseLead({ threadId: created.threadId, effort: 'low' })
+        const shown = (yield* lead(created.threadId))?.nextLead
+        assert.deepStrictEqual([shown?.model, shown?.effort], ['small', 'low'])
+        silent = false
+        yield* until(session(sessionId), (row) => row?.model === 'small')
+        const done = yield* lead(created.threadId)
+        assert.deepStrictEqual([done?.model, done?.effort, done?.nextLead ?? null], ['small', 'low', null])
+      }).pipe(Effect.provide(Queries.layer.pipe(Layer.provideMerge(runtime(':memory:', { holdsSets: () => silent })))))
+    })
+  })
+
   it.live('hands the thread to another agent, briefed with what happened so far', () =>
     Effect.gen(function* () {
       const sessions = yield* Sessions
@@ -744,7 +903,9 @@ describe('sessions', () => {
       Effect.gen(function* () {
         const sessions = yield* Sessions
         const { task: created } = yield* task()
-        yield* begin(created.threadId, 'claude-code')
+        // Windows cannot find the owner of an output file with lsof. Give the
+        // lookup a real agent tree, as production agents do, on every OS.
+        yield* begin(created.threadId, 'process')
         yield* say(created.threadId, scenarios.backgroundQuiet)
         yield* ended(created.threadId, 1)
         const [serving] = yield* until(shown(created.threadId), (all) => all[0]?.url != null)
@@ -792,7 +953,7 @@ describe('sessions', () => {
             Effect.ensuring(
               Effect.sync(() => {
                 process.env.PATH = path
-                rmSync(dir, { recursive: true, force: true })
+                removeTreeSync(dir)
               }),
             ),
           )
@@ -871,8 +1032,10 @@ describe('sessions', () => {
         assert.deepStrictEqual(notes, ['Fake codex takes over.'])
         const reply = (yield* threadItems(created.threadId)).filter((item) => item.kind === 'agent_message').at(-1)?.content.text as string
         assert.include(reply, 'You are taking over a task, in the same worktree.')
-        assert.include(reply, '[person] start with the worker')
+        // What waits is the turn's message, once: not in its brief's thread so far too.
+        assert.notInclude(reply, '[person] start with the worker')
         assert.isTrue(reply.endsWith('start with the worker'))
+        assert.strictEqual(reply.split('start with the worker').length - 1, 1)
       }).pipe(Effect.provide(runtime())),
     )
 
@@ -1022,6 +1185,9 @@ describe('sessions', () => {
               },
             },
           },
+          // The test moves its clock three minutes at once, past when a lead's turn is followed: none of that here, so the
+          // last notice is the one the start left.
+          idle: { reports: Duration.hours(1) },
         },
       ).pipe(Layer.provideMerge(observedClock))
       return Effect.gen(function* () {

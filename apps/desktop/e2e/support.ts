@@ -256,6 +256,52 @@ export const holdRuntime = async (page: Page) => {
   return () => page.evaluate(() => (window as unknown as { release: () => void }).release())
 }
 
+/** The header's ⋯, where the home's layout is: its panes, and which side the conversation is on. */
+const moreMenu = (page: Page) => page.getByRole('menu', { name: 'More' })
+export type LayoutItem = 'Conversation' | 'Board' | 'Conversation on the right'
+export const layoutItem = (page: Page, name: LayoutItem) => moreMenu(page).getByRole('menuitemcheckbox', { name, exact: true })
+
+/** Opens the header's ⋯ at its Layout. */
+export const openLayout = async (page: Page) => {
+  await page.getByRole('button', { name: 'More', exact: true }).click()
+  await expect(moreMenu(page)).toBeVisible()
+}
+
+/** Closes the header's ⋯ unpicked. */
+export const closeLayout = async (page: Page) => {
+  await page.keyboard.press('Escape')
+  await expect(moreMenu(page)).toHaveCount(0)
+}
+
+/** Picks one of the Layout checks in the header's ⋯: a pane, to show or hide it, or which side the conversation is on. */
+export const pickLayout = async (page: Page, name: LayoutItem) => {
+  await openLayout(page)
+  await layoutItem(page, name).click()
+  await expect(moreMenu(page)).toHaveCount(0)
+}
+
+/** The project's home with these of its panes showing, from ⋯: those wanted on first, so one always shows. */
+export const showPanes = async (page: Page, want: { conversation: boolean; board: boolean }) => {
+  const panes = [['Conversation', want.conversation] as const, ['Board', want.board] as const]
+  for (const [name, on] of [...panes.filter(([, on]) => on), ...panes.filter(([, on]) => !on)]) {
+    await openLayout(page)
+    const item = layoutItem(page, name)
+    if (((await item.getAttribute('aria-checked')) === 'true') !== on) {
+      await item.click()
+      await expect(moreMenu(page)).toHaveCount(0)
+    } else await closeLayout(page)
+  }
+  await expectPanes(page, want)
+}
+
+/** The home's panes showing are these, as ⋯ says. */
+export const expectPanes = async (page: Page, shown: { conversation: boolean; board: boolean }) => {
+  await openLayout(page)
+  await expect(layoutItem(page, 'Conversation')).toHaveAttribute('aria-checked', String(shown.conversation))
+  await expect(layoutItem(page, 'Board')).toHaveAttribute('aria-checked', String(shown.board))
+  await closeLayout(page)
+}
+
 export const say = async (page: Page, words: string) => {
   const box = page.getByRole('textbox', { name: /^(Tell .* something|Add to the queue)/ })
   // A click waits until the window takes input, as it doesn't while the launch plays over it; typing alone wouldn't.
@@ -265,26 +311,28 @@ export const say = async (page: Page, words: string) => {
 }
 
 /**
- * Moves a chat the coordinator started at once off Scratch and onto the board, as the person does from its menu (a task is a
- * conversation plus parts, "Chats and Scratch"): from the chip heading Up next, its row, then More for this task, and back.
+ * Moves a chat the coordinator started at once off Scratch and onto the board, as the person does (a task is a
+ * conversation plus parts, "Asides"): beside the conversation, from its pill over it, then Make it a task; the board alone,
+ * from the chip heading Up next, its row, then More for this task, and back.
  */
 export const toBoard = async (page: Page, title: string) => {
   const work = page.getByRole('region', { name: 'The project’s work' })
-  await work.getByRole('button', { name: /^Scratch · / }).click()
-  await page
-    .getByRole('list', { name: 'Chats on Scratch' })
-    .getByRole('listitem')
-    .filter({ hasText: title })
-    .getByRole('button')
-    .first()
-    .click()
+  const asides = page.getByRole('tablist', { name: 'Conversations' }).filter({ visible: true })
+  if ((await asides.count()) > 0) {
+    await asides.getByRole('tab', { name: title }).click()
+    await page.getByRole('button', { name: 'Make it a task' }).click()
+    await expect(asides.getByRole('tab', { name: title })).toHaveCount(0)
+    return
+  }
+  await work.getByRole('button', { name: /^Asides · / }).click()
+  await page.getByRole('list', { name: 'Asides' }).getByRole('listitem').filter({ hasText: title }).getByRole('button').first().click()
   await page.getByRole('button', { name: 'More for this task' }).click()
   await page
     .getByRole('menu')
     .getByRole('menuitem', { name: /^Move to the board/ })
     .click()
   await page.getByRole('button', { name: /^Back to / }).click()
-  await expect(work.getByRole('button', { name: /^Scratch · / })).toHaveCount(0)
+  await expect(work.getByRole('button', { name: /^Asides · / })).toHaveCount(0)
 }
 
 /**
@@ -320,13 +368,11 @@ export const projectSettings = async (page: Page, section: 'General' | 'Code and
     .click()
 }
 
-/** From the project's settings back to its work: the conversation with its coordinator. */
-export const backToWork = async (page: Page) => {
-  await page
-    .getByRole('radiogroup', { name: 'View' })
-    .getByRole('radio', { name: /^Conversation/ })
-    .click()
-}
+/**
+ * From the project's settings back to its work: home, its conversation with its coordinator alone, as from anywhere in the
+ * project; ⋯ picks only what isn't so already.
+ */
+export const backToWork = (page: Page) => showPanes(page, { conversation: true, board: false })
 
 /**
  * Has the project ask about more than what can't be undone, as it did before

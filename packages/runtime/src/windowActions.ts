@@ -40,6 +40,7 @@ export const WINDOW_ACTIONS = {
   // The task menu.
   stop: { tool: 'stop_task' },
   skipReview: { tool: 'skip_review' },
+  makeChange: { tool: 'change_part' },
   resume: { tool: 'restart_task' },
   setResolveConflicts: { tool: 'resolve_conflicts' },
   resolveConflictsNow: { tool: 'resolve_conflicts' },
@@ -55,6 +56,7 @@ export const WINDOW_ACTIONS = {
   moveToFront: { tool: 'move_to_front' },
   // The plan card.
   startPlan: { tool: 'restart_task' },
+  holdPlan: { tool: 'hold_task' },
   // Calls that wait on the person.
   answer: { person: 'answers an agent’s permission request: an agent never answers one itself' },
   answerStuck: { tool: 'answer_stuck_step' },

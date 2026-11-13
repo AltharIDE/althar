@@ -20,7 +20,7 @@ How sessions, processes and sign-in work is in [architecture 03](../architecture
 An agent joins where Althar sees every command before it runs and can stop it. That is what keeps the irreversible list asking and the person's Never rules holding ([what-agents-may-do.md](what-agents-may-do.md)). In practice that means:
 
 1. **It asks before it runs a command.** A mode or a session's `_meta` that Althar sets and checks keeps it asking. Edits inside the workspace may go unasked, as Codex's do in its sandbox.
-2. **It can be held to reading,** for a review of an outside author's pull request. Either a mode keeps Althar's tools and takes the agent's edits away, or its edits ask, so the rules refuse them ([reviews.md](reviews.md)).
+2. **It has a reading mode,** for a review: a mode keeps Althar's tools and takes the agent's edits away, or its edits ask, so the rules refuse them. One whose sandbox runs commands without asking, as Codex's does, still leads reviews: what it runs stays in its OS sandbox ([reviews.md](reviews.md)).
 3. **It was read at the version the ACP registry lists,** with permission options of known kinds.
 4. **Its vendor lets a third-party app use its sign-in,** or publishes it for any ACP client. Where the two disagree, the person is told before they sign in.
 
@@ -95,7 +95,7 @@ People choose who does work by model, not by the tool that runs it. The coordina
 - **What is known of models comes from OpenRouter's public list:** Artificial Analysis's indices, price and context size, matched by id or name. It is read at start and fetched again in the background, and nothing waits for it. The scores are for the coordinator, and the window doesn't show them.
 - **Agents are routes.** Althar reaches a named model the best way there is: on an agent whose account a plan pays for before one on a key, then in the agents' order.
 - **When a step's agent runs out,** the step goes to the strongest free model on a plan. A different maker wins within five points of the strongest. Althar never spends on a key unasked ([scheduling.md](scheduling.md)).
-- **The person can switch models off,** per agent, in Settings and from the model browser. A model switched off is never planned, and no picker offers it.
+- **The person can switch models off,** per agent, in Settings and from the model browser. A model switched off is never planned, and no picker offers it. Work that names no model, only its agent, never starts on one: where the agent's own default is a model switched off, its session starts on the agent's model a takeover would pick, or, before Althar has read the agent's models, the first other one it lists. With none left on, it doesn't start, and says why.
 - **The window names who works by model,** as people know it, such as "Claude Sonnet 5.5", with its maker's mark. The agent and account show on hover. Agent names appear only where the agent is what's meant, such as signing in.
 
 ## Keeping context small

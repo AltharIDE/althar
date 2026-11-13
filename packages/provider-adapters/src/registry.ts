@@ -171,6 +171,12 @@ export interface AgentDefinition {
      */
     readonly paidBy?: (output: string) => PaidBy | undefined
     /**
+     * When the sign-in ends, from the same output, as an ISO time; undefined
+     * where the agent doesn't say. Only an agent whose status says when the
+     * person must sign in again has one: never a token it renews by itself.
+     */
+    readonly endsAt?: (output: string) => string | undefined
+    /**
      * For an agent that reaches several providers, each with a sign-in of its
      * own (OpenCode: `opencode-go/glm-5.3`): the providers its status lists
      * as signed in (`connections` says by what, so a changed sign-in is told from the same), and the provider a model at the agent goes through.
@@ -342,15 +348,10 @@ export interface AgentDefinition {
    * (docs/architecture/06), beyond its reader mode and `sessionMeta`.
    * `env`, what its environment adds over `withoutOwnTools`' (which it is
    * given) so that nothing of the repository's own config, hooks or plugins
-   * loads. `outside`, whether that holds it to only reading a pull request
-   * from outside the project: every command it runs asks first and meets
-   * Althar's reader rules, none running because its sandbox would contain
-   * it, and nothing of its own reaches the network. Without `outside`, no
-   * review of someone else's pull request is started on it, a team's
-   * included: it could run the pull request's code.
+   * loads. Any agent leads a review (the person's note of 11 Nov): one whose
+   * sandbox runs commands without asking runs them there.
    */
   readonly reviewing?: {
-    readonly outside: boolean
     readonly env?: (own: Readonly<Record<string, string>>) => Readonly<Record<string, string>>
   }
   /**
@@ -634,6 +635,24 @@ const claudePaidBy = (output: string): PaidBy | undefined => {
   }
 }
 
+/**
+ * When a claude.ai sign-in ends, from `claude auth status` (2.1.318 and
+ * later): `loginExpiresAt`, an ISO time, the end of the login's refresh chain
+ * as stored at sign-in, which renewing never moves; null for a key, a token
+ * from the environment, Bedrock, Vertex or a gateway, and missing before
+ * 2.1.318. Its own description says the real end can be up to three days
+ * earlier, which the warning allows for (`WARN_WITHIN` in the runtime).
+ */
+const claudeEndsAt = (output: string): string | undefined => {
+  try {
+    const parsed: unknown = JSON.parse(output)
+    const at = typeof parsed === 'object' && parsed !== null && 'loginExpiresAt' in parsed ? parsed.loginExpiresAt : undefined
+    return typeof at === 'string' && !Number.isNaN(Date.parse(at)) ? new Date(Date.parse(at)).toISOString() : undefined
+  } catch {
+    return undefined
+  }
+}
+
 const loggedInField = (output: string): boolean | undefined => {
   try {
     const parsed: unknown = JSON.parse(output)
@@ -729,9 +748,9 @@ const openCodeSkills = (folder: string, own: Readonly<Record<string, string>>): 
  * reading: codex-acp 2.1.1 starts every turn with its mode's approval policy
  * (`on-request` for `read-only`), and no session option changes it, so
  * Codex runs a command its read-only sandbox contains without asking, and
- * Althar's reader rules never see it. It could run the pull request's
- * scripts there, with no network and no writes. So it reviews a team's pull
- * request held this far, and none from outside.
+ * Althar's reader rules never see it. It may run the pull request's
+ * scripts there, with no network and no writes: any agent leads a review
+ * (the person's note of 11 Nov), and its OS sandbox holds what it runs.
  */
 const codexReviewing = (own: Readonly<Record<string, string>>): Readonly<Record<string, string>> => ({
   CODEX_CONFIG: JSON.stringify({
@@ -890,6 +909,7 @@ export const claudeSandboxStarts = (): boolean => {
     const onPath = (name: string) =>
       (process.env.PATH ?? '').split(delimiter).some((folder) => folder !== '' && existsSync(join(folder, name)))
     if (!onPath('bwrap') || !onPath('socat')) return false
+    // oxlint-disable-next-line althar/off-the-thread -- Not off the thread yet: once a launch, on Linux with bubblewrap, up to 5 s (foundations.md).
     const tried = spawnSync('bwrap', ['--ro-bind', '/', '/', '--dev', '/dev', '--unshare-user', '--unshare-net', 'true'], {
       stdio: 'ignore',
       timeout: 5_000,
@@ -1034,6 +1054,7 @@ export const agents: Readonly<Record<AgentId, AgentDefinition>> = {
       status: () => ({ command: 'claude', args: ['auth', 'status'] }),
       read: loggedInField,
       paidBy: claudePaidBy,
+      endsAt: claudeEndsAt,
       login: 'claude auth login',
       inApp: { kind: 'claude-login', ways: ['browser'], run: () => ({ command: 'claude', args: ['auth', 'login', '--claudeai'] }) },
       // Its sign-in is a Keychain item named after the home's path, which deleting the folder would leave behind.
@@ -1087,12 +1108,9 @@ export const agents: Readonly<Record<AgentId, AgentDefinition>> = {
     holds: claudeHolds,
     // Each entry of its transcript names the folder its shell is in.
     shellFolder: claudeShellFolder,
-    /*
-     * As a review's lead it is held by its session's settings alone (claudeReads, untrusted): every command asks and meets
-     * Althar's reader rules, no settings file or hook of the repository's or the person's loads, and offline its web tools are
-     * denied. So it may read a pull request from outside.
-     */
-    reviewing: { outside: true },
+    // As a review's lead it is held by its session's settings alone (claudeReads, untrusted): no settings file or hook of the
+    // repository's or the person's loads, and offline its web tools are denied.
+    reviewing: {},
     permissionJudge: { sessionMeta: claudeJudges },
     knownGaps: [
       'Starts in whatever mode the user set in Claude Code, which may be bypassPermissions, so Althar always sets the mode.',
@@ -1137,7 +1155,8 @@ export const agents: Readonly<Record<AgentId, AgentDefinition>> = {
      * ask meets Althar's rules, which refuse it. But in that mode it asks
      * only to go beyond the sandbox: a command the sandbox contains runs
      * without asking (codexReviewing says why no session option changes
-     * that), so it never leads a review of a pull request from outside.
+     * that): as a review's lead it may run the pull request's code there,
+     * offline and writing nothing, which the person's note of 11 Nov allows.
      */
     modes: { ask: 'workspace-write', readOnly: 'read-only', reader: 'read-only' },
     options: { mode: 'mode', model: 'model', effort: 'reasoning_effort' },
@@ -1164,7 +1183,7 @@ export const agents: Readonly<Record<AgentId, AgentDefinition>> = {
     },
     version: () => ({ command: 'codex', args: ['--version'] }),
     withoutOwnTools: codexWithoutOwnTools,
-    reviewing: { outside: false, env: codexReviewing },
+    reviewing: { env: codexReviewing },
     sessionEnv: (own, options) => ({
       // Every command Codex doesn't read as safe reaches Althar, so the irreversible list holds inside its sandbox too
       // (ADR-097); everything else is answered at once. The adapter's patch puts it on the turn's approval policy.
@@ -1340,7 +1359,7 @@ export const agents: Readonly<Record<AgentId, AgentDefinition>> = {
         ]),
       ]
     },
-    reviewing: { outside: true, env: openCodeReviewing },
+    reviewing: { env: openCodeReviewing },
     /* Its config's `skills.paths`, each searched for every `SKILL.md` below it (OpenCode 1.19.0), beside its own config; its task tool runs subagents. */
     skills: {
       layout: 'plain',

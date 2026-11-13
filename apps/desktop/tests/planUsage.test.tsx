@@ -26,6 +26,54 @@ const NOW = new Date('2026-10-15T10:05:00.000Z')
 const RESET = '2026-10-15T15:00:00.000Z'
 const WEEK = '2026-10-19T09:00:00.000Z'
 
+describe('usage from a provider with no built-in mark', () => {
+  const account = () =>
+    usageAccount({
+      agentId: 'local-agent',
+      agentName: 'Local agent',
+      plan: 'Local plan',
+      windows: [{ kind: 'monthly', label: null, usedPercent: 20, resetsAt: null }],
+    })
+
+  it('names monthly and provider-defined windows, and keeps an unknown reset time unknown', () => {
+    expect(windowName({ kind: 'monthly', label: null })).toBe('Month')
+    expect(windowName({ kind: 'other', label: 'Credits' })).toBe('Credits')
+    expect(windowName({ kind: 'other', label: null })).toBe('')
+    const row = planOf(planUsage([account()]), NOW).agents[0]
+    expect(row).toMatchObject({ id: 'local-agent', name: 'Local agent', left: 80, until: null })
+    expect(row).not.toHaveProperty('brand')
+    expect(row?.accounts[0]?.windows[0]).toMatchObject({ label: 'Month', until: null })
+    const room: ModelRoom = {
+      agentId: 'local-agent',
+      model: 'large',
+      accountId: 'acc',
+      accountName: 'main',
+      several: false,
+      leftPercent: 80,
+      resetsAt: null,
+      kind: 'monthly',
+      label: null,
+    }
+    expect(roomOf({ id: 'local-agent:large' }, [room], planUsage([account()]), NOW)).toEqual({ left: 80, until: null, account: null })
+  })
+
+  it('keeps an unread plan connected, a signed-out one stopped, and an expired reading unnumbered', () => {
+    const unread = { ...account(), windows: [], noReading: 'Not published yet.' }
+    const connected = planOf(planUsage([unread]), NOW).agents[0]
+    expect(connected).toMatchObject({ connected: 'Connected', left: 0 })
+    expect(connected).not.toHaveProperty('brand')
+    const signedOut = { ...account(), fault: { kind: 'sign_in_again' as const, message: 'Sign in again.' } }
+    const stopped = planOf(planUsage([signedOut]), NOW).agents[0]
+    expect(stopped).toMatchObject({ stopped: 'Signed out', signIn: true })
+    expect(stopped).not.toHaveProperty('brand')
+    const other = { ...unread, accountId: 'another' }
+    expect(planOf(planUsage([signedOut, other]), NOW).agents[0]).toMatchObject({ connected: 'Connected' })
+    const reset = planOf(planUsage([{ ...unread, resetSince: true }]), NOW).agents[0]
+    expect(reset).toMatchObject({ unread: 'Not read since reset' })
+    expect(reset).not.toHaveProperty('brand')
+  })
+})
+
 // The window reads its windows at NOW, as the plan's own tests do: a window past its reset is no longer shown.
 beforeEach(() => {
   vi.useFakeTimers({ toFake: ['Date'], now: NOW })
@@ -580,5 +628,39 @@ describe('a step held before its agent ran out', () => {
     expect(waitsWords('Codex', '14:00', undefined, 3)).toBe('Waiting for Codex until 14:00')
     expect(waitsWords('Codex', '14:00', 'review', 0)).toBe('The review waits: Codex is out of usage until 14:00')
     expect(waitsWords('Codex', '14:00')).toBe('Codex is out of usage until 14:00')
+  })
+})
+
+describe('a sign-in that ends soon, in the bar (DEV-196)', () => {
+  const ENDS = '2026-10-18T09:00:00.000Z'
+  const ending = {
+    agentId: 'claude-code',
+    agentName: 'Claude Code',
+    accountId: 'acc_claude',
+    accountName: 'personal',
+    several: false,
+    endsAt: ENDS,
+    stage: 'soon' as const,
+  }
+
+  it('says nothing while all is well', async () => {
+    windowAt('/', planUsage([claude]))
+    await gauge()
+    expect(screen.queryByText(/sign-in ends/)).toBeNull()
+  })
+
+  it('says whose and by when, naming the account where the agent has several, and goes at once when put aside', async () => {
+    const fake = windowAt('/', { ...planUsage([claude]), endings: [{ ...ending, several: true }] })
+    const said = await screen.findByText(`Claude Code (personal)’s sign-in ends by ${clock(ENDS, NOW)}`)
+    expect(said).toBeTruthy()
+    await userEvent.click(screen.getByRole('button', { name: 'Dismiss' }))
+    expect(fake.client.dismissSignInEnding).toHaveBeenCalledWith('acc_claude', ENDS, 'soon')
+    expect(screen.queryByText(/sign-in ends/)).toBeNull()
+  })
+
+  it('says it has ended where the runtime says so, its date passed or its check signed out before it', async () => {
+    // Its date is days off: the check already said signed out, and the bar says what the row does.
+    windowAt('/', { ...planUsage([claude]), endings: [{ ...ending, stage: 'ended' as const }] })
+    expect(await screen.findByText('Claude Code’s sign-in has ended')).toBeTruthy()
   })
 })

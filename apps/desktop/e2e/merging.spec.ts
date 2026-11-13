@@ -6,7 +6,7 @@ import { join } from 'node:path'
 import { expect, test } from '@playwright/test'
 
 import { repository } from '../tests/repository'
-import { connectGitHub, launch, openFirstProject, say } from './support'
+import { connectGitHub, launch, openFirstProject, say, showPanes } from './support'
 
 /*
  * Merged in its task, and Back pressed at once, a task's card is out of
@@ -48,7 +48,7 @@ test('a task merged in its task view settles on the board as soon as GitHub merg
     // Merge, then Back at once, to the board.
     await page.getByRole('button', { name: 'Accept and merge' }).click()
     await page.getByRole('button', { name: 'Back to meridian' }).click()
-    await page.getByRole('radio', { name: /^Board/ }).click()
+    await showPanes(page, { conversation: false, board: true })
     const lane = (name: string) => page.getByRole('region', { name })
     const merging = lane('Running').getByRole('article').filter({ hasText: title })
     await expect(merging.getByText('Merging')).toBeVisible()

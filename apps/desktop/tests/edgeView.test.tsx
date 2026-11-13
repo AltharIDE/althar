@@ -125,7 +125,7 @@ describe('the edge', () => {
     expect(screen.getByText('1 in progress')).toBeTruthy()
   })
 
-  it('says why a stuck task waits and what a change is, and counts the work held and stopped', async () => {
+  it('says why a stuck task waits and what a change is, lists one stopped, and counts the work held', async () => {
     const host = fakeHost()
     const stuck: HomeCall = {
       ...permission,
@@ -151,7 +151,9 @@ describe('the edge', () => {
     expect(within(screen.getByRole('article', { name: 'Name the limits better' })).getByText(/#1191 · .+ · \+212 −41$/)).toBeTruthy()
     await userEvent.click(within(stalled).getByRole('button', { name: 'Open' }))
     expect(host.openInWindow).toHaveBeenCalledWith('th4')
-    expect(screen.getByText('3 in progress · 1 held · 1 stopped')).toBeTruthy()
+    // Stopped, it waits on the person, as on its board: not work in progress.
+    expect(within(screen.getByRole('article', { name: 'Left alone' })).getByText('Stopped')).toBeTruthy()
+    expect(screen.getByText('2 in progress · 1 held')).toBeTruthy()
   })
 
   it('brings back a call whose answer didn’t go through, and says why', async () => {
@@ -223,7 +225,7 @@ describe('the edge', () => {
       withServices(<Edge shown={{ place: 'menu' }} />, client)
       await act(async () => {})
       calls = [permission]
-      act(() => emit(changed('attention_request', 'a1', 'th3', 'p2')))
+      act(() => emit(changed('card', 't3', 'th3', 'p2')))
       const allow = await within(await screen.findByRole('article', { name: 'Run npm publish' })).findByRole('button', {
         name: 'Allow once',
       })
@@ -274,12 +276,24 @@ describe('the edge', () => {
     await screen.findByRole('button', { name: 'Nothing needs you' })
     expect(screen.queryByText('Permission')).toBeNull()
     calls = [permission]
-    act(() => emit(changed('attention_request', 'a1', 'th3', 'p2')))
+    act(() => emit(changed('card', 't3', 'th3', 'p2')))
     const region = screen.getByRole('region', { name: 'Althar' })
     // Said beside the notch, whose by its mark, and on its line in the sheet.
     await waitFor(() => expect(within(region).getAllByText('Permission')).toHaveLength(2))
     expect(within(region).getAllByText('halyard')).toHaveLength(2)
     expect(screen.getByRole('button', { name: '1 needs you' })).toBeTruthy()
+  })
+
+  it('counts a task the person stopped, without saying it as it comes', async () => {
+    let tasks: ReadonlyArray<HomeTask> = [running]
+    const { client, emit } = fakeClient({ getHome: vi.fn(async () => home({ tasks, projects: [project, halyard] })) })
+    withServices(<Edge />, client)
+    await screen.findByRole('button', { name: 'Nothing needs you' })
+    tasks = [{ ...running, phase: 'stopped', stopped: { by: 'interrupted', at: '2026-10-07T09:30:00.000Z' } }]
+    act(() => emit(changed('card', running.taskId, running.threadId, running.projectId)))
+    expect(await screen.findByRole('button', { name: '1 needs you' })).toBeTruthy()
+    // On its line in the sheet, but nothing beside the notch.
+    expect(within(screen.getByRole('region', { name: 'Althar' })).getAllByText('Stopped')).toHaveLength(1)
   })
 
   it('opens as the pointer comes onto it, as the main process watches it, and says where it draws', async () => {
@@ -321,8 +335,8 @@ describe('the edge’s reads', () => {
       listeners.forEach((listener) => listener(changed('decision', 'd1')))
       vi.advanceTimersByTime(500)
       expect(invalidate).not.toHaveBeenCalled()
-      listeners.forEach((listener) => listener(changed('attention_request', 'a1')))
-      listeners.forEach((listener) => listener(changed('task', 't1')))
+      listeners.forEach((listener) => listener(changed('card', 't1')))
+      listeners.forEach((listener) => listener(changed('project', 'p1')))
       vi.advanceTimersByTime(500)
       expect(invalidate).toHaveBeenCalledTimes(1)
       expect(invalidate).toHaveBeenCalledWith({ queryKey: edgeKey })

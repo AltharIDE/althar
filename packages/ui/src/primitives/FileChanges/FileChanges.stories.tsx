@@ -16,13 +16,6 @@ const meta = {
 export default meta
 type Story = StoryObj<typeof meta>
 
-/** Each file's size against the largest, split by addition and deletion. */
-export const Default: Story = {}
-/** Not links: nothing to open them into. */
-export const Plain: Story = { args: { onOpen: undefined } }
-/** On a larger scale, shared with another list, so the bars compare across both. */
-export const OnAScale: Story = { args: { most: 200 } }
-
 export const Opening: Story = {
   play: async ({ args, canvasElement }) => {
     await userEvent.click(within(canvasElement).getByRole('button', { name: 'Open the diff of src/auth/session.ts' }))

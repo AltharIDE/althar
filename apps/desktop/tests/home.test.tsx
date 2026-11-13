@@ -393,8 +393,11 @@ describe('the home', () => {
     const { client } = fakeClient({ getHome: vi.fn(async () => busy()) })
     withServices(<Home />, client)
     const projects = await screen.findByRole('complementary', { name: 'Projects' })
-    // The work in progress is in its project's row, which says only what is off: the stopped one and the one waiting.
-    expect(within(projects).getByText('1 stopped · 1 waiting')).toBeTruthy()
+    // The work in progress is in its project's row, which says only what is off: the one waiting. The stopped one waits on the
+    // person, in Needs you, as on its board.
+    expect(within(projects).getByText('1 waiting')).toBeTruthy()
+    const needs = screen.getByRole('region', { name: /needs? you/ })
+    expect(within(within(needs).getByRole('article', { name: 'Stopped work' })).getByText('Stopped')).toBeTruthy()
     // Which agents are signed in is for settings, not the home.
     expect(within(projects).queryByText(/Claude Code|Codex|OpenCode/)).toBeNull()
   })
@@ -419,7 +422,7 @@ describe('the home', () => {
     )
     // The runtime has closed it: read again, the line stays first, where it was, and only meridian still waits.
     calls = [later]
-    act(() => emit(changed('attention_request', 'a1', 'th3', 'p2')))
+    act(() => emit(changed('card', 't3', 'th3', 'p2')))
     await waitFor(() => expect(screen.getByText('in meridian')).toBeTruthy())
     expect(
       within(needs)
@@ -494,9 +497,9 @@ describe('the home', () => {
     withServices(<Home />, client)
     const needs = await screen.findByRole('region', { name: /needs? you/ })
     const projects = screen.getByRole('complementary', { name: 'Projects' })
-    expect(within(projects).getByText('1 stopped')).toBeTruthy()
+    expect(within(projects).queryByText(/waiting/)).toBeNull()
     await userEvent.click(within(needs).getByRole('button', { name: 'Allow once' }))
-    expect(await within(projects).findByText('1 stopped · 1 waiting')).toBeTruthy()
+    expect(await within(projects).findByText('1 waiting')).toBeTruthy()
   })
 
   it('says under its project what tasks waiting for a free agent wait for, and doesn’t count them as moving', async () => {
@@ -563,7 +566,7 @@ describe('the home', () => {
     fireEvent.keyDown(window, { key: ',', code: 'Comma', metaKey: true })
     expect(screen.queryByRole('dialog')).toBeNull()
 
-    emit(changed('task', 't1', 'th1', 'p2'))
+    emit(changed('card', 't1', 'th1', 'p2'))
     emit(changed('thread_item', 'i1'))
     await waitFor(() => expect(getHome).toHaveBeenCalledTimes(2))
     expect(getHome).toHaveBeenLastCalledWith('2026-10-06T18:00:00.000Z')

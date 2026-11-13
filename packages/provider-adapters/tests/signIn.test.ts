@@ -23,6 +23,58 @@ describe('reading sign-in status', () => {
     assert.isUndefined(read('{"authMethod": "none"}', 0))
   })
 
+  it('reads when a sign-in ends, only where its agent says: Claude Code 2.1.318 and later', () => {
+    const claude = agents['claude-code'].signIn.endsAt
+    // `claude auth status` as 2.1.319's bundle builds it (its `cli_auth_status` handler), field for field and in its order, for
+    // a claude.ai sign-in on Max 5x, printed as two-space JSON: `loginExpiresAt` is its stored login's end as `toISOString()`
+    // gives it, or null where it keeps none. No real end date is printed here: this computer's Claude Code is older than 2.1.318.
+    const signedIn = JSON.stringify(
+      {
+        loggedIn: true,
+        authMethod: 'claude.ai',
+        apiProvider: 'firstParty',
+        analyticsDisabled: false,
+        projectsDirectory: '/home/u/.claude/projects',
+        configDirectory: '/home/u/.claude',
+        loginExpiresAt: '2025-12-01T09:14:03.000Z',
+        email: 'you@meridian.dev',
+        orgId: '0f6c2a51-8d3e-4b7a-9c14-5e2d7f80a3b9',
+        orgName: 'you@meridian.dev’s Organization',
+        subscriptionType: 'max',
+        storedClaudeAiLogin: true,
+        planTier: 'max_5x',
+      },
+      null,
+      2,
+    )
+    assert.strictEqual(claude?.(signedIn), '2025-12-01T09:14:03.000Z')
+    assert.isUndefined(claude?.('{"loggedIn": false, "authMethod": "none", "loginExpiresAt": null}'))
+    // A key, and Claude Code before 2.1.318, say none; nor does output that isn't its JSON.
+    assert.isUndefined(claude?.('{"loggedIn": true, "authMethod": "api_key", "loginExpiresAt": null}'))
+    assert.isUndefined(claude?.('{"loggedIn": true, "authMethod": "claude.ai"}'))
+    assert.isUndefined(claude?.('{"loggedIn": true, "loginExpiresAt": "soon"}'))
+    assert.isUndefined(claude?.('not json'))
+    // The agents whose status says no end (DEV-196: Codex, OpenCode, Grok Build, Kimi Code; the others have no status) read none.
+    for (const agent of Object.values(agents)) if (agent.id !== 'claude-code') assert.isUndefined(agent.signIn.endsAt, agent.id)
+  })
+
+  it.effect('carries the end with the rest of the check, as the status command printed it', () =>
+    Effect.gen(function* () {
+      const claude: AgentDefinition = {
+        ...agents['claude-code'],
+        signIn: {
+          ...agents['claude-code'].signIn,
+          status: () => ({
+            command: 'bun',
+            args: ['-e', 'console.log(JSON.stringify({loggedIn:true,authMethod:"claude.ai",loginExpiresAt:"2025-12-01T09:14:03.000Z"}))'],
+          }),
+        },
+      }
+      const check = yield* signInCheck(claude, process.execPath)
+      assert.deepStrictEqual(check, { status: 'signed_in', paidBy: 'plan', endsAt: '2025-12-01T09:14:03.000Z' })
+    }),
+  )
+
   it('reads how each sign-in is paid for: a plan, or per use, on a key', () => {
     const claude = agents['claude-code'].signIn.paidBy
     assert.deepStrictEqual(

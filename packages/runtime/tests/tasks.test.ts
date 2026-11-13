@@ -1,5 +1,6 @@
+import { removeTreeSync } from '@althar/testing'
 import { execFileSync } from 'node:child_process'
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -397,7 +398,7 @@ describe('a task’s course', () => {
       yield* standsAt(task.threadId, (now) => now.phase === 'waiting')
       assert.deepStrictEqual((yield* shown(task.threadId)).actions, ['stop', 'abandon'])
       yield* tasks.stop({ envelope: yield* command('task.stop'), taskId: task.taskId })
-      assert.deepStrictEqual(yield* callsOf(task.taskId), [{ kind: 'stuck', state: 'withdrawn', why: 'failed_to_start' }])
+      assert.deepStrictEqual(yield* callsOf(task.taskId), [{ kind: 'stuck', state: 'withdrawn', why: 'not_installed' }])
       assert.strictEqual((yield* shown(task.threadId)).phase, 'stopped')
       // Resumed on an agent that can't start either, it needs the person again, as a plan starting would.
       yield* tasks.resume({ envelope: yield* command('task.resume'), taskId: task.taskId })
@@ -480,7 +481,7 @@ describe('a task’s course', () => {
       writeFileSync(join(before.worktree ?? '', 'note.txt'), 'kept\n')
       git(before.worktree ?? '', 'add', '.')
       git(before.worktree ?? '', 'commit', '-q', '-m', 'Keep a note')
-      rmSync(before.worktree ?? '', { recursive: true, force: true })
+      removeTreeSync(before.worktree ?? '')
       yield* tasks.reopen({ envelope: yield* command('task.reopen'), taskId: task.taskId })
       assert.strictEqual(git(before.worktree ?? '', 'rev-parse', '--abbrev-ref', 'HEAD'), before.branch)
       assert.isTrue(existsSync(join(before.worktree ?? '', 'note.txt')))
@@ -494,7 +495,7 @@ describe('a task’s course', () => {
 
       // Abandoned with its branch gone too, it can't be reopened on it, and stays as it was.
       yield* tasks.abandon({ envelope: yield* command('task.abandon'), taskId: task.taskId })
-      rmSync(before.worktree ?? '', { recursive: true, force: true })
+      removeTreeSync(before.worktree ?? '')
       git(root, 'worktree', 'prune')
       git(root, 'branch', '-D', before.branch ?? '')
       const refused = yield* Effect.flip(tasks.reopen({ envelope: yield* command('task.reopen'), taskId: task.taskId }))

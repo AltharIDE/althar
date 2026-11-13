@@ -1,3 +1,4 @@
+import { Problem } from '@althar/ui'
 import { useEffect, useState } from 'react'
 
 import type { AgentStatus, AutomationDefinition, AutomationStep, AutomationSummary } from '@althar/contracts'
@@ -123,9 +124,7 @@ function Tab({ projectId, onOpen, onNew }: { projectId: string; onOpen: (id: str
         <PartPending label={text.reading} />
       </div>
     ) : (
-      <p className={s.failure} role="alert">
-        {model.error}
-      </p>
+      <Problem className={s.failure}>{model.error}</Problem>
     )
   return (
     <Automations
@@ -170,9 +169,7 @@ function Page({
         <PartPending label={text.readingOne} />
       </div>
     ) : (
-      <p className={s.failure} role="alert">
-        {model.error}
-      </p>
+      <Problem className={s.failure}>{model.error}</Problem>
     )
   const standing = standingOf(view, view.allPaused, now)
   const definition = view.definition
@@ -190,6 +187,7 @@ function Page({
       onTryOnce={model.runNow}
       onTurnOn={model.turnOn}
       onRename={(name) => model.change({ ...definition, name })}
+      // oxlint-disable-next-line althar/press-at-once -- Not instant yet: a failed delete has nowhere to say so once its view is gone (foundations.md, The UI is instant).
       onDelete={() => void model.remove().then((removed) => removed && onBack())}
       onBack={onBack}
       {...(standing.tone === 'yours' ? { pausedItself: view.pauseReason ?? text.why } : {})}

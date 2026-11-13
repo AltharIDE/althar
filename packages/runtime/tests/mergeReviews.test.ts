@@ -6,7 +6,7 @@ import { basename, dirname, join } from 'node:path'
 import { type FakeService, makeFakeService } from '@althar/connectors/testing'
 import { holds } from '@althar/provider-adapters/testing'
 import { assert, describe, it } from '@effect/vitest'
-import { Duration, Effect, Layer, Option } from 'effect'
+import { Duration, Effect, Layer, Option, Schema } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { Changes } from '../src/Changes'
@@ -18,6 +18,7 @@ import { LeftBehind } from '../src/LeftBehind'
 import { MergeReviews } from '../src/MergeReviews'
 import { Projects } from '../src/Projects'
 import { Queries } from '../src/Queries'
+import { PlanParameters, Runs } from '../src/Runs'
 import * as Runtime from '../src/Runtime'
 import { Sessions } from '../src/Sessions'
 import { fakeConnectors, HOST, hosted, items, runtime, until } from './support'
@@ -77,10 +78,16 @@ const smallChange = (working: string, markers: string) =>
     const coordinator = yield* Coordinator
     const project = yield* projects.open({ envelope: yield* Runtime.envelope('project.open', {}), path: working })
     const threadId = yield* coordinator.thread(project.projectId)
-    const body = `Add a retry. [coordinator:plan] [coordinator:plan-small] [lead:finish] [lead:edit] ${markers}`
+    const body = `Add a retry. [coordinator:plan] [coordinator:plan-small] [coordinator:plan-no-review] [lead:finish] [lead:edit] ${markers}`
     yield* coordinator.say({ envelope: yield* Runtime.envelope('thread.send', { body }), threadId, body, disposition: 'after_current' })
     const [ready] = yield* until(cards(project.projectId), (all) => all[0]?.change != null && all[0].change.state === 'open')
     const card = ready ?? assert.fail('no card')
+    // This fixture deliberately requests after-merge timing; size alone now keeps the normal before-Ship review.
+    yield* (yield* Runs).reshape({
+      taskId: card.taskId,
+      afterMerge: { key: 'review', agentId: 'codex', model: null, skipped: true },
+      actorId: instance.personId,
+    })
     return { projectId: project.projectId, taskId: card.taskId, threadId: card.threadId, url: card.change?.url ?? '' }
   })
 
@@ -297,8 +304,80 @@ describe('the review after a merge, in the same task', () => {
       assert.lengthOf(yield* said(), 1)
       // Once it can, it starts, and reads.
       rmSync(blocker, { force: true })
+      yield* sql`UPDATE merge_reviews SET updated_at = '2000-01-01T00:00:00.000Z' WHERE url = ${task.url}`
       yield* (yield* FastLane).retryPendingReviews()
       yield* until(reviewOf(task.url), (row) => row?.state === 'clear')
+    }).pipe(Effect.provide(runtimeWith(github)))
+  })
+})
+
+describe('a fast-lane task’s reviewer is a task part', () => {
+  it.live('preserves the reviewer and after-merge timing when only its lead changes', () => {
+    const { working, bare, github } = onGitHub()
+    return Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const task = yield* smallChange(working, '[review:wait]')
+      yield* until(cards(task.projectId), (all) => all[0]?.phase === 'ready')
+      yield* until(
+        Effect.flatMap(Sessions, (sessions) => sessions.busy(task.threadId)),
+        (busy) => !busy,
+      )
+      const [plan] = yield* sql<{
+        id: string
+        parameters: string
+      }>`SELECT id, parameters FROM task_plans WHERE task_id = ${task.taskId} ORDER BY proposed_at DESC, rowid DESC LIMIT 1`
+      const before = Schema.decodeUnknownSync(Schema.fromJsonString(PlanParameters))(plan?.parameters ?? '')
+      const lead = before.steps.find((step) => step.key === 'implement') ?? assert.fail('no lead')
+      const review = before.steps.find((step) => step.key === 'review') ?? assert.fail('no reviewer')
+      const changed = yield* (yield* Runs).changeTeam({
+        taskId: task.taskId,
+        steps: [{ ...lead, model: 'large' }, review],
+        actorId: (yield* Instance).personId,
+      })
+      assert.isDefined(changed.lead)
+      assert.isUndefined(changed.review)
+      const [after] = yield* sql<{ parameters: string }>`SELECT parameters FROM task_plans WHERE id = ${plan?.id ?? ''}`
+      const kept = Schema.decodeUnknownSync(Schema.fromJsonString(PlanParameters))(after?.parameters ?? '')
+      assert.isTrue(kept.reviewAfterMerge)
+      assert.deepStrictEqual(
+        kept.steps.find((step) => step.key === 'review'),
+        review,
+      )
+      yield* mergeIt(bare, github, task.taskId)
+      yield* until(reviewOf(task.url), (row) => row?.state === 'running')
+    }).pipe(Effect.provide(runtimeWith(github)))
+  })
+
+  it.live('owes no review after direct removal of the fast-lane reviewer', () => {
+    const { working, bare, github } = onGitHub()
+    return Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const task = yield* smallChange(working, '[review:wait]')
+      yield* until(cards(task.projectId), (all) => all[0]?.phase === 'ready')
+      yield* until(
+        Effect.flatMap(Sessions, (sessions) => sessions.busy(task.threadId)),
+        (busy) => !busy,
+      )
+      const [plan] = yield* sql<{
+        id: string
+        parameters: string
+      }>`SELECT id, parameters FROM task_plans WHERE task_id = ${task.taskId} ORDER BY proposed_at DESC, rowid DESC LIMIT 1`
+      const before = Schema.decodeUnknownSync(Schema.fromJsonString(PlanParameters))(plan?.parameters ?? '')
+      const lead = before.steps.find((step) => step.key === 'implement') ?? assert.fail('no lead')
+      const review = before.steps.find((step) => step.key === 'review') ?? assert.fail('no reviewer')
+      const removed = yield* (yield* Runs).changeTeam({
+        taskId: task.taskId,
+        steps: [lead, { ...review, skipped: true }],
+        actorId: (yield* Instance).personId,
+      })
+      assert.isNull(removed.review?.step)
+      const [after] = yield* sql<{ parameters: string }>`SELECT parameters FROM task_plans WHERE id = ${plan?.id ?? ''}`
+      const kept = Schema.decodeUnknownSync(Schema.fromJsonString(PlanParameters))(after?.parameters ?? '')
+      assert.isUndefined(kept.reviewAfterMerge)
+      yield* (yield* MergeReviews).owe(task.taskId, task.url, {})
+      assert.isUndefined(yield* reviewOf(task.url))
+      yield* mergeIt(bare, github, task.taskId)
+      assert.isUndefined(yield* reviewOf(task.url))
     }).pipe(Effect.provide(runtimeWith(github)))
   })
 })

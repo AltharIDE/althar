@@ -134,6 +134,8 @@ export const ThreadItemKind = Schema.Literals([
   'model_move',
   /** A version of one of the project's canvases an agent published (ADR-104): its name, title and version, which open it beside the conversation. Althar posts it. */
   'canvas',
+  /** The merge line for a branch, in the thread of whoever asked for the merges: one card listing each pull request with where it stands. Althar posts it and keeps it current. */
+  'merge_line',
 ])
 export type ThreadItemKind = typeof ThreadItemKind.Type
 
@@ -142,7 +144,7 @@ export const InputDisposition = Schema.Literals(['after_current', 'interrupt_and
 export type InputDisposition = typeof InputDisposition.Type
 
 /** Where something the person said stands: waiting its turn, given to the agent, replaced, or taken back before it went. */
-export const UserInputState = Schema.Literals(['queued', 'delivered', 'superseded', 'withdrawn'])
+export const UserInputState = Schema.Literals(['queued', 'delivered', 'superseded', 'withdrawn', 'noted'])
 export type UserInputState = typeof UserInputState.Type
 
 export const TurnDeliveryState = Schema.Literals(['pending', 'delivered', 'completed', 'interrupted', 'interruption_uncertain', 'failed'])
@@ -204,7 +206,7 @@ export type SnapshotReason = typeof SnapshotReason.Type
  * Why a node attempt is held without needing a person: `machine_busy` waits for a place among the agents this machine runs at
  * once; `checkout`, a Local task's first step, for its repository's checkout (ADR-091).
  */
-export const HoldReason = Schema.Literals(['usage_limit', 'agent_unavailable', 'machine_busy', 'checkout'])
+export const HoldReason = Schema.Literals(['usage_limit', 'agent_unavailable', 'machine_busy', 'checkout', 'external'])
 export type HoldReason = typeof HoldReason.Type
 
 export const AttentionKind = Schema.Literals([
@@ -388,5 +390,7 @@ export const AggregateType = Schema.Literals([
   'skill',
   'setting',
   'canvas',
+  /** A task's card, as its board shows it, came out different as a change of the task was recorded (Queries' `cards`). */
+  'card',
 ])
 export type AggregateType = typeof AggregateType.Type

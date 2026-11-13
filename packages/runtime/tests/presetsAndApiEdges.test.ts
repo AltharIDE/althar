@@ -34,6 +34,7 @@ import { Queries } from '../src/Queries'
 import { mergeCopyOf } from '../src/reviewCopy'
 import { reviewBrief } from '../src/reviewing'
 import * as Runtime from '../src/Runtime'
+import { Runs } from '../src/Runs'
 import { Secrets } from '../src/Secrets'
 import { Sessions } from '../src/Sessions'
 import type { ToolAccess } from '../src/ToolServer'
@@ -99,8 +100,8 @@ const connected = Effect.gen(function* () {
     title: 'Retry checkout',
     description: 'Retry the checkout.\nTwice at most.\nThen give up.\nAnd log it.',
   })
-  const personId = Context.get(context, Instance).personId
-  return { client, grant, store, project, task, personId }
+  const { personId, coordinatorId } = Context.get(context, Instance)
+  return { client, grant, store, project, task, personId, coordinatorId }
 })
 
 /** What a call that can't be done says, as the window shows it. */
@@ -139,7 +140,7 @@ describe('presets, through the API', () => {
         )
         assert.strictEqual(
           builtIn.find((one) => one.name === 'Change')?.about,
-          'a worktree, reviewed before it ships, a draft pull request, the coordinator picks its lead',
+          'a worktree, reviewed before it ships, ends as the project says, the coordinator picks its lead',
         )
         assert.isTrue(builtIn.every((one) => one.builtin && one.keptTo === undefined && one.from === undefined))
 
@@ -168,13 +169,12 @@ describe('presets, through the API', () => {
         assert.deepStrictEqual(own[0]?.parts, {
           workspace: 'worktree',
           checked: 'none',
-          end: 'none',
           shelf: 'board',
           lead: null,
           reviewer: null,
           brief: 'Retry the checkout.\nTwice at most.\nThen give up.',
         })
-        assert.strictEqual(own[2]?.about, 'Local, reviewed before it ships, a pull request ready for review, led by large')
+        assert.strictEqual(own[2]?.about, 'Local, reviewed before it ships, a pull request ready for review, led by Large')
 
         // With neither a task nor parts there is nothing to keep, and a task that went has none either: neither is saved.
         assert.strictEqual(
@@ -288,57 +288,167 @@ describe('presets, through the API', () => {
   )
 })
 
-describe('a preset the coordinator offers', () => {
-  it.live('is not offered for parts one of the person’s presets holds already, with the same lead, and is offered once it goes', () =>
-    Effect.scoped(
+describe('a preset a task’s card offers', () => {
+  /** Tasks planned with these steps by whoever proposed them, each started: the newest last. */
+  const started = (
+    { client, store, project }: Effect.Success<typeof connected>,
+    proposer: ActorId,
+    steps: ReadonlyArray<{ key: 'implement' | 'review'; agentId: string; model: string | null; skipped: boolean }>,
+    titles: ReadonlyArray<string>,
+    end: 'draft' | 'ready' | null = null,
+  ) =>
+    Effect.forEach(titles, (title) =>
       Effect.gen(function* () {
-        const { client, store, project, task, personId } = yield* connected
-        const projectId = project.id as ProjectId
-        const second = yield* client.CreateTask({ commandId: commandId(), projectId: project.id, title: 'Retry payment' })
-        // Both planned alike: Codex leads, nothing reviews; held, so neither starts.
+        const one = yield* client.CreateTask({ commandId: commandId(), projectId: project.id, title })
         yield* store(
           Effect.gen(function* () {
             const plans = yield* Plans
-            for (const one of [task, second])
-              yield* plans.propose({
-                projectId,
-                taskId: one.id,
-                steps: [{ key: 'implement', agentId: 'codex', model: 'large', skipped: false }],
-                reason: null,
-                actorId: personId,
-                held: true,
-              })
+            yield* plans.propose({
+              projectId: project.id as ProjectId,
+              taskId: one.id,
+              steps,
+              reason: null,
+              actorId: proposer,
+              held: true,
+              end,
+              // An ending the person set is theirs; none set, the project's.
+              ...(end === null ? {} : { endChosen: true }),
+            })
+            // Started, without running it: the offer looks at started plans.
+            const sql = yield* SqlClient.SqlClient
+            yield* sql`UPDATE task_plans SET state = 'accepted' WHERE task_id = ${one.id}`
           }),
         )
-        const offers = store(
-          Effect.flatMap(
-            SqlClient.SqlClient,
-            (sql) => sql<{ payload: string }>`SELECT payload FROM record_events WHERE type = 'project.preset_offered'`,
-          ),
-        )
-        const held = { workspace: 'worktree', checked: 'none', end: 'none', shelf: 'board', reviewer: null, brief: '' } as const
-        // One of the person's holds those parts, led by the same model: nothing to offer.
-        yield* client.SavePreset({ commandId: commandId(), name: 'Codex alone', parts: { ...held, lead: 'codex/large' } })
-        yield* store(offerPreset(projectId, personId as ActorId))
-        assert.deepStrictEqual(yield* offers, [])
+        return one.id
+      }),
+    )
+  const CODEX_ALONE = [{ key: 'implement', agentId: 'codex', model: 'large', skipped: false }] as const
+  const offerOn = (made: Effect.Success<typeof connected>, taskId: string) =>
+    Effect.gen(function* () {
+      yield* made.store(
+        offerPreset({ projectId: made.project.id as ProjectId, taskId, personId: made.personId, actorId: made.coordinatorId }),
+      )
+      const coordinator = yield* made.client.GetCoordinator({ projectId: made.project.id })
+      const card = coordinator.items.find((item) => item.kind === 'task' && item.content.taskId === taskId)
+      return card?.kind === 'task' ? card.content.presetOffer : undefined
+    })
 
-        // Once it goes, the coordinator offers them, on a card in its thread, once.
-        const [kept] = (yield* client.ListPresets({})).filter((one) => !one.builtin)
-        yield* client.RemovePreset({ commandId: commandId(), id: kept?.id ?? '' })
-        yield* store(offerPreset(projectId, personId as ActorId))
-        yield* store(offerPreset(projectId, personId as ActorId))
-        assert.deepStrictEqual(
-          (yield* offers).map((one) => (JSON.parse(one.payload) as { name: string }).name),
-          ['large unchecked'],
-        )
-        const coordinator = yield* client.GetCoordinator({ projectId: project.id })
-        const card = coordinator.items.find(
-          (item) => item.kind === 'notice' && item.content.title === 'You set up these parts twice. Keep them as a preset?',
-        )
-        assert.strictEqual(
-          card?.kind === 'notice' ? card.content.description : undefined,
-          'large unchecked: a worktree, no review, ends here, led by large.',
-        )
+  it.live('never counts the coordinator’s plans, however alike, and offers the person’s own parts the third time', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const made = yield* connected
+        // The coordinator planned three alike, and the person changed none: nothing of theirs to keep.
+        const theirs = yield* started(made, made.coordinatorId, CODEX_ALONE, ['Bump a', 'Bump b', 'Bump c'])
+        assert.isUndefined(yield* offerOn(made, theirs[2] ?? ''))
+        // The person set them up twice: not yet; the third time, by a name in plain words.
+        const mine = yield* started(made, made.personId, CODEX_ALONE, ['Fix a', 'Fix b'])
+        assert.isUndefined(yield* offerOn(made, mine[1] ?? ''))
+        const [third] = yield* started(made, made.personId, CODEX_ALONE, ['Fix c'])
+        const offer = yield* offerOn(made, third ?? '')
+        assert.deepInclude(offer, { name: 'No review' })
+        assert.deepInclude(offer?.parts, { workspace: 'worktree', checked: 'none', lead: 'codex/large' })
+        // Its ending was the project's, so the preset follows the project's.
+        assert.isUndefined(offer?.parts.end)
+
+        // Kept from it, by the name the person gave: the card says so, and Undo offers it again.
+        yield* made.client.SavePreset({ commandId: commandId(), name: 'Codex alone', parts: offer?.parts, taskId: third })
+        const kept = yield* offerOn(made, third ?? '')
+        assert.strictEqual(kept?.kept?.name, 'Codex alone')
+        yield* made.client.RemovePreset({ commandId: commandId(), id: kept?.kept?.id ?? '' })
+        assert.isUndefined((yield* offerOn(made, third ?? ''))?.kept)
+
+        // Not to be offered again: the card stops, and a fourth alike isn't offered them.
+        yield* made.client.DeclinePresetOffer({ commandId: commandId(), taskId: third ?? '' })
+        assert.isUndefined(yield* offerOn(made, third ?? ''))
+        const [fourth] = yield* started(made, made.personId, CODEX_ALONE, ['Fix d'])
+        assert.isUndefined(yield* offerOn(made, fourth ?? ''))
+      }),
+    ),
+  )
+
+  it.live(
+    'through the API: none for the coordinator’s plans the person corrected, one on the third they start, and Keep never replaces a preset',
+    () =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          const made = yield* connected
+          const { client, project } = made
+          const offered = (taskId: string) =>
+            Effect.map(client.GetCoordinator({ projectId: project.id }), (coordinator) => {
+              const card = coordinator.items.find((item) => item.kind === 'task' && item.content.taskId === taskId)
+              return card?.kind === 'task' ? card.content.presetOffer : undefined
+            })
+          const reviewed = [...CODEX_ALONE, { key: 'review', agentId: 'claude-code', model: 'claude-opus-5-5', skipped: false }] as const
+
+          // The coordinator planned each with a review, and the person took it off and started it: three alike, none offered.
+          for (const title of ['Bump a', 'Bump b', 'Bump c']) {
+            const one = yield* client.CreateTask({ commandId: commandId(), projectId: project.id, title })
+            const planId = yield* made.store(
+              Effect.flatMap(Plans, (plans) =>
+                plans.propose({
+                  projectId: project.id as ProjectId,
+                  taskId: one.id,
+                  steps: reviewed,
+                  reason: null,
+                  actorId: made.coordinatorId,
+                  held: true,
+                }),
+              ),
+            )
+            yield* client.ChangeTeam({ commandId: commandId(), taskId: one.id, steps: CODEX_ALONE })
+            yield* client.StartPlan({ commandId: commandId(), planId })
+            assert.isUndefined(yield* offered(one.id))
+          }
+
+          // Started by the person themselves, alike: the third one's card offers them.
+          const mine: Array<string> = []
+          for (const title of ['Fix a', 'Fix b', 'Fix c']) {
+            const one = yield* client.StartTask({ commandId: commandId(), projectId: project.id, title, steps: CODEX_ALONE })
+            mine.push(one.id)
+          }
+          assert.isUndefined(yield* offered(mine[1] ?? ''))
+          const offer = yield* offered(mine[2] ?? '')
+          assert.deepInclude(offer, { name: 'No review' })
+
+          // Kept under a name another preset has: refused, and that preset stays as it was.
+          const other = { workspace: 'local', checked: 'before', shelf: 'board', lead: null, reviewer: null, brief: '' } as const
+          yield* client.SavePreset({ commandId: commandId(), name: 'Mine', parts: other })
+          const taken = { commandId: commandId(), name: 'mine', parts: offer?.parts, taskId: mine[2], asNew: true }
+          assert.strictEqual(yield* refused(client.SavePreset(taken)), 'Another preset is called mine.')
+          const listed = yield* client.ListPresets({})
+          assert.deepInclude(listed.find((one) => one.name === 'Mine')?.parts, { workspace: 'local', checked: 'before' })
+          assert.isUndefined((yield* offered(mine[2] ?? ''))?.kept)
+
+          // Kept by a name of its own: its card says so.
+          yield* client.SavePreset({ commandId: commandId(), name: 'Codex alone', parts: offer?.parts, taskId: mine[2], asNew: true })
+          assert.strictEqual((yield* offered(mine[2] ?? ''))?.kept?.name, 'Codex alone')
+        }),
+      ),
+  )
+
+  it.live('names the built-in preset parts nearly are, and offers none for parts a preset has', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const made = yield* connected
+        // Prototype as it is: nothing new to keep.
+        const opus = [{ key: 'implement', agentId: 'claude-code', model: 'claude-opus-5-5', skipped: false }] as const
+        const prototypes = yield* started(made, made.personId, opus, ['Try a', 'Try b', 'Try c'])
+        assert.isUndefined(yield* offerOn(made, prototypes[2] ?? ''))
+        // Prototype but for its pull request: it says so, rather than offer another.
+        const near = yield* started(made, made.personId, opus, ['Ship a', 'Ship b', 'Ship c'], 'ready')
+        assert.deepInclude((yield* offerOn(made, near[2] ?? ''))?.near, {
+          preset: 'Prototype',
+          differs: 'ending in a pull request ready for review',
+        })
+        // One of the person’s holds these parts, led by the same model: nothing to offer.
+        yield* made.client.SavePreset({
+          commandId: commandId(),
+          name: 'Sonnet alone',
+          parts: { workspace: 'worktree', checked: 'none', end: 'none', shelf: 'board', lead: 'codex/small', reviewer: null, brief: '' },
+        })
+        const small = [{ key: 'implement', agentId: 'codex', model: 'small', skipped: false }] as const
+        const held = yield* started(made, made.personId, small, ['Tidy a', 'Tidy b', 'Tidy c'])
+        assert.isUndefined(yield* offerOn(made, held[2] ?? ''))
       }),
     ),
   )
@@ -592,6 +702,49 @@ describe('a chat on Scratch, moving to the board', () => {
   )
 })
 
+describe('an aside, started by the person', () => {
+  it.live('sits on Scratch with no card in the coordinator’s conversation, opens with their words, and is noted there once it leaves', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { client, store, project } = yield* connected
+        const words = 'Why does the retry back off twice?\n\nIt feels slow when Stripe is down.'
+        const aside = yield* client.StartTask({
+          commandId: commandId(),
+          projectId: project.id,
+          title: 'Why does the retry back off twice?',
+          description: words,
+          steps: [{ key: 'implement', agentId: 'codex', model: null, skipped: false }],
+          chat: true,
+        })
+        const thread = yield* client.GetThread({ threadId: aside.threadId })
+        assert.isTrue(thread.task.scratch)
+        assert.strictEqual(thread.task.request, words)
+        const coordinator = () => client.GetCoordinator({ projectId: project.id })
+        const cards = (yield* coordinator()).items.filter((item) => item.kind === 'task')
+        assert.isFalse(cards.some((item) => item.kind === 'task' && item.content.taskId === aside.id))
+        // Nothing of it goes outside the project when it is done: it is quick, as a chat the coordinator starts.
+        const [kind] = yield* store(
+          Effect.flatMap(
+            SqlClient.SqlClient,
+            (sql) =>
+              sql<{ plain: number; here: number | null }>`
+                SELECT (SELECT count(*) FROM workspaces w WHERE w.task_id = k.id AND w.branched_at IS NOT NULL) = 0 AS plain,
+                  (SELECT json_extract(p.parameters, '$.here') FROM task_plans p WHERE p.task_id = k.id) AS here
+                FROM tasks k WHERE k.id = ${aside.id}`,
+          ),
+        )
+        assert.deepStrictEqual(kind, { plain: 1, here: 1 })
+        // Moved to the board, by the person or by itself, the coordinator's conversation says so in a line.
+        yield* client.ShelveTask({ commandId: commandId(), taskId: aside.id, shelf: null })
+        const lines = (yield* coordinator()).items.flatMap((item) =>
+          item.kind === 'notice' && item.content.title.startsWith('An aside') ? [item.content.title] : [],
+        )
+        assert.deepStrictEqual(lines, ['An aside became a task: Why does the retry back off twice?'])
+      }),
+    ),
+  )
+})
+
 describe('a lead’s helpers, among the agents at work', () => {
   it.live(
     'hold a place each while their turns run, four of a task’s at once with the fifth waiting for one, which carries on after a crash',
@@ -725,13 +878,20 @@ describe('a review after a merge, between its turns', () => {
         const project = yield* (yield* Projects).open({ envelope: yield* Runtime.envelope('project.open', {}), path: working })
         const coordinator = yield* Coordinator
         const threadId = yield* coordinator.thread(project.projectId)
-        const body = 'Add a retry. [coordinator:plan] [coordinator:plan-small] [lead:finish] [lead:edit] [review:wait]'
+        const body =
+          'Add a retry. [coordinator:plan] [coordinator:plan-small] [coordinator:plan-no-review] [lead:finish] [lead:edit] [review:wait]'
         yield* coordinator.say({ envelope: yield* Runtime.envelope('thread.send', { body }), threadId, body, disposition: 'after_current' })
         const cards = Effect.map(Effect.orDie((yield* Queries).coordinator(project.projectId)), (snapshot) =>
           snapshot.items.flatMap((item) => (item.kind === 'task' ? [item.content] : [])),
         )
         const [card] = yield* until(cards, (all) => all[0]?.change != null && all[0].change.state === 'open')
         const taskId = card?.taskId ?? assert.fail('no card')
+        // Its timing is explicit; size alone keeps the normal before-Ship review.
+        yield* (yield* Runs).reshape({
+          taskId,
+          afterMerge: { key: 'review', agentId: 'codex', model: null, skipped: true },
+          actorId: instance.personId,
+        })
         // The host squashes it into main, and Althar hears it merged: the task settles, and its reviewer reads what merged.
         const clone = mkdtempSync(join(tmpdir(), 'althar-merge-'))
         execFileSync('git', ['clone', '-q', bare, clone])
@@ -793,29 +953,35 @@ describe('a preset’s parts, on a plan', () => {
           { key: 'review', agentId: 'opencode', model: null, skipped: false },
         ],
         end: 'draft',
+        endChosen: true,
         worksIn: 'checkout',
       },
     )
   })
 
-  it('reviews with the lead’s agent where it needs a review it lacks, and with Claude Code where it has no lead either', () => {
-    assert.deepStrictEqual(planFromPreset(proposed({ steps: [LEAD] }), parts({})).steps[1], { ...LEAD, key: 'review' })
+  it('never reviews with the lead’s own model: it skips a review it needs and can’t name, to add back, and keeps the plan’s own', () => {
+    assert.deepStrictEqual(planFromPreset(proposed({ steps: [LEAD] }), parts({})).steps[1], {
+      key: 'review',
+      agentId: 'claude-code',
+      model: null,
+      skipped: true,
+    })
     assert.deepStrictEqual(planFromPreset(proposed({ steps: [] }), parts({ checked: 'after', workspace: 'copy' })), {
       steps: [{ key: 'review', agentId: 'claude-code', model: null, skipped: true }],
       end: 'draft',
+      endChosen: true,
       reviewAfterMerge: true,
       here: true,
     })
+    assert.deepStrictEqual(planFromPreset(proposed({ steps: [LEAD, REVIEW] }), parts({})).steps[1], { ...REVIEW, skipped: false })
   })
 
-  it('skips a review it has where nothing checks it, and adds none where it has none', () => {
-    assert.deepStrictEqual(planFromPreset(proposed({ steps: [LEAD, REVIEW] }), parts({ checked: 'none' })).steps, [
-      LEAD,
-      { ...REVIEW, skipped: true },
-    ])
+  it('leaves no review row where nothing checks it, one it had included, and adds none where it has none', () => {
+    assert.deepStrictEqual(planFromPreset(proposed({ steps: [LEAD, REVIEW] }), parts({ checked: 'none' })).steps, [LEAD])
     assert.deepStrictEqual(planFromPreset(proposed({ steps: [LEAD], worksIn: 'checkout' }), parts({ checked: 'none' })), {
       steps: [LEAD],
       end: 'draft',
+      endChosen: true,
       worksIn: 'worktree',
     })
   })

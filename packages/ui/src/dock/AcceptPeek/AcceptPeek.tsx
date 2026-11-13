@@ -12,6 +12,7 @@ import { Checks, type ChangeCheck } from '../../primitives/Checks/Checks'
 import { CheckState } from '../../foundations/vocabulary'
 import { Delta, FileChanges, type ChangedFile } from '../../primitives/FileChanges/FileChanges'
 import { NoteForm } from '../../primitives/NoteForm/NoteForm'
+import { Problem } from '../../primitives/Problem/Problem'
 import { PeekFoot, PeekHead, PeekSection } from '../Dock/Dock'
 import s from './AcceptPeek.module.css'
 
@@ -47,6 +48,9 @@ export interface AcceptPeekText {
   /** Said in place of Accept while the lead's later commits go up on their own. */
   going: (n: number) => string
   push: string
+  /** Said in place of Accept while commits wait on the branch for Ship. */
+  held: (n: number) => string
+  ship: string
 }
 
 export const acceptPeekText: AcceptPeekText = {
@@ -66,6 +70,8 @@ export const acceptPeekText: AcceptPeekText = {
   unpushed: (n) => (n === 1 ? 'One commit isn’t on the pull request yet' : `${n} commits aren’t on the pull request yet`),
   going: (n) => (n === 1 ? 'One commit is going up to the pull request' : `${n} commits are going up to the pull request`),
   push: 'Push',
+  held: (n) => (n === 1 ? 'One commit isn’t shipped yet' : `${n} commits aren’t shipped yet`),
+  ship: 'Ship',
 }
 
 export interface AcceptPeekProps {
@@ -91,6 +97,14 @@ export interface AcceptPeekProps {
   going?: number
   /** Pushing is under way: Push shows it and ignores presses. */
   pushing?: boolean
+  /**
+   * Commits that wait on the task's branch for Ship, which reviews them and
+   * sends them up, with `onShip`: never accepted without them, nor pushed.
+   */
+  held?: number
+  onShip?: () => void
+  /** Shipping is under way: Ship shows it and ignores presses. */
+  shipping?: boolean
   onOpenFile?: (path: string) => void
   /** Accepting is under way: Accept shows it and ignores presses. */
   accepting?: boolean
@@ -118,6 +132,9 @@ export function AcceptPeek({
   onPush,
   going = 0,
   pushing = false,
+  held = 0,
+  onShip,
+  shipping = false,
   onOpenFile,
   accepting = false,
   sendingBack = false,
@@ -130,7 +147,7 @@ export function AcceptPeek({
   const back = useRefocus<HTMLButtonElement>(sending)
   const add = files.reduce((n, f) => n + f.add, 0)
   const del = files.reduce((n, f) => n + f.del, 0)
-  const passed = checks.every((c) => c.state === CheckState.Passed)
+  const passed = checks.every((c) => c.state === CheckState.Passed || c.state === CheckState.Skipped)
   const link = safeHref(url)
   return (
     <>
@@ -182,7 +199,16 @@ export function AcceptPeek({
           />
         ) : (
           <>
-            {unpushed > 0 && onPush ? (
+            {held > 0 ? (
+              <>
+                {onShip && (
+                  <Button variant="signal" busy={shipping} onClick={onShip}>
+                    {t.ship}
+                  </Button>
+                )}
+                <span className={s.wait}>{t.held(held)}</span>
+              </>
+            ) : unpushed > 0 && onPush ? (
               <>
                 <Button variant="signal" busy={pushing} onClick={onPush}>
                   {t.push}
@@ -204,9 +230,9 @@ export function AcceptPeek({
           </>
         )}
         {error && (
-          <span className={s.error} role="alert">
+          <Problem as="span" size="small" className={s.problem}>
             {error}
-          </span>
+          </Problem>
         )}
       </PeekFoot>
     </>

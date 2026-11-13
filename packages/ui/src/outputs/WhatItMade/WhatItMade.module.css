@@ -27,11 +27,6 @@
   gap: 4px 16px;
   min-width: 0;
 }
-.count {
-  font: 500 11px/1 var(--font);
-  letter-spacing: 0;
-  text-transform: none;
-}
 
 /* what it is: its first paragraph a size up, the rest at reading size under it */
 .story {

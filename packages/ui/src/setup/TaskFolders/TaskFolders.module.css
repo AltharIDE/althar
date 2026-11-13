@@ -117,12 +117,6 @@
   flex: 1;
 }
 
-.error {
-  margin: 0;
-  font-size: 12px;
-  color: var(--danger);
-}
-
 /* ---- the list the legend opens: one line a folder ---- */
 
 .list {

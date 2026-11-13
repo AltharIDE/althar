@@ -1,3 +1,4 @@
+import { QueryClient } from '@tanstack/react-query'
 import { act, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { Brand } from '@althar/ui'
@@ -6,6 +7,7 @@ import { describe, expect, it, vi } from 'vitest'
 import type { AgentModels, AgentStatus } from '@althar/contracts'
 
 import { useModels, useSetDefaultEffort } from '../src/renderer/data/models'
+import { recheckStatus } from '../src/renderer/data/reads'
 import { useModelNames } from '../src/renderer/shared/modelNames'
 import {
   catalogOf,
@@ -171,6 +173,21 @@ describe('the models every agent offers', () => {
     ])
     expect(infoOf(unknown, { agentId: 'codex', model: null }).id).toBe('codex:')
     expect(defaultPins(unknown)).toEqual(['claude-code:', 'codex:'])
+  })
+
+  it('name a model the agent doesn’t list from its id, a version it writes with dashes as people write it: Claude Opus 5.5, never Opus 5 5', () => {
+    const named = (model: string) => infoOf(catalog, { agentId: 'claude-code', model }).name
+    expect(named('claude-opus-5-5')).toBe('Claude Opus 5.5')
+    expect(named('claude-sonnet-5-5')).toBe('Claude Sonnet 5.5')
+    expect(named('claude-3-5-sonnet')).toBe('Claude 3.5 Sonnet')
+    expect(named('gemini-2-5-pro')).toBe('Gemini 2.5 Pro')
+    expect(named('opencode-go/glm-5-3')).toBe('GLM 5.3')
+    // A version already dotted, a lone number, and a date stay as they are.
+    expect(named('opencode-go/deepseek-v4.1-flash')).toBe('DeepSeek V4.1 Flash')
+    expect(named('gpt-6-sol')).toBe('GPT 6 Sol')
+    expect(named('claude-sonnet-4-20250514')).toBe('Claude Sonnet 4 20250514')
+    expect(named('o3-mini-2025-01-31')).toBe('O3 Mini 2025 01 31')
+    expect(modelName(catalog, 'claude-code', 'claude-opus-5-5')).toBe('Claude Opus 5.5')
   })
 
   it('show a choice as its model, what its agent is on, or as it was set', () => {
@@ -443,6 +460,15 @@ describe('reading the models', () => {
     await waitFor(() => expect(setDefaultEffort).toHaveBeenCalledTimes(2))
     expect(getModels).toHaveBeenCalledTimes(2)
     expect(screen.getByRole('status').textContent).toBe('[{"model":"gpt-5.2","effort":"high"}]')
+  })
+
+  it('reads them again once the agents’ sign-ins are checked again: one found signed in may only now say them', async () => {
+    const settled = models.map((agent) => ({ ...agent, probing: false }))
+    const { client } = fakeClient({ getModels: vi.fn(async () => settled) })
+    withServices(<Known />, client)
+    await waitFor(() => expect(client.getModels).toHaveBeenCalledTimes(1))
+    await recheckStatus(client, new QueryClient())
+    await waitFor(() => expect(client.getModels).toHaveBeenCalledTimes(2))
   })
 
   it('offers each agent’s own default when they can’t be read', async () => {

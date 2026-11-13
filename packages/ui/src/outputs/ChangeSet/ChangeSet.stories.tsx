@@ -24,6 +24,16 @@ const accept = fn()
 const push = fn()
 const open = fn()
 
+/** One repository's change: one to accept, not both. */
+const ONE_REPO = {
+  ...CHANGE_ONE_REPO,
+  actions: (
+    <Button variant="signal" onClick={accept}>
+      Accept and merge
+    </Button>
+  ),
+}
+
 /** As wide as it is beside what a task made; `alone`, as wide as the page gives it with nothing beside it. */
 const SIDE = 360
 const ALONE = 700
@@ -121,7 +131,7 @@ export const Queued: Story = {
 }
 /** One pull request: its number is the one link to its host. */
 export const OneRepository: Story = {
-  args: CHANGE_ONE_REPO,
+  args: ONE_REPO,
   play: async ({ canvasElement }) => {
     const c = within(canvasElement)
     await expect(c.getByRole('link', { name: 'Open stripe-internal/meridian-api #1191 on GitHub' })).toHaveTextContent('PR #1191')
@@ -415,7 +425,7 @@ const GROUPED = [
 
 /** A few files, several to a folder: each folder a quiet heading over its files, the top of the repository under its name. */
 export const GroupedFiles: Story = {
-  args: { ...CHANGE_ONE_REPO, prs: [{ ...PR_416[0]!, files: GROUPED }] },
+  args: { ...ONE_REPO, prs: [{ ...PR_416[0]!, files: GROUPED }] },
   parameters: { width: ALONE },
   play: async ({ args, canvasElement }) => {
     const c = within(canvasElement)
@@ -446,7 +456,7 @@ const MANY = [
 
 /** A change of 116 files stays short: its folders, the most first, each with how much changed in it, six and the rest a press away. */
 export const ManyFiles: Story = {
-  args: { ...CHANGE_ONE_REPO, prs: [{ ...PR_416[0]!, files: MANY }] },
+  args: { ...ONE_REPO, prs: [{ ...PR_416[0]!, files: MANY }] },
   parameters: { width: ALONE },
   play: async ({ canvasElement }) => {
     const c = within(canvasElement)
@@ -484,7 +494,7 @@ export const AllStates: Story = {
         { state: 'a check failed', node: <ChangeSet {...args} {...Failed.args} /> },
         { state: 'merged', node: <ChangeSet {...args} {...Merged.args} /> },
         { state: 'in the merge queue', node: <ChangeSet {...args} {...Queued.args} /> },
-        { state: 'one repository', node: <ChangeSet {...args} {...CHANGE_ONE_REPO} /> },
+        { state: 'one repository', node: <ChangeSet {...args} {...ONE_REPO} /> },
         { state: 'on its branch', node: <ChangeSet {...args} {...OnItsBranch.args} /> },
         { state: 'on its branch, commits not pushed', node: <ChangeSet {...args} {...NightlyCheck.args} /> },
         { state: 'on its branch, not connected', node: <ChangeSet {...args} {...NotConnected.args} /> },

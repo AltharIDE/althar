@@ -1,10 +1,12 @@
 import { useState } from 'react'
 
 import type { AgentStatus, ChangeSummary, PlanStep, TaskEnd as End, WorksIn as Where } from '@althar/contracts'
-import { type IssueRefProps, type LaunchStep, TaskCard, TaskEnd, TaskLaunch, TaskStatus, WorksIn } from '@althar/ui'
+import { type IssueRefProps, type LaunchStep, PresetOffer, TaskCard, TaskEnd, TaskLaunch, TaskStatus, WorksIn } from '@althar/ui'
+import { useQueryClient } from '@tanstack/react-query'
 
-import { queuedWords, reconnectsWords, waitsWords } from '../../shared/agents'
-import { type NameModel, useEffortNames, useModelNames } from '../../shared/modelNames'
+import { useServices } from '../../data/services'
+import { externalWaitWords, queuedWords, reconnectsWords, waitsWords } from '../../shared/agents'
+import { type NameEffort, type NameModel, useEffortNames, useModelNames } from '../../shared/modelNames'
 import { Holders } from '../../shared/Holders'
 import { localText } from '../../shared/local'
 import { ModelChoice } from '../../shared/ModelChoice'
@@ -98,14 +100,43 @@ const fromOf = (card: TaskCardContent): IssueRefProps | undefined =>
  * the model's runtime. A review of someone else's pull request has one, its
  * lead, which reviews.
  */
-const launchSteps = (plan: Plan, named: NameModel, reviews: boolean): ReadonlyArray<LaunchStep> =>
+const launchSteps = (plan: Plan, named: NameModel, effortOf: NameEffort, reviews: boolean): ReadonlyArray<LaunchStep> =>
   plan.steps.map((step) => ({
     id: step.key,
     label: text.label[reviews ? 'review' : step.key],
     agents: [named(step.agentId, step.model)],
     optional: step.key === 'review',
     skipped: step.skipped,
+    effort: effortOf(step.agentId, step.model, step.effort ?? null),
   }))
+
+/**
+ * Its parts, offered to keep as a preset, quiet in its card's foot: Keep
+ * saves them from the task as a new preset by the name given (a name another
+ * preset has is refused, and the form says so), Undo removes what was kept, and
+ * the person can say not to offer them again. The card says what came of it
+ * once the runtime reads it again.
+ */
+function Offer({ card }: { card: TaskCardContent }) {
+  const { client } = useServices()
+  const cache = useQueryClient()
+  const offer = card.presetOffer
+  if (offer === undefined) return null
+  // Settings lists the person's presets: it reads them again.
+  const listed = () => void cache.invalidateQueries({ queryKey: ['presets'] })
+  return (
+    <PresetOffer
+      name={offer.name}
+      {...(offer.near === undefined ? {} : { near: offer.near })}
+      {...(offer.kept === undefined
+        ? {}
+        : { kept: offer.kept.name, onUndo: () => void client.removePreset(offer.kept?.id ?? '').then(listed) })}
+      // oxlint-disable-next-line althar/press-at-once -- A form the runtime checks (a name another preset has): it stays, busy, until kept, so a refusal lands at its field.
+      onKeep={(name) => client.savePreset({ name, parts: offer.parts, taskId: card.taskId, asNew: true }).then(listed)}
+      onDecline={() => void client.declinePresetOffer(card.taskId)}
+    />
+  )
+}
 
 function PlanCard({
   card,
@@ -120,6 +151,7 @@ function PlanCard({
   queued?: string
 }) {
   const named = useModelNames()
+  const effortOf = useEffortNames()
   // What the person changed shows at once; the runtime's copy replaces it when it comes back.
   const [shown, setShown] = useState<{
     readonly from: Plan
@@ -150,9 +182,6 @@ function PlanCard({
     else actions.onChange(plan.id, next, nextEnd, nextWhere, nextToward)
   }
   const from = fromOf(card)
-  // Only the agents the plan allows: a review's lead only reads, so an agent that can't be held to that isn't offered.
-  const allowed = plan.agents
-  const agents = allowed === undefined ? actions.agents : actions.agents.filter((agent) => allowed.includes(agent.id))
   return (
     <TaskLaunch
       task={card.slug}
@@ -167,17 +196,19 @@ function PlanCard({
       title={card.title}
       {...(from === undefined ? {} : { from })}
       project={actions.project}
-      steps={launchSteps({ ...plan, steps }, named, card.reviewing != null)}
+      steps={launchSteps({ ...plan, steps }, named, effortOf, card.reviewing != null)}
       onStepsChange={(next) =>
         change(steps.map((step) => ({ ...step, skipped: next.find((launch) => launch.id === step.key)?.skipped ?? step.skipped })))
       }
-      picker={({ step, owner }) => {
+      picker={({ step, owner, onOpenChange, skip }) => {
         const planned = steps.find((candidate) => candidate.key === step.id)
         return (
           planned !== undefined && (
             <ModelChoice
               owner={owner}
-              agents={agents}
+              onOpenChange={onOpenChange}
+              {...(skip === undefined ? {} : { onRemove: skip.onSkip, text: { remove: skip.label } })}
+              agents={actions.agents}
               value={{ agentId: planned.agentId, model: planned.model, effort: planned.effort ?? null }}
               {...(actions.projectId === undefined ? {} : { projectId: actions.projectId })}
               onChange={(choice) => change(steps.map((candidate) => (candidate.key === step.id ? { ...candidate, ...choice } : candidate)))}
@@ -225,6 +256,7 @@ function PlanCard({
                   },
                 }),
           })}
+      {...(card.presetOffer === undefined ? {} : { footNote: <Offer card={card} /> })}
       onStart={() => actions.onStart(plan.id)}
     />
   )
@@ -278,15 +310,17 @@ function Shown({ card, actions }: { card: TaskCardContent; actions: CardActions 
       ? handedBack
       : status === TaskStatus.Done
         ? card.summary?.split('\n')[0]
-        : card.queued !== null
-          ? queuedWords(card.queued)
-          : card.waits !== null
-            ? waitsWords(actions.agentName(card.waits.agentId), clock(card.waits.until), undefined, card.waits.left)
-            : card.reconnects != null
-              ? reconnectsWords(card.reconnects, clock)
-              : card.step === null
-                ? undefined
-                : text.now[card.step]
+        : card.externalWait !== undefined
+          ? externalWaitWords(card.externalWait, clock)
+          : card.queued !== null
+            ? queuedWords(card.queued)
+            : card.waits !== null
+              ? waitsWords(actions.agentName(card.waits.agentId), clock(card.waits.until), undefined, card.waits.left)
+              : card.reconnects != null
+                ? reconnectsWords(card.reconnects, clock)
+                : card.step === null
+                  ? undefined
+                  : text.now[card.step]
   const from = fromOf(card)
   // How hard its lead thinks, whoever chose it: what its session is on, or the plan's until it has started.
   const effort = effortOf(card.lead, card.leadModel, card.leadEffort)
@@ -299,11 +333,12 @@ function Shown({ card, actions }: { card: TaskCardContent; actions: CardActions 
       steps={steps}
       at={status === TaskStatus.Done || handedBack !== null ? steps.length - 1 : at}
       {...(now === undefined ? {} : { now })}
-      started={card.startedAt === null ? '' : ago(card.startedAt)}
+      started={card.startedAt === null || card.externalWait !== undefined ? '' : ago(card.startedAt)}
       lead={named(card.lead, card.leadModel)}
       {...(effort === null ? {} : { effort })}
       {...(from === undefined ? {} : { from })}
       {...(card.change === null ? {} : { pr: pullRequestOf(card.change) })}
+      {...(card.presetOffer === undefined ? {} : { footNote: <Offer card={card} /> })}
       onOpen={() => actions.onOpen(card.threadId)}
       text={{ status: text.status }}
     />

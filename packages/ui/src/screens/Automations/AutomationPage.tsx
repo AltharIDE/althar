@@ -10,6 +10,7 @@ import { Field, FieldError } from '../../primitives/Field/Field'
 import { Heading, type HeadingLevel, below } from '../../primitives/Heading/Heading'
 import { IconButton } from '../../primitives/IconButton/IconButton'
 import { Menu, MenuItem } from '../../primitives/Menu/Menu'
+import { Problem } from '../../primitives/Problem/Problem'
 import { Select, type SelectOption } from '../../primitives/Select/Select'
 import { Switch } from '../../primitives/Switch/Switch'
 import { VisuallyHidden } from '../../primitives/VisuallyHidden/VisuallyHidden'
@@ -473,11 +474,7 @@ export function AutomationPage({
             </p>
           </div>
         </header>
-        {error !== undefined && (
-          <p className={p.error} role="alert">
-            {error}
-          </p>
-        )}
+        {error !== undefined && <Problem className={p.error}>{error}</Problem>}
         {pausedItself !== undefined && (
           <div className={p.needs}>
             <div className={p.needsWords}>
@@ -499,13 +496,16 @@ export function AutomationPage({
         <Section title={t.does} {...(making ? {} : { note: t.doesNote })} level={inner}>
           {card}
         </Section>
-        <Section title={t.limits} level={inner}>
-          <div className={p.sheet}>
-            {limits.map((limit) => (
-              <Limit key={limit.id} limit={limit} />
-            ))}
-          </div>
-        </Section>
+        {/* no limits to set, no heading over nothing */}
+        {limits.length > 0 && (
+          <Section title={t.limits} level={inner}>
+            <div className={p.sheet}>
+              {limits.map((limit) => (
+                <Limit key={limit.id} limit={limit} />
+              ))}
+            </div>
+          </Section>
+        )}
         {runs !== undefined && (
           <Section title={t.runs} level={inner}>
             <div className={p.sheet}>

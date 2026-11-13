@@ -33,7 +33,7 @@ import {
   repositories,
   runnables,
 } from './fixtures'
-import { servicesFor } from './render'
+import { pickLayout, servicesFor } from './render'
 
 /*
  * A project's settings, a view of the project from Settings in the window's
@@ -167,7 +167,7 @@ describe('a project’s settings', () => {
     ])
     expect(side.getByRole('button', { name: 'General' }).getAttribute('aria-current')).toBe('page')
     // Back to its work, the conversation is where it was.
-    await userEvent.click((await views()).getByRole('radio', { name: 'Conversation' }))
+    await pickLayout('Board')
     expect(screen.queryByRole('navigation', { name: 'Project settings' })).toBeNull()
   })
 
@@ -401,6 +401,19 @@ describe('a project’s settings', () => {
     await userEvent.click(conflicts)
     await waitFor(() => expect(client.setProjectRules).toHaveBeenLastCalledWith({ projectId: 'p1', resolveConflicts: false }))
     expect(conflicts.getAttribute('aria-checked')).toBe('false')
+  })
+
+  it('says what a small change’s review after it merges brings back, Major only to start with, and keeps another choice', async () => {
+    const { client } = windowAt('/projects/p1')
+    await openSettings('Tasks')
+    const region = within(screen.getByRole('region', { name: 'Tasks' }))
+    const select = region.getByRole('combobox', { name: 'When a review is set after merge' })
+    expect(select.textContent).toBe('Bring back major findings')
+    expect(region.getByText('Minor findings and nits stay in the task’s thread.')).toBeTruthy()
+    await userEvent.click(select)
+    await userEvent.click(screen.getByRole('option', { name: 'Don’t review it' }))
+    await waitFor(() => expect(client.setProjectRules).toHaveBeenCalledWith({ projectId: 'p1', afterMergeReview: 'none' }))
+    expect(region.getByText('A review configured before Ship is unaffected.')).toBeTruthy()
   })
 
   it('moves a task’s issue to In Progress as it starts, on every tracker that has one, unless switched off', async () => {
@@ -940,8 +953,8 @@ describe('a project’s trackers, in its settings', () => {
     it('shows the bound tracker in the project’s header, opening its workspace', async () => {
       const opened = vi.spyOn(window, 'open').mockReturnValue(null)
       windowAt('/projects/p1', withBoard([], fnt, binding))
-      await userEvent.click(await screen.findByRole('button', { name: 'Made of' }))
-      const made = await screen.findByRole('menu', { name: 'Made of' })
+      await userEvent.click(await screen.findByRole('button', { name: 'More' }))
+      const made = await screen.findByRole('menu', { name: 'More' })
       await userEvent.click(within(made).getByRole('menuitem', { name: 'Linear issues' }))
       expect(opened).toHaveBeenCalledWith('https://linear.app/fnt', '_blank')
       opened.mockRestore()

@@ -1,6 +1,6 @@
 # Reviews
 
-Who reviews a task's change and how the rounds go, the review after a small
+Who reviews a task's change and how the rounds go, an explicitly chosen review after a
 change merges, reviews of other people's pull requests, and what a pull
 request shows of the review and of the work: the seal, the screenshots
 comment, and Outputs. How review steps run is in
@@ -32,9 +32,58 @@ by the models' scores ([agents](agents.md)):
   Zen is only the backup for Go.
 - **Never GPT Luna.**
 
-The person can change who reviews at any time before the task merges, as
-Change the team does; a review under way finishes with the reviewer it
-started with, and the next round takes the new one.
+The person can change who reviews at any time, either way, as Change the
+team does, or by telling the task's lead or the coordinator (a task is a
+conversation plus parts: the person's note of 12 November). A review under
+way finishes with the reviewer it started with, and the next round takes the
+new one. Once a review of the task **ran to its end** (it passed, or went on
+to the run's ending), or the task merged, the reviewer named reads what ships
+next (`reviewerChange` says `next_ship`): nothing locks it.
+
+### A skipped review is not a done review
+
+A review that was **skipped**, taken off, never planned (a prototype's plan
+has none), or planned for after a merge that hasn't come (the fast lane's, or
+a plan made before Prototype lost its review) is not a done one: the person
+adds a reviewer from Change the team, and picks its model; a lead on its own
+task and the coordinator do the same with `change_part` (`checked_by`) and
+`change_lead`, as one path (`Runs.changeTeam`, `reviewerChange`). Added
+before the work ships where the plan read it only after the merge, it reads
+it before now, and nothing reads it after the merge.
+
+Adding one where the work is up in an open pull request starts a review
+round on the task's current head (`reviewHead`, a Ship run that only
+reviews: `ships.reviewOnly`), once the lead's turn is over: it reads only
+what changed since the last review where one ran, else the whole change. Its
+findings go to the lead to settle as any round's, before merge or Ship. Work
+that still waits for Ship doesn't hold it back: the round reads the branch as
+it stands, that work too, and sends nothing up. Where the work isn't up in a
+pull request yet, as a prototype's branch, Ship runs the review before it
+sends the work up.
+
+### An agent offers the review, as the work turns real
+
+No rule offers a review. Where the person asked for the change, a review or
+a pull request, the lead or the coordinator puts it on at once
+(`change_part`, preset Change or `checked_by`): nothing asks them twice. A
+lead or the coordinator offers one, with `offer_review`, only where what the
+person said may turn work with no review into a real change without saying
+whether they want it reviewed. The offer is a quiet line in the thread where they
+said it ("Add a review?", or "Add a review of “…”?" in the coordinator's),
+with Add and No thanks. Its reviewer is the one the project's rules would
+pick, the strongest free model and another maker's than the lead's
+(`Limits.free`), unless the agent names one. It adds nothing by itself.
+Add goes through Change the team's command. No thanks (`DeclineReview`)
+turns it down, and it isn't offered again (`task.review_offer_declined`):
+the tool refuses after that. A review put on while an offer stands answers
+it too (`task.review_offer_accepted`), so taking that review off again
+before it runs doesn't bring the offer's buttons back. Changing a plan's
+ending to a pull request from the plan controls, or Althar opening one,
+offers nothing by itself: the person said it there without a word to an
+agent, and Change the team has the reviewer beside it. The line reads the task's card (`reviewOffer`,
+while the offer stands) and, once answered, says who reviews it or that
+there's no review. A task with a review, one that's merged, or a review of
+someone else's pull request isn't offered one.
 
 ## How a review round runs
 
@@ -69,7 +118,11 @@ started with, and the next round takes the new one.
   read by nothing.
 - **The person can skip a round's review** from the task's menu: a review
   under way stops, and a round whose lead is done concludes. The next round
-  has its review again.
+  has its review again, and a skipped review can be added back until the
+  task merges ([above](#a-skipped-review-is-not-a-done-review)). Skipping a
+  check of fixes accepts those fixes without reviewing them: the pull request
+  says the last fixes weren't reviewed and carries no seal. Skipping the
+  first pass creates no review record.
 - **Ship is reviewed as the plan says,** where it has a reviewer before the
   work ships: one pass over what came after the commit the last review read,
   found by its tree, as pushing may have credited it since. What the person's
@@ -79,14 +132,17 @@ started with, and the next round takes the new one.
   making a commit status or a check run, and dismissing a review are refused
   to agents ([what agents may do](what-agents-may-do.md)).
 
-## A small change is reviewed after it merges
+## An explicit review after merge
 
-A change of a few lines takes the fast lane ([tasks](tasks.md)): one step on
-a light model, no countdown, and a review step that names its reviewer but is
-skipped. Its pull request merges on the person's word, and the merge ends
-that change: the task settles where it was its last. Then **the task's own
-reviewer reads what merged, in the same task** (`MergeReviews.ts`, a
-decision of a task is a conversation plus parts, [tasks](tasks.md#a-task-holds-as-many-changes-as-it-needs)):
+A Small change keeps its configured review before Ship. Its size only
+removes the countdown: it never schedules or proposes a review after merge.
+The built-in Small change preset follows that same rule.
+
+The person can explicitly choose after-merge timing, by changing Checked by,
+with `review_after_merge`, or through a custom preset that says `after`.
+That review remains available, as does the review owed by Merge now. When
+such a pull request merges, **the task's own reviewer reads what merged, in
+the same task** (`MergeReviews.ts`):
 
 - It is owed as the merge is heard, kept before it is tried
   (`merge_reviews`), and started in a thread of the task's own
@@ -95,25 +151,79 @@ decision of a task is a conversation plus parts, [tasks](tasks.md#a-task-holds-a
 - It reports in the task's thread, naming the pull request it read. Nothing
   is posted on the merged pull request.
 - **Nothing found** is a line in the thread, and nothing more.
-- **Findings** bring the task back to Needs you, "Review found 2 after #715
-  merged", with **Fix it**, which hands them to the lead as the person's word
-  and ships its fix as a new pull request after the merged one once its turn
-  ends, and **Leave it**, which closes them. Agents answer it on the person's
-  word with `answer_review_after_merge`.
+- **What the project's rule brings back** puts the task back in Needs you,
+  "Review found 2 after #715 merged", with **Fix it**, which hands the
+  findings to the lead as the person's word and ships its fix as a new pull
+  request after the merged one once its turn ends, and **Leave it**, which
+  closes them. Agents answer it on the person's word with
+  `answer_review_after_merge`.
+- **What it doesn't bring back** ends as the same quiet line as nothing
+  found ("Review · … · 2 findings · None major"), its findings readable
+  there, and nothing waits on the person; its Outputs say "Reviewed by", not
+  "Changes asked by".
+
+### What the review after a merge brings back
+
+A project rule says it (`afterMergeReview`, on the project's Settings ›
+Tasks, under How they go; `read_settings` and `change_settings` reach it as
+`project/tasks`):
+
+- **Bring back major findings** (the default, and what a project made before
+  the rule has): the reviewer reads what merged, and only `blocking` and
+  `major` findings bring the task back. A review whose findings are all
+  `minor` or `nit` ends as a quiet line. Its brief tells the reviewer so,
+  so it doesn't pad the review with small things.
+- **Bring back every finding:** any finding brings it back, as before the
+  rule.
+- **Don't review it:** no configured review is owed after the merge. A
+  review configured before Ship is unaffected.
+
+New projects start from a default in Althar's Settings › Tasks (`althar/tasks`,
+`new_project_after_merge_review`), as the other new-project rules do.
+
+**An explicit task choice may say otherwise** for its current unmerged change: keep a review after
+its merge where the rule has none (it brings back what Major only does), or
+drop it where the rule has one (`review_after_merge` on the person's word,
+`SetReviewAfterMerge` from the window, kept as `task.after_merge_review_set`).
+Asking for that review also sets its configured reviewer to after-merge
+timing before stopping any pass already running before Ship. Its card reads
+what holds (`afterMerge`). A later open pull request may choose differently.
+Earlier merges keep their saved decisions, including a decision that no review
+was owed; a later choice cannot create retrospective debt for them. Older
+known merges without a saved decision are reconciled under the old timing and
+rule before the new choice is recorded. The task's choice is shared by its
+repositories, so it cannot change while a review owed before a merge still
+waits for its merged head; that debt keeps the existing rule-at-merge behavior.
+For an explicitly deferred review, the redesigned card's Review stop lets the
+person choose Before it merges, After it merges, or No review. It shows the
+review's state and finding count (`reviewAfter`); See findings opens its report
+in the thread. A new size-only Small change keeps its configured before-Ship
+review and offers no after-merge timing menu.
+
+
+The rule and the task's word are **read when the merge is heard**, not when
+Althar starts, and what the review brings back is kept on it then
+(`merge_reviews.reviewer`, `bringsBack`), so the reviewer's brief and its
+report read the same rule, whatever changes meanwhile.
 
 What Merge now merges with commits not shipped is reviewed after the merge
-the same way, where the task has a reviewer.
+the same way, where the task has a reviewer, and brings back what the rule
+says; an explicitly after-merge plan's review is dropped by Don't review it.
 
-The review after a merge isn't owed where the plan named no reviewer, or
-where the pull request closed without merging. "Make it a full task", on the
-small change's card, moves its review back before the merge.
+The review after a merge isn't owed where the plan named no reviewer, where
+the rule or the task's word says none, or where the pull request closed
+without merging. "Before it merges", from the Review stop on the small
+change's card (Make it a full task), moves its review back before the
+merge.
 
-Why: the review was a fifth of a small task's time, and the person wants
-small changes fast. Reviewing after the merge keeps a second reader without
-holding the merge. The trade is that a finding then needs a fix of its own.
+Size is not review policy (the person's note of 13 November). Older stored
+timing and already-recorded debt cannot always be attributed to size or an
+explicit request, so they are preserved; new plans record size separately
+from timing. No prose or tool-history inference changes an old task.
 
-Because nothing reviewed it before its pull request opened, **a fast-lane
-pull request carries no seal**, and its description has no review section.
+A pull request opened without a review before it has no review seal or
+review section; an explicitly deferred pass does not claim to have read it
+before publication.
 
 ## Reviewing someone else's pull request
 
@@ -122,14 +232,17 @@ its own kind.
 
 - **Its lead reads a read-only copy of the pull request's head** that Althar
   fetched: detached, on no branch, with git running with none of the person's
-  config (`addReadCopy`). It runs in reader mode under the reader rules and
-  runs nothing of the pull request's code. No setup or run touches the copy.
+  config (`addReadCopy`). It runs in reader mode under the reader rules. No
+  setup or run touches the copy, and nothing it does reaches the host but the
+  draft review the person posts.
 - **A review of the repository's own people** gets every lead tool, and its
   commands reach the network as a lead's do. **An outside author's** gets
   the six reading tools.
-- **Only an agent its session can hold to reading leads one.** One that runs
-  whatever its sandbox contains without asking, such as Codex, could run the
-  pull request's code, so it is refused with the names of those that can.
+- **Any model leads one,** Codex's GPT models included. Codex runs what its
+  read-only sandbox contains without asking, so as a review's lead it may run
+  the pull request's scripts there: offline for an outside author's, writing
+  nothing, held by the OS sandbox. That is the sandbox doing its job, not a
+  reason to refuse the agent (the person's note of 11 Nov).
 - **An outside author's pull request stays offline.** An outside author is
   someone on a fork, or someone the host doesn't name a member or
   collaborator. The review's commands reach no network, and none of the
@@ -277,3 +390,5 @@ A round that forgets `kept_views` shows less, never something stale.
 - 9 Nov 2026: a fix is checked only where it needs it, tiny ones not at all, and Ship is reviewed from where the last review left off (a task is a conversation plus parts, [tasks](tasks.md#changing-parts)).
 - 10 Nov 2026: Run it, safely or trusted, with its setting; any task can review a related pull request beside its own work (a task is a conversation plus parts).
 - 10 Nov 2026: Stop running it; Run safely names the lockfile's entries from a git host or a tarball that didn't install.
+- 11 Nov 2026: any model leads a review of someone else's pull request; the refusal of agents that "can't be held to reading only" is gone.
+- 12 Nov 2026: a reviewer changes at any time, either way: one changed after a review ran, or on a merged task, reads what ships next; a review never run, the fast lane's before its merge included, isn't a done one; a lead changes its own task's reviewer; where the person asked for a review or a change, it goes on at once rather than as an offer.

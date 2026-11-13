@@ -2,8 +2,8 @@ import type { Meta, StoryObj } from '@storybook/react-vite'
 import { expect, fn, userEvent, waitFor, within } from 'storybook/test'
 
 import { Brand } from '../../foundations/brands/brands'
-import { CODEX } from '../../fixtures/models'
-import { UsageLines } from '../../outputs/Usage/Usage'
+import { CODEX, model } from '../../fixtures/models'
+import type { UsageLine } from '../../outputs/Usage/Usage'
 import { States, statesParameters } from '../../storybook/States'
 import { ContextRing } from './ContextRing'
 
@@ -32,7 +32,6 @@ export const Default: Story = {
   },
 }
 export const Open: Story = { args: { defaultOpen: true } }
-export const Empty: Story = { args: { used: 0 } }
 export const NearlyFull: Story = {
   args: { used: 372, defaultOpen: true, note: 'Near the limit, the lead writes what it knows to the task and starts a fresh context.' },
 }
@@ -62,37 +61,116 @@ export const WithCompact: Story = {
     await expect(args.onCompact).toHaveBeenCalledOnce()
   },
 }
-/** Under the context, what the task so far used of each account: the share of a plan's week, the dollars of a credit. */
+const OPUS = model('claude-opus-5')
+const claude = (took: number, tokens: number): UsageLine => ({
+  id: 'cc',
+  name: 'Claude Code',
+  mark: Brand.ClaudeCode,
+  took,
+  estimated: true,
+  models: [OPUS.name],
+  tokens,
+})
+
+/** Under the context, a quiet line for each account the task so far used: the share of a plan's week, the dollars of a credit. */
 export const WithUsage: Story = {
   args: {
     defaultOpen: true,
-    usage: (
-      <UsageLines
-        heading="This task so far"
-        lines={[
-          {
-            id: 'max',
-            name: 'Claude Code Max',
-            mark: Brand.ClaudeCode,
-            took: 8.2,
-            estimated: true,
-            models: ['Claude Opus 5'],
-            tokens: 13_400_000,
-          },
-          { id: 'zen', name: 'OpenCode', mark: Brand.OpenCode, spent: 1.24, models: ['DeepSeek V3.2'], tokens: 2_100_000 },
-        ]}
-      />
-    ),
+    onClear: fn(),
+    onCompact: fn(),
+    usage: {
+      heading: 'This task',
+      lines: [
+        { ...claude(8.2, 13_400_000), id: 'max', name: 'Claude Code Max' },
+        { id: 'zen', name: 'OpenCode', mark: Brand.OpenCode, spent: 1.24, models: ['DeepSeek V3.2'], tokens: 2_100_000 },
+      ],
+    },
   },
   play: async () => {
     const panel = within(document.body).getByRole('dialog', { name: 'Context' })
+    await expect(within(panel).getByText('This task')).toBeInTheDocument()
     await expect(within(panel).getByText('~8% of week')).toBeInTheDocument()
     await expect(within(panel).getByText('$1.24')).toBeInTheDocument()
   },
 }
+/** The coordinator's day, with little used: under a tenth of a point is a bound, with no "~" before it. */
+export const Today: Story = {
+  args: {
+    used: 97.4,
+    total: 1000,
+    model: OPUS,
+    defaultOpen: true,
+    onClear: fn(),
+    onCompact: fn(),
+    usage: { heading: 'Today', lines: [claude(0.04, 2_600_000)] },
+  },
+  play: async () => {
+    const panel = within(document.body).getByRole('dialog', { name: 'Context' })
+    await expect(within(panel).getByText('< 0.1% of week')).toBeInTheDocument()
+    await expect(within(panel).queryByText(/Opus/)).toBeNull()
+  },
+}
+/** Several accounts, each a line: models and tokens as the pointer rests on one. */
+export const SeveralAccounts: Story = {
+  args: {
+    used: 214,
+    total: 1000,
+    model: OPUS,
+    defaultOpen: true,
+    onClear: fn(),
+    onCompact: fn(),
+    usage: {
+      heading: 'Today',
+      lines: [
+        {
+          ...claude(14, 11_400_000),
+          id: 'max',
+          name: 'Claude Code Max',
+          byModel: [
+            { name: OPUS.name, tokens: 9_100_000 },
+            { name: 'Claude Sonnet 5', tokens: 2_300_000 },
+          ],
+        },
+        { id: 'codex', name: 'Codex Pro', mark: Brand.Codex, took: 6, models: ['GPT-5.2'], tokens: 4_200_000 },
+        { id: 'or', name: 'OpenRouter', mark: Brand.OpenRouter, spent: 0.86, estimated: true, models: ['Kimi K2'], tokens: 1_300_000 },
+      ],
+    },
+  },
+}
+/** A long account name is cut with "…" and said whole on hover; the figure never is. */
+export const LongNames: Story = {
+  args: {
+    used: 141,
+    total: 256,
+    model: model('qwen3-coder'),
+    defaultOpen: true,
+    onClear: fn(),
+    onCompact: fn(),
+    usage: {
+      heading: 'Today',
+      lines: [
+        {
+          id: 'or',
+          name: 'OpenRouter, the shared team key for the whole studio',
+          mark: Brand.OpenRouter,
+          spent: 3.17,
+          models: ['Qwen3 Coder 480B A35B Instruct Turbo'],
+          tokens: 5_800_000,
+        },
+      ],
+    },
+  },
+}
 /** Asked for and not yet done: Compact is off, and says so. */
 export const Compacting: Story = {
-  args: { used: 372, onCompact: fn(), compacting: true, defaultOpen: true },
+  args: {
+    used: 372,
+    onClear: fn(),
+    onCompact: fn(),
+    compacting: true,
+    defaultOpen: true,
+    usage: { heading: 'Today', lines: [claude(4.1, 9_300_000)] },
+  },
   play: async () => {
     await expect(within(document.body).getByRole('button', { name: 'Compacting…' })).toBeDisabled()
   },

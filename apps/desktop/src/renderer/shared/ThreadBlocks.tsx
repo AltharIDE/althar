@@ -1,6 +1,6 @@
 import { createContext, Fragment, useContext, useState, type ReactNode } from 'react'
 
-import type { FieldAnswer, PresetParts, Unfurl } from '@althar/contracts'
+import type { FieldAnswer, Unfurl } from '@althar/contracts'
 import {
   AltharLine,
   Arrived,
@@ -13,6 +13,7 @@ import {
   IssueRef,
   LinkButton,
   Markdown,
+  MergeLine,
   Plan,
   Question,
   type QuestionAnswer,
@@ -40,7 +41,7 @@ import { fileAttachments } from './files'
 import { sentAttachments } from './images'
 import { useModelNames } from './modelNames'
 import { useServices } from '../data/services'
-import { WayOut } from './WayOut'
+import { FailedTurn } from './WayOut'
 import { serverBrand } from './mcpServers'
 import { keyOf, pastedIn } from './pasted'
 import { RuleReceipt } from './RuleReceipt'
@@ -65,6 +66,8 @@ import type {
   StepResult,
   TaskCardContent,
 } from './thread'
+import { setupStanding } from './thread'
+import { ReviewOfferOf } from '../features/team/ReviewOfferOf'
 import s from './ThreadBlocks.module.css'
 import { duration, lineOf, spentWords } from './turnTime'
 
@@ -150,22 +153,12 @@ export const text = {
  */
 function SetupView({ setup }: { setup: SetupContent }) {
   const { ended } = setup
-  const missing = ended?.missing ?? []
-  const failed = ended !== null && !ended.stopped && (ended.code !== 0 || missing.length > 0)
-  const line =
-    ended === null
-      ? text.setup.running(setup)
-      : ended.stopped
-        ? text.setup.stopped(setup)
-        : ended.code === 0 && missing.length > 0
-          ? text.setup.missing(setup, missing)
-          : failed
-            ? text.setup.failed(setup)
-            : text.setup.done(setup)
+  const standing = setupStanding(setup)
+  const line = standing === 'missing' ? text.setup.missing(setup, ended?.missing ?? []) : text.setup[standing](setup)
   return (
     <>
       <ThreadDivider icon="terminal">{line}</ThreadDivider>
-      {failed && (
+      {ended !== null && (standing === 'failed' || standing === 'missing') && (
         <Terminal
           command={setup.command}
           lines={ended.last?.split('\n') ?? []}
@@ -322,11 +315,14 @@ export function PartView({ part, threadId }: { part: Part; threadId: string }) {
     case 'plan':
       return <Plan steps={part.steps} />
     case 'notice':
+      // A review a lead offered: its line asks, with its buttons, and says what came of it once answered.
+      if (part.offer?.kind === 'review') return <ReviewOfferOf offer={part.offer} ask={part.text} />
+      // A turn that failed reads as a problem; the thread's last one has its ways out beside it (ThreadBlocks, TaskThread).
+      if (part.tone === 'error') return <FailedTurn text={part.text} detail={part.detail} failure={part.failure} />
       return (
         <>
           <p className={s[part.tone]}>{part.text}</p>
           {part.detail !== undefined && <p className={s.detail}>{part.detail}</p>}
-          {part.offer !== undefined && <PresetOffer offer={part.offer} />}
         </>
       )
     case 'pictures':
@@ -334,27 +330,6 @@ export function PartView({ part, threadId }: { part: Part; threadId: string }) {
     case 'canvas':
       return <CanvasOf part={part} />
   }
-}
-
-/** The coordinator's offer to keep parts the person set up twice as a preset: one press keeps it, by its name. */
-function PresetOffer({ offer }: { offer: { readonly name: string; readonly parts: PresetParts } }) {
-  const { client } = useServices()
-  const [kept, setKept] = useState<'no' | 'keeping' | 'kept'>('no')
-  if (kept === 'kept') return <p className={s.detail}>{`Kept as “${offer.name}”: Settings has your presets.`}</p>
-  return (
-    <LinkButton
-      disabled={kept === 'keeping'}
-      onClick={() => {
-        setKept('keeping')
-        client.savePreset({ name: offer.name, parts: offer.parts }).then(
-          () => setKept('kept'),
-          () => setKept('no'),
-        )
-      }}
-    >
-      {`Keep it as “${offer.name}”`}
-    </LinkButton>
-  )
 }
 
 /** What the person said, each link that unfurled read as its key where they pasted it; its card, under the words, says the rest. */
@@ -442,7 +417,19 @@ export const logLines = (log: string) => {
  * wasn't passed to the lead, as anyone can comment on a public one; the
  * person reads it, and can pass it on.
  */
-function ArrivalView({ arrival, at, onPassOn }: { arrival: ArrivalContent; at: string; onPassOn?: (words: string) => void }) {
+function ArrivalView({
+  arrival,
+  at,
+  count,
+  onPassOn,
+  'data-item': item,
+}: {
+  'data-item': string
+  arrival: ArrivalContent
+  at: string
+  count: number
+  onPassOn?: (words: string) => void
+}) {
   const where =
     arrival.path === null ? arrival.where : `${arrival.where} · ${arrival.path}${arrival.line === null ? '' : `:${arrival.line}`}`
   const verb = heardVerb(arrival)
@@ -462,6 +449,8 @@ function ArrivalView({ arrival, at, onPassOn }: { arrival: ArrivalContent; at: s
       verb={verb}
       where={where}
       at={at}
+      count={count}
+      data-item={item}
       mark={productBrand(arrival.source)}
       {...(foot === false ? {} : { foot })}
     >
@@ -553,6 +542,7 @@ export function ThreadBlocks({
   onAnswerQuestion,
   focusQuestion,
   project,
+  signed,
 }: {
   blocks: ReadonlyArray<Block>
   /** The thread they are of: what a command printed and the documents an agent wrote are read by it. */
@@ -565,6 +555,8 @@ export function ThreadBlocks({
   project?: string
   /** The thread's session, whose model and account name its turns. */
   session?: { readonly agentId: string; readonly model: string | null; readonly account: string | null } | null
+  /** Who signs its turns in place of their model, with its mark: the coordinator, in its conversation and in its asides. */
+  signed?: { readonly voice: string; readonly mark: ReactNode }
   /** Sends what someone outside said to the lead, in the person's name. */
   onPassOn?: (words: string) => void
   /** Answers an agent's question; what went wrong, in words, or null. Without it, a question can't be answered here. */
@@ -616,6 +608,9 @@ export function ThreadBlocks({
       : session != null && agentId === session.agentId
         ? named(agentId, session.model, session.account)
         : named(agentId)
+  // Signed, the turns say who speaks rather than which model.
+  const speaker = (agentId: string | null, model: string | null = null) =>
+    signed === undefined ? { model: turnModel(agentId, model) } : { voice: signed.voice, mark: signed.mark }
   // The thread's last turn, where an error ended it: it can be tried again. What the person said in it may wait after it.
   const last = blocks.findLast((block) => block.kind === 'turn' || block.kind === 'waiting')
   const ending = last?.kind === 'turn' && !last.live ? last.said.at(-1) : undefined
@@ -647,7 +642,16 @@ export function ThreadBlocks({
           </You>
         )
       case 'arrival':
-        return <ArrivalView key={block.id} arrival={block.arrival} at={block.at} {...(onPassOn === undefined ? {} : { onPassOn })} />
+        return (
+          <ArrivalView
+            key={block.id}
+            data-item={block.id}
+            arrival={block.arrival}
+            at={block.at}
+            count={block.count}
+            {...(onPassOn === undefined ? {} : { onPassOn })}
+          />
+        )
       case 'divider':
         return (
           <ThreadDivider key={block.id} icon="agents">
@@ -657,9 +661,7 @@ export function ThreadBlocks({
       case 'offer':
         return (
           <div key={block.id} className={s.offer}>
-            <p className={s.info}>{block.text}</p>
-            {block.detail !== null && <p className={s.detail}>{block.detail}</p>}
-            <PresetOffer offer={block.offer} />
+            <ReviewOfferOf offer={block.offer} ask={block.text} />
           </div>
         )
       case 'step':
@@ -696,11 +698,13 @@ export function ThreadBlocks({
         return <Fragment key={block.id}>{smallChange?.(block.card, block.id)}</Fragment>
       case 'model_move':
         return <Fragment key={block.id}>{modelMove?.(block.move, block.id)}</Fragment>
+      case 'merge_line':
+        return <MergeLine key={block.id} rows={block.line.rows} branch={block.line.branch} />
       case 'setting':
         return <SettingChangeOf key={block.id} change={block.change} itemId={block.id} />
       case 'waiting':
         return (
-          <Turn key={block.id} model={turnModel(session?.agentId ?? null)}>
+          <Turn key={block.id} {...speaker(session?.agentId ?? null)}>
             <Thinking {...(block.took === null ? {} : { took: block.took })} slow={block.slow} />
           </Turn>
         )
@@ -714,9 +718,11 @@ export function ThreadBlocks({
         return (
           <Turn
             key={block.id}
-            model={turnModel(block.agentId, block.model)}
+            {...speaker(block.agentId, block.model)}
             at={block.at}
             {...(said === '' || block.live ? {} : { copy: said })}
+            // Every message it shows, so a search can bring the person to the one it found.
+            data-items={block.parts.flatMap((part) => (part.kind === 'message' ? [part.id] : [])).join(' ')}
           >
             {block.work.length > 0 && (
               <WorkedFor
@@ -743,16 +749,21 @@ export function ThreadBlocks({
               </WorkedFor>
             )}
             <RuleReceipt parts={block.parts} {...(project === undefined ? {} : { project })} />
-            {block.said.map((part) => (
-              <PartView key={part.id} part={part} threadId={threadId} />
-            ))}
-            {block.id === failed && ending?.kind === 'notice' && (
-              <WayOut
-                failure={ending.failure}
-                onTryAgain={retryable === true ? onTryAgain : undefined}
-                onSignIn={signInAs(block.agentId)}
-                onCompact={onCompact}
-              />
+            {block.said.map((part) =>
+              // The thread's last turn, where it failed: the problem with its ways out beside it.
+              block.id === failed && part === ending && ending.kind === 'notice' ? (
+                <FailedTurn
+                  key={part.id}
+                  text={ending.text}
+                  detail={ending.detail}
+                  failure={ending.failure}
+                  onTryAgain={retryable === true ? onTryAgain : undefined}
+                  onSignIn={signInAs(block.agentId)}
+                  onCompact={onCompact}
+                />
+              ) : (
+                <PartView key={part.id} part={part} threadId={threadId} />
+              ),
             )}
             <HandedBack handed={block.handed} threadId={threadId} versionOf={versionOf} {...(openFile === undefined ? {} : { openFile })} />
           </Turn>

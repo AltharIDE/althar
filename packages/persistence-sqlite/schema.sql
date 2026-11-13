@@ -18,11 +18,11 @@
 -- node_type: deterministic_action, agent, integration, human_decision, condition, bounded_map, join, verification, compensation, subworkflow, bounded_loop
 -- node_state: pending, ready, running, succeeded, failed, skipped, cancelled, uncertain
 -- node_attempt_state: ready, admitted, running, waiting_attention, verifying, succeeded, failed, cancelling, cancelled, uncertain, reconciling, held, superseded
--- hold_reason: usage_limit, agent_unavailable, machine_busy, checkout
+-- hold_reason: usage_limit, agent_unavailable, machine_busy, checkout, external
 -- thread_kind: coordinator, task, step
--- thread_item_kind: user_message, agent_message, agent_thought, tool_call, plan, step_result, notice, task, arrival, question, run, issue_draft, setup, push_request, review_draft, issue_changes, automation, pictures, task_ask, setting, small_change, model_move, canvas
+-- thread_item_kind: user_message, agent_message, agent_thought, tool_call, plan, step_result, notice, task, arrival, question, run, issue_draft, setup, push_request, review_draft, issue_changes, automation, pictures, task_ask, setting, small_change, model_move, canvas, merge_line
 -- input_disposition: after_current, interrupt_and_continue, supersede_pending, cancel_run
--- user_input_state: queued, delivered, superseded, withdrawn
+-- user_input_state: queued, delivered, superseded, withdrawn, noted
 -- turn_delivery_state: pending, delivered, completed, interrupted, interruption_uncertain, failed
 -- installation_status: supported, degraded, blocked, missing
 -- auth_mode: vendor_cli, api_key, oauth, enterprise, workload
@@ -43,7 +43,7 @@
 -- pull_request_state: none, draft, ready, merged, closed
 -- work_item_state: pending, claimed, done, failed, uncertain
 -- mutation_state: intended, confirmed, failed, uncertain
--- aggregate_type: project, task, task_plan, run, run_attempt, workspace, workflow_execution, node, node_attempt, thread, user_input, turn_delivery, provider_session, permission_request, attention_request, decision, finding, change_set, mutation_receipt, agent_installation, account_status, thread_item, connection, external_link, policy, agent_account, issue_draft, conflict_resolution, project_note, review_draft, issue_change, automation, automation_occurrence, errand, followed_pull, skill, setting, canvas
+-- aggregate_type: project, task, task_plan, run, run_attempt, workspace, workflow_execution, node, node_attempt, thread, user_input, turn_delivery, provider_session, permission_request, attention_request, decision, finding, change_set, mutation_receipt, agent_installation, account_status, thread_item, connection, external_link, policy, agent_account, issue_draft, conflict_resolution, project_note, review_draft, issue_change, automation, automation_occurrence, errand, followed_pull, skill, setting, canvas, card
 -- connection_product: github, gitlab, bitbucket_cloud, bitbucket_dc, linear, jira_cloud, jira_dc, trello
 -- connection_auth: device_flow, pkce, token
 -- connection_state: ready, reauth_required, removed
@@ -1615,3 +1615,15 @@ CREATE INDEX canvases_by_project ON canvases (project_id, archived_at);
 CREATE INDEX canvas_copies_by_canvas ON canvas_copies (canvas_id);
 
 CREATE INDEX canvas_comments_by_canvas ON canvas_comments (canvas_id, version);
+
+CREATE INDEX thread_items_by_delivery ON thread_items (delivery_id, kind) WHERE delivery_id IS NOT NULL;
+
+CREATE INDEX turn_deliveries_with_heads ON turn_deliveries (thread_id, delivered_at) WHERE heads IS NOT NULL;
+
+CREATE INDEX thread_items_task_cards ON thread_items (json_extract(content, '$.taskId')) WHERE kind = 'task';
+
+CREATE INDEX decisions_answered ON decisions (decided_by_actor_id, decided_at) WHERE permission_request_id IS NOT NULL;
+
+CREATE INDEX thread_items_setups ON thread_items (kind) WHERE kind = 'setup';
+
+CREATE INDEX thread_items_runs ON thread_items (kind) WHERE kind = 'run';

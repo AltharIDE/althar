@@ -31,6 +31,8 @@ export const MemoryShort: Story = { args: { load: LOAD_MEMORY_SHORT } }
 export const NothingRunning: Story = { args: { load: LOAD_NOTHING_RUNNING } }
 /** Just opened: one reading. */
 export const FirstReading: Story = { args: { load: LOAD_FIRST_READING } }
+/** A trace that begins part way, after a gap: it starts at a dot, with nothing drawn before it. */
+export const TraceBeginsPartWay: Story = { args: { load: { ...LOAD_BUSY, history: LOAD_BUSY.history.slice(-12) } } }
 /** Where Althar's part can't be known, as on Windows: the Mac's figures alone. */
 export const WorkUnknown: Story = { args: { load: LOAD_UNKNOWN_WORK } }
 /** Without ways in or out: the rows say, and there is no switch. */
@@ -61,6 +63,7 @@ export const AllStates: Story = {
         { state: 'near max', node: <LoadPeek {...args} load={LOAD_NEAR_MAX} /> },
         { state: 'nothing running', node: <LoadPeek {...args} load={LOAD_NOTHING_RUNNING} /> },
         { state: 'first reading', node: <LoadPeek {...args} load={LOAD_FIRST_READING} /> },
+        { state: 'trace begins part way', node: <LoadPeek {...args} load={{ ...LOAD_BUSY, history: LOAD_BUSY.history.slice(-12) }} /> },
         { state: 'work unknown', node: <LoadPeek {...args} load={LOAD_UNKNOWN_WORK} /> },
         { state: 'without ways', node: <LoadPeek {...args} onOpen={undefined} onHide={undefined} /> },
       ]}

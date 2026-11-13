@@ -36,7 +36,16 @@ saw came from screens starting empty, not from slow reads.
   whole read it touches, on screen or not, so the next place the person goes
   is already right. A change to a thread only marks it out of date; the
   screen showing it reads what changed, item by item, and a thread not on
-  screen is read when it next opens.
+  screen is read when it next opens. A read under way is let finish and
+  read once more, never cut short to begin again.
+- **A board follows its cards, as the runtime says they changed.** The
+  runtime works a task's card out again as anything of the task changes,
+  whatever kind of record it is, and says `card` on the feed only where it
+  came out different, and of a project's own calls (its coordinator's
+  questions) as a card of the project. Boards, the home and the coordinator's cards read
+  again on that, so they keep up with a task as its view does, with no list
+  of kinds to keep; a task's header and its card say where it stands from
+  one reading (`taskStatusOf`).
 - **A screen reads before it shows.** Each route's loader waits for its
   reads, and the screen being left stays until then, so a screen opens whole.
 - **A slow read shows the place's outline,** and only past 150 ms, kept at
@@ -47,9 +56,12 @@ saw came from screens starting empty, not from slow reads.
 - **Reads stay cheap.** What Home, a board and a thread read from git is kept
   per worktree, and read again only when the worktree moves.
 
-The cache is never patched, only read again or marked. A full replica of the
-store in the window, as Linear keeps, isn't worth a second copy of the domain
-while the runtime is on the same machine.
+The cache is patched only by what the person does, at once, before the runtime
+answers ([foundations § The UI is instant](foundations.md#the-ui-is-instant)).
+That change holds until a read that has it lands, and is taken back with a
+line where it failed; otherwise the cache is only read again or marked. A full
+replica of the store in the window, as Linear keeps, isn't worth a second copy
+of the domain while the runtime is on the same machine.
 [ADR-103](proposed/103-projects-live-locally-or-on-a-host-and-place-work-in-pools.md)
 would change that premise.
 
@@ -551,7 +563,11 @@ way of what is done often. The tokens and their values are in
   uses `--slide`. The springs are sampled as CSS `linear()` curves
   (`lib/spring.ts`), with the same values in `lib/motion.ts` for script.
 - **Overlays grow from what opened them,** and dialogs from their middle. The
-  command menu, opened by key many times a day, is there at once.
+  search palette, opened by key many times a day, is there at once, and so
+  is each list a key brings. Only what keeps its identity across a step
+  glides (the chosen row's name into the field's chip and back, the box's
+  height, the highlight), with nothing real hidden meanwhile; neither typing
+  nor navigation waits on motion.
 - **Lists move as a whole** (`ListMotion`): an item keyed by `data-move`
   slides when its place changes, and a board card that changes lanes travels
   there as a copy above the board. The board, Home's calls, the tabs and the
@@ -569,4 +585,6 @@ way of what is done often. The tokens and their values are in
 - 8 Nov 2026: written from the ADRs under Replaces.
 - 8 Nov 2026: what stands open after a turn folds carries everything the person needs, never "see above" (#699).
 - 10 Nov 2026: a thread marks a new change as a stamped row of its own; the board keeps chats on Scratch behind one chip; the plan card's kicker names its preset; the header's parts move a task, point it elsewhere, run a review's code and stop a helper ([tasks](tasks.md#changing-parts)).
-- 10 Nov 2026: Scratch is a shelf of its own, by each chat's latest exchange, with Clear; the board card says one sentence across a task's changes with a mark for each; Shipped, Merged and Helper rows in the thread, a helper's opening in place to its work, and helpers' lanes on the Graph face; the plan card's preset picks another; Settings edits presets ([tasks](tasks.md#chats-and-scratch)).
+- 10 Nov 2026: Scratch is a shelf of its own, by each chat's latest exchange, with Clear; the board card says one sentence across a task's changes with a mark for each; Shipped, Merged and Helper rows in the thread, a helper's opening in place to its work, and helpers' lanes on the Graph face; the plan card's preset picks another; Settings edits presets ([tasks](tasks.md#asides)).
+- 11 Nov 2026: asides over the coordinator's conversation replace Scratch's chip beside it; the chip stays with the board alone ([tasks](tasks.md#asides)).
+- 13 Nov 2026: the cache is patched by what the person does, at once, and held until a read confirms it ([foundations § The UI is instant](foundations.md#the-ui-is-instant)); it used to say the cache was never patched.

@@ -18,10 +18,10 @@ was decided. These are what they leave open.
 
 **Tasks and the coordinator**
 
-- [x] **The Scratch shelf and presets.** Built: chats sit on Scratch, its own
-  shelf listing them by their latest exchange, and presets name a task's
-  starting parts ([tasks](decisions/tasks.md#chats-and-scratch)). Whether
-  Scratch offers to clear chats untouched for a while is still open.
+- [x] **Asides and presets.** Built: chats are asides, pills over the
+  coordinator's conversation, the latest first, and presets name a task's
+  starting parts ([tasks](decisions/tasks.md#asides)). Those untouched for a
+  week fold into one "N older" pill, which clears them together.
 - [x] **Moving a running task.** Built: it moves between a worktree and Local,
   and changes the branch it works toward, at any time
   ([workspaces and runs](decisions/workspaces-and-runs.md#moving-a-running-task)).
@@ -55,13 +55,14 @@ was decided. These are what they leave open.
 
 **Code hosts and trackers**
 
-- [ ] **The gated host and tracker calls.** `code_host_api` and
-  `tracker_api`, with a never list by family of paths, aren't built. Still
-  planned, or dropped? ([not built yet](decisions/code-hosts.md#not-built-yet))
+- [x] **The gated host and tracker calls.** Built on 12 November:
+  `code_host_api` and `tracker_api`, with parsed GraphQL, protected API
+  families, asked-for writes, durable receipts and explicit pagination.
 - [ ] **A red main.** Should a failing default branch start one fix task by
   itself? Today the coordinator is only woken to read it.
-- [ ] **Posting a review and deleting a branch as tools.** `post_review` and
-  `delete_branch` on the person's word, and declining on Bitbucket Cloud.
+- [ ] **Deleting a branch as a tool.** `delete_branch` on the person's word,
+  and declining on Bitbucket Cloud. `post_review` is built, bound to the
+  commit actually read and refusing self-approval.
 - [ ] **A lead's tags.** Should a lead's `push_tag` go ahead on the person's
   word in its thread, rather than asking every time?
 - [ ] **A contributor's fork.** Attaching a fork's pull request, and pushing

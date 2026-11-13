@@ -3,7 +3,7 @@ import { expect, fn, userEvent, within } from 'storybook/test'
 
 import { Artifacts } from './Artifacts'
 
-/* A project's artifacts as one table: filtered by kind, searched and sorted; narrow; and none yet. */
+/* A project's artifacts as one table: filtered by kind, searched and sorted; narrow; and none yet, wide and narrow. */
 
 const meta = {
   title: 'Screens/Artifacts',
@@ -159,4 +159,18 @@ export const OneKind: Story = {
   },
 }
 
-export const None: Story = { args: { canvases: [] } }
+/** None yet: a wall of faint drawings where the table will be, and what will be here where it fades. */
+export const None: Story = {
+  args: { canvases: [] },
+  play: async ({ canvasElement }) => {
+    const c = within(canvasElement)
+    await expect(c.getByText('No artifacts yet')).toBeInTheDocument()
+    await expect(c.queryByRole('table')).toBeNull()
+  },
+}
+
+/** None yet, narrow: the wall is cut by the view's edges and still fades into them. */
+export const NoneNarrow: Story = {
+  args: { canvases: [] },
+  decorators: Narrow.decorators,
+}

@@ -4,7 +4,7 @@ The code host and tracker connectors of [docs/architecture/06](../../docs/archit
 
 - **Owner:** Repository maintainers
 - **Consumers:** the runtime, which holds connections, keeps tokens sealed by the app, records every outward action with its receipt, and listens.
-- **Dependency direction:** depends on `effect` alone. It records nothing and stores no secret; persistence and secrets are the runtime's.
+- **Dependency direction:** depends on `effect` and GraphQL's parser. It records nothing and stores no secret; persistence and secrets are the runtime's.
 
 ## What it holds
 
@@ -25,6 +25,11 @@ The code host and tracker connectors of [docs/architecture/06](../../docs/archit
 | `trello.ts` | Trello, a tracker, over REST: a card by its short link, its list as its status |
 | `releases.ts`, `*Releases.ts` | Releases on each code host: tags, a release published as the host does, the runs on a tag with what each waits on, approving them, running failed jobs again. [RELEASES.md](RELEASES.md) says what each host can and can't do, and the docs relied on |
 | `http.ts` | Calls to a service's API: signed in per call, bounded in time, answers checked, failures classified, GETs cached by ETag |
+| `api.ts` | Authenticated API fallbacks: relative paths, Jira core/Agile/service-desk namespaces, GraphQL operation parsing, protected families, bounded responses and explicit continuation; no credential-bearing redirects |
+| `issueDiscussion.ts` | Unabridged discussion pages and comment edits on every tracker, with Linear and GitLab native replies |
+| `issueAttachments.ts` | Multipart Jira/Trello issue uploads and linked GitHub/GitLab uploads, bounded to 5 MiB; Linear delegates to its signed upload |
+| `hostReviews.ts` | GitLab and Bitbucket review summaries, inline comments and native verdicts, commit checks and explicit uncertain outcomes after partial writes |
+| `linearResources.ts`, `linearUpload.ts` | Linear workspace resources and relationships; signed attachment uploads without sending the account credential to storage |
 | `signIn.ts` | The device flow and OAuth with PKCE, and refreshing a token |
 | `links.ts` | Which host a git remote is on, and what a pasted link points at |
 | `testing/` | The fake service: a code host and tracker in memory that a test acts on as other people |
@@ -61,7 +66,7 @@ The code host and tracker connectors of [docs/architecture/06](../../docs/archit
 - **A Bitbucket Cloud API token is made with scopes** (`read:user`, `read:workspace`, `read:repository`, `write:repository`, `read:pullrequest`, `write:pullrequest` and `read:pipeline`, all `:bitbucket`); the Connections panel links to where it is made but doesn't list them.
 - **Where issues can be filed** is read page by page, up to ten pages: GitHub's and GitLab's repositories, Jira Cloud's projects and Linear's teams (Data Center's projects and Trello's boards come whole). An issue the tracker took is never reported as not filed: where reading it back fails (Jira, Trello), `create` returns what it knows.
 - **Pagination** follows a list a hundred at a time, up to ten pages, then logs that the rest was left unread: GitHub's comments since a cursor, reviews and checks, and GitLab's commit statuses. Bitbucket reads ten pages of comments, activity and a diff's stat, and Cloud the first hundred statuses.
-- **Reviewing a change Althar didn't open** is GitHub's alone (`capabilities.reviews`): its pull request is read with whether GitHub names its author one of the repository's people (owner, member, collaborator) and the fork it comes from, and a review is posted with its verdict, summary and comments on lines of the change's new side, of the commit its reviewer read. GitLab and Bitbucket refuse both as `rejected`, without asking the service.
+- **Reviewing a change Althar didn't open** works on all four code hosts (`capabilities.reviews`). Reads include author membership, fork and target commit. GitLab uses diff versions for inline positions, SHA-bound approvals and its `mergeRequestRequestChanges` mutation; older servers or permissions can refuse that mutation. Bitbucket Data Center binds a participant verdict with `lastReviewedCommit`; Cloud has no equivalent atomic head condition, so its head is checked before and after posting, with a move reported as uncertain. A failure after comments were posted is uncertain and must not replay the review.
 - **Pictures in a conversation** (`capabilities.pictures`, ADR-077) are GitHub's and GitLab's. GitHub takes them through the uploads endpoint its own CLI attaches with (`uploads.<host>/user-attachments/assets`), not one its REST documentation lists, and only on github.com and ghe.com tenants: Enterprise Server takes none. An upload can't be taken back. Bitbucket Cloud and Data Center have no API for one, so a comment there can't show a picture Althar uploads; editing a comment (`editComment`) comes with pictures, and is GitHub's and GitLab's too.
 - **Webhooks** aren't here: listening polls until Althar has a cloud.
 - **A fine-grained GitHub token's writes** can't be read: pushing, opening pull requests and commenting read as unknown, and only a refused read of the same permission says no. GitHub gives such tokens no check runs: the adapter reads a commit's statuses alone, and the check links to a classic token's page. A classic token needs `repo`: `public_repo` isn't taken for it, and `workflow`, which a push changing a workflow needs, isn't checked.

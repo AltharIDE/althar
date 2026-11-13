@@ -1,3 +1,4 @@
+import { isoAfter } from '@althar/testing'
 import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -334,7 +335,7 @@ describe('an agent out of usage', () => {
       const queries = yield* Queries
       assert.deepInclude(
         (yield* queries.projects).projects.find((project) => project.id === projectId),
-        { working: 1, ready: 0 },
+        { working: 1, yours: 0 },
       )
     }).pipe(
       Effect.provide(withAgents({ 'claude-code': { outOfUsage: { until: back } }, codex: { outOfUsage: { until: back } } }, ['opencode'])),
@@ -844,7 +845,8 @@ describe('a held step handed over while every place is taken, across a restart',
             WHERE task_id = ${task.taskId} AND kind = 'stuck' AND state = 'open'`,
           (rows) => rows.length === 1,
         )
-        assert.strictEqual(call?.why, 'failed_to_start')
+        // An agent that is no longer there stops for that: installing it is the way on.
+        assert.strictEqual(call?.why, 'not_installed')
         const states = yield* sql<{ state: string }>`
           SELECT a.state FROM node_attempts a JOIN nodes n ON n.id = a.node_id JOIN workflow_executions e ON e.id = n.execution_id
           JOIN runs r ON r.id = e.run_id WHERE r.task_id = ${task.taskId} AND n.node_key = 'implement' ORDER BY a.rowid DESC LIMIT 1`
@@ -961,7 +963,7 @@ describe('limits', () => {
     const time = new Intl.DateTimeFormat(undefined, { hour: 'numeric', minute: '2-digit' }).format(later)
     assert.strictEqual(whenWords(later.toISOString(), now), time)
     assert.match(whenWords(new Date('2026-10-05T09:00:00').toISOString(), now), /, /)
-    assert.match(whenWords(new Date('2026-11-20T09:00:00').toISOString(), now), /20/)
+    assert.match(whenWords(new Date(isoAfter(48 * 86_400_000 - 3 * 3_600_000, +now)).toISOString(), now), /20/)
     assert.strictEqual(outWords({ from: 'Codex', resetsAt: null, now }), 'Codex ran out of usage.')
     assert.strictEqual(
       outWords({ from: 'Codex', resetsAt: null, now, step: 'review', waits: 'step' }),

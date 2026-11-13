@@ -12,6 +12,7 @@ import { Button } from '../../primitives/Button/Button'
 import { Field, FieldArea, FieldError } from '../../primitives/Field/Field'
 import { Heading, type HeadingLevel } from '../../primitives/Heading/Heading'
 import { LinkButton } from '../../primitives/LinkButton/LinkButton'
+import { Problem } from '../../primitives/Problem/Problem'
 import { VisuallyHidden } from '../../primitives/VisuallyHidden/VisuallyHidden'
 import s from './IssueDraft.module.css'
 
@@ -362,42 +363,46 @@ function DraftCard({ root, draft, state, onFile, onChange, onDiscard, onAlwaysAt
             </div>
           )}
           {quiet.length > 0 && <p className={s.labels}>{quiet.join(' · ')}</p>}
+          {failed && (
+            <Problem size="small" className={s.problem}>
+              {t.failed(source)}
+              {error && <> {error}</>}
+            </Problem>
+          )}
           <div aria-live="polite">
-            {failed && (
-              <p className={s.error}>
-                {t.failed(source)}
-                {error && <> {error}</>}
-              </p>
-            )}
             {unsure && (
-              <p className={cx(s.error, s.unsure)}>
+              <p className={s.unsure}>
                 {t.uncertain(source)}
                 {error && <> {error}</>}
               </p>
             )}
           </div>
-          <div className={s.foot}>
-            <span className={s.note}>
-              {filing
-                ? t.filing(source)
-                : onAlwaysAtOnce && state === IssueDraftState.Pending && <LinkButton onClick={onAlwaysAtOnce}>{t.alwaysAtOnce}</LinkButton>}
-            </span>
-            {onDiscard && !filing && (
-              <Button variant="quiet" onClick={onDiscard}>
-                {t.discard}
-              </Button>
-            )}
-            {onChange && !filing && (
-              <Button ref={edit} onClick={() => setEditing(true)}>
-                {t.edit}
-              </Button>
-            )}
-            {onFile && (
-              <Button variant="signal" busy={filing} onClick={onFile}>
-                {failed || unsure ? t.fileAgain : t.file}
-              </Button>
-            )}
-          </div>
+          {/* no foot where there is nothing to say or press */}
+          {(filing || onAlwaysAtOnce !== undefined || onDiscard !== undefined || onChange !== undefined || onFile !== undefined) && (
+            <div className={s.foot}>
+              <span className={s.note}>
+                {filing
+                  ? t.filing(source)
+                  : onAlwaysAtOnce &&
+                    state === IssueDraftState.Pending && <LinkButton onClick={onAlwaysAtOnce}>{t.alwaysAtOnce}</LinkButton>}
+              </span>
+              {onDiscard && !filing && (
+                <Button variant="quiet" onClick={onDiscard}>
+                  {t.discard}
+                </Button>
+              )}
+              {onChange && !filing && (
+                <Button ref={edit} onClick={() => setEditing(true)}>
+                  {t.edit}
+                </Button>
+              )}
+              {onFile && (
+                <Button variant="signal" busy={filing} onClick={onFile}>
+                  {failed || unsure ? t.fileAgain : t.file}
+                </Button>
+              )}
+            </div>
+          )}
         </>
       )}
     </article>

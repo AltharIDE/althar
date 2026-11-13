@@ -39,6 +39,7 @@ import {
   TaskFolders,
   UpdateReady,
   UsageData,
+  Problem,
 } from '@althar/ui'
 
 import altharFace from '../../../../resources/faces/althar-ai.svg'
@@ -108,9 +109,13 @@ export interface SettingsPageProps {
    * its tab opens, with its sign-in started, once while the page shows.
    */
   signIn?: string
+  /** Its account to sign in again, where one is meant: one whose sign-in ends soon. */
+  account?: string
+  /** An agent whose tab opens, nothing started: one that isn't installed, where its Install is. */
+  agent?: string
 }
 
-export function SettingsPage({ start, section, onSection, onTask, signIn }: SettingsPageProps) {
+export function SettingsPage({ start, section, onSection, onTask, signIn, account: meant, agent: shown }: SettingsPageProps) {
   const preferences = usePreferences()
   const sounds = useSounds()
   const connections = useConnections()
@@ -120,8 +125,8 @@ export function SettingsPage({ start, section, onSection, onTask, signIn }: Sett
   const looks: Looks = { appIcon: useAppIcon(), edge: useEdgePlace(section === 'appearance') }
   const agents = start.status?.agents ?? []
   // Asked to sign an agent in again: its tab opens with its signed-out account's sign-in started, which takes focus. Once.
-  const [asked, setAsked] = useState(signIn)
-  if (signIn !== undefined && signIn !== asked) setAsked(signIn)
+  const [asked, setAsked] = useState(signIn ?? shown)
+  if ((signIn ?? shown) !== undefined && (signIn ?? shown) !== asked) setAsked(signIn ?? shown)
   // Started once the agents are read again as the page opens: a read already under way would take a Terminal sign-in as done.
   const [openedAt] = useState(start.checkedAt)
   const wanted = start.checkedAt > openedAt ? agents.find((agent) => agent.id === signIn) : undefined
@@ -130,14 +135,15 @@ export function SettingsPage({ start, section, onSection, onTask, signIn }: Sett
     if (wanted.installed && wanted.problem === null) {
       // The account signed out, else one a provider within it refused (OpenCode Go), else its first.
       const account =
+        wanted.accounts.find((one) => one.id === meant) ??
         wanted.accounts.find((one) => one.signIn === 'signed_out') ??
         wanted.accounts.find((one) => one.providers?.some((provider) => provider.refusedAt !== null) === true) ??
         wanted.accounts[0]
       if (account === undefined) accounts.add(wanted.id)
       else accounts.again(wanted.id, account.id)
     }
-    // oxlint-disable-next-line react-hooks/exhaustive-deps -- started once for the agent asked about, as it is read
-  }, [wanted?.id])
+    // oxlint-disable-next-line react-hooks/exhaustive-deps -- started once for the agent and account asked about, as it is read
+  }, [wanted?.id, meant])
   // A section where something waits on the person has a dot: an account to sign in again.
   const yours: Partial<Record<Section, boolean>> = {
     agents: agents.some((agent) => agent.accounts.some((account) => account.signIn === 'signed_out')),
@@ -249,11 +255,7 @@ function SectionBody({
 /** What couldn't be kept, said where it was made. */
 function Failed({ when, children = text.failed }: { when: boolean; children?: string }) {
   if (!when) return null
-  return (
-    <p role="alert" className={s.failed}>
-      {children}
-    </p>
-  )
+  return <Problem className={s.failed}>{children}</Problem>
 }
 
 /* ---- the agents ------------------------------------------------------------------- */
@@ -276,6 +278,12 @@ const tabOf = (agent: AgentStatus): AgentTab => {
 /** The agents, one at a time by their tabs: each one's accounts, and the models its work may use; or downloading one that isn't here. */
 function AgentsSection({ start, accounts, asked }: { start: StartModel; accounts: AccountSignInModel; asked?: string }) {
   const [agentId, setAgentId] = useState<string | null>(null)
+  // Looking for an agent again, after the person installed it themselves: the agents are read afresh, sign-ins too.
+  const [checking, setChecking] = useState(false)
+  const checkAgain = () => {
+    setChecking(true)
+    void start.recheck().finally(() => setChecking(false))
+  }
   // Those on this computer first, then the others Althar runs, each in the registry's order.
   const all = start.status?.agents ?? []
   const agents = [...all.filter((agent) => agent.installed), ...all.filter((agent) => !agent.installed)]
@@ -324,6 +332,8 @@ function AgentsSection({ start, accounts, asked }: { start: StartModel; accounts
             }
             onInstall={() => void start.install(chosen.id)}
             {...(chosen.guide === null ? {} : { onHelp: () => openGuide(start, chosen.id) })}
+            onCheck={checkAgain}
+            checking={checking}
           />
         )}
       </AgentTabPanel>

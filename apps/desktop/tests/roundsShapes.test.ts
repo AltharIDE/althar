@@ -69,6 +69,13 @@ describe('a task’s rounds', () => {
     expect(round?.work?.steps.at(-1)).toMatchObject({ text: 'Installed dependencies in meridian' })
   })
 
+  it('stands a setup that exited 0 but couldn’t copy a file it names apart from the round, as failed', () => {
+    const missed = { at: at(2), code: 0, timedOut: false, stopped: false, last: 'Not in the checkout: .env', missing: ['.env'] }
+    const blocks = read([items.you('Go'), when(items.tool({}), 1), when(items.setup({ ended: missed }), 2), when(items.says('Done.'), 3)])
+    expect(blocks.map((block) => block.kind)).toEqual(['you', 'round', 'setup', 'round'])
+    expect(rounds(blocks).flatMap((round) => round.work?.steps.map((step) => step.kind) ?? [])).not.toContain('aside')
+  })
+
   it('reads streamed text the store holds already from the store, not from when it streamed', () => {
     const said = when(items.says('Done.'), 5)
     const streaming = new Map([[said.id, { kind: 'agent_message' as const, agentId: 'claude-code', text: 'Do', sequence: 1, at: at(1) }]])
@@ -111,53 +118,6 @@ describe('reviews, and the lead settling them', () => {
     expect(first).toMatchObject({ settle: { kind: 'round', result: { text: 'Capped it.' } } })
     expect(second).toMatchObject({ settle: null })
     expect(rounds(blocks).at(-1)).toMatchObject({ result: { text: 'Named it better.' } })
-  })
-
-  it('folds a settling round its session said what it could see before, keeping that line after the review’s', () => {
-    const seen = when(
-      items.notice(
-        {
-          source: 'runtime',
-          title: 'Codex could see a skill',
-          role: 'skills',
-          skills: [{ name: 'mine', path: '/h/mine/SKILL.md', from: 'person' }],
-        },
-        null,
-      ),
-      6,
-    )
-    const blocks = read([...thread.slice(0, 5), seen, ...thread.slice(5)])
-    expect(blocks.map((block) => block.kind)).toEqual(['you', 'round', 'verdict', 'skills', 'verdict', 'round'])
-    expect(blocks[2]).toMatchObject({ settle: { kind: 'round', result: { text: 'Capped it.' } } })
-  })
-
-  it('says what the lead could see once where older threads kept the same line for every session', () => {
-    const line = (at: number, title: string, names: ReadonlyArray<string>) =>
-      when(
-        items.notice(
-          {
-            source: 'runtime',
-            title,
-            role: 'skills',
-            skills: names.map((name) => ({ name, path: `/h/${name}/SKILL.md`, from: 'person' as const })),
-          },
-          null,
-        ),
-        at,
-      )
-    const blocks = read([
-      ...thread.slice(0, 2),
-      line(3, 'Codex could see 2 skills', ['a', 'b']),
-      line(4, 'Codex could see 2 skills', ['a', 'b']),
-      line(5, 'Codex can now also see deploy', ['a', 'b', 'deploy']),
-      line(6, 'Codex could see 2 skills', ['a', 'b']),
-      ...thread.slice(2),
-    ])
-    expect(blocks.filter((block) => block.kind === 'skills').map((block) => (block as { title: string }).title)).toEqual([
-      'Codex could see 2 skills',
-      'Codex can now also see deploy',
-      'Codex could see 2 skills',
-    ])
   })
 
   it('leaves a review with no round settling it after it, or one still at work, as it is', () => {

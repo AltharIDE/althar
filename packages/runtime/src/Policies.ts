@@ -1,4 +1,4 @@
-import { commandStartOf, hostOf, NEW_PROJECT_DEFAULTS, type NewProjectDefaults } from '@althar/contracts'
+import { type AfterMergeRule, commandStartOf, hostOf, NEW_PROJECT_DEFAULTS, type NewProjectDefaults } from '@althar/contracts'
 import { type ActorId, Ids, newId, type ProjectId, WorksIn } from '@althar/domain'
 import type { Ledger } from '@althar/persistence-sqlite'
 import { Context, type Crypto, Effect, Layer, Schema } from 'effect'
@@ -106,6 +106,11 @@ export const ProjectRules = Schema.Struct({
   ),
   moveIssues: Schema.optional(Schema.Boolean),
   /**
+   * What an explicitly configured review after merge brings back (docs/decisions/reviews.md, "An explicit review after merge"): `major`, only blocking and major findings put the task in Needs you, the rest stay in the thread; `all`, any
+   * finding does; `none`, no review is owed after the merge. `major` without it, a project made before it included.
+   */
+  afterMergeReview: Schema.optional(Schema.Literals(['major', 'all', 'none'])),
+  /**
    * Where new tasks start (ADR-091): in a worktree of their own, or Local, in
    * each repository's own checkout here, one task at a time. The coordinator
    * chooses per task. A worktree without it.
@@ -207,6 +212,9 @@ export const usageLimitOf = (rules: ProjectRules): UsageLimit => rules.usageLimi
 /** Whether a revision's rules move a task's issue to In Progress as the task starts: they do unless the person turned it off. */
 export const movesIssues = (rules: ProjectRules): boolean => rules.moveIssues ?? true
 
+/** What a revision's rules have an explicitly requested review after merge bring back: only major findings, unless the person chose. */
+export const afterMergeReviewOf = (rules: ProjectRules): AfterMergeRule => rules.afterMergeReview ?? 'major'
+
 /** Where a revision's rules start new tasks (ADR-091): in a worktree of their own unless the person chose Local. */
 export const worksInOf = (rules: ProjectRules): WorksIn => rules.worksIn ?? 'worktree'
 
@@ -282,6 +290,7 @@ export const startingRules = (defaults: NewProjectDefaults): ProjectRules => {
     ...(defaults.postScreenshots === NEW_PROJECT_DEFAULTS.postScreenshots ? {} : { postScreenshots: defaults.postScreenshots }),
     ...(defaults.resolveConflicts === NEW_PROJECT_DEFAULTS.resolveConflicts ? {} : { resolveConflicts: defaults.resolveConflicts }),
     ...(defaults.moveIssues === NEW_PROJECT_DEFAULTS.moveIssues ? {} : { moveIssues: defaults.moveIssues }),
+    ...(defaults.afterMergeReview === NEW_PROJECT_DEFAULTS.afterMergeReview ? {} : { afterMergeReview: defaults.afterMergeReview }),
   }
   return Object.keys(chosen).length === 0 ? FIRST : { ...FIRST, ...chosen, source: 'defaults' }
 }
