@@ -2353,6 +2353,16 @@ export const HeldForConnection = Schema.Struct({
 })
 export type HeldForConnection = typeof HeldForConnection.Type
 
+/** A lead yielded while the runtime watches a condition on its host, or waits until a time. */
+export const HeldForExternal = Schema.Struct({
+  reason: Schema.String,
+  deadline: Schema.String,
+  lastCheck: Schema.NullOr(Schema.String),
+  nextCheck: Schema.String,
+  error: Schema.NullOr(Schema.String),
+})
+export type HeldForExternal = typeof HeldForExternal.Type
+
 /**
  * A task as its card shows it, in the coordinator's thread and on the board:
  * where it stands, its plan, the issue it came from, its pull request, the
@@ -2543,6 +2553,7 @@ export const TaskCard = Schema.Struct({
   waits: Schema.NullOr(HeldForLimit),
   /** The step is held for the connection: absent or null otherwise (ADR-060). */
   reconnects: Schema.optional(Schema.NullOr(HeldForConnection)),
+  externalWait: Schema.optional(HeldForExternal),
   /**
    * Ready, but its lead couldn't resolve the conflict its branch has with its
    * default branch, or fix the checks that failed on the merge Althar pushed,
@@ -3796,6 +3807,7 @@ export const ThreadSnapshot = Schema.Struct({
     waits: Schema.NullOr(HeldForLimit),
     /** Its step held for the connection: absent or null otherwise (ADR-060). */
     reconnects: Schema.optional(Schema.NullOr(HeldForConnection)),
+    externalWait: Schema.optional(HeldForExternal),
     /** It waits for a place among the agents this machine runs at once: how many are busy, and how many it runs at once. */
     queued: Schema.NullOr(Queued),
     /** Its place in its project's Up next, waiting for a place, as its card says: 1 gets one first; absent out of it. */

@@ -341,7 +341,7 @@ describe('Agents at once', () => {
     }).pipe(Effect.provide(machine(1))),
   )
 
-  it.live('leave a quick task the coordinator starts waiting, and say so to the coordinator', () =>
+  it.live('start an aside the coordinator asks for while every task place is taken, without joining the line', () =>
     Effect.gen(function* () {
       const { projectId, threadId } = yield* opened
       const first = yield* started(projectId, 'First', 'Work on it. [lead:wait]')
@@ -352,19 +352,15 @@ describe('Agents at once', () => {
         description: 'Jump twice and say whether it lands. [lead:finish]',
         lead: { agent: 'codex' },
       })
-      assert.match(said, /^Started try-the-double-jump, but it waits for a free agent: 1 of the 1 this computer runs at once are busy\./)
+      assert.match(said, /^Started try-the-double-jump: its lead is on it now/)
       const sql = yield* SqlClient.SqlClient
       const [quick] = yield* sql<{ id: string }>`SELECT id FROM tasks WHERE slug = 'try-the-double-jump'`
       const taskId = quick?.id ?? ''
-      yield* waiting(taskId)
-      assert.deepStrictEqual(countsOf((yield* cardOf(projectId, taskId))?.queued), { busy: 1, atOnce: 1 })
-      // Nothing of it has had an agent: it is in the line, up next, as a plan's task is.
-      assert.isTrue((yield* cardOf(projectId, taskId))?.inLine)
-      assert.strictEqual((yield* cardOf(projectId, taskId))?.place, 1)
-      // A place frees when the first is stopped: the quick task starts, and finishes.
-      const tasks = yield* Tasks
-      yield* tasks.stop({ envelope: yield* Runtime.envelope('task.stop', {}), taskId: first.taskId })
       yield* until(attempts(taskId), (rows) => rows[0]?.state === 'succeeded')
+      assert.isNull((yield* cardOf(projectId, taskId))?.queued)
+      assert.isUndefined((yield* cardOf(projectId, taskId))?.inLine)
+      assert.isUndefined((yield* cardOf(projectId, taskId))?.place)
+      assert.strictEqual((yield* (yield* Busy).now).busy, 1)
     }).pipe(Effect.provide(machine(1))),
   )
 

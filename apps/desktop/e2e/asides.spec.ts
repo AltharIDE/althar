@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { expect, type Locator, type Page, test } from '@playwright/test'
 
 import { repository } from '../tests/repository'
-import { launch, openFirstProject, say, shown, still } from './support'
+import { holdRuntime, launch, openFirstProject, say, shown, startTask, still } from './support'
 
 /*
  * Asides (docs/decisions/tasks.md, "Asides"), in a real window with the fake
@@ -37,8 +37,14 @@ const shoot = async (page: Page, pills: Locator, name: string) => {
  */
 const watchPills = (page: Page) =>
   page.evaluate(() => {
-    const seen = { most: 0, pills: new Set<Element>() }
+    const seen = { most: 0, pills: new Set<Element>(), loading: false }
     const look = () => {
+      if (
+        [...document.querySelectorAll<HTMLElement>('output[aria-label="Reading the conversation"]')].some(
+          (one) => one.offsetParent !== null,
+        )
+      )
+        seen.loading = true
       for (const bar of document.querySelectorAll<HTMLElement>('[role="tablist"][aria-label="Conversations"]')) {
         if (bar.offsetParent === null) continue
         const asides = [...bar.querySelectorAll('[role="tab"]')].filter((tab) => tab.textContent?.trim() !== 'Coordinator')
@@ -48,7 +54,7 @@ const watchPills = (page: Page) =>
     }
     new MutationObserver(look).observe(document.body, { childList: true, subtree: true, characterData: true, attributes: true })
     look()
-    Object.assign(window, { pillsSeen: () => ({ most: seen.most, elements: seen.pills.size }) })
+    Object.assign(window, { pillsSeen: () => ({ most: seen.most, elements: seen.pills.size, loading: seen.loading }) })
   })
 
 /** Starts an aside from the coordinator's composer, as the person does with +. */
@@ -124,6 +130,7 @@ test('a new aside is one pill from + on, named by its first words, and a plain r
     const pills = page.getByRole('tablist', { name: 'Conversations' }).filter({ visible: true })
     await expect(pills.getByRole('tab', { name: 'Coordinator', exact: true })).toHaveAttribute('aria-selected', 'true')
     await watchPills(page)
+    const release = await holdRuntime(page)
 
     // + starts it at once: its one pill, open, says it is new while the person writes.
     await page.getByRole('button', { name: 'New aside' }).click()
@@ -132,6 +139,11 @@ test('a new aside is one pill from + on, named by its first words, and a plain r
     await box.click()
     await box.fill('Hi')
     await box.press('Enter')
+    // Before the runtime can make even its thread, the first words and title are there in the same pill and conversation.
+    await expect(pills.getByRole('tab', { name: 'Hi', exact: true })).toHaveAttribute('aria-selected', 'true')
+    await expect(shown(page, 'Hi', { exact: true }).last()).toBeVisible()
+    await shoot(page, pills, 'starting')
+    await release()
 
     // Its first words name the same pill, and its lead's answer comes in its own conversation, the turn over.
     await expect(pills.getByRole('tab', { name: 'Hi', exact: true })).toHaveAttribute('aria-selected', 'true')
@@ -142,11 +154,54 @@ test('a new aside is one pill from + on, named by its first words, and a plain r
     await shoot(page, pills, 'hi')
 
     // One pill, one element, from + to the answer: never a second beside it, nor one that took its place.
-    expect(await page.evaluate(() => (window as unknown as { pillsSeen: () => unknown }).pillsSeen())).toEqual({ most: 1, elements: 1 })
+    expect(await page.evaluate(() => (window as unknown as { pillsSeen: () => unknown }).pillsSeen())).toEqual({
+      most: 1,
+      elements: 1,
+      loading: false,
+    })
     // Nothing the person did wrong, so no error over the composer; and a reply that checked nothing draws no Checked block.
     await expect(page.getByText(/isn.t there any more/)).toHaveCount(0)
     await expect(page.getByRole('alert').filter({ visible: true })).toHaveCount(0)
     await expect(page.getByText('What it checked')).toHaveCount(0)
+  } finally {
+    await electronApp.close()
+  }
+})
+
+test('an aside answers while the task slot is occupied and another task waits in Up next', async () => {
+  const home = mkdtempSync(join(tmpdir(), 'althar-e2e-'))
+  const projects = join(home, 'Projects')
+  mkdirSync(projects)
+  const { electronApp, page } = await launch(home)
+  try {
+    await openFirstProject(electronApp, page, repository(projects))
+    await page.getByRole('button', { name: /^Althar settings/ }).click()
+    const slider = page.getByRole('dialog', { name: 'Quick settings' }).getByRole('slider', { name: 'Agents at once' })
+    await slider.focus()
+    await page.keyboard.press('Home')
+    await expect(slider).toHaveAttribute('aria-valuenow', '1')
+    await page.keyboard.press('Escape')
+    await page
+      .getByRole('navigation', { name: 'Projects' })
+      .getByRole('button', { name: /^meridian/ })
+      .click()
+    await startTask(page, 'Keep the one task place', '[lead:wait]')
+    await startTask(page, 'Wait for the task place', '[lead:wait]')
+    const queued = page.getByText(/^Waiting: 1 of 1 agents busy/)
+    await expect(queued).toBeVisible()
+    await startAside(page, 'Hi')
+    const pills = page.getByRole('tablist', { name: 'Conversations' }).filter({ visible: true })
+    await expect(pills.getByRole('tab', { name: 'Hi', exact: true })).toHaveAttribute('aria-selected', 'true')
+    await expect(page.getByRole('article', { name: 'Coordinator' }).filter({ visible: true }).filter({ hasText: 'echo:' })).toBeVisible()
+    await expect(page.getByRole('button', { name: /^Waiting for a place/ })).toHaveCount(0)
+    await expect(
+      page.getByRole('region', { name: 'Up next', exact: true }).getByRole('button', { name: 'Wait for the task place', exact: true }),
+    ).toBeVisible()
+    await expect(
+      page.getByRole('region', { name: 'Running', exact: true }).getByRole('button', { name: 'Keep the one task place', exact: true }),
+    ).toBeVisible()
+    await expect(page.getByRole('alert').filter({ visible: true })).toHaveCount(0)
+    await shoot(page, pills, 'full-task-queue')
   } finally {
     await electronApp.close()
   }

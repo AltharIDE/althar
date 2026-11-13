@@ -54,7 +54,7 @@ jobs:
           bun-version-file: .bun-version
       # What this entry and those ahead of it add to main: what lands if this build passes.
       - env:
-          BASE: ${{ github.event.merge_group.base_ref }}
+          BASE: ${{ github.event.merge_group.base_sha }}
         run: |
           git fetch --no-tags --depth=1 origin "$BASE"
           git diff --name-only --no-renames FETCH_HEAD HEAD > "$RUNNER_TEMP/changed"
@@ -127,6 +127,9 @@ jobs:
       # keeps it out: this entry's, and those ahead of it, which merge with it if this build passes. Not run is fine; a
       # stress run still going is waited for, read again every 30 s, as its failure would come after the group merged.
       - uses: actions/checkout@v5
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: .bun-version
       - if: github.event_name == 'merge_group'
         env:
           GH_TOKEN: ${{ github.token }}
