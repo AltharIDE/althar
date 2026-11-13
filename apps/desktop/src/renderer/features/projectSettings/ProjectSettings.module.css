@@ -1,8 +1,6 @@
 /* why a switch didn't hold, under what it does */
 .failedLine {
-  display: block;
   margin-top: 3px;
-  color: var(--danger);
 }
 
 /* a line on the section as a whole, after its parts: lighter than anything in them */

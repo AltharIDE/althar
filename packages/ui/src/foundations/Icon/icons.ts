@@ -24,6 +24,7 @@ import {
   Expand,
   Folder,
   Frame,
+  InfoCircle,
   GitBranch,
   GitCompare,
   GitMerge,
@@ -64,6 +65,7 @@ import {
   TaskList,
   Terminal,
   Tools,
+  WarningCircle,
   WifiOff,
   Xmark,
 } from 'iconoir-react'
@@ -194,6 +196,10 @@ export const ICONS = {
   cookie: Cookie,
   /** One of the project's canvases: what its agents drew for the person to look at and iterate on (ADR-104). */
   canvas: Palette,
+  /** What something is, explained where it is pointed at. */
+  info: InfoCircle,
+  /** Something failed: the mark before the words that say what, in the danger colour. */
+  problem: WarningCircle,
 } satisfies Record<string, ComponentType<SVGProps<SVGSVGElement> & { strokeWidth?: number | string }>>
 
 export type IconName = keyof typeof ICONS

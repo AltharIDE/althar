@@ -1,3 +1,5 @@
+import type { SearchDocuments } from '@althar/contracts'
+
 import {
   type CanvasDetail,
   type CanvasSummary,
@@ -160,6 +162,8 @@ export interface Client {
   ) => Promise<ProjectSummary>
   readonly listTasks: (projectId: string) => Promise<TaskList>
   /** Tasks found by what they were about, best first: in one project, or every one; with no words, the ones changed last. */
+  readonly getSearchDocuments: (after?: string) => Promise<SearchDocuments>
+  readonly getSearchFiles: (threadId: string) => Promise<{ readonly files: ReadonlyArray<string> }>
   readonly searchTasks: (input: { readonly projectId?: string; readonly text: string; readonly limit?: number }) => Promise<FoundTasks>
   readonly createTask: (input: {
     readonly projectId: string
@@ -173,11 +177,14 @@ export interface Client {
     threadId: string,
     page?: { readonly before?: number; readonly limit?: number; readonly fresh?: boolean },
   ) => Promise<ThreadSnapshot>
-  readonly getThreadItem: (threadId: string, itemId: string) => Promise<ThreadItem>
+  /** One item of a thread; null for one it keeps for Althar and never shows. */
+  readonly getThreadItem: (threadId: string, itemId: string) => Promise<ThreadItem | null>
   /** What a command in a thread printed, as kept once it ended. */
   readonly readOutput: (threadId: string, itemId: string) => Promise<OutputText>
   /** What a command a thread's session left running has printed so far. */
   readonly readBackgroundOutput: (threadId: string, id: string) => Promise<OutputText>
+  /** What a run of the project has printed so far: the end of it. */
+  readonly readLaunchOutput: (id: string) => Promise<OutputText>
   /** A markdown document an agent in a thread wrote, as it is now in the task's worktree. */
   readonly readDocument: (threadId: string, path: string) => Promise<DocumentText>
   /** A project's canvases (ADR-104), newest first; archived ones too where asked. */
@@ -298,15 +305,19 @@ export interface Client {
   }) => Promise<void>
   /** Picks another preset for a plan before it starts: its parts change to match. The preset's name. */
   readonly applyPreset: (planId: string, preset: string) => Promise<string>
-  /** Saves a preset from a task, or the parts the coordinator offered. */
+  /** Saves a preset from a task: its parts, or the parts its card offered. */
   readonly savePreset: (input: {
     readonly name: string
     readonly taskId?: string
     readonly parts?: PresetParts
     readonly projectOnly?: boolean
+    /** Only as a new preset: a name another preset has is refused rather than replaced. */
+    readonly asNew?: boolean
   }) => Promise<{ readonly name: string }>
   /** Removes one of the person's presets. */
   readonly removePreset: (id: string) => Promise<void>
+  /** Says not to offer a task's parts as a preset again. */
+  readonly declinePresetOffer: (taskId: string) => Promise<void>
   /** "Run it" on the pull request a review task reviews, as far as `how` trusts it; `asks` where nothing says how far. */
   readonly runIt: (
     taskId: string,
@@ -451,11 +462,18 @@ export interface Client {
     readonly end?: TaskEnd | null
     /** The project's repositories it changes, by name: needed only in a project of several. */
     readonly repositories?: ReadonlyArray<string>
-    /** An aside: a chat of the person's own, on Scratch, with no card in the coordinator's thread; its words are `description`. */
+    /**
+     * An aside: a chat of the person's own, on Scratch, with no card in the coordinator's thread. Started as + is pressed, with
+     * no `description`: its lead waits for the person's first words, sent to its thread.
+     */
     readonly chat?: boolean
+    /** The id the window made for it (`newTaskId`): an aside's pill is keyed by it from the moment + is pressed. */
+    readonly taskId?: string
   }) => Promise<TaskSummary>
   readonly startPlan: (planId: string) => Promise<void>
   readonly holdPlan: (planId: string) => Promise<void>
+  /** Holds a task the coordinator is drafting, by its draft's key: its plan comes held. */
+  readonly holdDraft: (threadId: string, key: string) => Promise<void>
   /** Changes a plan before its first step starts: who does its steps, how it ends, and where it works (ADR-091). */
   readonly changePlan: (
     planId: string,
@@ -595,9 +613,11 @@ export interface Client {
   readonly openChange: (taskId: string) => Promise<void>
   /** Skips the review of the task's work under way. */
   readonly skipReview: (taskId: string) => Promise<void>
+  /** Gives a task another preset's parts at once, as Make it a change does with Change: its review, ending and worktree. */
+  readonly shapeTask: (taskId: string, preset: string) => Promise<void>
   /**
-   * One small change's own word on its review after the merge, over its project's rule, until it merges: `review`, `none`,
-   * or null for the rule. Its card reads what holds (`afterMerge` on the small change's card).
+   * The person's explicit choice of review after merge, over its project's rule, until it merges: `review`, `none`,
+   * or null for the rule. Its card reads what holds (`afterMerge` on the explicitly configured after-merge card).
    */
   readonly setReviewAfterMerge: (taskId: string, review: 'review' | 'none' | null) => Promise<void>
   /** Merges the task's pull request at the head the person saw, as they said to; a draft is marked ready first. */
@@ -759,13 +779,19 @@ export const newCommandId = (): string => `cmd_${globalThis.crypto.randomUUID().
  * ids sort by when they were made. The window makes one for a project before
  * it is made, to draw its mark from as it is named.
  */
-export const newProjectId = (now: number = Date.now()): string => {
+export const newProjectId = (now: number = Date.now()): string => `proj_${uuidV7(now)}`
+
+/** A new task's id, as the runtime makes them: the window makes one for an aside as + is pressed, to key its pill from then. */
+export const newTaskId = (now: number = Date.now()): string => `task_${uuidV7(now)}`
+
+/** A UUIDv7 as 32 hex digits: ids sort by when they were made. */
+const uuidV7 = (now: number) => {
   const bytes = globalThis.crypto.getRandomValues(new Uint8Array(16))
   // 48 bits of milliseconds, then the version and the variant over the random rest.
   for (let i = 0; i < 6; i++) bytes[i] = Math.floor(now / 2 ** (8 * (5 - i))) % 256
   bytes[6] = ((bytes[6] ?? 0) & 0x0f) | 0x70
   bytes[8] = ((bytes[8] ?? 0) & 0x3f) | 0x80
-  return `proj_${Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('')}`
+  return Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('')
 }
 
 /** Runs a call and settles its promise with the call's own failure, not Effect's wrapper around it. */
@@ -819,12 +845,15 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
         }),
       ),
     listTasks: (projectId) => settle(api.ListTasks({ projectId })),
+    getSearchDocuments: (after) => settle(api.GetSearchDocuments(after === undefined ? {} : { after })),
+    getSearchFiles: (threadId) => settle(api.GetSearchFiles({ threadId })),
     searchTasks: (input) => settle(api.SearchTasks(input)),
     createTask: (input) => command((commandId) => api.CreateTask({ commandId, ...input })),
     getThread: (threadId, page = {}) => settle(api.GetThread({ threadId, ...page })),
     getThreadItem: (threadId, itemId) => settle(api.GetThreadItem({ threadId, itemId })),
     readOutput: (threadId, itemId) => settle(api.ReadOutput({ threadId, itemId })),
     readBackgroundOutput: (threadId, id) => settle(api.ReadBackgroundOutput({ threadId, id })),
+    readLaunchOutput: (id) => settle(api.ReadLaunchOutput({ id })),
     readDocument: (threadId, path) => settle(api.ReadDocument({ threadId, path })),
     listCanvases: (projectId, archived) => settle(api.ListCanvases({ projectId, ...(archived === true ? { archived } : {}) })),
     getCanvas: (canvasId) => settle(api.GetCanvas({ canvasId })),
@@ -883,6 +912,7 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
     editPreset: (input) => command((commandId) => api.EditPreset({ commandId, ...input })),
     savePreset: (input) => command((commandId) => api.SavePreset({ commandId, ...input })),
     removePreset: (id) => command((commandId) => api.RemovePreset({ commandId, id })),
+    declinePresetOffer: (taskId) => command((commandId) => api.DeclinePresetOffer({ commandId, taskId })),
     runIt: (taskId, how) => command((commandId) => api.RunIt({ commandId, taskId, ...(how === undefined ? {} : { how }) })),
     stopRunning: (taskId) => command((commandId) => api.StopRunning({ commandId, taskId })),
     setReviewSeal: (on) => command((commandId) => api.SetReviewSeal({ commandId, on })),
@@ -957,6 +987,7 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
     startTask: (input) => command((commandId) => api.StartTask({ commandId, ...input })),
     startPlan: (planId) => command((commandId) => api.StartPlan({ commandId, planId })),
     holdPlan: (planId) => command((commandId) => api.HoldPlan({ commandId, planId })),
+    holdDraft: (threadId, key) => command((commandId) => api.HoldDraft({ commandId, threadId, key })),
     changePlan: (planId, steps, end, worksIn, toward) =>
       command((commandId) =>
         api.ChangePlan({
@@ -1033,6 +1064,7 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
     postScreenshots: (input) => command((commandId) => api.PostScreenshots({ commandId, ...input })),
     openChange: (taskId) => command((commandId) => api.OpenChange({ commandId, taskId })),
     skipReview: (taskId) => command((commandId) => api.SkipReview({ commandId, taskId })),
+    shapeTask: (taskId, preset) => command((commandId) => api.ShapeTask({ commandId, taskId, preset })),
     setReviewAfterMerge: (taskId, review) => command((commandId) => api.SetReviewAfterMerge({ commandId, taskId, review })),
     merge: (taskId, head, url, how) =>
       command((commandId) =>

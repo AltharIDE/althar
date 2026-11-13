@@ -172,6 +172,35 @@ const automationRow = (automationId: string) =>
   })
 
 describe('automations', () => {
+  it.live('report a blocked run as needing the person, keeping its original model when future runs are changed', () =>
+    Effect.gen(function* () {
+      const automations = yield* Automations
+      const instance = yield* Instance
+      const sql = yield* SqlClient.SqlClient
+      const projectId = yield* opened
+      const automationId = yield* automations.make({
+        projectId,
+        definition: { ...NOTES, lead: { agentId: 'claude-code', model: 'claude-fable-5-1' } },
+        on: true,
+        actorId: instance.personId,
+      })
+      yield* automations.runNow(automationId, instance.personId)
+      const [waiting] = yield* until(
+        Effect.map(automations.read(automationId), (view) => view.runs),
+        (runs) => runs[0]?.task?.needsYou === true,
+      )
+      assert.strictEqual(waiting?.state, 'running')
+      // Editing the automation changes future tasks, while this task still needs its original startup failure resolved.
+      yield* automations.change(automationId, NOTES, instance.personId)
+      const changed = yield* automations.read(automationId)
+      assert.deepStrictEqual(changed.definition.lead, NOTES.lead)
+      assert.isTrue(changed.latest[0]?.task?.needsYou)
+      assert.strictEqual((yield* automations.list(projectId))[0]?.latest[0]?.task?.needsYou, true)
+      yield* sql`UPDATE attention_requests SET state = 'answered' WHERE task_id = ${waiting?.task?.id} AND state = 'open'`
+      assert.isFalse((yield* automations.read(automationId)).runs[0]?.task?.needsYou)
+    }).pipe(Effect.provide(runtime())),
+  )
+
   it.live('fire a slot once at its time, as a task that says when it was due, which made something once it is done', () => {
     const clock = clockAt('2026-10-21T07:59:00Z')
     return Effect.gen(function* () {

@@ -8,8 +8,9 @@ import { useServices } from './services'
 /*
  * The models each agent offers, read once for the window and shared by
  * every picker in it: read again when a picker appears, shortly after while
- * an agent is still being asked, and when the person sets a default effort
- * or switches a model off or on.
+ * an agent is still being asked, when the agents' sign-ins are checked
+ * again (one found signed in is asked its models afresh), and when the
+ * person sets a default effort or switches a model off or on.
  */
 
 /** How soon an agent still being asked is read again. */
@@ -63,6 +64,9 @@ const read = (client: Client, store: Store, again = false) => {
 
 /** Reads the models ahead, as the window opens, so the first picker shows them. */
 export const readModelsAhead = (client: Client) => read(client, storeOf(client))
+
+/** Reads the models again, after something that may change them, such as an agent found signed in or newly installed. */
+export const readModelsAgain = (client: Client) => read(client, storeOf(client), true)
 
 /** Tells `listener` each time the models are read: an agent signed in or out, a model switched off or on. Until the returned stop. */
 export const onModelsRead = (client: Client, listener: () => void) => {

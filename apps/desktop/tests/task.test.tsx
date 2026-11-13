@@ -1,3 +1,4 @@
+import { isoAfter } from '@althar/testing'
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { Activity } from 'react'
@@ -1558,6 +1559,29 @@ describe('a task', () => {
     )
   })
 
+  it('drops another agent picked to take over once the lead it was to take over from stops', async () => {
+    const base = thread()
+    let current = base
+    const { client, emit } = fakeClient({ getThread: vi.fn(async () => current) })
+    withServices(<Task />, client)
+    await screen.findByRole('textbox', { name: 'Tell Claude Code something' })
+    await userEvent.click(screen.getByRole('button', { name: 'Lead: Claude Opus High' }))
+    await userEvent.click(await screen.findByRole('radio', { name: /gpt-5\.2-codex/ }))
+    await userEvent.keyboard('{Escape}')
+    await screen.findByRole('textbox', { name: 'Tell Codex something' })
+    // The lead stops before the person says anything; later a lead is on it again, on Claude Code, as it was.
+    const lead = { agentId: 'claude-code', model: 'opus', account: null }
+    current = { ...base, session: null, task: { ...base.task, phase: 'stopped', actions: ['resume', 'abandon'], lead } }
+    act(() => emit(changed('provider_session', 's1')))
+    await screen.findByText('Stopped')
+    current = base
+    act(() => emit(changed('provider_session', 's1')))
+    // What the person says goes to it: Codex taking over was for the lead that stopped.
+    await userEvent.type(await screen.findByRole('textbox', { name: 'Tell Claude Code something' }), 'Go on{Enter}')
+    await waitFor(() => expect(client.send).toHaveBeenCalledWith({ threadId: 'th1', body: 'Go on', disposition: 'after_current' }))
+    expect(client.switchAgent).not.toHaveBeenCalled()
+  })
+
   it('puts a queued message back in the composer with its images, which go again by their digests', async () => {
     const picture = { digest: 'f'.repeat(64), mediaType: 'image/png', bytes: 68, width: 1, height: 1, name: 'shot.png', unkept: null }
     const queued = items.you('Like this', { state: 'queued', interrupting: false }, [], [picture])
@@ -1565,7 +1589,7 @@ describe('a task', () => {
     withServices(<Task />, client)
     const busy = await screen.findByRole('textbox', { name: 'Add to the queue, or interrupt the lead' })
     // The queue says what went with it.
-    expect(screen.getByText('1 image')).toBeTruthy()
+    expect(screen.getByText(/1 image$/)).toBeTruthy()
     await userEvent.click(await screen.findByRole('button', { name: 'Edit' }))
     expect(await screen.findByRole('img', { name: 'shot.png' })).toHaveProperty('src', `althar-picture://shot/${'f'.repeat(64)}?w=1120`)
     await userEvent.type(busy, ' too{Enter}')
@@ -1962,7 +1986,7 @@ describe('a task', () => {
     expect(screen.queryByRole('menuitem', { name: /Change the team…/ })).toBeNull()
   })
 
-  it('changes the team of a task at work from its menu, saving through the task', async () => {
+  it('opens the team of a task at work from its menu, and saves no change when nothing was edited', async () => {
     const running = {
       ...card({ taskId: 't1', threadId: 'th1', phase: 'running', step: 'implement', reviewerChange: 'now' }),
       state: 'open',
@@ -1982,7 +2006,8 @@ describe('a task', () => {
     expect(dialog.getByText('From its next turn.')).toBeTruthy()
     expect(dialog.queryByRole('button', { name: 'Start' })).toBeNull()
     await userEvent.click(dialog.getByRole('button', { name: 'Save' }))
-    await waitFor(() => expect(client.changeTeam).toHaveBeenCalledWith('t1', running.plan!.steps))
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Team' })).toBeNull())
+    expect(client.changeTeam).not.toHaveBeenCalled()
     expect(client.changePlan).not.toHaveBeenCalled()
   })
 
@@ -2935,7 +2960,7 @@ describe('a task', () => {
             ...agent,
             accounts: [
               usual('acc_claude', 'signed_in'),
-              { ...usual('acc_work', 'signed_in'), name: 'work', outUntil: '2099-01-01T10:00:00.000Z' },
+              { ...usual('acc_work', 'signed_in'), name: 'work', outUntil: isoAfter(20 * 3_600_000) },
             ],
           }
         : agent.id === 'codex'
@@ -2992,7 +3017,7 @@ describe('a task', () => {
   })
 
   it('offers the models that could carry on a step held for a usage limit, with why it waits, without asking', async () => {
-    const back = '2099-01-01T14:00:00.000Z'
+    const back = isoAfter(24 * 3_600_000)
     const held = (step: 'implement' | 'review', why: 'nothing_free' | 'waits') =>
       thread({
         task: {

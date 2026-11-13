@@ -117,17 +117,28 @@ describe('GitLab as a code host', () => {
     }),
   )
 
-  it.effect('refuses to review a merge request it didn’t open, in GitLab’s words, without asking GitLab', () =>
+  it.effect('reads a merge request for review and refuses self-approval before posting', () =>
     Effect.gen(function* () {
-      const { host, sent } = gitlab([])
-      assert.isFalse(host.capabilities.reviews)
-      assert.deepInclude(yield* Effect.flip(host.changeToReview(repository, 12)), {
-        reason: 'rejected',
-        message: 'Althar can’t review a merge request on this host yet.',
-      })
-      const posted = yield* Effect.flip(host.postReview(repository, 12, { event: 'comment', body: 'b', commit: null, comments: [] }))
+      const { host, sent } = gitlab([
+        [
+          'GET',
+          `${PROJECT}/merge_requests/12`,
+          {
+            json: request({
+              source_project_id: 34675721,
+              target_project_id: 34675721,
+              diff_refs: { base_sha: 'base', start_sha: 'start', head_sha: 'head' },
+            }),
+          },
+        ],
+        ['GET', `${PROJECT}/members/all/5`, { json: { access_level: 30 } }],
+        ['GET', `${API}/user`, { json: user(5, 'you') }],
+      ])
+      assert.isTrue(host.capabilities.reviews)
+      assert.deepInclude(yield* host.changeToReview(repository, 12), { member: true, fork: null, baseSha: 'start' })
+      const posted = yield* Effect.flip(host.postReview(repository, 12, { event: 'approve', body: 'b', commit: null, comments: [] }))
       assert.strictEqual(posted.reason, 'rejected')
-      assert.lengthOf(sent, 0)
+      assert.isTrue(sent.every((one) => one.method === 'GET'))
     }),
   )
 
@@ -1180,7 +1191,7 @@ describe('GitLab as a tracker', () => {
             json: issue({
               milestone: { id: 41, iid: 3, project_id: 34675721, title: 'Q4 launch', state: 'active' },
               issue_type: 'incident',
-              due_date: '2026-11-30',
+              due_date: '2025-11-30',
               weight: 3,
             }),
           },
@@ -1190,7 +1201,7 @@ describe('GitLab as a tracker', () => {
       const found = yield* host.issue('meridian/payments/api#231')
       assert.deepStrictEqual(
         [found.milestone, found.type, found.due, found.estimate],
-        [{ id: '41', name: 'Q4 launch' }, 'Incident', '2026-11-30', 3],
+        [{ id: '41', name: 'Q4 launch' }, 'Incident', '2025-11-30', 3],
       )
       // GitLab has no parent, cycle or components to say: they are left out, not null.
       assert.deepStrictEqual([found.parent, found.cycle, found.components, found.project], [undefined, undefined, undefined, undefined])
@@ -1552,7 +1563,7 @@ describe('GitLab as a tracker', () => {
   it.effect('files one with its people, milestone, weight, kind and due day as it files it', () =>
     Effect.gen(function* () {
       const { host, sent } = gitlab([
-        ['POST', `${AT}/issues`, { status: 201, json: issue({ issue_type: 'task', due_date: '2026-11-30' }) }],
+        ['POST', `${AT}/issues`, { status: 201, json: issue({ issue_type: 'task', due_date: '2025-11-30' }) }],
       ])
       const filed = yield* host.create('meridian/payments/api', {
         title: 'Rate-limit refunds like charges',
@@ -1569,7 +1580,7 @@ describe('GitLab as a tracker', () => {
           milestone: { id: '41', name: 'Q4 launch' },
           estimate: 2,
           type: { id: 'task', name: 'Task' },
-          due: '2026-11-30',
+          due: '2025-11-30',
         },
       })
       assert.deepStrictEqual(sent[0]?.body, {
@@ -1579,9 +1590,9 @@ describe('GitLab as a tracker', () => {
         milestone_id: 41,
         weight: 2,
         issue_type: 'task',
-        due_date: '2026-11-30',
+        due_date: '2025-11-30',
       })
-      assert.deepStrictEqual([filed.type, filed.due], ['Task', '2026-11-30'])
+      assert.deepStrictEqual([filed.type, filed.due], ['Task', '2025-11-30'])
       // None, or no one, is filed without.
       yield* host.create('meridian/payments/api', {
         title: 't',
@@ -1800,7 +1811,7 @@ describe('GitLab listing merge requests', () => {
           milestone: { id: '41', name: 'Q4 launch' },
           estimate: 3,
           type: { id: 'incident', name: 'Incident' },
-          due: '2026-11-30',
+          due: '2025-11-30',
           labels: {
             add: [
               { id: 'type::bug', name: 'type::bug' },
@@ -1817,7 +1828,7 @@ describe('GitLab listing merge requests', () => {
           milestone_id: 41,
           weight: 3,
           issue_type: 'incident',
-          due_date: '2026-11-30',
+          due_date: '2025-11-30',
           add_labels: 'type::bug,docs',
           remove_labels: 'payments',
         })

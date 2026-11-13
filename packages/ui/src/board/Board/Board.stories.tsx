@@ -469,7 +469,7 @@ type Story = StoryObj<typeof meta>
 
 /** A project's work in four lanes, in the order it moves. */
 export const Default: Story = {}
-/** A new project: Up next says how work gets here, and every other lane is an empty box. */
+/** A new project: Up next says how work gets here, and every other lane says, quietly, what will be in it. */
 export const Empty: Story = { args: { empty: true } }
 
 /** A busy board with nothing in Up next: the same words and the way to the coordinator, not a bare box. */

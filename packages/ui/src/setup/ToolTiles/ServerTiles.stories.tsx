@@ -132,17 +132,17 @@ function Kept(args: ServerTilesProps) {
   )
 }
 
-/** Each server a tile, what waits first: the failed one, then those waiting on the person, then the rest; Add a server last. */
+/** Each server a tile, what waits first: the failed one, then those waiting on the person, then the rest, each by name; Add a server last. */
 export const Usual: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     const switches = canvas.getAllByRole('switch').map((one) => one.getAttribute('aria-label'))
-    await expect(switches.slice(0, 4)).toEqual(['notion', 'github', 'linear', 'akiflow'])
+    await expect(switches.slice(0, 4)).toEqual(['notion', 'akiflow', 'github', 'linear'])
     await expect(canvas.getByText('Failed to start')).toBeVisible()
     await expect(canvas.getByText('Codex runs it another way')).toBeVisible()
     await expect(canvas.getByText('Codex and OpenCode aren’t signed in')).toBeVisible()
     await expect(canvas.getByText('Not signed in yet')).toBeVisible()
-    await expect(canvas.getByText('Leads · not in fnt')).toBeVisible()
+    await expect(canvas.getByText('Leads only · not in fnt')).toBeVisible()
     await expect(canvas.getByRole('button', { name: 'Add a server' })).toBeVisible()
     await expect(canvas.getByRole('heading', { name: 'In althar’s repository' })).toBeVisible()
   },
@@ -211,7 +211,7 @@ export const Crowded: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     await expect(canvas.getAllByText('Failed to start')).toHaveLength(2)
-    await expect(canvas.getByText('Leads · only in meridian and ledger')).toBeVisible()
+    await expect(canvas.getByText('Leads only · only in meridian and ledger')).toBeVisible()
   },
 }
 

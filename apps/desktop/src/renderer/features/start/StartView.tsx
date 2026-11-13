@@ -1,7 +1,7 @@
 import { type ReactNode, useEffect, useState } from 'react'
 
 import type { AgentStatus, ProjectSummary } from '@althar/contracts'
-import { Button, CrashReportsLine, keys, modKey, primaryDown, type RuntimeEntry, RuntimeState } from '@althar/ui'
+import { Button, CrashReportsLine, keys, modKey, primaryDown, type RuntimeEntry, RuntimeState, Problem } from '@althar/ui'
 import { Welcome, type WelcomeStep, welcomeText } from '@althar/ui/screens'
 
 import { brandOf, pinnedOf } from '../../shared/agents'
@@ -131,9 +131,7 @@ const signInTo = (model: StartModel, signIn: AccountSignInModel, agentId: string
 export function AgentProblem({ why, model }: { why: string; model: StartModel }) {
   return (
     <div className={s.failure}>
-      <p className={s.error} role="alert">
-        {why}
-      </p>
+      <Problem className={s.error}>{why}</Problem>
       <Button size="small" onClick={() => void model.recheck()}>
         {text.checkAgain}
       </Button>
@@ -146,9 +144,7 @@ export function StartError({ model }: { model: StartModel }) {
   if (model.error === null) return null
   return (
     <div className={s.failure}>
-      <p className={s.error} role="alert">
-        {model.error}
-      </p>
+      <Problem className={s.error}>{model.error}</Problem>
       {model.unremoved !== null && (
         <Button size="small" onClick={() => void model.removeAnyway()}>
           {text.removeAnyway}
@@ -282,6 +278,8 @@ function First({
         onCreate={make}
         creating={project.making}
         made={made !== null}
+        // Where the runtime didn't answer, asking again is the way on.
+        onRecheck={() => void model.recheck()}
         {...(project.error !== null
           ? { error: { step: 'project' as const, said: project.error } }
           : model.error !== null

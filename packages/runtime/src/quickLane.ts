@@ -6,11 +6,10 @@
  * 14 minutes in the middle. A task planned small may take one place beyond
  * the number, so it never waits behind the long ones.
  *
- * Planned small is what a plan already says, not a size anyone writes: no
- * review, or every review skipped, and its lead at a light effort. The
- * coordinator plans a one-line fix that way (propose_plan says so), and a
- * plan the person changes to add a review, or a harder effort, leaves the
- * lane. Read from the run's own parameters, as the store keeps them.
+ * A light lead qualifies when the plan explicitly marks a small change,
+ * independently of its review timing. Older plans with no active review
+ * retain their existing qualification. Reviewers take ordinary places; a
+ * harder lead effort leaves the lane. Read from the run's own parameters.
  */
 
 /** The efforts that count as light, across agents: Codex's `minimal`, and `low` everywhere. */
@@ -23,7 +22,7 @@ const isRecord = (value: unknown): value is Readonly<Record<string, unknown>> =>
 
 /**
  * Whether a run's parameters, as the store keeps them (JSON), plan a small
- * task: a lead at a light effort, and no review that isn't skipped. Anything
+ * task: a lead at a light effort, plus a size marker or no active review. Anything
  * it can't read is not small: it waits as every task does.
  */
 export const plannedSmall = (parameters: string | null | undefined): boolean => {
@@ -41,5 +40,5 @@ export const plannedSmall = (parameters: string | null | undefined): boolean => 
   if (lead.length !== 1 || lead[0]?.skipped === true) return false
   const effort = lead[0]?.effort
   if (typeof effort !== 'string' || !LIGHT.has(effort)) return false
-  return of('review').every((review) => review.skipped === true)
+  return (isRecord(read) && read.smallChange === true) || of('review').every((review) => review.skipped === true)
 }

@@ -1,6 +1,7 @@
 import { type KeyboardEvent, type ReactNode, useId, useRef, useState } from 'react'
 
 import { Icon } from '../../foundations/Icon/Icon'
+import { Problem } from '../../primitives/Problem/Problem'
 import s from './RepositorySetups.module.css'
 
 /*
@@ -237,11 +238,7 @@ export function RepositorySetups({ repositories, onChange, error }: RepositorySe
           />
         </div>
       </section>
-      {error !== undefined && (
-        <p className={s.error} role="alert">
-          {error}
-        </p>
-      )}
+      {error !== undefined && <Problem>{error}</Problem>}
     </div>
   )
 }

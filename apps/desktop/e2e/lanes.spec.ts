@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { expect, test } from '@playwright/test'
 
 import { repository } from '../tests/repository'
-import { launch, openFirstProject, planTask, sizeWindow, still } from './support'
+import { launch, openFirstProject, planTask, sizeWindow, still, showPanes } from './support'
 
 /*
  * The board's lanes in a real window, as it narrows: those that don't fit
@@ -30,7 +30,7 @@ test('collapses the lanes that don’t fit, and opens Needs you when something a
     await planTask(page, 'Cache the rates', '[lead:ask] [lead:finish]')
 
     // Wide, the four lanes fit.
-    await page.getByRole('radio', { name: /^Board/ }).click()
+    await showPanes(page, { conversation: false, board: true })
     const work = page.getByRole('region', { name: 'The project’s work' })
     await expect(work.getByText('Cache the rates')).toBeVisible()
     await expect(work.getByRole('button', { name: /^Expand/ })).toHaveCount(0)
@@ -59,7 +59,7 @@ test('collapses the lanes that don’t fit, and opens Needs you when something a
     await page.screenshot({ path: 'test-results/lanes-needs-you-arrived.png', scale: 'css' })
 
     // Beside the conversation, at the window's narrowest: Running and Needs you keep the room.
-    await page.getByRole('radio', { name: 'Home' }).click()
+    await showPanes(page, { conversation: true, board: true })
     const beside = page.getByRole('region', { name: 'The project’s work' })
     await expect(beside.getByRole('button', { name: 'Expand Settled, 0' })).toBeVisible()
     await expect(beside.getByRole('button', { name: /^Expand Up next/ })).toBeVisible()

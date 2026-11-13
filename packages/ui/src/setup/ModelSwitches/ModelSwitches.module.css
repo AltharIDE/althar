@@ -23,6 +23,8 @@
 }
 /* The list scrolls under the field: its ends fade, so a row is never cut flat and the edge says there is more. */
 .list {
+  /* the boxes line up with the title, their rows' hover reaching past them */
+  margin-inline: -10px;
   max-height: 340px;
   padding-block: 10px;
   overflow-y: auto;

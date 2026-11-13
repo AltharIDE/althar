@@ -16,10 +16,6 @@ const meta = {
 export default meta
 type Story = StoryObj<typeof meta>
 
-export const Full: Story = {}
-export const Short: Story = { args: { short: true } }
-/** Who is speaking, at the head of a turn. */
-export const Strong: Story = { args: { strong: true } }
 /** How it is reached, on hover: the agent that runs it, and the account; read out after its name. */
 export const Via: Story = {
   args: { model: { ...OPUS, via: 'via Claude Code · work' } },
@@ -30,11 +26,6 @@ export const Via: Story = {
     await expect(await within(document.body).findByRole('tooltip')).toHaveTextContent('via Claude Code · work')
   },
 }
-/** Short, the full name comes with it on hover. */
-export const ShortVia: Story = { args: { model: { ...OPUS, via: 'via Claude Code' }, short: true } }
-/** A model with no mark prints its name alone. */
-export const NoMark: Story = { args: { model: UNKNOWN_MODEL } }
-
 export const Every: Story = {
   render: () => (
     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, max-content)', gap: '10px 32px' }}>

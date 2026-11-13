@@ -9,9 +9,6 @@ const meta = { title: 'Primitives/Heading', component: Heading, args: { level: 2
 export default meta
 type Story = StoryObj<typeof meta>
 
-export const Level2: Story = {}
-export const Level3: Story = { args: { level: 3 } }
-
 /* The rank sets the outline, not the look: without a class every rank is plain text. */
 export const AllStates: Story = {
   render: () => (

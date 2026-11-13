@@ -22,6 +22,7 @@ import {
   SettingSwitch,
   TaskEnd,
   unreachable,
+  Problem,
 } from '@althar/ui'
 import {
   type CommandPlace,
@@ -353,11 +354,7 @@ export function RulesSection({ model }: { model: RulesModel }) {
   const project = model.project ?? ''
   return (
     <>
-      {model.error !== null && (
-        <p className={s.error} role="alert">
-          {model.error}
-        </p>
-      )}
+      {model.error !== null && <Problem className={s.error}>{model.error}</Problem>}
       {rules === null ? (
         <PartPending label={pendingText.page} />
       ) : (

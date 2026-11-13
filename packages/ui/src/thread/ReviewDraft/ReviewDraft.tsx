@@ -13,6 +13,7 @@ import { Button } from '../../primitives/Button/Button'
 import { FieldArea, FieldError } from '../../primitives/Field/Field'
 import { Heading, type HeadingLevel } from '../../primitives/Heading/Heading'
 import { LinkButton } from '../../primitives/LinkButton/LinkButton'
+import { Problem } from '../../primitives/Problem/Problem'
 import { Segmented } from '../../primitives/Segmented/Segmented'
 import { Switch } from '../../primitives/Switch/Switch'
 import { VisuallyHidden } from '../../primitives/VisuallyHidden/VisuallyHidden'
@@ -483,13 +484,13 @@ function DraftCard({ root, draft, state, actions, saving, headingLevel, t }: Car
           )}
           <div aria-live="polite">
             {failed && (
-              <p className={s.error}>
+              <Problem className={s.said}>
                 {t.failed(source)}
                 {error && <> {error}</>}
-              </p>
+              </Problem>
             )}
             {unsure && (
-              <p className={cx(s.error, s.unsure)}>
+              <p className={cx(s.said, s.unsure)}>
                 {t.uncertain(source)}
                 {error && <> {error}</>}
               </p>

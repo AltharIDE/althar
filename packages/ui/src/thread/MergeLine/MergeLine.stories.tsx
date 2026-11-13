@@ -78,11 +78,6 @@ export const InTheQueue: Story = {
   },
 }
 
-/** Green and up to date: it is merging. */
-export const Merging: Story = {
-  args: { rows: [pull(778, 'Follow-up PRs say what they do', 'merging')] },
-}
-
 /** Sent back, with what is wrong and who settles it, under its title. */
 export const SentBack: Story = {
   args: {

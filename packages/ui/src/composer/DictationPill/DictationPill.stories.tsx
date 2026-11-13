@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react'
 import { expect, userEvent, within } from 'storybook/test'
 
 import { Brand } from '../../foundations/brands/brands'
+import { States } from '../../storybook/States'
 import { Composer } from '../Composer/Composer'
 import { Behind } from '../Behind/Behind'
 import { DictationPill } from './DictationPill'
@@ -38,8 +39,6 @@ export default meta
 type Story = StoryObj<typeof meta>
 
 export const Listening_: Story = { name: 'Listening' }
-export const JustStarted: Story = { args: { elapsed: '0:00', words: '' } }
-export const Writing: Story = { args: { phase: 'writing', elapsed: null } }
 export const Written: Story = {
   args: {
     phase: 'written',
@@ -49,8 +48,6 @@ export const Written: Story = {
     move: { label: 'Put it in this task', onMove: () => {} },
   },
 }
-/** It can't go from here (the task's lead isn't on it): back to its composer to send it. */
-export const WrittenNotSendable: Story = { args: { phase: 'written', elapsed: null, onKeep: () => {} } }
 export const SendFailed: Story = {
   args: { ...Written.args, phase: 'written', error: "It didn't send. It's still here." },
 }
@@ -109,6 +106,24 @@ export const OverAComposer: Story = {
           onStop={() => {}}
         />
       }
+    />
+  ),
+}
+
+export const AllStates: Story = {
+  render: (args) => (
+    <States
+      size="thread"
+      cells={[
+        { state: 'listening', node: <DictationPill {...args} /> },
+        { state: 'just started', node: <DictationPill {...args} elapsed="0:00" words="" /> },
+        { state: 'writing', node: <DictationPill {...args} phase="writing" elapsed={null} /> },
+        { state: 'written', node: <DictationPill {...args} {...Written.args} /> },
+        // It can't go from here (the task's lead isn't on it): back to its composer to send it.
+        { state: 'written, can’t go from here', node: <DictationPill {...args} phase="written" elapsed={null} onKeep={() => {}} /> },
+        { state: 'didn’t send', node: <DictationPill {...args} {...SendFailed.args} /> },
+        { state: 'not written down', node: <DictationPill {...args} {...Failed.args} /> },
+      ]}
     />
   ),
 }

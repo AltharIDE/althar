@@ -43,7 +43,7 @@ function look(result: Result, t: CopyButtonText): { said: string; icon: IconName
     case 'done':
       return { said: t.copied, icon: 'check' }
     case 'failed':
-      return { said: t.failed, icon: 'close' }
+      return { said: t.failed, icon: 'problem' }
     default:
       return unreachable(result)
   }

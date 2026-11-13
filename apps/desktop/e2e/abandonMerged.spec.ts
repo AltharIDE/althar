@@ -6,7 +6,7 @@ import { join } from 'node:path'
 import { expect, test } from '@playwright/test'
 
 import { repository } from '../tests/repository'
-import { connectGitHub, launch, openFirstProject, say } from './support'
+import { connectGitHub, launch, openFirstProject, say, showPanes } from './support'
 
 /*
  * A merged task with a commit after its pull request, as DEV-58 was (ADR-034):
@@ -49,7 +49,7 @@ test('a merged task with a commit after its pull request needs the person, and a
     git(clone, 'commit', '-q', '-m', `Merge ${branch}`)
     git(clone, 'push', '-q', 'origin', 'main')
     await page.getByRole('button', { name: 'Back to meridian' }).click()
-    await page.getByRole('radio', { name: /^Board/ }).click()
+    await showPanes(page, { conversation: false, board: true })
     const work = page.getByRole('region', { name: 'The project’s work' })
     await expect(work.getByText('PR #1 merged')).toBeVisible()
 

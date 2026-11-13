@@ -852,11 +852,16 @@ describe('the start', () => {
     // The tour not seen: with no projects read, this may be someone's install of long ago, so it isn't greeted as new.
     withServices(<Start onProject={vi.fn()} />, client, host)
     // Said on the agents' step, where no agent could be asked; the project can still be made.
-    expect((await screen.findByRole('alert')).textContent).toBe("Althar's runtime didn't answer. If it keeps happening, restart Althar.")
+    // Said as a problem, with Check again beside it.
+    expect((await screen.findByRole('alert')).textContent).toBe(
+      "Althar's runtime didn't answer. If it keeps happening, restart Althar. Check again",
+    )
     expect(screen.getByRole('heading', { name: 'Your agents', level: 1 })).toBeTruthy()
     expect(screen.queryByRole('button', { name: 'Skip' })).toBeNull()
     expect(screen.queryByRole('button', { name: 'Back' })).toBeNull()
-    expect(screen.getByText('None found.')).toBeTruthy()
+    // Not "None found." beside it, which nothing found: the error stands there, with Check again.
+    expect(screen.queryByText('None found.')).toBeNull()
+    expect(screen.getByRole('button', { name: 'Check again' })).toBeTruthy()
     await userEvent.click(screen.getByRole('button', { name: 'Continue without one' }))
     expect(await screen.findByText('None found in the usual places.')).toBeTruthy()
     await userEvent.click(screen.getByRole('button', { name: /Choose a folder/ }))

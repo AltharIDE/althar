@@ -6,14 +6,14 @@ import { join } from 'node:path'
 import { expect, test } from '@playwright/test'
 
 import { author, repository } from '../tests/repository'
-import { connectGitHub, launch, openFirstProject, say, startTask, still, toBoard } from './support'
+import { connectGitHub, launch, openFirstProject, say, showPanes, startTask, still } from './support'
 
 /*
  * The line up next, in a real window with the fake agent and the fake
  * GitHub: with one agent at a time, held by a server a finished task left
  * running, three reviews of someone else's pull requests, each started from
- * its plan, and a quick task with none, moved off Scratch to the board, wait in Up next, not Running. The
- * person drags the quick task to the front, to the back, and to the front
+ * its plan, and a task planned without a review, wait in Up next, not Running. The
+ * person drags the task to the front, to the back, and to the front
  * again let go outside the lane, starts a drag they cancel with Escape, and
  * moves the review last in line to the front from its own view; when the server stops, the line starts
  * in the person's order. Shots: test-results/line-*.png.
@@ -21,7 +21,7 @@ import { connectGitHub, launch, openFirstProject, say, startTask, still, toBoard
 
 const PULLS = ['Retry checkout once', 'Cache the partner list', 'Log refunds by partner']
 
-test('lists reviews and a quick task waiting for an agent in Up next, and starts them in the order the person puts them', async () => {
+test('lists reviews and a task waiting for an agent in Up next, and starts them in the order the person puts them', async () => {
   const home = mkdtempSync(join(tmpdir(), 'althar-e2e-'))
   const projects = join(home, 'Projects')
   mkdirSync(projects)
@@ -61,7 +61,7 @@ test('lists reviews and a quick task waiting for an agent in Up next, and starts
     await page.keyboard.press('Escape')
     await tabs.getByRole('button', { name: /^meridian/ }).click()
 
-    // A task whose server keeps the one place, then three reviews and a quick task, all waiting for it.
+    // A task whose server keeps the one place, then three reviews and a task, all waiting for it.
     await startTask(page, 'Serve the prototype', '[lead:serve] [lead:finish]')
     await expect(page.getByText('Ready', { exact: true })).toBeVisible()
     for (const [index] of PULLS.entries()) {
@@ -70,14 +70,12 @@ test('lists reviews and a quick task waiting for an agent in Up next, and starts
       await page.getByRole('button', { name: 'Start now' }).last().click()
       await expect(page.getByText(/^Waiting: 1 of 1 agents busy/)).toHaveCount(index + 1)
     }
-    // The quick task's lead keeps at it once it starts, so it keeps the place.
-    await say(page, 'Try the double jump. [coordinator:start] [lead:wait]')
+    // Planned work waits for a task place; an aside from start_task would start outside this line.
+    await startTask(page, 'Try the double jump', '[lead:wait]')
     await expect(page.getByText(/^Waiting: 1 of 1 agents busy/)).toHaveCount(4)
 
-    await page.getByRole('radio', { name: /^Board/ }).click()
+    await showPanes(page, { conversation: false, board: true })
     const work = page.getByRole('region', { name: 'The project’s work' })
-    // A chat starts on Scratch, off the lanes: the person moves it to the board, where it waits in line with the reviews.
-    await toBoard(page, 'Try the double jump')
     const next = work.getByRole('region', { name: 'Up next' })
     const running = work.getByRole('region', { name: 'Running' })
     const rows = next.getByRole('listitem')
@@ -107,7 +105,7 @@ test('lists reviews and a quick task waiting for an agent in Up next, and starts
         .toEqual(titles)
     const JUMP = 'Try the double jump'
 
-    // The person drags the quick task by its grip to the front: the rows make room, and once let go it says it is next.
+    // The person drags the task by its grip to the front: the rows make room, and once let go it says it is next.
     await rows.nth(3).hover()
     const grip = next.getByRole('button', { name: /^Move Try the double jump.* in the line$/ })
     const from = await grip.boundingBox()
@@ -194,14 +192,14 @@ test('lists reviews and a quick task waiting for an agent in Up next, and starts
     // First in the line before the place frees, or what was first starts in it.
     await expect(page.getByRole('button', { name: 'Waiting for a place, First in Up next' })).toBeVisible()
 
-    // The place frees: the line starts in the person's order, the review they put first (which reads in a turn), then the quick
+    // The place frees: the line starts in the person's order, the review they put first (which reads in a turn), then the
     // task, which keeps the place; the two older reviews wait on, oldest first.
     await behind
       .getByRole('button', { name: /^Stop what/ })
       .first()
       .click()
     await page.getByRole('button', { name: 'Back to meridian' }).click()
-    await page.getByRole('radio', { name: /^Board/ }).click()
+    await showPanes(page, { conversation: false, board: true })
     await expect(running.getByRole('button', { name: `Review #3: ${PULLS[2] ?? ''}`, exact: true })).toBeVisible()
     await expect(running.getByRole('button', { name: /^Try the double jump/ })).toBeVisible()
     await expect(rows).toHaveCount(2)

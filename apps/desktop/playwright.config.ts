@@ -1,4 +1,5 @@
 import { budget } from '@althar/testing/budget'
+import { playwrightShard } from '@althar/testing/shards'
 import { defineConfig } from '@playwright/test'
 
 /*
@@ -12,6 +13,7 @@ import { defineConfig } from '@playwright/test'
  */
 export default defineConfig({
   testDir: 'e2e',
+  ...(process.env.E2E_SHARD === undefined ? {} : { testMatch: [...playwrightShard(import.meta.dirname, process.env.E2E_SHARD)] }),
   timeout: budget.large,
   expect: { timeout: budget.medium },
   workers: 1,

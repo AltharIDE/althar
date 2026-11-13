@@ -29,6 +29,7 @@ import { Tasks } from '../src/Tasks'
 import { addItem } from '../src/threads'
 import { KEEP_ALIVE_MS, ToolServer, type ToolAccess } from '../src/ToolServer'
 import { callTool, fakeSandbox, notices, repository, runtime, sessionMetas, task as newTask, turns, until, withWork } from './support'
+import { knownModels } from './knownModels'
 
 /*
  * The coordinator loop (docs/plans/mvp.md): the person asks the coordinator,
@@ -39,6 +40,7 @@ import { callTool, fakeSandbox, notices, repository, runtime, sessionMetas, task
  */
 
 const opened = Effect.gen(function* () {
+  yield* knownModels
   const projects = yield* Projects
   const coordinator = yield* Coordinator
   const project = yield* projects.open({ envelope: yield* Runtime.envelope('project.open', {}), path: repository() })
@@ -1249,7 +1251,7 @@ describe('the coordinator', () => {
       const sql = yield* SqlClient.SqlClient
       const origin = repository()
       const clone = join(mkdtempSync(join(tmpdir(), 'althar-clone-')), 'meridian')
-      execFileSync('git', ['clone', '-q', origin, clone])
+      execFileSync('git', ['clone', '-q', '--', origin, clone])
       // The remote moves on after the clone.
       writeFileSync(join(origin, 'README.md'), '# Meridian, later\n')
       execFileSync('git', ['-c', 'user.name=Test', '-c', 'user.email=test@althar.test', 'commit', '-qam', 'Later'], { cwd: origin })
@@ -1345,7 +1347,7 @@ describe("the coordinator's tools", () => {
       yield* callTool(access, 'propose_plan', { task: 'plan-me', lead: { agent: 'codex', model: 'large' } })
       assert.include(yield* callTool(access, 'list_tasks', {}), '- plan-me: Plan me (planned)')
       assert.notInclude(yield* callTool(access, 'read_task', { task: 'plan-me' }), 'no plan')
-    }).pipe(Effect.provide(withQueries())),
+    }).pipe(Effect.provide(withQueries(undefined, undefined, { countdown: Duration.minutes(5) }))),
   )
 
   it.live('says what propose_plan takes when lead or review is given as a name, and plans again without making a second plan', () =>
@@ -1399,7 +1401,7 @@ describe("the coordinator's tools", () => {
         [second?.id],
       )
       assert.include(yield* callTool(access, 'propose_plan', plan), 'has started already; message its lead instead')
-    }).pipe(Effect.provide(withQueries())),
+    }).pipe(Effect.provide(withQueries(undefined, undefined, { countdown: Duration.minutes(5) }))),
   )
 
   it.live('makes one plan when the same propose_plan arrives again while its first is still being handled', () =>
@@ -1425,7 +1427,7 @@ describe("the coordinator's tools", () => {
       )
       // Every plan ever made for the task, replaced ones included: one, so the countdown was never restarted.
       assert.lengthOf(yield* sql`SELECT id FROM task_plans`, 1)
-    }).pipe(Effect.provide(withQueries())),
+    }).pipe(Effect.provide(withQueries(undefined, undefined, { countdown: Duration.minutes(5) }))),
   )
 
   it.live('keeps the connection an agent holds for its next call open for minutes, not Node’s five seconds', () =>
@@ -1565,7 +1567,7 @@ describe("the coordinator's tools", () => {
         yield* callTool({ ...lead, threadId: 'thr_missing' }, 'finish_step', { summary: 'Did it.', built: 'A hello.' }),
         'Althar could not record that. Try again.',
       )
-    }).pipe(Effect.provide(withQueries())),
+    }).pipe(Effect.provide(withQueries(undefined, undefined, { countdown: Duration.minutes(5) }))),
   )
 })
 

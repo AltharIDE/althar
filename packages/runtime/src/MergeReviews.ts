@@ -13,9 +13,9 @@ import { touchTask } from './cards'
 import { envelope } from './envelope'
 import { git } from './git'
 import { Instance } from './Instance'
+import { makeKeyedLock } from './keyedLock'
 import { Live, type LiveEvent } from './Live'
 import { fact, timestamp } from './records'
-import { smallChangeOf } from './smallChange'
 import { MERGE_REVIEW, mergeCopyOf } from './reviewCopy'
 import { Sessions } from './Sessions'
 import { addItem } from './threads'
@@ -26,8 +26,8 @@ import { summarize } from './words'
 /*
  * The review after a merge, in the same task (a task is a conversation plus
  * parts, "After merge, in the same task"). Where a task with a reviewer has
- * a pull request merge with something of it no review read (the small-change
- * lane, or what Merge now merged), that pull request is owed a review. The
+ * a pull request merge with something of it no review read (an explicitly
+ * configured after-merge pass, or what Merge now merged), that pull request is owed a review. The
  * task's own reviewer reads a copy at the merged head, from what the last
  * review read, in a thread of the task's own (`merge_review`), and reports
  * in the task's thread. Nothing is posted on the merged pull request.
@@ -37,7 +37,7 @@ import { summarize } from './words'
  * starts (LeftBehind.ts). What it brings back is the project's rule, or the
  * task's own word, read when the merge is heard and kept on the review
  * (afterMergeReview.ts): under `major` only blocking and major findings, under
- * `all` any; under `none` a small change owes no review at all. What it
+ * `all` any; under `none` an explicitly after-merge plan owes no review at all. What it
  * doesn't bring back is a line in the thread, its findings readable there.
  * What it brings back puts the task in Needs you for that change, until the
  * person says Fix it, which hands the findings to the lead in a turn that
@@ -103,7 +103,7 @@ interface Row {
 }
 
 /**
- * What a small change's review after its merge brings back: the project's rule, the task's own word (null where it leaves it
+ * What an explicitly requested review after merge brings back: the project's rule, the task's own word (null where it leaves it
  * to the project), and what holds of the two.
  */
 export interface AfterMergeChoice {
@@ -114,6 +114,8 @@ export interface AfterMergeChoice {
 
 /** Why a press on a review after a merge did nothing, in words for the window. */
 export class MergeReviewRefused extends Schema.TaggedError<MergeReviewRefused>()('MergeReviewRefused', { message: Schema.String }) {}
+
+const NO_REVIEW_OWED = 'external_link.merge_review_not_owed'
 
 const wordsOf = (row: Pick<Row, 'number' | 'url'>, prefix = '#') =>
   row.number === null ? (row.url.split('/').at(-1) ?? 'the pull request') : `${prefix}${row.number}`
@@ -188,12 +190,21 @@ export class MergeReviews extends Context.Service<
     /** The task's reviews after a merge, oldest first. */
     ofTask(taskId: string): Effect.Effect<ReadonlyArray<MergeReview>, unknown>
     /**
-     * One small change's own word on its review after the merge, over its project's rule, until it merges: `review`, reviewed
+     * The person's explicit choice of a task's review after the merge, over its project's rule, until it merges: `review`, reviewed
      * after it merges though the rule says none; `none`, not reviewed after it; null, as the project's rule says. Kept as a
-     * fact, read when the merge is heard. Refused for a task that isn't a small change, one merged already, and `review` where
+     * fact, read when the merge is heard. Saved reviews of earlier changes remain unchanged. Refused once every current change
+     * merged or has its review saved already, and for `review` where
      * its plan names no reviewer.
      */
-    choose(taskId: string, review: TaskAfterMerge | null, actorId: ActorId): Effect.Effect<AfterMergeChoice, unknown>
+    choose(
+      taskId: string,
+      review: TaskAfterMerge | null,
+      actorId: ActorId,
+      /** Persists explicit timing under the same decision lock, after validation and reconciliation of older merges. */
+      prepare?: Effect.Effect<void, unknown>,
+    ): Effect.Effect<AfterMergeChoice, unknown>
+    /** Preserve known merged decisions before changing canonical review timing through another task action. */
+    beforeChange<A>(taskId: string, change: Effect.Effect<A, unknown>): Effect.Effect<A, unknown>
   }
 >()('@althar/runtime/MergeReviews') {
   static readonly layer: Layer.Layer<MergeReviews, never, Store> = Layer.effect(
@@ -205,6 +216,7 @@ export class MergeReviews extends Context.Service<
       const live = yield* Live
       const instance = yield* Instance
       const scope = yield* Scope.fork(yield* Effect.scope, 'sequential')
+      const decisions = makeKeyedLock()
 
       const rowsOf = (taskId: string) =>
         Effect.gen(function* () {
@@ -256,8 +268,13 @@ export class MergeReviews extends Context.Service<
           }
           const steps = (read as { readonly steps?: unknown }).steps
           if (!Array.isArray(steps)) return undefined
-          const review = steps.find((step): step is Reviewer & { readonly key: string } => (step as { key?: unknown })?.key === 'review')
+          const review = steps.find(
+            (step): step is Reviewer & { readonly key: string; readonly skipped?: boolean } =>
+              (step as { key?: unknown })?.key === 'review',
+          )
           if (review === undefined || typeof review.agentId !== 'string') return undefined
+          // Fast-lane plans deliberately skip the before-merge pass while retaining their reviewer after the merge.
+          if (review.skipped === true && (read as { readonly reviewAfterMerge?: unknown }).reviewAfterMerge !== true) return undefined
           return {
             reviewer: { agentId: review.agentId, model: review.model ?? null, effort: review.effort ?? null } satisfies Reviewer,
             afterMerge: (read as { readonly reviewAfterMerge?: unknown }).reviewAfterMerge === true,
@@ -330,6 +347,7 @@ export class MergeReviews extends Context.Service<
             SELECT s.commit_sha FROM workspace_snapshots s JOIN node_attempts a ON a.id = s.node_attempt_id
             JOIN nodes n ON n.id = a.node_id
             WHERE s.workspace_id = ${workspaceId} AND n.node_key = 'review' AND s.commit_sha IS NOT NULL
+              AND a.state = 'succeeded' AND json_extract(a.output, '$.verdict') IS NOT NULL
             ORDER BY s.taken_at DESC, s.rowid DESC LIMIT 1`
           if (last?.commitSha == null) return null
           const tree = yield* git(dir, 'rev-parse', `${last.commitSha}^{tree}`)
@@ -342,32 +360,66 @@ export class MergeReviews extends Context.Service<
           )
         }).pipe(Effect.orElseSucceed(() => null))
 
+      /** A definitive decision for this merge, including no debt, survives policy changes and the recovery sweep. */
+      const noReviewOwed = (
+        link: { readonly id: string; readonly projectId: ProjectId; readonly revision: number },
+        url: string,
+        reason: 'no_reviewer' | 'before_ship' | 'rule_none' | 'review_task' | 'already_reviewed',
+      ) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          yield* sql.withTransaction(
+            Effect.gen(function* () {
+              const [had] = yield* sql<{ one: number }>`SELECT 1 AS one FROM record_events
+                WHERE aggregate_type = 'external_link' AND aggregate_id = ${link.id} AND type = ${NO_REVIEW_OWED} LIMIT 1`
+              if (had !== undefined) return
+              yield* fact({
+                projectId: link.projectId,
+                aggregateType: 'external_link',
+                aggregateId: link.id,
+                revision: link.revision,
+                type: NO_REVIEW_OWED,
+                payload: { url, reason },
+                actorId: instance.systemId,
+              })
+            }),
+          )
+        })
+
       /**
-       * A pull request merged. One owed already (Merge now owed it as it merged) starts; else, on the small-change lane, it is
-       * owed for what of it no review read, and starts. Any other merge was reviewed before it shipped.
+       * A pull request merged. Existing debt starts; otherwise the configured after-merge pass is owed for work no review read.
+       * A definitive decision that no review is owed is kept too: future task choices must not resurrect an earlier merge.
        */
       const merged = (taskId: string, url: string) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
           if ((yield* rowOf(url)) !== undefined) return yield* start(url)
+          const [link] = yield* sql<{ id: string; projectId: ProjectId; revision: number; snapshot: string }>`
+            SELECT id, project_id, revision, snapshot FROM external_links
+            WHERE task_id = ${taskId} AND kind = 'change' AND url = ${url} ORDER BY created_at DESC, rowid DESC LIMIT 1`
+          if (link === undefined) return
+          const snapshot = JSON.parse(link.snapshot) as { readonly number?: unknown; readonly headSha?: unknown; readonly state?: unknown }
+          if (snapshot.state !== 'merged') return
+          const [decided] = yield* sql<{ one: number }>`SELECT 1 AS one FROM record_events
+            WHERE aggregate_type = 'external_link' AND aggregate_id = ${link.id} AND type = ${NO_REVIEW_OWED} LIMIT 1`
+          if (decided !== undefined) return
           const plan = yield* reviewerOf(taskId)
-          // A plan that named no reviewer gets no review after its merge.
-          if (plan === undefined || !plan.afterMerge) return
-          // Nor one whose project's rule, or its own word, says none: read now, as the merge is heard.
+          if (plan === undefined) {
+            // A malformed stored plan is uncertain, not evidence that no reviewer was configured.
+            const [stored] = yield* sql<{ parameters: string }>`
+              SELECT parameters FROM task_plans WHERE task_id = ${taskId} ORDER BY proposed_at DESC, rowid DESC LIMIT 1`
+            if (stored !== undefined && !Array.isArray((JSON.parse(stored.parameters) as { readonly steps?: unknown }).steps)) return
+            return yield* noReviewOwed(link, url, 'no_reviewer')
+          }
+          if (!plan.afterMerge) return yield* noReviewOwed(link, url, 'before_ship')
           const rule = (yield* afterMergeNow(taskId)).holds
-          if (rule === 'none') return
+          if (rule === 'none') return yield* noReviewOwed(link, url, 'rule_none')
           const reviewer = { ...plan.reviewer, bringsBack: rule } satisfies Reviewer
           // Reviewed already in a review task of its own, as an Althar before this one did.
           const [reviewTask] = yield* sql<{
             one: number
           }>`SELECT 1 AS one FROM external_links WHERE kind = 'review' AND url = ${url} LIMIT 1`
-          if (reviewTask !== undefined) return
-          const [link] = yield* sql<{ projectId: ProjectId; snapshot: string }>`
-            SELECT project_id, snapshot FROM external_links WHERE task_id = ${taskId} AND kind = 'change' AND url = ${url}
-            ORDER BY created_at DESC, rowid DESC LIMIT 1`
-          if (link === undefined) return
-          const snapshot = JSON.parse(link.snapshot) as { readonly number?: unknown; readonly headSha?: unknown; readonly state?: unknown }
-          if (snapshot.state !== 'merged') return
+          if (reviewTask !== undefined) return yield* noReviewOwed(link, url, 'review_task')
           const head = typeof snapshot.headSha === 'string' && snapshot.headSha !== '' ? snapshot.headSha : null
           const number = typeof snapshot.number === 'number' ? snapshot.number : null
           const place = yield* placeOf(taskId, url)
@@ -375,7 +427,7 @@ export class MergeReviews extends Context.Service<
           const commit = place === undefined || dir === null ? null : yield* mergedCommit(dir, head, number, place)
           // What the last review read: the merged head itself, and nothing is owed.
           const upTo = place === undefined || dir === null || commit === null ? null : yield* reviewedUpTo(place.id, dir, commit)
-          if (upTo !== null && upTo === commit) return
+          if (upTo !== null && upTo === commit) return yield* noReviewOwed(link, url, 'already_reviewed')
           const at = yield* timestamp
           yield* sql`
             INSERT INTO merge_reviews ${sql.insert({
@@ -406,7 +458,7 @@ export class MergeReviews extends Context.Service<
           const sql = yield* SqlClient.SqlClient
           const plan = yield* reviewerOf(taskId)
           if (plan === undefined) return
-          // Merge now merges what no review read: it is reviewed after, but for a small change whose rule says none.
+          // Merge now merges what no review read: it is reviewed after, except an explicitly after-merge plan whose rule says none.
           const rule = (yield* afterMergeNow(taskId)).holds
           if (rule === 'none' && plan.afterMerge) return
           const reviewer = { ...plan.reviewer, bringsBack: rule === 'all' ? 'all' : 'major' } satisfies Reviewer
@@ -443,13 +495,18 @@ export class MergeReviews extends Context.Service<
        * rule as the merge is heard: a small change's whose rule or own word now says none is no longer owed, and dropped;
        * any other keeps what the rule brings back now. Undefined where it was dropped.
        */
-      const ruleOnMerge = (row: Row) =>
+      const ruleOnMerge = (row: Row, link: { readonly id: string; readonly projectId: ProjectId; readonly revision: number }) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
           const plan = yield* reviewerOf(row.taskId)
           const rule = (yield* afterMergeNow(row.taskId)).holds
           if (rule === 'none' && plan?.afterMerge === true) {
-            yield* sql`DELETE FROM merge_reviews WHERE url = ${row.url} AND state = 'owed'`
+            yield* sql.withTransaction(
+              Effect.gen(function* () {
+                yield* noReviewOwed(link, row.url, 'rule_none')
+                yield* sql`DELETE FROM merge_reviews WHERE url = ${row.url} AND state = 'owed'`
+              }),
+            )
             yield* touchTask(row.taskId)
             return undefined
           }
@@ -465,17 +522,17 @@ export class MergeReviews extends Context.Service<
         Effect.gen(function* () {
           if (row.head !== null) return { row, merged: true }
           const sql = yield* SqlClient.SqlClient
-          const [link] = yield* sql<{ snapshot: string }>`
-            SELECT snapshot FROM external_links WHERE task_id = ${row.taskId} AND kind = 'change' AND url = ${row.url}
+          const [link] = yield* sql<{ id: string; projectId: ProjectId; revision: number; snapshot: string }>`
+            SELECT id, project_id, revision, snapshot FROM external_links WHERE task_id = ${row.taskId} AND kind = 'change' AND url = ${row.url}
             ORDER BY created_at DESC, rowid DESC LIMIT 1`
           const snapshot = link === undefined ? {} : (JSON.parse(link.snapshot) as { readonly state?: unknown; readonly headSha?: unknown })
           if (snapshot.state === 'closed') {
             yield* setState(row.url, { state: 'stopped', message: 'It closed without merging.' })
             return { row, merged: false }
           }
-          if (snapshot.state !== 'merged' || typeof snapshot.headSha !== 'string') return { row, merged: false }
+          if (link === undefined || snapshot.state !== 'merged' || typeof snapshot.headSha !== 'string') return { row, merged: false }
           // Heard merged: what is owed, and what it brings back, is read by the rule now, not as it was owed.
-          const now = yield* ruleOnMerge(row)
+          const now = yield* ruleOnMerge(row, link)
           if (now === undefined) return { row, merged: false }
           yield* sql`UPDATE merge_reviews SET head = ${snapshot.headSha} WHERE url = ${row.url}`
           return { row: { ...now, head: snapshot.headSha }, merged: true }
@@ -817,28 +874,54 @@ export class MergeReviews extends Context.Service<
           })),
         )
 
-      const choose = (taskId: string, review: TaskAfterMerge | null, actorId: ActorId) =>
+      const reconcileMerged = (taskId: string) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const links = yield* sql<{ url: string }>`SELECT url FROM external_links
+            WHERE task_id = ${taskId} AND kind = 'change' AND json_extract(snapshot, '$.state') = 'merged'`
+          for (const link of links) yield* merged(taskId, link.url)
+        })
+
+      const choose = (taskId: string, review: TaskAfterMerge | null, actorId: ActorId, prepare?: Effect.Effect<void, unknown>) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
           const [task] = yield* sql<{ projectId: ProjectId; revision: number }>`
             SELECT project_id AS projectId, revision FROM tasks WHERE id = ${taskId}`
           if (task === undefined) return yield* new MergeReviewRefused({ message: 'That task isn’t here any more.' })
-          const [plan] = yield* sql<{ parameters: string }>`
-            SELECT parameters FROM task_plans WHERE task_id = ${taskId} ORDER BY proposed_at DESC, rowid DESC LIMIT 1`
-          const small = smallChangeOf(plan?.parameters ?? null)
-          if (small === undefined)
-            return yield* new MergeReviewRefused({
-              message: 'Only a small change is reviewed after it merges: a full task’s review runs before it ships.',
-            })
-          if (review === 'review' && small.review === null)
+          const configured = yield* reviewerOf(taskId)
+          if (review === 'review' && configured === undefined)
             return yield* new MergeReviewRefused({
               message: 'Its plan names no reviewer, so there is nobody to review it after it merges.',
             })
-          const [link] = yield* sql<{ snapshot: string }>`
-            SELECT snapshot FROM external_links WHERE task_id = ${taskId} AND kind = 'change' ORDER BY created_at DESC, rowid DESC LIMIT 1`
-          const state = link === undefined ? null : (JSON.parse(link.snapshot) as { readonly state?: unknown }).state
-          if (state === 'merged' || (yield* rowsOf(taskId)).length > 0)
+          const links = yield* sql<{ url: string; snapshot: string }>`
+            SELECT url, snapshot FROM external_links WHERE task_id = ${taskId} AND kind = 'change' ORDER BY created_at, rowid`
+          // As Changes.latestOf does: each repository's open pull request, else its newest. Earlier merges keep their saved
+          // reviewer and rule; they do not settle what a new follow-up, or an unmerged sibling, should do.
+          const current = new Map<string, { readonly url: string; readonly state: string | undefined }>()
+          for (const link of links) {
+            const snapshot = JSON.parse(link.snapshot) as { readonly state?: string; readonly repository?: ReadonlyArray<string> }
+            const repository = snapshot.repository?.join('/').toLowerCase() ?? link.url
+            if (current.get(repository)?.state !== 'open') current.set(repository, { url: link.url, state: snapshot.state })
+          }
+          const reviews = yield* rowsOf(taskId)
+          // The task's choice is shared by its repositories. Debt saved before a merge still reads it when that merge lands:
+          // changing it for a sibling now would also change that debt. Once the merged head is saved, its choice is independent.
+          if (reviews.some((row) => row.head === null && (row.state === 'owed' || row.state === 'running')))
+            return yield* new MergeReviewRefused({
+              message: 'A pull request is waiting to merge with its review already saved. Change this choice after that merge finishes.',
+            })
+          const saved = new Set(reviews.map((row) => row.url))
+          const mutable = [...current.values()].some((link) => link.state !== 'merged' && !saved.has(link.url))
+          if (current.size === 0 ? saved.size > 0 : !mutable)
             return yield* new MergeReviewRefused({ message: 'It merged already: what its review after the merge does was settled then.' })
+          // Older launches may have heard a merge without recording its no-debt decision. Reconcile those links under the
+          // old plan and policy before a future choice changes either; genuine missing debt is repaired as before.
+          yield* reconcileMerged(taskId)
+          if ((yield* rowsOf(taskId)).some((row) => row.head === null && (row.state === 'owed' || row.state === 'running')))
+            return yield* new MergeReviewRefused({
+              message: 'A pull request is waiting to merge with its review already saved. Change this choice after that merge finishes.',
+            })
+          if (prepare !== undefined) yield* prepare
           const was = yield* afterMergeNow(taskId)
           if (was.task !== review)
             yield* fact({
@@ -914,8 +997,10 @@ export class MergeReviews extends Context.Service<
 
       return MergeReviews.of({
         merged: (taskId, url) =>
-          provide(merged(taskId, url)).pipe(Effect.catchCause((cause) => Effect.logWarning('Could not owe a review after a merge', cause))),
-        owe: (taskId, url, marks) => provide(owe(taskId, url, marks)),
+          provide(decisions.withLock(taskId, merged(taskId, url))).pipe(
+            Effect.catchCause((cause) => Effect.logWarning('Could not owe a review after a merge', cause)),
+          ),
+        owe: (taskId, url, marks) => provide(decisions.withLock(taskId, owe(taskId, url, marks))),
         retry: () => provide(retry).pipe(Effect.catchCause((cause) => Effect.logWarning('Could not start reviews after a merge', cause))),
         owns: (threadId) => provide(owns(threadId)),
         reported: (access, report) => provide(reported(access, report)),
@@ -923,7 +1008,22 @@ export class MergeReviews extends Context.Service<
         leave: (taskId, url) => provide(leave(taskId, url)),
         afterTurnOf: (threadId, inputId) => provide(afterTurnOf(threadId, inputId)),
         ofTask: (taskId) => provide(ofTask(taskId)),
-        choose: (taskId, review, actorId) => provide(choose(taskId, review, actorId)),
+        choose: (taskId, review, actorId, prepare) => provide(decisions.withLock(taskId, choose(taskId, review, actorId, prepare))),
+        beforeChange: (taskId, change) =>
+          provide(
+            decisions.withLock(
+              taskId,
+              Effect.gen(function* () {
+                yield* reconcileMerged(taskId)
+                if ((yield* rowsOf(taskId)).some((row) => row.head === null && (row.state === 'owed' || row.state === 'running')))
+                  return yield* new MergeReviewRefused({
+                    message:
+                      'A pull request is waiting to merge with its review already saved. Change this choice after that merge finishes.',
+                  })
+                return yield* change
+              }),
+            ),
+          ),
       })
     }),
   )

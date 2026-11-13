@@ -4,6 +4,7 @@ import type { Brand } from '../../foundations/brands/brands'
 import { Icon } from '../../foundations/Icon/Icon'
 import { BrandMark } from '../../foundations/Marks/Marks'
 import { cx } from '../../lib/cx'
+import { Rhythm } from '../../lib/rhythm'
 import s from './McpAct.module.css'
 
 /*
@@ -40,7 +41,7 @@ export interface McpActProps {
 
 export function McpAct({ server, brand, did, words, link, open = 'Open', className }: McpActProps) {
   return (
-    <div className={cx(s.card, className)}>
+    <div className={cx(s.card, className)} data-rhythm={Rhythm.Card}>
       <p className={s.head}>
         <McpServer name={server} brand={brand} />
         <span className={s.did}>{did}</span>
