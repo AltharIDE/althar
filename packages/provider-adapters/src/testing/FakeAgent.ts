@@ -1247,6 +1247,14 @@ const playRole = async (
       }
       // Asked to wait on the person's answer (`[lead:wait-for-person]`), it asks in a line and ends its turn; told the
       // answer, it carries on and finishes as it would have.
+      if (available.has('wait_for') && session.markers.has('[lead:wait-for-external]')) {
+        if (text.includes('[lead:wait-for-external]'))
+          return await call('wait_for', {
+            reason: 'The deployment to finish',
+            conditions: [{ kind: 'time', at: new Date(Date.now() + 60 * 60_000).toISOString() }],
+          })
+        return await finish()
+      }
       if (available.has('wait_for_person') && session.markers.has('[lead:wait-for-person]')) {
         if (text.includes('[lead:wait-for-person]'))
           return await call('wait_for_person', { question: 'Which ADRs should the compaction keep?' })

@@ -6,7 +6,7 @@ import { AcceptPeek, ActionButton, Dock, type PeekStep, TaskStatus, TrackStep, W
 
 import { keys, reads } from '../../data/reads'
 import { useServices } from '../../data/services'
-import { queuedWords, reconnectsWords, waitsWords } from '../../shared/agents'
+import { externalWaitWords, queuedWords, reconnectsWords, waitsWords } from '../../shared/agents'
 import { useModelNames } from '../../shared/modelNames'
 import { callKindOf, whereOf } from '../../shared/calls'
 import { checkOf } from '../../shared/checks'
@@ -224,15 +224,17 @@ export function DockView({
         title={task.title}
         {...(waiting !== null
           ? { note: waiting }
-          : task.queued !== null
-            ? { note: queuedWords(task.queued) }
-            : task.waits !== null
-              ? { note: waitsWords(name(task.waits.agentId), clock(task.waits.until), task.step, task.waits.left) }
-              : task.reconnects != null
-                ? { note: reconnectsWords(task.reconnects, clock) }
-                : task.summary === null
-                  ? {}
-                  : { note: task.summary.split('\n')[0] ?? '' })}
+          : task.externalWait !== undefined
+            ? { note: externalWaitWords(task.externalWait, clock) }
+            : task.queued !== null
+              ? { note: queuedWords(task.queued) }
+              : task.waits !== null
+                ? { note: waitsWords(name(task.waits.agentId), clock(task.waits.until), task.step, task.waits.left) }
+                : task.reconnects != null
+                  ? { note: reconnectsWords(task.reconnects, clock) }
+                  : task.summary === null
+                    ? {}
+                    : { note: task.summary.split('\n')[0] ?? '' })}
         status={
           task.phase === 'waiting'
             ? TaskStatus.Yours
