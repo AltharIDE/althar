@@ -67,6 +67,11 @@ describe('undo from a task message', () => {
         const original = readFileSync(join(path, 'README.md'), 'utf8')
         yield* sessions.start({ threadId: created.threadId, agentId: 'codex' })
         yield* idle(created.threadId, 1)
+        // A plan's system-only brief has no delivered chat message to undo and must not snapshot its repositories.
+        assert.isNull(
+          (yield* sql<{ checkpoints: string | null }>`SELECT checkpoints FROM turn_deliveries WHERE thread_id = ${created.threadId}`)[0]
+            ?.checkpoints,
+        )
         yield* say(created.threadId, 'Keep this earlier decision: retries stay bounded.')
         yield* idle(created.threadId, 2)
         const input = yield* say(created.threadId, '[answers-after:5s] Raise the retry limit to twenty.')

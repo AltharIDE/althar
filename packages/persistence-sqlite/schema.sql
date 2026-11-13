@@ -1638,9 +1638,13 @@ CREATE TABLE evidence_galleries (
 
 CREATE INDEX thread_items_gallery_reports ON thread_items (thread_id, sequence) WHERE kind = 'step_result';
 
+CREATE INDEX turn_delivery_inputs_by_input ON turn_delivery_inputs (user_input_id, delivery_id);
+
 CREATE TABLE turn_undo_recoveries (
     command_id TEXT PRIMARY KEY NOT NULL,
     thread_id TEXT NOT NULL REFERENCES threads(id),
     plans TEXT NOT NULL CHECK (json_valid(plans)),
     state TEXT NOT NULL CHECK (state IN ('prepared', 'completed', 'recovered'))
   ) STRICT;
+
+CREATE INDEX turn_undo_recoveries_by_thread_state ON turn_undo_recoveries (thread_id, state);

@@ -61,7 +61,10 @@ export const checkpointBeforeTurn = (threadId: string, deliveryId: string) =>
 export const checkpointAfterTurn = (deliveryId: string) =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient
-    const [row] = yield* sql<{ checkpoints: string | null }>`SELECT checkpoints FROM turn_deliveries WHERE id = ${deliveryId}`
+    // Removing a project stops its agents without writing anything else into the person's repositories.
+    const [row] = yield* sql<{ checkpoints: string | null }>`
+      SELECT d.checkpoints FROM turn_deliveries d JOIN projects p ON p.id = d.project_id
+      WHERE d.id = ${deliveryId} AND p.archived_at IS NULL`
     if (row?.checkpoints == null) return
     const points = yield* Schema.decodeUnknownEffect(TurnCheckpoints)(JSON.parse(row.checkpoints))
     const completed: Array<(typeof TurnCheckpoints.Type)[number]> = []

@@ -2233,7 +2233,14 @@ export class Sessions extends Context.Service<
             )
             .pipe(Effect.catchTag('TakenBack', () => Effect.succeed(false)))
           if (!claimed) return true
-          if (thread.role === 'task')
+          // System-only plan turns before the person speaks have no chat message to undo.
+          // Once chat undo is available, keep later system turns in the same restorable suffix.
+          if (
+            thread.role === 'task' &&
+            (inputs.some((input) => input.author === 'person' && input.shown === 1) ||
+              (yield* sql`SELECT 1 FROM turn_deliveries WHERE thread_id = ${thread.threadId} AND checkpoints IS NOT NULL AND undone_at IS NULL LIMIT 1`)
+                .length > 0)
+          )
             yield* checkpointBeforeTurn(thread.threadId, turnId).pipe(
               Effect.catchCause((cause) => Effect.logWarning('Could not checkpoint a chat turn', cause)),
             )
@@ -4992,7 +4999,7 @@ export class Sessions extends Context.Service<
                   const gate = yield* Deferred.make<void>()
                   undoing.set(item.threadId, gate)
                   return yield* Effect.gen(function* () {
-                    if (running !== undefined) yield* stopRunning(running, { state: 'completed' })
+                    if (running !== undefined) yield* stopRunning(running, { state: 'completed', reason: 'stopped' })
                     yield* recoverTurnUndo(item.threadId)
                     return yield* undoConversation(input)
                   }).pipe(
