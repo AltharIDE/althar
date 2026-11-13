@@ -175,6 +175,8 @@ export interface Client {
   readonly readOutput: (threadId: string, itemId: string) => Promise<OutputText>
   /** What a command a thread's session left running has printed so far. */
   readonly readBackgroundOutput: (threadId: string, id: string) => Promise<OutputText>
+  /** What a run of the project has printed so far: the end of it. */
+  readonly readLaunchOutput: (id: string) => Promise<OutputText>
   /** A markdown document an agent in a thread wrote, as it is now in the task's worktree. */
   readonly readDocument: (threadId: string, path: string) => Promise<DocumentText>
   /** A project's canvases (ADR-104), newest first; archived ones too where asked. */
@@ -837,6 +839,7 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
     getThreadItem: (threadId, itemId) => settle(api.GetThreadItem({ threadId, itemId })),
     readOutput: (threadId, itemId) => settle(api.ReadOutput({ threadId, itemId })),
     readBackgroundOutput: (threadId, id) => settle(api.ReadBackgroundOutput({ threadId, id })),
+    readLaunchOutput: (id) => settle(api.ReadLaunchOutput({ id })),
     readDocument: (threadId, path) => settle(api.ReadDocument({ threadId, path })),
     listCanvases: (projectId, archived) => settle(api.ListCanvases({ projectId, ...(archived === true ? { archived } : {}) })),
     getCanvas: (canvasId) => settle(api.GetCanvas({ canvasId })),

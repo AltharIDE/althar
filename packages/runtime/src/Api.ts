@@ -2290,6 +2290,7 @@ export const handlers = Api.toLayer(
         ),
       StopLaunch: ({ commandId, id }) => once(commandId, api(launches.stop(id))),
       ClearLaunch: ({ commandId, id }) => once(commandId, api(launches.clear(id))),
+      ReadLaunchOutput: ({ id }) => api(launches.output(id)),
       Watch: ({ since }) => Stream.merge(changes(since), streaming),
     })
   }),

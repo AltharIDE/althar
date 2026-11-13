@@ -433,6 +433,7 @@ describe('the client', () => {
           ClearBackground: () => Effect.die('unused'),
           RunProject: () => Effect.die('unused'),
           StopLaunch: () => Effect.die('unused'),
+          ReadLaunchOutput: () => Effect.die('unused'),
           KeepRunnable: () => Effect.die('unused'),
           DropRunnable: () => Effect.die('unused'),
           OrderRunnables: () => Effect.die('unused'),

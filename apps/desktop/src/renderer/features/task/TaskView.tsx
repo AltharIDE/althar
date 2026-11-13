@@ -1456,7 +1456,7 @@ export function TaskView({
                       run={(run) => (
                         <RunOf
                           run={run}
-                          now={now}
+                          threadTask={snapshot.task.id}
                           onStop={(id) => void model.stopLaunch(id)}
                           onRunAgain={(_taskId, runnableId) => void model.runProject(runnableId)}
                         />

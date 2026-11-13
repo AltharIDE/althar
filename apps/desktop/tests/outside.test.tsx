@@ -817,6 +817,13 @@ describe('running what a task built, with no agent', () => {
     await userEvent.click(shown.getByRole('button', { name: 'Stop bun run dev' }))
     expect(client.stopLaunch).toHaveBeenCalledWith('proc_1')
     expect(shown.queryByRole('button', { name: 'Run bun run dev again' })).toBeNull()
+    // Its console reads what it printed only once it is opened, and shows it under the command.
+    expect(client.readLaunchOutput).not.toHaveBeenCalled()
+    await userEvent.click(shown.getByRole('button', { name: 'Output' }))
+    expect(client.readLaunchOutput).toHaveBeenCalledWith('proc_1')
+    const output = await screen.findByRole('dialog', { name: 'Output of bun run dev' })
+    expect(await within(output).findByText('VITE ready in 312 ms')).toBeTruthy()
+    await userEvent.keyboard('{Escape}')
     // It ended by itself: it says how, with its last line, and runs again here.
     const ended = {
       ...card,
