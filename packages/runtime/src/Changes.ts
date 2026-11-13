@@ -8420,7 +8420,13 @@ export class Changes extends Context.Service<
 
       /** Asks the host about one listened change now; one that can't be asked waits, as long as its service says or a while. */
       const listenTo = (link: LinkRow, now: number, how?: { readonly force: boolean; readonly fresh: boolean }) =>
-        locked(link.taskId)(poll(link, how)).pipe(
+        locked(link.taskId)(
+          Effect.gen(function* () {
+            // A stop may have held the lock while this turn chose its links. Honour it before asking the host.
+            const current = (yield* linksOf(link.taskId)).find((one) => one.id === link.id)
+            return current?.listening === 1 ? yield* poll(current, how) : false
+          }),
+        ).pipe(
           Effect.flatMap((happened) => (happened ? news(link.taskId) : Effect.void)),
           Effect.catchCause((cause) =>
             Effect.gen(function* () {

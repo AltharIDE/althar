@@ -112,7 +112,7 @@ describe('a task’s findings', () => {
         envelope: yield* Runtime.envelope('task.create', {}),
         projectId: project.projectId,
         title: 'Placed findings',
-        description: 'Do it. [lead:finish] [lead:edit] [review:wait]',
+        description: 'Do it. [lead:finish] [lead:edit] [lead:settle-quietly] [review:wait]',
         draft: true,
       })
       const planId = yield* plans.propose({
@@ -148,6 +148,8 @@ describe('a task’s findings', () => {
           { severity: 'minor', title: 'The third line says too much', file: 'notes.md', line: 3, claim: 'Cut it.' },
         ],
       })
+
+      // The lead leaves these findings open without writing a fix: the edits below belong to this test.
 
       // As the review read it: the file the change left alone, at its line.
       const [first, loose] = (yield* queries.findings(task.taskId)).findings

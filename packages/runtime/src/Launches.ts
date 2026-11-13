@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import { type ActorId, Ids, newId, type ProjectId } from '@althar/domain'
 import { bumpRevision, Ledger } from '@althar/persistence-sqlite'
 import { cleanUp, removeFully, spawnOwned } from '@althar/provider-adapters'
-import { Clock, Context, Crypto, Deferred, Duration, Effect, Exit, Layer, Schema, Scope } from 'effect'
+import { Clock, Context, Crypto, Deferred, Duration, Effect, Exit, Fiber, Layer, Schema, Scope } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { RuntimeConfig } from './Config'
@@ -749,7 +749,7 @@ export class Launches extends Context.Service<
                 cardOf(launch),
               ).pipe(Effect.catchCause((cause) => Effect.as(Effect.logWarning('Could not post a run’s card', cause), null)))
             // What it prints is read as it comes, so it never waits on a full pipe.
-            yield* Effect.forkIn(
+            const output = yield* Effect.forkIn(
               Effect.promise(async () => {
                 const reader = owned.stdout.getReader()
                 const decoder = new TextDecoder()
@@ -759,7 +759,7 @@ export class Launches extends Context.Service<
                   print(decoder.decode(value, { stream: true }))
                 }
               }),
-              scope,
+              launchesScope,
             )
             yield* Effect.forkIn(watchServing(launch), scope)
             // Ended by itself, it stays, to say how, and anything it left behind is stopped with its group.
@@ -767,13 +767,16 @@ export class Launches extends Context.Service<
               provide(
                 Effect.gen(function* () {
                   const exit = yield* Deferred.await(owned.exited)
+                  // Exit can precede the last pipe read. Stop descendants that kept it open, then drain it before
+                  // recording the final card; closing the process scope must not interrupt this reader.
+                  yield* Scope.close(scope, Exit.void)
+                  yield* Fiber.join(output)
                   if (!launches.has(id)) return
                   const at = yield* timestamp
                   launch.ended = { at, code: exit.code, signal: exit.signal }
                   yield* change('processes', id, { state: 'exited', exitCode: exit.code, signal: exit.signal, endedAt: at })
                   yield* toldCard(launch)
                   yield* told(input.projectId)
-                  yield* Scope.close(scope, Exit.void)
                 }),
               ),
               launchesScope,
