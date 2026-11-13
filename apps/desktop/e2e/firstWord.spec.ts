@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -165,7 +165,16 @@ const opened = async (env: Record<string, string> = {}) => {
   mkdirSync(projects)
   const launched = await launch(home, env)
   await openFirstProject(launched.electronApp, launched.page, repository(projects))
-  return launched
+  return { ...launched, home }
+}
+
+/** How many turns the runtime has ended, from its own log: a signal the window hasn't heard, while its line is held. */
+const turnsEnded = (home: string) => {
+  try {
+    return (readFileSync(join(home, 'profile', 'logs', 'runtime.log'), 'utf8').match(/Turn ended/g) ?? []).length
+  } catch {
+    return 0
+  }
 }
 
 test('holds the reply’s place, thinking, until its first words take it: in the coordinator’s thread and a task’s', async () => {
@@ -307,6 +316,53 @@ test('sends mid-turn straight to the queue before the runtime answers, in both c
       await page.getByRole('region', { name: /queued/i }).screenshot({ path: `test-results/mid-turn-${name}-accepted.png`, scale: 'css' })
       await page.getByRole('button', { name: /^Interrupt the/ }).click()
       await expect(page.getByRole('region', { name: /queued/i })).toHaveCount(0)
+    }
+    await check(page.getByRole('region', { name: 'Conversation' }), 'coordinator')
+    await check(await readyTask(page), 'task')
+  } finally {
+    await electronApp.close()
+  }
+})
+
+test('corrects a queued guess into the thread without a jump when the turn ended unseen, in both chats', async () => {
+  const { electronApp, page, home } = await opened()
+  try {
+    const check = async (thread: Locator, name: string) => {
+      await say(page, 'Nearly done. [answers-after:6s]')
+      const thinking = thinkingIn(thread)
+      await expect(thinking).toBeVisible()
+      // Its countdown says a turn of its own runs, so the first send has reached the runtime before the line is held.
+      await expect(thinking).toContainText(/Thinking\s*3s/)
+      const ended = turnsEnded(home)
+      const release = await holdRuntime(page)
+      try {
+        // The runtime ends the turn while its line to the window is held: the cached snapshot still says mid-turn.
+        await expect.poll(() => turnsEnded(home)).toBeGreaterThan(ended)
+        await say(page, 'Then the changelog.')
+        const queue = page.getByRole('region', { name: /queued/i })
+        await expect(queue).toContainText('Then the changelog.')
+        await expect(thread.getByText('Then the changelog.', { exact: true })).toHaveCount(0)
+        const move = await queue.locator('li[data-move]').last().getAttribute('data-move')
+        await still(page)
+        await queue.screenshot({ path: `test-results/mid-turn-${name}-corrected-before.png`, scale: 'css' })
+        await release()
+        // Taken now: it moves into the thread, one copy, under the same motion identity, so nothing jumps.
+        await expect(page.getByRole('region', { name: /queued/i })).toHaveCount(0)
+        await expect(thread.getByText('Then the changelog.', { exact: true })).toHaveCount(1)
+        const said = thread.getByRole('article', { name: /^You/ }).last()
+        await expect(said).toHaveAttribute('data-move', move ?? '')
+        await still(page)
+        const box = await said.boundingBox()
+        if (box === null) throw new Error('Nothing to shoot')
+        await page.screenshot({
+          path: `test-results/mid-turn-${name}-corrected-after.png`,
+          clip: { x: box.x - 20, y: box.y - 16, width: box.width + 40, height: box.height + 32 },
+          scale: 'css',
+          animations: 'disabled',
+        })
+      } finally {
+        await release()
+      }
     }
     await check(page.getByRole('region', { name: 'Conversation' }), 'coordinator')
     await check(await readyTask(page), 'task')

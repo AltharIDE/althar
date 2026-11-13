@@ -1348,6 +1348,96 @@ describe('a task', () => {
     await act(async () => accept())
   })
 
+  it('corrects a stale now-prediction into the queue without a second copy', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    try {
+      const base = thread()
+      const idle: ThreadSnapshot = {
+        ...base,
+        accepting: 'now',
+        session: base.session === null ? null : { ...base.session, turnRunning: false, accepting: 'now' },
+      }
+      const stored = {
+        ...items.you('Then the changelog.', { state: 'queued', interrupting: false }),
+        sequence: (idle.items.at(-1)?.sequence ?? 0) + 1,
+      }
+      let head: ThreadSnapshot = idle
+      const { client, emit } = fakeClient({
+        getThread: vi.fn(async () => head),
+        getThreadItem: vi.fn(async () => stored),
+        send: vi.fn(async () => undefined),
+      })
+      withServices(<Task />, client)
+      const box = await screen.findByRole('textbox')
+      await userEvent.type(box, 'Then the changelog.{Enter}')
+      await waitFor(() => expect(client.send).toHaveBeenCalled())
+      expect(screen.queryByRole('region', { name: /queued/i })).toBeNull()
+      expect(screen.getAllByText('Then the changelog.')).toHaveLength(1)
+      const move = screen.getByText('Then the changelog.').closest('[data-move]')?.getAttribute('data-move')
+      expect(move).toMatch(/^message:sending:/)
+      head = {
+        ...idle,
+        accepting: 'queued',
+        session: idle.session === null ? null : { ...idle.session, turnRunning: true, accepting: 'queued' },
+      }
+      act(() => {
+        emit(changed('thread_item', stored.id))
+        emit(changed('turn_delivery', 'd1'))
+      })
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(80)
+      })
+      const queue = await screen.findByRole('region', { name: /queued/i })
+      expect(within(queue).getByText('Then the changelog.')).toBeTruthy()
+      expect(screen.getAllByText('Then the changelog.')).toHaveLength(1)
+      expect(within(queue).getByText('Then the changelog.').closest('[data-move]')?.getAttribute('data-move')).toBe(move)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('corrects a stale queued-prediction into the thread without a second copy', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    try {
+      const busy: ThreadSnapshot = running({ accepting: 'queued' })
+      const stored = {
+        ...items.you('Then the changelog.', { state: 'delivered', interrupting: false }),
+        sequence: (busy.items.at(-1)?.sequence ?? 0) + 1,
+      }
+      let head: ThreadSnapshot = busy
+      const { client, emit } = fakeClient({
+        getThread: vi.fn(async () => head),
+        getThreadItem: vi.fn(async () => stored),
+        send: vi.fn(async () => undefined),
+      })
+      withServices(<Task />, client)
+      const box = await screen.findByRole('textbox')
+      await userEvent.type(box, 'Then the changelog.{Enter}')
+      await waitFor(() => expect(client.send).toHaveBeenCalled())
+      const queue = screen.getByRole('region', { name: /queued/i })
+      expect(within(queue).getByText('Then the changelog.')).toBeTruthy()
+      const move = within(queue).getByText('Then the changelog.').closest('[data-move]')?.getAttribute('data-move')
+      expect(move).toMatch(/^message:sending:/)
+      head = {
+        ...busy,
+        accepting: 'now',
+        session: busy.session === null ? null : { ...busy.session, turnRunning: false, accepting: 'now' },
+      }
+      act(() => {
+        emit(changed('thread_item', stored.id))
+        emit(changed('turn_delivery', 'd1'))
+      })
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(80)
+      })
+      await waitFor(() => expect(screen.queryByRole('region', { name: /queued/i })).toBeNull())
+      expect(screen.getAllByText('Then the changelog.')).toHaveLength(1)
+      expect(screen.getByText('Then the changelog.').closest('[data-move]')?.getAttribute('data-move')).toBe(move)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('talks to its lead: sends, queues while it works, sends now, and interrupts', async () => {
     const { client } = fakeClient({ getThread: vi.fn(async () => thread()) })
     const view = withServices(<Task />, client)

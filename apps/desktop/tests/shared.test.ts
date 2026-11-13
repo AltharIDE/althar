@@ -253,6 +253,9 @@ describe('the composer queue', () => {
     expect(queueShown(null, true)).toBe(false)
     // Sending behind a running turn never puts the message in the thread.
     expect(queueShown({ turnRunning: true }, true)).toBe(true)
+    // The runtime's accepting is enough, even when the cached turnRunning is stale.
+    expect(queueShown({ turnRunning: false }, true, 'queued')).toBe(true)
+    expect(queueShown({ turnRunning: false }, true, 'now')).toBe(false)
   })
 
   it('has what waits read now while the person sends, or the agent holds the thread or starts, but not behind a turn or a wait', () => {
