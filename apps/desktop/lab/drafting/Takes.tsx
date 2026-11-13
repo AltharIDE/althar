@@ -138,7 +138,15 @@ function WholePick({
 }) {
   const prefs = useModelPrefs()
   const at = useAtPointer()
-  if (planned === undefined || member.model === null) return <div className={cx(k.whole, className)}>{children}</div>
+  // The same shape before and after the plan, the trigger only added, so
+  // nothing in the row is made again (and plays its arrival again) as it comes.
+  if (planned === undefined || member.model === null)
+    return (
+      <div className={cx(k.whole, className)}>
+        {children}
+        {null}
+      </div>
+    )
   if (member.skipped)
     return (
       <button
@@ -186,7 +194,13 @@ function EndPick({
   children: ReactNode
 }) {
   const at = useAtPointer()
-  if (planned === undefined || props.draft.spec.onBranch) return <div className={cx(k.whole, className)}>{children}</div>
+  if (planned === undefined || props.draft.spec.onBranch)
+    return (
+      <div className={cx(k.whole, className)}>
+        {children}
+        {null}
+      </div>
+    )
   return (
     <div className={cx(k.whole, k.pickable, className)}>
       {children}
@@ -328,52 +342,150 @@ export function Relay(props: DirectionProps) {
   return <TeamCard {...props} {...(planned ? { planned } : {})} body={body} />
 }
 
-/* Roster: a list down a line, a node for each step; the whole row opens who does it. */
+/*
+ * Roster: a list down a line, a node for each step; the whole row opens who does it.
+ *
+ * Its motion, in the order a draft goes: the rows rise in one after another and
+ * the line draws down through them; the lead's node turns slowly while the
+ * brief is written; a node being chosen has an arc going round it and the
+ * makers' marks rolling through it, and the line into it runs toward it; the
+ * pick lands with a little overshoot and a ring, the line draws in dark, and
+ * the name rolls in at the row's end. When the plan is in, a light runs down
+ * the line, each node answering as it passes, and the chevrons come in.
+ */
+type NodeState = 'idle' | 'next' | 'choosing' | 'filled'
+
+function Node({ state, brand, end = false, landed }: { state: NodeState; brand?: Brand; end?: boolean; landed: string }) {
+  const [turn, setTurn] = useState(0)
+  const rolling = state === 'choosing' && !end
+  useEffect(() => {
+    if (!rolling) return
+    const id = window.setInterval(() => setTurn((n) => n + 1), 130)
+    return () => window.clearInterval(id)
+  }, [rolling])
+  const mark = 20
+  return (
+    <span className={k.node} data-state={state}>
+      <span className={k.nodeArc} />
+      <span className={k.nodeFace}>
+        {state === 'filled' ? (
+          <span key={landed} className={k.land}>
+            {end ? <Icon name="pr" size={mark - 2} /> : brand !== undefined ? <BrandMark brand={brand} size={mark} /> : null}
+          </span>
+        ) : rolling ? (
+          <span key={turn} className={k.reel}>
+            <BrandMark brand={SHUFFLE[turn % SHUFFLE.length] ?? Brand.Anthropic} size={mark} />
+          </span>
+        ) : null}
+      </span>
+      {state === 'filled' && <span key={landed} className={k.nodePulse} />}
+    </span>
+  )
+}
+
+/** Words that roll in each time they change. */
+const roll = (id: string, words: ReactNode) => (
+  <span key={id} className={k.roll}>
+    {words}
+  </span>
+)
+/** Words for something still going on, a light passing over them. */
+const going = (id: string, words: string) => roll(id, <span className={k.shimmer}>{words}</span>)
+
 export function Roster(props: DirectionProps) {
   const { planned, members } = useTake(props)
   const { draft } = props
+  const last = members.at(-1)
+  const rows = [
+    ...members.map((m) => ({
+      key: m.key,
+      on: m.model !== null,
+      state: (m.model !== null && !m.skipped
+        ? 'filled'
+        : m.choosing
+          ? 'choosing'
+          : m.key === 'lead' && !draft.size
+            ? 'next'
+            : 'idle') as NodeState,
+    })),
+    {
+      key: 'end',
+      on: draft.end,
+      state: (draft.end ? 'filled' : last?.model != null ? 'choosing' : 'idle') as NodeState,
+    },
+  ]
+  // The line from each row to the next: running toward a node being chosen, drawn once it's in.
+  const link = (i: number) => {
+    const next = rows[i + 1]
+    if (next === undefined) return null
+    const state = next.on ? 'done' : rows[i]?.on === true && next.state === 'choosing' ? 'flow' : 'idle'
+    return <span className={k.link} data-state={state} aria-hidden="true" />
+  }
+  const chevron = planned ? <Icon name="chevronD" size={10} className={cx(k.chev, k.chevIn)} /> : null
+  const why = (member: Member) =>
+    member.key !== 'lead'
+      ? 'Reads it over before the PR'
+      : draft.size
+        ? roll('size', draft.spec.size)
+        : draft.briefDone
+          ? going('sizing', 'Sizing it…')
+          : going('writing', 'Writing the brief…')
+  const who = (member: Member) =>
+    member.skipped
+      ? roll('skipped', <span className={k.faint}>No review</span>)
+      : member.model === null
+        ? member.choosing
+          ? going('choosing', 'Choosing…')
+          : roll('open', <span className={k.faint}>Open seat</span>)
+        : roll(
+            `${member.model.id}-${member.effort ?? ''}`,
+            <>
+              {member.model.short}
+              {member.effort !== null && <span className={k.effort}> {member.effort}</span>}
+            </>,
+          )
   const body = (
-    <ol className={k.roster}>
-      {members.map((member) => (
-        <li key={member.key} className={cx(k.rosterItem, member.model !== null && k.rosterOn)}>
-          <WholePick member={member} planned={planned} className={k.rosterRow}>
-            <Avatar member={member} size={34} />
-            <span className={k.twoLines}>
-              <span className={cx(k.rosterStep, member.skipped && k.struck)}>{member.step}</span>
-              <span className={k.rosterWhy}>
-                {member.key === 'lead' ? (
-                  draft.size ? (
-                    <Arrive>{draft.spec.size}</Arrive>
-                  ) : draft.briefDone ? (
-                    'Sizing it…'
-                  ) : (
-                    'Writing the brief…'
-                  )
-                ) : (
-                  'Reads it over before the PR'
-                )}
+    <div className={cx(k.rosterWrap, planned && k.rosterReady)}>
+      <ol className={k.roster}>
+        {members.map((member, i) => (
+          <li key={member.key} className={k.rosterItem} style={{ ['--i' as string]: i }}>
+            {link(i)}
+            <WholePick member={member} planned={planned} className={k.rosterRow}>
+              <Node
+                state={rows[i]?.state ?? 'idle'}
+                {...(member.model?.mark ? { brand: member.model.mark } : {})}
+                landed={member.model?.id ?? ''}
+              />
+              <span className={k.twoLines}>
+                <span className={cx(k.rosterStep, member.skipped && k.struck)}>{member.step}</span>
+                <span className={k.rosterWhy}>{why(member)}</span>
               </span>
+              <span className={k.rosterWho}>
+                {who(member)}
+                {chevron}
+              </span>
+            </WholePick>
+          </li>
+        ))}
+        <li className={k.rosterItem} style={{ ['--i' as string]: members.length }}>
+          <EndPick props={props} planned={planned} className={k.rosterRow}>
+            <Node state={rows.at(-1)?.state ?? 'idle'} end landed="end" />
+            <span className={k.twoLines}>
+              <span className={k.rosterStep}>When it’s done</span>
             </span>
             <span className={k.rosterWho}>
-              <Who member={member} />
-              <Chevron planned={planned} />
+              {draft.end
+                ? roll(endWords(props, planned), endWords(props, planned))
+                : rows.at(-1)?.state === 'choosing'
+                  ? going('ending', 'Deciding…')
+                  : roll('wait', <span className={k.faint}>…</span>)}
+              {chevron}
             </span>
-          </WholePick>
+          </EndPick>
         </li>
-      ))}
-      <li className={cx(k.rosterItem, draft.end && k.rosterOn)}>
-        <EndPick props={props} planned={planned} className={k.rosterRow}>
-          <Avatar end={draft.end} size={34} />
-          <span className={k.twoLines}>
-            <span className={k.rosterStep}>When it’s done</span>
-          </span>
-          <span className={k.rosterWho}>
-            {draft.end ? <Arrive>{endWords(props, planned)}</Arrive> : <span className={k.faint}>…</span>}
-            <Chevron planned={planned} />
-          </span>
-        </EndPick>
-      </li>
-    </ol>
+      </ol>
+      {planned && <span className={k.sweep} aria-hidden="true" />}
+    </div>
   )
   return <TeamCard {...props} {...(planned ? { planned } : {})} body={body} />
 }

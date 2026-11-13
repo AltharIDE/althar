@@ -306,43 +306,26 @@
 }
 
 /* Roster */
-.roster {
+.rosterWrap {
   position: relative;
+}
+.roster {
   margin: 0;
   padding: 2px 8px 8px;
   list-style: none;
 }
-/*
- * The line down through the nodes. It sits over the rows' hover fill and
- * under the nodes, so hovering a row never hides it; the rows make no layer
- * of their own for that.
- */
-.roster::before {
-  content: '';
-  position: absolute;
-  z-index: 1;
-  left: 35px;
-  top: 30px;
-  bottom: 36px;
-  border-left: 2px dotted var(--line-3);
-  pointer-events: none;
-}
+/* Rows rise in one after another as the card appears. No fill after: a
+   transform left on a row would make it a layer and hide the line under the
+   next row's hover. */
 .rosterItem {
   position: relative;
+  animation: rowIn 480ms var(--ease-out) backwards;
+  animation-delay: calc(var(--i) * 90ms + 80ms);
 }
-.rosterOn + .rosterOn::before {
-  content: '';
-  position: absolute;
-  z-index: 1;
-  left: 27px;
-  top: -28px;
-  height: 56px;
-  border-left: 2px dotted var(--t-4);
-  pointer-events: none;
-  transform-origin: top;
-  transition: transform var(--move) var(--ease-out);
-  @starting-style {
-    transform: scaleY(0);
+@keyframes rowIn {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
   }
 }
 .rosterRow {
@@ -352,27 +335,202 @@
   padding: 8px 10px;
   border-radius: 10px;
 }
-.rosterRow .avatar {
-  position: relative;
-  z-index: 2;
-  pointer-events: none;
-  background: var(--n-1);
-}
-.rosterRow .filled {
-  background: var(--paper);
-}
 .rosterRow.pickable:hover,
 .rosterRow:has([aria-expanded='true']) {
   background: var(--hover-paper);
 }
+
+/*
+ * The line, a dotted run from each node's centre to the next one's, over the
+ * rows' hover fill and under the nodes. It draws down as its row comes in;
+ * while the node below is chosen its dots run toward it; once that node is in,
+ * it draws in dark from the top.
+ */
+.link {
+  --dot: var(--line-3);
+  position: absolute;
+  z-index: 1;
+  left: 26px;
+  top: 50%;
+  width: 2px;
+  height: 100%;
+  pointer-events: none;
+  background: radial-gradient(circle at 1px 1px, var(--dot) 0.95px, transparent 1.25px) 0 0 / 2px 5px repeat-y;
+  animation: drawDown 520ms var(--ease-out) backwards;
+  animation-delay: calc(var(--i) * 90ms + 260ms);
+}
+.link[data-state='flow'] {
+  --dot: var(--live);
+  animation: run 420ms linear infinite;
+}
+.link[data-state='done']::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(circle at 1px 1px, var(--t-4) 0.95px, transparent 1.25px) 0 0 / 2px 5px repeat-y;
+  clip-path: inset(0 0 0 0);
+  transition: clip-path 460ms var(--ease-out);
+  @starting-style {
+    clip-path: inset(0 0 100% 0);
+  }
+}
+@keyframes drawDown {
+  from {
+    clip-path: inset(0 0 100% 0);
+  }
+  to {
+    clip-path: inset(0 0 0 0);
+  }
+}
+@keyframes run {
+  to {
+    background-position: 0 5px;
+  }
+}
+
+/* A node: an empty dashed seat, turning slowly while it's next; an arc going round it while it's chosen, the marks rolling through; then the pick. */
+.node {
+  position: relative;
+  z-index: 2;
+  flex: none;
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  border: 1.5px dashed var(--line-3);
+  background: var(--n-1);
+  color: var(--t-2);
+  pointer-events: none;
+  transition:
+    border-color 240ms var(--ease-out),
+    background 240ms var(--ease-out);
+}
+.node[data-state='next'] {
+  border-color: var(--t-4);
+  animation: turn 7s linear infinite;
+}
+.node[data-state='choosing'] {
+  border-color: color-mix(in oklab, var(--live) 30%, transparent);
+  background: var(--paper);
+}
+.node[data-state='filled'] {
+  border: 1px solid var(--line-2);
+  background: var(--paper);
+}
+.nodeArc {
+  position: absolute;
+  inset: -4px;
+  border-radius: 50%;
+  opacity: 0;
+  background: conic-gradient(from 0turn, transparent 0turn 0.5turn, var(--live) 1turn);
+  mask: radial-gradient(farthest-side, transparent calc(100% - 2px), #000 calc(100% - 1.5px));
+  transition: opacity 260ms var(--ease-out);
+}
+.node[data-state='choosing'] .nodeArc {
+  opacity: 1;
+  animation: turn 850ms linear infinite;
+}
+.nodeFace {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  overflow: hidden;
+}
+.nodeFace > span {
+  display: grid;
+  grid-area: 1 / 1;
+}
+.reel {
+  animation: reel 130ms var(--ease-out) both;
+}
+.land {
+  color: var(--t-1);
+  animation: land 560ms cubic-bezier(0.34, 1.56, 0.64, 1) both;
+}
+.nodePulse {
+  position: absolute;
+  inset: -1px;
+  border-radius: 50%;
+  border: 1.5px solid var(--live);
+  pointer-events: none;
+  animation: ring 700ms var(--ease-out) 60ms both;
+}
+@keyframes turn {
+  to {
+    transform: rotate(1turn);
+  }
+}
+@keyframes reel {
+  from {
+    opacity: 0;
+    transform: translateY(75%);
+    filter: blur(2px);
+  }
+}
+@keyframes land {
+  from {
+    opacity: 0;
+    transform: translateY(65%) scale(0.6);
+    filter: blur(3px);
+  }
+  55% {
+    opacity: 1;
+    filter: none;
+  }
+}
+@keyframes ring {
+  from {
+    opacity: 0.55;
+    transform: scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: scale(1.65);
+  }
+}
+
+/* Words: they roll in when they change; what's still going on has a light passing over it. */
+.roll {
+  display: inline-block;
+  animation: roll 420ms var(--ease-out) both;
+}
+@keyframes roll {
+  from {
+    opacity: 0;
+    transform: translateY(7px);
+    filter: blur(3px);
+  }
+}
+.shimmer {
+  color: transparent;
+  background: linear-gradient(90deg, var(--t-4) 0 38%, var(--t-1) 50%, var(--t-4) 62% 100%) 0 0 / 300% 100%;
+  background-clip: text;
+  animation: shimmer 1.9s linear infinite;
+}
+@keyframes shimmer {
+  from {
+    background-position: 100% 0;
+  }
+  to {
+    background-position: 0 0;
+  }
+}
+
 .rosterStep {
+  justify-self: start;
   font-size: 13.5px;
   font-weight: 550;
   color: var(--t-1);
+  /* Skipping the review strikes it through, drawn left to right. */
+  background: linear-gradient(currentColor, currentColor) 0 58% / 0 1px no-repeat;
+  transition:
+    background-size 340ms var(--ease-out),
+    color 240ms var(--ease-out);
 }
 .struck {
   color: var(--t-3);
-  text-decoration: line-through;
+  background-size: 100% 1px;
 }
 .rosterWhy {
   font-size: 12px;
@@ -387,10 +545,77 @@
   gap: 6px;
   margin-left: auto;
   padding-left: 12px;
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 550;
   color: var(--t-1);
   white-space: nowrap;
+}
+
+/* The plan is in: a light runs down the line, each node answering as it passes, and the chevrons come in after. */
+.sweep {
+  position: absolute;
+  z-index: 1;
+  left: 33px;
+  top: 30px;
+  bottom: 36px;
+  width: 4px;
+  border-radius: 2px;
+  pointer-events: none;
+  background: linear-gradient(transparent, var(--live), transparent) 0 0 / 100% 40px no-repeat;
+  animation: sweep 820ms cubic-bezier(0.45, 0, 0.25, 1) 40ms both;
+}
+@keyframes sweep {
+  from {
+    background-position: 0 -40px;
+  }
+  85% {
+    opacity: 1;
+  }
+  to {
+    background-position: 0 calc(100% + 40px);
+    opacity: 0;
+  }
+}
+.rosterReady .node {
+  animation: answer 480ms var(--ease-out) backwards;
+  animation-delay: calc(var(--i) * 300ms + 60ms);
+}
+@keyframes answer {
+  40% {
+    transform: scale(1.14);
+    box-shadow: 0 0 0 4px color-mix(in oklab, var(--live) 22%, transparent);
+  }
+}
+.chevIn {
+  transition:
+    opacity 260ms var(--ease-out),
+    transform 320ms var(--ease-out);
+  transition-delay: calc(var(--i, 0) * 120ms + 420ms);
+  @starting-style {
+    opacity: 0;
+    transform: translateY(-3px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rosterItem,
+  .link,
+  .link::after,
+  .node,
+  .nodeArc,
+  .reel,
+  .land,
+  .roll,
+  .shimmer,
+  .rosterStep,
+  .chevIn {
+    animation: none !important;
+    transition: none !important;
+  }
+  .nodePulse,
+  .sweep {
+    display: none;
+  }
 }
 
 /* Map */
@@ -440,8 +665,7 @@
 @media (prefers-reduced-motion: reduce) {
   .settle,
   .shuffle,
-  .arrow.on i,
-  .rosterOn + .rosterOn::before {
+  .arrow.on i {
     transform: none !important;
   }
 }
