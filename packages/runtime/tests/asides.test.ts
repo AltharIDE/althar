@@ -14,6 +14,7 @@ import { SqlClient } from 'effect/sql'
 import { until } from '@althar/testing/effect'
 
 import { connection, services } from '../src/Api'
+import { Busy } from '../src/Busy'
 import { Folders } from '../src/Folders'
 import { Secrets } from '../src/Secrets'
 import { Setups } from '../src/Setups'
@@ -75,6 +76,52 @@ const sqlOf = <A extends object>(query: (sql: SqlClient.SqlClient) => Effect.Eff
   Effect.flatMap(SqlClient.SqlClient, query)
 
 describe('an aside opened with +', () => {
+  it.live('starts and answers outside a full task queue, takes no place, and counts again once made a task', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { client, store, project } = yield* connected
+        yield* client.SetAgentsAtOnce({ commandId: commandId(), count: 1 })
+        const start = (title: string, chat = false) =>
+          client.StartTask({
+            commandId: commandId(),
+            projectId: project.id,
+            title,
+            ...(chat ? { chat: true } : { description: '[lead:wait]' }),
+            steps: [{ key: 'implement', agentId: 'codex', model: null, skipped: false }],
+          })
+        const working = yield* start('The task using the one place')
+        yield* until(client.GetThread({ threadId: working.threadId }), (thread) => thread.session?.turnRunning === true)
+        const waiting = yield* start('The task waiting for it')
+        assert.isNotNull((yield* client.GetThread({ threadId: waiting.threadId })).task.queued)
+
+        const aside = yield* start('', true)
+        yield* until(client.GetThread({ threadId: aside.threadId }), (thread) => thread.session?.state === 'active')
+        yield* client.Send({ commandId: commandId(), threadId: aside.threadId, body: 'hi', disposition: 'after_current' })
+        yield* until(client.GetThread({ threadId: aside.threadId }), (thread) => thread.items.some((item) => item.kind === 'agent_message'))
+        assert.isNull((yield* client.GetThread({ threadId: aside.threadId })).task.queued)
+        assert.strictEqual((yield* store(Effect.flatMap(Busy, (busy) => busy.now))).busy, 1)
+        assert.deepStrictEqual(
+          (yield* store(Effect.flatMap(Busy, (busy) => busy.order))).map((one) => one.taskId),
+          [waiting.id],
+        )
+
+        // Its next turn takes no place either; making it work puts it back among the task agents.
+        yield* client.Send({ commandId: commandId(), threadId: aside.threadId, body: '[lead:wait]', disposition: 'after_current' })
+        yield* until(client.GetThread({ threadId: aside.threadId }), (thread) => thread.session?.turnRunning === true)
+        const another = yield* start('', true)
+        yield* until(client.GetThread({ threadId: another.threadId }), (thread) => thread.session?.state === 'active')
+        assert.strictEqual((yield* store(Effect.flatMap(Busy, (busy) => busy.now))).busy, 1)
+        yield* client.ShelveTask({ commandId: commandId(), taskId: aside.id, shelf: null })
+        assert.strictEqual((yield* store(Effect.flatMap(Busy, (busy) => busy.now))).busy, 2)
+        // A persisted wait is reconsidered too: it starts even though the task places remain taken.
+        yield* client.ShelveTask({ commandId: commandId(), taskId: waiting.id, shelf: 'scratch' })
+        yield* until(client.GetThread({ threadId: waiting.threadId }), (thread) => thread.session?.turnRunning === true)
+        assert.isEmpty(yield* store(Effect.flatMap(Busy, (busy) => busy.order)))
+        assert.strictEqual((yield* store(Effect.flatMap(Busy, (busy) => busy.now))).busy, 2)
+      }),
+    ),
+  )
+
   it.live(
     'is made on Scratch by the window’s id, its lead waiting for the first words, which its light brief goes out with in one turn that ends it',
     () =>

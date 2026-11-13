@@ -13,7 +13,9 @@
     "./effect": "./src/effect.ts",
     "./performance": "./src/performance.ts",
     "./reporter": "./src/reporter.ts",
-    "./playwright": "./src/playwright.ts"
+    "./playwright": "./src/playwright.ts",
+    "./shards": "./src/shards.ts",
+    "./sequencer": "./src/sequencer.ts"
   },
   "scripts": {
     "check": "vp check",

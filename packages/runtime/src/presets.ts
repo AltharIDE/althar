@@ -5,7 +5,7 @@ import { SqlClient } from 'effect/sql'
 import { ChangeRefused, NotFound } from './errors'
 import { type ModelPick, type PresetModels } from './presetModels'
 import { fact, timestamp } from './records'
-import { addItem } from './threads'
+import { touchCard } from './cards'
 
 /*
  * Presets (a task is a conversation plus parts): a named set of a task's
@@ -222,11 +222,18 @@ export const savePreset = (input: {
   readonly projectId: string | null
   readonly fromTaskId: string | null
   readonly actorId: ActorId
+  /** Only as a new preset, as a card's offer keeps one: a name another preset has is refused rather than replaced. */
+  readonly asNew?: boolean | undefined
 }) =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient
     const given = input.name.trim().slice(0, 40)
     const name = given === '' ? 'Preset' : given
+    if (input.asNew === true) {
+      const [taken] = yield* sql<{ id: string }>`
+        SELECT id FROM presets WHERE coalesce(project_id, '') = ${input.projectId ?? ''} AND lower(name) = lower(${name})`
+      if (taken !== undefined) return yield* new ChangeRefused({ message: `Another preset is called ${name}.` })
+    }
     const id = yield* newId(Ids.artifact)
     const at = yield* timestamp
     yield* sql`
@@ -240,6 +247,8 @@ export const savePreset = (input: {
         updatedAt: at,
       })}
       ON CONFLICT (coalesce(project_id, ''), lower(name)) DO UPDATE SET parts = excluded.parts, updated_at = excluded.updated_at`
+    // Kept from a task, its card, which may have offered it, says so.
+    if (input.fromTaskId !== null) yield* touchCard(input.fromTaskId)
     return { name }
   })
 
@@ -266,52 +275,171 @@ export const partsOfTask = (taskId: string) =>
 export const removePreset = (id: string) =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient
+    const [from] = yield* sql<{ fromTaskId: string | null }>`SELECT from_task_id FROM presets WHERE id = ${id} AND builtin = 0`
     yield* sql`DELETE FROM presets WHERE id = ${id} AND builtin = 0`
+    // Kept from a task's offer, its card offers it again.
+    if (from?.fromTaskId != null) yield* touchCard(from.fromTaskId)
   })
 
+/** How many plans of the person's own, among their last few, must be alike before a preset is offered for them. */
+export const OFFER_AFTER = 3
+const OFFER_WITHIN = 6
+
+/** A name for parts in plain words: how they differ from Change, the plain task, two things at most. */
+export const plainName = (parts: PresetParts) => {
+  const said = [
+    parts.workspace === 'local' ? 'Local' : parts.workspace === 'copy' ? 'In a copy' : null,
+    parts.checked === 'none' ? 'no review' : parts.checked === 'after' ? 'reviewed after merge' : null,
+    parts.end === 'ready' ? 'ready PR' : parts.end === 'none' ? 'no PR' : null,
+  ].filter((one) => one !== null)
+  const name = said.slice(0, 2).join(', ')
+  return name === '' ? 'My change' : name.charAt(0).toUpperCase() + name.slice(1)
+}
+
+/** How parts differ from a built-in preset, in words, where only how it's checked or how it ends does; null otherwise. */
+const nearly = (preset: Preset, parts: PresetParts) => {
+  const q = preset.parts
+  if (
+    q.workspace !== parts.workspace ||
+    q.shelf !== parts.shelf ||
+    (q.reviews ?? false) !== (parts.reviews ?? false) ||
+    (q.lead !== null && parts.lead !== null && q.lead !== parts.lead)
+  )
+    return null
+  const differs = [
+    q.checked === parts.checked
+      ? null
+      : parts.checked === 'none'
+        ? `without its review ${q.checked === 'after' ? 'after merge' : 'before it ships'}`
+        : parts.checked === 'after'
+          ? 'reviewed after merge'
+          : 'reviewed before it ships',
+    // An ending left to the project's setting differs from none.
+    q.end === undefined || parts.end === undefined || q.end === parts.end
+      ? null
+      : parts.end === 'none'
+        ? 'ending on its branch'
+        : parts.end === 'ready'
+          ? 'ending in a pull request ready for review'
+          : 'ending in a draft pull request',
+  ].filter((one) => one !== null)
+  return differs.length === 1 ? (differs[0] ?? null) : null
+}
+
 /**
- * Offers a preset, on a card in the coordinator's thread, once the person
- * has set up the same parts for two tasks running that no preset has: a
- * name, and what it holds, which Save keeps. Each set of parts is offered
- * once.
+ * Offers to keep a task's parts as a preset, on its card in the coordinator's
+ * thread, as its plan starts (a task is a conversation plus parts). Only
+ * plans the person set up themselves count: one the coordinator or a lead
+ * proposed counts not, however the person changed it, since changing it
+ * teaches the coordinator rather than sets something up. It needs
+ * `OFFER_AFTER` alike, with the same lead, among their last `OFFER_WITHIN`,
+ * and no preset of theirs or built in with those parts; where a built-in one
+ * is a step away, it names that one instead of a new one. Each set of parts
+ * is offered once.
  */
-export const offerPreset = (projectId: ProjectId, actorId: ActorId) =>
+export const offerPreset = (input: {
+  readonly projectId: ProjectId
+  readonly taskId: string
+  readonly personId: ActorId
+  readonly actorId: ActorId
+}) =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient
-    const recent = yield* sql<{ taskId: string; parameters: string; shelf: string | null; description: string; title: string }>`
-      SELECT p.task_id, p.parameters, k.shelf, k.description, k.title FROM task_plans p JOIN tasks k ON k.id = p.task_id
-      WHERE p.project_id = ${projectId} AND p.state IN ('accepted', 'proposed')
-      ORDER BY p.proposed_at DESC LIMIT 2`
-    if (recent.length < 2) return
-    const [a, b] = recent.map((row) => partsOfPlan(JSON.parse(row.parameters) as Parameters<typeof partsOfPlan>[0], row.shelf, ''))
-    if (a === undefined || b === undefined || !alike(a, b) || a.lead === null || a.lead !== b.lead) return
-    const presets = yield* presetsIn(projectId)
-    if (presets.some((one) => !one.builtin && alike(one.parts, a) && one.parts.lead === a.lead)) return
-    const signature = JSON.stringify(a)
+    const own = yield* sql<{ taskId: string; parameters: string; shelf: string | null }>`
+      SELECT p.task_id, p.parameters, k.shelf FROM task_plans p JOIN tasks k ON k.id = p.task_id
+      WHERE p.project_id = ${input.projectId} AND p.state = 'accepted'
+        AND EXISTS (SELECT 1 FROM record_events e WHERE e.aggregate_type = 'task_plan' AND e.aggregate_id = p.id
+          AND e.type = 'task_plan.proposed' AND e.actor_id = ${input.personId})
+      ORDER BY p.proposed_at DESC, p.rowid DESC LIMIT ${OFFER_WITHIN}`
+    // The plan that starts is the person's own, the newest of them.
+    if (own[0]?.taskId !== input.taskId) return
+    const [parts, ...earlier] = own.map((row) =>
+      partsOfPlan(JSON.parse(row.parameters) as Parameters<typeof partsOfPlan>[0], row.shelf, ''),
+    )
+    if (parts === undefined || parts.lead === null) return
+    if (1 + earlier.filter((one) => alike(one, parts) && one.lead === parts.lead).length < OFFER_AFTER) return
+    const presets = yield* presetsIn(input.projectId)
+    if (presets.some((one) => alike(one.parts, parts) && (one.builtin || one.parts.lead === parts.lead))) return
+    const signature = JSON.stringify(parts)
     const [offered] = yield* sql<{ id: string }>`
-      SELECT id FROM record_events WHERE aggregate_type = 'project' AND aggregate_id = ${projectId} AND type = 'project.preset_offered'
-        AND json_extract(payload, '$.signature') = ${signature} LIMIT 1`
+      SELECT id FROM record_events WHERE aggregate_type = 'project' AND aggregate_id = ${input.projectId}
+        AND type = 'project.preset_offered' AND json_extract(payload, '$.signature') = ${signature} LIMIT 1`
     if (offered !== undefined) return
-    const [thread] = yield* sql<{ id: string }>`SELECT id FROM threads WHERE project_id = ${projectId} AND kind = 'coordinator' LIMIT 1`
-    if (thread === undefined) return
-    const name = `${a.lead.split('/').at(-1) ?? 'My'} ${a.workspace === 'local' ? 'Local ' : ''}${a.checked === 'none' ? 'unchecked' : 'change'}`
-    const [project] = yield* sql<{ revision: number }>`SELECT revision FROM projects WHERE id = ${projectId}`
+    // One step from a built-in preset; one that names the same lead fits closer than one that names none.
+    const near = presets
+      .filter((one) => one.builtin)
+      .toSorted((a, b) => Number(b.parts.lead === parts.lead) - Number(a.parts.lead === parts.lead))
+      .flatMap((one) => {
+        const differs = nearly(one, parts)
+        return differs === null ? [] : [{ preset: one.name, differs }]
+      })[0]
+    const [project] = yield* sql<{ revision: number }>`SELECT revision FROM projects WHERE id = ${input.projectId}`
     yield* fact({
-      projectId,
+      projectId: input.projectId,
       aggregateType: 'project',
-      aggregateId: projectId,
+      aggregateId: input.projectId,
       revision: project?.revision ?? 1,
       type: 'project.preset_offered',
-      payload: { signature, name },
+      payload: { signature, name: plainName(parts), taskId: input.taskId, ...(near === undefined ? {} : near) },
+      actorId: input.actorId,
+    })
+    yield* touchCard(input.taskId)
+  })
+
+/** The person said not to offer a task's parts as a preset: its card stops offering, and they aren't offered again. */
+export const declinePresetOffer = (taskId: string, actorId: ActorId) =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient
+    const [task] = yield* sql<{ projectId: ProjectId; revision: number }>`
+      SELECT k.project_id, p.revision FROM tasks k JOIN projects p ON p.id = k.project_id WHERE k.id = ${taskId}`
+    if (task === undefined) return yield* new NotFound({ kind: 'task', id: taskId })
+    yield* fact({
+      projectId: task.projectId,
+      aggregateType: 'project',
+      aggregateId: task.projectId,
+      revision: task.revision,
+      type: 'project.preset_declined',
+      payload: { taskId },
       actorId,
     })
-    yield* addItem({ projectId, threadId: thread.id }, 'notice', {
-      source: 'runtime',
-      severity: 'info',
-      title: 'You set up these parts twice. Keep them as a preset?',
-      description: `${name}: ${describe(a)}.`,
-      offer: { kind: 'preset', name, parts: a },
-    })
+    yield* touchCard(taskId)
+  })
+
+const OfferPayload = Schema.Struct({
+  signature: Schema.String,
+  name: Schema.String,
+  taskId: Schema.String,
+  preset: Schema.optional(Schema.String),
+  differs: Schema.optional(Schema.String),
+})
+const decodeOffer = Schema.decodeUnknownOption(Schema.fromJsonString(OfferPayload))
+
+/**
+ * What a task's card offers to keep as a preset, while it does: the name and
+ * parts, the built-in preset they nearly are, and, once kept from it, the
+ * preset kept, for Undo. Undefined where nothing was offered on it, or the
+ * person said not to.
+ */
+export const presetOfferOn = (projectId: string, taskId: string) =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient
+    const events = yield* sql<{ type: string; payload: string }>`
+      SELECT type, payload FROM record_events WHERE aggregate_type = 'project' AND aggregate_id = ${projectId}
+        AND type IN ('project.preset_offered', 'project.preset_declined') AND json_extract(payload, '$.taskId') = ${taskId}`
+    if (events.some((one) => one.type === 'project.preset_declined')) return undefined
+    const offered = events.find((one) => one.type === 'project.preset_offered')
+    const payload = offered === undefined ? undefined : decodeOffer(offered.payload)
+    if (payload === undefined || payload._tag === 'None') return undefined
+    const parts = decodeParts(payload.value.signature)
+    if (parts._tag === 'None') return undefined
+    const [kept] = yield* sql<{ id: string; name: string }>`
+      SELECT id, name FROM presets WHERE from_task_id = ${taskId} AND builtin = 0 ORDER BY created_at DESC, rowid DESC LIMIT 1`
+    return {
+      name: payload.value.name,
+      parts: parts.value,
+      ...(payload.value.preset === undefined ? {} : { near: { preset: payload.value.preset, differs: payload.value.differs ?? '' } }),
+      ...(kept === undefined ? {} : { kept }),
+    }
   })
 
 /**

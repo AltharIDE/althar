@@ -180,8 +180,11 @@ New projects start from a default in Althar's Settings › Tasks (`althar/tasks`
 its merge where the rule has none (it brings back what Major only does), or
 drop it where the rule has one (`review_after_merge` on the person's word,
 `SetReviewAfterMerge` from the window, kept as `task.after_merge_review_set`).
-Its card reads what holds (`afterMerge` on the small change's card); the
-card's control for it waits on the card's redesign.
+Its card reads what holds (`afterMerge` on the small change's card), and
+its Review stop is the control: Before it merges, After it merges, or No
+review. The card says the review's state and how many it found
+(`reviewAfter`), with the report's item in the thread, which See findings
+opens.
 
 The rule and the task's word are **read when the merge is heard**, not when
 Althar starts, and what the review brings back is kept on it then
@@ -194,8 +197,9 @@ says; only a small change's is dropped by Don't review it.
 
 The review after a merge isn't owed where the plan named no reviewer, where
 the rule or the task's word says none, or where the pull request closed
-without merging. "Make it a full task", on the small change's card, moves
-its review back before the merge.
+without merging. "Before it merges", from the Review stop on the small
+change's card (Make it a full task), moves its review back before the
+merge.
 
 Why: the review was a fifth of a small task's time, and the person wants
 small changes fast. Reviewing after the merge keeps a second reader without
