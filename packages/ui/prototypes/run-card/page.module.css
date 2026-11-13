@@ -28,7 +28,7 @@
 }
 .main {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 600px;
+  grid-template-columns: minmax(0, 1fr) auto;
   min-height: 0;
   overflow: auto;
 }
@@ -37,7 +37,7 @@
 }
 .grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, 440px);
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 380px), 440px));
   align-content: start;
   gap: 24px 22px;
   padding: 18px 28px 28px;
@@ -69,12 +69,34 @@
   margin: 0;
 }
 .side {
-  padding: 18px 28px 28px;
+  width: 600px;
+  min-height: 0;
   border-left: 1px solid var(--line);
   background: var(--n-2);
 }
+/* the fold's second round: room for what opens beside the thread */
+.side[data-wide] {
+  width: 1120px;
+}
+.main[data-only] .side[data-wide] {
+  width: auto;
+}
+.conversation {
+  display: flex;
+  height: 100%;
+  min-height: 560px;
+}
+.threadWrap {
+  flex: 1;
+  min-width: 0;
+  max-width: 600px;
+  padding: 18px 28px 28px;
+  overflow-y: auto;
+}
+.barItem {
+  display: contents;
+}
 .main[data-only] .side {
-  max-width: 660px;
   border-left: 0;
 }
 .sideHead {

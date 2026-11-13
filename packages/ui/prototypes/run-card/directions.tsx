@@ -31,14 +31,14 @@ export interface Direction {
   Card: ComponentType<CardProps>
 }
 
-const cx = (...names: Array<string | false | undefined>) => names.filter(Boolean).join(' ')
+export const cx = (...names: Array<string | false | undefined>) => names.filter(Boolean).join(' ')
 
 /* For screenshots, with the thread alone: &peek opens the hover card on its name, &fold opens D's fold. */
 const PARAMS = new URLSearchParams(location.search)
-const PEEK = PARAMS.has('peek') ? { defaultOpen: true } : {}
-const FOLD = PARAMS.has('fold')
+export const PEEK = PARAMS.has('peek') ? { defaultOpen: true } : {}
+export const FOLD = PARAMS.has('fold')
 
-const t = {
+export const t = {
   running: 'Running',
   starting: 'Starting',
   failed: 'Failed',
@@ -55,19 +55,19 @@ const t = {
 }
 
 /** Its state, in a word. */
-const wordOf = (s: RunState) => t[s.phase === 'up' ? 'running' : s.phase]
+export const wordOf = (s: RunState) => t[s.phase === 'up' ? 'running' : s.phase]
 
 /** What it's called: its name, or its command where it has none. */
-const calledOf = (s: RunState) => s.name ?? s.command
+export const calledOf = (s: RunState) => s.name ?? s.command
 
 /** When, in a few words: started, or how and when it ended. */
 const whenOf = (s: RunState) =>
   s.phase === 'stopped' ? t.stoppedAt(s.since) : isEnded(s) ? t.exited(s.code, s.since) : t.started(s.started)
 
-const labelOf = (s: RunState) => `${calledOf(s)}, ${wordOf(s).toLowerCase()}`
+export const labelOf = (s: RunState) => `${calledOf(s)}, ${wordOf(s).toLowerCase()}`
 
 /** The mark before its name: a still dot while it runs, a spinner while it starts, how it ended after. */
-function Mark({ s, className }: { s: RunState; className?: string }) {
+export function Mark({ s, className }: { s: RunState; className?: string }) {
   return (
     <span className={cx(d.mark, className)} aria-hidden="true">
       {s.phase === 'starting' && <Spinner size="small" />}
@@ -118,7 +118,7 @@ function Lines({ s, className }: { s: RunState; className?: string }) {
 }
 
 /** Where it answers, to open beside the conversation. */
-function Address({ s, onOpen, className }: { s: RunState; onOpen?: (() => void) | undefined; className?: string }) {
+export function Address({ s, onOpen, className }: { s: RunState; onOpen?: (() => void) | undefined; className?: string }) {
   if (s.url === undefined) return null
   return (
     <LinkButton className={cx(d.address, className)} aria-label={t.open(s.url)} onClick={onOpen}>
@@ -129,7 +129,7 @@ function Address({ s, onOpen, className }: { s: RunState; onOpen?: (() => void) 
 }
 
 /** Its state where there's no address to show. */
-function Word({ s, className }: { s: RunState; className?: string }) {
+export function Word({ s, className }: { s: RunState; className?: string }) {
   return <span className={cx(d.word, s.phase === 'failed' && d.bad, className)}>{wordOf(s)}</span>
 }
 

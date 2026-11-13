@@ -7,17 +7,21 @@ import { StrictMode, useEffect, useRef, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 
 import { type CardProps, DIRECTIONS, type Direction } from './directions'
+import { BesideRun, type BesideWhat, FOLDS, OutputContext } from './follow'
+import { hmrLine, outputOf } from './output'
 import { type RunState, STATES, whyOf } from './states'
 import p from './page.module.css'
 
 /*
  * A calmer card for a running project, a few directions: keys 0 and A–D swap
- * the direction, T the theme, 1–7 the state the thread beside the grid
+ * the direction, E–G the fold's second round (D1–D3), T the theme, 1–7 the state the thread beside the grid
  * starts at. The grid draws every state of the direction at once, at a narrow
  * thread's width; the thread draws the picked one among its neighbours, and
  * there Stop, Run again and the address do what they would: it stops, starts
  * again and comes up. ?d=a&theme=dark&s=3 opens it so; &shot hides the bar,
- * for screenshots; &only=grid or &only=thread draws one of the two.
+ * for screenshots; &only=grid or &only=thread draws one of the two;
+ * &beside=console or &beside=page opens the run's console or page beside
+ * the thread.
  */
 
 /** Today's card, from the kit, as the app gives it a run (runCardOf). */
@@ -46,13 +50,35 @@ function Now({ state: s, onOpen, onStop, onRunAgain }: CardProps) {
 }
 
 const NOW: Direction = { key: 'now', letter: '0', name: 'Now', idea: 'The card as it is today, from the kit.', Card: Now }
-const ALL: readonly Direction[] = [NOW, ...DIRECTIONS]
+const ALL: readonly Direction[] = [NOW, ...DIRECTIONS, ...FOLDS]
+const FIRST = new Set(['now', ...DIRECTIONS.map((d) => d.key)])
 
 const params = new URLSearchParams(location.search)
 const SHOT = params.has('shot')
 const ONLY = params.get('only')
 const STATE_KEYS = ['1', '2', '3', '4', '5', '6', '7']
 const noop = () => {}
+const BESIDE = params.get('beside') as BesideWhat | null
+
+/** What the run has printed, as it prints it: a dev server that's up says something every couple of seconds. */
+function useStream(s: RunState) {
+  // a screenshot can't wait for it, so it starts with more said
+  const more = SHOT ? 7 : 0
+  const said = (from: RunState) => [
+    ...outputOf(from),
+    ...(from.phase === 'up' ? Array.from({ length: more }, (_, i) => hmrLine(2 + i)) : []),
+  ]
+  const [lines, setLines] = useState<string[]>(() => said(s))
+  useEffect(() => {
+    setLines(said(s))
+    if (s.phase !== 'up') return
+    let n = 2 + more
+    const id = window.setInterval(() => setLines((l) => [...l, hmrLine(n++)]), 1800)
+    return () => window.clearInterval(id)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [s])
+  return lines
+}
 
 /** The picked state, played: Stop stops it, Run again starts it and it comes up, as the runtime would. */
 function usePlayed(start: RunState) {
@@ -82,48 +108,57 @@ function usePlayed(start: RunState) {
 function InThread({ dir, start }: { dir: Direction; start: RunState }) {
   const played = usePlayed(start)
   const [opened, setOpened] = useState<string | null>(null)
+  const [beside, setBeside] = useState<BesideWhat | null>(BESIDE)
+  const lines = useStream(played.state)
   const project = start.place === 'project'
+  const output = { lines, beside, open: (what: BesideWhat) => setBeside((was) => (was === what ? null : what)) }
   return (
-    <div className={p.threadWrap}>
-      <p className={p.sideHead}>
-        {project ? 'The project’s conversation' : 'A task’s thread, under its header:'} <strong>{project ? 'althar' : start.where}</strong>
-      </p>
-      <Thread label="Thread" className={p.thread}>
-        <You at="2:40 pm">Run it so I can click around.</You>
-        <CanvasLine
-          canvas={{ canvasId: 'c1', name: 'small-change', title: 'Small change card, four directions', kind: 'html', version: 3 }}
-          action="published"
-        />
-        <dir.Card
-          key={dir.key + start.key}
-          state={played.state}
-          onOpen={() => setOpened(played.state.url ?? null)}
-          onStop={played.onStop}
-          onRunAgain={played.onRunAgain}
-        />
-        {project && (
-          <StartedTask
-            title="Review a pull request: Launch screen loses its startup status"
-            tone={TaskStatus.Running}
-            word="Working"
-            detail="4m"
-          />
-        )}
-      </Thread>
-      {opened !== null && (
-        <p className={p.opened}>
-          Opens <code>{opened}</code> beside the conversation.{' '}
-          <button type="button" onClick={() => setOpened(null)}>
-            Close
-          </button>
-        </p>
-      )}
-    </div>
+    <OutputContext.Provider value={output}>
+      <div className={p.conversation} data-beside={beside !== null || undefined}>
+        <div className={p.threadWrap}>
+          <p className={p.sideHead}>
+            {project ? 'The project’s conversation' : 'A task’s thread, under its header:'}{' '}
+            <strong>{project ? 'althar' : start.where}</strong>
+          </p>
+          <Thread label="Thread" className={p.thread}>
+            <You at="2:40 pm">Run it so I can click around.</You>
+            <CanvasLine
+              canvas={{ canvasId: 'c1', name: 'small-change', title: 'Small change card, four directions', kind: 'html', version: 3 }}
+              action="published"
+            />
+            <dir.Card
+              key={dir.key + start.key}
+              state={played.state}
+              onOpen={() => setOpened(played.state.url ?? null)}
+              onStop={played.onStop}
+              onRunAgain={played.onRunAgain}
+            />
+            {project && (
+              <StartedTask
+                title="Review a pull request: Launch screen loses its startup status"
+                tone={TaskStatus.Running}
+                word="Working"
+                detail="4m"
+              />
+            )}
+          </Thread>
+          {opened !== null && (
+            <p className={p.opened}>
+              Opens <code>{opened}</code> beside the conversation.{' '}
+              <button type="button" onClick={() => setOpened(null)}>
+                Close
+              </button>
+            </p>
+          )}
+        </div>
+        {beside !== null && <BesideRun key={beside} s={played.state} what={beside} onClose={() => setBeside(null)} />}
+      </div>
+    </OutputContext.Provider>
   )
 }
 
 function Page() {
-  const [dirKey, setDir] = useState(() => ALL.find((d) => d.key === params.get('d'))?.key ?? 'a')
+  const [dirKey, setDir] = useState(() => ALL.find((d) => d.key === params.get('d'))?.key ?? 'd1')
   const [theme, setTheme] = useState(params.get('theme') === 'dark' ? 'dark' : 'light')
   const [live, setLive] = useState(() => Math.min(STATES.length - 1, Math.max(0, Number(params.get('s') ?? 2) - 1)))
   const dir = ALL.find((d) => d.key === dirKey) ?? NOW
@@ -171,23 +206,28 @@ function Page() {
                       <span>{STATE_KEYS[i]}</span> {s.label}
                     </button>
                   </figcaption>
-                  <dir.Card key={dir.key} state={s} onOpen={noop} onStop={noop} onRunAgain={noop} />
+                  <OutputContext.Provider value={{ lines: outputOf(s), beside: null, open: noop }}>
+                    <dir.Card key={dir.key} state={s} onOpen={noop} onStop={noop} onRunAgain={noop} />
+                  </OutputContext.Provider>
                 </figure>
               ))}
             </section>
           )}
           {ONLY !== 'grid' && (
-            <aside className={p.side}>
+            <aside className={p.side} data-wide={FIRST.has(dir.key) ? undefined : true}>
               <InThread dir={dir} start={state} />
             </aside>
           )}
         </main>
         {!SHOT && (
           <nav className={p.bar} aria-label="Directions">
-            {ALL.map((d) => (
-              <button key={d.key} type="button" aria-pressed={d.key === dirKey} onClick={() => setDir(d.key)}>
-                <kbd>{d.letter}</kbd> {d.name}
-              </button>
+            {ALL.map((d, i) => (
+              <span key={d.key} className={p.barItem}>
+                {i > 0 && FIRST.has(ALL[i - 1]!.key) && !FIRST.has(d.key) && <span className={p.sep} />}
+                <button type="button" aria-pressed={d.key === dirKey} onClick={() => setDir(d.key)}>
+                  <kbd>{d.letter}</kbd> {d.name}
+                </button>
+              </span>
             ))}
             <span className={p.sep} />
             <span className={p.liveState}>
