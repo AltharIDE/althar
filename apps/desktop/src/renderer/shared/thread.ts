@@ -96,7 +96,7 @@ export type Part =
       readonly id: string
       readonly text: string
       readonly tone: 'info' | 'warning' | 'error'
-      /** What the line offers: parts set up twice, kept as a preset, or a review a lead or the coordinator offered a task. */
+      /** What the line offers: a review a lead or the coordinator offered a task. */
       readonly offer?: Offer
       /** For an agent's turn that failed: why, as the runtime classes it (`auth_required`…), and the agent's own words, apart. */
       readonly failure?: string
@@ -182,7 +182,7 @@ export type Block =
       readonly spent: Spent | null
     }
   | { readonly kind: 'divider'; readonly id: string; readonly text: string }
-  /** What the coordinator offers to keep, such as parts set up twice as a preset (a task is a conversation plus parts): its line and button. */
+  /** A review a lead or the coordinator offers a task: its line and its buttons. */
   | {
       readonly kind: 'offer'
       readonly id: string
@@ -843,7 +843,7 @@ export const blocksOf = (
       case 'notice':
         // A restart is Althar's business, not the person's; earlier versions said so in the thread.
         if (item.content.source === 'runtime' && item.content.title === RESTARTED) continue
-        // What Althar offers to keep, such as a preset, stands on its own with its button.
+        // A review offered a task stands on its own with its buttons.
         if (item.content.offer !== undefined) {
           blocks.push({
             kind: 'offer',
