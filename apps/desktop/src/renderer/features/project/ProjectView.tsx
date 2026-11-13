@@ -288,7 +288,7 @@ export function ProjectView({
   // The lanes the person collapsed, kept for every project, apart beside the conversation.
   const [folds, setFolds] = useFolds(room === Room.Both ? 'beside' : 'alone')
   // The board as the person's moves on asides leave it, at once: one cleared gone, one made a task on it as work (`useAsideMoves`).
-  const asideMoves = useAsideMoves(useServices().client, board.board)
+  const asideMoves = useAsideMoves(useServices().client, board.board, model.project?.id ?? model.coordinator?.project.id ?? null)
   const seen = asideMoves.over
   const lanes = seen === null ? null : lanesOf(seen, board.merging)
   const yours = lanes === null ? 0 : yoursOf(lanes)

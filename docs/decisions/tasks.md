@@ -204,7 +204,9 @@ leaves its conversation as it was.
 - **Both moves show at once:** the pill goes, and a card made a task is on
   the board, in the frame the press is painted in. The window keeps the
   move over the board's reads until they say so, and one the runtime
-  refuses comes back with a line over the composer saying why. Clear waited
+  refuses, or answers but leaves on Scratch (a read of the board after its
+  answer says so), comes back with a line over the composer saying why
+  ([foundations](foundations.md#the-ui-is-instant)). Clear waited
   on the runtime and then on the board's next read, so the pill went late
   and came back for a moment (12 Nov 2026).
 - A call of its that waits on the person still shows in Needs you, and is

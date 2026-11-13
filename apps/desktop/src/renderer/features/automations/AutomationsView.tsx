@@ -190,6 +190,7 @@ function Page({
       onTryOnce={model.runNow}
       onTurnOn={model.turnOn}
       onRename={(name) => model.change({ ...definition, name })}
+      // oxlint-disable-next-line althar/press-at-once -- Not instant yet: a failed delete has nowhere to say so once its view is gone (foundations.md, The UI is instant).
       onDelete={() => void model.remove().then((removed) => removed && onBack())}
       onBack={onBack}
       {...(standing.tone === 'yours' ? { pausedItself: view.pauseReason ?? text.why } : {})}

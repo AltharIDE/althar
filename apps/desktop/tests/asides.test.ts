@@ -83,7 +83,7 @@ const LEAD: PlanStep = { key: 'implement', agentId: 'claude-code', model: 'opus'
 /** The pane's asides as the project's screen has them: the person's moves over the board, and the asides drawn from that. */
 const useScreen = (client: Client, props: { board: BoardSnapshot; lead: PlanStep }) => {
   const [cache] = useState(makeQueryClient)
-  const moves = useAsideMoves(client, props.board)
+  const moves = useAsideMoves(client, props.board, 'p1')
   const tasks = moves.over?.tasks ?? []
   const scratch = tasks.filter((task) => task.scratch === true && task.phase !== 'settled')
   const asides = useAsides({ client, cache, projectId: 'p1', lead: props.lead, scratch, tasks, moves })
@@ -141,6 +141,38 @@ describe('moves on asides', () => {
     // An aside that couldn't start says why the same way, its words back in the composer.
     act(() => result.current.moves.startFailed(new ApiError({ reason: 'conflict', message: 'Codex is signed out.' })))
     expect(result.current.moves.failed).toBe('Couldn’t start the aside. Codex is signed out.')
+  })
+
+  it('brings one back with why where the runtime answered without settling it, by a read of the board after its answer', async () => {
+    const retry = boardTask({ taskId: 'a2', title: 'Retry', latest: { at: ago(0), by: 'lead', said: 'Twice.' } })
+    const { client } = fakeClient({ getBoard: vi.fn(async () => boardOf([retry])) })
+    const { result } = renderHook(() => useScreen(client, { board: boardOf([retry]), lead: LEAD }))
+    act(() => result.current.asides.clear(['a2']))
+    expect(result.current.pills).toEqual([])
+    await waitFor(() => expect(result.current.moves.failed).toBe('Couldn’t clear “Retry”. Something of it is still open.'))
+    expect(result.current.pills.map((pill) => pill.id)).toEqual(['a2'])
+  })
+
+  it('leaves two cleared whose reads of the board overlap: neither comes back, and no line says so', async () => {
+    // Each clear's read of the board answers only when the test says, the second before the first.
+    const reads: Array<(board: BoardSnapshot) => void> = []
+    const { client } = fakeClient({ getBoard: vi.fn(() => new Promise<BoardSnapshot>((answer) => reads.push(answer))) })
+    const two = [said, boardTask({ taskId: 'a2', title: 'Retry', latest: { at: ago(0), by: 'lead', said: 'Twice.' } })]
+    const { result, rerender } = renderHook((props: { board: BoardSnapshot }) => useScreen(client, { ...props, lead: LEAD }), {
+      initialProps: { board: boardOf(two) },
+    })
+    act(() => result.current.asides.clear(['a1']))
+    act(() => result.current.asides.clear(['a2']))
+    expect(result.current.pills).toEqual([])
+    await waitFor(() => expect(reads).toHaveLength(2))
+    const settled = boardOf(two.map((task) => ({ ...task, phase: 'settled' as const })))
+    await act(async () => reads[1]?.(settled))
+    // A read of the board from before either clear lands meanwhile.
+    rerender({ board: boardOf(two) })
+    expect(result.current.pills).toEqual([])
+    await act(async () => reads[0]?.(settled))
+    expect(result.current.pills).toEqual([])
+    expect(result.current.moves.failed).toBeNull()
   })
 
   it('makes one a task at once: it is on the board as work, off the pills, and the pane is the coordinator’s', () => {

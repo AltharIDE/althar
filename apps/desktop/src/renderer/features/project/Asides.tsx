@@ -39,6 +39,7 @@ export const asidesText = {
   quoting: 'Quoting the coordinator',
   asked: (when: string) => `Asked ${when}`,
   clearFailed: (title: string, why: string) => `Couldn’t clear ${title}. ${why}`,
+  stillOpen: 'Something of it is still open.',
   taskFailed: (title: string, why: string) => `Couldn’t make ${title} a task. ${why}`,
   startFailed: (why: string) => `Couldn’t start the aside. ${why}`,
   dismiss: 'Dismiss',
@@ -57,7 +58,7 @@ const BELIEVED = 10_000
  * on the board as work, from the press until the board's own read says so. One the runtime refused comes back, and `failed`
  * says why. `over` is the board as the person sees it, which the lanes, the pills and the flights are drawn from.
  */
-export function useAsideMoves(client: Client, board: BoardSnapshot | null) {
+export function useAsideMoves(client: Client, board: BoardSnapshot | null, projectId: string | null = null) {
   const [moves, setMoves] = useState<ReadonlyMap<string, Move>>(new Map())
   const [failed, setFailed] = useState<string | null>(null)
   const drop = (taskId: string) =>
@@ -99,7 +100,20 @@ export function useAsideMoves(client: Client, board: BoardSnapshot | null) {
     for (const task of tasks) {
       const title = task.title === '' ? 'the aside' : `“${task.title}”`
       void (move === 'clear' ? client.markTaskDone(task.taskId) : client.shelveTask(task.taskId, null)).then(
-        () => setTimeout(() => drop(task.taskId), BELIEVED),
+        async () => {
+          // A clear the runtime answered without settling it (something of it opened meanwhile) says so: a read of the board's
+          // own, after the answer, never one another move's refresh may have cancelled (docs/decisions/foundations.md).
+          if (move === 'clear' && projectId !== null) {
+            const after = await client.getBoard(projectId).catch(() => null)
+            const now = after?.tasks.find((one) => one.taskId === task.taskId)
+            if (now !== undefined && now.scratch === true && now.phase !== 'settled') {
+              drop(task.taskId)
+              setFailed(asidesText.clearFailed(title, asidesText.stillOpen))
+              return
+            }
+          }
+          setTimeout(() => drop(task.taskId), BELIEVED)
+        },
         (error: unknown) => {
           drop(task.taskId)
           setFailed((move === 'clear' ? asidesText.clearFailed : asidesText.taskFailed)(title, messageOf(error)))
