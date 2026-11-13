@@ -441,31 +441,69 @@ describe('a lead waiting for an external condition', () => {
     )
   })
 
-  it.effect('a closed unmerged PR asks the person instead of reporting the backlog complete', () => {
+  for (const outcome of ['merged', 'checks_complete', 'checks_passed'] as const)
+    it.effect(`a closed unmerged PR asks the person rather than satisfying ${outcome}`, () => {
+      const gate = holds()
+      const { working, bare } = hosted()
+      const github = makeFakeService({ pushUrl: () => bare })
+      github.addRepository(['meridian', 'api'])
+      github.addPullRequest({ path: ['meridian', 'api'], title: 'A change', author: 'ada', state: 'closed' })
+      return onTestClock(
+        Effect.gen(function* () {
+          yield* (yield* Connections).connectToken({ product: 'github', token: 't', actorId: (yield* Instance).personId, webUrl: HOST })
+          const task = yield* planned(working)
+          yield* callTool(task.access, 'wait_for', {
+            reason: 'Merge the backlog',
+            conditions: [{ kind: 'pull_request', repository: 'meridian/api', number: 1, until: outcome }],
+          })
+          gate.open('[lead:slowly]')
+          yield* idle(task.threadId)
+          yield* TestClock.adjust(Duration.seconds(2))
+          const sql = yield* SqlClient.SqlClient
+          const [call] = yield* until(
+            sql<{ payload: string }>`SELECT payload FROM attention_requests WHERE task_id = ${task.taskId} AND state = 'open'`,
+            (rows) => rows.length === 1,
+          )
+          assert.include(call?.payload ?? '', 'closed without merging')
+          assert.lengthOf(yield* turns(task.threadId), 1)
+          assert.lengthOf(yield* held(task.taskId), 0)
+        }).pipe(
+          Effect.provide(
+            withQueries(':memory:', { holds: gate }, { connectors: fakeConnectors({ github }), listenEvery: Duration.hours(1) }),
+          ),
+        ),
+      )
+    })
+
+  it.effect('a merged PR with failed checks does not satisfy a checks-passed wait', () => {
     const gate = holds()
     const { working, bare } = hosted()
-    const github = makeFakeService({ pushUrl: () => bare })
+    let passing = false
+    const github = makeFakeService({ pushUrl: () => bare, checksFor: () => [{ name: 'build', state: passing ? 'passed' : 'failed' }] })
     github.addRepository(['meridian', 'api'])
-    github.addPullRequest({ path: ['meridian', 'api'], title: 'A change', author: 'ada', state: 'closed' })
+    github.addPullRequest({ path: ['meridian', 'api'], title: 'A change', author: 'ada', state: 'merged', headSha: 'head' })
     return onTestClock(
       Effect.gen(function* () {
         yield* (yield* Connections).connectToken({ product: 'github', token: 't', actorId: (yield* Instance).personId, webUrl: HOST })
         const task = yield* planned(working)
         yield* callTool(task.access, 'wait_for', {
-          reason: 'Merge the backlog',
-          conditions: [{ kind: 'pull_request', repository: 'meridian/api', number: 1, until: 'merged' }],
+          reason: 'Checks to pass',
+          conditions: [{ kind: 'pull_request', repository: 'meridian/api', number: 1, until: 'checks_passed' }],
         })
         gate.open('[lead:slowly]')
         yield* idle(task.threadId)
         yield* TestClock.adjust(Duration.seconds(2))
-        const sql = yield* SqlClient.SqlClient
-        const [call] = yield* until(
-          sql<{ payload: string }>`SELECT payload FROM attention_requests WHERE task_id = ${task.taskId} AND state = 'open'`,
-          (rows) => rows.length === 1,
+        const queries = yield* Queries
+        const card = yield* until(
+          Effect.map(queries.board(task.projectId), (board) => board.tasks.find((one) => one.taskId === task.taskId)),
+          (one) => one?.phase === 'ready' || one?.externalWait?.lastCheck != null,
         )
-        assert.include(call?.payload ?? '', 'closed without merging')
+        assert.strictEqual(card?.phase, 'running')
         assert.lengthOf(yield* turns(task.threadId), 1)
-        assert.lengthOf(yield* held(task.taskId), 0)
+        passing = true
+        yield* TestClock.adjust(Duration.seconds(31))
+        yield* ready(task.projectId, task.taskId)
+        assert.lengthOf(yield* turns(task.threadId), 2)
       }).pipe(
         Effect.provide(
           withQueries(':memory:', { holds: gate }, { connectors: fakeConnectors({ github }), listenEvery: Duration.hours(1) }),
