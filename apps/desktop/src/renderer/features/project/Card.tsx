@@ -1,8 +1,10 @@
 import { useState } from 'react'
 
 import type { AgentStatus, ChangeSummary, PlanStep, TaskEnd as End, WorksIn as Where } from '@althar/contracts'
-import { type IssueRefProps, type LaunchStep, TaskCard, TaskEnd, TaskLaunch, TaskStatus, WorksIn } from '@althar/ui'
+import { type IssueRefProps, type LaunchStep, PresetOffer, TaskCard, TaskEnd, TaskLaunch, TaskStatus, WorksIn } from '@althar/ui'
+import { useQueryClient } from '@tanstack/react-query'
 
+import { useServices } from '../../data/services'
 import { externalWaitWords, queuedWords, reconnectsWords, waitsWords } from '../../shared/agents'
 import { type NameEffort, type NameModel, useEffortNames, useModelNames } from '../../shared/modelNames'
 import { Holders } from '../../shared/Holders'
@@ -107,6 +109,33 @@ const launchSteps = (plan: Plan, named: NameModel, effortOf: NameEffort, reviews
     skipped: step.skipped,
     effort: effortOf(step.agentId, step.model, step.effort ?? null),
   }))
+
+/**
+ * Its parts, offered to keep as a preset, quiet in its card's foot: Keep
+ * saves them from the task as a new preset by the name given (a name another
+ * preset has is refused, and the form says so), Undo removes what was kept, and
+ * the person can say not to offer them again. The card says what came of it
+ * once the runtime reads it again.
+ */
+function Offer({ card }: { card: TaskCardContent }) {
+  const { client } = useServices()
+  const cache = useQueryClient()
+  const offer = card.presetOffer
+  if (offer === undefined) return null
+  // Settings lists the person's presets: it reads them again.
+  const listed = () => void cache.invalidateQueries({ queryKey: ['presets'] })
+  return (
+    <PresetOffer
+      name={offer.name}
+      {...(offer.near === undefined ? {} : { near: offer.near })}
+      {...(offer.kept === undefined
+        ? {}
+        : { kept: offer.kept.name, onUndo: () => void client.removePreset(offer.kept?.id ?? '').then(listed) })}
+      onKeep={(name) => client.savePreset({ name, parts: offer.parts, taskId: card.taskId, asNew: true }).then(listed)}
+      onDecline={() => void client.declinePresetOffer(card.taskId)}
+    />
+  )
+}
 
 function PlanCard({
   card,
@@ -226,6 +255,7 @@ function PlanCard({
                   },
                 }),
           })}
+      {...(card.presetOffer === undefined ? {} : { footNote: <Offer card={card} /> })}
       onStart={() => actions.onStart(plan.id)}
     />
   )
@@ -307,6 +337,7 @@ function Shown({ card, actions }: { card: TaskCardContent; actions: CardActions 
       {...(effort === null ? {} : { effort })}
       {...(from === undefined ? {} : { from })}
       {...(card.change === null ? {} : { pr: pullRequestOf(card.change) })}
+      {...(card.presetOffer === undefined ? {} : { footNote: <Offer card={card} /> })}
       onOpen={() => actions.onOpen(card.threadId)}
       text={{ status: text.status }}
     />

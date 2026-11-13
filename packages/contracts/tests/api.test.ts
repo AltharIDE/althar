@@ -565,6 +565,7 @@ describe('the API', () => {
               ListPresets: () => Effect.die('unused'),
               SavePreset: () => Effect.die('unused'),
               RemovePreset: () => Effect.die('unused'),
+              DeclinePresetOffer: () => Effect.die('unused'),
               RunIt: () => Effect.die('unused'),
               StopRunning: () => Effect.die('unused'),
               ApplyPreset: () => Effect.die('unused'),

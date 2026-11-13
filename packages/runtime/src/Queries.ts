@@ -100,7 +100,7 @@ import { commitOf, commitsAhead, commitsOf, git, gitOutcome, indexStamp, namedRe
 import { reachedRemote } from './sshHosts'
 import { commandIn, shortCommand } from './rules'
 import { reviewBriefOf } from './Reviews'
-import { partsOfPlan, presetOf, presetsIn } from './presets'
+import { partsOfPlan, presetOf, presetOfferOn, presetsIn } from './presets'
 import { Sessions } from './Sessions'
 import { spendingOf } from './Spending'
 import { timingsFrom } from './turnTimes'
@@ -115,6 +115,9 @@ import { actionsOf, standingOf } from './Tasks'
  * client that watches from there sees every change after, and at worst one
  * it already has.
  */
+
+/** A card's offer of a preset, as its content takes it: none where there is none. */
+const offering = <A>(presetOffer: A | undefined) => (presetOffer === undefined ? {} : { presetOffer })
 
 /** Session states in which a session is working on its thread. */
 const LIVE = ['starting', 'active', 'waiting_approval', 'cancelling']
@@ -661,6 +664,8 @@ export const itemOf = (row: ItemRow): ThreadItem | undefined => {
       // Older threads kept the agent's explanation of a refusal as a notice; the refused call's own row says it now.
       const title = text(content, 'title')
       if (title === 'Resumed after a rejection.') return undefined
+      // The coordinator's offer of a preset, as a line of its own, from before its task's card offered it: the card says it now.
+      if (field(field(content, 'offer'), 'kind') === 'preset') return undefined
       // What a lead's agent could see is kept for `skillsRead`, not for a chat: a line for it never reaches the window.
       if (role === 'skills') return undefined
       // What older threads said of another task (one that ended, or one changing the same files): news for the lead, not for the chat.
@@ -2746,6 +2751,8 @@ export class Queries extends Context.Service<
             ...(round?.state === 'unchecked' ? { conflictUnchecked: round.why } : {}),
             ...(phase === 'kept' ? { keptAt: task.keptAt } : {}),
             automation: yield* fromAutomation(taskId),
+            // Its parts, offered to keep as a preset, while they are.
+            ...offering(yield* presetOfferOn(task.projectId, taskId)),
           } satisfies Extract<ThreadItem, { kind: 'task' }>['content']
         })
 
@@ -3201,6 +3208,29 @@ export class Queries extends Context.Service<
             SELECT state, json_array_length(findings) AS findings, verdict, json_extract(reviewer, '$.bringsBack') AS bringsBack,
               updated_at AS updatedAt FROM merge_reviews
             WHERE url = ${change?.url ?? ''}`
+          // Where the full task's review stands: its draft, where it drafted one, else whether its run is still going.
+          const [draft] =
+            reviewed === undefined
+              ? []
+              : yield* sql<{ suggested: string; comments: number; at: string }>`
+            SELECT json_extract(content, '$.suggested') AS suggested, json_array_length(content, '$.comments') AS comments,
+              created_at AS at
+            FROM thread_items WHERE thread_id = ${reviewed.threadId} AND kind = 'review_draft' ORDER BY sequence DESC LIMIT 1`
+          const [reviewRun] =
+            reviewed === undefined || draft !== undefined
+              ? []
+              : yield* sql<{ state: string }>`
+            SELECT state FROM runs WHERE task_id = ${reviewed.taskId} ORDER BY created_at DESC LIMIT 1`
+          const reviewBefore =
+            reviewed === undefined
+              ? undefined
+              : draft !== undefined
+                ? draft.suggested !== 'approved' && draft.comments > 0
+                  ? { state: 'found' as const, findings: draft.comments, at: draft.at }
+                  : { state: 'clear' as const, findings: 0, at: draft.at }
+                : reviewRun === undefined || reviewRun.state === 'running'
+                  ? { state: 'running' as const, findings: 0, at: null }
+                  : { state: 'stopped' as const, findings: 0, at: null }
           // What its review after the merge brings back: as the rule and its own word say now, and once owed, as it was kept then.
           const rule = yield* afterMergeNow(task.id)
           const holds: AfterMergeRule = review === undefined ? rule.holds : review.bringsBack === 'all' ? 'all' : 'major'
@@ -3214,6 +3244,14 @@ export class Queries extends Context.Service<
           const [merged] = yield* sql<{ at: string }>`
             SELECT created_at AS at FROM thread_items WHERE thread_id = ${threadId} AND kind = 'arrival'
               AND json_extract(content, '$.kind') = 'merged' ORDER BY sequence DESC LIMIT 1`
+          // Its review's report, where its findings are: the latest review report in this thread on the change that merged.
+          const [verdict] =
+            review === undefined
+              ? []
+              : yield* sql<{ id: string }>`
+            SELECT id FROM thread_items WHERE thread_id = ${threadId} AND kind = 'step_result'
+              AND json_extract(content, '$.step') = 'review' AND json_extract(content, '$.afterMerge.url') = ${change?.url ?? ''}
+            ORDER BY sequence DESC LIMIT 1`
           // One file's line count where the lead left one: read from its worktree, or the pull request's numbers.
           const files =
             change !== null && change.changedFiles === 1
@@ -3233,7 +3271,8 @@ export class Queries extends Context.Service<
           const failed = change?.checks !== null && change?.checks !== undefined && change.checks.outcome === 'failed'
           const afterMerge = change !== null && change.state === 'merged'
           const at = task.startedAt ?? plan?.proposedAt ?? task.createdAt
-          const reviewBefore = reviewed !== undefined && !afterMerge
+          // Only Make it a full task gives a small change a review task of its own (FastLane.makeFullTask).
+          const reviewsBefore = reviewed !== undefined && !afterMerge
           const card: ThreadItem = {
             id: `small-change:${task.id}`,
             sequence: 0,
@@ -3250,7 +3289,7 @@ export class Queries extends Context.Service<
                 model: small.implement.model,
                 ...(small.implement.effort === undefined ? {} : { effort: small.implement.effort }),
               },
-              skips: smallChangeSkips(reviewBefore ? null : small.review, holds),
+              skips: smallChangeSkips(reviewsBefore ? null : small.review, holds),
               steps: [
                 { key: 'started', what: 'Started', at, done: true },
                 {
@@ -3291,10 +3330,33 @@ export class Queries extends Context.Service<
               ...(reviewed === undefined || !afterMerge
                 ? {}
                 : { review: { taskId: reviewed.taskId, slug: reviewed.slug, threadId: reviewed.threadId, title: reviewed.title } }),
-              ...(reviewBefore
-                ? { fullTask: { taskId: reviewed.taskId, slug: reviewed.slug, threadId: reviewed.threadId, title: reviewed.title } }
-                : {}),
+              ...(reviewed === undefined || reviewBefore === undefined
+                ? {}
+                : {
+                    fullTask: { taskId: reviewed.taskId, slug: reviewed.slug, threadId: reviewed.threadId, title: reviewed.title },
+                    reviewBefore,
+                  }),
               afterMerge: { project: rule.project, task: rule.task, holds },
+              reviewer: small.review === null ? null : { agentId: small.review.agentId, model: small.review.model ?? null },
+              ...(review === undefined
+                ? {}
+                : {
+                    reviewAfter: {
+                      state:
+                        review.state === 'found'
+                          ? ('found' as const)
+                          : review.state === 'owed' || review.state === 'running'
+                            ? ('running' as const)
+                            : review.state === 'stopped' || review.state === 'fixing' || review.state === 'left'
+                              ? review.state
+                              : review.verdict === 'changes_requested' && review.findings > 0
+                                ? ('quiet' as const)
+                                : ('clear' as const),
+                      findings: review.findings ?? 0,
+                      at: review.state === 'owed' || review.state === 'running' ? null : review.updatedAt,
+                      item: verdict?.id ?? null,
+                    },
+                  }),
             },
           }
           return card

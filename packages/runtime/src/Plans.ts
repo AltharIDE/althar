@@ -279,11 +279,14 @@ export class Plans extends Context.Service<
           )
           const plan = yield* load(planId)
           const parameters = parametersOf(plan)
-          // The same parts set up twice running: the coordinator offers them as a preset, once (a task is a conversation plus parts).
+          // Parts the person set up themselves, alike a few times: its card offers them as a preset, once (a task is a conversation plus parts).
           if (accepted)
-            yield* offerPreset(plan.projectId, instance.coordinatorId).pipe(
-              Effect.catchCause((cause) => Effect.logWarning('Could not offer a preset', cause)),
-            )
+            yield* offerPreset({
+              projectId: plan.projectId,
+              taskId: plan.taskId,
+              personId: instance.personId,
+              actorId: instance.coordinatorId,
+            }).pipe(Effect.catchCause((cause) => Effect.logWarning('Could not offer a preset', cause)))
           if (parameters.reads === true) {
             // A review's lead starts in its thread; accepted before, it started then, or its thread says why it couldn't.
             const [lead] = parameters.steps

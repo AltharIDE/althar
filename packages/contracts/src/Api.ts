@@ -1965,22 +1965,19 @@ export const NoticeItem = Schema.Struct({
       }),
     ),
     /**
-     * What the line offers: in the coordinator's thread, parts the person set up twice, kept as a preset by that name, which
-     * its button saves (a task is a conversation plus parts, "Presets"); or a review a lead or the coordinator offered a task
-     * whose work turned real with none (`offer_review`), by its reviewer, which Add puts on and No thanks turns down for good.
+     * What the line offers: a review a lead or the coordinator offered a task whose work turned real with none
+     * (`offer_review`), by its reviewer, which Add puts on and No thanks turns down for good. (A preset is offered on its
+     * task's card, `presetOffer`, not here.)
      */
     offer: Schema.optional(
-      Schema.Union([
-        Schema.Struct({ kind: Schema.Literal('preset'), name: Schema.String, parts: PresetParts }),
-        Schema.Struct({
-          kind: Schema.Literal('review'),
-          projectId: Schema.String,
-          taskId: Schema.String,
-          agentId: Schema.String,
-          model: Schema.NullOr(Schema.String),
-          effort: Schema.optional(Schema.NullOr(Schema.String)),
-        }),
-      ]),
+      Schema.Struct({
+        kind: Schema.Literal('review'),
+        projectId: Schema.String,
+        taskId: Schema.String,
+        agentId: Schema.String,
+        model: Schema.NullOr(Schema.String),
+        effort: Schema.optional(Schema.NullOr(Schema.String)),
+      }),
     ),
     /**
      * For an agent's turn that failed: why, as the runtime classes it
@@ -2621,6 +2618,20 @@ export const TaskCard = Schema.Struct({
   reordered: Schema.optional(Schema.Boolean),
   /** The automation whose run it is, where one started it; null or absent otherwise. */
   automation: Schema.optional(Schema.NullOr(FromAutomation)),
+  /**
+   * Its parts, offered to keep as a preset (a task is a conversation plus parts, "Presets"): parts the person set up
+   * themselves a few times, by a name in plain words, which Keep saves from this task. `near`: a built-in preset they
+   * are but for one thing, said instead of a new one. `kept`: the preset kept from it, which Undo removes. Absent where
+   * nothing was offered on it, or the person said not to.
+   */
+  presetOffer: Schema.optional(
+    Schema.Struct({
+      name: Schema.String,
+      parts: PresetParts,
+      near: Schema.optional(Schema.Struct({ preset: Schema.String, differs: Schema.String })),
+      kept: Schema.optional(Schema.Struct({ id: Schema.String, name: Schema.String })),
+    }),
+  ),
 })
 export type TaskCard = typeof TaskCard.Type
 
@@ -3057,9 +3068,21 @@ export const SmallChangeItem = Schema.Struct({
     review: Schema.optional(
       Schema.NullOr(Schema.Struct({ taskId: Schema.String, slug: Schema.String, threadId: Schema.String, title: Schema.String })),
     ),
-    /** The person made it a full task, reviewed before it merges: the card folds to the line saying what was made. */
+    /** The person made it a full task, reviewed before it merges: the review task it was given, before and after it merges. */
     fullTask: Schema.optional(
       Schema.NullOr(Schema.Struct({ taskId: Schema.String, slug: Schema.String, threadId: Schema.String, title: Schema.String })),
+    ),
+    /**
+     * Where that full task's review stands: reading, its draft approving or with nothing on its lines (`clear`), with
+     * findings on lines (`found`, how many), or its run over with no draft (`stopped`); when it drafted. Absent where it
+     * isn't a full task, and from a runtime before it.
+     */
+    reviewBefore: Schema.optional(
+      Schema.Struct({
+        state: Schema.Literals(['running', 'clear', 'found', 'stopped']),
+        findings: Schema.Number,
+        at: Schema.NullOr(Schema.String),
+      }),
     ),
     /**
      * What its review after the merge brings back: the project's rule (`afterMergeReview`), the task's own word over it (null
@@ -3071,6 +3094,22 @@ export const SmallChangeItem = Schema.Struct({
         project: AfterMergeRule,
         task: Schema.NullOr(Schema.Literals(['review', 'none'])),
         holds: AfterMergeRule,
+      }),
+    ),
+    /** Who reads it after it merges, as its plan names them; null where its plan names none. Absent from a runtime before it. */
+    reviewer: Schema.optional(Schema.NullOr(Schema.Struct({ agentId: Schema.String, model: Schema.NullOr(Schema.String) }))),
+    /**
+     * Its review after the merge, once one is owed: under way, nothing found, only what the rule keeps in the thread
+     * (`quiet`), what waits on the person (`found`), its lead fixing that, the person leaving it, or stopped; how many it
+     * found; and its report's item in this thread,
+     * where its findings are, once it reported. Absent before one is owed, and from a runtime before it.
+     */
+    reviewAfter: Schema.optional(
+      Schema.Struct({
+        state: Schema.Literals(['running', 'clear', 'quiet', 'found', 'fixing', 'left', 'stopped']),
+        findings: Schema.Number,
+        at: Schema.NullOr(Schema.String),
+        item: Schema.NullOr(Schema.String),
       }),
     ),
   }),
@@ -4916,11 +4955,15 @@ export const Api = RpcGroup.make(
       taskId: Schema.optional(Schema.String),
       parts: Schema.optional(PresetParts),
       projectOnly: Schema.optional(Schema.Boolean),
+      /** Only as a new preset, as a card's offer keeps one: a name another preset has is refused rather than replaced. */
+      asNew: Schema.optional(Schema.Boolean),
     },
     Schema.Struct({ name: Schema.String }),
   ),
   /** Removes one of the person's presets; a built-in one stays. */
   command('RemovePreset', { id: Schema.String }, Schema.Void),
+  /** Says not to offer a task's parts as a preset: its card stops offering them, and they aren't offered again. */
+  command('DeclinePresetOffer', { taskId: Schema.String }, Schema.Void),
   /** Edits one of the person's presets, from Settings: its name, its parts, and whether it is kept to its task's project. */
   command(
     'EditPreset',
