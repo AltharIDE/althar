@@ -243,10 +243,16 @@ describe('a task’s parts, both ways, on its lead’s word', () => {
       assert.include(git(bare, 'branch', '--list'), 'althar/add-a-retry')
       assert.isTrue((yield* cards(task.projectId))[0]?.reviewerChange === 'now')
 
+      yield* callTool(task.lead, 'rename_task', { task_id: task.taskId, title: 'Prototype retry behavior' })
       // "Make it a real change": one call, on the lead's own task, with nothing asked of the person.
       const said = yield* callTool(task.lead, 'change_part', { part: 'preset', preset: 'Change', why: 'the person asked' })
       assert.match(said, /^add-a-retry: made it a Change: reviewer set to .+, ending in a draft pull request\./)
       assert.match(said, /Ship runs its review, then opens its pull request/)
+      assert.include(said, "Review add-a-retry's current title, “Prototype retry behavior”")
+      assert.include(said, 'call rename_task')
+      // The agent chooses the words; reshaping alone never rewrites a title that might still fit.
+      assert.strictEqual((yield* cards(task.projectId))[0]?.title, 'Prototype retry behavior')
+      yield* callTool(task.lead, 'rename_task', { task_id: task.taskId, title: 'Add configurable retries' })
       const plan = yield* planOf(task.taskId)
       assert.deepStrictEqual(
         plan.steps.map((step) => [step.key, step.skipped]),
@@ -269,6 +275,7 @@ describe('a task’s parts, both ways, on its lead’s word', () => {
         (all) => all.length === 1,
       )
       assert.deepStrictEqual([opened?.source, opened?.draft], ['althar/add-a-retry', true])
+      assert.strictEqual(opened?.title, 'Add configurable retries')
       // Its review ran first, over everything since the task started.
       const reviewed = (yield* items(task.threadId)).find((item) => item.kind === 'step_result' && item.content.step === 'review')
       assert.strictEqual(reviewed?.kind === 'step_result' ? reviewed.content.verdict : undefined, 'pass')
