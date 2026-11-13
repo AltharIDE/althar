@@ -1492,6 +1492,8 @@ export const handlers = Api.toLayer(
             yield* sessions.takeBack({ envelope: yield* envelope('thread.take_back', { itemId }, commandId), itemId })
           }),
         ),
+      UndoTurn: ({ commandId, itemId }) =>
+        api(Effect.flatMap(envelope('thread.undo_turn', { itemId }, commandId), (said) => sessions.undoTurn({ envelope: said, itemId }))),
       GetCoordinator: ({ projectId, before, limit }) =>
         api(queries.coordinator(projectId, { ...(before === undefined ? {} : { before }), ...(limit === undefined ? {} : { limit }) })),
       StartTask: ({ commandId, projectId, title, description, steps, issue, end, repositories, chat, taskId }) =>

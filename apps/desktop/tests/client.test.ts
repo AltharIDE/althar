@@ -100,7 +100,10 @@ describe('the client', () => {
 
     await client.setModel({ threadId: task.threadId, model: 'large' })
     await client.setEffort({ threadId: task.threadId, effort: 'high' })
-    const offered = await client.getModels()
+    const offered = await waitFor(
+      () => client.getModels(),
+      (agents) => agents.some((agent) => agent.agentId === 'claude-code' && agent.model === 'large' && agent.effort === 'high'),
+    )
     expect(offered.find((agent) => agent.agentId === 'claude-code')).toMatchObject({ model: 'large', effort: 'high' })
     await client.interrupt(task.threadId)
     await client.switchAgent({ threadId: task.threadId, agentId: 'codex', model: 'small', effort: 'low' })
@@ -337,6 +340,7 @@ describe('the client', () => {
           ReopenTask: () => Effect.die('unused'),
           Send: () => Effect.die('unused'),
           TakeBack: () => Effect.die('unused'),
+          UndoTurn: () => Effect.die('unused'),
           Answer: () => Effect.die('unused'),
           AnswerQuestion: () => Effect.die('unused'),
           GetCoordinator: () => Effect.die('unused'),

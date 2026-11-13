@@ -1,5 +1,6 @@
 import { EarlierTurns } from '../../shared/EarlierTurns'
 import { ThreadWaysContext } from '../../shared/ThreadBlocks'
+import { useTurnUndo } from './useTurnUndo'
 import { useNavigate } from '@tanstack/react-router'
 import { type CSSProperties, type ReactNode, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 
@@ -537,6 +538,13 @@ export function TaskView({
       '\n',
     ),
   )
+  const turnUndo = useTurnUndo(
+    model,
+    images,
+    (prompt) => setDraft((current) => withQueued(current, prompt)),
+    () => voice.inputRef.current,
+    changes,
+  )
   // ⌘D opens what the task changed, when it changed something. With its modifier, never set off by typing or by voice.
   const { show } = changes
   useEffect(() => {
@@ -791,6 +799,7 @@ export function TaskView({
   const submit = (body: string, now: boolean) => {
     const own = images.take(receiver)
     if (own === null) return
+    turnUndo.dismiss()
     // The comments made beside the conversation go after the person's words, their crops after the person's own pictures where pictures go.
     const gathered = takeAll(kept)
     const pictures = receiver.takes !== false
@@ -1084,9 +1093,10 @@ export function TaskView({
         carried={<CarriedOver here={kept} />}
         // The lines about who answers go on the composer's edge, under the chip, so neither covers the other.
         notice={
-          model.error !== null || conflict !== null || line !== null || aside?.notice != null ? (
+          model.error !== null || conflict !== null || line !== null || aside?.notice != null || turnUndo.notice !== null ? (
             <>
               {aside?.notice}
+              {turnUndo.notice}
               {model.error !== null && (
                 <Problem
                   as="div"
@@ -1465,6 +1475,8 @@ export function TaskView({
                       {...(openFile === undefined ? {} : { openFile })}
                       session={session}
                       retryable={snapshot.retryable}
+                      undoable={snapshot.undoable}
+                      onUndoFrom={busy || model.pending ? undefined : turnUndo.ask}
                       project={snapshot.project.name}
                       // A failed turn is tried again here, unless its step waits on the person, whose call has its ways on.
                       {...(busy || stuckOpen ? {} : { onTryAgain: () => void model.tryAgain(), onCompact: () => void model.compact() })}
@@ -1592,6 +1604,7 @@ export function TaskView({
             </TaskFace>
           )}
           {host.lightbox}
+          {turnUndo.dialog}
           {changingTeam && (
             <ChangeTeam projectId={snapshot.project.id} task={teamed} agents={model.agents} onClose={() => setChangingTeam(false)} />
           )}
@@ -1695,6 +1708,10 @@ export function TaskView({
                 ...changes.untouched
                   .filter((path) => !files.some((file) => file.path === path))
                   .map((path) => ({ path, status: 'modified' as const, add: 0, del: 0, untouched: true })),
+                // A refused file can be absent from an older file list, or have been edited back to the task's base.
+                ...turnUndo.reviewFiles
+                  .filter((path) => !files.some((file) => file.path === path) && !changes.untouched.includes(path))
+                  .map((path) => ({ path, status: 'modified' as const, add: 0, del: 0 })),
               ]}
               selected={changes.selected}
               onSelect={changes.select}

@@ -302,6 +302,8 @@ export const words = (
         return 'An agent is already working on this task.'
       case 'RetryRefused':
         return 'There is no failed turn or lost connection to try again.'
+      case 'UndoRefused':
+        return `${text(error, 'message')}${Array.isArray(fieldOf(error, 'files')) ? ` ${(fieldOf(error, 'files') as unknown[]).join(', ')}` : ''}`.trim()
       case 'NoSession':
         return 'The task isn’t running.'
       case 'NothingToClear':
@@ -485,6 +487,16 @@ export const words = (
         return agentSaid(error) ?? "Althar's runtime couldn't do that. Its log has the details."
     }
   })()
+  // Undo names its affected files separately, so the window can open their changes without parsing prose.
+  if (reason === 'UndoRefused') {
+    const files = fieldOf(error, 'files')
+    return {
+      reason,
+      message,
+      ...(text(error, 'why') === '' ? {} : { why: text(error, 'why') }),
+      ...(Array.isArray(files) && files.length > 0 ? { detail: JSON.stringify(files) } : {}),
+    }
+  }
   // A merge that conflicts says in which files, for the window to have the lead settle them, or say it is.
   if (reason === 'CantMerge') return { reason, message, why: text(error, 'why'), detail: text(error, 'detail') }
   // A push refused says why, for the window to offer what puts it right: bringing the remote's commits in.
@@ -676,6 +688,7 @@ export const expected = new Set([
   'SessionRunning',
   'NoSession',
   'RetryRefused',
+  'UndoRefused',
   'NothingToClear',
   'AttentionClosed',
   'AlwaysNotOffered',
