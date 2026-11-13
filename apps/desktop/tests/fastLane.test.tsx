@@ -165,6 +165,18 @@ describe('the fast lane on a task’s screen', () => {
     expect(onOpenTask).toHaveBeenLastCalledWith('th2')
   })
 
+  it('keeps the review task of a merged full task where only review names it', async () => {
+    const full = { taskId: 't2', slug: 'review-the-run-menu', threadId: 'th2', title: 'Review: The Run menu says Strat' }
+    const merged = smallChange({ change: change({ state: 'merged', head: 'abc123', checks: PASSED }), review: full, fullTask: null })
+    const { client } = fakeClient({ getThread: vi.fn(async () => snapshot({ items: [merged] })) })
+    const onOpenTask = vi.fn()
+    withServices(<Task onOpenTask={onOpenTask} />, client)
+    expect(await screen.findByText('Full task')).toBeTruthy()
+    expect(screen.queryByText('After merge')).toBeNull()
+    await userEvent.click(screen.getByRole('button', { name: 'Review' }))
+    expect(onOpenTask).toHaveBeenCalledWith('th2')
+  })
+
   it('brings its review report into view from See findings, reading an earlier page for it', async () => {
     const report = {
       ...items.step({ step: 'review', verdict: 'changes_requested', summary: 'Two things in the usage card.' }),

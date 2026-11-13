@@ -39,7 +39,7 @@ function checksOf(card: SmallChangeContent): SmallChangeChecks {
 
 /** When its review reads it: before the merge once it was made a full task, none where its rule or its own word says so. */
 const whenOf = (card: SmallChangeContent): SmallChangeReviewWhen =>
-  card.fullTask != null ? 'before' : card.reviewer === null || card.afterMerge?.holds === 'none' ? 'none' : 'after'
+  (card.fullTask ?? card.review) != null ? 'before' : card.reviewer === null || card.afterMerge?.holds === 'none' ? 'none' : 'after'
 
 export function SmallChangeOf({
   card,
@@ -72,7 +72,8 @@ export function SmallChangeOf({
   const changed = stepOf(card, 'changed')
   const reported = changed?.done === true
   const after = card.reviewAfter
-  const full = card.fullTask ?? null
+  // Its review task: kept as fullTask after the merge too, and as review where a runtime before that names it only there.
+  const full = card.fullTask ?? card.review ?? null
   // A full task's review is its own task's, read before the merge and kept after it; else the review after the merge.
   const before = full === null ? undefined : card.reviewBefore
   const when = chosen ?? kept
