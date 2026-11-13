@@ -115,11 +115,18 @@ export const WorkflowStates: Story = {
         },
         {
           state: 'Checks running',
-          node: <ChangeSet state={ChangeState.Ready} host={GITHUB} prs={pr} needs={[{ kind: 'checks', state: 'waiting' }]} />,
+          node: (
+            <ChangeSet
+              state={ChangeState.Ready}
+              host={GITHUB}
+              prs={pr}
+              needs={[{ kind: 'checks', state: 'waiting', have: 2, need: 3, who: ['Tests'] }]}
+            />
+          ),
         },
         {
           state: 'Checks failed',
-          node: <ChangeSet state={ChangeState.Ready} host={GITHUB} prs={pr} needs={[{ kind: 'checks', state: 'unmet' }]} />,
+          node: <ChangeSet state={ChangeState.Ready} host={GITHUB} prs={pr} needs={[{ kind: 'checks', state: 'unmet', who: ['Tests'] }]} />,
         },
         {
           state: 'Queued, bypass allowed',
