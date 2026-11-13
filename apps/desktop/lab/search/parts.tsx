@@ -1,4 +1,4 @@
-import { type CSSProperties, type KeyboardEvent, type ReactNode, useEffect, useId, useRef, useState } from 'react'
+import { type CSSProperties, type KeyboardEvent, type ReactNode, useEffect, useId, useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 
 import { Icon, Kbd, ProjectMark } from '@althar/ui'
@@ -6,6 +6,7 @@ import { Icon, Kbd, ProjectMark } from '@althar/ui'
 import type { Entry, Found } from './index'
 import { projectInk, projectName, titleParts } from './index'
 import type { Part } from './match'
+import { close, open, useGlide } from './morph'
 import s from './search.module.css'
 
 /*
@@ -67,30 +68,53 @@ export interface Item {
   readonly run: () => void
 }
 
-/** The box: over the window, focus in its field, closed by Escape (once the direction has nothing to step back from) or a press outside. */
+/**
+ * The box: over the window, focus in its field, closed by Escape (once the
+ * direction has nothing to step back from) or a press outside. One that
+ * `fit`s is as tall as what it lists, up to most of the window; one that
+ * `moves` grows open, glides to each new height and fades as it closes.
+ */
 export function Box({
   label,
   width,
   height,
   onClose,
   children,
+  fit = false,
+  moves = false,
+  className,
 }: {
   label: string
   width?: number
   height?: number
   onClose: () => void
   children: ReactNode
+  fit?: boolean
+  moves?: boolean
+  className?: string
 }) {
   const [opener] = useState(() => document.activeElement)
+  const box = useRef<HTMLDivElement>(null)
+  const scrim = useRef<HTMLDivElement>(null)
+  const inner = useRef<HTMLDivElement>(null)
   useEffect(
     () => () => {
       if (opener instanceof HTMLElement && opener.isConnected) opener.focus()
     },
     [opener],
   )
+  useLayoutEffect(() => {
+    if (!moves) return
+    const drawn = box.current
+    const behind = scrim.current
+    open(drawn, behind)
+    return () => close(drawn, behind)
+  }, [moves])
+  useGlide(box, inner)
   return createPortal(
     <>
       <div
+        ref={scrim}
         className={s.overlay}
         onPointerDown={(event) => {
           event.preventDefault()
@@ -101,7 +125,8 @@ export function Box({
         role="dialog"
         aria-modal="true"
         aria-label={label}
-        className={cx('ch-root', s.dialog)}
+        ref={box}
+        className={cx('ch-root', s.dialog, fit && s.fit, className)}
         style={
           {
             ...(width === undefined ? {} : { '--width': `${width}px` }),
@@ -109,7 +134,13 @@ export function Box({
           } as CSSProperties
         }
       >
-        {children}
+        {fit ? (
+          <div ref={inner} className={s.inner}>
+            {children}
+          </div>
+        ) : (
+          children
+        )}
       </div>
     </>,
     document.body,
@@ -117,12 +148,18 @@ export function Box({
 }
 
 /** The list's keys, for a field that keeps focus: where the selection is among `items`, and moving it. */
-export const useList = (items: ReadonlyArray<Item>, reset: unknown) => {
+export const useList = (items: ReadonlyArray<Item>, reset: unknown, prefer?: string | null) => {
   const [active, setActive] = useState(0)
   const ids = useId()
   const list = useRef<HTMLDivElement>(null)
-  // New words start at the top.
-  useEffect(() => setActive(0), [reset])
+  const latest = useRef({ items, prefer })
+  latest.current = { items, prefer }
+  // New words start at the top, or on the row asked for (where a step back returns); before it is drawn.
+  useLayoutEffect(() => {
+    const { items: now, prefer: wanted } = latest.current
+    const at = wanted == null ? -1 : now.findIndex((one) => one.key === wanted)
+    setActive(Math.max(at, 0))
+  }, [reset])
   const at = Math.min(active, Math.max(items.length - 1, 0))
   const idOf = (key: string) => `${ids}-${key.replace(/[^a-zA-Z0-9_-]/g, '_')}`
   const move = (to: number) => {
@@ -169,7 +206,10 @@ export function Field({
   placeholder,
   list,
   before,
+  after,
   inputRef,
+  bare = false,
+  className,
 }: {
   value: string
   onChange: (value: string) => void
@@ -177,14 +217,18 @@ export function Field({
   placeholder: string
   list: List
   before?: ReactNode
+  after?: ReactNode
   inputRef?: React.RefObject<HTMLInputElement | null>
+  /** Without the search icon, the words first, as Linear's. */
+  bare?: boolean
+  className?: string
 }) {
   const own = useRef<HTMLInputElement>(null)
   const ref = inputRef ?? own
   useEffect(() => ref.current?.focus(), [ref])
   return (
-    <div className={s.field}>
-      <Icon name="search" size={15} />
+    <div className={cx(s.field, className)}>
+      {!bare && <Icon name="search" size={15} />}
       {before}
       <input
         ref={ref}
@@ -202,6 +246,7 @@ export function Field({
         onChange={(event) => onChange(event.target.value)}
         onKeyDown={onKeyDown}
       />
+      {after}
     </div>
   )
 }
@@ -218,6 +263,7 @@ export function Row({
   passage,
   className,
   danger,
+  move = false,
 }: {
   list: List
   item: Item
@@ -229,10 +275,13 @@ export function Row({
   passage?: ReactNode
   className?: string
   danger?: boolean
+  /** Moves as part of its list (the kit's ListMotion), known by its key. */
+  move?: boolean
 }) {
   const selected = list.isSelected(item.key)
   return (
     <div
+      {...(move ? { 'data-move': item.key } : {})}
       id={list.idOf(item.key)}
       role="option"
       aria-selected={selected}
@@ -244,7 +293,9 @@ export function Row({
     >
       <span className={s.icon}>{icon}</span>
       <span className={s.main}>
-        <span className={s.title}>{title}</span>
+        <span className={s.title} data-title="">
+          {title}
+        </span>
         {facts !== undefined && <span className={s.facts}>{facts}</span>}
       </span>
       <span className={s.end}>
@@ -266,6 +317,7 @@ export function EntryRow({
   className,
   passage = true,
   end,
+  move = false,
 }: {
   list: List
   found?: Found
@@ -276,6 +328,7 @@ export function EntryRow({
   className?: string
   passage?: boolean
   end?: ReactNode
+  move?: boolean
 }) {
   const title = found === undefined ? entry.title : <Marked parts={titleParts(found)} />
   const said = entry.kind === 'said' || entry.kind === 'note'
@@ -284,6 +337,7 @@ export function EntryRow({
       list={list}
       item={item}
       className={className}
+      move={move}
       danger={entry.danger === true}
       icon={<Icon name={entry.icon} size={14} />}
       title={said ? found?.passage == null ? entry.title : <Marked parts={found.passage} /> : title}
@@ -317,9 +371,9 @@ export function EntryRow({
   )
 }
 
-export function Label({ children, count, more }: { children: ReactNode; count?: number; more?: ReactNode }) {
+export function Label({ children, count, more, move }: { children: ReactNode; count?: number; more?: ReactNode; move?: string }) {
   return (
-    <div className={s.label} aria-hidden="true">
+    <div className={s.label} aria-hidden="true" data-label="" {...(move === undefined ? {} : { 'data-move': move })}>
       {children}
       {count !== undefined && <span className={s.labelCount}>{count}</span>}
       {more !== undefined && <span className={s.labelMore}>{more}</span>}

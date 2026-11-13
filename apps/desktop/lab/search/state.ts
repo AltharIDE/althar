@@ -23,7 +23,7 @@ export const NAMES: Readonly<Record<Direction, string>> = {
 
 export const LINES: Readonly<Record<Direction, string>> = {
   today: 'Tasks only, by the words they hold; waits for typing to pause.',
-  a: 'Everything in one ranked list, grouped by kind, every row acts. → for its actions, Tab to narrow.',
+  a: 'Everything in one box, as Linear’s: a top hit, groups by kind, every row acts (→ for its actions), a first character narrows it, Tab asks the coordinator. It morphs as it goes.',
   b: 'Goes to things by name; a prefix or Tab scopes it: > actions, # pull requests and issues, / files, " what was said, ! notes, @ a project.',
   c: 'Searches what was said, shows the passage, opens the thread at it; ask the coordinator when search can’t answer.',
 }
@@ -54,6 +54,12 @@ export const narrow = store(query.get('narrow') === '1')
 export const words = store(query.get('q') ?? '')
 /** Whether the box is open, as the app's TabsFrame says (it mounts it). */
 export const opened = store(false)
+
+/** How A moves: morphing (what the person asked for), the same five times slower to see each morph, or still, as DESIGN.md has the command menu today. */
+export const MOTIONS = ['morph', 'slow', 'still'] as const
+export type Motion = (typeof MOTIONS)[number]
+export const MOTION_NAMED: Readonly<Record<Motion, string>> = { morph: 'Morph', slow: 'Slow ×5', still: 'Still' }
+export const motion = store<Motion>(MOTIONS.find((one) => one === query.get('m')) ?? 'morph')
 /** What an action would have done, for a moment. */
 export const said = store<string | null>(null)
 
@@ -62,10 +68,13 @@ const toAddress = () => {
   next.set('d', direction.get().toUpperCase())
   if (narrow.get()) next.set('narrow', '1')
   else next.delete('narrow')
+  if (motion.get() === 'morph') next.delete('m')
+  else next.set('m', motion.get())
   window.history.replaceState(window.history.state, '', `${window.location.pathname}?${next.toString()}${window.location.hash}`)
 }
 direction.subscribe(toAddress)
 narrow.subscribe(toAddress)
+motion.subscribe(toAddress)
 
 export const useStore = <A>(one: { get: () => A; subscribe: (listener: () => void) => () => void }) =>
   useSyncExternalStore(one.subscribe, one.get)

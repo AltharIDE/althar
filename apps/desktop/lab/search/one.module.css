@@ -1,0 +1,142 @@
+/*
+ * A, shaped after Linear's ⌘K: the words first, with no icon or rule, the
+ * coordinator one Tab away at the field's end, roomier rows under one
+ * sliding highlight, groups named in sentence case, each command's key at
+ * its end.
+ */
+.box {
+  border-radius: 12px;
+}
+
+.box .field {
+  min-height: 54px;
+  padding: 0 14px 0 18px;
+  gap: 8px;
+  border-bottom: 0;
+}
+.box .field:focus-within {
+  box-shadow: none;
+}
+.box .field input {
+  height: 52px;
+  font-size: 15px;
+}
+
+/* what the box is narrowed to, or what it acts on: a chip before the words */
+.chip {
+  flex: 0 1 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  max-width: 280px;
+  height: 24px;
+  padding: 0 8px;
+  border-radius: 6px;
+  background: var(--chip);
+  font-size: 12.5px;
+  font-weight: 500;
+  line-height: 1;
+  color: var(--t-1);
+  white-space: nowrap;
+}
+.chip > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.chip svg {
+  flex: none;
+  color: var(--t-2);
+}
+.asking {
+  background: var(--signal-paper);
+  color: var(--signal);
+}
+.asking svg {
+  color: var(--signal);
+}
+
+/* the coordinator, one key away */
+.hint {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12.5px;
+  line-height: 1;
+  color: var(--t-3);
+  white-space: nowrap;
+}
+
+.results {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 0 8px 8px;
+  border-top: 1px solid var(--line);
+  scroll-padding: 36px 0 8px;
+}
+.within {
+  position: relative;
+  padding-top: 4px;
+}
+
+/* the one highlight, under the chosen row */
+.glide {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  border-radius: 8px;
+  background: var(--hover-paper);
+  pointer-events: none;
+  transition:
+    transform var(--slide) var(--ease-slide),
+    height var(--slide) var(--ease-slide),
+    opacity var(--fast) var(--ease);
+}
+
+.box [role='option'] {
+  position: relative;
+  min-height: 38px;
+  padding: 7px 12px;
+}
+.box [role='option'][aria-selected='true'],
+.box [role='option']:active {
+  background: transparent;
+}
+.box [data-label] {
+  padding: 12px 12px 6px;
+  font: 500 12px/1 var(--font);
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--t-3);
+}
+
+.box .top {
+  min-height: 44px;
+}
+.top [data-title] {
+  font-size: 14px;
+  font-weight: 500;
+}
+
+/* → for a row's actions: said on the chosen row, its room kept on every row */
+.more {
+  display: inline-flex;
+  opacity: 0;
+  transition: opacity var(--fast) var(--ease);
+}
+[aria-selected='true'] .more {
+  opacity: 1;
+}
+
+.quoted {
+  color: var(--t-2);
+}
+.quiet {
+  margin: 0;
+  padding: 14px 12px 10px;
+  font-size: 13px;
+  color: var(--t-3);
+}
