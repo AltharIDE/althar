@@ -399,6 +399,7 @@ export function ProjectView({
   // What the coordinator's pane shows: its conversation, an aside, or a new one, started as + is pressed on the lead picked here.
   const asides = useAsides({
     client: useServices().client,
+    cache: useServices().cache,
     projectId: about,
     lead:
       chosen === null ? null : { key: 'implement', agentId: chosen.agentId, model: chosen.model, effort: chosen.effort, skipped: false },
@@ -808,6 +809,7 @@ export function ProjectView({
                         scratch={lanes.scratch}
                         open={aside}
                         first={asides.first}
+                        title={asides.title}
                         onPick={asides.pick}
                         onNew={() => asides.begin(null)}
                         onClear={asides.clear}
@@ -826,7 +828,17 @@ export function ProjectView({
                       />
                     ) : aside.kind === 'new' ? (
                       <TaskFace className={s.face} composer={composer}>
-                        <Thread label={asidesText.newPlaceholder}>{null}</Thread>
+                        <Thread label={asidesText.newPlaceholder}>
+                          <ThreadBlocks
+                            blocks={blocksOf(
+                              { items: asides.items, turnRunning: false, worktree: null },
+                              new Map(),
+                              (iso) => ago(iso),
+                              now,
+                            )}
+                            threadId={aside.threadId ?? aside.taskId}
+                          />
+                        </Thread>
                       </TaskFace>
                     ) : (
                       <div ref={coordinatorFace} className={s.coordinatorFace}>

@@ -37,6 +37,7 @@ The runtime of [docs/architecture/02](../../docs/architecture/02-desktop-runtime
 | `reviewing.ts` | What every part knows of a review task: the pull request it reviews (its external link of kind `review`), its lead's brief, and what `read_pull_request` reads it |
 | `Tasks.ts` | A task's course as the person steers it: what applies where it stands (`actionsOf`), stopping it, resuming it, abandoning it and reopening it |
 | `Runs.ts` | Runs a started plan as the task workflow: Implement, then Review, which the lead settles, a fix checked once where it isn't tiny; Ship, a run that reviews what came since the last review and sends it up past the hold; the lead's and the reviewer's tools |
+| `externalWaits.ts` | Typed conditions for a lead's `wait_for`: resolves only connected project repositories, validates the held attempt's saved wait, and reads PRs, checks and time without a model; `Runs` owns the durable hold, deadline, admission and recovery |
 | `cards.ts` | Each task's card in the coordinator's thread: posted once, touched when what it shows changes |
 | `ToolServer.ts` | Althar's tools, served to sessions over MCP on this machine, each with a token that says who is calling |
 | `Accounts.ts` | Each agent's accounts on this Mac (ADR-012): its usual folder first, homes Althar makes, folders switchers made, found by name |

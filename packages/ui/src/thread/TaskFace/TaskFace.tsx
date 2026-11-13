@@ -4,6 +4,7 @@ import { cx } from '../../lib/cx'
 import type { RootProps } from '../../lib/props'
 import { useStickToBottom } from '../../lib/stick'
 import { JumpToLatest, type JumpToLatestText } from '../Furniture/Furniture'
+import { ThreadNavigator, type ThreadNavigatorText } from '../ThreadNavigator/ThreadNavigator'
 import { ThreadMeasure } from '../Thread/Thread'
 import s from './TaskFace.module.css'
 
@@ -20,7 +21,7 @@ export type TaskFaceProps = RootProps<
     panelWidth?: number
     /** How many things arrived since the reader scrolled away, for the pill that takes them down. The host counts them. */
     unseen?: number
-    text?: { jump?: Partial<JumpToLatestText> }
+    text?: { jump?: Partial<JumpToLatestText>; navigator?: Partial<ThreadNavigatorText> }
   }
 >
 
@@ -44,6 +45,7 @@ export function TaskFace({ children, composer, panel, panelWidth, unseen, text, 
             {/* room for what floats on the composer's edge; a child of the scroller, so growing it is followed like the thread growing */}
             <div className={s.clear} aria-hidden="true" />
           </div>
+          <ThreadNavigator scroll={scroll} text={text?.navigator} />
           {!atBottom && <JumpToLatest count={unseen} onJump={toBottom} className={s.jump} text={text?.jump} />}
         </div>
         <div className={s.composer}>

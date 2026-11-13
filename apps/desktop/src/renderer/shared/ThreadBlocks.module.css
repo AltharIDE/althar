@@ -40,7 +40,7 @@
   line-height: 1.55;
 }
 
-/* What Althar offers to keep, such as a preset: its line, what it holds, and its button. */
+/* A review offered a task: its line and its buttons. */
 .offer {
   display: flex;
   flex-direction: column;

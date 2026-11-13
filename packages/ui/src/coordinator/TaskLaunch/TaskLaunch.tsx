@@ -226,6 +226,8 @@ export interface TaskLaunchProps {
   onCreateBranch?: (branch: string) => void
   /** Start it: now, or when the time runs out. With what it will do when done. */
   onStart: (steps: readonly LaunchStep[], end: TaskEnd) => void
+  /** Something offered about the task, quiet in the foot after the estimate, below Start: keeping its parts as a preset. */
+  footNote?: ReactNode
   text?: Partial<TaskLaunchText>
 }
 
@@ -234,6 +236,7 @@ export function TaskLaunch({
   preset,
   presets,
   onPresetChange,
+  footNote,
   title,
   from,
   steps: stepsProp,
@@ -452,7 +455,11 @@ export function TaskLaunch({
       </ol>
       {queued !== undefined && !held ? (
         <div className={s.foot}>
-          <span className={s.estimate}>{estimate}</span>
+          <span className={s.estimate}>
+            {estimate}
+            {estimate !== undefined && footNote !== undefined && ' · '}
+            {footNote}
+          </span>
           <span className={s.when} role="status">
             {queued}
           </span>
@@ -465,6 +472,8 @@ export function TaskLaunch({
           <span className={s.estimate}>
             {estimate}
             {waiting.length > 0 && limited && <> · {t.alsoWaits(waiting.map((st) => st.label).join(', '), limited.until)}</>}
+            {(estimate !== undefined || (waiting.length > 0 && limited)) && footNote !== undefined && ' · '}
+            {footNote}
           </span>
           {!held && <CountdownRing left={share} />}
           {/* the countdown is not read out each second; that it starts on its own is said once, when it is first seen */}

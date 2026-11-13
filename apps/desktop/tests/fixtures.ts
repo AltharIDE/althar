@@ -1204,6 +1204,7 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
     listPresets: vi.fn(async () => []),
     savePreset: vi.fn(async () => ({ name: 'Preset' })),
     removePreset: vi.fn(async () => {}),
+    declinePresetOffer: vi.fn(async () => {}),
     runIt: vi.fn(async () => ({ kind: 'ran' as const, trust: 'safe' as const, said: '' })),
     stopRunning: vi.fn(async () => ''),
     applyPreset: vi.fn(async () => ''),

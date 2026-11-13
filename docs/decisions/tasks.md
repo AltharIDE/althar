@@ -175,6 +175,12 @@ leaves its conversation as it was.
   said, selected, start one about them, quoted over the composer and above
   the person's words. The coordinator still starts one at once with
   `start_task`, made on Scratch as + makes one.
+  An aside's lead never waits for a task slot and takes none: its start and
+  every turn go at once, even with a full task queue. A saved aside held for
+  a place by an older build starts on reopening too. Once made a task, it
+  counts among the task agents again. Its first words and title show as
+  Enter is pressed, and its thread is read while the person writes, so
+  opening the conversation flashes no loading skeleton.
 - **Answered** in its lead's reply: an aside's brief is light (who it is,
   where it reads, its tools, the person's decisions), with no step to report,
   no finish_step and no evidence, and the turn that answers ends its first
@@ -522,11 +528,19 @@ few lines is the exception to the usual course of a change:
   ([reviews.md](reviews.md#what-the-review-after-a-merge-brings-back)). A
   plan that named no reviewer gets no review after merge, and neither does a
   pull request that was closed unmerged.
-- **One card in its thread says what it skipped.** It lists each step with
-  its time (Started, Changed a line in …, Checks pass, Merged). It offers
-  Merge, which still asks, and **Make it a full task**, which starts the
-  review before the merge instead. The card is read from the task as it
-  stands, never stored, so it can't go stale.
+- **One card opens its thread, with its route.** Its stops sit in a row,
+  each with its time or where it stands: Change, Checks, Merge, and Review,
+  drawn dashed while it waits for the merge. Merge, which still asks, sits
+  under its stop once checks pass. Pressing Review moves it before the
+  merge (**Make it a full task**), keeps it after, or takes it off; with
+  none, the route ends at Merge. Made a full task, its Review stop reads
+  the review task it was given (reading, nothing found, how many found,
+  stopped) before and after the merge; Merge waits until that review comes
+  back clear, and See findings opens that task. What a small change is waits behind its
+  name, as a hover. What its review after the merge found isn't listed on
+  the card: it says how many, and See findings opens the review's report in
+  the thread. The card is read from the task as it stands, never stored, so
+  it can't go stale.
 
 The trade-off is that a small change merges unreviewed. A finding after the
 merge needs a fix of its own. Make it a full task is there for anything the
