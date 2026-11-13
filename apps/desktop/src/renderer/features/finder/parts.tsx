@@ -256,7 +256,11 @@ export function Row({
       className={cx(s.row, danger === true && s.danger, className)}
       // A press opens it; focus stays in the field, which owns the keys.
       onMouseDown={(event) => event.preventDefault()}
-      onMouseMove={() => list.hover(item.key)}
+      // Only a pointer that moved chooses a row: the one the browser re-reports after the list redraws under a pointer at rest does not.
+      onMouseMove={(event) => {
+        if (event.movementX === 0 && event.movementY === 0) return
+        list.hover(item.key)
+      }}
       onClick={item.run}
     >
       <span className={s.icon}>{icon}</span>
