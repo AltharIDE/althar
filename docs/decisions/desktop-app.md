@@ -20,7 +20,8 @@ ADR-069,
 ADR-083,
 ADR-098,
 ADR-099,
-ADR-100
+ADR-100,
+ADR-105
 
 ## How the window reads
 
@@ -128,7 +129,8 @@ The runtime pages it the same way, so a task opens on whole rounds.
   delivered in, and drawn on the person's side under "From the coordinator".
   What the person says while a turn runs moves to where the lead read it.
 - **The lead's work folds under one line,** and what it says last stands open
-  under it, with its report: every screenshot it handed in, large, with its
+  under it, with its report: at the latest handoff the task’s complete visual
+  collection, at earlier handoffs the screenshots handed then, large, with each
   whole caption, grouped by their names; a view it showed before and took
   again named in a line, not shown twice; then what it checked and what it
   couldn't. No step cards, and no card closes the thread. A picture the
@@ -579,6 +581,17 @@ way of what is done often. The tokens and their values are in
 - **Still, on purpose:** switching tabs, projects and rooms, opening Home or
   a task, anything done by key, and anything that repeats.
 - **Reduced motion:** nothing travels, grows or slides; lists only fade.
+
+## Undo from a task message
+
+A delivered task message with a complete checkpoint offers **Undo from here**. The person confirms the prompt and the scope: that message and everything after it leave the conversation, and the files touched by those turns return to their contents before the first turn. Prompts and attachments return beside any unsent draft. Messages delivered together are one turn, so the action belongs to the first message of that batch.
+
+- File boundaries are captured immediately before delivery and after the turn ends, including shell writes, untracked files and commits. Private Git refs keep those trees without moving HEAD, a branch or the person's index. Ignored files and external actions are outside this boundary. Existing commits stay in history; restored contents appear as local changes.
+- Undo needs the task's own worktrees, with its plan, helpers and background commands stopped. Local checkouts, shared folders and turns without complete checkpoints do not support it. All workspaces are checked before any file changes. Overlapping later edits, affected staged files, a moved folder or branch, links and submodules refuse the entire undo. Unrelated manual edits, including those between turns, stay.
+- A prepared recovery journal and private recovery refs precede file writes. Conversation changes, the command receipt and the completed journal commit together. An interrupted attempt restores its saved originals before another session starts; recovery preserves unexpected later manual edits and stays pending for an explicit retry.
+- Undone items and deliveries remain as audit records, omitted from the visible transcript, search and future agent context. The idle provider session ends; the next message starts a fresh session with the retained transcript. A conversation version makes every window discard removed pages and streamed content. Retrying a successful command reads its original receipt.
+
+[The T3 and Paradev research](../research/chat-turn-undo.md) informed the worktree boundary, selective file checks and prompt restoration. Althar refuses a conflicting restore as a whole, so the conversation and files cannot silently diverge through a partial undo. There is no redo control in this slice; recovery refs support interrupted operations rather than a second conversation branch.
 
 ## Changes
 

@@ -62,7 +62,11 @@ export const postingOf = (now: ReadonlyArray<ScreenshotNow>, leftOut: ReadonlyAr
       : [
           {
             key: shot.key,
-            caption: shot.caption,
+            caption: [
+              shot.caption,
+              ...(shot.needsRefresh ? ['Needs a new capture'] : []),
+              ...(shot.reportedAt === undefined ? [] : [`Reported ${shot.reportedAt}`]),
+            ].join(' · '),
             digest: shot.picture.digest,
             name: shot.picture.name ?? `${shot.key.replace(/[^\w.-]+/g, '-')}${extensionOf(shot.picture.mediaType)}`,
             mediaType: shot.picture.mediaType,
@@ -78,10 +82,16 @@ const extensionOf = (mediaType: string) =>
  * shows: a view taken again, one new, or one gone. Its order alone isn't a
  * change.
  */
-export const changedBetween = (posting: ReadonlyArray<Pick<Posting, 'key' | 'digest'>>, shown: ReadonlyArray<PostedShot>): number => {
-  const before = new Map(shown.map((shot) => [shot.key, shot.digest]))
+export const changedBetween = (
+  posting: ReadonlyArray<Pick<Posting, 'key' | 'digest'> & { readonly caption?: string }>,
+  shown: ReadonlyArray<PostedShot>,
+): number => {
+  const before = new Map(shown.map((shot) => [shot.key, shot]))
   const now = new Set(posting.map((shot) => shot.key))
-  const differ = posting.filter((shot) => before.get(shot.key) !== shot.digest).length
+  const differ = posting.filter(
+    (shot) =>
+      before.get(shot.key)?.digest !== shot.digest || (shot.caption !== undefined && before.get(shot.key)?.caption !== shot.caption),
+  ).length
   const gone = shown.filter((shot) => !now.has(shot.key)).length
   return differ + gone
 }
@@ -207,7 +217,7 @@ export const commentBody = (input: {
   readonly head: string | null
 }): string => {
   const of = short(input.head)
-  const parts: Array<string> = [SCREENSHOTS_MARK, of === null ? '**Screenshots**' : `**Screenshots** as of \`${of}\``]
+  const parts: Array<string> = [SCREENSHOTS_MARK, of === null ? '**Screenshots**' : `**Screenshots** · PR head \`${of}\``]
   if (input.shown.length > 0) parts.push(joined(blocksOf(input.shown, () => '')))
   // The views it showed no longer say anything of the change: it says so, rather than keep them.
   else parts.push(NONE_NOW)

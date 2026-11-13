@@ -1309,6 +1309,7 @@ describe("the coordinator's tools", () => {
         description: 'Jump twice from the hall stairs and say whether the second jump lands.',
         lead: { agent: 'claude-code', model: 'small' },
       }
+      yield* until((yield* Models).catalog, (all) => all.every((agent) => !agent.probing))
       assert.match(yield* callTool(access, 'start_task', asked), /^Started try-the-double-jump: /)
       // Its card: running at once, its lead the only step, and nothing outside the project when it is done.
       const [card] = yield* until(cardsOf(projectId), (all) => all[0]?.phase === 'running')

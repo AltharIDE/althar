@@ -79,7 +79,8 @@ export const projectRules: ProjectRulesView = {
   suggestedBots: [],
   leadsReachWeb: true,
   usageLimit: 'move',
-  rotateAccounts: false,
+  rotateAccounts: true,
+  accountStrategy: 'most_room',
   onlyAccounts: null,
   branchPattern: null,
   titlePattern: null,
@@ -297,7 +298,7 @@ export const project: ProjectSummary = {
   yours: 0,
   working: 1,
   usageLimit: 'move',
-  rotateAccounts: false,
+  rotateAccounts: true,
   onlyAccounts: null,
 }
 
@@ -1189,7 +1190,8 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
       plansAndReviews: { countdown: 25, rounds: 3, roundsOut: 'settled' } as const,
       newProjects: {
         usageLimit: 'move',
-        rotateAccounts: false,
+        rotateAccounts: true,
+        accountStrategy: 'most_room',
         end: 'draft',
         pushCommits: true,
         postScreenshots: false,
@@ -1270,6 +1272,7 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
     renameTask: vi.fn(async () => {}),
     send: vi.fn(async () => {}),
     takeBack: vi.fn(async () => {}),
+    undoTurn: vi.fn(async () => ({ prompt: '', messages: [], restored: 0 })),
     answer: vi.fn(async () => {}),
     answerQuestion: vi.fn(async () => {}),
     getCoordinator: vi.fn(async () => coordinatorSnapshot()),

@@ -135,7 +135,10 @@ describe('the review after a merge, in the same task', () => {
       const [reviews] = yield* sql<{ n: number }>`SELECT count(*) AS n FROM external_links WHERE kind = 'review'`
       assert.strictEqual(reviews?.n, 0)
       // The task merged and settled, and what the review found brings it back: Needs you, for that change.
-      const [settled] = yield* sql<{ state: string }>`SELECT state FROM tasks WHERE id = ${task.taskId}`
+      const [settled] = yield* until(
+        sql<{ state: string }>`SELECT state FROM tasks WHERE id = ${task.taskId}`,
+        (rows) => rows[0]?.state === 'done',
+      )
       assert.strictEqual(settled?.state, 'done')
       const [card] = yield* until(cards(task.projectId), (all) => all[0]?.afterMerge?.state === 'found')
       assert.strictEqual(card?.phase, 'ready')

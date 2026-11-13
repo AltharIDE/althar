@@ -1,7 +1,7 @@
 import { useQuery } from '@tanstack/react-query'
 import { useCallback, useRef, useState } from 'react'
 
-import type { AppSettings, NewProjectDefaults, NewProjectDefaultsChange } from '@althar/contracts'
+import { type AppSettings, type NewProjectDefaults, type NewProjectDefaultsChange, rotatesAccounts } from '@althar/contracts'
 
 import { keys, reads } from '../../data/reads'
 import { useServices } from '../../data/services'
@@ -33,6 +33,7 @@ export const useNewProjectDefaults = (): NewProjectDefaultsModel | null => {
     (change: NewProjectDefaultsChange) => {
       const at = ++made.current
       const given = Object.fromEntries(Object.entries(change).filter(([, value]) => value !== undefined))
+      if (change.accountStrategy !== undefined) given['rotateAccounts'] = rotatesAccounts(change.accountStrategy)
       cache.setQueryData<AppSettings>(keys.settings, (was) =>
         was === undefined ? was : { ...was, newProjects: { ...was.newProjects, ...given } },
       )

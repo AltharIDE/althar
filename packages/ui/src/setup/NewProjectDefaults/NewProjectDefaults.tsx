@@ -4,6 +4,7 @@ import { Icon, type IconName } from '../../foundations/Icon/Icon'
 import { LinkButton } from '../../primitives/LinkButton/LinkButton'
 import { Select } from '../../primitives/Select/Select'
 import { SettingList, SettingRow, SettingSwitch } from '../Preferences/Preferences'
+import { accountStrategies, type AccountStrategy } from '../Accounts/strategy'
 
 /*
  * What the rules of a project start with when it is made, as rows of the
@@ -31,6 +32,7 @@ export interface NewProjectDefaultsValue {
   moveIssues: boolean
   usageLimit: NewUsageLimit
   rotateAccounts: boolean
+  accountStrategy: AccountStrategy
   afterMergeReview: AfterMergeReview
 }
 
@@ -42,7 +44,8 @@ export const newProjectDefault: NewProjectDefaultsValue = {
   resolveConflicts: true,
   moveIssues: true,
   usageLimit: 'move',
-  rotateAccounts: false,
+  rotateAccounts: true,
+  accountStrategy: 'most_room',
   afterMergeReview: 'major',
 }
 
@@ -59,6 +62,7 @@ export interface NewProjectDefaultsText {
   moveIssues: { title: string; note: string }
   usageLimit: { title: string; options: Record<NewUsageLimit, Worded> }
   rotate: { title: string; note: string }
+  accountStrategy: { title: string; options: typeof accountStrategies }
   afterMergeReview: { title: string; options: Record<AfterMergeReview, Worded> }
   /** Goes back to what a project starts with, named. */
   reset: (label: string) => string
@@ -86,6 +90,7 @@ export const newProjectDefaultsText: NewProjectDefaultsText = {
     },
   },
   rotate: { title: 'Try an agent’s other accounts first', note: '' },
+  accountStrategy: { title: 'Account strategy', options: accountStrategies },
   afterMergeReview: {
     title: 'When a review is set after merge',
     options: {
@@ -106,6 +111,7 @@ const GLYPHS: Readonly<Record<keyof NewProjectDefaultsValue, IconName>> = {
   moveIssues: 'issues',
   usageLimit: 'load',
   rotateAccounts: 'reload',
+  accountStrategy: 'reload',
   afterMergeReview: 'after',
 }
 
@@ -134,7 +140,11 @@ export function NewProjectDefaults({ value, onChange, differs = {}, text }: NewP
     )
   }
   /** A row with a choice of words at the end. */
-  const row = <V extends string>(key: 'end' | 'usageLimit' | 'afterMergeReview', title: string, options: Record<V, Worded>) => {
+  const row = <V extends string>(
+    key: 'end' | 'usageLimit' | 'afterMergeReview' | 'accountStrategy',
+    title: string,
+    options: Record<V, Worded>,
+  ) => {
     const chosen = value[key] as string as V
     const start = newProjectDefault[key] as string as V
     return (
@@ -187,7 +197,7 @@ export function NewProjectDefaults({ value, onChange, differs = {}, text }: NewP
       {toggle('moveIssues', t.moveIssues)}
       {row('afterMergeReview', t.afterMergeReview.title, t.afterMergeReview.options)}
       {row('usageLimit', t.usageLimit.title, t.usageLimit.options)}
-      {toggle('rotateAccounts', t.rotate)}
+      {row('accountStrategy', t.accountStrategy.title, t.accountStrategy.options)}
     </SettingList>
   )
 }

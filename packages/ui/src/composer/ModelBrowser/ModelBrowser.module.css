@@ -143,16 +143,13 @@
   --agent-col: 92px;
   --effort-col: 104px;
 }
-.results[data-room] {
-  --room-col: 56px;
-}
 .results[data-context] {
   --ctx-col: 48px;
 }
 .cols,
 .row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) var(--agent-col,) var(--room-col,) var(--ctx-col,) var(--effort-col,) 62px;
+  grid-template-columns: minmax(0, 1fr) var(--agent-col,) var(--ctx-col,) var(--effort-col,) 62px;
   align-items: center;
   gap: 10px;
 }
@@ -220,11 +217,6 @@
   display: block;
   min-width: 0;
   height: 100%;
-}
-.room {
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
 }
 .ctx,
 .none {
@@ -335,12 +327,9 @@
   .cols,
   .row {
     --agent-col: initial;
-    --room-col: initial;
   }
   .colAgent,
-  .colRoom,
-  .via,
-  .room {
+  .via {
     display: none;
   }
 }

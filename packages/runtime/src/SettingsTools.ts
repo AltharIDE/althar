@@ -1,4 +1,5 @@
 import {
+  AccountStrategy,
   AtOnceCount,
   CommandRule,
   FolderWait,
@@ -42,6 +43,7 @@ import { Permissions } from './Permissions'
 import { newProjectDefaultsOf, plansAndReviewsOf, setNewProjectDefaults, setPlansAndReviews } from './plansAndReviews'
 import {
   accountsOf,
+  accountStrategyOf,
   allowsEverything,
   modeOf,
   movesIssues,
@@ -296,6 +298,7 @@ export class SettingsTools extends Context.Service<
               leadsReachWeb: rules.leadsReachWeb ?? true,
               usageLimit: usageLimitOf(rules),
               rotateAccounts: accounts.rotate,
+              accountStrategy: accountStrategyOf(rules),
               onlyAccounts: accounts.only ?? null,
               end: rules.end ?? null,
               repositoryFiles: repositoryFilesOf(rules),
@@ -320,6 +323,7 @@ export class SettingsTools extends Context.Service<
         'leadsReachWeb',
         'usageLimit',
         'rotateAccounts',
+        'accountStrategy',
         'onlyAccounts',
         'end',
         'repositoryFiles',
@@ -468,6 +472,7 @@ export class SettingsTools extends Context.Service<
             ),
             usageLimit: field('At an agent’s usage limit', 'move (to another), wait, or ask', UsageLimit),
             rotateAccounts: field('Move to an agent’s next account', SWITCH, Schema.Boolean),
+            accountStrategy: field('Account strategy', 'first, most_room, least_room, random, or in_order', AccountStrategy),
             onlyAccounts: field(
               'Accounts its work runs on',
               'by agent id, the account ids it may use, or null for every account',
@@ -512,6 +517,7 @@ export class SettingsTools extends Context.Service<
                   'worksIn',
                   'usageLimit',
                   'rotateAccounts',
+                  'accountStrategy',
                   'onlyAccounts',
                   'branchPattern',
                   'titlePattern',
@@ -547,6 +553,7 @@ export class SettingsTools extends Context.Service<
                 'worksIn',
                 'usageLimit',
                 'rotateAccounts',
+                'accountStrategy',
                 'onlyAccounts',
                 'branchPattern',
                 'titlePattern',
@@ -829,6 +836,7 @@ export class SettingsTools extends Context.Service<
             ),
             usageLimit: field('New projects: at an agent’s usage limit', 'move, wait or ask', NewProjectDefaults.fields.usageLimit),
             rotateAccounts: field('New projects: try an agent’s other accounts first', SWITCH, NewProjectDefaults.fields.rotateAccounts),
+            accountStrategy: field('New projects: account strategy', 'first, most_room, least_room, random, or in_order', AccountStrategy),
           },
           read: () =>
             Effect.gen(function* () {

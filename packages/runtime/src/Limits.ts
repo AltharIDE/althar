@@ -1,13 +1,13 @@
 import { isAgentDefault, modelName } from '@althar/contracts'
 import { type ConfigOption, leftOf, tightestWindow, type UsageWindow, type WindowKind } from '@althar/provider-adapters'
 import type { ProjectId } from '@althar/domain'
-import { Clock, Context, Duration, Effect, Layer, Option, Schema } from 'effect'
+import { Clock, Context, Duration, Effect, Layer, Option, Random, Schema } from 'effect'
 import { SqlClient, type SqlError } from 'effect/sql'
 
 import { type Account, Accounts } from './Accounts'
 import { Agents } from './Config'
 import { NotFound } from './errors'
-import { accountsOf, Policies, usageLimitOf } from './Policies'
+import { accountsOf, accountStrategyOf, Policies, usageLimitOf } from './Policies'
 import { timestamp } from './records'
 import { SignIns } from './SignIns'
 import { Models } from './Models'
@@ -26,7 +26,7 @@ import { Installs, isInstalled } from './Installs'
  * could take it over.
  *
  * Before a limit is reached, the plan's windows as last read (PlanUsage) say
- * how much room each account has: work starts on the account with the most,
+ * how much room each account has: new work follows the project’s account strategy,
  * and an agent whose accounts are all nearly out (under NEARLY_OUT percent of
  * their tightest window) is treated by the same rule for new steps. A step
  * already running is never stopped for it.
@@ -243,9 +243,8 @@ export class Limits extends Context.Service<
     /**
      * The account a session on the agent runs on, of those the project
      * allows: the one given; else the thread's own, while it can and isn't
-     * nearly out; else, where the project rotates, the one with the most
-     * room that isn't signed out or out of usage (the person's order where
-     * none is read); where it doesn't, the first not signed out; else the
+     * nearly out; else, where the project rotates, follow its account strategy
+     * among those not signed out or out of usage; where it doesn't, the first not signed out; else the
      * first. Room is for the model where named, so a model's own window
      * (Opus's week) counts. Where it doesn't
      * rotate, an account out of usage is still the one work runs on: its
@@ -257,6 +256,8 @@ export class Limits extends Context.Service<
       readonly threadId?: string
       readonly accountId?: string
       readonly model?: string
+      /** Before lowering a model, prefer accounts above this remaining share; fixed-account mode still stays fixed. */
+      readonly reserve?: number
     }): Effect.Effect<Account, Failure | NotFound>
     /**
      * The strongest free model on a plan, besides the agents given. Models
@@ -405,16 +406,31 @@ export class Limits extends Context.Service<
 
       const nearly = (room: Option.Option<Room>) => Option.isSome(room) && room.value.leftPercent < NEARLY_OUT
 
-      /** Accounts with the most room first, for the model where named; one not read goes just above one nearly out, and the person's order breaks ties. */
-      const byRoom = (list: ReadonlyArray<Account>, model?: string) =>
+      /** New conversations follow the project's strategy; signed-out and exhausted accounts are skipped by the caller. */
+      const byStrategy = (list: ReadonlyArray<Account>, model?: string, projectId?: string, reserve?: number) =>
         Effect.gen(function* () {
+          const strategy =
+            projectId === undefined ? 'most_room' : accountStrategyOf((yield* policies.current(projectId as ProjectId)).rules)
           const rooms = new Map<string, number>()
-          for (const account of list)
-            rooms.set(
-              account.id,
-              Option.match(yield* roomOf(account, model), { onNone: () => NEARLY_OUT, onSome: (room) => room.leftPercent }),
-            )
-          return list.toSorted((a, b) => (rooms.get(b.id) ?? 0) - (rooms.get(a.id) ?? 0))
+          for (const account of list) {
+            const room = yield* roomOf(account, model)
+            if (Option.isSome(room)) rooms.set(account.id, room.value.leftPercent)
+          }
+          const ordered = strategy === 'random' ? yield* Random.shuffle(list) : list
+          const group = (account: Account) => {
+            const left = rooms.get(account.id)
+            if (left !== undefined && (reserve === undefined ? left < NEARLY_OUT : left <= reserve)) return 2
+            return (strategy === 'least_room' || reserve !== undefined) && left === undefined ? 1 : 0
+          }
+          return ordered.toSorted((a, b) => {
+            if (strategy === 'most_room' && reserve === undefined) return (rooms.get(b.id) ?? NEARLY_OUT) - (rooms.get(a.id) ?? NEARLY_OUT)
+            const priority = group(a) - group(b)
+            if (priority === 0 && strategy === 'most_room') return (rooms.get(b.id) ?? NEARLY_OUT) - (rooms.get(a.id) ?? NEARLY_OUT)
+            if (priority !== 0 || strategy !== 'least_room') return priority
+            // Unread accounts follow those with room; accounts already nearly out stay last.
+            const difference = (rooms.get(a.id) ?? 0) - (rooms.get(b.id) ?? 0)
+            return group(a) === 2 ? -difference : difference
+          })
         })
 
       /**
@@ -560,7 +576,7 @@ export class Limits extends Context.Service<
                     (fact.intelligence ?? 0) / 1000
               let room: boolean | undefined
               let accountId: string | undefined
-              for (const account of yield* byRoom(yield* runnable(agentId, input.projectId), model.id ?? undefined)) {
+              for (const account of yield* byStrategy(yield* runnable(agentId, input.projectId), model.id ?? undefined, input.projectId)) {
                 if (Option.isSome(yield* outOf(account))) continue
                 const status = yield* signIns.account(account)
                 // A model the agent picks itself goes through the provider of its default.
@@ -757,13 +773,16 @@ export class Limits extends Context.Service<
               if (
                 own !== undefined &&
                 (yield* runs(own)) &&
-                !nearly(yield* roomOf(own, input.model)) &&
+                Option.match(yield* roomOf(own, input.model), {
+                  onNone: () => true,
+                  onSome: (room) => (input.reserve === undefined ? room.leftPercent >= NEARLY_OUT : room.leftPercent > input.reserve),
+                }) &&
                 (yield* providerStanding(own, input.model)) < 2
               )
                 return own
             }
-            // Where it rotates, the one with the most room; where it doesn't, the first, in the person's order.
-            const ordered = rotate ? yield* byRoom(list, input.model) : list
+            // Where it rotates, follow the saved strategy; otherwise use the first signed-in account.
+            const ordered = rotate ? yield* byStrategy(list, input.model, input.projectId, input.reserve) : list
             for (const account of yield* byProvider(input.agentId, ordered, input.model)) if (yield* runs(account)) return account
             const [first] = list
             return first ?? (yield* new NotFound({ kind: 'account', id: input.agentId }))
