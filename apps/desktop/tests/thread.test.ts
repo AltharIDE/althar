@@ -153,6 +153,19 @@ describe('a thread as blocks', () => {
     expect(stopped?.kind === 'turn' && stopped.parts[1]).toMatchObject({ verb: 'Read', state: ToolState.Cancelled })
   })
 
+  it('says one of Althar’s own tools in plain words, never by its raw name', () => {
+    const call = (status: string, title = 'mcp__althar__propose_plan') => items.tool({ title, toolKind: 'other', status })
+    const part = (status: string, running: boolean, title?: string) => {
+      const [turn] = blocksOf(source([call(status, title)], running), new Map(), at)
+      return turn?.kind === 'turn' ? turn.parts[0] : undefined
+    }
+    // OpenCode names them althar_<tool>.
+    expect(part('completed', false, 'althar_propose_plan')).toMatchObject({ verb: 'Planned', target: 'the task' })
+    expect(part('in_progress', true)).toMatchObject({ verb: 'Planning', target: 'the task' })
+    expect(part('completed', false)).toMatchObject({ verb: 'Planned', target: 'the task' })
+    expect(part('failed', false)).toMatchObject({ verb: 'Plan', target: 'the task' })
+  })
+
   it('takes no turn before Althar carried the step on after a restart, or what the agent read since, for the one running', () => {
     const earlier = [items.says('Reading.'), items.tool({ status: 'completed' })]
     const live = (thread: ReadonlyArray<ThreadItem>) =>
@@ -579,7 +592,7 @@ describe('tool calls', () => {
     expect(targetOf(tool({ locations: [{ path: '/w/a.ts' }] }), null)).toBe('/w/a.ts')
     expect(targetOf(tool({ command: 'bun test' }), '/w')).toBe('bun test')
     expect(targetOf(tool({ title: 'Write hello.txt', toolKind: 'edit' }), '/w')).toBe('hello.txt')
-    expect(targetOf(tool({ title: 'mcp__linear__search', toolKind: 'other' }), '/w')).toBe('mcp__linear__search')
+    expect(targetOf(tool({ title: 'mcp__linear__search', toolKind: 'other' }), '/w')).toBe('Search')
     expect(targetOf(tool({ title: 'format sql', toolKind: 'other' }), '/w')).toBe('format sql')
     expect(targetOf(tool({ title: 'Use format_sql', toolKind: 'other' }), '/w')).toBe('format_sql')
     // A command's title is the command: none of it is a verb to take off.

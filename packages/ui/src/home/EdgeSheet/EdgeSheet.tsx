@@ -17,11 +17,10 @@ import s from './EdgeSheet.module.css'
  * quiet, as on the home.
  */
 
-/** The work in progress, counted for the foot: how many, and of those, how many are held or stopped. */
+/** The work in progress, counted for the foot: how many, and of those, how many are held. Work stopped waits on the person, above. */
 export interface EdgeWork {
   inProgress: number
   held?: number
-  stopped?: number
 }
 
 export interface EdgeSheetText {
@@ -38,10 +37,8 @@ export const edgeSheetText: EdgeSheetText = {
   waiting: (n) => (n === 1 ? '1 needs you' : `${n} need you`),
   rest: 'Nothing needs you',
   openApp: 'Open Althar',
-  work: ({ inProgress, held = 0, stopped = 0 }) =>
-    inProgress === 0
-      ? 'Nothing in progress'
-      : [`${inProgress} in progress`, held > 0 && `${held} held`, stopped > 0 && `${stopped} stopped`].filter(Boolean).join(' · '),
+  work: ({ inProgress, held = 0 }) =>
+    inProgress === 0 ? 'Nothing in progress' : [`${inProgress} in progress`, held > 0 && `${held} held`].filter(Boolean).join(' · '),
 }
 
 export type EdgeSheetProps = RootProps<

@@ -8,7 +8,7 @@ import { TaskRefused } from './errors'
 import { makeScratch } from './firstWrite'
 import { branchExists, commitOf, git, restoreDetachedWorktree, restoreWorktree } from './git'
 import { Instance } from './Instance'
-import { change, fact } from './records'
+import { change, fact, timestamp } from './records'
 import { copyReviewed, reviewOf } from './reviewing'
 import { addItem } from './threads'
 
@@ -20,8 +20,11 @@ import { addItem } from './threads'
  * at the commit it was removed at, kept under `refs/althar/kept/<workspace>`;
  * a quick task's detached where it was; a review's copy of the pull request
  * again. Each is set up again, as a new one is, and the thread says the
- * folder is back, as a line across it. This is a module, not a service, so
- * a session can bring its task's folder back before its agent starts in it.
+ * folder is back, as a line across it. A worktree of Althar's the person
+ * deleted by hand comes back the same way, from its branch or where it
+ * started; a Local task's folder, the person's own checkout, never does. This
+ * is a module, not a service, so a session can bring its task's folder back
+ * before its agent starts in it.
  */
 
 /** Where a removed folder's last commit is kept, by its workspace: what its changes are read from while it is gone, and what it comes back from. */
@@ -43,6 +46,8 @@ export const withFolder = <A, E, R>(taskId: string, effect: Effect.Effect<A, E, 
 
 interface Removed {
   readonly id: string
+  /** Removed to free the disk; else a worktree that stands ready, which only comes back where its folder was deleted by hand. */
+  readonly cleaned: number
   readonly projectId: ProjectId
   readonly path: string
   readonly access: string
@@ -73,13 +78,17 @@ const bringingBack = (taskId: string, actorId: ActorId) =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient
     const instance = yield* Instance
-    const removed = yield* sql<Removed>`
-      SELECT w.id, w.project_id, w.path, w.access, w.branch, w.branched_at IS NOT NULL AS branched, w.base_commit, l.path AS repository
+    // Removed to free the disk, or a worktree of Althar's own (not a Local checkout) that stands ready where its folder is
+    // gone: deleted by hand, in Finder or with rm -rf.
+    const removed = (yield* sql<Removed>`
+      SELECT w.id, w.state = 'cleaned' AS cleaned, w.project_id, w.path, w.access, w.branch, w.branched_at IS NOT NULL AS branched,
+        w.base_commit, l.path AS repository
       FROM workspaces w
       JOIN repository_bindings b ON b.id = w.binding_id
       JOIN repository_locations l ON l.binding_id = w.binding_id AND l.device_id = ${instance.deviceId}
-      WHERE w.task_id = ${taskId} AND w.device_id = ${instance.deviceId} AND w.state = 'cleaned'
-      ORDER BY b.created_at, b.rowid`
+      WHERE w.task_id = ${taskId} AND w.device_id = ${instance.deviceId}
+        AND (w.state = 'cleaned' OR (w.state = 'ready' AND w.kind IS NULL))
+      ORDER BY b.created_at, b.rowid`).filter((one) => one.cleaned === 1 || !existsSync(one.path))
     if (removed.length === 0) return false
     for (const one of removed) {
       // Put back by hand already, it is only marked so; anything else where it goes is never taken for it, nor removed.
@@ -91,23 +100,27 @@ const bringingBack = (taskId: string, actorId: ActorId) =>
           if (review === null) return yield* new TaskRefused({ taskId, why: 'branch_gone' })
           yield* copyReviewed(one.repository, one.path, review)
         } else {
-          const kept = yield* commitOf(one.repository, `${KEPT}${one.id}`).pipe(Effect.orElseSucceed(() => null))
+          const kept = one.cleaned === 1 ? yield* commitOf(one.repository, `${KEPT}${one.id}`).pipe(Effect.orElseSucceed(() => null)) : null
           if (one.branched === 1 && (yield* branchExists(one.repository, one.branch)))
             yield* restoreWorktree(one.repository, one.path, one.branch)
+          // Deleted by hand, nothing kept its last commit: with its branch gone too, its work is.
+          else if (one.branched === 1 && one.cleaned === 0) return yield* new TaskRefused({ taskId, why: 'branch_gone' })
           else if (kept !== null || one.baseCommit !== null) {
             yield* restoreDetachedWorktree(one.repository, one.path, kept ?? one.baseCommit ?? '')
             if (one.branched === 0) yield* makeScratch(one.path)
           } else return yield* new TaskRefused({ taskId, why: 'branch_gone' })
         }
       }
-      // A write worktree is set up again, as a new one is: until it is, its task is said to be bringing its folder back. A
-      // review's copy has nothing to set up.
+      // A write worktree is set up again, as a new one is: until it is, its task is said to be bringing its folder back, and
+      // nothing removes it again. One deleted by hand is marked gone as of now, as one removed is, for both. A review's copy
+      // has nothing to set up.
+      const gone = one.cleaned === 1 ? {} : { cleanedAt: yield* timestamp }
       yield* sql.withTransaction(
         Effect.gen(function* () {
           const revision = yield* change(
             'workspaces',
             one.id,
-            one.access === 'write' ? { state: 'ready', setup: null } : { state: 'ready', cleanedAt: null },
+            one.access === 'write' ? { state: 'ready', setup: null, ...gone } : { state: 'ready', cleanedAt: null },
           )
           yield* fact({
             projectId: one.projectId,
@@ -115,7 +128,7 @@ const bringingBack = (taskId: string, actorId: ActorId) =>
             aggregateId: one.id,
             revision,
             type: 'workspace.restored',
-            payload: { removed: true },
+            payload: { removed: one.cleaned === 1 },
             actorId,
           })
         }),
@@ -143,13 +156,14 @@ export const bringBack = (taskId: string, actorId: ActorId) => withFolder(taskId
 
 /**
  * As `bringBack`, then `then`, before anything can remove the folders
- * again: for what opens them or runs from them to say so first, as the
- * removal asks again under the same lock (`FolderCleanup.ts`).
+ * again: for what opens them, runs from them or copies into them to say so
+ * first, as the removal asks again under the same lock (`FolderCleanup.ts`).
+ * Whether any came back, and what `then` gave.
  */
 export const bringBackThen = <A, E, R>(taskId: string, actorId: ActorId, then: Effect.Effect<A, E, R>) =>
   withFolder(
     taskId,
-    Effect.flatMap(bringingBack(taskId, actorId), (back) => Effect.as(then, back)),
+    Effect.flatMap(bringingBack(taskId, actorId), (back) => Effect.map(then, (value) => ({ back, value }))),
   )
 
 /** Brings back the folders of the task a thread is on, if any were removed: the task's id where they came back, else null. */

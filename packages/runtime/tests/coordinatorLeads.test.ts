@@ -132,9 +132,10 @@ describe('the buttons on a task’s lead, as tools', () => {
         yield* titles(one.threadId),
         "The coordinator changed the lead to Fake claude-code's default model: codex is out. It takes over from its next turn.",
       )
+      // A lead changes its own task's lead too, on the person's word: from its next turn.
       assert.match(
-        yield* callTool(lead, 'change_lead', { task: other.slug, lead: { agent: 'codex' } }),
-        /is your own task: the person changes who leads it/,
+        yield* callTool(lead, 'change_lead', { lead: { agent: 'claude-code' }, why: 'the person asked' }),
+        /^read-the-logs: changed the lead to Fake claude-code's default model\./,
       )
       assert.match(
         yield* callTool(coordinator, 'change_lead', { task: one.slug, lead: { agent: 'nobody' } }),

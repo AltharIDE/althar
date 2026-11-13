@@ -1,12 +1,20 @@
-import type { StuckStep } from '@althar/contracts'
+import {
+  kindWords,
+  plainTitle,
+  type ReadyTask,
+  readyWordOf,
+  type ReviewBrief,
+  type StuckStep,
+  waitingCount,
+  waitingOn,
+} from '@althar/contracts'
 import { Ledger } from '@althar/persistence-sqlite'
 import { Cause, Context, Duration, Effect, Layer, Option, PubSub, Ref, Stream } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { Agents } from './Config'
-import { answeredIn, issueCardsWaiting } from './kinds'
 import { outStep } from './Limits'
-import { field, parse, Queries, stuckOf, text } from './Queries'
+import { field, Queries, stuckOf, text } from './Queries'
 import { programOf } from './rules'
 import { Sessions } from './Sessions'
 
@@ -15,11 +23,17 @@ import { Sessions } from './Sessions'
  * that doesn't need you): a nudge each time something comes to need them,
  * a call, work that stopped, or a task ready to accept, each said by its
  * kind so the app can keep to what the person wants told; and how many such
- * things wait, for the app's badge. Never for progress. With them, whether
- * any work runs, so the app can keep the Mac awake while it does. Read from
- * the store whenever a change that can bear on it is recorded; what already
- * waited when Althar started isn't nudged again. A plain task that finished
- * is neither nudged nor counted: it waits on its board to be seen.
+ * things wait, for the app's badge. Never for progress. What waits, and how
+ * many things that is, is `waitingOn`'s (in contracts), the rule the board's
+ * Needs you, the home, the edge and the tabs count by, over the cards the
+ * card watcher keeps (Queries' `waiting`): so the badge, the menu bar and a
+ * notification never say ready what the board shows under way, in its merge
+ * queue or its checks running, and never leave out what is back in Needs
+ * you. A ready task is said in its card's word (`readyWordOf`). With them,
+ * whether any work runs, so the app can keep the Mac awake while it does.
+ * Read again whenever a change that can bear on it is recorded, a card
+ * coming out different among them; what already waited when Althar started
+ * isn't nudged again.
  */
 
 /** How long changes are gathered, so a burst is read once. */
@@ -95,11 +109,28 @@ export const readyWords = (summary: string): string => {
   return said === '' ? 'Ready to look at' : `Ready: ${said}`
 }
 
-/** A review drafted, in the words a nudge says it: whose pull request waits for the person to post its review. */
-/** Issues a lead drafted, for the person to file. */
-export const issuesWords = (count: number): string => (count === 1 ? 'An issue to file' : `${count} issues to file`)
+/** What a lead left for the person on a tracker, in the words a nudge says it: issues to file, else changes to its issue. */
+export const issuesWords = (issues: { readonly drafts: number; readonly changes: number } | undefined): string => {
+  const drafts = issues?.drafts ?? 0
+  const changes = issues?.changes ?? 0
+  if (drafts > 0) return drafts === 1 ? 'An issue to file' : `${drafts} issues to file`
+  return changes === 1 ? 'An issue change to apply' : `${changes} issue changes to apply`
+}
 
+/** A review drafted, in the words a nudge says it: whose pull request waits for the person to post its review. */
 export const draftedWords = (number: number, author: string): string => `Review drafted: #${number} by ${author}`
+
+/**
+ * A ready task, in the words its nudge says it: its card's word (`readyWordOf`), so a notification never says ready what
+ * its card says isn't; where that is plainly ready, or finished, what its lead last said it did; a review drafted, whose.
+ */
+export const readyBody = (
+  task: ReadyTask & { readonly summary: string | null; readonly reviewing?: ReviewBrief | null | undefined },
+): string => {
+  const word = readyWordOf(task)
+  if (word === kindWords.drafted && task.reviewing != null) return draftedWords(task.reviewing.number, task.reviewing.author)
+  return word === kindWords.ready || word === kindWords.finished ? readyWords(task.summary ?? '') : word
+}
 
 export class Nudges extends Context.Service<
   Nudges,
@@ -120,138 +151,33 @@ export class Nudges extends Context.Service<
       const waiting = yield* Ref.make(0)
       const working = yield* Ref.make(false)
 
-      /** Everything that needs the person now, by a key that stays the same while it does. */
+      /**
+       * Everything that needs the person now, by a key that stays the same
+       * while it does, and how many things that is, as the board's Needs you
+       * counts them (`waitingOn`): read from the cards the card watcher
+       * keeps, none worked out here. Each call is said as it comes, though a
+       * task that waits on several is one thing; a task whose lead stopped
+       * is counted, but nothing is said of it: the person stopped it, or saw
+       * it stop where they were.
+       */
       const needs = Effect.gen(function* () {
         const found = new Map<string, Extract<NudgeEvent, { _tag: 'Nudge' }>>()
-        // A task's calls, and the questions a project's coordinator asks, under the project's name.
-        const calls = yield* sql<{ id: string; kind: string; payload: string; threadId: string; title: string }>`
-          SELECT id, kind, payload, thread_id, title FROM (
-            SELECT a.id, a.kind, a.payload, t.id AS thread_id, k.title, a.created_at
-            FROM attention_requests a JOIN tasks k ON k.id = a.task_id JOIN threads t ON t.task_id = k.id AND t.kind = 'task'
-            WHERE a.state = 'open'
-            UNION ALL
-            SELECT a.id, a.kind, a.payload, t.id AS thread_id, p.name AS title, a.created_at
-            FROM attention_requests a JOIN projects p ON p.id = a.project_id AND p.archived_at IS NULL
-            JOIN threads t ON t.id = json_extract(a.payload, '$.threadId') AND t.kind = 'coordinator'
-            WHERE a.state = 'open' AND a.task_id IS NULL AND a.kind = 'question')
-          ORDER BY created_at, id`
+        const { tasks, calls } = yield* queries.waiting
+        const on = waitingOn(tasks, calls)
+        const nudge = (key: string, kind: NudgeKind, title: string, body: string, threadId: string) =>
+          found.set(key, { _tag: 'Nudge', kind, key, title, body, threadId })
         for (const call of calls)
-          found.set(`call:${call.id}`, {
-            _tag: 'Nudge',
-            kind: call.kind === 'stuck' ? 'stopped' : 'call',
-            key: `call:${call.id}`,
-            title: call.title,
-            body: callWords({ kind: call.kind, payload: parse(call.payload) }, agents.list),
-            threadId: call.threadId,
-          })
-        // Ready as its card reads it (Queries): its last run succeeded, nothing it planned waits to start, no call waits,
-        // and no agent of its is starting or mid-turn.
-        const ready = yield* sql<{ taskId: string; threadId: string; title: string; review: string | null; latest: string | null }>`
-          SELECT k.id AS task_id, t.id AS thread_id, k.title,
-            (SELECT s.id FROM threads s WHERE s.task_id = k.id AND s.kind = 'step' AND s.node_key = 'review' LIMIT 1) AS review,
-            (SELECT i.content FROM thread_items i WHERE i.thread_id = t.id AND i.kind = 'step_result'
-              AND json_extract(i.content, '$.step') IN ('implement', 'settle') ORDER BY i.sequence DESC LIMIT 1) AS latest
-          FROM tasks k
-          JOIN threads t ON t.task_id = k.id AND t.kind = 'task'
-          JOIN runs r ON r.id = (SELECT id FROM runs WHERE task_id = k.id ORDER BY created_at DESC LIMIT 1)
-          JOIN projects p ON p.id = k.project_id AND p.archived_at IS NULL
-          WHERE k.state NOT IN ('done', 'abandoned') AND r.state = 'succeeded'
-            AND coalesce((SELECT state FROM task_plans WHERE task_id = k.id AND state IN ('proposed', 'accepted')
-              ORDER BY proposed_at DESC LIMIT 1), '') <> 'proposed'
-            AND NOT EXISTS (SELECT 1 FROM attention_requests x WHERE x.task_id = k.id AND x.state = 'open')
-            AND ${sql.unsafe(issueCardsWaiting('k'))} = 0
-            AND NOT EXISTS (SELECT 1 FROM node_attempts a JOIN nodes n ON n.id = a.node_id JOIN workflow_executions e ON e.id = n.execution_id
-              WHERE e.run_id = r.id AND a.state = 'admitted')
-            AND NOT EXISTS (SELECT 1 FROM provider_sessions s JOIN threads h ON h.id = s.thread_id
-              WHERE h.task_id = k.id AND s.state = 'starting')
-          ORDER BY k.created_at, k.id`
-        // A task kept for later is out of Needs you: nothing nudges for it.
-        const kept = ready.length === 0 ? new Set<string>() : yield* queries.kept
-        for (const task of ready) {
-          if (kept.has(task.taskId)) continue
-          const turning = (threadId: string | null) =>
-            threadId === null
-              ? Effect.succeed(false)
-              : Effect.map(
-                  sessions.running(threadId),
-                  Option.exists((session) => session.turnRunning),
-                )
-          if ((yield* turning(task.threadId)) || (yield* turning(task.review))) continue
-          found.set(`ready:${task.taskId}`, {
-            _tag: 'Nudge',
-            kind: 'ready',
-            key: `ready:${task.taskId}`,
-            title: task.title,
-            body: readyWords(text(parse(task.latest), 'summary')),
-            threadId: task.threadId,
-          })
-        }
-        // A review drafted, waiting for the person to post it (DEV-96): a review has no run, so it is read from its draft.
-        const drafted = yield* sql<{ taskId: string; threadId: string; title: string; number: number; author: string }>`
-          SELECT k.id AS task_id, t.id AS thread_id, k.title, d.number, d.author
-          FROM review_drafts d
-          JOIN tasks k ON k.id = d.task_id
-          JOIN threads t ON t.task_id = k.id AND t.kind = 'task'
-          JOIN projects p ON p.id = k.project_id AND p.archived_at IS NULL
-          WHERE d.state = 'pending' AND k.state = 'open'
-            AND NOT EXISTS (SELECT 1 FROM attention_requests x WHERE x.task_id = k.id AND x.state = 'open')
-            AND ${sql.unsafe(issueCardsWaiting('k'))} = 0
-          ORDER BY d.created_at, d.rowid`
-        for (const review of drafted) {
-          const turning = yield* Effect.map(
-            sessions.running(review.threadId),
-            Option.exists((session) => session.turnRunning),
+          nudge(
+            `call:${call.id}`,
+            call.kind === 'stuck' ? 'stopped' : 'call',
+            plainTitle(call.title),
+            callWords({ kind: call.kind, payload: call.payload }, agents.list),
+            call.threadId,
           )
-          if (turning) continue
-          found.set(`ready:${review.taskId}`, {
-            _tag: 'Nudge',
-            kind: 'ready',
-            key: `ready:${review.taskId}`,
-            title: review.title,
-            body: draftedWords(review.number, review.author),
-            threadId: review.threadId,
-          })
-        }
-        // A review posted, written to again and answered: finished, the person's to settle (ADR-051), once its lead is done.
-        const answered = yield* sql<{ taskId: string; threadId: string; title: string }>`
-          SELECT k.id AS task_id, t.id AS thread_id, k.title
-          FROM tasks k
-          JOIN threads t ON t.task_id = k.id AND t.kind = 'task'
-          JOIN projects p ON p.id = k.project_id AND p.archived_at IS NULL
-          WHERE k.state = 'open' AND k.kept_at IS NULL AND ${sql.unsafe(answeredIn('k'))}
-            AND NOT EXISTS (SELECT 1 FROM attention_requests x WHERE x.task_id = k.id AND x.state = 'open')
-            AND ${sql.unsafe(issueCardsWaiting('k'))} = 0
-          ORDER BY k.created_at, k.id`
-        for (const review of answered) {
-          if (Option.exists(yield* sessions.running(review.threadId), (session) => session.turnRunning)) continue
-          found.set(`ready:${review.taskId}`, {
-            _tag: 'Nudge',
-            kind: 'ready',
-            key: `ready:${review.taskId}`,
-            title: review.title,
-            body: readyWords(''),
-            threadId: review.threadId,
-          })
-        }
-        // Issues a lead drafted, for the person to file: one nudge for a task, whatever the number.
-        const issues = yield* sql<{ threadId: string; title: string; drafts: number }>`
-          SELECT thread_id, title, drafts FROM (
-            SELECT t.id AS thread_id, k.title, ${sql.unsafe(issueCardsWaiting('k'))} AS drafts, k.created_at, k.id AS task_id
-            FROM tasks k
-            JOIN threads t ON t.task_id = k.id AND t.kind = 'task'
-            JOIN projects p ON p.id = k.project_id AND p.archived_at IS NULL
-            WHERE k.state = 'open')
-          WHERE drafts > 0 ORDER BY created_at, task_id`
-        for (const task of issues)
-          found.set(`issues:${task.threadId}`, {
-            _tag: 'Nudge',
-            kind: 'call',
-            key: `issues:${task.threadId}`,
-            title: task.title,
-            body: issuesWords(task.drafts),
-            threadId: task.threadId,
-          })
-        return found
+        // Issues a lead drafted, or changes it proposed to its issue, for the person: one nudge for a task, whatever the number.
+        for (const task of on.issues) nudge(`issues:${task.threadId}`, 'call', task.title, issuesWords(task.issues), task.threadId)
+        for (const task of on.ready) nudge(`ready:${task.taskId}`, 'ready', task.title, readyBody(task), task.threadId)
+        return { found, count: waitingCount(on) }
       })
 
       /**
@@ -289,14 +215,15 @@ export class Nudges extends Context.Service<
 
       /**
        * Whether a change after `cursor` bears on what needs the person: a call,
-       * a task, its plan or run, a step, a session starting, a turn ending, a
-       * review or an issue drafted, posted, filed or dropped. A thread's items, most of what is
-       * recorded, never do.
+       * a task's card coming out different (its checks, say), the task, its
+       * plan or run, a step, a session starting, a turn ending, a review or an
+       * issue drafted, posted, filed or dropped. A thread's items, most of what
+       * is recorded, never do.
        */
       const movedSince = (cursor: number) =>
         Effect.map(
           sql<{ moved: number }>`
-            SELECT EXISTS (SELECT 1 FROM change_log WHERE cursor > ${cursor} AND aggregate_type IN ('attention_request', 'task',
+            SELECT EXISTS (SELECT 1 FROM change_log WHERE cursor > ${cursor} AND aggregate_type IN ('attention_request', 'card', 'project', 'task',
               'task_plan', 'run', 'node_attempt', 'provider_session', 'turn_delivery', 'review_draft', 'issue_draft')) AS moved`,
           (rows) => rows.some((row) => row.moved === 1),
         )
@@ -308,10 +235,10 @@ export class Nudges extends Context.Service<
           let seen: ReadonlyMap<string, unknown> | undefined
           const round = Effect.gen(function* () {
             const cursor = yield* latest
-            const now = yield* needs
+            const { found: now, count } = yield* needs
             if (seen !== undefined) for (const [key, nudge] of now) if (!seen.has(key)) yield* PubSub.publish(published, nudge)
-            if ((yield* Ref.getAndSet(waiting, now.size)) !== now.size || seen === undefined)
-              yield* PubSub.publish(published, { _tag: 'Waiting', count: now.size })
+            if ((yield* Ref.getAndSet(waiting, count)) !== count || seen === undefined)
+              yield* PubSub.publish(published, { _tag: 'Waiting', count })
             const busy = yield* runs
             if ((yield* Ref.getAndSet(working, busy)) !== busy || seen === undefined)
               yield* PubSub.publish(published, { _tag: 'Working', working: busy })

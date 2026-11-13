@@ -922,16 +922,27 @@ export const makeGitHub = (options: AdapterOptions): CodeHost & Tracker => {
       return null as string | null
     })
 
-  /** Whether a commit is the merge GitHub's update-branch made from `from`: two parents, the first of them `from`. */
-  const madeFrom = (repository: Repository, sha: string, from: string) =>
-    Effect.map(
-      http.json(
+  /** Whether a commit is the merge GitHub's update-branch made from `from`: two parents, the first of them `from`, the second `base` where given. */
+  /** Whether `later` is `earlier` or comes after it (each a commit or a branch, as a path): `compare` counts what `earlier` has that `later` hasn't. */
+  const after = (repository: Repository, earlier: string, later: string) =>
+    Effect.map(http.json(Behind, 'GET', `${repo(repository)}/compare/${earlier}...${later}`), (compared) => compared.behind_by === 0)
+  const madeFrom = (repository: Repository, change: ChangeRequest & { readonly headSha: string }, from: string, base?: string) =>
+    Effect.gen(function* () {
+      const made = yield* http.json(
         Schema.Struct({ parents: Schema.Array(Schema.Struct({ sha: Schema.String })) }),
         'GET',
-        `${repo(repository)}/commits/${encodeURIComponent(sha)}`,
-      ),
-      (made) => made.parents.length === 2 && made.parents[0]?.sha === from,
-    )
+        `${repo(repository)}/commits/${encodeURIComponent(change.headSha)}`,
+      )
+      const [first, merged] = made.parents.map((parent) => parent.sha)
+      if (made.parents.length !== 2 || first !== from || merged === undefined) return false
+      if (base === undefined || merged === base) return true
+      // The target moved on before GitHub merged it in the background: it merged the target's newer head, which comes after
+      // the one asked for and is on the target still. A merge of another branch is neither.
+      return (
+        (yield* after(repository, encodeURIComponent(base), encodeURIComponent(merged))) &&
+        (yield* after(repository, encodeURIComponent(merged), branchPath(change.target)))
+      )
+    })
   const queueKey = (repository: Repository, target: string) => `${repository.path.join('/')} ${target}`
 
   /** Whether this server knows `refUpdateRule`: false once it said it doesn't, as an older Enterprise Server does. */
@@ -1675,7 +1686,8 @@ export const makeGitHub = (options: AdapterOptions): CodeHost & Tracker => {
             ),
             (answer) => answer.behind_by === 0,
           ),
-    madeFrom: (repository, change, from) => (change.headSha === null ? Effect.succeed(false) : madeFrom(repository, change.headSha, from)),
+    madeFrom: (repository, change, from, base) =>
+      change.headSha === null ? Effect.succeed(false) : madeFrom(repository, { ...change, headSha: change.headSha }, from, base),
     closeChange: (repository, change) =>
       Effect.gen(function* () {
         const now = yield* http.json(PullAnswer, 'GET', `${repo(repository)}/pulls/${change.number}`)

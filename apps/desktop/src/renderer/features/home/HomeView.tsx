@@ -11,8 +11,7 @@ import type { DoneHere } from '../../shared/standing'
 import { ago, clock, useNow } from '../../shared/time'
 import { useNewTab } from '../tabs/TabsFrame'
 import type { StartModel } from '../start/useStart'
-import { readyOf } from '../../shared/calls'
-import { asMerging } from '../../data/merges'
+import { yoursByProject } from '../board/lanes'
 import { homeGlanceOf, refOf } from './glance'
 import s from './Home.module.css'
 import type { HomeModel } from './useHome'
@@ -121,11 +120,9 @@ export function HomeView({
   const name = (id: string | null) => agents.find((agent) => agent.id === id)?.name ?? id ?? ''
 
   const projects = home?.projects ?? []
-  // One being merged is in progress, not waiting on the person, until it settles.
-  const tasks = asMerging(home?.tasks ?? [], model.merging)
   const refs = new Map(projects.map((project) => [project.id, refOf(project)]))
-  // Only tasks with an agent on them, or held for a reset, are running; one kept for later waits on its board.
-  const { calls, working, waiting, needs } = homeGlanceOf(home, {
+  // Each task where its board puts it: one being merged is in progress until it settles; one kept for later waits on its board.
+  const { working, waiting, needs } = homeGlanceOf(home, {
     answered,
     merging: model.merging,
     agentName: name,
@@ -187,13 +184,13 @@ export function HomeView({
     return line === undefined ? [] : [{ ...line, id: event.id }]
   })
 
+  // What waits in each, as its board and its tab count it.
+  const yours = home === null ? new Map<string, number>() : yoursByProject(home, model.merging)
   const list: ReadonlyArray<HomeProject> = projects.map((project) => {
     return {
       id: project.id,
       project: refOf(project),
-      yours:
-        calls.filter((call) => call.projectId === project.id).length +
-        readyOf(tasks).filter((task) => task.projectId === project.id).length,
+      yours: yours.get(project.id) ?? 0,
       note: project.lastWorkAt === null ? text.noWork : text.lastWork(ago(project.lastWorkAt, new Date(now))),
       fresh: project.lastWorkAt === null,
     }

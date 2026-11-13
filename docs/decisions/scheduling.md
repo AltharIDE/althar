@@ -136,7 +136,8 @@ that goes on by itself, in the order it will.
 
 - **Running** holds a task with an agent at work (in a turn, starting, or on
   its step), or with checks Althar is watching. Its count counts only those. A
-  stopped task stays at Running's foot, saying so, and isn't counted.
+  task whose lead stopped with no agent on it waits on the person, in Needs
+  you, and the home and the edge list and count it there too.
 - **Up next** is one order, the one places are given in. Every row in it can
   be dragged anywhere in it, or moved from its menu, and Move to front works
   on any of them (`MoveInLine`, `move_to_front`). A row that can't be ordered
@@ -162,13 +163,20 @@ that goes on by itself, in the order it will.
      so it isn't in the order. Once it can go on, it asks for a place as work
      under way.
 
-  Once the person moves a row, each task in the order takes one of the times
-  it stood at, kept on the task (`line_at`), so the order survives a restart,
-  a task that joins later goes to the end, and work under way and new work
-  stand by those times rather than in their default ranks. "Back to oldest
+  Once the person moves a row, each task in the order up to the last one not
+  where it would stand by default takes one of the times it stood at, kept on
+  the task (`line_at`); those after it, an automation's run nobody moved
+  among them, keep none, and a move back to the default order keeps nothing.
+  So the order survives a restart, a task that joins later goes after what
+  the person ordered (an automation's run nobody moved still after it), and
+  work under way and new work stand by those times rather than in their
+  default ranks. "Back to oldest
   first" (`LineOldestFirst`) clears it. The order is kept within a project; it
-  doesn't reorder other projects' work. A task loses its place once an agent
-  of it is at work.
+  doesn't reorder other projects' work: the project's rows take, in the
+  person's order, the places among everything that waits they stood at, so
+  an automation's run moved up still waits for the one at work. A task loses
+  its place once an agent of it is at work. Up next says "In your order" only
+  while it differs from the default.
 - **Althar's notes start no turn.** What Althar tells a lead that needs
   nothing done now is noted rather than queued: it waits for no place, shows
   nowhere in Up next, and the lead reads it with its next turn, whatever

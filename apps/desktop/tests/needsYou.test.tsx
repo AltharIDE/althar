@@ -192,8 +192,10 @@ describe('what needs the person', () => {
     expect(line('Merged, then more').getByText('Ready for a new pull request')).toBeTruthy()
     expect(line('Merged, then more').getByText('3 commits in no pull request · +40 −2')).toBeTruthy()
     expect(line('Merged, then more').getByRole('button', { name: 'Open' })).toBeTruthy()
-    expect(line('Conflict handed back').getByText('Stuck')).toBeTruthy()
+    // What its lead handed back says so, as its card does, and opens its task, where it is settled.
+    expect(line('Conflict handed back').getByText('Merge conflict')).toBeTruthy()
     expect(line('Conflict handed back').getByText('It conflicts in README.md.')).toBeTruthy()
+    expect(line('Conflict handed back').getByRole('button', { name: 'Open' })).toBeTruthy()
     expect(line('Review #1199').getByRole('button', { name: 'Review' })).toBeTruthy()
     // A task that finished and isn't a change says so, and what its lead said.
     expect(line('Which partners call v1?').getByText('Finished')).toBeTruthy()

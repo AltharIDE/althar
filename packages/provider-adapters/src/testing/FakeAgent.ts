@@ -554,6 +554,12 @@ const EXPLORED = [
 /** Worktrees where a lead has stopped answering once: started afresh, it answers. Kept across sessions, as a restart makes a new one. */
 const wedgedIn = new Set<string>()
 
+/**
+ * The tools a lead was told in words to call (`[lead:call <tool> <json>]`), by its worktree: each call once, so a lead handed
+ * the thread so far, as a new lead is, doesn't call again what the one before it called.
+ */
+const calledIn = new Map<string, Set<string>>()
+
 /** Worktrees where a lead's session has been lost once (`[lead:lost-once]`): a fresh session there carries on. */
 const lostIn = new Set<string>()
 
@@ -664,7 +670,7 @@ const playStall = async (
  * Calls Althar's tools over the MCP server a session was given. The fake
  * plays a role when its prompt carries a marker, as a task's description or
  * the person's message can: `[coordinator:plan]` drafts and plans a task (`[coordinator:plan-small]` as a small change, reviewed
- * only once it merged),
+ * only once it merged; `[coordinator:plan-branch]` ending with its branch, as a prototype does),
  * passing on the `[lead:…]` and `[review:…]` markers it was given
  * (`[coordinator:plan-effort]` puts its lead on the large model at high
  * effort), and `[coordinator:start]` starts one at once, without a plan;
@@ -679,7 +685,8 @@ const playStall = async (
  * and ends its turn, then finishes once their answer comes; asked to, `[lead:make-change]` makes its quick task a change
  * first, reviewed by Codex and ending in a draft pull request, or with no
  * review (`[lead:make-change-alone]`), and without `[lead:finish]` ends its
- * turn there; `[review:pass]` and `[review:findings]`
+ * turn there; told `[lead:call <tool> <json>]`, it calls that tool with those arguments, once each, as a lead does what
+ * the person says (change_part, change_lead, ship_task); `[review:pass]` and `[review:findings]`
  * report a review. Settling findings, it writes a file and commits it, so
  * the change changes, and finishes; a later review round passes. The session remembers its
  * markers: `[review:always]` finds something every round, and
@@ -939,7 +946,12 @@ const playRole = async (
     text.startsWith('Round ') ||
     text.includes('A check of the fixes, not another review.') ||
     text.includes('More to review. The person ships')
-  const asked = session.markers.size > 0 || text.includes('Settle each') || laterRound || text.startsWith('More to review')
+  const asked =
+    session.markers.size > 0 ||
+    text.includes('Settle each') ||
+    laterRound ||
+    text.startsWith('More to review') ||
+    text.includes('[lead:call ')
   if (session.tools === undefined || !asked) return undefined
   const client = new Client({ name: 'fake-agent', version: '1.0.0' })
   const transport = new StreamableHTTPClientTransport(new URL(session.tools.url), { requestInit: { headers: session.tools.headers } })
@@ -1053,6 +1065,20 @@ const playRole = async (
       if (text.includes('[lead:offer-review]') && available.has('offer_review')) {
         const offered = await call('offer_review', {})
         if (!text.includes('[lead:finish]')) return offered
+      }
+      // Told in words to change something, `[lead:call <tool> <json>]` (change_part, change_lead, ship_task…), it calls that tool
+      // with those arguments, as an agent does what the person said, once each, and says what each answered.
+      const calls = [...text.matchAll(/\[lead:call ([a-z_]+)(?: (\{.*?\}))?\]/g)]
+      if (calls.length > 0) {
+        const done = calledIn.get(session.cwd) ?? new Set<string>()
+        calledIn.set(session.cwd, done)
+        const answers: Array<string> = []
+        for (const [marker, name, args] of calls) {
+          if (name === undefined || done.has(marker) || !available.has(name)) continue
+          done.add(marker)
+          answers.push(await call(name, args === undefined ? {} : (JSON.parse(args) as Record<string, unknown>)))
+        }
+        if (answers.length > 0 && !text.includes('[lead:finish]')) return answers.join('\n')
       }
       // Told in these words to move its task on (`[lead:task-done]`, `[lead:task-keep]`, `[lead:task-discard]`), it does, and says what it was told.
       const moved = /\[lead:task-(done|keep|discard)\]/.exec(text)?.[1]
@@ -1464,7 +1490,7 @@ const playRole = async (
       const which = /as repositories: (.+)\.$/.exec(first)?.[1]
       const drafted = which === undefined ? first : await call('draft_task', { ...draft, repositories: which.split(', ') })
       const slug = /Drafted ([^\s,.]+)/.exec(drafted)?.[1] ?? ''
-      return await call('propose_plan', {
+      const planned = await call('propose_plan', {
         task: slug,
         lead: {
           agent: 'claude-code',
@@ -1476,6 +1502,10 @@ const playRole = async (
         // `[coordinator:plan-small]`: a small change, reviewed only once it merged.
         ...(ask.includes('[coordinator:plan-small]') ? { small_change: true } : {}),
       })
+      // `[coordinator:plan-branch]`: it ends with its branch, as a prototype does, set on the plan before it starts.
+      if (ask.includes('[coordinator:plan-branch]') && available.has('change_part'))
+        await call('change_part', { task: slug, part: 'ending', end: 'branch', why: 'a prototype' })
+      return planned
     }
     return undefined
   } finally {
