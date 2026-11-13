@@ -115,6 +115,8 @@ type Shared = Omit<ComponentProps<typeof ThreadBlocks>, 'blocks' | 'card' | 'que
 
 export interface TaskThreadProps extends Shared {
   readonly rounds: ReadonlyArray<RoundBlock>
+  /** Complete collection at the latest handoff; older rounds retain their own evidence. */
+  readonly gallery?: { readonly reportId: string; readonly shots: ReadonlyArray<GalleryShot> }
   /** What each document was last changed by, so one handed back is read again after an edit (documentVersions). */
   readonly versionOf: (whole: string) => string
   /** Opens another task, by its thread: one this task's lead started, from the line that says so. */
@@ -189,6 +191,7 @@ interface RoundProps {
   readonly signed?: { readonly voice: string; readonly mark: ReactNode }
   /** The names of its pictures an earlier round showed already: shown small, as retakes. */
   readonly retakes: ReadonlyArray<string>
+  readonly gallery?: ReadonlyArray<GalleryShot>
   /** What each document it hands back was last changed by. */
   readonly versions: Readonly<Record<string, string>>
   readonly threadId: string
@@ -208,6 +211,7 @@ const RoundView = memo(function RoundView({
   model,
   signed,
   retakes,
+  gallery,
   versions,
   threadId,
   worktree,
@@ -266,8 +270,8 @@ const RoundView = memo(function RoundView({
   const report = block.report
   const shown = report === null ? null : shownBy(report)
   const before = new Set(retakes)
-  const fresh = shown?.shots.filter((shot) => !before.has(shotName(shot.caption) ?? shot.id)) ?? []
-  const retaken = shown?.shots.filter((shot) => !fresh.includes(shot)) ?? []
+  const fresh = gallery ?? shown?.shots.filter((shot) => !before.has(shotName(shot.caption) ?? shot.id)) ?? []
+  const retaken = gallery === undefined ? (shown?.shots.filter((shot) => !fresh.includes(shot)) ?? []) : []
   const names = new Set(fresh.flatMap((shot) => shotName(shot.caption) ?? []))
   const showing = shown !== null && (
     <>
@@ -385,6 +389,7 @@ export function TaskThread({
   started,
   settledOf,
   reviewing = null,
+  gallery,
   stepAction,
   ...shared
 }: TaskThreadProps) {
@@ -436,6 +441,7 @@ export function TaskThread({
         model={modelOf(block.agentId, block.model)}
         {...(shared.signed === undefined ? {} : { signed: shared.signed })}
         retakes={retakes}
+        {...(block.report?.id === gallery?.reportId ? { gallery: gallery?.shots } : {})}
         versions={Object.fromEntries(documentsOf(block).map((whole) => [whole, versionOf(whole)]))}
         threadId={threadId}
         worktree={worktree}

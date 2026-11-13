@@ -11,7 +11,6 @@ import {
   ChangeView,
   BackCrumb,
   Button,
-  ChromeButton,
   Delivery,
   DiffLineKind,
   type FileView,
@@ -87,6 +86,7 @@ import { HeldLimit } from './LimitCall'
 import { StuckCall } from './StuckCall'
 import { coordinatorSigned } from '../../shared/signed'
 import { countsDown, StartedOf, type StartedReading, startedBy, startedIn, useStartedBoard } from './Started'
+import { outcomeOf } from '../../shared/outcome'
 import { TaskThread, workStepText } from './TaskThread'
 import { SmallChangeOf } from './SmallChangeOf'
 import { ModelMoveOf } from './ModelMoveOf'
@@ -1443,6 +1443,17 @@ export function TaskView({
                       // An aside is the coordinator's, as its conversation is.
                       {...(embedded ? { signed: coordinatorSigned } : {})}
                       rounds={blocks}
+                      gallery={{
+                        reportId:
+                          [...snapshot.reports, ...snapshot.items]
+                            .filter(
+                              (item) =>
+                                item.kind === 'step_result' && (item.content.step === 'implement' || item.content.step === 'settle'),
+                            )
+                            .sort((a, b) => a.sequence - b.sequence)
+                            .at(-1)?.id ?? '',
+                        shots: outcomeOf(snapshot).shots,
+                      }}
                       stepAction={stepAction}
                       versionOf={versionOf}
                       settledOf={settledOf}
