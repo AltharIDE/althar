@@ -43,18 +43,33 @@ export const OnTheCoordinator: Story = {
   },
 }
 
-/** An aside open: its × shows on its pill, and on any other under the pointer. */
-export const AsideOpen: Story = {
-  args: { current: 'a1' },
-  play: async ({ canvasElement, args }) => {
-    await userEvent.click(within(canvasElement).getByRole('button', { name: 'Clear “Why does the retry back off twice?”' }))
-    await expect(args.onClear).toHaveBeenCalledWith('a1')
-    await expect(args.onPick).not.toHaveBeenCalled()
+/** An aside open. */
+export const AsideOpen: Story = { args: { current: 'a1' } }
+
+/** A new aside, just started: its one pill, open and first, says it is new until its first words name it. */
+export const Starting: Story = {
+  args: { asides: [{ id: 'a0', title: '' }, ...ASIDES], current: 'a0' },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await expect(canvas.getAllByRole('tab', { name: 'New aside' })).toHaveLength(1)
+    await expect(canvas.getByRole('tab', { name: 'New aside' })).toHaveAttribute('aria-selected', 'true')
   },
 }
 
-/** A new aside being started: its pill first among them. */
-export const Starting: Story = { args: { starting: true } }
+/** Each aside's × clears it, as Delete does on its pill; the open one's shows at rest, the others' on hover. */
+export const Clearing: Story = {
+  args: { current: 'a2' },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement)
+    await userEvent.click(canvas.getByRole('button', { name: 'Clear Name for the refunds export' }))
+    await expect(args.onClear).toHaveBeenCalledWith('a3')
+    canvas.getByRole('tab', { name: /Stripe API/ }).focus()
+    await userEvent.keyboard('{Delete}')
+    await expect(args.onClear).toHaveBeenCalledWith('a2')
+    // The tab is the pill's name alone: its × is beside it, never in it.
+    await expect(canvas.getByRole('tab', { name: 'Name for the refunds export' })).toBeInTheDocument()
+  },
+}
 
 /** Those a week old fold into one pill, which clears them together. */
 export const Older: Story = {

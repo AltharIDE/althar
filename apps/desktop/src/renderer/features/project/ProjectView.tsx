@@ -79,18 +79,7 @@ import { Card, type CardActions } from './Card'
 import { useClearChat } from './ClearChat'
 import { TaskAskOf } from './TaskAskOf'
 import { FirstConnectionsView } from './FirstConnectionsView'
-import {
-  type AsideOpen,
-  AsideConversation,
-  AsideQuote,
-  AsidesBar,
-  AskInAside,
-  useAsideClears,
-  asideTitle,
-  asideWords,
-  asidesText,
-  COORDINATOR,
-} from './Asides'
+import { AsideConversation, AsideMoveFailed, AsideQuote, AsidesBar, AskInAside, asidesText, useAsideMoves, useAsides } from './Asides'
 import { coordinatorSigned } from '../../shared/signed'
 import { ChangesCard, type ChangesActions } from '../../shared/ChangesCard'
 import { DraftCard, type DraftActions } from '../../shared/DraftCard'
@@ -146,10 +135,10 @@ export const text = {
  * How wide the conversation is beside the board, as the person last dragged it: this window's own, kept across launches.
  * `lane` is the least of the board worth leaving beside a file open over it.
  */
-/** No asides yet, the same each time, while the board is read. */
-const NO_TASKS: ReadonlyArray<BoardTask> = []
-
 const WIDTH = { key: 'althar.both', start: 560, min: 340, board: 480, lane: 240 } as const
+
+/** No tasks, the same list each time. */
+const NO_TASKS: ReadonlyArray<BoardTask> = []
 
 /*
  * The width last kept in this window where storage wouldn't take it: the column goes with a switch of room, and back
@@ -282,8 +271,6 @@ export function ProjectView({
   ways?: SettingsWays
 }) {
   const [room, setRoom] = useState<Room>(asked ?? Room.Both)
-  // What the coordinator's pane shows: its conversation, an aside, or a new one being started (Asides).
-  const [asideOpen, setAside] = useState<AsideOpen>(COORDINATOR)
   const coordinatorFace = useRef<HTMLDivElement>(null)
   const [automation, setAutomation] = useState<string | null>(openingAutomation)
   useEffect(() => onAutomationChange?.(automation), [automation, onAutomationChange])
@@ -300,12 +287,10 @@ export function ProjectView({
   useEffect(() => onRoomChange?.(room), [room, onRoomChange])
   // The lanes the person collapsed, kept for every project, apart beside the conversation.
   const [folds, setFolds] = useFolds(room === Room.Both ? 'beside' : 'alone')
-  const lanes = board.board === null ? null : lanesOf(board.board, board.merging)
-  // An aside that left Scratch, for the board or cleared, gives the pane back to the coordinator; one just started stays open
-  // until the board has it.
-  const asideTask = asideOpen.kind === 'aside' ? board.board?.tasks.find((task) => task.taskId === asideOpen.taskId) : undefined
-  const aside: AsideOpen =
-    asideTask !== undefined && (asideTask.scratch !== true || asideTask.phase === 'settled') ? COORDINATOR : asideOpen
+  // The board as the person's moves on asides leave it, at once: one cleared gone, one made a task on it as work (`useAsideMoves`).
+  const asideMoves = useAsideMoves(useServices().client, board.board, model.project?.id ?? model.coordinator?.project.id ?? null)
+  const seen = asideMoves.over
+  const lanes = seen === null ? null : lanesOf(seen, board.merging)
   const yours = lanes === null ? 0 : yoursOf(lanes)
   // An abandoned task's pull request left open, closed from its row.
   const closing = useClosePullRequests()
@@ -327,8 +312,6 @@ export function ProjectView({
   }, [])
   // What the person writes to the coordinator, kept by the project while they are elsewhere, as are its images and what they dictate.
   const about = model.project?.id ?? model.coordinator?.project.id ?? null
-  // Asides the person cleared leave the pills at once, the runtime settling them behind.
-  const clears = useAsideClears(about, lanes?.scratch ?? NO_TASKS)
   const draftOf = draftKey.coordinator(about ?? '')
   const [draft, setDraft] = useDraft(draftOf)
   // A page beside the coordinator's conversation (ADR-100): the project goes to its conversation, the board stepping aside for it.
@@ -413,6 +396,21 @@ export function ProjectView({
     pick ??
     (suggested?.available === true ? { agentId: suggested.agentId, model: suggested.model, effort: suggested.effort } : null) ??
     (first === undefined ? null : { agentId: first.id, model: null, effort: null })
+  // What the coordinator's pane shows: its conversation, an aside, or a new one, started as + is pressed on the lead picked here.
+  const asides = useAsides({
+    client: useServices().client,
+    cache: useServices().cache,
+    projectId: about,
+    lead:
+      chosen === null ? null : { key: 'implement', agentId: chosen.agentId, model: chosen.model, effort: chosen.effort, skipped: false },
+    scratch: lanes?.scratch ?? NO_TASKS,
+    tasks: seen?.tasks ?? NO_TASKS,
+    moves: asideMoves,
+  })
+  const aside = asides.open
+  // What the composer's picker shows and sets: a new aside's own lead while one is open, else the coordinator's.
+  const picking: Choice | null =
+    asides.lead === null ? chosen : { agentId: asides.lead.agentId, model: asides.lead.model, effort: asides.lead.effort ?? null }
   const name = model.project?.name ?? coordinator?.project.name ?? text.project
   // The presets a plan can start from, this project's own with them: what the plan card's kicker lists.
   const { client } = useServices()
@@ -455,25 +453,22 @@ export function ProjectView({
   }
 
   // The agent what the person says goes to, and whether it takes images.
-  const receiver = { name: agentName(chosen?.agentId ?? null), takes: takesImages(models, chosen?.agentId ?? null) }
+  const receiver = { name: agentName(picking?.agentId ?? null), takes: takesImages(models, picking?.agentId ?? null) }
   const clearing = useClearChat(model)
-  /** Starts an aside of the person's words, on the model the composer has picked, and opens it; the words come back where it fails. */
-  const startAside = (body: string, quote: string | null) => {
-    const words = body.trim()
-    if (words === '' || about === null || chosen === null) return
+  /** The person's first words in a new aside, sent to it, which opens; the words come back where they couldn't go. */
+  const startAside = (body: string) => {
+    if (body.trim() === '') return
     setDraft('')
-    void client
-      .startTask({
-        projectId: about,
-        title: asideTitle(words),
-        description: asideWords(words, quote),
-        steps: [{ key: 'implement', agentId: chosen.agentId, model: chosen.model, effort: chosen.effort, skipped: false }],
-        chat: true,
-      })
-      .then(
-        (task) => setAside({ kind: 'aside', taskId: task.id, threadId: task.threadId }),
-        () => setDraft((current) => (current === '' ? body : current)),
-      )
+    void asides.say(body).then(
+      (went) => {
+        if (!went) setDraft((current) => (current === '' ? body : current))
+      },
+      (error: unknown) => {
+        // The words come back, and the line over the composer says why.
+        setDraft((current) => (current === '' ? body : current))
+        asideMoves.startFailed(error)
+      },
+    )
   }
   const send = (body: string, now: boolean) => {
     // Asking to clear the chat is not said to the coordinator.
@@ -483,7 +478,7 @@ export function ProjectView({
     }
     // A new aside: the coordinator's composer starts it, with what it quotes, and it opens.
     if (aside.kind === 'new') {
-      startAside(body, aside.quote)
+      startAside(body)
       return
     }
     // Images that can't go yet hold the message back, and the composer says why.
@@ -576,8 +571,9 @@ export function ProjectView({
         carried={<CarriedOver here={draftOf} />}
         // The lines about who answers go on the composer's edge, so a running launch's chip and they never overlap.
         notice={
-          model.error !== null || line !== null ? (
+          model.error !== null || line !== null || asideMoves.failed !== null ? (
             <>
+              <AsideMoveFailed moves={asideMoves} className={s.failure} />
               {model.error !== null && (
                 <div className={s.failure} role="alert">
                   {model.error} <LinkButton onClick={model.dismissError}>{text.dismiss}</LinkButton>
@@ -590,7 +586,7 @@ export function ProjectView({
         // The project's own runs, the ones of no task, as the task's chip says its own (ADR-096).
         above={
           aside.kind === 'new'
-            ? aside.quote !== null && <AsideQuote quote={aside.quote} onDrop={() => setAside({ kind: 'new', quote: null })} />
+            ? aside.quote !== null && <AsideQuote quote={aside.quote} onDrop={asides.dropQuote} />
             : (offer.offering !== null || projectRuns.some((launch) => launch.ended === null)) && (
                 <>
                   {offer.offering !== null && <ForkOffer offer={offer} />}
@@ -645,13 +641,14 @@ export function ProjectView({
             })}
         picker={
           model.agents.length > 0 &&
-          chosen !== null && (
+          picking !== null && (
             <ModelChoice
-              owner={text.coordinator}
+              owner={aside.kind === 'new' ? asidesText.lead : text.coordinator}
               agents={model.agents}
               {...(about === null ? {} : { projectId: about })}
-              value={chosen}
-              onChange={choose}
+              value={picking}
+              // A new aside's pick is its own: the coordinator's model, effort or agent stays as it was.
+              onChange={aside.kind === 'new' ? (next) => asides.choose({ key: 'implement', ...next, skipped: false }) : choose}
             />
           )
         }
@@ -809,32 +806,39 @@ export function ProjectView({
                     {/* The coordinator first, then its asides: the conversation says who it is with. */}
                     {lanes !== null && (
                       <AsidesBar
-                        scratch={clears.scratch}
+                        scratch={lanes.scratch}
                         open={aside}
-                        onOpen={setAside}
-                        onClear={(ids) => {
-                          if (aside.kind === 'aside' && ids.includes(aside.taskId)) setAside(COORDINATOR)
-                          clears.clear(ids)
-                        }}
-                        board={board.board?.tasks ?? []}
+                        first={asides.first}
+                        title={asides.title}
+                        onPick={asides.pick}
+                        onNew={() => asides.begin(null)}
+                        onClear={asides.clear}
+                        board={seen?.tasks ?? []}
                         now={Date.parse(now)}
                       />
-                    )}
-                    {clears.failed !== null && (
-                      <p className={s.asideFailed} role="alert">
-                        {clears.failed}
-                      </p>
                     )}
                     {aside.kind === 'aside' ? (
                       <AsideConversation
                         key={aside.threadId}
                         threadId={aside.threadId}
-                        onBack={() => setAside(COORDINATOR)}
+                        onBack={asides.back}
                         onOpenTask={onTask}
+                        onMakeTask={asides.makeTask}
+                        failed={asideMoves.failed === null ? null : <AsideMoveFailed moves={asideMoves} className={s.failure} />}
                       />
                     ) : aside.kind === 'new' ? (
                       <TaskFace className={s.face} composer={composer}>
-                        <Thread label={asidesText.newPlaceholder}>{null}</Thread>
+                        <Thread label={asidesText.newPlaceholder}>
+                          <ThreadBlocks
+                            blocks={blocksOf(
+                              { items: asides.items, turnRunning: false, worktree: null },
+                              new Map(),
+                              (iso) => ago(iso),
+                              now,
+                            )}
+                            threadId={aside.threadId ?? aside.taskId}
+                          />
+                        </Thread>
                       </TaskFace>
                     ) : (
                       <div ref={coordinatorFace} className={s.coordinatorFace}>
@@ -915,7 +919,7 @@ export function ProjectView({
                             </ThreadShellProvider>
                           </Thread>
                         </TaskFace>
-                        <AskInAside within={coordinatorFace} onAsk={(quote) => setAside({ kind: 'new', quote })} />
+                        <AskInAside within={coordinatorFace} onAsk={asides.begin} />
                       </div>
                     )}
                   </>
@@ -933,6 +937,7 @@ export function ProjectView({
                         {text.olderFailed} {board.olderError}
                       </p>
                     )}
+                    {!talking && <AsideMoveFailed moves={asideMoves} className={s.failure} />}
                     <BoardView
                       // Beside the conversation, its asides are there; the board alone keeps them behind its chip.
                       lanes={talking ? { ...lanes, scratch: [] } : lanes}
@@ -940,7 +945,15 @@ export function ProjectView({
                       now={now}
                       onOpen={onTask}
                       closing={closing}
-                      actions={board}
+                      // An aside cleared from the chip goes at once, as from its pill.
+                      actions={{
+                        ...board,
+                        markDone: (taskId) => {
+                          if (!lanes.scratch.some((one) => one.taskId === taskId)) return board.markDone(taskId)
+                          asides.clear([taskId])
+                          return Promise.resolve(true)
+                        },
+                      }}
                       line={board.line}
                       folds={folds}
                       onFoldsChange={setFolds}

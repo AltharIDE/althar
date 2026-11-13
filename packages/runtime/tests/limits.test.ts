@@ -334,7 +334,7 @@ describe('an agent out of usage', () => {
       const queries = yield* Queries
       assert.deepInclude(
         (yield* queries.projects).projects.find((project) => project.id === projectId),
-        { working: 1, ready: 0 },
+        { working: 1, yours: 0 },
       )
     }).pipe(
       Effect.provide(withAgents({ 'claude-code': { outOfUsage: { until: back } }, codex: { outOfUsage: { until: back } } }, ['opencode'])),

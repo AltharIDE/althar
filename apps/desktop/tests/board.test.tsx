@@ -1,4 +1,4 @@
-import { act, cleanup, screen, waitFor, within } from '@testing-library/react'
+import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { Activity, useState } from 'react'
@@ -21,7 +21,9 @@ import { makeQueryClient } from '../src/renderer/data/reads'
 import { useMerge } from '../src/renderer/data/merges'
 import { useProject } from '../src/renderer/features/project/useProject'
 import { agents, card, change, changed, fakeClient, snapshot } from './fixtures'
-import { useSettingsOf, withServices } from './render'
+import { ServicesProvider } from '../src/renderer/data/services'
+import { forgetArrived, hasArrived, markArrived } from '../src/renderer/features/board/arrived'
+import { servicesFor, useSettingsOf, withServices } from './render'
 
 function Project({ onTask = vi.fn() }: { onTask?: (threadId: string) => void }) {
   return (
@@ -646,7 +648,8 @@ describe('the board’s lanes', () => {
     expect(yoursOf(lanes)).toBe(2)
     expect(needsOf(lanes, () => '', vi.fn()).map((need) => [need.kind, need.title])).toEqual([
       ['Finished', 'Which partners call v1?'],
-      ['Ready to accept', 'Rate-limit refunds'],
+      // In its card's word: a check of its failed.
+      ['Not ready to accept', 'Rate-limit refunds'],
     ])
     expect(firstNeedOf(lanes)).toBe('thp1')
     // Kept for later, it is out of Needs you, with what else was kept, the latest first.
@@ -864,21 +867,36 @@ describe('the board’s lanes', () => {
     expect(trackItems(round.steps, round.at, round.at, round.done).map((item) => item.state)).toEqual([TrackStep.Done, TrackStep.Now])
   })
 
-  it('lists work its lead couldn’t resolve a conflict for as stuck, with why, among what needs the person', () => {
+  it('lists work its lead couldn’t resolve a conflict for as a merge conflict, with why, among what needs the person', () => {
     const why = 'The lead couldn’t resolve the conflict with main, in README.md. The merge of origin/main isn’t committed.'
     const lanes = lanesOf(
       board({ tasks: [task({ taskId: 't8', threadId: 'th8', title: 'Add a limit', phase: 'ready', handedBack: why })], calls: [] }),
     )
     expect(lanes.ready.map((work) => work.taskId)).toEqual(['t8'])
-    expect(needsOf(lanes, () => '', vi.fn()).map((need) => [need.kind, need.title, need.meta])).toEqual([['Stuck', 'Add a limit', why]])
+    // In its card's word, as every place says it.
+    expect(needsOf(lanes, () => '', vi.fn()).map((need) => [need.kind, need.title, need.meta])).toEqual([
+      ['Merge conflict', 'Add a limit', why],
+    ])
   })
 
-  it('lists work whose failing checks its lead brought to the person as stuck, with its line', () => {
+  it('puts a task that waits only on issues its lead drafted in Needs you, counted once, not in Running', () => {
+    const drafted = task({ taskId: 't7', threadId: 'th7', title: 'File the gaps', phase: 'waiting', issues: { drafts: 2, changes: 0 } })
+    const lanes = lanesOf(board({ tasks: [drafted], calls: [] }))
+    expect({ issues: lanes.issues.map((work) => work.taskId), running: lanes.running.length, yours: yoursOf(lanes) }).toEqual({
+      issues: ['t7'],
+      running: 0,
+      yours: 1,
+    })
+    expect(needsOf(lanes, () => '', vi.fn()).map((need) => [need.kind, need.title])).toEqual([['Issues to file', 'File the gaps']])
+  })
+
+  it('lists work whose failing checks its lead brought to the person as not ready to accept, with its line', () => {
     const why = 'Fails on main too: test times out in limit.test.ts.'
-    const lanes = lanesOf(
-      board({ tasks: [task({ taskId: 't9', threadId: 'th9', title: 'Add a limit', phase: 'ready', checksBack: why })], calls: [] }),
-    )
-    expect(needsOf(lanes, () => '', vi.fn()).map((need) => [need.kind, need.title, need.meta])).toEqual([['Stuck', 'Add a limit', why]])
+    const back = task({ taskId: 't9', threadId: 'th9', title: 'Add a limit', phase: 'ready', change: change(), checksBack: why })
+    const lanes = lanesOf(board({ tasks: [back], calls: [] }))
+    expect(needsOf(lanes, () => '', vi.fn()).map((need) => [need.kind, need.title, need.meta])).toEqual([
+      ['Not ready to accept', 'Add a limit', why],
+    ])
   })
 })
 
@@ -2160,7 +2178,7 @@ describe('what stands between a ready change and merging', () => {
     // Cancelled: said in place of a pass, and nothing to do from here but open the task.
     expect(said('A check cancelled')).toContain('check 4 cancelled')
     expect(said('A check cancelled')).not.toMatch(/checks passed|Accept and merge/)
-    expect(said('A check skipped')).toMatch(/4 of 5 checks passed\s*Accept and merge/)
+    expect(said('A check skipped')).toMatch(/All 4 checks passed\s*Accept and merge/)
     expect(said('Closed since')).not.toMatch(/checks passed|Accept and merge/)
   })
 })
@@ -2674,3 +2692,63 @@ describe('the moves a row put in Up next asks of the runtime', () => {
     ])
   })
 })
+
+describe('A settled card moves into Settled once', () => {
+  const NOW = '2026-10-01T10:00:00.000Z'
+  const moves = (title: string) =>
+    (screen.getByRole('button', { name: title }).closest('article') as HTMLElement).closest('[data-move]') as HTMLElement
+  const quiet = (title: string) => moves(title).hasAttribute('data-move-seen')
+  const services = () => servicesFor(fakeClient().client)
+  const shownBy = (value: ReturnType<typeof servicesFor>) => (tasks: BoardSnapshot['tasks']) => (
+    <ServicesProvider value={value}>
+      <BoardView lanes={lanesOf(board({ tasks, calls: [] }))} agents={agents} now={NOW} onOpen={vi.fn()} />
+    </ServicesProvider>
+  )
+  const all = board().tasks
+  const old = all.find((one) => one.taskId === 't6')!
+  const without = (id: string) => all.filter((one) => one.taskId !== id)
+  const as = (id: string, phase: BoardTask['phase']) => all.map((one) => (one.taskId === id ? { ...one, phase } : one))
+
+  it('moves in when this window watched it settle, and is drawn there as it is after: a lane change back and forth', () => {
+    const shown = shownBy(services())
+    const { rerender } = render(shown(as('t6', 'ready')))
+    rerender(shown(all))
+    expect(quiet('Old work')).toBe(false)
+    // Its lead works on it again, and it settles again: it is in Settled as before.
+    rerender(shown(as('t6', 'running')))
+    rerender(shown(all))
+    expect(quiet('Old work')).toBe(true)
+  })
+
+  it('draws what settled before this window looked as it is: first drawn, or brought by a later snapshot', () => {
+    const shown = shownBy(services())
+    const { rerender } = render(shown(without('t6')))
+    // No history kept, and a snapshot brings a task settled long ago: it doesn't move in.
+    rerender(shown(all))
+    expect(quiet('Old work')).toBe(true)
+    expect(quiet('Given up')).toBe(true)
+  })
+
+  it('remembers what moved in across a reload or restart, and every task it has drawn however many there are', () => {
+    const shown = shownBy(services())
+    const first = render(shown(as('t6', 'ready')))
+    first.rerender(shown(all))
+    first.unmount()
+    // A window reloaded: the task is at work when it is first drawn, and settles again.
+    forgetArrivedMemory()
+    const again = render(shown(as('t6', 'running')))
+    again.rerender(shown(all))
+    expect(quiet('Old work')).toBe(true)
+    again.unmount()
+    // Thousands of settled tasks later, the first is still known.
+    markArrived(Array.from({ length: 5000 }, (_, i) => `many${i}`))
+    expect(hasArrived('t6')).toBe(true)
+    expect(hasArrived('many0')).toBe(true)
+    forgetArrivedMemory()
+    expect(hasArrived('t6')).toBe(true)
+    expect(hasArrived('many4999')).toBe(true)
+  })
+})
+
+/** A window reloaded: what it held in memory is gone, what it kept in storage is read again. */
+const forgetArrivedMemory = () => forgetArrived()

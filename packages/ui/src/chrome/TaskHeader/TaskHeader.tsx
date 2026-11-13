@@ -113,7 +113,11 @@ export function TaskHeader<F extends string>({
               </Tooltip>
             )
           ) : (
-            <HoverCard placement="below" width={280} card={<Plan steps={plan} status={status} took={took} elapsed={elapsed} text={t} />}>
+            <HoverCard
+              placement="below"
+              width={280}
+              card={<Plan steps={plan} status={status} why={why} took={took} elapsed={elapsed} text={t} />}
+            >
               {said}
             </HoverCard>
           )}
@@ -134,18 +138,21 @@ export function TaskHeader<F extends string>({
 function Plan({
   steps,
   status,
+  why,
   took,
   elapsed,
   text,
 }: {
   steps: readonly TaskHeaderStep[]
   status: TaskStatus
+  why: string | undefined
   took: string | undefined
   elapsed: string | undefined
   text: TaskHeaderText
 }) {
   return (
     <span className={s.plan}>
+      {why !== undefined && <span>{why}</span>}
       <span className={s.steps}>
         {steps.map((step, at) => (
           <span key={`${step.label}${at}`} className={s.step} data-state={step.state}>

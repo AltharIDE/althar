@@ -136,10 +136,10 @@ describe('adding a part', () => {
         yield* callTool(task.lead, 'change_part', { part: 'output', why: 'It needs it.' }),
         'Name the pull request it follows: pull_request.',
       )
-      // Its review comes from its plan, and running an outside author's code is the person's word.
+      // A review goes on a plan, which a task only drafted has yet to have; running an outside author's code is the person's word.
       assert.strictEqual(
         yield* add({ part: 'checked_by' }),
-        `${task.slug}'s review comes from its plan: a quick task gets one with make_it_a_change; a planned one has it already, and remove_part takes it away.`,
+        `${task.slug} has no plan yet: propose_plan plans it, with its review and its ending.`,
       )
       assert.strictEqual(
         yield* add({ part: 'access' }),
@@ -391,13 +391,13 @@ describe('removing a part', () => {
     }).pipe(Effect.provide(runtimeWith(github)))
   })
 
-  it.live('takes this round’s review away, saying one under way stops and what it found stays', () => {
+  it.live('takes a review off only where the task has a plan to take it off', () => {
     const { working, github } = onGitHub()
     return Effect.gen(function* () {
       const task = yield* aTask(working)
       assert.strictEqual(
         yield* callTool(task.coordinator, 'remove_part', { task: task.slug, part: 'checked_by', why: 'The person skips it.' }),
-        `${task.slug} has no review this round: one under way stops, findings filed already stay in its thread.`,
+        `${task.slug} has no plan yet: propose_plan plans it, with its review and its ending.`,
       )
     }).pipe(Effect.provide(runtimeWith(github)))
   })

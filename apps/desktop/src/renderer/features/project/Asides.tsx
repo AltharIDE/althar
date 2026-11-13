@@ -1,12 +1,13 @@
-import { type RefObject, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { type ReactNode, type RefObject, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
+import type { QueryClient } from '@tanstack/react-query'
 
-import type { BoardTask } from '@althar/contracts'
-import { type Aside, AsideMoves, AsideTabs, Button, Icon, IconButton } from '@althar/ui'
+import type { BoardSnapshot, BoardTask, PlanStep, ThreadItem, ThreadSnapshot } from '@althar/contracts'
+import { type Aside, AsideMoves, AsideTabs, Button, Icon, IconButton, LinkButton } from '@althar/ui'
 
-import { useGoneAtOnce } from '../../data/goneAtOnce'
-import { keys } from '../../data/reads'
-import { useServices } from '../../data/services'
+import { type Client, messageOf, newTaskId } from '../../data/client'
+import { keys, reads } from '../../data/reads'
+import { mergeItems, sending, unsent } from '../../shared/items'
 import { coordinatorSigned } from '../../shared/signed'
 import { ago } from '../../shared/time'
 import { TaskView } from '../task/TaskView'
@@ -15,11 +16,16 @@ import s from './Asides.module.css'
 
 /*
  * Asides (docs/decisions/tasks.md, "Asides"): the project's chats, the tasks
- * on Scratch, as pills over the coordinator's conversation. One open shows its
- * own conversation in the coordinator's place, with the composer every task
- * has, its runs over it and its own move (Make it a task); the × on its pill
- * clears it, at once, the runtime settling it behind (useAsideClears); a new one
- * is started from the coordinator's composer, which sends to it instead.
+ * on Scratch, as pills over the coordinator's conversation, each with an ×
+ * that clears it. One open shows its own conversation in the coordinator's
+ * place, with the composer every task has, its runs over it and its move to
+ * the board (Make it a task). Clearing one and making one a task show at
+ * once, the runtime catching up behind, and one it refuses comes back with a
+ * line saying why (`useAsideMoves`). A new one
+ * starts as + is pressed, by an id the window makes, so its worktree and its
+ * lead get ready while the person writes and its one pill is keyed by that id
+ * from the first frame; the coordinator's composer sends its first words to
+ * it, which name it.
  * Words the coordinator said, selected, start one about them. One that leaves
  * Scratch for the board, by its agent's work or the person's word, flies to
  * its card there, and the coordinator's conversation keeps a line of it.
@@ -32,13 +38,121 @@ export const asidesText = {
   askAside: 'Ask in an aside',
   quoting: 'Quoting the coordinator',
   asked: (when: string) => `Asked ${when}`,
-  notCleared: (title: string) => `“${title}” wasn’t cleared: it still has something open, or its agent is at it.`,
+  clearFailed: (title: string, why: string) => `Couldn’t clear ${title}. ${why}`,
+  stillOpen: 'Something of it is still open.',
+  taskFailed: (title: string, why: string) => `Couldn’t make ${title} a task. ${why}`,
+  startFailed: (why: string) => `Couldn’t start the aside. ${why}`,
+  dismiss: 'Dismiss',
+  /** Whose pick the new aside's picker is: its lead's, as in an aside's own composer. */
+  lead: 'Lead',
 }
 
-/** What the coordinator's pane shows: its own conversation, a new aside being started, or an aside. */
+/** An aside the person moved, before the board says so: cleared, or made a task. */
+type Move = 'clear' | 'task'
+
+/** How long a move the runtime took waits for the board to say so, before the board is believed again. */
+const BELIEVED = 10_000
+
+/**
+ * The person's moves on asides, shown at once (UI is instant): one cleared is gone from the board's tasks, one made a task is
+ * on the board as work, from the press until the board's own read says so. One the runtime refused comes back, and `failed`
+ * says why. `over` is the board as the person sees it, which the lanes, the pills and the flights are drawn from.
+ */
+export function useAsideMoves(client: Client, board: BoardSnapshot | null, projectId: string | null = null) {
+  const [moves, setMoves] = useState<ReadonlyMap<string, Move>>(new Map())
+  const [failed, setFailed] = useState<string | null>(null)
+  const drop = (taskId: string) =>
+    setMoves((now) => {
+      if (!now.has(taskId)) return now
+      const next = new Map(now)
+      next.delete(taskId)
+      return next
+    })
+  // Each move the board says now is the board's again: a cleared one settled, or gone; one made a task off Scratch.
+  const agreed =
+    board === null
+      ? []
+      : [...moves.keys()].filter((taskId) => {
+          const task = board.tasks.find((one) => one.taskId === taskId)
+          return task === undefined || task.scratch !== true || task.phase === 'settled'
+        })
+  if (agreed.length > 0) setMoves((now) => new Map([...now].filter(([taskId]) => !agreed.includes(taskId))))
+  const over = useMemo(
+    (): BoardSnapshot | null =>
+      board === null || moves.size === 0
+        ? board
+        : {
+            ...board,
+            tasks: board.tasks.flatMap((task): ReadonlyArray<BoardTask> => {
+              const move = moves.get(task.taskId)
+              if (move === undefined) return [task]
+              if (move === 'clear') return []
+              const { scratch: _, ...work } = task
+              return [work]
+            }),
+          },
+    [board, moves],
+  )
+  const act = (move: Move, tasks: ReadonlyArray<BoardTask>) => {
+    if (tasks.length === 0) return
+    setFailed(null)
+    setMoves((now) => new Map([...now, ...tasks.map((task) => [task.taskId, move] as const)]))
+    for (const task of tasks) {
+      const title = task.title === '' ? 'the aside' : `“${task.title}”`
+      void (move === 'clear' ? client.markTaskDone(task.taskId) : client.shelveTask(task.taskId, null)).then(
+        async () => {
+          // A clear the runtime answered without settling it (something of it opened meanwhile) says so: a read of the board's
+          // own, after the answer, never one another move's refresh may have cancelled (docs/decisions/foundations.md).
+          if (move === 'clear' && projectId !== null) {
+            const after = await client.getBoard(projectId).catch(() => null)
+            const now = after?.tasks.find((one) => one.taskId === task.taskId)
+            if (now !== undefined && now.scratch === true && now.phase !== 'settled') {
+              drop(task.taskId)
+              setFailed(asidesText.clearFailed(title, asidesText.stillOpen))
+              return
+            }
+          }
+          setTimeout(() => drop(task.taskId), BELIEVED)
+        },
+        (error: unknown) => {
+          drop(task.taskId)
+          setFailed((move === 'clear' ? asidesText.clearFailed : asidesText.taskFailed)(title, messageOf(error)))
+        },
+      )
+    }
+  }
+  return {
+    over,
+    /** The asides being moved, by id. */
+    moving: moves as ReadonlyMap<string, unknown>,
+    clear: (tasks: ReadonlyArray<BoardTask>) => act('clear', tasks),
+    makeTask: (task: BoardTask) => act('task', [task]),
+    failed,
+    /** Says why an aside's own start didn't go through, as a move's failure is said. */
+    startFailed: (error: unknown) => setFailed(asidesText.startFailed(messageOf(error))),
+    dismiss: () => setFailed(null),
+  }
+}
+
+export type AsideMoveState = ReturnType<typeof useAsideMoves>
+
+/** Why a move on an aside didn't go through, where the person is: over the composer, with a way to dismiss it. */
+export function AsideMoveFailed({ moves, className }: { moves: AsideMoveState; className?: string }) {
+  if (moves.failed === null) return null
+  return (
+    <div className={className} role="alert">
+      {moves.failed} <LinkButton onClick={moves.dismiss}>{asidesText.dismiss}</LinkButton>
+    </div>
+  )
+}
+
+/**
+ * What the coordinator's pane shows: its own conversation, a new aside waiting for its first words (its thread once the runtime
+ * has made it), or an aside.
+ */
 export type AsideOpen =
   | { readonly kind: 'coordinator' }
-  | { readonly kind: 'new'; readonly quote: string | null }
+  | { readonly kind: 'new'; readonly taskId: string; readonly threadId: string | null; readonly quote: string | null }
   | { readonly kind: 'aside'; readonly taskId: string; readonly threadId: string }
 
 export const COORDINATOR: AsideOpen = { kind: 'coordinator' }
@@ -50,21 +164,46 @@ const asideOf = (task: BoardTask): Aside => ({
   id: task.taskId,
   title: task.title,
   ...(task.latest === undefined ? {} : { said: task.latest.said }),
-  ...(task.phase === 'running' ? { running: true } : {}),
+  // Its lead waiting for the person's first words isn't at work.
+  ...(task.phase === 'running' && task.unsaid !== true ? { running: true } : {}),
 })
 
-/** The asides, the latest first, and those left a week, apart. */
-export const asidesOf = (scratch: ReadonlyArray<BoardTask>, now: number) => {
-  const old = (task: BoardTask) => now - Date.parse(task.latest?.at ?? task.createdAt) > OLDER
-  return { recent: scratch.filter((task) => !old(task)).map(asideOf), older: scratch.filter(old).map(asideOf) }
+/**
+ * The asides, the latest first, and those left a week, apart. The open one always has its pill; one left unsaid shows only
+ * while it is open. The one just started (`first`) comes first, under the id it keeps, before the board has it, and after,
+ * until the board has its first exchange: however the board's reads land, its one pill never moves or goes.
+ */
+export const asidesOf = (
+  scratch: ReadonlyArray<BoardTask>,
+  now: number,
+  keep: { readonly open?: string | null; readonly first?: string | null; readonly title?: string } = {},
+) => {
+  const kept = (task: BoardTask) => task.taskId === keep.open || task.taskId === keep.first
+  const shown = scratch.filter((task) => task.unsaid !== true || kept(task))
+  const old = (task: BoardTask) => !kept(task) && now - Date.parse(task.latest?.at ?? task.createdAt) > OLDER
+  const recent = shown.filter((task) => !old(task)).map(asideOf)
+  const { first } = keep
+  const ahead =
+    first == null
+      ? []
+      : [
+          {
+            ...(recent.find((one) => one.id === first) ?? { id: first, title: '' }),
+            ...(keep.title === undefined ? {} : { title: keep.title }),
+          },
+        ]
+  return { recent: [...ahead, ...recent.filter((one) => one.id !== first)], older: shown.filter(old).map(asideOf) }
 }
 
-/** A title for an aside from the person's words: their first line, cut at a word. */
+/** The longest a task's title may be (the runtime's TITLE_LENGTH). */
+const TITLE = 60
+
+/** A title for an aside from the person's words: their first line, cut at a word to fit a task's title. */
 export const asideTitle = (words: string) => {
   const line = words.trim().split('\n')[0]?.trim() ?? ''
-  if (line.length <= 80) return line
-  const cut = line.slice(0, 80)
-  return `${cut.slice(0, Math.max(cut.lastIndexOf(' '), 40))}…`
+  if (line.length <= TITLE) return line
+  const cut = line.slice(0, TITLE - 1)
+  return `${cut.slice(0, Math.max(cut.lastIndexOf(' '), TITLE / 2)).trimEnd()}…`
 }
 
 /** The person's words to start an aside with, under what they quoted of the coordinator. */
@@ -76,72 +215,233 @@ export const asideWords = (words: string, quote: string | null) =>
         .map((line) => `> ${line}`)
         .join('\n')}\n\n${words}`
 
-/** On Scratch still, as a read of the board has it. */
-const onScratch = (task: BoardTask | undefined) => task !== undefined && task.scratch === true && task.phase !== 'settled'
+/** Whether two leads are the same agent, model and effort. */
+const sameLead = (a: PlanStep, b: PlanStep) => a.agentId === b.agentId && a.model === b.model && (a.effort ?? null) === (b.effort ?? null)
 
 /**
- * Clearing asides at once (docs/decisions/foundations.md, "The UI is instant"): a cleared
- * one leaves the pills in the frame it is pressed, and the runtime settles it
- * behind. It stays hidden until a read of the board no longer has it on
- * Scratch (useGoneAtOnce), so a read from before the clear never brings it
- * back for a moment. Once the runtime has answered, each clear reads the board
- * itself, a read that can only be from after it, whatever other reads overlap;
- * one the runtime left on Scratch (still at work, or waiting on the person)
- * comes back with a line.
+ * Which conversation the coordinator's pane shows, and the starting of new asides: + starts one at once (`StartTask` with
+ * `chat`), on the lead the composer has picked, by an id made here, so it is one pill from that moment, and its worktree and
+ * lead get ready while the person writes. One opened and left unsaid is opened again by the next +, rather than another. The
+ * person's first words go to its thread, under what it quotes, and name it, on the lead the composer has picked as they are
+ * sent. A new one's picker is its own (`lead`, `choose`): what is picked there never changes the coordinator's. Clearing one, or
+ * making it a task, gives the pane back to the coordinator at once (`useAsideMoves`).
  */
-export function useAsideClears(projectId: string | null, scratch: ReadonlyArray<BoardTask>) {
-  const { client, cache } = useServices()
-  const gone = useGoneAtOnce(scratch, (task) => task.taskId)
-  const [failed, setFailed] = useState<string | null>(null)
-  const clear = (ids: ReadonlyArray<string>) => {
-    setFailed(null)
-    gone.hide(ids)
-    for (const id of ids) {
-      const title = scratch.find((task) => task.taskId === id)?.title ?? ''
-      const back = () => {
-        gone.back(id)
-        setFailed(asidesText.notCleared(title))
+export function useAsides({
+  client,
+  cache,
+  projectId,
+  lead,
+  scratch,
+  tasks,
+  moves,
+}: {
+  client: Client
+  cache: QueryClient
+  projectId: string | null
+  /** Who leads a new one, unless the person picks another for it: the coordinator's composer's pick. */
+  lead: PlanStep | null
+  scratch: ReadonlyArray<BoardTask>
+  /** Every task on the board, as the person's moves leave it, to tell one that left Scratch. */
+  tasks: ReadonlyArray<BoardTask>
+  moves: AsideMoveState
+}) {
+  const [opened, setOpened] = useState<AsideOpen>(COORDINATOR)
+  // The one whose first words just went from here: first among the pills until the board has its first exchange.
+  const [sent, setSent] = useState<string | null>(null)
+  const [said, setSaid] = useState<{ taskId: string; title: string; items: ReadonlyArray<ThreadItem> } | null>(null)
+  const saying = useRef(new Set<string>())
+  // Each one started here, as its start lands: its thread, or null where it couldn't start; and the lead it started on.
+  const starts = useRef(new Map<string, Promise<string | null>>())
+  const leads = useRef(new Map<string, PlanStep>())
+  // The lead the person picked for a new one, in its composer, after +: its own, never the coordinator's.
+  const [picked, setPicked] = useState<{ taskId: string; lead: PlanStep } | null>(null)
+  const task = opened.kind === 'coordinator' ? undefined : tasks.find((one) => one.taskId === opened.taskId)
+  // One that left Scratch, for the board or cleared, gives the pane back to the coordinator.
+  const open: AsideOpen = task !== undefined && (task.scratch !== true || task.phase === 'settled') ? COORDINATOR : opened
+  // The one just sent keeps its place until the board has its first exchange, or it leaves Scratch: cleared, or made work. Then
+  // it is let go, for good: the board's reads never bring back a pill for it.
+  const sentTask = sent === null ? undefined : tasks.find((one) => one.taskId === sent)
+  const sentDone =
+    sent !== null &&
+    (moves.moving.has(sent) ||
+      (sentTask !== undefined && (sentTask.scratch !== true || sentTask.phase === 'settled' || sentTask.latest !== undefined)))
+  if (sentDone) setSent(null)
+  const first = open.kind === 'new' ? open.taskId : sent !== null && !sentDone ? sent : null
+  // Who leads the new one open: the person's pick for it, or else the coordinator's composer's.
+  const own = open.kind === 'new' && picked?.taskId === open.taskId ? picked.lead : lead
+
+  const start = (taskId: string, quote: string | null) => {
+    if (projectId === null || lead === null) return
+    setOpened({ kind: 'new', taskId, threadId: null, quote })
+    leads.current.set(taskId, lead)
+    const made = client.startTask({ projectId, title: '', steps: [lead], chat: true, taskId }).then(
+      (started) => {
+        // Read while the person writes: the first words open a ready conversation, without a skeleton between composers.
+        void cache.prefetchQuery(reads(client).thread(started.threadId))
+        setOpened((current) => (current.kind === 'new' && current.taskId === taskId ? { ...current, threadId: started.threadId } : current))
+        return started.threadId
+      },
+      () => null,
+    )
+    starts.current.set(taskId, made)
+  }
+
+  /** + over the conversation, or the coordinator's words asked about: a new aside, open, waiting for the person's words. */
+  const begin = (quote: string | null) => {
+    if (open.kind === 'new') return setOpened({ ...open, quote })
+    const unsaid = scratch.find((one) => one.unsaid === true && one.phase !== 'settled')
+    if (unsaid !== undefined) return setOpened({ kind: 'new', taskId: unsaid.taskId, threadId: unsaid.threadId, quote })
+    start(newTaskId(), quote)
+  }
+
+  /** A pill: the coordinator's conversation, by null, or an aside's. */
+  const pick = (taskId: string | null) => {
+    if (open.kind === 'new' && open.taskId === taskId) return
+    const one = taskId === null ? undefined : scratch.find((candidate) => candidate.taskId === taskId)
+    if (one === undefined) return setOpened(COORDINATOR)
+    setOpened(
+      one.unsaid === true
+        ? { kind: 'new', taskId: one.taskId, threadId: one.threadId, quote: null }
+        : { kind: 'aside', taskId: one.taskId, threadId: one.threadId },
+    )
+  }
+
+  /** Words to a thread whose lead was `was`, on `lead`, picked now: another agent takes the thread, another model or effort it. */
+  const sendOn = async (threadId: string, body: string, was: PlanStep | undefined, lead: PlanStep) => {
+    if (was === undefined || sameLead(was, lead)) return await client.send({ threadId, body, disposition: 'after_current' })
+    if (was.agentId !== lead.agentId)
+      return void (await client.switchAgent({
+        threadId,
+        agentId: lead.agentId,
+        ...(lead.model === null ? {} : { model: lead.model }),
+        ...(lead.effort == null ? {} : { effort: lead.effort }),
+        body,
+      }))
+    if (lead.model !== null && lead.model !== was.model) await client.setModel({ threadId, model: lead.model })
+    if (lead.effort != null && lead.effort !== was.effort) await client.setEffort({ threadId, effort: lead.effort })
+    await client.send({ threadId, body, disposition: 'after_current' })
+  }
+
+  /** The person's first words in the new aside: to its thread, under what it quotes, naming it; it opens. False for no words. */
+  const say = async (body: string) => {
+    const lead = own
+    if (open.kind !== 'new' || projectId === null || lead === null) return false
+    const words = body.trim()
+    if (words === '') return false
+    const { taskId, quote } = open
+    if (saying.current.has(taskId)) return false
+    const said = asideWords(words, quote)
+    const optimistic = sending([], { text: said, queued: false, interrupting: false })
+    saying.current.add(taskId)
+    setSaid({ taskId, title: asideTitle(words), items: optimistic.items })
+    let sentTo: string | null = null
+    try {
+      const threadId = open.threadId ?? (await starts.current.get(taskId)) ?? null
+      if (threadId === null) {
+        // It couldn't start as + was pressed: once more, now, started with the words themselves.
+        const again = await client.startTask({ projectId, title: asideTitle(words), description: said, steps: [lead], chat: true })
+        await cache.ensureQueryData(reads(client).thread(again.threadId))
+        setSent(again.id)
+        setOpened({ kind: 'aside', taskId: again.id, threadId: again.threadId })
+        return true
       }
-      void client
-        .markTaskDone(id)
-        .then(async () => {
-          if (projectId === null) return
-          const board = await client.getBoard(projectId)
-          if (onScratch(board.tasks.find((task) => task.taskId === id))) back()
-          void cache.invalidateQueries({ queryKey: keys.board(projectId), exact: true })
-        })
-        .catch(back)
+      // On the lead the composer has picked now: where it changed since +, the words go to that one, as a task's composer hands over.
+      const was =
+        leads.current.get(taskId) ?? scratch.find((one) => one.taskId === taskId)?.plan?.steps.find((step) => step.key === 'implement')
+      await cache.ensureQueryData(reads(client).thread(threadId))
+      sentTo = threadId
+      cache.setQueryData<ThreadSnapshot>(keys.thread(threadId), (current) =>
+        current === undefined ? current : { ...current, items: mergeItems(current.items, optimistic.items) },
+      )
+      await Promise.all([client.renameTask(taskId, asideTitle(words)).catch(() => undefined), sendOn(threadId, said, was, lead)])
+      // Keep the person's message on screen until its stored copy arrives. A failed refresh never sends it twice.
+      await cache.fetchQuery({ ...reads(client).thread(threadId), staleTime: 0 }).catch(() => undefined)
+      leads.current.set(taskId, lead)
+      setSent(taskId)
+      setOpened((current) => (current.kind === 'new' && current.taskId === taskId ? { kind: 'aside', taskId, threadId } : current))
+      return true
+    } catch (error) {
+      setSaid((current) => (current?.taskId === taskId ? null : current))
+      if (sentTo !== null)
+        cache.setQueryData<ThreadSnapshot>(keys.thread(sentTo), (current) =>
+          current === undefined ? current : { ...current, items: unsent(current.items, optimistic.id, said) },
+        )
+      throw error
+    } finally {
+      saying.current.delete(taskId)
     }
   }
-  return { scratch: gone.shown ?? scratch, clear, failed, dismiss: () => setFailed(null) }
+
+  /**
+   * Clears asides, by their ×s or "N older": they leave the pills at once, and the pane goes back to the coordinator where one
+   * was open. A new one, nothing said in it, is only closed: it waits, ready, for the next +.
+   */
+  const clear = (taskIds: ReadonlyArray<string>) => {
+    if (open.kind !== 'coordinator' && taskIds.includes(open.taskId)) setOpened(COORDINATOR)
+    moves.clear(scratch.filter((one) => taskIds.includes(one.taskId) && one.unsaid !== true))
+  }
+
+  /** Make it a task: it flies to the board at once, as work, and the pane goes back to the coordinator. */
+  const makeTask = (taskId: string) => {
+    const one = scratch.find((candidate) => candidate.taskId === taskId)
+    if (one === undefined) return
+    if (open.kind !== 'coordinator' && open.taskId === taskId) setOpened(COORDINATOR)
+    moves.makeTask(one)
+  }
+
+  return {
+    open,
+    first,
+    title: first === said?.taskId ? said.title : undefined,
+    items: open.kind === 'new' && said?.taskId === open.taskId ? said.items : [],
+    /** Who leads the new one open, as its picker shows: null while none is. */
+    lead: open.kind === 'new' ? own : null,
+    /** A pick in the new one's composer: its lead, for its first words; the coordinator's is left as it was. */
+    choose: (next: PlanStep) => {
+      if (open.kind === 'new') setPicked({ taskId: open.taskId, lead: next })
+    },
+    begin,
+    pick,
+    say,
+    clear,
+    makeTask,
+    back: () => setOpened(COORDINATOR),
+    dropQuote: () => setOpened((current) => (current.kind === 'new' ? { ...current, quote: null } : current)),
+  }
 }
 
 /** The pills over the coordinator's conversation, flying one that left for the board to its card there. */
 export function AsidesBar({
   scratch,
   open,
-  onOpen,
+  first,
+  title,
+  onPick,
+  onNew,
   onClear,
   board,
   now,
 }: {
   scratch: ReadonlyArray<BoardTask>
   open: AsideOpen
-  onOpen: (open: AsideOpen) => void
-  /** Settles asides, from a pill's × or the older ones together: they leave the pills, and ⌘K still finds them. */
+  /** The one just started, first among them until the board has its first exchange (`useAsides`). */
+  first: string | null
+  title?: string | undefined
+  onPick: (taskId: string | null) => void
+  onNew: () => void
+  /** Clears asides, by a pill's × or "N older": they leave the pills at once, and ⌘K still finds them. */
   onClear: (taskIds: ReadonlyArray<string>) => void
   /** Every task on the board, to tell one that left for the board from one cleared. */
   board: ReadonlyArray<BoardTask>
   now: number
 }) {
-  const { recent, older } = asidesOf(scratch, now)
+  const { recent, older } = asidesOf(scratch, now, {
+    open: open.kind === 'coordinator' ? null : open.taskId,
+    first,
+    ...(title === undefined ? {} : { title }),
+  })
   const strip = useRef<HTMLDivElement>(null)
   useFlights(strip, scratch, board)
-  const current = open.kind === 'aside' ? open.taskId : null
-  const pick = (id: string | null) => {
-    const task = id === null ? undefined : scratch.find((one) => one.taskId === id)
-    onOpen(task === undefined ? COORDINATOR : { kind: 'aside', taskId: task.taskId, threadId: task.threadId })
-  }
   return (
     <AsideTabs
       ref={strip}
@@ -149,11 +449,10 @@ export function AsidesBar({
       mark={coordinatorSigned.mark}
       asides={recent}
       older={older}
-      current={current}
-      starting={open.kind === 'new'}
-      onPick={pick}
-      onNew={() => onOpen({ kind: 'new', quote: null })}
-      onClear={(id) => onClear([id])}
+      current={open.kind === 'coordinator' ? null : open.taskId}
+      onPick={onPick}
+      onNew={onNew}
+      onClear={(taskId) => onClear([taskId])}
       onClearOlder={onClear}
     />
   )
@@ -164,7 +463,7 @@ export function AsidesBar({
  * there, or to the Board tab with the board closed; one cleared just goes.
  */
 function useFlights(strip: RefObject<HTMLDivElement | null>, scratch: ReadonlyArray<BoardTask>, board: ReadonlyArray<BoardTask>) {
-  // Where each pill was, last drawn: once it leaves, it is gone from the page.
+  // Where each pill was, last drawn, and the pill: once it leaves, it is gone from the page, and only then copied to fly.
   const rects = useRef(new Map<string, { rect: DOMRect; node: HTMLElement }>())
   const was = useRef<ReadonlySet<string>>(new Set(scratch.map((task) => task.taskId)))
   useLayoutEffect(() => {
@@ -174,13 +473,13 @@ function useFlights(strip: RefObject<HTMLDivElement | null>, scratch: ReadonlyAr
       const left = board.find((task) => task.taskId === id)
       const from = rects.current.get(id)
       if (left === undefined || left.scratch === true || left.phase === 'settled' || from === undefined) continue
-      fly(from.node, from.rect, id)
+      fly(from.node.cloneNode(true) as HTMLElement, from.rect, id)
     }
     was.current = ids
     rects.current = new Map(
       [...(strip.current?.querySelectorAll<HTMLElement>('[data-aside]') ?? [])].map((node) => [
         node.dataset.aside ?? '',
-        { rect: node.getBoundingClientRect(), node: node.cloneNode(true) as HTMLElement },
+        { rect: node.getBoundingClientRect(), node },
       ]),
     )
   })
@@ -218,21 +517,32 @@ const fly = (ghost: HTMLElement, from: DOMRect, taskId: string) => {
   })
 }
 
-/** An aside open in the coordinator's place: its conversation and composer, as on its own screen, with its moves over the composer. */
+/**
+ * An aside open in the coordinator's place: its conversation and composer, as on its own screen, with its move to the board over
+ * the composer, and why a move on an aside failed over it.
+ */
 export function AsideConversation({
   threadId,
   onBack,
   onOpenTask,
+  onMakeTask,
+  failed,
 }: {
   threadId: string
-  /** Back to the coordinator's conversation. */
   onBack: () => void
   onOpenTask: (threadId: string) => void
+  /** Make it a task: it leaves for the board at once (`useAsides`). */
+  onMakeTask: (taskId: string) => void
+  /** Why the person's last move on an aside failed, over the composer; null for none. */
+  failed: ReactNode
 }) {
   const model = useTask(threadId)
   const task = model.snapshot?.task
-  const request = task?.request ?? null
-  const quoted = request?.startsWith('> ') === true
+  // What the person first asked, as its request or, started with +, its first message: when, and whether it quotes the coordinator.
+  const first = model.snapshot?.items.find((item) => item.kind === 'user_message')
+  const asked = task?.request ?? (first?.kind === 'user_message' ? first.content.text : null)
+  const quoted = asked?.startsWith('> ') === true
+  const askedAt = first?.createdAt ?? task?.startedAt ?? null
   return (
     <TaskView
       model={model}
@@ -242,11 +552,11 @@ export function AsideConversation({
         bar:
           task === undefined || task.scratch !== true || task.phase === 'settled' ? null : (
             <AsideMoves
-              busy={model.pending}
-              onMakeTask={() => void model.shelve(null)}
-              {...(quoted ? { note: asidesText.quoting } : task.startedAt === null ? {} : { note: asidesText.asked(ago(task.startedAt)) })}
+              onMakeTask={() => onMakeTask(task.id)}
+              {...(quoted ? { note: asidesText.quoting } : askedAt === null ? {} : { note: asidesText.asked(ago(askedAt)) })}
             />
           ),
+        notice: failed,
       }}
     />
   )

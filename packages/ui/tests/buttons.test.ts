@@ -64,6 +64,7 @@ const PLAIN: Readonly<Record<string, string>> = {
   'screens/Home/Home.tsx': 'the line that folds what the loop did since you looked',
   'chrome/PlanGauge/PlanPeek.tsx': 'an agent’s row, which folds its accounts; the line of agents with no reading, which folds why',
   /* an option in a list or a rail */
+  'thread/ThreadNavigator/ThreadNavigator.tsx': 'a message’s navigation mark, drawn as a compact tick rather than a labelled action',
   'composer/ModelPick/ModelPick.tsx': 'the picker and its options',
   'composer/ModelBrowser/ModelBrowser.tsx': 'the rail and a model’s row',
   'outputs/ChangeView/ChangeView.tsx': 'a file in the list of what changed',

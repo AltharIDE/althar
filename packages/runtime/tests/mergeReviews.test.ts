@@ -297,6 +297,7 @@ describe('the review after a merge, in the same task', () => {
       assert.lengthOf(yield* said(), 1)
       // Once it can, it starts, and reads.
       rmSync(blocker, { force: true })
+      yield* sql`UPDATE merge_reviews SET updated_at = '2000-01-01T00:00:00.000Z' WHERE url = ${task.url}`
       yield* (yield* FastLane).retryPendingReviews()
       yield* until(reviewOf(task.url), (row) => row?.state === 'clear')
     }).pipe(Effect.provide(runtimeWith(github)))
