@@ -182,6 +182,7 @@ export function RunCard({
           align="end"
           width={544}
           padded={false}
+          initialFocus="panel"
           open={open}
           onOpenChange={setOpen}
         >
