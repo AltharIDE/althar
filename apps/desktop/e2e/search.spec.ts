@@ -28,8 +28,8 @@ test('searches real task text and files, morphs into actions without emptying, a
     await expect(async () => {
       await expect(task).toHaveAttribute('aria-selected', 'true')
       await field.press('ArrowRight')
-      await expect(dialog.getByRole('option', { name: 'Copy', exact: true })).toBeVisible({ timeout: 2000 })
-    }).toPass({ timeout: 30_000 })
+      await expect(dialog.getByRole('option', { name: 'Copy', exact: true })).toBeVisible()
+    }).toPass()
     // No real row or chip is hidden for the length of a spring.
     expect(await dialog.locator('[data-chip]').evaluate((el) => getComputedStyle(el).visibility)).toBe('visible')
     await field.press('Escape')
