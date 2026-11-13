@@ -683,7 +683,7 @@ export function TaskLaunch({
           {endRow && (
             <Row
               i={rows.length}
-              node={<Node state={endState} mark={<Icon name={end === TaskEnd.PushOnly ? 'branch' : 'pr'} size={17} />} />}
+              node={<Node state={endState} mark={<Icon name={hideEnd || end === TaskEnd.PushOnly ? 'branch' : 'pr'} size={17} />} />}
               link={null}
               label={hideEnd ? t.toward : t.endLabel}
               who={

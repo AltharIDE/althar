@@ -50,8 +50,11 @@ export const altharToolOf = (title: string, meta?: unknown): string | undefined 
   const claude = record(record(meta)?.['claudeCode'])
   const toolName = typeof claude?.['toolName'] === 'string' ? claude['toolName'] : undefined
   const named = fromName(toolName ?? title) ?? (toolName === undefined ? undefined : fromName(title))
-  return named !== undefined && ALTHAR.test(named.server) ? named.tool : undefined
+  if (named !== undefined) return ALTHAR.test(named.server) ? named.tool : undefined
+  // Codex names some calls by server and tool alone: althar.draft_task, or althar/draft_task.
+  return BARE.exec((toolName ?? title).trim())?.[1]
 }
+const BARE = /^althar[./:]([A-Za-z0-9_-]+)$/i
 
 /**
  * The MCP call a tool call is, from its title and what its `_meta` says;
