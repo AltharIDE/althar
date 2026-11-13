@@ -1615,6 +1615,23 @@ export const makeGitHub = (options: AdapterOptions): CodeHost & Tracker => {
         if (how?.auto === true)
           return yield* new ConnectorFailed({ product, reason: 'rejected', message: 'Althar doesn’t turn on GitHub’s auto-merge' })
         const { conflicts: _, ...seen } = change
+        // A merge queue is the branch's normal way to merge, even where this account may bypass it. Ask before trying a
+        // direct merge: an admin's successful merge would otherwise skip the queue. Never use a listening turn's cached no.
+        const queue = yield* queueOf(repository, change.number, change.target).pipe(
+          // Older Enterprise Servers have no merge-queue fields. Other lookup failures must not become a direct merge.
+          Effect.catchIf(
+            (error) =>
+              server &&
+              error.reason === 'rejected' &&
+              error.message.includes('isMergeQueueEnabled') &&
+              /doesn't exist|cannot query field/i.test(error.message),
+            () => Effect.succeed(null),
+          ),
+        )
+        if (queue?.isMergeQueueEnabled) {
+          if (!queue.isInMergeQueue) yield* http.graphql(Schema.Unknown, graphqlUrl, ENQUEUE, { id: change.id, head: change.headSha })
+          return { ...seen, state: 'open', queued: true, updatedAt: new Date(yield* Clock.currentTimeMillis).toISOString() } as const
+        }
         const answer = yield* http
           .json(MergeAnswer, 'PUT', `${repo(repository)}/pulls/${change.number}/merge`, {
             merge_method: how?.method ?? repository.merges[0] ?? 'merge',
@@ -1622,8 +1639,8 @@ export const makeGitHub = (options: AdapterOptions): CodeHost & Tracker => {
             ...(change.headSha === null ? {} : { sha: change.headSha }),
           })
           .pipe(
-            // A branch that merges through a merge queue refuses a merge as one it can't make (405), in words that vary: asked,
-            // GitHub says which, and the pull request goes in the queue, which merges it once the queue's checks pass.
+            // The queue may have been turned on since the read above. GitHub refuses a direct merge (405): ask again and
+            // put it in the queue, which merges it once the queue's checks pass.
             Effect.catchIf(
               (error) => error.status === 405,
               (refused) =>
