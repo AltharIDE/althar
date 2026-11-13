@@ -350,8 +350,7 @@ export function Relay(props: DirectionProps) {
  * brief is written; a node being chosen has an arc going round it and the
  * makers' marks rolling through it, and the line into it runs toward it; the
  * pick lands with a little overshoot and a ring, the line draws in dark, and
- * the name rolls in at the row's end. When the plan is in, a light runs down
- * the line, each node answering as it passes, and the chevrons come in.
+ * the name rolls in at the row's end. When the plan is in, the chevrons come in.
  */
 type NodeState = 'idle' | 'next' | 'choosing' | 'filled'
 
@@ -445,7 +444,7 @@ export function Roster(props: DirectionProps) {
             </>,
           )
   const body = (
-    <div className={cx(k.rosterWrap, planned && k.rosterReady)}>
+    <div className={k.rosterWrap}>
       <ol className={k.roster}>
         {members.map((member, i) => (
           <li key={member.key} className={k.rosterItem} style={{ ['--i' as string]: i }}>
@@ -484,7 +483,6 @@ export function Roster(props: DirectionProps) {
           </EndPick>
         </li>
       </ol>
-      {planned && <span className={k.sweep} aria-hidden="true" />}
     </div>
   )
   return <TeamCard {...props} {...(planned ? { planned } : {})} body={body} />
