@@ -1161,7 +1161,9 @@ describe('the Talk room', () => {
     let accept: () => void = () => undefined
     const sent = new Promise<void>((resolve) => (accept = resolve))
     const { client } = fakeClient({
-      getCoordinator: vi.fn(async () => coordinatorSnapshot({ session: { ...session, accepting: 'queued', turnRunning }, items: [] })),
+      getCoordinator: vi.fn(async () =>
+        coordinatorSnapshot({ accepting: 'queued', session: { ...session, accepting: 'queued', turnRunning }, items: [] }),
+      ),
       send: vi.fn(async () => sent),
     })
     withServices(<Project room={Room.Talk} />, client)

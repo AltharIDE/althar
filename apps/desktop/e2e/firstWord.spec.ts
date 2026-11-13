@@ -57,6 +57,11 @@ const shoot = async (page: Page, thread: Locator, name: string) => {
   await page.screenshot({ path: `test-results/first-word-${name}.png`, clip, scale: 'css', animations: 'disabled' })
 }
 
+/* The place is read to the pixel, and layout may round an element either way between two reads: a pixel apart is still
+ * the place it stood in, where Thinking's own place is taken by what comes next. */
+const samePlace = (now: { readonly name: number; readonly first: number }, before: { readonly name: number; readonly first: number }) =>
+  Math.abs(now.name - before.name) <= 1 && Math.abs(now.first - before.first) <= 1
+
 /** From now on, frame by frame, whatever the window shows saying Queued: when, where, and what. */
 const watchQueued = (page: Page) =>
   page.evaluate(() => {
@@ -126,7 +131,7 @@ const handedOff = async (
   gates.open(marker)
   await expect(thinking).toHaveCount(0)
   // The name stays where it stood, and what it shows first starts where Thinking was: its words, or a thought or a call.
-  expect(await placeOf(thread)).toEqual(before)
+  expect(samePlace(await placeOf(thread), before)).toBe(true)
   if (first === 'words') await expect(thread.getByRole('article').last().locator('header + *')).toContainText(ANSWER)
   await still(page)
   await shoot(page, thread, `${name}-${first === 'words' ? 'words' : 'first'}`)
