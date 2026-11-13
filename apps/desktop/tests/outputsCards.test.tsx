@@ -126,6 +126,25 @@ describe('what a task changed, card by card', () => {
     expect(screen.queryByRole('menuitem', { name: 'Merge without queue' })).toBeNull()
   })
 
+  it.each([false, true])('keeps a sibling’s published PR available while another repository needs Ship (queued: %s)', async (queued) => {
+    const published = pr('web', 18, { canBypassQueue: true, queued })
+    const { onAccept } = show(
+      task({
+        end: 'draft',
+        changes: [pr('api', 12, { state: 'merged' }), published],
+        unshipped: { commits: 1, add: 4, del: 0 },
+      }),
+    )
+    expect(screen.getByRole('button', { name: 'Ship 1 commit' })).toBeTruthy()
+    if (!queued) {
+      await userEvent.click(screen.getByRole('button', { name: 'Accept and merge web' }))
+      expect(onAccept).toHaveBeenLastCalledWith([{ head: published.head, url: published.url }])
+    }
+    await userEvent.click(screen.getByRole('button', { name: 'Other ways to merge' }))
+    await userEvent.click(screen.getByRole('menuitem', { name: queued ? 'Merge web without queue' : 'Merge without queue' }))
+    expect(onAccept).toHaveBeenLastCalledWith([{ head: published.head, url: published.url, bypassQueue: true }])
+  })
+
   it.each(['draft', 'ready'] as const)('offers Ship for committed work ending in a %s pull request before any hold exists', async (end) => {
     const here = [
       {

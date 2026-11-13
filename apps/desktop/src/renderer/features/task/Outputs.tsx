@@ -368,7 +368,8 @@ export function Outputs({
           }))
           const checked = open.some((one) => one.checks != null)
           // What the lead committed since goes up first: accepting merges what the pull request has.
-          const accepting = (ready || task.mergeable === true) && state === ChangeState.Ready && pushes.length === 0 && !waitsForShip
+          // Unshipped commits belong to repositories without an open PR, so they don't hold a sibling's published PR back.
+          const accepting = (ready || task.mergeable === true) && state === ChangeState.Ready && pushes.length === 0 && held === undefined
           if (open.length > 1) return track(accepting)
           // Merge, with commits not shipped: Review and merge, or Merge now, beside Ship.
           const mergingWaiting =
@@ -426,7 +427,7 @@ export function Outputs({
                   </MergeButton>,
                 ]
               : []),
-            ...(first.queued === true && first.canBypassQueue === true && first.unpushed === 0 && !waitsForShip
+            ...(first.queued === true && first.canBypassQueue === true && first.unpushed === 0 && held === undefined
               ? [
                   <MergeButton
                     key="queued"
@@ -541,8 +542,9 @@ export function Outputs({
             {left.length === open.length ? text.accept(left.length) : text.acceptLeft(left.map((one) => labelOf(one)))}
           </SplitButton>
         )
-      ) : next?.queued === true && next.canBypassQueue === true && next.unpushed === 0 && !waitsForShip ? (
+      ) : next?.queued === true && next.canBypassQueue === true && next.unpushed === 0 && held === undefined ? (
         <MergeButton
+          key="queued"
           queued
           {...pressed(doing.accept)}
           onBypassQueue={bypass}
