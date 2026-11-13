@@ -388,6 +388,9 @@ describe('what the coordinator and a lead are told of presets', () => {
       assert.include(brief, 'A prototype ends with its branch')
       assert.include(brief, 'the same task goes on as a change, rather than a new task by default: change_part with preset Change')
       assert.include(brief, 'never assume either way')
+      assert.include(brief, 'Whenever a task’s scope or shape changes, check whether its title still says what it does now')
+      assert.include(brief, 'call rename_task with its id or slug')
+      assert.include(brief, 'Keep a title that still fits')
 
       const tools = yield* toolDescriptions(coordinator)
       for (const words of PICKS) assert.include(tools.get('propose_plan'), words)
@@ -395,6 +398,8 @@ describe('what the coordinator and a lead are told of presets', () => {
       assert.include(tools.get('draft_task'), 'Prototype for a prototype or design directions')
       assert.include(tools.get('list_presets'), 'Prototype is for a prototype or design directions')
       assert.include(tools.get('list_presets'), 'Change for the rest')
+      assert.include(tools.get('change_part'), 'Whenever a task’s scope or shape changes')
+      assert.include(tools.get('rename_task'), 'An open pull request Althar opened for it takes the new title too')
     }).pipe(Effect.provide(runtimeWith(github)))
   })
 
@@ -420,6 +425,9 @@ describe('what the coordinator and a lead are told of presets', () => {
       for (const words of PICKS) assert.include(brief, words)
       assert.include(brief, 'A prototype ends with its branch')
       assert.include(brief, 'never assume either way')
+      assert.include(brief, 'Whenever a task’s scope or shape changes, check whether its title still says what it does now')
+      assert.include(brief, 'call rename_task with its id or slug')
+      assert.include(brief, 'Keep a title that still fits')
       const tools = yield* toolDescriptions({
         role: 'lead',
         projectId: projectId as never,
@@ -429,6 +437,8 @@ describe('what the coordinator and a lead are told of presets', () => {
       } as ToolAccess)
       assert.include(tools.get('draft_task'), 'list_presets')
       assert.include(tools.get('propose_plan'), 'Prototype for a prototype or design directions')
+      assert.include(tools.get('change_part'), 'Whenever a task’s scope or shape changes')
+      assert.include(tools.get('rename_task'), 'An open pull request Althar opened for it takes the new title too')
     }).pipe(Effect.provide(runtimeWith(github)))
   })
 })

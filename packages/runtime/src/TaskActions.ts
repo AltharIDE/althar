@@ -15,6 +15,7 @@ import { SignIns } from './SignIns'
 import { StepPick, stepOf } from './stepPick'
 import { modelNamer, withEffort } from './coordinatorNews'
 import { presetsIn } from './presets'
+import { TITLES_FOLLOW_WORK } from './presetBrief'
 import { Agents } from './Config'
 import { envelope } from './envelope'
 import { Errands } from './Errands'
@@ -1408,10 +1409,11 @@ export class TaskActions extends Context.Service<
                   ),
                 )}`
               : ''
-          if (said.length === 0) return `Nothing changed: ${task.slug} has those parts already.${next}${shipping}`
+          const titleReview = ` Review ${task.slug}'s current title, “${task.title}”, against what it does now. If it no longer fits, call rename_task; its open pull request follows by the project's naming. Keep it if it still fits.`
+          if (said.length === 0) return `Nothing changed: ${task.slug} has those parts already.${titleReview}${next}${shipping}`
           const changed = `${did_}: ${said.join(', ')}`
           yield* did(access, input, task, `${changed.charAt(0).toUpperCase()}${changed.slice(1)} on “${task.title}”`, changed)
-          return `${task.slug}: ${changed}. ${threadsSaying(access, task)}.${next}${shipping}`
+          return `${task.slug}: ${changed}. ${threadsSaying(access, task)}.${titleReview}${next}${shipping}`
         })
 
       /** The ending a part's change asks for, as a plan keeps it. */
@@ -1988,7 +1990,7 @@ export class TaskActions extends Context.Service<
         ),
         tool(
           'change_part',
-          'Changes one of a task’s parts, with why, any task’s, your own included, either way and at any time, on the person’s word, in plain words or by voice (a task is a conversation plus parts): act at once, and say what you did in a line; never ask them again. preset gives it another preset’s parts all at once, by name as list_presets names it: a prototype the person wants built becomes a Change (a reviewer added, the project’s pull request ending, and a worktree with its branch where it had none), a change becomes a Prototype (no review, ending with its branch, an open pull request closed) or a Chat (no review, nothing going up, on Scratch), a chat becomes a Change; its lead stays (change_lead changes it). When the person names a reviewer or effort while choosing a preset, pass review in this same call so no other reviewer is selected first. checked_by puts a review of its own work on before it ships, by review’s model or, left out, the one its plan had or the project’s rules pick, or changes its reviewer; null takes it off, one under way stopping. ending: here (nothing goes up until it ships), branch (its branch pushed, no pull request; an open one is closed, its branch staying), draft or ready (a pull request; an open draft is marked ready). Where the ending is a pull request and its work isn’t up, Ship runs its review and opens it: ship ships it now, as ship_task does, where the person asked for it to go up. workspace moves it between a worktree and Local (to: worktree or checkout; it waits for the lead’s turn to end, and asks the person before taking their checkout off a branch of their own) or points it at another branch to work toward (toward, null for the default); shelf puts it on Scratch or on the board. Running an outside author’s code is the person’s word alone: suggest Run it to them.',
+          `Changes one of a task’s parts, with why, any task’s, your own included, either way and at any time, on the person’s word, in plain words or by voice (a task is a conversation plus parts): act at once, and say what you did in a line; never ask them again. preset gives it another preset’s parts all at once, by name as list_presets names it: a prototype the person wants built becomes a Change (a reviewer added, the project’s pull request ending, and a worktree with its branch where it had none), a change becomes a Prototype (no review, ending with its branch, an open pull request closed) or a Chat (no review, nothing going up, on Scratch), a chat becomes a Change; its lead stays (change_lead changes it). When the person names a reviewer or effort while choosing a preset, pass review in this same call so no other reviewer is selected first. checked_by puts a review of its own work on before it ships, by review’s model or, left out, the one its plan had or the project’s rules pick, or changes its reviewer; null takes it off, one under way stopping. ending: here (nothing goes up until it ships), branch (its branch pushed, no pull request; an open one is closed, its branch staying), draft or ready (a pull request; an open draft is marked ready). Where the ending is a pull request and its work isn’t up, Ship runs its review and opens it: ship ships it now, as ship_task does, where the person asked for it to go up. workspace moves it between a worktree and Local (to: worktree or checkout; it waits for the lead’s turn to end, and asks the person before taking their checkout off a branch of their own) or points it at another branch to work toward (toward, null for the default); shelf puts it on Scratch or on the board. Running an outside author’s code is the person’s word alone: suggest Run it to them. ${TITLES_FOLLOW_WORK}`,
           {
             type: 'object',
             properties: {

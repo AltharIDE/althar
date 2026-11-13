@@ -234,6 +234,34 @@ describe('a lead’s edit_pull_request', () => {
 })
 
 describe('a task renamed, its pull request following', () => {
+  for (const role of ['lead', 'coordinator'] as const) {
+    it.live(`reminds the ${role} to retitle reshaped work, and its rename updates the open pull request by the project's naming`, () => {
+      const { working, github } = seeded()
+      return Effect.gen(function* () {
+        const made = yield* withPullRequest(working)
+        const access = made[role]
+        yield* fromIssue(made.projectId, made.taskId)
+        yield* callTool(access, 'rename_task', { task_id: made.taskId, title: 'Prototype retry behavior' })
+        const shaped = yield* callTool(access, 'change_part', {
+          task: made.taskId,
+          part: 'ending',
+          end: 'ready',
+          why: 'the person asked',
+        })
+        assert.include(shaped, 'current title, “Prototype retry behavior”')
+        assert.include(shaped, 'call rename_task')
+        assert.include(shaped, 'Keep it if it still fits')
+        assert.strictEqual(yield* titleOf(made.taskId), 'Prototype retry behavior')
+        const renamed = yield* callTool(access, 'rename_task', { task_id: made.taskId, title: 'Add configurable retries' })
+        assert.include(renamed, 'PR #1 is called “MER-231: Add configurable retries” now.')
+        assert.strictEqual(yield* titleOf(made.taskId), 'Add configurable retries')
+        assert.strictEqual(github.changes[0]?.title, 'MER-231: Add configurable retries')
+        assert.strictEqual(github.changes[0]?.source, 'althar/add-a-retry')
+        assert.isFalse(github.changes[0]?.draft)
+      }).pipe(Effect.provide(runtimeWith(github)))
+    })
+  }
+
   it.live('follows the person’s rename in the background, and the coordinator’s at once, saying so', () => {
     const { working, github } = seeded()
     return Effect.gen(function* () {
