@@ -66,8 +66,8 @@ function Project() {
   )
 }
 
-/** The conversation hidden, or shown again beside the board, by its toggle. */
-const toggleConversation = () => fireEvent.click(screen.getByRole('button', { name: 'Conversation' }))
+/** The conversation hidden, or shown again beside the board, by its key. */
+const toggleConversation = () => fireEvent.keyDown(document.body, { key: 'c' })
 
 const WINDOW = window.innerWidth
 const widen = (width: number) => {

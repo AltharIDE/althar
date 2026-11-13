@@ -98,24 +98,6 @@ function Grip(props: SVGProps<SVGSVGElement>) {
   )
 }
 
-/* Two arrows passing each other, left and right: two panes changing sides. Iconoir's own run up and down. */
-function SwapSides(props: SVGProps<SVGSVGElement>) {
-  return createElement(
-    'svg',
-    {
-      viewBox: '0 0 24 24',
-      fill: 'none',
-      stroke: 'currentColor',
-      strokeWidth: 1.5,
-      strokeLinecap: 'round',
-      strokeLinejoin: 'round',
-      ...props,
-    },
-    createElement('path', { d: 'M4 8.5h15.5M16 5l3.5 3.5L16 12' }),
-    createElement('path', { d: 'M20 15.5H4.5M8 12l-3.5 3.5L8 19' }),
-  )
-}
-
 export const ICONS = {
   work: TaskList,
   knowledge: Book,
@@ -130,10 +112,6 @@ export const ICONS = {
   corner: LongArrowDownLeft,
   check: Check,
   answer: ChatBubble,
-  /** The conversation with the coordinator, as a pane of a project's home. */
-  conversation: ChatBubble,
-  /** Two panes changing sides. */
-  swap: SwapSides,
   stop: Prohibition,
   hold: Pause,
   plus: Plus,

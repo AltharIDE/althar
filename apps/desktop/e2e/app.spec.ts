@@ -233,8 +233,8 @@ test('connects GitHub, and a planned task ends in a draft pull request', async (
 
     // Its remote is on GitHub, which isn't connected yet: nothing says so up front, and the project's settings connect it.
     await expect(page.getByText(/isn't connected to GitHub/)).toHaveCount(0)
-    await page.getByRole('button', { name: 'Made of' }).click()
-    await expect(page.getByRole('menu', { name: 'Made of' }).getByRole('menuitem')).toHaveText([/^meridian/])
+    await page.getByRole('button', { name: 'More', exact: true }).click()
+    await expect(page.getByRole('menu', { name: 'More' }).getByRole('menuitem')).toHaveText([/^meridian/])
     await page.keyboard.press('Escape')
     await projectSettings(page, 'Code and issues')
     const github = page.getByRole('region', { name: 'GitHub' })

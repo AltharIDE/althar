@@ -21,8 +21,6 @@ export interface ChromeButtonProps extends Omit<ComponentProps<'button'>, 'child
   label: string
   /** What it opened is open. A menu or popover it triggers sets this itself. */
   expanded?: boolean
-  /** A toggle, on: what it shows is showing (aria-pressed). Leave it out for a button that isn't a toggle. */
-  pressed?: boolean
   /** Only the glyph shows. */
   compact?: boolean
   /** Its shortcut, in its tooltip; the consumer binds it. */
@@ -37,26 +35,13 @@ export interface ChromeButtonProps extends Omit<ComponentProps<'button'>, 'child
   count?: number
 }
 
-export function ChromeButton({
-  icon,
-  label,
-  expanded,
-  pressed,
-  compact,
-  kbd,
-  mark,
-  count,
-  className,
-  type = 'button',
-  ...rest
-}: ChromeButtonProps) {
+export function ChromeButton({ icon, label, expanded, compact, kbd, mark, count, className, type = 'button', ...rest }: ChromeButtonProps) {
   const markId = useId()
   const button = (
     <button
       type={type}
       className={cx(s.button, compact && s.compact, mark !== undefined && s.marked, className)}
       aria-expanded={expanded}
-      aria-pressed={pressed}
       aria-label={compact ? label : undefined}
       aria-describedby={mark === undefined ? undefined : markId}
       {...rest}

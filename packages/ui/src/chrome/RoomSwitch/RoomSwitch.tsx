@@ -4,7 +4,7 @@ import { Segmented, type SegmentedOption } from '../../primitives/Segmented/Segm
 
 /*
  * The project window's only navigation: home (the conversation and the board,
- * either or both, as the panes' toggles say: PaneToggles), its automations,
+ * either or both, as its layout says: PaneLayout), its automations,
  * its artifacts, or the project's settings in their place. A dot says the
  * conversation has news while you are elsewhere, and a violet one that
  * something waits on you there: an automation that paused itself, or

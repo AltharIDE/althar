@@ -94,7 +94,7 @@ import { turnsById } from '../../shared/turnTime'
  * A project: its header across the top, the bar a task has, then its home:
  * the conversation with its coordinator, the board of its work, or both side
  * by side, the conversation as wide as the person drags it and on whichever
- * side they put it (the toggles at the header's end; c and b, rooms.ts). With
+ * side they put it (⋯'s Layout in its header; c and b, rooms.ts). With
  * the conversation hidden, its composer stays under the board, and what is
  * sent there brings the conversation back for the answer. Or its automations,
  * its artifacts or its settings, in the home's place, a violet dot on
@@ -337,7 +337,7 @@ export function ProjectView({
   const yours = lanes === null ? 0 : yoursOf(lanes)
   // An abandoned task's pull request left open, closed from its row.
   const closing = useClosePullRequests()
-  /** A pane's toggle, pressed or keyed. */
+  /** A pane shown or hidden, from ⋯ or its key. */
   const togglePane = useCallback((pane: Pane) => setRoom((was) => toggled(was, home, pane)), [home])
   // c and b toggle the conversation and the board, when nothing is being typed; ⌘ and a number belongs to the window's tabs.
   useEffect(() => {

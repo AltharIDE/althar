@@ -5,20 +5,33 @@ import { join } from 'node:path'
 import { expect, type Page, test } from '@playwright/test'
 
 import { repository } from '../tests/repository'
-import { expectPanes, launch, openFirstProject, planTask, say, showPanes, sizeWindow, still } from './support'
+import {
+  closeLayout,
+  expectPanes,
+  launch,
+  layoutItem,
+  openFirstProject,
+  openLayout,
+  pickLayout,
+  planTask,
+  say,
+  showPanes,
+  sizeWindow,
+  still,
+} from './support'
 
 /*
  * A project's home in a real window: its conversation and board, either
- * hidden by its toggle at the end of the header, one always showing; the
- * conversation on either side; its composer under the board while the
+ * hidden from the Layout of the header's ⋯ or by c and b, one always showing;
+ * the conversation on either side; its composer under the board while the
  * conversation is hidden, which brings the conversation back as it sends.
- * The header never moves as they are pressed. Its shots are
+ * The header never moves as the layout changes. Its shots are
  * test-results/panes-*.png, light and dark.
  */
 
-/** Where the panes' toggles stand on the screen, and how wide they are: what must not move as they are pressed. */
+/** Where the header's ⋯ stands on the screen, and how wide it is: what must not move as the layout changes. */
 const placeOf = async (page: Page) => {
-  const box = await page.getByRole('group', { name: 'Panes' }).boundingBox()
+  const box = await page.getByRole('button', { name: 'More', exact: true }).boundingBox()
   return box === null ? null : { x: Math.round(box.x), width: Math.round(box.width) }
 }
 
@@ -45,18 +58,18 @@ for (const appearance of ['light', 'dark'] as const) {
       const place = await placeOf(page)
       await shoot('1-both')
 
-      // The board hidden by b, from outside the composer, where it is a letter: the conversation alone; its toggle can't hide it too.
+      // The board hidden by b, from outside the composer, where it is a letter: the conversation alone, which can't be hidden too.
       await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur())
       await page.keyboard.press('b')
-      await expectPanes(page, { conversation: true, board: false })
       await expect(work).toHaveCount(0)
-      await expect(page.getByRole('group', { name: 'Panes' }).getByRole('button', { name: 'Conversation' })).toHaveAttribute(
-        'aria-disabled',
-        'true',
-      )
-      await expect(page.getByRole('button', { name: 'Swap sides' })).toHaveAttribute('aria-disabled', 'true')
+      await openLayout(page)
+      await expect(layoutItem(page, 'Conversation')).toHaveAttribute('aria-checked', 'true')
+      await expect(layoutItem(page, 'Conversation')).toHaveAttribute('aria-disabled', 'true')
+      await expect(layoutItem(page, 'Board')).toHaveAttribute('aria-checked', 'false')
+      await expect(layoutItem(page, 'Conversation on the right')).toHaveAttribute('aria-disabled', 'true')
       expect(await placeOf(page)).toEqual(place)
       await shoot('2-conversation')
+      await closeLayout(page)
 
       // The conversation hidden: the board, its composer under it; sending there brings the conversation back.
       await page.keyboard.press('b')
@@ -67,17 +80,16 @@ for (const appearance of ['light', 'dark'] as const) {
       await shoot('3-board')
       await say(page, 'What is up next?')
       await expectPanes(page, { conversation: true, board: true })
-      await expect(conversation.getByText('What is up next?')).toBeVisible()
+      await expect(conversation.getByText('What is up next?', { exact: true })).toBeVisible()
 
       // Swapped: the conversation on the right.
-      await page.getByRole('button', { name: 'Swap sides' }).click()
-      await expect(page.getByRole('button', { name: 'Swap sides' })).toHaveAttribute('aria-pressed', 'true')
+      await pickLayout(page, 'Conversation on the right')
       const left = async () => Math.round((await conversation.boundingBox())?.x ?? 0)
       expect(await left()).toBeGreaterThan(700)
       expect(await placeOf(page)).toEqual(place)
       await shoot('4-swapped')
 
-      // Away from the home, the toggles stay where they are; one goes back home with its pane.
+      // Away from the home, neither pane is checked; checking one goes back home with it.
       await page
         .getByRole('radiogroup', { name: 'View' })
         .getByRole('radio', { name: /^Settings/ })
@@ -88,7 +100,7 @@ for (const appearance of ['light', 'dark'] as const) {
         .locator('header')
         .filter({ has: page.getByRole('heading', { level: 1 }) })
         .screenshot({ path: `test-results/panes-5-away-${appearance}.png`, scale: 'css' })
-      await page.getByRole('group', { name: 'Panes' }).getByRole('button', { name: 'Board' }).click()
+      await pickLayout(page, 'Board')
       await expectPanes(page, { conversation: true, board: true })
     } finally {
       await electronApp.close()

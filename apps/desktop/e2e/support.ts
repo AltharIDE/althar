@@ -256,24 +256,50 @@ export const holdRuntime = async (page: Page) => {
   return () => page.evaluate(() => (window as unknown as { release: () => void }).release())
 }
 
-/** A pane's toggle at the end of the project's header: the conversation's or the board's. */
-const paneToggle = (page: Page, name: 'Conversation' | 'Board') =>
-  page.getByRole('group', { name: 'Panes' }).getByRole('button', { name, exact: true })
+/** The header's ⋯, where the home's layout is: its panes, and which side the conversation is on. */
+const moreMenu = (page: Page) => page.getByRole('menu', { name: 'More' })
+export type LayoutItem = 'Conversation' | 'Board' | 'Conversation on the right'
+export const layoutItem = (page: Page, name: LayoutItem) => moreMenu(page).getByRole('menuitemcheckbox', { name, exact: true })
 
-/** The project's home with these of its panes showing, by their toggles: those wanted on first, so one always shows. */
+/** Opens the header's ⋯ at its Layout. */
+export const openLayout = async (page: Page) => {
+  await page.getByRole('button', { name: 'More', exact: true }).click()
+  await expect(moreMenu(page)).toBeVisible()
+}
+
+/** Closes the header's ⋯ unpicked. */
+export const closeLayout = async (page: Page) => {
+  await page.keyboard.press('Escape')
+  await expect(moreMenu(page)).toHaveCount(0)
+}
+
+/** Picks one of the Layout checks in the header's ⋯: a pane, to show or hide it, or which side the conversation is on. */
+export const pickLayout = async (page: Page, name: LayoutItem) => {
+  await openLayout(page)
+  await layoutItem(page, name).click()
+  await expect(moreMenu(page)).toHaveCount(0)
+}
+
+/** The project's home with these of its panes showing, from ⋯: those wanted on first, so one always shows. */
 export const showPanes = async (page: Page, want: { conversation: boolean; board: boolean }) => {
   const panes = [['Conversation', want.conversation] as const, ['Board', want.board] as const]
   for (const [name, on] of [...panes.filter(([, on]) => on), ...panes.filter(([, on]) => !on)]) {
-    const toggle = paneToggle(page, name)
-    if (((await toggle.getAttribute('aria-pressed')) === 'true') !== on) await toggle.click()
-    await expect(toggle).toHaveAttribute('aria-pressed', String(on))
+    await openLayout(page)
+    const item = layoutItem(page, name)
+    if (((await item.getAttribute('aria-checked')) === 'true') !== on) {
+      await item.click()
+      await expect(moreMenu(page)).toHaveCount(0)
+    } else await closeLayout(page)
   }
+  await expectPanes(page, want)
 }
 
-/** The home's panes showing are these, as their toggles say. */
+/** The home's panes showing are these, as ⋯ says. */
 export const expectPanes = async (page: Page, shown: { conversation: boolean; board: boolean }) => {
-  await expect(paneToggle(page, 'Conversation')).toHaveAttribute('aria-pressed', String(shown.conversation))
-  await expect(paneToggle(page, 'Board')).toHaveAttribute('aria-pressed', String(shown.board))
+  await openLayout(page)
+  await expect(layoutItem(page, 'Conversation')).toHaveAttribute('aria-checked', String(shown.conversation))
+  await expect(layoutItem(page, 'Board')).toHaveAttribute('aria-checked', String(shown.board))
+  await closeLayout(page)
 }
 
 export const say = async (page: Page, words: string) => {
@@ -344,8 +370,8 @@ export const projectSettings = async (page: Page, section: 'General' | 'Code and
 
 /** From the project's settings back to its work: home, with the conversation with its coordinator showing. */
 export const backToWork = async (page: Page) => {
-  await paneToggle(page, 'Conversation').click()
-  await expect(paneToggle(page, 'Conversation')).toHaveAttribute('aria-pressed', 'true')
+  await pickLayout(page, 'Conversation')
+  await expect(page.getByRole('region', { name: 'Conversation' })).toBeVisible()
 }
 
 /**

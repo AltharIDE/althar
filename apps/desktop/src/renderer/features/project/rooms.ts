@@ -2,12 +2,11 @@ import { type Pane, Room } from '@althar/ui'
 
 /*
  * A project's home: the conversation with its coordinator, the board of its
- * work, or both side by side, as its panes' toggles say (the kit's
- * PaneToggles, at the end of its header); c and b toggle them. One always
- * shows: the toggle of the only pane showing does nothing. Both always fit:
- * the window is never narrower than the narrowest conversation beside the
- * least of the board. From its automations, artifacts or settings, a toggle
- * goes back home with its pane showing. The home's layout is a view
+ * work, or both side by side, as the Layout group of its header's ⋯ menu
+ * says (the kit's PaneLayout); c and b toggle them. One always shows: the only
+ * pane showing can't be hidden. Both always fit: the window is never narrower
+ * than the narrowest conversation beside the least of the board. From its
+ * automations, artifacts or settings, showing a pane goes back home with it. The home's layout is a view
  * (Room.Both, Talk or Board), kept per project as the view it was last on;
  * the views have no shortcut of their own: ⌘ and a number belongs to the
  * window's tabs.
@@ -28,7 +27,7 @@ export const shownOf = (room: Room): Readonly<Record<Pane, boolean>> => ({
 })
 
 /**
- * The view after a pane's toggle: hidden where the other shows, shown beside it where it doesn't; the only pane showing
+ * The view after a pane is shown or hidden: hidden where the other shows, shown beside it where it doesn't; the only pane showing
  * stays. Away from the home, back to its layout (`home`), the pane showing.
  */
 export const toggled = (room: Room, home: HomeRoom, pane: Pane): HomeRoom => {

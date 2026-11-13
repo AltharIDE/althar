@@ -9,7 +9,7 @@ import { cx } from '../../lib/cx'
 import { Heading, type HeadingLevel } from '../../primitives/Heading/Heading'
 import { Menu, MenuGroup, MenuItem } from '../../primitives/Menu/Menu'
 import { ChromeButton } from '../ChromeButton/ChromeButton'
-import { PaneLayoutItems, PaneToggles, type PaneTogglesProps, useLayoutInMenu } from '../PaneToggles/PaneToggles'
+import { PaneLayoutGroup, type PaneLayoutProps } from '../PaneLayout/PaneLayout'
 import { roomFace, roomOptions, type RoomSwitchText } from '../RoomSwitch/RoomSwitch'
 import { TaskHeader } from '../TaskHeader/TaskHeader'
 import { TitleBar, type TitleBarProps } from '../TitleBar/TitleBar'
@@ -31,8 +31,8 @@ import s from './ProjectHeader.module.css'
  * violet dot on automations and settings where one paused itself or a
  * connection waits on you. The window's bar keeps only the tabs.
  *
- * At the end, the home's panes (PaneToggles): the conversation, the board,
- * and their sides; then what it runs (a RunButton), then ⋯, what it is made of: its
+ * At the end, what it runs (a RunButton), then ⋯: the home's layout (PaneLayout:
+ * the conversation, the board, and their sides), then what it is made of: its
  * repositories, each with its host's mark, and the tracker its tasks name,
  * each opening where it lives. The project's colour is in its mark alone.
  */
@@ -42,7 +42,9 @@ export interface ProjectHeaderText {
   views: string
   /** Nothing waits and nothing runs. */
   quiet: string
-  /** What the project is made of, as ⋯ names it. */
+  /** ⋯, its button and its menu. */
+  more: string
+  /** What the project is made of, as ⋯ heads it. */
   madeOf: string
   /** The views' own names and dots' words (RoomSwitch). */
   rooms?: Partial<RoomSwitchText>
@@ -51,6 +53,7 @@ export interface ProjectHeaderText {
 export const projectHeaderText: ProjectHeaderText = {
   views: 'View',
   quiet: 'Nothing running',
+  more: 'More',
   madeOf: 'Made of',
 }
 
@@ -90,8 +93,8 @@ export interface ProjectHeaderProps {
   automationsNeedYou?: boolean
   /** What the project is made of, its repositories first; with none, no ⋯. */
   parts?: ReadonlyArray<ProjectPart>
-  /** The home's panes, which show and which side each is on; without it, no toggles. */
-  panes?: PaneTogglesProps
+  /** The home's panes, which show and which side each is on, laid out from ⋯; without it, ⋯ has no layout. */
+  panes?: PaneLayoutProps
   /** What it runs, with no agent: a RunButton. */
   run?: ReactNode
   /** Under the tabs, none; a window of its own leaves room for the system's lights. */
@@ -146,9 +149,8 @@ export function ProjectHeader({
           actions={
             (panes !== undefined || run != null || parts.length > 0) && (
               <>
-                {panes !== undefined && <PaneToggles {...panes} className={s.panes} />}
                 {run}
-                <MadeOf parts={parts} label={t.madeOf} layout={panes === undefined ? null : <PaneLayoutItems panes={panes} />} />
+                <More parts={parts} panes={panes} label={t.more} madeOf={t.madeOf} />
               </>
             )
           }
@@ -188,15 +190,24 @@ function standingOf(
   return { status: TaskStatus.Done, state: t.quiet }
 }
 
-/** ⋯: the home's layout, where the header leaves it out (prototype); then what the project is made of, each opening where it lives. */
-function MadeOf({ parts, label, layout }: { parts: ReadonlyArray<ProjectPart>; label: string; layout: ReactNode }) {
-  const inMenu = useLayoutInMenu() && layout !== null
-  if (parts.length === 0 && !inMenu) return null
+/** ⋯: the home's layout, then what the project is made of, each opening where it lives. */
+function More({
+  parts,
+  panes,
+  label,
+  madeOf,
+}: {
+  parts: ReadonlyArray<ProjectPart>
+  panes: PaneLayoutProps | undefined
+  label: string
+  madeOf: string
+}) {
+  if (parts.length === 0 && panes === undefined) return null
   return (
     <Menu label={label} align="end" width={280} trigger={<ChromeButton icon="more" label={label} compact />}>
-      {inMenu && layout}
+      {panes !== undefined && <PaneLayoutGroup {...panes} />}
       {parts.length > 0 && (
-        <MenuGroup label={label}>
+        <MenuGroup label={madeOf}>
           {parts.map((part) => (
             <MenuItem
               key={part.id}
