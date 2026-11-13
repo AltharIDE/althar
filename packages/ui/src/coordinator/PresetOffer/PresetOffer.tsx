@@ -4,6 +4,7 @@ import { Icon } from '../../foundations/Icon/Icon'
 import { Button } from '../../primitives/Button/Button'
 import { Field, FieldError } from '../../primitives/Field/Field'
 import { HoverCard } from '../../primitives/HoverCard/HoverCard'
+import { IconButton } from '../../primitives/IconButton/IconButton'
 import { LinkButton } from '../../primitives/LinkButton/LinkButton'
 import { Popover } from '../../primitives/Popover/Popover'
 import s from './PresetOffer.module.css'
@@ -180,9 +181,8 @@ export function PresetOffer({ name, near, kept, onKeep, onDecline, onUndo, text 
           </span>
         }
       >
-        <button type="button" className={s.info} aria-label={t.aboutLabel}>
-          <Icon name="info" size={12} />
-        </button>
+        {/* Its hover card says what it is: no tooltip over it. */}
+        <IconButton icon="info" label={t.aboutLabel} size="small" tooltipShut className={s.info} />
       </HoverCard>
     </span>
   )

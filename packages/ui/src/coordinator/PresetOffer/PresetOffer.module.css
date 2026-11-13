@@ -17,18 +17,9 @@
   text-overflow: ellipsis;
 }
 
+/* The info mark sits close to its link, its button's padding taken in. */
 .info {
-  display: grid;
-  place-items: center;
-  width: 16px;
-  height: 16px;
-  margin-left: -2px;
-  border-radius: 50%;
-  color: var(--t-4);
-}
-.info:hover,
-.info:focus-visible {
-  color: var(--t-1);
+  margin: -4px -4px -4px -6px;
 }
 .about {
   display: grid;
