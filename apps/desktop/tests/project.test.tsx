@@ -624,7 +624,8 @@ describe('the Talk room', () => {
         null,
       ),
     )
-    await userEvent.click(screen.getByRole('button', { name: 'Skip' }))
+    // Skipping the review is in its dropdown, the whole row, still open.
+    await userEvent.click(await screen.findByRole('button', { name: 'Skip the review' }))
     await waitFor(() =>
       expect(client.changePlan).toHaveBeenLastCalledWith(
         'pln1',
@@ -761,7 +762,9 @@ describe('the Talk room', () => {
     expect(screen.queryByRole('button', { name: 'Start now' })).toBeNull()
     await userEvent.click(screen.getByRole('button', { name: 'Hold' }))
     expect(client.holdPlan).toHaveBeenCalledWith('pln1')
-    await userEvent.click(screen.getByRole('button', { name: 'Skip' }))
+    // Skipping the review is in its dropdown, the whole row.
+    await userEvent.click(screen.getByRole('button', { name: /^Review: / }))
+    await userEvent.click(await screen.findByRole('button', { name: 'Skip the review' }))
     await waitFor(() =>
       expect(client.changePlan).toHaveBeenLastCalledWith(
         'pln1',
@@ -799,7 +802,9 @@ describe('the Talk room', () => {
     expect(await screen.findByRole('button', { name: 'Lead for this task: Claude Opus High' })).toBeTruthy()
     expect(screen.getByRole('button', { name: 'Review: gpt-5.2-codex Medium' })).toBeTruthy()
     // Skipping the review keeps it.
-    await userEvent.click(screen.getByRole('button', { name: 'Skip' }))
+    // Skipping the review is in its dropdown, the whole row.
+    await userEvent.click(screen.getByRole('button', { name: /^Review: / }))
+    await userEvent.click(await screen.findByRole('button', { name: 'Skip the review' }))
     await waitFor(() =>
       expect(client.changePlan).toHaveBeenLastCalledWith(
         'pln1',

@@ -5,6 +5,7 @@ import {
   ApiError,
   type AgentStatus,
   type CoordinatorSnapshot,
+  type Draft,
   PAGE,
   type PlanStep,
   type ProjectRepository,
@@ -22,6 +23,7 @@ import { useServices, useWatch } from '../../data/services'
 import type { OutputSoFar } from '../../shared/handed'
 import { type Outgoing, sentWith } from '../../shared/useAttachments'
 import { useOutputs } from '../../shared/useOutputs'
+import { useDrafts } from '../../shared/useDrafts'
 import { useStreamed } from '../../shared/useStreamed'
 import { canPick } from '../../shared/agents'
 import { inView, isSending, mergeItems, newestReads, sending, takenBack, unsent, waiting } from '../../shared/items'
@@ -50,6 +52,8 @@ export interface ProjectModel {
   readonly coordinator: CoordinatorSnapshot | null
   /** Text still streaming, by thread item. */
   readonly streaming: ReadonlyMap<string, Streamed>
+  /** The tasks the coordinator is drafting now, as far as written (useDrafts). */
+  readonly drafts: ReadonlyArray<Draft>
   /** Commands' output as far as it has come, by their tool call's item, while they run. */
   readonly outputs: ReadonlyMap<string, OutputSoFar>
   /** Agents that could work: signed in, or that don't say. */
@@ -96,6 +100,7 @@ export interface ProjectModel {
   readonly answerQuestion: (attentionId: string, answers: Readonly<Record<string, FieldAnswer>>) => Promise<string | null>
   readonly startPlan: (planId: string) => Promise<void>
   readonly holdPlan: (planId: string) => Promise<void>
+  readonly holdDraft: (threadId: string, key: string) => Promise<void>
   /** Stops a command a task's lead left running, which keeps a place the waiting plans wait for. */
   readonly stopBackground: (threadId: string, id: string) => Promise<void>
   readonly changePlan: (
@@ -154,6 +159,7 @@ export const useProject = (projectId: string): ProjectModel => {
   const outputs = useOutputs(threadId, coordinator?.items ?? NO_ITEMS, coordinator?.session?.turnRunning ?? false)
   // What it is still saying, while the window hears it.
   const streaming = useStreamed(threadId, coordinator?.items ?? NO_ITEMS, coordinator?.view)
+  const drafts = useDrafts(threadId)
 
   /** Changes the coordinator's thread as the window keeps it; nothing before it is first read. */
   const setCoordinator = useCallback(
@@ -283,6 +289,8 @@ export const useProject = (projectId: string): ProjectModel => {
   useWatch((event) => {
     // A command's output as far as it has come is useOutputs'; the coordinator leaves nothing running; plan usage is the plan gauge's and the pickers'.
     if (event._tag === 'Output' || event._tag === 'Background' || event._tag === 'PlanUsage') return
+    // The tasks the coordinator is drafting, as far as written, are useDrafts'.
+    if (event._tag === 'Drafting') return
     // Every run in the project, the tasks' too, whole each time, which the pill over the composer shows.
     if (event._tag === 'Launches') {
       if (event.projectId === projectId) setCoordinator((current) => ({ ...current, launches: event.launches }))
@@ -424,6 +432,7 @@ export const useProject = (projectId: string): ProjectModel => {
     repositories,
     coordinator,
     streaming,
+    drafts,
     outputs,
     agents,
     agentsKnown: status !== undefined,
@@ -531,6 +540,12 @@ export const useProject = (projectId: string): ProjectModel => {
       ),
     startPlan: (planId) => act(() => client.startPlan(planId)),
     holdPlan: (planId) => act(() => client.holdPlan(planId)),
+    // Shown held at once by its card, which shows it as it was again where this fails, with the line saying why.
+    holdDraft: (threadId, key) =>
+      client.holdDraft(threadId, key).catch((failure: unknown) => {
+        fail(failure)
+        throw failure
+      }),
     stopBackground: (threadId, id) => act(() => client.stopBackground(threadId, id)),
     changePlan: (planId, steps, end, worksIn, toward) =>
       act(() =>
