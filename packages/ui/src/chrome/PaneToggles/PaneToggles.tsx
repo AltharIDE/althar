@@ -1,8 +1,9 @@
-import { createContext, useContext } from 'react'
+import { createContext, type ReactNode, useContext } from 'react'
 
 import { Icon } from '../../foundations/Icon/Icon'
 import { cx } from '../../lib/cx'
 import { Tooltip } from '../../primitives/HoverCard/HoverCard'
+import { MenuCheckboxItem, MenuGroup } from '../../primitives/Menu/Menu'
 import { ChromeButton } from '../ChromeButton/ChromeButton'
 import s from './PaneToggles.module.css'
 
@@ -31,6 +32,9 @@ export interface PaneTogglesText {
   talk: string
   board: string
   swap: string
+  /** In the ⋯ menu: its group, and swap as a choice. */
+  layout: string
+  talkRight: string
 }
 
 export const paneTogglesText: PaneTogglesText = {
@@ -38,20 +42,20 @@ export const paneTogglesText: PaneTogglesText = {
   talk: 'Conversation',
   board: 'Board',
   swap: 'Swap sides',
+  layout: 'Layout',
+  talkRight: 'Conversation on the right',
 }
 
 /** How the toggles are drawn, for the home lab to compare: today's glyph buttons, or the layout map one of five ways. */
 export type PaneTogglesDesign = 'today' | MapLook
 
-/** How the layout map is drawn and coloured. */
-type MapLook = 'soft' | 'hatch' | 'sheet' | 'icon' | 'quiet'
+/** How the layout map is drawn, and how much of the layout goes in the header's ⋯ menu instead. */
+type MapLook = 'soft' | 'loose' | 'menu'
 
 export const paneTogglesDesigns: ReadonlyArray<{ readonly key: MapLook; readonly label: string }> = [
-  { key: 'soft', label: 'First, softer' },
-  { key: 'hatch', label: 'Hatched when closed' },
-  { key: 'sheet', label: 'White window' },
-  { key: 'icon', label: 'System icon' },
-  { key: 'quiet', label: 'Frameless' },
+  { key: 'soft', label: 'Framed, swap beside (now)' },
+  { key: 'loose', label: 'Loose, swap in ⋯' },
+  { key: 'menu', label: 'All in ⋯' },
 ]
 
 const Design = createContext<PaneTogglesDesign>('today')
@@ -73,8 +77,48 @@ export interface PaneTogglesProps {
 
 export function PaneToggles(props: PaneTogglesProps) {
   const design = useContext(Design)
+  if (design === 'menu') return null
   return design === 'today' ? <GlyphButtons {...props} /> : <LayoutMap {...props} look={design} />
 }
+
+/** Whether the header's ⋯ menu holds some of the layout. */
+export function useLayoutInMenu(): boolean {
+  const design = useContext(Design)
+  return design === 'loose' || design === 'menu'
+}
+
+/**
+ * What of the layout the header's ⋯ menu holds, under its own group: swap, where the map leaves it out; the panes and swap,
+ * where the header has no map. Null where the header holds it all.
+ */
+export function PaneLayoutItems({ panes }: { panes: PaneTogglesProps | undefined }): ReactNode {
+  const design = useContext(Design)
+  const all = usePanes(panes ?? NO_PANES)
+  if (panes === undefined || (design !== 'loose' && design !== 'menu')) return null
+  const { shown, swapped, keys = {} } = panes
+  const { t, both, only, toggle, swap } = all
+  return (
+    <MenuGroup label={t.layout}>
+      {design === 'menu' &&
+        (['talk', 'board'] as const).map((pane) => (
+          <MenuCheckboxItem
+            key={pane}
+            checked={shown[pane]}
+            disabled={only(pane)}
+            {...(keys[pane] === undefined ? {} : { kbd: keys[pane] })}
+            onCheckedChange={() => toggle(pane)}
+          >
+            {t[pane]}
+          </MenuCheckboxItem>
+        ))}
+      <MenuCheckboxItem checked={swapped} disabled={!both} onCheckedChange={swap}>
+        {t.talkRight}
+      </MenuCheckboxItem>
+    </MenuGroup>
+  )
+}
+
+const NO_PANES: PaneTogglesProps = { shown: { talk: true, board: true }, onToggle: () => {}, swapped: false, onSwap: () => {} }
 
 /** What every design shares: its words, whether both show, and a toggle that never hides the only pane showing. */
 function usePanes({ shown, onToggle, swapped, onSwap, text }: PaneTogglesProps) {
@@ -122,25 +166,19 @@ function GlyphButtons(props: PaneTogglesProps) {
   )
 }
 
-const LOOK: Record<MapLook, string | undefined> = {
+const LOOK: Record<Exclude<MapLook, 'menu'>, string | undefined> = {
   soft: s.soft,
-  hatch: s.hatch,
-  sheet: s.sheet,
-  icon: s.icon,
-  quiet: s.quiet,
+  loose: s.loose,
 }
 
 /**
  * The layout map: one small drawing of the window, its two panes as they sit, the conversation the narrower; each half
- * shows or hides its pane. Swap beside it. All five keep the first map's shape and change only its drawing:
+ * shows or hides its pane.
  *
- * - soft: the first, its frame a hairline and a pane that shows tinted in ink, not filled grey.
- * - hatch: a pane that shows is plain with its glyph; one closed is hatched, as a space put away.
- * - sheet: a white window on the chrome; a pane closed is greyed out of it.
- * - icon: no glyphs, drawn as a system icon in one stroke; a pane that shows is filled.
- * - quiet: no frame; a pane that shows is the header's pressed wash, one closed a dashed outline.
+ * - soft: framed as tall as the views' switch, a pane that shows tinted in ink; swap beside it.
+ * - loose: no frame, its two glyphs loose in the header like the rest; swap in the ⋯ menu.
  */
-function LayoutMap(props: PaneTogglesProps & { look: MapLook }) {
+function LayoutMap(props: PaneTogglesProps & { look: Exclude<MapLook, 'menu'> }) {
   const { shown, swapped, keys = {}, className, look } = props
   const { t, both, only, toggle, swap, sides } = usePanes(props)
   return (
@@ -156,12 +194,12 @@ function LayoutMap(props: PaneTogglesProps & { look: MapLook }) {
               aria-disabled={only(pane) || undefined}
               onClick={() => toggle(pane)}
             >
-              {look !== 'icon' && <Icon name={ICON[pane]} size={12} />}
+              <Icon name={ICON[pane]} size={12} />
             </button>
           </Tooltip>
         ))}
       </span>
-      <SwapButton label={t.swap} pressed={both && swapped} can={both} onSwap={swap} />
+      {look === 'soft' && <SwapButton label={t.swap} pressed={both && swapped} can={both} onSwap={swap} />}
     </fieldset>
   )
 }

@@ -76,89 +76,24 @@
   color: var(--t-1);
 }
 
-/* hatch: a pane that shows is plain with its glyph; one closed is hatched */
-.hatch {
-  border: 1.25px solid var(--t-4);
+/* loose: no frame, its two glyphs loose in the header like the rest; a pane that shows tinted in ink */
+.loose {
+  width: auto;
+  height: 30px;
+  align-items: center;
 }
-.hatch .half[aria-pressed='false'] {
-  background: repeating-linear-gradient(-45deg, var(--line-3) 0 1px, transparent 1px 4px);
-  color: transparent;
-}
-.hatch .half[aria-pressed='false']:hover:not([aria-disabled='true']) {
-  background: var(--line);
-  color: var(--t-2);
-}
-.hatch .half[aria-pressed='true'] {
-  color: var(--t-1);
-}
-
-/* sheet: a white window on the chrome; a pane closed is greyed out of it */
-.sheet {
-  padding: 0;
-  gap: 0;
-  overflow: hidden;
-  border: 1px solid var(--line-3);
-  background: var(--paper);
-  box-shadow: var(--lift);
-}
-.sheet .half {
-  border-radius: 0;
-}
-.sheet .half + .half {
-  border-inline-start: 1px solid var(--line-2);
-}
-.sheet .half[aria-pressed='true'] {
-  color: var(--t-1);
-}
-.sheet .half[aria-pressed='false'] {
-  background: var(--line-2);
-}
-.sheet .half:hover:not([aria-disabled='true'], [aria-pressed='true']) {
-  background: var(--line);
-}
-
-/* icon: no glyphs, one stroke like a system icon; a pane that shows is filled */
-.icon {
-  width: 40px;
+.loose .half {
+  flex: none;
+  width: 28px;
   height: 26px;
-  padding: 5px 4px;
   border-radius: var(--r);
 }
-.icon .half {
-  height: 16px;
-  border: 1.5px solid var(--t-3);
-  border-radius: 0;
-}
-.icon .half:first-child {
-  border-radius: 3.5px 0 0 3.5px;
-}
-.icon .half:last-child {
-  border-radius: 0 3.5px 3.5px 0;
-}
-.icon .half + .half {
-  border-inline-start-width: 0;
-}
-.icon {
-  gap: 0;
-}
-.icon .half[aria-pressed='true'] {
-  background: color-mix(in srgb, var(--t-3) 55%, transparent);
-}
-.icon .half:hover:not([aria-disabled='true']) {
-  border-color: var(--t-1);
-}
-
-/* quiet: no frame; a pane that shows is the header's pressed wash, one closed a dashed outline */
-.quiet .half[aria-pressed='true'] {
-  background: var(--line-2);
+.loose .half[aria-pressed='false']:hover {
   color: var(--t-1);
 }
-.quiet .half[aria-pressed='false'] {
-  outline: 1px dashed var(--line-3);
-  outline-offset: -1px;
-}
-.quiet .half:hover:not([aria-disabled='true']) {
-  background: var(--line);
+.loose .half[aria-pressed='true'] {
+  background: color-mix(in srgb, var(--t-1) 9%, transparent);
+  color: var(--t-1);
 }
 
 @media (prefers-reduced-motion: reduce) {

@@ -9,7 +9,7 @@ import { cx } from '../../lib/cx'
 import { Heading, type HeadingLevel } from '../../primitives/Heading/Heading'
 import { Menu, MenuGroup, MenuItem } from '../../primitives/Menu/Menu'
 import { ChromeButton } from '../ChromeButton/ChromeButton'
-import { PaneToggles, type PaneTogglesProps } from '../PaneToggles/PaneToggles'
+import { PaneLayoutItems, PaneToggles, type PaneTogglesProps, useLayoutInMenu } from '../PaneToggles/PaneToggles'
 import { roomFace, roomOptions, type RoomSwitchText } from '../RoomSwitch/RoomSwitch'
 import { TaskHeader } from '../TaskHeader/TaskHeader'
 import { TitleBar, type TitleBarProps } from '../TitleBar/TitleBar'
@@ -148,7 +148,7 @@ export function ProjectHeader({
               <>
                 {panes !== undefined && <PaneToggles {...panes} className={s.panes} />}
                 {run}
-                <MadeOf parts={parts} label={t.madeOf} />
+                <MadeOf parts={parts} label={t.madeOf} layout={panes === undefined ? null : <PaneLayoutItems panes={panes} />} />
               </>
             )
           }
@@ -188,24 +188,30 @@ function standingOf(
   return { status: TaskStatus.Done, state: t.quiet }
 }
 
-/** ⋯: what the project is made of, each opening where it lives. */
-function MadeOf({ parts, label }: { parts: ReadonlyArray<ProjectPart>; label: string }) {
-  if (parts.length === 0) return null
+/** ⋯: the home's layout, where the header leaves it out (prototype); then what the project is made of, each opening where it lives. */
+function MadeOf({ parts, label, layout }: { parts: ReadonlyArray<ProjectPart>; label: string; layout: ReactNode }) {
+  const inMenu = useLayoutInMenu() && layout !== null
+  if (parts.length === 0 && !inMenu) return null
   return (
     <Menu label={label} align="end" width={280} trigger={<ChromeButton icon="more" label={label} compact />}>
-      <MenuGroup label={label}>
-        {parts.map((part) => (
-          <MenuItem
-            key={part.id}
-            lead={part.brand === undefined ? <span className={s.noMark} aria-hidden="true" /> : <BrandMark brand={part.brand} size={14} />}
-            {...(part.openLabel === undefined ? {} : { hint: part.openLabel })}
-            disabled={part.onOpen === undefined}
-            onSelect={() => part.onOpen?.()}
-          >
-            {part.name}
-          </MenuItem>
-        ))}
-      </MenuGroup>
+      {inMenu && layout}
+      {parts.length > 0 && (
+        <MenuGroup label={label}>
+          {parts.map((part) => (
+            <MenuItem
+              key={part.id}
+              lead={
+                part.brand === undefined ? <span className={s.noMark} aria-hidden="true" /> : <BrandMark brand={part.brand} size={14} />
+              }
+              {...(part.openLabel === undefined ? {} : { hint: part.openLabel })}
+              disabled={part.onOpen === undefined}
+              onSelect={() => part.onOpen?.()}
+            >
+              {part.name}
+            </MenuItem>
+          ))}
+        </MenuGroup>
+      )}
     </Menu>
   )
 }
