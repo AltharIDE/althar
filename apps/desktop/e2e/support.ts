@@ -368,14 +368,11 @@ export const projectSettings = async (page: Page, section: 'General' | 'Code and
     .click()
 }
 
-/** From the project's settings back to its work: home, with the conversation with its coordinator showing. */
-export const backToWork = async (page: Page) => {
-  await pickLayout(page, 'Conversation')
-  // A new project's conversation is empty, so it says it shows as ⋯ does, not by what it draws.
-  await openLayout(page)
-  await expect(layoutItem(page, 'Conversation')).toHaveAttribute('aria-checked', 'true')
-  await closeLayout(page)
-}
+/**
+ * From the project's settings back to its work: home, its conversation with its coordinator alone, as from anywhere in the
+ * project; ⋯ picks only what isn't so already.
+ */
+export const backToWork = (page: Page) => showPanes(page, { conversation: true, board: false })
 
 /**
  * Has the project ask about more than what can't be undone, as it did before
