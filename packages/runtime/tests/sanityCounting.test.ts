@@ -243,11 +243,8 @@ describe('a chat on Scratch, where tasks are counted', () => {
     }).pipe(Effect.provide(Queries.layer.pipe(Layer.provideMerge(runtime())))),
   )
 
-  // Finding (sanity pass): an aside's first words start its plan's first step, which Busy puts in the project's line of new work
-  // (`Order` 'new'), behind every task waiting there, once the agents at work fill the person's number; the coordinator, whose
-  // tools and voice an aside has, takes no place. The board keeps asides off Up next (lanes.ts), so the person's "Hi" sits
-  // unanswered with nothing saying why. Flips to passing when fixed.
-  it.live.fails('answers the person’s first words though every place is taken, as the coordinator does', () =>
+  // An aside's first words start outside the task queue, as the coordinator's do, even when every task place is taken.
+  it.live('answers the person’s first words though every place is taken, as the coordinator does', () =>
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
       const projects = yield* Projects
