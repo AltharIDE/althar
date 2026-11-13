@@ -25,7 +25,8 @@ import {
  * hidden from the Layout of the header's ⋯ or by c and b, one always showing;
  * the conversation on either side; its composer under the board while the
  * conversation is hidden, which brings the conversation back as it sends.
- * The header never moves as the layout changes. Its shots are
+ * The header never moves as the layout changes, and at the narrowest window
+ * ⋯ still lays it out. Its shots are
  * test-results/panes-*.png, light and dark.
  */
 
@@ -102,6 +103,22 @@ for (const appearance of ['light', 'dark'] as const) {
         .screenshot({ path: `test-results/panes-5-away-${appearance}.png`, scale: 'css' })
       await pickLayout(page, 'Board')
       await expectPanes(page, { conversation: true, board: true })
+
+      // At the narrowest window the app allows, ⋯ is still in reach and lays out the home as wide.
+      await sizeWindow(electronApp, page, 880, 700)
+      const more = await page.getByRole('button', { name: 'More', exact: true }).boundingBox()
+      expect((more?.x ?? Infinity) + (more?.width ?? 0)).toBeLessThanOrEqual(880)
+      expect(await left()).toBeGreaterThan(300)
+      await openLayout(page)
+      await expect(layoutItem(page, 'Conversation on the right')).toHaveAttribute('aria-checked', 'true')
+      await shoot('6-narrow-menu')
+      await layoutItem(page, 'Board').click()
+      await expect(work).toHaveCount(0)
+      await expect(conversation).toBeVisible()
+      await shoot('7-narrow-conversation')
+      await pickLayout(page, 'Board')
+      await expect(work).toBeVisible()
+      await shoot('8-narrow-swapped')
     } finally {
       await electronApp.close()
     }
