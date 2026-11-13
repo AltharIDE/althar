@@ -274,7 +274,7 @@ const tabOf = (agent: AgentStatus): AgentTab => {
     ...(line === undefined ? {} : { line }),
     ...(agent.accounts.some((account) => account.signIn === 'signed_out') ? { yours: true } : {}),
     // Not on this computer: its tab quieter, after those that are.
-    ...(agent.installed ? {} : { away: true }),
+    ...(agent.installed || agent.id === 'copilot-direct' ? {} : { away: true }),
   }
 }
 
@@ -317,7 +317,7 @@ function AgentsSection({ start, accounts, asked }: { start: StartModel; accounts
       >
         {chosen.problem !== null ? (
           <AgentProblem why={chosen.problem} model={start} />
-        ) : chosen.installed && chosen.download?.installing !== true ? (
+        ) : chosen.id === 'copilot-direct' || (chosen.installed && chosen.download?.installing !== true) ? (
           <AgentAccounts agent={chosen} start={start} signIn={accounts} />
         ) : (
           <AgentInstall

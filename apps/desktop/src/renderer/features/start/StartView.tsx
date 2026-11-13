@@ -66,6 +66,7 @@ export const runtimeEntry = (agent: AgentStatus, detail?: RuntimeEntry['detail']
   // Couldn't be checked this time: it says so on its own row, and the others stand as they are.
   if (agent.problem !== null)
     return { id: base.id, name: base.name, ...(brand === undefined ? {} : { brand }), state: RuntimeState.Unchecked, why: agent.problem }
+  if (agent.id === 'copilot-direct' && !agent.installed) return { ...base, state: RuntimeState.SignedOut }
   // Not on this Mac: downloading, or the way to have it, where Althar can fetch it.
   if (agent.download?.installing === true)
     return {
@@ -108,7 +109,11 @@ export const openGuide = (model: StartModel, agentId: string) => {
  */
 export const runtimesOf = (model: StartModel, signIn: AccountSignInModel): ReadonlyArray<RuntimeEntry> =>
   model.status?.agents.map((agent) => {
-    const entry = runtimeEntry(agent, agent.installed ? signingInOf(agent, signIn) : undefined, model.installFailed[agent.id])
+    const entry = runtimeEntry(
+      agent,
+      agent.installed || agent.id === 'copilot-direct' ? signingInOf(agent, signIn) : undefined,
+      model.installFailed[agent.id],
+    )
     return entry.state === RuntimeState.Ready && entry.account === undefined ? { ...entry, account: text.signedIn } : entry
   }) ?? []
 

@@ -1,3 +1,4 @@
+import { signInHost } from '@althar/contracts'
 import { type SignInFlowHandle, type SignInWay, startSignInFlow } from '@althar/provider-adapters'
 import { Clock, Context, Effect, Layer, Schema } from 'effect'
 import type { SqlError } from 'effect/sql'
@@ -48,6 +49,7 @@ export class AccountSignIns extends Context.Service<
     start(input: {
       readonly accountId: string
       readonly way: SignInWay
+      readonly host?: string
     }): Effect.Effect<
       { readonly flowId: string; readonly state: AccountSignInState },
       NotFound | UnknownAgent | NoSignInHere | SqlError.SqlError
@@ -85,10 +87,13 @@ export class AccountSignIns extends Context.Service<
       }
 
       return AccountSignIns.of({
-        start: ({ accountId, way }) =>
+        start: ({ accountId, way, host: inputHost }) =>
           Effect.gen(function* () {
             const account = yield* accounts.get(accountId)
             const entry = yield* agents.get(account.agentId)
+            const host = inputHost === undefined ? undefined : signInHost(inputHost)
+            if (host === null || (host !== undefined && entry.definition.signIn.inApp?.kind !== 'opencode-copilot'))
+              return yield* new NoSignInHere({ agentId: account.agentId, way: 'Use a GitHub Enterprise hostname or HTTPS address.' })
             yield* accounts.prepare(account)
             // One at a time per agent: a new one stops the one before.
             for (const [id, flow] of flows) if (flow.agentId === account.agentId) stop(id)
@@ -123,18 +128,31 @@ export class AccountSignIns extends Context.Service<
                     // Signed in: checked again, so every screen shows it, before the window hears it; plan usage told again
                     // with it, so a warning that the old sign-in was ending goes from the bar at once (DEV-196).
                     Effect.runFork(
-                      signIns
-                        .account(account, true)
-                        .pipe(
-                          Effect.andThen(planUsage.retell),
-                          Effect.ensuring(Effect.sync(() => (flow.state = { state: 'done', who: event.who, plan: event.plan }))),
+                      signIns.account(account, true).pipe(
+                        Effect.flatMap((checked) =>
+                          planUsage.retell.pipe(
+                            Effect.ensuring(
+                              Effect.sync(() => {
+                                flow.state =
+                                  entry.definition.id === 'copilot-direct' && checked.status !== 'signed_in'
+                                    ? {
+                                        state: 'failed',
+                                        message:
+                                          'GitHub sign-in finished, but Copilot access could not be confirmed. Try signing in again.',
+                                      }
+                                    : { state: 'done', who: event.who, plan: event.plan }
+                              }),
+                            ),
+                          ),
                         ),
+                      ),
                     )
                     return
                 }
               },
               {
                 way,
+                ...(host === undefined ? {} : { host }),
                 home: accounts.env(account),
                 ...(config.openUrl === undefined
                   ? {}

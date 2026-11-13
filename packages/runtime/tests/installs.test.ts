@@ -73,6 +73,22 @@ const using = (options: Partial<InstallsOptions>) => {
 }
 
 describe('downloading an agent', () => {
+  it('keeps native Copilot on its verified engine even when a personal OpenCode install is present', async () => {
+    const personal = mkdtempSync(join(tmpdir(), 'althar-personal-engine-'))
+    writeFileSync(join(personal, 'opencode'), 'unrelated engine')
+    chmodSync(join(personal, 'opencode'), 0o755)
+    const native = agents['copilot-direct']
+    const { root, run } = using({ fetch: github(archive()).fetch, search: { env: { PATH: personal }, dirs: [personal] } })
+    const result = await run(
+      Effect.gen(function* () {
+        const installs = yield* Installs
+        expect(installs.locate(native)).toBeNull()
+        yield* installs.install(native)
+        expect(installs.locate(native)).toEqual({ command: join(root, 'copilot-direct', 'current', 'opencode'), whose: 'althar' })
+      }),
+    )
+    expect(Exit.isSuccess(result)).toBe(true)
+  })
   it.effect.each(['release headers', 'release body', 'archive headers', 'archive body'] as const)(
     'aborts stalled %s, cleans up, keeps its installed version, and allows another attempt',
     (stage) =>
