@@ -87,5 +87,5 @@ export const checksums: Readonly<Record<string, string>> = {
   '0081_merge_line_card': '34ee9865f46c5090435da7892805c65821dbfeecb8d31b6c2dcbfe0a9a9c6e95',
   '0082_noted_input': '3145f15d49061460831960fbe34ba94a57bc37dd85e760adaa71353158632a71',
   '0083_external_waits': 'dfbbdb2e69cf9e0c392b5836c7fc396a60d519e89eff3b080061f1dbc41645af',
-  '0084_evidence_galleries': 'd7c32b10de572a3be9f5769ab4ae5608a52ab16343759a8064a00f6a43ca5ede',
+  '0084_evidence_galleries': 'fd304ffc7a103f4ab250d468c17e2cdb1fc472fc2d2622acb188b3207dc77ab4',
 }

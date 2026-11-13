@@ -3,7 +3,7 @@ export const statements: ReadonlyArray<string> = [
   `CREATE TABLE evidence_galleries (
     thread_id TEXT PRIMARY KEY REFERENCES threads (id) ON DELETE CASCADE,
     scope TEXT NOT NULL,
-    revision INTEGER NOT NULL CHECK (revision >= 0),
+    through_sequence INTEGER NOT NULL CHECK (through_sequence >= 0),
     handoff INTEGER NOT NULL CHECK (handoff >= 0),
     shots TEXT NOT NULL CHECK (json_valid(shots))
   ) STRICT`,

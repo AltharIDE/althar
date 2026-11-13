@@ -28,7 +28,7 @@ export const evidenceGallery = (threadId: string) =>
         const options = { change: task?.quick !== 1 || task?.changed === 1, since: task?.since ?? null }
         const scope = JSON.stringify(options)
         const [checkpoint] = yield* sql<{ scope: string; revision: number; handoff: number; shots: string }>`
-        SELECT scope, revision, handoff, shots FROM evidence_galleries WHERE thread_id = ${threadId}`
+        SELECT scope, through_sequence AS revision, handoff, shots FROM evidence_galleries WHERE thread_id = ${threadId}`
         const existing = checkpoint?.scope === scope ? checkpoint : undefined
         let revision = existing?.revision ?? 0
         let handoff = existing?.handoff ?? 0
@@ -54,9 +54,9 @@ export const evidenceGallery = (threadId: string) =>
         }
         if (existing === undefined || revision !== existing.revision)
           yield* sql`
-          INSERT INTO evidence_galleries (thread_id, scope, revision, handoff, shots)
+          INSERT INTO evidence_galleries (thread_id, scope, through_sequence, handoff, shots)
           VALUES (${threadId}, ${scope}, ${revision}, ${handoff}, ${JSON.stringify(shots)})
-          ON CONFLICT (thread_id) DO UPDATE SET scope = excluded.scope, revision = excluded.revision, handoff = excluded.handoff, shots = excluded.shots`
+          ON CONFLICT (thread_id) DO UPDATE SET scope = excluded.scope, through_sequence = excluded.through_sequence, handoff = excluded.handoff, shots = excluded.shots`
         return { revision, shots: shots.map((shot) => ({ ...shot, earlier: (shot.sequence ?? handoff) < handoff })) }
       }),
     )
