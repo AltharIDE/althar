@@ -4,7 +4,7 @@ import type { AgentStatus, ChangeSummary, PlanStep, TaskEnd as End, WorksIn as W
 import { type IssueRefProps, type LaunchStep, TaskCard, TaskEnd, TaskLaunch, TaskStatus, WorksIn } from '@althar/ui'
 
 import { queuedWords, reconnectsWords, waitsWords } from '../../shared/agents'
-import { type NameModel, useEffortNames, useModelNames } from '../../shared/modelNames'
+import { type NameEffort, type NameModel, useEffortNames, useModelNames } from '../../shared/modelNames'
 import { Holders } from '../../shared/Holders'
 import { localText } from '../../shared/local'
 import { ModelChoice } from '../../shared/ModelChoice'
@@ -98,13 +98,14 @@ const fromOf = (card: TaskCardContent): IssueRefProps | undefined =>
  * the model's runtime. A review of someone else's pull request has one, its
  * lead, which reviews.
  */
-const launchSteps = (plan: Plan, named: NameModel, reviews: boolean): ReadonlyArray<LaunchStep> =>
+const launchSteps = (plan: Plan, named: NameModel, effortOf: NameEffort, reviews: boolean): ReadonlyArray<LaunchStep> =>
   plan.steps.map((step) => ({
     id: step.key,
     label: text.label[reviews ? 'review' : step.key],
     agents: [named(step.agentId, step.model)],
     optional: step.key === 'review',
     skipped: step.skipped,
+    effort: effortOf(step.agentId, step.model, step.effort ?? null),
   }))
 
 function PlanCard({
@@ -120,6 +121,7 @@ function PlanCard({
   queued?: string
 }) {
   const named = useModelNames()
+  const effortOf = useEffortNames()
   // What the person changed shows at once; the runtime's copy replaces it when it comes back.
   const [shown, setShown] = useState<{
     readonly from: Plan
@@ -164,16 +166,18 @@ function PlanCard({
       title={card.title}
       {...(from === undefined ? {} : { from })}
       project={actions.project}
-      steps={launchSteps({ ...plan, steps }, named, card.reviewing != null)}
+      steps={launchSteps({ ...plan, steps }, named, effortOf, card.reviewing != null)}
       onStepsChange={(next) =>
         change(steps.map((step) => ({ ...step, skipped: next.find((launch) => launch.id === step.key)?.skipped ?? step.skipped })))
       }
-      picker={({ step, owner }) => {
+      picker={({ step, owner, onOpenChange, skip }) => {
         const planned = steps.find((candidate) => candidate.key === step.id)
         return (
           planned !== undefined && (
             <ModelChoice
               owner={owner}
+              onOpenChange={onOpenChange}
+              {...(skip === undefined ? {} : { onRemove: skip.onSkip, text: { remove: skip.label } })}
               agents={actions.agents}
               value={{ agentId: planned.agentId, model: planned.model, effort: planned.effort ?? null }}
               {...(actions.projectId === undefined ? {} : { projectId: actions.projectId })}

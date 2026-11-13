@@ -4078,7 +4078,6 @@ export const Draft = Schema.Struct({
   slug: Schema.NullOr(Schema.String),
   planning: Schema.Boolean,
   lead: Schema.NullOr(DraftStep),
-  reason: Schema.NullOr(Schema.String),
   review: Schema.NullOr(DraftStep),
   noReview: Schema.Boolean,
   preset: Schema.NullOr(Schema.String),

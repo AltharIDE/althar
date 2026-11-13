@@ -26,7 +26,7 @@ describe('a task followed as the coordinator drafts it', () => {
     expect(lead.lead).toEqual({ model: 'Opus 5.5', effort: 'high' })
     expect(lead.review).toBeUndefined()
     state = resolved(lead.state, 'p1', 'lead', OPUS)
-    expect(state.drafts[0]).toMatchObject({ lead: OPUS, reason: 'Knows the code.' })
+    expect(state.drafts[0]).toMatchObject({ lead: OPUS })
 
     const review = inputWritten(state, 'p1', {
       task: '812',

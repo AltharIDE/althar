@@ -41,9 +41,8 @@ export interface Draft {
   readonly slug: string | null
   /** Its plan is being written. */
   readonly planning: boolean
-  /** Its lead, once written and known; why, in the coordinator's words. */
+  /** Its lead, once written and known. */
   readonly lead: DraftStep | null
-  readonly reason: string | null
   /** Its reviewer, once written and known; `noReview` once planned without one. */
   readonly review: DraftStep | null
   readonly noReview: boolean
@@ -77,7 +76,6 @@ const blank = (key: string): Draft => ({
   slug: null,
   planning: false,
   lead: null,
-  reason: null,
   review: null,
   noReview: false,
   preset: null,
@@ -166,14 +164,12 @@ export const inputWritten = (
   }
   if (key === null) return { state: next }
   const preset = text(fields['preset'])
-  const reason = text(record(fields['lead'])?.['reason'])
   const lead = writtenPick(fields['lead'])
   const review = fields['review'] === null ? null : writtenPick(fields['review'])
   next = change(next, key, (draft) => ({
     ...draft,
     planning: true,
     ...(preset === undefined ? {} : { preset }),
-    ...(reason === undefined ? {} : { reason }),
     ...(review === null ? { noReview: true, review: null } : {}),
   }))
   return {

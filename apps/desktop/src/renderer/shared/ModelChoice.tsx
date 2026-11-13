@@ -57,6 +57,8 @@ export interface ModelChoiceProps {
   variant?: 'quiet' | 'field'
   placement?: 'above' | 'below'
   text?: Partial<ModelPickText>
+  /** Its menu opened or closed: a plan's row, whose whole is the picker, keeps it under the pointer while it's open. */
+  onOpenChange?: (open: boolean) => void
 }
 
 export function ModelChoice({
@@ -72,6 +74,7 @@ export function ModelChoice({
   variant,
   placement,
   text,
+  onOpenChange,
 }: ModelChoiceProps) {
   const known = useModels()
   const room = useModelRooms(projectId)
@@ -124,7 +127,10 @@ export function ModelChoice({
         asking={asking}
         onAskingChange={setAsking}
         open={open}
-        onOpenChange={setOpen}
+        onOpenChange={(next) => {
+          setOpen(next)
+          onOpenChange?.(next)
+        }}
         count={catalog.models.length}
         owner={owner}
         {...(variant === undefined ? {} : { variant })}
