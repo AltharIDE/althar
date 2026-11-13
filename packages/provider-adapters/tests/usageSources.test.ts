@@ -70,6 +70,7 @@ describe('every agent’s plan', () => {
     const unread = usagePairs.filter((pair) => pair.pays === 'plan' && pair.sources.every((source) => source.kind === 'none'))
     expect(unread.map((pair) => `${pair.agent}/${pair.provider}`).sort()).toEqual([
       'antigravity/google',
+      'copilot-direct/github',
       'copilot/github',
       'junie/jetbrains',
       'mistral-vibe/mistral',
