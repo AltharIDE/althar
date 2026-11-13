@@ -1,4 +1,5 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
+import type { ReactNode } from 'react'
 import { expect, userEvent, waitFor, within } from 'storybook/test'
 
 import { SHOT_AFTER, SHOT_BEFORE, SHOT_NOT_KEPT } from '../../fixtures/shots'
@@ -56,12 +57,6 @@ export const Grouped: Story = {
   },
 }
 
-/** Pictures with no names: two across, each with its whole caption. */
-export const Plain: Story = { args: { shots: PLAIN } }
-
-/** One alone: wider still. */
-export const One: Story = { args: { shots: [PLAIN[1] as GalleryShot] } }
-
 /** Views shown earlier and taken again aren't shown twice: a line counts them, and opens them on a click. */
 export const Retaken: Story = {
   args: { shots: PLAIN.slice(0, 2), retaken: RETAKEN },
@@ -71,11 +66,11 @@ export const Retaken: Story = {
   },
 }
 
-/** Only retakes: the line alone. */
-export const OnlyRetaken: Story = { args: { shots: [], retaken: RETAKEN } }
-
 /** A picture Althar couldn't keep says so, and doesn't open. */
 export const NotKept: Story = { args: { shots: [shot('gone', 'The whole page', SHOT_NOT_KEPT), PLAIN[1] as GalleryShot] } }
+
+/* Each cell is the room a gallery measures itself by, as the thread's column is, so a wide one centres in its cell. */
+const Room = ({ children }: { children: ReactNode }) => <div style={{ containerType: 'inline-size' }}>{children}</div>
 
 export const AllStates: Story = {
   render: () => (
@@ -88,8 +83,7 @@ export const AllStates: Story = {
         { state: 'retaken', node: <Gallery shots={PLAIN.slice(0, 2)} retaken={RETAKEN} /> },
         { state: 'only retaken', node: <Gallery shots={[]} retaken={RETAKEN} /> },
         { state: 'not kept', node: <Gallery shots={[shot('gone', 'The whole page', SHOT_NOT_KEPT)]} /> },
-        { state: 'dark', node: <Gallery shots={PLAIN} />, dark: true },
-      ]}
+      ].map((cell) => ({ ...cell, node: <Room>{cell.node}</Room> }))}
     />
   ),
 }

@@ -78,7 +78,11 @@ export function Checks({ checks, className, text }: ChecksProps) {
             <span className={s.name}>
               {c.name}
               <VisuallyHidden>, {t.state[c.state]}</VisuallyHidden>
-              {c.by !== undefined && c.by.length > 0 && <ModelList models={c.by} short className={s.by} />}
+              {c.by !== undefined && c.by.length > 0 && (
+                <span className={s.by}>
+                  <ModelList models={c.by} short />
+                </span>
+              )}
               {c.added && (
                 <span className={s.added}>
                   <Icon name="plus" size={9} />

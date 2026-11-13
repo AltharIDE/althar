@@ -27,9 +27,9 @@ export interface PeekStep {
 export interface WorkPeekText {
   steps: string
   waiting: string
+  /** In the lead's place, before there is one. */
   chosenLater: string
   lead: string
-  unstarted: string
   added: string
   state: Record<TrackStep, string>
 }
@@ -37,9 +37,8 @@ export interface WorkPeekText {
 export const workPeekText: WorkPeekText = {
   steps: 'Steps',
   waiting: 'Waiting for',
-  chosenLater: 'Chosen when it starts',
+  chosenLater: 'Its lead is chosen when it starts',
   lead: 'Lead',
-  unstarted: 'Not started',
   added: 'added by rule',
   state: { [TrackStep.Done]: 'done', [TrackStep.Now]: 'now', [TrackStep.Seen]: 'reached, then sent back', [TrackStep.Next]: 'to come' },
 }
@@ -99,9 +98,7 @@ export function WorkPeek({ title, note, status = TaskStatus.Running, steps, wait
       ) : (
         waiting && (
           <PeekSection label={t.waiting}>
-            <PeekDetail>
-              {waiting}. {t.chosenLater}
-            </PeekDetail>
+            <PeekDetail>{waiting}.</PeekDetail>
           </PeekSection>
         )
       )}
@@ -111,7 +108,7 @@ export function WorkPeek({ title, note, status = TaskStatus.Running, steps, wait
             {t.lead} <Model model={lead} className={s.model} />
           </span>
         ) : (
-          t.unstarted
+          t.chosenLater
         )}
       </PeekFoot>
     </>

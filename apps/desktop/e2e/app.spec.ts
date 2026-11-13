@@ -19,6 +19,8 @@ import {
   startTask,
   still,
   toConversation,
+  expectPanes,
+  showPanes,
 } from './support'
 
 /*
@@ -231,8 +233,8 @@ test('connects GitHub, and a planned task ends in a draft pull request', async (
 
     // Its remote is on GitHub, which isn't connected yet: nothing says so up front, and the project's settings connect it.
     await expect(page.getByText(/isn't connected to GitHub/)).toHaveCount(0)
-    await page.getByRole('button', { name: 'Made of' }).click()
-    await expect(page.getByRole('menu', { name: 'Made of' }).getByRole('menuitem')).toHaveText([/^meridian/])
+    await page.getByRole('button', { name: 'More', exact: true }).click()
+    await expect(page.getByRole('menu', { name: 'More' }).getByRole('menuitem')).toHaveText([/^meridian/])
     await page.keyboard.press('Escape')
     await projectSettings(page, 'Code and issues')
     const github = page.getByRole('region', { name: 'GitHub' })
@@ -309,7 +311,7 @@ test('connects GitHub, and a planned task ends in a draft pull request', async (
 
     // The task's bar goes back to the project: its board has it ready to accept, and so does the bar.
     await page.getByRole('button', { name: 'Back to meridian' }).click()
-    await page.getByRole('radio', { name: /^Board/ }).click()
+    await showPanes(page, { conversation: false, board: true })
     const work = page.getByRole('region', { name: 'The project’s work' })
     await expect(work.getByText('Ready to accept')).toBeVisible()
     await page.getByRole('button', { name: '1 needs you' }).hover()
@@ -326,7 +328,7 @@ test('connects GitHub, and a planned task ends in a draft pull request', async (
     await page.getByRole('button', { name: /Accept and merge/ }).click()
     // Back goes to the view it came from, the board.
     await page.getByRole('button', { name: 'Back to meridian' }).click()
-    await expect(page.getByRole('radio', { name: 'Board', checked: true })).toBeVisible()
+    await expectPanes(page, { conversation: false, board: true })
     await expect(work.getByText('PR #1 merged')).toBeVisible()
     await page.screenshot({ path: 'test-results/settled.png', animations: 'disabled' })
   } finally {
@@ -385,7 +387,7 @@ const catchWhatReachesThem = (electronApp: ElectronApplication) =>
 /** Where the system carries an app's count, as Settings names it: the Dock, Linux's launcher. */
 const COUNT = process.platform === 'darwin' ? 'Count them on the Dock icon' : 'Count them on the launcher icon'
 
-test('notifies the person of a ready task while they look elsewhere, counts it on the Dock, and opens it on a click', async () => {
+test('notifies the person of a finished task in its card’s words, counts it on the Dock, and opens it on a click', async () => {
   const home = mkdtempSync(join(tmpdir(), 'althar-e2e-'))
   const repo = repository(home)
   const { electronApp, page } = await launch(home)
@@ -397,12 +399,13 @@ test('notifies the person of a ready task while they look elsewhere, counts it o
 
     await expect
       .poll(() => electronApp.evaluate(() => globalThis.shown))
-      .toEqual([{ title: 'Add a retry to the checkout call', body: 'Ready: Did the task.', silent: true }])
+      .toEqual([{ title: 'Add a retry to the checkout call', body: 'Nothing built', silent: true }])
     await expect.poll(() => electronApp.evaluate(() => globalThis.badge)).toBe(1)
 
     // Clicked, it opens the task.
     await electronApp.evaluate(() => globalThis.clickLast?.())
     await expect(page.getByRole('heading', { name: 'Add a retry to the checkout call', level: 1 })).toBeVisible()
+    await expect(shown(page, 'Nothing built', { exact: true })).toBeVisible()
   } finally {
     await electronApp.close()
   }

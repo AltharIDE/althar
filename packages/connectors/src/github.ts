@@ -4,7 +4,7 @@ import { type Access, type AccessInput, type AccessLine, type AccessNeed, type A
 import { type AdapterOptions, authorizationOf } from './credential'
 import { mergeInCopy } from './branchCopy'
 import { ConnectorFailed } from './errors'
-import { makeHttp, paged } from './http'
+import { makeHttp, paged, withoutTrailingSlashes } from './http'
 import { makeGitHubReleases } from './githubReleases'
 import { mergeRulesOf, mergeRulesQuery, NEWER_FIELDS, NO_RULESETS, PullRulesAnswer, RulesetsAnswer, rulesetsOf } from './githubRules'
 import type {
@@ -786,7 +786,7 @@ export const STRICT_KEPT_MS = 60 * 60_000
 
 export const makeGitHub = (options: AdapterOptions): CodeHost & Tracker => {
   const product = 'github' as const
-  const api = options.apiUrl.replace(/\/+$/, '')
+  const api = withoutTrailingSlashes(options.apiUrl)
   /** Enterprise Server: its API is under its own address, at /api/v3. */
   const server = api.endsWith('/api/v3')
   const graphqlUrl = server ? `${api.slice(0, -'/v3'.length)}/graphql` : `${api}/graphql`
@@ -922,16 +922,27 @@ export const makeGitHub = (options: AdapterOptions): CodeHost & Tracker => {
       return null as string | null
     })
 
-  /** Whether a commit is the merge GitHub's update-branch made from `from`: two parents, the first of them `from`. */
-  const madeFrom = (repository: Repository, sha: string, from: string) =>
-    Effect.map(
-      http.json(
+  /** Whether a commit is the merge GitHub's update-branch made from `from`: two parents, the first of them `from`, the second `base` where given. */
+  /** Whether `later` is `earlier` or comes after it (each a commit or a branch, as a path): `compare` counts what `earlier` has that `later` hasn't. */
+  const after = (repository: Repository, earlier: string, later: string) =>
+    Effect.map(http.json(Behind, 'GET', `${repo(repository)}/compare/${earlier}...${later}`), (compared) => compared.behind_by === 0)
+  const madeFrom = (repository: Repository, change: ChangeRequest & { readonly headSha: string }, from: string, base?: string) =>
+    Effect.gen(function* () {
+      const made = yield* http.json(
         Schema.Struct({ parents: Schema.Array(Schema.Struct({ sha: Schema.String })) }),
         'GET',
-        `${repo(repository)}/commits/${encodeURIComponent(sha)}`,
-      ),
-      (made) => made.parents.length === 2 && made.parents[0]?.sha === from,
-    )
+        `${repo(repository)}/commits/${encodeURIComponent(change.headSha)}`,
+      )
+      const [first, merged] = made.parents.map((parent) => parent.sha)
+      if (made.parents.length !== 2 || first !== from || merged === undefined) return false
+      if (base === undefined || merged === base) return true
+      // The target moved on before GitHub merged it in the background: it merged the target's newer head, which comes after
+      // the one asked for and is on the target still. A merge of another branch is neither.
+      return (
+        (yield* after(repository, encodeURIComponent(base), encodeURIComponent(merged))) &&
+        (yield* after(repository, encodeURIComponent(merged), branchPath(change.target)))
+      )
+    })
   const queueKey = (repository: Repository, target: string) => `${repository.path.join('/')} ${target}`
 
   /** Whether this server knows `refUpdateRule`: false once it said it doesn't, as an older Enterprise Server does. */
@@ -1675,7 +1686,8 @@ export const makeGitHub = (options: AdapterOptions): CodeHost & Tracker => {
             ),
             (answer) => answer.behind_by === 0,
           ),
-    madeFrom: (repository, change, from) => (change.headSha === null ? Effect.succeed(false) : madeFrom(repository, change.headSha, from)),
+    madeFrom: (repository, change, from, base) =>
+      change.headSha === null ? Effect.succeed(false) : madeFrom(repository, { ...change, headSha: change.headSha }, from, base),
     closeChange: (repository, change) =>
       Effect.gen(function* () {
         const now = yield* http.json(PullAnswer, 'GET', `${repo(repository)}/pulls/${change.number}`)
@@ -2055,7 +2067,7 @@ export const makeGitHub = (options: AdapterOptions): CodeHost & Tracker => {
 
 /** GitHub's page for a classic token, filled in: what it is for, and the scopes Althar uses, check runs included. */
 export const classicTokenPage = (webUrl: string): string =>
-  `${webUrl.replace(/\/+$/, '')}/settings/tokens/new?${new URLSearchParams({ description: 'Althar', scopes: 'repo,workflow' }).toString()}`
+  `${withoutTrailingSlashes(webUrl)}/settings/tokens/new?${new URLSearchParams({ description: 'Althar', scopes: 'repo,workflow' }).toString()}`
 
 /** Where a person's tokens are listed: fine-grained ones on github.com; on a company's own server, which may predate them, classic ones. */
 const tokensPage = (web: string) => (web === 'https://github.com' ? `${web}/settings/personal-access-tokens` : `${web}/settings/tokens`)
@@ -2079,8 +2091,8 @@ interface Found {
 
 export const accessGitHub: Access = (input: AccessInput) =>
   Effect.gen(function* () {
-    const api = input.apiUrl.replace(/\/+$/, '')
-    const web = input.webUrl.replace(/\/+$/, '')
+    const api = withoutTrailingSlashes(input.apiUrl)
+    const web = withoutTrailingSlashes(input.webUrl)
     const ask = (url: string) => probe(input, url, { headers: HEADERS })
     const repo = (path: ReadonlyArray<string>) => `${api}/repos/${path.map(encodeURIComponent).join('/')}`
 

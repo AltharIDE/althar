@@ -25,10 +25,6 @@ const meta = { title: 'Primitives/Fold', component: Fold, args: { children: null
 export default meta
 type Story = StoryObj<typeof meta>
 
-export const Closed: Story = {
-  render: () => <Example />,
-}
-
 /** Opening it eases the content in. */
 export const Opening: Story = {
   render: () => <Example />,
@@ -43,7 +39,6 @@ export const Opening: Story = {
     await waitFor(() => expect(c.getByRole('link')).toBeVisible())
   },
 }
-export const Open: Story = { render: () => <Example initial /> }
 
 export const AllStates: Story = {
   parameters: statesParameters,

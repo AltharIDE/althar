@@ -25,6 +25,7 @@ import { Sessions } from '../src/Sessions'
 import { piecesOf } from '../src/threads'
 import type { ToolAccess } from '../src/ToolServer'
 import { callTool, items, notices, repository, runtime, until } from './support'
+import { knownModels } from './knownModels'
 
 /*
  * Althar hands the coordinator to a fresh session before its context fills
@@ -36,6 +37,7 @@ import { callTool, items, notices, repository, runtime, until } from './support'
 const withQueries = (...args: Parameters<typeof runtime>) => Queries.layer.pipe(Layer.provideMerge(runtime(...args)))
 
 const opened = Effect.gen(function* () {
+  yield* knownModels
   const projects = yield* Projects
   const coordinator = yield* Coordinator
   const project = yield* projects.open({ envelope: yield* Runtime.envelope('project.open', {}), path: repository() })
@@ -245,6 +247,8 @@ describe('handing the coordinator to a fresh session', () => {
       assert.strictEqual(turns[2]?.providerSessionId, fresh.id)
       assert.include(turns[2]?.prompt, 'You are taking over this conversation')
       assert.match(turns[2]?.prompt ?? '', /\n\nMeanwhile, one more thing\.$/)
+      // Said once: its brief's last messages leave out what waits for its first turn.
+      assert.strictEqual((turns[2]?.prompt ?? '').split('Meanwhile, one more thing.').length - 1, 1)
     }).pipe(Effect.provide(withQueries())),
   )
 
@@ -338,6 +342,8 @@ describe('handing the coordinator to a fresh session', () => {
           }),
           /^Started pick-a-cache/,
         )
+        // On the board: start_task leaves what it starts on Scratch, an aside, until it takes a worktree, and asides aren't tasks.
+        yield* sql`UPDATE tasks SET shelf = NULL WHERE slug = 'pick-a-cache'`
         const asked = yield* until(
           sql<{ taskId: string }>`SELECT task_id FROM attention_requests WHERE kind = 'question' AND state = 'open'`,
           (rows) => rows.length === 1,
@@ -649,6 +655,8 @@ describe("a handover brief's open tasks", () => {
           description: 'Do it. [lead:finish]',
           lead: { agent: 'claude-code', model: 'small' },
         })
+      // On the board: start_task leaves what it starts on Scratch, an aside, until it takes a worktree, and asides aren't tasks.
+      yield* sql`UPDATE tasks SET shelf = NULL`
       const [ready, stopped, again] = yield* until(
         sql<{ slug: string; threadId: string; runId: string; taskId: string }>`
           SELECT k.slug, t.id AS thread_id, r.id AS run_id, k.id AS task_id FROM tasks k
@@ -740,6 +748,51 @@ describe("a handover brief's open tasks", () => {
       assert.strictEqual(record.open, 3)
       assert.include(record.sections, 'The conversation has no messages yet.')
       assert.include(record.sections, 'The project has no notes yet.')
+    }).pipe(Effect.provide(withQueries())),
+  )
+
+  it.live('leaves what start_task started on Scratch out of the task brief, including its calls and reports', () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const projects = yield* Projects
+      const { projectId, access } = yield* opened
+      // Three asides, as start_task starts them: one that asks the person, one done, and one whose run then stopped.
+      const start = (title: string, description: string) =>
+        callTool(access, 'start_task', { title, description, lead: { agent: 'claude-code', model: 'small' } })
+      yield* start('Pick a cache', 'Ask which database the cache should use. [lead:ask]')
+      yield* start('Which partners call v1', 'Look, and say. [lead:finish]')
+      yield* start('Count the callers', 'Count them. [lead:finish]')
+      yield* until(
+        sql<{ n: number }>`
+          SELECT (SELECT count(*) FROM attention_requests WHERE kind = 'question' AND state = 'open')
+            + (SELECT count(*) FROM runs WHERE state = 'succeeded') AS n`,
+        (rows) => rows[0]?.n === 3,
+      )
+      yield* sql`UPDATE runs SET state = 'failed' WHERE task_id = (SELECT id FROM tasks WHERE slug = 'count-the-callers')`
+      const tasks = yield* openTasks(
+        projectId,
+        (step) => step.model ?? step.agentId,
+        () => false,
+      )
+      assert.strictEqual(tasks.count, 0)
+      assert.strictEqual(tasks.text, 'The project has no open tasks.')
+      // More asides never add a list or a count to the brief.
+      for (let index = 1; index <= 9; index += 1) {
+        const made = yield* projects.createTask({
+          envelope: yield* Runtime.envelope('task.create', {}),
+          projectId,
+          title: `Chat ${index}`,
+          draft: true,
+        })
+        yield* sql`UPDATE tasks SET shelf = 'scratch' WHERE id = ${made.taskId}`
+      }
+      const more = yield* openTasks(
+        projectId,
+        (step) => step.agentId,
+        () => false,
+      )
+      assert.deepStrictEqual(more, { count: 0, text: 'The project has no open tasks.' })
+      assert.strictEqual(yield* callTool(access, 'list_tasks'), 'The project has no tasks yet.')
     }).pipe(Effect.provide(withQueries())),
   )
 })

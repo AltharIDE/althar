@@ -77,10 +77,15 @@ export class Plans extends Context.Service<
       readonly here?: boolean
       /** A review of someone else's pull request, its one step its lead (`PlanParameters.reads`). */
       readonly reads?: boolean
-      /** No card in the coordinator's conversation: an aside's, which has a tab of its own there instead. */
-      readonly card?: false
-      /** The fast lane: reviewed after it merges, not before (`PlanParameters.reviewAfterMerge`). */
+      /**
+       * An aside the person started (`PlanParameters.aside`): no card in the coordinator's conversation, where it has a pill of
+       * its own instead, and its first step ends with its lead's turn.
+       */
+      readonly aside?: boolean
+      /** Explicitly chosen after-merge timing (`PlanParameters.reviewAfterMerge`), independent of size. */
       readonly reviewAfterMerge?: boolean
+      /** Start without a countdown, independently of its configured review timing. */
+      readonly smallChange?: boolean
       /** Where it works (ADR-091), and why, where that isn't the project's default (`PlanParameters.worksIn`). */
       readonly worksIn?: WorksIn
       readonly worksInWhy?: string | null
@@ -183,11 +188,13 @@ export class Plans extends Context.Service<
           end?: TaskEnd | null
           endChosen?: boolean
           here?: boolean
+          aside?: boolean
           reads?: boolean
           worksIn?: WorksIn
           worksInWhy?: string | null
           proposal?: string
           reviewAfterMerge?: boolean
+          smallChange?: boolean
         }
 
       /** Whether a plan still counts down. */
@@ -228,13 +235,22 @@ export class Plans extends Context.Service<
                   taskId: input.taskId,
                   workflowVersionId,
                   parameters: JSON.stringify({
-                    steps: input.steps,
+                    steps:
+                      input.reviewAfterMerge === true
+                        ? input.steps.map((step) => (step.key === 'review' ? { ...step, skipped: true } : step))
+                        : input.steps,
                     reason: input.reason,
                     end: input.end ?? null,
                     ...(input.endChosen === true ? { endChosen: true } : {}),
                     ...(input.here === true ? { here: true } : {}),
+                    ...(input.aside === true ? { aside: true } : {}),
                     ...(input.reads === true ? { reads: true } : {}),
                     ...(input.reviewAfterMerge === true ? { reviewAfterMerge: true } : {}),
+                    ...(input.smallChange !== undefined
+                      ? { smallChange: input.smallChange }
+                      : input.reviewAfterMerge === true
+                        ? { smallChange: false }
+                        : {}),
                     ...(input.worksIn === undefined ? {} : { worksIn: input.worksIn }),
                     ...(input.worksInWhy == null || input.worksInWhy.trim() === '' ? {} : { worksInWhy: input.worksInWhy.trim() }),
                     ...(input.proposal === undefined ? {} : { proposal: input.proposal }),
@@ -255,11 +271,42 @@ export class Plans extends Context.Service<
                 })
               }),
             )
-            if (input.card !== false) yield* postCard(input.projectId, input.taskId)
+            if (input.aside !== true) yield* postCard(input.projectId, input.taskId)
             yield* Queue.offer(wake, undefined)
             return planId
           }),
         )
+
+      /** An acceptance with no run is not work under way: keep it as a held plan, atomically with that check. */
+      const holdUnstarted = (planId: string | null) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const held = yield* sql.withTransaction(
+            Effect.gen(function* () {
+              const plans = yield* sql<{ id: string; taskId: string; projectId: ProjectId }>`
+                SELECT p.id, p.task_id, p.project_id FROM task_plans p
+                JOIN tasks k ON k.id = p.task_id AND k.state IN ('draft', 'open')
+                JOIN projects o ON o.id = p.project_id AND o.archived_at IS NULL
+                WHERE p.state = 'accepted' AND (${planId} IS NULL OR p.id = ${planId})
+                  AND coalesce(json_extract(p.parameters, '$.reads'), 0) = 0
+                  AND NOT EXISTS (SELECT 1 FROM runs r WHERE r.plan_id = p.id)`
+              for (const plan of plans) {
+                const revision = yield* change('task_plans', plan.id, { state: 'proposed', startsAt: null, decidedAt: null })
+                yield* fact({
+                  projectId: plan.projectId,
+                  aggregateType: 'task_plan',
+                  aggregateId: plan.id,
+                  revision,
+                  type: 'task_plan.held',
+                  actorId: instance.systemId,
+                })
+              }
+              return plans
+            }),
+          )
+          for (const plan of held) yield* touchCard(plan.taskId)
+          if (held.length > 0) yield* Queue.offer(wake, undefined)
+        })
 
       /** Starts a proposed plan: when the person says, or, `due`, when its countdown has ended and it isn't held. */
       const start = (planId: string, actorId: ActorId, due = false) =>
@@ -274,11 +321,14 @@ export class Plans extends Context.Service<
           )
           const plan = yield* load(planId)
           const parameters = parametersOf(plan)
-          // The same parts set up twice running: the coordinator offers them as a preset, once (a task is a conversation plus parts).
+          // Parts the person set up themselves, alike a few times: its card offers them as a preset, once (a task is a conversation plus parts).
           if (accepted)
-            yield* offerPreset(plan.projectId, instance.coordinatorId).pipe(
-              Effect.catchCause((cause) => Effect.logWarning('Could not offer a preset', cause)),
-            )
+            yield* offerPreset({
+              projectId: plan.projectId,
+              taskId: plan.taskId,
+              personId: instance.personId,
+              actorId: instance.coordinatorId,
+            }).pipe(Effect.catchCause((cause) => Effect.logWarning('Could not offer a preset', cause)))
           if (parameters.reads === true) {
             // A review's lead starts in its thread; accepted before, it started then, or its thread says why it couldn't.
             const [lead] = parameters.steps
@@ -286,9 +336,19 @@ export class Plans extends Context.Service<
             yield* reviews.lead(plan.taskId, lead, actorId)
             return 'running' as const
           }
-          if (accepted) return yield* runs.run(planId)
-          // Accepted, but Althar stopped before its run was made: it runs now, once.
-          return !due && plan.state === 'accepted' ? yield* runs.run(planId) : null
+          // Accepted, but Althar stopped before its run was made: an explicit start can admit it now. A stale countdown
+          // that didn't accept this plan must leave another start's acceptance alone.
+          if (!accepted && (due || plan.state !== 'accepted')) return null
+          const started = yield* runs.run(planId).pipe(
+            // A failure before the run was recorded leaves a visible, startable plan, without masking the failure.
+            Effect.onError(() =>
+              holdUnstarted(planId).pipe(
+                Effect.catchCause((cause) => Effect.logWarning('Could not hold a plan whose run was not made', cause)),
+              ),
+            ),
+          )
+          if (started === null) yield* holdUnstarted(planId)
+          return started
         })
 
       /**
@@ -355,6 +415,8 @@ export class Plans extends Context.Service<
           const overdue = yield* sql<{ id: string }>`
             SELECT id FROM task_plans WHERE state = 'proposed' AND starts_at IS NOT NULL AND starts_at < ${yield* timestamp}`
           for (const plan of overdue) yield* transition(plan.id, counting, () => ({ startsAt: null }), 'task_plan.held', instance.systemId)
+          // Acceptance and run admission are separate durable writes: a crash between them is held as an overdue plan is.
+          yield* holdUnstarted(null)
         }).pipe(Effect.catchCause((cause) => Effect.logWarning('Could not hold the plans that came due while Althar was closed', cause))),
       )
       yield* Effect.forkScoped(provide(keptGoing('Plans.countdown', countdown)))
@@ -378,11 +440,13 @@ export class Plans extends Context.Service<
                   // A card sends the ending it shows with every change: only another one than the plan had is the person's choice.
                   ...(before.endChosen === true || (end !== undefined && end !== (before.end ?? null)) ? { endChosen: true } : {}),
                   ...(before.here === true ? { here: true } : {}),
+                  ...(before.aside === true ? { aside: true } : {}),
                   ...(before.reads === true ? { reads: true } : {}),
                   ...(where === undefined ? {} : { worksIn: where }),
                   ...(why == null ? {} : { worksInWhy: why }),
                   ...(before.proposal === undefined ? {} : { proposal: before.proposal }),
                   ...(before.reviewAfterMerge === true ? { reviewAfterMerge: true } : {}),
+                  ...(before.smallChange === undefined ? {} : { smallChange: before.smallChange }),
                 })
               }
               // Any agent Althar has may lead a review.
@@ -416,7 +480,11 @@ export class Plans extends Context.Service<
               if (before.reads === true) for (const step of steps) if (!step.skipped) yield* reviews.canLead(step.agentId)
               yield* reshape(
                 planId,
-                (now) => JSON.stringify(planFromPreset(parametersOf(now), preset.parts, models, projectEnd)),
+                (now) =>
+                  JSON.stringify({
+                    ...planFromPreset(parametersOf(now), preset.parts, models, projectEnd),
+                    smallChange: preset.id === 'builtin:small-change',
+                  }),
                 actorId,
                 undefined,
                 true,

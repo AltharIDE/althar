@@ -81,7 +81,8 @@ export const ChangeRunning: Story = {
     const card = within(canvasElement)
     // Its step's word, on top and under its bar.
     await expect(card.getAllByText('Implement')).toHaveLength(2)
-    await expect(card.getByText('Change')).toBeInTheDocument()
+    // A change is the usual kind, so it isn't said.
+    await expect(card.queryByText('Change')).toBeNull()
     await expect(card.getByRole('list', { name: 'Steps' })).toBeInTheDocument()
     await expect(card.getByText('meridian/return-409-on-reused-idempotency-key')).toBeInTheDocument()
     // Nothing on it is pressed but the card itself.
@@ -94,7 +95,7 @@ export const ChangeRunningWithItsPullRequest: Story = { args: CHANGE_RUNNING_PR 
 export const ChangeRunningLocal: Story = {
   args: { ...CHANGE_RUNNING, local: true },
   play: async ({ canvasElement }) => {
-    await expect(within(canvasElement).getByText('Change · Local')).toBeInTheDocument()
+    await expect(within(canvasElement).getByText('Local')).toBeInTheDocument()
   },
 }
 export const ChangeRunningLocalDark: Story = { ...ChangeRunningLocal, globals: { theme: 'dark' } }
@@ -504,6 +505,41 @@ export const QuestionNoOptions: Story = {
   },
 }
 export const Stuck: Story = { args: CHANGE_STUCK }
+
+/** Its step stuck on something that failed: said as a problem, and its strip offers what fixes it, from the card. */
+const SIGNED_OUT = {
+  ...CHANGE_STUCK,
+  problem: 'Claude Code is signed out.',
+  next: (
+    <NextStep signal onPress={() => undefined}>
+      Sign in again
+    </NextStep>
+  ),
+}
+export const StuckSignedOut: Story = {
+  args: SIGNED_OUT,
+  play: async ({ canvasElement }) => {
+    const card = within(canvasElement)
+    await expect(card.getByRole('alert')).toHaveTextContent('Claude Code is signed out.')
+    await expect(card.getByRole('button', { name: 'Sign in again' })).toBeVisible()
+    await mainActionPlace(canvasElement)
+  },
+}
+
+/** In a lane as narrow as beside the conversation: its top stays one line, the kind giving way first, then the word. */
+export const NarrowTop: Story = {
+  args: { ...CHANGE_READY, local: true },
+  decorators: [(Story) => <div style={{ width: 186 }}>{Story()}</div>],
+  play: async ({ canvasElement }) => {
+    const top = canvasElement.querySelector('article > div')!
+    const at = within(canvasElement).getByText(CHANGE_READY.at!)
+    await expect(within(canvasElement).getByText('Ready to accept')).toBeInTheDocument()
+    // Where there is layout to measure (a browser, not jsdom): one line, as tall as how long is, and how long whole.
+    if (top.getBoundingClientRect().width === 0) return
+    await expect(top.getBoundingClientRect().height).toBeLessThan(at.getBoundingClientRect().height * 2)
+    await expect(at.scrollWidth).toBeLessThanOrEqual(at.clientWidth)
+  },
+}
 export const ReviewRunning: Story = {
   args: REVIEW_RUNNING,
   play: async ({ canvasElement }) => {
@@ -706,6 +742,15 @@ export const AllStates: Story = {
       size="wide"
       cells={[
         ...KIND_CARDS.map(({ id, card }) => ({ state: id, node: <BoardCard {...card} onOpen={args.onOpen} /> })),
+        { state: 'stuck, signed out', node: <BoardCard {...SIGNED_OUT} onOpen={args.onOpen} /> },
+        {
+          state: 'narrow',
+          node: (
+            <div style={{ width: 186 }}>
+              <BoardCard {...CHANGE_READY} local onOpen={args.onOpen} />
+            </div>
+          ),
+        },
         { state: 'done', node: <BoardCard {...args} status={TaskStatus.Done} word="Done" /> },
         { state: 'current', node: <BoardCard {...args} current /> },
         { state: 'from an automation', node: <BoardCard {...args} from="Nightly bump" /> },

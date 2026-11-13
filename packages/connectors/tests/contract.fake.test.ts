@@ -161,7 +161,7 @@ describe('The fake, reviewing someone else’s pull request', () => {
       assert.strictEqual((yield* Effect.flip(service.postReview(repository, team.number, review))).reason, 'unreachable')
       assert.lengthOf(service.reviewsPosted, 1)
 
-      const gitlab = makeFakeService({ product: 'gitlab' })
+      const gitlab = makeFakeService({ product: 'gitlab', reviews: false })
       const project = gitlab.addRepository(['meridian', 'api'])
       gitlab.addPullRequest({ path: ['meridian', 'api'], title: 'x', author: 'ana' })
       assert.isFalse(gitlab.capabilities.reviews)

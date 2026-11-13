@@ -60,7 +60,7 @@ export const Asking: Story = { args: { remote: null, defaultOpen: true } }
 
 /** The remote out of reach: what is known, and why the rest isn't. */
 export const OutOfReach: Story = {
-  args: { remote: [], note: 'Althar couldn’t reach origin: you may be offline.', defaultOpen: true },
+  args: { remote: [], problem: 'Althar couldn’t reach origin. Check this computer is online.', defaultOpen: true },
 }
 
 /** Typed: what it finds; a pull request's number nobody listed is still offered; Enter picks. */
@@ -212,7 +212,7 @@ export const FindingARepository: Story = {
 
 /** The remote out of reach: each repository's default is still there to go back to. */
 export const SeveralOutOfReach: Story = {
-  args: { ...SEVERAL, remote: [], note: 'Althar couldn’t reach engine’s remote: this computer may be offline.' },
+  args: { ...SEVERAL, remote: [], problem: 'Althar couldn’t reach engine’s remote. Check this computer is online.' },
   play: async () => {
     const page = within(document.body)
     await expect(await page.findAllByRole('option', { name: /Default/ })).toHaveLength(5)

@@ -115,7 +115,7 @@ const spawnGit = (
   first: boolean,
 ): {
   readonly result: Effect.Effect<GitProcessResult>
-  readonly timeout: (milliseconds: number) => void
+  readonly timeout: (milliseconds: number) => GitProcessResult
   readonly stop: () => void
 } => {
   const at = gitIn(cwd, ['-c', 'core.hooksPath=/dev/null', ...args])
@@ -134,6 +134,7 @@ const spawnGit = (
     network: reachesRemote(args),
   })
   let ended = false
+  let answer: GitProcessResult | undefined
   let timeoutMilliseconds: number | undefined
   const result = started.result.then((done): GitProcessResult => {
     ended = true
@@ -145,17 +146,17 @@ const spawnGit = (
     // It couldn't start, as for a git that isn't there: what Node said, with its code.
     if (done.error !== null) {
       const error = Object.assign(new Error(done.error.message), { code: done.error.code ?? undefined })
-      return {
+      return (answer = {
         error,
         stdout: done.stdout,
         stderr: done.stderr,
         ...(timeoutMilliseconds === undefined ? { reason: why ?? done.error.message } : {}),
         ...(timeoutMilliseconds === undefined ? {} : { timedOut: true, timeout: timeoutMilliseconds }),
-      }
+      })
     }
     const code = done.code ?? 128
     const reason = timeoutMilliseconds !== undefined ? undefined : (why ?? undefined)
-    return {
+    return (answer = {
       error:
         done.code === 0 && why === null
           ? null
@@ -166,14 +167,23 @@ const spawnGit = (
       code,
       ...(done.signal === null ? {} : { signal: done.signal }),
       ...(timeoutMilliseconds === undefined ? {} : { timedOut: true, timeout: timeoutMilliseconds }),
-    }
+    })
   })
   return {
     result: Effect.promise(() => result),
     timeout: (milliseconds) => {
-      if (ended) return
+      if (answer !== undefined) return answer
       timeoutMilliseconds = milliseconds
       started.stop()
+      // A root that exited can leave descendants holding its pipes. The deadline ends this read even if the runner's
+      // close acknowledgement never arrives; cancellation still asks the runner to stop and release its streams.
+      return {
+        error: new Error(`No answer within ${milliseconds / 1000} s, so Althar stopped waiting.`),
+        stdout: '',
+        stderr: '',
+        timedOut: true,
+        timeout: milliseconds,
+      }
     },
     stop: () => {
       if (!ended) started.stop()
@@ -205,6 +215,33 @@ export const gitOutcome = (
 /** A git command's output exactly as it wrote it, for output whose spaces and last line matter, such as a diff. */
 export const gitExactly = (cwd: string, ...args: ReadonlyArray<string>): Effect.Effect<string, GitFailed> =>
   run(60_000, cwd, args, {}, false)
+
+/** Exact patch identities, including whitespace, for matching a copied commit sequence after a branch move. */
+export const patchIdsOf = (cwd: string, commits: ReadonlyArray<string>) =>
+  Effect.gen(function* () {
+    if (commits.length === 0) return new Map<string, string>()
+    const patches = yield* gitExactly(
+      cwd,
+      'show',
+      '--format=commit %H',
+      '--no-ext-diff',
+      '--no-textconv',
+      '--no-renames',
+      '--binary',
+      '--full-index',
+      ...commits,
+    )
+    const listed = yield* run(60_000, cwd, ['patch-id', '--verbatim'], {}, true, patches)
+    return new Map(
+      listed
+        .split('\n')
+        .filter((line) => line !== '')
+        .map((line) => {
+          const [patch = '', commit = ''] = line.split(' ')
+          return [commit, patch] as const
+        }),
+    )
+  })
 
 /** What every git command in an effect runs with besides, as `untouched` sets it for a folder someone else works in. */
 const Untouched = Context.Reference<Readonly<Record<string, string>>>('@althar/runtime/git/Untouched', { defaultValue: () => ({}) })
@@ -315,10 +352,7 @@ const runProcess = (
       (running) =>
         Effect.race(
           running.result,
-          Effect.sleep(Duration.millis(timeout)).pipe(
-            Effect.tap(() => Effect.sync(() => running.timeout(timeout))),
-            Effect.andThen(running.result),
-          ),
+          Effect.sleep(Duration.millis(timeout)).pipe(Effect.andThen(Effect.sync(() => running.timeout(timeout)))),
         ),
       (running) => Effect.sync(running.stop),
     ),

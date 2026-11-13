@@ -8,6 +8,7 @@ import { Button } from '../../primitives/Button/Button'
 import { Dialog } from '../../primitives/Dialog/Dialog'
 import { Tooltip } from '../../primitives/HoverCard/HoverCard'
 import { LinkButton } from '../../primitives/LinkButton/LinkButton'
+import { Problem } from '../../primitives/Problem/Problem'
 import { Skeleton } from '../../primitives/Skeleton/Skeleton'
 import { VisuallyHidden } from '../../primitives/VisuallyHidden/VisuallyHidden'
 import { ControlDetail } from '../ControlCenter/ControlCenter'
@@ -162,7 +163,7 @@ export function ServerSheet({
         <div className={s.sheet}>
           {server.failed !== null && (
             <SheetFact label={t.lastStart}>
-              <span className={s.danger}>{failedBy === null ? server.failed.why : t.failedIn(nameOf(failedBy), server.failed.why)}</span>
+              <Problem>{failedBy === null ? server.failed.why : t.failedIn(nameOf(failedBy), server.failed.why)}</Problem>
             </SheetFact>
           )}
           <SheetFact label={t.runs}>
@@ -231,11 +232,7 @@ export function ServerSheet({
             </>
           }
         >
-          {removeError !== null && (
-            <p className={s.error} role="alert">
-              {removeError}
-            </p>
-          )}
+          {removeError !== null && <Problem>{removeError}</Problem>}
         </Dialog>
       )}
     </div>

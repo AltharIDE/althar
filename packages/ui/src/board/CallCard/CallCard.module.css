@@ -26,6 +26,14 @@
   -webkit-line-clamp: 2;
   line-clamp: 2;
 }
+/* what went wrong, as much as two lines */
+.clamp {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+}
 .options {
   display: flex;
   flex-direction: column;

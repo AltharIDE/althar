@@ -1,6 +1,6 @@
 import { useState } from 'react'
 
-import { ModelMove } from '@althar/ui'
+import { ModelMove, Problem } from '@althar/ui'
 
 import { messageOf } from '../../data/client'
 import { useServices } from '../../data/services'
@@ -43,11 +43,7 @@ export function ModelMoveOf({ move, itemId, named }: { move: ModelMoveContent; i
         onKeep={() => act(() => client.keepTheModel(itemId))}
         onUndo={() => act(() => client.undoTheModelMove(itemId))}
       />
-      {error !== null && (
-        <p className={s.failure} role="alert">
-          That didn’t go through. {error}
-        </p>
-      )}
+      {error !== null && <Problem className={s.failure}>That didn’t go through. {error}</Problem>}
     </>
   )
 }

@@ -135,6 +135,10 @@ const start = (job, lane) => {
     } catch {
       child.kill()
     }
+    // A descendant may keep the pipes after this root exits. Cancel our reads too, so close frees its lane.
+    child.stdin.destroy()
+    child.stdout.destroy()
+    child.stderr.destroy()
   }
   running.set(job.id, { stop })
   const collect = (into) => (chunk) => {
@@ -267,6 +271,10 @@ export const startHere = (command: Command): Started => {
     } catch {
       child.kill()
     }
+    // A descendant may keep the pipes after this root exits. Cancel our reads too, as on the runner thread.
+    child.stdin.destroy()
+    child.stdout.destroy()
+    child.stderr.destroy()
   }
   const collect = (into: Array<Buffer>) => (chunk: Buffer) => {
     size += chunk.length

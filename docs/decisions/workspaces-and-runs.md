@@ -199,7 +199,9 @@ first lead in a repository works it out, and Althar replays it.
   failed and the end of what it printed, and is asked to get the folder ready
   and record the setup that works, which replaces the old one.
   `install_dependencies` runs the setup again on the lead's request, never a
-  command it names.
+  command it names. A Local task's lead runs it in the person's checkout,
+  which Althar never sets up by itself and keeps no record of; there is no
+  setup to record from it.
 - **Secret files are copied** like any other file the setup names, because
   the person asked for it. The lead can read the checkout already.
 - **The person can see and change it** in the project's settings, under
@@ -253,10 +255,18 @@ tasks' folders go after a wait, and come back when the task needs them.
 - **Coming back.** A task whose folder went still shows its diff, commits and
   committed documents from the kept commit, and its screenshots from the
   artifact store. Its folder comes back at the same path before anything
-  needs it: an agent starting, opening in an editor, a run, or reopening. It
-  is set up again, which costs about a minute, and its header says
-  "Bringing its folder back" until it is ready. Something else at that path
-  is never taken or removed.
+  needs it: an agent starting, opening in an editor, a run, a file the
+  person sends its lead, or reopening. It is set up again, which costs about
+  a minute, and its header says "Bringing its folder back" until it is
+  ready, and nothing removes it meanwhile. A file sent to its lead keeps
+  it as opened, as opening it does; a file that can't be sent brings
+  nothing back. Something else at that path is never taken or removed. A
+  worktree the person deleted by hand comes back the same way, header and
+  hold too; its branch gone as well, it can't. Moving a task between a
+  worktree and its checkout holds the same lock, so a worktree removed for
+  the move is never taken for one deleted by hand. A Local task's checkout
+  never comes back, and its lead that can't start says the folder is gone,
+  not that the agent isn't installed.
 - **The Settings row** shows the disk as one bar, with what's held back and
   what could go now. Its list says why each folder is held, and offers
   Remove. Clean up takes what nothing holds, and says what it freed.
@@ -394,11 +404,16 @@ A run is said in three places that share one state, so they agree:
   main", a branch or a pull request). A run and a process a lead left running
   are never merged into one row, even on the same address. The running time
   is the whole reminder; the pill doesn't nag.
-- **The run's card** in the thread it was asked for in: where it runs, the
-  command, its address as a link, its uptime and Stop, and, once over, how it
-  ended, with Run again. A run that Althar's restart ended is marked stopped.
-  Its output lives here. `run_project` waits up to 30 seconds for the
-  address, so the coordinator's reply can link it, or say how it ended.
+- **The run's card** in the thread it was asked for in: what runs, its
+  address as a link, and Stop, with where it runs only outside its own task's
+  thread, whose header says it; once over, how it ended, with the line that
+  says why, and Run again. A run that Althar's restart ended is marked
+  stopped. Its output lives here, a press away: a console over the card, the
+  command at its head, read for a person, and what it printed under it,
+  following the end. Althar keeps what a run printed while it runs and for its
+  last few runs after, never past a restart. `run_project` waits up to 30
+  seconds for the address, so the coordinator's reply can link it, or say how
+  it ended.
 
 Where a run answers is read from the first local address it prints. One that
 answers nowhere (an app's window, a watcher) is taken as starting for ten

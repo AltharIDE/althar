@@ -33,22 +33,34 @@ export type CheckedProps = RootProps<
 /** How many of a run's last lines show when it opens. */
 const SHOWN = 30
 
+/** Whether a piece says anything: a caption, or something it ran, printed or noted. One that says nothing is no check. */
+const says = (piece: EvidencePiece) =>
+  piece.caption.trim() !== '' ||
+  (piece.form === 'output' && (piece.command !== undefined || piece.lines.some((line) => line.trim() !== ''))) ||
+  (piece.form === 'note' && (piece.text ?? '').trim() !== '')
+
+/** A run that ended in a failure. */
+const failing = (piece: EvidencePiece) => piece.form === 'output' && piece.exit !== undefined && piece.exit !== 0
+
 /**
  * What a lead checked, other than by looking, under its result: a quiet line
  * each, ticked or crossed, opening to what it printed; then what it couldn't
- * check, in plain words. Nothing to say, nothing drawn.
+ * check, in plain words. Nothing to say, nothing drawn: a turn that checked
+ * nothing has no block at all, even handed a piece that says nothing.
  */
 export function Checked({ pieces, unverified = [], text, className, ...rest }: CheckedProps) {
   const t = { ...checkedText, ...text }
-  const checks = pieces.filter((piece) => piece.form !== 'picture')
-  if (checks.length === 0 && unverified.length === 0) return null
+  // what failed first: a problem is what the person reads before what is fine
+  const checks = pieces.filter((piece) => piece.form !== 'picture' && says(piece)).sort((a, b) => Number(failing(b)) - Number(failing(a)))
+  const unchecked = unverified.filter((line) => line.trim() !== '')
+  if (checks.length === 0 && unchecked.length === 0) return null
   return (
     <div className={cx(s.checks, className)} {...rest}>
       {checks.length > 0 && (
         <div className={s.part}>
           <p className={s.head}>{t.checked}</p>
           {checks.map((piece) => {
-            const failed = piece.form === 'output' && piece.exit !== undefined && piece.exit !== 0
+            const failed = failing(piece)
             const printed =
               piece.form === 'output' ? [...(piece.command === undefined ? [] : [`$ ${piece.command}`]), ...piece.lines.slice(-SHOWN)] : []
             const said = piece.form === 'note' ? (piece.text ?? '') : ''
@@ -81,10 +93,10 @@ export function Checked({ pieces, unverified = [], text, className, ...rest }: C
           })}
         </div>
       )}
-      {unverified.length > 0 && (
+      {unchecked.length > 0 && (
         <div className={s.part}>
           <p className={s.head}>{t.notChecked}</p>
-          <Markdown source={unverified.map((line) => `- ${line}`).join('\n')} />
+          <Markdown source={unchecked.map((line) => `- ${line}`).join('\n')} />
         </div>
       )}
     </div>

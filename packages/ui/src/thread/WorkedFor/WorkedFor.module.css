@@ -19,18 +19,23 @@
   flex: none;
   font-variant-numeric: tabular-nums;
 }
-/* the part of its time that took most, quieter than the time it took */
+/* the part of its time that took most, quieter than the time it took: smaller, in the same readable grey */
 .most {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  color: var(--t-4);
+  font-size: 12px;
+  color: var(--t-3);
   font-variant-numeric: tabular-nums;
 }
 button.head:hover,
 .worked[data-state='open'] > .head {
   color: var(--t-1);
+}
+/* the ring rounds its corners, as every other row's does */
+button.head:focus-visible {
+  border-radius: var(--r-sm);
 }
 .chevron {
   flex: none;

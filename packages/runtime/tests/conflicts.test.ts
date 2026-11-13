@@ -1,3 +1,4 @@
+import { removeTreeSync } from '@althar/testing'
 import { randomBytes } from 'node:crypto'
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -339,7 +340,7 @@ describe('rounds an earlier launch left under way', () => {
         return made
       }).pipe(Effect.provide(launch()))
       // Meanwhile one task's worktree went, and another's is no longer one git reads.
-      rmSync(gone?.path ?? '', { recursive: true, force: true })
+      removeTreeSync(gone?.path ?? '')
       rmSync(join(unreadable?.path ?? '', '.git'), { force: true })
 
       yield* Effect.gen(function* () {

@@ -19,7 +19,7 @@ import { CheckState } from '../../foundations/vocabulary'
 import { Button } from '../../primitives/Button/Button'
 import { Menu, MenuItem } from '../../primitives/Menu/Menu'
 import { SplitButton } from '../../primitives/SplitButton/SplitButton'
-import { ChangeTrack } from './ChangeTrack'
+import { ChangeTrack, type TrackStop } from './ChangeTrack'
 
 const accept = fn()
 const ready = fn()
@@ -145,6 +145,9 @@ export const OneRepositorysFiles: Story = {
   },
 }
 
+/** In the grid, a change's files once, under its first state: the same files under every state say nothing new. */
+const noFiles = (stops: readonly TrackStop[] | undefined) => (stops ?? TRACK_READY).map((stop) => ({ ...stop, files: [] }))
+
 export const AllStates: Story = {
   parameters: statesParameters,
   render: (args) => (
@@ -152,14 +155,24 @@ export const AllStates: Story = {
       size="thread"
       cells={[
         { state: 'both drafts', node: <ChangeTrack {...args} {...BothDrafts.args} /> },
-        { state: 'one ready, one a draft', node: <ChangeTrack {...args} {...OneReady.args} /> },
-        { state: 'checks failing in one', node: <ChangeTrack {...args} {...FailingInOne.args} /> },
-        { state: 'a conflict in one', node: <ChangeTrack {...args} {...ConflictInOne.args} /> },
-        { state: 'ready', node: <ChangeTrack {...args} /> },
-        { state: 'merging, in order', node: <ChangeTrack {...args} {...Merging.args} /> },
-        { state: 'the first in the merge queue', node: <ChangeTrack {...args} {...QueuedFirst.args} /> },
-        { state: 'one merged, one open', node: <ChangeTrack {...args} {...OneMerged.args} /> },
-        { state: 'one merged, one refused', node: <ChangeTrack {...args} {...Refused.args} /> },
+        { state: 'one ready, one a draft', node: <ChangeTrack {...args} {...OneReady.args} stops={noFiles(OneReady.args?.stops)} /> },
+        {
+          state: 'checks failing in one',
+          node: <ChangeTrack {...args} {...FailingInOne.args} stops={noFiles(FailingInOne.args?.stops)} />,
+        },
+        { state: 'a conflict in one', node: <ChangeTrack {...args} {...ConflictInOne.args} stops={noFiles(ConflictInOne.args?.stops)} /> },
+        { state: 'ready', node: <ChangeTrack {...args} stops={noFiles(args.stops)} /> },
+        { state: 'merging, in order', node: <ChangeTrack {...args} {...Merging.args} stops={noFiles(Merging.args?.stops)} /> },
+        {
+          state: 'the first in the merge queue',
+          node: <ChangeTrack {...args} {...QueuedFirst.args} stops={noFiles(QueuedFirst.args?.stops)} />,
+        },
+        { state: 'one merged, one open', node: <ChangeTrack {...args} {...OneMerged.args} stops={noFiles(OneMerged.args?.stops)} /> },
+        { state: 'one merged, one refused', node: <ChangeTrack {...args} {...Refused.args} stops={noFiles(Refused.args?.stops)} /> },
+        {
+          state: 'merge failed',
+          node: <ChangeTrack {...args} stops={noFiles(args.stops)} error="GitLab didn’t answer, so nothing merged." />,
+        },
         { state: 'four repositories', node: <ChangeTrack {...args} {...FourRepositories.args} /> },
       ]}
     />

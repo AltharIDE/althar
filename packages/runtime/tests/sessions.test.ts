@@ -1,5 +1,6 @@
+import { removeTreeSync } from '@althar/testing'
 import { execFileSync } from 'node:child_process'
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -902,7 +903,9 @@ describe('sessions', () => {
       Effect.gen(function* () {
         const sessions = yield* Sessions
         const { task: created } = yield* task()
-        yield* begin(created.threadId, 'claude-code')
+        // Windows cannot find the owner of an output file with lsof. Give the
+        // lookup a real agent tree, as production agents do, on every OS.
+        yield* begin(created.threadId, 'process')
         yield* say(created.threadId, scenarios.backgroundQuiet)
         yield* ended(created.threadId, 1)
         const [serving] = yield* until(shown(created.threadId), (all) => all[0]?.url != null)
@@ -950,7 +953,7 @@ describe('sessions', () => {
             Effect.ensuring(
               Effect.sync(() => {
                 process.env.PATH = path
-                rmSync(dir, { recursive: true, force: true })
+                removeTreeSync(dir)
               }),
             ),
           )
@@ -1029,8 +1032,10 @@ describe('sessions', () => {
         assert.deepStrictEqual(notes, ['Fake codex takes over.'])
         const reply = (yield* threadItems(created.threadId)).filter((item) => item.kind === 'agent_message').at(-1)?.content.text as string
         assert.include(reply, 'You are taking over a task, in the same worktree.')
-        assert.include(reply, '[person] start with the worker')
+        // What waits is the turn's message, once: not in its brief's thread so far too.
+        assert.notInclude(reply, '[person] start with the worker')
         assert.isTrue(reply.endsWith('start with the worker'))
+        assert.strictEqual(reply.split('start with the worker').length - 1, 1)
       }).pipe(Effect.provide(runtime())),
     )
 
@@ -1180,6 +1185,9 @@ describe('sessions', () => {
               },
             },
           },
+          // The test moves its clock three minutes at once, past when a lead's turn is followed: none of that here, so the
+          // last notice is the one the start left.
+          idle: { reports: Duration.hours(1) },
         },
       ).pipe(Layer.provideMerge(observedClock))
       return Effect.gen(function* () {

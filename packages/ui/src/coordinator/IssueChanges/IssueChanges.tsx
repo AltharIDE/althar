@@ -10,6 +10,7 @@ import { Rhythm } from '../../lib/rhythm'
 import { safeHref } from '../../lib/safeHref'
 import { Button } from '../../primitives/Button/Button'
 import { LinkButton } from '../../primitives/LinkButton/LinkButton'
+import { Problem } from '../../primitives/Problem/Problem'
 import { VisuallyHidden } from '../../primitives/VisuallyHidden/VisuallyHidden'
 import s from './IssueChanges.module.css'
 
@@ -381,32 +382,35 @@ function Card({ root, issues, note, noteHref, task, state, onApply, onDiscard, o
               )}
               {comment?.field === 'comment' && <p className={s.comment}>{comment.to}</p>}
               {failed && issue.applied === true && <p className={s.done}>{t.appliedOne}</p>}
-              {failed && issue.applied === false && issue.error && <p className={s.error}>{issue.error}</p>}
+              {failed && issue.applied === false && issue.error && <Problem size="small">{issue.error}</Problem>}
             </li>
           )
         })}
       </ul>
-      <div className={s.foot}>
-        <span className={cx(s.note, failed && s.noteFailed)} aria-live="polite">
-          {applying ? (
-            t.applying
-          ) : failed ? (
-            t.failed
-          ) : onAlwaysAtOnce ? (
-            <LinkButton onClick={onAlwaysAtOnce}>{t.alwaysAtOnce}</LinkButton>
-          ) : null}
-        </span>
-        {onDiscard && !applying && (
-          <Button variant="quiet" onClick={onDiscard}>
-            {t.discard}
-          </Button>
-        )}
-        {onApply && (
-          <Button variant="signal" busy={applying} onClick={onApply}>
-            {failed ? t.applyAgain : t.apply}
-          </Button>
-        )}
-      </div>
+      {/* no foot where there is nothing to say or press: a card the person can't act on ends with its issues */}
+      {(onApply !== undefined || onDiscard !== undefined || onAlwaysAtOnce !== undefined || applying || failed) && (
+        <div className={s.foot}>
+          <span className={cx(s.note, failed && s.noteFailed)} aria-live="polite">
+            {applying ? (
+              t.applying
+            ) : failed ? (
+              t.failed
+            ) : onAlwaysAtOnce ? (
+              <LinkButton onClick={onAlwaysAtOnce}>{t.alwaysAtOnce}</LinkButton>
+            ) : null}
+          </span>
+          {onDiscard && !applying && (
+            <Button variant="quiet" onClick={onDiscard}>
+              {t.discard}
+            </Button>
+          )}
+          {onApply && (
+            <Button variant="signal" busy={applying} onClick={onApply}>
+              {failed ? t.applyAgain : t.apply}
+            </Button>
+          )}
+        </div>
+      )}
     </article>
   )
 }

@@ -485,8 +485,14 @@ export class Limits extends Context.Service<
           if (input.planned?.agentId === input.agentId && input.planned.model !== null) return input.planned.model
           const [last] = yield* sql<{ model: string }>`
             SELECT model FROM provider_sessions WHERE project_id = ${input.projectId} AND agent_id = ${input.agentId} AND model IS NOT NULL
-            ORDER BY started_at DESC LIMIT 1`
-          return last?.model ?? null
+              AND config IS NOT NULL AND state <> 'failed'
+            ORDER BY started_at DESC, rowid DESC LIMIT 1`
+          if (last === undefined) return null
+          // History includes automatic picks too. Reuse one only while the agent still offers it; otherwise use its own default.
+          const offered = (yield* models.catalog).find((one) => one.agentId === input.agentId)
+          return offered?.models.some((one) => one.id === last.model && !isAgentDefault(one)) && !offered.blocked.includes(last.model)
+            ? last.model
+            : null
         })
 
       /** One ranking for both picking an agent and picking its model. */

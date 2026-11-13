@@ -21,7 +21,7 @@ describe('slots', () => {
     // Friday after 9 goes to Monday.
     assert.strictEqual(slotAfter(WEEKDAYS, '2026-10-23T10:00'), '2026-10-26T09:00')
     // Across a month and a year.
-    assert.strictEqual(slotAfter(NIGHTLY, '2026-12-31T03:00'), '2027-01-01T02:00')
+    assert.strictEqual(slotAfter(NIGHTLY, '2025-12-31T03:00'), '2026-01-01T02:00')
   })
 
   it('finds the last slot at or before a time', () => {

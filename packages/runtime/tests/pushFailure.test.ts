@@ -130,9 +130,9 @@ describe('a push that failed', () => {
     assert.strictEqual(why, 'unanswered')
     assert.strictEqual(
       message,
-      'GitLab didn’t answer in time, so the push was stopped. git may have been waiting for a sign-in it couldn’t ask for here: sign git in to GitLab from a terminal, then try again.',
+      'GitLab didn’t answer in time, so Althar stopped waiting for the push. git may have been waiting for a sign-in it couldn’t ask for here: sign git in to GitLab from a terminal, then try again.',
     )
-    assert.strictEqual(detail, 'Stopped after a minute with no answer.')
+    assert.strictEqual(detail, 'Stopped waiting after a minute with no answer.')
     assert.notInclude(message, 'git -c')
     assert.notInclude(message, '8ac5a185')
   })
@@ -223,11 +223,14 @@ describe('a git command that fails', () => {
     }),
   )
 
-  it.live('says it ran out of time where it was stopped for it', () =>
+  it.live('reports a deadline without claiming an unacknowledged process exit', () =>
     Effect.gen(function* () {
       const slow = yield* Effect.flip(gitWithin(200, repository(), '-c', 'alias.slow=!sleep 2', 'slow'))
-      assert.deepInclude(slow, { stderr: '', timedOut: true, timeout: 200, signal: 'SIGTERM' })
-      assert.strictEqual(words(slow, String).message, 'git slow got no answer in a second, so Althar stopped it. Try again.')
+      assert.deepInclude(slow, { stderr: '', timedOut: true, timeout: 200 })
+      // The deadline is confirmed; a request to stop is not an observed process exit.
+      assert.notProperty(slow, 'signal')
+      assert.notProperty(slow, 'code')
+      assert.strictEqual(words(slow, String).message, 'git slow got no answer in a second, so Althar stopped waiting. Try again.')
     }),
   )
 })

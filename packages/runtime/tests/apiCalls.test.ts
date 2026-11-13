@@ -121,8 +121,13 @@ describe('what a project runs, from the window', () => {
           snapshot.launches.some((launch) => launch.ended !== null),
         )).launches
         assert.deepInclude(ended?.ended, { code: 0 })
+        // What it printed is read from its card, and still once it has left the list.
+        assert.strictEqual((yield* client.ReadLaunchOutput({ id: first.id })).text.trim(), 'done')
         yield* client.ClearLaunch({ commandId: commandId(), id: first.id })
         assert.deepStrictEqual((yield* client.GetCoordinator({ projectId })).launches, [])
+        assert.strictEqual((yield* client.ReadLaunchOutput({ id: first.id })).text.trim(), 'done')
+        const missing = yield* Effect.flip(client.ReadLaunchOutput({ id: 'nothing' }))
+        assert.strictEqual(missing instanceof ApiError ? missing.reason : '', 'NotFound')
 
         yield* client.DropRunnable({ commandId: commandId(), projectId, id: once.id })
         assert.deepStrictEqual(

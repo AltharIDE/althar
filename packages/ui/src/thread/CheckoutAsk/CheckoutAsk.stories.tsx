@@ -21,7 +21,6 @@ type Story = StoryObj<typeof meta>
 
 /** The checkout has changes that aren't committed: the task waits for them, or starts in a worktree. Nothing is stashed. */
 export const Changes: Story = {}
-export const ChangesDark: Story = { globals: { theme: 'dark' } }
 
 /** Answered once: the rest wait for the runtime, which moves on and takes the card with the call. */
 export const AnsweredOnce: Story = {

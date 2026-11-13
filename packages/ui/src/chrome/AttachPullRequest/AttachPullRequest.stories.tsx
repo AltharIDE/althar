@@ -57,9 +57,32 @@ export const NothingOwn: Story = {
 /** Attaching it. */
 export const Busy: Story = { args: { defaultValue: '#185', busy: true } }
 
-/** The runtime said no, in its words. */
+/** The runtime said no, in its words, at the link, which stays to be changed and sent again. */
 export const Refused: Story = {
   args: { defaultValue: '#3', error: 'PR #3 is closed: only an open one can be attached.' },
+  play: async () => {
+    const field = await within(document.body).findByRole('textbox', { name: 'Its link or number' })
+    await expect(field).toHaveAccessibleDescription('PR #3 is closed: only an open one can be attached.')
+    await expect(field).toHaveAttribute('aria-invalid', 'true')
+  },
+}
+/** The link refused is changed: the runtime's words were about the old one, so they go. */
+export const ChangingWhatWasRefused: Story = {
+  args: Refused.args,
+  play: async () => {
+    const page = within(document.body)
+    await userEvent.type(await page.findByRole('textbox', { name: 'Its link or number' }), '5')
+    await expect(page.queryByRole('alert')).toBeNull()
+  },
+}
+
+/** Refused on the second page: why, under what starting from its head does, with the way back to the link. */
+export const StartRefused: Story = {
+  args: {
+    defaultValue: '#185',
+    start: { name: 'PR #185', source: 'ninemate:permission-card-enter', own: 2 },
+    error: 'Althar couldn’t fetch ninemate:permission-card-enter. Check this computer is online.',
+  },
 }
 
 /** Escape closes it, and nothing is attached. */

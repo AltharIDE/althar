@@ -6,7 +6,7 @@ import { join } from 'node:path'
 import { expect, test } from '@playwright/test'
 
 import { author, repository } from '../tests/repository'
-import { launch, openFirstProject, say } from './support'
+import { launch, openFirstProject, say, showPanes } from './support'
 
 /*
  * A finished task's folder (ADR-056), in a real window with the fake agent,
@@ -86,7 +86,7 @@ test('a finished task’s folder goes from Settings, its work still reads, and i
   try {
     await (await electronApp.browserWindow(page)).evaluate((window) => window.setSize(1280, 860))
     await openFirstProject(electronApp, page, repo)
-    await page.getByRole('radio', { name: 'Home' }).click()
+    await showPanes(page, { conversation: true, board: true })
     const work = page.getByRole('region', { name: 'The project’s work' })
 
     // Only when the person cleans up, so nothing goes by itself while the test runs.

@@ -14,9 +14,11 @@ import { partsOfTask, presetsIn, savePreset } from '../src/presets'
 import { Projects } from '../src/Projects'
 import { Queries } from '../src/Queries'
 import * as Runtime from '../src/Runtime'
+import { shelve } from '../src/scratch'
 import { Sessions } from '../src/Sessions'
 import { ToolServer, type ToolAccess } from '../src/ToolServer'
 import { callTool, fakeConnectors, HOST, hosted, items, runtime, until } from './support'
+import { knownModels } from './knownModels'
 
 /*
  * Chats on Scratch, the parts tools and presets (a task is a conversation
@@ -102,7 +104,7 @@ describe('a chat on Scratch', () => {
 })
 
 describe('a chat’s copy', () => {
-  it.live('is made without setup, which replays the first time its lead runs something', () => {
+  it.live('is never set up while it is an aside, whatever its lead runs: made a task, it is, before its next turn', () => {
     const { working, bare } = hosted()
     const github = makeFakeService({ pushUrl: () => bare })
     github.addRepository(['meridian', 'api'])
@@ -115,22 +117,35 @@ describe('a chat’s copy', () => {
         lead: { agent: 'claude-code' },
       })
       const [chat] = yield* until(cards(projectId), (all) => all[0]?.phase === 'ready')
+      // Started by the coordinator, it was made on Scratch: its setup, begun as it was made, never ran.
+      assert.isTrue(chat?.scratch === true)
       const setupOf = sql<{ setup: string | null }>`SELECT setup FROM workspaces WHERE task_id = ${chat?.taskId ?? ''}`
-      // Only talking, nothing was set up.
       assert.isNull((yield* setupOf)[0]?.setup ?? null)
-      // Its lead runs something: its setup replays then.
-      yield* (yield* Sessions).send({
-        envelope: yield* Runtime.envelope('thread.send', { threadId: chat?.threadId ?? '' }),
-        threadId: chat?.threadId ?? '',
-        body: 'Run it. [lead:serve] [lead:finish]',
-      })
+      // Its lead runs something, and its turn ends: still nothing set up, then or before the turn after.
+      const sessions = yield* Sessions
+      const say = (body: string) =>
+        Effect.gen(function* () {
+          yield* sessions.send({
+            envelope: yield* Runtime.envelope('thread.send', { threadId: chat?.threadId ?? '' }),
+            threadId: chat?.threadId ?? '',
+            body,
+          })
+          yield* until(sessions.busy(chat?.threadId ?? ''), (busy) => !busy)
+        })
+      yield* say('Run it. [lead:serve] [lead:finish]')
+      yield* say('And now? [lead:finish]')
+      assert.isNull((yield* setupOf)[0]?.setup ?? null)
+      assert.isFalse((yield* items(chat?.threadId ?? '')).some((item) => item.kind === 'setup'))
+      // Made a task, it is work: its copy is set up before its next turn.
+      yield* shelve(chat?.taskId ?? '', null, (yield* Instance).personId)
+      yield* say('Build it. [lead:finish]')
       yield* until(setupOf, (rows) => rows[0]?.setup != null)
     }).pipe(Effect.provide(runtimeWith(github)))
   })
 })
 
 describe('presets', () => {
-  it.live('are saved from a task, and offered once the person sets up the same parts twice', () => {
+  it.live('are saved from a task, and not offered for parts the coordinator planned, however alike', () => {
     const { working, bare } = hosted()
     const github = makeFakeService({ pushUrl: () => bare })
     github.addRepository(['meridian', 'api'])
@@ -162,18 +177,14 @@ describe('presets', () => {
       // Its card names it now, as the next with those parts.
       assert.strictEqual((yield* cards(projectId))[0]?.plan?.preset, 'Quick change')
 
-      // The same parts again, with the same lead and no preset of them: the coordinator offers one, once.
+      // The same parts again, as the coordinator planned them: nothing of the person's to keep, so nothing is offered.
       const sql = yield* SqlClient.SqlClient
       yield* sql`DELETE FROM presets`
       yield* say('Add a timeout. [coordinator:plan] [coordinator:plan-no-review] [lead:finish] [lead:edit]')
-      yield* until(cards(projectId), (all) => all.length === 2 && all.every((one) => one.phase === 'ready'))
-      const offers = yield* until(
-        Effect.map(items(threadId), (all) =>
-          all.filter((item) => item.kind === 'notice' && (item.content as { offer?: unknown }).offer !== undefined),
-        ),
-        (found) => found.length === 1,
-      )
-      assert.strictEqual(String(offers[0]?.content.title), 'You set up these parts twice. Keep them as a preset?')
+      const both = yield* until(cards(projectId), (all) => all.length === 2 && all.every((one) => one.phase === 'ready'))
+      assert.isTrue(both.every((one) => one.presetOffer === undefined))
+      const offered = yield* sql<{ id: string }>`SELECT id FROM record_events WHERE type = 'project.preset_offered'`
+      assert.deepStrictEqual(offered, [])
     }).pipe(Effect.provide(runtimeWith(github)))
   })
 
@@ -185,7 +196,7 @@ describe('presets', () => {
       const { projectId, coordinator } = yield* opened(working)
       const sql = yield* SqlClient.SqlClient
       // The coordinator lists them, and plans from the one that fits.
-      assert.include(yield* callTool(coordinator, 'list_presets', {}), '- Small change: a worktree, reviewed after it merges')
+      assert.include(yield* callTool(coordinator, 'list_presets', {}), '- Small change: a worktree, reviewed before it ships')
       yield* callTool(coordinator, 'draft_task', { title: 'Fix a typo' })
       const said = yield* callTool(coordinator, 'propose_plan', {
         task: 'fix-a-typo',
@@ -206,12 +217,13 @@ describe('presets', () => {
       const first = yield* plan()
       yield* (yield* Plans).hold(first.id, (yield* Instance).personId)
       // Small change has no ending of its own: it ends as the project says (a draft where the project says nothing).
-      assert.deepInclude(first.parameters, { end: 'draft', reviewAfterMerge: true })
+      assert.deepInclude(first.parameters, { end: 'draft', smallChange: true })
+      assert.isUndefined(first.parameters.reviewAfterMerge)
       assert.deepStrictEqual(
         first.parameters.steps.map((step: { key: string; skipped: boolean }) => [step.key, step.skipped]),
         [
           ['implement', false],
-          ['review', true],
+          ['review', false],
         ],
       )
       const [card] = yield* until(cards(projectId), (all) => all[0]?.plan?.preset === 'Small change')
@@ -260,6 +272,7 @@ describe('presets', () => {
         }))
       const planned = (title: string, slug: string, preset: string, small?: boolean) =>
         Effect.gen(function* () {
+          yield* knownModels
           yield* callTool(coordinator, 'draft_task', { title })
           yield* callTool(coordinator, 'propose_plan', {
             task: slug,
@@ -375,8 +388,11 @@ describe('what the coordinator and a lead are told of presets', () => {
       assert.include(brief, 'The person’s own presets count too')
       // A prototype ends with its branch; it may graduate to a change in the same task, or not, and the person decides.
       assert.include(brief, 'A prototype ends with its branch')
-      assert.include(brief, 'the same task can go on as a change, with its pull request ending and its review added then')
+      assert.include(brief, 'the same task goes on as a change, rather than a new task by default: change_part with preset Change')
       assert.include(brief, 'never assume either way')
+      assert.include(brief, 'Whenever a task’s scope or shape changes, check whether its title still says what it does now')
+      assert.include(brief, 'call rename_task with its id or slug')
+      assert.include(brief, 'Keep a title that still fits')
 
       const tools = yield* toolDescriptions(coordinator)
       for (const words of PICKS) assert.include(tools.get('propose_plan'), words)
@@ -384,6 +400,8 @@ describe('what the coordinator and a lead are told of presets', () => {
       assert.include(tools.get('draft_task'), 'Prototype for a prototype or design directions')
       assert.include(tools.get('list_presets'), 'Prototype is for a prototype or design directions')
       assert.include(tools.get('list_presets'), 'Change for the rest')
+      assert.include(tools.get('change_part'), 'Whenever a task’s scope or shape changes')
+      assert.include(tools.get('rename_task'), 'An open pull request Althar opened for it takes the new title too')
     }).pipe(Effect.provide(runtimeWith(github)))
   })
 
@@ -409,6 +427,9 @@ describe('what the coordinator and a lead are told of presets', () => {
       for (const words of PICKS) assert.include(brief, words)
       assert.include(brief, 'A prototype ends with its branch')
       assert.include(brief, 'never assume either way')
+      assert.include(brief, 'Whenever a task’s scope or shape changes, check whether its title still says what it does now')
+      assert.include(brief, 'call rename_task with its id or slug')
+      assert.include(brief, 'Keep a title that still fits')
       const tools = yield* toolDescriptions({
         role: 'lead',
         projectId: projectId as never,
@@ -418,6 +439,8 @@ describe('what the coordinator and a lead are told of presets', () => {
       } as ToolAccess)
       assert.include(tools.get('draft_task'), 'list_presets')
       assert.include(tools.get('propose_plan'), 'Prototype for a prototype or design directions')
+      assert.include(tools.get('change_part'), 'Whenever a task’s scope or shape changes')
+      assert.include(tools.get('rename_task'), 'An open pull request Althar opened for it takes the new title too')
     }).pipe(Effect.provide(runtimeWith(github)))
   })
 })
