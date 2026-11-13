@@ -1127,7 +1127,8 @@ describe('the Talk room', () => {
       act(() => emit({ _tag: 'Context', threadId: 'thc', used: 100_000, size: 1_000_000 }))
       expect(await screen.findByRole('button', { name: 'Context 10% used' })).toBeTruthy()
       act(() => {
-        emit(changed('thread_item', 'i9', 'thc'))
+        // An id of its own, which the fixtures' counted ids (i1, i2…) never meet.
+        emit(changed('thread_item', 'changed-item', 'thc'))
         emit(changed('provider_session', 's1', 'thc'))
         emit(changed('user_input', 'u1', 'thc'))
         emit(changed('run', 'r1', 'th1'))
@@ -1142,7 +1143,7 @@ describe('the Talk room', () => {
             .mocked(client.getThreadItem)
             .mock.calls.map(([, itemId]) => itemId)
             .toSorted(),
-        ).toEqual(['c1', 'i9', queued.id].toSorted()),
+        ).toEqual(['c1', 'changed-item', queued.id].toSorted()),
       )
       expect(client.getCoordinator).toHaveBeenLastCalledWith('p1', { limit: 0 })
       await waitFor(() => expect(screen.queryByText('Queued')).toBeNull())
