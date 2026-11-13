@@ -852,8 +852,6 @@ export const blocksOf = (
         blocks.push({ kind: 'merge_line', id: item.id, line: item.content })
         continue
       case 'notice':
-        // Quota belongs in Plan usage. Blocking work still has its own actionable task state.
-        if (item.content.source === 'runtime' && item.content.about === 'limit') continue
         // A restart is Althar's business, not the person's; earlier versions said so in the thread.
         if (item.content.source === 'runtime' && item.content.title === RESTARTED) continue
         // A review offered a task stands on its own with its buttons.

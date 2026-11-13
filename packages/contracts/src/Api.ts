@@ -1942,8 +1942,6 @@ export const NoticeItem = Schema.Struct({
   kind: Schema.Literal('notice'),
   content: Schema.Struct({
     source: Schema.Literals(['agent', 'runtime']),
-    /** Workflow context for passive notices; quota notices belong in Plan usage. */
-    about: Schema.optional(Schema.Literals(['limit', 'stall'])),
     severity: Schema.Literals(['info', 'warning', 'error']),
     title: Schema.String,
     description: Schema.NullOr(Schema.String),

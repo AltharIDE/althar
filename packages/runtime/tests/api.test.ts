@@ -2992,6 +2992,14 @@ describe('thread items', () => {
     assert.strictEqual(itemOf(row('notice', about))?.kind, 'notice')
   })
 
+  it('keeps passive quota notices out of the thread while retaining other notices', () => {
+    const notice = { source: 'runtime', severity: 'info', title: 'Codex has 6% left.', description: null }
+    assert.isUndefined(itemOf(row('notice', { ...notice, about: 'limit' })))
+    assert.strictEqual(itemOf(row('notice', { ...notice, about: 'stall' }))?.kind, 'notice')
+    assert.strictEqual(itemOf(row('notice', { ...notice, about: 'permission' }))?.kind, 'notice')
+    assert.strictEqual(itemOf(row('notice', { ...notice, source: 'agent', failure: 'auth_required' }))?.kind, 'notice')
+  })
+
   it('gives each kind its own content, and leaves out kinds the window has no use for yet', () => {
     assert.deepStrictEqual(itemOf(row('user_message', { text: 'Now' }, { state: 'queued', disposition: 'interrupt_and_continue' })), {
       id: 'i1',

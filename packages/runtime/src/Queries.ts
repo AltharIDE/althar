@@ -659,6 +659,8 @@ export const itemOf = (row: ItemRow): ThreadItem | undefined => {
       }
     }
     case 'notice': {
+      // Quota belongs in Plan usage. Blocking work keeps its actionable task state.
+      if (text(content, 'source') === 'runtime' && text(content, 'about') === 'limit') return undefined
       const severity = text(content, 'severity')
       const description = text(content, 'description')
       const role = text(content, 'role')
@@ -3134,7 +3136,7 @@ export class Queries extends Context.Service<
             FROM thread_items i JOIN threads t ON t.id = i.thread_id AND t.kind = 'task' JOIN tasks k ON k.id = t.task_id
             JOIN projects p ON p.id = i.project_id
             WHERE p.archived_at IS NULL AND i.created_at > ${from}
-              AND (i.kind = 'step_result' OR (i.kind = 'notice' AND json_extract(i.content, '$.about') IN ('limit', 'stall')))
+              AND (i.kind = 'step_result' OR (i.kind = 'notice' AND json_extract(i.content, '$.about') = 'stall'))
             ORDER BY i.created_at DESC, i.sequence DESC LIMIT ${EVENTS}`
           const events: Array<HomeEvent> = items.flatMap((row): ReadonlyArray<HomeEvent> => {
             const base = {
