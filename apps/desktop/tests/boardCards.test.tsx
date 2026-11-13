@@ -11,7 +11,7 @@ import { ServicesProvider } from '../src/renderer/data/services'
 import { BoardView, readyCardOf, runningCardOf, severalSaid } from '../src/renderer/features/board/BoardView'
 import { DockView } from '../src/renderer/features/board/DockView'
 import { lanesOf } from '../src/renderer/features/board/lanes'
-import { needsOf } from '../src/renderer/features/board/needs'
+import { firstNeedOf, needsOf } from '../src/renderer/features/board/needs'
 import { useBoard } from '../src/renderer/features/board/useBoard'
 import { agents, card, change, fakeClient, snapshot } from './fixtures'
 import { servicesFor, withServices } from './render'
@@ -253,6 +253,28 @@ describe('a card that waits on the person', () => {
       ['Run make deploy', 'Ship it', undefined],
       ['Tidy the docs', 'althar/tidy-the-docs', true],
     ])
+  })
+
+  it('lists what waits on issues and what stopped, says who stopped it, and opens the first not on screen', () => {
+    const lanes = lanesOf(
+      board([
+        task({ taskId: 't5', threadId: 'th5', title: 'File the bugs', phase: 'waiting', issues: { drafts: 2, changes: 0 } }),
+        task({ taskId: 't6', threadId: 'th6', title: 'Halted', phase: 'stopped', stopped: { by: 'declined', at: null } }),
+        task({ taskId: 't7', threadId: 'th7', title: 'Left off', phase: 'stopped', stopped: null }),
+      ]),
+    )
+    const onTask = vi.fn()
+    const needs = needsOf(lanes, () => '', onTask, 'th6')
+    expect(needs.map((need) => [need.title, need.kind, need.meta, need.here])).toEqual([
+      ['File the bugs', 'Issues to file', undefined, undefined],
+      ['Halted', 'Stopped', 'Stopped when you declined a command', true],
+      ['Left off', 'Stopped', undefined, undefined],
+    ])
+    for (const need of needs) need.onOpen?.()
+    expect(onTask.mock.calls).toEqual([['th5'], ['th6'], ['th7']])
+    expect(firstNeedOf(lanes)).toBe('th5')
+    expect(firstNeedOf(lanes, 'th5')).toBe('th6')
+    expect(firstNeedOf(lanesOf(board([])))).toBeNull()
   })
 })
 
