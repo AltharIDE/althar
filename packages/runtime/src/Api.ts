@@ -121,7 +121,7 @@ import { IssueDrafts } from './IssueDrafts'
 import { postTeamReviews, Reviews, runOutside, setPostTeamReviews, setRunOutside } from './Reviews'
 import { shelve } from './scratch'
 import { Helpers } from './Helpers'
-import { describe as describePreset, editPreset, partsOfTask, presetsIn, removePreset, savePreset } from './presets'
+import { declinePresetOffer, describe as describePreset, editPreset, partsOfTask, presetsIn, removePreset, savePreset } from './presets'
 import { FastLane } from './fastLane'
 import { MergeReviews } from './MergeReviews'
 import { Plans } from './Plans'
@@ -1715,7 +1715,7 @@ export const handlers = Api.toLayer(
             ),
           ),
         ),
-      SavePreset: ({ commandId, name, taskId, parts, projectOnly }) =>
+      SavePreset: ({ commandId, name, taskId, parts, projectOnly, asNew }) =>
         once(
           commandId,
           api(
@@ -1731,13 +1731,16 @@ export const handlers = Api.toLayer(
                   projectId: projectOnly === true ? (from?.projectId ?? null) : null,
                   fromTaskId: taskId ?? null,
                   actorId: instance.personId,
+                  asNew,
                 })
               }),
               folderStore,
             ),
           ),
         ),
-      RemovePreset: ({ commandId, id }) => once(commandId, api(removePreset(id).pipe(Effect.provideService(SqlClient.SqlClient, sql)))),
+      RemovePreset: ({ commandId, id }) => once(commandId, api(Effect.provideContext(removePreset(id), folderStore))),
+      DeclinePresetOffer: ({ commandId, taskId }) =>
+        once(commandId, api(Effect.provideContext(declinePresetOffer(taskId, instance.personId), folderStore))),
       ShelveTask: ({ commandId, taskId, shelf }) =>
         once(
           commandId,

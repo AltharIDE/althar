@@ -300,15 +300,19 @@ export interface Client {
   }) => Promise<void>
   /** Picks another preset for a plan before it starts: its parts change to match. The preset's name. */
   readonly applyPreset: (planId: string, preset: string) => Promise<string>
-  /** Saves a preset from a task, or the parts the coordinator offered. */
+  /** Saves a preset from a task: its parts, or the parts its card offered. */
   readonly savePreset: (input: {
     readonly name: string
     readonly taskId?: string
     readonly parts?: PresetParts
     readonly projectOnly?: boolean
+    /** Only as a new preset: a name another preset has is refused rather than replaced. */
+    readonly asNew?: boolean
   }) => Promise<{ readonly name: string }>
   /** Removes one of the person's presets. */
   readonly removePreset: (id: string) => Promise<void>
+  /** Says not to offer a task's parts as a preset again. */
+  readonly declinePresetOffer: (taskId: string) => Promise<void>
   /** "Run it" on the pull request a review task reviews, as far as `how` trusts it; `asks` where nothing says how far. */
   readonly runIt: (
     taskId: string,
@@ -899,6 +903,7 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
     editPreset: (input) => command((commandId) => api.EditPreset({ commandId, ...input })),
     savePreset: (input) => command((commandId) => api.SavePreset({ commandId, ...input })),
     removePreset: (id) => command((commandId) => api.RemovePreset({ commandId, id })),
+    declinePresetOffer: (taskId) => command((commandId) => api.DeclinePresetOffer({ commandId, taskId })),
     runIt: (taskId, how) => command((commandId) => api.RunIt({ commandId, taskId, ...(how === undefined ? {} : { how }) })),
     stopRunning: (taskId) => command((commandId) => api.StopRunning({ commandId, taskId })),
     setReviewSeal: (on) => command((commandId) => api.SetReviewSeal({ commandId, on })),

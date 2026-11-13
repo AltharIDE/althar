@@ -1,6 +1,6 @@
 import { createContext, Fragment, useContext, useState, type ReactNode } from 'react'
 
-import type { FieldAnswer, PresetParts, SentLineComment, Unfurl } from '@althar/contracts'
+import type { FieldAnswer, SentLineComment, Unfurl } from '@althar/contracts'
 import {
   AltharLine,
   Arrived,
@@ -324,7 +324,6 @@ export function PartView({ part, threadId }: { part: Part; threadId: string }) {
         <>
           <p className={s[part.tone]}>{part.text}</p>
           {part.detail !== undefined && <p className={s.detail}>{part.detail}</p>}
-          {part.offer?.kind === 'preset' && <PresetOffer offer={part.offer} />}
         </>
       )
     case 'pictures':
@@ -332,27 +331,6 @@ export function PartView({ part, threadId }: { part: Part; threadId: string }) {
     case 'canvas':
       return <CanvasOf part={part} />
   }
-}
-
-/** The coordinator's offer to keep parts the person set up twice as a preset: one press keeps it, by its name. */
-function PresetOffer({ offer }: { offer: { readonly name: string; readonly parts: PresetParts } }) {
-  const { client } = useServices()
-  const [kept, setKept] = useState<'no' | 'keeping' | 'kept'>('no')
-  if (kept === 'kept') return <p className={s.detail}>{`Kept as “${offer.name}”: Settings has your presets.`}</p>
-  return (
-    <LinkButton
-      disabled={kept === 'keeping'}
-      onClick={() => {
-        setKept('keeping')
-        client.savePreset({ name: offer.name, parts: offer.parts }).then(
-          () => setKept('kept'),
-          () => setKept('no'),
-        )
-      }}
-    >
-      {`Keep it as “${offer.name}”`}
-    </LinkButton>
-  )
 }
 
 /** What the person said, each link that unfurled read as its key where they pasted it; its card, under the words, says the rest. */
@@ -687,17 +665,9 @@ export function ThreadBlocks({
           </ThreadDivider>
         )
       case 'offer':
-        if (block.offer.kind === 'review')
-          return (
-            <div key={block.id} className={s.offer}>
-              <ReviewOfferOf offer={block.offer} ask={block.text} />
-            </div>
-          )
         return (
           <div key={block.id} className={s.offer}>
-            <p className={s.info}>{block.text}</p>
-            {block.detail !== null && <p className={s.detail}>{block.detail}</p>}
-            <PresetOffer offer={block.offer} />
+            <ReviewOfferOf offer={block.offer} ask={block.text} />
           </div>
         )
       case 'step':

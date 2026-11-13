@@ -99,6 +99,7 @@ export function You({
   return (
     <article
       data-rhythm={Rhythm.You}
+      data-thread-prompt={queued ? undefined : ''}
       className={cx(s.you, queued && s.queued, className)}
       aria-label={queued ? t.youQueued : t.you}
       {...rest}
@@ -113,7 +114,11 @@ export function You({
       {/* images sent with nothing written have no bubble of words */}
       {(said || unfurl || comments) && (
         <div className={s.body}>
-          {said && <p className={s.said}>{children}</p>}
+          {said && (
+            <p className={s.said} data-thread-preview="">
+              {children}
+            </p>
+          )}
           {unfurl && <div className={s.unfurl}>{unfurl}</div>}
           {comments && <div className={s.comments}>{comments}</div>}
         </div>

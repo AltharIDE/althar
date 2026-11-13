@@ -51,7 +51,7 @@ import { Fragment, type ReactNode, useEffect, useState } from 'react'
 
 import { pictureUrl } from '../../../main/pictureAddress'
 import { taskStatusOf } from '../../shared/taskStatus'
-import { busyWords, inLineWords, reconnectsWords, waitsWords } from '../../shared/agents'
+import { busyWords, externalWaitWords, inLineWords, reconnectsWords, waitsWords } from '../../shared/agents'
 import { localText } from '../../shared/local'
 import { askOf, callKindOf, isAnswered, isSettleable, kindWords, takesDone, whereOf } from '../../shared/calls'
 import { moreOf as questionMore } from '../../shared/questions'
@@ -466,22 +466,24 @@ const runningCard = (work: BoardTask, now: string, name: (id: string | null) => 
   // stands is its card's, as its header and the home say it (`taskStatusOf`).
   const status = taskStatusOf(work)
   const still: Pick<Card, 'status' | 'word' | 'why'> | null =
-    status === TaskStatus.Paused && work.waits !== null
-      ? {
-          status,
-          word: text.status[status],
-          why: waitsWords(name(work.waits.agentId), clock(work.waits.until), undefined, work.waits.left),
-        }
-      : status === TaskStatus.Paused && work.reconnects != null
-        ? { status, word: text.status[status], why: reconnectsWords(work.reconnects, clock) }
-        : status === TaskStatus.Queued
-          ? { status, word: text.status[status], ...(work.queued === null ? {} : { why: busyWords(work.queued) }) }
-          : status === TaskStatus.Stopped
-            ? { status, word: text.status[status], ...(work.stopped?.by == null ? {} : { why: text.stoppedBy[work.stopped.by] }) }
-            : // Its folder set up before its lead starts: what holds it, in place of the step its lead hasn't begun.
-              work.settingUp != null
-              ? { status: TaskStatus.Running, word: text.settingUp[work.settingUp] }
-              : null
+    status === TaskStatus.Running && work.externalWait !== undefined
+      ? { status, word: 'Waiting', why: externalWaitWords(work.externalWait, clock) }
+      : status === TaskStatus.Paused && work.waits !== null
+        ? {
+            status,
+            word: text.status[status],
+            why: waitsWords(name(work.waits.agentId), clock(work.waits.until), undefined, work.waits.left),
+          }
+        : status === TaskStatus.Paused && work.reconnects != null
+          ? { status, word: text.status[status], why: reconnectsWords(work.reconnects, clock) }
+          : status === TaskStatus.Queued
+            ? { status, word: text.status[status], ...(work.queued === null ? {} : { why: busyWords(work.queued) }) }
+            : status === TaskStatus.Stopped
+              ? { status, word: text.status[status], ...(work.stopped?.by == null ? {} : { why: text.stoppedBy[work.stopped.by] }) }
+              : // Its folder set up before its lead starts: what holds it, in place of the step its lead hasn't begun.
+                work.settingUp != null
+                ? { status: TaskStatus.Running, word: text.settingUp[work.settingUp] }
+                : null
   const beforeWork = work.queued !== null && work.inLine === true
   const base = {
     kind: kindOf(work),
@@ -490,7 +492,7 @@ const runningCard = (work: BoardTask, now: string, name: (id: string | null) => 
     title: work.title,
     ...fromOf(work),
     // Waiting before its first step has had an agent, nothing has run: no clock.
-    ...(work.startedAt === null || beforeWork ? {} : { at: running(work.startedAt, now) }),
+    ...(work.startedAt === null || beforeWork || work.externalWait !== undefined ? {} : { at: running(work.startedAt, now) }),
   }
   switch (work.kind) {
     case 'plain':

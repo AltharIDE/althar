@@ -148,6 +148,14 @@ describe('what a small change’s review after its merge brings back', () => {
       assert.deepStrictEqual(result?.afterMerge, { url: task.url, words: '#1', kept: true })
       const after = yield* smallCardOf(task.threadId)
       assert.strictEqual(after.steps.at(-1)?.what, 'Reviewed, nothing major')
+      // Its card: kept quiet, with its report's item in the thread, where See findings goes.
+      const [report] = yield* Effect.flatMap(
+        SqlClient.SqlClient,
+        (sql) => sql<{ id: string }>`
+          SELECT id FROM thread_items WHERE thread_id = ${task.threadId} AND kind = 'step_result' ORDER BY sequence DESC LIMIT 1`,
+      )
+      assert.deepInclude(after.reviewAfter, { state: 'quiet', findings: 2, item: report?.id ?? assert.fail('no report') })
+      assert.isNotNull(after.reviewer)
       // Its reviewer was told only blocking and major findings come back.
       const reviewer = yield* Effect.flatMap(
         SqlClient.SqlClient,
@@ -167,6 +175,7 @@ describe('what a small change’s review after its merge brings back', () => {
       yield* until(reviewOf(task.url), (one) => one?.state === 'found')
       const [card] = yield* until(cards(task.projectId), (all) => all[0]?.afterMerge?.state === 'found')
       assert.strictEqual(card?.afterMerge?.findings, 2)
+      assert.deepInclude((yield* smallCardOf(task.threadId)).reviewAfter, { state: 'found', findings: 2 })
       const reviewer = yield* Effect.flatMap(
         SqlClient.SqlClient,
         (sql) => sql<{ id: string }>`SELECT id FROM threads WHERE task_id = ${task.taskId} AND kind = 'step' AND node_key = 'merge_review'`,
@@ -190,6 +199,7 @@ describe('what a small change’s review after its merge brings back', () => {
       assert.isUndefined(yield* reviewOf(task.url))
       const after = yield* smallCardOf(task.threadId)
       assert.isUndefined(after.steps.find((step) => step.key === 'review'))
+      assert.isUndefined(after.reviewAfter)
       assert.isUndefined((yield* cards(task.projectId))[0]?.afterMerge)
     }).pipe(Effect.provide(runtimeWith(github)))
   })
