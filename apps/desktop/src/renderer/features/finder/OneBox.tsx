@@ -416,10 +416,10 @@ export function OneBox({
             }
           },
         }))
-  // The selection starts over at the top as each new list of results shows, or when the top hit changes as the index fills in, not as words are typed over the list still shown.
+  // The selection starts over at the top as each new list of results shows, or when the top hit changes or ranking settles again as the index fills in, not as words are typed over the list still shown.
   const list = useList(
     items,
-    `${query === '' ? '' : `${ranking.shown}|${ranking.results[0]?.entry.id}`}|${scope?.scope.id}|${asking}|${acting?.entry.id}|${filter}`,
+    `${query === '' ? '' : `${ranking.shown}|${ranking.results[0]?.entry.id}|${ranking.pending}`}|${scope?.scope.id}|${asking}|${acting?.entry.id}|${filter}`,
     backTo.current,
   )
 
