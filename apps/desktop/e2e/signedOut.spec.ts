@@ -65,9 +65,8 @@ test('a signed-out coordinator leads to its sign-in in Settings, and back to try
       .first()
       .click()
     await conversation.getByRole('button', { name: 'Try again' }).click()
-    // Still signed out here, the fake agent fails the turn again: it went again, with what the person said, and the first try
-    // folds into the turn's work.
-    await expect(conversation.getByText(/^Worked for/)).toBeVisible()
+    // Still signed out, the fake agent fails a new turn with the same request. Each attempt remains its own turn.
+    await expect(conversation.getByText(/is signed out\./)).toHaveCount(2)
     await expect(conversation.getByRole('button', { name: 'Sign in again' })).toBeVisible()
   } finally {
     await electronApp.close()

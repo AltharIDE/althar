@@ -285,6 +285,21 @@ describe('a coordinator that is signed out', () => {
     expect(onTryAgain).toHaveBeenCalledOnce()
   })
 
+  it('keeps a sign-in retry as a separate turn, with recovery actions only on the latest failure', () => {
+    show(
+      [
+        items.you('What is left on the checkout?'),
+        { ...signedOut, id: 'first-failure', turn: 'first-attempt' },
+        { ...signedOut, id: 'retry-failure', turn: 'retry-attempt', createdAt: '2026-09-29T12:01:00.000Z' },
+      ],
+      { onSignIn: vi.fn(), onTryAgain: vi.fn() },
+    )
+    expect(screen.getAllByText('Claude Code is signed out.')).toHaveLength(2)
+    expect(screen.getAllByRole('button', { name: 'Sign in again' })).toHaveLength(1)
+    expect(screen.getAllByRole('button', { name: 'Try again' })).toHaveLength(1)
+    expect(screen.queryByText(/^Worked for/)).toBeNull()
+  })
+
   it('keeps the agent’s own words under it where they say more', () => {
     const revoked = items.notice({
       severity: 'error',
