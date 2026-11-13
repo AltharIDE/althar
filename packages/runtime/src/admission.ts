@@ -8,6 +8,11 @@
  * thread (Busy, order `person`), so a wait for an agent slot queues only a
  * thread with no session to take it: one still to start, or one between
  * sessions. Everything else is work already under way on the thread.
+ *
+ * A session merely starting is not work: there is nothing ahead of what the
+ * person sends then, and it is the turn that start reads, so it shows in the
+ * thread as it always has rather than in the queue. Only work already claimed
+ * or under way keeps a send waiting.
  */
 export type Accepting = 'now' | 'queued'
 
@@ -17,19 +22,11 @@ export const acceptingOf = (work: {
   readonly handingOver: boolean
   readonly nextLead: boolean
   readonly moved: boolean
-  readonly starting: boolean
   readonly claimed: boolean
   readonly compactQueued: boolean
   /** No session holds the thread, and it waits for a place or for its agent's usage. */
   readonly waitingForPlace: boolean
 }): Accepting =>
-  work.turnRunning ||
-  work.handingOver ||
-  work.nextLead ||
-  work.moved ||
-  work.starting ||
-  work.claimed ||
-  work.compactQueued ||
-  work.waitingForPlace
+  work.turnRunning || work.handingOver || work.nextLead || work.moved || work.claimed || work.compactQueued || work.waitingForPlace
     ? 'queued'
     : 'now'

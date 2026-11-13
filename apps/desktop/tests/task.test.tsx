@@ -1349,6 +1349,25 @@ describe('a task', () => {
     await act(async () => accept())
   })
 
+  it('draws a send while the agent starts in the thread, not the queue: nothing is ahead of it', async () => {
+    const base = thread()
+    const queued = {
+      ...items.you('While it starts.', { state: 'queued', interrupting: false }),
+      sequence: (base.items.at(-1)?.sequence ?? 0) + 1,
+    }
+    const starting: ThreadSnapshot = {
+      ...base,
+      accepting: 'now',
+      session: base.session === null ? null : { ...base.session, state: 'starting', turnRunning: false, accepting: 'now' },
+      items: [...base.items, queued],
+    }
+    const { client } = fakeClient({ getThread: vi.fn(async () => starting) })
+    withServices(<Task />, client)
+    expect(await screen.findByText('While it starts.')).toBeTruthy()
+    expect(screen.queryByRole('region', { name: /queued/i })).toBeNull()
+    expect(screen.getAllByText('While it starts.')).toHaveLength(1)
+  })
+
   it('corrects a stale now-prediction into the queue without a second copy', async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true })
     try {

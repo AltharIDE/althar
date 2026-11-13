@@ -2693,10 +2693,12 @@ export class Sessions extends Context.Service<
 
       /**
        * Whether a new message waits behind work already claimed: a turn
-       * running or still preparing its prompt, a session starting, a handover
-       * (under way, or due on the next message), a compaction waiting, or no
-       * session held while the thread waits for a place. The window reads the
-       * same answer as `snapshot.accepting`.
+       * running or still preparing its prompt, a handover (under way, or due
+       * on the next message), a compaction waiting, or no session held while
+       * the thread waits for a place. A session merely starting is not work
+       * ahead: what the person sends then is the turn that start reads, and
+       * shows in the thread. The window reads the same answer as
+       * `snapshot.accepting`.
        */
       const placement = (threadId: string) =>
         Effect.gen(function* () {
@@ -2704,8 +2706,6 @@ export class Sessions extends Context.Service<
           const running = threads.get(threadId)
           const [claimed] = yield* sql<{ one: number }>`SELECT 1 AS one FROM turn_deliveries
             WHERE thread_id = ${threadId} AND state IN ('pending', 'delivered') LIMIT 1`
-          const [starting] = yield* sql<{ one: number }>`SELECT 1 AS one FROM provider_sessions
-            WHERE thread_id = ${threadId} AND state = 'starting' LIMIT 1`
           const [waiting] = yield* sql<{ waits: string | null }>`SELECT waits_for_place AS waits FROM threads WHERE id = ${threadId}`
           // No session holds the thread, and its task waits for a place of its own to start one.
           const [busy] = yield* sql<{ one: number }>`
@@ -2720,7 +2720,6 @@ export class Sessions extends Context.Service<
             handingOver: running?.handover === 'under_way',
             nextLead: running?.nextLead !== undefined,
             moved: running?.moved === true,
-            starting: starting !== undefined,
             claimed: claimed !== undefined,
             compactQueued: yield* compactQueued(threadId),
             waitingForPlace: running === undefined && (waiting?.waits != null || busy !== undefined),

@@ -109,22 +109,12 @@ describe('where a new message goes', () => {
       handingOver: false,
       nextLead: false,
       moved: false,
-      starting: false,
       claimed: false,
       compactQueued: false,
       waitingForPlace: false,
     }
     assert.strictEqual(acceptingOf(idle), 'now')
-    for (const flag of [
-      'turnRunning',
-      'handingOver',
-      'nextLead',
-      'moved',
-      'starting',
-      'claimed',
-      'compactQueued',
-      'waitingForPlace',
-    ] as const)
+    for (const flag of ['turnRunning', 'handingOver', 'nextLead', 'moved', 'claimed', 'compactQueued', 'waitingForPlace'] as const)
       assert.strictEqual(acceptingOf({ ...idle, [flag]: true }), 'queued')
   })
 
@@ -165,7 +155,7 @@ describe('where a new message goes', () => {
     }).pipe(Effect.provide(Queries.layer.pipe(Layer.provideMerge(runtime(':memory:', { holds: held })))))
   })
 
-  it.live('sends while a session is starting stay queued, as accepting said', () => {
+  it.live('sends while a session is starting are the turn it reads, taken now', () => {
     let goOn = () => {}
     const up = new Promise<void>((resolve) => (goOn = resolve))
     return Effect.gen(function* () {
@@ -179,12 +169,16 @@ describe('where a new message goes', () => {
       )
       const read = queries.thread(created.threadId)
       const before = yield* read
-      assert.strictEqual(before.accepting, 'queued')
+      // Nothing is ahead of it: the start has read no turn yet, so the window draws it in the thread, never in the queue.
+      assert.strictEqual(before.accepting, 'now')
       yield* say(created.threadId, 'While it starts.')
       const after = yield* until(read, (snapshot) => you(snapshot.items, 'While it starts.') !== undefined)
-      lands(you(after.items, 'While it starts.'), before.accepting)
+      assert.strictEqual(after.accepting, 'now')
       goOn()
       yield* Fiber.join(starting)
+      // The start reads it as its first turn, and nothing waited behind it.
+      const first = yield* until(read, (snapshot) => you(snapshot.items, 'While it starts.')?.input?.state === 'delivered')
+      lands(you(first.items, 'While it starts.'), after.accepting)
     }).pipe(Effect.provide(withQueries({ each: { codex: { beforeNewSession: () => up } } })))
   })
 
