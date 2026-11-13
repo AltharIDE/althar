@@ -531,8 +531,8 @@ export type NewProjectDefaultsChange = { readonly [Key in keyof NewProjectDefaul
 /** What a project's rules are made with when the person has chosen nothing. */
 export const NEW_PROJECT_DEFAULTS: NewProjectDefaults = {
   usageLimit: 'move',
-  rotateAccounts: false,
-  accountStrategy: 'first',
+  rotateAccounts: true,
+  accountStrategy: 'most_room',
   end: 'draft',
   pushCommits: true,
   postScreenshots: false,
@@ -1942,6 +1942,8 @@ export const NoticeItem = Schema.Struct({
   kind: Schema.Literal('notice'),
   content: Schema.Struct({
     source: Schema.Literals(['agent', 'runtime']),
+    /** Workflow context for passive notices; quota notices belong in Plan usage. */
+    about: Schema.optional(Schema.Literals(['limit', 'stall'])),
     severity: Schema.Literals(['info', 'warning', 'error']),
     title: Schema.String,
     description: Schema.NullOr(Schema.String),

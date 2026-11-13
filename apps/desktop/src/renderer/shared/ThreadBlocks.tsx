@@ -40,7 +40,6 @@ import { documentVersions } from './handed'
 import { fileAttachments } from './files'
 import { sentAttachments } from './images'
 import { useModelNames } from './modelNames'
-import { useServices } from '../data/services'
 import { FailedTurn } from './WayOut'
 import { serverBrand } from './mcpServers'
 import { keyOf, pastedIn } from './pasted'
@@ -714,6 +713,7 @@ export function ThreadBlocks({
         const working = block.live && !block.answering
         const onTheWay = working ? block.work.flatMap((part) => (part.kind === 'message' && part.text.trim() !== '' ? [part] : [])) : []
         const doing = block.doing
+        const workTime = block.spent === null ? null : { ...block.spent, total: block.spent.work, place: 0, session: 0 }
         return (
           <Turn
             key={block.id}
@@ -725,9 +725,9 @@ export function ThreadBlocks({
           >
             {block.work.length > 0 && (
               <WorkedFor
-                took={block.spent === null ? block.took : duration(block.spent.total)}
+                took={workTime === null ? block.took : duration(workTime.work)}
                 {...(block.spent === null ? {} : { spent: spentWords(block.spent) })}
-                {...(block.spent === null || lineOf(block.spent) === undefined ? {} : { most: lineOf(block.spent) })}
+                {...(workTime === null || lineOf(workTime) === undefined ? {} : { most: lineOf(workTime) })}
                 live={working}
                 {...(onTheWay.length === 0
                   ? {}

@@ -54,7 +54,7 @@ export const Starting: Story = {
     await expect(c.getByRole('combobox', { name: 'When an account runs out' })).toHaveTextContent(
       'Move to the strongest model with usage left',
     )
-    await expect(c.getByRole('combobox', { name: 'Account strategy' })).toHaveTextContent('Stay on the first account')
+    await expect(c.getByRole('combobox', { name: 'Account strategy' })).toHaveTextContent('Least depleted first')
     await expect(c.queryByRole('button', { name: /^Use / })).toBeNull()
   },
 }

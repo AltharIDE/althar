@@ -44,8 +44,8 @@ export const newProjectDefault: NewProjectDefaultsValue = {
   resolveConflicts: true,
   moveIssues: true,
   usageLimit: 'move',
-  rotateAccounts: false,
-  accountStrategy: 'first',
+  rotateAccounts: true,
+  accountStrategy: 'most_room',
   afterMergeReview: 'major',
 }
 

@@ -945,7 +945,7 @@ describe('accounts, through the API', () => {
           assert.deepStrictEqual(yield* client.FindAccounts({ agentId: 'opencode' }), { found: [] })
           // A project's rule for accounts: rotation, off until turned on, and which accounts each agent may use there.
           const project = yield* client.OpenProject({ commandId: commandId(), grant: yield* grant(repository()) })
-          assert.deepStrictEqual([project.rotateAccounts, project.onlyAccounts], [false, null])
+          assert.deepStrictEqual([project.rotateAccounts, project.onlyAccounts], [true, null])
           yield* client.SetProjectAccounts({ commandId: commandId(), projectId: project.id, rotate: true, only: { codex: [work.id] } })
           const listed = (yield* client.ListProjects()).projects.find((each) => each.id === project.id)
           assert.deepStrictEqual([listed?.rotateAccounts, listed?.onlyAccounts], [true, { codex: [work.id] }])
@@ -1102,8 +1102,8 @@ describe('finished tasks’ folders, through the API', () => {
         assert.deepStrictEqual(before.plansAndReviews, { countdown: 25, rounds: 3, roundsOut: 'settled' })
         assert.deepStrictEqual(before.newProjects, {
           usageLimit: 'move',
-          rotateAccounts: false,
-          accountStrategy: 'first',
+          rotateAccounts: true,
+          accountStrategy: 'most_room',
           end: 'draft',
           pushCommits: true,
           postScreenshots: false,
@@ -1230,8 +1230,8 @@ describe('project rules, through the API', () => {
           postScreenshots: false,
           leadsReachWeb: true,
           usageLimit: 'move',
-          rotateAccounts: false,
-          accountStrategy: 'first',
+          rotateAccounts: true,
+          accountStrategy: 'most_room',
           onlyAccounts: null,
           branchPattern: null,
           titlePattern: null,

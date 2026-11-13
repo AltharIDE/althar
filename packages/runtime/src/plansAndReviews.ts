@@ -96,8 +96,12 @@ export const roundsOutNow = Effect.map(plansAndReviewsOf, (settings) => settings
 /** What the rules of a project made now start with. */
 export const newProjectDefaultsOf = Effect.map(rowsOf, (kept): NewProjectDefaults => ({
   usageLimit: choiceOf(kept.get(USAGE_LIMIT), ['move', 'wait', 'ask'], NEW_PROJECT_DEFAULTS.usageLimit),
-  rotateAccounts: kept.get(ROTATE) === 'on',
-  accountStrategy: choiceOf(kept.get(ACCOUNT_STRATEGY), AccountStrategy.literals, kept.get(ROTATE) === 'on' ? 'most_room' : 'first'),
+  rotateAccounts: switchOf(kept.get(ROTATE), NEW_PROJECT_DEFAULTS.rotateAccounts),
+  accountStrategy: choiceOf(
+    kept.get(ACCOUNT_STRATEGY),
+    AccountStrategy.literals,
+    switchOf(kept.get(ROTATE), NEW_PROJECT_DEFAULTS.rotateAccounts) ? 'most_room' : 'first',
+  ),
   end: choiceOf(kept.get(END), ['draft', 'ready', 'none'], NEW_PROJECT_DEFAULTS.end),
   pushCommits: switchOf(kept.get(PUSH_COMMITS), NEW_PROJECT_DEFAULTS.pushCommits),
   postScreenshots: switchOf(kept.get(POST_SCREENSHOTS), NEW_PROJECT_DEFAULTS.postScreenshots),
@@ -132,11 +136,11 @@ export const setNewProjectDefaults = (change: NewProjectDefaultsChange) =>
     if (change.usageLimit !== undefined) yield* keep(USAGE_LIMIT, unlessDefault(change.usageLimit, NEW_PROJECT_DEFAULTS.usageLimit))
     if (change.accountStrategy !== undefined) {
       yield* keep(ACCOUNT_STRATEGY, unlessDefault(change.accountStrategy, NEW_PROJECT_DEFAULTS.accountStrategy))
-      yield* keep(ROTATE, rotatesAccounts(change.accountStrategy) ? 'on' : null)
+      yield* keep(ROTATE, rotatesAccounts(change.accountStrategy) ? null : 'off')
     } else if (change.rotateAccounts !== undefined) {
-      yield* keep(ROTATE, change.rotateAccounts ? 'on' : null)
+      yield* keep(ROTATE, change.rotateAccounts ? null : 'off')
       // Older callers still set the switch alone: turning it off must leave a matching strategy in Settings.
-      if (!change.rotateAccounts) yield* keep(ACCOUNT_STRATEGY, null)
+      yield* keep(ACCOUNT_STRATEGY, null)
     }
     if (change.end !== undefined) yield* keep(END, unlessDefault(change.end, NEW_PROJECT_DEFAULTS.end))
     if (change.afterMergeReview !== undefined)

@@ -77,8 +77,8 @@ export const projectRules: ProjectRulesView = {
   postScreenshots: false,
   leadsReachWeb: true,
   usageLimit: 'move',
-  rotateAccounts: false,
-  accountStrategy: 'first',
+  rotateAccounts: true,
+  accountStrategy: 'most_room',
   onlyAccounts: null,
   branchPattern: null,
   titlePattern: null,
@@ -296,7 +296,7 @@ export const project: ProjectSummary = {
   yours: 0,
   working: 1,
   usageLimit: 'move',
-  rotateAccounts: false,
+  rotateAccounts: true,
   onlyAccounts: null,
 }
 
@@ -1188,8 +1188,8 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
       plansAndReviews: { countdown: 25, rounds: 3, roundsOut: 'settled' } as const,
       newProjects: {
         usageLimit: 'move',
-        rotateAccounts: false,
-        accountStrategy: 'first',
+        rotateAccounts: true,
+        accountStrategy: 'most_room',
         end: 'draft',
         pushCommits: true,
         postScreenshots: false,

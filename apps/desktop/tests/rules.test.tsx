@@ -513,12 +513,14 @@ describe('a project’s rules', () => {
     })
     withServices(<Tasks />, client)
     await waitFor(() =>
-      expect(says('Limits')).toBe('When an account runs out, the work moves to the strongest model with usage left. Codex works on main.'),
+      expect(says('Limits')).toBe(
+        'When an account runs out, the work goes on with the agent’s next account, then moves to the strongest model with usage left. Codex works on main or work.',
+      ),
     )
-    await userEvent.click(within(sentence('Limits')).getByRole('button', { name: 'main' }))
-    await userEvent.click(await screen.findByRole('menuitemradio', { name: 'Least depleted first' }))
+    await userEvent.click(within(sentence('Limits')).getByRole('button', { name: 'main or work' }))
+    await userEvent.click(await screen.findByRole('menuitemradio', { name: 'Most depleted first' }))
     await waitFor(() =>
-      expect(client.setProjectRules).toHaveBeenLastCalledWith({ projectId: 'p1', accountStrategy: 'most_room', rotateAccounts: true }),
+      expect(client.setProjectRules).toHaveBeenLastCalledWith({ projectId: 'p1', accountStrategy: 'least_room', rotateAccounts: true }),
     )
     expect(says('Limits')).toBe(
       'When an account runs out, the work goes on with the agent’s next account, then moves to the strongest model with usage left. Codex works on main or work.',

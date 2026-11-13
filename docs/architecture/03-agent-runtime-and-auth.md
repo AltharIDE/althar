@@ -746,7 +746,7 @@ support is built, and checked again by the contract suite.
 - Every account can run work. A project's rules can limit each agent to some
   of its accounts, which is an `ExecutionGrant`'s `allowedProjectIds`.
 - Moving to the agent's next account on a limit is the project's rule too,
-  off until the person turns it on (ADR-012).
+  on by default, with an explicit first-account strategy to keep it off (ADR-012).
 - A conversation stays on the account it runs on, for its session and its
   prompt cache.
 - A new conversation chooses an allowed account by the project's strategy:

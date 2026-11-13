@@ -127,8 +127,7 @@ export const ProjectRules = Schema.Struct({
   usageLimit: Schema.optional(Schema.Literals(['move', 'wait', 'ask'])),
   /**
    * An agent's accounts here (ADR-012): whether work moves on to the agent's
-   * next account when one runs out, which the person turns on (off without
-   * it), and which accounts each agent may use, by agent (every one without).
+   * next account when one runs out, on by default unless the person keeps the first account, and which accounts each agent may use, by agent (every one without).
    */
   accounts: Schema.optional(
     Schema.Struct({
@@ -255,8 +254,8 @@ const sandboxWith = (rules: ProjectRules, change: NonNullable<ProjectRules['sand
   ...(change.hosts === undefined ? {} : { hosts: keptEdits(change.hosts, hostOf) }),
 })
 
-/** What a revision's rules say of accounts: no rotation, and every account, unless the person said otherwise. */
-export const accountsOf = (rules: ProjectRules): AccountRule => rules.accounts ?? { rotate: false }
+/** What a revision's rules say of accounts: rotation and every account, unless the person said otherwise. */
+export const accountsOf = (rules: ProjectRules): AccountRule => rules.accounts ?? { rotate: NEW_PROJECT_DEFAULTS.rotateAccounts }
 
 /** Older rules chose the most room when switching was on, and the first account when it was off. */
 export const accountStrategyOf = (rules: ProjectRules): AccountStrategy => {
@@ -298,9 +297,11 @@ export const insertRevision = (projectId: ProjectId, revision: number, rules: Pr
 export const startingRules = (defaults: NewProjectDefaults): ProjectRules => {
   const chosen: Partial<ProjectRules> = {
     ...(defaults.usageLimit === NEW_PROJECT_DEFAULTS.usageLimit ? {} : { usageLimit: defaults.usageLimit }),
-    ...(defaults.rotateAccounts
-      ? { accounts: { rotate: true, ...(defaults.accountStrategy === 'first' ? {} : { strategy: defaults.accountStrategy }) } }
-      : {}),
+    ...(!defaults.rotateAccounts
+      ? { accounts: { rotate: false } }
+      : defaults.accountStrategy !== 'first' && defaults.accountStrategy !== 'most_room'
+        ? { accounts: { rotate: true, strategy: defaults.accountStrategy } }
+        : {}),
     ...(defaults.end === NEW_PROJECT_DEFAULTS.end ? {} : { end: defaults.end }),
     ...(defaults.pushCommits === NEW_PROJECT_DEFAULTS.pushCommits ? {} : { pushCommits: defaults.pushCommits }),
     ...(defaults.postScreenshots === NEW_PROJECT_DEFAULTS.postScreenshots ? {} : { postScreenshots: defaults.postScreenshots }),
