@@ -339,7 +339,7 @@ describe('an aside opened with +', () => {
           // Words to it while it is an aside still are only the words; its context full, the next goes to a fresh session.
           const again = yield* said('Look again. [context:25/1000000]')
           assert.strictEqual(again, 'Look again. [context:25/1000000]')
-          const fresh = yield* said('And now?')
+          const fresh = yield* said('And now? [context:1/1000000]')
           assert.match(fresh, /^You are carrying on an aside of this project's coordinator.+to keep your context small\./)
           assert.notInclude(fresh, WORK)
 
@@ -351,7 +351,13 @@ describe('an aside opened with +', () => {
           assert.include(work, SANDBOX)
           assert.notInclude(work, 'The thread so far')
           assert.isTrue(work.endsWith('Fix it then.'))
-          assert.strictEqual(yield* said('And the tests?'), 'And the tests?')
+          // A report reminder can share this turn with the person's words; the full brief must not be repeated.
+          const next = yield* said('And the tests?')
+          assert.isTrue(next.endsWith('And the tests?'))
+          assert.notInclude(next, WORK)
+          assert.notInclude(next, SANDBOX)
+          assert.notInclude(next, 'gather evidence')
+          assert.notInclude(next, 'You are taking over a task')
         }),
       ),
   )
