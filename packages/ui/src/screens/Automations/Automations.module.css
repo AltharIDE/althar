@@ -493,6 +493,10 @@
   background: var(--live);
 }
 
+.markYours {
+  background: var(--signal);
+}
+
 .markNone {
   box-shadow: inset 0 0 0 1px var(--line-2);
 }

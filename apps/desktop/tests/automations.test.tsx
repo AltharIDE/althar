@@ -200,6 +200,26 @@ describe('the Automations tab', () => {
 })
 
 describe('an automation’s page', () => {
+  it('opens the blocked run directly, keeping its future configuration separate from the task that needs attention', async () => {
+    const onTask = vi.fn()
+    const run = automationRun({ state: 'running' })
+    const waiting = { ...run, task: { ...run.task!, needsYou: true } }
+    const { client } = fakeClient({
+      getAutomation: vi.fn(async () => ({
+        cursor: 6,
+        automation: automationView({ latest: [waiting], runs: [waiting] }),
+      })),
+    })
+    withServices(<Room opening="auto1" onTask={onTask} />, client)
+    expect(await screen.findByText('Needs you', { exact: true })).toBeTruthy()
+    expect(screen.getByText('Changes apply to future runs.')).toBeTruthy()
+    expect(screen.queryByText('It paused itself.')).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Run now' })).toBeNull()
+    await userEvent.click(screen.getByRole('button', { name: 'Open run' }))
+    expect(onTask).toHaveBeenCalledWith(waiting.task.threadId)
+    expect(client.runAutomationNow).not.toHaveBeenCalled()
+  })
+
   it('says where it stands, runs it now, turns it off and on, and opens a run’s task', async () => {
     const onTask = vi.fn()
     const { client } = fakeClient({
