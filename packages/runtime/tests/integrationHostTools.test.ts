@@ -2,9 +2,29 @@ import { makeServiceApi } from '@althar/connectors'
 import { assert, describe, it } from '@effect/vitest'
 import { Effect } from 'effect'
 
-import { reviewerRequest } from '../src/integrationHostTools'
+import { bitbucketThreadRequest, reviewerRequest } from '../src/integrationHostTools'
 
 describe('adding pull request reviewers', () => {
+  it.effect('resolves and reopens Bitbucket conversations without changing their text', () =>
+    Effect.gen(function* () {
+      const api = makeServiceApi('bitbucket_dc', {
+        apiUrl: 'https://host.test/rest/api/latest',
+        webUrl: 'https://host.test',
+        credential: Effect.succeed({ kind: 'bearer', token: 'test-token' }),
+        fetch: async () => new Response(JSON.stringify({ version: 4, text: 'Original comment' })),
+      })
+      assert.deepStrictEqual(yield* bitbucketThreadRequest('bitbucket_dc', api, '/pulls/1', '42', true), {
+        method: 'PUT',
+        path: '/pulls/1/comments/42',
+        body: { version: 4, state: 'RESOLVED' },
+      })
+      assert.deepStrictEqual(yield* bitbucketThreadRequest('bitbucket_cloud', api, '/pulls/1', '42', false), {
+        method: 'DELETE',
+        path: '/pulls/1/comments/42/resolve',
+        body: {},
+      })
+    }),
+  )
   for (const fixture of [
     {
       product: 'gitlab' as const,

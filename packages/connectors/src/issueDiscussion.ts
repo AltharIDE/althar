@@ -29,7 +29,7 @@ export const readIssueDiscussion = (
   api: ServiceApi,
   issue: { readonly id: string; readonly ref: string },
   options: { readonly cursor?: string | undefined; readonly limit?: number | undefined } = {},
-) =>
+): Effect.Effect<{ readonly comments: ReadonlyArray<Readonly<Record<string, unknown>>>; readonly next: string | null }, ConnectorFailed> =>
   Effect.gen(function* () {
     const limit = Math.min(100, Math.max(1, options.limit ?? 50))
     if (product === 'linear') {
@@ -63,8 +63,21 @@ export const readIssueDiscussion = (
       const path =
         product === 'github'
           ? `/repos/${repository}/issues/${number}/comments?per_page=${limit}&page=${page}`
-          : `/projects/${encodeURIComponent(repository)}/issues/${number}/notes?per_page=${limit}&page=${page}&order_by=created_at&sort=asc`
+          : `/projects/${encodeURIComponent(repository)}/issues/${number}/discussions?per_page=${limit}&page=${page}`
       const answer = yield* api.request({ path })
+      if (product === 'gitlab') {
+        const discussions = yield* decode(
+          product,
+          Schema.Array(Schema.Struct({ id: Schema.String, individual_note: Schema.Boolean, notes: Records })),
+          answer.body,
+        )
+        return {
+          comments: discussions.flatMap((thread) =>
+            thread.notes.map((note) => ({ ...note, threadId: thread.individual_note ? null : thread.id })),
+          ),
+          next: answer.next !== null || discussions.length === limit ? String(page + 1) : null,
+        }
+      }
       const comments = yield* decode(product, Records, answer.body)
       return { comments, next: answer.next !== null || comments.length === limit ? String(page + 1) : null }
     }
@@ -99,7 +112,7 @@ export const readIssueDiscussion = (
     return yield* fail(product, 'This connection has no issue discussion API.')
   })
 
-/** Editing addresses the service's stable comment ID; only Linear has native issue comment threads. */
+/** Editing addresses a stable comment ID; replies use Linear's root comment or GitLab's discussion ID. */
 export const issueCommentRequest = (
   product: Product,
   issue: { readonly id: string; readonly ref: string },
@@ -119,6 +132,14 @@ export const issueCommentRequest = (
               'mutation($id: String!, $input: CommentUpdateInput!) { result: commentUpdate(id: $id, input: $input) { success comment { id body url } } }',
             variables: { id: options.id, input: { body } },
           }
+    if (product === 'gitlab' && options.parent !== undefined) {
+      const [repository = '', number = ''] = issue.ref.split('#')
+      return {
+        method: 'POST',
+        path: `/projects/${encodeURIComponent(repository)}/issues/${number}/discussions/${encodeURIComponent(options.parent)}/notes`,
+        body: { body },
+      }
+    }
     if (options.parent !== undefined)
       return yield* fail(product, 'This tracker does not have native threaded issue comments; use comment_on_issue.')
     const id = options.id

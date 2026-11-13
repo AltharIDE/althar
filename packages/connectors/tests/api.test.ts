@@ -5,6 +5,29 @@ import { makeServiceApi, prepareApi } from '../src/api'
 import { stubFetch } from './stub'
 
 describe('authenticated service calls', () => {
+  it.effect('reaches Jira Agile and service-desk APIs without allowing arbitrary roots or origins', () =>
+    Effect.gen(function* () {
+      for (const product of ['jira_cloud', 'jira_dc'] as const) {
+        const root = `https://jira.test/company/rest/api/${product === 'jira_cloud' ? '3' : '2'}`
+        assert.strictEqual(
+          (yield* prepareApi(product, root, { namespace: 'agile', path: '/board/7/sprint' })).url,
+          'https://jira.test/company/rest/agile/1.0/board/7/sprint',
+        )
+        assert.strictEqual(
+          (yield* prepareApi(product, root, { namespace: 'service_desk', path: '/request' })).url,
+          'https://jira.test/company/rest/servicedeskapi/request',
+        )
+        assert.strictEqual(
+          (yield* Effect.flip(prepareApi(product, root, { namespace: 'agile', path: '/../../api/3/user' }))).reason,
+          'rejected',
+        )
+      }
+      assert.strictEqual(
+        (yield* Effect.flip(prepareApi('github', 'https://api.github.com', { namespace: 'agile', path: '/board' }))).reason,
+        'rejected',
+      )
+    }),
+  )
   it.effect('keeps credentials on the connected origin and returns a next page without truncating its JSON', () =>
     Effect.gen(function* () {
       const { fetch, sent } = stubFetch([
@@ -50,6 +73,8 @@ describe('authenticated service calls', () => {
         '/repos/a/b/check-runs',
         '/repos/a/b/statuses/abc',
         '/repos/a/b/branches/main/protection',
+        '/repositories/a/b/pullrequests/1/request-changes',
+        '/projects/A/repos/b/pull-requests/1/participants/me',
         '/projects/a%2Fb',
       ]) {
         assert.strictEqual(
@@ -72,6 +97,7 @@ describe('authenticated service calls', () => {
         'query { viewer { ...Hidden } } fragment Hidden on User { token: apiKeys { nodes { id } } }',
         'mutation { okay: createCommitOnBranch(input: {}) { clientMutationId } }',
         'mutation { okay: updateRepository(input: {}) { clientMutationId } }',
+        'mutation { mergeRequestRequestChanges(input: { projectPath: "a/b", iid: "1" }) { errors } }',
         'mutation { first: issueUpdate(id: "a", input: {}) { success } second: issueUpdate(id: "b", input: {}) { success } }',
         'query A { viewer { id } } mutation B { issueDelete(id: "x") { success } }',
         'subscription { issue { id } }',

@@ -8,6 +8,7 @@ import { tail } from './github'
 import { CloudParticipants, CloudRestrictions, cloudRulesOf } from './bitbucketRules'
 import { makeHttp } from './http'
 import { makeBitbucketCloudReleases } from './bitbucketCloudReleases'
+import { postHostReview } from './hostReviews'
 import type {
   Account,
   Activity,
@@ -26,7 +27,7 @@ import type {
   Review,
   Verdict,
 } from './model'
-import { branchPath, lacking, noReopen, noReviews, stillOpen } from './model'
+import { branchPath, lacking, noReopen, stillOpen } from './model'
 import {
   type Answer,
   answered,
@@ -94,7 +95,10 @@ const PullAnswer = Schema.Struct({
     // The repository the branch is on: a fork's, for a branch from one; null where the fork is gone.
     repository: Schema.optional(Schema.NullOr(Schema.Struct({ full_name: Schema.String }))),
   }),
-  destination: Schema.Struct({ branch: Schema.Struct({ name: Schema.String }) }),
+  destination: Schema.Struct({
+    branch: Schema.Struct({ name: Schema.String }),
+    commit: Schema.optional(Schema.Struct({ hash: Schema.String })),
+  }),
   author: Schema.optional(Schema.NullOr(User)),
   reviewers: Schema.optional(Schema.Array(User)),
   // Who took part, and how each left it: given in a list only when asked for.
@@ -534,7 +538,7 @@ export const makeBitbucketCloud = (options: AdapterOptions): CodeHost => {
   return {
     product,
     words: { noun: 'pull request', short: 'PR', prefix: '#' },
-    capabilities: { drafts: true, checkLogs: true, threads: true, reviews: false, pictures: false, reopen: false, rerun: true },
+    capabilities: { drafts: true, checkLogs: true, threads: true, reviews: true, pictures: false, reopen: false, rerun: true },
     ...makeBitbucketCloudReleases({ http, repo }),
     account,
     repository: (path) =>
@@ -815,9 +819,18 @@ export const makeBitbucketCloud = (options: AdapterOptions): CodeHost => {
         // Althar's own reply: whether it counts as a member's doesn't matter, it is known by its receipt.
         (comment) => commentOf(comment, reply.threadId ?? String(comment.id), true),
       ),
-    // Reviews of a change Althar didn't open are GitHub's alone, for now.
-    changeToReview: () => Effect.fail(noReviews(product, { noun: 'pull request', short: 'PR', prefix: '#' })),
-    postReview: () => Effect.fail(noReviews(product, { noun: 'pull request', short: 'PR', prefix: '#' })),
+    changeToReview: (repository, number) =>
+      Effect.gen(function* () {
+        const one = yield* http.json(PullAnswer, 'GET', pull(repository, number))
+        const source = one.source.repository?.full_name
+        return {
+          ...changeOf(repository, one),
+          fork: source === undefined || source === repository.path.join('/') ? null : source.split('/'),
+          baseSha: one.destination.commit?.hash ?? null,
+          member: source === undefined || one.author?.uuid === undefined ? false : yield* memberOf(repository, one.author.uuid),
+        }
+      }),
+    postReview: (repository, number, review) => postHostReview(product, http, pull(repository, number), review, account),
     pushTarget,
   }
 }

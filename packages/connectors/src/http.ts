@@ -496,9 +496,19 @@ export const makeHttp = (options: HttpOptions): Http => {
         Effect.flatMap((answer) => decode(schema, answer.body)),
       ),
     upload: (schema, url, bytes, mediaType) =>
-      call('POST', url, { raw: { bytes, type: mediaType } }).pipe(
+      call('POST', url, { raw: { bytes, type: mediaType }, manual: true }).pipe(
         Effect.flatMap(success),
         Effect.flatMap((answer) => decode(schema, answer.body)),
+        Effect.mapError((error) =>
+          error.sizeLimit === undefined
+            ? error
+            : new ConnectorFailed({
+                product,
+                reason: 'invalid_response',
+                message: 'The upload response exceeded its size cap; its outcome is uncertain.',
+                sizeLimit: error.sizeLimit,
+              }),
+        ),
       ),
     cached: (schema, url) =>
       Effect.gen(function* () {

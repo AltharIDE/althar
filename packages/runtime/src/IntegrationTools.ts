@@ -34,6 +34,7 @@ import {
 import { hostIntegrationTools } from './integrationHostTools'
 
 const ApiAsked = Schema.Struct({
+  namespace: Schema.optional(Schema.Literals(['agile', 'service_desk'])),
   connection: Schema.optional(Schema.String),
   method: Schema.optional(Schema.String),
   path: Schema.optional(Schema.String),
@@ -136,9 +137,10 @@ export class IntegrationTools extends Context.Service<IntegrationTools, { readon
         ...(['code_host_api', 'tracker_api'] as const).map((name) =>
           tool(
             name,
-            'Authenticated API fallback for operations without a dedicated tool. A REST call takes a relative path, method (GET by default) and JSON body. GraphQL takes query and variables; Althar parses its operation. Reads work in any turn. Writes need message from read_turn or an errand, leave a receipt, and never retry an uncertain outcome. Credentials, administration, repository content and checks/reviews of your own work stay outside this fallback. Responses are full JSON, up to 4 MiB; next is the relative REST continuation. GraphQL includes pageInfo in body.',
+            'Authenticated API fallback for operations without a dedicated tool. A REST call takes a relative path, method (GET by default) and JSON body. Jira namespace agile reaches boards/sprints (/board, /sprint); service_desk reaches service requests (/request); omit namespace for the core API. GraphQL takes query and variables; Althar parses its operation. Reads work in any turn. Writes need message from read_turn or an errand, leave a receipt, and never retry an uncertain outcome. Credentials, administration, repository content and checks/reviews of your own work stay outside this fallback. Responses are full JSON, up to 4 MiB; next is the relative REST continuation. GraphQL includes pageInfo in body.',
             {
               connection: connectionInput,
+              namespace: { type: 'string', enum: ['agile', 'service_desk'] },
               method: { type: 'string', enum: ['GET', 'HEAD', 'POST', 'PATCH', 'PUT', 'DELETE'] },
               path: { type: 'string' },
               body: { description: 'Any JSON request body, including arrays.' },
@@ -275,7 +277,7 @@ export class IntegrationTools extends Context.Service<IntegrationTools, { readon
         ...(['edit_issue_comment', 'reply_to_issue_comment'] as const).map((name) =>
           tool(
             name,
-            `${name === 'edit_issue_comment' ? 'Edits a comment by its stable service ID, on every tracker that supports comments.' : 'Replies to a Linear issue comment thread; comment is its root comment ID.'} body is full Markdown. Requires the person’s word and leaves a receipt.`,
+            `${name === 'edit_issue_comment' ? 'Edits a comment by its stable service ID, on every tracker that supports comments.' : 'Replies to an issue thread: comment is the root comment ID on Linear, or threadId from read_issue_comments on GitLab.'} body is full Markdown. Requires the person’s word and leaves a receipt.`,
             { issue: { type: 'string' }, comment: { type: 'string' }, body: { type: 'string' }, ...wordInput },
             ['issue', 'comment', 'body'],
             (input, access) =>
@@ -321,14 +323,22 @@ export class IntegrationTools extends Context.Service<IntegrationTools, { readon
         ),
         tool(
           'read_issue_attachments',
-          'Lists Linear issue attachment resources with IDs, titles and download URLs, a full page at a time. Continue with cursor from pageInfo. Linked documents are available through list_linear_resource.',
+          'Reads issue attachments: Linear Resources, Jira attachment fields, or Trello attachments. GitHub and GitLab attach files through comments, so those return full comment pages containing the links, with source=comments. Follow the returned continuation. Linked Linear documents use list_linear_resource.',
           { issue: { type: 'string' }, cursor: { type: 'string' }, limit: { type: 'integer', minimum: 1, maximum: 100 } },
           ['issue'],
           (input, access) =>
             Effect.gen(function* () {
               const asked = yield* decode(IssueAsked, input)
               const found = yield* issueAt(access.projectId, asked.issue)
-              if (found.connection.product !== 'linear') return yield* refused('Use tracker_api to read attachments on this tracker.')
+              if (found.connection.product === 'jira_cloud' || found.connection.product === 'jira_dc')
+                return serialize(yield* found.api.request({ path: `/issue/${encodeURIComponent(found.issue.ref)}?fields=attachment` }))
+              if (found.connection.product === 'trello')
+                return serialize(yield* found.api.request({ path: `/cards/${encodeURIComponent(found.issue.id)}/attachments` }))
+              if (found.connection.product === 'github' || found.connection.product === 'gitlab')
+                return JSON.stringify({
+                  source: 'comments',
+                  ...(yield* readIssueDiscussion(found.connection.product, found.api, found.issue, asked)),
+                })
               return serialize(
                 yield* found.api.request({
                   query:
@@ -340,15 +350,13 @@ export class IntegrationTools extends Context.Service<IntegrationTools, { readon
         ),
         tool(
           'upload_issue_attachment',
-          'Uploads a file from this conversation’s working folder to a Linear issue’s Resources. path is local, media_type is its MIME type (application/octet-stream by default), at most 5 MiB. Requires the person’s word; the receipt records the filename and digest, never file bytes or credentials.',
+          'Uploads a file from this conversation’s working folder to an issue: Linear Resources, Jira/Trello attachments, or a linked comment on GitHub/GitLab. GitHub Enterprise Server has no supported upload endpoint. path is local, media_type is its MIME type (application/octet-stream by default), at most 5 MiB. Requires the person’s word; the receipt records the filename and digest, never file bytes or credentials.',
           { issue: { type: 'string' }, path: { type: 'string' }, media_type: { type: 'string' }, ...wordInput },
           ['issue', 'path'],
           (input, access) =>
             Effect.gen(function* () {
               const asked = yield* decode(AttachmentAsked, input)
               const found = yield* issueAt(access.projectId, asked.issue)
-              if (found.connection.product !== 'linear')
-                return yield* refused('Direct attachment uploads use Linear; use this tracker’s own attachment API.')
               const { bytes, filename } = yield* attachmentBytes(access, asked.path)
               const request = {
                 issue: found.issue.id,
@@ -362,8 +370,15 @@ export class IntegrationTools extends Context.Service<IntegrationTools, { readon
                 asked,
                 found.issue.url,
                 request,
-                found.api.uploadAttachment(found.issue.id, filename, request.mediaType, bytes).pipe(Effect.flatMap(ensureSuccess)),
-                readyAccount(found.api, 'linear'),
+                found.api
+                  .uploadAttachment(
+                    ['linear', 'trello'].includes(found.connection.product) ? found.issue.id : found.issue.ref,
+                    filename,
+                    request.mediaType,
+                    bytes,
+                  )
+                  .pipe(Effect.flatMap(ensureSuccess)),
+                readyAccount(found.api, found.connection.product, found.tracker?.account),
               )
             }),
         ),

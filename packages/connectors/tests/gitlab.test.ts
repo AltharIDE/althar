@@ -117,17 +117,28 @@ describe('GitLab as a code host', () => {
     }),
   )
 
-  it.effect('refuses to review a merge request it didn’t open, in GitLab’s words, without asking GitLab', () =>
+  it.effect('reads a merge request for review and refuses self-approval before posting', () =>
     Effect.gen(function* () {
-      const { host, sent } = gitlab([])
-      assert.isFalse(host.capabilities.reviews)
-      assert.deepInclude(yield* Effect.flip(host.changeToReview(repository, 12)), {
-        reason: 'rejected',
-        message: 'Althar can’t review a merge request on this host yet.',
-      })
-      const posted = yield* Effect.flip(host.postReview(repository, 12, { event: 'comment', body: 'b', commit: null, comments: [] }))
+      const { host, sent } = gitlab([
+        [
+          'GET',
+          `${PROJECT}/merge_requests/12`,
+          {
+            json: request({
+              source_project_id: 34675721,
+              target_project_id: 34675721,
+              diff_refs: { base_sha: 'base', start_sha: 'start', head_sha: 'head' },
+            }),
+          },
+        ],
+        ['GET', `${PROJECT}/members/all/5`, { json: { access_level: 30 } }],
+        ['GET', `${API}/user`, { json: user(5, 'you') }],
+      ])
+      assert.isTrue(host.capabilities.reviews)
+      assert.deepInclude(yield* host.changeToReview(repository, 12), { member: true, fork: null, baseSha: 'start' })
+      const posted = yield* Effect.flip(host.postReview(repository, 12, { event: 'approve', body: 'b', commit: null, comments: [] }))
       assert.strictEqual(posted.reason, 'rejected')
-      assert.lengthOf(sent, 0)
+      assert.isTrue(sent.every((one) => one.method === 'GET'))
     }),
   )
 

@@ -850,14 +850,19 @@ returning credentials; ambiguous workspace names are refused.
 - `read_issue_relations` reads outgoing or incoming Linear relationships,
   each paginated; `change_issue_relation` adds blocks, blocked-by, related or
   duplicate links, or removes one by its ID. These are separate from parent.
-- `edit_issue_comment` addresses an existing comment ID on every tracker;
-  `reply_to_issue_comment` uses Linear's native parent comment, rather than
-  adding another root comment. Trackers without native threads say so.
-- `read_issue_attachments` pages Linear's Resources;
-  `upload_issue_attachment` uploads a regular file of at most 5 MiB from the
-  caller's own working folder. Its receipt keeps the digest, not the bytes.
-  Linear prepares a signed upload; its account credential never goes to
-  storage; only a completed PUT is linked as an attachment.
+- `edit_issue_comment` addresses an existing comment ID on every tracker.
+  `reply_to_issue_comment` uses Linear's root comment or GitLab's discussion
+  ID, included as threadId in full discussion pages. Other trackers refuse
+  threaded replies rather than creating a new root comment.
+- `read_issue_attachments` reads Linear Resources, Jira attachment fields
+  and Trello attachments; GitHub/GitLab return full comment pages containing
+  their file links, explicitly marked source=comments. Uploads take a regular
+  file of at most 5 MiB from the caller's own working folder. Linear uses a
+  signed storage PUT; Jira/Trello use authenticated multipart uploads;
+  GitHub/GitLab upload and post a linked issue comment. GitHub Enterprise
+  Server has no supported upload endpoint. Receipts keep the digest, not
+  bytes; failure to link an uploaded file remains uncertain. Uploads never
+  follow redirects with the account credential.
 - `search_pull_requests` reads beyond the project's repositories, through
   the connected account's permissions. GitHub accepts its search syntax and
   returns total, next page and incompleteness; its 1000-match search window
@@ -866,7 +871,9 @@ returning credentials; ambiguous workspace names are refused.
   quick list, and its description points to the search for complete results.
 - `request_pull_request_reviewers`, `resolve_review_thread` and
   `mark_pull_request_draft` expose the host's review controls where it has
-  them. `post_review` posts a requested review through the host's adapter,
+  them. Thread resolution includes Bitbucket Cloud's resolve endpoint and
+  Data Center's versioned comment state, retaining comment text. `post_review`
+  posts a requested review through each of the four code-host adapters,
   bound to the commit actually read; an agent cannot approve its own work
   or a pull request Althar opened. With an existing draft, it uses the same
   posting path as the card, updates that card and settles the review task;
@@ -888,6 +895,13 @@ a relative API path, method and JSON body. GraphQL takes a query and
 variables; a parser, including aliases and fragments, determines whether
 it reads or writes. There is one operation, and one root mutation field per
 call, so partial batches cannot be reported as wholly refused.
+
+Jira also accepts namespace `agile` for `/board` and `/sprint`, or
+`service_desk` for `/request` and other Service Management resources. These
+select known sibling API roots on the same server and context path, using
+the same connection; they cannot select an arbitrary URL or origin. Omit the
+namespace for Jira's core v2/v3 API. Multipart uploads use the dedicated
+attachment tool, keeping local paths and file bytes out of raw API inputs.
 
 Reads work in any ordinary lead or coordinator turn; writes go through the
 same asked-for receipt path. Credentials, administration, repository content
@@ -1061,8 +1075,19 @@ Althar narrows them itself. A listing refused for a scope says which
   request as soon as it is drafted, with the lead's verdict ("Post reviews of
   my team's pull requests without asking", off by default). A pull request
   from outside always waits for Post.
-- **Other hosts** don't take reviews yet: the code host model's
-  `capabilities.reviews` is GitHub's alone, and the coordinator says so.
+- **Other hosts** use the same review task and card lifecycle: GitLab's
+  merge-request head ref and Data Center's pull-request source ref are fetched
+  into the read-only copy. Cloud fetches the actual source branch from its
+  repository or fork, and the base from the target repository; it exposes no
+  pull-request Git ref. Every fetched head must match the provider's SHA,
+  accepting Cloud's abbreviated hashes only against a full fetched commit.
+  Their native review adapters handle summaries,
+  inline comments and verdicts. GitLab request-changes needs its GraphQL
+  mutation, whose availability and permission are the server's. Multi-call
+  reviews that partly succeed remain uncertain; they are never automatically
+  repeated. GitLab approvals and Data Center verdicts bind the reviewed SHA;
+  Bitbucket Cloud has no atomic head condition, so a move detected before or
+  after its verdict requires reconciliation.
 
 ### Signing in
 

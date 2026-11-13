@@ -1,4 +1,5 @@
 import type { ApiRequest, Product, ServiceApi } from '@althar/connectors'
+import { reviewCommitMatches } from '@althar/connectors'
 import { Effect, Schema } from 'effect'
 import { SqlClient } from 'effect/sql'
 
@@ -124,6 +125,22 @@ export const reviewerRequest = (
     }
   })
 
+export const bitbucketThreadRequest = (
+  product: Product,
+  api: ServiceApi,
+  base: string,
+  id: string,
+  resolved: boolean,
+): Effect.Effect<ApiRequest, unknown> =>
+  Effect.gen(function* () {
+    const path = `${base}/comments/${encodeURIComponent(id)}`
+    if (product === 'bitbucket_cloud') return { method: resolved ? 'POST' : 'DELETE', path: `${path}/resolve`, body: {} }
+    if (product !== 'bitbucket_dc') return yield* refused('This host does not expose a supported resolution endpoint.')
+    const current = yield* api.request({ path })
+    const { version } = yield* decode(Schema.Struct({ version: Schema.Number }), current.body)
+    return { method: 'PUT', path, body: { version, state: resolved ? 'RESOLVED' : 'OPEN' } }
+  })
+
 export const hostIntegrationTools = (tool: IntegrationTool): ReadonlyArray<Tool> => [
   tool(
     'search_pull_requests',
@@ -205,7 +222,7 @@ export const hostIntegrationTools = (tool: IntegrationTool): ReadonlyArray<Tool>
   ),
   tool(
     'resolve_review_thread',
-    'Resolves or reopens a GitHub or GitLab review thread by its stable ID; resolved defaults to true. Requires the person’s message or errand and leaves a receipt. This resolves conversation, never approves code.',
+    'Resolves or reopens a GitHub/GitLab review thread or a Bitbucket comment by its stable ID; resolved defaults to true. Requires the person’s message or errand and leaves a receipt. This resolves conversation, never approves code.',
     { pull_request: { type: ['string', 'number'] }, thread: { type: 'string' }, resolved: { type: 'boolean' }, ...wordInput },
     ['pull_request', 'thread'],
     (input, access) =>
@@ -234,7 +251,7 @@ export const hostIntegrationTools = (tool: IntegrationTool): ReadonlyArray<Tool>
               }
             : found.host.product === 'gitlab'
               ? { method: 'PUT', path: `${found.base}/discussions/${encodeURIComponent(asked.thread)}`, body: { resolved } }
-              : yield* refused('Use code_host_api for this host’s thread resolution.')
+              : yield* bitbucketThreadRequest(found.host.product, found.api, found.base, asked.thread, resolved)
         return yield* write(
           'resolve_review_thread',
           access,
@@ -358,7 +375,7 @@ export const hostIntegrationTools = (tool: IntegrationTool): ReadonlyArray<Tool>
             .change(found.repository, found.change.number)
             .pipe(
               Effect.flatMap((now) =>
-                now.headSha !== draft.headCommit
+                !reviewCommitMatches(draft.headCommit, now.headSha)
                   ? Effect.fail(refused('The head moved. Review the current commit and draft again before posting.'))
                   : Effect.succeed({ state: 'ready' as const, head: draft.headCommit }),
               ),
@@ -397,7 +414,7 @@ export const hostIntegrationTools = (tool: IntegrationTool): ReadonlyArray<Tool>
           .change(found.repository, found.change.number)
           .pipe(
             Effect.flatMap((now) =>
-              now.headSha !== commit
+              !reviewCommitMatches(commit, now.headSha)
                 ? Effect.fail(refused('The head moved. Review the current commit before posting.'))
                 : Effect.succeed({ state: 'ready' as const, head: now.headSha ?? undefined }),
             ),

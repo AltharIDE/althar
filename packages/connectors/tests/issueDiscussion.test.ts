@@ -50,14 +50,25 @@ describe('complete issue discussions', () => {
         const path =
           product === 'github'
             ? '/repos/a/b/issues/12/comments?per_page=2&page=2'
-            : '/projects/a%2Fb/issues/12/notes?per_page=2&page=2&order_by=created_at&sort=asc'
+            : '/projects/a%2Fb/issues/12/discussions?per_page=2&page=2'
         const comments = [
           { id: 3, body: 'three' },
           { id: 4, body: 'four' },
         ]
-        const { api } = at(product, root, [['GET', root + path, { json: comments }]])
+        const { api } = at(product, root, [
+          [
+            'GET',
+            root + path,
+            {
+              json:
+                product === 'github'
+                  ? comments
+                  : comments.map((note) => ({ id: `thread-${note.id}`, individual_note: false, notes: [note] })),
+            },
+          ],
+        ])
         assert.deepStrictEqual(yield* readIssueDiscussion(product, api, { id: 'i', ref: 'a/b#12' }, { cursor: '2', limit: 2 }), {
-          comments,
+          comments: product === 'github' ? comments : comments.map((note) => ({ ...note, threadId: `thread-${note.id}` })),
           next: '3',
         })
         assert.strictEqual(
@@ -120,6 +131,11 @@ describe('complete issue discussions', () => {
       const edit = yield* issueCommentRequest('github', issue, 'Edited', { id: '42' })
       assert.deepStrictEqual(edit, { method: 'PATCH', path: '/repos/a/b/issues/comments/42', body: { body: 'Edited' } })
       assert.strictEqual((yield* Effect.flip(issueCommentRequest('github', issue, 'Reply', { parent: '42' }))).reason, 'rejected')
+      assert.deepStrictEqual(yield* issueCommentRequest('gitlab', issue, 'Reply', { parent: 'thread-id' }), {
+        method: 'POST',
+        path: '/projects/a%2Fb/issues/12/discussions/thread-id/notes',
+        body: { body: 'Reply' },
+      })
       const jira = yield* issueCommentRequest('jira_cloud', { id: 'i', ref: 'DEV-1' }, '**Edited**', { id: '42' })
       assert.strictEqual(jira.path, '/issue/DEV-1/comment/42')
       assert.strictEqual(

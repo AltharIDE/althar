@@ -5,10 +5,12 @@ import { type AdapterOptions, authorizationOf } from './credential'
 import { ConnectorFailed } from './errors'
 import { GraphqlError, graphqlFailure, makeHttp } from './http'
 import type { Product } from './model'
-import { uploadLinearAttachment } from './linearUpload'
+import { uploadIssueAttachment } from './issueAttachments'
 
 /** Requests use the connection's API root, never a caller-supplied origin or credential. */
 export interface ApiRequest {
+  /** Jira's separately rooted public APIs; omitted for the connection's core API. */
+  readonly namespace?: 'agile' | 'service_desk' | undefined
   readonly method?: string | undefined
   readonly path?: string | undefined
   readonly body?: unknown
@@ -43,30 +45,42 @@ const PRIVATE =
   /(?:^|\/)(?:secrets|tokens?|access[_-]?tokens?|api[_-]?keys?|authorizations|hooks|webhooks|deploy[_-]?keys|runners|credentials)(?:\/|$)/i
 const ADMIN = /(?:^|\/)(?:protection|rulesets?|collaborators|permissions|members|invitations|settings|variables|environments)(?:\/|$)/i
 const CODE = /(?:^|\/)(?:contents|git|repository\/(?:files|commits|branches|tags)|src|commits|refs|branches|tags)(?:\/|$)/i
-const VERDICTS = /(?:^|\/)(?:check-runs|check-suites|statuses|approve|approvals|merge|reviews)(?:\/|$)/i
+const VERDICTS = /(?:^|\/)(?:check-runs|check-suites|statuses|approve|approvals|request-changes|participants|merge|reviews)(?:\/|$)/i
 const GRAPH_PRIVATE = /secret|token|apikey|authorization|webhook|deploykey|credential|runner/i
 const GRAPH_ADMIN =
   /protection|ruleset|collaborator|permission|invitation|organizationmember|repositorysettings|^(?:(?:create|update|delete)Repository|(?:organization|team|user|oauthclient|oauthapplication)(?:Create|Update|Delete|Archive))$/i
 const GRAPH_CODE = /(?:create|update|delete)(?:commit|tree|blob|ref)|createcommitonbranch/i
-const GRAPH_VERDICT = /checkrun|checksuite|commitstatus|pullrequestreview|merg(?:e|ing)pullrequest|enqueuepullrequest|pullrequestautomerge/i
+const GRAPH_VERDICT =
+  /checkrun|checksuite|commitstatus|pullrequestreview|mergerequestrequestchanges|mergerequestapprove|merg(?:e|ing)pullrequest|enqueuepullrequest|pullrequestautomerge/i
 const hasControl = (text: string) => {
   for (let at = 0; at < text.length; at++) if (text.charCodeAt(at) < 32) return true
   return false
 }
-const rootOf = (value: string) => {
+const rootOf = (value: string, product: Product, namespace?: ApiRequest['namespace']) => {
   let end = value.length
   while (end > 0 && value[end - 1] === '/') end--
-  return new URL(`${value.slice(0, end)}/`)
+  const root = new URL(`${value.slice(0, end)}/`)
+  if (namespace !== undefined) {
+    if (
+      !['agile', 'service_desk'].includes(namespace) ||
+      !['jira_cloud', 'jira_dc'].includes(product) ||
+      !/\/rest\/api\/[23]\/$/.test(root.pathname)
+    )
+      throw new Error('API namespaces are available only on Jira connections.')
+    root.pathname = root.pathname.replace(/\/rest\/api\/[23]\/$/, namespace === 'agile' ? '/rest/agile/1.0/' : '/rest/servicedeskapi/')
+  }
+  return root
 }
 
 /** Parse before authorization: GraphQL POST is a read only when its sole operation is a query. */
 export const prepareApi = (product: Product, apiRoot: string, request: ApiRequest): Effect.Effect<ApiPlan, ConnectorFailed> =>
   Effect.try({
     try: () => {
-      const root = rootOf(apiRoot)
+      const root = rootOf(apiRoot, product, request.namespace)
       if (root.protocol !== 'https:' && root.hostname !== 'localhost' && root.hostname !== '127.0.0.1')
         throw new Error('An API connection must use HTTPS.')
       if (request.query !== undefined) {
+        if (request.namespace !== undefined) throw new Error('GraphQL does not take a Jira API namespace.')
         if (request.path !== undefined || request.body !== undefined || (request.method !== undefined && request.method !== 'POST'))
           throw new Error('A GraphQL call takes query and variables, without path, body or another method.')
         if (!['linear', 'github', 'gitlab'].includes(product)) throw new Error('This service has no GraphQL API.')
@@ -140,15 +154,7 @@ export const makeServiceApi = (product: Product, options: AdapterOptions): Servi
   const api: ServiceApi = {
     prepare,
     uploadAttachment: (issue, filename, mediaType, bytes) =>
-      product === 'linear'
-        ? uploadLinearAttachment(api, options.fetch, issue, filename, mediaType, bytes)
-        : Effect.fail(
-            new ConnectorFailed({
-              product,
-              reason: 'rejected',
-              message: 'Direct issue attachment uploads are available on Linear; use this service’s own attachment API.',
-            }),
-          ),
+      uploadIssueAttachment(product, options, api, issue, filename, mediaType, bytes),
     request: (request) =>
       Effect.gen(function* () {
         const plan = yield* prepare(request)
@@ -178,7 +184,7 @@ export const makeServiceApi = (product: Product, options: AdapterOptions): Servi
         }
         const linked = /<([^>]+)>;\s*rel="next"/.exec(response.headers.get('link') ?? '')?.[1]
         const next = linked === undefined ? null : new URL(linked, plan.url)
-        const root = rootOf(options.apiUrl)
+        const root = rootOf(options.apiUrl, product, request.namespace)
         return {
           status: response.status,
           body: response.body,
