@@ -14,6 +14,13 @@ import type { Product } from './model'
 /** `fetch`, or a stand-in for it in tests. */
 export type Fetch = (input: string, init?: RequestInit) => Promise<Response>
 
+/** Trim a URL's trailing separators in linear time, including on untrusted input. */
+export const withoutTrailingSlashes = (value: string): string => {
+  let end = value.length
+  while (end > 0 && value[end - 1] === '/') end--
+  return value.slice(0, end)
+}
+
 export interface HttpOptions {
   readonly product: Product
   readonly fetch: Fetch

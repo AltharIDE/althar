@@ -1,6 +1,6 @@
 import { Duration, Effect, Option, Schema } from 'effect'
 
-import type { Fetch } from './http'
+import { type Fetch, withoutTrailingSlashes } from './http'
 import type { Product, Service } from './model'
 
 /*
@@ -85,7 +85,7 @@ const sameServer = (said: string, base: string): boolean => {
       at.origin === asked.origin &&
       at.username === '' &&
       at.password === '' &&
-      `${at.pathname}/`.startsWith(`${asked.pathname.replace(/\/+$/, '')}/`)
+      `${at.pathname}/`.startsWith(`${withoutTrailingSlashes(asked.pathname)}/`)
     )
   } catch {
     return false
@@ -124,7 +124,7 @@ const answerAt = (fetch: Fetch, service: Service, base: string): Effect.Effect<{
         const info = answer.status === 200 ? fits(JiraInfo, answer.json) : undefined
         if (info === undefined) return null
         // Jira says where it lives; kept only where that is the server asked, never another host a token would go to.
-        const said = info.baseUrl.replace(/\/+$/, '')
+        const said = withoutTrailingSlashes(info.baseUrl)
         const webUrl = sameServer(said, base) ? said : base
         return { product: info.deploymentType === 'Cloud' ? 'jira_cloud' : 'jira_dc', webUrl }
       }

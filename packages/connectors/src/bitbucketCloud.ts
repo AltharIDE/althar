@@ -6,7 +6,7 @@ import { updateInCopy } from './branchUpdate'
 import { ConnectorFailed } from './errors'
 import { tail } from './github'
 import { CloudParticipants, CloudRestrictions, cloudRulesOf } from './bitbucketRules'
-import { makeHttp } from './http'
+import { makeHttp, withoutTrailingSlashes } from './http'
 import { makeBitbucketCloudReleases } from './bitbucketCloudReleases'
 import { postHostReview } from './hostReviews'
 import type {
@@ -316,15 +316,15 @@ const listedOf = (repository: Repository, pull: PullAnswer): ListedChange => {
 
 /** Where a commit status points at a Pipelines run of this repository: its build number. */
 const pipelineOf = (repository: Repository, url: string | null | undefined) => {
-  const home = repository.webUrl.replace(/\/+$/, '').toLowerCase()
+  const home = withoutTrailingSlashes(repository.webUrl).toLowerCase()
   if (url == null || !url.toLowerCase().startsWith(`${home}/`)) return undefined
   return /^\/(?:pipelines\/results|addon\/pipelines\/home#!\/results)\/(\d+)/.exec(url.slice(home.length))?.[1]
 }
 
 export const makeBitbucketCloud = (options: AdapterOptions): CodeHost => {
   const product = 'bitbucket_cloud' as const
-  const api = options.apiUrl.replace(/\/+$/, '')
-  const web = options.webUrl.replace(/\/+$/, '')
+  const api = withoutTrailingSlashes(options.apiUrl)
+  const web = withoutTrailingSlashes(options.webUrl)
   const http = makeHttp({ product, fetch: options.fetch, authorization: Effect.map(options.credential, authorizationOf) })
   const repo = (path: ReadonlyArray<string>) => `${api}/repositories/${path.map(encodeURIComponent).join('/')}`
   const pull = (repository: Repository, number: number) => `${repo(repository.path)}/pullrequests/${number}`
@@ -867,7 +867,7 @@ interface Found {
 
 export const accessBitbucketCloud: Access = (input) =>
   Effect.gen(function* () {
-    const api = input.apiUrl.replace(/\/+$/, '')
+    const api = withoutTrailingSlashes(input.apiUrl)
     const ask = (url: string) => probe(input, url)
     const repo = (path: ReadonlyArray<string>) => `${api}/repositories/${path.map(encodeURIComponent).join('/')}`
     /** The scopes the token was given, once a refusal says. */

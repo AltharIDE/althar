@@ -5,7 +5,7 @@ import { type AdapterOptions, authorizationOf } from './credential'
 import { updateInCopy } from './branchUpdate'
 import { ConnectorFailed } from './errors'
 import { DataCenterMerge, dataCenterRulesOf } from './bitbucketRules'
-import { type Http, makeHttp } from './http'
+import { type Http, makeHttp, withoutTrailingSlashes } from './http'
 import { makeBitbucketDataCenterReleases } from './bitbucketDataCenterReleases'
 import { postHostReview } from './hostReviews'
 import type {
@@ -281,8 +281,8 @@ const iso = (at: number) => new Date(at).toISOString()
 
 export const makeBitbucketDataCenter = (options: AdapterOptions): CodeHost => {
   const product = 'bitbucket_dc' as const
-  const api = options.apiUrl.replace(/\/+$/, '')
-  const web = options.webUrl.replace(/\/+$/, '')
+  const api = withoutTrailingSlashes(options.apiUrl)
+  const web = withoutTrailingSlashes(options.webUrl)
   // Build statuses have their own API, beside the main one.
   const rest = api.replace(/\/api\/[^/]+$/, '')
   const raw = makeHttp({ product, fetch: options.fetch, authorization: Effect.map(options.credential, authorizationOf) })
@@ -882,7 +882,7 @@ export const makeBitbucketDataCenter = (options: AdapterOptions): CodeHost => {
 
 export const accessBitbucketDataCenter: Access = (input) =>
   Effect.gen(function* () {
-    const api = input.apiUrl.replace(/\/+$/, '')
+    const api = withoutTrailingSlashes(input.apiUrl)
     const ask = (url: string) => probe(input, url)
 
     const properties = yield* ask(`${api}/application-properties`)

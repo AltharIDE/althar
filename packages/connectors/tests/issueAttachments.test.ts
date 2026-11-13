@@ -20,7 +20,7 @@ describe('issue file uploads', () => {
           ['GET', root + projectPath, { json: repository }],
           [
             'POST',
-            product === 'github' ? /^https:\/\/uploads.github.com\/user-attachments\/assets\?/ : root + '/projects/1/uploads',
+            product === 'github' ? /^https:\/\/uploads\.github\.com\/user-attachments\/assets\?/ : root + '/projects/1/uploads',
             { json: { url: product === 'github' ? 'https://github.com/user-attachments/assets/file' : '/uploads/file/report.txt' } },
           ],
           ['POST', root + commentPath, () => (++links === 1 ? { json: { id: 42 } } : { status: 403, json: { message: 'Forbidden' } })],

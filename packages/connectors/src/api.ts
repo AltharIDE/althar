@@ -3,7 +3,7 @@ import { Kind, parse, visit } from 'graphql'
 
 import { type AdapterOptions, authorizationOf } from './credential'
 import { ConnectorFailed } from './errors'
-import { GraphqlError, graphqlFailure, makeHttp } from './http'
+import { GraphqlError, graphqlFailure, makeHttp, withoutTrailingSlashes } from './http'
 import type { Product } from './model'
 import { uploadIssueAttachment } from './issueAttachments'
 
@@ -57,9 +57,7 @@ const hasControl = (text: string) => {
   return false
 }
 const rootOf = (value: string, product: Product, namespace?: ApiRequest['namespace']) => {
-  let end = value.length
-  while (end > 0 && value[end - 1] === '/') end--
-  const root = new URL(`${value.slice(0, end)}/`)
+  const root = new URL(`${withoutTrailingSlashes(value)}/`)
   if (namespace !== undefined) {
     if (
       !['agile', 'service_desk'].includes(namespace) ||

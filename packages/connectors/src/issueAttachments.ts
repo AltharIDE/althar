@@ -7,7 +7,7 @@ import { type AdapterOptions, authorizationOf } from './credential'
 import { ConnectorFailed } from './errors'
 import { makeGitHub } from './github'
 import { makeGitLab } from './gitlab'
-import { makeHttp } from './http'
+import { makeHttp, withoutTrailingSlashes } from './http'
 import { uploadLinearAttachment } from './linearUpload'
 import type { Product } from './model'
 
@@ -72,7 +72,7 @@ export const uploadIssueAttachment = (
       authorization: Effect.map(options.credential, authorizationOf),
       ...(product === 'trello' ? {} : { headers: { 'X-Atlassian-Token': 'no-check' } }),
     })
-    const root = options.apiUrl.endsWith('/') ? options.apiUrl.slice(0, -1) : options.apiUrl
+    const root = withoutTrailingSlashes(options.apiUrl)
     const path =
       product === 'trello' ? `/cards/${encodeURIComponent(issue)}/attachments` : `/issue/${encodeURIComponent(issue)}/attachments`
     const body = yield* http.upload(Schema.Unknown, root + path, form, `multipart/form-data; boundary=${boundary}`)

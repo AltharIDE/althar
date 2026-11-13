@@ -7,7 +7,7 @@ import { type AdapterOptions, authorizationOf } from './credential'
 import { updateInCopy } from './branchUpdate'
 import { ConnectorFailed } from './errors'
 import { ApprovalsAnswer, ApprovalStateAnswer, gitlabRulesOf, ProjectRules, RequestRules, ReviewersAnswer } from './gitlabRules'
-import { makeHttp, paged } from './http'
+import { makeHttp, paged, withoutTrailingSlashes } from './http'
 import { makeGitLabReleases } from './gitlabReleases'
 import { postHostReview } from './hostReviews'
 import { pageOfCursor, tail } from './github'
@@ -599,8 +599,8 @@ const SIZES_KEPT = 1_000
 
 export const makeGitLab = (options: AdapterOptions): CodeHost & Tracker => {
   const product = 'gitlab' as const
-  const api = options.apiUrl.replace(/\/+$/, '')
-  const web = options.webUrl.replace(/\/+$/, '')
+  const api = withoutTrailingSlashes(options.apiUrl)
+  const web = withoutTrailingSlashes(options.webUrl)
   const http = makeHttp({ product, fetch: options.fetch, authorization: Effect.map(options.credential, authorizationOf) })
   const graphqlUrl = `${api.replace(/\/v4$/, '')}/graphql`
   const project = (repository: Repository | ReadonlyArray<string>) =>
@@ -1530,8 +1530,8 @@ const dayOf = (day: string | null | undefined): string | null => {
 
 export const accessGitLab: Access = (input) =>
   Effect.gen(function* () {
-    const api = input.apiUrl.replace(/\/+$/, '')
-    const web = input.webUrl.replace(/\/+$/, '')
+    const api = withoutTrailingSlashes(input.apiUrl)
+    const web = withoutTrailingSlashes(input.webUrl)
     const ask = (url: string) => probe(input, url)
     const scope = (name: string): AccessReason => ({ kind: 'scope', scope: name, url: `${web}/-/user_settings/personal_access_tokens` })
     const lines: Array<AccessLine> = []
