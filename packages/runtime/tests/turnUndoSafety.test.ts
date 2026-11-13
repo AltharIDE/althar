@@ -1,7 +1,7 @@
 import { readFileSync, writeFileSync, existsSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 
-import { Ids, newId } from '@althar/domain'
+import { Ids, newId, type ProjectId } from '@althar/domain'
 import { assert, describe, it } from '@effect/vitest'
 import { Effect, Option } from 'effect'
 import { SqlClient } from 'effect/sql'
@@ -12,6 +12,8 @@ import * as Runtime from '../src/Runtime'
 import { Sessions } from '../src/Sessions'
 import { checkpointBeforeTurn, checkpointAfterTurn } from '../src/turnUndo'
 import { words } from '../src/words'
+import { evidenceGallery } from '../src/evidenceGallery'
+import { addItem } from '../src/threads'
 import { runtime, task, turns, until } from './support'
 
 const fixture = Effect.gen(function* () {
@@ -76,6 +78,37 @@ const refused = (itemId: string) =>
   })
 
 describe('chat undo safety boundaries', () => {
+  it.live('rebuilds a cached visual collection from retained reports without resurrecting undone screenshots', () =>
+    Effect.gen(function* () {
+      const on = yield* fixture
+      const place = { projectId: on.projectId as ProjectId, threadId: on.threadId }
+      const report = (view: string) =>
+        addItem(place, 'step_result', {
+          step: 'implement',
+          gallery: { mode: 'patch' },
+          evidence: [
+            {
+              kind: 'screenshot',
+              view,
+              caption: view,
+              picture: { sha256: 'a'.repeat(64), mediaType: 'image/png', bytes: 1, width: 1, height: 1, name: 'screen.png' },
+            },
+          ],
+        })
+      yield* report('Kept screen')
+      assert.lengthOf((yield* evidenceGallery(on.threadId)).shots, 1)
+      const turn = yield* recorded(on, 'Change README', () => writeFileSync(join(on.workspace.path, 'README.md'), 'Agent work'))
+      yield* report('Undone screen')
+      assert.lengthOf((yield* evidenceGallery(on.threadId)).shots, 2)
+      yield* undo(turn.itemId)
+      assert.deepStrictEqual(
+        (yield* evidenceGallery(on.threadId)).shots.map((shot) => shot.key),
+        ['Kept screen'],
+      )
+      assert.strictEqual(readFileSync(join(on.workspace.path, 'README.md'), 'utf8'), on.original)
+    }).pipe(Effect.provide(runtime())),
+  )
+
   it.live('recovers changed files if the conversation transaction fails, then safely retries the same command', () =>
     Effect.gen(function* () {
       const on = yield* fixture

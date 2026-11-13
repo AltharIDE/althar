@@ -86,7 +86,6 @@ import { statements as mergeLineCard } from './0081_merge_line_card'
 import { statements as notedInput } from './0082_noted_input'
 import { statements as externalWaits } from './0083_external_waits'
 import { statements as evidenceGalleries } from './0084_evidence_galleries'
-
 import { statements as turnUndo } from './0085_turn_undo'
 
 export interface Migration {
@@ -191,7 +190,6 @@ export const migrations: ReadonlyArray<Migration> = [
   { key: '0082_noted_input', statements: notedInput },
   { key: '0083_external_waits', statements: externalWaits },
   { key: '0084_evidence_galleries', statements: evidenceGalleries },
-
   { key: '0085_turn_undo', statements: turnUndo },
 ]
 

@@ -239,6 +239,8 @@ export const undoConversation = (input: { readonly envelope: CommandEnvelope; re
         handle: Effect.gen(function* () {
           const at = yield* timestamp
           yield* sql`UPDATE thread_items SET undone_at = ${at} WHERE thread_id = ${target.threadId} AND sequence >= ${first.sequence} AND undone_at IS NULL`
+          // The visual collection is derived from retained reports; rebuild it without the discarded suffix.
+          yield* sql`DELETE FROM evidence_galleries WHERE thread_id = ${target.threadId}`
           yield* sql`UPDATE turn_deliveries SET undone_at = ${at} WHERE id IN ${sql.in(deliveries.map((delivery) => delivery.id))}`
           yield* sql`UPDATE user_inputs SET state = 'withdrawn' WHERE thread_id = ${target.threadId} AND (
             state IN ('queued', 'noted') OR (state = 'delivered' AND id IN (SELECT user_input_id FROM thread_items

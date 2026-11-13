@@ -35,7 +35,7 @@ export const evidenceGallery = (threadId: string) =>
         let shots: EvidenceGallery['shots'] = existing === undefined ? [] : JSON.parse(existing.shots)
         const rows = yield* sql<{ id: string; sequence: number; createdAt: string; content: string }>`
         SELECT id, sequence, created_at, content FROM thread_items
-        WHERE thread_id = ${threadId} AND kind = 'step_result' AND sequence > ${revision} ORDER BY sequence`
+        WHERE thread_id = ${threadId} AND kind = 'step_result' AND undone_at IS NULL AND sequence > ${revision} ORDER BY sequence`
         for (const row of rows) {
           const content = JSON.parse(row.content) as Record<string, unknown>
           if (content.step === 'implement' || content.step === 'settle') {
