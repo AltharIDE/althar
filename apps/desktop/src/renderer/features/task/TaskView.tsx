@@ -44,7 +44,7 @@ import {
 import { isAnswered, isSettleable, kindWords, takesDone } from '../../shared/calls'
 import { text as boardText } from '../board/BoardView'
 import { doing } from './actions'
-import { queuedWords, reconnectsWords, upNextWords, waitsWords } from '../../shared/agents'
+import { externalWaitWords, queuedWords, reconnectsWords, upNextWords, waitsWords } from '../../shared/agents'
 import { useModels } from '../../data/models'
 import { contextMeter } from '../../shared/ContextMeter'
 import { CarriedOver } from '../../shared/dictation/Carried'
@@ -173,6 +173,7 @@ export const text = {
   },
   working: 'Working',
   needsYou: 'Needs you',
+  waiting: 'Waiting',
   /** A review of someone else's pull request, drafted: the person's to post. */
   drafted: 'Review drafted',
   /** Drafted by the coordinator, its plan not proposed yet: it is off the board until it is. */
@@ -219,6 +220,8 @@ export const statusOf = (
   const inQueue = queuedToMerge({ phase, change: shown })
   // Where it stands is its card's, as the board and the home say it (`taskStatusOf`); only the words are the header's own.
   const status = taskStatusOf({ ...snapshot.task, inMergeQueue: inQueue, calls: snapshot.attention.length })
+  if (status === TaskStatus.Running && snapshot.task.externalWait !== undefined)
+    return { status, state: text.waiting, why: externalWaitWords(snapshot.task.externalWait, clock) }
   // A round of work after its plan is its lead following up, as the person asked (ADR-034).
   const doing =
     step === null ? undefined : step === 'implement' && snapshot.task.followUp === true ? stepText.followingUp : stepText.now[step]
@@ -300,7 +303,7 @@ const ticking = (snapshot: ThreadSnapshot | null) =>
  */
 export const elapsedOf = (snapshot: ThreadSnapshot, now: string): string | null => {
   const { startedAt, settledAt, phase } = snapshot.task
-  if (startedAt === null) return null
+  if (startedAt === null || snapshot.task.externalWait !== undefined) return null
   if (settledAt !== null) return running(startedAt, settledAt)
   if (ticking(snapshot)) return running(startedAt, now)
   const last = phase === 'ready' ? snapshot.items.findLast((item) => item.kind === 'step_result') : snapshot.items.at(-1)
@@ -310,6 +313,7 @@ export const elapsedOf = (snapshot: ThreadSnapshot, now: string): string | null 
 /** How long the step it is on has run, while it runs: what its header's card says beside that step. */
 export const tookOf = (snapshot: ThreadSnapshot, now: string): string | null => {
   const { phase, step, stepAt } = snapshot.task
+  if (snapshot.task.externalWait !== undefined) return null
   return phase === 'running' && step !== null && stepAt !== null ? running(stepAt, now) : null
 }
 
@@ -1337,6 +1341,7 @@ export function TaskView({
                   refused={model.refused}
                   onReplace={(head, replaces, url) => void model.replace(head, replaces, url)}
                   // Bringing a pull request's commits in is the lead's: Althar fetches them, and the note says how to merge them.
+                  // oxlint-disable-next-line althar/press-at-once -- What the note says is what the fetch found; the card is busy from the press.
                   onBringIn={(url) =>
                     void model.mergeNote(url).then((note) => {
                       if (note !== null) void send(note, false)
@@ -1452,7 +1457,7 @@ export function TaskView({
                       run={(run) => (
                         <RunOf
                           run={run}
-                          now={now}
+                          threadTask={snapshot.task.id}
                           onStop={(id) => void model.stopLaunch(id)}
                           onRunAgain={(_taskId, runnableId) => void model.runProject(runnableId)}
                         />
@@ -1500,6 +1505,7 @@ export function TaskView({
                           busy={model.pending}
                           onMerge={(change) => void model.accept([change])}
                           {...(onOpenTask === undefined ? {} : { onOpen: onOpenTask })}
+                          onShow={showInThread}
                         />
                       )}
                       // Auto's line on moving the lead to a lighter model, with Keep and Undo (README section 7).
@@ -1599,6 +1605,7 @@ export function TaskView({
                   })}
               busy={model.pending}
               {...(model.error === null ? {} : { error: model.error })}
+              // oxlint-disable-next-line althar/press-at-once -- A dialog the host answers (closing pull requests): it stays open, busy, so a refusal lands in it.
               onAbandon={(choices) =>
                 void model
                   .abandon(
@@ -1635,6 +1642,7 @@ export function TaskView({
                   })}
               busy={model.pending}
               {...(model.error === null ? {} : { error: model.error })}
+              // oxlint-disable-next-line althar/press-at-once -- A dialog the host answers: it stays open, busy, so a refusal lands in it.
               onAttach={(pullRequest, start) =>
                 void model.attach(pullRequest, start).then((done) => {
                   if (done === null) return

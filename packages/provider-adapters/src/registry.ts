@@ -909,6 +909,7 @@ export const claudeSandboxStarts = (): boolean => {
     const onPath = (name: string) =>
       (process.env.PATH ?? '').split(delimiter).some((folder) => folder !== '' && existsSync(join(folder, name)))
     if (!onPath('bwrap') || !onPath('socat')) return false
+    // oxlint-disable-next-line althar/off-the-thread -- Not off the thread yet: once a launch, on Linux with bubblewrap, up to 5 s (foundations.md).
     const tried = spawnSync('bwrap', ['--ro-bind', '/', '/', '--dev', '/dev', '--unshare-user', '--unshare-net', 'true'], {
       stdio: 'ignore',
       timeout: 5_000,

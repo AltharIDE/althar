@@ -2,6 +2,7 @@ import type { FullConfig, FullResult, Reporter, Suite, TestCase, TestResult } fr
 
 import { type Flaky, fromRoot, record, said } from './flaky'
 import { type Held, held, judge, letThrough, type Quarantine } from './quarantine'
+import { recordTiming } from './timings'
 
 /** A test as flaky.ts names it. Its title path starts with the root and the project, both unnamed here, then its file. */
 const named = (test: TestCase): Flaky => ({
@@ -37,6 +38,7 @@ export default class FlakyReporter implements Reporter {
   }
 
   onTestEnd(test: TestCase, result: TestResult) {
+    recordTiming(test.location.file, result.duration)
     if (result.status === 'passed' && result.retry > 0) record(named(test))
   }
 

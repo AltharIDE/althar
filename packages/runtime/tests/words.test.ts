@@ -65,7 +65,7 @@ describe('what Althar writes about a pull request', () => {
   })
 
   it('sums up its checks', () => {
-    const check = (name: string, state: 'queued' | 'running' | 'passed' | 'failed' | 'skipped') => ({
+    const check = (name: string, state: 'queued' | 'running' | 'passed' | 'failed' | 'skipped' | 'cancelled') => ({
       id: name,
       name,
       state,
@@ -89,6 +89,11 @@ describe('what Althar writes about a pull request', () => {
       ],
     })
     assert.strictEqual(checksOf('a', [check('lint', 'passed')]).outcome, 'passed')
+    const cancelled = checksOf('a', [check('test', 'passed'), check('e2e', 'cancelled')])
+    assert.strictEqual(cancelled.outcome, 'failed')
+    assert.strictEqual(cancelled.failed, 0)
+    assert.deepStrictEqual(cancelled.failing, [])
+    assert.strictEqual(checksOf('a', [check('e2e', 'cancelled'), check('lint', 'running')]).outcome, 'running')
     assert.strictEqual(checksLine(checksOf('a', [])), 'No checks have run.')
     assert.strictEqual(checksLine(checksOf('a', [check('lint', 'passed')])), 'Checks: 1 passed, 0 failed, 0 running.')
     assert.strictEqual(

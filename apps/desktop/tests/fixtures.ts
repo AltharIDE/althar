@@ -1,3 +1,4 @@
+import { isoAfter } from '@althar/testing'
 import type {
   AccountSignInState,
   AgentModels,
@@ -1012,7 +1013,7 @@ export const githubGuide: ConnectGuide = {
   tokenPages: [{ product: 'github', webUrl: 'https://github.com', url: GITHUB_TOKEN_PAGE }],
 }
 
-/** Everything a GitHub connection needs, which it can do; its token runs out on 8 January 2027. */
+/** Everything a GitHub connection needs, which it can do; its token has another 30 days to run. */
 export const githubCheck: ConnectionCheck = {
   connectionId: 'conn1',
   lines: [
@@ -1023,7 +1024,7 @@ export const githubCheck: ConnectionCheck = {
     { need: 'checks', state: 'ok', fact: null, count: null, reason: null },
     { need: 'issues', state: 'ok', fact: null, count: null, reason: null },
   ],
-  expiresAt: '2027-01-08T00:00:00.000Z',
+  expiresAt: isoAfter(30 * 86_400_000),
   renews: false,
   settings: 'https://github.com/settings/personal-access-tokens',
 }
@@ -1099,6 +1100,7 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
     getThreadItem: vi.fn(async (_threadId: string, itemId: string) => ({ ...items.says('Read again'), id: itemId })),
     readOutput: vi.fn(async () => ({ text: ' ✓ charges/limit (14)\n ✓ refunds/router (38)\n', dropped: 0 })),
     readBackgroundOutput: vi.fn(async () => ({ text: 'VITE ready in 312 ms\n\n  ➜  Local:   http://localhost:5173/\n', dropped: 0 })),
+    readLaunchOutput: vi.fn(async () => ({ text: 'VITE ready in 312 ms\n\n  ➜  Local:   http://localhost:5173/\n', dropped: 0 })),
     readDocument: vi.fn(async (_threadId: string, path: string) => ({
       path,
       body: '# Notes\n\nRefunds share the partner budget.\n',
@@ -1202,6 +1204,7 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
     listPresets: vi.fn(async () => []),
     savePreset: vi.fn(async () => ({ name: 'Preset' })),
     removePreset: vi.fn(async () => {}),
+    declinePresetOffer: vi.fn(async () => {}),
     runIt: vi.fn(async () => ({ kind: 'ran' as const, trust: 'safe' as const, said: '' })),
     stopRunning: vi.fn(async () => ''),
     applyPreset: vi.fn(async () => ''),

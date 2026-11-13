@@ -36,7 +36,7 @@ describe('reading sign-in status', () => {
         analyticsDisabled: false,
         projectsDirectory: '/home/u/.claude/projects',
         configDirectory: '/home/u/.claude',
-        loginExpiresAt: '2026-12-01T09:14:03.000Z',
+        loginExpiresAt: '2025-12-01T09:14:03.000Z',
         email: 'you@meridian.dev',
         orgId: '0f6c2a51-8d3e-4b7a-9c14-5e2d7f80a3b9',
         orgName: 'you@meridian.dev’s Organization',
@@ -47,7 +47,7 @@ describe('reading sign-in status', () => {
       null,
       2,
     )
-    assert.strictEqual(claude?.(signedIn), '2026-12-01T09:14:03.000Z')
+    assert.strictEqual(claude?.(signedIn), '2025-12-01T09:14:03.000Z')
     assert.isUndefined(claude?.('{"loggedIn": false, "authMethod": "none", "loginExpiresAt": null}'))
     // A key, and Claude Code before 2.1.318, say none; nor does output that isn't its JSON.
     assert.isUndefined(claude?.('{"loggedIn": true, "authMethod": "api_key", "loginExpiresAt": null}'))
@@ -66,12 +66,12 @@ describe('reading sign-in status', () => {
           ...agents['claude-code'].signIn,
           status: () => ({
             command: 'bun',
-            args: ['-e', 'console.log(JSON.stringify({loggedIn:true,authMethod:"claude.ai",loginExpiresAt:"2026-12-01T09:14:03.000Z"}))'],
+            args: ['-e', 'console.log(JSON.stringify({loggedIn:true,authMethod:"claude.ai",loginExpiresAt:"2025-12-01T09:14:03.000Z"}))'],
           }),
         },
       }
       const check = yield* signInCheck(claude, process.execPath)
-      assert.deepStrictEqual(check, { status: 'signed_in', paidBy: 'plan', endsAt: '2026-12-01T09:14:03.000Z' })
+      assert.deepStrictEqual(check, { status: 'signed_in', paidBy: 'plan', endsAt: '2025-12-01T09:14:03.000Z' })
     }),
   )
 

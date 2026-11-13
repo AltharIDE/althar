@@ -1,3 +1,7 @@
+import { mkdtempSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+
 import type { BranchUpdate, ChangeRequest, CheckState, CodeHost, Repository } from '@althar/connectors'
 import type { ChangeSummary } from '@althar/contracts'
 import { type FakeCheck, type FakeService, makeFakeService } from '@althar/connectors/testing'
@@ -7,6 +11,7 @@ import { Duration, Effect } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { Changes } from '../src/Changes'
+import { Errands } from '../src/Errands'
 import { Connections } from '../src/Connections'
 import { Coordinator } from '../src/Coordinator'
 import { updateBranch } from '../src/coordinatorPullRequests'
@@ -108,17 +113,22 @@ const takeStep = (access: ToolAccess, errand: string) =>
   })
 
 /** The runtime, the coordinator's agent signed out so a wake waits as news, and the line swept only by hand. */
-const layer = (service: FakeService) =>
+const layer = (service: FakeService, database = ':memory:', keychain?: Map<string, string>) =>
   runtime(
-    ':memory:',
+    database,
     {},
-    { connectors: fakeConnectors({ github: service }), signedOut: ['claude-code'], mergeLineEvery: Duration.infinity },
+    {
+      connectors: fakeConnectors({ github: service }),
+      signedOut: ['claude-code'],
+      mergeLineEvery: Duration.infinity,
+      ...(keychain === undefined ? {} : { keychain }),
+    },
   )
 
 describe('sanity pass: the merge line and queue', () => {
   // Finding (sanity pass): a check that was cancelled counts as green in the merge line, so "merge once it's green" merges a
   // pull request whose test job never finished. Flips to passing when fixed.
-  it.live.fails('a pull request with a cancelled check isn’t merged as green', () => {
+  it.live('a pull request with a cancelled check isn’t merged as green', () => {
     const { service, pull, set } = host()
     const { working } = hosted(['meridian', 'api'])
     return Effect.gen(function* () {
@@ -134,7 +144,7 @@ describe('sanity pass: the merge line and queue', () => {
 
   // Finding (sanity pass): one that stepped out of line (its checks failed) comes back in ahead of the one whose merge is
   // already in flight, and is merged too: two merges in Althar's one slot at once, untested together. Flips to passing when fixed.
-  it.live.fails('one that comes back in after its checks pass waits for the merge already in flight behind it', () => {
+  it.live('one that comes back in after its checks pass waits for the merge already in flight behind it', () => {
     const { service, pull, set } = host('gitlab')
     const { working } = hosted(['meridian', 'api'])
     return Effect.gen(function* () {
@@ -162,7 +172,7 @@ describe('sanity pass: the merge line and queue', () => {
 
   // Finding (sanity pass): a head the lead pushed is merged as soon as the line reads it, before its checks have even
   // appeared: only Althar's own update of a branch is given time for its checks to start. Flips to passing when fixed.
-  it.live.fails('a head its lead pushed waits for its checks to appear before it merges', () => {
+  it.live('a head its lead pushed waits for its checks to appear before it merges', () => {
     const { service, pull, set } = host()
     const { working } = hosted(['meridian', 'api'])
     return Effect.gen(function* () {
@@ -208,7 +218,7 @@ describe('sanity pass: the merge line and queue', () => {
   // Finding (sanity pass): one the merge queue sent back for failing checks is put straight back in at the same head:
   // the coordinator is woken to enqueue it again, though its task's lead is told putting it back is the person's.
   // Flips to passing when fixed.
-  it.live.fails('one the merge queue sent back for its checks isn’t put back in at the same head', () => {
+  it.live('one the merge queue sent back for its checks isn’t put back in at the same head', () => {
     const { service, pull } = host()
     const { working } = hosted(['meridian', 'api'])
     return Effect.gen(function* () {
@@ -226,7 +236,7 @@ describe('sanity pass: the merge line and queue', () => {
 
   // Finding (sanity pass): the line's card shows one the merge queue sent back for failing checks as queued, while it is
   // out of the queue. Flips to passing when fixed.
-  it.live.fails('one the merge queue sent back for its checks is shown sent back on the line’s card, not queued', () => {
+  it.live('one the merge queue sent back for its checks is shown sent back on the line’s card, not queued', () => {
     const { service, pull } = host()
     const { working } = hosted(['meridian', 'api'])
     return Effect.gen(function* () {
@@ -240,7 +250,7 @@ describe('sanity pass: the merge line and queue', () => {
   // Finding (sanity pass): one whose checks failed takes the slot back whenever main moves: Althar merges main into its
   // branch and the next in line waits behind it again, though its card says it goes back in once its checks pass.
   // Flips to passing when fixed.
-  it.live.fails('one whose checks failed at its head holds no slot when main moves: the next goes ahead', () => {
+  it.live('one whose checks failed at its head holds no slot when main moves: the next goes ahead', () => {
     const { service, pull, set } = host()
     const { working } = hosted(['meridian', 'api'])
     return Effect.gen(function* () {
@@ -258,6 +268,178 @@ describe('sanity pass: the merge line and queue', () => {
       yield* sweep(access)
       // The red one is still red at its head: the second is the one brought up to date.
       assert.include(service.updated, second)
+    }).pipe(Effect.provide(layer(service)))
+  })
+
+  it.live('keeps a queue-rejected head out across restarts, main advancing and the host forgetting the reason', () => {
+    const { service, pull } = host()
+    const { working } = hosted(['meridian', 'api'])
+    const database = join(mkdtempSync(join(tmpdir(), 'althar-queue-rejected-')), 'althar.db')
+    const keychain = new Map<string, string>()
+    const number = pull('Fails only in the queue').number
+    let forget = false
+    const github = new Proxy(service, {
+      get: (target, key, receiver) =>
+        key === 'change'
+          ? (...args: Parameters<FakeService['change']>) =>
+              Effect.map(target.change(...args), (change) => (forget ? { ...change, leftQueue: null, queueSha: null } : change))
+          : Reflect.get(target, key, receiver),
+    }) as FakeService
+    return Effect.gen(function* () {
+      const access = yield* Effect.gen(function* () {
+        const access = yield* opened(working)
+        yield* sentBackByTheQueue(github, access, number)
+        assert.strictEqual((yield* cards(access))[0]?.rows[0]?.state, 'sent_back')
+        return access
+      }).pipe(Effect.provide(layer(github, database, keychain)))
+      forget = true
+      yield* Effect.gen(function* () {
+        const errand = (yield* errandsOf(access)).get(number)?.id ?? ''
+        service.writeTo('main')
+        yield* sweep(access)
+        yield* takeStep(access, errand)
+        yield* sweep(access)
+        assert.lengthOf(service.merged, 1)
+        assert.strictEqual((yield* cards(access))[0]?.rows[0]?.state, 'sent_back')
+        // A new word from the person is a new authorization, and can deliberately try this head again.
+        const message = yield* turn(access, 'person', 'Put #1 back in the queue now')
+        assert.match(yield* merge(access, { pull_request: '#1', head: `head-${number}`, message }), /merge queue/)
+        assert.lengthOf(service.merged, 2)
+      }).pipe(Effect.provide(layer(github, database, keychain)))
+    })
+  })
+
+  it.live('keeps an uncertain accepted merge in its slot after a restart and the flight timeout', () => {
+    const { service, pull } = host()
+    const { working } = hosted(['meridian', 'api'])
+    const database = join(mkdtempSync(join(tmpdir(), 'althar-flight-')), 'althar.db')
+    const keychain = new Map<string, string>()
+    service.landLater()
+    const first = pull('Merge accepted, answer not settled').number
+    const second = pull('Must wait').number
+    return Effect.gen(function* () {
+      const access = yield* Effect.gen(function* () {
+        const access = yield* opened(working)
+        const message = yield* turn(access, 'person')
+        yield* merge(access, { pull_request: `#${first}`, head: `head-${first}`, message })
+        const sql = yield* SqlClient.SqlClient
+        yield* sql`UPDATE observations SET observed_at = '2000-01-01T00:00:00.000Z' WHERE subject_type = 'merge_line' AND kind = 'merging'`
+        return access
+      }).pipe(Effect.provide(layer(service, database, keychain)))
+      yield* Effect.gen(function* () {
+        yield* sweep(access)
+        const firstErrand = (yield* errandsOf(access)).get(first)?.id ?? ''
+        assert.match(yield* takeStep(access, firstErrand), /has not confirmed|slot stays held/)
+        const message = yield* turn(access, 'person', 'Merge #2 now')
+        assert.match(yield* merge(access, { pull_request: `#${second}`, head: `head-${second}`, message, now: true }), /merge in flight/)
+        assert.deepStrictEqual(
+          service.merged.map((one) => one.number),
+          [first],
+        )
+        service.mergeByHand(first)
+        yield* takeStep(access, firstErrand)
+        yield* sweep(access)
+        yield* takeStep(access, (yield* errandsOf(access)).get(second)?.id ?? '')
+        assert.deepStrictEqual(
+          service.merged.map((one) => one.number),
+          [first, second],
+        )
+      }).pipe(Effect.provide(layer(service, database, keychain)))
+    })
+  })
+
+  it.live.each(['direct', 'auto'] as const)('reconciles an accepted %s merge while paused, keeping its slot until it lands', (how) => {
+    const { service, pull } = host(how === 'auto' ? 'gitlab' : 'github')
+    const { working } = hosted(['meridian', 'api'])
+    service.landLater()
+    return Effect.gen(function* () {
+      const access = yield* opened(working)
+      const first = pull('Already accepted').number
+      const second = pull('Waits for accepted merge').number
+      const message = yield* turn(access, 'person')
+      yield* merge(access, { pull_request: `#${first}`, head: `head-${first}`, message })
+      const firstErrand = (yield* errandsOf(access)).get(first)?.id ?? ''
+      yield* (yield* Errands).pause(access, firstErrand, 'Wait for me')
+      const next = yield* turn(access, 'person', 'Merge #2 now')
+      assert.match(
+        yield* merge(access, { pull_request: `#${second}`, head: `head-${second}`, message: next, now: true }),
+        /merge in flight/,
+      )
+      yield* sweep(access)
+      assert.deepStrictEqual(
+        service.merged.map((one) => one.number),
+        [first],
+      )
+      service.mergeByHand(first)
+      yield* sweep(access)
+      yield* sweep(access)
+      assert.strictEqual((yield* errandsOf(access)).get(first)?.state, 'paused')
+      assert.strictEqual((yield* cards(access))[0]?.rows.find((row) => row.number === first)?.state, 'merged')
+      yield* takeStep(access, (yield* errandsOf(access)).get(second)?.id ?? '')
+      assert.deepStrictEqual(
+        service.merged.map((one) => one.number),
+        [first, second],
+      )
+    }).pipe(Effect.provide(layer(service)))
+  })
+
+  it.live('rechecks a Ship hold that arrives while the merge checks are being read', () => {
+    const { service, pull } = host()
+    const { working } = hosted(['meridian', 'api'])
+    let hold = Effect.void
+    const github = new Proxy(service, {
+      get: (target, key, receiver) =>
+        key === 'checks'
+          ? (...args: Parameters<FakeService['checks']>) => Effect.tap(target.checks(...args), () => hold)
+          : Reflect.get(target, key, receiver),
+    }) as FakeService
+    return Effect.gen(function* () {
+      const access = yield* opened(working)
+      const task = yield* (yield* Projects).createTask({
+        envelope: yield* Runtime.envelope('task.create', {}),
+        projectId: access.projectId,
+        title: 'Late hold',
+      })
+      const pr = pull('Late hold')
+      const sql = yield* SqlClient.SqlClient
+      const at = yield* timestamp
+      yield* sql`INSERT INTO external_links ${sql.insert({ id: yield* newId(Ids.externalLink), projectId: access.projectId, taskId: task.taskId, product: 'github', kind: 'change', externalId: String(pr.number), ref: String(pr.number), key: String(pr.number), url: pr.url, snapshot: JSON.stringify({ state: 'open', url: pr.url, headSha: pr.headSha }), createdAt: at, updatedAt: at })}`
+      // The first hold read is clear, then the host check read gives another fiber the opportunity to record the hold.
+      hold = sql`UPDATE workspaces SET held_at = ${at} WHERE task_id = ${task.taskId}`.pipe(Effect.asVoid, Effect.orDie)
+      const message = yield* turn(access, 'person')
+      assert.match(yield* merge(access, { pull_request: `#${pr.number}`, head: pr.headSha, message }), /wait for Ship/)
+      assert.deepStrictEqual(service.merged, [])
+      hold = Effect.void
+      yield* sql`UPDATE workspaces SET held_at = NULL WHERE task_id = ${task.taskId}`
+      yield* takeStep(access, (yield* errandsOf(access)).get(pr.number)?.id ?? '')
+      assert.lengthOf(service.merged, 1)
+    }).pipe(Effect.provide(layer(github)))
+  })
+
+  it.live.each(['direct', 'auto', 'queue'] as const)('holds %s merges while the task has commits held for Ship', (how) => {
+    const { service, pull } = host(how === 'auto' ? 'gitlab' : 'github')
+    const { working } = hosted(['meridian', 'api'])
+    if (how === 'queue') service.mergeQueue()
+    return Effect.gen(function* () {
+      const access = yield* opened(working)
+      const task = yield* (yield* Projects).createTask({
+        envelope: yield* Runtime.envelope('task.create', {}),
+        projectId: access.projectId,
+        title: 'A held change',
+      })
+      const pr = pull('A held change')
+      const sql = yield* SqlClient.SqlClient
+      const at = yield* timestamp
+      yield* sql`INSERT INTO external_links ${sql.insert({ id: yield* newId(Ids.externalLink), projectId: access.projectId, taskId: task.taskId, product: 'github', kind: 'change', externalId: String(pr.number), ref: String(pr.number), key: String(pr.number), url: pr.url, snapshot: JSON.stringify({ state: 'open', url: pr.url, headSha: pr.headSha }), createdAt: at, updatedAt: at })}`
+      yield* sql`UPDATE workspaces SET held_at = ${at} WHERE task_id = ${task.taskId}`
+      const message = yield* turn(access, 'person')
+      assert.match(yield* merge(access, { pull_request: `#${pr.number}`, head: pr.headSha, message }), /held for Ship/)
+      yield* sweep(access)
+      yield* takeStep(access, (yield* errandsOf(access)).get(pr.number)?.id ?? '')
+      assert.deepStrictEqual(service.merged, [])
+      yield* sql`UPDATE workspaces SET held_at = NULL WHERE task_id = ${task.taskId}`
+      yield* takeStep(access, (yield* errandsOf(access)).get(pr.number)?.id ?? '')
+      assert.lengthOf(service.merged, 1)
     }).pipe(Effect.provide(layer(service)))
   })
 })

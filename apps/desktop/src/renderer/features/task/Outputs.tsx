@@ -30,6 +30,7 @@ import { mergeHereHint, mergeHereLabel } from '../../shared/mergeHere'
 import { shownQueued } from '../../data/merges'
 import { productBrand, productName } from '../../shared/products'
 import { personPushes } from '../../shared/standing'
+import { commitsToShip } from '../../shared/shipping'
 import s from './Task.module.css'
 import { device } from '../../shared/device'
 import { ScreenshotsOnPullRequest, screenshotsTarget } from './ScreenshotsOnPullRequest'
@@ -64,6 +65,7 @@ export const text = {
   story: (change: boolean) => (change ? 'What changed' : 'What it made'),
   /** Work with no pull request, its host not connected: what connecting it gives, beside the button that does. */
   connectFirst: (host: string) => `Althar opens its pull request once ${host} is connected.`,
+  connectShip: (host: string) => `Connect ${host} to ship these commits.`,
   connect: (host: string) => `Connect ${host}`,
   /** Work with no pull request, where Althar can tell no code host for it: why it can only merge here or push, by its remote. */
   noHost: (remote: string | null) =>
@@ -285,9 +287,12 @@ export function Outputs({
   const closed = latest.filter((change) => change.state === 'closed')
   // Commits after its last pull request, in none yet: a new one opens for them, as the person says.
   const shipping = ready && task.unshipped != null && task.unshipped.commits > 0 && snapshot.host?.connected === true
-  // Held for Ship: Ship sends what waits, after its review, in place of Push and of opening a new pull request. Offered once
+  // Held for Ship, or the first/new pull request its ending now asks for: Ship sends what waits, after its review, in place
+  // of Push and of opening a new pull request directly. Offered once
   // the task is ready; while Ship's review reads them, or the lead is at work again, they still wait for it, so no Push either.
   const held = task.held
+  const toShip = commitsToShip(task)
+  const waitsForShip = held !== undefined || toShip > 0
   // Its repositories: those with a pull request, those still to merge here, and those merged here already.
   const several = open.length + task.here.length + task.merged.length > 1
   const [first] = open
@@ -319,7 +324,7 @@ export function Outputs({
     (one) => one.state === 'open' && one.unpushed > 0 && one.localHead !== null && !parted.some((p) => p.change.url === one.url),
   )
   const drafts = open.filter((one) => one.state === 'open' && one.draft)
-  const openNew = held === undefined && shipping && (
+  const openNew = !waitsForShip && shipping && (
     <Button key="new" variant="signal" {...pressed(doing.openChange)} onClick={onOpenChange}>
       {text.openNewChange}
     </Button>
@@ -330,10 +335,18 @@ export function Outputs({
   const hostedHere = task.here.filter((repo) => repo.host?.connected === true)
   const openNewHere = first !== undefined && openNew !== false && hostedHere.length > 0 && !latest.some((one) => one.state !== 'open')
   const openNewThere = openNewHere ? false : openNew
-  const shipNow =
-    held === undefined || !ready || onShip === undefined ? null : (
+  const shipAction =
+    !waitsForShip ||
+    !(ready || task.phase === 'stopped') ||
+    snapshot.session?.turnRunning === true ||
+    onShip === undefined ||
+    (toShip > 0 && snapshot.host == null) ? null : toShip > 0 && snapshot.host?.connected === false ? (
+      <Button key="connect" variant="signal" onClick={onConnect}>
+        {text.connect(snapshot.host.name)}
+      </Button>
+    ) : (
       <Button key="ship" variant="signal" {...pressed(doing.ship)} onClick={onShip}>
-        {text.ship(held.commits)}
+        {text.ship(held?.commits ?? toShip)}
       </Button>
     )
 
@@ -386,11 +399,11 @@ export function Outputs({
                 ]
               : []
           const actions: ReactNode[] = [
-            ...(shipNow === null ? [] : [shipNow]),
+            ...(shipAction === null ? [] : [shipAction]),
             ...mergingWaiting,
             // Only those Althar held, where the project's rules push the lead's commits on their own (ADR-072); held for Ship, none.
             ...pushes
-              .filter((one) => held === undefined && personPushes(one))
+              .filter((one) => !waitsForShip && personPushes(one))
               .map((one) => (
                 <Button
                   key={`push-${one.url}`}
@@ -538,10 +551,10 @@ export function Outputs({
         </SplitButton>
       )
     const actions: ReactNode[] = [
-      ...(shipNow === null ? [] : [shipNow]),
+      ...(shipAction === null ? [] : [shipAction]),
       // Only those Althar held, where the project's rules push the lead's commits on their own (ADR-072); held for Ship, none.
       ...pushes
-        .filter((one) => held === undefined && personPushes(one))
+        .filter((one) => !waitsForShip && personPushes(one))
         .map((one) => (
           <Button
             key={`push-${one.url}`}
@@ -629,29 +642,32 @@ export function Outputs({
   const opening = idle && first === undefined && task.commits > 0
   const host = snapshot.host
   // Opened by Althar on its host, connected; else connecting it is what to do, where Althar knows the host: by its name.
-  const opens = opening && host?.connected === true
+  const opens = opening && host?.connected === true && !waitsForShip
   const connects = opening && host !== null && !host.connected ? host.name : null
   // Where Althar can tell no host for it, the card says so, rather than leave a merge here as all there is.
   const hostless = opening && host === null
   const here =
     task.here.length > 0 || branchOnly
       ? (() => {
-          const merging = ready && task.here.length > 0
+          const merging = ready && task.here.length > 0 && toShip === 0
           // Beside the rest's pull request, Althar opens one for these as a new one, where their host is the connected one.
           const beside = first !== undefined
           const opensHere = beside ? openNewHere : opens
           // Beside it, one on a host Althar knows but isn't connected to: connecting it is how its pull request opens.
           const unconnected = task.here.find((repo) => repo.host != null && !repo.host.connected)?.host?.name ?? null
           const connectsHere = beside ? (opensHere ? null : unconnected) : connects
-          // A pull request is the way forward where there can be one: opened by Althar, else once its host is connected.
-          const reviewed = shipNow !== null || opensHere || connectsHere !== null
-          const pushable = remote !== undefined && remote.ahead > 0
+          // Ship, or connecting its host for it, is pressed here only where there is no pull request, whose card holds it otherwise.
+          const shipHere = beside ? null : shipAction
+          // A pull request is the way forward where there can be one: Ship's, opened by Althar, else once its host is connected.
+          const reviewed = shipAction !== null || opensHere || connectsHere !== null
+          // Held for Ship, nothing pushes on its own: Ship sends it.
+          const pushable = remote !== undefined && remote.ahead > 0 && !waitsForShip
           // Where none can be opened from here but the rest of the task goes through one, pushing them, for review where they're
           // hosted, comes before merging them here, which nothing reviews.
           const pushFirst = !reviewed && beside && pushable
           const actions: ReactNode[] = [
-            ...(shipNow !== null
-              ? [shipNow]
+            ...(shipHere !== null
+              ? [shipHere]
               : opensHere
                 ? [
                     <Button key="open" variant="signal" {...pressed(doing.openChange)} onClick={onOpenChange}>
@@ -697,7 +713,7 @@ export function Outputs({
               state={ChangeState.Branch}
               {...(task.branch === null ? {} : { branch: task.branch })}
               {...(connectsHere !== null
-                ? { note: text.connectFirst(connectsHere) }
+                ? { note: waitsForShip ? text.connectShip(connectsHere) : text.connectFirst(connectsHere) }
                 : hostless && !beside
                   ? { note: text.noHost(task.here.find((repo) => repo.remote != null)?.remote?.name ?? null) }
                   : {})}
@@ -780,7 +796,7 @@ export function Outputs({
         </p>
       )}
       {/* With no pull request still open to hold it, nor its branch's card, a new one is pressed from here. */}
-      {first === undefined && here === null && (shipNow ?? openNew)}
+      {first === undefined && here === null && (shipAction ?? openNew)}
       {usage.length > 0 && <UsageCard lines={usage} open={usageOpen} onOpenChange={setUsageOpen} />}
     </>
   )

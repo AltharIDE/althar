@@ -78,6 +78,7 @@ Rules marked "prefer" are leanings; follow them unless the screen gives a reason
 ## Interaction
 
 - **Act in place.** A one-click action (push, approve, allow) never sends the person to another screen; answer it from the board, the tab or the menu bar.
+- **Show the result of every press at once.** It changes in the frame it is pressed and the runtime catches up behind it; what fails comes back with a line. Never a press that shows nothing until a call answers, and never an older read flickering it back ([the rules](docs/decisions/foundations.md#the-ui-is-instant)).
 - **Switch instantly.** Changing project or view shows what was there last time and refreshes quietly; no skeleton flash for something already seen.
 - **Lose nothing on leaving a screen:** composer text, dictation, scroll position.
 - **Show a validation error at its field, and scroll to it.** A message at the top of a form only for an error that belongs to no field.

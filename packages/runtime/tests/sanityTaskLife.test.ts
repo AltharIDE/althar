@@ -142,7 +142,7 @@ const planned = (working: string, body: string, ready: (card: Effect.Success<Ret
 describe('skipping a review', () => {
   // Finding (sanity pass): skipping the plan's review writes "skipped" into the plan's own run, which every later Ship and
   // round copies its steps from, so the task never has its reviewer again. Flips to passing when fixed.
-  it.live.fails('skips only that round’s review: a later Ship still runs the plan’s reviewer', () => {
+  it.live('skips only that round’s review: a later Ship still runs the plan’s reviewer', () => {
     const { working, github } = onGitHub()
     return Effect.gen(function* () {
       const runs = yield* Runs
@@ -287,7 +287,7 @@ describe('Merge now, with commits not shipped', () => {
   // Finding (sanity pass): the review after a merge reads the plan's review step without looking at `skipped`, so a task
   // whose review the person took off (the plan card's toggle, Change the team's Remove) is still owed one after Merge now.
   // Flips to passing when fixed.
-  it.live.fails('owes no review after the merge where the person took the task’s review off', () => {
+  it.live('owes no review after the merge where the person took the task’s review off', () => {
     const { working, github } = onGitHub()
     return Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
@@ -325,7 +325,7 @@ describe('a turn while Ship reviews', () => {
   // Finding (sanity pass): Ship's ending pushes each branch up to its head as it is then, so what a turn of the person's
   // committed while Ship's review read its copy goes up with it: never reviewed, and never held for the next Ship. Flips to
   // passing when fixed.
-  it.live.fails('leaves what it commits for the next Ship, rather than sending it up unreviewed', () => {
+  it.live('leaves what it commits for the next Ship, rather than sending it up unreviewed', () => {
     const { working, bare, github } = onGitHub()
     // The reviewer reads at once, until the test holds it back.
     let reads = true
@@ -380,7 +380,7 @@ describe('a lead that ships its own task', () => {
   // Finding (sanity pass): ship_task from the task's own lead writes "Its lead shipped this task" in the thread as it is
   // called, before anything is tried, and the Ship it forks for after the turn swallows its refusal (a warning in the log),
   // so the line stays where nothing shipped. Flips to passing when fixed.
-  it.live.fails('leaves no line saying it shipped where nothing did', () => {
+  it.live('leaves no line saying it shipped where nothing did', () => {
     const { working, bare, github } = onGitHub()
     return Effect.gen(function* () {
       const runs = yield* Runs
@@ -423,7 +423,7 @@ describe('a plan whose countdown ended as Althar stopped', () => {
   // run, nothing said: its card says Running, with no step and nothing it waits for, find_tasks says "stopped" and read_task
   // "planned", until the person finds Start. Seen on "A message sent mid-turn goes straight to the queue", accepted by its countdown at 17:54:29, as Althar
   // restarted. Flips to passing when fixed.
-  it.live.fails('waits for the person after a restart, held, as a plan that came due while Althar was closed does', () =>
+  it.live('waits for the person after a restart, held, as a plan that came due while Althar was closed does', () =>
     Effect.gen(function* () {
       const file = join(mkdtempSync(join(tmpdir(), 'althar-plans-')), 'althar.sqlite')
       const projectId = yield* Effect.gen(function* () {
