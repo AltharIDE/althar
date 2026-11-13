@@ -1505,6 +1505,7 @@ export function TaskView({
                           busy={model.pending}
                           onMerge={(change) => void model.accept([change])}
                           {...(onOpenTask === undefined ? {} : { onOpen: onOpenTask })}
+                          onShow={showInThread}
                         />
                       )}
                       // Auto's line on moving the lead to a lighter model, with Keep and Undo (README section 7).

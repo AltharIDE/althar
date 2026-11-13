@@ -530,11 +530,19 @@ few lines is the exception to the usual course of a change:
   ([reviews.md](reviews.md#what-the-review-after-a-merge-brings-back)). A
   plan that named no reviewer gets no review after merge, and neither does a
   pull request that was closed unmerged.
-- **One card in its thread says what it skipped.** It lists each step with
-  its time (Started, Changed a line in …, Checks pass, Merged). It offers
-  Merge, which still asks, and **Make it a full task**, which starts the
-  review before the merge instead. The card is read from the task as it
-  stands, never stored, so it can't go stale.
+- **One card opens its thread, with its route.** Its stops sit in a row,
+  each with its time or where it stands: Change, Checks, Merge, and Review,
+  drawn dashed while it waits for the merge. Merge, which still asks, sits
+  under its stop once checks pass. Pressing Review moves it before the
+  merge (**Make it a full task**), keeps it after, or takes it off; with
+  none, the route ends at Merge. Made a full task, its Review stop reads
+  the review task it was given (reading, nothing found, how many found,
+  stopped) before and after the merge; Merge waits until that review comes
+  back clear, and See findings opens that task. What a small change is waits behind its
+  name, as a hover. What its review after the merge found isn't listed on
+  the card: it says how many, and See findings opens the review's report in
+  the thread. The card is read from the task as it stands, never stored, so
+  it can't go stale.
 
 The trade-off is that a small change merges unreviewed. A finding after the
 merge needs a fix of its own. Make it a full task is there for anything the
