@@ -100,7 +100,7 @@ export interface FakeServiceOptions {
   readonly listReads?: number
   /** Whether the host can run a check again; it can, unless a test says. A check run again is in `reruns`. */
   readonly reruns?: boolean
-  /** Whether it reads changes to review: as GitHub does, unless said, and no other. */
+  /** Whether it reads and posts reviews: every code host does unless a test says otherwise. */
   readonly reviews?: boolean
   /** Whether it takes pictures in its conversations: as GitHub and GitLab do, unless said, and no other. */
   readonly pictures?: boolean
@@ -270,8 +270,17 @@ export interface FakeControls {
   }>
   /** Every change whose branch Althar brought up to date, in order. */
   readonly updated: ReadonlyArray<number>
-  /** The next call to `method` fails with this: when to try again for a rate limit, and the HTTP status a host would give. */
-  failNext(method: string, reason: ConnectorFailed['reason'], retryAt?: string, status?: number): void
+  /**
+   * The next call to `method` fails with this: when to try again for a rate limit, and the HTTP status a host would give; with
+   * `said`, in the host's words, and `after` calls that go through first.
+   */
+  failNext(
+    method: string,
+    reason: ConnectorFailed['reason'],
+    retryAt?: string,
+    status?: number,
+    said?: { readonly message?: string; readonly after?: number },
+  ): void
   /** Every change opened, with every comment on it, Althar's included. */
   readonly changes: ReadonlyArray<ChangeRequest>
   /** The ids of the checks Althar ran again, in order. */
@@ -400,7 +409,10 @@ export const makeFakeService = (options: FakeServiceOptions = {}): FakeService =
   }
   /** Its statuses: a repository's issue is open or closed; any other has a team's. */
   const statusesOf = (issue: Issue) => (issue.ref.includes('#') ? OPEN_CLOSED : STATUSES)
-  const failures = new Map<string, { readonly reason: ConnectorFailed['reason']; readonly retryAt?: string; readonly status?: number }>()
+  const failures = new Map<
+    string,
+    { readonly reason: ConnectorFailed['reason']; readonly retryAt?: string; readonly status?: number; message?: string; after: number }
+  >()
   const calls: Array<string> = []
   const deleted: Array<number> = []
   let ids = 0
@@ -461,12 +473,16 @@ export const makeFakeService = (options: FakeServiceOptions = {}): FakeService =
     Effect.suspend(() => {
       const failure = failures.get(method)
       if (failure === undefined) return Effect.void
+      if (failure.after > 0) {
+        failure.after -= 1
+        return Effect.void
+      }
       failures.delete(method)
       return Effect.fail(
         new ConnectorFailed({
           product,
           reason: failure.reason,
-          message: `The fake ${method} failed (${failure.reason})`,
+          message: failure.message ?? `The fake ${method} failed (${failure.reason})`,
           ...(failure.retryAt === undefined ? {} : { retryAt: failure.retryAt }),
           ...(failure.status === undefined ? {} : { status: failure.status }),
         }),
@@ -602,7 +618,7 @@ export const makeFakeService = (options: FakeServiceOptions = {}): FakeService =
       drafts: true,
       checkLogs: true,
       threads: true,
-      reviews: options.reviews ?? product === 'github',
+      reviews: options.reviews ?? ['github', 'gitlab', 'bitbucket_cloud', 'bitbucket_dc'].includes(product),
       pictures: options.pictures ?? (product === 'github' || product === 'gitlab'),
       // As each adapter declares: a declined Bitbucket Cloud pull request is final, and Data Center's builds are another service's.
       reopen: product !== 'bitbucket_cloud',
@@ -833,8 +849,15 @@ export const makeFakeService = (options: FakeServiceOptions = {}): FakeService =
     // As GitHub's alone, which merges in the background: whether a head is the merge its update made from another.
     ...(product === 'github'
       ? {
-          madeFrom: (_repository: Repository, change: ChangeRequest, from: string) =>
-            Effect.andThen(called('madeFrom'), () => Effect.succeed(change.headSha?.startsWith(`${from}+`) === true)),
+          madeFrom: (repository: Repository, change: ChangeRequest, from: string, base?: string) =>
+            Effect.andThen(called('madeFrom'), () => {
+              if (change.headSha?.startsWith(`${from}+`) !== true) return Effect.succeed(false)
+              if (base === undefined) return Effect.succeed(true)
+              // Its target's head asked for, or a later one, where the target moved on before the merge.
+              const merged = change.headSha.slice(from.length + 1)
+              const history = historyOf(repository.id, change.target)
+              return Effect.succeed(merged === base || (history.includes(base) && history.indexOf(merged) >= history.indexOf(base)))
+            }),
         }
       : {}),
     closeChange: (_repository, change) =>
@@ -1291,9 +1314,11 @@ export const makeFakeService = (options: FakeServiceOptions = {}): FakeService =
     get updated() {
       return [...updates]
     },
-    failNext: (method, reason, retryAt, status) =>
+    failNext: (method, reason, retryAt, status, said) =>
       void failures.set(method, {
         reason,
+        after: said?.after ?? 0,
+        ...(said?.message === undefined ? {} : { message: said.message }),
         ...(retryAt === undefined ? {} : { retryAt }),
         ...(status === undefined ? {} : { status }),
       }),

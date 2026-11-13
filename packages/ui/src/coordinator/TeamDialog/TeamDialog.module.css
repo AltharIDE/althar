@@ -69,8 +69,13 @@
   line-height: 1.45;
   color: var(--t-3);
 }
-.error {
+/* under the steps: why it can't change any more, or why the last save failed */
+.problem {
+  padding-top: 16px;
+}
+.settled {
   margin: 16px 0 0;
-  font-size: 13px;
-  color: var(--danger);
+  font-size: 12.5px;
+  line-height: 1.45;
+  color: var(--t-2);
 }

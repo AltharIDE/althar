@@ -24,7 +24,6 @@ const meta = {
 export default meta
 type Story = StoryObj<typeof meta>
 
-export const Image: Story = {}
 /** No preview to show: the name stands in. */
 export const NoPreview: Story = { args: { images: [{ name: '429-response.png' }] } }
 
@@ -128,7 +127,7 @@ export const Gallery: Story = {
     await userEvent.keyboard('{Home}')
     await userEvent.click(page.getByRole('button', { name: 'Next image' }))
     await expect(page.getByRole('dialog', { name: 'After' })).toBeInTheDocument()
-    await userEvent.click(page.getByRole('button', { name: 'Open in Preview' }))
+    await userEvent.click(page.getByRole('button', { name: 'Open in viewer' }))
     await expect(args.onOpen).toHaveBeenCalledWith(expect.objectContaining({ name: SHOT_AFTER.name }))
     await userEvent.keyboard('{Escape}')
     await expect(args.onClose).toHaveBeenCalledOnce()

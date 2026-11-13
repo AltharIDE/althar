@@ -2,7 +2,10 @@ import { act, render, screen, within } from '@testing-library/react'
 import { userEvent } from 'storybook/test'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
+import type { ReactNode } from 'react'
+
 import { NextLine, SETTLE } from '../src/board/NextLine/NextLine'
+import { MenuItem } from '../src/primitives/Menu/Menu'
 
 const row = (id: string) => ({ id, title: `Task ${id}` })
 const draw = (ids: ReadonlyArray<string>, onMove: (id: string, to: number) => void | Promise<unknown>) => (
@@ -133,5 +136,45 @@ describe('the line up next, moving as a whole', () => {
     await move.refuse()
     expect(shown()).toEqual(['1: Task a', '2: Task b', '3: Task c'])
     expect(slid('a')).toEqual([{ translate: '0px -50px' }, { translate: '0px 50px' }])
+  })
+})
+
+describe('the line up next, across its groups', () => {
+  const grouped = (onMove: (id: string, to: number) => void, more?: (id: string) => ReactNode) => (
+    <NextLine
+      rows={[
+        { id: 'a', title: 'Task a', group: 'waiting' },
+        { id: 'b', title: 'Task b', group: 'waiting' },
+        { id: 'p', title: 'Task p', group: 'planned' },
+      ]}
+      heads={{ planned: <span>Planned</span> }}
+      render={(id, place) => <p>{`${place}: Task ${id}`}</p>}
+      onMove={onMove}
+      {...(more === undefined ? {} : { more })}
+    />
+  )
+
+  it('heads the first of a group after another’s, and moves a row across them, its heading going where it no longer follows', async () => {
+    const onMove = vi.fn()
+    render(grouped(onMove))
+    const headed = () => screen.getAllByRole('listitem').flatMap((item) => (within(item).queryByText('Planned') === null ? [] : [item]))
+    expect(headed().map((item) => item.querySelector('p')?.textContent)).toEqual(['3: Task p'])
+    await moveFromMenu('p', 'Move to the front of the line')
+    expect(onMove).toHaveBeenCalledWith('p', 0)
+    expect(shown()).toEqual(['1: Task p', '2: Task a', '3: Task b'])
+    expect(headed()).toEqual([])
+  })
+
+  it('offers more than moves in a row’s menu, after them, and a grip for it though nothing moves', async () => {
+    const cancel = vi.fn()
+    const more = (id: string) => (id === 'b' ? <MenuItem onSelect={() => cancel(id)}>Cancel this turn</MenuItem> : null)
+    render(grouped(vi.fn(), more))
+    await moveFromMenu('b', 'Cancel this turn')
+    expect(cancel).toHaveBeenCalledWith('b')
+    render(<NextLine rows={[{ id: 'b', title: 'Task b' }]} render={(id) => <p>{id}</p>} more={more} />)
+    screen.getAllByRole('button', { name: 'Move Task b in the line' }).at(-1)?.focus()
+    await userEvent.keyboard('{Enter}')
+    const menu = within(await screen.findByRole('menu', { name: 'Move in the line' }))
+    expect(menu.getAllByRole('menuitem').map((item) => item.textContent)).toEqual(['Cancel this turn'])
   })
 })

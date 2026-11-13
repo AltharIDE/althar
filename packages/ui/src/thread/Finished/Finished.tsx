@@ -1,5 +1,6 @@
 import { Icon } from '../../foundations/Icon/Icon'
 import { cx } from '../../lib/cx'
+import { Rhythm } from '../../lib/rhythm'
 import { Evidence, type EvidencePiece, type EvidenceText } from '../Evidence/Evidence'
 import s from './Finished.module.css'
 
@@ -31,7 +32,7 @@ export interface FinishedProps {
 export function Finished({ built, pieces, unverified = [], className, text }: FinishedProps) {
   const t = { ...finishedText, ...text }
   return (
-    <article className={cx(s.card, className)} aria-label={t.label}>
+    <article className={cx(s.card, className)} aria-label={t.label} data-rhythm={Rhythm.Card}>
       <span className={s.kicker}>
         <Icon name="check" size={11} className={s.done} />
         {t.kicker}

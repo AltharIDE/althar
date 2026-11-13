@@ -9,6 +9,7 @@ import { focusQuietly } from '../../lib/focusQuietly'
 import { Button } from '../../primitives/Button/Button'
 import { Heading, type HeadingLevel } from '../../primitives/Heading/Heading'
 import { Tooltip } from '../../primitives/HoverCard/HoverCard'
+import { Problem } from '../../primitives/Problem/Problem'
 import { Skeleton } from '../../primitives/Skeleton/Skeleton'
 import { VisuallyHidden } from '../../primitives/VisuallyHidden/VisuallyHidden'
 import { ControlGrid, ControlLine, ControlToggle } from '../ControlCenter/ControlCenter'
@@ -31,7 +32,7 @@ import s from './ToolTiles.module.css'
 export interface ToolWordsText {
   /** Each role, as a switch names it. */
   roles: Record<ToolRoleId, string>
-  /** Who gets it, in a few words: Every role, Leads and reviewers. */
+  /** Who gets it, in a few words: Leads and reviewers only; nothing where every role does. */
   whoGets: (roles: readonly ToolRoleId[]) => string
   /** Where it isn't given, from the projects pressed out and those left in: not in fnt, only in ledger; nothing where every project gets it. */
   where: (off: readonly string[], on: readonly string[]) => string
@@ -57,18 +58,20 @@ export interface ToolWordsText {
 const and = (names: readonly string[]) => (names.length <= 1 ? (names[0] ?? '') : `${names.slice(0, -1).join(', ')} and ${names.at(-1)}`)
 const ROLES_IN_A_LINE: Record<ToolRoleId, string> = { lead: 'leads', reviewer: 'reviewers', coordinator: 'the coordinator' }
 const sentence = (words: string) => words.charAt(0).toUpperCase() + words.slice(1)
-const some = (names: readonly string[]) => (names.length <= 3 ? and(names) : `${names.slice(0, 2).join(', ')} and ${names.length - 2} more`)
+/** Two names said, more counted: a tile's line stays whole however many projects there are. */
+const some = (names: readonly string[]) => (names.length <= 2 ? and(names) : `${names.length} projects`)
 
 export const toolWordsText: ToolWordsText = {
   roles: { lead: 'Leads', reviewer: 'Reviewers', coordinator: 'The coordinator' },
+  // Every role is the usual, and the usual isn't said: a tile's line is only for what differs.
   whoGets: (roles) =>
     roles.length === TOOL_ROLES.length
-      ? 'Every role'
-      : sentence(and(TOOL_ROLES.filter((role) => roles.includes(role)).map((role) => ROLES_IN_A_LINE[role]))),
+      ? ''
+      : `${and(TOOL_ROLES.filter((role) => roles.includes(role)).map((role) => ROLES_IN_A_LINE[role]))} only`,
   where: (off, on) =>
     off.length === 0 ? '' : on.length === 0 ? 'in no project' : on.length < off.length ? `only in ${some(on)}` : `not in ${some(off)}`,
   off: 'Off',
-  reach: (who, where) => (where === '' ? who : `${who} · ${where}`),
+  reach: (who, where) => sentence([who, where].filter((part) => part !== '').join(' · ')),
   roleGets: (role, name) =>
     role === 'coordinator' ? `The coordinator gets ${name}` : `${role === 'lead' ? 'Leads' : 'Reviewers'} get ${name}`,
   projectsFor: (name) => `Projects that get ${name}`,
@@ -81,7 +84,7 @@ export const toolWordsText: ToolWordsText = {
   back: 'Back',
 }
 
-/** Who gets it and where, in a line: Every role; Leads · not in fnt; Off. Where only counts for the person's own. */
+/** Who gets it and where, in a line, only where it differs: Leads only · not in fnt; Off; nothing for every role in every project. */
 export const reachOf = (
   one: { roles: readonly ToolRoleId[]; offIn: readonly string[]; repository: string | null },
   projects: readonly ToolProjectView[],
@@ -130,7 +133,7 @@ export function ToolTile({ tileKey, name, brand, line, on, onChange, onOpen }: T
       <ControlToggle
         className={s.tile}
         title={name}
-        line={line}
+        {...(line === '' ? {} : { line })}
         on={on}
         onChange={onChange}
         glyph={<TileGlyph name={name} brand={brand} />}
@@ -331,14 +334,21 @@ export function TilesLoading({ label }: { label: string }) {
 /** What couldn't be read, in its words, and Try again beside it. */
 export function TilesFailed({ error, retry, onRetry }: { error: string; retry: string; onRetry?: (() => void) | undefined }) {
   return (
-    <div className={s.failed} role="alert">
-      <p className={s.failedWords}>{error}</p>
-      {onRetry !== undefined && (
-        <Button size="small" icon="reload" onClick={onRetry}>
-          {retry}
-        </Button>
-      )}
-    </div>
+    <Problem
+      banner
+      as="div"
+      {...(onRetry === undefined
+        ? {}
+        : {
+            action: (
+              <Button size="small" icon="reload" onClick={onRetry}>
+                {retry}
+              </Button>
+            ),
+          })}
+    >
+      {error}
+    </Problem>
   )
 }
 

@@ -66,10 +66,6 @@ const meta = {
 export default meta
 type Story = StoryObj<typeof meta>
 
-export const Closed: Story = {
-  render: () => <EffortMenu />,
-}
-
 /** Opened with Enter, a letter jumps to its item, Enter chooses and focus returns. */
 export const ChoosingByKeyboard: Story = {
   render: () => <EffortMenu />,
@@ -90,9 +86,6 @@ export const ChoosingByKeyboard: Story = {
     await expect(c.getByRole('button', { name: /Effort: Medium/ })).toHaveFocus()
   },
 }
-
-/** Every kind of item: a choice that is current, one that is not, a command with an icon, a hint and a shortcut, and one that is disabled. */
-export const Open: Story = { render: () => <EffortMenu defaultOpen /> }
 
 /** The highlighted item, reached with the arrow keys. */
 export const Highlighted: Story = {

@@ -1,6 +1,7 @@
 import type { PlanUsage as PlanUsageView } from '@althar/contracts'
 import type { SessionEvent } from '@althar/provider-adapters'
 
+import type { Draft } from './drafts'
 import type { ShownLaunch } from './Launches'
 import type { ShownLeftRunning } from './leftRunning'
 import { Context, Effect, Layer, PubSub, type Scope, Stream } from 'effect'
@@ -31,6 +32,8 @@ export type LiveEvent =
   | { readonly _tag: 'Background'; readonly threadId: string; readonly background: ReadonlyArray<ShownLeftRunning> }
   /** What Althar runs of a project itself, whole each time it changes (Launches.ts). */
   | { readonly _tag: 'Launches'; readonly projectId: string; readonly launches: ReadonlyArray<ShownLaunch> }
+  /** The tasks a coordinator is drafting now, as far as written, whole each time they change (drafts.ts). */
+  | { readonly _tag: 'Drafting'; readonly threadId: string; readonly drafts: ReadonlyArray<Draft> }
   /** Every account's plan usage and the warnings not yet seen, whole each time either changes (PlanUsage.ts). */
   | { readonly _tag: 'PlanUsage'; readonly usage: PlanUsageView }
   | {

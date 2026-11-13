@@ -4,7 +4,7 @@ import type { AgentStatus } from '@althar/contracts'
 import { type ModelInfo, ModelBrowser, modelBrowserText, ModelPick, type ModelPickText, modKey } from '@althar/ui'
 
 import { useModels, useSetDefaultEffort, useSetModelBlocked } from '../data/models'
-import { useMissedReports, useModelRooms } from '../features/usage/usePlan'
+import { useModelRooms } from '../features/usage/usePlan'
 import {
   catalogOf,
   type Choice,
@@ -57,6 +57,8 @@ export interface ModelChoiceProps {
   variant?: 'quiet' | 'field'
   placement?: 'above' | 'below'
   text?: Partial<ModelPickText>
+  /** Its menu opened or closed: a plan's row, whose whole is the picker, keeps it under the pointer while it's open. */
+  onOpenChange?: (open: boolean) => void
 }
 
 export function ModelChoice({
@@ -72,10 +74,10 @@ export function ModelChoice({
   variant,
   placement,
   text,
+  onOpenChange,
 }: ModelChoiceProps) {
   const known = useModels()
   const room = useModelRooms(projectId)
-  const missed = useMissedReports()
   const setDefault = useSetDefaultEffort()
   const prefs = useModelPrefs()
   const [open, setOpen] = useState(false)
@@ -120,11 +122,13 @@ export function ModelChoice({
         {...(onTeam === undefined ? {} : { onTeam })}
         {...(confirm === undefined ? {} : { confirm })}
         room={room}
-        missed={missed}
         asking={asking}
         onAskingChange={setAsking}
         open={open}
-        onOpenChange={setOpen}
+        onOpenChange={(next) => {
+          setOpen(next)
+          onOpenChange?.(next)
+        }}
         count={catalog.models.length}
         owner={owner}
         {...(variant === undefined ? {} : { variant })}

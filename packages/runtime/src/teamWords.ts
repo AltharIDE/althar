@@ -34,7 +34,11 @@ export const teamChanges = (changed: TeamChanged, named: ModelNamer): ReadonlyAr
         : {
             verb: 'changed',
             thing: `the review to ${named(review.step)}`,
-            ...(review.when === 'next_round' ? { note: 'It starts from the next round.' } : {}),
+            ...(review.when === 'next_round'
+              ? { note: 'It starts from the next round.' }
+              : review.when === 'next_ship'
+                ? { note: 'It reads what ships next.' }
+                : {}),
           },
     )
   return lines

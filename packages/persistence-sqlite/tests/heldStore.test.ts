@@ -49,3 +49,17 @@ describe('a store held by another writer', () => {
     ),
   )
 })
+
+describe('a store on disk', () => {
+  it.effect('syncs its log at checkpoints, not on every commit, in WAL mode', () =>
+    withFile((filename) =>
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient
+        const [mode] = yield* sql<{ journalMode: string }>`PRAGMA journal_mode`
+        const [sync] = yield* sql<{ synchronous: number }>`PRAGMA synchronous`
+        // NORMAL (1): whole after any crash; FULL (2), the default, waited for the disk on each commit.
+        assert.deepStrictEqual([mode?.journalMode, sync?.synchronous], ['wal', 1])
+      }).pipe(Effect.provide(Layer.fresh(Database.layer({ filename })))),
+    ),
+  )
+})

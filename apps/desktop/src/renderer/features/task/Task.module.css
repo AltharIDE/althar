@@ -5,6 +5,14 @@
   background: var(--n-2);
 }
 
+/* An aside: its conversation alone, in the coordinator's pane, on the pane's own ground */
+.aside {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+}
+
 .face {
   flex: 1;
   min-height: 0;
@@ -38,8 +46,6 @@
 
 .failure {
   margin: 0;
-  color: var(--danger);
-  font-size: 13px;
   /* Some say what git said, line by line. */
   white-space: pre-line;
 }

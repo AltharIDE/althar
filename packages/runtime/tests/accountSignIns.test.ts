@@ -5,12 +5,13 @@ import { join } from 'node:path'
 import type { AgentDefinition } from '@althar/provider-adapters'
 import { fakeAgent } from '@althar/provider-adapters/testing'
 import { assert, describe, it } from '@effect/vitest'
-import { Effect, Layer } from 'effect'
+import { Effect, Fiber, Layer, Option, Stream } from 'effect'
 import { until } from '@althar/testing/effect'
 
 import { Accounts } from '../src/Accounts'
 import { AccountSignIns, type AccountSignInState, NoSignInHere } from '../src/AccountSignIns'
 import { type AgentEntry, Agents } from '../src/Config'
+import { Live } from '../src/Live'
 import * as Runtime from '../src/Runtime'
 import { Secrets } from '../src/Secrets'
 import { definition, fakeConnectors } from './support'
@@ -118,6 +119,25 @@ describe('signing an account in inside Althar', () => {
       assert.deepStrictEqual(done, { state: 'done', who: 'dana@northwind.io', plan: 'ChatGPT Team' })
     }).pipe(Effect.provide(layer(true, opened)))
   })
+
+  it.live('tells plan usage again once signed in, so a warning the old sign-in raised goes from the bar at once', () =>
+    Effect.gen(function* () {
+      const [usual] = yield* (yield* Accounts).of('codex')
+      if (usual === undefined) return assert.fail('Codex has its usual account')
+      const events = yield* (yield* Live).subscribe
+      const told = yield* events.pipe(
+        Stream.filter((event) => event._tag === 'PlanUsage'),
+        Stream.take(1),
+        Stream.runCollect,
+        Effect.forkScoped,
+      )
+      const signIns = yield* AccountSignIns
+      const { flowId } = yield* signIns.start({ accountId: usual.id, way: 'browser' })
+      yield* until(signIns.get(flowId), (state) => state.state === 'done')
+      // Told before the flow says done, so it is there by now.
+      assert.isTrue(Option.isSome(yield* Fiber.join(told).pipe(Effect.timeoutOption('2 seconds'))), 'plan usage told again')
+    }).pipe(Effect.scoped, Effect.provide(layer(true, []))),
+  )
 
   it.live('gives a one-time code, signs an agent in one account at a time, and refuses a way it has none for', () => {
     const opened: string[] = []

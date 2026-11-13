@@ -3,11 +3,11 @@ import { type ReactNode, useEffect, useEffectEvent, useRef, useState } from 'rea
 import { EdgeSheet, Island, ISLAND_HOVER, type NotchSize } from '@althar/ui'
 
 import { useServices } from '../../data/services'
-import { refOf, text as homeText } from '../home/HomeView'
-import { DEFAULT_ANSWER, needLineOf, needsOf, workOf } from '../home/needs'
+import { homeGlanceOf } from '../home/glance'
+import { text as homeText } from '../home/HomeView'
+import { DEFAULT_ANSWER, needLineOf } from '../home/needs'
 import s from './Edge.module.css'
 import type { EdgeModel } from './useEdge'
-import { readyOf, standingCalls } from '../../shared/calls'
 import { useModelNames } from '../../shared/modelNames'
 
 /*
@@ -48,36 +48,23 @@ export function EdgeView({ model, shown }: { model: EdgeModel; shown: EdgePlaceS
   const home = model.home
   const named = useModelNames()
   const name = (id: string | null) => model.agents.find((agent) => agent.id === id)?.name ?? id ?? ''
-  const refs = new Map((home?.projects ?? []).map((project) => [project.id, refOf(project)]))
-  const tasks = home?.tasks ?? []
-  const standing = standingCalls(tasks, home?.calls ?? [])
-  const calls = standing.filter((call) => !model.answered.some((one) => one.call.id === call.id))
-  // What waits on the person as work ready for them (`needsYou`).
-  const ready = readyOf(tasks)
-  // What has a call above isn't counted again in the work.
-  const called = new Set((home?.calls ?? []).map((call) => call.threadId))
-  // Nor is a task kept for later, which waits for the person to write to it.
-  const working = tasks.filter(
-    (task) => task.phase !== 'ready' && task.phase !== 'kept' && !called.has(task.threadId) && refs.has(task.projectId),
-  )
-  const waiting = calls.length + ready.length
-  const openThread = (threadId: string) => host.openInWindow(threadId)
-
-  const needs: ReadonlyArray<ReactNode> = needsOf({
-    calls: standing,
+  // What waits and what is in progress, as the home reads it (`homeGlanceOf`), and as each board's lanes put them.
+  const glance = homeGlanceOf(home, {
     answered: model.answered,
-    ready,
-    refs,
     agentName: name,
     modelName: (agentId, model) => named(agentId, model).name,
-  }).map((need) => needLineOf(need, { onOpen: openThread, onAnswer: (call, _project, decision) => model.answer(call, decision) }))
+  })
+  const openThread = (threadId: string) => host.openInWindow(threadId)
+  const needs: ReadonlyArray<ReactNode> = glance.needs.map((need) =>
+    needLineOf(need, { onOpen: openThread, onAnswer: (call, _project, decision) => model.answer(call, decision) }),
+  )
 
   const sheet = (
     <EdgeSheet
       tone={shown.place === 'island' ? 'ink' : 'paper'}
-      waiting={waiting}
+      waiting={glance.waiting}
       needs={needs}
-      work={workOf(working)}
+      work={glance.edge.work}
       failure={model.error}
       onOpenApp={() => host.openInWindow()}
     />
@@ -90,7 +77,7 @@ export function EdgeView({ model, shown }: { model: EdgeModel; shown: EdgePlaceS
           <Island
             ref={ref}
             notch={shown.notch}
-            waiting={waiting}
+            waiting={glance.waiting}
             saying={model.saying}
             open={open}
             onOpenChange={setOpen}

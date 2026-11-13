@@ -131,8 +131,8 @@ coordinator's disposable folder, apart.
 | Tool | What it does | Kind |
 |---|---|---|
 | `project_overview` | Rules, repositories, notes | Read |
-| `list_tasks`, `read_task` | Status, plan, steps, lead, and how its pull request stands: draft or ready, checks, unpushed commits, merged or closed, read from the same data as the task's card (never asked of the host; said as last seen where it may be stale or unknown). A task whose pull requests are all merged reads as finished; a closed one is said as last seen, since nothing watches it for reopening | Read |
-| `find_tasks` | The project's tasks found by what they were about: words from a title, what the person asked, what a lead reported or built, a pull request's number, an issue's key, a branch or a file; best first, a line each with where it stands, its pull request, its id and what matched ([02](02-desktop-runtime.md#queries)) | Read |
+| `list_tasks`, `read_task` | Status, plan, steps, lead, and how its pull request stands: draft or ready, checks, unpushed commits, merged or closed, read from the same data as the task's card (never asked of the host; said as last seen where it may be stale or unknown). A task whose pull requests are all merged reads as finished; a closed one is said as last seen, since nothing watches it for reopening. Asides aren't listed: the open ones are named on a line after, with where each stands ([tasks](../decisions/tasks.md#asides)) | Read |
+| `find_tasks` | The project's tasks found by what they were about: words from a title, what the person asked, what a lead reported or built, a pull request's number, an issue's key, a branch or a file; best first, a line each with where it stands (an aside said to be one), its pull request, its id and what matched ([02](02-desktop-runtime.md#queries)) | Read |
 | `read_thread` | A task's thread, or, without a task, its own conversation: the latest part, then further back a part at a time | Read |
 | `read_change` | A task's diff and checks | Read |
 | `read_pull_request` | Any of the project's pull requests, whoever opened it, by its number or link, as its host has it now: state, where it goes and whether it conflicts there, size, description, checks with the end of a failed one's log, and what everyone said on it, as data ([ADR-058](../decisions/coordinator.md#its-copies-of-the-repositories)) | Read |
@@ -299,9 +299,11 @@ conversation may not survive it. So Althar hands the coordinator over first
   `read_thread`, `read_task` or the code rather than guess, the project as
   `project_overview` gives it, the notes, every open task (where it stands,
   who leads it and what waits on the person; for the newest 25, its plan and
-  what its lead last reported too), and the conversation's last twelve
-  messages, word for word. Each part is bounded; a message longer than a
-  part comes in parts, so `read_thread` reaches all of it.
+  what its lead last reported too; asides apart and uncounted, with what of
+  each waits on the person and its last report), and
+  the conversation's last twelve messages, word for word, but for what waits
+  for its first turn, which that turn says. Each part is bounded; a message
+  longer than a part comes in parts, so `read_thread` reaches all of it.
 - **What the person sees:** a quiet line in the thread, "Started a fresh
   session; picked up 3 open tasks." The thread is Althar's record, so the
   whole conversation stays there to scroll.

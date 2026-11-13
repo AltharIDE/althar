@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
-import { useState } from 'react'
+import { type CSSProperties, useState } from 'react'
 import { fn } from 'storybook/test'
 
 import { PROJECTS, MERIDIAN } from '../../fixtures/chrome'
@@ -7,7 +7,6 @@ import { Room } from '../../foundations/vocabulary'
 import { States } from '../../storybook/States'
 import { BackCrumb } from '../BackCrumb/BackCrumb'
 import { ChromeButton } from '../ChromeButton/ChromeButton'
-import { Elsewhere } from '../Elsewhere/Elsewhere'
 import { ProjectSwitcher } from '../ProjectSwitcher/ProjectSwitcher'
 import { RoomSwitch } from '../RoomSwitch/RoomSwitch'
 import { WorkStatus } from '../WorkStatus/WorkStatus'
@@ -56,7 +55,6 @@ function ProjectBar({
       }
     >
       <ProjectSwitcher current={MERIDIAN} projects={PROJECTS} onPick={fn()} onRename={fn()} onNew={fn()} />
-      <Elsewhere projects={PROJECTS.slice(1)} onPick={fn()} onMore={fn()} />
       <RoomSwitch value={room} onChange={setRoom} news={room === Room.Board} />
     </TitleBar>
   )
@@ -70,12 +68,8 @@ const meta = {
 export default meta
 type Story = StoryObj<typeof meta>
 
-/** A project's window: the project, one elsewhere that needs you, the views, the work's status, and the panels. */
+/** A project's window: the project, the views, the work's status, and the panels. */
 export const ProjectWindow: Story = {}
-/** A narrow window: the panel buttons keep only their glyphs. */
-export const Narrow: Story = { args: { compact: true } }
-/** In the app the system draws the lights; the bar keeps their space. */
-export const NativeLights: Story = { args: { lights: 'space' } }
 
 /** A task that has the window: the way back, which task this is, and what else needs you while you are in it. */
 export const TaskTakeover: Story = {
@@ -95,33 +89,6 @@ const KDE: WindowControls = { look: 'kde', start: [], end: ['minimize', 'maximiz
 const KDE_LEFT: WindowControls = { look: 'kde', start: ['close', 'maximize', 'minimize'], end: [] }
 const WINDOWS: WindowControls = { look: 'windows', start: [], end: ['minimize', 'maximize', 'close'] }
 const NEUTRAL: WindowControls = { look: 'gnome', tone: 'legacy', start: [], end: ['minimize', 'maximize', 'close'] }
-
-/** GNOME: round buttons at the end, as its button-layout says. */
-export const Gnome: Story = { args: { controls: GNOME } }
-/** GNOME's own default layout: close alone, at the end. */
-export const GnomeCloseOnly: Story = { args: { controls: GNOME_CLOSE } }
-/** GNOME with its buttons moved to the left. */
-export const GnomeLeft: Story = { args: { controls: GNOME_LEFT } }
-/** Ubuntu's Yaru theme. */
-export const Yaru: Story = { args: { controls: YARU } }
-/** KDE's manner, for a Qt desktop on a compositor that draws no frame (KWin itself draws its own). */
-export const Kde: Story = { args: { controls: KDE } }
-/** KDE's manner with kwinrc's buttons on the left. */
-export const KdeLeft: Story = { args: { controls: KDE_LEFT } }
-/** Windows: caption buttons the bar's full height, square to the window's edge. */
-export const Windows: Story = { args: { controls: WINDOWS } }
-/** A desktop Althar doesn't know: neutral buttons at the end. */
-export const Fallback: Story = { args: { controls: NEUTRAL } }
-/** Where the window manager draws the frame (KDE, Xfce, MATE) or a tiling one has none: no buttons, no room for them. */
-export const SystemFrame: Story = { args: { lights: 'none' } }
-
-export const GnomeDark: Story = { ...Gnome, globals: { theme: 'dark' } }
-export const GnomeCloseOnlyDark: Story = { ...GnomeCloseOnly, globals: { theme: 'dark' } }
-export const KdeDark: Story = { ...Kde, globals: { theme: 'dark' } }
-export const KdeLeftDark: Story = { ...KdeLeft, globals: { theme: 'dark' } }
-export const WindowsDark: Story = { ...Windows, globals: { theme: 'dark' } }
-export const FallbackDark: Story = { ...Fallback, globals: { theme: 'dark' } }
-export const NativeLightsDark: Story = { ...NativeLights, globals: { theme: 'dark' } }
 
 /* A task's bar, which fits a narrow cell: the way back, the task, the work's status. */
 function TaskBar({ controls, lights = 'drawn' }: { controls?: WindowControls; lights?: 'space' | 'drawn' | 'none' }) {
@@ -159,24 +126,30 @@ export const Desktops: Story = {
 }
 export const DesktopsDark: Story = { ...Desktops, globals: { theme: 'dark' } }
 
+/* A project's bar needs a window's width, not a thread's: each cell takes the whole row. */
+const WINDOW_WIDE = { '--measure': '100vw' } as CSSProperties
+
+/** Every way a window's bar stands: the panel buttons keep only their glyphs in a narrow one; the system's lights, Althar's, or none. */
 export const AllStates: Story = {
   render: () => (
-    <States
-      size="thread"
-      cells={[
-        { state: 'project window', node: <ProjectBar /> },
-        { state: 'narrow', node: <ProjectBar compact /> },
-        { state: 'native lights', node: <ProjectBar lights="space" /> },
-        { state: 'no lights', node: <ProjectBar lights="none" /> },
-        {
-          state: 'task takeover',
-          node: (
-            <TitleBar lights="drawn">
-              <BackCrumb to="Meridian" kbd="esc" onBack={fn()} task="418" title="Repair token refresh on privilege change" />
-            </TitleBar>
-          ),
-        },
-      ]}
-    />
+    <div style={WINDOW_WIDE}>
+      <States
+        size="thread"
+        cells={[
+          { state: 'project window', node: <ProjectBar /> },
+          { state: 'narrow', node: <ProjectBar compact /> },
+          { state: 'native lights', node: <ProjectBar lights="space" /> },
+          { state: 'no lights', node: <ProjectBar lights="none" /> },
+          {
+            state: 'task takeover',
+            node: (
+              <TitleBar lights="drawn">
+                <BackCrumb to="Meridian" kbd="esc" onBack={fn()} task="418" title="Repair token refresh on privilege change" />
+              </TitleBar>
+            ),
+          },
+        ]}
+      />
+    </div>
   ),
 }

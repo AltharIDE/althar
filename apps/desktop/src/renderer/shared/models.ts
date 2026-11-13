@@ -490,6 +490,26 @@ export const runningOn = (session: {
   effort: session.effort,
 })
 
+/**
+ * Who a held session leads as from its next turn, where its lead was changed and the agent isn't set to it yet: a model or
+ * effort the person just picked, or another agent a tool chose. Null where nothing waits.
+ */
+export const upcomingOn = (session: {
+  readonly agentId: string
+  readonly model: string | null
+  readonly effort: string | null
+  readonly nextLead?: { readonly agentId: string; readonly model: string | null; readonly effort: string | null } | null
+}): Choice | null => {
+  const next = session.nextLead
+  if (next == null) return null
+  const same = next.agentId === session.agentId
+  return {
+    agentId: next.agentId,
+    model: next.model ?? (same ? session.model : null),
+    effort: next.effort ?? (same ? session.effort : null),
+  }
+}
+
 /** Puts a running thread on what the person chose: its model and effort, or another agent taking over with them. */
 export const moveTo = async (client: Client, threadId: string, current: Choice, next: Choice): Promise<void> => {
   if (next.agentId !== current.agentId) {

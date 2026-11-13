@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import { assert, describe, it } from '@effect/vitest'
+import { Effect } from 'effect'
 
 import { guard, guardEnv, guardHolds, guardStopIn, passGuard } from '../src/pushGuard'
 import { gitRunsOf } from '../src/rules'
@@ -53,7 +54,7 @@ const env = {
   // A test's repositories are its own, not the live task's inherited guard scope.
   ALTHAR_GUARD_REPOSITORIES: '',
   ALTHAR_GUARD_REMOTES: '',
-  ...guardEnv({ sessionId, taskBranch: 'althar/retry', defaultBranches: ['main'], count: 0, at }),
+  ...(await Effect.runPromise(guardEnv({ sessionId, taskBranch: 'althar/retry', defaultBranches: ['main'], count: 0, at }))),
   GIT_AUTHOR_NAME: 'Try',
   GIT_AUTHOR_EMAIL: 'try@althar.test',
   GIT_COMMITTER_NAME: 'Try',
@@ -140,12 +141,14 @@ describe("a lead's git", () => {
     assert.strictEqual(run(work, 'git', 'branch', '-f', 'feature/unmerged', 'main').status, 0)
   })
 
-  it('leaves a repository that isn’t the task’s alone: a scratch one in the temp folder is the lead’s', () => {
+  it('leaves a repository that isn’t the task’s alone: a scratch one in the temp folder is the lead’s', async () => {
     const task = repository()
     const scratch = repository()
     const own = {
       ...env,
-      ...guardEnv({ sessionId, taskBranch: 'althar/retry', defaultBranches: ['main'], repositories: [task.work], count: 0, at }),
+      ...(await Effect.runPromise(
+        guardEnv({ sessionId, taskBranch: 'althar/retry', defaultBranches: ['main'], repositories: [task.work], count: 0, at }),
+      )),
     }
     const ran = (cwd: string, ...args: Array<string>) => {
       const done = spawnSync('git', args, { cwd, env: own, encoding: 'utf8' })
@@ -169,10 +172,10 @@ describe("a lead's git", () => {
   })
 
   // No guard on Windows, where Git for Windows' `ps` can't show git's own words (guardHolds).
-  it.skipIf(!guardHolds)('lets through the one git the person allowed, once, and nothing else on its pass', () => {
+  it.skipIf(!guardHolds)('lets through the one git the person allowed, once, and nothing else on its pass', async () => {
     const { work } = repository()
     const allowed = 'git push -q origin althar/retry:main'
-    passGuard(sessionId, runsOf(`${allowed} 2>&1`, work), at)
+    await Effect.runPromise(passGuard(sessionId, runsOf(`${allowed} 2>&1`, work), at))
     // Another irreversible git, in a script or plainly, gets nothing from it.
     const other = run(
       work,
@@ -191,24 +194,24 @@ describe("a lead's git", () => {
     assert.include(again.said, 'a push to main, the default branch')
   })
 
-  it.skipIf(!guardHolds)('lets through what was allowed only in its repository, and only to where its remote pointed then', () => {
+  it.skipIf(!guardHolds)('lets through what was allowed only in its repository, and only to where its remote pointed then', async () => {
     const one = repository()
     const two = repository()
     const allowed = 'git push -q origin althar/retry:main'
-    passGuard(sessionId, runsOf(allowed, one.work), at)
+    await Effect.runPromise(passGuard(sessionId, runsOf(allowed, one.work), at))
     // The same words in another repository of the task get nothing from it, and leave it unspent.
     const elsewhere = run(two.work, 'git', ...allowed.split(' ').slice(1))
     assert.notStrictEqual(elsewhere.status, 0, 'the same push in another repository')
     assert.include(elsewhere.said, 'a push to main, the default branch')
     assert.strictEqual(run(one.work, 'git', ...allowed.split(' ').slice(1)).status, 0, 'the allowed push')
     // A remote pointed elsewhere after the person allowed it is another crossing.
-    passGuard(sessionId, runsOf(allowed, one.work), at)
+    await Effect.runPromise(passGuard(sessionId, runsOf(allowed, one.work), at))
     run(one.work, 'git', 'remote', 'set-url', 'origin', join(two.home, 'remote.git'))
     run(one.work, 'git', 'commit', '-q', '--allow-empty', '-m', 'Again')
     const moved = run(one.work, 'git', ...allowed.split(' ').slice(1))
     assert.notStrictEqual(moved.status, 0, 'the push to a remote pointed elsewhere')
     // A line that goes into the other repository first is allowed there, and only there.
-    passGuard(sessionId, runsOf(`cd '${two.work}' && ${allowed}`, one.work), at)
+    await Effect.runPromise(passGuard(sessionId, runsOf(`cd '${two.work}' && ${allowed}`, one.work), at))
     assert.notStrictEqual(run(one.work, 'git', ...allowed.split(' ').slice(1)).status, 0, 'where it didn’t go')
     assert.strictEqual(run(two.work, 'git', ...allowed.split(' ').slice(1)).status, 0, 'where it went')
   })
@@ -236,9 +239,9 @@ describe('the git commands a pass names', () => {
 })
 
 describe('a pass past the guard, as written for the hook', () => {
-  const passed = (sessionId: string, runs: Parameters<typeof passGuard>[1]) => {
+  const passed = async (sessionId: string, runs: Parameters<typeof passGuard>[1]) => {
     const at = { hooks: mkdtempSync(join(tmpdir(), 'althar-hooks-')), passes: mkdtempSync(join(tmpdir(), 'althar-passes-')) }
-    passGuard(sessionId, runs, at)
+    await Effect.runPromise(passGuard(sessionId, runs, at))
     const file = join(at.passes, sessionId)
     return existsSync(file) ? readFileSync(file, 'utf8') : null
   }
@@ -248,23 +251,23 @@ describe('a pass past the guard, as written for the hook', () => {
     return work
   }
 
-  it('names where a push goes: the remote named, else the branch’s push remote as its config says, else origin', () => {
+  it('names where a push goes: the remote named, else the branch’s push remote as its config says, else origin', async () => {
     const work = repo()
     execFileSync('git', ['-C', work, 'remote', 'add', 'origin', 'https://example.test/a.git'])
     execFileSync('git', ['-C', work, 'remote', 'add', 'fork', 'https://example.test/fork.git'])
     const push = (remote: string | undefined) => [{ words: 'git push', folder: work, push: { remote } }]
-    assert.strictEqual(passed('s1', push(undefined)), `${work}\thttps://example.test/a.git\tgit push\n`)
-    assert.strictEqual(passed('s2', push('fork')), `${work}\thttps://example.test/fork.git\tgit push\n`)
+    assert.strictEqual(await passed('s1', push(undefined)), `${work}\thttps://example.test/a.git\tgit push\n`)
+    assert.strictEqual(await passed('s2', push('fork')), `${work}\thttps://example.test/fork.git\tgit push\n`)
     // A remote it doesn't have is passed as it is named: a URL or a path.
-    assert.strictEqual(passed('s3', push('/srv/bare.git')), `${work}\t/srv/bare.git\tgit push\n`)
+    assert.strictEqual(await passed('s3', push('/srv/bare.git')), `${work}\t/srv/bare.git\tgit push\n`)
     execFileSync('git', ['-C', work, 'config', 'remote.pushDefault', 'fork'])
-    assert.strictEqual(passed('s4', push(undefined)), `${work}\thttps://example.test/fork.git\tgit push\n`)
+    assert.strictEqual(await passed('s4', push(undefined)), `${work}\thttps://example.test/fork.git\tgit push\n`)
     // Not a push: its repository alone.
-    assert.strictEqual(passed('s5', [{ words: 'git reset --hard', folder: work }]), `${work}\t\tgit reset --hard\n`)
+    assert.strictEqual(await passed('s5', [{ words: 'git reset --hard', folder: work }]), `${work}\t\tgit reset --hard\n`)
   })
 
-  it('writes none for a git whose repository Althar can’t tell', () => {
-    assert.isNull(passed('s6', [{ words: 'git push', folder: undefined, push: { remote: 'origin' } }]))
-    assert.isNull(passed('s7', [{ words: 'git push', folder: mkdtempSync(join(tmpdir(), 'althar-not-git-')) }]))
+  it('writes none for a git whose repository Althar can’t tell', async () => {
+    assert.isNull(await passed('s6', [{ words: 'git push', folder: undefined, push: { remote: 'origin' } }]))
+    assert.isNull(await passed('s7', [{ words: 'git push', folder: mkdtempSync(join(tmpdir(), 'althar-not-git-')) }]))
   })
 })

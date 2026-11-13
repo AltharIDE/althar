@@ -50,6 +50,39 @@ const meta = {
 export default meta
 type Story = StoryObj<typeof meta>
 
+export const GitHubCopilot: Story = {
+  args: { agent: 'GitHub Copilot', holds: undefined, ways: { browser: 'GitHub', enterprise: true }, onEnterprise: fn() },
+  play: async ({ args, canvasElement }) => {
+    const c = within(canvasElement)
+    await userEvent.click(c.getByRole('button', { name: 'Continue with GitHub' }))
+    await expect(args.onWay).toHaveBeenCalledWith(SignInWay.Browser)
+    await expect(c.queryByRole('button', { name: /terminal/i })).not.toBeInTheDocument()
+  },
+}
+
+export const GitHubEnterprise: Story = {
+  args: { agent: 'GitHub Copilot', holds: undefined, ways: { browser: 'GitHub', enterprise: true }, onEnterprise: fn() },
+  play: async ({ args, canvasElement }) => {
+    const c = within(canvasElement)
+    await userEvent.click(c.getByRole('button', { name: 'Use a GitHub Enterprise address…' }))
+    const field = c.getByRole('textbox', { name: 'GitHub Enterprise address' })
+    await expect(field).toHaveFocus()
+    await userEvent.type(field, 'company.ghe.com')
+    await userEvent.click(c.getByRole('button', { name: /^Continue$/ }))
+    await expect(args.onEnterprise).toHaveBeenCalledWith('company.ghe.com')
+  },
+}
+
+export const GitHubEnterpriseAddressError: Story = {
+  args: {
+    agent: 'GitHub Copilot',
+    holds: undefined,
+    ways: { browser: 'GitHub', enterprise: true },
+    step: { kind: 'choose', enterprise: 'not a host', error: 'Enter your GitHub Enterprise hostname, such as company.ghe.com.' },
+    onEnterprise: fn(),
+  },
+}
+
 /** The ways in: the browser first, the rest as quiet links, and a word on who the browser may still be signed in as. Escape inside cancels. */
 export const Choosing: Story = {
   play: async ({ args, canvasElement }) => {

@@ -63,6 +63,15 @@ export const running = (from: string, now: string): string => {
 }
 
 /**
+ * How long something has run, for a place meant to be glanced at, as the board: "just now" for its first minute, then as
+ * `running` says it, so the words change once a minute rather than with every second.
+ */
+export const runningCalmly = (from: string, now: string): string => {
+  if (!known(from, now)) return ''
+  return new Date(now).getTime() - new Date(from).getTime() < 60_000 ? 'just now' : running(from, now)
+}
+
+/**
  * The time now, as an ISO string, again each second while `ticking`: for how
  * long a running turn has worked. `every` slows it, for what only says how
  * many minutes or hours ago something was.

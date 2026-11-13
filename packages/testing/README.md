@@ -16,6 +16,12 @@ That is `testTimeout` and `hookTimeout` from `budget` (`src/budget.ts`: small 10
 
 Tests wait with `until` from `@althar/testing/effect`, or `waitFor` from `@althar/testing` with promises: each reads again every 20 ms until its check passes, and gives up only with a tenth of its test's time left (`src/deadline.ts`), saying what it last read.
 
+For a live reset or expiry, use `isoAfter(milliseconds)` from `@althar/testing`; its optional second argument is an explicit reference time in milliseconds. Use historical dates for static payload and calendar examples. `tests/dates.test.ts` rejects future date values and timestamps in tests and fixtures, including JSON and SQL, so a deadline cannot silently pass as the calendar moves on. Dates mentioned in prose and comments are not deadlines.
+
+For time-dependent reads that must not wake the runtime's background loops, obtain `const clock = yield* readClock` from `@althar/testing/effect` after the runtime is provided. `yield* clock.advance('5 days')` moves only the time seen by `yield* clock.run(service.read)`; the runtime's timers retain their original clock. Use `TestClock.adjust` when firing timers is what the test covers.
+
+For test folders, `realPath` canonicalizes an existing path (including Windows' short names), and `slashPath` formats paths for output that uses forward slashes on every OS. Use `removeTree` or `removeTreeSync` for recursive test cleanup: they retry Windows' transient busy/permission errors with Node's backoff, while persistent failures still fail the test. Stop processes using a folder before removing it.
+
 In CI the settings add `retry: 1` and the reporters `default`, `github-actions` and `@althar/testing/reporter`. A command that names its own reporters names this one too (`--reporter=@althar/testing/reporter`). Playwright takes `@althar/testing/playwright` as a reporter, with `retries: 1` in CI.
 
 Both reporters write a warning on the run for each flaky test (a GitHub annotation) and a line to the file `FLAKY_REPORT` names. The workflows set `FLAKY_REPORT`, and their test jobs end with `.github/actions/flaky`, which runs `src/report.ts`: it files each flaky test as an issue labelled `flaky`, or comments on its issue, reopening it if it was closed.
@@ -26,6 +32,20 @@ A test with an open issue labelled `flaky`, titled as `src/report.ts` titles one
 
 Vitest checks coverage only on a run with no failed test, unless the coverage config sets `reportOnFailure`; without it, the reporter doesn't let a quarantined failure pass a coverage run, since its coverage would go unchecked. A job that doesn't read the issues, or one with `QUARANTINE` unset, as on a computer, quarantines nothing.
 
+### Durations and shards
+
+`@althar/testing/sequencer` distributes the runtime's selected files across Vitest shards; `playwrightShard` from `@althar/testing/shards` assigns the app's full specs when `E2E_SHARD` is set. Both use `durations.json`, separately by OS, and assign every discovered file exactly once. Missing or invalid measurements fall back to a normal cost; timings never decide whether a test runs or passes. Playwright's worker count stays one, and Vitest's normal sorting and isolation remain.
+
+The CI install action names `TEST_TIMINGS`. Both existing reporters append measurements there, and `.github/actions/flaky` uploads each job's `test-timings-*` artifact. Vitest report merging records no duplicate measurements. To refresh the checked-in history, download those artifacts from a chosen full post-merge run into a directory and run from the repository root:
+
+```sh
+bun packages/testing/src/timingHistory.ts work/timings 'post-merge run <id>'
+```
+
+The refresh sums each spec's test attempts per job and uses median durations across the supplied jobs. Review the resulting JSON like other source changes. Keep Windows and Linux data separate and use full runs, rather than stress runs with extra repetitions. A timing artifact is optional diagnostics; losing it cannot turn a failed test or coverage gate green.
+
+Windows uses a fresh Bun package-cache directory and an exact OS, architecture, Bun-version and lockfile key. `post-merge`'s manual `bun-cache` input compares `isolated`, `off` and the old `legacy` cache with the same tests. Install durations are recorded on the summary; cache restoration time is the cache step's duration. Jobs that do not execute Electron skip its binary caches.
+
 ## Work on it
 
 ```sh
@@ -33,6 +53,6 @@ bun run check
 bun run test
 ```
 
-`src/select.ts` is what CI runs for a change: the workflows `harness`, `desktop` and `ui` plan with it, and run its plan ([Changes and CI](../../DEVELOPMENT.md#changes-and-ci)). `tests/select.test.ts` checks the plan for example changes in a small repository shaped like this one, and that every import in this one leads to a file or a package it depends on, so none goes unseen.
+`src/select.ts` is what CI runs for a change: the workflows `harness`, `desktop`, `ui` and `windows` plan with it, and run its plan ([Changes and CI](../../DEVELOPMENT.md#changes-and-ci)). Windows runs affected unit tests for changes to the runtime, adapters, connectors, persistence, skills, CLI and the desktop host, including on drafts and in the merge queue. Renderer-only work and docs do not start Windows unit jobs; shared tooling starts the whole set. `tests/select.test.ts` checks the plan for example changes in a small repository shaped like this one, and that every import in this one leads to a file or a package it depends on, so none goes unseen.
 
 `tests/reporter.test.ts` runs Vitest on a test that fails once, then passes (`tests/fixtures/once.fixture.ts`), and checks that it alone is reported. `tests/quarantine.test.ts` runs Vitest on tests that always fail (`tests/fixtures/fails.fixture.ts`, `broken.fixture.ts`, `hook.fixture.ts`, with a fake coverage provider in `coverage.ts`), and the Playwright reporter on a run's end, and checks which runs quarantine lets pass; and the matching of tests to issues, the decision and the job's summary on their own. `tests/deadline.test.ts` checks the waits and their deadline. `tests/limits.test.ts` reads every test in the repository and fails on any that sets a time of its own: a third argument to `it`, `test` or `describe` other than a budget by name, a `timeout` in a test's options, a time given to a hook or to a wait, or a loop that gives up after so many tries.

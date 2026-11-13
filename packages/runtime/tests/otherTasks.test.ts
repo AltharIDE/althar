@@ -1,5 +1,6 @@
+import { removeTreeSync } from '@althar/testing'
 import { execFileSync } from 'node:child_process'
-import { existsSync, mkdirSync, readFileSync, rmSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs'
 import { basename, join } from 'node:path'
 
 import type { ProjectId, WorksIn } from '@althar/domain'
@@ -260,7 +261,7 @@ describe('a lead reading a task whose folder was removed', () => {
       git(theirs.path, 'add', 'notes.md')
       git(theirs.path, 'commit', '-q', '-m', 'Notes')
       writeFileSync(join(theirs.path, 'draft.md'), 'Not committed\n')
-      rmSync(theirs.path, { recursive: true, force: true, maxRetries: 5 })
+      removeTreeSync(theirs.path)
       const diff = yield* callTool(leadOf(projectId, mine), 'read_task_diff', { task: theirs.slug })
       assert.include(diff, 'as committed')
       assert.include(diff, 'its folder was removed, so nothing uncommitted is read')
@@ -377,7 +378,7 @@ describe('two tasks changing the same file', () => {
 })
 
 describe('a heads-up to a lead between turns', () => {
-  it.live('isn’t woken for it, and hears of it as its next turn starts, though it changed the file only with a command', () => {
+  it.live('isn’t woken for it, nor queued a turn, and reads it with its next turn, though it changed the file only with a command', () => {
     const root = repository()
     return Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
@@ -430,13 +431,32 @@ describe('a heads-up to a lead between turns', () => {
       })
       const [heard] = yield* until(told(resting.threadId), (rows) => rows.length === 1)
       assert.strictEqual(heard?.body, overlapWords({ slug: working.slug, title: 'Retry the checkout' }, ['README.md']))
-      // It reads it as that turn ends, in the next, and nothing more is said as those turns start and end.
+      // A heads-up is a note: as that turn ends, no turn starts for it, nor waits for a place.
+      const noted = sql<{ state: string }>`SELECT state FROM user_inputs WHERE thread_id = ${resting.threadId} AND body LIKE 'Heads-up:%'`
+      assert.deepStrictEqual(yield* noted, [{ state: 'noted' }])
       yield* sessions.interrupt(resting.threadId)
+      yield* until(turns(resting.threadId), (rows) => rows.every((row) => !['pending', 'delivered'].includes(row.state)))
+      assert.lengthOf(yield* turns(resting.threadId), before + 1)
+      assert.deepStrictEqual(yield* noted, [{ state: 'noted' }])
+      assert.isNull(
+        (yield* sql<{ waits: string | null }>`SELECT waits_for_place AS waits FROM threads WHERE id = ${resting.threadId}`)[0]?.waits ??
+          null,
+      )
+      // It reads it with its next turn, whatever starts that, and nothing more is said as those turns start and end.
+      const again = 'And the docs.'
+      yield* sessions.send({
+        envelope: yield* Runtime.envelope('thread.send', { threadId: resting.threadId, body: again }),
+        threadId: resting.threadId,
+        body: again,
+        sender: { kind: 'window' },
+      })
       const delivered = yield* until(
         turns(resting.threadId),
         (rows) => rows.length >= before + 2 && rows.every((row) => !['pending', 'delivered'].includes(row.state)),
       )
       assert.include(delivered.at(-1)?.prompt ?? '', 'Heads-up: another running task, Retry the checkout')
+      assert.include(delivered.at(-1)?.prompt ?? '', again)
+      assert.deepStrictEqual(yield* noted, [{ state: 'delivered' }])
       yield* (yield* Overlaps).look(resting.taskId)
       assert.lengthOf(yield* told(resting.threadId), 1)
       assert.lengthOf(yield* told(working.threadId), 1)

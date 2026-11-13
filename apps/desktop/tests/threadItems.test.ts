@@ -23,6 +23,15 @@ describe('what can’t change any more', () => {
     expect(settled(items.card(card({ phase: 'settled' })))).toBe(true)
   })
 
+  it('keeps a merge line’s card read again until every pull request on it has merged', () => {
+    const [moving] = [items.mergeLine()]
+    expect(moving && settled(moving)).toBe(false)
+    const done = items.mergeLine({
+      rows: [{ number: 778, title: 'Retry', url: 'https://github.com/meridian/api/pull/778', state: 'merged' }],
+    })
+    expect(settled(done)).toBe(true)
+  })
+
   it('settles a question once it is answered or withdrawn', () => {
     expect(settled(items.question())).toBe(false)
     expect(settled(items.question({ state: 'answered' }))).toBe(true)

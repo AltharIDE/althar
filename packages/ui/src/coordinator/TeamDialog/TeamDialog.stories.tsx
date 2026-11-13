@@ -44,6 +44,11 @@ interface AtWork {
   review?: string
   /** Its review is done: the reviewer is shown as it stays. */
   done?: string
+  /** Its review was skipped: it starts with none, and can be added back. */
+  skipped?: boolean
+  /** It can't change any more, and why: no Save. */
+  settled?: string
+  /** The last save failed, and why: Save tries again. */
   error?: string
 }
 
@@ -60,7 +65,7 @@ function Team({
   onStart: () => void
 }) {
   const [lead, setLead] = useState(OPUS)
-  const [review, setReview] = useState<ModelInfo | null>(CODEX)
+  const [review, setReview] = useState<ModelInfo | null>(atWork?.skipped === true ? null : CODEX)
   const [end, setEnd] = useState(TaskEnd.DraftPr)
   return (
     <TeamDialog
@@ -83,7 +88,8 @@ function Team({
         },
       ]}
       {...(ends && atWork === undefined ? { end: { value: end, onChange: setEnd } } : {})}
-      {...(atWork?.error === undefined ? { onSave: rest.onSave } : { error: atWork.error })}
+      {...(atWork?.settled === undefined ? { onSave: rest.onSave } : { settled: atWork.settled })}
+      {...(atWork?.error === undefined ? {} : { error: atWork.error })}
       {...(held && atWork === undefined ? { onStart: rest.onStart } : {})}
       onClose={() => {}}
     />
@@ -130,11 +136,34 @@ export const ReviewDone: Story = {
   args: { held: false, atWork: { ...AT_WORK, done: 'The review is done, so the reviewer stays.' } },
 }
 
-export const ReviewDoneDark: Story = { ...ReviewDone, globals: { theme: 'dark' } }
+/** A review that was skipped is not a done one: until the task merges, it can be added back, and its model picked. */
+export const SkippedReviewToAddBack: Story = {
+  args: { held: false, atWork: { ...AT_WORK, skipped: true } },
+}
 
-/** Merged: nothing changes, and it says why. */
+/** Added back to a change whose work is up: it says its review starts on saving, on the change as it stands. */
+export const SkippedReviewAddedBack: Story = {
+  args: { held: false, atWork: { ...AT_WORK, skipped: true, review: 'Its review starts now, on the change as it stands.' } },
+  play: async () => {
+    const page = within(document.body)
+    await userEvent.click(page.getByRole('button', { name: 'Add a review' }))
+    await expect(page.getByText('Its review starts now, on the change as it stands.')).toBeInTheDocument()
+  },
+}
+
+/** Merged: nothing changes, and it says why, quietly: nothing failed. */
 export const Merged: Story = {
-  args: { held: false, atWork: { ...AT_WORK, error: 'It’s merged, so its team stays.' } },
+  args: { held: false, atWork: { ...AT_WORK, settled: 'It’s merged, so its team stays.' } },
+}
+
+/** The last save didn't go: why, under the steps, and Save to try again. */
+export const SaveFailed: Story = {
+  args: { held: false, atWork: { ...AT_WORK, error: 'Couldn’t save the team: the runtime didn’t answer.' } },
+  play: async () => {
+    const page = within(document.body)
+    await expect(page.getByRole('alert')).toHaveTextContent('Couldn’t save the team: the runtime didn’t answer.')
+    await expect(page.getByRole('button', { name: 'Save' })).toBeEnabled()
+  },
 }
 
 /** Started, waiting for a free agent: it starts by itself, so only Save. */

@@ -1,5 +1,6 @@
+import { removeTreeSync } from '@althar/testing'
 import { execFileSync } from 'node:child_process'
-import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { chmodSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -159,7 +160,7 @@ describe('opening with tasks whose pull requests merged (bench)', () => {
         Effect.ensuring(
           Effect.sync(() => {
             process.env.PATH = path
-            rmSync(shim, { recursive: true, force: true })
+            removeTreeSync(shim)
           }),
         ),
         Effect.provide(

@@ -68,6 +68,44 @@ export const Startable: Story = {
   },
 }
 
+/** Waiting for a free worker: Hold, in place of the line as you point at it, takes it out of the line until you start it. */
+export const Holdable: Story = {
+  args: {
+    ...WORKERS,
+    place: 2,
+    kind: 'Change',
+    reason: 'Next in line',
+    onHold: fn(),
+    menu: (
+      <Menu
+        trigger={<IconButton icon="more" size="small" label="The team" />}
+        label="This task"
+        align="end"
+        note="Opus 5.5 · High, GPT-6.1 Sol reviews"
+      >
+        <MenuItem icon="hold" onSelect={fn()}>
+          Hold
+        </MenuItem>
+        <MenuItem icon="agents" onSelect={fn()}>
+          Change the team…
+        </MenuItem>
+      </Menu>
+    ),
+  },
+  play: async ({ args, canvasElement }) => {
+    const row = within(canvasElement)
+    await userEvent.tab()
+    await userEvent.tab()
+    await userEvent.click(row.getByRole('button', { name: 'Hold' }))
+    await expect(args.onHold).toHaveBeenCalledOnce()
+  },
+}
+
+/** On its countdown: Start now, or Hold, as you point at it. */
+export const CountingDown: Story = {
+  args: { ...WORKERS, place: 3, kind: 'Change', reason: 'Starts in 14s', onStart: fn(), onHold: fn() },
+}
+
 /** The queue as it stands, in order. */
 export const Queue: Story = {
   render: (args) => (

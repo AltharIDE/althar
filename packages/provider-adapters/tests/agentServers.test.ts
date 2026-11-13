@@ -4,7 +4,7 @@ import { join } from 'node:path'
 
 import { afterEach, describe, expect, it } from 'vitest'
 
-import { mcpCallOf } from '../src/mcpCalls'
+import { altharToolOf, mcpCallOf } from '../src/mcpCalls'
 import {
   agentServers,
   asWritten,
@@ -33,6 +33,15 @@ describe('the person’s agents’ settings, read', () => {
     expect(mcpCallOf('mcp.linear.update_issue')).toEqual({ server: 'linear', tool: 'update_issue' })
     expect(mcpCallOf(`mcp__-__${'-__-'.repeat(20_000)}`)).toEqual({ server: '-', tool: '-__-'.repeat(20_000) })
     expect(mcpCallOf('mcp__a b__c')).toBeUndefined()
+  })
+
+  it('names a call to Althar’s own server by its tool there, which is no one else’s MCP call', () => {
+    expect(altharToolOf('Draft', { claudeCode: { toolName: 'mcp__althar__draft_task' } })).toBe('draft_task')
+    expect(mcpCallOf('Draft', { claudeCode: { toolName: 'mcp__althar__draft_task' } })).toBeUndefined()
+    expect(altharToolOf('mcp.althar.propose_plan')).toBe('propose_plan')
+    expect(altharToolOf('althar.propose_plan')).toBe('propose_plan')
+    expect(altharToolOf('mcp__linear__update_issue')).toBeUndefined()
+    expect(altharToolOf('Read file.ts')).toBeUndefined()
   })
 
   it('takes a token named each agent’s way as the same set-up', () => {

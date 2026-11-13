@@ -24,6 +24,7 @@ export const DEFAULT_KEYS: ReadonlyArray<DefaultKey> = [
   'postScreenshots',
   'resolveConflicts',
   'moveIssues',
+  'afterMergeReview',
   'usageLimit',
   'rotateAccounts',
 ]

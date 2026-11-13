@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 
 import type { AccountSignInState, AccountStatus, AgentStatus, FoundAccount } from '@althar/contracts'
+import { signInHost } from '@althar/contracts'
 import { type AccountSignInStep, accountsText, SignInWay } from '@althar/ui'
 
 import { messageOf } from '../../data/client'
@@ -41,6 +42,7 @@ export interface AccountSignInModel {
   /** Signs one of its accounts in again: its ways in, or Terminal at once where Althar has none. */
   readonly again: (agentId: string, accountId: string) => void
   readonly way: (way: SignInWay) => void
+  readonly enterprise: (host: string) => void
   /** Opens the one-time code's page, or the sign-in in Terminal again. */
   readonly reopen: () => void
   /** Asks the agent again whether it is signed in, after Terminal. */
@@ -65,6 +67,8 @@ export const newName = (n: number) => `Account ${n}`
 const POLL = 1_000
 
 interface Flow extends SigningIn {
+  /** Keep the selected enterprise address while recovering from a failed sign-in. */
+  readonly enterpriseHost?: string | null
   /** When the agents were read as Terminal opened: a later read that still finds the account signed out says so. */
   readonly since: number
   /** The runtime's sign-in under way, while Althar runs the agent's login. */
@@ -255,12 +259,26 @@ export const useAccountSignIn = (start: StartModel): AccountSignInModel => {
   }
 
   /** Signs in by a way: the account made where it is new, then the agent's login, inside Althar or in Terminal. */
-  const signInBy = async (agentId: string, how: 'browser' | 'device' | 'terminal', grant: string | null, name: string, mine: number) => {
+  const signInBy = async (
+    agentId: string,
+    how: 'browser' | 'device' | 'terminal',
+    grant: string | null,
+    name: string,
+    mine: number,
+    host?: string,
+  ) => {
     try {
+      if (agentId === 'copilot-direct' && agentOf(agentId)?.installed === false) {
+        await client.installAgent(agentId)
+        if (mine !== token.current) return
+        void start.recheck()
+      }
       const accountId = await accountFor(agentId, name, grant, mine)
       if (accountId === null) return
       if (how === 'terminal') return await terminal(accountId, mine)
-      const started = await client.startAccountSignIn(accountId, how)
+      const started = await (host === undefined
+        ? client.startAccountSignIn(accountId, how)
+        : client.startAccountSignIn(accountId, how, host))
       // Left while it started: what it started is stopped, so a sign-in the person left can't finish behind them.
       if (mine !== token.current) return void client.cancelAccountSignIn(started.flowId).catch(() => undefined)
       setFlow((now) => (now === null ? now : { ...now, flowId: started.flowId }))
@@ -294,7 +312,13 @@ export const useAccountSignIn = (start: StartModel): AccountSignInModel => {
     token.current += 1
     if (flow.flowId !== null) void client.cancelAccountSignIn(flow.flowId).catch(() => undefined)
     if (flow.made !== null) void forget(flow.made)
-    setFlow({ ...flow, made: null, flowId: null, step: { kind: 'choose' }, since: 0 })
+    setFlow({
+      ...flow,
+      made: null,
+      flowId: null,
+      step: flow.enterpriseHost == null ? { kind: 'choose' } : { kind: 'choose', enterprise: flow.enterpriseHost },
+      since: 0,
+    })
   }
 
   return {
@@ -308,7 +332,11 @@ export const useAccountSignIn = (start: StartModel): AccountSignInModel => {
       const name = fresh(flow.agentId)
       switch (way) {
         case SignInWay.Browser:
-          setFlow({ ...flow, step: { kind: 'browser', host: signInWordsOf(flow.agentId).host } })
+          setFlow({
+            ...flow,
+            enterpriseHost: null,
+            step: flow.agentId === 'copilot-direct' ? { kind: 'checking' } : { kind: 'browser', host: signInWordsOf(flow.agentId).host },
+          })
           return void signInBy(flow.agentId, 'browser', null, name, mine)
         case SignInWay.Code:
           setFlow({ ...flow, step: { kind: 'checking' } })
@@ -323,6 +351,19 @@ export const useAccountSignIn = (start: StartModel): AccountSignInModel => {
         case SignInWay.Console:
           return
       }
+    },
+    enterprise: (input) => {
+      if (flow === null || flow.agentId !== 'copilot-direct') return
+      const host = signInHost(input)
+      if (host === null) {
+        setFlow({
+          ...flow,
+          step: { kind: 'choose', enterprise: input, error: 'Enter your GitHub Enterprise hostname, such as company.ghe.com.' },
+        })
+        return
+      }
+      setFlow({ ...flow, enterpriseHost: host === 'github.com' ? null : host, step: { kind: 'checking' } })
+      void signInBy(flow.agentId, 'browser', null, fresh(flow.agentId), token.current, host === 'github.com' ? undefined : host)
     },
     reopen: () => {
       if (flow === null) return

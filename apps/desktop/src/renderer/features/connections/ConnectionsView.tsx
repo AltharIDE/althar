@@ -1,9 +1,10 @@
 import { useState } from 'react'
 
 import type { ConnectionList, ConnectPlace, Service } from '@althar/contracts'
-import { Connections, Heading, LinkButton, type ServiceConnection, type ServiceOption } from '@althar/ui'
+import { Connections, Heading, LinkButton, type ServiceConnection, type ServiceOption, Problem } from '@althar/ui'
 
 import { PartPending } from '../../shared/Pending'
+import { ReadFailed } from '../../shared/ReadFailed'
 import { ConnectFlow } from './ConnectFlow'
 import s from './Connections.module.css'
 import { useConnect } from './useConnect'
@@ -113,7 +114,7 @@ export function ConnectionsView({ model, columns = false, onConnect, only }: Con
       <ConnectingHere connecting={here} back={only === undefined ? text.backToList : text.backTo[only]} onClose={() => setHere(null)} />
     )
   const list = model.list
-  if (list === null) return model.error === null ? <PartPending label={text.reading} /> : <p role="alert">{model.error}</p>
+  if (list === null) return model.error === null ? <PartPending label={text.reading} /> : <ReadFailed error={model.error} />
   // Under a heading that says what they are for, a row says only where the projects' code is.
   const services = servicesOf(list, { what: !columns && only === undefined }).filter(
     (service) => only === undefined || (isService(service.id) && hostsCode(service.id) === (only === 'hosts')),
@@ -162,11 +163,7 @@ export function ConnectionsView({ model, columns = false, onConnect, only }: Con
       ) : (
         listOf(only === undefined ? text.label : text.columns[only].title, services)
       )}
-      {model.error !== null && (
-        <p className={s.error} role="alert">
-          {model.error}
-        </p>
-      )}
+      {model.error !== null && <Problem className={s.error}>{model.error}</Problem>}
     </div>
   )
 }

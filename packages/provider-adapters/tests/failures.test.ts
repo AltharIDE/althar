@@ -177,7 +177,7 @@ describe('each agent’s limit, in its own words', () => {
     [
       'Quota exhausted: Your token-plan 1-week quota has been exhausted. The quota will reset at 07-27 09:25:00 UTC.\n\nPlease retry after the reset time, or switch to another API key / auth method.',
       'usage_limit',
-      '2027-07-27T09:25:00.000Z',
+      new Date(Date.UTC(now.getUTCFullYear() + 1, 6, 27, 9, 25)).toISOString(),
     ],
     [
       'Qwen OAuth free tier has been discontinued as of 2026-04-15.\n\nTo continue using Qwen Code, try one of these alternatives',

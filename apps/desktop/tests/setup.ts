@@ -2,6 +2,7 @@ import { deadline } from '@althar/testing'
 import { cleanup, configure } from '@testing-library/react'
 import { afterEach, beforeEach } from 'vitest'
 
+import { forgetArrived } from '../src/renderer/features/board/arrived'
 import { forgetFolds } from '../src/renderer/features/board/folds'
 import { forgetPages } from '../src/renderer/features/browser/pages'
 import { forgetHiddenCards } from '../src/renderer/features/project/FirstConnectionsView'
@@ -56,6 +57,7 @@ if (typeof window !== 'undefined') {
     window.localStorage.clear()
     forgetChosenFaces()
     forgetFolds()
+    forgetArrived()
     forgetDrafts()
     forgetSessions()
     forgetHiddenCards()

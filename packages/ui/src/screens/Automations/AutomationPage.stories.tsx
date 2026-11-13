@@ -3,8 +3,11 @@ import { useState } from 'react'
 import { expect, fireEvent, fn, userEvent, waitFor, within } from 'storybook/test'
 
 import { AutomationCard } from '../../coordinator/AutomationCard/AutomationCard'
+import { ModelPick } from '../../composer/ModelPick/ModelPick'
 import { REVIEW_RUNS } from '../../fixtures/automations'
 import { PROJECT } from '../../fixtures/meridian'
+import { CODEX } from '../../fixtures/models'
+import { AutomationRunState } from '../../foundations/vocabulary'
 import { States } from '../../storybook/States'
 import { type AutomationLimit, AutomationPage, type AutomationPageProps } from './AutomationPage'
 
@@ -34,6 +37,62 @@ const card = (
     onPromptChange={() => {}}
   />
 )
+
+/** A prior run couldn't start; its next runs' model is edited independently of that task. */
+export const NeedsAttention: Story = {
+  args: { onOpenCurrentRun: fn() },
+  render: ({ onOpenCurrentRun }) => (
+    <Page
+      onOpenCurrentRun={onOpenCurrentRun}
+      name="Nightly dependency check"
+      status="Needs you"
+      statusTone="yours"
+      tone="yours"
+      paused={false}
+      review={false}
+      card={
+        <AutomationCard
+          name="Nightly dependency check"
+          project={PROJECT}
+          prompt="Check the dependencies for new releases and security advisories. Where an update is safe, make it and run the tests; if they pass, open a draft pull request, and say what you left and why."
+          stage="kept"
+          when={[{ value: 'nightly', label: 'Every night at 2:00' }]}
+          whenValue="nightly"
+          next="tonight at 2:00"
+          onWhenChange={fn()}
+          picker={({ owner }) => (
+            <ModelPick
+              owner={owner}
+              model={CODEX}
+              variant="field"
+              placement="below"
+              pinned={[CODEX]}
+              effort={null}
+              defaultEffort={null}
+              onChange={fn()}
+              onEffort={fn()}
+            />
+          )}
+          review={{ on: true, onSkip: fn() }}
+          ends={[{ value: 'draft', label: 'Open a draft pull request' }]}
+          endsValue="draft"
+          onEndsChange={fn()}
+          onPromptChange={fn()}
+        />
+      }
+      runs={[
+        { id: 'blocked', state: AutomationRunState.NeedsYou, at: 'Today 2:00', words: 'Needs you · Nightly dependency check', opens: true },
+      ]}
+    />
+  ),
+  play: async ({ canvasElement, args }) => {
+    const c = within(canvasElement)
+    await expect(c.getByText('Needs you', { exact: true })).toBeInTheDocument()
+    await expect(c.queryByRole('button', { name: 'Run now' })).not.toBeInTheDocument()
+    await userEvent.click(c.getByRole('button', { name: 'Open run' }))
+    await expect(args.onOpenCurrentRun).toHaveBeenCalled()
+  },
+}
 
 /** Its limits, as a consumer keeps them. */
 function useLimits(review: boolean): readonly AutomationLimit[] {
@@ -191,9 +250,6 @@ const meta = {
 export default meta
 type Story = StoryObj<typeof meta>
 
-/** The morning review, on: as its page opens. */
-export const MorningReview: Story = { render: () => <Page /> }
-
 /** Where it stands and what can be done to it; what it does, its limits, and its runs, each with a task opening it. */
 export const On: Story = {
   render: () => <Page />,
@@ -343,7 +399,18 @@ export const LongFormScrolled: Story = {
 }
 
 /** What went wrong with the last thing asked of it, under its head. */
-export const Failed: Story = { args: { error: 'Althar couldn’t turn it on. Try again.' } }
+/** Turning it on failed: it says so under the head, still off, with the switch there to try again. */
+export const Failed: Story = {
+  args: {
+    error: 'Althar couldn’t turn it on. Try again.',
+    status: 'Paused',
+    statusTone: 'off',
+    paused: true,
+    on: false,
+    onRunNow: fn(),
+    onSwitch: fn(),
+  },
+}
 
 export const AllStates: Story = {
   render: (args) => (

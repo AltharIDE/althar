@@ -1,6 +1,8 @@
 /* The section: its width decides how many tiles go across. */
 .section {
   container-type: inline-size;
+  /* as a container it can't take its width from what it holds, so it fills what it is in */
+  width: 100%;
   display: grid;
   gap: 16px;
   min-width: 0;
@@ -174,12 +176,6 @@
     grid-column: 1 / -1;
   }
 }
-.errors {
-  margin: 0;
-  font-size: 12.5px;
-  line-height: 1.45;
-  color: var(--danger);
-}
 
 /* ---- none yet ----------------------------------------------------------------------- */
 
@@ -228,30 +224,12 @@
   color: var(--t-3);
 }
 
-/* ---- while read, and when it can't be ------------------------------------------------- */
+/* ---- while read --------------------------------------------------------------------- */
 
 .ghost {
   display: block;
   width: 100%;
   border-radius: 15px;
-}
-.failed {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  padding: 14px 16px;
-  border-radius: 15px;
-  background: var(--paper);
-  box-shadow: 0 0 0 1px var(--line-2);
-}
-.failedWords {
-  margin: 0;
-  min-width: 0;
-  font-size: 12.5px;
-  line-height: 1.45;
-  color: var(--danger);
-  overflow-wrap: anywhere;
 }
 
 /* ---- an opened one ---------------------------------------------------------------------- */
@@ -653,12 +631,6 @@
   font-size: 12px;
   line-height: 1.45;
   color: var(--t-3);
-}
-.error {
-  margin: 0;
-  font-size: 12.5px;
-  line-height: 1.45;
-  color: var(--danger);
 }
 .form {
   display: grid;

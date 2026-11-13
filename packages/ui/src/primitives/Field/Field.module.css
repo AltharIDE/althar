@@ -24,15 +24,16 @@
   background: var(--n-2);
 }
 .invalid,
-.invalid:hover,
-.invalid:focus {
+.invalid:hover {
   box-shadow: inset 0 0 0 1px var(--danger);
 }
+/* where you type still shows, in the colour of what is wrong */
+.invalid:focus {
+  box-shadow: inset 0 0 0 1.5px var(--danger);
+}
+/* under its field, a step away from it */
 .error {
-  display: block;
   margin-top: 4px;
-  font-size: 11.5px;
-  color: var(--danger);
 }
 .large {
   height: 38px;

@@ -49,6 +49,17 @@ export const Downloads: Story = {
   },
 }
 
+/** Installed by hand, with its own installer: Check again looks for it at once, rather than wait for the window to come back. */
+export const ChecksAgain: Story = {
+  args: { name: 'Grok Build', brand: Brand.XAI, size: undefined, onHelp: fn(), onCheck: fn() },
+  play: async ({ canvasElement, args }) => {
+    const c = within(canvasElement)
+    await expect(c.getByText('Install Grok Build with its own installer, then come back here.')).toBeInTheDocument()
+    await userEvent.click(c.getByRole('button', { name: 'Check again' }))
+    await expect(args.onCheck).toHaveBeenCalledOnce()
+  },
+}
+
 /** One version from its maker's own address, as Antigravity's server is from Google: which, and from whom, not GitHub's latest. */
 export const FromItsMaker: Story = {
   args: {
@@ -93,6 +104,15 @@ export const AllStates: Story = {
           ),
         },
         { state: 'only its own installer', node: <AgentInstall name="Gemini CLI" onHelp={fn()} /> },
+        {
+          state: 'can download, or check',
+          node: <AgentInstall name="OpenCode" brand={Brand.OpenCode} size="45 MB" onInstall={fn()} onHelp={fn()} onCheck={fn()} />,
+        },
+        { state: 'installed by hand', node: <AgentInstall name="Grok Build" brand={Brand.XAI} onHelp={fn()} onCheck={fn()} /> },
+        {
+          state: 'checking again',
+          node: <AgentInstall name="Grok Build" brand={Brand.XAI} onHelp={fn()} onCheck={fn()} checking />,
+        },
       ]}
     />
   ),

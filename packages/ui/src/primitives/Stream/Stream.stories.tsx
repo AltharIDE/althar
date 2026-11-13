@@ -16,24 +16,6 @@ const meta = { title: 'Primitives/Stream', component: Stream, args: { content: R
 export default meta
 type Story = StoryObj<typeof meta>
 
-/** A whole reply, arrived and finished. */
-export const Finished: Story = {
-  render: (args) => (
-    <div style={prose}>
-      <Stream {...args} as="p" />
-    </div>
-  ),
-}
-
-/** Arriving now: words released at an even pace from uneven bursts. */
-export const Streaming: Story = {
-  render: () => (
-    <div style={prose}>
-      <Looping content={REPLY} />
-    </div>
-  ),
-}
-
 /** In an agent's turn, in the thread's prose. */
 export const InATurn: Story = {
   decorators: [threadDecorator],
@@ -41,25 +23,6 @@ export const InATurn: Story = {
     <Turn model={CODEX} at="now">
       <Looping content={REPLY} className={proseClass} />
     </Turn>
-  ),
-}
-
-/** Mid-word, not done: the half-word is held back. */
-export const HeldBack: Story = {
-  args: { content: 'The refund router retries tw', done: false },
-  render: (args) => (
-    <div style={prose}>
-      <Stream {...args} />
-    </div>
-  ),
-}
-
-/** Already watched once, as when you come back to a thread: shown whole, no animation. */
-export const Seen: Story = {
-  render: () => (
-    <div style={prose}>
-      <Stream content={REPLY} animate={false} />
-    </div>
   ),
 }
 

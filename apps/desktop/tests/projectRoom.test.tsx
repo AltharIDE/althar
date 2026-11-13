@@ -400,7 +400,7 @@ describe('a task’s card in the Talk room', () => {
     )
     const where = await screen.findByRole('radiogroup', { name: 'Works in' })
     expect(within(where).getByRole('radio', { name: 'Worktree' }).getAttribute('aria-checked')).toBe('true')
-    expect(screen.getByText('Local is taken by Dark mode for Settings. Side by side with other tasks. Builds from cold.')).toBeTruthy()
+    expect(screen.getByText('Local is taken by Dark mode for Settings.')).toBeTruthy()
     await userEvent.click(within(where).getByRole('radio', { name: 'Local' }))
     await waitFor(() => expect(client.changePlan).toHaveBeenLastCalledWith('pln1', expect.any(Array), plan.end, 'checkout'))
     expect(await screen.findByText('Waits for Dark mode for Settings.')).toBeTruthy()
@@ -434,14 +434,17 @@ describe('a task’s card in the Talk room', () => {
       ),
     })
     withServices(<Project />, client)
-    await userEvent.click(await screen.findByRole('button', { name: 'Skip' }))
+    // Skipping the review is in its dropdown.
+    await userEvent.click(await screen.findByRole('button', { name: /^Review: gpt-5\.2-codex/ }))
+    await userEvent.click(await screen.findByRole('button', { name: 'Skip the review' }))
     await waitFor(() => expect(client.changePlan).toHaveBeenCalledTimes(1))
-    expect(await screen.findByRole('button', { name: 'Add back' })).toBeTruthy()
-    // Its copy shows once it is read again.
+    expect(await screen.findByRole('button', { name: 'Add back: Review' })).toBeTruthy()
+    // Its copy shows once it is read again: the review kept, by Claude Code.
     act(() => emit(changed('thread_item', 'c0', 'thc')))
     await waitFor(() => expect(client.getThreadItem).toHaveBeenCalledWith('thc', 'c0'))
-    expect(await screen.findByRole('button', { name: 'Skip' })).toBeTruthy()
-    expect(screen.queryByRole('button', { name: /^gpt-5\.2-codex/ })).toBeNull()
+    expect(await screen.findByRole('button', { name: /^Review: Claude Code/ })).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Add back: Review' })).toBeNull()
+    expect(screen.queryByRole('button', { name: /^Review: gpt-5\.2-codex/ })).toBeNull()
   })
 })
 

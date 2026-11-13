@@ -65,13 +65,21 @@ export interface ThreadHost {
    * The workbench, with what is open on it: the document `docPanel` draws,
    * and the file open, on top of the document where it was opened from it;
    * nothing where neither is open. Where it opens over something to the
-   * conversation's right, as the board beside it, it is dragged by its end,
-   * within the `room` there, leaving `keep` of it; where it would leave less,
+   * conversation's right, as the board beside it, it is dragged by its end
+   * (by its start, `edge`, where what it opens over is on the conversation's
+   * left), within the `room` there, leaving `keep` of it; where it would leave less,
    * as in a small window, it takes the whole room, to the window's edge.
    */
   readonly workbench: (
     docPanel: ReactNode,
-    over?: { readonly room: number; readonly keep: number; readonly className?: string; readonly style?: CSSProperties },
+    over?: {
+      readonly room: number
+      readonly keep: number
+      /** The edge it is dragged by: its end, over what is right of the conversation; its start, over what is left of it. */
+      readonly edge?: 'start' | 'end'
+      readonly className?: string
+      readonly style?: CSSProperties
+    },
   ) => ReactNode | undefined
 }
 
@@ -197,7 +205,7 @@ export const useThreadHost = (
         onWidth={bench.set}
         onCommit={bench.keep}
         onReset={bench.reset}
-        edge={over === undefined ? 'start' : 'end'}
+        edge={over === undefined ? 'start' : (over.edge ?? 'end')}
         {...(over?.className === undefined ? {} : { className: over.className })}
         {...(over?.style === undefined ? {} : { style: { ...over.style, width } })}
       >

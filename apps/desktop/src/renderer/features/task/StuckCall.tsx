@@ -8,7 +8,9 @@ import { canPick } from '../../shared/agents'
 import { ModelsBrowser } from '../../shared/ModelChoice'
 import { catalogOf, defaultPins, handOnChoice, handOnModels, infoOf, useModelPrefs, withoutModel } from '../../shared/models'
 import { useModelNames, useProviderNames } from '../../shared/modelNames'
+import { device } from '../../shared/device'
 import { clock } from '../../shared/time'
+import { saysMore } from '../../shared/WayOut'
 import { LimitCall, limitText } from './LimitCall'
 
 /*
@@ -30,7 +32,7 @@ type Why = StuckStep['why']
 interface Ways {
   readonly ways: ReadonlyArray<StuckWay>
   readonly primary: StuckWay
-  readonly fix?: 'signIn' | 'connect'
+  readonly fix?: 'signIn' | 'install' | 'connect'
 }
 
 /** The lead's work went wrong: told what to do instead, first. */
@@ -63,6 +65,9 @@ export const waysOn: Record<Why, { readonly lead: Ways; readonly review: Ways }>
   refused: { lead: tellFirst, review: anotherFirst },
   // Signed in again in Settings first, then tried again.
   signed_out: { lead: { ...againFirst, fix: 'signIn' }, review: { ...againFirst, fix: 'signIn' } },
+  sign_in_ended: { lead: { ...againFirst, fix: 'signIn' }, review: { ...againFirst, fix: 'signIn' } },
+  // Installed in Settings first, then tried again; or handed to an agent that is here.
+  not_installed: { lead: { ...againFirst, fix: 'install' }, review: { ...anotherFirst, fix: 'install' } },
   // The lead stopped to wait for the person's answer: they give it, and it starts again.
   waiting_on_person: { lead: { ways: ['tell'], primary: 'tell' }, review: { ways: ['tell'], primary: 'tell' } },
 }
@@ -108,6 +113,10 @@ export const text = {
         return `${agent} refused to go on.`
       case 'signed_out':
         return `${agent} is signed out.`
+      case 'sign_in_ended':
+        return `${agent}'s sign-in has ended.`
+      case 'not_installed':
+        return `${agent} isn't installed, or isn't on ${device.this}'s PATH.`
       case 'waiting_on_person':
         return stuck.detail ?? 'It needs your answer before it can go on.'
     }
@@ -133,7 +142,7 @@ export const text = {
     restarted: { again: (agent: string) => `Start ${agent} again`, tryingAgain: (agent: string) => `Starting ${agent} again` },
   },
   /** What puts it right elsewhere: the agent's sign-in, or the repository's host, in Settings. */
-  fix: { signIn: 'Sign in again', provider: (provider: string) => `Sign in to ${provider}`, connect: 'Connect' },
+  fix: { signIn: 'Sign in again', install: 'Install', provider: (provider: string) => `Sign in to ${provider}`, connect: 'Connect' },
   /** For the pull request, which Althar opens itself: what went wrong. */
   publishing: (stuck: StuckStep): string =>
     stuck.why === 'restarted' ? text.crashed : `Couldn't open the pull request.${stuck.detail === null ? '' : ` ${stuck.detail}`}`,
@@ -172,8 +181,10 @@ interface StuckCallProps {
   onAnswer: (attentionId: string, answer: StuckAnswer) => void | Promise<boolean>
   /** Report a problem about this step, with its task: Report this. Without it, none. */
   onReport?: (step: string) => void
-  /** Opens Settings at an agent's sign-in, for a step whose agent is signed out: Sign in again. */
+  /** Opens Settings at an agent's sign-in, for a step whose agent is signed out or whose sign-in ended: Sign in again. */
   onSignIn?: (agentId: string) => void
+  /** Opens the agent's tab in Settings, where it is installed, for a step whose agent isn't: Install. */
+  onInstall?: (agentId: string) => void
   /** Opens the code hosts in Settings, for a pull request whose host isn't connected: Connect. */
   onConnect?: () => void
 }
@@ -262,6 +273,7 @@ function StuckCard({
   onAnswer,
   onReport,
   onSignIn,
+  onInstall,
   onConnect,
 }: Omit<StuckCallProps, 'onAnswer'> & { onAnswer: (attentionId: string, answer: StuckAnswer) => void }) {
   const named = useModelNames()
@@ -273,7 +285,7 @@ function StuckCard({
       ? providerName(stuck.agentId, stuck.model, stuck.provider)
       : undefined
   // The agent's own words under it, where they say more than the headline.
-  const said = stuck.why === 'signed_out' && stuck.detail !== null && !/signed out/i.test(stuck.detail) ? stuck.detail : undefined
+  const said = stuck.why === 'signed_out' && saysMore('signed_out', stuck.detail) ? stuck.detail : undefined
   const { handOn, browser } = useHandOn(request.id, stuck, agents, onAnswer)
   // A usage limit that says who could take over asks with them; one raised before it did asks as any stuck step.
   if (stuck.why === 'usage_limit' && stuck.limit !== undefined)
@@ -310,9 +322,11 @@ function StuckCard({
             onFix: () => onSignIn(stuck.agentId ?? ''),
           },
         }
-      : fix === 'connect' && onConnect !== undefined
-        ? { fix: { label: text.fix.connect, onFix: onConnect } }
-        : {}
+      : fix === 'install' && stuck.agentId !== null && onInstall !== undefined
+        ? { fix: { label: text.fix.install, onFix: () => onInstall(stuck.agentId ?? '') } }
+        : fix === 'connect' && onConnect !== undefined
+          ? { fix: { label: text.fix.connect, onFix: onConnect } }
+          : {}
   const reporting = (step: string) => (onReport === undefined ? {} : { onReport: () => onReport(step) })
   // Opening the pull request is Althar's own step: tried again as it was, or gone on without.
   if (stuck.step === 'publish')

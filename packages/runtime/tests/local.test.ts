@@ -459,6 +459,29 @@ describe('a Local plan', () => {
     }).pipe(Effect.provide(withQueries()))
   })
 
+  it.live('holds a task that waits for the checkout, out of the line, and starts it again once the person says', () => {
+    const root = repository()
+    return Effect.gen(function* () {
+      const plans = yield* Plans
+      const projectId = yield* opened(root)
+      const first = yield* started(projectId, 'Dark mode [lead:wait]')
+      assert.strictEqual(first.outcome, 'running')
+      const second = yield* started(projectId, 'Fix the login')
+      const waiting = yield* until(cardOf(projectId, second.taskId), (card) => card?.waitsForCheckout != null, 'it waits for the checkout')
+      // Its card and its row up next can hold it: the plan still changes, and it is holdable.
+      assert.deepInclude(waiting, { planWaits: true, holdable: true })
+      assert.isTrue(yield* plans.hold(second.planId, yield* person))
+      const held = yield* cardOf(projectId, second.taskId)
+      assert.deepInclude(held, { phase: 'held' })
+      assert.isUndefined(held?.waitsForCheckout)
+      assert.isUndefined(held?.holdable)
+      // Started again, it waits for the checkout as before.
+      assert.isNotNull(yield* plans.start(second.planId, yield* person))
+      const again = yield* until(cardOf(projectId, second.taskId), (card) => card?.waitsForCheckout != null, 'it waits again')
+      assert.deepInclude(again, { holdable: true })
+    }).pipe(Effect.provide(withQueries()))
+  })
+
   it.live('keeps the checkout from the next task while a settled one’s lead is still in its turn, until it has stopped', () => {
     const lead = holds()
     const root = repository()

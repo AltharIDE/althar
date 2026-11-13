@@ -169,11 +169,6 @@
   cursor: default;
 }
 
-.error {
-  font-size: 12px;
-  color: var(--danger);
-}
-
 /* answered, or withdrawn: a line for each question */
 .lines {
   display: flex;

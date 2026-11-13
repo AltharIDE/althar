@@ -73,6 +73,52 @@ describe('Althar’s lines and a step’s report', () => {
   })
 })
 
+describe('the merge line', () => {
+  it('draws the line as one card, each pull request linked with where it stands, and no line of chat', () => {
+    show([items.mergeLine()])
+    const card = screen.getByRole('region', { name: 'Merge line' })
+    expect(card.querySelectorAll('li')).toHaveLength(4)
+    expect(screen.getByRole('link', { name: /#783/ }).getAttribute('href')).toBe('https://github.com/meridian/api/pull/783')
+    for (const word of ['Merged', 'In the queue', 'Checks running', 'Waiting']) expect(screen.getByText(word)).toBeTruthy()
+    // Nothing of the internal name, the repository or a number said twice.
+    expect(screen.queryByText(/merge line,|AltharIDE|of meridian/i)).toBeNull()
+  })
+
+  it('folds to one line once every pull request has merged', () => {
+    const merged = (number: number) => ({
+      number,
+      title: `Change ${number}`,
+      url: `https://github.com/meridian/api/pull/${number}`,
+      state: 'merged' as const,
+    })
+    show([items.mergeLine({ rows: [merged(778), merged(783)] })])
+    expect(screen.getByText(/Merged/).textContent).toMatch(/^Merged #778.*, #783/)
+    expect(screen.getAllByRole('link').map((link) => link.getAttribute('href'))).toEqual([
+      'https://github.com/meridian/api/pull/778',
+      'https://github.com/meridian/api/pull/783',
+    ])
+    expect(screen.queryByText('Waiting')).toBeNull()
+  })
+
+  it('says what is wrong with a pull request sent back, and what to do', () => {
+    show([
+      items.mergeLine({
+        rows: [
+          {
+            number: 773,
+            title: 'Board cards show handed-back pictures',
+            url: 'https://github.com/meridian/api/pull/773',
+            state: 'sent_back',
+            reason: 'Checks failed. It goes back in once they pass.',
+          },
+        ],
+      }),
+    ])
+    expect(screen.getByText('Sent back')).toBeTruthy()
+    expect(screen.getByText('Checks failed. It goes back in once they pass.')).toBeTruthy()
+  })
+})
+
 describe('what was heard from outside', () => {
   it('says where a comment was left, by file, with no line where it named none', () => {
     show([items.arrival({ path: 'src/retry.ts', line: null })])
@@ -214,14 +260,26 @@ describe('a coordinator that is signed out', () => {
     const onTryAgain = vi.fn()
     show([items.you('What is left on the checkout?'), signedOut], { onSignIn, onTryAgain })
     expect(screen.getByText('Claude Code is signed out.')).toBeTruthy()
-    // The agent's own words stand under it, not as its headline.
-    expect(screen.getByText('Authentication required')).toBeTruthy()
+    // The agent's words only restate it, so they aren't said again under it.
+    expect(screen.queryByText('Authentication required')).toBeNull()
+    expect(screen.getByRole('alert').textContent).toContain('Claude Code is signed out.')
     const ways = screen.getAllByRole('button').filter((button) => ['Sign in again', 'Try again'].includes(button.textContent ?? ''))
     expect(ways.map((button) => button.textContent)).toEqual(['Sign in again', 'Try again'])
     await userEvent.click(screen.getByRole('button', { name: 'Sign in again' }))
     expect(onSignIn).toHaveBeenCalledWith('claude-code')
     await userEvent.click(screen.getByRole('button', { name: 'Try again' }))
     expect(onTryAgain).toHaveBeenCalledOnce()
+  })
+
+  it('keeps the agent’s own words under it where they say more', () => {
+    const revoked = items.notice({
+      severity: 'error',
+      title: 'Claude Code is signed out.',
+      description: 'The key for the work account was revoked.',
+      failure: 'auth_required',
+    })
+    show([items.you('Hi'), revoked], { onSignIn: vi.fn() })
+    expect(screen.getByText('The key for the work account was revoked.')).toBeTruthy()
   })
 
   it('offers no Sign in again for a turn that failed for another reason', () => {

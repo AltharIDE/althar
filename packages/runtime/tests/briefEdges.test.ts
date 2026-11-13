@@ -15,6 +15,7 @@ import * as Runtime from '../src/Runtime'
 import { addItem } from '../src/threads'
 import type { ToolAccess } from '../src/ToolServer'
 import { callTool, repository, runtime, task, turns, until } from './support'
+import { knownModels } from './knownModels'
 
 /*
  * What an agent is told as it takes a thread over, where sessions.test.ts
@@ -52,6 +53,7 @@ describe('an agent taking a thread over', () => {
         const sessions = yield* Sessions
         const { projectId } = yield* open(repository())
         const threadId = yield* (yield* Coordinator).thread(projectId)
+        yield* knownModels
         // The coordinator starts it at once, and its lead writes in the repository.
         const access: ToolAccess = { role: 'coordinator', projectId, threadId, sessionId: 'none', taskId: null }
         yield* callTool(access, 'start_task', {

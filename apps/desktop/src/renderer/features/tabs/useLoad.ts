@@ -12,11 +12,14 @@ import { usePreferences } from '../../shared/usePreferences'
 /*
  * How hard this computer works, for the meter in the window's bar: the
  * runtime's reading (`GetLoad`), asked for every three seconds while the
- * person keeps the meter on and the window is in view, and never otherwise,
- * so the computer is read only while someone can see it. A row of the peek
+ * person keeps the meter on and the window is in view, and never otherwise.
+ * The trace in its peek isn't made of these asks: while the meter is on, the
+ * runtime reads the computer on its own every three seconds, a window in view
+ * or not (the app tells it as `showLoad` changes), and keeps two minutes of
+ * it, so the peek opens onto the time before it. Turned off, in Settings or
+ * the peek's switch, for every window, nothing is read. A row of the peek
  * opens its work: a task's thread, a project's conversation for its
- * coordinator, its front for its default branch running. The switch in the
- * peek turns the meter off as Settings does, for every window.
+ * coordinator, its front for its default branch running.
  */
 
 /** How often the meter reads again while it shows. */

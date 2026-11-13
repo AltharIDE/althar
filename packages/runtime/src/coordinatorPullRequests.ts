@@ -2,6 +2,7 @@ import { type CodeHost, ConnectorFailed, fromOutside, parseRemote, type Reposito
 import { Effect, Option, Schema } from 'effect'
 import { SqlClient } from 'effect/sql'
 
+import { keepUpdate } from './branchUpdates'
 import { hostName, logForLead, readLog } from './checkLogs'
 import { Connections } from './Connections'
 import { withoutAgentCredit } from './credit'
@@ -409,8 +410,12 @@ export const updateBranch = (projectId: string, input: unknown) =>
     const { host, repository, change, name } = yield* readOne(projectId, (yield* decodePull(input)).pull)
     if (change.state !== 'open') return yield* refused(`${name} is ${change.state}, so its branch isn't brought up to date.`)
     if (change.headSha === null) return yield* refused(`${name} has no commits to bring up to date.`)
-    const result = yield* viaHost(host.updateBranch(repository, change, { expectedHead: change.headSha }))
     const target = change.target
+    // The target's head it merges in, so the merge it makes is told from someone else's: unread, only its first parent is.
+    const base = yield* host.branchHead(repository, target).pipe(Effect.orElseSucceed(() => null))
+    const result = yield* viaHost(host.updateBranch(repository, change, { expectedHead: change.headSha }))
+    // What it made is Althar's own, not someone else's push: a task's lead's commits on top of it still go up by themselves.
+    if (result.outcome === 'updated') yield* keepUpdate(projectId, change.url, { from: change.headSha, base, head: result.head })
     switch (result.outcome) {
       case 'updated':
         return result.head === null

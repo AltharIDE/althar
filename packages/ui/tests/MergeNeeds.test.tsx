@@ -101,4 +101,20 @@ describe('what merging needs', () => {
     expect(order).toEqual([...order].sort((a, b) => a - b))
     expect(order.every((i) => i >= 0)).toBe(true)
   })
+
+  it('shows passed and skipped checks as settled where merge needs are unavailable', () => {
+    render(
+      <ChangeSet
+        state={ChangeState.Ready}
+        host={GITHUB}
+        prs={[{ repo: 'acme/api', number: 7, files: [] }]}
+        checks={[
+          { id: '1', name: 'build', state: CheckState.Passed },
+          { id: '2', name: 'ui', state: CheckState.Skipped },
+        ]}
+      />,
+    )
+    expect(screen.getByRole('button', { name: /1 check passed, 1 skipped/ })).toBeInTheDocument()
+    expect(screen.queryByText(/the rest running/)).not.toBeInTheDocument()
+  })
 })

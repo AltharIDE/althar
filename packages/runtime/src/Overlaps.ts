@@ -27,9 +27,10 @@ import { Sessions } from './Sessions'
  * one at a time, and a task that asks again while it waits is looked at
  * once: a lead making many edits in a row costs one look, not one for each.
  * A running task is an open one with its lead's session here. A lead is told
- * only while it is in a turn, at work on the task, and reads it as that turn
- * ends; one between turns isn't woken for it, and hears of it as its next
- * turn starts.
+ * only while it is in a turn, at work on the task. The heads-up is a note: it
+ * starts no turn of its own, nor waits for a place among the agents at work,
+ * and the lead reads it with its next turn, whatever starts that. One between
+ * turns isn't told until it is in one.
  */
 
 type Store = SqlClient.SqlClient | Instance | Sessions | Ledger | Crypto.Crypto
@@ -100,12 +101,14 @@ export class Overlaps extends Context.Service<
           })
           // Only the lead hears of it, quietly: a task's chat shows what is about that task, and another task's files aren't.
           const body = overlapWords(about, files)
+          // A heads-up needs nothing done now: it starts no turn after this one, and waits for no agent's place, but is read
+          // with the lead's next turn.
           yield* sessions.send({
             envelope: yield* envelope('thread.send', { threadId: to.threadId, body }, undefined, instance.systemId),
             threadId: to.threadId,
             body,
-            disposition: 'after_current',
             quiet: true,
+            note: true,
           })
         })
 

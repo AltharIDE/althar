@@ -97,7 +97,7 @@ export const REST_WAYS = 3
 /** The most marks it stacks beside the heading, and stands up at rest. */
 export const MARKS_SHOWN = 4
 
-/** A task in progress, as the home is given it: a tick in its project's row; still, when held or stopped. */
+/** A task in progress, as the home is given it: a tick in its project's row; still, when held or waiting. */
 export interface HomeRun {
   id: string
   project: ProjectRef

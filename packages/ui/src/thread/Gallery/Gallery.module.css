@@ -87,3 +87,9 @@ button.image:hover {
     grid-template-columns: minmax(0, 1fr);
   }
 }
+
+.note {
+  display: block;
+  color: var(--t-3);
+  font-size: 12px;
+}

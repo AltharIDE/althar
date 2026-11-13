@@ -1,5 +1,5 @@
 import type { AttentionRequest } from '@althar/contracts'
-import { ActionButton, GraphNodeState, LinkButton, Markdown, StepGraph, unreachable } from '@althar/ui'
+import { ActionButton, GraphNodeState, LinkButton, Markdown, StepGraph, unreachable, Problem } from '@althar/ui'
 import { type ReactNode, useState } from 'react'
 
 import type { StepFacts, TaskGraph } from './graph'
@@ -89,9 +89,9 @@ export function GraphFace({ graph, stuck, permissions, onShow, onReview, error =
 /** What went wrong, in a line, with the way to put it away. */
 function Failure({ error, onDismiss }: { error: string; onDismiss?: () => void }) {
   return (
-    <p className={s.failure} role="alert">
+    <Problem className={s.failure}>
       {error} {onDismiss !== undefined && <LinkButton onClick={onDismiss}>{graphFaceText.dismiss}</LinkButton>}
-    </p>
+    </Problem>
   )
 }
 

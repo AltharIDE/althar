@@ -1,3 +1,4 @@
+import { QueryClient } from '@tanstack/react-query'
 import { act, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { Brand } from '@althar/ui'
@@ -6,6 +7,7 @@ import { describe, expect, it, vi } from 'vitest'
 import type { AgentModels, AgentStatus } from '@althar/contracts'
 
 import { useModels, useSetDefaultEffort } from '../src/renderer/data/models'
+import { recheckStatus } from '../src/renderer/data/reads'
 import { useModelNames } from '../src/renderer/shared/modelNames'
 import {
   catalogOf,
@@ -458,6 +460,15 @@ describe('reading the models', () => {
     await waitFor(() => expect(setDefaultEffort).toHaveBeenCalledTimes(2))
     expect(getModels).toHaveBeenCalledTimes(2)
     expect(screen.getByRole('status').textContent).toBe('[{"model":"gpt-5.2","effort":"high"}]')
+  })
+
+  it('reads them again once the agents’ sign-ins are checked again: one found signed in may only now say them', async () => {
+    const settled = models.map((agent) => ({ ...agent, probing: false }))
+    const { client } = fakeClient({ getModels: vi.fn(async () => settled) })
+    withServices(<Known />, client)
+    await waitFor(() => expect(client.getModels).toHaveBeenCalledTimes(1))
+    await recheckStatus(client, new QueryClient())
+    await waitFor(() => expect(client.getModels).toHaveBeenCalledTimes(2))
   })
 
   it('offers each agent’s own default when they can’t be read', async () => {

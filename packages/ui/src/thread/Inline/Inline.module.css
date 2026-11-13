@@ -45,8 +45,8 @@
   height: 15px;
   margin-left: 2px;
   padding: 0 3px;
-  border-radius: 4px;
-  background: var(--n-4);
+  border-radius: var(--r-sm);
+  background: var(--chip);
   font: 600 9.5px/15px var(--mono);
   text-align: center;
   color: var(--t-2);

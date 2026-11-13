@@ -1,6 +1,7 @@
 import type { RootProps } from '../../lib/props'
 import { AskCard, AskFoot } from '../../primitives/Ask/Ask'
 import { Button } from '../../primitives/Button/Button'
+import { Problem } from '../../primitives/Problem/Problem'
 import s from './UpstreamOffer.module.css'
 
 /*
@@ -44,11 +45,7 @@ export function UpstreamOffer({ upstream, onAccept, onNotNow, error, text, ...re
   return (
     <AskCard icon="branch" kicker={t.kicker} what={t.what(upstream)} quiet {...rest}>
       <p className={s.stays}>{t.stays}</p>
-      {error !== undefined && (
-        <p className={s.error} role="alert">
-          {error}
-        </p>
-      )}
+      {error !== undefined && <Problem size="small">{error}</Problem>}
       <AskFoot>
         <Button size="small" variant="quiet" onClick={onNotNow}>
           {t.notNow}

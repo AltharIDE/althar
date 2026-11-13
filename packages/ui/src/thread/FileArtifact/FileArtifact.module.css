@@ -114,10 +114,14 @@
   gap: 10px;
   padding-bottom: 16px;
 }
-/* what the file says of itself in place of a preview: nothing in it, or it couldn't be read */
+/* what the file says of itself in place of a preview: nothing in it */
 .said {
   margin: 0;
   padding: 12px 16px 13px;
   font-size: 12px;
   color: var(--t-3);
+}
+/* or that it couldn't be read, in the same place */
+.failed {
+  padding: 12px 16px 13px;
 }

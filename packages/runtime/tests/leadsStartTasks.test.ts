@@ -100,6 +100,15 @@ describe('a lead starting tasks', () => {
         threadId: child?.threadId ?? '',
         title: 'Built-in browser beside the conversation',
       })
+      // And its snapshot names every task it started itself, whatever page of its thread says so.
+      assert.deepStrictEqual(line.started, [
+        {
+          taskId: child?.id ?? '',
+          slug: child?.slug ?? '',
+          title: 'Built-in browser beside the conversation',
+          threadId: child?.threadId ?? '',
+        },
+      ])
 
       // Its plan, as the coordinator's, waits the countdown: the person can hold it.
       assert.match(

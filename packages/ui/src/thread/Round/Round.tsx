@@ -15,6 +15,8 @@ export type RoundProps = RootProps<
   {
     /** Who answers: the task's lead, or a reviewer. */
     model: ModelInfo
+    /** Who signs it in place of the model, with its mark: the coordinator, in an aside. */
+    signed?: { voice: string; mark: ReactNode }
     /** When it started, as the thread says it: 4m ago. */
     at?: string
     /** The part it plays, where that isn't leading: Review. */
@@ -34,11 +36,18 @@ export type RoundProps = RootProps<
  * picture set it shows stands wider than the words. Copy, where there is
  * something to copy, waits for the round to be hovered or reached by keyboard.
  */
-export function Round({ model, at, part, children, copy, text, className, ...rest }: RoundProps) {
+export function Round({ model, signed, at, part, children, copy, text, className, ...rest }: RoundProps) {
   return (
-    <article className={cx(s.round, className)} aria-label={model.name} data-arrivals="" {...rest}>
+    <article className={cx(s.round, className)} aria-label={signed?.voice ?? model.name} data-arrivals="" {...rest}>
       <header className={s.head}>
-        <Model model={model} strong />
+        {signed === undefined ? (
+          <Model model={model} strong />
+        ) : (
+          <span className={s.signed}>
+            {signed.mark}
+            {signed.voice}
+          </span>
+        )}
         {part !== undefined && <span className={s.part}>{part}</span>}
         {at !== undefined && at !== '' && <span className={s.at}>{at}</span>}
       </header>

@@ -33,10 +33,21 @@ const providersOf = (account: AccountStatus): Pick<AccountEntry, 'providers'> =>
   }
 }
 
+/**
+ * When an account's sign-in ends, where its agent says, only once it ends soon: within the days the runtime raises its one
+ * warning in. Quiet before then, and none once it has ended, as its row then says it is signed out.
+ */
+const endsOf = (account: AccountStatus, now: Date): Pick<AccountEntry, 'ends'> => {
+  const at = account.endsAt === undefined ? Number.NaN : Date.parse(account.endsAt)
+  if (account.endsAt === undefined || account.endsSoon !== true || Number.isNaN(at) || at <= now.getTime()) return {}
+  return { ends: { at: clock(account.endsAt, now) } }
+}
+
 /** An account, as a line of the kit's list of an agent's accounts. */
 export const accountEntry = (account: AccountStatus, now: Date = new Date()): AccountEntry => ({
   id: account.id,
   name: account.name,
+  ...endsOf(account, now),
   // Each provider within the agent in its own state, one that refused work lately as the line's button.
   ...providersOf(account),
   place:
@@ -75,7 +86,10 @@ export function AgentSignIn({
   return (
     <AccountSignIn
       agent={agent.name}
-      text={{ folder: `A folder on ${device.this}` }}
+      text={{
+        folder: `A folder on ${device.this}`,
+        ...(agent.id === 'copilot-direct' ? { checking: () => 'Preparing GitHub Copilot…' } : {}),
+      }}
       position={position}
       {...(account === undefined ? {} : { account })}
       {...(caution === undefined ? {} : { caution })}
@@ -85,10 +99,12 @@ export function AgentSignIn({
         ...(agent.ways.includes('device') ? { code: true } : {}),
         // An agent that signs in only inside Althar has no command for a terminal.
         terminal: agent.login !== '',
+        ...(agent.id === 'copilot-direct' ? { enterprise: true } : {}),
         found: signIn.found.map((place) => ({ id: place.grant, name: place.name, folder: shortFolder(place.path), from: place.tool })),
-        choose: true,
+        choose: agent.id !== 'copilot-direct',
       }}
       onWay={signIn.way}
+      onEnterprise={signIn.enterprise}
       onOpen={signIn.reopen}
       onCheck={signIn.check}
       onPaste={signIn.paste}
@@ -117,7 +133,9 @@ export function AgentAccounts({ agent, start, signIn }: { agent: AgentStatus; st
   return (
     <Accounts
       agent={agent.name}
-      accounts={accounts.map((account) => accountEntry(account))}
+      accounts={accounts.map((account) =>
+        accountEntry(agent.id === 'copilot-direct' && !agent.installed ? { ...account, signIn: 'signed_out' } : account),
+      )}
       // An agent whose sign-in every folder shares has its one account (the registry's `home.accounts`).
       {...(agent.addsAccounts ? { onAdd: () => signIn.add(agent.id) } : {})}
       onSignIn={(accountId) => signIn.again(agent.id, accountId)}

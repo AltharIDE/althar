@@ -1,6 +1,7 @@
+import { removeTreeSync } from '@althar/testing'
 import { randomBytes } from 'node:crypto'
 import { execFileSync } from 'node:child_process'
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, realpathSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -116,7 +117,7 @@ describe('a round across two repositories that an earlier launch left under way'
         return { taskId: task.taskId, paths: worktrees.map((worktree) => worktree.path) }
       }).pipe(Effect.provide(launch()))
       // Meanwhile both worktrees went.
-      for (const path of paths) rmSync(path, { recursive: true, force: true })
+      for (const path of paths) removeTreeSync(path)
 
       yield* Effect.gen(function* () {
         const sql = yield* SqlClient.SqlClient

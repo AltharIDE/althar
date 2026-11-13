@@ -1,4 +1,5 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
+import type { ReactNode } from 'react'
 import { expect, fn, userEvent, within } from 'storybook/test'
 
 import { ARTIFACTS, NOTES_KEPT, NOTES_SEEN } from '../../fixtures/chrome'
@@ -38,17 +39,55 @@ export const Opening: Story = {
   },
 }
 
+/** A peek in a cell of the grid as it is in the dock: its parts down a column, as wide as the cell. */
+const Peek = ({ children }: { children: ReactNode }) => <div style={{ width: '100%' }}>{children}</div>
+
 export const AllStates: Story = {
   parameters: statesOn({ hover: 'li:first-child button', focus: 'li:first-child button', pressed: 'li:first-child button' }),
   render: (args) => (
     <States
       size="wide"
       cells={[
-        { state: 'knowledge', node: <ListPeek {...args} {...Knowledge.args} /> },
-        { state: 'artifacts', node: <ListPeek {...args} {...Artifacts.args} /> },
-        { state: 'plain', node: <ListPeek {...args} onOpen={undefined} /> },
-        { state: 'hover', node: <ListPeek {...args} /> },
-        { state: 'focus', node: <ListPeek {...args} /> },
+        {
+          state: 'knowledge',
+          node: (
+            <Peek>
+              <ListPeek {...args} {...Knowledge.args} />
+            </Peek>
+          ),
+        },
+        {
+          state: 'artifacts',
+          node: (
+            <Peek>
+              <ListPeek {...args} {...Artifacts.args} />
+            </Peek>
+          ),
+        },
+        {
+          state: 'plain',
+          node: (
+            <Peek>
+              <ListPeek {...args} onOpen={undefined} />
+            </Peek>
+          ),
+        },
+        {
+          state: 'hover',
+          node: (
+            <Peek>
+              <ListPeek {...args} />
+            </Peek>
+          ),
+        },
+        {
+          state: 'focus',
+          node: (
+            <Peek>
+              <ListPeek {...args} />
+            </Peek>
+          ),
+        },
       ]}
     />
   ),

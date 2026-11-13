@@ -371,10 +371,21 @@ export interface FakeAgentOptions {
   readonly allowAllStays?: boolean
   /** Once it leaves its mode by itself (`leaveMode`), it refuses to be put back in one. */
   readonly leavesForGood?: boolean
+  /** Called as it is asked to set its model or effort, before it answers. */
+  readonly optionAsked?: (configId: string, value: string) => void
+  /** Called as it is given a prompt, before it answers. */
+  readonly promptAsked?: () => void
+  /**
+   * Whether it holds its answer to a request to set its model or effort, asked while one waits: as an agent does that answers
+   * one request at a time and is at its turn. It answers once this says no.
+   */
+  readonly holdsSets?: () => boolean
 }
 
 /** The holds a test opens, by marker, for an agent to go on from (`FakeAgentOptions.holds`). */
 export interface Holds {
+  /** A file-backed hold may name only some markers; other markers keep their usual behaviour. */
+  readonly has?: (marker: string) => boolean
   /** Lets what waits on the marker go on, now and from now on. */
   readonly open: (marker: string) => void
   readonly opened: (marker: string) => boolean
@@ -545,6 +556,12 @@ const EXPLORED = [
 /** Worktrees where a lead has stopped answering once: started afresh, it answers. Kept across sessions, as a restart makes a new one. */
 const wedgedIn = new Set<string>()
 
+/**
+ * The tools a lead was told in words to call (`[lead:call <tool> <json>]`), by its worktree: each call once, so a lead handed
+ * the thread so far, as a new lead is, doesn't call again what the one before it called.
+ */
+const calledIn = new Map<string, Set<string>>()
+
 /** Worktrees where a lead's session has been lost once (`[lead:lost-once]`): a fresh session there carries on. */
 const lostIn = new Set<string>()
 
@@ -655,7 +672,7 @@ const playStall = async (
  * Calls Althar's tools over the MCP server a session was given. The fake
  * plays a role when its prompt carries a marker, as a task's description or
  * the person's message can: `[coordinator:plan]` drafts and plans a task (`[coordinator:plan-small]` as a small change, reviewed
- * only once it merged),
+ * only once it merged; `[coordinator:plan-branch]` ending with its branch, as a prototype does),
  * passing on the `[lead:…]` and `[review:…]` markers it was given
  * (`[coordinator:plan-effort]` puts its lead on the large model at high
  * effort), and `[coordinator:start]` starts one at once, without a plan;
@@ -670,7 +687,8 @@ const playStall = async (
  * and ends its turn, then finishes once their answer comes; asked to, `[lead:make-change]` makes its quick task a change
  * first, reviewed by Codex and ending in a draft pull request, or with no
  * review (`[lead:make-change-alone]`), and without `[lead:finish]` ends its
- * turn there; `[review:pass]` and `[review:findings]`
+ * turn there; told `[lead:call <tool> <json>]`, it calls that tool with those arguments, once each, as a lead does what
+ * the person says (change_part, change_lead, ship_task); `[review:pass]` and `[review:findings]`
  * report a review. Settling findings, it writes a file and commits it, so
  * the change changes, and finishes; a later review round passes. The session remembers its
  * markers: `[review:always]` finds something every round, and
@@ -703,7 +721,8 @@ const playStall = async (
  * `[lead:fix-late]` leaves the full tests running and commits it once they
  * end, and `[lead:fix-hold]` works on after it until it is interrupted. Asked to "push pls" once its pull request is open,
  * `[lead:push]` commits what it has and asks the person to push it; asked to "tidy pls", `[lead:commit]` commits and ends its
- * turn, asking no one to push it. Told its checks failed, `[lead:fix-push]` commits a fix and calls push_to_pull_request itself, and out of tries, brings them to the person with hand_checks_to_person; `[lead:checks-main]` reads the default branch's checks and, where one fails there, brings it to the person instead; `[lead:fix-gone]` goes on its own instead, as an agent that crashes does, each time it is told. Asked to bring its branch up to date, `[lead:resolve]`
+ * turn, asking no one to push it; asked to "bring main in pls", `[lead:merge-main]` merges origin/main, keeping both sides of
+ * a conflict, and commits the merge ("and tidy" commits other work after it). Sent back by the merge queue and told to, `[lead:update-branch]` calls update_branch. Told its checks failed, `[lead:fix-push]` commits a fix and calls push_to_pull_request itself, and out of tries, brings them to the person with hand_checks_to_person; `[lead:checks-main]` reads the default branch's checks and, where one fails there, brings it to the person instead; `[lead:fix-gone]` goes on its own instead, as an agent that crashes does, each time it is told. Asked to bring its branch up to date, `[lead:resolve]`
  * merges what it was told to, keeps both sides of each conflict and commits
  * the merge; `[lead:resolve-more]` does too, then commits other work on top
  * of it in two commits; `[lead:resolve-fix]` commits one fix on top of the
@@ -889,7 +908,7 @@ const leaveTests = async (
  * (`FakeAgentOptions.holds`); either way only until the turn is stopped.
  */
 const takesAWhile = async (session: SessionState, marker: string, milliseconds: number) => {
-  const held = session.holds
+  const held = session.holds?.has?.(marker) === false ? undefined : session.holds
   if (held === undefined) for (let waited = 0; !session.cancelled && waited < milliseconds; waited += 10) await pause(10)
   else while (!session.cancelled && !held.opened(marker)) await pause(10)
 }
@@ -917,7 +936,12 @@ const playRole = async (
     readonly again?: boolean
   }) => Promise<void> = () => Promise.resolve(),
   /** What it says on the way, and a step of work between, each in the thread as the turn goes. */
-  aloud: { readonly say: (said: string) => Promise<void>; readonly step: (title: string) => Promise<void> } = {
+  aloud: {
+    readonly say: (said: string) => Promise<void>
+    readonly step: (title: string) => Promise<void>
+    /** A session update of its own, such as a tool call it streams. */
+    readonly update?: (update: Record<string, unknown>) => Promise<void>
+  } = {
     say: () => Promise.resolve(),
     step: () => Promise.resolve(),
   },
@@ -929,7 +953,12 @@ const playRole = async (
     text.startsWith('Round ') ||
     text.includes('A check of the fixes, not another review.') ||
     text.includes('More to review. The person ships')
-  const asked = session.markers.size > 0 || text.includes('Settle each') || laterRound || text.startsWith('More to review')
+  const asked =
+    session.markers.size > 0 ||
+    text.includes('Settle each') ||
+    laterRound ||
+    text.startsWith('More to review') ||
+    text.includes('[lead:call ')
   if (session.tools === undefined || !asked) return undefined
   const client = new Client({ name: 'fake-agent', version: '1.0.0' })
   const transport = new StreamableHTTPClientTransport(new URL(session.tools.url), { requestInit: { headers: session.tools.headers } })
@@ -941,6 +970,44 @@ const playRole = async (
       const result = await client.callTool({ name, arguments: args })
       const content = Array.isArray(result.content) ? result.content : []
       return content.map((part) => (typeof part === 'object' && part !== null && 'text' in part ? String(part.text) : '')).join('')
+    }
+    /*
+     * One of Althar's tools called as Claude Code calls it, its input streamed: the call first with nothing in it, then its
+     * input again each time a field is written, then its answer. `[coordinator:slowly]` writes each field over a while, as a
+     * model does, so the card drafting shows; otherwise it goes quickly.
+     */
+    let streamed = 0
+    const callStreamed = async (name: string, args: Record<string, unknown>) => {
+      const notify = aloud.update
+      if (notify === undefined) return await call(name, args)
+      const toolCallId = `althar-${name}-${++streamed}`
+      const meta = { claudeCode: { toolName: `mcp__althar__${name}` } }
+      const pace = text.includes('[coordinator:slowly]') ? 1200 : 15
+      await notify({
+        sessionUpdate: 'tool_call',
+        toolCallId,
+        title: `mcp__althar__${name}`,
+        kind: 'other',
+        status: 'pending',
+        rawInput: {},
+        _meta: meta,
+      })
+      const fields = Object.entries(args)
+      for (let i = 1; i < fields.length; i++) {
+        await pause(pace)
+        await notify({ sessionUpdate: 'tool_call_update', toolCallId, rawInput: Object.fromEntries(fields.slice(0, i)), _meta: meta })
+      }
+      await pause(pace)
+      await notify({ sessionUpdate: 'tool_call_update', toolCallId, status: 'in_progress', rawInput: args, _meta: meta })
+      const answer = await call(name, args)
+      await notify({
+        sessionUpdate: 'tool_call_update',
+        toolCallId,
+        status: 'completed',
+        content: [{ type: 'content', content: { type: 'text', text: answer } }],
+        _meta: meta,
+      })
+      return answer
     }
     // A lead's helper (ADR-087) has no step to finish: it does what its brief's markers say in its folder, slowly
     // (`[lead:slowly]`), writing a file (`[lead:write]`) or committing one (`[lead:commit]`), and its last words are its result.
@@ -1038,6 +1105,25 @@ const playRole = async (
           output: 'draft',
         })
         if (!text.includes('[lead:finish]')) return made
+      }
+      // Asked in these words to make work with no review real, it offers its task a review, as a line the person answers.
+      if (text.includes('[lead:offer-review]') && available.has('offer_review')) {
+        const offered = await call('offer_review', {})
+        if (!text.includes('[lead:finish]')) return offered
+      }
+      // Told in words to change something, `[lead:call <tool> <json>]` (change_part, change_lead, ship_task…), it calls that tool
+      // with those arguments, as an agent does what the person said, once each, and says what each answered.
+      const calls = [...text.matchAll(/\[lead:call ([a-z_]+)(?: (\{.*?\}))?\]/g)]
+      if (calls.length > 0) {
+        const done = calledIn.get(session.cwd) ?? new Set<string>()
+        calledIn.set(session.cwd, done)
+        const answers: Array<string> = []
+        for (const [marker, name, args] of calls) {
+          if (name === undefined || done.has(marker) || !available.has(name)) continue
+          done.add(marker)
+          answers.push(await call(name, args === undefined ? {} : (JSON.parse(args) as Record<string, unknown>)))
+        }
+        if (answers.length > 0 && !text.includes('[lead:finish]')) return answers.join('\n')
       }
       // Told in these words to move its task on (`[lead:task-done]`, `[lead:task-keep]`, `[lead:task-discard]`), it does, and says what it was told.
       const moved = /\[lead:task-(done|keep|discard)\]/.exec(text)?.[1]
@@ -1206,6 +1292,14 @@ const playRole = async (
       }
       // Asked to wait on the person's answer (`[lead:wait-for-person]`), it asks in a line and ends its turn; told the
       // answer, it carries on and finishes as it would have.
+      if (available.has('wait_for') && session.markers.has('[lead:wait-for-external]')) {
+        if (text.includes('[lead:wait-for-external]'))
+          return await call('wait_for', {
+            reason: 'The deployment to finish',
+            conditions: [{ kind: 'time', at: new Date(Date.now() + 60 * 60_000).toISOString() }],
+          })
+        return await finish()
+      }
       if (available.has('wait_for_person') && session.markers.has('[lead:wait-for-person]')) {
         if (text.includes('[lead:wait-for-person]'))
           return await call('wait_for_person', { question: 'Which ADRs should the compaction keep?' })
@@ -1269,6 +1363,16 @@ const playRole = async (
         await commitIn(session.cwd, 'pushed.txt', 'Tidy up before pushing')
         return await call('push_to_pull_request', {})
       }
+      // Asked to bring main in, it merges origin/main as it stands here, keeping both sides of a conflict, and commits the merge.
+      if (session.markers.has('[lead:merge-main]') && /\bbring main in pls\b/i.test(text)) {
+        await resolveIn(session.cwd, 'origin/main')
+        if (/\band tidy\b/i.test(text)) await commitIn(session.cwd, 'tidied.txt', 'Tidy up')
+        return 'Merged main in, and committed the merge.'
+      }
+      // Sent back by the merge queue and told an update from main is update_branch's, it calls that, and nothing of its plan again.
+      const sentBack = /The merge queue took (PR #\d+) out/.exec(text)?.[1]
+      if (session.markers.has('[lead:update-branch]') && sentBack !== undefined && text.includes('call update_branch'))
+        return await call('update_branch', { pull_request: sentBack.slice(3) })
       // Asked to tidy up, it commits and ends its turn: what goes up, and when, isn't its to say.
       if (session.markers.has('[lead:commit]') && /\btidy pls\b/i.test(text)) {
         // Within its turn, as a lead commits before it answers: what the turn's end looks at has it.
@@ -1435,11 +1539,11 @@ const playRole = async (
         ...(link === undefined ? {} : { issue: link }),
       }
       // In a project of several repositories, asked which it changes, it names every one it is told of.
-      const first = await call('draft_task', draft)
+      const first = await callStreamed('draft_task', draft)
       const which = /as repositories: (.+)\.$/.exec(first)?.[1]
-      const drafted = which === undefined ? first : await call('draft_task', { ...draft, repositories: which.split(', ') })
+      const drafted = which === undefined ? first : await callStreamed('draft_task', { ...draft, repositories: which.split(', ') })
       const slug = /Drafted ([^\s,.]+)/.exec(drafted)?.[1] ?? ''
-      return await call('propose_plan', {
+      const planned = await callStreamed('propose_plan', {
         task: slug,
         lead: {
           agent: 'claude-code',
@@ -1451,6 +1555,10 @@ const playRole = async (
         // `[coordinator:plan-small]`: a small change, reviewed only once it merged.
         ...(ask.includes('[coordinator:plan-small]') ? { small_change: true } : {}),
       })
+      // `[coordinator:plan-branch]`: it ends with its branch, as a prototype does, set on the plan before it starts.
+      if (ask.includes('[coordinator:plan-branch]') && available.has('change_part'))
+        await call('change_part', { task: slug, part: 'ending', end: 'branch', why: 'a prototype' })
+      return planned
     }
     return undefined
   } finally {
@@ -1658,9 +1766,13 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
       session.mode = params.modeId
       return {}
     })
-    .onRequest(acp.methods.agent.session.setConfigOption, ({ params }) => {
+    .onRequest(acp.methods.agent.session.setConfigOption, async ({ params }) => {
       const session = sessionOf(params.sessionId)
       const value = String(params.value)
+      if (params.configId === 'model' || params.configId === 'effort') {
+        options.optionAsked?.(params.configId, value)
+        while (options.holdsSets?.() === true && !session.closed) await pause(10)
+      }
       if (params.configId === 'mode' && MODES.includes(value)) session.mode = modes === 'stuck' ? session.mode : value
       else if (params.configId === 'model' && options.failsOnce?.includes(value) && !failedOnce.has(value)) {
         failedOnce.add(value)
@@ -1726,6 +1838,7 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
       // What it was given in the prompts it did nothing with, it reads with this one, as its transcript keeps them.
       const prompted = `${session.unread}${params.prompt.map((block) => (block.type === 'text' ? block.text : '')).join('')}`
       session.prompts += 1
+      options.promptAsked?.()
       const blank = options.blank ?? 0
       if (
         typeof blank === 'number'
@@ -1788,6 +1901,7 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
           await update({ sessionUpdate: 'tool_call', toolCallId, title, kind: 'read', status: 'in_progress' })
           await update({ sessionUpdate: 'tool_call_update', toolCallId, status: 'completed' })
         },
+        update: (value: Record<string, unknown>) => update(value as unknown as acp.SessionUpdate),
       }
       const ended = (usage?: acp.Usage): acp.PromptResponse => ({ stopReason: 'end_turn', ...(usage === undefined ? {} : { usage }) })
       // Signed out, as its account no longer is, where the prompt says `[signed-out]`.
@@ -1802,7 +1916,7 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
       // holds it (`holds`), each wait lasts until the test opens the marker as written (`[answers-after:5s]`) instead.
       const slowly = [...text.matchAll(/\[(answers|thinks|reads|fails|ends)-after:(\d+)s\]/g)].at(-1)
       if (slowly?.[2] !== undefined) {
-        const held = session.holds
+        const held = session.holds?.has?.(slowly[0]) === false ? undefined : session.holds
         const waitOut = async (ms: number) => {
           if (ms > 0 && held !== undefined) while (!session.cancelled && !session.closed && !held.opened(slowly[0])) await pause(10)
           else for (let waited = 0; !session.cancelled && waited < ms; waited += 10) await pause(10)
@@ -2271,7 +2385,7 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
           return ended()
         case scenarios.keepsGoing: {
           await say('Done')
-          const held = session.holds
+          const held = session.holds?.has?.(scenarios.keepsGoing) === false ? undefined : session.holds
           void (async () => {
             while (held !== undefined && !session.closed && !held.opened(scenarios.keepsGoing)) await pause(10)
             await say('Checking it once more.')

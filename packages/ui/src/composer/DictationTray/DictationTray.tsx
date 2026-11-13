@@ -203,6 +203,7 @@ export function DictationTray({
       case DictationSetup.Stopped:
         return {
           head: t.stopped,
+          problem: true,
           note: t.stoppedNote(state.got, state.size),
           bar: state.progress,
           stopped: true,
@@ -220,6 +221,7 @@ export function DictationTray({
       case DictationSetup.NoRoom:
         return {
           head: t.noRoom,
+          problem: true,
           note: t.noRoomNote(state.need, state.free),
           actions: (
             <>
@@ -235,6 +237,7 @@ export function DictationTray({
       case DictationSetup.Denied:
         return {
           head: t.denied,
+          problem: true,
           note: t.deniedNote,
           actions: (
             <>
@@ -250,6 +253,7 @@ export function DictationTray({
       case DictationSetup.NoMicrophone:
         return {
           head: t.noMicrophone,
+          problem: true,
           note: t.noMicrophoneNote,
           actions: (
             <>
@@ -265,6 +269,7 @@ export function DictationTray({
       case DictationSetup.Failed:
         return {
           head: t.failed,
+          problem: true,
           note: t.failedNote(state.said),
           actions: (
             <>
@@ -284,8 +289,9 @@ export function DictationTray({
 
   return (
     <div ref={root} role="group" aria-label={t.label} className={cx(s.tray, className)} onKeyDown={keys} {...rest}>
-      <div className={s.main}>
-        <Icon name="mic" size={14} className={s.icon} />
+      <div className={cx(s.main, 'problem' in view && s.problem)}>
+        {/* what is in the way reads as a problem by its mark and colour, as Problem does */}
+        <Icon name={'problem' in view ? 'problem' : 'mic'} size={14} className={s.icon} />
         <div className={s.words}>
           <p className={s.head}>
             <output className={s.live}>{view.head}</output>

@@ -9,6 +9,7 @@ import { Button } from '../../primitives/Button/Button'
 import { Dialog } from '../../primitives/Dialog/Dialog'
 import { Tooltip } from '../../primitives/HoverCard/HoverCard'
 import { LinkButton } from '../../primitives/LinkButton/LinkButton'
+import { Problem } from '../../primitives/Problem/Problem'
 import { VisuallyHidden } from '../../primitives/VisuallyHidden/VisuallyHidden'
 import { ControlDetail } from '../ControlCenter/ControlCenter'
 import { escapeBack, ProjectPicks, RoleSwitches, SheetFact, toolWordsText, type ToolWordsText } from './ToolParts'
@@ -178,11 +179,7 @@ export function SkillSheet({
             </>
           }
         >
-          {removeError !== null && (
-            <p className={s.error} role="alert">
-              {removeError}
-            </p>
-          )}
+          {removeError !== null && <Problem>{removeError}</Problem>}
         </Dialog>
       )}
     </div>

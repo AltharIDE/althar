@@ -7,7 +7,7 @@ import { SqlClient } from 'effect/sql'
 import { Instance } from '../src/Instance'
 import { plansAndReviewsOf, roundsOutNow, newProjectDefaultsOf, setPlansAndReviews, setNewProjectDefaults } from '../src/plansAndReviews'
 import { Plans } from '../src/Plans'
-import { Policies } from '../src/Policies'
+import { afterMergeReviewOf, Policies } from '../src/Policies'
 import { Projects } from '../src/Projects'
 import { Queries } from '../src/Queries'
 import * as Runtime from '../src/Runtime'
@@ -161,6 +161,7 @@ describe('the rules a new project starts with', () => {
         postScreenshots: true,
         resolveConflicts: false,
         moveIssues: false,
+        afterMergeReview: 'none',
       })
       const after = yield* projects.open({ envelope: yield* Runtime.envelope('project.open', {}), path: repository() })
       const made = yield* rulesOf(after.projectId)
@@ -174,14 +175,24 @@ describe('the rules a new project starts with', () => {
           made.postScreenshots,
           made.resolveConflicts,
           made.moveIssues,
+          made.afterMergeReview,
         ],
-        ['defaults', 'wait', true, 'ready', false, true, false, false],
+        ['defaults', 'wait', true, 'ready', false, true, false, false, 'none'],
       )
       const earlier = yield* rulesOf(before.projectId)
       assert.deepStrictEqual(
         [earlier.source, earlier.usageLimit, earlier.accounts, earlier.end, earlier.pushCommits, earlier.postScreenshots],
         ['mvp', undefined, undefined, undefined, undefined, undefined],
       )
+      // A project made before keeps no rule for its review after a merge, and reads as Major only.
+      assert.isUndefined(earlier.afterMergeReview)
+      assert.strictEqual(afterMergeReviewOf(earlier), 'major')
+      assert.strictEqual((yield* newProjectDefaultsOf).afterMergeReview, 'none')
+      // Put back to Major only, the default is forgotten.
+      yield* setNewProjectDefaults({ afterMergeReview: 'major' })
+      const sql = yield* SqlClient.SqlClient
+      const [kept] = yield* sql<{ n: number }>`SELECT count(*) AS n FROM settings WHERE key = 'new_project_after_merge_review'`
+      assert.strictEqual(kept?.n, 0)
       // And what the person changes in the project afterwards is the project's own, whatever the defaults say.
       yield* setNewProjectDefaults({ usageLimit: 'ask' })
       assert.strictEqual((yield* rulesOf(after.projectId)).usageLimit, 'wait')

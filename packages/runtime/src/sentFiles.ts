@@ -7,7 +7,7 @@ import { cleanUp, type PromptFile } from '@althar/provider-adapters'
 import { Effect } from 'effect'
 import { SqlClient } from 'effect/sql'
 
-import { attachmentsIn, copyName, copyTo, measure, mediaTypeOf, wordsOf } from './attachments'
+import { attachmentsIn, copyName, copyTo, type Measured, measure, mediaTypeOf, wordsOf } from './attachments'
 import { RuntimeConfig } from './Config'
 import { coordinatorFolderAt } from './coordinatorFolder'
 import { FileRefused, NotFound } from './errors'
@@ -79,23 +79,33 @@ const freeName = (name: string, taken: Set<string>) => {
   return candidate
 }
 
-/** Reads, checks and copies the files sent with a message to a thread, in their order; refused whole where one can't be sent. */
-export const keepFiles = (threadId: string, files: ReadonlyArray<SentFile>) =>
+/** A message's files, read and checked, each one kept before or one to copy: what `copyFiles` copies. */
+export interface CheckedFiles {
+  readonly found: ReadonlyArray<
+    | { readonly kept: InputFile }
+    | { readonly source: string; readonly name: string; readonly measured: Extract<Measured, { readonly ok: true }> }
+  >
+}
+
+/**
+ * Reads and checks the files sent with a message to a thread, in their order,
+ * copying nothing: refused whole where one can't be sent, before anything is
+ * done for it, such as bringing its task's folder back.
+ */
+export const checkFiles = (threadId: string, files: ReadonlyArray<SentFile>) =>
   Effect.gen(function* () {
-    if (files.length === 0) return []
     if (files.length > MESSAGE_FILES.count) return yield* new FileRefused({ reason: 'too_many', name: null })
     const sql = yield* SqlClient.SqlClient
     const folders = yield* Folders
-    const { projectId, folder } = yield* folderOf(threadId)
-    if (folder === null) return yield* new FileRefused({ reason: 'nowhere', name: null })
-    // What each is first, all of them, so nothing is copied for a message that is refused.
+    const [thread] = yield* sql<{ projectId: string }>`SELECT project_id FROM threads WHERE id = ${threadId}`
+    if (thread === undefined) return yield* new NotFound({ kind: 'thread', id: threadId })
     const found = yield* Effect.forEach(files, (file) =>
       Effect.gen(function* () {
         if ('kept' in file) {
           const [inputId, position] = file.kept.split(':')
           const [row] = yield* sql<Omit<InputFile, 'kind'> & { kind: string }>`
             SELECT name, kind, media_type, bytes, entries, path FROM user_input_files
-            WHERE project_id = ${projectId} AND user_input_id = ${inputId ?? ''} AND position = ${Number(position)}`
+            WHERE project_id = ${thread.projectId} AND user_input_id = ${inputId ?? ''} AND position = ${Number(position)}`
           if (row === undefined || !existsSync(row.path)) return yield* new FileRefused({ reason: 'missing', name: row?.name ?? null })
           const kept: InputFile = { ...row, kind: row.kind === 'folder' ? 'folder' : 'file' }
           return { kept }
@@ -111,6 +121,19 @@ export const keepFiles = (threadId: string, files: ReadonlyArray<SentFile>) =>
     )
     const total = found.reduce((sum, one) => sum + ('kept' in one ? 0 : one.measured.bytes), 0)
     if (total > MESSAGE_FILES.total) return yield* new FileRefused({ reason: 'too_much', name: null })
+    return { found } satisfies CheckedFiles
+  })
+
+/**
+ * Copies a message's checked files into the folder its thread's agent starts
+ * from, in their order: refused where there is none here, or where one can't
+ * be copied, and what was copied for it goes.
+ */
+export const copyFiles = (threadId: string, { found }: CheckedFiles) =>
+  Effect.gen(function* () {
+    if (found.length === 0) return []
+    const { folder } = yield* folderOf(threadId)
+    if (folder === null) return yield* new FileRefused({ reason: 'nowhere', name: null })
     const fresh = found.some((one) => !('kept' in one))
     const own = fresh ? join(attachmentsIn(folder), randomBytes(6).toString('hex')) : null
     const taken = new Set<string>()
@@ -144,6 +167,10 @@ export const keepFiles = (threadId: string, files: ReadonlyArray<SentFile>) =>
       Effect.tapError(() => (own === null ? Effect.void : cleanUp(own, 'what was copied for a message refused'))),
     )
   })
+
+/** Reads, checks and copies the files sent with a message to a thread, in their order; refused whole where one can't be sent. */
+export const keepFiles = (threadId: string, files: ReadonlyArray<SentFile>) =>
+  files.length === 0 ? Effect.succeed([]) : Effect.flatMap(checkFiles(threadId, files), (checked) => copyFiles(threadId, checked))
 
 /**
  * The files sent with each input, for a turn that delivers them, in order:

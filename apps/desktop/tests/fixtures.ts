@@ -1,3 +1,4 @@
+import { isoAfter } from '@althar/testing'
 import type {
   AccountSignInState,
   AgentModels,
@@ -81,6 +82,7 @@ export const projectRules: ProjectRulesView = {
   branchPattern: null,
   titlePattern: null,
   moveIssues: true,
+  afterMergeReview: 'major',
   repositoryFiles: { writeSkills: false, writeOpenSpec: false, pushProtected: false },
   conventions: [{ repository: 'api', branch: null, title: null, template: null }],
   sandbox: {
@@ -290,9 +292,8 @@ export const project: ProjectSummary = {
   worktrees: '/Users/me/Althar/meridian',
   tasks: 1,
   running: 1,
-  waiting: 0,
+  yours: 0,
   working: 1,
-  ready: 0,
   usageLimit: 'move',
   rotateAccounts: false,
   onlyAccounts: null,
@@ -459,6 +460,22 @@ export const items = {
       unverified: null,
       agentId: null,
       change: null,
+      ...content,
+    },
+  }),
+  mergeLine: (content: Partial<Extract<ThreadItem, { kind: 'merge_line' }>['content']> = {}): ThreadItem => ({
+    ...next(),
+    agentId: null,
+    kind: 'merge_line',
+    content: {
+      key: 'github:meridian/api main',
+      branch: null,
+      rows: [
+        { number: 778, title: 'Follow-up PRs say what they do', url: 'https://github.com/meridian/api/pull/778', state: 'merged' },
+        { number: 783, title: 'The model picker shows a change at once', url: 'https://github.com/meridian/api/pull/783', state: 'queued' },
+        { number: 773, title: 'Board cards show handed-back pictures', url: 'https://github.com/meridian/api/pull/773', state: 'checks' },
+        { number: 779, title: 'A queued task can be held', url: 'https://github.com/meridian/api/pull/779', state: 'waiting' },
+      ],
       ...content,
     },
   }),
@@ -996,7 +1013,7 @@ export const githubGuide: ConnectGuide = {
   tokenPages: [{ product: 'github', webUrl: 'https://github.com', url: GITHUB_TOKEN_PAGE }],
 }
 
-/** Everything a GitHub connection needs, which it can do; its token runs out on 8 January 2027. */
+/** Everything a GitHub connection needs, which it can do; its token has another 30 days to run. */
 export const githubCheck: ConnectionCheck = {
   connectionId: 'conn1',
   lines: [
@@ -1007,7 +1024,7 @@ export const githubCheck: ConnectionCheck = {
     { need: 'checks', state: 'ok', fact: null, count: null, reason: null },
     { need: 'issues', state: 'ok', fact: null, count: null, reason: null },
   ],
-  expiresAt: '2027-01-08T00:00:00.000Z',
+  expiresAt: isoAfter(30 * 86_400_000),
   renews: false,
   settings: 'https://github.com/settings/personal-access-tokens',
 }
@@ -1077,12 +1094,15 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
       path: `/Users/ada/code/${name.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`,
     })),
     listTasks: vi.fn(async () => ({ cursor: 4, tasks: [task] })),
+    getSearchDocuments: vi.fn(async () => ({ documents: [], next: null })),
+    getSearchFiles: vi.fn(async () => ({ files: [] })),
     searchTasks: vi.fn(async () => ({ tasks: [] })),
     createTask: vi.fn(async () => task),
     getThread: vi.fn(async () => snapshot()),
     getThreadItem: vi.fn(async (_threadId: string, itemId: string) => ({ ...items.says('Read again'), id: itemId })),
     readOutput: vi.fn(async () => ({ text: ' ✓ charges/limit (14)\n ✓ refunds/router (38)\n', dropped: 0 })),
     readBackgroundOutput: vi.fn(async () => ({ text: 'VITE ready in 312 ms\n\n  ➜  Local:   http://localhost:5173/\n', dropped: 0 })),
+    readLaunchOutput: vi.fn(async () => ({ text: 'VITE ready in 312 ms\n\n  ➜  Local:   http://localhost:5173/\n', dropped: 0 })),
     readDocument: vi.fn(async (_threadId: string, path: string) => ({
       path,
       body: '# Notes\n\nRefunds share the partner budget.\n',
@@ -1116,6 +1136,7 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
     ]),
     getLoad: vi.fn(async () => load),
     getPlanUsage: vi.fn(async () => ({ accounts: [] })),
+    dismissSignInEnding: vi.fn(async () => undefined),
     getModelRooms: vi.fn(async () => []),
     getMissedReports: vi.fn(async () => []),
     openInEditor: vi.fn(async () => true),
@@ -1172,6 +1193,7 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
         postScreenshots: false,
         resolveConflicts: true,
         moveIssues: true,
+        afterMergeReview: 'major',
       } as const,
     })),
     setCoAuthor: vi.fn(async () => {}),
@@ -1184,6 +1206,7 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
     listPresets: vi.fn(async () => []),
     savePreset: vi.fn(async () => ({ name: 'Preset' })),
     removePreset: vi.fn(async () => {}),
+    declinePresetOffer: vi.fn(async () => {}),
     runIt: vi.fn(async () => ({ kind: 'ran' as const, trust: 'safe' as const, said: '' })),
     stopRunning: vi.fn(async () => ''),
     applyPreset: vi.fn(async () => ''),
@@ -1251,8 +1274,10 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
     startTask: vi.fn(async () => task),
     startPlan: vi.fn(async () => {}),
     holdPlan: vi.fn(async () => {}),
+    holdDraft: vi.fn(async () => {}),
     changePlan: vi.fn(async () => {}),
     changeTeam: vi.fn(async () => {}),
+    declineReview: vi.fn(async () => {}),
     changeIssueDraft: vi.fn(async () => {}),
     fileIssueDraft: vi.fn(async () => {}),
     discardIssueDraft: vi.fn(async () => {}),
@@ -1324,6 +1349,8 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
     postScreenshots: vi.fn(async () => {}),
     openChange: vi.fn(async () => {}),
     skipReview: vi.fn(async () => {}),
+    shapeTask: vi.fn(async () => {}),
+    setReviewAfterMerge: vi.fn(async () => {}),
     refreshTask: vi.fn(async () => {}),
     stopListening: vi.fn(async () => {}),
     attachPullRequest: vi.fn(async () => ({

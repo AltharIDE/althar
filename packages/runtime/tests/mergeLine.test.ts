@@ -3,16 +3,21 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import type { CheckState } from '@althar/connectors'
+import type { ThreadItem } from '@althar/contracts'
 import { type FakeService, type FakeServiceOptions, makeFakeService } from '@althar/connectors/testing'
 import { Ids, newId } from '@althar/domain'
+import { Ledger } from '@althar/persistence-sqlite'
 import { assert, describe, it } from '@effect/vitest'
-import { Duration, Effect } from 'effect'
+import { Duration, Effect, Layer } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { Connections } from '../src/Connections'
 import { Coordinator } from '../src/Coordinator'
 import { Instance } from '../src/Instance'
+import { errandRecords } from '../src/Errands'
+import { errandCardLines } from '../src/errandWords'
 import { MergeLine } from '../src/MergeLine'
+import { Queries } from '../src/Queries'
 import { Projects } from '../src/Projects'
 import { timestamp } from '../src/records'
 import * as Runtime from '../src/Runtime'
@@ -87,6 +92,10 @@ const errandsOf = (access: ToolAccess) =>
     return new Map(rows.map((row) => [row.number, row]))
   })
 
+/** What a task's card says of a merge errand, as its records and the line's last read of it stand. */
+const cardSays = (access: ToolAccess, errandId: string) =>
+  Effect.map(errandRecords(access.projectId, { errandId }), (records) => errandCardLines(records, null))
+
 /** What Althar's news woke the coordinator with, and the lines in its chat. */
 const news = (access: ToolAccess) =>
   Effect.gen(function* () {
@@ -102,6 +111,22 @@ const lines = (access: ToolAccess) =>
     }>`SELECT content FROM thread_items WHERE thread_id = ${access.threadId} AND kind = 'notice' ORDER BY rowid`).map((row) =>
       String((JSON.parse(row.content) as { title?: string }).title ?? ''),
     )
+  })
+
+/** The merge line's cards in the coordinator's thread, as the store keeps them: the item's id, and what it says of each pull request. */
+const cards = (access: ToolAccess) =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient
+    return (yield* sql<{
+      id: string
+      content: string
+    }>`SELECT id, content FROM thread_items WHERE thread_id = ${access.threadId} AND kind = 'merge_line' ORDER BY sequence`).map((row) => ({
+      id: row.id,
+      ...(JSON.parse(row.content) as {
+        branch: string | null
+        rows: ReadonlyArray<{ number: number; title: string; url: string; state: string; reason?: string }>
+      }),
+    }))
   })
 
 const merge = (access: ToolAccess, args: Record<string, unknown>) => callTool(access, 'merge_pull_request', args)
@@ -169,6 +194,10 @@ describe('the coordinator’s merge line', () => {
         [first],
       )
       assert.deepStrictEqual(service.updated, [])
+      // Its card says where each stands as the line read it: the first merging, the second behind it.
+      const waiting = yield* errandsOf(access)
+      assert.deepStrictEqual(yield* cardSays(access, waiting.get(first)?.id ?? ''), ['Merging #1'])
+      assert.deepStrictEqual(yield* cardSays(access, waiting.get(second)?.id ?? ''), ['Waiting its turn to merge #2'])
 
       service.mergeByHand(first)
       yield* sweep(access)
@@ -182,6 +211,8 @@ describe('the coordinator’s merge line', () => {
       // Now first in line, the second is brought up to date with main's new head, by a merge, and merged at the head that went green.
       yield* sweep(access)
       assert.deepStrictEqual(service.updated, [second])
+      // First in line now, its card no longer says it waits behind another.
+      assert.notDeepEqual(yield* cardSays(access, b), ['Waiting its turn to merge #2'])
       yield* sweep(access)
       assert.include((yield* news(access)).at(-1), `errand "${b}"`)
       assert.match(yield* takeStep(access, b), /lands it later/)
@@ -196,11 +227,289 @@ describe('the coordinator’s merge line', () => {
       yield* sweep(access)
       assert.match(yield* takeStep(access, b), /is merged into main/)
       assert.strictEqual((yield* errandsOf(access)).get(second)?.state, 'done')
-      // The line shows in the chat, as it changes.
-      assert.isTrue(
-        (yield* lines(access)).some((title) => /main of meridian\/api, Althar’s merge line: 1\. #1 .*· 2\. #2 waiting/.test(title)),
+      // The line shows as one card that moved in place, never as chat lines.
+      const shown = yield* cards(access)
+      assert.strictEqual(shown.length, 1)
+      assert.deepStrictEqual(
+        shown[0]?.rows.map((row) => [row.number, row.state]),
+        [
+          [first, 'merged'],
+          [second, 'merged'],
+        ],
+      )
+      assert.deepStrictEqual(
+        (yield* lines(access)).filter((title) => /merge line|^main of/.test(title)),
+        [],
       )
     }).pipe(Effect.provide(layer(service)))
+  })
+
+  it.live('the line is one card that moves in place, with no line of chat for it', () => {
+    const { service, checks, pull } = host()
+    const { working } = hosted(['meridian', 'api'])
+    return Effect.gen(function* () {
+      const access = yield* opened(working)
+      service.landLater()
+      const first = pull('Retry refunds')
+      const second = pull('Cap retries')
+      const third = pull('Page on-call')
+      checks.set(`head-${third}`, 'running')
+      const message = yield* turn(access, 'person')
+      for (const number of [first, second, third]) yield* merge(access, { pull_request: `#${number}`, head: `head-${number}`, message })
+      yield* sweep(access)
+      const [card] = yield* cards(access)
+      assert.strictEqual((yield* cards(access)).length, 1)
+      // Each pull request in order, by number and title, linked, with where it stands; the branch is the default, so it isn't named.
+      assert.deepStrictEqual(
+        card?.rows.map((row) => [row.number, row.title, row.state]),
+        [
+          [first, 'Retry refunds', 'merging'],
+          [second, 'Cap retries', 'waiting'],
+          [third, 'Page on-call', 'waiting'],
+        ],
+      )
+      assert.isTrue(card?.rows.every((row) => row.url.startsWith('http')))
+      assert.strictEqual(card?.branch, null)
+
+      // The first lands: the same card says so, and the next goes.
+      service.mergeByHand(first)
+      yield* sweep(access)
+      yield* sweep(access)
+      const after = yield* cards(access)
+      assert.strictEqual(after.length, 1)
+      assert.strictEqual(after[0]?.id, card?.id)
+      assert.strictEqual(after[0]?.rows[0]?.state, 'merged')
+
+      // A sweep that finds nothing new writes nothing.
+      const before = JSON.stringify(yield* cards(access))
+      yield* sweep(access)
+      assert.strictEqual(JSON.stringify(yield* cards(access)), before)
+
+      // No status line went into the thread, and the coordinator's news is as it was: for the agent, not the chat.
+      const chat = yield* lines(access)
+      assert.deepStrictEqual(
+        chat.filter((title) => /merge line|waiting|checks running|merge queue/i.test(title)),
+        [],
+      )
+      assert.deepStrictEqual(
+        (yield* news(access)).filter((body) => !body.includes('merge line (news, not the person')),
+        [],
+      )
+    }).pipe(Effect.provide(layer(service)))
+  })
+
+  it.live('a pull request whose checks failed is sent back on the card, with what to do', () => {
+    const { service, checks, pull } = host()
+    const { working } = hosted(['meridian', 'api'])
+    return Effect.gen(function* () {
+      const access = yield* opened(working)
+      const first = pull('Retry refunds')
+      checks.set(`head-${first}`, 'running')
+      const message = yield* turn(access, 'person')
+      yield* merge(access, { pull_request: `#${first}`, head: `head-${first}`, message })
+      yield* sweep(access)
+      assert.strictEqual((yield* cards(access))[0]?.rows[0]?.state, 'checks')
+      checks.set(`head-${first}`, 'failed')
+      yield* sweep(access)
+      const [card] = yield* cards(access)
+      assert.strictEqual(card?.rows[0]?.state, 'sent_back')
+      assert.match(card?.rows[0]?.reason ?? '', /Checks failed/)
+      // The reason doesn't say its number again.
+      assert.notMatch(card?.rows[0]?.reason ?? '', /#\d/)
+    }).pipe(Effect.provide(layer(service)))
+  })
+
+  it.live('a branch that isn’t the default is named on its card', () => {
+    const { service, checks } = host()
+    const { working } = hosted(['meridian', 'api'])
+    return Effect.gen(function* () {
+      const access = yield* opened(working)
+      const number = service.addPullRequest({
+        path: ['meridian', 'api'],
+        title: 'Backport the retry fix',
+        author: 'you',
+        target: 'release',
+      }).number
+      checks.set(`head-${number}`, 'running')
+      const message = yield* turn(access, 'person')
+      yield* merge(access, { pull_request: `#${number}`, head: `head-${number}`, message })
+      yield* sweep(access)
+      const [card] = yield* cards(access)
+      assert.strictEqual(card?.branch, 'release')
+      assert.deepStrictEqual(
+        card?.rows.map((row) => [row.number, row.state]),
+        [[number, 'checks']],
+      )
+    }).pipe(Effect.provide(layer(service)))
+  })
+
+  it.live('a later ask, once every pull request on the card has merged, is a card of its own', () => {
+    const { service, checks, pull } = host()
+    const { working } = hosted(['meridian', 'api'])
+    return Effect.gen(function* () {
+      const access = yield* opened(working)
+      const first = pull('Retry refunds')
+      checks.set(`head-${first}`, 'running')
+      const message = yield* turn(access, 'person')
+      yield* merge(access, { pull_request: `#${first}`, head: `head-${first}`, message })
+      yield* sweep(access)
+      service.mergeByHand(first)
+      yield* sweep(access)
+      yield* takeStep(access, (yield* errandsOf(access)).get(first)?.id ?? '')
+      yield* sweep(access)
+      assert.deepStrictEqual(
+        (yield* cards(access)).map((card) => card.rows.map((row) => [row.number, row.state])),
+        [[[first, 'merged']]],
+      )
+      const second = pull('Cap retries')
+      checks.set(`head-${second}`, 'running')
+      const again = yield* turn(access, 'person', 'Merge #2 too')
+      yield* merge(access, { pull_request: `#${second}`, head: `head-${second}`, message: again })
+      yield* sweep(access)
+      assert.deepStrictEqual(
+        (yield* cards(access)).map((card) => card.rows.map((row) => [row.number, row.state])),
+        [[[first, 'merged']], [[second, 'checks']]],
+      )
+    }).pipe(Effect.provide(layer(service)))
+  })
+
+  it.live('a pull request that merges the moment it is asked for still gets its row, as merged', () => {
+    const { service, pull } = host()
+    const { working } = hosted(['meridian', 'api'])
+    return Effect.gen(function* () {
+      const access = yield* opened(working)
+      const first = pull('Retry refunds')
+      const message = yield* turn(access, 'person')
+      assert.match(yield* merge(access, { pull_request: `#${first}`, head: `head-${first}`, message }), /Merged PR #1/)
+      const [card] = yield* cards(access)
+      assert.deepStrictEqual(
+        card?.rows.map((row) => [row.number, row.title, row.state]),
+        [[first, 'Retry refunds', 'merged']],
+      )
+      assert.isTrue(card?.rows[0]?.url.startsWith('http'))
+      // Sweeping after it changes nothing: still the one card.
+      yield* sweep(access)
+      assert.deepStrictEqual(
+        (yield* cards(access)).map((one) => one.rows.map((row) => row.state)),
+        [['merged']],
+      )
+    }).pipe(Effect.provide(layer(service)))
+  })
+
+  it.live('a pull request shown waiting that merges when its step is taken, as the last in the line, is shown merged', () => {
+    const { service, checks, pull } = host()
+    const { working } = hosted(['meridian', 'api'])
+    return Effect.gen(function* () {
+      const access = yield* opened(working)
+      const first = pull('Retry refunds')
+      checks.set(`head-${first}`, 'running')
+      const message = yield* turn(access, 'person')
+      yield* merge(access, { pull_request: `#${first}`, head: `head-${first}`, message })
+      yield* sweep(access)
+      assert.strictEqual((yield* cards(access))[0]?.rows[0]?.state, 'checks')
+      // Green: the coordinator is woken, and takes the step, which merges at once. Nothing waits in the line any more.
+      checks.set(`head-${first}`, 'passed')
+      yield* sweep(access)
+      assert.match(yield* takeStep(access, (yield* errandsOf(access)).get(first)?.id ?? ''), /Merged PR #1/)
+      const cardsNow = yield* cards(access)
+      assert.strictEqual(cardsNow.length, 1)
+      assert.deepStrictEqual(
+        cardsNow[0]?.rows.map((row) => [row.number, row.state]),
+        [[first, 'merged']],
+      )
+    }).pipe(Effect.provide(layer(service)))
+  })
+
+  it.live('a pull request asked for “now” after the card shows moves ahead of the ones waiting, as it will merge', () => {
+    const { service, checks, pull } = host()
+    const { working } = hosted(['meridian', 'api'])
+    return Effect.gen(function* () {
+      const access = yield* opened(working)
+      const slow = pull('Retry refunds')
+      const slower = pull('Cap retries')
+      checks.set(`head-${slow}`, 'running')
+      checks.set(`head-${slower}`, 'running')
+      const message = yield* turn(access, 'person')
+      yield* merge(access, { pull_request: `#${slow}`, head: `head-${slow}`, message })
+      yield* merge(access, { pull_request: `#${slower}`, head: `head-${slower}`, message })
+      yield* sweep(access)
+      assert.deepStrictEqual(
+        (yield* cards(access))[0]?.rows.map((row) => row.number),
+        [slow, slower],
+      )
+      const urgent = pull('Fix the outage')
+      checks.set(`head-${urgent}`, 'running')
+      const again = yield* turn(access, 'person', 'Merge #3 now')
+      yield* merge(access, { pull_request: `#${urgent}`, head: `head-${urgent}`, message: again, now: true })
+      yield* sweep(access)
+      const shown = yield* cards(access)
+      assert.strictEqual(shown.length, 1)
+      assert.deepStrictEqual(
+        shown[0]?.rows.map((row) => row.number),
+        [urgent, slow, slower],
+      )
+    }).pipe(Effect.provide(layer(service)))
+  })
+
+  it.live('the thread the desktop reads gets the card as it arrives, moves, and folds, and nothing else of the line', () => {
+    const { service, checks, pull } = host()
+    const { working } = hosted(['meridian', 'api'])
+    return Effect.gen(function* () {
+      const access = yield* opened(working)
+      const queries = yield* Queries
+      const read = () => queries.coordinator(access.projectId).pipe(Effect.map((thread) => thread.items))
+      const first = pull('Retry refunds')
+      const second = pull('Cap retries')
+      checks.set(`head-${first}`, 'running')
+      checks.set(`head-${second}`, 'running')
+      const message = yield* turn(access, 'person')
+      yield* merge(access, { pull_request: `#${first}`, head: `head-${first}`, message })
+      yield* merge(access, { pull_request: `#${second}`, head: `head-${second}`, message })
+      yield* sweep(access)
+      const states = (items: ReadonlyArray<ThreadItem>) =>
+        items.flatMap((item) =>
+          item.kind === 'merge_line' ? [{ id: item.id, rows: item.content.rows.map((row) => [row.number, row.state]) }] : [],
+        )
+      const arrived = states(yield* read())
+      assert.deepStrictEqual(
+        arrived.map((card) => card.rows),
+        [
+          [
+            [first, 'checks'],
+            [second, 'waiting'],
+          ],
+        ],
+      )
+
+      // Both go green and land one after the other, as the coordinator takes each step.
+      checks.set(`head-${first}`, 'passed')
+      checks.set(`head-${second}`, 'passed')
+      yield* sweep(access)
+      yield* takeStep(access, (yield* errandsOf(access)).get(first)?.id ?? '')
+      yield* sweep(access)
+      yield* takeStep(access, (yield* errandsOf(access)).get(second)?.id ?? '')
+      yield* sweep(access)
+      const items = yield* read()
+      const folded = states(items)
+      // The same card, moved in place, with every row merged: what the desktop folds to one line.
+      assert.deepStrictEqual(folded, [
+        {
+          id: arrived[0]?.id,
+          rows: [
+            [first, 'merged'],
+            [second, 'merged'],
+          ],
+        },
+      ])
+      // No line of chat about the line.
+      assert.deepStrictEqual(
+        items.filter(
+          (item) =>
+            item.kind === 'notice' && /merge line|waiting|checks running|queue/i.test(String((item.content as { title?: string }).title)),
+        ),
+        [],
+      )
+    }).pipe(Effect.provide(Queries.layer.pipe(Layer.provideMerge(layer(service)))))
   })
 
   it.live('the person’s “merge it now” goes ahead of the line, waiting only for a merge in flight', () => {
@@ -262,13 +571,34 @@ describe('the coordinator’s merge line', () => {
       // The merge went at the head the person saw, untested with the write beside it: main going red is heard.
       assert.deepStrictEqual(service.merged.at(-1)?.head, `head-${number}`)
       assert.deepStrictEqual(service.updated, [])
-      assert.isTrue((yield* lines(access)).some((title) => title.includes(`meridian/api’s main is red at ${landed}: post-merge failed`)))
+      assert.isTrue((yield* lines(access)).some((title) => title.includes(`main is red at ${landed}: post-merge failed`)))
       assert.include((yield* news(access)).at(-1), 'Main is red')
       // Heard once for a head.
       yield* sweep(access)
       assert.strictEqual((yield* news(access)).filter((body) => body.includes('Main is red')).length, 1)
     }).pipe(Effect.provide(layer(service)))
   })
+
+  for (const state of ['failed', 'cancelled'] as const) {
+    it.live(`reports main's ${state} checks without attributing their cause to its latest merge`, () => {
+      const { service, checks, pull } = host()
+      const { working } = hosted(['meridian', 'api'])
+      return Effect.gen(function* () {
+        const access = yield* opened(working)
+        checks.set(service.branchHeadOf('main'), state)
+        const number = pull('Retry refunds')
+        const message = yield* turn(access, 'person')
+        yield* merge(access, { pull_request: `#${number}`, head: `head-${number}`, message })
+        checks.set(service.branchHeadOf('main'), state)
+        yield* sweep(access)
+        yield* sweep(access)
+        const alerts = (yield* news(access)).filter((body) => body.includes('Main is red'))
+        assert.lengthOf(alerts, state === 'failed' ? 1 : 0)
+        assert.isFalse(alerts.some((body) => body.includes('landed untested together') || body.includes('after #1 merged')))
+        if (state === 'failed') assert.include(alerts[0], 'investigate the cause')
+      }).pipe(Effect.provide(layer(service)))
+    })
+  }
 
   it.live(
     'someone else writing to the branch while it holds the slot: brought up to date three times at most, then it waits for the person',
@@ -356,6 +686,46 @@ describe('the coordinator’s merge line', () => {
       assert.match(yield* merge(access, { pull_request: `#${second}`, head: `head-${second}`, message }), /Merged PR #2/)
       assert.strictEqual((yield* errandsOf(access)).get(first)?.state, 'open')
     }).pipe(Effect.provide(layer(service)))
+  })
+
+  it.live('a task’s card hears its merge move on, and says it no longer waits behind another', () => {
+    const { service, pull } = host()
+    const { working } = hosted(['meridian', 'api'])
+    return Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const access = yield* opened(working)
+      const task = yield* (yield* Projects).createTask({
+        envelope: yield* Runtime.envelope('task.create', { title: 'Cap retries' }),
+        projectId: access.projectId,
+        title: 'Cap retries',
+      })
+      service.landLater()
+      const first = pull('Retry refunds')
+      const second = pull('Cap retries')
+      const at = new Date().toISOString()
+      const url = `https://github.com/meridian/api/pull/${second}`
+      yield* sql`INSERT INTO external_links ${sql.insert({ id: 'xlink_c4d0000000000000000000000000000a', projectId: access.projectId, taskId: task.taskId, connectionId: null, product: 'github', kind: 'change', externalId: String(second), ref: String(second), key: String(second), url, snapshot: JSON.stringify({ number: second, title: 'Cap retries', url, state: 'open', draft: false, words: { noun: 'pull request', short: 'PR', prefix: '#' }, repository: ['meridian', 'api'] }), createdAt: at, updatedAt: at })}`
+      const message = yield* turn(access, 'person')
+      yield* merge(access, { pull_request: `#${first}`, head: `head-${first}`, message })
+      yield* merge(access, { pull_request: `#${second}`, head: `head-${second}`, message })
+      const queries = yield* Queries
+      const ledger = yield* Ledger
+      const card = Effect.map(Effect.orDie(queries.board(access.projectId)), (board) =>
+        board.tasks.find((one) => one.taskId === task.taskId),
+      )
+      yield* sweep(access)
+      assert.include((yield* card)?.errands ?? [], 'Waiting its turn to merge')
+      const cursor = (yield* ledger.changesSince(0, 100_000)).at(-1)?.cursor ?? 0
+
+      // The first lands and is done: the second is first in line, its card told to read again, and it no longer says it waits.
+      service.mergeByHand(first)
+      yield* sweep(access)
+      assert.match(yield* takeStep(access, (yield* errandsOf(access)).get(first)?.id ?? ''), /is merged into main/)
+      yield* sweep(access)
+      const heard = yield* ledger.changesSince(cursor, 100_000)
+      assert.isTrue(heard.some((change) => change.aggregateType === 'task' && change.aggregateId === task.taskId))
+      assert.notInclude((yield* card)?.errands ?? [], 'Waiting its turn to merge')
+    }).pipe(Effect.provide(Queries.layer.pipe(Layer.provideMerge(layer(service)))))
   })
 
   it.live('a restart keeps the line', () => {

@@ -3,14 +3,15 @@ import { useEffect, useRef, useState } from 'react'
 
 import type { QueryClient } from '@tanstack/react-query'
 
-import type { HomeCall, HomeSnapshot, ProjectSummary } from '@althar/contracts'
+import { type HomeCall, type HomeSnapshot, issuesWordOf, readyWordOf } from '@althar/contracts'
 import type { IslandSaying } from '@althar/ui'
 
 import { type Client, messageOf } from '../../data/client'
 import { type Feed, HOME, HOME_SHOWN } from '../../data/feed'
 import { reads } from '../../data/reads'
 import { useServices } from '../../data/services'
-import { callKindOf, readyKindOf, readyOf, standingCalls } from '../../shared/calls'
+import { callKindOf } from '../../shared/calls'
+import { waitsOf } from '../home/glance'
 import { refOf } from '../home/HomeView'
 import type { AnsweredCall } from '../home/needs'
 
@@ -64,21 +65,18 @@ export interface EdgeModel {
   readonly error: string | null
 }
 
-/** What waits on the person, by id: the calls, and the tasks ready to accept. */
-const needIds = (home: HomeSnapshot) => [
-  ...standingCalls(home.tasks, home.calls).map((call) => call.id),
-  ...readyOf(home.tasks).map((task) => task.taskId),
-]
-
-/** A need, as the island says it: whose, by its project's mark, and what kind. */
-const sayingOf = (home: HomeSnapshot, id: string, projects: ReadonlyMap<string, ProjectSummary>): IslandSaying | null => {
-  const call = home.calls.find((one) => one.id === id)
-  const task = home.tasks.find((one) => one.taskId === id)
-  const projectId = call?.projectId ?? task?.projectId
-  const project = projectId === undefined ? undefined : projects.get(projectId)
-  if (project === undefined) return null
-  const kind = call === undefined ? readyKindOf(task ?? {}) : callKindOf(call)
-  return { project: refOf(project), kind }
+/**
+ * What the island says as it comes, by id, with its project and its kind: each call, each task that waits on issues to
+ * file, and each task ready, as the home lists them (`waitsOf`). Not a task that stopped: it waits, counted, but the person
+ * stopped it, or saw it stop, so it isn't news.
+ */
+const sayable = (home: HomeSnapshot) => {
+  const waits = waitsOf(home)
+  return [
+    ...waits.calls.map((call) => ({ id: call.id, projectId: call.projectId, kind: callKindOf(call) })),
+    ...waits.issues.map((task) => ({ id: task.taskId, projectId: task.projectId, kind: issuesWordOf(task.issues) })),
+    ...waits.ready.map((task) => ({ id: task.taskId, projectId: task.projectId, kind: readyWordOf(task) })),
+  ]
 }
 
 export const useEdge = (): EdgeModel => {
@@ -95,12 +93,13 @@ export const useEdge = (): EdgeModel => {
   const said = useRef<ReturnType<typeof setTimeout>>(undefined)
   useEffect(() => {
     if (home === null) return
-    const ids = needIds(home)
+    const now = sayable(home)
     const before = seen.current
-    seen.current = new Set(ids)
-    const came = before === null ? undefined : ids.find((id) => !before.has(id))
-    if (came === undefined) return
-    setSaying(sayingOf(home, came, new Map(home.projects.map((project) => [project.id, project]))))
+    seen.current = new Set(now.map((one) => one.id))
+    const came = before === null ? undefined : now.find((one) => !before.has(one.id))
+    const project = came === undefined ? undefined : home.projects.find((one) => one.id === came.projectId)
+    if (came === undefined || project === undefined) return
+    setSaying({ project: refOf(project), kind: came.kind })
     clearTimeout(said.current)
     said.current = setTimeout(() => setSaying(null), SAY_FOR)
   }, [home])

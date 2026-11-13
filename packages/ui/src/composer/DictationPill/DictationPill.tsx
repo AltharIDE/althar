@@ -1,10 +1,10 @@
 import { useEffect, useRef, useState } from 'react'
 
-import { Icon } from '../../foundations/Icon/Icon'
 import { cssVars } from '../../lib/cssVars'
 import { cx } from '../../lib/cx'
 import { Button } from '../../primitives/Button/Button'
 import { IconButton } from '../../primitives/IconButton/IconButton'
+import { Problem } from '../../primitives/Problem/Problem'
 import { Spinner } from '../../primitives/Spinner/Spinner'
 import s from './DictationPill.module.css'
 
@@ -183,20 +183,13 @@ export function DictationPill({
           onChange={(event) => onChange?.(event.target.value)}
         />
       ) : phase === 'failed' ? (
-        <p className={s.failed}>
-          <Icon name="stop" size={12} />
-          {t.failed(said)}
-        </p>
+        <Problem>{t.failed(said)}</Problem>
       ) : (
         <div className={s.words} ref={end} aria-live="off">
           {words === '' ? <span className={s.faint}>{t.nothing}</span> : words}
         </div>
       )}
-      {error !== null && (
-        <p className={s.error} role="alert">
-          {error}
-        </p>
-      )}
+      {error !== null && <Problem size="small">{error}</Problem>}
       <footer className={s.foot}>
         {phase === 'failed' ? (
           <>

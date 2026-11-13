@@ -13,8 +13,6 @@ const meta = { title: 'Primitives/CopyButton', component: CopyButton, args: { va
 export default meta
 type Story = StoryObj<typeof meta>
 
-export const Default: Story = {}
-
 /** Copying says so, for a moment. */
 export const Copying: Story = {
   play: async ({ canvasElement }) => {

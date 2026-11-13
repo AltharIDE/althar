@@ -18,7 +18,7 @@ import s from './ProjectList.module.css'
  * you first, then the ones with work in progress, then the quiet ones. A
  * row is the project's mark, large enough to see as its picture, its name,
  * and a quiet line under it: what is off (held for a reset, waiting for a
- * free agent, stopped), or
+ * free agent, or on a call of the person's), or
  * else how much is in progress, or else when it last had a task. At its
  * end, how many calls wait there, in violet; otherwise a still grey tick
  * for each task in progress. The row opens the project, where its tasks
@@ -39,7 +39,6 @@ export interface ProjectListText {
   held: (n: number) => string
   /** Tasks waiting for a free agent, and why: every one the machine runs at once is busy. */
   queued: (n: number) => string
-  stopped: (n: number) => string
   waiting: (n: number) => string
   /** Under a project's name, with nothing off: how many tasks are in progress in it. */
   inProgress: (n: number) => string
@@ -53,13 +52,12 @@ export const projectListText: ProjectListText = {
   yours: (n) => (n === 1 ? '1 needs you' : `${n} need you`),
   held: (n) => `${n} held for a reset`,
   queued: (n) => `${n} waiting for a free agent`,
-  stopped: (n) => `${n} stopped`,
   waiting: (n) => `${n} waiting`,
   inProgress: (n) => (n === 1 ? '1 task in progress' : `${n} tasks in progress`),
   quiet: (n) => (n === 1 ? '1 quiet project' : `${n} quiet projects`),
 }
 
-/** A task in progress, as a tick in its project's row: still, when held or stopped. */
+/** A task in progress, as a tick in its project's row: still, when held or waiting. */
 export interface ProjectListTask {
   id: string
   status?: TaskStatus
@@ -94,7 +92,6 @@ const offOf = (tasks: readonly ProjectListTask[], t: ProjectListText) => {
   return [
     count(TaskStatus.Paused) > 0 && t.held(count(TaskStatus.Paused)),
     count(TaskStatus.Queued) > 0 && t.queued(count(TaskStatus.Queued)),
-    count(TaskStatus.Stopped) > 0 && t.stopped(count(TaskStatus.Stopped)),
     count(TaskStatus.Yours) > 0 && t.waiting(count(TaskStatus.Yours)),
   ]
     .filter(Boolean)

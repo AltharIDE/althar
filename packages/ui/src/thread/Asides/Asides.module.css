@@ -1,0 +1,139 @@
+.strip {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  height: 44px;
+  padding: 0 12px;
+  border-bottom: 1px solid var(--line);
+}
+.tabs {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  overflow-x: auto;
+  scrollbar-width: none;
+  mask-image: linear-gradient(to right, black calc(100% - 24px), transparent);
+}
+.rule {
+  flex-shrink: 0;
+  width: 1px;
+  height: 16px;
+  margin: 0 4px;
+  background: var(--line-2);
+}
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+  max-width: 160px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  color: var(--t-3);
+  font-size: 12.5px;
+}
+.pill:hover {
+  color: var(--t-1);
+  background: var(--chip);
+}
+/* chosen: a strong fill, darker than the page on paper and lighter on dark, never a hole */
+.pill[aria-selected='true'] {
+  color: var(--t-1);
+  background: var(--n-5);
+  box-shadow: 0 0 0 1px var(--line-2);
+}
+.coordinator {
+  max-width: none;
+  font-weight: 600;
+}
+/* An aside's pill: its tab, then its ×, whose room is kept at rest so the pill never changes width as it shows. */
+.aside {
+  gap: 0;
+  padding: 0 3px 0 0;
+}
+.aside:hover {
+  color: var(--t-1);
+  background: var(--chip);
+}
+.aside[data-current] {
+  color: var(--t-1);
+  background: var(--n-5);
+  box-shadow: 0 0 0 1px var(--line-2);
+}
+.tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  padding: 4px 3px 4px 10px;
+  border-radius: 999px;
+  color: inherit;
+}
+.clear {
+  flex-shrink: 0;
+  display: grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 999px;
+  color: var(--t-3);
+  opacity: 0;
+  transition:
+    opacity var(--fast) var(--ease-out),
+    background-color var(--fast) var(--ease-out);
+}
+.aside:hover .clear,
+.aside[data-current] .clear,
+.clear:focus-visible {
+  opacity: 1;
+}
+.clear:hover {
+  color: var(--t-1);
+  background: var(--n-5);
+}
+.aside[data-current] .clear:hover {
+  background: var(--n-5-hover);
+}
+.title {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.older {
+  flex-shrink: 0;
+  padding: 4px 8px;
+  border-radius: var(--r);
+  color: var(--t-3);
+  font-size: 12px;
+}
+.older:hover,
+.older[aria-expanded='true'] {
+  color: var(--t-1);
+  background: var(--chip);
+}
+
+/* It floats over the conversation's end, as the run chips beside it do: on paper of its own, so what scrolls under it never shows through. */
+.moves {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+  max-width: 100%;
+  padding: 2px 10px 2px 2px;
+  border-radius: 99px;
+  background: var(--paper);
+  box-shadow:
+    inset 0 0 0 1px var(--line-2),
+    var(--lift-card);
+}
+.note {
+  margin-left: auto;
+  padding-left: 8px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: 11.5px;
+  color: var(--t-3);
+}

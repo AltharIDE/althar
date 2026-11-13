@@ -23,6 +23,11 @@ describe('A plan planned small', () => {
     expect(plannedSmall(plan([lead('low'), review(true), review(false)]))).toBe(false)
   })
 
+  it('keeps a labelled small change’s light lead in the lane without postponing its review', () => {
+    expect(plannedSmall(JSON.stringify({ smallChange: true, steps: [lead('low'), review(false)] }))).toBe(true)
+    expect(plannedSmall(JSON.stringify({ smallChange: true, steps: [lead('high'), review(false)] }))).toBe(false)
+  })
+
   it('is not one whose lead works harder, or at its agent’s own default', () => {
     for (const effort of ['medium', 'high', 'xhigh', 'max', null, undefined]) expect(plannedSmall(plan([lead(effort)]))).toBe(false)
   })

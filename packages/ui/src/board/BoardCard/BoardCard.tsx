@@ -4,8 +4,10 @@ import { Icon } from '../../foundations/Icon/Icon'
 import { TaskKind, TaskStatus, unreachable } from '../../foundations/vocabulary'
 import { cx } from '../../lib/cx'
 import type { RootProps } from '../../lib/props'
+import { LinkButton } from '../../primitives/LinkButton/LinkButton'
 import { LiveDot } from '../../primitives/LiveDot/LiveDot'
 import { NextSteps } from '../../primitives/NextStep/NextStep'
+import { Problem } from '../../primitives/Problem/Problem'
 import { StepTrack, type TrackItem } from '../../primitives/StepTrack/StepTrack'
 import { TaskGlyph } from '../../primitives/TaskGlyph/TaskGlyph'
 import { VisuallyHidden } from '../../primitives/VisuallyHidden/VisuallyHidden'
@@ -19,7 +21,8 @@ import s from './BoardCard.module.css'
  * what's next (only its next steps, in the strip at its foot, may be buttons
  * of their own, as NextStep says). Its top says where it stands in a word, in the lane's colour
  * (cobalt while it runs, violet when it needs you), then its kind's word,
- * then how long. Then its title, and, where the word isn't enough, why.
+ * then how long. Then its title, and, where the word isn't enough, why, or
+ * what went wrong, as a problem.
  * Under them, at most, its steps, one card in the card (the pull request,
  * the branch, what it handed back) and one fact. A task an automation's run
  * started says which, quietly, at its foot, as one another task's lead
@@ -50,6 +53,8 @@ export interface BoardCardText {
   from: (automation: string) => string
   /** The task whose lead started it (ADR-097). */
   startedBy: (task: string) => string
+  /** What comes before the parent's title, where the title opens the parent. */
+  startedByLead: string
   /** What its work goes into, where it isn't the default branch (ADR-093), for a screen reader: the card shows an arrow. */
   toward: (branch: string) => string
   /** How many changes it holds, where it holds several (a task is a conversation plus parts). */
@@ -58,13 +63,15 @@ export interface BoardCardText {
 
 export const boardCardText: BoardCardText = {
   kind: {
-    [TaskKind.Change]: 'Change',
+    // A change is the usual kind: unsaid, so the word only shows where a task is something else.
+    [TaskKind.Change]: '',
     [TaskKind.Review]: 'Review',
     [TaskKind.Plain]: '',
   },
   local: (kind) => (kind === '' ? 'Local' : `${kind} · Local`),
   from: (automation) => `From ${automation}`,
   startedBy: (task) => `Started by ${task}`,
+  startedByLead: 'Started by',
   toward: (branch) => `Toward ${branch}`,
   changes: (count) => `${count} changes`,
 }
@@ -82,10 +89,16 @@ export type BoardCardProps = RootProps<
     local?: boolean
     /** How long, or since when: 9m. */
     at?: string
+    /** What its open errands wait on, in a few plain words each, one line apiece: In the merge queue, Merges once checks pass. */
     errands?: readonly string[] | undefined
     title: string
     /** Under the title, where the word isn't enough to say why it needs you. */
     why?: string
+    /**
+     * What went wrong, where something did (Claude Code is signed out.): said as a problem, in place of `why`, first
+     * under the title. What fixes it goes in `next`, as a NextStep that does it (Sign in again).
+     */
+    problem?: string
     /** Its steps, where it has some worth seeing. */
     track?: readonly TrackItem[]
     /** The card in the card: what this kind makes, at a glance. */
@@ -107,6 +120,8 @@ export type BoardCardProps = RootProps<
     from?: string
     /** The task whose lead started it, by its title: said in a small line, as `from` is. */
     startedBy?: string
+    /** Opens the task whose lead started it: its title in that line is then a link, apart from the card's own press. */
+    onOpenStartedBy?: () => void
     /** The branch its work goes into, where it isn't the default (ADR-093): release/0.8.0, quietly, at its foot. */
     toward?: string
     /**
@@ -132,11 +147,11 @@ const markClass: Record<ChangeMarkTone, string | undefined> = {
   still: undefined,
 }
 
-/** The word's glyph: a live dot while it runs, none when it needs you (the violet says it), else the still state's own. */
+/** The word's glyph: a live dot while it runs, still, as a board is glanced at; none when it needs you (the violet says it), else the still state's own. */
 function Glyph({ status }: { status: TaskStatus }) {
   switch (status) {
     case TaskStatus.Running:
-      return <LiveDot pulse />
+      return <LiveDot />
     case TaskStatus.Yours:
       return null
     case TaskStatus.Queued:
@@ -149,6 +164,34 @@ function Glyph({ status }: { status: TaskStatus }) {
   }
 }
 
+/**
+ * Where a task came from, when another task's lead started it (ADR-097): a quiet line, with that task's title as a link where
+ * it opens it. On a card's foot, and under a plan up next, where there is no card yet.
+ */
+export function StartedBy({
+  task,
+  onOpen,
+  text,
+}: {
+  task: string
+  onOpen?: (() => void) | undefined
+  text?: Partial<BoardCardText> | undefined
+}) {
+  const t = { ...boardCardText, ...text }
+  return (
+    <p className={s.from}>
+      <Icon name="corner" size={11} />
+      {onOpen === undefined ? (
+        t.startedBy(task)
+      ) : (
+        <>
+          {t.startedByLead} <LinkButton onClick={onOpen}>{task}</LinkButton>
+        </>
+      )}
+    </p>
+  )
+}
+
 export function BoardCard({
   status = TaskStatus.Running,
   word,
@@ -158,6 +201,7 @@ export function BoardCard({
   title,
   errands,
   why,
+  problem,
   track,
   object,
   foot,
@@ -165,6 +209,7 @@ export function BoardCard({
   corner,
   from,
   startedBy,
+  onOpenStartedBy,
   toward,
   changes,
   marks,
@@ -179,24 +224,34 @@ export function BoardCard({
   const named = local ? t.local(own) : own
   return (
     <article className={cx(b.card, s.card, s[status], className)} aria-current={current || undefined} {...rest}>
-      <div className={b.top}>
+      {/* One line however narrow the lane: its kind gives way first, then its word; how long stays whole. */}
+      <div className={cx(b.top, s.top)}>
         <span className={s.word}>
           <Glyph status={status} />
-          {word}
+          <span className={s.cut}>{word}</span>
         </span>
-        {named !== '' && <span className={s.kind}>{named}</span>}
+        {named !== '' && <span className={cx(s.kind, s.cut)}>{named}</span>}
         {at !== undefined && at !== '' && <span className={b.at}>{at}</span>}
       </div>
       <CardTitle className={s.title} onOpen={onOpen}>
         {title}
       </CardTitle>
-      {why !== undefined && why !== '' && (
-        <p className={s.why} title={why}>
-          {why}
-        </p>
+      {problem !== undefined && problem !== '' ? (
+        <Problem size="small">
+          <span className={s.clamp} title={problem}>
+            {problem}
+          </span>
+        </Problem>
+      ) : (
+        why !== undefined &&
+        why !== '' && (
+          <p className={s.why} title={why}>
+            {why}
+          </p>
+        )
       )}
       {errands?.map((line) => (
-        <p className={s.why} key={line}>
+        <p className={s.errand} key={line} title={line}>
           {line}
         </p>
       ))}
@@ -231,12 +286,7 @@ export function BoardCard({
           {t.from(from)}
         </p>
       )}
-      {startedBy !== undefined && startedBy !== '' && (
-        <p className={s.from}>
-          <Icon name="corner" size={11} />
-          {t.startedBy(startedBy)}
-        </p>
-      )}
+      {startedBy !== undefined && startedBy !== '' && <StartedBy task={startedBy} onOpen={onOpenStartedBy} text={text} />}
       {next !== undefined && next !== null && next !== false && <NextSteps className={b.strip}>{next}</NextSteps>}
       {corner !== undefined && corner !== null && <div className={s.corner}>{corner}</div>}
     </article>

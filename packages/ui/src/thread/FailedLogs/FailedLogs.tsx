@@ -1,3 +1,4 @@
+import { Problem } from '../../primitives/Problem/Problem'
 import { Terminal } from '../Terminal/Terminal'
 import s from './FailedLogs.module.css'
 
@@ -49,14 +50,20 @@ export function FailedLogs({ logs, text }: FailedLogsProps) {
           {log.lines !== null ? (
             <Terminal lines={log.lines.slice(-SHOWN)} earlier={log.lines.slice(0, -SHOWN)} />
           ) : (
-            <p className={s.missing}>
-              <span>{t.missing(log.missing ?? '')}</span>
-              {log.url !== null && (
-                <a href={log.url} target="_blank" rel="noreferrer">
-                  {t.open}
-                </a>
-              )}
-            </p>
+            <Problem
+              size="small"
+              {...(log.url === null
+                ? {}
+                : {
+                    action: (
+                      <a className={s.open} href={log.url} target="_blank" rel="noreferrer">
+                        {t.open}
+                      </a>
+                    ),
+                  })}
+            >
+              {t.missing(log.missing ?? '')}
+            </Problem>
           )}
         </section>
       ))}

@@ -1,4 +1,5 @@
-import { render } from '@testing-library/react'
+import { render, screen } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import type { ReactNode } from 'react'
 
 import type { Client } from '../src/renderer/data/client'
@@ -24,3 +25,9 @@ export const useSettingsOf = (projectId: string): ProjectSettingsActions => ({
   model: useProjectSettings(projectId, () => undefined),
   onConnections: () => undefined,
 })
+
+/** Picks one of the Layout checks in a project's header's ⋯: a pane, to show or hide it, or which side the conversation is on. */
+export const pickLayout = async (name: 'Conversation' | 'Board' | 'Conversation on the right') => {
+  await userEvent.click(await screen.findByRole('button', { name: 'More' }))
+  await userEvent.click(await screen.findByRole('menuitemcheckbox', { name }))
+}

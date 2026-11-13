@@ -86,9 +86,6 @@ export const Sentences: Story = {
   ),
 }
 
-/** How to read them: what an underlined word is, and what code is. */
-export const Key: Story = { render: () => <CharterKey /> }
-
 /** A built-in word, opened: where it can sit, the current place checked, and what it catches at the foot. */
 export const WordOpen: Story = {
   decorators: [(Story) => <div style={{ minHeight: 380, fontSize: 18.5 }}>{Story()}</div>],

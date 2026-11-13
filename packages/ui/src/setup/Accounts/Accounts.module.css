@@ -22,23 +22,33 @@
   font-size: 12px;
   color: var(--t-3);
 }
+/* the lines share their columns, so each one's word stands in one column just past who they are, not across the width */
 .list {
+  display: grid;
+  /* a long name gives way, never the controls at the end, and leaves room for who it is */
+  grid-template-columns: 14px fit-content(40%) minmax(0, max-content) minmax(max-content, 1fr) 28px;
+  column-gap: 12px;
   margin: 0 -8px;
   padding: 0;
   list-style: none;
 }
-
-/* a line: number, name, who, a word at the end, its menu */
+/* a line: number, name, who, a word at the start of the room left, its menu */
 .row,
 .line {
   display: grid;
-  /* a long name gives way, never the controls at the end, and leaves room for who it is */
-  grid-template-columns: 14px fit-content(60%) minmax(0, 1fr) auto 28px;
   align-items: center;
   column-gap: 12px;
   min-height: 38px;
   padding: 0 4px 0 8px;
   border-radius: 8px;
+}
+.row {
+  grid-column: 1 / -1;
+  grid-template-columns: subgrid;
+}
+/* a sign-in's line (AccountSignIn), on its own: what it says reaches its close */
+.line {
+  grid-template-columns: 14px fit-content(60%) minmax(0, 1fr) auto 28px;
 }
 .row {
   transition: background var(--fast) var(--ease);
@@ -73,11 +83,10 @@
   grid-column: 4;
   font-size: 12px;
   color: var(--t-3);
-  text-align: right;
   white-space: nowrap;
 }
 .menu {
-  grid-column: 5;
+  grid-column: -2;
   display: flex;
   justify-content: flex-end;
 }
@@ -109,7 +118,6 @@
 .providers {
   display: inline-flex;
   flex-wrap: wrap;
-  justify-content: flex-end;
   align-items: center;
   gap: 2px 14px;
 }
@@ -133,8 +141,9 @@
   height: 28px;
 }
 
-/* a sign-in under way, in the line it is for */
+/* a sign-in under way, in the line it is for, across the list */
 .signing {
+  grid-column: 1 / -1;
   margin: 2px 0 6px;
 }
 
@@ -144,9 +153,12 @@
 }
 
 @container (max-width: 380px) {
-  .row,
+  .list,
   .line {
     grid-template-columns: 14px minmax(0, 1fr) auto 28px;
+  }
+  .row,
+  .line {
     row-gap: 1px;
     padding-block: 6px;
   }
@@ -166,9 +178,26 @@
   .end {
     grid-column: 3;
     grid-row: 1 / span 2;
+    text-align: right;
+  }
+  .providers {
+    justify-content: flex-end;
+  }
+  /* its sign-in, lined up with the words' right edges rather than their left */
+  .end .endAction {
+    margin-inline: 0 calc(-1 * var(--action-pad));
   }
   .menu {
     grid-column: 4;
     grid-row: 1 / span 2;
   }
+}
+/* when its sign-in ends, before its one word: given only within its last days, in the signal's colour */
+.endsWith {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 12px;
+}
+.ends {
+  color: var(--signal);
 }

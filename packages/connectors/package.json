@@ -19,7 +19,8 @@
     "verify": "bun run check && bun run test:coverage"
   },
   "dependencies": {
-    "effect": "4.0.7"
+    "effect": "4.0.7",
+    "graphql": "16.11.0"
   },
   "devDependencies": {
     "@althar/testing": "workspace:*",

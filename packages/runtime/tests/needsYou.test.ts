@@ -56,6 +56,16 @@ describe('a ready change that goes on by itself (DEV-173)', () => {
     assert.strictEqual(byItself(change({ checks: again })), 'checks_running')
   })
 
+  it('waits for known CI after a push before either the first check read or the first job appears', () => {
+    for (const unseen of [null, checks({ outcome: 'none', total: 0, passed: 0 })]) {
+      assert.strictEqual(byItself(change({ checks: unseen }), { checksAppearing: true }), 'checks_running')
+      // No known push, an expired grace or unreadable checks give no registration wait.
+      assert.isNull(byItself(change({ checks: unseen }), { checksAppearing: false }))
+      assert.isNull(byItself(change({ checks: unseen, conflicts: true }), { checksAppearing: true }))
+      assert.isNull(byItself(change({ checks: unseen, unpushed: 1 }), { checksAppearing: true }))
+    }
+  })
+
   it("is the person's where a conflict, a failure or a parted branch comes before the checks running", () => {
     assert.isNull(byItself(change({ checks: running, conflicts: true })))
     assert.isNull(byItself(change({ checks: checks({ outcome: 'failed', failed: 1, running: 1, failing: ['test'] }) })))

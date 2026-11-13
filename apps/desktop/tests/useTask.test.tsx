@@ -126,6 +126,26 @@ describe('a task before its thread is read', () => {
   })
 })
 
+describe('opening the task’s first or next pull request', () => {
+  it.each(['draft', 'ready'] as const)('runs Ship for work whose ending is %s instead of publishing around its review', async (end) => {
+    const { result, client, unmount } = reading({ task: { ...snapshot().task, end, phase: 'ready', commits: 9 } })
+    await waitFor(() => expect(result.current.snapshot).not.toBeNull())
+    await act(() => result.current.openChange())
+    expect(client.ship).toHaveBeenCalledWith('t1')
+    expect(client.openChange).not.toHaveBeenCalled()
+    unmount()
+  })
+
+  it('keeps opening a draft directly for a prototype whose work ends on its branch', async () => {
+    const { result, client, unmount } = reading({ task: { ...snapshot().task, end: 'none', phase: 'ready', commits: 9 } })
+    await waitFor(() => expect(result.current.snapshot).not.toBeNull())
+    await act(() => result.current.openChange())
+    expect(client.openChange).toHaveBeenCalledWith('t1')
+    expect(client.ship).not.toHaveBeenCalled()
+    unmount()
+  })
+})
+
 describe('what a task hears', () => {
   it('keeps its launches where the project’s runs that changed are another project’s', async () => {
     const launch = {
@@ -195,6 +215,17 @@ describe('what a task hears', () => {
     await waitFor(() => expect(client.getThread).toHaveBeenCalledWith('th1', { limit: 0 }))
   })
 
+  it('says nothing of an item its thread keeps for Althar alone, such as what its lead could see: it draws nothing of it', async () => {
+    // Its lead's session starting writes a line of the skills it could see, which the window hears of but never shows.
+    const { result, emit, client } = reading({ items: [items.says('Hi.'), { ...items.says('Kept for Althar'), id: 'k1' }] })
+    await waitFor(() => expect(result.current.snapshot).not.toBeNull())
+    vi.mocked(client.getThreadItem).mockResolvedValue(null)
+    act(() => emit(changed('thread_item', 'k1')))
+    await waitFor(() => expect(result.current.snapshot?.items.map((item) => item.id)).not.toContain('k1'))
+    expect(client.getThreadItem).toHaveBeenCalledWith('th1', 'k1')
+    expect(result.current.error).toBeNull()
+  })
+
   it('reads again what still waits its turn once a message is delivered', async () => {
     const queued = { ...items.you('Then the docs', { state: 'queued', interrupting: false }), id: 'q1' }
     const { result, emit, client } = reading({ items: [items.says('On it.'), queued] })
@@ -237,6 +268,44 @@ describe('what the person does on a task', () => {
     await act(() => result.current.choose({ agentId: 'codex', model: 'gpt-5.2', effort: null }))
     expect(client.startSession).toHaveBeenCalledWith({ threadId: 'th1', agentId: 'codex', model: 'gpt-5.2' })
     expect(client.setModel).not.toHaveBeenCalled()
+  })
+
+  it('sends a pick back to the model the lead is on while another is held for its next turn', async () => {
+    const base = snapshot().session!
+    const { result, client } = reading({
+      session: { ...base, model: 'opus', effort: 'high', nextLead: { agentId: base.agentId, model: 'sonnet', effort: null } },
+    })
+    await waitFor(() => expect(result.current.snapshot).not.toBeNull())
+    await act(() => result.current.choose({ agentId: base.agentId, model: 'opus', effort: 'high' }))
+    expect(client.setModel).toHaveBeenCalledWith({ threadId: 'th1', model: 'opus' })
+    expect(client.setEffort).not.toHaveBeenCalled()
+  })
+
+  it('sends a pick back to the model the lead is on, made after the first was taken and before the head read lands', async () => {
+    const base = snapshot().session!
+    const on = { agentId: base.agentId, model: 'opus', effort: 'high' }
+    let slow = false
+    const releases: Array<() => void> = []
+    const { client, ...view } = (() => {
+      const fake = fakeClient({
+        getThread: vi.fn(async () => {
+          if (slow) await new Promise<void>((resolve) => releases.push(resolve))
+          return snapshot({ session: { ...base, ...on } })
+        }),
+      })
+      return { ...fake, ...hook(fake.client) }
+    })()
+    await waitFor(() => expect(view.result.current.snapshot).not.toBeNull())
+    slow = true
+    act(() => void view.result.current.choose({ ...on, model: 'sonnet' }))
+    await waitFor(() => expect(client.setModel).toHaveBeenCalledWith({ threadId: 'th1', model: 'sonnet' }))
+    // The first is taken, and the thread isn't read again yet: still as it was, on the model the pick goes back to.
+    await waitFor(() => expect(releases.length).toBeGreaterThan(0))
+    act(() => void view.result.current.choose(on))
+    await waitFor(() => expect(client.setModel).toHaveBeenLastCalledWith({ threadId: 'th1', model: 'opus' }))
+    expect(client.setModel).toHaveBeenCalledTimes(2)
+    slow = false
+    await act(async () => releases.forEach((release) => release()))
   })
 
   it('shows why Try again was refused instead of silently accepting the click', async () => {

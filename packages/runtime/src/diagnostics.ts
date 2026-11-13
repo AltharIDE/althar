@@ -57,12 +57,23 @@ const READS =
 const NAMED = /(?<![\w.-])(?=([\w.-]+))\1(\s*["']?\s*[:=]\s*)(?:"[^"\n]*"|'[^'\n]*'|[^\s,;]+)/g
 const SECRET_NAME = /api[_-]?key|token|secret|passw(?:or)?d|credential|^authorization$/i
 
-/** Best-effort: a credential it doesn't recognise stays. */
-const redact = (text: string) =>
+/** A credential in a URL's query, as Google's carry a key (`?key=AIza…`): read before `NAMED`, which takes a whole URL as one value. */
+const QUERY_SECRET = /([?&](?:key|api[_-]?key|access[_-]?token|token|secret|sig|signature)=)[^&\s#"']+/gi
+
+/**
+ * What looks like a credential, taken out: from a failed command's output, and
+ * from the line of an agent's own an error shows (words.ts). Best-effort: a
+ * credential it doesn't recognise stays.
+ */
+export const redact = (text: string) =>
   text
     .replace(/-----BEGIN [^-]*PRIVATE KEY-----[\s\S]*?(?:-----END [^-]*PRIVATE KEY-----|$)/g, '[REDACTED PRIVATE KEY]')
     .replace(/\b(Bearer|Basic)\s+[A-Za-z0-9+/_.=-]+/gi, '$1 [REDACTED]')
-    .replace(/\b(?:sk-[A-Za-z0-9_-]{8,}|gh[pousr]_[A-Za-z0-9_]{12,}|github_pat_[A-Za-z0-9_]{20,}|AKIA[A-Z0-9]{16}\b)/g, '[REDACTED]')
+    .replace(
+      /\b(?:sk-[A-Za-z0-9_-]{8,}|gh[pousr]_[A-Za-z0-9_]{12,}|github_pat_[A-Za-z0-9_]{20,}|AKIA[A-Z0-9]{16}\b|AIza[0-9A-Za-z_-]{35})/g,
+      '[REDACTED]',
+    )
+    .replace(QUERY_SECRET, '$1[REDACTED]')
     .replace(NAMED, (pair, name: string, between: string) => (SECRET_NAME.test(name) ? `${name}${between}[REDACTED]` : pair))
     .replace(/(https?:\/\/)[^\s/@:]+:[^\s/@]+@/gi, '$1[REDACTED]@')
 

@@ -13,31 +13,25 @@ const meta = {
 export default meta
 type Story = StoryObj<typeof meta>
 
-/** The repository has a template: the lead fills it in. */
-export const HasATemplate: Story = {}
+/* Each state over the default, a repository with a template the lead fills in. */
+// No template: Althar writes its own description.
+const NO_TEMPLATE = [{ id: 'api', name: 'api', path: null }]
+// Several repositories, each with its own.
+const SEVERAL = [
+  { id: 'api', name: 'api', path: '.github/pull_request_template.md' },
+  { id: 'web', name: 'web', path: '.gitlab/merge_request_templates/Default.md' },
+  { id: 'docs', name: 'docs', path: null },
+]
 
-/** No template: Althar writes its own description. */
-export const NoTemplate: Story = { args: { repositories: [{ id: 'api', name: 'api', path: null }] } }
-
-/** Several repositories, each with its own. */
-export const SeveralRepositories: Story = {
-  args: {
-    repositories: [
-      { id: 'api', name: 'api', path: '.github/pull_request_template.md' },
-      { id: 'web', name: 'web', path: '.gitlab/merge_request_templates/Default.md' },
-      { id: 'docs', name: 'docs', path: null },
-    ],
-  },
-}
-
+/** Every state: a repository with a template, one without, and several, each with its own. */
 export const AllStates: Story = {
   render: (args) => (
     <States
       size="wide"
       cells={[
         { state: 'has a template', node: <TemplateSources {...args} /> },
-        { state: 'no template', node: <TemplateSources {...args} {...NoTemplate.args} /> },
-        { state: 'several repositories', node: <TemplateSources {...args} {...SeveralRepositories.args} /> },
+        { state: 'no template', node: <TemplateSources {...args} repositories={NO_TEMPLATE} /> },
+        { state: 'several repositories', node: <TemplateSources {...args} repositories={SEVERAL} /> },
       ]}
     />
   ),

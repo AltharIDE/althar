@@ -15,16 +15,25 @@
   grid-template-columns: minmax(0, 560px);
 }
 .shot {
+  position: relative;
   display: flex;
   flex-direction: column;
   width: 100%;
   overflow: hidden;
   border-radius: 10px;
   background: var(--paper);
-  box-shadow: inset 0 0 0 1px var(--line-2);
   text-align: left;
 }
-.shot:hover {
+/* its edge drawn over the picture, so a picture, or the place of one that couldn't be shown, never covers it */
+.shot::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  box-shadow: inset 0 0 0 1px var(--line-2);
+  pointer-events: none;
+}
+.shot:hover::after {
   box-shadow: inset 0 0 0 1px var(--line-3);
 }
 .shot:active {
@@ -35,7 +44,7 @@
   aspect-ratio: 16 / 10;
   overflow: hidden;
   border-bottom: 1px solid var(--line);
-  background: var(--n-2);
+  background: var(--well);
   transition: filter var(--fast) var(--ease);
 }
 .shot:hover .image {
@@ -60,8 +69,8 @@
 .still {
   margin: 0;
 }
-.still:hover {
-  box-shadow: none;
+.still:hover::after {
+  box-shadow: inset 0 0 0 1px var(--line-2);
 }
 .still:active {
   transform: none;

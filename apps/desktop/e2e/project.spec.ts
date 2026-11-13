@@ -43,8 +43,8 @@ test('renames a project, adds and leaves out a repository, and removes it, all w
     const before = [asLeft(meridian), asLeft(web)]
 
     // Its header's ⋯ says what it is made of, and never where it is.
-    await page.getByRole('button', { name: 'Made of' }).click()
-    await expect(page.getByRole('menu', { name: 'Made of' }).getByRole('menuitem')).toHaveText([/^meridian/])
+    await page.getByRole('button', { name: 'More', exact: true }).click()
+    await expect(page.getByRole('menu', { name: 'More' }).getByRole('menuitem')).toHaveText([/^meridian/])
     await page.keyboard.press('Escape')
     await expect(page.getByText(meridian)).toHaveCount(0)
 

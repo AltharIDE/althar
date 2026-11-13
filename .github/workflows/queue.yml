@@ -14,10 +14,14 @@ name: queue
 # request in its group. A change that reaches the runtime runs its coverage gate here too (harness.yml). Windows' unit
 # tests, the other packages' coverage and the packages run after merge, in post-merge.yml.
 #
-# Main's rules require one check, `merge queue`. On a pull request it passes at once, the pull request's own checks
-# being the ones that say how it stands; in the queue, it passes once every check that ran there did.
+# Main's rules require one check, `merge queue`. On a pull request it passes once the pull request's own stress run
+# has (or it has none), and the Windows smoke test hasn't failed: waited for here, on the pull request, a stress run
+# no longer holds the queue, where every entry behind a waiting one waited too. In the
+# queue, it passes once every check that ran there did, and the stress run it reads again has long finished.
 on:
   pull_request:
+    # And when a draft is ready for review, which is when its stress run starts (stress.yml).
+    types: [opened, synchronize, reopened, ready_for_review]
   merge_group:
 
 permissions:
@@ -43,6 +47,7 @@ jobs:
       site: ${{ steps.paths.outputs.site }}
       brand: ${{ steps.paths.outputs.brand }}
       report: ${{ steps.paths.outputs.report }}
+      windows: ${{ steps.paths.outputs.windows }}
     steps:
       - uses: actions/checkout@v5
       - uses: oven-sh/setup-bun@v2
@@ -50,7 +55,7 @@ jobs:
           bun-version-file: .bun-version
       # What this entry and those ahead of it add to main: what lands if this build passes.
       - env:
-          BASE: ${{ github.event.merge_group.base_ref }}
+          BASE: ${{ github.event.merge_group.base_sha }}
         run: |
           git fetch --no-tags --depth=1 origin "$BASE"
           git diff --name-only --no-renames FETCH_HEAD HEAD > "$RUNNER_TEMP/changed"
@@ -58,7 +63,7 @@ jobs:
         run: |
           bun -e '
             const changed = (await Bun.file(`${process.env.RUNNER_TEMP}/changed`).text()).split("\n").filter(Boolean)
-            for (const name of ["desktop", "harness", "ui", "site", "brand", "report"]) {
+            for (const name of ["desktop", "harness", "ui", "site", "brand", "report", "windows"]) {
               const workflow = Bun.YAML.parse(await Bun.file(`.github/workflows/${name}.yml`).text())
               const globs = workflow.on.pull_request.paths.map((path) => new Bun.Glob(path))
               console.log(`${name}=${changed.some((file) => globs.some((glob) => glob.match(file)))}`)
@@ -74,6 +79,11 @@ jobs:
     needs: changes
     if: needs.changes.outputs.harness == 'true'
     uses: ./.github/workflows/harness.yml
+
+  windows:
+    needs: changes
+    if: needs.changes.outputs.windows == 'true'
+    uses: ./.github/workflows/windows.yml
 
   ui:
     needs: changes
@@ -98,7 +108,7 @@ jobs:
   # The one check main's rules require: passes when nothing that ran failed. On a pull request, nothing above runs.
   merge-queue:
     name: merge queue
-    needs: [changes, desktop, harness, ui, site, brand, report]
+    needs: [changes, desktop, harness, ui, site, brand, report, windows]
     if: ${{ !cancelled() }}
     runs-on: ubuntu-24.04
     # Long enough to wait out a stress run still going, whose own jobs take 75 minutes at most.
@@ -122,23 +132,22 @@ jobs:
       # Stress and Windows' smoke test run on the pull request alone, so one that failed on a pull request's own head
       # keeps it out: this entry's, and those ahead of it, which merge with it if this build passes. Not run is fine; a
       # stress run still going is waited for, read again every 30 s, as its failure would come after the group merged.
+      - uses: actions/checkout@v5
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: .bun-version
       - if: github.event_name == 'merge_group'
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
+          BASE_SHA: ${{ github.event.merge_group.base_sha }}
         run: |
-          prs="$(gh api "repos/$GH_REPO/compare/main...$GITHUB_SHA" --jq '.commits[].commit.message | split("\n")[0] | capture("\\(#(?<n>[0-9]+)\\)$").n')"
-          for pr in $prs; do
-            head="$(gh api "repos/$GH_REPO/pulls/$pr" --jq .head.sha)"
-            until read -r status stress < <(gh api "repos/$GH_REPO/actions/workflows/stress.yml/runs?head_sha=$head&per_page=1" \
-              --jq '.workflow_runs[0] | "\(.status // "none") \(.conclusion // "")"') && [[ $status == completed || $status == none ]]; do
-              echo "#$pr's stress run is ${status:-unread}: waiting for it"
-              sleep 30
-            done
-            smoke="$(gh api "repos/$GH_REPO/commits/$head/check-runs?check_name=windows-e2e" --jq '.check_runs[0].conclusion // ""')"
-            echo "#$pr at ${head::8}: stress ${stress:-not run}, smoke test ${smoke:-not run}"
-            if [ "$stress" = failure ] || [ "$smoke" = failure ]; then
-              echo "::error::#$pr's stress run or Windows' smoke test failed on its own head: fix it on its branch."
-              exit 1
-            fi
-          done
+          python3 -m unittest discover -s .github/scripts -p 'test_*.py'
+          python3 .github/scripts/queue-stress.py
+      # On the pull request, its own stress run is waited for here, so auto-merge queues it only once that has passed.
+      - if: github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+        run: python3 .github/scripts/queue-stress.py "$PR"

@@ -1,12 +1,13 @@
 import type { ReactNode } from 'react'
 
-import type { HomeCall, HomeTask } from '@althar/contracts'
+import { type HomeCall, type HomeTask, issuesWordOf } from '@althar/contracts'
 import { Button, type EdgeWork, Fact, LinkButton, NeedLine, type ProjectRef } from '@althar/ui'
 
 import { commandOf, titleOf } from '../../shared/callCommand'
-import { askOf, callKindOf, isUnshipped, kindWords, readyKindOf, whereOf } from '../../shared/calls'
+import { askOf, callKindOf, isUnshipped, kindWords, whereOf } from '../../shared/calls'
 import type { Reply } from '../../shared/permissions'
 import { briefOf as questionBrief } from '../../shared/questions'
+import { stepText } from '../../shared/steps'
 import {
   doingWords,
   doneHere,
@@ -17,6 +18,8 @@ import {
   nextWords,
   standingOf,
   afterMergeText,
+  readyText,
+  readyWordOf,
   shipText,
   standingText,
 } from '../../shared/standing'
@@ -53,6 +56,8 @@ export const needText = {
   deny: 'Deny',
   look: 'Open',
   review: 'Review',
+  /** A stuck step whose agent is signed out: Settings, at its sign-in, started. */
+  signIn: 'Sign in again',
   /** An agent's question, opened where it was asked to answer it. */
   answer: 'Answer',
   /** A change on its branch alone, by its size. */
@@ -80,6 +85,10 @@ export interface Need {
   readonly brief?: string
   /** A permission, which is answered in place. */
   readonly permission?: HomeCall
+  /** What its button says where it only opens its task, where that isn't Open: Review, for work to look over and accept. */
+  readonly opens?: string
+  /** A step stuck on its agent's sign-in, by the agent's id: its line signs it in again, as the task's card does. */
+  readonly signIn?: string
   /** A ready change: the task, and the one next thing its pull request needs, done from its line where the place offers it. */
   readonly ready?: { readonly task: HomeTask; readonly next: Next }
   /** Answered here: which way, what was said, and where it was kept or what to do instead. */
@@ -180,10 +189,15 @@ export const nextOf = (task: HomeTask): Next | null =>
         ? null
         : standingOf(task.change).next
 
-/** The calls first, then the tasks ready to accept; any in a project not known yet waits until it is. */
+/**
+ * The calls first, then the tasks that wait on issues to file, those whose lead stopped, then the tasks ready to accept; any in
+ * a project not known yet waits until it is.
+ */
 export const needsOf = ({
   calls,
   answered = [],
+  issues = [],
+  stopped = [],
   ready,
   refs,
   agentName,
@@ -193,6 +207,10 @@ export const needsOf = ({
   calls: ReadonlyArray<HomeCall>
   /** Calls answered here: each stays where it was, among the others, as it was answered. */
   answered?: ReadonlyArray<AnsweredCall>
+  /** Tasks that wait on issues their lead drafted, or changes to their issue, for the person to file or apply. */
+  issues?: ReadonlyArray<HomeTask>
+  /** Tasks whose lead stopped with no agent on them, which wait for the person to carry on or abandon, as on the board. */
+  stopped?: ReadonlyArray<HomeTask>
   ready: ReadonlyArray<HomeTask>
   refs: ReadonlyMap<string, ProjectRef>
   agentName: (id: string | null) => string
@@ -252,7 +270,31 @@ export const needsOf = ({
               stuck.step === 'publish' && stuck.why !== 'not_connected'
                 ? stuckText.publishing(stuck)
                 : stuckText.what(stuck, agentName(stuck.agentId) || 'The agent'),
+            ...((stuck.why === 'signed_out' || stuck.why === 'sign_in_ended') && stuck.agentId !== null ? { signIn: stuck.agentId } : {}),
           },
+    ]
+  }),
+  // Issues to file, or changes to apply, in its task, where its lead drafted them.
+  ...issues.flatMap((task): ReadonlyArray<Need> => {
+    const project = refs.get(task.projectId)
+    return project === undefined
+      ? []
+      : [{ id: task.taskId, threadId: task.threadId, kind: issuesWordOf(task.issues), project, title: task.title }]
+  }),
+  // Stopped, as its card in the board's Needs you says it: the word, and what stopped its lead, where something says.
+  ...stopped.flatMap((task): ReadonlyArray<Need> => {
+    const project = refs.get(task.projectId)
+    if (project === undefined) return []
+    const by = task.stopped?.by
+    return [
+      {
+        id: task.taskId,
+        threadId: task.threadId,
+        kind: kindWords.stopped,
+        project,
+        title: task.title,
+        ...(by == null ? {} : { brief: stepText.stoppedBy[by] }),
+      },
     ]
   }),
   ...ready.flatMap((task): ReadonlyArray<Need> => {
@@ -262,11 +304,13 @@ export const needsOf = ({
     const next = nextOf(task)
     // Its conflict not asked of its lead (the person turned that off, say): why, beside the button, never the button alone.
     const brief = task.checksBack ?? task.handedBack ?? unsentBriefOf(task) ?? briefOf(task)
+    const word = readyWordOf(task)
     return [
       {
         id: task.taskId,
         threadId: task.threadId,
-        kind: readyKindOf(task),
+        kind: word,
+        ...(reviews(task, word) ? { opens: needText.review } : {}),
         project,
         title: task.title,
         ...(brief === undefined ? {} : { brief }),
@@ -275,6 +319,17 @@ export const needsOf = ({
     ]
   }),
 ]
+
+/** The words of a change whose pull request, or branch, stands to be looked over and accepted. */
+const TO_ACCEPT: ReadonlySet<string> = new Set([kindWords.ready, readyText.blocked, readyText.readyOnPush, readyText.checksRunning])
+
+/**
+ * Whether a ready task's line opens it to review: a review drafted, or a change to look over and accept, whatever stands in
+ * its way. Not what its lead handed back, a conflict or failing checks, which its task is where it is settled, as its card on
+ * the board opens it, and not what else of it is the person's (its lead's answer, what waits for Ship, what a review found).
+ */
+const reviews = (task: HomeTask, word: string) =>
+  word === kindWords.drafted || (task.handedBack == null && task.checksBack == null && TO_ACCEPT.has(word))
 
 /** A permission's Allow once on its line: what Enter gives, where focus is put on it. */
 export const DEFAULT_ANSWER = '[data-default-answer]'
@@ -295,6 +350,7 @@ export function needLineOf(
     onNext,
     doing,
     failed,
+    onSignIn,
   }: {
     onOpen: (threadId: string) => void
     onAnswer: (call: HomeCall, project: ProjectRef, decision: 'allow' | 'reject') => void
@@ -306,6 +362,8 @@ export function needLineOf(
     doing?: (taskId: string) => boolean
     /** What last failed for a task's push or merge, to say in its line and offer to try again. */
     failed?: (taskId: string) => ActionFailure | undefined
+    /** Opens Settings at an agent's sign-in, started: a stuck step's line whose agent is signed out offers it. */
+    onSignIn?: (agentId: string) => void
   },
 ): ReactNode {
   const open = () => onOpen(need.threadId)
@@ -372,13 +430,14 @@ export function needLineOf(
               {doing?.(ready.task.taskId) === true ? doingWords(here) : why === null ? nextWords(here) : standingText.nextFailed.again}
             </Button>
           )
+        ) : need.signIn !== undefined && onSignIn !== undefined ? (
+          // What puts it right, as the task's card offers first; once signed in, its task's Try again picks up where it stopped.
+          <Button size="small" onClick={() => onSignIn(need.signIn ?? '')}>
+            {needText.signIn}
+          </Button>
         ) : permission === undefined ? (
           <Button size="small" {...(need.kind === kindWords.question ? { variant: 'signal' as const } : {})} onClick={open}>
-            {need.kind === kindWords.ready || need.kind === kindWords.drafted
-              ? needText.review
-              : need.kind === kindWords.question
-                ? needText.answer
-                : needText.look}
+            {need.opens ?? (need.kind === kindWords.question ? needText.answer : needText.look)}
           </Button>
         ) : answers !== undefined ? (
           answers(permission, need.project)
@@ -398,9 +457,11 @@ export function needLineOf(
   )
 }
 
-/** The work in progress, counted, for the edge's one line: how much, and of it, how much is held for a reset or stopped. */
+/**
+ * The work in progress, counted, for the edge's one line: how much, and of it, how much is held for a reset. A task whose lead
+ * stopped isn't in progress: it waits on the person, among what needs them, as on the board.
+ */
 export const workOf = (working: ReadonlyArray<HomeTask>): EdgeWork => ({
   inProgress: working.length,
   held: working.filter((task) => task.waits !== null).length,
-  stopped: working.filter((task) => task.phase === 'stopped').length,
 })

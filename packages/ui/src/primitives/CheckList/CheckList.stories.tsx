@@ -36,8 +36,6 @@ export const Default: Story = {
   },
 }
 
-export const Disabled: Story = { args: { disabled: true } }
-
 function KeepingOne() {
   const [v, setV] = useState<readonly string[]>(['prod', 'main'])
   return <CheckList label="Accounts this project may use" items={ITEMS} value={v} onChange={setV} keepOne />

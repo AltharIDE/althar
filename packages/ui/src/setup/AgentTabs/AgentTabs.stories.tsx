@@ -9,6 +9,8 @@ import { Accounts } from '../Accounts/Accounts'
 import { AgentInstall } from '../AgentInstall/AgentInstall'
 import { ControlDetail } from '../ControlCenter/ControlCenter'
 import { ModelSwitches } from '../ModelSwitches/ModelSwitches'
+import { SettingsLayout } from '../SettingsLayout/SettingsLayout'
+import { SettingsNav } from '../SettingsNav/SettingsNav'
 import { type AgentTab, AgentTabList, AgentTabPanel, AgentTabs, type AgentTabsProps } from './AgentTabs'
 
 const onValueChange = fn()
@@ -28,7 +30,14 @@ function Agents({
   const [value, setValue] = useState(start)
   const chosen = agents.find((agent) => agent.id === value)
   return (
-    <div style={{ width, padding: 12, borderRadius: 20, background: 'var(--frost)' }}>
+    <div
+      style={{
+        width,
+        padding: 12,
+        borderRadius: 20,
+        background: 'var(--frost)',
+      }}
+    >
       <AgentTabs
         value={value}
         onValueChange={(id) => {
@@ -46,7 +55,9 @@ function Agents({
             <AgentTabPanel
               agent={chosen}
               {...(models
-                ? { aside: <ModelSwitches agent={chosen.name} models={CODEX_MODELS} off={['gpt-5-mini']} onChange={fn()} /> }
+                ? {
+                    aside: <ModelSwitches agent={chosen.name} models={CODEX_MODELS} off={['gpt-5-mini']} onChange={fn()} />,
+                  }
                 : {})}
             >
               {chosen.away ? (
@@ -115,13 +126,48 @@ export const ManyAgents: Story = {
       models={false}
       agents={[
         ...AGENT_TABS,
-        { id: 'copilot', name: 'GitHub Copilot', brand: Brand.GitHubCopilot, line: '1.0.98', away: true },
-        { id: 'antigravity', name: 'Google Antigravity', brand: Brand.Antigravity, line: 'Google', away: true },
+        {
+          id: 'copilot',
+          name: 'GitHub Copilot',
+          brand: Brand.GitHubCopilot,
+          line: '1.0.98',
+          away: true,
+        },
+        {
+          id: 'antigravity',
+          name: 'Google Antigravity',
+          brand: Brand.Antigravity,
+          line: 'Google',
+          away: true,
+        },
         { id: 'junie', name: 'Junie', brand: Brand.Junie, away: true },
-        { id: 'grok', name: 'Grok Build', brand: Brand.XAI, line: 'xAI', away: true },
-        { id: 'kimi', name: 'Kimi Code', brand: Brand.Moonshot, line: 'Moonshot AI', away: true },
-        { id: 'mistral-vibe', name: 'Mistral Vibe', brand: Brand.Mistral, line: 'Mistral AI', away: true },
-        { id: 'qwen-code', name: 'Qwen Code', brand: Brand.Alibaba, away: true },
+        {
+          id: 'grok',
+          name: 'Grok Build',
+          brand: Brand.XAI,
+          line: 'xAI',
+          away: true,
+        },
+        {
+          id: 'kimi',
+          name: 'Kimi Code',
+          brand: Brand.Moonshot,
+          line: 'Moonshot AI',
+          away: true,
+        },
+        {
+          id: 'mistral-vibe',
+          name: 'Mistral Vibe',
+          brand: Brand.Mistral,
+          line: 'Mistral AI',
+          away: true,
+        },
+        {
+          id: 'qwen-code',
+          name: 'Qwen Code',
+          brand: Brand.Alibaba,
+          away: true,
+        },
       ]}
     />
   ),
@@ -134,6 +180,53 @@ export const ManyAgents: Story = {
     await expect(c.getByRole('heading', { name: 'Google Antigravity', level: 3 })).toBeInTheDocument()
     await expect(c.getByText('Google')).toBeInTheDocument()
   },
+}
+
+/* The tabs and the chosen agent as Settings puts them: over the sheet, on the section's own. */
+function InSettingsPage({ value: start = 'codex' }: { value?: string }) {
+  const [value, setValue] = useState(start)
+  const chosen = AGENT_TABS.find((agent) => agent.id === value)
+  return (
+    <SettingsLayout
+      section="agents"
+      title="Agents"
+      side={
+        <SettingsNav
+          label="Settings"
+          groups={[
+            [
+              { id: 'general', title: 'General', icon: 'gear' },
+              { id: 'agents', title: 'Agents', icon: 'agents', yours: true },
+            ],
+          ]}
+          value="agents"
+          onChange={fn()}
+        />
+      }
+    >
+      <AgentTabs value={value} onValueChange={setValue}>
+        {/* The app's own spacing between the tabs and the sheet. */}
+        <div style={{ display: 'grid', gap: 16 }}>
+          <AgentTabList label="Agents" agents={AGENT_TABS} />
+          {chosen && (
+            <AgentTabPanel
+              agent={chosen}
+              headingLevel={2}
+              aside={<ModelSwitches agent={chosen.name} models={CODEX_MODELS} off={['gpt-5-mini']} onChange={fn()} />}
+            >
+              <Accounts agent={chosen.name} accounts={ACCOUNTS} onSignIn={fn()} onAdd={fn()} />
+            </AgentTabPanel>
+          )}
+        </div>
+      </AgentTabs>
+    </SettingsLayout>
+  )
+}
+
+/** Where the person meets it: on Settings' own sheet, the tabs over the chosen agent's. */
+export const InSettings: Story = {
+  parameters: { layout: 'fullscreen' },
+  render: () => <InSettingsPage />,
 }
 
 /** A value that names no agent shows the tabs alone. */
@@ -153,7 +246,11 @@ const tabs = (args: Pick<AgentTabsProps, 'value'>) => (
 
 /** Every state: a tab hovered, focused and pressed, and the sheet where there is little room, its models under its accounts. */
 export const AllStates: Story = {
-  parameters: statesOn({ hover: '[role=tab]:first-child', focus: '[role=tab]:first-child', pressed: '[role=tab]:first-child' }),
+  parameters: statesOn({
+    hover: '[role=tab]:first-child',
+    focus: '[role=tab]:first-child',
+    pressed: '[role=tab]:first-child',
+  }),
   render: () => (
     <States
       size="wide"

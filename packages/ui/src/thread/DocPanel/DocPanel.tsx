@@ -1,5 +1,6 @@
 import { ActionButton } from '../../primitives/ActionButton/ActionButton'
 import { CopyButton, type CopyButtonText } from '../../primitives/CopyButton/CopyButton'
+import { Problem } from '../../primitives/Problem/Problem'
 import { Skeleton } from '../../primitives/Skeleton/Skeleton'
 import { Markdown } from '../Markdown/Markdown'
 import type { DocRef } from '../Shell/Shell'
@@ -63,7 +64,9 @@ export function DocPanel({ doc, onClose, onOpen, loading = false, error, text }:
             <Skeleton width="72%" />
           </div>
         ) : error !== undefined ? (
-          <p className={s.said}>{error}</p>
+          <Problem banner className={s.problem}>
+            {error}
+          </Problem>
         ) : readable ? (
           <Markdown source={doc.body} size="panel" />
         ) : (

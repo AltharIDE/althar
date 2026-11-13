@@ -1,4 +1,5 @@
-import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, rmSync, writeFileSync } from 'node:fs'
+import { removeTreeSync } from '@althar/testing'
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -146,7 +147,7 @@ describe('accounts', () => {
       const definition = (yield* (yield* Agents).get('claude-code')).definition
       const usual = definition.home.usual({}, '')
       // The usual folder is the whole file's: the person's skills in it are this test's alone.
-      yield* Effect.addFinalizer(() => Effect.sync(() => rmSync(join(usual, 'skills'), { recursive: true, force: true })))
+      yield* Effect.addFinalizer(() => Effect.sync(() => removeTreeSync(join(usual, 'skills'))))
       mkdirSync(join(usual, 'skills', 'mine'), { recursive: true })
       const [account] = yield* accounts.of('claude-code')
       if (account === undefined) return assert.fail('Claude Code has its usual account')
@@ -338,7 +339,7 @@ describe('accounts', () => {
       // As OpenCode's data folder: its sign-in stays the account's, other tools' data is shared.
       const usualFolder = (yield* (yield* Agents).get('opencode')).definition.home.usual({}, '')
       // The usual folder lasts the run: what an earlier run of this test left there goes first.
-      rmSync(join(usualFolder, 'pnpm'), { recursive: true, force: true })
+      removeTreeSync(join(usualFolder, 'pnpm'))
       mkdirSync(join(usualFolder, 'mise'), { recursive: true })
       writeFileSync(join(usualFolder, 'auth.json'), '{}')
       const own = yield* accounts.add({ agentId: 'opencode', name: 'second' })

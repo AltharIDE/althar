@@ -6,6 +6,7 @@ import { ActionButton } from '../../primitives/ActionButton/ActionButton'
 import { IconButton } from '../../primitives/IconButton/IconButton'
 import { LinkButton } from '../../primitives/LinkButton/LinkButton'
 import { NoteForm } from '../../primitives/NoteForm/NoteForm'
+import { Problem } from '../../primitives/Problem/Problem'
 import { SidePanel, SidePanelTitle, sidePanelText, type SidePanelText } from '../../primitives/SidePanel/SidePanel'
 import { Skeleton } from '../../primitives/Skeleton/Skeleton'
 import { type CanvasKind, canvasKindWords } from './canvas'
@@ -170,7 +171,7 @@ export function CanvasPanel({
             </span>
           )}
           {onReload !== undefined && <IconButton icon="reload" label={t.reload} size="small" onClick={onReload} />}
-          {onComment !== undefined && (
+          {onComment !== undefined && error === undefined && (
             <ActionButton
               icon="comment"
               aria-pressed={writing}
@@ -197,7 +198,8 @@ export function CanvasPanel({
           </span>
         )}
       </div>
-      <div className={cx(s.body, fill ? s.fill : s.reading)} data-canvas-body="">
+      {/* what stands in for it, still being read or unreadable, sits at reading width even where it would fill */}
+      <div className={cx(s.body, fill && !loading && error === undefined ? s.fill : s.reading)} data-canvas-body="">
         {loading ? (
           <div className={s.loading} aria-busy="true">
             <Skeleton width="54%" height={14} />
@@ -205,16 +207,16 @@ export function CanvasPanel({
             <Skeleton width="81%" />
           </div>
         ) : error !== undefined ? (
-          <p className={s.said}>
+          <Problem banner>
             {t.failed} {error}
-          </p>
+          </Problem>
         ) : (
           children
         )}
       </div>
       {(writing || comments.length > 0) && (
         <div className={s.foot}>
-          {writing && onComment !== undefined && (
+          {writing && onComment !== undefined && error === undefined && (
             <NoteForm
               className={s.write}
               text={{ placeholder: aimed === null ? t.commentOn(version) : t.commentOnWords(aimed), submit: t.add }}

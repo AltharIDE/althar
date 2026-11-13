@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from 'vitest'
 
 import { MERIDIAN_KINDS } from '../src/fixtures/rules'
 import { CommandMatch, PermissionPolicy, RuleKind, RulePlace } from '../src/foundations/vocabulary'
-import { ProjectRules, type ProjectRulesProps, type RuleCommand } from '../src/screens/ProjectRules/ProjectRules'
+import { ProjectRules, type ProjectRulesProps, type RuleCommand, sandboxGroups } from '../src/screens/ProjectRules/ProjectRules'
 
 /*
  * A project's rules as a few sentences. Who each sentence is about is said
@@ -95,5 +95,27 @@ describe('changing a rule in place', () => {
     await userEvent.click(await screen.findByRole('menuitemradio', { name: /^Never/ }))
     expect(onKindChange).toHaveBeenCalledWith(RuleKind.ForcePush, RulePlace.Never)
     expect(screen.getByRole('button', { name: 'force push' })).toBeInTheDocument()
+  })
+})
+
+describe('the commands leads run outside their sandbox', () => {
+  it('are named once per tool however they are run, a script once by any manager, and the rest in their own words', () => {
+    const groups = sandboxGroups([
+      'ps',
+      'vite',
+      'npx vite',
+      'bunx vite',
+      'pnpm exec vite',
+      'yarn vite',
+      'bunx playwright',
+      'npm run dev',
+      'pnpm dev',
+      'yarn run dev',
+      'yarn dev',
+      'node scripts/e2e.ts',
+    ])
+    expect(groups.map((group) => group.label)).toEqual(['ps', 'vite', 'bunx playwright', 'npm run dev', 'node scripts/e2e.ts'])
+    expect(groups[1]?.members).toEqual(['vite', 'npx vite', 'bunx vite', 'pnpm exec vite', 'yarn vite'])
+    expect(groups[3]?.members).toEqual(['npm run dev', 'pnpm dev', 'yarn run dev', 'yarn dev'])
   })
 })

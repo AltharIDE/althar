@@ -7,6 +7,7 @@ import { cx } from '../../lib/cx'
 import type { RootProps } from '../../lib/props'
 import { Field, FieldError } from '../../primitives/Field/Field'
 import { Tooltip } from '../../primitives/HoverCard/HoverCard'
+import { Problem } from '../../primitives/Problem/Problem'
 import s from './ProjectIdentity.module.css'
 
 /*
@@ -155,11 +156,7 @@ export function ProjectIdentity({ name, seed, ink, taken = {}, onRename, onInk, 
           )
         })}
       </RadioGroup.Root>
-      {error !== undefined && error !== '' && (
-        <p className={s.error} role="alert">
-          {error}
-        </p>
-      )}
+      {error !== undefined && error !== '' && <Problem size="small">{error}</Problem>}
     </div>
   )
 }

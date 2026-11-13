@@ -115,14 +115,8 @@ type Story = StoryObj<typeof meta>
 /** Named, with nothing added yet: its mark drawn, and what this Mac has named like it, each one press away. */
 export const Named: Story = {}
 
-/** Just opened: no name, so no mark yet, and what is found is offered as it is. */
-export const Unnamed: Story = { args: { name: '', found: { like: null, first: FOUND.more, more: [] } } }
-
 /** Nothing on this Mac to offer: where the folders will be, with the two ways to add one. */
 export const NothingFound: Story = { args: { name: 'Northwind Ops', found: { like: null, first: [], more: [] } } }
-
-/** Still looking on this Mac: nothing offered yet. */
-export const Looking: Story = { args: { found: null } }
 
 /** One read, one being read: Create waits for it. */
 export const Reading: Story = {
@@ -307,10 +301,11 @@ export const Long: Story = {
   decorators: [(Story) => <div style={{ width: 680, height: 900 }}>{Story()}</div>],
 }
 
+/** Each at a window's size, shrunk to its cell, so both sides of the page show. */
 export const AllStates: Story = {
   render: (args) => (
     <States
-      size="wide"
+      size="thread"
       cells={[
         { state: 'unnamed', node: <NewProject {...args} name="" found={{ like: null, first: FOUND.more, more: [] }} /> },
         { state: 'named', node: <NewProject {...args} /> },
@@ -323,7 +318,7 @@ export const AllStates: Story = {
         { state: 'making it', node: <NewProject {...args} {...Creating.args} /> },
         { state: 'couldn’t make it', node: <NewProject {...args} {...Failed.args} /> },
         { state: 'in another ink', node: <NewProject {...args} {...Read.args} ink={ProjectInk.Slate} /> },
-      ].map((cell) => ({ ...cell, node: <div style={{ height: 720 }}>{cell.node}</div> }))}
+      ].map((cell) => ({ ...cell, node: <div style={{ flex: 'none', width: 1000, height: 680, zoom: 0.62 }}>{cell.node}</div> }))}
     />
   ),
 }

@@ -1,7 +1,7 @@
 import { useQuery } from '@tanstack/react-query'
 import { useCallback, useEffect, useRef, useState } from 'react'
 
-import type { ProjectInk, ProjectNote, ProjectRulesView, ProjectSummary, WorksIn } from '@althar/contracts'
+import type { AfterMergeRule, ProjectInk, ProjectNote, ProjectRulesView, ProjectSummary, WorksIn } from '@althar/contracts'
 
 import { messageOf } from '../../data/client'
 import { keys, reads } from '../../data/reads'
@@ -23,8 +23,8 @@ import { useServices } from '../../data/services'
 
 /** A rule the settings switch in place. */
 export type RuleSwitch = 'resolveConflicts' | 'pushCommits' | 'postScreenshots' | 'moveIssues' | 'repositoryFiles'
-/** A rule set from General: one of its switches, or where new tasks start (ADR-091). */
-export type GeneralRule = RuleSwitch | 'worksIn'
+/** A rule set from General: one of its switches, where new tasks start (ADR-091), or what an explicitly requested review after merge brings back. */
+export type GeneralRule = RuleSwitch | 'worksIn' | 'afterMergeReview'
 
 /** One of the three permissions for skill and OpenSpec files in its repositories. */
 export type RepositoryFile = keyof ProjectRulesView['repositoryFiles']
@@ -64,6 +64,8 @@ export interface ProjectSettingsModel {
   readonly setRepositoryFile: (file: RepositoryFile, on: boolean) => void
   /** Where new tasks start: Local, in the person's checkout, or a worktree of their own (ADR-091). */
   readonly setWorksIn: (worksIn: WorksIn) => void
+  /** What an explicitly requested review after merge brings back: only major findings, every one, or no review. */
+  readonly setAfterMergeReview: (rule: AfterMergeRule) => void
   /** Which rule didn't hold, and why. */
   readonly ruleFailed: { readonly rule: GeneralRule; readonly message: string } | null
   /** Asking whether to remove it from Althar. */
@@ -167,6 +169,7 @@ export const useProjectSettings = (projectId: string, onRemoved: () => void): Pr
     [cache, projectId, setRule],
   )
   const setWorksIn = useCallback((worksIn: WorksIn) => setRule('worksIn', worksIn), [setRule])
+  const setAfterMergeReview = useCallback((rule: AfterMergeRule) => setRule('afterMergeReview', rule), [setRule])
 
   const taken: Partial<Record<ProjectInk, string>> = {}
   for (const other of listed?.projects ?? []) if (other.id !== projectId && taken[other.ink] === undefined) taken[other.ink] = other.name
@@ -250,6 +253,7 @@ export const useProjectSettings = (projectId: string, onRemoved: () => void): Pr
     setMoveIssues,
     setRepositoryFile,
     setWorksIn,
+    setAfterMergeReview,
     ruleFailed,
     removing,
     askRemove,

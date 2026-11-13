@@ -10,6 +10,8 @@ const of = (id: string): ServerTileModel => SERVERS.find((one) => one.id === id)
 const width = (px: number) => (Story: () => ReactNode) => <div style={{ maxWidth: px }}>{Story()}</div>
 
 const linear = of('linear')
+// Notion's last start failed because Claude Code's sign-in to it ran out: its file says so, with its Sign in.
+const notion: ServerTileModel = { ...of('notion'), signIn: { ...of('notion').signIn, claude: 'no' } }
 
 const meta = {
   title: 'Setup/ToolTiles/ServerSheet',
@@ -83,7 +85,7 @@ export const CantGoThere: Story = {
 
 /** Its last start failed: why, and where; no tool count, since none could be read. */
 export const Failed: Story = {
-  args: { server: of('notion'), files: filesOf(of('notion')), tools: null },
+  args: { server: notion, files: filesOf(notion), tools: null },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     await expect(canvas.getByText(/^Claude Code: Notion refused/)).toBeVisible()

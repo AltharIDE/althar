@@ -26,11 +26,6 @@
 .ask > :first-child {
   flex: 1;
 }
-.error {
-  margin: 0;
-  font-size: 12px;
-  color: var(--danger);
-}
 .found {
   display: grid;
   gap: 6px;

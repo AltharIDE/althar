@@ -10,206 +10,190 @@ import {
 import { act, fireEvent, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-
-import type { FoundTask, ProjectSummary } from '@althar/contracts'
-import { FoundState } from '@althar/ui'
-
+import type { SearchDocument } from '@althar/contracts'
 import type { Client } from '../src/renderer/data/client'
-import type { Host } from '../src/renderer/data/services'
-import { PAUSE_MS, rowOf, stateOf } from '../src/renderer/features/finder/useFinder'
 import { TabsFrame } from '../src/renderer/features/tabs/TabsFrame'
-import { fakeClient, fakeHost, project } from './fixtures'
+import { search, type Ask, type Context, type Entry } from '../src/renderer/features/finder/model'
+import { draftKey, draftOf } from '../src/renderer/shared/drafts'
+import { fakeClient, project } from './fixtures'
 import { withServices } from './render'
 
-/* The keys are read once from the system the window runs on (the kit's keys.ts), a Mac here; a test off a Mac says so through this. */
-const system = vi.hoisted(() => ({ offMac: false }))
-vi.mock('@althar/ui', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@althar/ui')>()
-  return { ...actual, primaryDown: (event: KeyboardEvent) => (system.offMac ? event.ctrlKey && !event.metaKey : actual.primaryDown(event)) }
-})
-
-const halyard: ProjectSummary = { ...project, id: 'p2', name: 'halyard', slug: 'halyard', ink: 'teal' }
-
-const found = (over: Partial<FoundTask> = {}): FoundTask => ({
-  taskId: 'task_1',
-  threadId: 'th1',
+class RankWorker {
+  static hold = false
+  static pending: Array<() => void> = []
+  entries: ReadonlyArray<Entry> = []
+  onmessage: ((event: MessageEvent) => void) | null = null
+  postMessage(message: { type: string; entries: ReadonlyArray<Entry>; id: number; query: string; context: Context; ask: Ask }) {
+    if (message.type === 'entries') this.entries = message.entries
+    else {
+      const results = search(this.entries, message.query, message.context, message.ask)
+      const answer = () => this.onmessage?.({ data: { id: message.id, results } } as MessageEvent)
+      if (RankWorker.hold) RankWorker.pending.push(answer)
+      else queueMicrotask(answer)
+    }
+  }
+  terminate() {}
+}
+const doc = (over: Partial<SearchDocument> = {}): SearchDocument => ({
+  id: 'task:t1',
+  kind: 'task',
   projectId: 'p1',
-  title: 'Retry webhook deliveries',
-  slug: 'retry-webhook-deliveries',
-  phase: 'running',
-  state: 'open',
-  pullRequest: '#1206',
-  changedAt: '2026-10-14T09:00:00.000Z',
-  matched: null,
+  threadId: 'th1',
+  taskId: 't1',
+  itemId: null,
+  title: 'Retry checkout deliveries',
+  body: 'Use bounded retries',
+  ref: 'retry-checkout',
+  url: null,
+  changedAt: '2026-11-13T00:00:00.000Z',
+  state: 'running',
   ...over,
 })
-
-const RECENT = {
-  tasks: [found(), found({ taskId: 'task_2', threadId: 'th2', title: 'Tidy the logs', phase: 'stopped', pullRequest: null })],
-}
-const RETRY = {
-  tasks: [
-    found(),
-    found({
-      taskId: 'task_9',
-      threadId: 'th9',
-      projectId: 'p2',
-      title: 'Charges time out',
-      phase: 'ready',
-      matched: [
-        { text: 'Bounded ', hit: false },
-        { text: 'retries', hit: true },
-      ],
-    }),
-  ],
-}
-
+const documents = [
+  doc(),
+  doc({ id: 'task:t2', taskId: 't2', threadId: 'th2', title: 'Compact the database', ref: 'compact-database', state: 'ready' }),
+  doc({
+    id: 'note:n1',
+    kind: 'note',
+    taskId: null,
+    threadId: 'co1',
+    title: 'Always merge main; never rebase a published branch.',
+    ref: '',
+    body: 'Always merge main; never rebase a published branch.',
+  }),
+]
 function Where() {
-  return <p data-testid="where">{useRouterState({ select: (state) => state.location.pathname })}</p>
-}
-/* A screen with a field to type in, as a task's composer is. */
-function Writing() {
   return (
     <>
-      <Where />
-      <textarea aria-label="Message the lead" />
+      <p data-testid="where">{useRouterState({ select: (state) => state.location.pathname })}</p>
+      <textarea aria-label="Message" />
     </>
   )
 }
-const rootRoute = createRootRoute({
+const root = createRootRoute({
   component: () => (
     <TabsFrame>
       <Outlet />
     </TabsFrame>
   ),
 })
-const homeRoute = createRoute({ getParentRoute: () => rootRoute, path: '/', component: Where })
-const projectRoute = createRoute({ getParentRoute: () => rootRoute, path: '/projects/$projectId', component: Writing })
-const threadRoute = createRoute({ getParentRoute: () => rootRoute, path: '/threads/$threadId', component: Where })
-
-const windowAt = (path: string, host: Host = fakeHost(), searchTasks?: Client['searchTasks']) => {
+const home = createRoute({ getParentRoute: () => root, path: '/', component: Where })
+const projectRoute = createRoute({ getParentRoute: () => root, path: '/projects/$projectId', component: Where })
+const thread = createRoute({ getParentRoute: () => root, path: '/threads/$threadId', component: Where })
+const settings = createRoute({ getParentRoute: () => root, path: '/settings/$section', component: Where })
+const windowAt = (overrides: Partial<Client> = {}) => {
   const router = createRouter({
-    routeTree: rootRoute.addChildren([homeRoute, projectRoute, threadRoute]),
-    history: createMemoryHistory({ initialEntries: [path] }),
+    routeTree: root.addChildren([home, projectRoute, thread, settings]),
+    history: createMemoryHistory({ initialEntries: ['/projects/p1'] }),
   })
   const { client } = fakeClient({
-    listProjects: vi.fn(async () => ({ cursor: 3, projects: [project, halyard] })),
-    searchTasks: searchTasks ?? vi.fn(async ({ text }) => (text === '' ? RECENT : RETRY)),
+    listProjects: vi.fn(async () => ({ cursor: 0, projects: [{ ...project, coordinatorThreadId: 'co1' }] })),
+    getSearchDocuments: vi.fn(async () => ({ documents, next: null })),
+    ...overrides,
   })
-  withServices(<RouterProvider router={router} />, client, host)
-  return { client, router }
+  withServices(<RouterProvider router={router} />, client)
+  return client
+}
+const open = async () => {
+  await screen.findByRole('navigation', { name: 'Projects' })
+  fireEvent.keyDown(window, { key: 'k', metaKey: true })
+  return screen.findByRole('dialog', { name: 'Search' })
 }
 
-const where = () => screen.getByTestId('where').textContent
-const finder = () => screen.findByRole('dialog', { name: 'Find a task' })
-
 beforeEach(() => {
-  window.localStorage.clear()
-  system.offMac = false
+  vi.stubGlobal('Worker', RankWorker)
+  RankWorker.hold = false
+  RankWorker.pending = []
 })
-
-describe('finding a task', () => {
-  it('opens on ⌘K in a project, searching it as the words pause, and opens the task chosen', async () => {
-    const { client } = windowAt('/projects/p1')
-    await screen.findByRole('navigation', { name: 'Projects' })
-    fireEvent.keyDown(window, { key: 'k', metaKey: true })
-    const dialog = await finder()
-    const field = within(dialog).getByRole('combobox', { name: 'Find a task in meridian' })
-    // With no words, the tasks changed last.
-    await within(dialog).findByRole('option', { name: /Tidy the logs/ })
-    expect(client.searchTasks).toHaveBeenLastCalledWith({ text: '', projectId: 'p1' })
-    await userEvent.type(field, 'retr')
-    // Searched once, for the words as they stood when typing paused; what was found before stays meanwhile.
-    expect(within(dialog).getAllByRole('option')).toHaveLength(2)
-    await waitFor(() => expect(client.searchTasks).toHaveBeenLastCalledWith({ text: 'retr', projectId: 'p1' }))
-    expect(vi.mocked(client.searchTasks).mock.calls.filter(([input]) => input.text !== '')).toHaveLength(1)
-    const option = await within(dialog).findByRole('option', { name: /Charges time out/ })
-    expect(option.textContent).toContain('Ready')
-    expect(option.querySelector('mark')?.textContent).toBe('retries')
-    // In one project, no project is named.
-    expect(option.textContent).not.toContain('halyard')
-    await userEvent.keyboard('{ArrowDown}{Enter}')
-    await waitFor(() => expect(where()).toBe('/threads/th9'))
-    expect(screen.queryByRole('dialog')).toBeNull()
-  })
-
-  it('searches every project on the home, naming each', async () => {
-    const { client } = windowAt('/')
-    await screen.findByRole('navigation', { name: 'Projects' })
-    fireEvent.keyDown(window, { key: 'K', metaKey: true })
-    const dialog = await finder()
-    await userEvent.type(within(dialog).getByRole('combobox', { name: 'Find a task in any project' }), 'retry')
-    const option = await within(dialog).findByRole('option', { name: /Charges time out/ })
-    expect(option.textContent).toContain('halyard')
-    expect(client.searchTasks).toHaveBeenLastCalledWith({ text: 'retry' })
-    await userEvent.click(within(dialog).getByRole('option', { name: /Retry webhook deliveries/ }))
-    await waitFor(() => expect(where()).toBe('/threads/th1'))
-  })
-
-  it('opens from a field being typed in, and Escape gives the field its focus back', async () => {
-    windowAt('/projects/p1')
-    const message = await screen.findByRole('textbox', { name: 'Message the lead' })
+describe('search across Althar', () => {
+  it('searches without a runtime call per key, opens a result, and restores focus on Escape', async () => {
+    const client = windowAt()
+    const message = await screen.findByRole('textbox', { name: 'Message' })
     message.focus()
-    fireEvent.keyDown(message, { key: 'k', metaKey: true })
-    const dialog = await finder()
-    await waitFor(() => expect(document.activeElement).toBe(within(dialog).getByRole('combobox')))
+    const dialog = await open()
+    const field = within(dialog).getByRole('combobox')
+    await userEvent.type(field, 'retry')
+    await within(dialog).findByRole('option', { name: /Retry checkout deliveries/ })
+    expect(client.getSearchDocuments).toHaveBeenCalledTimes(1)
+    expect(client.searchTasks).not.toHaveBeenCalled()
     await userEvent.keyboard('{Escape}')
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
     expect(document.activeElement).toBe(message)
+    const again = await open()
+    await userEvent.type(within(again).getByRole('combobox'), 'retry')
+    await within(again).findByRole('option', { name: /Retry checkout deliveries/ })
+    await userEvent.keyboard('{Enter}')
+    await waitFor(() => expect(screen.getByTestId('where').textContent).toBe('/threads/th1'))
   })
-
-  it('takes Control-K off a Mac, and not ⌘ there', async () => {
-    system.offMac = true
-    windowAt('/projects/p1', fakeHost({ platform: 'linux' }))
-    await screen.findByRole('navigation', { name: 'Projects' })
-    fireEvent.keyDown(window, { key: 'k', metaKey: true })
-    fireEvent.keyDown(window, { key: 'k', ctrlKey: true, shiftKey: true })
-    await act(async () => await new Promise((done) => setTimeout(done, PAUSE_MS)))
-    expect(screen.queryByRole('dialog')).toBeNull()
-    fireEvent.keyDown(window, { key: 'k', ctrlKey: true })
-    await finder()
+  it('uses prefixes, backs out of actions, and puts a question in the coordinator draft', async () => {
+    windowAt()
+    const dialog = await open()
+    const field = within(dialog).getByRole('combobox')
+    await userEvent.type(field, '!rebase')
+    await within(dialog).findByRole('option', { name: /Always merge main/ })
+    await userEvent.keyboard('{ArrowRight}')
+    await within(dialog).findByRole('option', { name: 'Copy' })
+    await userEvent.keyboard('{Escape}{Escape}')
+    await userEvent.clear(field)
+    await userEvent.type(field, 'why merge main?')
+    await userEvent.keyboard('{Tab}')
+    expect(field.getAttribute('placeholder')).toContain('Ask')
+    await userEvent.keyboard('{Enter}')
+    await waitFor(() => expect(draftOf(draftKey.coordinator('p1')).text).toBe('why merge main?'))
   })
-
-  it('shows the field alone until the first answer comes', async () => {
-    let answer: (found: { tasks: ReadonlyArray<FoundTask> }) => void = () => {}
-    windowAt(
-      '/projects/p1',
-      fakeHost(),
-      vi.fn(() => new Promise<{ tasks: ReadonlyArray<FoundTask> }>((done) => (answer = done))),
-    )
-    await screen.findByRole('navigation', { name: 'Projects' })
-    fireEvent.keyDown(window, { key: 'k', metaKey: true })
-    const dialog = await finder()
-    expect(within(dialog).queryByRole('listbox')).toBeNull()
-    act(() => answer(RECENT))
-    await within(dialog).findByRole('listbox', { name: 'Recent' })
+  it('chooses the top hit once the results show, not a row of the list typed over', async () => {
+    windowAt()
+    const dialog = await open()
+    const field = within(dialog).getByRole('combobox')
+    RankWorker.hold = true
+    await userEvent.type(field, 'database')
+    // While ranking: the words' own rows stand in, and the choice may rest on one.
+    await within(dialog).findByRole('option', { name: /Start a task/ })
+    const pending = RankWorker.pending.splice(0)
+    await act(async () => pending.at(-1)?.())
+    const top = await within(dialog).findByRole('option', { name: /Compact the database/ })
+    expect(top.getAttribute('aria-selected')).toBe('true')
+    await userEvent.keyboard('{ArrowRight}')
+    await within(dialog).findByRole('option', { name: 'Copy' })
   })
-})
-
-describe('a found task, as the finder lists it', () => {
-  it('says where it stands in a word', () => {
-    expect(stateOf(found({ phase: 'drafting' }))).toBe(FoundState.Planned)
-    expect(stateOf(found({ phase: 'planned' }))).toBe(FoundState.Planned)
-    expect(stateOf(found({ phase: 'held' }))).toBe(FoundState.Planned)
-    expect(stateOf(found({ phase: 'running' }))).toBe(FoundState.Running)
-    expect(stateOf(found({ phase: 'waiting' }))).toBe(FoundState.Yours)
-    expect(stateOf(found({ phase: 'ready' }))).toBe(FoundState.Ready)
-    expect(stateOf(found({ phase: 'stopped' }))).toBe(FoundState.Stopped)
-    expect(stateOf(found({ phase: 'settled', state: 'done' }))).toBe(FoundState.Merged)
-    expect(stateOf(found({ phase: 'settled', state: 'done', pullRequest: null }))).toBe(FoundState.Done)
-    expect(stateOf(found({ phase: 'settled', state: 'abandoned' }))).toBe(FoundState.Abandoned)
+  it("lists the top hit's actions when → is pressed while ranking, once it settles", async () => {
+    windowAt()
+    const dialog = await open()
+    const field = within(dialog).getByRole('combobox')
+    RankWorker.hold = true
+    await userEvent.type(field, 'database')
+    await within(dialog).findByRole('option', { name: /Start a task/ })
+    await userEvent.keyboard('{ArrowRight}')
+    const pending = RankWorker.pending.splice(0)
+    await act(async () => pending.at(-1)?.())
+    await within(dialog).findByRole('option', { name: 'Copy' })
   })
-
-  it('opens by its thread, with its project only where one is given', () => {
-    expect(rowOf(found({ pullRequest: null }), undefined)).toEqual({
-      id: 'th1',
-      title: 'Retry webhook deliveries',
-      state: FoundState.Running,
-    })
-    expect(rowOf(found({ matched: [{ text: 'x', hit: true }] }), halyard)).toMatchObject({
-      project: { seed: 'p2', name: 'halyard', ink: 'teal' },
-      pullRequest: '#1206',
-      matched: [{ text: 'x', hit: true }],
-    })
+  it('is chosen by a pointer that moves, not by one at rest under a list that redraws', async () => {
+    windowAt()
+    const dialog = await open()
+    const field = within(dialog).getByRole('combobox')
+    await userEvent.type(field, 'database')
+    const top = await within(dialog).findByRole('option', { name: /Compact the database/ })
+    const ask = within(dialog).getByRole('option', { name: /Ask the coordinator/ })
+    fireEvent.mouseMove(ask, { movementX: 0, movementY: 0 })
+    expect(top.getAttribute('aria-selected')).toBe('true')
+    fireEvent.mouseMove(ask, { movementX: 3, movementY: 2 })
+    expect(ask.getAttribute('aria-selected')).toBe('true')
+  })
+  it('keeps results visible and ignores late replies to older words', async () => {
+    windowAt()
+    const dialog = await open()
+    const field = within(dialog).getByRole('combobox')
+    await userEvent.type(field, 'retry')
+    await within(dialog).findByRole('option', { name: /Retry checkout deliveries/ })
+    RankWorker.hold = true
+    await userEvent.clear(field)
+    await userEvent.type(field, 'database')
+    expect(within(dialog).getByRole('option', { name: /Retry checkout deliveries/ })).toBeTruthy()
+    const pending = RankWorker.pending.splice(0)
+    await act(async () => pending.at(-1)?.())
+    await within(dialog).findByRole('option', { name: /Compact the database/ })
+    await act(async () => pending.slice(0, -1).forEach((answer) => answer()))
+    expect(within(dialog).queryByRole('option', { name: /Retry checkout deliveries/ })).toBeNull()
   })
 })

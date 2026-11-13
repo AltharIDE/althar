@@ -16,6 +16,7 @@ import { Button } from '../../primitives/Button/Button'
 import { IconButton } from '../../primitives/IconButton/IconButton'
 import { InkSwatches, type InkSwatchesText } from '../../primitives/InkSwatches/InkSwatches'
 import { LinkButton } from '../../primitives/LinkButton/LinkButton'
+import { Problem } from '../../primitives/Problem/Problem'
 import { Spinner } from '../../primitives/Spinner/Spinner'
 import { VisuallyHidden } from '../../primitives/VisuallyHidden/VisuallyHidden'
 import s from './NewProject.module.css'
@@ -456,9 +457,9 @@ export function NewProject({
             }}
           />
           {missing === 'name' && (
-            <p id={ids.missing} className={s.missing} role="alert">
+            <Problem id={ids.missing} size="small">
               {t.needsName}
-            </p>
+            </Problem>
           )}
           <p id={ids.note} className={s.note}>
             {t.nameNote}
@@ -541,9 +542,9 @@ export function NewProject({
                     {clone}
                   </div>
                   {missing === 'folder' ? (
-                    <p id={ids.missing} className={s.missing} role="alert">
+                    <Problem id={ids.missing} size="small" className={s.zoneProblem}>
                       {fresh ? t.needsFolderOrFresh : t.needsFolder}
-                    </p>
+                    </Problem>
                   ) : (
                     fresh && <p className={s.note}>{t.freshNote(named === '' ? null : repositoryFolder(named))}</p>
                   )}
@@ -566,9 +567,9 @@ export function NewProject({
                   )}
                   {clone}
                   {missing === 'folder' ? (
-                    <span id={ids.missing} className={s.missing} role="alert">
+                    <Problem id={ids.missing} as="span" size="small">
                       {fresh ? t.needsFolderOrFresh : t.needsFolder}
-                    </span>
+                    </Problem>
                   ) : (
                     <span className={s.note}>{t.chooseNote}</span>
                   )}
@@ -604,13 +605,13 @@ export function NewProject({
         </div>
         <footer className={s.foot}>
           {error !== undefined && error !== null ? (
-            <span className={s.error} role="alert">
+            <Problem as="span" size="small" className={s.error}>
               {error}
-            </span>
+            </Problem>
           ) : side !== undefined && missing === 'folder' ? (
-            <span className={s.error} role="alert">
+            <Problem as="span" size="small" className={s.error}>
               {t.needsFolder}
-            </span>
+            </Problem>
           ) : (
             footNote !== undefined && <span className={s.footNote}>{footNote}</span>
           )}

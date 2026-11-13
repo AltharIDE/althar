@@ -1,3 +1,4 @@
+import { removeTreeSync } from '@althar/testing'
 import { execFileSync } from 'node:child_process'
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -235,7 +236,7 @@ describe('attaching a task to a pull request it didn’t open', () => {
       assert.strictEqual(yield* refusal({ taskId: task.taskId, pullRequest: '#1', actorId: personId }), unconnected)
       yield* (yield* Connections).connectToken({ product: 'github', token: 't', actorId: personId, webUrl: HOST })
       // Connected, but its worktree is gone from this computer: there is nothing here to attach.
-      rmSync(task.worktree, { recursive: true, force: true })
+      removeTreeSync(task.worktree)
       assert.strictEqual(yield* refusal({ taskId: task.taskId, pullRequest: '#1', actorId: personId }), unconnected)
       assert.lengthOf(
         github.calls.filter((call) => call === 'change'),

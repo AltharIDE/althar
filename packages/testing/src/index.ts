@@ -1,3 +1,5 @@
 export { budget, scale, type Size } from './budget'
 export { deadline } from './deadline'
 export { waitFor } from './wait'
+export { isoAfter } from './time'
+export { realPath, removeTree, removeTreeSync, slashPath } from './files'

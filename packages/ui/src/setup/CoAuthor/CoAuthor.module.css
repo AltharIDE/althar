@@ -1,6 +1,8 @@
 /* What it does, or the ask; the commit as the host shows it; and what goes out, under it. */
 .coAuthor {
   container-type: inline-size;
+  /* as a container it can't take its width from what it holds, so it fills what it is in */
+  width: 100%;
   display: grid;
   gap: 14px;
 }

@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { expect, test } from '@playwright/test'
 
 import { repository } from '../tests/repository'
-import { launch, openFirstProject, sizeWindow, startTask, still, toConversation } from './support'
+import { launch, openFirstProject, sizeWindow, startTask, still, toConversation, showPanes } from './support'
 
 /*
  * Why a task waits, over its composer, in a real window with the fake agent:
@@ -44,7 +44,7 @@ test('says over the composer why the task waits, opens who holds the place, and 
     await expect(page.getByText(/^Waiting: 1 of 1 agents busy/)).toHaveCount(2)
 
     // The second in line, opened from the board.
-    await page.getByRole('radio', { name: /^Board/ }).click()
+    await showPanes(page, { conversation: false, board: true })
     const next = page.getByRole('region', { name: 'The project’s work' }).getByRole('region', { name: 'Up next' })
     await next.getByRole('button', { name: 'Tidy the docs', exact: true }).click()
     await toConversation(page)

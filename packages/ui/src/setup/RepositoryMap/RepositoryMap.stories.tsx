@@ -284,8 +284,9 @@ export const AllStates: Story = {
     pressed: 'li:first-child button',
   }),
   render: (args) => (
+    // A whole map to a cell: a half-width cell is narrower than any page it is set on.
     <States
-      size="wide"
+      size="thread"
       cells={[
         { state: 'rest', node: <RepositoryMap {...args} /> },
         { state: 'hover', node: <RepositoryMap {...args} /> },

@@ -32,25 +32,19 @@ const meta = {
 export default meta
 type Story = StoryObj<typeof meta>
 
-/** The repository's docs say nothing: Althar names branches its own way, and says so. */
-export const SaysNothing: Story = {}
-
-/** Its CONTRIBUTING.md names them: Althar follows it, and says where from. */
-export const FollowingTheDocs: Story = { args: { repositories: CONTRIBUTING } }
-
-/** The person's own pattern, over what the docs say. */
-export const YourOwn: Story = { args: { value: 'team/{slug}', repositories: CONTRIBUTING } }
-
-/** A pattern Althar can't follow, and why, beside the field. */
-export const CantFollow: Story = {
-  args: { value: 'feature/{key}', error: 'It needs {slug}, so each task’s is its own.', repositories: CONTRIBUTING },
+/* Each state over the defaults, where the docs say nothing: Althar names branches its own way, and says so. */
+// Its CONTRIBUTING.md names them: Althar follows it, and says where from.
+const FOLLOWING_THE_DOCS: Partial<NamingRuleProps> = { repositories: CONTRIBUTING }
+// The person's own pattern, over what the docs say.
+const YOUR_OWN: Partial<NamingRuleProps> = { value: 'team/{slug}', repositories: CONTRIBUTING }
+// A pattern Althar can't follow, and why, beside the field.
+const CANT_FOLLOW: Partial<NamingRuleProps> = {
+  value: 'feature/{key}',
+  error: 'It needs {slug}, so each task’s is its own.',
+  repositories: CONTRIBUTING,
 }
-
-/** Several repositories, each saying where its names come from. */
-export const SeveralRepositories: Story = { args: { repositories: SEVERAL } }
-
-/** Without a way to change it, the pattern only reads. */
-export const ReadOnly: Story = { args: { value: 'team/{slug}', onChange: undefined } }
+// Without a way to change it, the pattern only reads.
+const READ_ONLY: Partial<NamingRuleProps> = { value: 'team/{slug}', onChange: undefined }
 
 /** Typing shows what it makes; Enter sets it, Escape puts it back, and the button follows the repository again. */
 export const Typing: Story = {
@@ -82,6 +76,7 @@ export const Typing: Story = {
   },
 }
 
+/** Every state: the docs saying nothing, followed, overruled, a pattern it can't follow, several repositories, read only, hovered and focused. */
 export const AllStates: Story = {
   parameters: statesOn({ hover: 'input', focus: 'input', pressed: 'button' }),
   render: (args) => (
@@ -89,11 +84,11 @@ export const AllStates: Story = {
       size="wide"
       cells={[
         { state: 'says nothing', node: <NamingRule {...args} /> },
-        { state: 'following the docs', node: <NamingRule {...args} {...FollowingTheDocs.args} /> },
-        { state: 'your own', node: <NamingRule {...args} {...YourOwn.args} /> },
-        { state: 'can’t follow', node: <NamingRule {...args} {...CantFollow.args} /> },
-        { state: 'several repositories', node: <NamingRule {...args} {...SeveralRepositories.args} /> },
-        { state: 'read only', node: <NamingRule {...args} {...ReadOnly.args} /> },
+        { state: 'following the docs', node: <NamingRule {...args} {...FOLLOWING_THE_DOCS} /> },
+        { state: 'your own', node: <NamingRule {...args} {...YOUR_OWN} /> },
+        { state: 'can’t follow', node: <NamingRule {...args} {...CANT_FOLLOW} /> },
+        { state: 'several repositories', node: <NamingRule {...args} repositories={SEVERAL} /> },
+        { state: 'read only', node: <NamingRule {...args} {...READ_ONLY} /> },
         { state: 'hover', node: <NamingRule {...args} /> },
         { state: 'focus', node: <NamingRule {...args} /> },
       ]}

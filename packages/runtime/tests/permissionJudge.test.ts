@@ -1,5 +1,6 @@
+import { removeTreeSync } from '@althar/testing'
 import { execFileSync } from 'node:child_process'
-import { chmodSync, existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, mkdirSync, writeFileSync } from 'node:fs'
 import { basename, dirname, join } from 'node:path'
 
 import { assert, describe, it } from '@effect/vitest'
@@ -347,7 +348,7 @@ describe('coordinator permission judgments', () => {
           Effect.sync(() => {
             for (const locked of held) {
               chmodSync(locked, 0o755)
-              rmSync(dirname(locked), { recursive: true, force: true })
+              removeTreeSync(dirname(locked))
             }
           }),
         ),

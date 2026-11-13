@@ -66,8 +66,8 @@
 .panel {
   container-type: inline-size;
   display: grid;
-  gap: 14px;
-  padding: 16px 18px;
+  gap: 16px;
+  padding: 18px 20px 20px;
   border-radius: 15px;
   background: var(--page-sheet, var(--frost-raised));
   box-shadow: var(--frost-ring);

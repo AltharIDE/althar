@@ -8,6 +8,7 @@ import { CopyButton } from '../../primitives/CopyButton/CopyButton'
 import { Field, FieldError } from '../../primitives/Field/Field'
 import { IconButton } from '../../primitives/IconButton/IconButton'
 import { LinkButton } from '../../primitives/LinkButton/LinkButton'
+import { Problem } from '../../primitives/Problem/Problem'
 import a from './Accounts.module.css'
 import type { FoundFolder } from './Accounts'
 import s from './AccountSignIn.module.css'
@@ -31,7 +32,7 @@ import s from './AccountSignIn.module.css'
 /** Where a sign-in stands. */
 export type AccountSignInStep =
   /** The ways in. */
-  | { kind: 'choose' }
+  | { kind: 'choose'; enterprise?: string; error?: string }
   /** The agent's sign-in is open in the browser, waiting on `host`. `link`: to open it elsewhere. `paste`: it takes a code the page shows when the browser can't reach back. */
   | { kind: 'browser'; host: string; link?: string; paste?: boolean; pasteError?: ReactNode }
   /** The agent's sign-in runs in a terminal: opened there, or, where it couldn't be, `line` to run. `notYet`: back without being signed in; `unclear`: the agent answered something Althar couldn't read; `checking`: reading again. */
@@ -53,6 +54,8 @@ export type AccountSignInStep =
 
 /** The ways an agent offers in. Each shows only when given. */
 export interface AccountSignInWays {
+  /** GitHub.com by default, with a separate hostname only when the person needs it. */
+  enterprise?: boolean
   /** The plan it signs in to in the browser: Claude, ChatGPT. */
   browser?: string
   /** It signs in with its own command, in a terminal: first where there is no browser way, else among the others. */
@@ -192,6 +195,7 @@ export interface AccountSignInProps {
   caution?: string
   /** Goes one way in. */
   onWay: (way: SignInWay) => void
+  onEnterprise?: (host: string) => void
   /** Opens the code's page, or the terminal sign-in again. */
   onOpen?: () => void
   /** Asks the agent again who it is signed in as, after a sign-in in a terminal. */
@@ -342,6 +346,7 @@ function Under({
   holds,
   caution,
   onWay,
+  onEnterprise,
   onOpen,
   onCheck,
   onPaste,
@@ -357,6 +362,7 @@ function Under({
   const another = onBack && <LinkButton onClick={onBack}>{t.another}</LinkButton>
   switch (step.kind) {
     case 'choose': {
+      if (ways.enterprise) return <GitHubChoice step={step} onWay={onWay} onEnterprise={onEnterprise} />
       const others = [
         ways.code && { way: SignInWay.Code, label: t.code },
         ways.terminal && ways.browser && { way: SignInWay.Terminal, label: t.terminal },
@@ -483,15 +489,84 @@ function Under({
     case 'failed':
       return (
         <div className={s.under}>
-          <p className={s.failed}>
+          <Problem action={onBack && <LinkButton onClick={onBack}>{t.tryAgain}</LinkButton>}>
             {t.stopped(agent)} <span className={s.said}>{step.said}</span>
-          </p>
-          <div className={s.row}>{onBack && <LinkButton onClick={onBack}>{t.tryAgain}</LinkButton>}</div>
+          </Problem>
         </div>
       )
     default:
       return unreachable(step)
   }
+}
+
+/** Most work accounts use github.com. An enterprise hostname is a quiet, optional second path. */
+function GitHubChoice({
+  step,
+  onWay,
+  onEnterprise,
+}: {
+  step: Extract<AccountSignInStep, { kind: 'choose' }>
+  onWay: (way: SignInWay) => void
+  onEnterprise?: (host: string) => void
+}) {
+  const [enterprise, setEnterprise] = useState(step.enterprise !== undefined)
+  const [host, setHost] = useState(step.enterprise ?? '')
+  const [empty, setEmpty] = useState(false)
+  const field = useRef<HTMLInputElement>(null)
+  const errorId = useId()
+  useEffect(() => {
+    if (enterprise) field.current?.focus()
+  }, [enterprise])
+  if (!enterprise)
+    return (
+      <div className={s.under}>
+        <div className={s.row}>
+          <Button size="small" icon="external" onClick={() => onWay(SignInWay.Browser)}>
+            Continue with GitHub
+          </Button>
+          <LinkButton onClick={() => setEnterprise(true)}>Use a GitHub Enterprise address…</LinkButton>
+        </div>
+        <p className={s.hint}>GitHub will ask you to authorize OpenCode. Usage is on your Copilot subscription.</p>
+      </div>
+    )
+  return (
+    <form
+      className={s.under}
+      onSubmit={(event) => {
+        event.preventDefault()
+        if (host.trim() === '') return setEmpty(true)
+        onEnterprise?.(host.trim())
+      }}
+    >
+      <div className={s.row}>
+        <Field
+          ref={field}
+          value={host}
+          placeholder="company.ghe.com"
+          aria-label="GitHub Enterprise address"
+          autoCapitalize="none"
+          autoCorrect="off"
+          spellCheck={false}
+          invalid={empty || step.error !== undefined}
+          aria-describedby={empty || step.error ? errorId : undefined}
+          className={s.field}
+          onChange={(event) => {
+            setHost(event.target.value)
+            setEmpty(false)
+          }}
+        />
+        <Button size="small" type="submit">
+          Continue
+        </Button>
+        <LinkButton onClick={() => setEnterprise(false)}>Use github.com</LinkButton>
+      </div>
+      {empty || step.error ? (
+        <FieldError id={errorId}>{step.error ?? 'Enter your GitHub Enterprise address.'}</FieldError>
+      ) : (
+        <p className={s.hint}>Use the address where you sign in to GitHub, such as company.ghe.com.</p>
+      )}
+    </form>
+  )
 }
 
 function Browser({

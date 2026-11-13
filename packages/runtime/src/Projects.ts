@@ -341,11 +341,12 @@ export const towardHere = (repository: string, branch: string, remote = 'origin'
  * it now, fetched first, falling back to the local branch when the remote
  * can't be reached.
  */
-export const startCommitOf = (repository: string, base: string, from = 'origin') =>
+export const startCommitOf = (repository: string, base: string, from = 'origin', fetch = true) =>
   Effect.gen(function* () {
-    const fetched = yield* fetchBranch(repository, base, from)
+    const fetched = fetch ? yield* fetchBranch(repository, base, from) : false
     const remote = `${from}/${base}`
-    const fromRemote = fetched ? yield* commitOf(repository, remote).pipe(Effect.option) : Option.none()
+    // Not fetched now, the remote's as last fetched, else the branch here.
+    const fromRemote = fetched || !fetch ? yield* commitOf(repository, remote).pipe(Effect.option) : Option.none()
     const baseRef = Option.isSome(fromRemote) ? remote : base
     const baseCommit = Option.isSome(fromRemote)
       ? fromRemote.value
@@ -369,9 +370,11 @@ export const prepareWorktree = (
   planned: { readonly worktree: string; readonly branch: string },
   from = 'origin',
   plain = false,
+  /** Fetched first; an aside's copy is made from the remote as last fetched, which the coordinator's copies fetch after each turn. */
+  fetch = true,
 ) =>
   Effect.gen(function* () {
-    const { baseRef, baseCommit, fetched } = yield* startCommitOf(repository, base, from)
+    const { baseRef, baseCommit, fetched } = yield* startCommitOf(repository, base, from, fetch)
     let branch = planned.branch
     let worktree = planned.worktree
     for (let n = 2; (yield* branchExists(repository, branch)) || existsSync(worktree); n += 1) {
@@ -474,6 +477,10 @@ export class Projects extends Context.Service<
       readonly plain?: boolean
       /** The automation's occurrence it is the run of, named in the transaction that makes it, so a restart never makes a second. */
       readonly occurrence?: string
+      /** The id the window made for it (an aside's, keyed by it from the moment + is pressed); refused where it is taken. */
+      readonly taskId?: string
+      /** Made on Scratch, an aside, in the transaction that makes it: never on the board, even for a moment. */
+      readonly shelf?: 'scratch'
     }): Effect.Effect<CreatedTask, NotFound | RepositoriesNeeded | BranchNotFound | GitFailed | Failure>
     /**
      * Starts another change in a task (a task is a conversation plus parts,
@@ -889,12 +896,17 @@ export class Projects extends Context.Service<
         readonly occurrence?: string
         readonly worksIn?: WorksIn
         readonly toward?: string | null
+        /** The id the window made for it, so what it drew of it before it was made is what it gets: refused where it is taken. */
+        readonly taskId?: string
+        /** Made on Scratch, an aside, in the transaction that makes it: never on the board, even for a moment. */
+        readonly shelf?: 'scratch'
       }) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
           const commands = yield* Commands
           const { envelope } = input
           const plain = input.plain === true
+          const asked = input.taskId === undefined ? undefined : yield* Schema.decodeUnknownEffect(Ids.task.schema)(input.taskId)
           const local = input.worksIn === 'checkout'
           const bindings = yield* sql<{
             projectId: ProjectId
@@ -953,7 +965,8 @@ export class Projects extends Context.Service<
               const [live] = yield* sql<{ id: string }>`SELECT id FROM projects WHERE id = ${first.projectId} AND archived_at IS NULL`
               if (live === undefined) return yield* new NotFound({ kind: 'project', id: first.projectId })
               const createdAt = yield* timestamp
-              const taskId: TaskId = yield* newId(Ids.task)
+              // One the window made is new, as a project's is; taken, its row's key refuses it.
+              const taskId: TaskId = asked ?? (yield* newId(Ids.task))
               const taken = yield* sql<{ slug: string }>`SELECT slug FROM tasks WHERE project_id = ${first.projectId}`
               const slug = freeSlug(
                 slugify(input.title, 'task'),
@@ -968,6 +981,7 @@ export class Projects extends Context.Service<
                 ...(input.request === undefined || input.request.trim() === '' ? {} : { request: input.request.trim() }),
                 slug,
                 state: input.draft === true ? 'draft' : 'open',
+                ...(input.shelf === undefined ? {} : { shelf: input.shelf }),
                 createdByActorId: envelope.actorId,
                 createdAt,
               })}`
@@ -1021,6 +1035,17 @@ export class Projects extends Context.Service<
                 actorId: envelope.actorId,
                 commandId: envelope.commandId,
               })
+              // Where it was put, as `shelve` records it: what moves it off Scratch later counts from here.
+              if (input.shelf !== undefined)
+                yield* fact({
+                  projectId: first.projectId,
+                  aggregateType: 'task',
+                  aggregateId: taskId,
+                  revision: 1,
+                  type: 'task.shelved',
+                  payload: { shelf: input.shelf },
+                  actorId: envelope.actorId,
+                })
               yield* indexTask(taskId)
               if (input.occurrence !== undefined) yield* linkTask(input.occurrence, taskId, envelope.actorId)
               // A task started by hand shows in the coordinator's thread as its card; a draft's card comes with its plan.
@@ -1062,7 +1087,8 @@ export class Projects extends Context.Service<
               continue
             }
             const prepared = yield* Effect.exit(
-              prepareWorktree(binding.repository, base, { worktree: workspace.path, branch }, remote, plain),
+              // An aside's, made as + is pressed, doesn't wait on the network: it is a copy to read, from the remote as last fetched.
+              prepareWorktree(binding.repository, base, { worktree: workspace.path, branch }, remote, plain, input.shelf !== 'scratch'),
             )
             yield* sql.withTransaction(
               Effect.gen(function* () {

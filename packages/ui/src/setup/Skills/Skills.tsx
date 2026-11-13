@@ -4,6 +4,7 @@ import { cx } from '../../lib/cx'
 import type { RootProps } from '../../lib/props'
 import { Button } from '../../primitives/Button/Button'
 import { Field } from '../../primitives/Field/Field'
+import { Problem } from '../../primitives/Problem/Problem'
 import s from './Skills.module.css'
 
 /*
@@ -67,11 +68,7 @@ export function SkillInstall({ found, busy, error, onFind, onReview, text, class
           {busy ? t.finding : t.find}
         </Button>
       </form>
-      {error !== null && (
-        <p className={s.error} role="alert">
-          {error}
-        </p>
-      )}
+      {error !== null && <Problem>{error}</Problem>}
       {found !== null && (
         <div className={s.found}>
           <span className={s.label}>
@@ -245,9 +242,12 @@ export function SkillReview({ card, busy, onInstall, onCancel, text, className, 
         <Button variant="quiet" onClick={onCancel} disabled={busy}>
           {t.cancel}
         </Button>
-        <Button variant="signal" disabled={busy || !card.installable} onClick={() => onInstall(card.replaces !== null)}>
-          {card.replaces !== null ? t.replace(card.replaces) : card.update ? t.update : t.install}
-        </Button>
+        {/* One that can't be installed has no Install to press: why is said above, and Cancel leaves. */}
+        {card.installable && (
+          <Button variant="signal" disabled={busy} onClick={() => onInstall(card.replaces !== null)}>
+            {card.replaces !== null ? t.replace(card.replaces) : card.update ? t.update : t.install}
+          </Button>
+        )}
       </footer>
     </section>
   )

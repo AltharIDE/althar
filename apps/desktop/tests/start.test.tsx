@@ -8,6 +8,7 @@ import { RuntimeState } from '@althar/ui'
 
 import { useServices } from '../src/renderer/data/services'
 import { accountEntry } from '../src/renderer/features/accounts/AgentAccounts'
+import { clock } from '../src/renderer/shared/time'
 import { useAccountSignIn } from '../src/renderer/features/accounts/useAccountSignIn'
 import { HomeView } from '../src/renderer/features/home/HomeView'
 import { useHome } from '../src/renderer/features/home/useHome'
@@ -80,6 +81,17 @@ describe('accounts in settings', () => {
     const own = { ...usual('acc_3', 'signed_in'), home: '/Users/me/profile/accounts/acc_3', outUntil: '2026-10-03T14:00:00' }
     expect(accountEntry(own, now)).toMatchObject({ place: { kind: 'own' }, state: { kind: 'out' } })
     expect(accountEntry({ ...usual('acc_4', 'unknown') }, now).state).toEqual({ kind: 'ready' })
+  })
+
+  it('says when a sign-in ends only where the runtime says it ends soon, and nothing of an end further off', () => {
+    const now = new Date('2026-10-03T12:00:00.000Z')
+    const ends = (endsAt: string, endsSoon = false) => accountEntry({ ...usual('acc_1', 'signed_in'), endsAt, endsSoon }, now).ends
+    // A month off: all is well, so the row says nothing of it.
+    expect(ends('2026-11-02T12:00:00.000Z')).toBeUndefined()
+    expect(ends('2026-10-05T12:00:00.000Z', true)).toEqual({ at: clock('2026-10-05T12:00:00.000Z', now) })
+    // Past its end, its row says it is signed out instead: no end to say.
+    expect(ends('2026-10-01T12:00:00.000Z')).toBeUndefined()
+    expect(accountEntry(usual('acc_1', 'signed_in'), now).ends).toBeUndefined()
   })
 
   it('says Go and Zen each in its own state, the one that refused work lately as its button, and no provider it can’t place', () => {
@@ -840,11 +852,16 @@ describe('the start', () => {
     // The tour not seen: with no projects read, this may be someone's install of long ago, so it isn't greeted as new.
     withServices(<Start onProject={vi.fn()} />, client, host)
     // Said on the agents' step, where no agent could be asked; the project can still be made.
-    expect((await screen.findByRole('alert')).textContent).toBe("Althar's runtime didn't answer. If it keeps happening, restart Althar.")
+    // Said as a problem, with Check again beside it.
+    expect((await screen.findByRole('alert')).textContent).toBe(
+      "Althar's runtime didn't answer. If it keeps happening, restart Althar. Check again",
+    )
     expect(screen.getByRole('heading', { name: 'Your agents', level: 1 })).toBeTruthy()
     expect(screen.queryByRole('button', { name: 'Skip' })).toBeNull()
     expect(screen.queryByRole('button', { name: 'Back' })).toBeNull()
-    expect(screen.getByText('None found.')).toBeTruthy()
+    // Not "None found." beside it, which nothing found: the error stands there, with Check again.
+    expect(screen.queryByText('None found.')).toBeNull()
+    expect(screen.getByRole('button', { name: 'Check again' })).toBeTruthy()
     await userEvent.click(screen.getByRole('button', { name: 'Continue without one' }))
     expect(await screen.findByText('None found in the usual places.')).toBeTruthy()
     await userEvent.click(screen.getByRole('button', { name: /Choose a folder/ }))

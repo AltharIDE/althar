@@ -1,3 +1,4 @@
+import { copilotDefinition } from './copilot'
 import type { InAppSignIn } from './signInFlow'
 import { spawnSync } from 'node:child_process'
 import { existsSync } from 'node:fs'
@@ -38,6 +39,7 @@ export type AgentId =
   | 'codex'
   | 'opencode'
   | 'copilot'
+  | 'copilot-direct'
   | 'junie'
   | 'grok'
   | 'kimi'
@@ -171,6 +173,12 @@ export interface AgentDefinition {
      */
     readonly paidBy?: (output: string) => PaidBy | undefined
     /**
+     * When the sign-in ends, from the same output, as an ISO time; undefined
+     * where the agent doesn't say. Only an agent whose status says when the
+     * person must sign in again has one: never a token it renews by itself.
+     */
+    readonly endsAt?: (output: string) => string | undefined
+    /**
      * For an agent that reaches several providers, each with a sign-in of its
      * own (OpenCode: `opencode-go/glm-5.3`): the providers its status lists
      * as signed in (`connections` says by what, so a changed sign-in is told from the same), and the provider a model at the agent goes through.
@@ -238,6 +246,8 @@ export interface AgentDefinition {
    * Althar makes, so every account works the same; never a sign-in.
    */
   readonly home: {
+    /** Its usual account belongs to Althar, separately from the engine’s own accounts. */
+    readonly managed?: boolean
     readonly variable: string
     readonly usual: (env: Readonly<Record<string, string | undefined>>, homeDir: string) => string
     readonly shared: (names: ReadonlyArray<string>) => ReadonlyArray<string>
@@ -482,6 +492,8 @@ export const excludedCommandsOf = (commands: ReadonlyArray<string>): ReadonlyArr
   commands.flatMap((command) => [command, `${command} *`])
 
 export interface AgentCli {
+  /** Use Althar’s verified engine; an unrelated or older personal install cannot replace it. */
+  readonly managed?: boolean
   /** The command by name, as on the person's PATH; `.exe` is added on Windows. */
   readonly name: string
   /**
@@ -624,6 +636,24 @@ const claudePaidBy = (output: string): PaidBy | undefined => {
     const method = typeof parsed === 'object' && parsed !== null && 'authMethod' in parsed ? parsed.authMethod : undefined
     if (typeof method !== 'string' || method === 'none') return undefined
     return method === 'claude.ai' ? 'plan' : 'key'
+  } catch {
+    return undefined
+  }
+}
+
+/**
+ * When a claude.ai sign-in ends, from `claude auth status` (2.1.318 and
+ * later): `loginExpiresAt`, an ISO time, the end of the login's refresh chain
+ * as stored at sign-in, which renewing never moves; null for a key, a token
+ * from the environment, Bedrock, Vertex or a gateway, and missing before
+ * 2.1.318. Its own description says the real end can be up to three days
+ * earlier, which the warning allows for (`WARN_WITHIN` in the runtime).
+ */
+const claudeEndsAt = (output: string): string | undefined => {
+  try {
+    const parsed: unknown = JSON.parse(output)
+    const at = typeof parsed === 'object' && parsed !== null && 'loginExpiresAt' in parsed ? parsed.loginExpiresAt : undefined
+    return typeof at === 'string' && !Number.isNaN(Date.parse(at)) ? new Date(Date.parse(at)).toISOString() : undefined
   } catch {
     return undefined
   }
@@ -885,6 +915,7 @@ export const claudeSandboxStarts = (): boolean => {
     const onPath = (name: string) =>
       (process.env.PATH ?? '').split(delimiter).some((folder) => folder !== '' && existsSync(join(folder, name)))
     if (!onPath('bwrap') || !onPath('socat')) return false
+    // oxlint-disable-next-line althar/off-the-thread -- Not off the thread yet: once a launch, on Linux with bubblewrap, up to 5 s (foundations.md).
     const tried = spawnSync('bwrap', ['--ro-bind', '/', '/', '--dev', '/dev', '--unshare-user', '--unshare-net', 'true'], {
       stdio: 'ignore',
       timeout: 5_000,
@@ -998,7 +1029,7 @@ const claudeJudges = {
   },
 }
 
-export const agents: Readonly<Record<AgentId, AgentDefinition>> = {
+const cliAgents: Readonly<Record<Exclude<AgentId, 'copilot-direct'>, AgentDefinition>> = {
   'claude-code': {
     id: 'claude-code',
     name: 'Claude Code',
@@ -1029,6 +1060,7 @@ export const agents: Readonly<Record<AgentId, AgentDefinition>> = {
       status: () => ({ command: 'claude', args: ['auth', 'status'] }),
       read: loggedInField,
       paidBy: claudePaidBy,
+      endsAt: claudeEndsAt,
       login: 'claude auth login',
       inApp: { kind: 'claude-login', ways: ['browser'], run: () => ({ command: 'claude', args: ['auth', 'login', '--claudeai'] }) },
       // Its sign-in is a Keychain item named after the home's path, which deleting the folder would leave behind.
@@ -1393,7 +1425,7 @@ export const agents: Readonly<Record<AgentId, AgentDefinition>> = {
     id: 'copilot',
     ownHelpers: { off: true, how: '--excluded-tools task', kept: 'none: one tool runs both ways' },
     skills: null,
-    name: 'GitHub Copilot',
+    name: 'GitHub Copilot CLI',
     service: { name: 'GitHub', url: 'https://api.githubcopilot.com' },
     source: 'user_installed',
     /*
@@ -1867,4 +1899,13 @@ export const agents: Readonly<Record<AgentId, AgentDefinition>> = {
       'It unpacks about 1 GB into a temporary folder each time it starts, removed when it stops.',
     ],
   },
+}
+
+/** Native Copilot keeps its identity and credentials separate from the existing CLI connection. */
+const { 'claude-code': firstClaude, codex: firstCodex, ...otherAgents } = cliAgents
+export const agents: Readonly<Record<AgentId, AgentDefinition>> = {
+  'claude-code': firstClaude,
+  codex: firstCodex,
+  'copilot-direct': copilotDefinition(cliAgents.opencode),
+  ...otherAgents,
 }

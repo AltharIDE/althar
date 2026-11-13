@@ -19,12 +19,14 @@
   letter-spacing: -0.01em;
   color: var(--t-1);
 }
-/* a window shrunk to fit a cell of the states grid */
+/* a window at the app's own size, shrunk to fit a cell of the states grid, so the calls and the projects both show */
 .cell {
-  width: 1280px;
-  height: 720px;
+  flex: none;
+  width: 960px;
+  height: 600px;
   overflow: hidden;
   box-shadow: inset 0 0 0 1px var(--line-2);
+  zoom: 0.66;
 }
 .cell .window {
   position: relative;

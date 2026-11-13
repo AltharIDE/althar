@@ -3,7 +3,7 @@ name: desktop
 # On a pull request, and for its entry in the merge queue: the desktop app's checks and the unit tests its change
 # reaches, and the app's whole end-to-end run (e2e.yml) when it reaches the app (packages/testing/src/select.ts). On a
 # pull request, Windows' smoke test too, when what reaches the app is code that behaves differently there. Windows'
-# unit tests, the coverage gate and the packages run after merge, in post-merge.yml.
+# affected unit tests run separately in windows.yml; full suites, coverage and packages run after merge in post-merge.yml.
 on:
   # From queue.yml, for a pull request in the merge queue.
   workflow_call:
@@ -65,7 +65,7 @@ jobs:
       # What the change is: against the pull request's base, or in the merge queue against main, since the build at a
       # group's head merges the whole group when it passes, and so must cover every entry in it.
       - env:
-          BASE: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_ref }}
+          BASE: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha }}
         run: |
           if [ -n "$BASE" ] && git fetch --no-tags --depth=1 origin "$BASE"; then
             git diff --name-only --no-renames FETCH_HEAD HEAD > "$RUNNER_TEMP/changed"
@@ -125,11 +125,6 @@ jobs:
       - uses: actions/setup-node@v5
         with:
           node-version-file: .node-version
-      - uses: actions/cache@v4
-        with:
-          path: ~/.bun/install/cache
-          key: windows-bun-${{ hashFiles('bun.lock') }}
-          restore-keys: windows-bun-
       - uses: ./.github/actions/electron
       # Tests with an open flaky issue run, but don't fail this job (packages/testing).
       - uses: ./.github/actions/flaky/quarantine

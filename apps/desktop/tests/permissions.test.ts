@@ -38,7 +38,7 @@ describe('a permission call, as the card asks it', () => {
       done: 'Posted on #640.',
       stays: 'Everyone watching it is told at once; it can’t be called back.',
       words: 'Not needed once #635 merges.',
-      through: { server: 'github', brand: Brand.GitHub, tool: 'add_issue_comment' },
+      through: { server: 'github', brand: Brand.GitHub, tool: 'Add issue comment' },
     })
     expect(merge.offers).toBeUndefined()
   })

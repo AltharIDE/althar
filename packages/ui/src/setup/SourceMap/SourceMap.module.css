@@ -1,5 +1,7 @@
 .map {
   container-type: inline-size;
+  /* as a container it can't take its width from what it holds, so it fills what it is in */
+  width: 100%;
   display: flex;
   flex-direction: column;
   gap: 10px;

@@ -25,12 +25,16 @@
 .body {
   margin: 6px 0 0 26px;
   padding: 9px 12px;
-  border-radius: 10px;
+  border-radius: var(--r-lg);
   background: var(--n-1);
   box-shadow: inset 0 0 0 1px var(--line-2);
   font-size: 13px;
   line-height: 1.55;
   color: var(--t-2);
+}
+/* what they wrote, and what came with it (a failed check's log) under it */
+.body > * + * {
+  margin-top: 8px;
 }
 .foot {
   display: flex;

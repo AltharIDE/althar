@@ -47,13 +47,6 @@ const meta = {
 export default meta
 type Story = StoryObj<typeof meta>
 
-export const Default: Story = {}
-export const Small: Story = { args: { size: 'small' } }
-export const Disabled: Story = { args: { disabled: true } }
-export const Busy: Story = { args: { busy: true, children: 'Switching' } }
-/** The first way on an ask offers, in its violet. */
-export const Signal: Story = { args: { variant: 'signal' } }
-
 /** The button does the likely thing; the chevron opens the others, and Escape brings focus back to it. */
 export const ChoosingAnother: Story = {
   play: async ({ args, canvasElement }) => {

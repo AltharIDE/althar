@@ -53,7 +53,7 @@ export interface Plan {
   readonly windowsE2e: boolean
 }
 
-export type Workflow = 'harness' | 'desktop' | 'ui'
+export type Workflow = 'harness' | 'desktop' | 'ui' | 'windows'
 
 /** A job's packages, and whether its tests are split by file into machines of their own. */
 interface Group {
@@ -84,6 +84,27 @@ const LAYOUT: Record<Workflow, { readonly jobs: ReadonlyArray<Group>; readonly e
   },
   desktop: { jobs: [{ name: 'apps/desktop', dirs: ['apps/desktop'] }], e2e: true },
   ui: { jobs: [{ name: 'packages/ui', dirs: ['packages/ui'] }], e2e: false },
+  windows: {
+    jobs: [
+      { name: 'desktop', dirs: ['apps/desktop'] },
+      { name: 'packages/runtime', dirs: ['packages/runtime'], sharded: true },
+      {
+        name: 'packages',
+        dirs: [
+          'packages/connectors',
+          'packages/contracts',
+          'packages/domain',
+          'packages/persistence-sqlite',
+          'packages/provider-adapters',
+          'packages/skills',
+          'packages/testing',
+          'packages/ui',
+          'apps/cli',
+        ],
+      },
+    ],
+    e2e: false,
+  },
 }
 
 /** About a quarter of the runtime's tests: a machine's worth, a few minutes. More take more machines, up to four. */
@@ -111,7 +132,8 @@ const SMOKE = 'apps/desktop/e2e/smoke.spec.ts'
  * What behaves differently by OS (paths, processes, files, the keyring): the runtime and the packages it runs, and the
  * desktop app but its renderer.
  */
-const BY_OS = /^(?:packages\/(?:runtime|provider-adapters|persistence-sqlite|connectors)\/|apps\/desktop\/(?!src\/renderer\/))/
+const BY_OS =
+  /^(?:packages\/(?:runtime|provider-adapters|persistence-sqlite|connectors|skills)\/|apps\/cli\/|apps\/desktop\/(?!src\/renderer\/))/
 
 const MODULE = /\.(?:[cm]?[jt]sx?|css)$/
 const SCRIPT = /\.[cm]?jsx?$/
@@ -369,6 +391,8 @@ export const plan = (changed: ReadonlyArray<string>, repo: Repository, workflow:
   const testsOf = (dir: string) => tests.filter((file) => file.startsWith(`${dir}/`))
   const why: Array<string> = []
   const everything = changed.find((file) => EVERYTHING.test(file))
+  if (workflow === 'windows' && everything === undefined && !changed.some((file) => BY_OS.test(file) && !INERT.test(file)))
+    return { why: [], jobs: [], e2e: false, windowsE2e: false }
   if (everything !== undefined)
     why.push(everything === '*' ? 'What changed is unknown: everything runs.' : `${everything} changed: everything runs.`)
 
@@ -411,7 +435,7 @@ export const plan = (changed: ReadonlyArray<string>, repo: Repository, workflow:
         .map((dir): Part => {
           const all = testsOf(dir)
           const some = everything === undefined ? all.filter((file) => reached.has(file)) : all
-          const check = everything !== undefined || checked.has(dir)
+          const check = workflow !== 'windows' && (everything !== undefined || checked.has(dir))
           return {
             dir,
             check,
@@ -445,6 +469,16 @@ export const repository = (root = '.'): Repository => ({
     }
   },
 })
+
+/** Full runtime coverage replaces its selected tests in the queue, while its checks still gate once. */
+export const coveredRuntime = (jobs: ReadonlyArray<Job>): ReadonlyArray<Job> =>
+  jobs.flatMap((job) => {
+    const parts = job.parts
+      .map((part): Part => (part.dir === 'packages/runtime' ? { dir: part.dir, check: part.check, tests: [] } : part))
+      .filter((part) => part.check || part.tests === 'all' || part.tests.length > 0)
+    if (parts.length === 0) return []
+    return [{ name: parts.every((part) => part.dir === 'packages/runtime') ? 'packages/runtime checks' : job.name, parts }]
+  })
 
 const describe = (part: Part) =>
   `${part.dir}: ${part.check ? 'checks, ' : ''}${part.tests === 'all' ? 'all its tests' : `${part.tests.length} of its tests`}${part.shard === undefined ? '' : `, part ${part.shard}`}`
@@ -481,7 +515,7 @@ const [mode, workflow, list] = process.argv.slice(2)
 const output = process.env.GITHUB_OUTPUT
 if (
   mode === 'plan' &&
-  (workflow === 'harness' || workflow === 'desktop' || workflow === 'ui') &&
+  (workflow === 'harness' || workflow === 'desktop' || workflow === 'ui' || workflow === 'windows') &&
   list !== undefined &&
   output !== undefined
 ) {
@@ -489,11 +523,15 @@ if (
     .split('\n')
     .filter((line) => line.trim() !== '')
   const planned = plan(changed, repository(), workflow, { draft: process.env.DRAFT === 'true' })
+  const runtime = planned.jobs.some((job) => job.parts.some((part) => part.dir === 'packages/runtime'))
+  const covered = workflow === 'harness' && process.env.RUNTIME_COVERAGE === 'true' && runtime
+  const jobs = covered ? coveredRuntime(planned.jobs) : planned.jobs
   appendFileSync(
     output,
     [
-      `jobs=${JSON.stringify(planned.jobs)}`,
-      `any=${planned.jobs.length > 0}`,
+      `jobs=${JSON.stringify(jobs)}`,
+      `any=${jobs.length > 0}`,
+      `runtime=${runtime}`,
       `e2e=${planned.e2e}`,
       `windows-e2e=${planned.windowsE2e}`,
       '',
@@ -503,8 +541,9 @@ if (
     `### What ${workflow} runs`,
     '',
     ...planned.why.map((line) => `- ${line}`),
-    ...planned.jobs.flatMap((job) => job.parts.map((part) => `- ${describe(part)}`)),
-    ...(planned.jobs.length === 0 ? ['- No checks or tests: nothing it changed reaches them.'] : []),
+    ...jobs.flatMap((job) => job.parts.map((part) => `- ${describe(part)}`)),
+    ...(covered ? ['- The runtime’s full suite runs once with coverage; its selected tests are covered there.'] : []),
+    ...(jobs.length === 0 && !covered ? ['- No checks or tests: nothing it changed reaches them.'] : []),
     ...(LAYOUT[workflow].e2e
       ? [`- The end-to-end run: ${planned.e2e ? 'yes' : 'no'}. Windows' smoke test: ${planned.windowsE2e ? 'yes' : 'no'}.`]
       : []),

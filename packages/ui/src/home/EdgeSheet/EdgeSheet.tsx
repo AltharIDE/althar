@@ -4,6 +4,7 @@ import { cx } from '../../lib/cx'
 import type { RootProps } from '../../lib/props'
 import { LinkButton } from '../../primitives/LinkButton/LinkButton'
 import { LiveDot } from '../../primitives/LiveDot/LiveDot'
+import { Problem } from '../../primitives/Problem/Problem'
 import { NeedList } from '../NeedLine/NeedLine'
 import s from './EdgeSheet.module.css'
 
@@ -17,11 +18,10 @@ import s from './EdgeSheet.module.css'
  * quiet, as on the home.
  */
 
-/** The work in progress, counted for the foot: how many, and of those, how many are held or stopped. */
+/** The work in progress, counted for the foot: how many, and of those, how many are held. Work stopped waits on the person, above. */
 export interface EdgeWork {
   inProgress: number
   held?: number
-  stopped?: number
 }
 
 export interface EdgeSheetText {
@@ -38,10 +38,8 @@ export const edgeSheetText: EdgeSheetText = {
   waiting: (n) => (n === 1 ? '1 needs you' : `${n} need you`),
   rest: 'Nothing needs you',
   openApp: 'Open Althar',
-  work: ({ inProgress, held = 0, stopped = 0 }) =>
-    inProgress === 0
-      ? 'Nothing in progress'
-      : [`${inProgress} in progress`, held > 0 && `${held} held`, stopped > 0 && `${stopped} stopped`].filter(Boolean).join(' · '),
+  work: ({ inProgress, held = 0 }) =>
+    inProgress === 0 ? 'Nothing in progress' : [`${inProgress} in progress`, held > 0 && `${held} held`].filter(Boolean).join(' · '),
 }
 
 export type EdgeSheetProps = RootProps<
@@ -80,9 +78,9 @@ export function EdgeSheet({ waiting, needs, work, tone = 'paper', onOpenApp, fai
         )}
       </header>
       {failure && (
-        <p role="alert" className={s.failure}>
+        <Problem size="small" className={s.failure}>
           {failure}
-        </p>
+        </Problem>
       )}
       {hasNeeds && (
         <NeedList bare className={s.calls}>

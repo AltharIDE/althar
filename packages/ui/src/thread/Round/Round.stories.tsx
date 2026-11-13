@@ -146,18 +146,6 @@ export const AllStates: Story = {
             </Round>
           ),
         },
-        {
-          state: 'dark',
-          node: (
-            <Round {...args}>
-              <Markdown source={ACK} />
-              <WorkLine took="11m 40s" summary="edited 2 files">
-                {work}
-              </WorkLine>
-            </Round>
-          ),
-          dark: true,
-        },
       ]}
     />
   ),

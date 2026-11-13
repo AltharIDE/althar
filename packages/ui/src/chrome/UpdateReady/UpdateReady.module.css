@@ -15,9 +15,6 @@
   color: var(--t-2);
   white-space: nowrap;
 }
-.error {
-  color: var(--danger);
-}
 
 @keyframes arrive {
   from {

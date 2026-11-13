@@ -6,7 +6,7 @@ import { expect, type Page, test } from '@playwright/test'
 
 import { repository } from '../tests/repository'
 import { seedClaude, seedCodex, seedHealth, seedOpenCode, seedSkill } from './agentHome'
-import { launch, openFirstProject, projectSettings, sizeWindow, still } from './support'
+import { launch, openFirstProject, projectSettings, sizeWindow, still, backToWork } from './support'
 
 /*
  * Every section of Althar's Settings and of a project's, as a person finds them with their agents set up: tiles of MCP
@@ -153,10 +153,7 @@ test('draws each section of Althar’s Settings and of a project’s, light and 
         await expect(page.getByRole('heading', { name: title, level: 2 })).toBeVisible()
         await shoot(page, `project-${String(PROJECT.findIndex(([, one]) => one === id) + 1).padStart(2, '0')}-${id}-${scheme}`)
       }
-      await page
-        .getByRole('radiogroup', { name: 'View' })
-        .getByRole('radio', { name: /^Conversation/ })
-        .click()
+      await backToWork(page)
     }
 
     // The servers again at a narrow window, nothing running past its edge.

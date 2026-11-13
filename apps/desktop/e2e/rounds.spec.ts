@@ -6,7 +6,7 @@ import { join } from 'node:path'
 import { expect, test } from '@playwright/test'
 
 import { repository } from '../tests/repository'
-import { connectGitHub, launch, openFirstProject, say, toConversation } from './support'
+import { connectGitHub, launch, openFirstProject, say, toConversation, showPanes } from './support'
 
 /*
  * A task goes back to work, and ships again (ADR-034), in a real window
@@ -55,7 +55,7 @@ test('a merged task’s lead works on what the person asks, and Ship opens what 
     await page.getByRole('button', { name: 'Accept and merge' }).click()
     squashMerge(remote, branch)
     await page.getByRole('button', { name: 'Back to meridian' }).click()
-    await page.getByRole('radio', { name: /^Board/ }).click()
+    await showPanes(page, { conversation: false, board: true })
     const work = page.getByRole('region', { name: 'The project’s work' })
     await expect(work.getByText('PR #1 merged')).toBeVisible()
 
@@ -174,7 +174,7 @@ test('a task of two repositories: one’s pull request open beside the other’s
     await page.getByRole('button', { name: /^Accept and merge/ }).click()
     squashMerge(remotes.api ?? '', branch)
     await page.getByRole('button', { name: 'Back to api' }).click()
-    await page.getByRole('radio', { name: /^Board/ }).click()
+    await showPanes(page, { conversation: false, board: true })
     await expect(work.getByText('PR #1 merged')).toBeVisible()
 
     // Its lead changes web for the first time: web's first pull request opens from the task.
@@ -182,14 +182,14 @@ test('a task of two repositories: one’s pull request open beside the other’s
     await work.getByRole('button', { name: 'Share the retry' }).click()
     await outputs()
     await expect(page.getByText('One commit isn’t in a pull request yet.')).toBeVisible()
-    await page.getByRole('button', { name: 'Open a new draft pull request' }).click()
+    await page.getByRole('button', { name: /^Ship \d+ commits?$/ }).click()
     await expect(page.getByRole('button', { name: 'Mark web ready for review' })).toBeVisible()
 
     // Then more in api: web's pull request open, to mark ready and accept, beside api's next, to open.
     commitIn(api, 'More for api')
     await again()
     await expect(page.getByText('One commit isn’t in a pull request yet.')).toBeVisible()
-    await expect(page.getByRole('button', { name: 'Open a new draft pull request' })).toBeVisible()
+    await expect(page.getByRole('button', { name: /^Ship \d+ commits?$/ })).toBeVisible()
     await expect(page.getByRole('button', { name: 'Mark web ready for review' })).toBeVisible()
     await page.mouse.move(1400, 300)
     await page.screenshot({ path: 'test-results/rounds-mixed-task.png', animations: 'disabled' })
@@ -211,28 +211,38 @@ test('a task of two repositories: one’s pull request open beside the other’s
     writeFileSync(refuse, '#!/bin/sh\nexit 1\n', { mode: 0o755 })
     await again()
     await expect(page.getByText('3 commits aren’t in a pull request yet.')).toBeVisible()
-    await page.getByRole('button', { name: 'Open a new draft pull request' }).click()
-    await expect(page.getByRole('alert')).toBeVisible()
+    await page.getByRole('button', { name: /^Ship \d+ commits?$/ }).click()
+    await toConversation(page)
+    await expect(page.getByRole('button', { name: 'Try again', exact: true })).toBeVisible()
+    await outputs()
     await expect(page.getByRole('button', { name: 'Mark api ready for review' })).toBeEnabled()
     await page.mouse.move(1400, 300)
     await page.screenshot({ path: 'test-results/rounds-partial-try.png', animations: 'disabled' })
     await again()
-    await expect(page.getByText('One commit isn’t in a pull request yet.')).toBeVisible()
+    // The accepted Ship waits for its failed repository; its successful pull request and remaining commit survive navigation.
+    expect(git(remotes.web ?? '', 'for-each-ref', '--format=%(objectname)', `refs/heads/${branch}-2`)).toBe('')
+    expect(git(web, 'log', '-1', '--format=%s')).toBe('More for web')
     await expect(page.getByText('Before this: api PR #1, merged on GitHub.')).toBeVisible()
-    await expect(page.getByRole('button', { name: 'Open a new draft pull request' })).toBeVisible()
+    await expect(page.getByRole('button', { name: /^Ship \d+ commits?$/ })).toHaveCount(0)
     await page.mouse.move(1400, 300)
     await page.screenshot({ path: 'test-results/rounds-partial-task.png', animations: 'disabled' })
     await page.getByRole('button', { name: 'Back to api' }).click()
-    await expect(work.getByText('Ready to accept')).toBeVisible()
-    await expect(work.getByText('althar/share-the-retry-2')).toBeVisible()
+    await expect(work.getByText('Needs you', { exact: true })).toBeVisible()
+    await expect(work.getByText(/Couldn't open the pull request/)).toBeVisible()
+    expect(git(api, 'branch', '--show-current')).toBe(`${branch}-2`)
     await page.screenshot({ path: 'test-results/rounds-partial-board.png', animations: 'disabled' })
 
     // Tried again once the host takes it, web's next opens, on the branch made for it the first time.
     rmSync(refuse)
     await work.getByRole('button', { name: 'Share the retry' }).click()
     await outputs()
-    await page.getByRole('button', { name: 'Open a new draft pull request' }).click()
-    await expect(page.getByRole('button', { name: 'Open a new draft pull request' })).toHaveCount(0)
+    await toConversation(page)
+    await page.getByRole('button', { name: 'Try again', exact: true }).click()
+    await outputs()
+    await expect(page.getByRole('link', { name: 'Open web #4 on GitHub' })).toBeVisible()
+    await expect(page.getByRole('link', { name: 'Open api #3 on GitHub' })).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Mark both ready for review' })).toBeVisible()
+    await expect(page.getByRole('button', { name: /^Ship \d+ commits?$/ })).toHaveCount(0)
     expect(
       execFileSync('git', ['--git-dir', remotes.web ?? '', 'log', '-1', '--format=%s', `${branch}-2`], { encoding: 'utf8' }).trim(),
     ).toBe('More for web')

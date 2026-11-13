@@ -277,4 +277,4 @@ export const AllStates: Story = {
   ),
 }
 
-export const ErrandWaiting: Story = { args: { errands: ['Waiting for #1187: checks at 9b50d2c.'] } }
+export const ErrandWaiting: Story = { args: { errands: ['Merges once checks pass'] } }

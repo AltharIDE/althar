@@ -41,7 +41,7 @@ test('shows on the plan the effort the coordinator picked for its lead, which th
     const conversation = page.getByRole('region', { name: 'Conversation' })
     await expect(conversation.getByText(/^Starts in \d+s$/)).toBeVisible()
     await page.getByRole('button', { name: 'Hold' }).click()
-    await expect(conversation.getByText('Held. Starts when you say')).toBeVisible()
+    await expect(conversation.getByText('Held', { exact: true })).toBeVisible()
     const plan = page.locator('div[data-rhythm]', { has: lead }).last()
     await plan.screenshot({ path: 'test-results/plan-effort.png', animations: 'disabled' })
     await page.screenshot({ path: 'test-results/plan-effort-window.png', animations: 'disabled' })

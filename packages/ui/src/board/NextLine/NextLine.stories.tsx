@@ -4,6 +4,7 @@ import { expect, fn, userEvent, waitFor, within } from 'storybook/test'
 
 import { Wait } from '../../foundations/vocabulary'
 import { laneDecorator } from '../../storybook/lane'
+import { BoardDivider } from '../Board/Board'
 import { NextRow } from '../NextRow/NextRow'
 import { NextLine } from './NextLine'
 
@@ -210,5 +211,81 @@ export const Scrolling: Story = {
     })
     await user.pointer({ keys: '[/MouseLeft]' })
     await waitFor(() => expect(args.onMove).toHaveBeenCalledWith('451', 13))
+  },
+}
+
+/** Up next as the board shows it: what continues, the line, and a plan under Planned, one order. */
+const UP_NEXT: ReadonlyArray<UpNextEntry> = [
+  { id: '501', title: 'Repeated PR check lines fold into one in the thread', group: 'waiting', continues: 'Implement' },
+  { id: '502', title: 'The load trace has history before the peek opens', group: 'waiting', continues: 'Review' },
+  { id: '503', title: 'Board cards’ activity line reads plainly, with no URLs', group: 'waiting' },
+  { id: '504', title: 'Merging main into a task’s branch starts no review round', group: 'planned' },
+]
+
+type UpNextEntry = { id: string; title: string; group: 'waiting' | 'planned'; continues?: string }
+
+/** The board's Up next, kept in the story's own state: a plan moved among what waits starts there, as the runtime starts it. */
+function UpNext({ onMove }: { onMove: (id: string, to: number) => void }) {
+  const [order, setOrder] = useState(UP_NEXT)
+  return (
+    <NextLine
+      rows={order}
+      heads={{ planned: <BoardDivider>Planned</BoardDivider> }}
+      render={(id, place) => {
+        const row = order.find((one) => one.id === id)
+        const waits = row?.group === 'waiting'
+        return (
+          <NextRow
+            place={place}
+            task={id}
+            kind="Change"
+            {...(row?.continues === undefined ? {} : { continues: row.continues })}
+            title={row?.title ?? ''}
+            wait={Wait.Workers}
+            reason={!waits ? 'Starting' : row?.continues === undefined ? inLine(place) : '4 of 4 agents busy on this Mac'}
+            text={{ task: () => '' }}
+          />
+        )
+      }}
+      onMove={(id, to) => {
+        onMove(id, to)
+        setOrder((now) => {
+          const it = now.find((one) => one.id === id)
+          if (it === undefined) return now
+          const others = now.filter((one) => one !== it)
+          const waiting = others.filter((one) => one.group === 'waiting').length
+          const moved = it.group === 'planned' && to <= waiting ? { ...it, group: 'waiting' as const } : it
+          return [...others.slice(0, to), moved, ...others.slice(to)]
+        })
+      }}
+    />
+  )
+}
+
+/** Up next with what continues, the line and a plan: every row has a grip, and the plan is headed Planned. */
+export const AcrossGroups: StoryObj<typeof UpNext> = {
+  render: (args) => <UpNext {...args} />,
+  args: { onMove: fn() },
+}
+
+/** The plan dragged to the top, over what continues: it starts first, and Planned heads nothing now. */
+export const DraggedAcrossGroups: StoryObj<typeof UpNext> = {
+  render: (args) => <UpNext {...args} />,
+  args: { onMove: fn() },
+  play: async ({ args, canvasElement }) => {
+    const user = userEvent.setup()
+    const all = rows(canvasElement)
+    const plan = all.at(-1)
+    const from = middle(plan)
+    const to = middle(all[0])
+    await user.pointer([
+      { keys: '[MouseLeft>]', target: plan, coords: from },
+      { coords: { ...from, clientY: from.clientY - 20 } },
+      { coords: { ...to, clientY: to.clientY - 30 } },
+    ])
+    await user.pointer({ keys: '[/MouseLeft]' })
+    await waitFor(() => expect(args.onMove).toHaveBeenCalledWith('504', 0))
+    await waitFor(() => expect(order(canvasElement)[0]).toBe(UP_NEXT[3]?.title))
+    await expect(within(canvasElement).queryByText('Planned')).toBeNull()
   },
 }

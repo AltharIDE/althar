@@ -3,6 +3,7 @@ import { useDragOver } from '../../lib/dragOver'
 import type { RootProps } from '../../lib/props'
 import { Button } from '../../primitives/Button/Button'
 import { below, type HeadingLevel } from '../../primitives/Heading/Heading'
+import { Problem } from '../../primitives/Problem/Problem'
 import { EmptyState } from '../../setup/EmptyState/EmptyState'
 import { SettingGroup } from '../../setup/Preferences/Preferences'
 import { RepositoryMap, type RepositoryMapProps } from '../../setup/RepositoryMap/RepositoryMap'
@@ -113,11 +114,7 @@ export function ProjectRepositories({
       {...handlers}
       {...rest}
     >
-      {error !== undefined && (
-        <p className={s.error} role="alert">
-          {error}
-        </p>
-      )}
+      {error !== undefined && <Problem>{error}</Problem>}
       {repositories.length === 0 && (reading === undefined || reading.length === 0) ? (
         <EmptyState icon="folder" title={t.none} line={t.noneLine} headingLevel={below(headingLevel)} />
       ) : (

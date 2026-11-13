@@ -7,17 +7,12 @@ const meta = { title: 'Primitives/Kbd', component: Kbd, args: { children: '↵' 
 export default meta
 type Story = StoryObj<typeof meta>
 
-export const Key: Story = {}
-export const Word: Story = { args: { children: 'esc' } }
-export const Chord: Story = { args: { children: '⌘P' } }
-export const OnFill: Story = {
-  args: { onFill: true },
-  render: (args) => (
-    <span style={{ display: 'inline-flex', padding: 8, borderRadius: 7, background: 'var(--signal)' }}>
-      <Kbd {...args} />
-    </span>
-  ),
-}
+/** On a filled button it takes the button's words' colour: violet, then ink. */
+const fill = (background: string, color: string, key: string) => (
+  <span style={{ display: 'inline-flex', padding: 6, borderRadius: 7, background, color }}>
+    <Kbd onFill>{key}</Kbd>
+  </span>
+)
 
 export const AllStates: Story = {
   render: () => (
@@ -26,15 +21,8 @@ export const AllStates: Story = {
         { state: 'key', node: <Kbd>↵</Kbd> },
         { state: 'word', node: <Kbd>esc</Kbd> },
         { state: 'chord', node: <Kbd>⌘P</Kbd> },
-        {
-          state: 'on fill',
-          node: (
-            <span style={{ display: 'inline-flex', padding: 6, borderRadius: 7, background: 'var(--signal)' }}>
-              <Kbd onFill>↵</Kbd>
-            </span>
-          ),
-        },
-        { state: 'on ink', dark: true, node: <Kbd onFill>esc</Kbd> },
+        { state: 'on fill', node: fill('var(--signal-fill)', 'var(--on-signal)', '↵') },
+        { state: 'on ink', node: fill('var(--ink-fill)', 'var(--on-ink)', 'esc') },
       ]}
     />
   ),

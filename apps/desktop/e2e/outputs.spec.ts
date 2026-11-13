@@ -159,13 +159,22 @@ test('a stopped branch with no pull request opens its draft one; a pull request 
     await expect(branch.getByText('1 commit not pushed')).toBeVisible()
     await expect(branch.getByText('2 commits not pushed')).toBeHidden()
     await expect(branch.getByRole('button', { name: 'Open the diff of apps/cli/package.json' })).toBeVisible()
-    await expect(branch.getByRole('button', { name: 'Open a draft pull request' })).toBeVisible()
+    await expect(branch.getByRole('button', { name: /^Ship \d+ commits?$/ })).toBeVisible()
+    await expect(branch.getByRole('button', { name: 'Open a draft pull request' })).toHaveCount(0)
     await shoot(electronApp, page, 'branch')
-    // All of it pushed: nothing to say of it, and Althar opens its pull request, never GitHub's own page for one.
-    await branch.getByRole('button', { name: 'Push to origin' }).click()
+    // The person pushes the rest externally: Ship remains the publication action, with no raw push or host-page bypass.
+    await expect(branch.getByRole('button', { name: 'Push to origin' })).toHaveCount(0)
+    git(nightly.path, 'push', '-q', remote, `HEAD:refs/heads/${nightly.branch}`)
+    await page.getByRole('button', { name: 'Back to meridian' }).click()
+    await page
+      .getByRole('button', { name: /Open task/ })
+      .first()
+      .click()
+    await toOutputs(page)
     await expect(branch.getByText(/not pushed/)).toBeHidden()
     await expect(branch.getByRole('link', { name: /Open a pull request/ })).toHaveCount(0)
-    await expect(branch.getByRole('button', { name: 'Open a draft pull request' })).toBeVisible()
+    await expect(branch.getByRole('button', { name: /^Ship \d+ commits?$/ })).toBeVisible()
+    await expect(branch.getByRole('button', { name: 'Open a draft pull request' })).toHaveCount(0)
     await shoot(electronApp, page, 'branch-pushed')
 
     // A pull request: opened as the lead finishes, then four more files the lead committed, pushed by the person.
@@ -207,7 +216,7 @@ test('a stopped branch with no pull request opens its draft one; a pull request 
       .first()
       .click()
     await toOutputs(page)
-    await branch.getByRole('button', { name: 'Open a draft pull request' }).click()
+    await branch.getByRole('button', { name: /^Ship \d+ commits?$/ }).click()
     const opened = page.getByRole('article', { name: 'Nightly dependency check, 27 Oct' })
     await expect(opened.getByText('PR #2')).toBeVisible()
     await expect(opened.getByText('Draft', { exact: true })).toBeVisible()

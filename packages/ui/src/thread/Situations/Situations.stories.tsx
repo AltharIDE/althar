@@ -136,8 +136,6 @@ export const AllStates: Story = {
         { state: 'child failed', node: <ChildStopped how="failed" /> },
         { state: 'same files', node: <SameFiles /> },
         { state: 'server fails', node: <ServerFails /> },
-        { state: 'server fails, dark', node: <ServerFails />, dark: true },
-        { state: 'never rule met, dark', node: <NeverMet />, dark: true },
       ]}
     />
   ),

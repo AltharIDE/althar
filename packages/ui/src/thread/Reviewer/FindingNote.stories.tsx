@@ -27,9 +27,6 @@ export const Open: Story = {
   },
 }
 
-/** The one you're on: whole, marked. */
-export const Current: Story = { args: { current: true } }
-
 /** Fixed, with what changed and the commit. */
 export const Fixed: Story = {
   args: { finding: REVIEW_FINDINGS_SETTLED[0]! },
@@ -58,7 +55,6 @@ export const AllStates: Story = {
         { state: 'current', node: <FindingNote finding={REVIEW_FINDINGS[0]!} current /> },
         { state: 'fixed', node: <FindingNote finding={REVIEW_FINDINGS_SETTLED[1]!} /> },
         { state: 'kept', node: <FindingNote finding={REVIEW_KEPT} /> },
-        { state: 'dark', node: <FindingNote finding={REVIEW_FINDINGS[0]!} current />, dark: true },
       ]}
     />
   ),

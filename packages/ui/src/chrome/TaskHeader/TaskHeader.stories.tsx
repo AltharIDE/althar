@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
-import { useState } from 'react'
+import { type CSSProperties, useState } from 'react'
 import { expect, fn, userEvent, waitFor, within } from 'storybook/test'
 
 import { CODEX, OPUS } from '../../fixtures/models'
@@ -117,6 +117,24 @@ export const Reviewing: Story = {
 }
 /** Its lead implementing, the review to come; how long in all is the step's own, so it is said once. */
 export const Implementing: Story = { args: { state: 'Implementing', steps: planAt(0), took: '52m', elapsed: '52m' } }
+/** A condition outside the task: keep its headline short and its check details with its plan. */
+export const Waiting: Story = {
+  args: {
+    state: 'Waiting',
+    why: 'Waiting: Checks on PR #402. Last checked just now; next check in 30s.',
+    steps: planAt(0),
+    took: undefined,
+    elapsed: undefined,
+  },
+  play: async ({ canvasElement }) => {
+    const said = within(canvasElement).getByText('Waiting').parentElement
+    said?.focus()
+    const card = await within(document.body).findByRole('tooltip')
+    await expect(card).toHaveTextContent('Checks on PR #402')
+    await expect(card).toHaveTextContent('next check in 30s')
+    await expect(card).toHaveTextContent(OPUS.name)
+  },
+}
 /** Reviewed and settled; accepting it is yours. Nothing runs, so where it stands has nothing more to say: no bars, no card. */
 export const ReadyForYou: Story = {
   args: { status: TaskStatus.Yours, state: 'Ready to accept', steps: planAt(1, true), face: 'out' },
@@ -202,19 +220,24 @@ export const SwitchingFaces: Story = {
   },
 }
 
+/* The bar needs a window's width, not a thread's: each cell takes the whole row. */
+const WINDOW_WIDE = { '--measure': '100vw' } as CSSProperties
+
 export const AllStates: Story = {
   render: () => (
-    <States
-      size="wide"
-      cells={[
-        { state: 'reviewing', node: <Header /> },
-        { state: 'implementing', node: <Header {...Implementing.args} /> },
-        { state: 'ready for you', node: <Header {...ReadyForYou.args} /> },
-        { state: 'finished, not a change', node: <Header {...FinishedNotAChange.args} /> },
-        { state: 'stopped', node: <Header {...Stopped.args} /> },
-        { state: 'nothing built', node: <Header {...NothingBuilt.args} /> },
-        { state: 'long title', node: <Header {...LongTitle.args} /> },
-      ]}
-    />
+    <div style={WINDOW_WIDE}>
+      <States
+        size="thread"
+        cells={[
+          { state: 'reviewing', node: <Header /> },
+          { state: 'implementing', node: <Header {...Implementing.args} /> },
+          { state: 'ready for you', node: <Header {...ReadyForYou.args} /> },
+          { state: 'finished, not a change', node: <Header {...FinishedNotAChange.args} /> },
+          { state: 'stopped', node: <Header {...Stopped.args} /> },
+          { state: 'nothing built', node: <Header {...NothingBuilt.args} /> },
+          { state: 'long title', node: <Header {...LongTitle.args} /> },
+        ]}
+      />
+    </div>
   ),
 }

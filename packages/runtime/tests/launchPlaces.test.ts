@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process'
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -271,7 +271,7 @@ describe('a run that ends at once', () => {
     }).pipe(Effect.provide(withQueries())),
   )
 
-  it.live("tells an agent Althar couldn't run it where the task's worktree is gone from disk", () =>
+  it.live('brings back a worktree deleted by hand, and runs in it', () =>
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
       const launches = yield* Launches
@@ -282,39 +282,31 @@ describe('a run that ends at once', () => {
       yield* launches.keepRunnable({ projectId, name: 'Echo', command: 'echo hello', actorId: instance.personId })
       const [worktree] = yield* sql<{ path: string }>`SELECT path FROM workspaces WHERE task_id = ${task.taskId}`
       rmSync(worktree?.path ?? '', { recursive: true, force: true })
+      // Its folder comes back first, as it would for its agent (workspaces and runs, ADR-056), and the run goes on there.
+      assert.include(yield* callTool(access('coordinator', projectId), 'run_project', { task: 'gone', run: 'Echo' }), 'hello')
+      assert.isTrue(existsSync(worktree?.path ?? ''))
+    }).pipe(Effect.provide(withQueries())),
+  )
+
+  it.live("tells an agent Althar couldn't run it where the task's worktree can't come back", () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const launches = yield* Launches
+      const projects = yield* Projects
+      const instance = yield* Instance
+      const { projectId } = yield* open(repository())
+      const task = yield* projects.createTask({ envelope: yield* Runtime.envelope('task.create', {}), projectId, title: 'Gone' })
+      yield* launches.keepRunnable({ projectId, name: 'Echo', command: 'echo hello', actorId: instance.personId })
+      const [worktree] = yield* sql<{ path: string }>`SELECT path FROM workspaces WHERE task_id = ${task.taskId}`
+      // Gone, and something else is where it goes: it can't be brought back.
+      rmSync(worktree?.path ?? '', { recursive: true, force: true })
+      writeFileSync(worktree?.path ?? '', 'not a folder')
       assert.strictEqual(
         yield* callTool(access('coordinator', projectId), 'run_project', { task: 'gone', run: 'Echo' }),
         'Althar could not do that. Try again, or tell the person.',
       )
-      // Nothing is left running, and its process is on the record as unknown.
+      // Nothing is left running.
       assert.lengthOf(yield* launches.ofProject(projectId), 0)
-      const [row] = yield* sql<{ state: string }>`SELECT state FROM processes WHERE purpose = 'run'`
-      assert.strictEqual(row?.state, 'unknown')
-    }).pipe(Effect.provide(withQueries())),
-  )
-})
-
-describe('what runs, for how hard the machine works', () => {
-  it.live('lists every run still running, by its process, and none that ended', () =>
-    Effect.gen(function* () {
-      const launches = yield* Launches
-      const instance = yield* Instance
-      const projects = yield* Projects
-      const { projectId } = yield* open(repository())
-      yield* launches.keep({ projectId, run: { command: 'sleep 30', setup: null }, actorId: instance.personId })
-      const running = yield* launches.start({ projectId, taskId: null, threadId: null })
-      const task = yield* projects.createTask({ envelope: yield* Runtime.envelope('task.create', {}), projectId, title: 'Ends' })
-      const quick = yield* launches.keepRunnable({ projectId, name: 'Quick', command: 'true', actorId: instance.personId })
-      const ended = yield* launches.start({ projectId, taskId: task.taskId, runnableId: quick.id, threadId: null })
-      yield* until(launches.ofProject(projectId), (all) => all.find((one) => one.id === ended.id)?.ended != null)
-      const processes = yield* launches.processes()
-      assert.deepStrictEqual(
-        processes.map((one) => [one.projectId, one.taskId]),
-        [[projectId, null]],
-      )
-      assert.isAbove(processes[0]?.pid ?? 0, 0)
-      yield* launches.stop(running.id)
-      assert.lengthOf(yield* launches.processes(), 0)
     }).pipe(Effect.provide(withQueries())),
   )
 })

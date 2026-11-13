@@ -1,0 +1,53 @@
+/* The pills, over the coordinator's conversation or an aside's */
+.bar {
+  flex-shrink: 0;
+}
+
+/* A new aside's quote of the coordinator, over the composer */
+.quote {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 6px 4px 6px 10px;
+  border-left: 2px solid var(--line-2);
+  color: var(--t-2);
+  font-size: 12.5px;
+}
+.quoteText {
+  flex: 1;
+  min-width: 0;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* Words selected: the button that starts an aside about them */
+.ask {
+  position: fixed;
+  z-index: 50;
+  transform: translate(-50%, calc(-100% - 8px));
+  border-radius: 8px;
+  box-shadow: 0 6px 20px rgb(0 0 0 / 0.18);
+}
+
+/* An aside on its way to the board */
+.ghost {
+  position: fixed;
+  z-index: 60;
+  margin: 0;
+  pointer-events: none;
+  background: var(--n-0);
+  box-shadow: 0 12px 30px rgb(0 0 0 / 0.2);
+}
+:global([data-arrived]) {
+  animation: arrived 1.4s ease-out;
+}
+@keyframes arrived {
+  from {
+    box-shadow: 0 0 0 3px var(--live);
+  }
+  to {
+    box-shadow: 0 0 0 3px transparent;
+  }
+}

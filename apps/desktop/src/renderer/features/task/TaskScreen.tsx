@@ -33,6 +33,7 @@ export const TaskScreen = memo(function TaskScreen({ threadId }: { threadId: str
       onBack={back}
       {...rules}
       onSignIn={ways.signIn}
+      onInstall={ways.agents}
       onConnections={ways.connections}
       onOpenTask={(other) => void navigate({ to: '/threads/$threadId', params: { threadId: other } })}
     />

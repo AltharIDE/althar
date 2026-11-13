@@ -1,4 +1,4 @@
-import { existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
+import { copyFileSync, existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { basename, dirname, join, resolve } from 'node:path'
 
@@ -248,8 +248,20 @@ export const copyAt = (repository: string, path: string, commit: string, from = 
     yield* git(path, 'config', 'commit.gpgSign', 'false')
     // Its unborn branch may be one it fetches.
     yield* git(path, 'fetch', '--quiet', '--update-head-ok', 'origin')
-    yield* git(path, 'checkout', '--quiet', '--detach', '--force', commit)
+    // The index the last copy ended with, kept beside the mirror, where only Althar writes: with it, checking the copy out again
+    // compares each file with what it was, rather than writing every one afresh, which is most of a refresh in a large repository.
+    // Only what was written in the copy since is put back. One kept in the copy itself could have been changed there.
+    const kept = from === repository ? null : `${from.replace(/\.git$/, '')}.index`
+    const index = join(path, '.git', 'index')
+    if (kept !== null) yield* Effect.ignore(Effect.try(() => copyFileSync(kept, index)))
+    const checkedOut = yield* Effect.exit(git(path, 'checkout', '--quiet', '--detach', '--force', commit))
+    // An index git can't read is no help: checked out again without it, as before.
+    if (checkedOut._tag === 'Failure') {
+      yield* Effect.ignore(removeFully(index))
+      yield* git(path, 'checkout', '--quiet', '--detach', '--force', commit)
+    }
     yield* git(path, 'clean', '-fdq')
+    if (kept !== null) yield* Effect.ignore(Effect.try(() => copyFileSync(index, kept)))
   })
 
 /** Where a project's coordinator folder is, by the project's slug: its copies are in it, each by its repository's. */

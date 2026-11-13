@@ -5,7 +5,19 @@ import { join } from 'node:path'
 import { expect, type Page, test } from '@playwright/test'
 
 import { repository } from '../tests/repository'
-import { askAboutMore, launch, openFirstProject, planTask, projectSettings, say, shown, startTask, still, toConversation } from './support'
+import {
+  askAboutMore,
+  launch,
+  openFirstProject,
+  planTask,
+  projectSettings,
+  say,
+  shown,
+  startTask,
+  still,
+  toConversation,
+  showPanes,
+} from './support'
 
 /*
  * Allow everything (ADR-043), as the person meets it: a new project always
@@ -75,20 +87,20 @@ test('allows everything on a task or a project, clearing what waits, and says so
 
     // Its card on the board.
     await page.getByRole('button', { name: 'Back to meridian' }).click()
-    await page.getByRole('radio', { name: /^Board/ }).click()
+    await showPanes(page, { conversation: false, board: true })
     const work = page.getByRole('region', { name: 'The project’s work' })
     const cardOf = (title: string) => work.getByRole('article').filter({ hasText: title })
     await expect(cardOf('Ship the fix')).toBeVisible()
     await shoot(page, 'app-board-allowed.png')
 
     // Another task's deploys wait on the person, as a stack of its own: on the board, it needs you, and asks as ever.
-    await page.getByRole('radio', { name: /^Conversation/ }).click()
+    await showPanes(page, { conversation: true, board: false })
     await startTask(page, 'Tag the release')
     await openReady(page, 'Tag the release')
     await say(page, 'run each make deploy; npm run deploy')
     await expect(page.getByRole('button', { name: 'Allow all 2' })).toBeVisible()
     await page.getByRole('button', { name: 'Back to meridian' }).click()
-    await page.getByRole('radio', { name: /^Board/ }).click()
+    await showPanes(page, { conversation: false, board: true })
     // The card shows its oldest call: the agent asked for both at once, so either may be it.
     await expect(
       cardOf('Tag the release')
@@ -106,15 +118,15 @@ test('allows everything on a task or a project, clearing what waits, and says so
     await expect(allowAll).toHaveCount(0)
     await expect(page.getByRole('button', { name: 'Ask about more' })).toBeVisible()
     await shoot(page, 'app-rules-allow-everything.png')
-    await page.getByRole('radio', { name: /^Board/ }).click()
+    await showPanes(page, { conversation: false, board: true })
 
     // Turned on, the other task's stack went ahead: it waits on no one.
     await expect(cardOf('Tag the release').getByText(/make deploy|npm run deploy/)).toHaveCount(0)
     // A task planned now is up next.
-    await page.getByRole('radio', { name: /^Conversation/ }).click()
+    await showPanes(page, { conversation: true, board: false })
     await planTask(page, 'Rotate the keys')
     await expect(page.getByRole('button', { name: 'Start now' }).last()).toBeVisible()
-    await page.getByRole('radio', { name: /^Board/ }).click()
+    await showPanes(page, { conversation: false, board: true })
     await expect(cardOf('Rotate the keys')).toBeVisible()
     await shoot(page, 'app-board-cleared.png')
 

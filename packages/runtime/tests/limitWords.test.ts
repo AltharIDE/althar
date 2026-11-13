@@ -59,8 +59,9 @@ describe('the words for an agent out of usage', () => {
       callWords({ kind: 'stuck', payload: { step: 'publish', why: 'usage_limit', agentId: 'codex' } }, named),
       'Needs you: Codex ran out of usage',
     )
-    assert.strictEqual(issuesWords(1), 'An issue to file')
-    assert.strictEqual(issuesWords(3), '3 issues to file')
+    assert.strictEqual(issuesWords({ drafts: 1, changes: 0 }), 'An issue to file')
+    assert.strictEqual(issuesWords({ drafts: 3, changes: 2 }), '3 issues to file')
+    assert.strictEqual(issuesWords({ drafts: 0, changes: 2 }), '2 issue changes to apply')
   })
 })
 

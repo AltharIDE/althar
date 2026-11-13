@@ -1,6 +1,7 @@
 import { realpathSync } from 'node:fs'
 import { relative } from 'node:path'
 
+import { toolPhrase } from '@althar/contracts'
 import { Ids, newId, type ProjectId, type ThreadItemKind } from '@althar/domain'
 import { Ledger } from '@althar/persistence-sqlite'
 import {
@@ -62,7 +63,7 @@ const mcpKept = (
       tool: call.tool,
       ...(act === undefined
         ? had?.acts === undefined
-          ? { acts: false, did: call.tool }
+          ? { acts: false, did: toolPhrase(call.server, call.tool) }
           : {}
         : { acts: act.acts, did: act.done, ...(act.words === undefined ? {} : { words: act.words.slice(0, WORDS_KEPT) }) }),
       ...(link === undefined ? {} : { link }),
@@ -783,6 +784,8 @@ export const transcript = (
     readonly last?: number
     /** What the thread's agent is called, in place of its agent's id. */
     readonly agent?: string
+    /** False leaves out what still waits in the thread's queue: a brief's next turn says it itself, so it isn't said twice. */
+    readonly waiting?: boolean
   } = {},
 ) =>
   Effect.gen(function* () {
@@ -809,7 +812,11 @@ export const transcript = (
       FROM thread_items i
       LEFT JOIN provider_sessions s ON s.id = i.provider_session_id
       LEFT JOIN attention_requests a ON i.kind = 'question' AND a.id = json_extract(i.content, '$.attentionId')
-      WHERE i.thread_id = ${threadId} ORDER BY i.sequence`
+      WHERE i.thread_id = ${threadId}${
+        options.waiting === false
+          ? sql` AND NOT EXISTS (SELECT 1 FROM user_inputs u WHERE u.id = i.user_input_id AND u.state IN ('queued', 'noted'))`
+          : sql``
+      } ORDER BY i.sequence`
     const lines = items.flatMap((item) => {
       if (options.kinds !== undefined && !options.kinds.includes(item.kind)) return []
       const content = JSON.parse(item.content) as Record<string, unknown>

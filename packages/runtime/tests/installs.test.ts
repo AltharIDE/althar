@@ -6,10 +6,11 @@ import { join } from 'node:path'
 
 import { type AgentDefinition, agents, type LaunchSpec, usingLocated } from '@althar/provider-adapters'
 import { assert, describe, expect, it } from '@effect/vitest'
-import { Effect, Exit } from 'effect'
+import { Deferred, Effect, Exit, Fiber } from 'effect'
+import { TestClock } from 'effect/testing'
 import { zipSync } from 'fflate'
 
-import { Installs, type InstallsOptions } from '../src/Installs'
+import { DOWNLOAD_WITHIN, Installs, type InstallsOptions, RELEASE_WITHIN } from '../src/Installs'
 
 /** Windows, where what some tests stand on isn't (each says what). */
 const windows = process.platform === 'win32'
@@ -72,6 +73,131 @@ const using = (options: Partial<InstallsOptions>) => {
 }
 
 describe('downloading an agent', () => {
+  it('keeps native Copilot on its verified engine even when a personal OpenCode install is present', async () => {
+    const personal = mkdtempSync(join(tmpdir(), 'althar-personal-engine-'))
+    const name = process.platform === 'win32' ? 'opencode.exe' : 'opencode'
+    writeFileSync(join(personal, name), 'unrelated engine')
+    chmodSync(join(personal, name), 0o755)
+    const native = agents['copilot-direct']
+    const { root, run } = using({ platform: process.platform, search: { env: { PATH: personal }, dirs: [personal] } })
+    const result = await run(
+      Effect.gen(function* () {
+        const installs = yield* Installs
+        expect(installs.locate(native)).toBeNull()
+        // Discovery only: the shared download tests exercise verification and execution of release archives.
+        const managed = join(root, 'copilot-direct', 'current')
+        mkdirSync(managed, { recursive: true })
+        writeFileSync(join(managed, name), 'managed engine')
+        chmodSync(join(managed, name), 0o755)
+        expect(installs.locate(native)).toEqual({ command: join(managed, name), whose: 'althar' })
+      }),
+    )
+    expect(Exit.isSuccess(result)).toBe(true)
+  })
+  it.effect.each(['release headers', 'release body', 'archive headers', 'archive body'] as const)(
+    'aborts stalled %s, cleans up, keeps its installed version, and allows another attempt',
+    (stage) =>
+      Effect.gen(function* () {
+        const entered = yield* Deferred.make<void>()
+        const bytes = archive()
+        const good = github(bytes).fetch
+        let first = true
+        let aborted = false
+        const hang = (signal: AbortSignal) =>
+          new Promise<never>((_resolve, reject) => {
+            signal.addEventListener(
+              'abort',
+              () => {
+                aborted = true
+                reject(new Error('Aborted'))
+              },
+              { once: true },
+            )
+            Effect.runSync(Deferred.succeed(entered, undefined))
+          })
+        const fetch = async (url: string, init?: RequestInit) => {
+          const release = stage.startsWith('release')
+          if (listing(url) !== release) return good(url)
+          // The retry reaches the network again and fails normally, rather than being left "already downloading".
+          if (!first) throw new Error('A new attempt reached the network')
+          first = false
+          const signal = init?.signal
+          assert.isNotNull(signal)
+          if (signal == null) throw new Error('No abort signal')
+          if (stage.endsWith('headers')) return hang(signal)
+          const response = new Response()
+          Object.defineProperty(response, release ? 'json' : 'arrayBuffer', { value: () => hang(signal) })
+          return response
+        }
+        const { root } = using({})
+        // A previous working install must stay in place throughout a failed replacement, on every platform.
+        const old = join(root, 'opencode', 'v2.0.0')
+        mkdirSync(old, { recursive: true })
+        writeFileSync(join(old, 'opencode'), 'previous install')
+        symlinkSync(
+          process.platform === 'win32' ? old : 'v2.0.0',
+          join(root, 'opencode', 'current'),
+          process.platform === 'win32' ? 'junction' : 'dir',
+        )
+        const layer = Installs.layer({ root, fetch, platform: 'linux', arch: 'x64', musl: false, search: { env: { PATH: '' }, dirs: [] } })
+        yield* Effect.gen(function* () {
+          const installs = yield* Installs
+          const attempt = yield* Effect.forkChild(Effect.exit(installs.install(opencode)))
+          yield* Deferred.await(entered)
+          assert.isTrue((yield* installs.state(opencode)).installing)
+          yield* TestClock.adjust(stage.startsWith('release') ? RELEASE_WITHIN : DOWNLOAD_WITHIN)
+          const stopped = yield* Fiber.join(attempt)
+          assert.isTrue(Exit.isFailure(stopped))
+          assert.include(JSON.stringify(stopped), 'took too long')
+          assert.isTrue(aborted)
+          assert.isFalse((yield* installs.state(opencode)).installing)
+          assert.strictEqual(readFileSync(join(root, 'opencode', 'current', 'opencode'), 'utf8'), 'previous install')
+          assert.deepStrictEqual(readdirSync(join(root, 'opencode')).toSorted(), ['current', 'v2.0.0'])
+          const retry = yield* Effect.exit(installs.install(opencode))
+          assert.isTrue(Exit.isFailure(retry))
+          assert.include(JSON.stringify(retry), 'A new attempt reached the network')
+          assert.isFalse((yield* installs.state(opencode)).installing)
+          assert.deepStrictEqual(readdirSync(join(root, 'opencode')).toSorted(), ['current', 'v2.0.0'])
+        }).pipe(Effect.provide(layer))
+      }),
+  )
+
+  it.effect('aborts an interrupted download and frees its install reservation', () =>
+    Effect.gen(function* () {
+      const entered = yield* Deferred.make<void>()
+      let aborted = false
+      const { root } = using({})
+      const layer = Installs.layer({
+        root,
+        platform: 'linux',
+        arch: 'x64',
+        musl: false,
+        search: { env: { PATH: '' }, dirs: [] },
+        fetch: (_url, init) =>
+          new Promise<never>((_resolve, reject) => {
+            init?.signal?.addEventListener(
+              'abort',
+              () => {
+                aborted = true
+                reject(new Error('Aborted'))
+              },
+              { once: true },
+            )
+            Effect.runSync(Deferred.succeed(entered, undefined))
+          }),
+      })
+      yield* Effect.gen(function* () {
+        const installs = yield* Installs
+        const attempt = yield* Effect.forkChild(installs.install(opencode))
+        yield* Deferred.await(entered)
+        yield* Fiber.interrupt(attempt)
+        assert.isTrue(aborted)
+        assert.isFalse((yield* installs.state(opencode)).installing)
+        assert.deepStrictEqual(readdirSync(join(root, 'opencode')), [])
+      }).pipe(Effect.provide(layer))
+    }),
+  )
+
   // Not on Windows: the release it downloads is a shell script, which Althar runs (--version) to check it.
   it.skipIf(windows)('keeps its newest 2.x release, checked, and runs it where the person has none', async () => {
     const { fetch, asked } = github(archive())

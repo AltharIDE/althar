@@ -540,11 +540,14 @@ export interface CodeHost extends HostReleases {
   contains(repository: Repository, change: ChangeRequest, sha: string): Effect.Effect<boolean, ConnectorFailed>
   /**
    * Whether a change's head now is the merge `updateBranch` made from the
-   * head `from`, a merge whose first parent is it: GitHub's update-branch
-   * lands in the background, so the head it says may be null, or someone
-   * else's push. Present on GitHub alone; the others know the commit they pushed.
+   * head `from`, a merge whose first parent is it, and whose second is
+   * `base`, the target's head asked to merge in, where that is known, or a
+   * later head of the target, where it moved on before the merge: GitHub's
+   * update-branch lands in the background, so the head it says may be null,
+   * or someone else's push. Present on GitHub alone; the others know the
+   * commit they pushed.
    */
-  madeFrom?(repository: Repository, change: ChangeRequest, from: string): Effect.Effect<boolean, ConnectorFailed>
+  madeFrom?(repository: Repository, change: ChangeRequest, from: string, base?: string): Effect.Effect<boolean, ConnectorFailed>
   /**
    * Closes a change without merging it, because the person said to: never
    * on an agent's word. Read back as the host has it after; one already

@@ -35,8 +35,8 @@ export const NothingWaits: Story = { args: { waiting: 0, needs: [] } }
 /** Nothing at all: it says so, and still opens Althar. */
 export const NothingAtAll: Story = { args: { waiting: 0, needs: [], work: { inProgress: 0 } } }
 
-/** Work held and stopped: the foot says how many of each, and nothing more. */
-export const HeldAndStopped: Story = { args: { work: { inProgress: 6, held: 2, stopped: 1 } } }
+/** Work held: the foot says how many, and nothing more. */
+export const Held: Story = { args: { work: { inProgress: 6, held: 2 } } }
 
 /** A call just answered here stays its line, quiet, as on the home: same place, same height. */
 export const JustAnswered: Story = {

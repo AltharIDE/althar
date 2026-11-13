@@ -3,6 +3,7 @@ import { expect, fn, userEvent, within } from 'storybook/test'
 
 import { CALLS, QUESTION_CALL, STUCK_CALL } from '../../fixtures/board'
 import { QUESTION_LONG } from '../../fixtures/home'
+import { NextStep } from '../../primitives/NextStep/NextStep'
 import { States, statesOn } from '../../storybook/States'
 import { cardStates, laneDecorator } from '../../storybook/lane'
 import { CallCard } from './CallCard'
@@ -25,7 +26,6 @@ export const Approval: Story = { args: APPROVAL }
 export const Contradiction: Story = { args: CONTRADICTION }
 /** An agent's question: its options listed as it asks them, and the way in says Answer. */
 export const Question: Story = { args: { ...QUESTION_CALL, text: { decide: 'Answer' } } }
-/** A task that couldn't finish: what went wrong, and no choices here; they are in the task. */
 /** A question that came with a paragraph: the background is cut at two lines; the whole of it is in the task. */
 export const QuestionLong: Story = {
   args: { ...QUESTION_CALL, because: QUESTION_LONG.background, text: { decide: 'Answer' } },
@@ -34,7 +34,27 @@ export const QuestionLong: Story = {
   },
 }
 
+/** A task that couldn't finish: why, and no choices here; they are in the task. */
 export const Stuck: Story = { args: STUCK_CALL }
+/** A step stuck on something that failed: said as a problem, and the strip offers what fixes it in place of Decide. */
+const SIGNED_OUT = {
+  ...STUCK_CALL,
+  problem: 'Claude Code is signed out.',
+  next: (
+    <NextStep signal onPress={() => undefined}>
+      Sign in again
+    </NextStep>
+  ),
+}
+export const StuckSignedOut: Story = {
+  args: SIGNED_OUT,
+  play: async ({ canvasElement }) => {
+    const card = within(canvasElement)
+    await expect(card.getByRole('alert')).toHaveTextContent('Claude Code is signed out.')
+    await expect(card.getByRole('button', { name: 'Sign in again' })).toBeVisible()
+    await expect(card.queryByText('Decide')).not.toBeInTheDocument()
+  },
+}
 /** Open beside the board. */
 export const Current: Story = { args: { current: true } }
 
@@ -57,6 +77,7 @@ export const AllStates: Story = {
         { state: 'from, not holding', node: <CallCard {...args} {...CONTRADICTION} /> },
         { state: 'question', node: <CallCard {...args} {...Question.args} /> },
         { state: 'stuck, no choices', node: <CallCard {...args} {...STUCK_CALL} /> },
+        { state: 'stuck, signed out', node: <CallCard {...args} {...SIGNED_OUT} /> },
         { state: 'current', node: <CallCard {...args} current /> },
         { state: 'hover', node: <CallCard {...args} /> },
         { state: 'focus', node: <CallCard {...args} /> },

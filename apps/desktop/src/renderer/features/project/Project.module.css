@@ -27,6 +27,12 @@
 .over aside {
   border-left: 0;
 }
+/* the conversation on the right: what it names opens on its left, over the board, its shadow cast the other way */
+.overLeft {
+  box-shadow:
+    0 0 0 1px var(--line-2),
+    -12px 0 32px -8px var(--shadow);
+}
 
 /* its settings, in the views' place: their page scrolls under the header */
 .settings {
@@ -64,6 +70,31 @@
 .board > .failure {
   padding: 16px 16px 0 0;
 }
+/* Swapped, the conversation on the right: the board first, the conversation's line on its left edge. */
+.both.swapped {
+  flex-direction: row-reverse;
+}
+.both.swapped .talk {
+  border-right: 0;
+  border-left: 1px solid var(--line);
+}
+.both.swapped .board {
+  padding: 0 16px 0 0;
+}
+
+/* The conversation hidden: its composer under the board, across it on a hairline, the composer at its reading width. */
+.dock {
+  flex: none;
+  /* to the board's edges, past its inset */
+  margin-left: -16px;
+  padding: 12px 16px 14px;
+  border-top: 1px solid var(--line);
+}
+.dock > .composer {
+  width: min(720px, 100%);
+  margin: 0 auto;
+}
+
 /* Beside the conversation, the lanes narrow, then collapse to rails, before the board scrolls. */
 .both .board {
   --lane-min: 186px;
@@ -72,6 +103,14 @@
 
 .face {
   flex: 1;
+  min-height: 0;
+}
+
+/* The coordinator's conversation under its asides' pills: the face fills what is left of the column */
+.coordinatorFace {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
   min-height: 0;
 }
 
@@ -97,8 +136,6 @@
 
 .failure {
   margin: 0;
-  color: var(--danger);
-  font-size: 13px;
 }
 
 /* A new project's card for its code host and a tracker, at the head of its empty conversation. */

@@ -30,6 +30,34 @@ describe('starting a plan, or changing its team, before it begins', () => {
     expect(screen.queryByRole('button', { name: 'Start' })).toBeNull()
   })
 
+  it('lets a row up next hold, beside Start where it has both, and only where it is given', () => {
+    const onHold = vi.fn()
+    const { rerender } = render(
+      <NextRow place={1} task="t" title="Waits for an agent" wait={Wait.Workers} reason="Next in line" onHold={onHold} />,
+    )
+    fireEvent.click(screen.getByRole('button', { name: 'Hold' }))
+    expect(onHold).toHaveBeenCalledOnce()
+    expect(screen.queryByRole('button', { name: 'Start' })).toBeNull()
+    rerender(
+      <NextRow place={1} task="t" title="Counting down" wait={Wait.Workers} reason="Starts in 12s" onStart={vi.fn()} onHold={onHold} />,
+    )
+    expect(screen.getByRole('button', { name: 'Start' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Hold' })).toBeTruthy()
+    rerender(<NextRow place={1} task="t" title="Held" wait={Wait.You} reason="Held" onStart={vi.fn()} />)
+    expect(screen.queryByRole('button', { name: 'Hold' })).toBeNull()
+  })
+
+  it('offers Hold in the task’s menu, under Start now, while its plan can be held', () => {
+    const onHold = vi.fn()
+    render(<TaskMenu defaultOpen onStartNow={vi.fn()} onHold={onHold} />)
+    const items = within(screen.getByRole('menu', { name: 'This task' })).getAllByRole('menuitem')
+    expect(
+      items.map((item) => document.getElementById(item.getAttribute('aria-labelledby') ?? '')?.textContent ?? item.textContent),
+    ).toEqual(['Start now', 'Hold'])
+    fireEvent.click(items[1]!)
+    expect(onHold).toHaveBeenCalledOnce()
+  })
+
   it('opens the team from the task’s menu, under Start now', () => {
     const onChangeTeam = vi.fn()
     render(<TaskMenu defaultOpen onStartNow={vi.fn()} onChangeTeam={onChangeTeam} />)

@@ -25,6 +25,10 @@ export interface DocRef {
 
 export interface ImageRef {
   name: string
+  /** An animated image, played only on request in the lightbox. thumb is its still poster. */
+  animated?: boolean
+  /** A known still poster; otherwise the browser makes one from the first frame. */
+  poster?: string
   meta?: string
   /** What the picture shows, in words: its alternative text. Without it, its name. */
   alt?: string

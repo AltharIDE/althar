@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os'
 import { basename, join } from 'node:path'
 
 import { agents, type AgentDefinition } from '@althar/provider-adapters'
-import { codexLikeMeanings, fakeAgent } from '@althar/provider-adapters/testing'
+import { codexLikeMeanings, fakeAgent, fileHolds } from '@althar/provider-adapters/testing'
 import { type AgentEntry, Agents } from '@althar/runtime'
 import { Layer } from 'effect'
 
@@ -86,6 +86,10 @@ const out = new Map(
 /** How long each fake agent takes to start a session, in milliseconds, where ALTHAR_FAKE_SLOW_START says: for what shows meanwhile. */
 const slowStart = process.env.ALTHAR_FAKE_SLOW_START === undefined ? undefined : Number(process.env.ALTHAR_FAKE_SLOW_START)
 
+/** A spec releases each named marker by writing its file, after it has asserted the waiting state. */
+const held = process.env.ALTHAR_FAKE_AGENT_HELD
+const heldMarkers = held === undefined ? undefined : fileHolds(JSON.parse(held) as Readonly<Record<string, string>>)
+
 /**
  * Every other agent the registry has, as it is, where ALTHAR_FAKE_EVERY_AGENT
  * is set: for what the window shows with all of them. None is started; where
@@ -115,6 +119,7 @@ export const fakeAgents = Layer.succeed(
           return {
             _tag: 'InProcess' as const,
             agent: fakeAgent({
+              ...(heldMarkers === undefined ? {} : { holds: heldMarkers }),
               ...(own === undefined ? {} : { outOfUsage: own }),
               ...(slowStart === undefined ? {} : { slowStart }),
               ...(connection === undefined ? {} : { connection }),

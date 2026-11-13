@@ -34,8 +34,8 @@ import type { Block, StepResult } from '../../shared/thread'
 import { RuleReceipt } from '../../shared/RuleReceipt'
 import { SaidIn } from '../../shared/code/CodeHost'
 import { CanvasLines, McpActs, PartView, ThreadBlocks } from '../../shared/ThreadBlocks'
-import { WayOut } from '../../shared/WayOut'
-import { PublishedReport, ReviewReport } from './Reports'
+import { FailedTurn } from '../../shared/WayOut'
+import { PublishedReport, reportText, ReviewReport } from './Reports'
 import { HelperWork } from './HelperWork'
 import s from './TaskThread.module.css'
 import { duration, lineOf, spentWords } from '../../shared/turnTime'
@@ -115,10 +115,17 @@ type Shared = Omit<ComponentProps<typeof ThreadBlocks>, 'blocks' | 'card' | 'que
 
 export interface TaskThreadProps extends Shared {
   readonly rounds: ReadonlyArray<RoundBlock>
+  /** Complete collection at the latest handoff; older rounds retain their own evidence. */
+  readonly gallery?: { readonly reportId: string; readonly shots: ReadonlyArray<GalleryShot> }
   /** What each document was last changed by, so one handed back is read again after an edit (documentVersions). */
   readonly versionOf: (whole: string) => string
   /** Opens another task, by its thread: one this task's lead started, from the line that says so. */
   readonly onOpenTask?: (threadId: string) => void
+  /**
+   * Where this task's lead started another, in place of a line: a chip that stays current as the task moves, so what became
+   * of it shows where it was started (ADR-097). Without it, a line with the task's title, which opens it.
+   */
+  readonly started?: (task: { readonly threadId: string; readonly title: string }) => ReactNode
   /** What became of a review's findings, in words ("2 fixed, 1 declined"), by its report; undefined while none is settled. */
   readonly settledOf?: (review: string) => string | undefined
   /** A review running now, by who and for how long: a line at the thread's end. */
@@ -180,8 +187,11 @@ const shotNames = (report: RoundModel['report']) =>
 interface RoundProps {
   readonly block: RoundModel
   readonly model: ModelInfo
+  /** Who signs it in place of the model: the coordinator, in an aside. */
+  readonly signed?: { readonly voice: string; readonly mark: ReactNode }
   /** The names of its pictures an earlier round showed already: shown small, as retakes. */
   readonly retakes: ReadonlyArray<string>
+  readonly gallery?: ReadonlyArray<GalleryShot>
   /** What each document it hands back was last changed by. */
   readonly versions: Readonly<Record<string, string>>
   readonly threadId: string
@@ -199,7 +209,9 @@ interface RoundProps {
 const RoundView = memo(function RoundView({
   block,
   model,
+  signed,
   retakes,
+  gallery,
   versions,
   threadId,
   worktree,
@@ -258,8 +270,8 @@ const RoundView = memo(function RoundView({
   const report = block.report
   const shown = report === null ? null : shownBy(report)
   const before = new Set(retakes)
-  const fresh = shown?.shots.filter((shot) => !before.has(shotName(shot.caption) ?? shot.id)) ?? []
-  const retaken = shown?.shots.filter((shot) => !fresh.includes(shot)) ?? []
+  const fresh = gallery ?? shown?.shots.filter((shot) => !before.has(shotName(shot.caption) ?? shot.id)) ?? []
+  const retaken = gallery === undefined ? (shown?.shots.filter((shot) => !fresh.includes(shot)) ?? []) : []
   const names = new Set(fresh.flatMap((shot) => shotName(shot.caption) ?? []))
   const showing = shown !== null && (
     <>
@@ -292,7 +304,25 @@ const RoundView = memo(function RoundView({
   // What it writes now, and then the same words as its result, stand in one place, so they never draw again as it ends.
   const answer = block.result ?? block.writing
   return (
-    <Round model={model} at={block.at} {...(copy === undefined ? {} : { copy })} {...(report === null ? {} : { 'data-item': report.id })}>
+    <Round
+      model={model}
+      {...(signed === undefined ? {} : { signed })}
+      at={block.at}
+      {...(copy === undefined ? {} : { copy })}
+      {...(report === null ? {} : { 'data-item': report.id })}
+      // Every message it shows, so a search can bring the person to the one it found.
+      data-items={[
+        ...new Set(
+          [
+            ...block.parts.flatMap((part) => (part.kind === 'message' ? [part.id] : [])),
+            ack?.id,
+            block.result?.id,
+            block.writing?.id,
+            report?.id,
+          ].filter((id) => id !== undefined),
+        ),
+      ].join(' ')}
+    >
       {work !== null && (
         <WorkedFor
           took={work.spent === null ? work.took : duration(work.spent.total)}
@@ -340,18 +370,14 @@ const RoundView = memo(function RoundView({
       {pictures(block.shown.after)}
       <CanvasLines drawn={block.drawn} />
       {block.failed !== null && (
-        <>
-          <AltharLine tone="warning">{block.failed.text}</AltharLine>
-          {block.failed.detail !== undefined && <p className={s.detail}>{block.failed.detail}</p>}
-          {out !== null && (
-            <WayOut
-              failure={block.failed.failure}
-              {...(out.again ? { onTryAgain } : {})}
-              {...(out.compact ? { onCompact } : {})}
-              {...(out.signIn === null ? {} : { onSignIn: () => onSignIn(out.signIn ?? '') })}
-            />
-          )}
-        </>
+        <FailedTurn
+          text={block.failed.text}
+          detail={block.failed.detail}
+          failure={block.failed.failure}
+          {...(out?.again === true ? { onTryAgain } : {})}
+          {...(out?.compact === true ? { onCompact } : {})}
+          {...(out == null || out.signIn === null ? {} : { onSignIn: () => onSignIn(out.signIn ?? '') })}
+        />
       )}
     </Round>
   )
@@ -368,7 +394,17 @@ const YouView = memo(
 /** What the thread says of a task this task's lead started, before its title, which opens it. */
 const STARTED = 'Started'
 
-export function TaskThread({ rounds, versionOf, onOpenTask, settledOf, reviewing = null, stepAction, ...shared }: TaskThreadProps) {
+export function TaskThread({
+  rounds,
+  versionOf,
+  onOpenTask,
+  started,
+  settledOf,
+  reviewing = null,
+  gallery,
+  stepAction,
+  ...shared
+}: TaskThreadProps) {
   const { threadId, worktree = null, openFile, session, project, onTryAgain, onCompact, onSignIn } = shared
   const named = useModelNames()
   // A round on the model its own turn ran, as the runtime recorded it; an older one without, on the thread's current
@@ -415,7 +451,9 @@ export function TaskThread({ rounds, versionOf, onOpenTask, settledOf, reviewing
         key={block.id}
         block={block}
         model={modelOf(block.agentId, block.model)}
+        {...(shared.signed === undefined ? {} : { signed: shared.signed })}
         retakes={retakes}
+        {...(block.report?.id === gallery?.reportId ? { gallery: gallery?.shots } : {})}
         versions={Object.fromEntries(documentsOf(block).map((whole) => [whole, versionOf(whole)]))}
         threadId={threadId}
         worktree={worktree}
@@ -435,13 +473,18 @@ export function TaskThread({ rounds, versionOf, onOpenTask, settledOf, reviewing
         return round(block)
       case 'waiting':
         return (
-          <Round key={block.id} model={modelOf(session?.agentId ?? null)}>
+          <Round
+            key={block.id}
+            model={modelOf(session?.agentId ?? null)}
+            {...(shared.signed === undefined ? {} : { signed: shared.signed })}
+          >
             <Thinking {...(block.took === null ? {} : { took: block.took })} slow={block.slow} />
           </Round>
         )
       case 'relayed':
         return <Relayed key={block.id} title={block.title} body={block.body} data-item={block.id} />
       case 'althar':
+        if (block.task !== undefined && started !== undefined) return <Fragment key={block.id}>{started(block.task)}</Fragment>
         return (
           <AltharLine key={block.id} tone={block.tone}>
             {block.task !== undefined && onOpenTask !== undefined ? (
@@ -500,7 +543,8 @@ export function TaskThread({ rounds, versionOf, onOpenTask, settledOf, reviewing
       }
       case 'verdict': {
         // One line: who reviewed, what it found, what became of it; opened, its findings and words, and the lead settling them.
-        const settled = settledOf?.(block.id)
+        // A review after a merge whose findings the project's rule doesn't bring back: they stay here, and nothing waits.
+        const settled = settledOf?.(block.id) ?? (block.result.afterMerge?.kept === true ? reportText.kept : undefined)
         return (
           <ReviewLine
             key={block.id}

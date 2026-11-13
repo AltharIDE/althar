@@ -142,7 +142,7 @@ function Stateful({
 }: {
   found: FoundCode
   where: CodeWhere
-  read?: typeof limitsRead
+  read?: typeof limitsRead | null
   back?: boolean
 }) {
   const [mode, setMode] = useState<CodeMode>(firstMode(found))
@@ -217,6 +217,16 @@ export const PanelBinary: Story = {
   args: Peek.args,
   decorators: [beside],
   render: () => <Stateful found={iconsFound} where={TASK} />,
+}
+
+/** Its lines couldn't be read: said as a problem in their place; Open in the editor is still there. */
+export const PanelUnreadable: Story = {
+  args: Peek.args,
+  decorators: [beside],
+  render: () => <Stateful found={limitsFound} where={TASK} read={null} />,
+  play: async ({ canvasElement }) => {
+    await expect(within(canvasElement).getByRole('alert')).toHaveTextContent('Couldn’t read this file.')
+  },
 }
 
 const SAID = `The limiter is in \`src/refunds/limits.ts:22-33\`: \`checkRefundLimit\` counts the merchant's refunds since the window opened. I also wrote docs/decisions/012-refund-limits.md. The old path \`src/refund/limit.ts\` is gone, and \`npm test\` passes.`

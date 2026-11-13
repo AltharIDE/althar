@@ -128,6 +128,33 @@ describe('calls answered here', () => {
   })
 })
 
+describe('a stuck step’s line', () => {
+  const stuck = (why: 'signed_out' | 'stalled') =>
+    call('s', '2026-10-07T09:10:00.000Z', {
+      kind: 'stuck',
+      stuck: { step: 'implement', why, detail: null, agentId: 'claude-code', round: 0, open: 0 },
+    })
+
+  it('signs its agent in again where it is signed out, as its task’s card does first', async () => {
+    const [need] = needsOf({ calls: [stuck('signed_out')], answered: [], ready: [], refs, agentName })
+    const onSignIn = vi.fn()
+    const onOpen = vi.fn()
+    render(<>{needLineOf(need!, { onOpen, onAnswer: vi.fn(), onSignIn })}</>)
+    await userEvent.click(screen.getByRole('button', { name: 'Sign in again' }))
+    expect(onSignIn).toHaveBeenCalledWith('claude-code')
+    expect(onOpen).not.toHaveBeenCalled()
+  })
+
+  it('opens its task for any other reason, or where the place can’t sign in', () => {
+    const [stalled] = needsOf({ calls: [stuck('stalled')], answered: [], ready: [], refs, agentName })
+    render(<>{needLineOf(stalled!, { onOpen: vi.fn(), onAnswer: vi.fn(), onSignIn: vi.fn() })}</>)
+    expect(screen.getByRole('button', { name: 'Open' })).toBeTruthy()
+    const [signedOut] = needsOf({ calls: [stuck('signed_out')], answered: [], ready: [], refs, agentName })
+    render(<>{needLineOf(signedOut!, { onOpen: vi.fn(), onAnswer: vi.fn() })}</>)
+    expect(screen.getAllByRole('button', { name: 'Open' })).toHaveLength(2)
+  })
+})
+
 function Home({ onTask = vi.fn() }: { onTask?: (threadId: string) => void }) {
   return <HomeView model={useHome()} start={useStart()} onProject={vi.fn()} onTalk={vi.fn()} onTask={onTask} />
 }

@@ -195,8 +195,7 @@ describe('starting a lead’s helper', () => {
     const { working, github } = onGitHub()
     return Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
-      // Althar looks once, a moment after it starts, for helpers to carry on: one kept at work with no agent, in a project of
-      // its own, is failed then. What is kept after that stands as kept.
+      // A helper in a project of its own, failed as a restart leaves one: it counts for nothing here.
       const projects = yield* Projects
       const aside = yield* projects.open({ envelope: yield* Runtime.envelope('project.open', {}), path: repository() })
       const early = yield* projects.createTask({
@@ -204,6 +203,7 @@ describe('starting a lead’s helper', () => {
         projectId: aside.projectId,
         title: 'Aside',
       })
+      const failedAt = new Date().toISOString()
       yield* sql`INSERT INTO helpers ${sql.insert({
         id: 'hlp_aside',
         taskId: early.taskId,
@@ -212,10 +212,11 @@ describe('starting a lead’s helper', () => {
         name: 'Aside',
         brief: 'Read it.',
         agentId: 'claude-code',
-        state: 'working',
-        startedAt: new Date().toISOString(),
+        state: 'failed',
+        result: 'Althar restarted, and its agent couldn’t start again.',
+        startedAt: failedAt,
+        endedAt: failedAt,
       })}`
-      yield* helperIn(early.taskId, 'Aside', 'failed')
       const task = yield* opened(working)
       const at = new Date().toISOString()
       const kept = (n: number, state: string) =>
@@ -416,6 +417,33 @@ describe('a helper that can’t go on', () => {
           task.threadId,
           'Helper "Orphan" (claude-code) couldn\'t go on: Althar restarted, and its agent couldn’t start again.',
         )
+      }).pipe(Effect.provide(runtimeWith(github, undefined, file)))
+    })
+  })
+
+  it.live('one that started after Althar did is not a restart’s to carry on', () => {
+    const { working, github } = onGitHub()
+    const file = join(mkdtempSync(join(tmpdir(), 'althar-helpers-')), 'althar.sqlite')
+    return Effect.gen(function* () {
+      const task = yield* opened(working).pipe(Effect.provide(runtimeWith(github, undefined, file)))
+      yield* Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient
+        // A second Althar starts: a helper's row is in before its session is, as one started just then.
+        yield* sql`INSERT INTO helpers ${sql.insert({
+          id: 'hlp_starting',
+          taskId: task.taskId,
+          projectId: task.projectId,
+          threadId: 'thr_starting',
+          name: 'Starting',
+          brief: 'Read it.',
+          agentId: 'claude-code',
+          state: 'working',
+          startedAt: new Date().toISOString(),
+        })}`
+        // Past the moment a restart's helpers are carried on: at work still, not failed for a restart it wasn't in.
+        yield* Effect.sleep(Duration.seconds(3))
+        const [helper] = yield* helperOf(task.taskId, 'Starting')
+        assert.strictEqual(helper?.state, 'working')
       }).pipe(Effect.provide(runtimeWith(github, undefined, file)))
     })
   })

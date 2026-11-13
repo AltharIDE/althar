@@ -9,6 +9,7 @@ import { safeHref } from '../../lib/safeHref'
 import { Button } from '../../primitives/Button/Button'
 import type { ChangeCheck } from '../../primitives/Checks/Checks'
 import { Delta, type ChangedFile } from '../../primitives/FileChanges/FileChanges'
+import { Problem } from '../../primitives/Problem/Problem'
 import { Segmented } from '../../primitives/Segmented/Segmented'
 import { Spinner } from '../../primitives/Spinner/Spinner'
 import { type ChangeReview, ChangeFiles, ChangeReviewLine, type ChangeSetText, ChecksLine, changeSetText } from './ChangeSet'
@@ -130,7 +131,7 @@ export interface ChangeTrackProps {
   review?: ChangeReview
   /** What can be done with it now: one button, or two where it's a choice; the first is the one to press. */
   actions?: ReactNode
-  /** Why the last action did not go through, where no stop says it: a note in a line or two. */
+  /** Why the last action did not go through, where no stop says it: a problem in a line or two, under the buttons. */
   error?: ReactNode
   /** Open the whole diff. */
   onReviewDiff?: () => void
@@ -192,9 +193,9 @@ export function ChangeTrack({
         </div>
         {acting && <div className={cx(s.actions, t.acts)}>{actions}</div>}
         {error && (
-          <p className={s.error} role="alert">
+          <Problem size="small" className={s.problem}>
             {error}
-          </p>
+          </Problem>
         )}
       </div>
       {withFiles.length > 0 && (

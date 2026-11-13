@@ -2,6 +2,7 @@ import { cx } from '../../lib/cx'
 import type { RootProps } from '../../lib/props'
 import { Tooltip } from '../../primitives/HoverCard/HoverCard'
 import { IconButton } from '../../primitives/IconButton/IconButton'
+import { Problem } from '../../primitives/Problem/Problem'
 import b from '../Board/Board.module.css'
 import { CardTitle } from '../Board/CardTitle'
 import s from './KeptRow.module.css'
@@ -59,9 +60,9 @@ export function KeptRow({ title, at, current, onOpen, onDone, doneHint, busy = f
         </span>
       )}
       {error && (
-        <p className={s.error} role="alert">
+        <Problem size="small" className={s.error}>
           {error}
-        </p>
+        </Problem>
       )}
     </article>
   )

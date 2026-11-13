@@ -94,7 +94,7 @@ describe('checking a GitHub connection', () => {
     Effect.gen(function* () {
       const { check, sent } = gitHub(
         [
-          me({ 'x-oauth-scopes': 'repo, workflow', 'github-authentication-token-expiration': '2027-01-08 00:00:00 UTC' }),
+          me({ 'x-oauth-scopes': 'repo, workflow', 'github-authentication-token-expiration': '2025-01-08 00:00:00 UTC' }),
           ['GET', NORTHWIND, { json: repository() }],
           ['GET', `${GH}/repos/Northwind/web`, { json: repository({ id: 8, full_name: 'northwind/web' }) }],
         ],
@@ -117,7 +117,7 @@ describe('checking a GitHub connection', () => {
           line('checks', 'ok'),
           line('issues', 'ok'),
         ],
-        expiresAt: '2027-01-08T00:00:00.000Z',
+        expiresAt: '2025-01-08T00:00:00.000Z',
         scopes: ['repo', 'workflow'],
       })
       for (const request of sent) {
@@ -359,7 +359,7 @@ describe('checking a GitHub connection', () => {
   )
 
   it('reads when a token runs out, as GitHub writes it', () => {
-    assert.strictEqual(expiryOf('2027-01-08 00:00:00 UTC'), '2027-01-08T00:00:00.000Z')
+    assert.strictEqual(expiryOf('2025-01-08 00:00:00 UTC'), '2025-01-08T00:00:00.000Z')
     assert.strictEqual(expiryOf('2023-03-08 13:28:54 +0100'), '2023-03-08T12:28:54.000Z')
     assert.strictEqual(expiryOf('2023-03-08 13:28:54 -05:30'), '2023-03-08T18:58:54.000Z')
     assert.isNull(expiryOf(null))
@@ -391,7 +391,7 @@ describe('checking a GitLab connection', () => {
       const { check } = gitLab(
         [
           gitLabUser,
-          ['GET', `${GL}/personal_access_tokens/self`, { json: { scopes: ['api'], expires_at: '2026-12-31' } }],
+          ['GET', `${GL}/personal_access_tokens/self`, { json: { scopes: ['api'], expires_at: '2025-12-31' } }],
           ['GET', `${GL}/projects/northwind%2Fapi`, { json: project('northwind/api', 30, 40) }],
           ['GET', `${GL}/projects/northwind%2Fplatform%2Fweb`, { json: project('northwind/platform/web', null, 30) }],
         ],
@@ -412,7 +412,7 @@ describe('checking a GitLab connection', () => {
           line('checks', 'ok'),
           line('issues', 'ok'),
         ],
-        expiresAt: '2026-12-31T00:00:00.000Z',
+        expiresAt: '2025-12-31T00:00:00.000Z',
         scopes: ['api'],
       })
     }),

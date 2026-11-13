@@ -16,8 +16,9 @@ import { Sessions } from '../src/Sessions'
 import { repository, runtime, task } from './support'
 
 /*
- * How hard this computer works, and Althar's part (MachineLoad.ts): read only
- * when asked and at most once a moment however often; each task's agents, a
+ * How hard this computer works, and Althar's part (MachineLoad.ts): read when
+ * asked, and in the background while the meter is on and no window asks, at
+ * most once a moment however often; each task's agents, a
  * project's coordinator and its runs, each with what they started, however
  * it has left their trees, and what ended between two readings; work an
  * earlier launch left running; Althar itself; and the last readings, started
@@ -216,6 +217,83 @@ describe('this computer’s load', () => {
     }).pipe(
       Effect.provide(
         runtime(':memory:', {}, { load: { read: stand.read, app: NO_APP, every: Duration.millis(50), settle: Duration.millis(1) } }),
+      ),
+    )
+  })
+
+  it.live('fills the history while no window asks, from lean readings, once the app says the meter is on', () => {
+    const world = { lead: 0 }
+    const stand = machine(() => [[world.lead, { parent: 1, cpu: 600, memory: 5 * MB }]])
+    let lean = 0
+    return Effect.gen(function* () {
+      const machineLoad = yield* MachineLoad
+      // The meter is off until the app says: nothing is read, however long it waits.
+      yield* Effect.sleep(Duration.millis(300))
+      assert.strictEqual(stand.reads(), 0)
+
+      yield* machineLoad.meter(true)
+      yield* Effect.sleep(Duration.millis(900))
+      // Read on its own, and lean: no window asked.
+      assert.isAbove(lean, 4)
+      assert.strictEqual(stand.reads(), lean)
+
+      // A window opening now hears the two minutes' start at once: with the trace there, and one full reading of its own.
+      const load = yield* machineLoad.now
+      assert.isAtLeast(load.history.length, 5)
+      assert.strictEqual(stand.reads() - lean, 1)
+      assert.deepInclude(load, { memoryUsed: 8_000 * MB, memoryTotal: 16_000 * MB, pressure: 'normal' })
+      for (const point of load.history) assert.strictEqual(point.cpu, 0.25)
+
+      // The meter turned off, nothing is read again.
+      yield* machineLoad.meter(false)
+      yield* Effect.sleep(Duration.millis(100))
+      const reads = stand.reads()
+      yield* Effect.sleep(Duration.millis(400))
+      assert.strictEqual(stand.reads(), reads)
+    }).pipe(
+      Effect.provide(
+        runtime(
+          ':memory:',
+          {},
+          {
+            load: {
+              read: stand.read,
+              lean: stand.read.pipe(Effect.tap(() => Effect.sync(() => void (lean += 1)))),
+              app: NO_APP,
+              every: Duration.millis(50),
+              settle: Duration.millis(1),
+              sample: Duration.millis(20),
+            },
+          },
+        ),
+      ),
+    )
+  })
+
+  it.live('starts the background readings afresh after a gap, the trace beginning where they do', () => {
+    const stand = machine(() => [])
+    return Effect.gen(function* () {
+      const machineLoad = yield* MachineLoad
+      yield* machineLoad.meter(true)
+      yield* Effect.sleep(Duration.millis(700))
+      const kept = yield* machineLoad.now
+      assert.isAtLeast(kept.history.length, 4)
+      // The meter off for a while, as a Mac asleep: what it read last is too old to measure from.
+      yield* machineLoad.meter(false)
+      yield* Effect.sleep(Duration.millis(400))
+      const reads = stand.reads()
+      const afresh = yield* machineLoad.now
+      // One point, where it begins: not the old trace, nor one padded with nothing.
+      assert.lengthOf(afresh.history, 1)
+      assert.strictEqual(afresh.history[0]?.cpu, 0.25)
+      assert.strictEqual(stand.reads(), reads + 2)
+    }).pipe(
+      Effect.provide(
+        runtime(
+          ':memory:',
+          {},
+          { load: { read: stand.read, app: NO_APP, every: Duration.millis(50), settle: Duration.millis(1), sample: Duration.millis(20) } },
+        ),
       ),
     )
   })

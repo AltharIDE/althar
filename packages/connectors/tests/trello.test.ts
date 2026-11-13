@@ -320,13 +320,13 @@ describe('Trello', () => {
   it.effect('reads the day a card is due, in UTC, and none where it has no due date', () =>
     Effect.gen(function* () {
       const { tracker } = trello([
-        ['GET', /\/cards\/noon0001\?/, { json: card({ due: '2026-11-30T12:00:00.000Z' }) }],
+        ['GET', /\/cards\/noon0001\?/, { json: card({ due: '2025-11-30T12:00:00.000Z' }) }],
         // Set in Sydney at nine in the morning: the day before, in UTC.
-        ['GET', /\/cards\/sydney01\?/, { json: card({ due: '2026-11-29T22:00:00.000Z' }) }],
+        ['GET', /\/cards\/sydney01\?/, { json: card({ due: '2025-11-29T22:00:00.000Z' }) }],
         ['GET', /\/cards\/none0001\?/, { json: card({ due: undefined }) }],
       ])
-      assert.strictEqual((yield* tracker.issue('noon0001')).due, '2026-11-30')
-      assert.strictEqual((yield* tracker.issue('sydney01')).due, '2026-11-29')
+      assert.strictEqual((yield* tracker.issue('noon0001')).due, '2025-11-30')
+      assert.strictEqual((yield* tracker.issue('sydney01')).due, '2025-11-29')
       assert.isNull((yield* tracker.issue('none0001')).due)
     }),
   )
@@ -840,12 +840,12 @@ describe('Trello', () => {
     it.effect('sets its due day as noon UTC and its description, and clears its due date', () =>
       Effect.gen(function* () {
         const { tracker, sent } = trello([['PUT', `${API}/cards/${CARD}`, { json: {} }], readBack])
-        yield* tracker.update(found, { due: '2026-11-30', description: 'Siri, **securely**.' })
-        assert.deepStrictEqual(sent[0]?.body, { desc: 'Siri, **securely**.', due: '2026-11-30T12:00:00.000Z' })
+        yield* tracker.update(found, { due: '2025-11-30', description: 'Siri, **securely**.' })
+        assert.deepStrictEqual(sent[0]?.body, { desc: 'Siri, **securely**.', due: '2025-11-30T12:00:00.000Z' })
         yield* tracker.update(found, { due: null })
         assert.deepStrictEqual(sent[2]?.body, { due: null })
         // Not a day, or one no calendar has: nothing asked.
-        for (const due of ['30/11/2026', '2026-02-30', '2026-11-30T09:00'])
+        for (const due of ['30/11/2026', '2026-02-30', '2025-11-30T09:00'])
           assert.deepInclude(yield* Effect.flip(tracker.update(found, { due })), { reason: 'rejected', message: `Not a day: ${due}` })
         assert.lengthOf(sent, 4)
       }),
@@ -902,8 +902,8 @@ describe('Trello', () => {
   it.effect('files a card with its people and its due day as noon UTC, and refuses what it can’t file it with before filing', () =>
     Effect.gen(function* () {
       const { tracker, sent } = trello([
-        ['POST', `${API}/cards`, { json: posted({ labels: [], due: '2026-11-30T12:00:00.000Z' }) }],
-        ['GET', /\/cards\/dRlAmgAi\?/, { json: card({ due: '2026-11-30T12:00:00.000Z' }) }],
+        ['POST', `${API}/cards`, { json: posted({ labels: [], due: '2025-11-30T12:00:00.000Z' }) }],
+        ['GET', /\/cards\/dRlAmgAi\?/, { json: card({ due: '2025-11-30T12:00:00.000Z' }) }],
       ])
       const filed = yield* tracker.create('5c4a1ec10405013c8a2fc48e', {
         title: 'iOS 12',
@@ -917,16 +917,16 @@ describe('Trello', () => {
             ],
             remove: [],
           },
-          due: '2026-11-30',
+          due: '2025-11-30',
         },
       })
-      assert.strictEqual(filed.due, '2026-11-30')
+      assert.strictEqual(filed.due, '2025-11-30')
       assert.deepStrictEqual(sent[0]?.body, {
         idList: '5c4a1ec10405013c8a2fc48e',
         name: 'iOS 12',
         desc: '',
         idMembers: 'mem1,mem2',
-        due: '2026-11-30T12:00:00.000Z',
+        due: '2025-11-30T12:00:00.000Z',
       })
       for (const [fields, message] of [
         [{ status: { id: 'aaa2', name: 'Doing' } }, 'Trello files a card without its status: it is set after'],

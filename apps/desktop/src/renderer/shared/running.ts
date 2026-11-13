@@ -33,13 +33,19 @@ export const runningOf = (
       : { since: ago(command.ended.at, new Date(now)), exited: command.ended.code }),
   }))
 
-/** A run's card as the thread keeps it: where, the command, where it answers, for how long, and how it ended. */
-export const runCardOf = (run: RunContent, now: string): Pick<RunCardProps, 'where' | 'name' | 'command' | 'url' | 'since' | 'ended'> => ({
+/**
+ * A run's card as the thread keeps it: where, the command, where it answers, and how it ended. In its own task's thread,
+ * where the header names the task, where it runs isn't shown.
+ */
+export const runCardOf = (
+  run: RunContent,
+  threadTask: string | null = null,
+): Pick<RunCardProps, 'where' | 'ownThread' | 'name' | 'command' | 'url' | 'ended'> => ({
   where: run.where,
+  ...(run.taskId !== null && run.taskId === threadTask ? { ownThread: true } : {}),
   ...(run.name == null || run.name === run.command ? {} : { name: run.name }),
   command: run.command,
   ...(run.url === null ? {} : { url: addressOf(run.url) }),
-  since: run.ended === null ? running(run.startedAt, now) : ago(run.ended.at, new Date(now)),
   ...(run.ended === null
     ? {}
     : { ended: { code: run.ended.code, stopped: run.ended.stopped, ...(run.ended.last === null ? {} : { last: run.ended.last }) } }),

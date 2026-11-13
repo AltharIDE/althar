@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { expect, test } from '@playwright/test'
 
 import { repository } from '../tests/repository'
-import { launch, openFirstProject, startTask, still } from './support'
+import { launch, openFirstProject, startTask, still, showPanes } from './support'
 
 /*
  * A change whose lead built nothing: no commits on its branch, no pull
@@ -26,7 +26,7 @@ for (const appearance of ['light', 'dark'] as const) {
       await openFirstProject(electronApp, page, repository(projects))
       await startTask(page, 'Plan usage shows what is left on OpenCode Zen', '[lead:finish]')
       await expect(page.getByText('Ready', { exact: true })).toBeVisible()
-      await page.getByRole('radio', { name: 'Home' }).click()
+      await showPanes(page, { conversation: true, board: true })
       const work = page.getByRole('region', { name: 'The project’s work' })
       await expect(work.getByText('Nothing built', { exact: true })).toBeVisible()
       await expect(work.getByText('Ready to accept')).toHaveCount(0)
@@ -61,7 +61,7 @@ test('settles it as Done from its board card, with no pull request', async () =>
     await openFirstProject(electronApp, page, repository(projects))
     await startTask(page, 'Plan usage shows what is left on OpenCode Zen', '[lead:finish]')
     await expect(page.getByText('Ready', { exact: true })).toBeVisible()
-    await page.getByRole('radio', { name: 'Home' }).click()
+    await showPanes(page, { conversation: true, board: true })
     const work = page.getByRole('region', { name: 'The project’s work' })
     const card = work.getByRole('article').filter({ hasText: 'Nothing built' })
     await expect(card).toBeVisible()

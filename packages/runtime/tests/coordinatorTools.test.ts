@@ -69,10 +69,13 @@ describe('a lead settling its task as the person says', () => {
       assert.match(yield* settle('keep'), /^Kept which-partners-still-call-v1 for later: out of Needs you as it is/)
       assert.isNotNull((yield* stateOf(task.taskId))[0]?.keptAt)
       assert.match(yield* settle('keep'), /^Nothing changed: which-partners-still-call-v1 is kept for later already\./)
-      // The coordinator finds it as kept for later.
+      // The coordinator finds it as kept for later: an aside, as start_task starts one.
       const threadId = yield* (yield* Coordinator).thread(project.projectId)
       const coordinator: ToolAccess = { role: 'coordinator', projectId: project.projectId, threadId, sessionId: 'none', taskId: null }
-      assert.include(yield* callTool(coordinator, 'find_tasks', { text: 'partners' }), '(kept for later; id ')
+      assert.include(
+        yield* callTool(coordinator, 'find_tasks', { text: 'partners' }),
+        '(an aside on Scratch, a chat rather than a task, kept for later; id ',
+      )
       assert.match(yield* settle('done'), /^Marked which-partners-still-call-v1 done: it is in Settled/)
       assert.strictEqual((yield* stateOf(task.taskId))[0]?.state, 'done')
       // Its own thread says so, once: the lead acted in it.

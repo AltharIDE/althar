@@ -32,10 +32,6 @@ const meta = {
 export default meta
 type Story = StoryObj<typeof meta>
 
-export const Quiet: Story = {
-  render: () => <Example />,
-}
-
 /** Choosing from the list. */
 export const Choosing: Story = {
   render: () => <Example />,
@@ -78,7 +74,6 @@ export const BackToTheField: Story = {
   },
 }
 
-export const Filled: Story = { render: () => <Example variant="filled" width={220} /> }
 export const Open: Story = { render: () => <Example defaultOpen /> }
 
 /* A long list: an agent's models. */

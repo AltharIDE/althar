@@ -3,7 +3,7 @@ import { Clock, Effect, Schema } from 'effect'
 import { type Access, type AccessLine, line } from './access'
 import { type AdapterOptions, authorizationOf } from './credential'
 import { ConnectorFailed } from './errors'
-import { makeHttp } from './http'
+import { makeHttp, withoutTrailingSlashes } from './http'
 import {
   cantChange,
   cantFind,
@@ -251,7 +251,7 @@ const CAPABILITIES = TRELLO_TRACKING
 
 export const makeTrello = (options: AdapterOptions): Tracker => {
   const product = 'trello' as const
-  const api = options.apiUrl.replace(/\/+$/, '')
+  const api = withoutTrailingSlashes(options.apiUrl)
   const http = makeHttp({ product, fetch: options.fetch, authorization: Effect.map(options.credential, authorizationOf) })
   const call = <A>(schema: Schema.Codec<A, unknown>, method: string, url: string, body?: unknown) =>
     Effect.mapError(http.json(schema, method, url, body), classified)
@@ -679,7 +679,7 @@ const NAMED = 'Althar'
 
 export const accessTrello: Access = (input) =>
   Effect.gen(function* () {
-    const api = input.apiUrl.replace(/\/+$/, '')
+    const api = withoutTrailingSlashes(input.apiUrl)
     const ask = (url: string) => probe(input, url)
     const key = input.credential.kind === 'app' ? input.credential.key : null
     if (key === null) return stopped([line('key', 'no', { reason: { kind: 'failed', message: 'No API key' } })])

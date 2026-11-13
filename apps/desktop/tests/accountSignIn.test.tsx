@@ -13,7 +13,7 @@ import { useAccountSignIn } from '../src/renderer/features/accounts/useAccountSi
 import type { Section } from '../src/renderer/features/settings/sections'
 import { SettingsPage } from '../src/renderer/features/settings/SettingsPage'
 import { type StartModel, useStart } from '../src/renderer/features/start/useStart'
-import { agents, fakeClient, fakeHost, usual } from './fixtures'
+import { agents, fakeClient, fakeHost, usual, withoutOpenCode } from './fixtures'
 import { servicesFor, withServices } from './render'
 
 /*
@@ -56,6 +56,92 @@ const signInOf = (client: Client, start: StartModel, host: Host = fakeHost()) =>
 }
 
 const usualCodex = usual('acc_usual', 'signed_in')
+
+const copilotStatus = (installed = true): Status => ({
+  ...codexWith(['browser'], usual('acc_copilot', 'signed_out')),
+  agents: [
+    {
+      ...agents[1]!,
+      id: 'copilot-direct',
+      name: 'GitHub Copilot',
+      login: '',
+      installed,
+      ways: ['browser'],
+      accounts: [usual('acc_copilot', 'signed_out')],
+    },
+  ],
+})
+
+describe('Copilot sign-in without a terminal', () => {
+  it('keeps the enterprise address when retrying a failed sign-in', async () => {
+    const { client } = fakeClient()
+    vi.spyOn(client, 'startAccountSignIn').mockRejectedValue(
+      new ApiError({ reason: 'SignInFailed', message: 'GitHub could not be reached.' }),
+    )
+    const { result } = signInOf(client, startOf(copilotStatus()))
+    act(() => result.current.again('copilot-direct', 'acc_copilot'))
+    act(() => result.current.enterprise('company.ghe.com'))
+    await waitFor(() => expect(result.current.signingIn?.step.kind).toBe('failed'))
+    act(() => result.current.back())
+    expect(result.current.signingIn?.step).toEqual({ kind: 'choose', enterprise: 'company.ghe.com' })
+  })
+  it('uses the selected enterprise hostname and never opens Terminal', async () => {
+    const { client } = fakeClient()
+    const { result } = signInOf(client, startOf(copilotStatus()))
+    act(() => result.current.again('copilot-direct', 'acc_copilot'))
+    act(() => result.current.enterprise('https://Company.GHE.com/'))
+    await waitFor(() => expect(client.startAccountSignIn).toHaveBeenCalledWith('acc_copilot', 'browser', 'company.ghe.com'))
+    expect(client.signInAccount).not.toHaveBeenCalled()
+  })
+
+  it('puts an invalid enterprise address back at its field', () => {
+    const { client } = fakeClient()
+    const { result } = signInOf(client, startOf(copilotStatus()))
+    act(() => result.current.again('copilot-direct', 'acc_copilot'))
+    act(() => result.current.enterprise('https://user:password@company.ghe.com'))
+    expect(result.current.signingIn?.step).toMatchObject({
+      kind: 'choose',
+      enterprise: 'https://user:password@company.ghe.com',
+      error: expect.any(String),
+    })
+    expect(client.startAccountSignIn).not.toHaveBeenCalled()
+  })
+
+  it('prepares the engine first and does not start a sign-in that was cancelled during download', async () => {
+    const { client } = fakeClient()
+    let finish: () => void = () => {}
+    const installing = new Promise<void>((resolve) => {
+      finish = resolve
+    })
+    vi.spyOn(client, 'installAgent').mockReturnValue(installing)
+    const { result } = signInOf(client, startOf(copilotStatus(false)))
+    act(() => result.current.again('copilot-direct', 'acc_copilot'))
+    act(() => result.current.way(SignInWay.Browser))
+    expect(result.current.signingIn?.step.kind).toBe('checking')
+    expect(client.installAgent).toHaveBeenCalledWith('copilot-direct')
+    expect(client.startAccountSignIn).not.toHaveBeenCalled()
+    act(() => result.current.cancel())
+    await act(async () => {
+      finish()
+      await installing
+    })
+    expect(client.startAccountSignIn).not.toHaveBeenCalled()
+    expect(result.current.signingIn).toBeNull()
+  })
+
+  it('explains a download failure and returns to a usable sign-in', async () => {
+    const { client } = fakeClient()
+    vi.spyOn(client, 'installAgent').mockRejectedValue(
+      new ApiError({ reason: 'InstallFailed', message: 'The download stopped. Try again.' }),
+    )
+    const { result } = signInOf(client, startOf(copilotStatus(false)))
+    act(() => result.current.again('copilot-direct', 'acc_copilot'))
+    act(() => result.current.way(SignInWay.Browser))
+    await waitFor(() => expect(result.current.signingIn?.step).toEqual({ kind: 'failed', said: 'The download stopped. Try again.' }))
+    act(() => result.current.back())
+    expect(result.current.signingIn?.step.kind).toBe('choose')
+  })
+})
 
 describe('an account’s sign-in, with nothing under way', () => {
   it('takes no way, opens nothing, pastes nothing, adds no folder, and keeps nothing', async () => {
@@ -374,6 +460,43 @@ describe('Settings opened to sign an agent in again, from its error', () => {
     withServices(<Asked />, client)
     await waitFor(() => expect(client.signInAccount).toHaveBeenCalledWith('acc_work'))
     expect(client.signInAccount).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('Settings opened on an agent that isn’t installed, from a step that couldn’t start', () => {
+  it('opens that agent’s tab, nothing started', async () => {
+    const { client } = fakeClient({ status: vi.fn(async () => ({ apiVersion: 1, appVersion: '0.0.0', agents: withoutOpenCode })) })
+    function Asked() {
+      return <SettingsPage start={useStart()} section="agents" onSection={() => {}} agent="opencode" />
+    }
+    withServices(<Asked />, client)
+    await waitFor(() => expect(screen.getByRole('tab', { name: /OpenCode/, selected: true })).toBeTruthy())
+    expect(client.signInAccount).not.toHaveBeenCalled()
+    expect(client.addAccount).not.toHaveBeenCalled()
+  })
+})
+
+describe('Settings opened to sign in again an account whose sign-in ends soon', () => {
+  it('starts the next account’s sign-in too, where it is another account of the same agent', async () => {
+    // Claude Code (work) handled from the bar; Claude Code (personal) the next to end, while Settings is still open on the agent.
+    const work = { ...usual('acc_work', 'signed_in'), name: 'work', home: '/Users/me/work' }
+    const { client } = fakeClient({ status: vi.fn(async () => codexWith([], usualCodex, work)) })
+    function Asked() {
+      const [meant, setMeant] = useState('acc_work')
+      return (
+        <>
+          <button type="button" onClick={() => setMeant('acc_usual')}>
+            Next ending
+          </button>
+          <SettingsPage start={useStart()} section="agents" onSection={() => {}} signIn="codex" account={meant} />
+        </>
+      )
+    }
+    withServices(<Asked />, client)
+    await waitFor(() => expect(client.signInAccount).toHaveBeenCalledWith('acc_work'))
+    await userEvent.click(screen.getByRole('button', { name: 'Next ending' }))
+    await waitFor(() => expect(client.signInAccount).toHaveBeenCalledWith('acc_usual'))
+    expect(client.signInAccount).toHaveBeenCalledTimes(2)
   })
 })
 

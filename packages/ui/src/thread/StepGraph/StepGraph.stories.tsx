@@ -51,13 +51,14 @@ const LOOP: StepGraphStep[] = [
 
 const report = (id: string) => <p style={{ margin: 0 }}>{`The report of ${id}: what it found, what it did, and its summary.`}</p>
 
-const frame: CSSProperties = { height: 460, border: '1px solid var(--line)', borderRadius: 10, overflow: 'hidden' }
+const frame: CSSProperties = { width: '100%', height: 460, border: '1px solid var(--line)', borderRadius: 10, overflow: 'hidden' }
 
 const meta = {
   title: 'Thread/StepGraph',
   component: StepGraph,
   args: { lanes: LANES, rounds: [ASKED], steps: SIMPLE, detail: report, onRound: fn() },
-  decorators: [(Story) => <div style={frame}>{Story()}</div>],
+  // each story in a graph's frame; a grid frames each of its cells itself
+  decorators: [(Story, { parameters }) => (parameters.grid === true ? Story() : <div style={frame}>{Story()}</div>)],
   parameters: { layout: 'padded' },
 } satisfies Meta<typeof StepGraph>
 export default meta
@@ -341,5 +342,5 @@ export const AllStates: Story = {
       ]}
     />
   ),
-  decorators: [(Story) => <>{Story()}</>],
+  parameters: { grid: true },
 }

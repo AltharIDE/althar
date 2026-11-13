@@ -256,7 +256,8 @@ describe('a plan from a preset', () => {
       assert.strictEqual((yield* planOf('fix-a-typo')).description, brief)
       // Picked again, or another with no brief, the words stay as they are.
       yield* plans.applyPreset(id, 'Prototype', person)
-      assert.strictEqual(yield* plans.applyPreset(id, 'Change', person), 'Change')
+      // Change has no ending of its own: the plan ends as the project says, which callers hand it.
+      assert.strictEqual(yield* plans.applyPreset(id, 'Change', person, 'draft'), 'Change')
       const now = yield* planOf('fix-a-typo')
       assert.strictEqual(now.description, brief)
       assert.deepInclude(now.parameters, { end: 'draft' })
@@ -271,12 +272,21 @@ describe('a plan from a preset', () => {
       yield* callTool(coordinator, 'propose_plan', { task: 'fix-a-typo', lead: { model: 'Claude Large' }, review: null })
       const plans = yield* Plans
       const { id, taskId } = yield* planOf('fix-a-typo')
-      yield* plans.applyPreset(id, 'Small change', person)
+      // The test explicitly requests this timing; the built-in Small change keeps its review before Ship.
+      yield* savePreset({
+        name: 'Review after merge',
+        parts: { workspace: 'worktree', checked: 'after', end: 'draft', shelf: 'board', lead: null, reviewer: null, brief: '' },
+        projectId: null,
+        fromTaskId: null,
+        actorId: person,
+      })
+      yield* plans.applyPreset(id, 'Review after merge', person)
+      assert.deepInclude((yield* planOf('fix-a-typo')).parameters, { reviewAfterMerge: true, end: 'draft' })
       const steps = [{ key: 'implement' as const, agentId: 'codex', model: null, skipped: false }]
       yield* plans.change(id, steps, person, undefined, undefined, 'release/0.8.0')
       const changed = yield* planOf('fix-a-typo')
       assert.deepStrictEqual(changed.parameters.steps, steps)
-      assert.deepInclude(changed.parameters, { reviewAfterMerge: true, end: 'ready' })
+      assert.deepInclude(changed.parameters, { reviewAfterMerge: true, end: 'draft' })
       assert.strictEqual(yield* towardOf(taskId), 'release/0.8.0')
     }).pipe(Effect.provide(runtimeWith(github)))
   })

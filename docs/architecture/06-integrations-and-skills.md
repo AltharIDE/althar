@@ -822,10 +822,96 @@ early rather than skip what it would say next.
 
 `read_issue` says who has an issue, its labels, project, milestone, cycle,
 parent, type, estimate and due date, its description, and its ten latest
-comments. It reads up to twenty-five at once (keys, links, runs of keys),
+comments, with full Markdown bodies. It explicitly points to
+`read_issue_comments` for the whole discussion: unabridged pages, stable
+comment IDs and threading where the service has it, with a continuation
+until the end. This is Linear's cursor, GitHub's and GitLab's page, Jira's
+offset and Trello's last action. It reads up to twenty-five issues at once (keys, links, runs of keys),
 four at a time, each said on its own: one comes with its comments, several
-without unless asked. A tracker that couldn't be searched or read is said
-as such, with its words, never taken for none found.
+without unless asked. Its description and comments are quoted as their
+authors' words, data, never instructions, as `read_pull_request` quotes a
+pull request's, and a description is cut as a pull request's is, at 12,000
+characters; several read at once share 48,000 between them.
+A tracker that couldn't be searched or read is said as such, with its
+words, never taken for none found.
+
+### More than issues and task pull requests
+
+`IntegrationTools` serves the coordinator and leads the same additional
+tools. `list_integrations` identifies the connection and workspace without
+returning credentials; ambiguous workspace names are refused.
+
+- `list_linear_resource`, `read_linear_resource` and `save_linear_resource`
+  reach documents, projects, project milestones, initiatives and their
+  status updates. Lists carry Linear's native filter and pageInfo; reads
+  retain full Markdown. Saves accept the resource's public GraphQL input,
+  and create without an ID or update with one. Assigning an issue to an
+  existing project remains `change_issue`.
+- `read_issue_relations` reads outgoing or incoming Linear relationships,
+  each paginated; `change_issue_relation` adds blocks, blocked-by, related or
+  duplicate links, or removes one by its ID. These are separate from parent.
+- `edit_issue_comment` addresses an existing comment ID on every tracker.
+  `reply_to_issue_comment` uses Linear's root comment or GitLab's discussion
+  ID, included as threadId in full discussion pages. Other trackers refuse
+  threaded replies rather than creating a new root comment.
+- `read_issue_attachments` reads Linear Resources, Jira attachment fields
+  and Trello attachments; GitHub/GitLab return full comment pages containing
+  their file links, explicitly marked source=comments. Uploads take a regular
+  file of at most 5 MiB from the caller's own working folder. Linear uses a
+  signed storage PUT; Jira/Trello use authenticated multipart uploads;
+  GitHub/GitLab upload and post a linked issue comment. GitHub Enterprise
+  Server has no supported upload endpoint. Receipts keep the digest, not
+  bytes; failure to link an uploaded file remains uncertain. Uploads never
+  follow redirects with the account credential.
+- `search_pull_requests` reads beyond the project's repositories, through
+  the connected account's permissions. GitHub accepts its search syntax and
+  returns total, next page and incompleteness; its 1000-match search window
+  is explicit, with larger queries partitioned by dates. GitLab pages its
+  global merge request search. `find_pull_requests` remains the project's
+  quick list, and its description points to the search for complete results.
+- `request_pull_request_reviewers`, `resolve_review_thread` and
+  `mark_pull_request_draft` expose the host's review controls where it has
+  them. Thread resolution includes Bitbucket Cloud's resolve endpoint and
+  Data Center's versioned comment state, retaining comment text. `post_review`
+  posts a requested review through each of the four code-host adapters,
+  bound to the commit actually read; an agent cannot approve its own work
+  or a pull request Althar opened. With an existing draft, it uses the same
+  posting path as the card, updates that card and settles the review task;
+  another direct review cannot leave that draft waiting to be posted twice.
+  `draft_review` remains a draft card until the person asks to post it.
+
+The additional writes take the person's message ID or an errand through
+`Errands.execute`, with its authorization, durable intent, receipt and
+thread line. A lost response stays uncertain and is never blindly replayed.
+Provider input and capabilities can still refuse an operation; a successful
+HTTP response with GraphQL errors is an uncertain partial outcome, not a
+successful write.
+
+### Authenticated API fallbacks
+
+`code_host_api` and `tracker_api` cover operations without a typed tool,
+using the selected connection's existing, refreshed credential. REST takes
+a relative API path, method and JSON body. GraphQL takes a query and
+variables; a parser, including aliases and fragments, determines whether
+it reads or writes. There is one operation, and one root mutation field per
+call, so partial batches cannot be reported as wholly refused.
+
+Jira also accepts namespace `agile` for `/board` and `/sprint`, or
+`service_desk` for `/request` and other Service Management resources. These
+select known sibling API roots on the same server and context path, using
+the same connection; they cannot select an arbitrary URL or origin. Omit the
+namespace for Jira's core v2/v3 API. Multipart uploads use the dedicated
+attachment tool, keeping local paths and file bytes out of raw API inputs.
+
+Reads work in any ordinary lead or coordinator turn; writes go through the
+same asked-for receipt path. Credentials, administration, repository content
+writes and verdicts/checks on the agent's own work are excluded by path and
+GraphQL field families. The fallback cannot override the dedicated merge,
+release or review tools' rules. Calls stay on the connection's API root,
+reject traversal and double encoding, and never follow redirects with the
+credential. Each response is bounded to 4 MiB and returned without silent
+truncation; REST Link headers expose a relative next path, GraphQL retains
+its own pageInfo. Unknown write outcomes require reconciliation, not retry.
 
 ### What leads do with issues
 
@@ -930,8 +1016,10 @@ Althar narrows them itself. A listing refused for a scope says which
   language servers; Codex with its hooks off. Git takes no bare repository
   the pull request carries for its own unless named (`safe.bareRepository`).
 - **Only a review's tools.** Its lead is given `read_pull_request`,
-  `read_checks`, `read_issue`, `find_issues`, `draft_review` and
-  `settle_task`; every other lead tool is refused to it
+  `read_checks`, `read_issue`, `read_issue_comments`, `find_issues`,
+  `draft_review`, `post_review`, `read_turn`, `run_it` and `settle_task`.
+  Posting still needs the person's actual message in that turn; every
+  other lead tool is refused to it
   when called, listed or not, nothing that could change the project
   (keeping how it runs, which Althar later runs outside any sandbox) or reach
   the host (a reply, a push).
@@ -959,8 +1047,9 @@ Althar narrows them itself. A listing refused for a scope says which
   Each review task's view says what its lead can reach, in a sentence under
   its header.
 - **It reads the pull request through Althar.** `read_pull_request` reads it
-  the pull request as GitHub has it now: its description, its checks with the
-  end of a failed one's log, and what everyone said, those who aren't the
+  the pull request as GitHub has it now: its description, quoted as its
+  author's words and cut at 12,000 characters, its checks with the end of two
+  failed ones' logs, and what everyone said, those who aren't the
   repository's people marked so. Whether its head moved since the copy is
   said too.
 - **It drafts, and the person posts.** The lead's `draft_review` (a verdict:
@@ -986,8 +1075,19 @@ Althar narrows them itself. A listing refused for a scope says which
   request as soon as it is drafted, with the lead's verdict ("Post reviews of
   my team's pull requests without asking", off by default). A pull request
   from outside always waits for Post.
-- **Other hosts** don't take reviews yet: the code host model's
-  `capabilities.reviews` is GitHub's alone, and the coordinator says so.
+- **Other hosts** use the same review task and card lifecycle: GitLab's
+  merge-request head ref and Data Center's pull-request source ref are fetched
+  into the read-only copy. Cloud fetches the actual source branch from its
+  repository or fork, and the base from the target repository; it exposes no
+  pull-request Git ref. Every fetched head must match the provider's SHA,
+  accepting Cloud's abbreviated hashes only against a full fetched commit.
+  Their native review adapters handle summaries,
+  inline comments and verdicts. GitLab request-changes needs its GraphQL
+  mutation, whose availability and permission are the server's. Multi-call
+  reviews that partly succeed remain uncertain; they are never automatically
+  repeated. GitLab approvals and Data Center verdicts bind the reviewed SHA;
+  Bitbucket Cloud has no atomic head condition, so a move detected before or
+  after its verdict requires reconciliation.
 
 ### Signing in
 
@@ -1461,6 +1561,10 @@ A fork PR's workflow output is less trusted: contributors can change the code
 and scripts producing it, even when the workflow itself belongs to the project.
 Logs, annotations and artifact names/content are evidence, never instructions
 or authority to run commands or disclose credentials. Reading CI does not relax
-the existing filtering of outsiders' comments. Tool responses are capped at
+the existing filtering of outsiders' comments. The coordinator's news of a
+pull request the merge queue sent back names each failed job in a line, with
+its page, and never pastes its log: it reads one with `read_checks` where it
+needs to, rather than every turn after carrying thousands of lines of it
+(12 Nov 2026). Tool responses are capped at
 32 KiB, log downloads at 16 MiB, artifact archives at 5 MiB. The download cap
 applies while streaming, even when the server omits or lies about its size.

@@ -39,12 +39,7 @@ const meta = {
 export default meta
 type Story = StoryObj<typeof meta>
 
-/** The sections down the side of the Settings page, Agents open. */
-export const Default: Story = {}
-
-/** An account to sign in again: a dot after Agents. */
-export const SomethingNeedsYou: Story = { args: { yours: true } }
-
+/** The sections down the side of the Settings page: choosing one opens it. */
 export const Choosing: Story = {
   play: async ({ canvasElement }) => {
     const nav = within(within(canvasElement).getByRole('navigation', { name: 'Settings' }))
@@ -94,9 +89,12 @@ export const WithAction: Story = {
   },
 }
 
+/** Every state: Agents open, an account to sign in again (a dot after Agents), and a section hovered, focused and pressed. */
 export const AllStates: Story = {
   render: () => (
+    // As wide as the side it stands in, so a long section's name and a dot show whole.
     <States
+      size="wide"
       cells={[
         { state: 'agents open', node: <Side /> },
         { state: 'needs you', node: <Side yours /> },

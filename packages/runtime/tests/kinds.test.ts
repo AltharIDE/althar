@@ -214,19 +214,21 @@ describe("a task's kind", () => {
         home.tasks.map((task) => task.title),
         ['Which partners still call v1?', 'Sketch the settings', 'Retry the checkout', 'Keep the old checkout'],
       )
-      const readyIn = Effect.map(queries.projects, (all) => all.projects.find((one) => one.id === project.projectId)?.ready)
-      assert.strictEqual(yield* readyIn, 4)
-      assert.lengthOf([...(yield* queries.kept)], 0)
+      // The project counts what its board's Needs you shows: not the question, an aside its coordinator started on Scratch,
+      // but the sketch, which went to the board as its lead committed (cards.ts, offScratch).
+      assert.isTrue((yield* queries.card(question.taskId)).scratch)
+      assert.isUndefined((yield* queries.card(sketch.taskId)).scratch)
+      const yoursIn = Effect.map(queries.projects, (all) => all.projects.find((one) => one.id === project.projectId)?.yours)
+      yield* until(yoursIn, (n) => n === 3)
       // Kept for later, it is out of Needs you: kept on its board, and nothing else counts it.
-      assert.isTrue(yield* keep(question.taskId))
-      const shelved = yield* cardOnce(question.taskId, (card) => card.phase === 'kept')
+      assert.isTrue(yield* keep(sketch.taskId))
+      const shelved = yield* cardOnce(sketch.taskId, (card) => card.phase === 'kept')
       assert.isNotNull(shelved.keptAt)
       assert.notInclude(
         (yield* queries.home()).tasks.map((task) => task.title),
-        'Which partners still call v1?',
+        'Sketch the settings',
       )
-      assert.strictEqual(yield* readyIn, 3)
-      assert.sameMembers([...(yield* queries.kept)], [question.taskId])
+      yield* until(yoursIn, (n) => n === 2)
     }).pipe(Effect.provide(withQueries())),
   )
 

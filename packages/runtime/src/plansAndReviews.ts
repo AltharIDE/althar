@@ -1,4 +1,5 @@
 import {
+  AFTER_MERGE_REVIEWS,
   PLANS_AND_REVIEWS,
   type PlansAndReviews,
   type PlansAndReviewsChange,
@@ -35,6 +36,7 @@ const PUSH_COMMITS = 'new_project_push_commits'
 const POST_SCREENSHOTS = 'new_project_post_screenshots'
 const RESOLVE_CONFLICTS = 'new_project_resolve_conflicts'
 const MOVE_ISSUES = 'new_project_move_issues'
+const AFTER_MERGE_REVIEW = 'new_project_after_merge_review'
 
 const ALL = [
   COUNTDOWN,
@@ -47,6 +49,7 @@ const ALL = [
   POST_SCREENSHOTS,
   RESOLVE_CONFLICTS,
   MOVE_ISSUES,
+  AFTER_MERGE_REVIEW,
 ] as const
 
 const rowsOf = Effect.gen(function* () {
@@ -95,6 +98,7 @@ export const newProjectDefaultsOf = Effect.map(rowsOf, (kept): NewProjectDefault
   postScreenshots: switchOf(kept.get(POST_SCREENSHOTS), NEW_PROJECT_DEFAULTS.postScreenshots),
   resolveConflicts: switchOf(kept.get(RESOLVE_CONFLICTS), NEW_PROJECT_DEFAULTS.resolveConflicts),
   moveIssues: switchOf(kept.get(MOVE_ISSUES), NEW_PROJECT_DEFAULTS.moveIssues),
+  afterMergeReview: choiceOf(kept.get(AFTER_MERGE_REVIEW), AFTER_MERGE_REVIEWS, NEW_PROJECT_DEFAULTS.afterMergeReview),
 }))
 
 /** Keeps a setting, or, at the value it has without one, forgets it. */
@@ -123,6 +127,8 @@ export const setNewProjectDefaults = (change: NewProjectDefaultsChange) =>
     if (change.usageLimit !== undefined) yield* keep(USAGE_LIMIT, unlessDefault(change.usageLimit, NEW_PROJECT_DEFAULTS.usageLimit))
     if (change.rotateAccounts !== undefined) yield* keep(ROTATE, change.rotateAccounts ? 'on' : null)
     if (change.end !== undefined) yield* keep(END, unlessDefault(change.end, NEW_PROJECT_DEFAULTS.end))
+    if (change.afterMergeReview !== undefined)
+      yield* keep(AFTER_MERGE_REVIEW, unlessDefault(change.afterMergeReview, NEW_PROJECT_DEFAULTS.afterMergeReview))
     for (const [key, value, fallback] of [
       [PUSH_COMMITS, change.pushCommits, NEW_PROJECT_DEFAULTS.pushCommits],
       [POST_SCREENSHOTS, change.postScreenshots, NEW_PROJECT_DEFAULTS.postScreenshots],

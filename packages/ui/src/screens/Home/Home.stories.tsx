@@ -51,12 +51,30 @@ type Story = StoryObj<typeof meta>
 
 /* ---- the window around the home: its one bar, as the app draws it ---- */
 
-function Window({ waiting, children }: { waiting: number; children: ReactNode }) {
+/* `open`: the projects whose tabs are open, when not all of them; `still`: nothing running in any of them. */
+function Window({
+  waiting,
+  open,
+  still = false,
+  children,
+}: {
+  waiting: number
+  open?: readonly string[]
+  still?: boolean
+  children: ReactNode
+}) {
   return (
     <div className={s.window}>
       <ProjectTabs
         lights="drawn"
-        tabs={MARKED.map((p) => ({ id: p.id, name: p.name, seed: p.id, ink: p.ink, running: p.running, yours: 0 }))}
+        tabs={MARKED.filter((p) => open === undefined || open.includes(p.id)).map((p) => ({
+          id: p.id,
+          name: p.name,
+          seed: p.id,
+          ink: p.ink,
+          running: p.running && !still,
+          yours: 0,
+        }))}
         current={null}
         yours={waiting}
         onSelect={fn()}
@@ -329,7 +347,7 @@ const MANY_PROJECTS: HomeProject[] = [
     note: i % 3 === 0 ? 'Last task last week' : 'Last task 11 days ago',
   })),
 ]
-/** Two tasks or so in most of the busy projects, a few held or stopped. */
+/** Two tasks or so in most of the busy projects, a few held or waiting for a free agent. */
 const MANY_RUNNING: HomeRun[] = MANY_PROJECTS.slice(0, 12).flatMap((p, i) =>
   Array.from({ length: (i % 3) + 1 }, (_, k) => {
     const base = RUNNING[(i + k) % RUNNING.length]!
@@ -338,7 +356,7 @@ const MANY_RUNNING: HomeRun[] = MANY_PROJECTS.slice(0, 12).flatMap((p, i) =>
       id: `${p.id}-${k}`,
       project: p.project,
       ...(i === 6 && k === 0 ? { status: TaskStatus.Paused } : {}),
-      ...(i === 9 && k === 1 ? { status: TaskStatus.Stopped } : {}),
+      ...(i === 9 && k === 1 ? { status: TaskStatus.Queued } : {}),
     }
   }),
 )
@@ -352,6 +370,11 @@ export const HeavyDay: Story = {
 /** Without a way to start a project, the projects' head has no button. */
 export const WithoutOpeningAFolder: Story = {
   args: { onNewProject: undefined, waiting: 0, running: RUNNING_QUIET, since: SINCE_QUIET, projects: PROJECTS_QUIET },
+  render: (args) => (
+    <Window waiting={0}>
+      <Home {...args} />
+    </Window>
+  ),
 }
 
 /* ---- at rest: nothing waits on you and nothing is in progress ---- */
@@ -366,7 +389,7 @@ const fresh = (id: string, project: typeof MERIDIAN): HomeProject => ({
 
 function Resting(args: HomeProps) {
   return (
-    <Window waiting={0}>
+    <Window waiting={0} open={args.projects.map((p) => p.id)} still>
       <Home {...args} waiting={0} running={[]} />
     </Window>
   )
@@ -402,7 +425,7 @@ export const AtRestAllQuiet: Story = {
 function WorkComing(args: HomeProps) {
   const [working, setWorking] = useState(false)
   return (
-    <Window waiting={0}>
+    <Window waiting={0} open={args.projects.map((p) => p.id)} still={!working}>
       <div className={s.toggle}>
         <Button size="small" onClick={() => setWorking((now) => !now)}>
           {working ? 'Settle the task' : 'Start a task'}
@@ -422,7 +445,7 @@ export const AtRestWorkComes: Story = {
 export const AllStates: Story = {
   render: (args) => (
     <States
-      size="wide"
+      size="thread"
       cells={[
         {
           state: 'busy',

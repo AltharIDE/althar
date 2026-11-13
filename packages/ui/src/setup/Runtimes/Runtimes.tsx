@@ -8,6 +8,7 @@ import { RuntimeState, unreachable } from '../../foundations/vocabulary'
 import { cx } from '../../lib/cx'
 import { ActionButton } from '../../primitives/ActionButton/ActionButton'
 import { Button } from '../../primitives/Button/Button'
+import { Problem } from '../../primitives/Problem/Problem'
 import { Spinner } from '../../primitives/Spinner/Spinner'
 import s from './Runtimes.module.css'
 
@@ -269,7 +270,14 @@ function parts(r: RuntimeEntry, t: RuntimesText, h: Handlers): Parts {
         <Button onClick={() => h.onInstall?.(r.id)}>{r.failed === undefined ? t.download : t.tryAgain}</Button>
       )
       return {
-        line: r.failed === undefined ? t.missing : <span role="alert">{r.failed}</span>,
+        line:
+          r.failed === undefined ? (
+            t.missing
+          ) : (
+            <Problem as="span" size="small">
+              {r.failed}
+            </Problem>
+          ),
         ...(fetch && r.download !== undefined
           ? { note: r.pinned === undefined ? t.downloadNote(r.name, r.download) : t.pinnedNote(r.name, r.download, r.pinned) }
           : {}),
@@ -302,7 +310,14 @@ function parts(r: RuntimeEntry, t: RuntimesText, h: Handlers): Parts {
       }
     // Only this one; the rest of the list stands as it is.
     case RuntimeState.Unchecked:
-      return { line: <span role="alert">{r.why}</span>, actions: check }
+      return {
+        line: (
+          <Problem as="span" size="small">
+            {r.why}
+          </Problem>
+        ),
+        actions: check,
+      }
     default:
       return unreachable(r)
   }

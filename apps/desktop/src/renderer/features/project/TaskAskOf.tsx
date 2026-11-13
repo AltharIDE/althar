@@ -1,6 +1,6 @@
 import { useState } from 'react'
 
-import { TaskAsk } from '@althar/ui'
+import { TaskAsk, Problem } from '@althar/ui'
 
 import { messageOf } from '../../data/client'
 import { useServices } from '../../data/services'
@@ -58,11 +58,7 @@ export function TaskAskOf({
         onAnswer={answer}
         onOpen={() => onOpen(ask.threadId)}
       />
-      {error !== null && (
-        <p className={s.failure} role="alert">
-          {text.failed(error)}
-        </p>
-      )}
+      {error !== null && <Problem className={s.failure}>{text.failed(error)}</Problem>}
     </>
   )
 }

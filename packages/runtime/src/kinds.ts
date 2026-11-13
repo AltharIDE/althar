@@ -57,6 +57,12 @@ export const answeredIn = (task: string) =>
     AND NOT EXISTS (SELECT 1 FROM review_drafts ad WHERE ad.task_id = ${task}.id AND ad.state IN ('pending', 'posting', 'failed', 'uncertain')))`
 
 /**
+ * Whether the task `task` (a table alias) is an aside, a chat on Scratch (`tasks.shelf`), as SQL: the one rule for it, so
+ * none is listed or counted as a task.
+ */
+export const asideIn = (task: string) => `coalesce(${task}.shelf, '') = 'scratch'`
+
+/**
  * Whether the task `task` (a table alias) is a quick task still, as SQL:
  * its latest plan says it stays on this Mac and ends in nothing, and it has
  * no pull request of its own. What makes it plain, as `kindOf` reads it.
@@ -77,11 +83,17 @@ export const quickIn = (task: string) =>
  * task's pull request opens, isn't: the task is ready for the person then, and
  * its card waits in the thread they open.
  */
-export const issueCardsWaiting = (task: string) =>
-  `((SELECT count(*) FROM issue_drafts wd JOIN threads wt ON wt.id = wd.thread_id
-    WHERE wt.task_id = ${task}.id AND wd.state IN ('pending', 'failed', 'uncertain'))
-  + (SELECT count(*) FROM issue_changes wc JOIN threads wct ON wct.id = wc.thread_id
-    WHERE wct.task_id = ${task}.id AND wc.proposed_by = 'lead' AND wc.state IN ('pending', 'failed')))`
+export const issueCardsWaiting = (task: string) => `(${issueDraftsWaiting(task)} + ${issueChangesWaiting(task)})`
+
+/** How many issues a task's lead drafted wait for the person to file, as SQL over a task row aliased `task`. */
+export const issueDraftsWaiting = (task: string) =>
+  `(SELECT count(*) FROM issue_drafts wd JOIN threads wt ON wt.id = wd.thread_id
+    WHERE wt.task_id = ${task}.id AND wd.state IN ('pending', 'failed', 'uncertain'))`
+
+/** How many changes a task's lead proposed to its issue wait for the person to apply, as SQL over a task row aliased `task`. */
+export const issueChangesWaiting = (task: string) =>
+  `(SELECT count(*) FROM issue_changes wc JOIN threads wct ON wct.id = wc.thread_id
+    WHERE wct.task_id = ${task}.id AND wc.proposed_by = 'lead' AND wc.state IN ('pending', 'failed'))`
 
 /**
  * What a plain task handed back, for its card: the pictures its lead showed

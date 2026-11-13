@@ -21,6 +21,29 @@ function Host({ items }: { items: ReadonlyArray<ImageRef & { id: string }> }) {
 }
 
 describe('Lightbox', () => {
+  it('opens a GIF paused, plays its original bytes on request and stops when another image opens', async () => {
+    const user = userEvent.setup()
+    const gif = {
+      ...SHOT_AFTER,
+      name: 'Opening panel',
+      alt: 'Panel opens',
+      animated: true,
+      src: '/opening.gif',
+      thumb: '/opening-poster.png',
+      poster: '/opening-poster.png',
+    }
+    render(<Lightbox images={[gif, SHOT_BEFORE]} onClose={() => {}} />)
+    expect(screen.getByRole('img', { name: 'Panel opens' })).toHaveAttribute('src', '/opening-poster.png')
+    await user.click(screen.getByRole('button', { name: 'Play recording' }))
+    expect(screen.getByRole('img', { name: 'Panel opens' })).toHaveAttribute('src', '/opening.gif')
+    await user.click(screen.getByRole('button', { name: 'Pause recording' }))
+    expect(screen.getByRole('img', { name: 'Panel opens' })).toHaveAttribute('src', '/opening-poster.png')
+    await user.click(screen.getByRole('button', { name: 'Play recording' }))
+    await user.keyboard('{ArrowRight}{ArrowLeft}')
+    expect(screen.getByRole('button', { name: 'Play recording' })).toHaveAttribute('aria-pressed', 'false')
+    expect(screen.getByRole('img', { name: 'Panel opens' })).toHaveAttribute('src', '/opening-poster.png')
+  })
+
   it('takes focus, keeps it inside while open, and gives it back to the shot that opened it', async () => {
     const user = userEvent.setup()
     render(<Host items={[SHOT_BEFORE, SHOT_AFTER]} />)

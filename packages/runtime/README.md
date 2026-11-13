@@ -28,6 +28,7 @@ Effect.runPromise(Effect.scoped(program).pipe(Effect.provide(Runtime.layer({ dat
 - **`Coordinator`** is the project's coordinator. `say` starts it, on the agent the person last used, with what they said; it answers questions and turns changes into tasks with Althar's tools.
 - **`Plans`** proposes a task's plan (its steps and who does each), and holds, changes or starts it; left alone, it starts when its countdown ends.
 - **`Runs`** runs a started plan: the lead implements, another agent reviews, the lead settles what the review found, and the review looks again, up to three rounds.
+- A lead can **`wait_for`** PR state, checks on a PR or ref, or a time, with any/all conditions and a deadline. The step stays open while its agent place is released; the runtime watches and resumes it with what changed, including after a restart. Stop cancels the wait. See [the scheduling decision](../../docs/decisions/scheduling.md#waiting-for-an-external-change).
 
 - **`Queries`** reads what a client's screens show: projects, tasks, and a task's thread a page at a time, each with the change-feed cursor it read at.
 - **`Folders`** holds the folders the person chose, by grant, so a client opens a project without naming a path.

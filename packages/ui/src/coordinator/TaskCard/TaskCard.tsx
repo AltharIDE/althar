@@ -68,6 +68,8 @@ export interface TaskCardProps {
   pr?: string
   /** Anything else for the foot, in a few words. */
   meta?: ReactNode
+  /** Something offered about the task, quiet at the end of its foot's facts: keeping its parts as a preset. */
+  footNote?: ReactNode
   /** Just started: it lands, and its track fills in. */
   fresh?: boolean
   /** Just jumped to: it flashes once. */
@@ -92,6 +94,7 @@ export function TaskCard({
   from,
   pr,
   meta,
+  footNote,
   errands,
   fresh,
   found,
@@ -122,7 +125,7 @@ export function TaskCard({
         {title}
       </p>
       {errands?.map((line) => (
-        <p className={s.errand} key={line}>
+        <p className={s.errand} key={line} title={line}>
           {line}
         </p>
       ))}
@@ -144,6 +147,7 @@ export function TaskCard({
               <span className={s.prName}>{pr}</span>
             </span>
           )}
+          {footNote}
         </div>
         {onOpen && (
           <NextSteps className={s.next}>

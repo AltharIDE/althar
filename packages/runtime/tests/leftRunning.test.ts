@@ -8,6 +8,8 @@ import {
   exitCodeIn,
   type InHand,
   type LeftRunning,
+  printedMore,
+  readable,
   servingAt,
   shownOf,
   stillBusy,
@@ -170,6 +172,14 @@ describe('the line that says why a run ended', () => {
     assert.strictEqual(endingLine(`${vite}\n`, 1, 'warning: x\nelectron exited\n'), 'electron exited')
     assert.strictEqual(endingLine(`compiling\n✓ built in 2.41s\n${vite}\n`, 0), '✓ built in 2.41s')
     assert.strictEqual(endingLine('compiling\n', null), null)
+  })
+})
+
+describe('what a run printed, to read', () => {
+  it('reads without colours, from its first whole line once only the end was kept', () => {
+    assert.strictEqual(readable('\u001b[32mready\u001b[39m in 312 ms\n'), 'ready in 312 ms\n')
+    const kept = printedMore('', `${'x'.repeat(20_000)}\nlast line\n`)
+    assert.strictEqual(readable(kept), 'last line\n')
   })
 })
 

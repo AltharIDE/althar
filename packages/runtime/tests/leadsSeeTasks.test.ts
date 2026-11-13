@@ -123,9 +123,9 @@ describe('a task’s lead', () => {
       assert.notInclude(yield* takenOver(elsewhere.threadId), 'Also planned from this message')
 
       // A turn that runs for hours is one message still: its tasks are siblings however far apart they were made.
-      yield* sql`UPDATE turn_deliveries SET requested_at = '2030-01-01T00:00:00.000Z', ended_at = '2030-01-01T03:00:00.000Z' WHERE id = ${first.id}`
-      yield* sql`UPDATE tasks SET created_at = '2030-01-01T00:30:00.000Z' WHERE id = ${automations.taskId}`
-      yield* sql`UPDATE tasks SET created_at = '2030-01-01T02:30:00.000Z' WHERE id = ${control.taskId}`
+      yield* sql`UPDATE turn_deliveries SET requested_at = '2025-01-01T00:00:00.000Z', ended_at = '2025-01-01T03:00:00.000Z' WHERE id = ${first.id}`
+      yield* sql`UPDATE tasks SET created_at = '2025-01-01T00:30:00.000Z' WHERE id = ${automations.taskId}`
+      yield* sql`UPDATE tasks SET created_at = '2025-01-01T02:30:00.000Z' WHERE id = ${control.taskId}`
       assert.deepStrictEqual(
         (yield* siblingsOf(automations.taskId)).map((other) => other.slug),
         [control.slug],

@@ -1,6 +1,7 @@
 import type { ComponentProps } from 'react'
 
 import { cx } from '../../lib/cx'
+import { Problem } from '../Problem/Problem'
 import s from './Field.module.css'
 
 export interface FieldProps extends Omit<ComponentProps<'input'>, 'size'> {
@@ -36,11 +37,11 @@ export function FieldArea({ invalid = false, rows = 5, className, ...rest }: Fie
   )
 }
 
-/** Why a Field's value will not do, under it. Give it an id and point the field's aria-describedby at it. */
+/** Why a Field's value will not do, under it: a small Problem. Give it an id and point the field's aria-describedby at it. */
 export function FieldError({ id, children }: { id: string; children: ComponentProps<'span'>['children'] }) {
   return (
-    <span id={id} className={s.error} role="alert">
+    <Problem as="span" size="small" id={id} className={s.error}>
       {children}
-    </span>
+    </Problem>
   )
 }

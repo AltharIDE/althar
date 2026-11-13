@@ -68,7 +68,7 @@ describe('what the edge says as it comes in', () => {
     withEdge(<Edge />, client)
     await screen.findByRole('button', { name: 'Nothing needs you' })
     tasks = [running, task({ taskId: 't2', threadId: 'th2', title: 'Name the limits better', phase: 'ready', projectId: 'p2' })]
-    act(() => emit(changed('task', 't2', 'th2', 'p2')))
+    act(() => emit(changed('card', 't2', 'th2', 'p2')))
     const region = screen.getByRole('region', { name: 'Althar' })
     await waitFor(() => expect(within(region).getAllByText('halyard')).toHaveLength(2))
     expect(screen.getByRole('button', { name: '1 needs you' })).toBeTruthy()
@@ -81,7 +81,7 @@ describe('what the edge says as it comes in', () => {
     withEdge(<Edge />, client)
     await screen.findByRole('button', { name: 'Nothing needs you' })
     calls = [{ ...permission, projectId: 'gone' }]
-    act(() => emit(changed('attention_request', 'a1', 'th3', 'gone')))
+    act(() => emit(changed('card', 't3', 'th3', 'gone')))
     await waitFor(() => expect(getHome).toHaveBeenCalledTimes(2))
     expect(within(screen.getByRole('region', { name: 'Althar' })).queryByText('Permission')).toBeNull()
   })

@@ -42,7 +42,9 @@
 .opens:active {
   background: var(--hover-paper);
 }
+/* the caret keeps its column whether or not the row says how it exited */
 .opens > :last-child {
+  grid-column: 4;
   align-self: center;
   color: var(--t-3);
 }

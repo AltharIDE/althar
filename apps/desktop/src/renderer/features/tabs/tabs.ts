@@ -60,7 +60,7 @@ export const whereOf = (pathname: string): Where => {
  * a window opens with before the home is read. A tab's dot is the board's own
  * count (`yoursByProject`), never this: it is a quick reading, not the rule.
  */
-export const yoursIn = (project: ProjectSummary): number => project.waiting + project.ready
+export const yoursIn = (project: ProjectSummary): number => project.yours
 
 /**
  * The tabs a window opens with before it has kept any: the projects where

@@ -7,12 +7,12 @@ import { Popover } from '../../primitives/Popover/Popover'
 import s from './ScratchShelf.module.css'
 
 /*
- * Scratch (a task is a conversation plus parts, "Chats and Scratch"): the
+ * Scratch (a task is a conversation plus parts, "Asides"): the
  * chats the coordinator started, off the board's lanes, behind one chip at
  * the head of Up next. Opened in place, never a sidebar, it lists them by
  * their latest exchange, the latest first: each by its title, what was said
- * last and by whom, and when, a live dot while its lead is at it. A press on
- * one opens it; Clear settles it, and ⌘K still finds it.
+ * last and by whom, and when, with a still live dot while its lead is at
+ * it. A press on one opens it; Clear settles it, and ⌘K still finds it.
  */
 
 export interface ScratchChat {
@@ -74,9 +74,10 @@ export function ScratchShelf({ chats, onOpen, onClear, defaultOpen, text, classN
           {chats.map((chat) => (
             <li key={chat.id} className={s.chat}>
               <button type="button" className={s.open} onClick={() => onOpen(chat.id)}>
+                {/* The titles line up; a live dot, still, goes with when. */}
                 <span className={s.top}>
-                  {chat.running === true && <LiveDot pulse />}
                   <span className={s.title}>{chat.title}</span>
+                  {chat.running === true && <LiveDot />}
                   {chat.at !== undefined && <span className={s.at}>{chat.at}</span>}
                 </span>
                 {chat.said !== undefined && chat.said.text !== '' && (

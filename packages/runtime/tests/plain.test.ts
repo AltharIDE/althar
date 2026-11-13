@@ -1,5 +1,6 @@
+import { removeTreeSync } from '@althar/testing'
 import { execFileSync } from 'node:child_process'
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -196,8 +197,10 @@ describe('a plain task', () => {
           published.map((one) => [one.kind, one.left]),
           [['nothing', []]],
         )
-        // The coordinator reads it as a task with no branch.
+        // The coordinator leaves the aside out of its task list. On the board, it is a task with no branch.
         const access: ToolAccess = { role: 'coordinator', ...place, sessionId: 'none', taskId: null }
+        assert.strictEqual(yield* callTool(access, 'list_tasks', {}), 'The project has no tasks yet.')
+        yield* sql`UPDATE tasks SET shelf = NULL WHERE id = ${task.id}`
         assert.include(
           yield* callTool(access, 'list_tasks', {}),
           `${task.slug}: Which partners still call v1? (ready, led by Fake claude-code) — no branch`,
@@ -427,7 +430,6 @@ describe('a plain task', () => {
         const worktree = yield* worktreeOf(task.id)
         assert.isNotNull(worktree.branchedAt)
         assert.deepStrictEqual([card.kind, card.change, card.branch], ['plain', null, worktree.branch])
-        assert.deepStrictEqual([...(yield* (yield* Queries).kept)], [])
         // Nothing went to the host: no push, no pull request, and nothing in its thread says it ends on its branch.
         assert.lengthOf(github.changes, 0)
         assert.isNull(gitIn(bare, 'rev-parse', '--verify', '--quiet', `refs/heads/${worktree.branch}`))
@@ -474,7 +476,7 @@ describe('a plain task', () => {
         )
         const worktree = yield* worktreeOf(task.id)
         // Again a moment later where Windows won't yet, while its lead's process, which worked in it, is still going.
-        rmSync(worktree.path, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 })
+        removeTreeSync(worktree.path)
         yield* tasks.reopen({ envelope: yield* Runtime.envelope('task.reopen', { task }), taskId: task.id })
       }
       const plain = yield* worktreeOf(quiet.id)
@@ -506,6 +508,24 @@ describe('a plain task', () => {
         taskId: created.taskId,
       }
       assert.strictEqual(yield* callTool(lead, 'finish_step', { summary: 'Read them.' }), 'Althar has your summary.')
+      // Handed a note that only says there was nothing to check, it keeps none: what it shows is what it ran, and a note of what it
+      // found, though it changed nothing.
+      yield* callTool(lead, 'finish_step', {
+        summary: 'Said hi back.',
+        evidence: [
+          { kind: 'note', caption: 'Nothing to show', text: 'This was only a greeting, so nothing was changed or checked.' },
+          { kind: 'command', caption: 'The logs', command: 'tail app.log', exit_code: 0, output: 'ok' },
+          { kind: 'note', caption: 'Where the retry backs off', text: 'Twice: in the client (client.ts:40) and in the queue.' },
+        ],
+      })
+      const sql = yield* SqlClient.SqlClient
+      const [report] = yield* sql<{ content: string }>`
+        SELECT content FROM thread_items WHERE thread_id = ${created.threadId} AND kind = 'step_result' ORDER BY sequence DESC LIMIT 1`
+      const kept = (JSON.parse(report?.content ?? '{}') as { evidence?: ReadonlyArray<{ kind: string }> }).evidence ?? []
+      assert.deepStrictEqual(
+        kept.map((piece) => piece.kind),
+        ['command', 'note'],
+      )
     }).pipe(Effect.provide(withQueries())),
   )
 
@@ -816,13 +836,13 @@ describe('making a quick task a change', () => {
         (yield* coordinatorNews(place.threadId, place.projectId, yield* modelNamer)) ?? '',
         `- ${task.slug} (Make the sketch real) (it was “Sketch the settings”): the person asked its lead to make this quick task a change, and it is one now: Fake codex's default model reviews it, and it ends as a draft pull request.`,
       )
-      // Made once, it isn't made again.
+      // Made once, asked again it is made so in place: its parts as asked, with no round of its own.
       const lead: ToolAccess = { role: 'lead', ...place, threadId: task.threadId, sessionId: 'none', taskId: task.id }
+      assert.include(yield* listTools(lead), 'make_it_a_change')
       assert.match(
-        yield* callTool(lead, 'make_it_a_change', { title: 'Again', review: null, output: 'draft' }),
-        /^This task is a change already/,
+        yield* callTool(lead, 'make_it_a_change', { title: 'Make the sketch real', review: { agent: 'codex' }, output: 'draft' }),
+        /^The task is a change now, called “Make the sketch real”, reviewed by Fake codex's default model, ending in a draft pull request\./,
       )
-      assert.notInclude(yield* listTools(lead), 'make_it_a_change')
     }).pipe(Effect.provide(withGitHub(github)))
   })
 
@@ -976,7 +996,7 @@ describe('making a quick task a change', () => {
       const place = yield* opened
       const lead = (taskId: string, threadId: string): ToolAccess => ({ role: 'lead', ...place, threadId, sessionId: 'none', taskId })
       const asked = { title: 'Make it real', review: { agent: 'codex' }, output: 'draft' }
-      // A planned task: not offered to its lead, and refused, saying why.
+      // A planned task, such as a prototype: made a change in place, its review and its ending as asked.
       const planned = yield* projects.createTask({
         envelope: yield* Runtime.envelope('task.create', {}),
         projectId: place.projectId,
@@ -992,8 +1012,11 @@ describe('making a quick task a change', () => {
         startsIn: Duration.hours(1),
       })
       const plannedLead = lead(planned.taskId, planned.threadId)
-      assert.notInclude(yield* listTools(plannedLead), 'make_it_a_change')
-      assert.match(yield* callTool(plannedLead, 'make_it_a_change', asked), /^This task was planned as a change from its start/)
+      assert.include(yield* listTools(plannedLead), 'make_it_a_change')
+      assert.match(
+        yield* callTool(plannedLead, 'make_it_a_change', asked),
+        /^The task is a change now, called “Make it real”, reviewed by Fake codex's default model, ending /,
+      )
       // A review of someone else's pull request.
       const reviewing = yield* projects.createTask({
         envelope: yield* Runtime.envelope('task.create', {}),
@@ -1041,7 +1064,7 @@ describe('making a quick task a change', () => {
       )
       // None of it changed the task: it is still plain.
       assert.strictEqual((yield* cardOnce(quick.id, () => true)).kind, 'plain')
-      // With a pull request of its own, it is a change already.
+      // With a pull request of its own, it is a change already: made so again in place.
       yield* sql`INSERT INTO external_links ${sql.insert({
         id: `xlink_${'b'.repeat(32)}`,
         projectId: place.projectId,
@@ -1055,10 +1078,7 @@ describe('making a quick task a change', () => {
         createdAt: at,
         updatedAt: at,
       })}`
-      assert.match(
-        yield* callTool(quickLead, 'make_it_a_change', asked),
-        /^This task has a pull request already, so it is a change: there is nothing to make\. Where the person wants another change made from it, .*draft_task, then propose_plan\.$/,
-      )
+      assert.match(yield* callTool(quickLead, 'make_it_a_change', asked), /^The task is a change now, called “Make it real”/)
       // And only a task's lead makes its task one.
       const none: ToolAccess = { role: 'lead', ...place, sessionId: 'none', taskId: null }
       assert.notInclude(yield* listTools(none), 'make_it_a_change')

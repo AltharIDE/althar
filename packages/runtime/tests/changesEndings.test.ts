@@ -185,14 +185,15 @@ describe('a task that ends in a pull request', () => {
       assert.deepInclude(call?.stuck, { step: 'publish', why: 'not_connected' })
       const thread = yield* items(created.threadId)
       assert.isTrue(thread.some((item) => item.kind === 'step_result' && item.content.step === 'review' && item.content.verdict === 'pass'))
-      // The run isn't over, yet its review is done: the reviewer stays, and the lead still changes.
-      assert.strictEqual((yield* cards(project.projectId))[0]?.reviewerChange, 'never')
-      const refused = yield* Effect.flip(
-        runs.changeTeam({ taskId: created.taskId, steps: team('claude-code', 'claude-code'), actorId: instance.personId }),
-      )
-      assert.strictEqual((refused as { why?: string }).why, 'review_done')
-      // The review stays codex's; only the lead changes.
-      const lead = yield* runs.changeTeam({ taskId: created.taskId, steps: team('codex', 'codex'), actorId: instance.personId })
+      // The run isn't over, yet its review is done: another reviewer reads what ships next, and the lead still changes.
+      assert.strictEqual((yield* cards(project.projectId))[0]?.reviewerChange, 'next_ship')
+      const reviewer = yield* runs.changeTeam({
+        taskId: created.taskId,
+        steps: team('claude-code', 'claude-code'),
+        actorId: instance.personId,
+      })
+      assert.deepStrictEqual([reviewer.review?.step?.agentId, reviewer.review?.when], ['claude-code', 'next_ship'])
+      const lead = yield* runs.changeTeam({ taskId: created.taskId, steps: team('codex', 'claude-code'), actorId: instance.personId })
       assert.deepStrictEqual([lead.lead?.step.agentId, lead.review], ['codex', undefined])
     }).pipe(Effect.provide(runtimeWith({ github })))
   })

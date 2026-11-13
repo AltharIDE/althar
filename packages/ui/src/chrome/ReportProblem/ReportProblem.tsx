@@ -1,5 +1,6 @@
 import { type KeyboardEvent, type ReactNode, useEffect, useId, useRef, useState } from 'react'
 
+import { keys, modKey } from '../../foundations/keys'
 import { cx } from '../../lib/cx'
 import { Button } from '../../primitives/Button/Button'
 import { Dialog } from '../../primitives/Dialog/Dialog'
@@ -7,6 +8,7 @@ import { Field, FieldArea, FieldError } from '../../primitives/Field/Field'
 import { Disclosure, DisclosureTrigger, Fold, useOpen } from '../../primitives/Fold/Fold'
 import { KeyValues } from '../../primitives/KeyValues/KeyValues'
 import { LinkButton } from '../../primitives/LinkButton/LinkButton'
+import { Problem } from '../../primitives/Problem/Problem'
 import { Skeleton } from '../../primitives/Skeleton/Skeleton'
 import { Switch } from '../../primitives/Switch/Switch'
 import s from './ReportProblem.module.css'
@@ -53,7 +55,7 @@ export const reportProblemText: ReportProblemText = {
   reading: 'Reading…',
   email: 'Email, if you’d like a reply',
   send: 'Send',
-  sendKbd: '⌘↵',
+  sendKbd: modKey(keys.return),
   cancel: 'Cancel',
   close: 'Close',
 }
@@ -284,11 +286,7 @@ export function ReportProblem({
           </label>
           <Field id={ids.email} type="email" autoComplete="email" value={email} onChange={(event) => setEmail(event.target.value)} />
         </div>
-        {error !== undefined && (
-          <p id={ids.error} role="alert" className={s.error}>
-            {error}
-          </p>
-        )}
+        {error !== undefined && <Problem id={ids.error}>{error}</Problem>}
       </div>
     </Dialog>
   )

@@ -29,8 +29,6 @@ const meta = {
 export default meta
 type Story = StoryObj<typeof meta>
 
-export const Default: Story = {}
-
 /** As a form, with the buttons that submit it in the foot. */
 export const AsAForm: Story = {
   render: (args) => (
@@ -51,9 +49,6 @@ export const AsAForm: Story = {
     </Panel>
   ),
 }
-
-/** Just a title and its rows. */
-export const Bare: Story = { args: { kicker: undefined, lede: undefined, foot: undefined } }
 
 export const AllStates: Story = {
   render: (args) => (

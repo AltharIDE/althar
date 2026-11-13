@@ -43,7 +43,7 @@ const ISSUE: Issue = {
   cycle: 'Cycle 4',
   parent: { key: 'MER-0', title: 'Reliability' },
   type: 'Bug',
-  due: '2026-11-30',
+  due: '2025-11-30',
   estimate: 3,
   components: ['api', 'web'],
 }
@@ -187,7 +187,7 @@ describe('names read against choices', () => {
           estimate: 2,
           type: 'Bug',
           components: ['api'],
-          due: '2026-12-01',
+          due: '2025-12-01',
         }),
         {
           status: 'Done',
@@ -200,7 +200,7 @@ describe('names read against choices', () => {
           estimate: 2,
           type: 'Bug',
           components: ['api'],
-          due: '2026-12-01',
+          due: '2025-12-01',
         },
       )
       const refused = yield* Effect.flip(wantedFields({ priority: 'soon' }))
@@ -233,7 +233,7 @@ describe("an issue's fields read against its tracker", () => {
         estimate: 3,
         type: 'bug',
         components: ['web', 'API'],
-        due: '2026-11-30',
+        due: '2025-11-30',
         title: 'Retry the upload ',
         description: 'It fails on a slow network.',
       })
@@ -251,7 +251,7 @@ describe("an issue's fields read against its tracker", () => {
         'estimate 3',
         'type Bug',
         'components api, web',
-        'due 2026-11-30',
+        'due 2025-11-30',
         'its title as asked',
         'its description as asked',
       ])
@@ -410,7 +410,7 @@ describe("an issue's fields read against its tracker", () => {
   it.effect('files a new issue with what it is asked, as nothing is so already', () =>
     Effect.gen(function* () {
       const result = yield* read(
-        { status: 'Todo', priority: 'high', assignee: null, due: '2026-12-01', title: 'New', description: 'Body', estimate: 1 },
+        { status: 'Todo', priority: 'high', assignee: null, due: '2025-12-01', title: 'New', description: 'Body', estimate: 1 },
         { issue: null },
       )
       assert.deepStrictEqual(result.change, {
@@ -418,7 +418,7 @@ describe("an issue's fields read against its tracker", () => {
         priority: 'high',
         assignee: null,
         estimate: 1,
-        due: '2026-12-01',
+        due: '2025-12-01',
         title: 'New',
         description: 'Body',
       })

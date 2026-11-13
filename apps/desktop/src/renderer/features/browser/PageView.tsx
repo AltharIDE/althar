@@ -279,6 +279,7 @@ export function PageView({ owner, kind, draft, where, onDock }: PageViewProps) {
       onForward={() => void browser.move(owner, 'forward')}
       onReload={() => void browser.move(owner, 'reload')}
       onStop={() => void browser.move(owner, 'stop')}
+      // oxlint-disable-next-line althar/press-at-once -- Notes the page once it opened; the page itself shows from the press.
       onNavigate={(typed) => void browser.open(owner, typed).then((opened) => opened !== null && pages.known(opened))}
       addressRef={address}
       keep={kind === 'project' && keep === 'task' ? text.keepsProject : text.keeps[keep]}

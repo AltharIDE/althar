@@ -617,6 +617,8 @@ export function useDictation(key: string, options: DictationOptions = {}): Voice
       busy: phase === 'writing',
       // Written down while the person was away, and the draft not changed since.
       arrived: arrived !== null && arrived === draft,
+      // What couldn't be written down, by identity: sending while it listens waits, and holds back if this fails.
+      failed,
       expanded: shown !== null,
       ...(download !== null && shown === null ? { progress: download.got / download.size } : {}),
       inputs: microphones,

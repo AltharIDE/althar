@@ -29,7 +29,7 @@ describe('a change to an issue in words', () => {
             estimate: 3,
             type: choice('Bug'),
             components: [choice('api'), choice('web')],
-            due: '2026-11-30',
+            due: '2025-11-30',
             title: 'Retry uploads',
             description: 'Back off.',
           },
@@ -38,7 +38,7 @@ describe('a change to an issue in words', () => {
         },
         { key: 'DEV-142', change: { priority: 'none' }, assignees: 'one' },
       ]),
-      'DEV-67: status to Done, closed, priority to Low, assignees +Ada −Grace, labels +bug −docs, project to Uploads, milestone to Beta, cycle to Cycle 4, part of DEV-1, estimate to 3, type to Bug, components to api, web, due 2026-11-30, title to Retry uploads, its description rewritten, a comment, a link to https://github.com/acme/web/pull/12; DEV-142: priority to No priority',
+      'DEV-67: status to Done, closed, priority to Low, assignees +Ada −Grace, labels +bug −docs, project to Uploads, milestone to Beta, cycle to Cycle 4, part of DEV-1, estimate to 3, type to Bug, components to api, web, due 2025-11-30, title to Retry uploads, its description rewritten, a comment, a link to https://github.com/acme/web/pull/12; DEV-142: priority to No priority',
     )
   })
 

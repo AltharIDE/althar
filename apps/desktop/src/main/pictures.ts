@@ -25,6 +25,8 @@ const answer = (bytes: Buffer, type: string) =>
       // A digest's bytes never change.
       'cache-control': 'private, max-age=31536000, immutable',
       'x-content-type-options': 'nosniff',
+      // The file-origin app can decode an animation's first frame for its still poster.
+      'access-control-allow-origin': 'null',
     },
   })
 

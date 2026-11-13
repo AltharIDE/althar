@@ -4,6 +4,7 @@ import { cx } from '../../lib/cx'
 import { useTheme } from '../../lib/theme'
 import { ActionButton } from '../../primitives/ActionButton/ActionButton'
 import { CopyButton, type CopyButtonText } from '../../primitives/CopyButton/CopyButton'
+import { Problem } from '../../primitives/Problem/Problem'
 import { Tooltip } from '../../primitives/HoverCard/HoverCard'
 import { Lightbox, type LightboxText } from '../Lightbox/Lightbox'
 import { diagram, type Drawn } from './drawing'
@@ -105,7 +106,7 @@ export function Diagram({
         copy={copy}
         after={
           <div className={s.diagramError} role="note">
-            <span>{t.failed}</span>
+            <Problem size="small">{t.failed}</Problem>
             <pre>{now.error}</pre>
           </div>
         }

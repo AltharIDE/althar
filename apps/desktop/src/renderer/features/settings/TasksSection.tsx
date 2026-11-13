@@ -1,15 +1,4 @@
-import {
-  newProjectDefaultsText,
-  NewProjectDefaults,
-  PlanPreview,
-  PLAN_PREVIEW_SAMPLE,
-  PlansAndReviews,
-  RoundsPreview,
-  SettingGroup,
-  SettingPreviews,
-  TASK_PREVIEW_SEAL,
-  DiffersLine,
-} from '@althar/ui'
+import { newProjectDefaultsText, NewProjectDefaults, PlansAndReviews, SettingGroup, DiffersLine, Problem } from '@althar/ui'
 import type { NewProjectDefaultsValue } from '@althar/ui'
 
 import { type DefaultKey, useDifferingProjects } from './useDifferingProjects'
@@ -30,6 +19,8 @@ import { text } from './text'
 const worded = (key: DefaultKey, value: unknown): string => {
   if (typeof value === 'boolean') return value ? text.on : text.off
   if (key === 'end') return newProjectDefaultsText.end.options[value as NewProjectDefaultsValue['end']].label
+  if (key === 'afterMergeReview')
+    return newProjectDefaultsText.afterMergeReview.options[value as NewProjectDefaultsValue['afterMergeReview']].label
   if (key === 'usageLimit') return newProjectDefaultsText.usageLimit.options[value as NewProjectDefaultsValue['usageLimit']].label
   return String(value)
 }
@@ -40,13 +31,6 @@ export function TasksSection() {
   const { differing, inEveryProject, busy, failed } = useDifferingProjects(defaults?.value ?? null)
   return (
     <>
-      {plans !== null && (
-        <SettingPreviews>
-          <PlanPreview countdown={plans.value.countdown} sample={PLAN_PREVIEW_SAMPLE} />
-          {/* A review and the one check of its fixes, whatever the old rounds setting kept: no fix is reviewed again in whole. */}
-          <RoundsPreview rounds={2} out={plans.value.roundsOut} facts={TASK_PREVIEW_SEAL} />
-        </SettingPreviews>
-      )}
       {plans !== null && (
         <SettingGroup title={text.everyTask} headingLevel={2}>
           <PlansAndReviews value={plans.value} onChange={plans.set} />
@@ -72,11 +56,7 @@ export function TasksSection() {
           />
         </SettingGroup>
       )}
-      {(plans?.failed === true || defaults?.failed === true) && (
-        <p role="alert" className={s.failed}>
-          {text.failed}
-        </p>
-      )}
+      {(plans?.failed === true || defaults?.failed === true) && <Problem className={s.failed}>{text.failed}</Problem>}
     </>
   )
 }

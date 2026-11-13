@@ -2,7 +2,18 @@ import type { ThreadItem, TurnTime } from '@althar/contracts'
 import { ToolKind, ToolState } from '@althar/ui'
 
 import { type Handed, handedBy, type OutputSoFar } from './handed'
-import { type Block, blocksOf, carriedOn, type Doing, doingOf, type Part, relayed, type StepResult, type Streamed } from './thread'
+import {
+  type Block,
+  blocksOf,
+  carriedOn,
+  type Doing,
+  doingOf,
+  type Part,
+  relayed,
+  setupStanding,
+  type StepResult,
+  type Streamed,
+} from './thread'
 import { text as threadText } from './ThreadBlocks'
 import { took } from './time'
 import { type Spent, spentOf, turnOfItems } from './turnTime'
@@ -406,8 +417,7 @@ export const roundsOf = (
       }
       case 'setup': {
         // Set up as it should be, it is Althar's housekeeping: with the next round's work. Under way or failed, it stands alone.
-        const ended = block.setup.ended
-        if (ended !== null && !ended.stopped && ended.code === 0) {
+        if (setupStanding(block.setup) === 'done') {
           const aside = { kind: 'aside' as const, id: block.id, text: threadText.setup.done(block.setup) }
           if (open !== null) open.steps.push(aside)
           else pending.push(aside)

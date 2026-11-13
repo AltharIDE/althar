@@ -35,8 +35,6 @@ const meta = {
 export default meta
 type Story = StoryObj<typeof meta>
 
-export const BetweenTwoColumns: Story = {}
-
 /** The keyboard moves it a step at a time, and Home and End to the ends. */
 export const ByKeyboard: Story = {
   play: async ({ canvasElement }) => {

@@ -6,6 +6,12 @@
   background: var(--n-1);
   box-shadow: inset 0 0 0 1px var(--line);
 }
+/* in a host that frames it already, as a run's console: its lines alone, no block of its own */
+.flush {
+  border-radius: 0;
+  background: none;
+  box-shadow: none;
+}
 .out {
   margin: 0;
   padding: 8px 12px 9px;
@@ -35,6 +41,8 @@
   width: 100%;
   height: 26px;
   padding: 0 12px;
+  /* the block's own top corners, so its focus ring follows them rather than being cut by them */
+  border-radius: 8px 8px 0 0;
   font: 11.5px var(--font);
   color: var(--t-3);
   box-shadow: inset 0 -1px 0 var(--line);
@@ -90,18 +98,10 @@
   margin-left: 2px;
   vertical-align: -2px;
   background: currentColor;
+  /* steady, not blinking: the line's cobalt already says it is still being written */
   opacity: 0.7;
-  animation: blink 1s steps(1) infinite;
-}
-@keyframes blink {
-  50% {
-    opacity: 0;
-  }
 }
 @media (prefers-reduced-motion: reduce) {
-  .cursor {
-    animation: none;
-  }
   .earlier,
   .chevron {
     transition: none;

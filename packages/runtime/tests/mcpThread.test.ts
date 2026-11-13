@@ -58,7 +58,7 @@ describe('an MCP call in the thread', () => {
         server: 'github',
         tool: 'add_issue_comment',
         acts: false,
-        did: 'add_issue_comment',
+        did: 'Add issue comment',
       })
       yield* record.record({
         _tag: 'ToolCallUpdate',
@@ -102,7 +102,7 @@ describe('an MCP call in the thread', () => {
       server: 'gh',
       tool: 'merge_pull_request',
       acts: false,
-      did: 'merge_pull_request',
+      did: 'Merge pull request',
     })
   })
 })

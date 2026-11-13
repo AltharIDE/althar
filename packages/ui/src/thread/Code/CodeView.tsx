@@ -5,6 +5,7 @@ import { Button } from '../../primitives/Button/Button'
 import { CopyButton } from '../../primitives/CopyButton/CopyButton'
 import { Tooltip } from '../../primitives/HoverCard/HoverCard'
 import { IconButton } from '../../primitives/IconButton/IconButton'
+import { Problem } from '../../primitives/Problem/Problem'
 import { Segmented, type SegmentedOption } from '../../primitives/Segmented/Segmented'
 import { SidePanel } from '../../primitives/SidePanel/SidePanel'
 import { Skeleton } from '../../primitives/Skeleton/Skeleton'
@@ -386,7 +387,12 @@ function Body({
     )
   }
   if (read === undefined) return <Reading />
-  if (read === null) return <div className={s.say}>{t.unreadable}</div>
+  if (read === null)
+    return (
+      <div className={s.say}>
+        <Problem as="div">{t.unreadable}</Problem>
+      </div>
+    )
   return (
     <CodeLines
       key={`${found.path}\u0000${mode}`}

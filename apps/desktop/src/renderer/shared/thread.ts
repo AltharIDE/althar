@@ -1,14 +1,5 @@
-import type {
-  PresetParts,
-  AllowedBy,
-  AttachedFile,
-  FileMention,
-  Picture,
-  ShownPicture,
-  ThreadItem,
-  TurnTime,
-  Unfurl,
-} from '@althar/contracts'
+import { plainTitle, toolWordsOf } from '@althar/contracts'
+import type { AllowedBy, AttachedFile, FileMention, Picture, ShownPicture, ThreadItem, TurnTime, Unfurl } from '@althar/contracts'
 import { Delivery, headingOf, oneLine, PlanState, ToolKind, ToolState } from '@althar/ui'
 
 import { type Handed, handedBy, type OutputSoFar, type PartHanded, type Ran, ranOf } from './handed'
@@ -105,8 +96,8 @@ export type Part =
       readonly id: string
       readonly text: string
       readonly tone: 'info' | 'warning' | 'error'
-      /** Parts the person set up twice, which the coordinator offers to keep as a preset (a task is a conversation plus parts). */
-      readonly offer?: { readonly name: string; readonly parts: PresetParts }
+      /** What the line offers: a review a lead or the coordinator offered a task. */
+      readonly offer?: Offer
       /** For an agent's turn that failed: why, as the runtime classes it (`auth_required`…), and the agent's own words, apart. */
       readonly failure?: string
       readonly detail?: string
@@ -116,6 +107,8 @@ export type Part =
   /** A version of one of the project's canvases the agent published or opened (ADR-104): open under its work, a line that opens it. */
   | { readonly kind: 'canvas'; readonly id: string; readonly canvas: CanvasContent }
 
+/** What a notice offers: parts set up twice, as a preset; or a review a lead or the coordinator offered a task (`offer_review`). */
+export type Offer = NonNullable<Extract<ThreadItem, { kind: 'notice' }>['content']['offer']>
 export type StepResult = Extract<ThreadItem, { kind: 'step_result' }>['content']
 export type TaskCardContent = Extract<ThreadItem, { kind: 'task' }>['content']
 export type ArrivalContent = Extract<ThreadItem, { kind: 'arrival' }>['content']
@@ -132,6 +125,21 @@ export type TaskAskContent = Extract<ThreadItem, { kind: 'task_ask' }>['content'
 export type SettingChangeContent = Extract<ThreadItem, { kind: 'setting' }>['content']
 export type SmallChangeContent = Extract<ThreadItem, { kind: 'small_change' }>['content']
 export type ModelMoveContent = Extract<ThreadItem, { kind: 'model_move' }>['content']
+export type MergeLineContent = Extract<ThreadItem, { kind: 'merge_line' }>['content']
+
+/**
+ * How a setup stands: under way; stopped as Althar quit; gone through; or
+ * failed, as its command did, or as it couldn't copy a file a recorded setup
+ * names (ADR-080), though its command exited 0. The one rule the thread's
+ * line for it and its round's fold both read.
+ */
+export const setupStanding = (setup: SetupContent): 'running' | 'stopped' | 'done' | 'failed' | 'missing' => {
+  const { ended } = setup
+  if (ended === null) return 'running'
+  if (ended.stopped) return 'stopped'
+  if (ended.code !== 0) return 'failed'
+  return (ended.missing?.length ?? 0) > 0 ? 'missing' : 'done'
+}
 
 export type Block =
   | {
@@ -174,13 +182,13 @@ export type Block =
       readonly spent: Spent | null
     }
   | { readonly kind: 'divider'; readonly id: string; readonly text: string }
-  /** What the coordinator offers to keep, such as parts set up twice as a preset (a task is a conversation plus parts): its line and button. */
+  /** A review a lead or the coordinator offers a task: its line and its buttons. */
   | {
       readonly kind: 'offer'
       readonly id: string
       readonly text: string
       readonly detail: string | null
-      readonly offer: { readonly name: string; readonly parts: PresetParts }
+      readonly offer: Offer
     }
   | {
       readonly kind: 'step'
@@ -217,6 +225,8 @@ export type Block =
   | { readonly kind: 'small_change'; readonly id: string; readonly card: SmallChangeContent }
   /** Auto's line on moving the lead to a lighter model, with the way back (README section 7). */
   | { readonly kind: 'model_move'; readonly id: string; readonly move: ModelMoveContent }
+  /** The merge line for a branch: one card, kept current in place. */
+  | { readonly kind: 'merge_line'; readonly id: string; readonly line: MergeLineContent }
   /**
    * The agent's turn runs on what it was last asked, and it hasn't said
    * anything yet: where its reply will start, held for it, with how long it
@@ -382,7 +392,7 @@ export const targetOf = (content: ToolContent, worktree: string | null): string 
   if (content.command !== null) return content.label ?? content.command
   const space = content.title.indexOf(' ')
   const first = space > 0 ? content.title.slice(0, space).toLowerCase() : ''
-  return TITLE_VERBS.has(first) ? content.title.slice(space + 1) : content.title
+  return TITLE_VERBS.has(first) ? content.title.slice(space + 1) : plainTitle(content.title)
 }
 
 /** Text an agent is still writing, by the item it will be. */
@@ -458,12 +468,32 @@ const partOf = (
       const state = toolStateOf(item.content.status, turnRunning, item.content.declined)
       const refused = ruleRefusal(item.content)
       const why = refused === undefined ? declinedWords(item.content.declinedBy, item.content.declinedWhy) : undefined
+      // An MCP tool's raw name never shows: it reads as what it does, in the tense of how far it is.
+      const own =
+        toolKind === ToolKind.Other
+          ? toolWordsOf(item.content.title, state === ToolState.Running ? 'running' : state === ToolState.Done ? 'done' : 'plain')
+          : undefined
+      const ownSpace = own === undefined ? -1 : own.indexOf(' ')
       return {
         kind: 'tool',
         id: item.id,
         toolKind,
-        verb: toolKind === ToolKind.Skill && skill?.reported === false ? 'Read skill' : verbFor(toolKind, state),
-        target: toolKind === ToolKind.Skill && skill !== undefined ? skill.names.join(', ') : targetOf(item.content, worktree),
+        verb:
+          own !== undefined
+            ? ownSpace > 0
+              ? own.slice(0, ownSpace)
+              : own
+            : toolKind === ToolKind.Skill && skill?.reported === false
+              ? 'Read skill'
+              : verbFor(toolKind, state),
+        target:
+          own !== undefined
+            ? ownSpace > 0
+              ? own.slice(ownSpace + 1)
+              : ''
+            : toolKind === ToolKind.Skill && skill !== undefined
+              ? skill.names.join(', ')
+              : targetOf(item.content, worktree),
         ...(skill === undefined ? {} : { skills: skill }),
         state,
         command: item.content.command,
@@ -507,7 +537,7 @@ const partOf = (
           id: item.id,
           text: title,
           tone: severity,
-          offer: { name: item.content.offer.name, parts: item.content.offer.parts },
+          offer: item.content.offer,
           ...(description === null ? {} : { detail: description }),
         }
       return { kind: 'notice', id: item.id, text: noticeText(item.content), tone: severity }
@@ -644,7 +674,7 @@ const FOLDS = new Set(['checks', 'merged', 'closed', 'ready'])
 
 /**
  * Where the news repeats the line just before it (same kind, outcome, pull
- * request and sender, nothing between), one line with the latest time and a
+ * request by its address and sender, and the same failures, nothing between), one line with the latest time and a
  * count. The records keep both.
  */
 export const foldArrival = (last: Block | undefined, next: Extract<Block, { kind: 'arrival' }>): Block => {
@@ -655,8 +685,11 @@ export const foldArrival = (last: Block | undefined, next: Extract<Block, { kind
     FOLDS.has(b.kind) &&
     a.kind === b.kind &&
     a.where === b.where &&
+    a.url === b.url &&
     a.from === b.from &&
-    ((a.failed ?? 0) === 0) === ((b.failed ?? 0) === 0)
+    ((a.failed ?? 0) === 0) === ((b.failed ?? 0) === 0) &&
+    // A failure is read by its details, so only runs that show the same ones fold.
+    JSON.stringify([a.failing, a.logs]) === JSON.stringify([b.failing, b.logs])
   return same ? { ...next, id: last.id, count: last.count + 1 } : next
 }
 
@@ -804,17 +837,20 @@ export const blocksOf = (
       case 'model_move':
         blocks.push({ kind: 'model_move', id: item.id, move: item.content })
         continue
+      case 'merge_line':
+        blocks.push({ kind: 'merge_line', id: item.id, line: item.content })
+        continue
       case 'notice':
         // A restart is Althar's business, not the person's; earlier versions said so in the thread.
         if (item.content.source === 'runtime' && item.content.title === RESTARTED) continue
-        // What Althar offers to keep, such as a preset, stands on its own with its button.
+        // A review offered a task stands on its own with its buttons.
         if (item.content.offer !== undefined) {
           blocks.push({
             kind: 'offer',
             id: item.id,
             text: item.content.title,
             detail: item.content.description,
-            offer: { name: item.content.offer.name, parts: item.content.offer.parts },
+            offer: item.content.offer,
           })
           continue
         }

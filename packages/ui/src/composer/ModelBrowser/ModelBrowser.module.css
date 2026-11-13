@@ -160,7 +160,8 @@
   position: sticky;
   top: 0;
   z-index: 1;
-  padding: 8px 10px 6px;
+  /* the row's own insets, so each heading stands over its column */
+  padding: 8px 4px 6px 10px;
   background: var(--paper);
   font-size: 11px;
   color: var(--t-3);
@@ -191,6 +192,10 @@
   border-radius: 7px;
   color: var(--t-1);
   font-weight: 500;
+}
+/* no mark of its own: its name starts where the others' do, after a mark and its gap */
+.unmarked {
+  padding-left: calc(10px + 14px + 5px);
 }
 .use:focus-visible {
   outline-offset: -1.5px;

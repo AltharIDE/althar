@@ -1,11 +1,12 @@
-import { execFileSync } from 'node:child_process'
-import { chmodSync, mkdirSync, mkdtempSync, realpathSync, writeFileSync } from 'node:fs'
+import { chmodSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
+import { realpath, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 
 import { type RemoveFailed, removeFully } from '@althar/provider-adapters'
 import { Effect } from 'effect'
 
+import { gitWithin } from './git'
 import type { GitRun } from './rules'
 
 /*
@@ -251,36 +252,27 @@ const passOf = (sessionId: string, at: Guard) => join(at.passes, sessionId.repla
  */
 export const guardHolds = process.platform !== 'win32'
 
-/** What git says in a repository, or none where it fails. */
-const gitSays = (repository: string, ...args: Array<string>): string | undefined => {
-  try {
-    return execFileSync('git', ['-C', repository, ...args], {
-      encoding: 'utf8',
-      stdio: ['ignore', 'pipe', 'ignore'],
-      timeout: 5_000,
-    }).trim()
-  } catch {
-    return undefined
-  }
-}
+/**
+ * What git says in a repository, or none where it fails: through the runtime's own git (git.ts), on its runner thread,
+ * so a session starting or a person allowing a push never holds the thread that answers the window.
+ */
+const gitSays = (repository: string, ...args: Array<string>): Effect.Effect<string | undefined> =>
+  gitWithin(5_000, repository, ...args).pipe(Effect.orElseSucceed(() => undefined))
 
 /** The git folder a repository's worktrees share, as the hook finds it from any of them; none where git can't say. */
-const commonDirOf = (repository: string): string | undefined => {
-  const said = gitSays(repository, 'rev-parse', '--git-common-dir')
-  if (said === undefined) return undefined
-  try {
-    return realpathSync(resolve(repository, said))
-  } catch {
-    return undefined
-  }
-}
+const commonDirOf = (repository: string): Effect.Effect<string | undefined> =>
+  Effect.flatMap(gitSays(repository, 'rev-parse', '--git-common-dir'), (said) =>
+    said === undefined ? Effect.succeed(undefined) : Effect.promise(() => realpath(resolve(repository, said)).catch(() => undefined)),
+  )
 
 /** Where a repository's remotes fetch and push, as its config has them, which is what git hands `pre-push`. */
-const remotesOf = (repository: string): ReadonlyArray<string> =>
-  (gitSays(repository, 'config', '--get-regexp', '^remote\\..*\\.(url|pushurl)$') ?? '').split('\n').flatMap((line) => {
-    const url = line.slice(line.indexOf(' ') + 1)
-    return line.includes(' ') && url !== '' ? [url] : []
-  })
+const remotesOf = (repository: string): Effect.Effect<ReadonlyArray<string>> =>
+  Effect.map(gitSays(repository, 'config', '--get-regexp', '^remote\\..*\\.(url|pushurl)$'), (said) =>
+    (said ?? '').split('\n').flatMap((line) => {
+      const url = line.slice(line.indexOf(' ') + 1)
+      return line.includes(' ') && url !== '' ? [url] : []
+    }),
+  )
 
 /**
  * What a lead's environment adds so its git runs Althar's hooks: git's
@@ -297,21 +289,29 @@ export const guardEnv = (input: {
   readonly repositories?: ReadonlyArray<string>
   readonly count: number
   readonly at?: Guard
-}): Readonly<Record<string, string>> => {
-  const at = input.at ?? guard()
-  const guarded = [...new Set((input.repositories ?? []).flatMap((repository) => commonDirOf(repository) ?? []))]
-  const remotes = [...new Set((input.repositories ?? []).flatMap(remotesOf))]
-  return {
-    GIT_CONFIG_COUNT: String(input.count + 1),
-    [`GIT_CONFIG_KEY_${input.count}`]: 'core.hooksPath',
-    [`GIT_CONFIG_VALUE_${input.count}`]: at.hooks,
-    ALTHAR_TASK_BRANCH: input.taskBranch ?? '',
-    ALTHAR_DEFAULT_BRANCHES: [...new Set(input.defaultBranches)].join(' '),
-    ...(input.towards === undefined || input.towards.length === 0 ? {} : { ALTHAR_TOWARD_BRANCHES: [...new Set(input.towards)].join(' ') }),
-    ALTHAR_GUARD_PASS: passOf(input.sessionId, at),
-    ...(guarded.length === 0 ? {} : { ALTHAR_GUARD_REPOSITORIES: guarded.join('\n'), ALTHAR_GUARD_REMOTES: remotes.join('\n') }),
-  }
-}
+}): Effect.Effect<Readonly<Record<string, string>>> =>
+  Effect.gen(function* () {
+    const at = input.at ?? guard()
+    const repositories = input.repositories ?? []
+    const [commons, remoteLists] = yield* Effect.all(
+      [Effect.forEach(repositories, commonDirOf, { concurrency: 4 }), Effect.forEach(repositories, remotesOf, { concurrency: 4 })],
+      { concurrency: 2 },
+    )
+    const guarded = [...new Set(commons.flatMap((common) => common ?? []))]
+    const remotes = [...new Set(remoteLists.flat())]
+    return {
+      GIT_CONFIG_COUNT: String(input.count + 1),
+      [`GIT_CONFIG_KEY_${input.count}`]: 'core.hooksPath',
+      [`GIT_CONFIG_VALUE_${input.count}`]: at.hooks,
+      ALTHAR_TASK_BRANCH: input.taskBranch ?? '',
+      ALTHAR_DEFAULT_BRANCHES: [...new Set(input.defaultBranches)].join(' '),
+      ...(input.towards === undefined || input.towards.length === 0
+        ? {}
+        : { ALTHAR_TOWARD_BRANCHES: [...new Set(input.towards)].join(' ') }),
+      ALTHAR_GUARD_PASS: passOf(input.sessionId, at),
+      ...(guarded.length === 0 ? {} : { ALTHAR_GUARD_REPOSITORIES: guarded.join('\n'), ALTHAR_GUARD_REMOTES: remotes.join('\n') }),
+    }
+  })
 
 /**
  * Lets past the guard, for the next two minutes, the one run of git that is
@@ -319,48 +319,43 @@ export const guardEnv = (input: {
  * allowed what it stops. A new pass takes the place of the one before,
  * spent or not. A git whose repository Althar can't tell gets none.
  */
-export const passGuard = (sessionId: string, runs: ReadonlyArray<GitRun>, at: Guard | undefined = made): void => {
-  if (at === undefined) return
-  const lines = runs.flatMap((run) => {
-    const where = whereRuns(run)
-    return where === undefined ? [] : [`${where}\t${run.words}\n`]
-  })
-  if (lines.length === 0) return
-  try {
-    // Its file's own time is what the hook reads, so writing it again starts the two minutes again.
-    writeFileSync(passOf(sessionId, at), lines.join(''))
-  } catch {
-    // A pass that can't be written leaves the guard as it is: the command says what stopped it.
-  }
-}
+export const passGuard = (sessionId: string, runs: ReadonlyArray<GitRun>, at: Guard | undefined = made): Effect.Effect<void> =>
+  at === undefined
+    ? Effect.void
+    : Effect.gen(function* () {
+        const lines = (yield* Effect.forEach(runs, whereRuns)).flatMap((where, index) =>
+          where === undefined ? [] : [`${where}\t${runs[index]?.words ?? ''}\n`],
+        )
+        if (lines.length === 0) return
+        // Its file's own time is what the hook reads, so writing it again starts the two minutes again.
+        // A pass that can't be written leaves the guard as it is: the command says what stopped it.
+        yield* Effect.promise(() => writeFile(passOf(sessionId, at), lines.join('')).catch(() => undefined))
+      })
 
 /** Where a git runs, as its hook sees it: the repository's top folder, and for a push the URL it pushes to; none where git can't say. */
-const whereRuns = (run: GitRun): string | undefined => {
-  const { folder, push } = run
-  if (folder === undefined) return undefined
-  const git = (...args: Array<string>) =>
-    execFileSync('git', ['-C', folder, ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 5_000 }).trim()
-  const or = (read: () => string) => {
-    try {
-      return read()
-    } catch {
-      return ''
-    }
-  }
-  const top = or(() => realpathSync(git('rev-parse', '--show-toplevel')))
-  if (top === '') return undefined
-  if (push === undefined) return `${top}\t`
-  // Where it names no remote, git pushes to the branch's, as its config says, or origin.
-  const branch = or(() => git('symbolic-ref', '--short', 'HEAD'))
-  const remote =
-    push.remote ??
-    ([`branch.${branch}.pushRemote`, 'remote.pushDefault', `branch.${branch}.remote`]
-      .map((key) => or(() => git('config', '--get', key)))
-      .find((value) => value !== '') ||
-      'origin')
-  // A remote's URL as its config has it, which is what git hands the hook; a URL or a path named itself.
-  return `${top}\t${or(() => git('remote', 'get-url', '--push', remote)) || remote}`
-}
+const whereRuns = (run: GitRun): Effect.Effect<string | undefined> =>
+  Effect.gen(function* () {
+    const { folder, push } = run
+    if (folder === undefined) return undefined
+    const said = yield* gitSays(folder, 'rev-parse', '--show-toplevel')
+    const top = said === undefined ? '' : yield* Effect.promise(() => realpath(said).catch(() => ''))
+    if (top === '') return undefined
+    if (push === undefined) return `${top}\t`
+    // Where it names no remote, git pushes to the branch's, as its config says, or origin.
+    const branch = (yield* gitSays(folder, 'symbolic-ref', '--short', 'HEAD')) ?? ''
+    let remote = push.remote
+    if (remote === undefined)
+      for (const key of [`branch.${branch}.pushRemote`, 'remote.pushDefault', `branch.${branch}.remote`]) {
+        const value = (yield* gitSays(folder, 'config', '--get', key)) ?? ''
+        if (value !== '') {
+          remote = value
+          break
+        }
+      }
+    remote ??= 'origin'
+    // A remote's URL as its config has it, which is what git hands the hook; a URL or a path named itself.
+    return `${top}\t${((yield* gitSays(folder, 'remote', 'get-url', '--push', remote)) ?? '') || remote}`
+  })
 
 /**
  * Takes a session's pass away, as when it has ended: tried again where Windows still holds it, and a failure if it

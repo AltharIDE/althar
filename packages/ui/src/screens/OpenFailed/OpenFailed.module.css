@@ -26,18 +26,21 @@
   color: var(--t-1);
 }
 
+/* the same title as the other screens that stand in for the window */
 .title {
   margin: 0;
-  font-size: 15px;
+  font-size: 17px;
   font-weight: 560;
-  letter-spacing: -0.017em;
+  line-height: 1.3;
+  letter-spacing: -0.02em;
   color: var(--t-1);
 }
 
+/* what went wrong, as it was said: in mono, as DataNotMoved sets what stopped it, so it reads as the system's words under the plain title */
 .reason {
   margin: 0 0 8px;
-  font-size: 12.5px;
-  line-height: 1.5;
+  font: 12px/1.55 var(--mono);
   color: var(--t-2);
   overflow-wrap: anywhere;
+  user-select: text;
 }

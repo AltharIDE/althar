@@ -58,4 +58,47 @@ describe('presets in Settings', () => {
       }),
     )
   })
+
+  it('removes one at once, and no older list brings it back while removals overlap', async () => {
+    const other: Preset = { ...own, id: 'pst_2', name: 'Spike' }
+    // What each read of the list answers, in turn: the runtime is slow, so the first reads still have both.
+    const lists = [[builtIn, own, other], [builtIn, own, other], [builtIn, other], [builtIn]]
+    const listPresets = vi.fn(async () => lists.shift() ?? [builtIn])
+    const removals = new Map<string, () => void>()
+    const removePreset = vi.fn((id: string) => new Promise<void>((done) => removals.set(id, done)))
+    const { client } = fakeClient({ listPresets, removePreset })
+    withServices(<PresetsSection />, client)
+    expect(await screen.findByText('Spike')).toBeTruthy()
+
+    const [first, second] = screen.getAllByRole('button', { name: 'Remove' })
+    await userEvent.click(first!)
+    // Gone in the frame it is pressed, before the runtime answers.
+    expect(screen.queryByText('Quick change')).toBeNull()
+    await userEvent.click(second!)
+    expect(screen.queryByText('Spike')).toBeNull()
+
+    // The first is removed; the read after it is from before the runtime caught up, and still has both.
+    removals.get('pst_1')!()
+    await waitFor(() => expect(listPresets).toHaveBeenCalledTimes(2))
+    expect(screen.queryByText('Quick change')).toBeNull()
+    expect(screen.queryByText('Spike')).toBeNull()
+
+    // The second is removed: the reads after it have neither, and neither ever came back.
+    removals.get('pst_2')!()
+    await waitFor(() => expect(listPresets).toHaveBeenCalledTimes(3))
+    expect(screen.queryByText('Quick change')).toBeNull()
+    expect(screen.queryByText('Spike')).toBeNull()
+    expect(screen.queryByRole('alert')).toBeNull()
+  })
+
+  it('brings one the runtime kept back, with a line', async () => {
+    const { client } = fakeClient({
+      listPresets: vi.fn(async () => [builtIn, own]),
+      removePreset: vi.fn(async () => Promise.reject(new Error('That preset is in use by a running automation.'))),
+    })
+    withServices(<PresetsSection />, client)
+    await userEvent.click(await screen.findByRole('button', { name: 'Remove' }))
+    expect((await screen.findByRole('alert')).textContent).toBe('That preset is in use by a running automation.')
+    expect(screen.getByText('Quick change')).toBeTruthy()
+  })
 })

@@ -14,6 +14,8 @@ export type SignInStatus = 'signed_in' | 'signed_out' | 'unknown'
 export interface SignInCheck {
   readonly status: SignInStatus
   readonly paidBy: PaidBy | 'unknown'
+  /** When the sign-in ends, as an ISO time, where the agent's status says (`signIn.endsAt`). */
+  readonly endsAt?: string
   /** For an agent with a sign-in for each provider it reaches: the providers it lists as signed in. */
   readonly providers?: ReadonlyArray<{
     readonly id: string
@@ -55,10 +57,12 @@ export const signInCheck = (
         // The fallback is for a version that rejects the first's flags: one that answered, even with nothing to read, said what it knows.
         if (signedIn === undefined && exitCode !== 0 && again !== undefined) return again()
         const providers = agent.signIn.providers?.read(output) ?? []
+        const endsAt = agent.signIn.endsAt?.(output)
         resume(
           Effect.succeed({
             status: signedIn === undefined ? 'unknown' : signedIn ? 'signed_in' : 'signed_out',
             paidBy: agent.signIn.paidBy?.(output) ?? 'unknown',
+            ...(endsAt === undefined ? {} : { endsAt }),
             ...(providers.length === 0 ? {} : { providers }),
           }),
         )

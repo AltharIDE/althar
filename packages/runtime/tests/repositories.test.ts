@@ -209,6 +209,63 @@ describe('a task of several repositories', () => {
     }).pipe(Effect.provide(withQueries())),
   )
 
+  it.live('says which repository its host refused, and where the others’ pull requests are, opening none of them again', () => {
+    const bares: Record<string, string> = {}
+    for (const name of ['api', 'web']) {
+      bares[name] = mkdtempSync(join(tmpdir(), 'althar-remote-'))
+      execFileSync('git', ['init', '-q', '--bare', '-b', 'main'], { cwd: bares[name] })
+    }
+    const github = makeFakeService({ pushUrl: (path) => bares[path.at(-1) ?? ''] ?? '' })
+    github.addRepository(['meridian', 'api'])
+    github.addRepository(['meridian', 'web'])
+    const folder = folderOf('api', 'web')
+    for (const name of ['api', 'web']) git(join(folder, name), 'remote', 'add', 'origin', `${HOST}/meridian/${name}.git`)
+    return Effect.gen(function* () {
+      const connections = yield* Connections
+      const instance = yield* Instance
+      yield* connections.connectToken({ product: 'github', token: 't', actorId: instance.personId, webUrl: HOST })
+      const opened = yield* open(folder)
+      const projects = yield* Projects
+      const plans = yield* Plans
+      const queries = yield* Queries
+      const sql = yield* SqlClient.SqlClient
+      const task = yield* projects.createTask({
+        envelope: yield* Runtime.envelope('task.create', {}),
+        projectId: opened.projectId,
+        title: 'Share the retry',
+        description: '[lead:finish]',
+        draft: true,
+        repositories: ['api', 'web'],
+      })
+      for (const worktree of yield* sql<{ path: string }>`SELECT path FROM workspaces WHERE task_id = ${task.taskId}`) {
+        writeFileSync(join(worktree.path, 'retry.txt'), 'retry\n')
+        git(worktree.path, 'add', '.')
+        git(worktree.path, 'commit', '-q', '-m', 'Retry')
+      }
+      // api's opens; web's is refused as GitLab refused fnt/wiki's, its branch pushed a moment before.
+      github.failNext('openChange', 'rejected', undefined, 400, { message: `meridian/web has no branch ${task.branch}`, after: 1 })
+      const planId = yield* plans.propose({
+        projectId: opened.projectId as Parameters<typeof plans.propose>[0]['projectId'],
+        taskId: task.taskId,
+        steps: [{ key: 'implement', agentId: 'codex', model: null, skipped: false }],
+        reason: null,
+        actorId: instance.personId,
+      })
+      yield* plans.start(planId, instance.personId)
+      const [call] = yield* until(
+        Effect.map(queries.thread(task.threadId), (snapshot) => snapshot.attention),
+        (attention) => attention.length === 1,
+      )
+      assert.lengthOf(github.changes, 1)
+      assert.deepInclude(call?.stuck, {
+        step: 'publish',
+        detail: `GitHub said no: in web: meridian/web has no branch ${task.branch}; meridian/api #${github.changes[0]?.number ?? 0} is open.`,
+      })
+      // Both branches went up: what was missing was the host's, not the task's.
+      for (const name of ['api', 'web']) assert.include(git(bares[name] ?? '', 'log', '--format=%s', task.branch), 'Retry')
+    }).pipe(Effect.provide(withQueries(':memory:', {}, { connectors: fakeConnectors({ github }) })))
+  })
+
   it.live('publishes each: a pull request where its host is connected, its branch where it has no host', () => {
     const github = makeFakeService({ pushUrl: () => bare })
     github.addRepository(['meridian', 'api'])

@@ -21,7 +21,7 @@ export const OneTask: Story = { args: { working: 1 } }
 export const Quiet: Story = { args: { working: 0, worktrees: null } }
 /** Removing it. */
 export const Busy: Story = { args: { busy: true } }
-/** The runtime said no. */
+/** It didn't go: why, and Remove project stays to try again. */
 export const Failed: Story = { args: { error: 'Althar couldn’t remove the project.' } }
 
 /** Cancel has focus: Enter alone removes nothing. */

@@ -176,7 +176,7 @@ describe('what the comment showed before', () => {
 describe('the comment', () => {
   it('shows each screenshot under its caption, as of its commit, marked and signed', () => {
     const body = commentBody({ shown: [posted('A1', 'a'), posted('A2', 'b')], earlier: [], head: 'abcdef1234' })
-    assert.isTrue(body.startsWith(`${SCREENSHOTS_MARK}\n\n**Screenshots** as of \`abcdef1\``))
+    assert.isTrue(body.startsWith(`${SCREENSHOTS_MARK}\n\n**Screenshots** · PR head \`abcdef1\``))
     assert.include(
       body,
       '#### A1 · A view\n\n<img src="https://example.test/a.png" alt="A1 · A view" width="720">\n\n---\n\n#### A2 · A view',

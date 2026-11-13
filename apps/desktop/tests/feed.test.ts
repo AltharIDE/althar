@@ -97,10 +97,11 @@ describe('the window’s watch', () => {
       cache.fetchQuery(read.board('p2')),
       cache.fetchQuery(read.connections()),
     ])
-    // A burst of changes to a task in p1 reads each once.
+    // A burst of changes to tasks in p1, two of whose cards came out different, reads each once.
     emit(changed('task', 't1', 'th1', 'p1'))
     emit(changed('run', 'r1', 'th1', 'p1'))
-    emit(changed('provider_session', 's1', 'th1', 'p1'))
+    emit(changed('card', 't1', 'th1', 'p1'))
+    emit(changed('card', 't2', 'th2', 'p1'))
     await settle()
     expect(client.listProjects).toHaveBeenCalledTimes(2)
     expect(client.getHome).toHaveBeenCalledTimes(2)
@@ -108,11 +109,12 @@ describe('the window’s watch', () => {
     expect(vi.mocked(client.getBoard).mock.calls.filter(([id]) => id === 'p2')).toHaveLength(1)
     expect(client.listConnections).toHaveBeenCalledTimes(1)
 
-    // What is said in a thread changes none of them.
-    emit(changed('thread_item', 'i1', 'th1', 'p1'))
+    // A change of a task that left its card as it was reads no board, whatever it is of: the runtime says which moved one.
+    for (const type of ['thread_item', 'run', 'node_attempt', 'external_link', 'conflict_resolution', 'finding', 'workspace'])
+      emit(changed(type, `${type}1`, 'th1', 'p1'))
     await settle()
-    expect(client.listProjects).toHaveBeenCalledTimes(2)
     expect(client.getBoard).toHaveBeenCalledTimes(3)
+    expect(client.getHome).toHaveBeenCalledTimes(2)
 
     // A connection reads the connections again.
     emit(changed('connection', 'c1', null, null))
@@ -138,7 +140,7 @@ describe('the window’s watch', () => {
     expect(cache.getQueryState(keys.home)?.isInvalidated).toBe(true)
     // Gathered with a change that moves more of it, it is read off screen too.
     emit(changed('decision', 'd2', 'th1', 'p1'))
-    emit(changed('task', 't1', 'th1', 'p1'))
+    emit(changed('card', 't1', 'th1', 'p1'))
     await settle()
     expect(client.getHome).toHaveBeenCalledTimes(2)
     // While the home shows, it is read at once.
@@ -277,11 +279,16 @@ describe('the window’s watch', () => {
     await settle()
     expect(client.getAutomations).toHaveBeenCalledTimes(3)
     expect(pages().slice(4).toSorted()).toEqual(['auto1', 'auto2'])
+    // A task's call opened or answered changes whether its automation needs the person.
+    emit(changed('attention_request', 'attn1', 't1', 'p1'))
+    await settle()
+    expect(client.getAutomations).toHaveBeenCalledTimes(4)
+    expect(pages().slice(6).toSorted()).toEqual(['auto1', 'auto2'])
     for (const stop of showing) stop()
     // Off screen, only marked for the next visit.
     emit(changed('automation', 'auto1', null, 'p1'))
     await settle()
-    expect(client.getAutomations).toHaveBeenCalledTimes(3)
+    expect(client.getAutomations).toHaveBeenCalledTimes(4)
     expect(cache.getQueryState(keys.automations('p1'))?.isInvalidated).toBe(true)
     expect(cache.getQueryState(keys.automation('auto1'))?.isInvalidated).toBe(true)
   })
@@ -319,10 +326,33 @@ describe('the window’s watch', () => {
     expect(client.listProjects).toHaveBeenCalledTimes(3)
   })
 
+  it('lets a board read under way land while its cards keep changing, then reads it once more', async () => {
+    const { client, cache, emit, read } = opened()
+    const was = await cache.fetchQuery(read.board('p1'))
+    const slow = later<typeof was>()
+    vi.mocked(client.getBoard).mockImplementationOnce(() => slow.promise)
+    const landed: Array<number> = []
+    cache.getQueryCache().subscribe((event) => {
+      if (event.type === 'updated' && event.action.type === 'success') landed.push((event.query.state.data as typeof was).cursor)
+    })
+    // Its cards change, and keep changing a moment apart, longer than the board takes to read.
+    for (const n of [1, 2, 3, 4, 5]) {
+      emit(changed('card', `t${n}`, `th${n}`, 'p1'))
+      await settle()
+    }
+    // The read under way is let finish: what it read shows, rather than each gathered change cutting it short.
+    slow.resolve({ ...was, cursor: 99 })
+    await settle()
+    await settle()
+    // One read under way, and one more as it ends, for what changed while it ran.
+    expect(landed).toEqual([99, was.cursor])
+    expect(client.getBoard).toHaveBeenCalledTimes(3)
+  })
+
   it('forgets a read the cache lets go, so reads keyed anew each time don’t pile up', async () => {
     const { cache, emit, feed, read } = opened()
     for (const id of ['p1', 'p2', 'p3']) await cache.fetchQuery(read.board(id))
-    emit(changed('task', 't1', 'th1', 'p1'))
+    for (const id of ['p1', 'p2', 'p3']) emit(changed('card', 't1', 'th1', id))
     await settle()
     const all = feed.remembered()
     expect(all).toBeGreaterThanOrEqual(3)

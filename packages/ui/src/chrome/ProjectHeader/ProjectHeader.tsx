@@ -9,7 +9,8 @@ import { cx } from '../../lib/cx'
 import { Heading, type HeadingLevel } from '../../primitives/Heading/Heading'
 import { Menu, MenuGroup, MenuItem } from '../../primitives/Menu/Menu'
 import { ChromeButton } from '../ChromeButton/ChromeButton'
-import { roomOptions, type RoomSwitchText } from '../RoomSwitch/RoomSwitch'
+import { PaneLayoutGroup, type PaneLayoutProps } from '../PaneLayout/PaneLayout'
+import { roomFace, roomOptions, type RoomSwitchText } from '../RoomSwitch/RoomSwitch'
 import { TaskHeader } from '../TaskHeader/TaskHeader'
 import { TitleBar, type TitleBarProps } from '../TitleBar/TitleBar'
 import { type WorkNeed, WorkStatus, workStatusText } from '../WorkStatus/WorkStatus'
@@ -26,11 +27,12 @@ import s from './ProjectHeader.module.css'
  * into the first of it (pointed at, what each is); blue while work runs, how
  * much; grey and checked when neither. Until the work is read, no chip.
  *
- * Its views are all five, home, the conversation, the board, its automations
- * and its settings, a violet dot on the last two where one paused itself or
- * a connection waits on you. The window's bar keeps only the tabs.
+ * Its views are its home, its automations, its artifacts and its settings, a
+ * violet dot on automations and settings where one paused itself or a
+ * connection waits on you. The window's bar keeps only the tabs.
  *
- * At the end, what it runs (a RunButton), then ⋯, what it is made of: its
+ * At the end, what it runs (a RunButton), then ⋯: the home's layout (PaneLayout:
+ * the conversation, the board, and their sides), then what it is made of: its
  * repositories, each with its host's mark, and the tracker its tasks name,
  * each opening where it lives. The project's colour is in its mark alone.
  */
@@ -40,7 +42,9 @@ export interface ProjectHeaderText {
   views: string
   /** Nothing waits and nothing runs. */
   quiet: string
-  /** What the project is made of, as ⋯ names it. */
+  /** ⋯, its button and its menu. */
+  more: string
+  /** What the project is made of, as ⋯ heads it. */
   madeOf: string
   /** The views' own names and dots' words (RoomSwitch). */
   rooms?: Partial<RoomSwitchText>
@@ -49,6 +53,7 @@ export interface ProjectHeaderText {
 export const projectHeaderText: ProjectHeaderText = {
   views: 'View',
   quiet: 'Nothing running',
+  more: 'More',
   madeOf: 'Made of',
 }
 
@@ -77,7 +82,7 @@ export interface ProjectHeaderProps {
   onYours?: () => void
   /** How many tasks are at work. */
   inProgress?: number
-  /** The view it is on. */
+  /** The view it is on; the conversation or the board alone is the home. */
   room: Room
   onRoom: (room: Room) => void
   /** The conversation has something you haven't seen. */
@@ -88,6 +93,8 @@ export interface ProjectHeaderProps {
   automationsNeedYou?: boolean
   /** What the project is made of, its repositories first; with none, no ⋯. */
   parts?: ReadonlyArray<ProjectPart>
+  /** The home's panes, which show and which side each is on, laid out from ⋯; without it, ⋯ has no layout. */
+  panes?: PaneLayoutProps
   /** What it runs, with no agent: a RunButton. */
   run?: ReactNode
   /** Under the tabs, none; a window of its own leaves room for the system's lights. */
@@ -111,6 +118,7 @@ export function ProjectHeader({
   settingsNeedYou,
   automationsNeedYou,
   parts = [],
+  panes,
   run,
   lights = 'none',
   headingLevel = 1,
@@ -135,14 +143,14 @@ export function ProjectHeader({
             // The views have no shortcut of their own: ⌘ and a number belongs to the window's tabs.
             text: { key: () => '', ...t.rooms },
           })}
-          face={room}
+          face={roomFace(room)}
           onFace={onRoom}
           text={{ faces: t.views }}
           actions={
-            (run != null || parts.length > 0) && (
+            (panes !== undefined || run != null || parts.length > 0) && (
               <>
                 {run}
-                <MadeOf parts={parts} label={t.madeOf} />
+                <More parts={parts} panes={panes} label={t.more} madeOf={t.madeOf} />
               </>
             )
           }
@@ -182,24 +190,39 @@ function standingOf(
   return { status: TaskStatus.Done, state: t.quiet }
 }
 
-/** ⋯: what the project is made of, each opening where it lives. */
-function MadeOf({ parts, label }: { parts: ReadonlyArray<ProjectPart>; label: string }) {
-  if (parts.length === 0) return null
+/** ⋯: the home's layout, then what the project is made of, each opening where it lives. */
+function More({
+  parts,
+  panes,
+  label,
+  madeOf,
+}: {
+  parts: ReadonlyArray<ProjectPart>
+  panes: PaneLayoutProps | undefined
+  label: string
+  madeOf: string
+}) {
+  if (parts.length === 0 && panes === undefined) return null
   return (
     <Menu label={label} align="end" width={280} trigger={<ChromeButton icon="more" label={label} compact />}>
-      <MenuGroup label={label}>
-        {parts.map((part) => (
-          <MenuItem
-            key={part.id}
-            lead={part.brand === undefined ? <span className={s.noMark} aria-hidden="true" /> : <BrandMark brand={part.brand} size={14} />}
-            {...(part.openLabel === undefined ? {} : { hint: part.openLabel })}
-            disabled={part.onOpen === undefined}
-            onSelect={() => part.onOpen?.()}
-          >
-            {part.name}
-          </MenuItem>
-        ))}
-      </MenuGroup>
+      {panes !== undefined && <PaneLayoutGroup {...panes} />}
+      {parts.length > 0 && (
+        <MenuGroup label={madeOf}>
+          {parts.map((part) => (
+            <MenuItem
+              key={part.id}
+              lead={
+                part.brand === undefined ? <span className={s.noMark} aria-hidden="true" /> : <BrandMark brand={part.brand} size={14} />
+              }
+              {...(part.openLabel === undefined ? {} : { hint: part.openLabel })}
+              disabled={part.onOpen === undefined}
+              onSelect={() => part.onOpen?.()}
+            >
+              {part.name}
+            </MenuItem>
+          ))}
+        </MenuGroup>
+      )}
     </Menu>
   )
 }

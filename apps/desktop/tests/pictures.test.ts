@@ -57,6 +57,7 @@ describe('serving a picture from the store', () => {
     expect(answer.headers.get('content-type')).toBe('image/png')
     expect(answer.headers.get('cache-control')).toContain('immutable')
     expect(answer.headers.get('x-content-type-options')).toBe('nosniff')
+    expect(answer.headers.get('access-control-allow-origin')).toBe('null')
     expect(Buffer.from(await answer.arrayBuffer()).equals(PNG)).toBe(true)
   })
 

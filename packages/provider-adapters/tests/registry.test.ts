@@ -157,6 +157,7 @@ describe('the agent registry', () => {
         'claude-code': ['claude-plugin', 'meta'],
         codex: ['agents', 'directory'],
         opencode: ['plain', 'env'],
+        'copilot-direct': ['plain', 'env'],
         copilot: 'none',
         junie: 'none',
         grok: 'none',

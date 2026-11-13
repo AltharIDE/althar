@@ -23,6 +23,8 @@ export const galleryText: GalleryText = {
 export interface GalleryShot extends ImageRef {
   readonly id: string
   readonly caption: string
+  /** Provenance or a request for a new capture, separate from the caption and view identity. */
+  readonly note?: string
 }
 
 /** "A1 · One quiet line: the first message lands", or "T1 Today: …": the picture's name, A1, where its caption starts with one. */
@@ -128,7 +130,10 @@ export function Gallery({ shots, retaken = [], text, className, ...rest }: Galle
                         <Picture shot={shot} />
                       </span>
                     )}
-                    <figcaption className={s.caption}>{caption}</figcaption>
+                    <figcaption className={s.caption}>
+                      {caption}
+                      {shot.note !== undefined && <span className={s.note}>{shot.note}</span>}
+                    </figcaption>
                   </figure>
                 ))}
               </div>

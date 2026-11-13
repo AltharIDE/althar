@@ -124,15 +124,15 @@
   overflow-wrap: anywhere;
 }
 
-.error {
-  margin: 0;
+/* what came of posting, over the foot: a failure as a problem, or a doubt in plain words */
+.said {
   padding: 0 16px 10px;
-  font-size: 12.5px;
-  line-height: 1.5;
-  color: var(--danger);
 }
 /* not a failure: it may have worked, and the person looks */
 .unsure {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.5;
   color: var(--t-1);
 }
 

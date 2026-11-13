@@ -1,86 +1,228 @@
-/* the small change's card: ink, since nothing waits on the person but the merge */
-.what {
-  display: grid;
-  gap: 1px;
-  margin: 7px 0 10px;
-  font-size: 13px;
-  color: var(--t-1);
+/* A small change's card: ink, its route in a row; violet only on what waits on the person */
+.card {
+  padding: 15px 18px 16px;
 }
-.titleText {
+.named {
+  text-decoration: underline dotted var(--t-4);
+  text-underline-offset: 3px;
+  cursor: help;
+  outline: none;
+}
+.named:hover,
+.named:focus-visible {
+  text-decoration-color: var(--t-2);
+}
+.explain {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--t-2);
+  text-wrap: pretty;
+}
+.title {
   overflow: hidden;
-  font-weight: 550;
+  margin: 9px 0 0;
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1.35;
+  letter-spacing: -0.005em;
   text-overflow: ellipsis;
   white-space: nowrap;
+  color: var(--t-1);
 }
-.skipped {
-  font-size: 12px;
-  color: var(--t-3);
+.titleLink {
+  font: inherit;
+  color: inherit;
 }
-.aside {
-  font-size: 12.5px;
-  color: var(--t-3);
-}
-.steps {
+
+/* The route: a knot per stop, the track from each to the next */
+.route {
   display: grid;
-  gap: 2px;
-  margin: 0;
+  column-gap: 0;
+  margin: 16px 0 0;
   padding: 0;
   list-style: none;
 }
-.steps li {
+.stop {
+  position: relative;
   display: grid;
-  grid-template-columns: 14px minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 8px;
-  color: var(--t-3);
+  justify-items: start;
+  align-content: start;
+  gap: 1px;
+  min-width: 0;
+  padding: 21px 10px 0 0;
 }
-.steps li[data-done] {
-  color: var(--t-1);
+.stop:last-child {
+  padding-right: 0;
 }
-.steps li[data-failed] {
-  color: var(--danger);
+.stop:not(:last-child)::after {
+  position: absolute;
+  top: 6px;
+  left: 18px;
+  right: 5px;
+  height: 1px;
+  background: var(--line-3);
+  content: '';
 }
-.dot {
+.stop[data-at='done']:not(:last-child)::after {
+  height: 1.5px;
+  top: 5.75px;
+  background: var(--t-2);
+}
+/* to a stop that waits for the merge: dashed */
+.stop:has(+ .stop[data-later])::after,
+.stop:has(+ .add)::after {
+  height: 0;
+  top: 6px;
+  border-top: 1px dashed var(--line-3);
+  background: none;
+}
+.stop:has(+ .add)::after {
+  border-top-style: dotted;
+}
+.knot {
+  position: absolute;
+  top: 0;
+  left: 0;
   display: grid;
   place-items: center;
-  width: 12px;
-  height: 12px;
+  width: 13px;
+  height: 13px;
   border-radius: 50%;
-  box-shadow: inset 0 0 0 1px var(--line-3);
+  box-shadow: inset 0 0 0 1.25px var(--line-3);
+  font-size: 9px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+  color: var(--n-0);
+  transition:
+    background var(--slow) var(--ease),
+    box-shadow var(--slow) var(--ease);
 }
-li[data-done] > .dot {
+.stop[data-at='done'] > .knot {
   background: var(--t-1);
   box-shadow: none;
-  color: var(--n-0);
 }
-.stepWhat {
-  overflow: hidden;
+.stop[data-at='now'] > .knot {
+  box-shadow: inset 0 0 0 1.25px var(--t-1);
+}
+.stop[data-at='now'] > .knot::after {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--t-1);
+  content: '';
+  animation: breathe 1.8s var(--ease) infinite;
+}
+.stop[data-at='failed'] > .knot {
+  background: var(--danger);
+  box-shadow: none;
+  color: var(--on-signal);
+}
+.stop[data-at='found'] > .knot {
+  background: var(--signal);
+  box-shadow: none;
+  color: var(--on-signal);
+}
+.stop[data-later] > .knot {
+  box-shadow: none;
+  outline: 1px dashed var(--line-3);
+  outline-offset: -1px;
+}
+@keyframes breathe {
+  50% {
+    transform: scale(0.55);
+    opacity: 0.55;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .stop[data-at='now'] > .knot::after {
+    animation: none;
+  }
+}
+.what {
   font-size: 12.5px;
+  font-weight: 550;
+  line-height: 18px;
+  color: var(--t-3);
+}
+.stop[data-at='done'] > .what,
+.stop[data-at='now'] > .what,
+.stop[data-at='found'] > .what {
+  color: var(--t-1);
+}
+.stop[data-at='failed'] > .what {
+  color: var(--danger);
+}
+.sub {
+  overflow: hidden;
+  max-width: 100%;
+  font-size: 11.5px;
+  line-height: 16px;
+  font-variant-numeric: tabular-nums;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-.when {
-  font-size: 12px;
-  font-variant-numeric: tabular-nums;
   color: var(--t-3);
 }
-.state {
-  font-size: 12.5px;
-  color: var(--t-2);
+.stop[data-at='found'] > .sub {
+  color: var(--signal);
 }
-/* made a full task: one line, where the card was */
-.full {
-  display: flex;
+.stop[data-at='failed'] > .sub {
+  color: var(--danger);
+}
+/* The review's name, where pressing it moves its review or takes it off */
+/* over LinkButton's own look: a word of the route, dotted, at its size */
+button.choose {
+  display: inline-flex;
   align-items: center;
-  gap: 8px;
-  margin: 6px 0 10px;
-  padding: 6px 12px;
-  border-radius: var(--r-lg);
-  box-shadow: inset 0 0 0 1px var(--line);
-  font-size: 12px;
-  color: var(--t-3);
+  gap: 3px;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  color: inherit;
+  text-decoration: underline dotted var(--t-4);
+  text-underline-offset: 3px;
+  cursor: pointer;
 }
-.fullWhat {
+.choose:hover,
+.choose[aria-expanded='true'] {
   color: var(--t-1);
+  text-decoration-color: var(--t-2);
+}
+.choose:focus-visible {
+  border-radius: 3px;
+  outline: 2px solid var(--signal-line);
+  outline-offset: 2px;
+}
+/* no review: a way to add one, there while the person points at the route */
+.add {
+  position: relative;
+  padding-top: 21px;
+  font-size: 12.5px;
   font-weight: 550;
+  line-height: 18px;
+  color: var(--t-3);
+  opacity: 0;
+  transition: opacity var(--fast) var(--ease);
+}
+.route:hover > .add,
+.add:focus-within {
+  opacity: 1;
+}
+
+.foot {
+  display: grid;
+  margin-top: 12px;
+}
+/* lined up with its stop's name, which starts at the knot */
+.act {
+  justify-self: start;
+  margin-left: -1px;
+}
+/* a way into the thread, no box: its words start where its stop's do */
+.to {
+  justify-self: start;
+  margin: -3px 0 0 -9px;
+  color: var(--t-2);
 }

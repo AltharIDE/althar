@@ -71,6 +71,9 @@ const DOCUMENTS: ComposerFile[] = [
 const PICTURE_TYPES = ['image/png', 'image/jpeg', 'image/gif', 'image/webp']
 const sizeOf = (bytes: number) => (bytes < 1024 ? `${bytes} B` : `${Math.round(bytes / 1024)} KB`)
 
+/* Each file added in a story a name of its own, even after one is taken off. */
+let addedSoFar = 0
+
 function Example(
   props: Partial<ComposerProps> & {
     /** The share left of the model's tightest window. */
@@ -160,13 +163,13 @@ function Example(
                 const others = taken.filter((file) => !PICTURE_TYPES.includes(file.type))
                 setImages((now) => [
                   ...now,
-                  ...pictured.map((file, i) => ({ id: `added-${now.length + i}`, name: file.name, src: SHOT_BEFORE.src })),
+                  ...pictured.map((file) => ({ id: `added-${(addedSoFar += 1)}`, name: file.name, src: SHOT_BEFORE.src })),
                 ])
                 setFiles((now) => [
                   ...now,
-                  ...others.map((file, i) => {
+                  ...others.map((file) => {
                     const folder = file.type === '' && !file.name.includes('.')
-                    return { id: `file-${now.length + i}`, name: file.name, meta: folder ? '3 files · 2 KB' : sizeOf(file.size), folder }
+                    return { id: `file-${(addedSoFar += 1)}`, name: file.name, meta: folder ? '3 files · 2 KB' : sizeOf(file.size), folder }
                   }),
                 ])
               },
@@ -299,12 +302,6 @@ const meta = {
 export default meta
 type Story = StoryObj<typeof meta>
 
-export const Empty: Story = { render: () => <Example /> }
-export const Drafting: Story = { render: () => <Example initial="Keep the limiter where it is, and add the test first." /> }
-export const MultiLine: Story = {
-  render: () => <Example initial={'Two things:\n1. keep the limiter where it is\n2. add the test first'} />,
-}
-/** The lead is working: an empty composer offers to interrupt it. The task keeps going; the lead waits for you. */
 /** A finished task's likely next word, in grey: Tab takes it into the field, Enter then sends it. */
 export const Suggesting: Story = {
   render: () => <Example suggestion="Mark this as done" />,
@@ -317,10 +314,6 @@ export const Suggesting: Story = {
     await expect(field).toHaveValue('Mark this as done')
   },
 }
-export const Busy: Story = { render: () => <Example busy onStopAgent={() => {}} /> }
-/** The lead is working and you have written something: Enter queues it, and Send now interrupts the lead with it instead. */
-export const BusyWithDraft: Story = { render: () => <Example busy initial="Also check the webhook retry path." /> }
-/** The foot from 300 to 900px, in each state: the picker gives way first, then the recording gets compact; send stays on the row at the right. */
 /** A model nearly out, beside its chip: one muted run, warmer as it runs down. */
 export const NearlyOut: Story = {
   render: () => (
@@ -343,6 +336,7 @@ export const NearlyOutNarrow: Story = {
     </div>
   ),
 }
+/** The foot from 300 to 900px, in each state: the picker gives way first, then the recording gets compact; send stays on the row at the right. */
 export const NarrowFoot: Story = {
   render: () => (
     <div style={{ display: 'grid', gap: 24 }}>
@@ -377,11 +371,9 @@ export const SendingNow: Story = {
     await expect(args.onSendNow).toHaveBeenLastCalledWith('And keep the test.')
   },
 }
-/** Your voice drawn as bars while you talk; stopping puts what was heard in the field. */
-export const Dictating: Story = { render: () => <Example recording /> }
 /** A transcriber that streams: the words arrive faint in the field as you say them. */
 export const DictatingWordByWord: Story = { render: () => <Example recording streaming initial="Keep the limiter where it is." /> }
-/** Enter while dictating stops without sending, and the field is the size the same text typed would be: one row for a short transcript. */
+/** Stopping dictation puts the words in the field, and it is the size the same text typed would be: one row for a short transcript. */
 export const EnterEndsDictationAtItsSize: Story = {
   render: () => {
     const said = SAID.join(' ')
@@ -415,14 +407,114 @@ export const EnterEndsDictationAtItsSize: Story = {
         await waitFor(() => expect((field.previousElementSibling as HTMLElement).getBoundingClientRect().height).toBeGreaterThan(80), {
           timeout: 10000,
         })
-      await userEvent.type(field, '{Enter}')
+      await userEvent.click(within(c.getByTestId(`dictated-${kind}`)).getByRole('button', { name: /^Stop dictating/ }))
       await expect(within(c.getByTestId(`dictated-${kind}`)).queryByRole('button', { name: /^Stop dictating/ })).not.toBeInTheDocument()
-      /* stopped, not sent: the words are in the field, and it is as tall as the same text typed */
+      /* the words are in the field, and it is as tall as the same text typed */
       await expect(field.value).toBe(box(`typed-${kind}`).value)
       await expect(height(`dictated-${kind}`)).toBeCloseTo(height(`typed-${kind}`), 0)
     }
     /* a short transcript stays one row; a long one is capped like typed text */
     await expect(height('dictated-short')).toBeLessThan(height('dictated-long'))
+  },
+}
+/*
+ * Sending while dictating: it stops the recording, waits for the words to be
+ * written down, and sends them with what is attached. `hold` leaves the
+ * writing down under way; `fails` has it fail.
+ */
+function SendWhileDictating({ hold = false, fails = false, typed = '' }: { hold?: boolean; fails?: boolean; typed?: string }) {
+  const [value, setValue] = useState(typed)
+  const [phase, setPhase] = useState<'recording' | 'writing' | 'idle'>('recording')
+  const [failed, setFailed] = useState<object | null>(null)
+  const [sent, setSent] = useState<string[]>([])
+  const [seconds, setSeconds] = useState(4)
+  const [tick, setTick] = useState(0)
+  useEffect(() => {
+    if (phase !== 'recording') return
+    const t = window.setInterval(() => setSeconds((n) => n + 1), 1000)
+    const w = window.setInterval(() => setTick((n) => n + 1), 140)
+    return () => {
+      window.clearInterval(t)
+      window.clearInterval(w)
+    }
+  }, [phase])
+  useEffect(() => {
+    if (phase !== 'writing' || hold) return
+    const t = window.setTimeout(() => {
+      if (fails) setFailed({})
+      else setValue((v) => `${v ? `${v.trimEnd()} ` : ''}${SAID.join(' ')}`)
+      setPhase('idle')
+    }, 600)
+    return () => window.clearTimeout(t)
+  }, [phase, hold, fails])
+  const [images, setImages] = useState<ComposerImage[]>([{ id: 'i1', name: 'refunds-before.png', src: SHOT_BEFORE.src }])
+  return (
+    <div style={{ maxWidth: 700, paddingTop: 60 }}>
+      <Composer
+        value={value}
+        onChange={setValue}
+        onSubmit={(text) => {
+          setSent((now) => [...now, `${text} + ${images.length} image`])
+          setValue('')
+          setImages([])
+        }}
+        images={images}
+        placeholder="Tell the lead"
+        hint="/"
+        picker={<Picker />}
+        dictation={{
+          elapsed: phase === 'recording' ? clock(seconds) : null,
+          levels: voice(tick),
+          busy: phase === 'writing',
+          failed,
+          kbd: '⌘⇧D',
+          onStart: () => {
+            setPhase('recording')
+            setSeconds(0)
+          },
+          onStop: () => setPhase('writing'),
+        }}
+      />
+      <output data-testid="sent" style={{ display: 'block', marginTop: 12, font: '12px var(--mono)' }}>
+        {sent.length === 0 ? 'Nothing sent' : `Sent: ${sent.join(' | ')}`}
+      </output>
+    </div>
+  )
+}
+
+/** Enter while dictating, with an image attached: the recording ends, the send button turns to say it is finishing the transcription, and nothing goes yet. */
+export const SendWaitsForTheTranscription: Story = {
+  render: () => <SendWhileDictating hold />,
+  play: async ({ canvasElement }) => {
+    const c = within(canvasElement)
+    await userEvent.type(c.getByRole('textbox', { name: 'Tell the lead' }), '{Enter}')
+    await expect(await c.findByRole('button', { name: 'Finishing the transcription' })).toBeInTheDocument()
+    await expect(c.queryByRole('button', { name: /^Stop dictating/ })).toBeNull()
+    await expect(c.getByTestId('sent')).toHaveTextContent('Nothing sent')
+  },
+}
+/** Once the words are written down they go with the image, as one message. */
+export const SendGoesWithTheTranscript: Story = {
+  render: () => <SendWhileDictating typed="Look at this." />,
+  play: async ({ canvasElement }) => {
+    const c = within(canvasElement)
+    await userEvent.click(c.getByRole('button', { name: 'Send' }))
+    await expect(await c.findByRole('button', { name: 'Finishing the transcription' })).toBeInTheDocument()
+    await waitFor(() => expect(c.getByTestId('sent')).toHaveTextContent(`Sent: Look at this. ${SAID.join(' ')} + 1 image`), {
+      timeout: 4000,
+    })
+    await expect(c.queryByRole('button', { name: 'Finishing the transcription' })).toBeNull()
+  },
+}
+/** The transcription failed: nothing is sent, the image stays, and a line says why. */
+export const SendHeldBackWhenItFails: Story = {
+  render: () => <SendWhileDictating fails />,
+  play: async ({ canvasElement }) => {
+    const c = within(canvasElement)
+    await userEvent.type(c.getByRole('textbox', { name: 'Tell the lead' }), '{Enter}')
+    await expect(await c.findByRole('alert', {}, { timeout: 4000 })).toHaveTextContent('Not sent')
+    await expect(c.getByTestId('sent')).toHaveTextContent('Nothing sent')
+    await expect(c.getByRole('list', { name: '1 attachment to send' })).toBeInTheDocument()
   },
 }
 /** A dictation grown past the composer's max height: it stays at 200px with the newest words in view, and the earlier text scrolls under the wheel. */
@@ -562,10 +654,6 @@ export const DictatingMidSentence: Story = {
     await expect(field).toHaveAttribute('readonly')
   },
 }
-/** Sent while the lead worked: it waits until the lead is done with what it is doing, and can be taken back or out. */
-export const Queued: Story = {
-  render: () => <Example busy onStopAgent={() => {}} waiting={['Also check the webhook retry path.']} />,
-}
 /** Queueing another, taking one out, and editing the one left. */
 export const QueueingAndEditing: Story = {
   render: () => <Example busy onStopAgent={() => {}} waiting={['Also check the webhook retry path.']} />,
@@ -599,19 +687,6 @@ export const SendingQueuedNow: Story = {
     await expect(c.getByText('Queued')).toBeInTheDocument()
     await expect(c.queryByText('Use the fixture log, not staging.')).toBeNull()
   },
-}
-export const SeveralQueued: Story = {
-  render: () => (
-    <Example
-      busy
-      onStopAgent={() => {}}
-      waiting={[
-        'Also check the webhook retry path.',
-        'Use the fixture log, not staging.',
-        'And say what the headers look like on a 429 once it passes.',
-      ]}
-    />
-  ),
 }
 const long =
   "Okay, so there's a few bits and bars that um we would need to fix. Number one, I've attached a screenshot just here of the passcard, which is just a bit convoluted. Like you can see that some things are just not fitting."
@@ -699,18 +774,12 @@ export const BehindAndNoticeNarrow: Story = {
   ),
   play: apart,
 }
-/** Nothing in the lower row but send: no picker, no meter, no dictation. */
-export const Minimal: Story = { render: () => <Example picker={undefined} meter={undefined} dictation={undefined} hint={undefined} /> }
 
 /** The context's detail open, as pointing at the ring opens it: the numbers, and Compact under them. */
 export const ContextDetail: Story = {
   render: () => <Example meter={<ContextRing used={412} total={1000} model={model('claude-opus-5')} onCompact={() => {}} defaultOpen />} />,
 }
 
-/** Images to send with what you write, drawn small above the field, each with a way off. */
-export const WithImages: Story = {
-  render: () => <Example takesFiles pictures={SHOTS} initial="The refund button moved; put it back where it was." />,
-}
 /** Images alone are something to send: the button shows, and Enter sends them with nothing written. */
 export const ImagesOnly: Story = {
   args: { onSubmit: fn() },
@@ -802,7 +871,7 @@ export const FileRefused: Story = {
     const c = within(canvasElement)
     const files = [new File(['zip'], 'huge-export.zip', { type: 'application/zip' }), new File(['png'], 'shot.png', { type: 'image/png' })]
     await fireEvent.drop(c.getByRole('textbox', { name: 'Tell the lead' }), { dataTransfer: { types: ['Files'], files } })
-    await expect(c.getByRole('status')).toHaveTextContent(refusedNote('huge-export.zip'))
+    await expect(c.getByRole('alert')).toHaveTextContent(refusedNote('huge-export.zip'))
     await expect(c.getByRole('list', { name: '1 attachment to send' })).toBeInTheDocument()
   },
 }
@@ -867,8 +936,8 @@ export const SendsOnEnter: Story = {
   },
 }
 
-/** Enter while dictating wraps up and writes down what was said, and does not send; with ⌘Enter the same. */
-export const EnterStopsDictating: Story = {
+/** Enter while dictating stops it and waits for what was said, to send it with the rest: pressed again, or with ⌘Enter, it does not stop or send twice. */
+export const EnterWhileDictatingStopsAndWaits: Story = {
   args: { onSubmit: fn(), onSendNow: fn(), busy: true, dictation: { elapsed: '0:04', onStart: () => {}, onStop: fn() } },
   render: (args) => <Composer {...args} value="Keep the limiter where it is." onChange={() => {}} />,
   play: async ({ args, canvasElement }) => {
@@ -877,13 +946,14 @@ export const EnterStopsDictating: Story = {
     await userEvent.click(field)
     await userEvent.keyboard('{Enter}')
     await userEvent.keyboard('{Meta>}{Enter}{/Meta}')
-    await expect(args.dictation?.onStop).toHaveBeenCalledTimes(2)
+    await expect(args.dictation?.onStop).toHaveBeenCalledTimes(1)
+    await expect(c.getByRole('button', { name: 'Finishing the transcription' })).toBeInTheDocument()
     await expect(args.onSubmit).not.toHaveBeenCalled()
     await expect(args.onSendNow).not.toHaveBeenCalled()
   },
 }
-/** Enter while what was said is written down does nothing: a half-finished message cannot go. */
-export const EnterWhileWritingDoesNothing: Story = {
+/** Enter while what was said is written down waits for it too, without stopping anything: a half-finished message cannot go. */
+export const EnterWhileWritingWaits: Story = {
   args: { onSubmit: fn(), onSendNow: fn(), dictation: { elapsed: null, busy: true, onStart: () => {}, onStop: fn() } },
   render: (args) => <Composer {...args} value="Keep the limiter where it is." onChange={() => {}} />,
   play: async ({ args, canvasElement }) => {
@@ -891,6 +961,7 @@ export const EnterWhileWritingDoesNothing: Story = {
     await userEvent.click(c.getByRole('textbox', { name: 'Tell the lead' }))
     await userEvent.keyboard('{Enter}')
     await expect(args.dictation?.onStop).not.toHaveBeenCalled()
+    await expect(c.getByRole('button', { name: 'Finishing the transcription' })).toBeInTheDocument()
     await expect(args.onSubmit).not.toHaveBeenCalled()
   },
 }

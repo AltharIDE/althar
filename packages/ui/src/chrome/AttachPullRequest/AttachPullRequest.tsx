@@ -3,6 +3,7 @@ import { useId, useState } from 'react'
 import { Button } from '../../primitives/Button/Button'
 import { Dialog } from '../../primitives/Dialog/Dialog'
 import { Field, FieldError } from '../../primitives/Field/Field'
+import { Problem } from '../../primitives/Problem/Problem'
 import s from './AttachPullRequest.module.css'
 
 /*
@@ -11,7 +12,9 @@ import s from './AttachPullRequest.module.css'
  * link or number; from then on the task follows it, and its work goes to
  * that pull request's branch, with no new one. Where the task's branch isn't
  * based on that pull request's head, a second page says what starting from
- * the head keeps, and nothing changes until it is pressed.
+ * the head keeps, and nothing changes until it is pressed. One the runtime
+ * refuses says why under the link, which stays to be changed and sent again;
+ * the words go as soon as it is.
  */
 
 export interface AttachPullRequestText {
@@ -76,13 +79,14 @@ export function AttachPullRequest({
   const t = { ...attachPullRequestText, ...text }
   const [value, setValue] = useState(defaultValue)
   const [missing, setMissing] = useState(false)
+  // The link changed since the runtime refused it: its words are about another one, so they go.
+  const [edited, setEdited] = useState(false)
+  const [refused, setRefused] = useState(error)
+  if (refused !== error) {
+    setRefused(error)
+    setEdited(false)
+  }
   const errorId = useId()
-  const failed =
-    error === undefined ? null : (
-      <p className={s.error} role="alert">
-        {error}
-      </p>
-    )
   if (start !== undefined)
     return (
       <Dialog
@@ -103,13 +107,17 @@ export function AttachPullRequest({
           </>
         }
       >
-        <ul className={s.list}>
-          <li>{t.startFrom(start.name, start.source)}</li>
-          {start.own > 0 && <li>{t.keeps(start.own)}</li>}
-        </ul>
-        {failed}
+        <div className={s.body}>
+          <ul className={s.list}>
+            <li>{t.startFrom(start.name, start.source)}</li>
+            {start.own > 0 && <li>{t.keeps(start.own)}</li>}
+          </ul>
+          {error !== undefined && <Problem>{error}</Problem>}
+        </div>
       </Dialog>
     )
+  // What is wrong with the link, at the link: nothing given, or the runtime's word on the one sent.
+  const said = missing ? t.empty : error !== undefined && !edited ? error : null
   return (
     <Dialog
       title={t.title}
@@ -138,15 +146,15 @@ export function AttachPullRequest({
         aria-label={t.label}
         placeholder={t.placeholder}
         value={value}
-        invalid={missing}
-        {...(missing ? { 'aria-describedby': errorId } : {})}
+        invalid={said !== null}
+        {...(said === null ? {} : { 'aria-describedby': errorId })}
         onChange={(event) => {
           setValue(event.target.value)
           setMissing(false)
+          setEdited(true)
         }}
       />
-      {missing && <FieldError id={errorId}>{t.empty}</FieldError>}
-      {failed}
+      {said !== null && <FieldError id={errorId}>{said}</FieldError>}
     </Dialog>
   )
 }

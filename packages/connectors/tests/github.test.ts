@@ -196,6 +196,13 @@ describe('GitHub as a code host', () => {
         ['GET', `${REPO}/pulls/12`, { json: pull({ draft: false }) }],
         ['GET', `${REPO}/commits/made`, { json: { parents: [{ sha: 'abc' }, { sha: 'tip' }] } }],
         ['GET', `${REPO}/commits/theirs`, { json: { parents: [{ sha: 'made' }] } }],
+        ['GET', `${REPO}/commits/later`, { json: { parents: [{ sha: 'abc' }, { sha: 'newer' }] } }],
+        ['GET', `${REPO}/commits/other`, { json: { parents: [{ sha: 'abc' }, { sha: 'branch' }] } }],
+        ['GET', `${REPO}/compare/elsewhere...tip`, { json: { behind_by: 1, ahead_by: 1 } }],
+        ['GET', `${REPO}/compare/tip...newer`, { json: { behind_by: 0, ahead_by: 1 } }],
+        ['GET', `${REPO}/compare/newer...main`, { json: { behind_by: 0, ahead_by: 0 } }],
+        ['GET', `${REPO}/compare/tip...branch`, { json: { behind_by: 0, ahead_by: 2 } }],
+        ['GET', `${REPO}/compare/branch...main`, { json: { behind_by: 2, ahead_by: 1 } }],
       ])
       assert.strictEqual(yield* host.branchHead(repository, 'release/1.0'), 'tip')
       const open = yield* host.change(repository, 12)
@@ -204,6 +211,12 @@ describe('GitHub as a code host', () => {
       // Update-branch lands in the background: the head read later is its own only where it is a merge whose first parent is the head it had.
       assert.isTrue(yield* host.madeFrom!(repository, { ...open, headSha: 'made' }, 'abc'))
       assert.isFalse(yield* host.madeFrom!(repository, { ...open, headSha: 'theirs' }, 'abc'))
+      // Given the target's head it merged in, that is its second parent: someone's merge of another branch at that head isn't it.
+      assert.isTrue(yield* host.madeFrom!(repository, { ...open, headSha: 'made' }, 'abc', 'tip'))
+      assert.isFalse(yield* host.madeFrom!(repository, { ...open, headSha: 'made' }, 'abc', 'elsewhere'))
+      // The target moved on before the merge landed: a later head of it, still on it, is Althar's merge too; a branch off it isn't.
+      assert.isTrue(yield* host.madeFrom!(repository, { ...open, headSha: 'later' }, 'abc', 'tip'))
+      assert.isFalse(yield* host.madeFrom!(repository, { ...open, headSha: 'other' }, 'abc', 'tip'))
     }),
   )
 
@@ -1654,7 +1667,7 @@ describe('GitHub as a tracker', () => {
         const { host, sent } = github([])
         const refused = (change: IssueChange) =>
           Effect.map(Effect.flip(host.update(open, change)), (error) => [error.reason, error.message])
-        assert.deepStrictEqual(yield* refused({ due: '2026-11-30' }), [
+        assert.deepStrictEqual(yield* refused({ due: '2025-11-30' }), [
           'rejected',
           'Althar can’t change an issue’s due here: GitHub’s issues have no due date; a project board’s date field is the board’s own',
         ])
