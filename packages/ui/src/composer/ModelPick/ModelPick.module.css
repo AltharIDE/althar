@@ -90,25 +90,13 @@
   grid-row: 1;
   visibility: hidden;
 }
-/* Secondary facts get their own line, so neither can crowd out the model's name. */
-.notes {
-  display: flex;
-  flex-wrap: wrap;
+/* Usage sits below the model's name, with long account names wrapping inside the row. */
+.room {
   grid-column: 1 / -1;
-  gap: 2px 8px;
-}
-.notes > span {
   max-width: 100%;
   white-space: normal;
   overflow-wrap: anywhere;
   text-align: left;
-}
-/* A model that keeps ending steps without its report: as quiet as its room. */
-.missed {
-  font-size: 11px;
-  font-weight: 400;
-  font-variant-numeric: tabular-nums;
-  color: var(--t-3);
 }
 
 /* A pick that asks first: what it would do, and the answer. */

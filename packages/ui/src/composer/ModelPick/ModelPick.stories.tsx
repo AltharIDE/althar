@@ -153,45 +153,22 @@ export const Room: Story = {
   },
 }
 
-/**
- * A model that ended steps without its report this week, once reminded: how
- * many, in faint ink before its room, the rest on hover. Nothing where none.
- */
-export const MissedReports: Story = {
-  args: {
-    model: OPUS,
-    pinned: [OPUS, model('qwen3-coder'), model('gpt-5.2-codex')],
-    defaultOpen: true,
-    room: (x) => (x.runtime === OPUS.runtime ? { left: 62, until: '17:00', account: null } : undefined),
-    missed: (x) => (x.id === 'qwen3-coder' ? 3 : x.id === 'gpt-5.2-codex' ? 1 : undefined),
-  },
-  play: async () => {
-    const page = within(document.body)
-    await expect(page.getByText('3 missed reports')).toBeInTheDocument()
-    await expect(page.getByText('1 missed report')).toHaveAttribute('title', 'Ended a step without a report this week, even once reminded.')
-  },
-}
-
-/** A missed report and a low plan balance leave the model's full name readable. */
+/** A low plan balance and account leave the model's full name readable. */
 export const CrowdedRow: Story = {
   args: {
     model: OPUS,
     pinned: [OPUS, model('gpt-5.2-codex')],
     defaultOpen: true,
     room: (x) => (x.runtime === 'codex' ? { left: 17, until: 'Sat 23:39', account: 'Main' } : undefined),
-    missed: (x) => (x.runtime === 'codex' ? 1 : undefined),
   },
   play: async () => {
     const row = within(document.body).getByRole('radio', { name: /GPT-5.2 Codex/ })
     const name = within(row).getByText('GPT-5.2 Codex')
-    const missed = within(row).getByText('1 missed report')
     const room = within(row).getByText('Main · 17% · until Sat 23:39')
     await expect(name.clientWidth).toBeGreaterThan(0)
     await expect(name.scrollWidth).toBeLessThanOrEqual(name.clientWidth)
-    for (const note of [missed, room]) {
-      await expect(note.getBoundingClientRect().top).toBeGreaterThanOrEqual(name.getBoundingClientRect().bottom)
-      await expect(note.getBoundingClientRect().right).toBeLessThanOrEqual(row.getBoundingClientRect().right)
-    }
+    await expect(room.getBoundingClientRect().top).toBeGreaterThanOrEqual(name.getBoundingClientRect().bottom)
+    await expect(room.getBoundingClientRect().right).toBeLessThanOrEqual(row.getBoundingClientRect().right)
   },
 }
 

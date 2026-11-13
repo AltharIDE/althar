@@ -32,9 +32,6 @@ export interface ModelPickText {
   /** Going ahead with a pick that asked first, and not. */
   proceed: string
   cancel: string
-  /** Beside a model that ended steps without its report this week: how many, and in full, on hover. */
-  missed: (count: number) => string
-  missedFull: (count: number) => string
 }
 
 export const modelPickText: ModelPickText = {
@@ -50,8 +47,6 @@ export const modelPickText: ModelPickText = {
   team: 'Change the team…',
   proceed: 'Switch',
   cancel: 'Cancel',
-  missed: (n) => `${n} missed ${n === 1 ? 'report' : 'reports'}`,
-  missedFull: (n) => `Ended ${n === 1 ? 'a step' : `${n} steps`} without a report this week, even once reminded.`,
 }
 
 export interface ModelPickProps {
@@ -81,11 +76,9 @@ export interface ModelPickProps {
   variant?: 'quiet' | 'field'
   /** Where the list opens: above in a composer, below in a plan. */
   placement?: 'above' | 'below'
-  /** How much room a model has where work on it would start, at its row's end; null where its plan is read by nothing, undefined where there is nothing to say. Once the model in use is nearly out, the chip says so beside itself. */
+  /** How much room a model has where work on it would start, beneath its name; null where its plan is read by nothing, undefined where there is nothing to say. Once the model in use is nearly out, the chip says so beside itself. */
   room?: (model: ModelInfo) => ModelRoom | null | undefined
   roomText?: Partial<ModelRoomText>
-  /** How many steps a model ended without its report this week, once reminded, in faint ink before its room; nothing where none. */
-  missed?: (model: ModelInfo) => number | undefined
   /** What picking a model would do that needs a yes first, in a sentence. Picking such a model asks, in the list, before `onChange`. */
   confirm?: (model: ModelInfo) => string | undefined
   /** The model waiting on that yes: one picked here, or elsewhere, like the consumer's browser. */
@@ -120,7 +113,6 @@ export function ModelPick({
   placement = 'above',
   room,
   roomText,
-  missed,
   confirm,
   asking: askingProp,
   defaultAsking = null,
@@ -190,20 +182,10 @@ export function ModelPick({
         >
           {list.map((x) => {
             const left = room?.(x)
-            const misses = missed?.(x) ?? 0
             return (
               <RadioGroup.Item key={x.id} value={x.id} className={cx(s.option, x.id === model.id && s.current)}>
                 <Model model={x} />
-                {(misses > 0 || left != null) && (
-                  <span className={s.notes}>
-                    {misses > 0 && (
-                      <span className={s.missed} title={t.missedFull(misses)}>
-                        {t.missed(misses)}
-                      </span>
-                    )}
-                    {left != null && <RoomNote room={left} text={roomText} />}
-                  </span>
-                )}
+                {left != null && <RoomNote room={left} text={roomText} className={s.room} />}
                 <Icon name="check" size={11} className={s.check} />
               </RadioGroup.Item>
             )
