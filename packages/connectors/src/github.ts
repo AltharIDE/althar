@@ -4,7 +4,7 @@ import { type Access, type AccessInput, type AccessLine, type AccessNeed, type A
 import { type AdapterOptions, authorizationOf } from './credential'
 import { mergeInCopy } from './branchCopy'
 import { ConnectorFailed } from './errors'
-import { makeHttp, paged } from './http'
+import { makeHttp, paged, withoutTrailingSlashes } from './http'
 import { makeGitHubReleases } from './githubReleases'
 import { mergeRulesOf, mergeRulesQuery, NEWER_FIELDS, NO_RULESETS, PullRulesAnswer, RulesetsAnswer, rulesetsOf } from './githubRules'
 import type {
@@ -786,7 +786,7 @@ export const STRICT_KEPT_MS = 60 * 60_000
 
 export const makeGitHub = (options: AdapterOptions): CodeHost & Tracker => {
   const product = 'github' as const
-  const api = options.apiUrl.replace(/\/+$/, '')
+  const api = withoutTrailingSlashes(options.apiUrl)
   /** Enterprise Server: its API is under its own address, at /api/v3. */
   const server = api.endsWith('/api/v3')
   const graphqlUrl = server ? `${api.slice(0, -'/v3'.length)}/graphql` : `${api}/graphql`
@@ -2067,7 +2067,7 @@ export const makeGitHub = (options: AdapterOptions): CodeHost & Tracker => {
 
 /** GitHub's page for a classic token, filled in: what it is for, and the scopes Althar uses, check runs included. */
 export const classicTokenPage = (webUrl: string): string =>
-  `${webUrl.replace(/\/+$/, '')}/settings/tokens/new?${new URLSearchParams({ description: 'Althar', scopes: 'repo,workflow' }).toString()}`
+  `${withoutTrailingSlashes(webUrl)}/settings/tokens/new?${new URLSearchParams({ description: 'Althar', scopes: 'repo,workflow' }).toString()}`
 
 /** Where a person's tokens are listed: fine-grained ones on github.com; on a company's own server, which may predate them, classic ones. */
 const tokensPage = (web: string) => (web === 'https://github.com' ? `${web}/settings/personal-access-tokens` : `${web}/settings/tokens`)
@@ -2091,8 +2091,8 @@ interface Found {
 
 export const accessGitHub: Access = (input: AccessInput) =>
   Effect.gen(function* () {
-    const api = input.apiUrl.replace(/\/+$/, '')
-    const web = input.webUrl.replace(/\/+$/, '')
+    const api = withoutTrailingSlashes(input.apiUrl)
+    const web = withoutTrailingSlashes(input.webUrl)
     const ask = (url: string) => probe(input, url, { headers: HEADERS })
     const repo = (path: ReadonlyArray<string>) => `${api}/repos/${path.map(encodeURIComponent).join('/')}`
 

@@ -654,14 +654,10 @@ The decisions above are current. These parts of them aren't built on main:
 
 - **Noticing an agent's own push,** and adopting a pull request it opened
   with `gh`.
-- **A gated call to the host's API** (`code_host_api`) and to a tracker's
-  (`tracker_api`), for whatever no typed tool covers: reads in any turn,
-  writes asked-for, with the never list, the repository's content and what
-  stands in for a check refused by family of paths. Until then, what no
-  tool covers is the person's on the host.
-- **`post_review` and `delete_branch` for agents:** posting a review the
-  person asked for, and deleting a branch on their word. A review task's
-  draft is posted by the person, and so is a branch deleted on Close.
+- **`delete_branch` for agents:** deleting a branch on the person's word.
+  A branch can still be deleted on Close. `post_review` now posts an
+  explicitly requested review at the commit read; `draft_review` keeps its
+  existing card.
 - **A lead's tag on the person's word in its thread:** a lead's `push_tag`
   still asks every time. A lead's merge goes through the same tool and line
   as the coordinator's.
@@ -681,6 +677,12 @@ The decisions above are current. These parts of them aren't built on main:
 
 ## Changes
 
+- 12 Nov 2026: the lead and coordinator gain complete discussion pages,
+  Linear resources, relationships and attachments, review controls and
+  broader PR search. `code_host_api` and `tracker_api` provide authenticated
+  fallbacks with asked-for writes and receipts; [architecture
+  06](../architecture/06-integrations-and-skills.md#authenticated-api-fallbacks)
+  records their bounds and protected families.
 - 8 Nov 2026: written from the ADRs under Replaces.
 - 8 Nov 2026: the limits sweep (#696) built: agents carry the person's own sign-in, and `gh` and `glab` are read as git is.
 - 9 Nov 2026: what a turn the person's words began after the plan commits holds the branch for Ship (a task is a conversation plus parts, [tasks](tasks.md#changing-parts)).

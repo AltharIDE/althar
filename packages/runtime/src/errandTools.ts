@@ -25,6 +25,7 @@ const decode = <S extends Schema.Top>(schema: S, input: unknown) =>
 export const errandTools = (errands: typeof Errands.Service): ReadonlyArray<Tool> => [
   {
     name: 'read_turn',
+    inReview: true,
     description:
       'Read this live turn’s origin, byPerson and the ids of its messages from the person. Only those messages or an open errand can authorize an asked-for tool.',
     input: { type: 'object', properties: {} },

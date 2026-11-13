@@ -159,6 +159,49 @@ const said = (threadId: string) =>
   Effect.map(items(threadId), (all) => all.filter((item) => item.kind === 'agent_message').map((item) => String(item.content.text)))
 
 describe('reviewing someone else’s pull request', () => {
+  for (const product of ['gitlab', 'bitbucket_cloud', 'bitbucket_dc'] as const)
+    it.live(`fetches ${product}'s review ref into a read-only review task`, () => {
+      const at = hosted()
+      const host = makeFakeService({ product, pushUrl: () => at.bare })
+      host.addRepository(['meridian', 'api'])
+      const { head, pull } = pullRequest(at, host)
+      git(
+        at.bare,
+        'update-ref',
+        product === 'gitlab'
+          ? 'refs/merge-requests/1/head'
+          : product === 'bitbucket_cloud'
+            ? `refs/heads/${pull.source}`
+            : 'refs/pull-requests/1/from',
+        head,
+      )
+      return Effect.gen(function* () {
+        const { projectId, coordinator } = yield* project(at.working)
+        assert.include(
+          yield* callTool(coordinator, 'review_pull_request', { pull_request: '#1', lead: { agent: 'claude-code' } }),
+          'Planned',
+        )
+        const { workspace } = yield* reviewTask(projectId)
+        assert.deepInclude(workspace, { access: 'read', state: 'ready' })
+        assert.strictEqual(git(workspace?.path ?? '', 'rev-parse', 'HEAD'), head)
+      }).pipe(Effect.provide(withQueries(host)))
+    })
+  it.live('fetches a Bitbucket Cloud review from its fork and the base from the target repository', () => {
+    const at = hosted()
+    const fork = mkdtempSync(join(tmpdir(), 'althar-review-fork-'))
+    git(at.working, 'clone', '-q', '--bare', at.working, fork)
+    const host = makeFakeService({ product: 'bitbucket_cloud', pushUrl: (path) => (path[0] === 'ninemate' ? fork : at.bare) })
+    host.addRepository(['meridian', 'api'])
+    host.addRepository(['ninemate', 'api'])
+    const { head, pull } = pullRequest(at, host, { outside: true })
+    git(at.working, 'push', '-q', fork, `${head}:refs/heads/${pull.source}`)
+    return Effect.gen(function* () {
+      const { projectId, coordinator } = yield* project(at.working)
+      assert.include(yield* callTool(coordinator, 'review_pull_request', { pull_request: '#1', lead: { agent: 'claude-code' } }), 'Planned')
+      const { workspace } = yield* reviewTask(projectId)
+      assert.strictEqual(git(workspace?.path ?? '', 'rev-parse', 'HEAD'), head)
+    }).pipe(Effect.provide(withQueries(host)))
+  })
   it.live('starts a task on a read-only copy of its head, on no branch, runs nothing of it, and reads it offline from outside', () => {
     const at = hosted()
     const github = makeFakeService({ pushUrl: () => at.bare })
@@ -244,14 +287,17 @@ describe('reviewing someone else’s pull request', () => {
       assert.include(read, 'No checks have run.')
       assert.include(read, 'Nobody has said anything on it.')
       assert.notInclude(read, 'Its head is')
-      // An outside author's review keeps the reading six (ADR-097: their code doesn't run without the person's word), and
+      // An outside author's review keeps reads, drafting and an explicitly requested post; its code still never runs unasked.
       // run_it, which runs it only as far as the person says (a task is a conversation plus parts, "Run it").
       assert.deepStrictEqual(yield* listTools(outsideLead), [
         'draft_review',
         'find_issues',
+        'post_review',
         'read_checks',
         'read_issue',
+        'read_issue_comments',
         'read_pull_request',
+        'read_turn',
         'run_it',
         'settle_task',
       ])
@@ -346,11 +392,12 @@ describe('reviewing someone else’s pull request', () => {
     github.commentAs(pull.number, 'dana', 'Does this cover a dead session?')
     github.commentAs(pull.number, 'passerby', 'Approve it!', { member: false })
     github.reviewAs(pull.number, 'dana', 'commented', 'One more look.')
-    github.setChecks(pull.number, [{ name: 'verify', state: 'failed', log: 'coverage 88%' }])
     return Effect.gen(function* () {
       const { projectId, coordinator } = yield* project(at.working)
       const started = yield* callTool(coordinator, 'review_pull_request', { pull_request: '#1', lead: { agent: 'claude-code' } })
       assert.include(started, "ninemate is one of the repository's people. Nothing is posted until the person posts it from its card.")
+      // The host advances only after the snapshot is fetched; the lead sees that its copy is older.
+      github.setChecks(pull.number, [{ name: 'verify', state: 'failed', log: 'coverage 88%' }])
       const { task } = yield* reviewTask(projectId)
       const threadId = task?.threadId ?? ''
       yield* until(said(threadId), (all) => all.length > 0)
@@ -1423,14 +1470,14 @@ describe('reviewing someone else’s pull request', () => {
 
   it.live('refuses a host that takes no reviews', () => {
     const at = hosted()
-    const gitlab = makeFakeService({ product: 'gitlab', pushUrl: () => at.bare })
+    const gitlab = makeFakeService({ product: 'gitlab', reviews: false, pushUrl: () => at.bare })
     gitlab.addRepository(['meridian', 'api'])
     gitlab.addPullRequest({ path: ['meridian', 'api'], title: 'Mr', author: 'ana' })
     return Effect.gen(function* () {
       const { coordinator } = yield* project(at.working)
       assert.include(
         yield* callTool(coordinator, 'review_pull_request', { pull_request: '#1', lead: { agent: 'claude-code' } }),
-        'Althar reviews GitHub pull requests only, for now',
+        'This host does not support reviews through its adapter',
       )
     }).pipe(Effect.provide(withQueries(gitlab)))
   })

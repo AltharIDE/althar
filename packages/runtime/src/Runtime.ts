@@ -18,6 +18,7 @@ import { IssueChanges } from './IssueChanges'
 import { Helpers } from './Helpers'
 import { IssueDrafts } from './IssueDrafts'
 import { Issues } from './Issues'
+import { IntegrationTools } from './IntegrationTools'
 import { Fetches } from './Fetches'
 import { Launches } from './Launches'
 import { Live } from './Live'
@@ -179,6 +180,7 @@ export const layer = (options: RuntimeLayerOptions) => {
         TaskActions.layer,
         // The settings, read and changed by the coordinator and leads as the person can (ADR-097).
         SettingsTools.layer,
+        IntegrationTools.layer,
         // The page beside a conversation, read and driven by its lead and the coordinator (ADR-100).
         PageTools.layer,
         // The project's canvases, drawn by its agents and commented on by the person (ADR-104).

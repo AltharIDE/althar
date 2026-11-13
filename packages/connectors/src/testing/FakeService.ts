@@ -100,7 +100,7 @@ export interface FakeServiceOptions {
   readonly listReads?: number
   /** Whether the host can run a check again; it can, unless a test says. A check run again is in `reruns`. */
   readonly reruns?: boolean
-  /** Whether it reads changes to review: as GitHub does, unless said, and no other. */
+  /** Whether it reads and posts reviews: every code host does unless a test says otherwise. */
   readonly reviews?: boolean
   /** Whether it takes pictures in its conversations: as GitHub and GitLab do, unless said, and no other. */
   readonly pictures?: boolean
@@ -618,7 +618,7 @@ export const makeFakeService = (options: FakeServiceOptions = {}): FakeService =
       drafts: true,
       checkLogs: true,
       threads: true,
-      reviews: options.reviews ?? product === 'github',
+      reviews: options.reviews ?? ['github', 'gitlab', 'bitbucket_cloud', 'bitbucket_dc'].includes(product),
       pictures: options.pictures ?? (product === 'github' || product === 'gitlab'),
       // As each adapter declares: a declined Bitbucket Cloud pull request is final, and Data Center's builds are another service's.
       reopen: product !== 'bitbucket_cloud',
