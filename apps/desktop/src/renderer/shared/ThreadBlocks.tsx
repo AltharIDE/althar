@@ -333,7 +333,6 @@ export function PartView({ part, threadId }: { part: Part; threadId: string }) {
   }
 }
 
-/** What the person said, each link that unfurled read as its key where they pasted it; its card, under the words, says the rest. */
 /** The person's comments on lines of the diff, in their message: each opens the diff at its line, where the thread is a task's. */
 function SentComments({ comments }: { comments: ReadonlyArray<SentLineComment> }) {
   const open = useContext(ThreadWaysContext).onOpenComment
@@ -342,6 +341,7 @@ function SentComments({ comments }: { comments: ReadonlyArray<SentLineComment> }
   ))
 }
 
+/** What the person said, each link that unfurled read as its key where they pasted it; its card, under the words, says the rest. */
 function Said({ text, links }: { text: string; links: ReadonlyArray<Unfurl> }) {
   return pastedIn(text, links).map((piece, at) =>
     typeof piece === 'string' ? (
