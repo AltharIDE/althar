@@ -1,4 +1,5 @@
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { removeTreeSync } from '@althar/testing'
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -398,7 +399,7 @@ describe('the models each agent offers', () => {
         Effect.ensuring(
           Effect.sync(() => {
             for (const locked of held) chmodSync(locked, 0o755)
-            rmSync(probeRoot, { recursive: true, force: true })
+            removeTreeSync(probeRoot)
           }),
         ),
       )

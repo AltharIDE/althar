@@ -6,7 +6,6 @@ import type { ModelInfo, ModelRoom } from '@althar/ui'
 
 import { reads } from '../../data/reads'
 import { useServices } from '../../data/services'
-import { choiceOf } from '../../shared/models'
 import { useNow } from '../../shared/time'
 import { planOf, roomOf } from './plan'
 
@@ -22,19 +21,6 @@ export const usePlan = () => {
   // The reset times say today's time or a day's, and the ages minutes: written again each minute.
   const now = useNow(true, 60_000)
   return useMemo(() => planOf(usage, new Date(now)), [usage, now])
-}
-
-/** How many steps each model ended without its report this week, once reminded, for a picker: none where it didn't. */
-export const useMissedReports = (): ((info: Pick<ModelInfo, 'id'>) => number | undefined) => {
-  const { client } = useServices()
-  const missed = useQuery(reads(client).missedReports()).data
-  return useCallback(
-    (info) => {
-      const { agentId, model } = choiceOf(info.id)
-      return missed?.find((one) => one.agentId === agentId && one.model === model)?.count
-    },
-    [missed],
-  )
 }
 
 /** Each model's room for a picker, in the project where given: what `roomOf` says of it. */

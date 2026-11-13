@@ -144,7 +144,7 @@ describe('a chat’s copy', () => {
 })
 
 describe('presets', () => {
-  it.live('are saved from a task, and offered once the person sets up the same parts twice', () => {
+  it.live('are saved from a task, and not offered for parts the coordinator planned, however alike', () => {
     const { working, bare } = hosted()
     const github = makeFakeService({ pushUrl: () => bare })
     github.addRepository(['meridian', 'api'])
@@ -176,18 +176,14 @@ describe('presets', () => {
       // Its card names it now, as the next with those parts.
       assert.strictEqual((yield* cards(projectId))[0]?.plan?.preset, 'Quick change')
 
-      // The same parts again, with the same lead and no preset of them: the coordinator offers one, once.
+      // The same parts again, as the coordinator planned them: nothing of the person's to keep, so nothing is offered.
       const sql = yield* SqlClient.SqlClient
       yield* sql`DELETE FROM presets`
       yield* say('Add a timeout. [coordinator:plan] [coordinator:plan-no-review] [lead:finish] [lead:edit]')
-      yield* until(cards(projectId), (all) => all.length === 2 && all.every((one) => one.phase === 'ready'))
-      const offers = yield* until(
-        Effect.map(items(threadId), (all) =>
-          all.filter((item) => item.kind === 'notice' && (item.content as { offer?: unknown }).offer !== undefined),
-        ),
-        (found) => found.length === 1,
-      )
-      assert.strictEqual(String(offers[0]?.content.title), 'You set up these parts twice. Keep them as a preset?')
+      const both = yield* until(cards(projectId), (all) => all.length === 2 && all.every((one) => one.phase === 'ready'))
+      assert.isTrue(both.every((one) => one.presetOffer === undefined))
+      const offered = yield* sql<{ id: string }>`SELECT id FROM record_events WHERE type = 'project.preset_offered'`
+      assert.deepStrictEqual(offered, [])
     }).pipe(Effect.provide(runtimeWith(github)))
   })
 
@@ -199,7 +195,7 @@ describe('presets', () => {
       const { projectId, coordinator } = yield* opened(working)
       const sql = yield* SqlClient.SqlClient
       // The coordinator lists them, and plans from the one that fits.
-      assert.include(yield* callTool(coordinator, 'list_presets', {}), '- Small change: a worktree, reviewed after it merges')
+      assert.include(yield* callTool(coordinator, 'list_presets', {}), '- Small change: a worktree, reviewed before it ships')
       yield* callTool(coordinator, 'draft_task', { title: 'Fix a typo' })
       const said = yield* callTool(coordinator, 'propose_plan', {
         task: 'fix-a-typo',
@@ -220,12 +216,13 @@ describe('presets', () => {
       const first = yield* plan()
       yield* (yield* Plans).hold(first.id, (yield* Instance).personId)
       // Small change has no ending of its own: it ends as the project says (a draft where the project says nothing).
-      assert.deepInclude(first.parameters, { end: 'draft', reviewAfterMerge: true })
+      assert.deepInclude(first.parameters, { end: 'draft', smallChange: true })
+      assert.isUndefined(first.parameters.reviewAfterMerge)
       assert.deepStrictEqual(
         first.parameters.steps.map((step: { key: string; skipped: boolean }) => [step.key, step.skipped]),
         [
           ['implement', false],
-          ['review', true],
+          ['review', false],
         ],
       )
       const [card] = yield* until(cards(projectId), (all) => all[0]?.plan?.preset === 'Small change')

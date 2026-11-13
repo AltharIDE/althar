@@ -118,6 +118,11 @@ export class Helpers extends Context.Service<
       const toolServer = yield* ToolServer
       // A failing service is tried again after each of a step's pauses (ADR-060): 15 s, 1 min, 4 min.
       const pauses = (yield* Connectivity).pauses
+      // Only work present as this service starts can belong to the previous runtime. A new helper may still be starting
+      // when the delayed recovery runs, so the cohort is captured before callers can create one.
+      const leftOver = yield* provide(
+        Effect.flatMap(SqlClient.SqlClient, (sql) => sql<{ id: string }>`SELECT id FROM helpers WHERE state = 'working'`),
+      ).pipe(Effect.orDie)
 
       const working = (taskId: string) =>
         Effect.gen(function* () {
@@ -255,8 +260,9 @@ export class Helpers extends Context.Service<
           const sql = yield* SqlClient.SqlClient
           // Its copy goes first: what reads it as ended finds nothing of it left.
           yield* dropCopy(id)
-          yield* sql`UPDATE helpers SET state = ${state}, result = ${result}, ended_at = ${yield* timestamp}
-            WHERE id = ${id} AND state = 'working'`
+          const changed = yield* sql<{ id: string }>`UPDATE helpers SET state = ${state}, result = ${result}, ended_at = ${yield* timestamp}
+            WHERE id = ${id} AND state = 'working' RETURNING id`
+          return changed.length > 0
         })
 
       /**
@@ -365,7 +371,7 @@ export class Helpers extends Context.Service<
       /** A helper that can't go on, told to its lead at once, with the models it may use now to start another. */
       const failedForGood = (helper: HelperRow & { readonly taskId: string }, why: string) =>
         Effect.gen(function* () {
-          yield* ended(helper.id, 'failed', why)
+          if (!(yield* ended(helper.id, 'failed', why))) return
           yield* sessions.stop(helper.threadId).pipe(Effect.ignore)
           const lead = yield* leadThreadOf(helper.taskId)
           if (lead === undefined) return yield* touchTask(helper.taskId)
@@ -425,6 +431,8 @@ export class Helpers extends Context.Service<
                     origin: 'system',
                     quiet: true,
                   })
+                  // This pause's retry is intentional: queued system words alone do not resume a failed delivery.
+                  yield* sessions.wake(helper.threadId)
                 }),
               ),
             ).pipe(Effect.catchCause((cause) => Effect.logWarning('Could not try a helper again', cause))),
@@ -505,28 +513,29 @@ export class Helpers extends Context.Service<
         ),
       )
 
-      // The helpers at work as Althar started: those a restart left behind. Read now, before the delay below, so a helper
-      // started since — its row in, its session still starting — isn't taken for one a restart left, and failed for it.
-      const leftBehind = yield* SqlClient.SqlClient.pipe(
-        Effect.flatMap(
-          (sql) => sql<HelperRow & { taskId: string }>`
-            SELECT id, name, thread_id, agent_id, model, state, task_id FROM helpers WHERE state = 'working'`,
-        ),
-        Effect.orDie,
-      )
-
       /**
        * After a restart, a helper that was at work carries on: its agent started again on its thread, told to go on from where
        * it stands. One that can't start is its lead's to hear of, as a failure.
        */
       const carryOn = Effect.gen(function* () {
         const sql = yield* SqlClient.SqlClient
-        for (const helper of leftBehind) {
-          // Stopped or ended since Althar started: nothing left to carry on.
-          const [still] = yield* sql<{ state: string }>`SELECT state FROM helpers WHERE id = ${helper.id}`
-          if (still?.state !== 'working') continue
+        for (const { id } of leftOver) {
+          const [helper] = yield* sql<HelperRow & { taskId: string }>`
+            SELECT id, name, thread_id, agent_id, model, state, task_id FROM helpers WHERE id = ${id} AND state = 'working'`
+          if (helper === undefined) continue
+          if (yield* settled(helper.taskId)) {
+            yield* ended(helper.id, 'stopped', 'Its task settled.')
+            continue
+          }
           if (Option.isSome(yield* sessions.running(helper.threadId))) continue
           const started = yield* sessions.startLast(helper.threadId).pipe(Effect.orElseSucceed(() => false))
+          // The person may have stopped it while its agent was starting: no continuation or failure revives it.
+          const [still] = yield* sql<{ state: string }>`SELECT state FROM helpers WHERE id = ${helper.id}`
+          if (still?.state !== 'working' || (yield* settled(helper.taskId))) {
+            if (started) yield* sessions.stop(helper.threadId).pipe(Effect.ignore)
+            if (still?.state === 'working') yield* ended(helper.id, 'stopped', 'Its task settled.')
+            continue
+          }
           if (!started) {
             yield* failedForGood(helper, 'Althar restarted, and its agent couldn’t start again.')
             continue

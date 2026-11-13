@@ -39,11 +39,12 @@ describe('the command line', () => {
   })
 
   it('keeps the profile where the platform keeps app data, unless told otherwise', () => {
-    assert.strictEqual(defaultProfile({}, 'darwin', '/Users/ada'), '/Users/ada/Library/Application Support/Althar')
-    assert.strictEqual(defaultProfile({}, 'linux', '/home/ada'), '/home/ada/.local/share/althar')
-    assert.strictEqual(defaultProfile({ XDG_DATA_HOME: '/data' }, 'linux', '/home/ada'), '/data/althar')
+    const absent = () => false
+    assert.strictEqual(defaultProfile({}, 'darwin', '/Users/ada', absent), join('/Users/ada', 'Library', 'Application Support', 'Althar'))
+    assert.strictEqual(defaultProfile({}, 'linux', '/home/ada', absent), join('/home/ada', '.local', 'share', 'althar'))
+    assert.strictEqual(defaultProfile({ XDG_DATA_HOME: '/data' }, 'linux', '/home/ada', absent), join('/data', 'althar'))
     assert.strictEqual(defaultProfile({ ALTHAR_PROFILE: '/p' }, 'darwin', '/Users/ada'), '/p')
-    assert.strictEqual(defaultWorktrees({}, '/Users/ada'), '/Users/ada/Althar')
+    assert.strictEqual(defaultWorktrees({}, '/Users/ada', absent), join('/Users/ada', 'Althar'))
     assert.strictEqual(defaultWorktrees({ ALTHAR_WORKTREES: '/w' }, '/Users/ada'), '/w')
   })
 })
@@ -190,3 +191,4 @@ describe('the printer', () => {
     assert.strictEqual(out.print(agent({ _tag: 'ToolCall', toolCallId: 'x', title: 'ls', kind: 'execute', status: 'pending' })), '\n→ ls\n')
   })
 })
+import { join } from 'node:path'

@@ -126,6 +126,26 @@ describe('a task before its thread is read', () => {
   })
 })
 
+describe('opening the task’s first or next pull request', () => {
+  it.each(['draft', 'ready'] as const)('runs Ship for work whose ending is %s instead of publishing around its review', async (end) => {
+    const { result, client, unmount } = reading({ task: { ...snapshot().task, end, phase: 'ready', commits: 9 } })
+    await waitFor(() => expect(result.current.snapshot).not.toBeNull())
+    await act(() => result.current.openChange())
+    expect(client.ship).toHaveBeenCalledWith('t1')
+    expect(client.openChange).not.toHaveBeenCalled()
+    unmount()
+  })
+
+  it('keeps opening a draft directly for a prototype whose work ends on its branch', async () => {
+    const { result, client, unmount } = reading({ task: { ...snapshot().task, end: 'none', phase: 'ready', commits: 9 } })
+    await waitFor(() => expect(result.current.snapshot).not.toBeNull())
+    await act(() => result.current.openChange())
+    expect(client.openChange).toHaveBeenCalledWith('t1')
+    expect(client.ship).not.toHaveBeenCalled()
+    unmount()
+  })
+})
+
 describe('what a task hears', () => {
   it('keeps its launches where the project’s runs that changed are another project’s', async () => {
     const launch = {

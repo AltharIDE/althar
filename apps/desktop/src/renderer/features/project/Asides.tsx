@@ -1,10 +1,13 @@
 import { type ReactNode, type RefObject, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
+import type { QueryClient } from '@tanstack/react-query'
 
-import type { BoardSnapshot, BoardTask, PlanStep } from '@althar/contracts'
+import type { BoardSnapshot, BoardTask, PlanStep, ThreadItem, ThreadSnapshot } from '@althar/contracts'
 import { type Aside, AsideMoves, AsideTabs, Button, Icon, IconButton, LinkButton } from '@althar/ui'
 
 import { type Client, messageOf, newTaskId } from '../../data/client'
+import { keys, reads } from '../../data/reads'
+import { mergeItems, sending, unsent } from '../../shared/items'
 import { coordinatorSigned } from '../../shared/signed'
 import { ago } from '../../shared/time'
 import { TaskView } from '../task/TaskView'
@@ -36,6 +39,7 @@ export const asidesText = {
   quoting: 'Quoting the coordinator',
   asked: (when: string) => `Asked ${when}`,
   clearFailed: (title: string, why: string) => `Couldn’t clear ${title}. ${why}`,
+  stillOpen: 'Something of it is still open.',
   taskFailed: (title: string, why: string) => `Couldn’t make ${title} a task. ${why}`,
   startFailed: (why: string) => `Couldn’t start the aside. ${why}`,
   dismiss: 'Dismiss',
@@ -54,7 +58,7 @@ const BELIEVED = 10_000
  * on the board as work, from the press until the board's own read says so. One the runtime refused comes back, and `failed`
  * says why. `over` is the board as the person sees it, which the lanes, the pills and the flights are drawn from.
  */
-export function useAsideMoves(client: Client, board: BoardSnapshot | null) {
+export function useAsideMoves(client: Client, board: BoardSnapshot | null, projectId: string | null = null) {
   const [moves, setMoves] = useState<ReadonlyMap<string, Move>>(new Map())
   const [failed, setFailed] = useState<string | null>(null)
   const drop = (taskId: string) =>
@@ -96,7 +100,20 @@ export function useAsideMoves(client: Client, board: BoardSnapshot | null) {
     for (const task of tasks) {
       const title = task.title === '' ? 'the aside' : `“${task.title}”`
       void (move === 'clear' ? client.markTaskDone(task.taskId) : client.shelveTask(task.taskId, null)).then(
-        () => setTimeout(() => drop(task.taskId), BELIEVED),
+        async () => {
+          // A clear the runtime answered without settling it (something of it opened meanwhile) says so: a read of the board's
+          // own, after the answer, never one another move's refresh may have cancelled (docs/decisions/foundations.md).
+          if (move === 'clear' && projectId !== null) {
+            const after = await client.getBoard(projectId).catch(() => null)
+            const now = after?.tasks.find((one) => one.taskId === task.taskId)
+            if (now !== undefined && now.scratch === true && now.phase !== 'settled') {
+              drop(task.taskId)
+              setFailed(asidesText.clearFailed(title, asidesText.stillOpen))
+              return
+            }
+          }
+          setTimeout(() => drop(task.taskId), BELIEVED)
+        },
         (error: unknown) => {
           drop(task.taskId)
           setFailed((move === 'clear' ? asidesText.clearFailed : asidesText.taskFailed)(title, messageOf(error)))
@@ -159,14 +176,22 @@ const asideOf = (task: BoardTask): Aside => ({
 export const asidesOf = (
   scratch: ReadonlyArray<BoardTask>,
   now: number,
-  keep: { readonly open?: string | null; readonly first?: string | null } = {},
+  keep: { readonly open?: string | null; readonly first?: string | null; readonly title?: string } = {},
 ) => {
   const kept = (task: BoardTask) => task.taskId === keep.open || task.taskId === keep.first
   const shown = scratch.filter((task) => task.unsaid !== true || kept(task))
   const old = (task: BoardTask) => !kept(task) && now - Date.parse(task.latest?.at ?? task.createdAt) > OLDER
   const recent = shown.filter((task) => !old(task)).map(asideOf)
   const { first } = keep
-  const ahead = first == null ? [] : [recent.find((one) => one.id === first) ?? { id: first, title: '' }]
+  const ahead =
+    first == null
+      ? []
+      : [
+          {
+            ...(recent.find((one) => one.id === first) ?? { id: first, title: '' }),
+            ...(keep.title === undefined ? {} : { title: keep.title }),
+          },
+        ]
   return { recent: [...ahead, ...recent.filter((one) => one.id !== first)], older: shown.filter(old).map(asideOf) }
 }
 
@@ -203,6 +228,7 @@ const sameLead = (a: PlanStep, b: PlanStep) => a.agentId === b.agentId && a.mode
  */
 export function useAsides({
   client,
+  cache,
   projectId,
   lead,
   scratch,
@@ -210,6 +236,7 @@ export function useAsides({
   moves,
 }: {
   client: Client
+  cache: QueryClient
   projectId: string | null
   /** Who leads a new one, unless the person picks another for it: the coordinator's composer's pick. */
   lead: PlanStep | null
@@ -221,6 +248,8 @@ export function useAsides({
   const [opened, setOpened] = useState<AsideOpen>(COORDINATOR)
   // The one whose first words just went from here: first among the pills until the board has its first exchange.
   const [sent, setSent] = useState<string | null>(null)
+  const [said, setSaid] = useState<{ taskId: string; title: string; items: ReadonlyArray<ThreadItem> } | null>(null)
+  const saying = useRef(new Set<string>())
   // Each one started here, as its start lands: its thread, or null where it couldn't start; and the lead it started on.
   const starts = useRef(new Map<string, Promise<string | null>>())
   const leads = useRef(new Map<string, PlanStep>())
@@ -247,6 +276,8 @@ export function useAsides({
     leads.current.set(taskId, lead)
     const made = client.startTask({ projectId, title: '', steps: [lead], chat: true, taskId }).then(
       (started) => {
+        // Read while the person writes: the first words open a ready conversation, without a skeleton between composers.
+        void cache.prefetchQuery(reads(client).thread(started.threadId))
         setOpened((current) => (current.kind === 'new' && current.taskId === taskId ? { ...current, threadId: started.threadId } : current))
         return started.threadId
       },
@@ -298,23 +329,47 @@ export function useAsides({
     const words = body.trim()
     if (words === '') return false
     const { taskId, quote } = open
+    if (saying.current.has(taskId)) return false
     const said = asideWords(words, quote)
-    const threadId = open.threadId ?? (await starts.current.get(taskId)) ?? null
-    if (threadId === null) {
-      // It couldn't start as + was pressed: once more, now, started with the words themselves.
-      const again = await client.startTask({ projectId, title: asideTitle(words), description: said, steps: [lead], chat: true })
-      setSent(again.id)
-      setOpened({ kind: 'aside', taskId: again.id, threadId: again.threadId })
+    const optimistic = sending([], { text: said, queued: false, interrupting: false })
+    saying.current.add(taskId)
+    setSaid({ taskId, title: asideTitle(words), items: optimistic.items })
+    let sentTo: string | null = null
+    try {
+      const threadId = open.threadId ?? (await starts.current.get(taskId)) ?? null
+      if (threadId === null) {
+        // It couldn't start as + was pressed: once more, now, started with the words themselves.
+        const again = await client.startTask({ projectId, title: asideTitle(words), description: said, steps: [lead], chat: true })
+        await cache.ensureQueryData(reads(client).thread(again.threadId))
+        setSent(again.id)
+        setOpened({ kind: 'aside', taskId: again.id, threadId: again.threadId })
+        return true
+      }
+      // On the lead the composer has picked now: where it changed since +, the words go to that one, as a task's composer hands over.
+      const was =
+        leads.current.get(taskId) ?? scratch.find((one) => one.taskId === taskId)?.plan?.steps.find((step) => step.key === 'implement')
+      await cache.ensureQueryData(reads(client).thread(threadId))
+      sentTo = threadId
+      cache.setQueryData<ThreadSnapshot>(keys.thread(threadId), (current) =>
+        current === undefined ? current : { ...current, items: mergeItems(current.items, optimistic.items) },
+      )
+      await Promise.all([client.renameTask(taskId, asideTitle(words)).catch(() => undefined), sendOn(threadId, said, was, lead)])
+      // Keep the person's message on screen until its stored copy arrives. A failed refresh never sends it twice.
+      await cache.fetchQuery({ ...reads(client).thread(threadId), staleTime: 0 }).catch(() => undefined)
+      leads.current.set(taskId, lead)
+      setSent(taskId)
+      setOpened((current) => (current.kind === 'new' && current.taskId === taskId ? { kind: 'aside', taskId, threadId } : current))
       return true
+    } catch (error) {
+      setSaid((current) => (current?.taskId === taskId ? null : current))
+      if (sentTo !== null)
+        cache.setQueryData<ThreadSnapshot>(keys.thread(sentTo), (current) =>
+          current === undefined ? current : { ...current, items: unsent(current.items, optimistic.id, said) },
+        )
+      throw error
+    } finally {
+      saying.current.delete(taskId)
     }
-    // On the lead the composer has picked now: where it changed since +, the words go to that one, as a task's composer hands over.
-    const was =
-      leads.current.get(taskId) ?? scratch.find((one) => one.taskId === taskId)?.plan?.steps.find((step) => step.key === 'implement')
-    await Promise.all([client.renameTask(taskId, asideTitle(words)).catch(() => undefined), sendOn(threadId, said, was, lead)])
-    leads.current.set(taskId, lead)
-    setSent(taskId)
-    setOpened((current) => (current.kind === 'new' && current.taskId === taskId ? { kind: 'aside', taskId, threadId } : current))
-    return true
   }
 
   /**
@@ -337,6 +392,8 @@ export function useAsides({
   return {
     open,
     first,
+    title: first === said?.taskId ? said.title : undefined,
+    items: open.kind === 'new' && said?.taskId === open.taskId ? said.items : [],
     /** Who leads the new one open, as its picker shows: null while none is. */
     lead: open.kind === 'new' ? own : null,
     /** A pick in the new one's composer: its lead, for its first words; the coordinator's is left as it was. */
@@ -358,6 +415,7 @@ export function AsidesBar({
   scratch,
   open,
   first,
+  title,
   onPick,
   onNew,
   onClear,
@@ -368,6 +426,7 @@ export function AsidesBar({
   open: AsideOpen
   /** The one just started, first among them until the board has its first exchange (`useAsides`). */
   first: string | null
+  title?: string | undefined
   onPick: (taskId: string | null) => void
   onNew: () => void
   /** Clears asides, by a pill's × or "N older": they leave the pills at once, and ⌘K still finds them. */
@@ -376,7 +435,11 @@ export function AsidesBar({
   board: ReadonlyArray<BoardTask>
   now: number
 }) {
-  const { recent, older } = asidesOf(scratch, now, { open: open.kind === 'coordinator' ? null : open.taskId, first })
+  const { recent, older } = asidesOf(scratch, now, {
+    open: open.kind === 'coordinator' ? null : open.taskId,
+    first,
+    ...(title === undefined ? {} : { title }),
+  })
   const strip = useRef<HTMLDivElement>(null)
   useFlights(strip, scratch, board)
   return (

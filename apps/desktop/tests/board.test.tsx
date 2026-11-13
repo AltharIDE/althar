@@ -23,7 +23,7 @@ import { useProject } from '../src/renderer/features/project/useProject'
 import { agents, card, change, changed, fakeClient, snapshot } from './fixtures'
 import { ServicesProvider } from '../src/renderer/data/services'
 import { forgetArrived, hasArrived, markArrived } from '../src/renderer/features/board/arrived'
-import { servicesFor, useSettingsOf, withServices } from './render'
+import { pickLayout, servicesFor, useSettingsOf, withServices } from './render'
 
 function Project({ onTask = vi.fn() }: { onTask?: (threadId: string) => void }) {
   return (
@@ -904,7 +904,7 @@ describe('the board', () => {
   it('shows the project’s work by lane, and how much runs and needs you', async () => {
     const { client } = fakeClient({ getBoard: vi.fn(async () => board()) })
     withServices(<Project />, client)
-    await userEvent.click(await screen.findByRole('radio', { name: 'Board' }))
+    await pickLayout('Conversation')
     const work = await screen.findByRole('region', { name: 'The project’s work' })
     expect(within(work).getByText('Add a retry')).toBeTruthy()
     expect(within(work).getByText('Fix the limit')).toBeTruthy()
@@ -927,16 +927,16 @@ describe('the board', () => {
   it('says in Up next, on a board with nothing on it, that work comes from the coordinator, and puts the person in its composer', async () => {
     const { client } = fakeClient({ getBoard: vi.fn(async () => board({ tasks: [], calls: [], settledTotal: 0 })) })
     withServices(<Project />, client)
-    await userEvent.click(await screen.findByRole('radio', { name: 'Board' }))
+    await pickLayout('Conversation')
     const next = within(await screen.findByRole('region', { name: 'Up next' }))
     expect(next.getByText('Nothing queued')).toBeTruthy()
     expect(next.getByText('Tell the coordinator what you want done. The tasks it plans line up here.')).toBeTruthy()
     // Only Up next says so; the other lanes stay empty boxes.
     expect(within(screen.getByRole('region', { name: 'Running' })).queryByText(/coordinator/)).toBeNull()
     await userEvent.click(next.getByRole('button', { name: 'Talk to the coordinator' }))
-    // The conversation comes in beside the board, with the composer ready to write in.
-    expect(screen.getByRole('radio', { name: 'Home' }).getAttribute('aria-checked')).toBe('true')
-    await waitFor(() => expect(document.activeElement?.tagName).toBe('TEXTAREA'))
+    // The composer under the board is ready to write in; the conversation comes back once something is sent.
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByRole('textbox', { name: 'Tell the coordinator something' })))
+    expect(screen.queryByRole('region', { name: 'Conversation' })).toBeNull()
     expect(screen.getByRole('region', { name: 'The project’s work' })).toBeTruthy()
   })
 
@@ -947,7 +947,7 @@ describe('the board', () => {
       ),
     })
     withServices(<Project />, client)
-    await userEvent.click(await screen.findByRole('radio', { name: 'Board' }))
+    await pickLayout('Conversation')
     const next = within(await screen.findByRole('region', { name: 'Up next' }))
     expect(next.getByText('Nothing queued')).toBeTruthy()
     // Only Up next says so; the other lanes stay plain boxes.
@@ -978,7 +978,7 @@ describe('the board', () => {
       ),
     })
     withServices(<Project />, client)
-    await userEvent.click(await screen.findByRole('radio', { name: 'Board' }))
+    await pickLayout('Conversation')
     const work = await screen.findByRole('region', { name: 'The project’s work' })
     const cardOf = (title: string) => within(within(work).getByRole('button', { name: title }).closest('article') as HTMLElement)
     expect(cardOf('Review #264').getByText('From Morning review')).toBeTruthy()
@@ -1005,7 +1005,7 @@ describe('the board', () => {
     const getOlderSettled = vi.fn(async () => older)
     const { client, emit } = fakeClient({ getBoard, getOlderSettled })
     withServices(<Project />, client)
-    await userEvent.click(await screen.findByRole('radio', { name: 'Board' }))
+    await pickLayout('Conversation')
     const work = await screen.findByRole('region', { name: 'The project’s work' })
     const column = within(work).getByRole('heading', { name: 'Settled' }).closest('section') as HTMLElement
     // 35 in all, though 30 are loaded.
@@ -1055,7 +1055,7 @@ describe('the board', () => {
       .mockResolvedValue([])
     const { client } = fakeClient({ getBoard: vi.fn(async () => board({ tasks: latest, calls: [], settledTotal: 65 })), getOlderSettled })
     withServices(<Project />, client)
-    await userEvent.click(await screen.findByRole('radio', { name: 'Board' }))
+    await pickLayout('Conversation')
     const work = await screen.findByRole('region', { name: 'The project’s work' })
     const column = within(work).getByRole('heading', { name: 'Settled' }).closest('section') as HTMLElement
     const more = within(column).getByRole('button', { name: 'Show older' })
@@ -1097,7 +1097,7 @@ describe('the board', () => {
     const onTask = vi.fn()
     const { client } = fakeClient({ getBoard: vi.fn(async () => board()) })
     withServices(<Project onTask={onTask} />, client)
-    await userEvent.click(await screen.findByRole('radio', { name: 'Board' }))
+    await pickLayout('Conversation')
     for (const [title, thread] of [
       ['Add a retry', 'th1'],
       ['Fix the limit', 'th2'],
@@ -1198,7 +1198,7 @@ describe('the board', () => {
         </>,
         client,
       )
-      await userEvent.click(await screen.findByRole('radio', { name: 'Board' }))
+      await pickLayout('Conversation')
       expect(await lane('Needs you').findByText('Rate-limit refunds')).toBeTruthy()
       await userEvent.click(screen.getByRole('button', { name: 'Merge there' }))
       // At once, with nothing read again: at work, merging, and no longer counted as needing the person.
@@ -1227,7 +1227,7 @@ describe('the board', () => {
       const getBoard = vi.fn(async () => queued)
       const { client, emit } = fakeClient({ getBoard })
       withServices(<Project />, client)
-      await userEvent.click(await screen.findByRole('radio', { name: 'Board' }))
+      await pickLayout('Conversation')
       // Read so, as after a restart, with nothing pressed in this window: at work, and saying where.
       expect(await lane('Running').findByText('In the merge queue')).toBeTruthy()
       expect(lane('Running').getByText('Rate-limit refunds')).toBeTruthy()
@@ -1251,7 +1251,7 @@ describe('the board', () => {
         </>,
         client,
       )
-      await userEvent.click(await screen.findByRole('radio', { name: 'Board' }))
+      await pickLayout('Conversation')
       await lane('Needs you').findByText('Rate-limit refunds')
       // #12 merged; the task shows #13 now, still open, which nobody is merging.
       getBoard.mockImplementation(async () =>
@@ -1277,7 +1277,7 @@ describe('the board', () => {
         </>,
         client,
       )
-      await userEvent.click(await screen.findByRole('radio', { name: 'Board' }))
+      await pickLayout('Conversation')
       await lane('Needs you').findByText('Rate-limit refunds')
       await userEvent.click(screen.getByRole('button', { name: 'Merge there' }))
       const card = within((await lane('Needs you').findByRole('button', { name: 'Rate-limit refunds' })).closest('article') as HTMLElement)
@@ -1524,7 +1524,7 @@ describe('the board', () => {
     const getBoard = vi.fn(async () => board())
     const { client, emit } = fakeClient({ getBoard })
     withServices(<Project />, client)
-    await userEvent.click(await screen.findByRole('radio', { name: 'Board' }))
+    await pickLayout('Conversation')
     await screen.findByRole('region', { name: 'The project’s work' })
     const reads = getBoard.mock.calls.length
     await act(async () => {
@@ -1547,7 +1547,7 @@ describe('the board', () => {
   it('says when it can’t be read', async () => {
     const { client } = fakeClient({ getBoard: vi.fn(async () => Promise.reject(new ApiError({ reason: 'SqlError', message: 'Broken.' }))) })
     withServices(<Project />, client)
-    await userEvent.click(await screen.findByRole('radio', { name: 'Board' }))
+    await pickLayout('Conversation')
     expect(await screen.findByText('Althar couldn’t read the board. Broken.')).toBeTruthy()
   })
 })
@@ -2538,7 +2538,7 @@ describe('the bar and the dock, on the rest of the board', () => {
       getBoard: vi.fn(async () => board({ tasks: [task({ taskId: 't9', threadId: 'th9', phase: 'ready', change: bare })], calls: [] })),
     })
     withServices(<Project onTask={onTask} />, client)
-    await userEvent.click(await screen.findByRole('radio', { name: 'Board' }))
+    await pickLayout('Conversation')
     const work = await screen.findByRole('region', { name: 'The project’s work' })
     // A pull request its host said nothing about: no sizes, and no checks.
     expect(within(work).getByText('No checks ran')).toBeTruthy()
@@ -2573,7 +2573,7 @@ describe('collapsing lanes', () => {
   const theBoard = async () => {
     const { client } = fakeClient({ getBoard: vi.fn(async () => board()) })
     withServices(<Project />, client)
-    await userEvent.click(await screen.findByRole('radio', { name: 'Board' }))
+    await pickLayout('Conversation')
     return screen.findByRole('region', { name: 'The project’s work' })
   }
 
@@ -2586,10 +2586,10 @@ describe('collapsing lanes', () => {
       beside: { collapsed: [], opened: [] },
     })
     // Beside the conversation, the board keeps its own.
-    await userEvent.click(screen.getByRole('radio', { name: 'Home' }))
+    await pickLayout('Conversation')
     const beside = await screen.findByRole('region', { name: 'The project’s work' })
     expect(within(beside).getByRole('button', { name: 'Collapse Settled' })).toBeTruthy()
-    await userEvent.click(screen.getByRole('radio', { name: 'Board' }))
+    await pickLayout('Conversation')
     const alone = await screen.findByRole('region', { name: 'The project’s work' })
     await userEvent.click(within(alone).getByRole('button', { name: 'Expand Settled, 2' }))
     expect(JSON.parse(window.localStorage.getItem('althar.lanes') ?? 'null').alone).toEqual({ collapsed: [], opened: ['settled'] })

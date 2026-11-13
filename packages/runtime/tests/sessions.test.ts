@@ -1,5 +1,6 @@
+import { removeTreeSync } from '@althar/testing'
 import { execFileSync } from 'node:child_process'
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -902,7 +903,9 @@ describe('sessions', () => {
       Effect.gen(function* () {
         const sessions = yield* Sessions
         const { task: created } = yield* task()
-        yield* begin(created.threadId, 'claude-code')
+        // Windows cannot find the owner of an output file with lsof. Give the
+        // lookup a real agent tree, as production agents do, on every OS.
+        yield* begin(created.threadId, 'process')
         yield* say(created.threadId, scenarios.backgroundQuiet)
         yield* ended(created.threadId, 1)
         const [serving] = yield* until(shown(created.threadId), (all) => all[0]?.url != null)
@@ -950,7 +953,7 @@ describe('sessions', () => {
             Effect.ensuring(
               Effect.sync(() => {
                 process.env.PATH = path
-                rmSync(dir, { recursive: true, force: true })
+                removeTreeSync(dir)
               }),
             ),
           )

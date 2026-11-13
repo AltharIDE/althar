@@ -1,5 +1,5 @@
 import { Commands, Database, Ledger, type Migration, migrations } from '@althar/persistence-sqlite'
-import { Layer } from 'effect'
+import { Context, Layer } from 'effect'
 
 import { startupLayer } from './startup'
 
@@ -194,6 +194,7 @@ export const layer = (options: RuntimeLayerOptions) => {
         startupLayer('skills', shippedSkillsLayer),
       ).pipe(Layer.provideMerge(automating)),
     ),
+    Layer.tap((services) => Context.get(services, Sessions).recoverQueued),
   )
 }
 

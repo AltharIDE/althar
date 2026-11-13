@@ -1965,22 +1965,19 @@ export const NoticeItem = Schema.Struct({
       }),
     ),
     /**
-     * What the line offers: in the coordinator's thread, parts the person set up twice, kept as a preset by that name, which
-     * its button saves (a task is a conversation plus parts, "Presets"); or a review a lead or the coordinator offered a task
-     * whose work turned real with none (`offer_review`), by its reviewer, which Add puts on and No thanks turns down for good.
+     * What the line offers: a review a lead or the coordinator offered a task whose work turned real with none
+     * (`offer_review`), by its reviewer, which Add puts on and No thanks turns down for good. (A preset is offered on its
+     * task's card, `presetOffer`, not here.)
      */
     offer: Schema.optional(
-      Schema.Union([
-        Schema.Struct({ kind: Schema.Literal('preset'), name: Schema.String, parts: PresetParts }),
-        Schema.Struct({
-          kind: Schema.Literal('review'),
-          projectId: Schema.String,
-          taskId: Schema.String,
-          agentId: Schema.String,
-          model: Schema.NullOr(Schema.String),
-          effort: Schema.optional(Schema.NullOr(Schema.String)),
-        }),
-      ]),
+      Schema.Struct({
+        kind: Schema.Literal('review'),
+        projectId: Schema.String,
+        taskId: Schema.String,
+        agentId: Schema.String,
+        model: Schema.NullOr(Schema.String),
+        effort: Schema.optional(Schema.NullOr(Schema.String)),
+      }),
     ),
     /**
      * For an agent's turn that failed: why, as the runtime classes it
@@ -2356,6 +2353,16 @@ export const HeldForConnection = Schema.Struct({
 })
 export type HeldForConnection = typeof HeldForConnection.Type
 
+/** A lead yielded while the runtime watches a condition on its host, or waits until a time. */
+export const HeldForExternal = Schema.Struct({
+  reason: Schema.String,
+  deadline: Schema.String,
+  lastCheck: Schema.NullOr(Schema.String),
+  nextCheck: Schema.String,
+  error: Schema.NullOr(Schema.String),
+})
+export type HeldForExternal = typeof HeldForExternal.Type
+
 /**
  * A task as its card shows it, in the coordinator's thread and on the board:
  * where it stands, its plan, the issue it came from, its pull request, the
@@ -2546,6 +2553,7 @@ export const TaskCard = Schema.Struct({
   waits: Schema.NullOr(HeldForLimit),
   /** The step is held for the connection: absent or null otherwise (ADR-060). */
   reconnects: Schema.optional(Schema.NullOr(HeldForConnection)),
+  externalWait: Schema.optional(HeldForExternal),
   /**
    * Ready, but its lead couldn't resolve the conflict its branch has with its
    * default branch, or fix the checks that failed on the merge Althar pushed,
@@ -2610,6 +2618,20 @@ export const TaskCard = Schema.Struct({
   reordered: Schema.optional(Schema.Boolean),
   /** The automation whose run it is, where one started it; null or absent otherwise. */
   automation: Schema.optional(Schema.NullOr(FromAutomation)),
+  /**
+   * Its parts, offered to keep as a preset (a task is a conversation plus parts, "Presets"): parts the person set up
+   * themselves a few times, by a name in plain words, which Keep saves from this task. `near`: a built-in preset they
+   * are but for one thing, said instead of a new one. `kept`: the preset kept from it, which Undo removes. Absent where
+   * nothing was offered on it, or the person said not to.
+   */
+  presetOffer: Schema.optional(
+    Schema.Struct({
+      name: Schema.String,
+      parts: PresetParts,
+      near: Schema.optional(Schema.Struct({ preset: Schema.String, differs: Schema.String })),
+      kept: Schema.optional(Schema.Struct({ id: Schema.String, name: Schema.String })),
+    }),
+  ),
 })
 export type TaskCard = typeof TaskCard.Type
 
@@ -3039,6 +3061,8 @@ export const SmallChangeItem = Schema.Struct({
     }),
     /** What the path leaves out, in a short line each: "no plan", "reviewed after it merges". */
     skips: Schema.Array(Schema.String),
+    /** Explicit after-merge timing; false for new size-only Small changes. Absent on older cards. */
+    reviewAfterMerge: Schema.optional(Schema.Boolean),
     steps: Schema.Array(SmallChangeStep),
     /** Its pull request as last seen, where it has one: Merge acts on it, and the card says when it is merged. */
     change: Schema.NullOr(ChangeSummary),
@@ -3046,9 +3070,21 @@ export const SmallChangeItem = Schema.Struct({
     review: Schema.optional(
       Schema.NullOr(Schema.Struct({ taskId: Schema.String, slug: Schema.String, threadId: Schema.String, title: Schema.String })),
     ),
-    /** The person made it a full task, reviewed before it merges: the card folds to the line saying what was made. */
+    /** The person made it a full task, reviewed before it merges: the review task it was given, before and after it merges. */
     fullTask: Schema.optional(
       Schema.NullOr(Schema.Struct({ taskId: Schema.String, slug: Schema.String, threadId: Schema.String, title: Schema.String })),
+    ),
+    /**
+     * Where that full task's review stands: reading, its draft approving or with nothing on its lines (`clear`), with
+     * findings on lines (`found`, how many), or its run over with no draft (`stopped`); when it drafted. Absent where it
+     * isn't a full task, and from a runtime before it.
+     */
+    reviewBefore: Schema.optional(
+      Schema.Struct({
+        state: Schema.Literals(['running', 'clear', 'found', 'stopped']),
+        findings: Schema.Number,
+        at: Schema.NullOr(Schema.String),
+      }),
     ),
     /**
      * What its review after the merge brings back: the project's rule (`afterMergeReview`), the task's own word over it (null
@@ -3060,6 +3096,22 @@ export const SmallChangeItem = Schema.Struct({
         project: AfterMergeRule,
         task: Schema.NullOr(Schema.Literals(['review', 'none'])),
         holds: AfterMergeRule,
+      }),
+    ),
+    /** Who reads it after it merges, as its plan names them; null where its plan names none. Absent from a runtime before it. */
+    reviewer: Schema.optional(Schema.NullOr(Schema.Struct({ agentId: Schema.String, model: Schema.NullOr(Schema.String) }))),
+    /**
+     * Its review after the merge, once one is owed: under way, nothing found, only what the rule keeps in the thread
+     * (`quiet`), what waits on the person (`found`), its lead fixing that, the person leaving it, or stopped; how many it
+     * found; and its report's item in this thread,
+     * where its findings are, once it reported. Absent before one is owed, and from a runtime before it.
+     */
+    reviewAfter: Schema.optional(
+      Schema.Struct({
+        state: Schema.Literals(['running', 'clear', 'quiet', 'found', 'fixing', 'left', 'stopped']),
+        findings: Schema.Number,
+        at: Schema.NullOr(Schema.String),
+        item: Schema.NullOr(Schema.String),
       }),
     ),
   }),
@@ -3785,6 +3837,7 @@ export const ThreadSnapshot = Schema.Struct({
     waits: Schema.NullOr(HeldForLimit),
     /** Its step held for the connection: absent or null otherwise (ADR-060). */
     reconnects: Schema.optional(Schema.NullOr(HeldForConnection)),
+    externalWait: Schema.optional(HeldForExternal),
     /** It waits for a place among the agents this machine runs at once: how many are busy, and how many it runs at once. */
     queued: Schema.NullOr(Queued),
     /** Its place in its project's Up next, waiting for a place, as its card says: 1 gets one first; absent out of it. */
@@ -3793,6 +3846,8 @@ export const ThreadSnapshot = Schema.Struct({
     front: Schema.optional(Schema.Boolean),
     /** Its plan's steps, as its header's track shows them; empty without a plan. */
     steps: Schema.Array(PlanStep),
+    /** Its plan's ending: a first or new pull request goes through Ship and its review, even before a hold was recorded. */
+    end: Schema.optional(Schema.NullOr(TaskEnd)),
     /** Its rounds of work as its graph had them, oldest first: what its Graph face draws. Absent from a runtime before it. */
     graph: Schema.optional(Schema.Array(GraphRound)),
     /** Who leads it, running or not: the last agent on its thread, on its model and account, else the one its plan names. */
@@ -4055,6 +4110,38 @@ export const PAGE = 100
  * how full the context of the agent on a thread is, as it last said. Neither
  * is in the feed, so they have no cursor.
  */
+/** Who does a step of a plan being drafted, once the coordinator has written it and Althar knows the model. */
+export const DraftStep = Schema.Struct({
+  agentId: Schema.String,
+  model: Schema.NullOr(Schema.String),
+  effort: Schema.NullOr(Schema.String),
+})
+export type DraftStep = typeof DraftStep.Type
+
+/**
+ * A task the coordinator is drafting now, as far as it has written it, so its
+ * card shows from the moment the draft begins: its title, whether its
+ * description is written, the task it became once drafted, and its plan as
+ * that is written. It lasts the coordinator's turn; once planned, its card is
+ * in the thread.
+ */
+export const Draft = Schema.Struct({
+  key: Schema.String,
+  title: Schema.NullOr(Schema.String),
+  brief: Schema.Boolean,
+  taskId: Schema.NullOr(Schema.String),
+  slug: Schema.NullOr(Schema.String),
+  planning: Schema.Boolean,
+  lead: Schema.NullOr(DraftStep),
+  review: Schema.NullOr(DraftStep),
+  noReview: Schema.Boolean,
+  preset: Schema.NullOr(Schema.String),
+  planned: Schema.Boolean,
+  /** The person held it while it was drafted: its plan comes held. */
+  held: Schema.Boolean,
+})
+export type Draft = typeof Draft.Type
+
 export const WatchEvent = Schema.Union([
   Schema.Struct({
     _tag: Schema.Literal('Changed'),
@@ -4082,6 +4169,8 @@ export const WatchEvent = Schema.Union([
   Schema.Struct({ _tag: Schema.Literal('Launches'), projectId: Schema.String, launches: Schema.Array(Launch) }),
   /** Every account's plan usage, whole each time it changes. */
   Schema.Struct({ _tag: Schema.Literal('PlanUsage'), usage: PlanUsage }),
+  /** The tasks a coordinator thread is drafting now, as far as written, whole each time they change. */
+  Schema.Struct({ _tag: Schema.Literal('Drafting'), threadId: Schema.String, drafts: Schema.Array(Draft) }),
   /** A command's output as far as it has come, while it runs: its last lines, whole each time, and how many came before them. */
   Schema.Struct({
     _tag: Schema.Literal('Output'),
@@ -4694,6 +4783,8 @@ export const Api = RpcGroup.make(
   command('StartPlan', { planId: Schema.String }, Schema.Void),
   /** Holds a planned task: it waits until you start it. */
   command('HoldPlan', { planId: Schema.String }, Schema.Void),
+  /** Holds a task the coordinator is drafting, by its draft's key: its plan comes held, even one that would start at once. */
+  command('HoldDraft', { threadId: Schema.String, key: Schema.String }, Schema.Void),
   /** Changes who does a planned task's steps, or skips one, before it starts. */
   command(
     'ChangePlan',
@@ -4712,6 +4803,7 @@ export const Api = RpcGroup.make(
    * Changes who leads and who reviews a task at any time before it merges. Its lead changes from its next turn, never in the one it
    * is in; its reviewer until its review round starts, and from the next round during one, not once a review of it ran to its
    * end. A review skipped or never planned can be added until the task merges; where its work is up already, it starts a round.
+   * Only supplied steps change; omit untouched steps, and explicitly skip the review step to remove its reviewer.
    */
   command('ChangeTeam', { taskId: Schema.String, steps: Schema.Array(PlanStep) }, Schema.Void),
   /** Changes what an issue the coordinator drafted says, before it is filed. */
@@ -4868,11 +4960,15 @@ export const Api = RpcGroup.make(
       taskId: Schema.optional(Schema.String),
       parts: Schema.optional(PresetParts),
       projectOnly: Schema.optional(Schema.Boolean),
+      /** Only as a new preset, as a card's offer keeps one: a name another preset has is refused rather than replaced. */
+      asNew: Schema.optional(Schema.Boolean),
     },
     Schema.Struct({ name: Schema.String }),
   ),
   /** Removes one of the person's presets; a built-in one stays. */
   command('RemovePreset', { id: Schema.String }, Schema.Void),
+  /** Says not to offer a task's parts as a preset: its card stops offering them, and they aren't offered again. */
+  command('DeclinePresetOffer', { taskId: Schema.String }, Schema.Void),
   /** Edits one of the person's presets, from Settings: its name, its parts, and whether it is kept to its task's project. */
   command(
     'EditPreset',
@@ -5560,6 +5656,8 @@ export const Api = RpcGroup.make(
   command('StopLaunch', { id: Schema.String }, Schema.Void),
   /** Clears a run that ended by itself from the list. */
   command('ClearLaunch', { id: Schema.String }, Schema.Void),
+  /** What a run of the project has printed so far, the end of it; readable a while after it leaves the list, while Althar runs. */
+  call('ReadLaunchOutput', { id: Schema.String }, OutputText),
   /** The skills a task's lead is given: what the person added from GitHub and turned on. */
   call('ListSkills', {}, SkillList),
   /** The skill folders in a GitHub repository (a URL or `owner/name`), at the ref given or its default branch. */
