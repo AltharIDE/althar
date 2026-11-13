@@ -20,6 +20,7 @@ import * as Runtime from '../src/Runtime'
 import { TaskActions } from '../src/TaskActions'
 import type { ToolAccess } from '../src/ToolServer'
 import { callTool, fakeConnectors, HOST, hosted, items, runtime, until } from './support'
+import { knownModels } from './knownModels'
 
 /*
  * A task's shape at its edges (a task is a conversation plus parts, "Changing parts"): the preset, review and ending moves
@@ -313,6 +314,7 @@ describe('a task’s shape, at its edges', () => {
       yield* (yield* Plans).start(task.planId, instance.personId)
       yield* until(phaseOf(task.projectId, task.taskId), (phase) => phase === 'ready')
       // The person's own preset: in their checkout, reviewed by Codex on its large model, ending ready for review.
+      yield* knownModels
       yield* savePreset({
         name: 'On my checkout',
         parts: { workspace: 'local', checked: 'before', end: 'ready', shelf: 'board', lead: null, reviewer: 'codex/large', brief: '' },
