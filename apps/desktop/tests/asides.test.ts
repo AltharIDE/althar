@@ -233,6 +233,123 @@ describe('moves on asides', () => {
 })
 
 describe('an aside’s first words', () => {
+  it('reuses an unsaid aside and changes or drops its quote without starting another', async () => {
+    const unsaid = boardTask({ taskId: 'a1', title: '', unsaid: true })
+    const { client } = fakeClient()
+    const { result } = renderHook(() => useScreen(client, { board: boardOf([unsaid]), lead: LEAD }))
+    await act(async () => expect(await result.current.asides.say('Hi')).toBe(false))
+    act(() => result.current.asides.begin('The client retries.'))
+    expect(result.current.asides.open).toEqual({ kind: 'new', taskId: 'a1', threadId: 'th-a1', quote: 'The client retries.' })
+    act(() => result.current.asides.begin('Twice.'))
+    expect(result.current.asides.open).toHaveProperty('quote', 'Twice.')
+    act(() => result.current.asides.pick('a1'))
+    expect(result.current.asides.open).toHaveProperty('quote', 'Twice.')
+    act(() => result.current.asides.dropQuote())
+    expect(result.current.asides.open).toHaveProperty('quote', null)
+    await act(async () => expect(await result.current.asides.say('  \n ')).toBe(false))
+    expect(client.startTask).not.toHaveBeenCalled()
+    act(() => result.current.asides.clear(['a1']))
+    expect(result.current.asides.open.kind).toBe('coordinator')
+    expect(client.markTaskDone).not.toHaveBeenCalled()
+    act(() => result.current.asides.begin('The client retries.'))
+    await act(async () => expect(await result.current.asides.say('Why?')).toBe(true))
+    expect(client.send).toHaveBeenCalledWith({ threadId: 'th-a1', body: '> The client retries.\n\nWhy?', disposition: 'after_current' })
+    act(() => result.current.asides.pick(null))
+    act(() => result.current.asides.dropQuote())
+    act(() => result.current.asides.choose(LEAD))
+    expect(result.current.asides.open.kind).toBe('coordinator')
+    act(() => result.current.asides.pick('missing'))
+    act(() => result.current.asides.makeTask('missing'))
+    expect(client.shelveTask).not.toHaveBeenCalled()
+  })
+
+  it('starts again with the first words after its background start failed, and reports a failed retry', async () => {
+    const startTask = vi
+      .fn<Client['startTask']>()
+      .mockRejectedValueOnce(new Error('Offline'))
+      .mockRejectedValueOnce(new Error('Still offline'))
+      .mockResolvedValueOnce({ id: 'a2', threadId: 'th-a2' } as never)
+    const { client } = fakeClient({ startTask })
+    const { result } = renderHook(() => useScreen(client, { board: boardOf([]), lead: LEAD }))
+    act(() => result.current.asides.begin('Quoted'))
+    await act(async () => {
+      await expect(result.current.asides.say('Why?')).rejects.toThrow('Still offline')
+    })
+    expect(result.current.asides.items).toEqual([])
+    await act(async () => expect(await result.current.asides.say('Why?')).toBe(true))
+    expect(startTask).toHaveBeenLastCalledWith({
+      projectId: 'p1',
+      title: 'Why?',
+      description: '> Quoted\n\nWhy?',
+      steps: [LEAD],
+      chat: true,
+    })
+    expect(result.current.asides.open).toEqual({ kind: 'aside', taskId: 'a2', threadId: 'th-a2' })
+    expect(client.send).not.toHaveBeenCalled()
+  })
+
+  it('sends once while held and leaves a conversation the person opened meanwhile on screen', async () => {
+    const { promise, resolve } = Promise.withResolvers<void>()
+    const { client } = fakeClient({
+      startTask: vi.fn(async () => ({ id: 'new', threadId: 'th-new' }) as never),
+      send: vi.fn(() => promise),
+    })
+    const { result } = renderHook(() => useScreen(client, { board: boardOf([boardTask({ taskId: 'a1', title: 'Old' })]), lead: LEAD }))
+    act(() => result.current.asides.begin(null))
+    let sent: Promise<boolean> | undefined
+    act(() => {
+      sent = result.current.asides.say('Hi')
+    })
+    await act(async () => expect(await result.current.asides.say('Hi')).toBe(false))
+    await waitFor(() => expect(client.send).toHaveBeenCalledOnce())
+    act(() => result.current.asides.pick('a1'))
+    await act(async () => {
+      resolve()
+      await sent
+    })
+    expect(result.current.asides.open).toEqual({ kind: 'aside', taskId: 'a1', threadId: 'th-a1' })
+    expect(client.send).toHaveBeenCalledOnce()
+  })
+
+  it('keeps a delivered message when renaming or refreshing fails, without sending it again', async () => {
+    const { client } = fakeClient({
+      startTask: vi.fn(async () => ({ id: 'new', threadId: 'th-new' }) as never),
+      renameTask: vi.fn(async () => {
+        throw new Error('Rename refused')
+      }),
+    })
+    const { result } = renderHook(() => useScreen(client, { board: boardOf([]), lead: LEAD }))
+    await act(async () => result.current.asides.begin(null))
+    await waitFor(() => expect(result.current.cache.getQueryData(['thread', 'th-new'])).toBeDefined())
+    vi.mocked(client.getThread).mockRejectedValue(new Error('Refresh offline'))
+    await act(async () => expect(await result.current.asides.say('Hi')).toBe(true))
+    expect(client.send).toHaveBeenCalledOnce()
+    expect(result.current.asides.open.kind).toBe('aside')
+    expect(result.current.cache.getQueryData<import('@althar/contracts').ThreadSnapshot>(['thread', 'th-new'])?.items).toEqual(
+      expect.arrayContaining([expect.objectContaining({ kind: 'user_message', content: expect.objectContaining({ text: 'Hi' }) })]),
+    )
+  })
+
+  it('restores a failed move to the board, without undoing another aside’s successful clear', async () => {
+    const one = boardTask({ taskId: 'a1', title: '' })
+    const two = boardTask({ taskId: 'a2', title: 'Keep' })
+    const { client } = fakeClient({
+      shelveTask: vi.fn(async () => {
+        throw new ApiError({ reason: 'conflict', message: 'Still starting' })
+      }),
+      markTaskDone: vi.fn(async (id) => {
+        if (id === 'a1') throw new ApiError({ reason: 'conflict', message: 'Still starting' })
+      }),
+    })
+    const { result } = renderHook(() => useScreen(client, { board: boardOf([one, two]), lead: LEAD }))
+    act(() => result.current.asides.makeTask('a1'))
+    await waitFor(() => expect(result.current.moves.failed).toBe('Couldn’t make the aside a task. Still starting'))
+    expect(result.current.scratch.map((task) => task.taskId)).toEqual(['a1', 'a2'])
+    act(() => result.current.asides.clear(['a1', 'a2']))
+    await waitFor(() => expect(result.current.moves.failed).toBe('Couldn’t clear the aside. Still starting'))
+    expect(result.current.scratch.map((task) => task.taskId)).toEqual(['a1'])
+  })
+
   it('shows the words and title while startup is held, and opens a cached thread without a loading gap', async () => {
     let started!: (value: never) => void
     const { client } = fakeClient({
