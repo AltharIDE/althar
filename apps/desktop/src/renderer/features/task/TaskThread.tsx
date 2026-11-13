@@ -306,6 +306,18 @@ const RoundView = memo(function RoundView({
       at={block.at}
       {...(copy === undefined ? {} : { copy })}
       {...(report === null ? {} : { 'data-item': report.id })}
+      // Every message it shows, so a search can bring the person to the one it found.
+      data-items={[
+        ...new Set(
+          [
+            ...block.parts.flatMap((part) => (part.kind === 'message' ? [part.id] : [])),
+            ack?.id,
+            block.result?.id,
+            block.writing?.id,
+            report?.id,
+          ].filter((id) => id !== undefined),
+        ),
+      ].join(' ')}
     >
       {work !== null && (
         <WorkedFor

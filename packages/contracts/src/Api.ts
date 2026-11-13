@@ -4310,6 +4310,25 @@ export const FOUND_MOST = 50
 export const FoundTasks = Schema.Struct({ tasks: Schema.Array(FoundTask) })
 export type FoundTasks = typeof FoundTasks.Type
 
+/** Local search documents, read in pages independently of what is typed. */
+export const SearchDocument = Schema.Struct({
+  id: Schema.String,
+  kind: Schema.Literals(['task', 'pull', 'issue', 'conversation', 'said', 'note']),
+  projectId: Schema.String,
+  threadId: Schema.NullOr(Schema.String),
+  taskId: Schema.NullOr(Schema.String),
+  itemId: Schema.NullOr(Schema.String),
+  title: Schema.String,
+  body: Schema.String,
+  ref: Schema.String,
+  url: Schema.NullOr(Schema.String),
+  changedAt: Schema.String,
+  state: Schema.String,
+})
+export type SearchDocument = typeof SearchDocument.Type
+export const SearchDocuments = Schema.Struct({ documents: Schema.Array(SearchDocument), next: Schema.NullOr(Schema.String) })
+export type SearchDocuments = typeof SearchDocuments.Type
+
 /** A part of the whole, 0 to 1. */
 const Part = Schema.Number.check(Schema.isBetween({ minimum: 0, maximum: 1 }))
 /** A number of bytes. */
@@ -4502,6 +4521,8 @@ const socketCalls = new Set<string>([
   'GetSettings',
   'GetLoad',
   'SearchTasks',
+  'GetSearchDocuments',
+  'GetSearchFiles',
   'Watch',
   'Send',
   'TakeBack',
@@ -4641,6 +4662,8 @@ export const Api = RpcGroup.make(
     },
     FoundTasks,
   ),
+  call('GetSearchDocuments', { after: Schema.optional(Schema.String) }, SearchDocuments),
+  call('GetSearchFiles', { threadId: Schema.String }, Schema.Struct({ files: Schema.Array(Schema.String) })),
   command(
     'CreateTask',
     {

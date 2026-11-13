@@ -120,6 +120,7 @@ import {
 import { REQUEST, taskGraphOf } from './graph'
 import { GraphFace } from './GraphFace'
 import { reveal } from './reveal'
+import { useSearchReveal } from '../finder/revealSearch'
 import { turnsById } from '../../shared/turnTime'
 import { ReadFailed } from '../../shared/ReadFailed'
 
@@ -618,6 +619,7 @@ export function TaskView({
     },
     [setFace],
   )
+  useSearchReveal(model.snapshot?.threadId, showInThread)
   // The tasks its lead started, as the board has them: a chip where each was started, and a part of its own.
   const board = useStartedBoard(model.snapshot?.project.id)
   const started = startedBy(board, model.snapshot?.task.id)

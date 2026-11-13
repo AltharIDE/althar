@@ -128,6 +128,8 @@ import { presetModels } from './presetModels'
 import { usableModels } from './usableModels'
 import { Runs } from './Runs'
 import { findTasks } from './Search'
+import { searchDocuments } from './searchDocuments'
+import { searchFiles } from './searchFiles'
 import { Tasks } from './Tasks'
 import { Sessions } from './Sessions'
 import { makeRepository, placeRepository } from './newRepository'
@@ -976,6 +978,14 @@ export const handlers = Api.toLayer(
           ),
         ),
       ListTasks: ({ projectId }) => api(queries.tasks(projectId)),
+      GetSearchDocuments: ({ after }) =>
+        api(
+          Effect.gen(function* () {
+            const working = new Set((yield* sessions.onTasks).flatMap((one) => (one.turnRunning ? [one.taskId] : [])))
+            return yield* searchDocuments(after, working)
+          }),
+        ),
+      GetSearchFiles: ({ threadId }) => api(Effect.flatMap(queries.codeRoots(threadId), searchFiles)),
       SearchTasks: ({ projectId, text, limit }) =>
         api(
           Effect.gen(function* () {

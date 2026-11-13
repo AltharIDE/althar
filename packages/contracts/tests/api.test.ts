@@ -467,6 +467,8 @@ describe('the API', () => {
               PlaceRepository: () => Effect.die('unused'),
               MakeRepository: () => Effect.die('unused'),
               ListTasks: () => Effect.succeed({ cursor: 0, tasks: [] }),
+              GetSearchDocuments: () => Effect.succeed({ documents: [], next: null }),
+              GetSearchFiles: () => Effect.succeed({ files: [] }),
               SearchTasks: ({ text, projectId }) =>
                 Effect.succeed({
                   tasks: [

@@ -1,3 +1,5 @@
+import { useSearchReveal } from '../finder/revealSearch'
+import { reveal } from '../task/reveal'
 import { EarlierTurns } from '../../shared/EarlierTurns'
 import { useQuery } from '@tanstack/react-query'
 import { useNavigate } from '@tanstack/react-router'
@@ -376,6 +378,17 @@ export function ProjectView({
   const [draft, setDraft] = useDraft(draftOf)
   // A page beside the coordinator's conversation (ADR-100): the project goes to its conversation, the board stepping aside for it.
   const showTalk = useCallback(() => setRoom(Room.Talk), [])
+  const latestSearch = useRef(model)
+  latestSearch.current = model
+  useSearchReveal(model.coordinator?.threadId, (itemId) => {
+    showTalk()
+    void reveal(itemId, async () => {
+      const now = latestSearch.current
+      if (!now.coordinator?.earlier) return false
+      await now.loadEarlier()
+      return true
+    })
+  })
   const opener = useOpener(about, showTalk)
   const navigate = useNavigate()
   const comments = useComments(draftOf)

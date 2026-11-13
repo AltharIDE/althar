@@ -99,8 +99,9 @@ test('shows each kind of task on the board, with nothing to press, and finds one
     await page.keyboard.press(process.platform === 'darwin' ? 'Meta+k' : 'Control+k')
     const finder = page.getByRole('dialog')
     await finder.getByRole('combobox').fill('webhook')
-    await expect(finder.getByRole('option')).toHaveCount(1)
-    await expect(finder.getByRole('option', { name: /Retry webhook deliveries/ })).toContainText('Ready')
+    // The task is the top hit, with where it stands; the words' own rows follow it.
+    await expect(finder.getByRole('option').first()).toContainText('Retry webhook deliveries')
+    await expect(finder.getByRole('option').first()).toContainText('Ready')
     await page.screenshot({ path: 'test-results/kinds-finder.png', animations: 'disabled' })
     await page.keyboard.press('Enter')
     await expect(page.getByRole('heading', { name: 'Retry webhook deliveries with backoff', level: 1 })).toBeVisible()

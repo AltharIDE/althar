@@ -563,7 +563,11 @@ way of what is done often. The tokens and their values are in
   uses `--slide`. The springs are sampled as CSS `linear()` curves
   (`lib/spring.ts`), with the same values in `lib/motion.ts` for script.
 - **Overlays grow from what opened them,** and dialogs from their middle. The
-  command menu, opened by key many times a day, is there at once.
+  search palette, opened by key many times a day, is there at once, and so
+  is each list a key brings. Only what keeps its identity across a step
+  glides (the chosen row's name into the field's chip and back, the box's
+  height, the highlight), with nothing real hidden meanwhile; neither typing
+  nor navigation waits on motion.
 - **Lists move as a whole** (`ListMotion`): an item keyed by `data-move`
   slides when its place changes, and a board card that changes lanes travels
   there as a copy above the board. The board, Home's calls, the tabs and the
