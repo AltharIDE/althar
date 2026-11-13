@@ -12,6 +12,7 @@ import {
   readyWordOf,
   shownChangeOf,
   shownQueued,
+  standingCalls,
   waitingCount,
   waitingIn,
   waitingOn,
@@ -48,6 +49,47 @@ const card = (taskId: string, phase: 'waiting' | 'ready' | 'stopped' | 'running'
 const call = (id: string, taskId: string | null, createdAt = '2026-11-12T09:00:00.000Z') => ({ id, taskId, createdAt, projectId: 'p1' })
 
 describe('what waits on the person', () => {
+  it('keeps independent calls, and keeps the oldest waiting call regardless of the order they were read', () => {
+    const oldest = call('old', 't1')
+    const newer = call('new', 't1', '2026-11-12T10:00:00.000Z')
+    const independent = [call('coordinator', null), call('running', 't2'), call('elsewhere', 't3')]
+    expect(standingCalls([card('t1', 'waiting'), card('t2', 'running')], [oldest, newer, ...independent])).toEqual([oldest, ...independent])
+    const on = waitingOn([card('t1', 'waiting'), card('t2', 'running')], [newer, ...independent, oldest])
+    expect(on.waiting).toEqual([{ task: card('t1', 'waiting'), call: oldest }])
+    expect(on.calls).toEqual(independent)
+    expect(waitingCount(on)).toBe(4)
+  })
+
+  it('counts issue changes without drafts, and gives drafts the word when both wait', () => {
+    const task = card('t1', 'waiting', { issues: { drafts: 0, changes: 2 } })
+    const on = waitingOn([task], [])
+    expect(on.issues).toEqual([task])
+    expect(on.unread).toEqual([])
+    expect(issuesWordOf({ drafts: 0, changes: 2 })).toBe(kindWords.issueChanges)
+    expect(issuesWordOf({ drafts: 1, changes: 2 })).toBe(kindWords.issues)
+    expect(issuesWordOf(undefined)).toBe(kindWords.issueChanges)
+  })
+
+  it('shows the first open pull request and otherwise the latest, with no queue on an empty or closed set', () => {
+    const merged = change({ state: 'merged', queued: true })
+    const closed = change({ state: 'closed' })
+    const open = change({ queued: true })
+    expect(shownChangeOf([])).toBeNull()
+    expect(shownChangeOf([merged, closed])).toBe(closed)
+    expect(shownChangeOf([merged, open, change()])).toBe(open)
+    expect(shownQueued([])).toBe(false)
+    expect(shownQueued([merged])).toBe(false)
+    expect(inMergeQueue([merged, open])).toBe(true)
+    expect(inMergeQueue([open, change()])).toBe(false)
+    expect(inMergeQueue([change()])).toBe(false)
+    expect(waitingCount(waitingOn([card('t1', 'ready', { change: closed })], []))).toBe(1)
+  })
+
+  it('keeps zero counts for quiet projects, and counts calls in a project with no tasks', () => {
+    expect(Object.fromEntries(waitingIn([card('t1', 'running')], [{ ...call('c1', null), projectId: 'p2' }]))).toEqual({ p1: 0, p2: 1 })
+    expect(Object.fromEntries(waitingIn([card('t1', 'ready')], [], new Set(['t1'])))).toEqual({ p1: 0 })
+    expect(isAside({ scratch: true, phase: 'settled' })).toBe(false)
+  })
   it('counts a task that waits on two calls once, by its oldest', () => {
     const on = waitingOn([card('t1', 'waiting')], [call('a2', 't1', '2026-11-12T09:05:00.000Z'), call('a1', 't1')])
     expect(on.waiting.map((one) => one.call.id)).toEqual(['a1'])
@@ -117,6 +159,35 @@ describe('what waits on the person', () => {
 })
 
 describe('a ready task, in a word', () => {
+  it('distinguishes an answered review from a new draft after its last review was posted', () => {
+    for (const reviewing of [null, undefined, { posted: null }, { posted: 'review-1' }, { posted: 'review-1', waiting: true }]) {
+      expect(isAnswered(reviewing)).toBe(false)
+      expect(readyWordOf({ kind: 'review', reviewing })).toBe(kindWords.drafted)
+    }
+    const reviewing = { posted: 'review-1', waiting: false }
+    expect(isAnswered(reviewing)).toBe(true)
+    expect(readyWordOf({ kind: 'review', reviewing })).toBe(kindWords.finished)
+  })
+
+  it('says when there is nothing to accept, or commits need a new pull request after one closed', () => {
+    expect(readyWordOf({ nothingBuilt: true })).toBe(kindWords.nothingBuilt)
+    expect(readyWordOf({ conflictUnsent: 'main' })).toBe(readyText.mergeConflict)
+    expect(readyWordOf({})).toBe(kindWords.ready)
+    for (const state of ['closed', 'merged'] as const) {
+      expect(isUnshipped({ unshipped: { commits: 2 }, change: { state } })).toBe(true)
+      expect(readyWordOf({ change: change({ state }), unshipped: { commits: 2 }, replied: 'now' })).toBe(kindWords.unshipped)
+    }
+    expect(isUnshipped({})).toBe(false)
+    expect(isUnshipped({ unshipped: { commits: 2 } })).toBe(true)
+    expect(isUnshipped({ unshipped: { commits: 2 }, change: { state: 'open' } })).toBe(false)
+    expect(readyWordOf({ change: change(), unshipped: { commits: 2 }, replied: 'now' })).toBe(kindWords.ready)
+  })
+
+  it('says a conflict is ready once pushed only when local commits resolve it, with no other blocker', () => {
+    expect(readyWordOf({ change: change({ localHead: 'def', unpushed: 2, conflicts: true }) })).toBe(readyText.readyOnPush)
+    expect(readyWordOf({ change: change({ conflicts: true }) })).toBe(readyText.blocked)
+    expect(readyWordOf({ afterMerge: { state: 'clear', findings: 0 }, change: change() })).toBe(kindWords.ready)
+  })
   it('says a change as its pull request stands, never Ready to accept where something is in its way', () => {
     expect(readyWordOf({ kind: 'change', change: change() })).toBe(kindWords.ready)
     expect(

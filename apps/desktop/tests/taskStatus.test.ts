@@ -39,6 +39,10 @@ const both = (overrides: Partial<BoardTask>) => {
       step: work.step,
       queued: work.queued,
       waits: work.waits,
+      kind: work.kind,
+      state: work.state,
+      ...(work.held === undefined ? {} : { held: work.held }),
+      ...(work.afterMerge === undefined ? {} : { afterMerge: work.afterMerge }),
       ...(work.reconnects == null ? {} : { reconnects: work.reconnects }),
       ...(work.externalWait === undefined ? {} : { externalWait: work.externalWait }),
       ...(work.stopped == null ? {} : { stopped: work.stopped }),
@@ -59,6 +63,37 @@ const busy = { busy: 4, atOnce: 4 }
 const waits = { agentId: 'codex', until: '2026-10-01T12:00:00.000Z' }
 
 describe('where a task stands', () => {
+  it('says what a review after the merge found, and what waits for Ship, in the task’s header', () => {
+    const found = both({
+      phase: 'ready',
+      afterMerge: { state: 'found', findings: 2, words: 'PR #12', url: 'https://github.com/meridian/api/pull/12' },
+    })
+    expect(statusOf(found.view).state).toBe('Review found 2 after PR #12 merged')
+    const held = both({ phase: 'ready', kind: 'plain', held: { since: NOW, commits: 3 }, branch: null })
+    expect(statusOf(held.view).state).toBe('3 commits not shipped')
+    expect(readyCardOf(held.work).word).toBe('Not shipped')
+    expect(readyCardOf(held.work).object).toBeUndefined()
+  })
+
+  it('says why a running task is reconnecting, with or without the next retry time', () => {
+    for (const next of [null, NOW]) {
+      const { work, view } = both({
+        reconnects: { agentId: 'codex', service: 'OpenAI', offline: true, next, failure: 'The network is down.' },
+      })
+      expect(statusOf(view).status).toBe(TaskStatus.Paused)
+      expect(runningCardOf(work, NOW, () => 'Codex').status).toBe(TaskStatus.Paused)
+      expect(statusOf(view).state).toMatch(/connection|offline|back/i)
+    }
+  })
+
+  it('keeps an unasked conflict or an unchecked branch on a running card', () => {
+    const unasked = both({ conflictUnsent: 'Resolve it when ready.' })
+    expect(runningCardOf(unasked.work, NOW, () => '').foot).toBeDefined()
+    const unchecked = both({ conflictUnchecked: 'The branch could not be read.' })
+    expect(runningCardOf(unchecked.work, NOW, () => '').foot).toBeDefined()
+    const ready = both({ phase: 'ready', conflictUnsent: 'Resolve it when ready.' })
+    expect(readyCardOf(ready.work).foot).toBeDefined()
+  })
   it('keeps an external wait running, shows its reason and next check, and hides idle clocks', () => {
     const externalWait = { reason: 'Checks on PR #402', deadline: NOW, lastCheck: NOW, nextCheck: NOW, error: null }
     const { work, view } = both({ externalWait, step: 'implement' })

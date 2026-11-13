@@ -48,8 +48,8 @@ describe('the shared rule for accepting a change', () => {
     for (const end of [undefined, null, 'none', 'here']) expect(shipsToOpen({ end, open: false, commits: 1 })).toBe(false)
   })
 
-  it('leaves a diverged branch to the task instead of offering a push that would be refused', () => {
-    const seen = standingOf(change({ diverged: { kind: 'moved', local: 1, onPullRequest: 2 }, unpushed: 3 }))
+  it.each(['moved', 'rewritten'] as const)('leaves a %s branch to the task instead of offering a push that would be refused', (kind) => {
+    const seen = standingOf(change({ diverged: { kind, local: 1, onPullRequest: 2 }, unpushed: 3 }))
     expect(seen).toEqual({ blockers: [{ kind: 'parted' }], next: null })
     expect(isBlocked(seen)).toBe(true)
     expect(pushResolves(seen)).toBe(false)
@@ -79,6 +79,13 @@ describe('the shared rule for accepting a change', () => {
       [false, false, true],
       [true, false, false],
     ])
+    for (const one of [held, automatic, shipping]) expect(isBlocked(standingOf(one))).toBe(false)
+    const notHeld = change({ unpushed: 2, pushing: { held: null, ship: true } })
+    expect(forShip(notHeld)).toBe(true)
+    expect(personPushes(notHeld)).toBe(false)
+    expect(goingUp(notHeld)).toBe(false)
+    expect(standingOf(notHeld)).toEqual({ blockers: [{ kind: 'shipping', commits: 2 }], next: null })
+    expect(isBlocked(standingOf(notHeld))).toBe(false)
   })
 
   it('offers the push before resolving a conflict, but keeps failing checks as a blocker', () => {
@@ -103,10 +110,12 @@ describe('the shared rule for accepting a change', () => {
   })
 
   it('asks the lead to resolve a conflict even when the host has not named its target', () => {
-    const seen = standingOf(change({ conflicts: true }))
-    expect(seen).toEqual({ blockers: [{ kind: 'conflict', target: null }], next: { kind: 'resolve' } })
-    expect(isBlocked(seen)).toBe(true)
-    expect(pushResolves(seen)).toBe(false)
+    for (const target of [undefined, 'main']) {
+      const seen = standingOf(change({ conflicts: true, ...(target === undefined ? {} : { target }) }))
+      expect(seen).toEqual({ blockers: [{ kind: 'conflict', target: target ?? null }], next: { kind: 'resolve' } })
+      expect(isBlocked(seen)).toBe(true)
+      expect(pushResolves(seen)).toBe(false)
+    }
     expect(standingOf(change({ conflicts: null })).next).toEqual({ kind: 'merge' })
   })
 

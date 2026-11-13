@@ -6,6 +6,8 @@ import type { ThreadItem } from '@althar/contracts'
 
 import { TaskView } from '../src/renderer/features/task/TaskView'
 import { useTask } from '../src/renderer/features/task/useTask'
+import { SmallChangeOf } from '../src/renderer/features/task/SmallChangeOf'
+import type { SmallChangeContent } from '../src/renderer/shared/thread'
 import { act } from 'react'
 
 import { change, changed, fakeClient, items, snapshot } from './fixtures'
@@ -67,6 +69,61 @@ const modelMove = (kept = false): ThreadItem => ({
 const Task = ({ onOpenTask }: { onOpenTask?: (threadId: string) => void }) => (
   <TaskView model={useTask('th1')} onBack={vi.fn()} {...(onOpenTask === undefined ? {} : { onOpenTask })} />
 )
+
+describe('a small change before the runtime knows its final route', () => {
+  const show = (over: Partial<SmallChangeContent>) => {
+    const item = smallChange(over)
+    if (item.kind !== 'small_change') throw new Error('Expected a small change')
+    const { client } = fakeClient()
+    const onMerge = vi.fn()
+    withServices(
+      <SmallChangeOf
+        card={item.content}
+        named={(id, model) => ({ id: id ?? '', name: model ?? id ?? '', short: model ?? id ?? '', runtime: id ?? '', efforts: [] })}
+        busy={false}
+        onMerge={onMerge}
+      />,
+      client,
+    )
+    return { client, onMerge }
+  }
+
+  it.each([
+    { change: null },
+    { change: change({ checks: null }) },
+    { change: change({ checks: { ...PASSED, outcome: 'none', total: 2 } }) },
+    { change: change({ head: null, checks: PASSED }) },
+    { change: change({ queued: true, checks: { ...PASSED, outcome: 'running', running: 1 } }) },
+  ])('offers no merge until its head and checks are known: $change', (over) => {
+    show({ ...over, steps: [] })
+    expect(screen.queryByRole('button', { name: 'Merge' })).toBeNull()
+  })
+
+  it('offers a known head with no checks to run, and says there is no review where none was picked', async () => {
+    const { onMerge } = show({
+      change: change({ head: 'head', checks: { ...PASSED, outcome: 'none', total: 0 } }),
+      reviewer: null,
+      steps: [{ key: 'changed', what: 'Changed a line', at: when, done: true }],
+    })
+    await userEvent.click(screen.getByRole('button', { name: 'Merge' }))
+    expect(onMerge).toHaveBeenCalledWith({ head: 'head', url: 'https://github.com/meridian/api/pull/12' })
+    expect(screen.queryByText('After merge')).toBeNull()
+  })
+
+  it('can put a review back even when the project defaults to none', async () => {
+    const { client } = show({ afterMerge: { project: 'none', task: 'none', holds: 'none' } })
+    await userEvent.click(screen.getByRole('button', { name: 'Review' }))
+    await userEvent.click(await screen.findByRole('menuitemradio', { name: /After it merges/ }))
+    expect(client.setReviewAfterMerge).toHaveBeenCalledWith('t1', 'review')
+  })
+
+  it('holds a full task while its review is being read, even when no navigation to it was supplied', () => {
+    show({ fullTask: { taskId: 'review', threadId: 'th-review', slug: 'review', title: 'Review the change' }, reviewBefore: undefined })
+    expect(screen.queryByRole('button', { name: 'Merge' })).toBeNull()
+    expect(screen.getByText('Reading')).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'See findings' })).toBeNull()
+  })
+})
 
 describe('the fast lane on a task’s screen', () => {
   it.each(['none', 'major'] as const)('only enables deferred review on an explicit choice when the project rule is %s', async (project) => {
