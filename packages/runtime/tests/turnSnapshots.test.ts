@@ -109,4 +109,95 @@ describe('the files of a chat turn', () => {
       assert.strictEqual(run(cwd, 'show', `${plan.recovery.ref}:README.md`), 'Agent')
     }),
   )
+
+  it.live('refuses recovery after either the branch or HEAD moves and retains the saved contents', () =>
+    Effect.gen(function* () {
+      const cwd = repository()
+      const before = yield* takeSnapshot(cwd, 'refs/althar/test/before')
+      writeFileSync(join(cwd, 'README.md'), 'Agent')
+      const after = yield* takeSnapshot(cwd, 'refs/althar/test/after')
+      const plan = yield* planRestore(cwd, before, after, 'refs/althar/test/recovery')
+      yield* applyRestore(plan)
+      run(cwd, 'switch', '-qc', 'another-branch')
+      assert.strictEqual((yield* Effect.flip(rollBackRestore(plan)))._tag, 'UndoRefused')
+      run(cwd, 'switch', '-q', '-')
+      writeFileSync(join(cwd, 'new-commit.txt'), 'Later commit')
+      run(cwd, 'add', 'new-commit.txt')
+      run(cwd, 'commit', '-qm', 'Later commit')
+      assert.strictEqual((yield* Effect.flip(rollBackRestore(plan)))._tag, 'UndoRefused')
+      assert.strictEqual(run(cwd, 'show', `${plan.recovery.ref}:README.md`), 'Agent')
+      assert.strictEqual(read(cwd, 'new-commit.txt'), 'Later commit')
+    }),
+  )
+
+  it.live('rejects invalid restore paths before writing inside or outside the repository', () =>
+    Effect.gen(function* () {
+      const cwd = repository()
+      const before = yield* takeSnapshot(cwd, 'refs/althar/test/before')
+      writeFileSync(join(cwd, 'README.md'), 'Agent')
+      const after = yield* takeSnapshot(cwd, 'refs/althar/test/after')
+      for (const path of ['.', '..', '../outside.txt']) {
+        const error = yield* Effect.flip(planRestore(cwd, before, after, 'refs/althar/test/recovery', [path]))
+        // Git itself rejects some out-of-tree pathspecs before the filesystem check is reached.
+        assert.oneOf(error._tag, ['UndoRefused', 'GitFailed'])
+        if (path === '.') assert.strictEqual(error._tag, 'UndoRefused')
+      }
+      assert.strictEqual(read(cwd), 'Agent')
+    }),
+  )
+
+  it.live('preserves an ignored file that reappeared after the turn deleted it', () =>
+    Effect.gen(function* () {
+      const cwd = repository()
+      writeFileSync(join(cwd, 'local.txt'), 'Before the turn')
+      const before = yield* takeSnapshot(cwd, 'refs/althar/test/before')
+      rmSync(join(cwd, 'local.txt'))
+      writeFileSync(join(cwd, '.gitignore'), 'local.txt\n')
+      const after = yield* takeSnapshot(cwd, 'refs/althar/test/after')
+      writeFileSync(join(cwd, 'local.txt'), 'Manual contents after the turn')
+      assert.strictEqual((yield* Effect.flip(planRestore(cwd, before, after, 'refs/althar/test/recovery')))._tag, 'UndoRefused')
+      assert.strictEqual(read(cwd, 'local.txt'), 'Manual contents after the turn')
+      assert.strictEqual(read(cwd, '.gitignore'), 'local.txt\n')
+    }),
+  )
+
+  it.live('preserves a directory that replaced an affected file', () =>
+    Effect.gen(function* () {
+      const cwd = repository()
+      const before = yield* takeSnapshot(cwd, 'refs/althar/test/before')
+      writeFileSync(join(cwd, 'README.md'), 'Agent')
+      const after = yield* takeSnapshot(cwd, 'refs/althar/test/after')
+      rmSync(join(cwd, 'README.md'))
+      mkdirSync(join(cwd, 'README.md'))
+      writeFileSync(join(cwd, 'README.md/note.txt'), 'Manual contents')
+      assert.strictEqual((yield* Effect.flip(planRestore(cwd, before, after, 'refs/althar/test/recovery')))._tag, 'UndoRefused')
+      assert.strictEqual(read(cwd, 'README.md/note.txt'), 'Manual contents')
+    }),
+  )
+
+  it.live('refuses a checkpoint that would restore a symlink, even when the current file is plain', () =>
+    Effect.gen(function* () {
+      const cwd = repository()
+      writeFileSync(join(cwd, 'link'), 'README.md')
+      run(cwd, 'add', 'link')
+      const blob = run(cwd, 'rev-parse', ':link')
+      // Store the old symlink as a Git tree, portable to hosts that cannot create filesystem symlinks.
+      run(cwd, 'update-index', '--cacheinfo', `120000,${blob},link`)
+      const tree = run(cwd, 'write-tree')
+      const commit = run(cwd, 'commit-tree', tree, '-p', 'HEAD', '-m', 'Old link checkpoint')
+      run(cwd, 'update-ref', 'refs/althar/test/before', commit)
+      const before = {
+        ref: 'refs/althar/test/before',
+        head: run(cwd, 'rev-parse', 'HEAD'),
+        branch: run(cwd, 'rev-parse', '--symbolic-full-name', 'HEAD'),
+      }
+      run(cwd, 'reset', '-q', 'HEAD', '--', 'link')
+      writeFileSync(join(cwd, 'link'), 'Plain file after the turn')
+      const after = yield* takeSnapshot(cwd, 'refs/althar/test/after')
+      const error = yield* Effect.flip(planRestore(cwd, before, after, 'refs/althar/test/recovery'))
+      assert.strictEqual(error._tag, 'UndoRefused')
+      assert.strictEqual(read(cwd, 'link'), 'Plain file after the turn')
+      assert.strictEqual(run(cwd, 'diff', '--cached'), '')
+    }),
+  )
 })
