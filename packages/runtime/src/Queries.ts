@@ -1,5 +1,6 @@
 import { errandRecords } from './Errands'
 import { errandCardLines } from './errandWords'
+import { externalWaitOf } from './externalWaits'
 import { HOSTED, MergeRules, newPullRequestLink } from '@althar/connectors'
 import { existsSync, readFileSync, realpathSync, statSync } from 'node:fs'
 import { isAbsolute, join, resolve, sep } from 'node:path'
@@ -2346,6 +2347,7 @@ export class Queries extends Context.Service<
           const line = queued && task.state !== 'abandoned' ? yield* placeOf(taskId) : null
           // Local, its first step held for its checkout: what it waits for, where it isn't the person's answer (ADR-091).
           const waitsForCheckout = task.heldFor === 'checkout' ? checkoutWaitOf(task.held) : null
+          const externalWait = task.heldFor === 'external' ? externalWaitOf(task.held) : undefined
           // Held for a usage limit or the connection, or for its checkout, none of its agents in a turn, it goes on by itself:
           // up next too.
           const paused =
@@ -2709,6 +2711,17 @@ export class Queries extends Context.Service<
             ...(task.toward === null ? {} : { toward: task.toward }),
             waits: task.heldFor === 'usage_limit' ? waitsOf(task.held) : null,
             ...(task.heldFor === 'agent_unavailable' ? { reconnects: reconnectsOf(task.held) } : {}),
+            ...(externalWait === undefined
+              ? {}
+              : {
+                  externalWait: {
+                    reason: externalWait.reason,
+                    deadline: externalWait.deadline,
+                    lastCheck: externalWait.lastCheck,
+                    nextCheck: externalWait.nextCheck,
+                    error: externalWait.error,
+                  },
+                }),
             // A merged task whose lead goes back to work waits its turn too (ADR-034).
             queued: queued && task.state !== 'abandoned' ? yield* queuedNow(taskId) : null,
             // Its plan's first step waits for a place, or Local for its checkout, nothing of it begun: its plan can still change.
@@ -3188,6 +3201,29 @@ export class Queries extends Context.Service<
             SELECT state, json_array_length(findings) AS findings, verdict, json_extract(reviewer, '$.bringsBack') AS bringsBack,
               updated_at AS updatedAt FROM merge_reviews
             WHERE url = ${change?.url ?? ''}`
+          // Where the full task's review stands: its draft, where it drafted one, else whether its run is still going.
+          const [draft] =
+            reviewed === undefined
+              ? []
+              : yield* sql<{ suggested: string; comments: number; at: string }>`
+            SELECT json_extract(content, '$.suggested') AS suggested, json_array_length(content, '$.comments') AS comments,
+              created_at AS at
+            FROM thread_items WHERE thread_id = ${reviewed.threadId} AND kind = 'review_draft' ORDER BY sequence DESC LIMIT 1`
+          const [reviewRun] =
+            reviewed === undefined || draft !== undefined
+              ? []
+              : yield* sql<{ state: string }>`
+            SELECT state FROM runs WHERE task_id = ${reviewed.taskId} ORDER BY created_at DESC LIMIT 1`
+          const reviewBefore =
+            reviewed === undefined
+              ? undefined
+              : draft !== undefined
+                ? draft.suggested !== 'approved' && draft.comments > 0
+                  ? { state: 'found' as const, findings: draft.comments, at: draft.at }
+                  : { state: 'clear' as const, findings: 0, at: draft.at }
+                : reviewRun === undefined || reviewRun.state === 'running'
+                  ? { state: 'running' as const, findings: 0, at: null }
+                  : { state: 'stopped' as const, findings: 0, at: null }
           // What its review after the merge brings back: as the rule and its own word say now, and once owed, as it was kept then.
           const rule = yield* afterMergeNow(task.id)
           const holds: AfterMergeRule = review === undefined ? rule.holds : review.bringsBack === 'all' ? 'all' : 'major'
@@ -3201,6 +3237,14 @@ export class Queries extends Context.Service<
           const [merged] = yield* sql<{ at: string }>`
             SELECT created_at AS at FROM thread_items WHERE thread_id = ${threadId} AND kind = 'arrival'
               AND json_extract(content, '$.kind') = 'merged' ORDER BY sequence DESC LIMIT 1`
+          // Its review's report, where its findings are: the latest review report in this thread on the change that merged.
+          const [verdict] =
+            review === undefined
+              ? []
+              : yield* sql<{ id: string }>`
+            SELECT id FROM thread_items WHERE thread_id = ${threadId} AND kind = 'step_result'
+              AND json_extract(content, '$.step') = 'review' AND json_extract(content, '$.afterMerge.url') = ${change?.url ?? ''}
+            ORDER BY sequence DESC LIMIT 1`
           // One file's line count where the lead left one: read from its worktree, or the pull request's numbers.
           const files =
             change !== null && change.changedFiles === 1
@@ -3220,7 +3264,8 @@ export class Queries extends Context.Service<
           const failed = change?.checks !== null && change?.checks !== undefined && change.checks.outcome === 'failed'
           const afterMerge = change !== null && change.state === 'merged'
           const at = task.startedAt ?? plan?.proposedAt ?? task.createdAt
-          const reviewBefore = reviewed !== undefined && !afterMerge
+          // Only Make it a full task gives a small change a review task of its own (FastLane.makeFullTask).
+          const reviewsBefore = reviewed !== undefined && !afterMerge
           const card: ThreadItem = {
             id: `small-change:${task.id}`,
             sequence: 0,
@@ -3237,7 +3282,7 @@ export class Queries extends Context.Service<
                 model: small.implement.model,
                 ...(small.implement.effort === undefined ? {} : { effort: small.implement.effort }),
               },
-              skips: smallChangeSkips(reviewBefore ? null : small.review, holds),
+              skips: smallChangeSkips(reviewsBefore ? null : small.review, holds),
               steps: [
                 { key: 'started', what: 'Started', at, done: true },
                 {
@@ -3278,10 +3323,33 @@ export class Queries extends Context.Service<
               ...(reviewed === undefined || !afterMerge
                 ? {}
                 : { review: { taskId: reviewed.taskId, slug: reviewed.slug, threadId: reviewed.threadId, title: reviewed.title } }),
-              ...(reviewBefore
-                ? { fullTask: { taskId: reviewed.taskId, slug: reviewed.slug, threadId: reviewed.threadId, title: reviewed.title } }
-                : {}),
+              ...(reviewed === undefined || reviewBefore === undefined
+                ? {}
+                : {
+                    fullTask: { taskId: reviewed.taskId, slug: reviewed.slug, threadId: reviewed.threadId, title: reviewed.title },
+                    reviewBefore,
+                  }),
               afterMerge: { project: rule.project, task: rule.task, holds },
+              reviewer: small.review === null ? null : { agentId: small.review.agentId, model: small.review.model ?? null },
+              ...(review === undefined
+                ? {}
+                : {
+                    reviewAfter: {
+                      state:
+                        review.state === 'found'
+                          ? ('found' as const)
+                          : review.state === 'owed' || review.state === 'running'
+                            ? ('running' as const)
+                            : review.state === 'stopped' || review.state === 'fixing' || review.state === 'left'
+                              ? review.state
+                              : review.verdict === 'changes_requested' && review.findings > 0
+                                ? ('quiet' as const)
+                                : ('clear' as const),
+                      findings: review.findings ?? 0,
+                      at: review.state === 'owed' || review.state === 'running' ? null : review.updatedAt,
+                      item: verdict?.id ?? null,
+                    },
+                  }),
             },
           }
           return card
@@ -3711,6 +3779,7 @@ export class Queries extends Context.Service<
               madeChangeAt: head.madeChangeAt,
               waits: card?.waits ?? null,
               ...(card?.reconnects == null ? {} : { reconnects: card.reconnects }),
+              ...(card?.externalWait == null ? {} : { externalWait: card.externalWait }),
               queued: card?.queued ?? null,
               ...(card?.place === undefined ? {} : { place: card.place }),
               // In Up next behind another of its tasks, continuing or in the line, or a plan waiting to start, the person can put it

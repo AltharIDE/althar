@@ -58,7 +58,7 @@
   width: 100%;
   max-width: var(--measure);
   margin: 0 auto;
-  padding: 0 calc(28px * var(--sp));
+  padding: 0 calc(32px * var(--sp));
 }
 .wide {
   max-width: calc(var(--measure) + 140px);

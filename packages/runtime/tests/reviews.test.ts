@@ -291,14 +291,31 @@ describe('reviewing someone else’s pull request', () => {
     return Effect.gen(function* () {
       const { projectId, coordinator } = yield* project(at.working)
       const sql = yield* SqlClient.SqlClient
-      // One agent at a time, at work on a quick task.
+      // One agent at a time, at work on a planned task. An aside takes no task place.
       yield* (yield* Busy).set(1)
-      yield* callTool(coordinator, 'start_task', { title: 'Busy', description: 'Work on it. [lead:wait]', lead: { agent: 'codex' } })
-      const [busy] = yield* sql<{ id: string }>`SELECT id FROM tasks WHERE slug = 'busy'`
+      const busy = yield* (yield* Projects).createTask({
+        envelope: yield* Runtime.envelope('task.create', {}),
+        projectId,
+        title: 'Busy',
+        description: 'Work on it. [lead:wait]',
+        draft: true,
+      })
+      const actorId = (yield* Instance).personId
+      const plans = yield* Plans
+      const planId = yield* plans.propose({
+        projectId,
+        taskId: busy.taskId,
+        steps: [{ key: 'implement', agentId: 'codex', model: null, skipped: false }],
+        reason: null,
+        actorId,
+        end: null,
+        held: true,
+      })
+      yield* plans.start(planId, actorId)
       yield* until(
         sql<{ state: string }>`
           SELECT a.state FROM node_attempts a JOIN nodes n ON n.id = a.node_id JOIN workflow_executions e ON e.id = n.execution_id
-          JOIN runs r ON r.id = e.run_id WHERE r.task_id = ${busy?.id ?? ''}`,
+          JOIN runs r ON r.id = e.run_id WHERE r.task_id = ${busy.taskId}`,
         (rows) => rows[0]?.state === 'running',
       )
       yield* callTool(coordinator, 'review_pull_request', { pull_request: linkTo(pull.number), lead: { agent: 'claude-code' } })
@@ -313,7 +330,7 @@ describe('reviewing someone else’s pull request', () => {
       assert.strictEqual(waiting?.place, 1)
       assert.isNotNull(waiting?.queued)
       // A place frees: its lead reads it, and it leaves the line.
-      yield* (yield* Tasks).stop({ envelope: yield* Runtime.envelope('task.stop', {}), taskId: busy?.id ?? '' })
+      yield* (yield* Tasks).stop({ envelope: yield* Runtime.envelope('task.stop', {}), taskId: busy.taskId })
       const [reading] = yield* until(cardOf, (cards) => cards[0]?.queued === null)
       assert.isUndefined(reading?.inLine)
       assert.isUndefined(reading?.place)
