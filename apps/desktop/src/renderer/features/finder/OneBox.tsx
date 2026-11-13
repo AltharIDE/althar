@@ -240,6 +240,7 @@ export function OneBox({
   // The last results stay while the next are ranked, but not the empty box's: the first key shows its own rows at once.
   const ranked = ranking.pending && ranking.query === '' ? [] : ranking.results
   const enterWhenReady = useRef(false)
+  const drillWhenReady = useRef(false)
   /* ——— What it lists ——— */
   const sections = useMemo((): ReadonlyArray<Section> => {
     const more = (entry: Entry) =>
@@ -437,6 +438,11 @@ export function OneBox({
       enterWhenReady.current = false
       list.selected?.run()
     }
+    if (!ranking.pending && drillWhenReady.current) {
+      drillWhenReady.current = false
+      const chosen = entries.find((one) => one.id === list.selected?.key)
+      if (chosen !== undefined && acting === null) drill(chosen)
+    }
   })
 
   const selectedEntry = acting === null ? entries.find((one) => one.id === list.selected?.key) : undefined
@@ -451,6 +457,12 @@ export function OneBox({
     const input = event.currentTarget
     const empty = input.value === ''
     const atEnd = input.selectionStart === input.value.length
+    // → on a list still ranking waits for it, as Enter does: the row it would open is not yet the top hit.
+    if (event.key === 'ArrowRight' && atEnd && acting === null && ranking.pending && (query !== '' || scope !== null)) {
+      event.preventDefault()
+      drillWhenReady.current = true
+      return
+    }
     if (acting !== null) {
       if (event.key === 'Escape' || ((event.key === 'ArrowLeft' || event.key === 'Backspace') && empty)) {
         event.preventDefault()

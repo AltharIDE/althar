@@ -24,12 +24,9 @@ test('searches real task text and files, morphs into actions without emptying, a
     await expect(task).toBeVisible()
     await expect(task).toHaveAttribute('aria-selected', 'true')
     await dialog.screenshot({ path: 'test-results/search-light.png', scale: 'css' })
-    // The index may still be filling in under the first keystroke, which ranks again; → lists the actions once the top hit is chosen.
-    await expect(async () => {
-      await expect(task).toHaveAttribute('aria-selected', 'true')
-      await field.press('ArrowRight')
-      await expect(dialog.getByRole('option', { name: 'Copy', exact: true })).toBeVisible()
-    }).toPass()
+    // → lists the chosen row's actions; pressed while the index is still ranking again, it waits for the top hit, as Enter does.
+    await field.press('ArrowRight')
+    await expect(dialog.getByRole('option', { name: 'Copy', exact: true })).toBeVisible()
     // No real row or chip is hidden for the length of a spring.
     expect(await dialog.locator('[data-chip]').evaluate((el) => getComputedStyle(el).visibility)).toBe('visible')
     await field.press('Escape')
