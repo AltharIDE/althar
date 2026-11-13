@@ -67,6 +67,14 @@ describe('what stands in a change’s way', () => {
     expect(standingOf(change({ localHead: 'def456', unpushed: 1, checks: checks() })).next).toEqual({ kind: 'push', commits: 1 })
   })
 
+  it('offers no Push for commits that wait for Ship, nor says they are going up', () => {
+    // Held for Ship, in the lead's turn or not: Ship sends them, after its review, and is offered where the task's hold is.
+    const held = change({ localHead: 'def456', unpushed: 2, pushing: { held: 'Held for Ship', ship: true }, checks: checks() })
+    expect(standingOf(held)).toEqual({ blockers: [{ kind: 'shipping', commits: 2 }], next: null })
+    expect(factsOf(held).map((fact) => [fact.words, fact.icon, fact.tone])).toEqual([['2 commits not shipped', 'up', 'warm']])
+    expect(isBlocked(standingOf(held))).toBe(false)
+  })
+
   it('says a conflict with the branch it merges into, by name where it is known, and asks the lead to resolve it', () => {
     const named = change({ conflicts: true, target: 'main', checks: checks() })
     expect(factsOf(named).map((fact) => fact.words)).toEqual(['Conflicts with main'])

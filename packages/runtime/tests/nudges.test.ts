@@ -2,18 +2,21 @@ import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
+import type { ChangeSummary } from '@althar/contracts'
 import type { ProjectId } from '@althar/domain'
 import { type FakeAgentOptions, holds } from '@althar/provider-adapters/testing'
+import { Ledger } from '@althar/persistence-sqlite'
 import { assert, describe, it } from '@effect/vitest'
 import { Duration, Effect, Fiber, Layer, Stream } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { Instance } from '../src/Instance'
-import { callWords, type NudgeEvent, Nudges, readyWords } from '../src/Nudges'
+import { callWords, type NudgeEvent, Nudges, readyBody, readyWords } from '../src/Nudges'
 import { Plans } from '../src/Plans'
 import { Projects } from '../src/Projects'
 import { Queries } from '../src/Queries'
 import { Runs } from '../src/Runs'
+import { shelve } from '../src/scratch'
 import { Sessions } from '../src/Sessions'
 import { Tasks } from '../src/Tasks'
 import * as Runtime from '../src/Runtime'
@@ -94,15 +97,27 @@ describe('nudges', () => {
         Effect.sync(() => counts(events)),
         (seen) => seen.at(-1) === 2,
       )
-      // Answered, it waits no more.
+      // Its step given up, the call is answered, and the task stopped waits on the person still, as its board's Needs you
+      // shows it; abandoned, it waits no more.
       const sql = yield* SqlClient.SqlClient
-      const [call] = yield* sql<{ id: string }>`SELECT id FROM attention_requests WHERE state = 'open'`
+      const [call] = yield* sql<{ id: string; taskId: string }>`SELECT id, task_id FROM attention_requests WHERE state = 'open'`
       const runs = yield* Runs
       yield* runs.answerStuck({
         envelope: yield* Runtime.envelope('attention.answer', {}),
         attentionId: call?.id ?? '',
         answer: { kind: 'abandon' },
       })
+      const queries = yield* Queries
+      yield* until(
+        Effect.map(queries.card(call?.taskId ?? ''), (card) => [card.phase]),
+        ([phase]) => phase === 'stopped',
+      )
+      yield* until(
+        Effect.sync(() => counts(events)),
+        (seen) => seen.at(-1) === 2,
+      )
+      const taskId = call?.taskId ?? ''
+      yield* (yield* Tasks).abandon({ envelope: yield* Runtime.envelope('task.abandon', { taskId }), taskId })
       yield* until(
         Effect.sync(() => counts(events)),
         (seen) => seen.at(-1) === 1,
@@ -176,7 +191,8 @@ describe('nudges', () => {
         Effect.sync(() => nudged(events)),
         (said) => said.length === 2,
       )
-      assert.deepStrictEqual(nudged(events)[1], ['Retry the checkout [lead:finish] [lead:edit]', 'Ready: Did the task.'])
+      // Its lead answered the person, unread: said in its card's word.
+      assert.deepStrictEqual(nudged(events)[1], ['Retry the checkout [lead:finish] [lead:edit]', 'Replied'])
       yield* stop
     }).pipe(Effect.provide(withNudges(':memory:', { holds: lead })))
   })
@@ -298,6 +314,75 @@ describe('nudges', () => {
     })
   })
 
+  it.live('count a task whose lead stopped with no agent on it, as its board puts it in Needs you, and say nothing of it', () =>
+    Effect.gen(function* () {
+      const { events, stop } = yield* heard
+      const queries = yield* Queries
+      const held = yield* started('Hold the line [lead:wait]')
+      yield* until(
+        Effect.map(queries.card(held.taskId), (card) => [card.phase]),
+        ([phase]) => phase === 'running',
+      )
+      yield* (yield* Tasks).stop({ envelope: yield* Runtime.envelope('task.stop', {}), taskId: held.taskId })
+      yield* until(
+        Effect.map(queries.card(held.taskId), (card) => [card.phase]),
+        ([phase]) => phase === 'stopped',
+      )
+      // One thing waits on the person, as the board's Needs you and its tab count it; the person stopped it, so none is said.
+      yield* until(
+        Effect.sync(() => counts(events)),
+        (seen) => seen.at(-1) === 1,
+      )
+      assert.deepStrictEqual(nudged(events), [])
+      yield* stop
+    }).pipe(Effect.provide(withNudges())),
+  )
+
+  it.live('count a finished task as it moves between Scratch and the board, either way', () =>
+    Effect.gen(function* () {
+      const { events, stop } = yield* heard
+      const instance = yield* Instance
+      const task = yield* started('Which partners call v1? [lead:finish]', true)
+      const last = (want: number) =>
+        until(
+          Effect.sync(() => counts(events)),
+          (seen) => seen.at(-1) === want,
+        )
+      yield* last(1)
+      // On Scratch it is an aside, off the board's Needs you, and so off the Dock's count; back on the board, it counts again.
+      yield* shelve(task.taskId, 'scratch', instance.personId)
+      yield* last(0)
+      yield* shelve(task.taskId, null, instance.personId)
+      yield* last(1)
+      yield* stop
+    }).pipe(Effect.provide(withNudges())),
+  )
+
+  it.live('count nothing of a project once it is archived, its calls neither', () =>
+    Effect.gen(function* () {
+      const { events, stop } = yield* heard
+      const task = yield* started('Quietly')
+      yield* until(
+        Effect.sync(() => counts(events)),
+        (seen) => seen.at(-1) === 1,
+      )
+      const sql = yield* SqlClient.SqlClient
+      const [row] = yield* sql<{ projectId: string }>`SELECT project_id FROM tasks WHERE id = ${task.taskId}`
+      yield* sql`UPDATE projects SET archived_at = ${new Date().toISOString()} WHERE id = ${row?.projectId ?? ''}`
+      yield* (yield* Ledger).notify({
+        projectId: row?.projectId as never,
+        aggregateType: 'project',
+        aggregateId: row?.projectId ?? '',
+        aggregateRevision: 2,
+      })
+      yield* until(
+        Effect.sync(() => counts(events)),
+        (seen) => seen.at(-1) === 0,
+      )
+      yield* stop
+    }).pipe(Effect.provide(withNudges())),
+  )
+
   it('say a call as the person reads it, never with what a command was given', () => {
     const named = [{ definition: { id: 'codex', name: 'Codex' } }]
     const permission = (payload: object) => callWords({ kind: 'permission', payload }, named)
@@ -337,5 +422,30 @@ describe('nudges', () => {
     )
     assert.strictEqual(readyWords(''), 'Ready to look at')
     assert.strictEqual(readyWords('Did it.\nAnd more.'), 'Ready: Did it.')
+  })
+
+  it('say a ready task in its card’s word, never Ready where the card says otherwise', () => {
+    const summary = 'Did it.'
+    const failing = { outcome: 'failed', passed: 0, failed: 1, running: 0, total: 1, failing: ['test'], list: [] }
+    const open = {
+      state: 'open',
+      diverged: null,
+      localHead: null,
+      unpushed: 0,
+      conflicts: false,
+      checks: failing,
+    } as unknown as ChangeSummary
+    assert.deepStrictEqual(
+      [
+        readyBody({ kind: 'change', summary, change: null }),
+        readyBody({ kind: 'plain', summary }),
+        readyBody({ kind: 'change', summary, change: open }),
+        readyBody({ kind: 'change', summary, change: null, handedBack: 'Couldn’t resolve it.' }),
+        readyBody({ kind: 'change', summary, change: null, replied: '2026-11-12T09:00:00.000Z' }),
+        readyBody({ kind: 'change', summary, afterMerge: { state: 'found', findings: 2 } }),
+        readyBody({ kind: 'change', summary, held: { commits: 1 } }),
+      ],
+      ['Ready: Did it.', 'Ready: Did it.', 'Not ready to accept', 'Merge conflict', 'Replied', 'Review found 2', 'Not shipped'],
+    )
   })
 })

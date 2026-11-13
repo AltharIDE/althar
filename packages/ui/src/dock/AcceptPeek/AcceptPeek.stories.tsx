@@ -74,6 +74,19 @@ export const Going: Story = {
   },
 }
 
+/** Commits wait on the branch for Ship: Ship, which reviews them first, and never Accept or Push without them. */
+export const Held: Story = {
+  args: { held: 2, onShip: fn(), unpushed: 2, onPush: fn() },
+  play: async ({ args, canvasElement }) => {
+    const c = within(canvasElement)
+    await expect(c.getByText('2 commits aren’t shipped yet')).toBeInTheDocument()
+    await expect(c.queryByRole('button', { name: 'Accept and merge' })).toBeNull()
+    await expect(c.queryByRole('button', { name: 'Push' })).toBeNull()
+    await userEvent.click(c.getByRole('button', { name: 'Ship' }))
+    await expect(args.onShip).toHaveBeenCalledOnce()
+  },
+}
+
 export const AllStates: Story = {
   render: (args) => (
     <States
@@ -87,6 +100,7 @@ export const AllStates: Story = {
         { state: 'a commit to push', node: <AcceptPeek {...args} unpushed={1} onPush={() => {}} /> },
         { state: 'pushing', node: <AcceptPeek {...args} unpushed={2} onPush={() => {}} pushing /> },
         { state: 'a commit going up', node: <AcceptPeek {...args} going={1} /> },
+        { state: 'commits held for Ship', node: <AcceptPeek {...args} held={2} onShip={() => {}} /> },
         { state: 'accept failed', node: <AcceptPeek {...args} error="GitHub refused the merge: the branch is behind main." /> },
       ]}
     />

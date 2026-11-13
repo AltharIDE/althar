@@ -125,6 +125,8 @@ export interface TaskModel {
   readonly stop: () => Promise<void>
   /** Skips the review of the work under way: ready once its lead is done. */
   readonly skipReview: () => Promise<void>
+  /** Makes it a change in one move: a reviewer on, and its pull request ending (a task is a conversation plus parts). */
+  readonly makeChange: () => Promise<void>
   /** Carries the task on from the step it stopped on, with its last lead. */
   readonly resume: () => Promise<void>
   /** Whether its lead resolves conflicts on its own, otherwise than its project says; null goes back to the project. */
@@ -368,8 +370,21 @@ export const useTask = (threadId: string): TaskModel => {
 
   const readItems = useCallback(
     (ids: Iterable<string>) =>
-      Promise.all([...ids].map((itemId) => newest(itemId, client.getThreadItem(threadId, itemId), (item) => arrived([item]), fail))),
-    [client, threadId, newest, arrived, fail],
+      Promise.all(
+        [...ids].map((itemId) =>
+          newest(
+            itemId,
+            client.getThreadItem(threadId, itemId),
+            // One the thread keeps for Althar alone, such as what its lead could see, is nothing to draw, and nothing wrong.
+            (item) =>
+              item === null
+                ? setSnapshot((current) => ({ ...current, items: current.items.filter((one) => one.id !== itemId) }))
+                : arrived([item]),
+            fail,
+          ),
+        ),
+      ),
+    [client, threadId, newest, arrived, fail, setSnapshot],
   )
 
   // What the lead was last picked to, until the thread says it: a pick made before the last one was taken goes from there.
@@ -666,6 +681,7 @@ export const useTask = (threadId: string): TaskModel => {
       shown(body, 'after_current', () => client.switchAgent({ ...startOf(threadId, choice), body, ...sentWith(images) }), images, false),
     stop: () => onTask((taskId) => client.stopTask(taskId)),
     skipReview: () => onTask((taskId) => client.skipReview(taskId)),
+    makeChange: () => onTask((taskId) => client.shapeTask(taskId, 'Change')),
     resume: () => onTask((taskId) => client.resumeTask({ taskId })),
     setResolveConflicts: (on) => onTask((taskId) => client.setTaskResolveConflicts({ taskId, resolveConflicts: on })),
     resolveConflictsNow: () => onTask((taskId) => client.resolveConflictsNow(taskId)),

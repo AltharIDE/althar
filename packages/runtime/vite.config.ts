@@ -1,9 +1,11 @@
 import { defineConfig } from 'vite-plus'
 import { testing } from '@althar/testing/vitest'
+import DurationSequencer from '@althar/testing/sequencer'
 
 export default defineConfig({
   test: {
     ...testing('medium'),
+    sequence: { sequencer: DurationSequencer },
     // The fake agents only, so it runs in CI; the real ones run with `bun run test:agents`.
     include: ['tests/*.test.ts'],
     environment: 'node',
