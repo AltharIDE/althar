@@ -279,12 +279,34 @@
 
 /* In a narrow thread the old value drops under its row, and the foot's words take a line of their own above its buttons */
 @container (max-width: 420px) {
+  .row {
+    grid-template-columns: 16px 50px minmax(0, 1fr) auto;
+    gap: 8px;
+  }
+
+  .act {
+    grid-column: 4;
+    grid-row: 1;
+  }
+
   .why {
     grid-column: 3 / -1;
     grid-row: 2;
     white-space: normal;
     margin-top: -6px;
     padding-bottom: 6px;
+  }
+
+  .why:empty {
+    display: none;
+  }
+
+  .another {
+    padding-left: 8px;
+  }
+
+  .days {
+    flex-wrap: wrap;
   }
 
   .foot {
@@ -298,4 +320,16 @@
   .foot > :nth-child(2) {
     margin-left: auto;
   }
+}
+
+/* A model or schedule picker stays within its row, even with a long name. */
+.who > * {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.pick > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }

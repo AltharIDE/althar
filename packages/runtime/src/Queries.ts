@@ -80,6 +80,7 @@ import type { PullRequestFacts } from './pullRequestStanding'
 import { baseOf, changedBetween, type ChangedFile, changedFiles, fileDiff, type FileDiff, unchangedFileDiff } from './diffs'
 import { beforeShipReviewStep, changedWords, smallChangeOf, smallChangeSkips } from './smallChange'
 import { afterMergeNow } from './afterMergeReview'
+import { evidenceGallery, galleryUpdateIn } from './evidenceGallery'
 import { builtIn, descriptionsIn, evidenceOf, evidencePaths, keptViewsIn, shownOf, unverifiedIn } from './evidence'
 import { graphOf, type RunRows, type StepRow } from './graph'
 import { taskFindingsOf } from './taskFindings'
@@ -726,6 +727,7 @@ export const itemOf = (row: ItemRow): ThreadItem | undefined => {
           unverified: unverifiedIn(field(content, 'unverified')),
           ...descriptionsIn(field(content, 'descriptions')),
           ...keptViewsIn(field(content, 'keptViews')),
+          ...(galleryUpdateIn(field(content, 'gallery')) === undefined ? {} : { gallery: galleryUpdateIn(field(content, 'gallery')) }),
           // A review after a merge says which pull request it read.
           ...(text(field(content, 'afterMerge'), 'url') === ''
             ? {}
@@ -3688,7 +3690,12 @@ export class Queries extends Context.Service<
           // What the store says comes first, together, so it is as of the cursor; git after.
           const { items, earlier, turns } = yield* pageOf(threadId, page, true)
           // Its steps' reports, whatever page they're on: the task's finished view is read from the lead's, its graph from all.
-          const reports = (yield* itemRows(threadId, { reports: true, limit: REPORTS })).items.map(itemOf)
+          const { reports, gallery } = yield* sql.withTransaction(
+            Effect.gen(function* () {
+              const reports = (yield* itemRows(threadId, { reports: true, limit: REPORTS })).items.map(itemOf)
+              return { reports, gallery: yield* evidenceGallery(threadId) }
+            }),
+          )
           // The tasks its lead started, all of them: its thread's page may not reach the line that says so.
           const started = yield* sql<{ taskId: string; slug: string; title: string; threadId: string }>`
             SELECT k.id AS task_id, k.slug AS slug, k.title AS title, t.id AS thread_id
@@ -3945,6 +3952,7 @@ export class Queries extends Context.Service<
             items,
             earlier,
             reports: reports.flatMap((item) => (item === undefined ? [] : [item])),
+            gallery,
             turns,
             started,
           } satisfies ThreadSnapshot

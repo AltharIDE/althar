@@ -250,6 +250,8 @@ export class Installs extends Context.Service<
         const locateOf = (definition: AgentDefinition): Located | null => {
           const cli = definition.cli
           if (cli === undefined) return null
+          if (cli.managed === true)
+            return locate(cli.name, { bundled: cli.bundled?.() ?? null, kept: kept(definition, cli.name) }, { platform, env: {}, dirs: [] })
           const onDevice = options.onDevice
           const outThere = (command: string): Located =>
             onDevice === undefined

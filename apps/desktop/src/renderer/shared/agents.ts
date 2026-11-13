@@ -20,6 +20,7 @@ const BRANDS: Readonly<Record<string, Brand>> = {
   codex: Brand.OpenAI,
   opencode: Brand.OpenCode,
   copilot: Brand.GitHubCopilot,
+  'copilot-direct': Brand.GitHubCopilot,
   junie: Brand.Junie,
   grok: Brand.XAI,
   kimi: Brand.Moonshot,
@@ -93,6 +94,7 @@ export const queuedOfWords = (n: number, { busy, atOnce }: Queued) =>
 const SIGN_IN: Readonly<Record<string, { readonly plan: string; readonly host: string }>> = {
   'claude-code': { plan: 'Claude', host: 'claude.ai' },
   codex: { plan: 'ChatGPT', host: 'chatgpt.com' },
+  'copilot-direct': { plan: 'GitHub', host: 'github.com' },
   antigravity: { plan: 'Google', host: 'accounts.google.com' },
 }
 
@@ -108,6 +110,7 @@ export const signInCautionOf = (agentId: string): string | undefined => CAUTIONS
 
 /** Who makes an agent, as Settings says it under its name; none for one that runs anyone's models. */
 const MAKERS: Readonly<Record<string, string>> = {
+  'copilot-direct': 'OpenCode',
   'claude-code': 'Anthropic',
   codex: 'OpenAI',
   grok: 'xAI',

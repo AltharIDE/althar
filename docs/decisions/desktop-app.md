@@ -128,7 +128,8 @@ The runtime pages it the same way, so a task opens on whole rounds.
   delivered in, and drawn on the person's side under "From the coordinator".
   What the person says while a turn runs moves to where the lead read it.
 - **The lead's work folds under one line,** and what it says last stands open
-  under it, with its report: every screenshot it handed in, large, with its
+  under it, with its report: at the latest handoff the task’s complete visual
+  collection, at earlier handoffs the screenshots handed then, large, with each
   whole caption, grouped by their names; a view it showed before and took
   again named in a line, not shown twice; then what it checked and what it
   couldn't. No step cards, and no card closes the thread. A picture the

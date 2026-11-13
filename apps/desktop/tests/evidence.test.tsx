@@ -47,6 +47,44 @@ function Task() {
 }
 
 describe('evidence, as the window draws it', () => {
+  it('keeps the whole collection in Outputs and at the latest conversation handoff after a small amendment', async () => {
+    const original = items.step({ built: 'A panel and its states.', evidence: [] })
+    const amended = items.step({ built: 'The panel with its amended button.', evidence: [SHOT] })
+    const gallery = {
+      revision: amended.sequence,
+      shots: Array.from({ length: 15 }, (_, i) => ({
+        id: `${i < 12 ? original.id : amended.id}:${i}`,
+        key: i < 12 ? `Screen ${i + 1}` : `Button detail ${i - 11}`,
+        caption: i < 12 ? `Screen ${i + 1}` : `Button detail ${i - 11}`,
+        picture: PICTURE,
+        earlier: i < 12,
+      })),
+    }
+    const { client } = fakeClient({
+      getThread: vi.fn(async () =>
+        snapshot({
+          // The collection is authoritative even when older evidence isn't on the current report page.
+          reports: [amended],
+          items: [original, amended],
+          gallery,
+          task: { ...snapshot().task, phase: 'ready', changes: [change()] },
+        }),
+      ),
+    })
+    withServices(<Task />, client)
+    await screen.findByRole('heading', { name: /^What it looks like/ })
+    await userEvent.click(screen.getByRole('button', { name: /Show all 15/ }))
+    expect(screen.getByRole('button', { name: 'View Screen 1 full size' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'View Button detail 3 full size' })).toBeTruthy()
+    expect(screen.getAllByText('From an earlier update')).toHaveLength(12)
+    await userEvent.click(screen.getByRole('radio', { name: /Conversation/ }))
+    await screen.findByText('The panel with its amended button.')
+    const latest = document.querySelector(`[data-item="${amended.id}"]`)
+    expect(latest).not.toBeNull()
+    expect(within(latest as HTMLElement).getAllByRole('img')).toHaveLength(15)
+    expect(within(latest as HTMLElement).queryByText(/Retook/)).toBeNull()
+  })
+
   it('says each kind of piece as the kit names it', () => {
     const kinds = (['screenshot', 'recording', 'command', 'test_run', 'response', 'log', 'note'] as const).map(
       (kind) => pieceOf(piece({ kind, ...(kind === 'note' ? {} : { text: 'printed' }) }), kind).kind,

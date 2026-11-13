@@ -2026,6 +2026,32 @@ export const Evidence = Schema.Struct({
 })
 export type Evidence = typeof Evidence.Type
 
+/** An explicit edit to the task's visual collection. Omission never removes a view. */
+export const GalleryUpdate = Schema.Struct({
+  mode: Schema.Literals(['patch', 'replace']),
+  remove: Schema.optional(Schema.Array(Schema.String)),
+  invalidate: Schema.optional(Schema.Array(Schema.String)),
+})
+export type GalleryUpdate = typeof GalleryUpdate.Type
+
+/** Images in the task's collection, independent of how its conversation is paged. */
+export const EvidenceGallery = Schema.Struct({
+  revision: Schema.Number,
+  shots: Schema.Array(
+    Schema.Struct({
+      key: Schema.String,
+      id: Schema.String,
+      caption: Schema.String,
+      picture: Picture,
+      sequence: Schema.optional(Schema.Number),
+      reportedAt: Schema.optional(Schema.String),
+      needsRefresh: Schema.optional(Schema.Boolean),
+      earlier: Schema.optional(Schema.Boolean),
+    }),
+  ),
+})
+export type EvidenceGallery = typeof EvidenceGallery.Type
+
 /**
  * What a step reported when it ended: the lead's summary of its work or of
  * settling a review, or the review's verdict and findings. The person reads
@@ -2049,6 +2075,7 @@ export const StepResultItem = Schema.Struct({
     evidence: Schema.Array(Evidence),
     /** For the lead's steps: the views an earlier step pictured that still show the work as it is, carried beside this step's own pictures. */
     keptViews: Schema.optional(Schema.Array(Schema.String)),
+    gallery: Schema.optional(GalleryUpdate),
     /** For the lead's steps: what it couldn't show, as it said it; null where it didn't say, so an earlier step's list stands. */
     unverified: Schema.NullOr(Schema.Array(Schema.String)),
     /** For the lead's steps: its pull request's description, by the slug of the repository each is for, where it gave one. */
@@ -3745,6 +3772,8 @@ export const ThreadSnapshot = Schema.Struct({
   threadId: Schema.String,
   /** The runtime's placement for a new message, including work between sessions. */
   accepting: Schema.optional(Schema.Literals(['now', 'queued'])),
+  /** The complete visual collection, read independently of the thread's report limit. */
+  gallery: Schema.optional(EvidenceGallery),
   cursor: Cursor,
   /** What the task used of each account its agents ran on, in every thread of it, its reviews' too (ADR-084). */
   usage: Schema.optional(Schema.Array(AccountUse)),
@@ -5395,7 +5424,7 @@ export const Api = RpcGroup.make(
   /** Signs an account in inside Althar, this way: its id, to ask how it stands. */
   command(
     'StartAccountSignIn',
-    { accountId: Schema.String, way: Schema.Literals(['browser', 'device']) },
+    { accountId: Schema.String, way: Schema.Literals(['browser', 'device']), host: Schema.optional(Schema.String) },
     Schema.Struct({ flowId: Schema.String, state: AccountSignInState }),
   ),
   call('GetAccountSignIn', { flowId: Schema.String }, AccountSignInState),

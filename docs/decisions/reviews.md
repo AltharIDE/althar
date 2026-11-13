@@ -342,10 +342,10 @@ image proxies keep it after.
 
 ## Screenshots on the pull request
 
-- **What goes is what Outputs shows.** One function (`screenshotsNow`) works
-  out a task's screenshots as it is now, each view once, as last taken. The
-  window draws Outputs by it and the runtime posts by it, so they can't
-  differ.
+- **What goes is what Outputs shows.** One durable collection (`evidenceGallery`) holds
+  each view once, as last reported. Outputs, the latest conversation handoff
+  and the pull-request publisher read that collection. Conversation paging
+  does not change it.
 - **One comment, written anew** as they change, rather than a new comment
   each time. Earlier pictures of a view are folded away under the current
   ones. A hidden mark finds the comment again; a deleted one is posted again.
@@ -376,14 +376,41 @@ what goes.
   between, or an exploration. A change's options stay in the thread and never
   reach Outputs or the pull request. A prototype's Outputs are its
   directions.
-- **A later round replaces earlier ones,** but for the views it takes again
-  and those it names in `kept_views`. A round that only takes known views
-  again leaves the others as they were. A view gone from Outputs leaves the
-  posted comment too.
+- **Follow-ups patch the collection.** A stable `view` identifies a screen or
+  state independently of its caption and filename. New images update that
+  view in place or add another; omission never removes an unrelated view. A
+  detail crop supplements a fresh capture of the affected panel in context.
+- **Retirement and redesign are explicit.** `finish_step.gallery.remove`
+  retires named views, `invalidate` keeps them visible as needing another
+  capture, and `mode: replace` deliberately starts a different selection.
+  These edits require `expected_gallery_revision` from `read_gallery`; a
+  stale revision, an unknown view or conflicting edits refuse the handoff.
+- **Provenance survives.** Older captures remain visible with “From an earlier
+  update”; invalidated views say “Needs a new capture”. The stored time is
+  when evidence was reported, not proof of when it was captured or which
+  commit it depicts. PR images carry that report time, and the header names
+  the PR head rather than claiming every image depicts it. Failed retakes
+  keep the last usable image and mark it for another capture.
+- **One incremental projection.** `evidence_galleries` checkpoints immutable
+  reports by thread and sequence. Reads replay only newer reports through a
+  partial index, in a transaction. The gallery is sent separately from the
+  newest 200 reports; the latest completed handoff renders it in full, while
+  older handoffs keep their historical attachments. Rebuilding the checkpoint
+  yields the same collection.
+- **Existing tasks retain their selection.** Reports made before this protocol
+  replay the old selection rules; the first new handoff patches that
+  baseline. Discarded prototypes do not reappear on migration. Original
+  reports and their artifact links remain in the conversation history.
+- **Record motion as GIF.** GIF recordings retain their original bytes and
+  upload once by digest like stills. Galleries use a bounded still poster
+  decoded by the browser; the lightbox offers Play and Pause, starts paused
+  and stops when changing images. This also respects reduced motion. Video
+  containers are not accepted: convert a short demonstration to GIF.
 
-A round that forgets `kept_views` shows less, never something stale.
 
 ## Changes
+
+- 13 Nov 2026: a task keeps a persistent visual collection across amendments, with explicit retirement and GIF playback.
 
 - 8 Nov 2026: written from the ADRs under Replaces.
 - 8 Nov 2026: the limits sweep (#696) built: a review of the repository's own people gets every lead tool and the network.

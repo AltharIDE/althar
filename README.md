@@ -227,13 +227,15 @@ Open it. The first screen finds the agents on your computer and shows which are 
 
 <img src="brand/export/screenshots/framed/first-run.jpg" width="100%" alt="The first screen: Your agents. Claude Code, Codex, GitHub Copilot and OpenCode are signed in, each on its own plan, and Kimi Code and Junie aren't on this computer yet." />
 
-Claude Code, Codex and Google Antigravity sign in from inside Althar. The others sign in with their own tools:
+Claude Code, Codex, GitHub Copilot and Google Antigravity sign in from inside Althar. The others sign in with their own tools:
 
 ```bash
 opencode auth login
 ```
 
-And `copilot login`, `junie`, `grok login`, `kimi login`, `vibe --setup`, and `qwen` then `/auth`.
+Copilot signs in inside Althar, for personal and work accounts. Its optional CLI connection uses `copilot login`.
+
+And `junie`, `grok login`, `kimi login`, `vibe --setup`, and `qwen` then `/auth`.
 
 Want a hand getting set up? Book 20 minutes with me: [althar.ai/office-hours](https://althar.ai/office-hours). To build it from source instead, see [DEVELOPMENT.md](DEVELOPMENT.md).
 
