@@ -431,12 +431,6 @@ export function TaskView({
   const { client, host: servicesHost } = useServices()
   // Images and files to send with what the person says, and which agents take images.
   const images = useAttachments(kept, servicesHost)
-  const turnUndo = useTurnUndo(
-    model,
-    images,
-    (prompt) => setDraft((current) => withQueued(current, prompt)),
-    () => voice.inputRef.current,
-  )
   const models = useModels()
   // Whether the person has their team's reviews posted once drafted: what a review's reach says it posts.
   const postsTeamReviews = usePostTeamReviews()?.on === true
@@ -543,6 +537,13 @@ export function TaskView({
     [...files.map((file) => `${file.path}:${file.add}:${file.del}`), ...(model.snapshot?.reports ?? []).map((report) => report.id)].join(
       '\n',
     ),
+  )
+  const turnUndo = useTurnUndo(
+    model,
+    images,
+    (prompt) => setDraft((current) => withQueued(current, prompt)),
+    () => voice.inputRef.current,
+    changes,
   )
   // ⌘D opens what the task changed, when it changed something. With its modifier, never set off by typing or by voice.
   const { show } = changes
@@ -1707,6 +1708,10 @@ export function TaskView({
                 ...changes.untouched
                   .filter((path) => !files.some((file) => file.path === path))
                   .map((path) => ({ path, status: 'modified' as const, add: 0, del: 0, untouched: true })),
+                // A refused file can be absent from an older file list, or have been edited back to the task's base.
+                ...turnUndo.reviewFiles
+                  .filter((path) => !files.some((file) => file.path === path) && !changes.untouched.includes(path))
+                  .map((path) => ({ path, status: 'modified' as const, add: 0, del: 0 })),
               ]}
               selected={changes.selected}
               onSelect={changes.select}

@@ -90,6 +90,7 @@ export class RetryRefused extends Schema.TaggedError<RetryRefused>()('RetryRefus
 export class UndoRefused extends Schema.TaggedError<UndoRefused>()('UndoRefused', {
   message: Schema.String,
   files: Schema.Array(Schema.String),
+  why: Schema.optional(Schema.Literals(['edited', 'staged'])),
 }) {}
 
 /** The agent could not be started, or its session could not be set up. */

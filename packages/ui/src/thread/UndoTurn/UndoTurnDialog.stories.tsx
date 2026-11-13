@@ -3,6 +3,8 @@ import { useState } from 'react'
 import { fn } from 'storybook/test'
 
 import { Composer } from '../../composer/Composer/Composer'
+import { ChangeView } from '../../outputs/ChangeView/ChangeView'
+import { DiffLineKind } from '../../foundations/vocabulary'
 import { threadDecorator } from '../../storybook/ThreadFrame'
 import { Markdown } from '../Markdown/Markdown'
 import { Thread } from '../Thread/Thread'
@@ -17,15 +19,23 @@ function Conversation({
   restored = false,
   busy = false,
   error = null,
+  prompt = PROMPT,
+  errorFiles = [],
+  errorKind,
 }: {
   asking?: boolean
   restored?: boolean
   busy?: boolean
   error?: string | null
+  prompt?: string
+  errorFiles?: ReadonlyArray<string>
+  errorKind?: 'edited' | 'staged'
 }) {
   const [open, setOpen] = useState(asking)
   const [undone, setUndone] = useState(restored)
-  const [draft, setDraft] = useState(restored ? PROMPT : '')
+  const [draft, setDraft] = useState(restored ? prompt : '')
+  const [review, setReview] = useState(false)
+  const [reviewed, setReviewed] = useState(false)
   return (
     <>
       <Thread label="Retry checkout">
@@ -36,7 +46,7 @@ function Conversation({
         {!undone && (
           <>
             <You at="1m ago" onUndo={() => setOpen(true)}>
-              {PROMPT}
+              {prompt}
             </You>
             <Turn voice="Lead" at="Just now">
               <Markdown source="The retry limit is now twenty. I removed the backoff and updated the tests in `retry.test.ts`." />
@@ -50,19 +60,49 @@ function Conversation({
           onChange={setDraft}
           onSubmit={fn()}
           placeholder="Reply to the lead…"
-          notice={undone ? <span role="status">Files and conversation restored.</span> : undefined}
+          notice={undone ? <output>Files and conversation restored.</output> : undefined}
         />
       </div>
-      {open && (
+      {open && !review && (
         <UndoTurnDialog
-          prompt={PROMPT}
+          prompt={prompt}
           busy={busy}
-          error={error}
+          error={reviewed ? null : error}
+          errorFiles={errorFiles}
+          errorKind={errorKind}
+          {...(errorFiles.length > 0
+            ? {
+                onReviewEdits: () => {
+                  setReview(true)
+                  setReviewed(true)
+                },
+              }
+            : {})}
           onClose={() => setOpen(false)}
           onUndo={() => {
             setUndone(true)
-            setDraft(PROMPT)
+            setDraft(prompt)
             setOpen(false)
+          }}
+        />
+      )}
+      {review && (
+        <ChangeView
+          branch="althar/retry-checkout"
+          base="main"
+          files={errorFiles.map((path) => ({ path, status: 'modified', add: 1, del: 1, uncommitted: true }))}
+          selected={errorFiles[0] ?? null}
+          onSelect={fn()}
+          onClose={() => setReview(false)}
+          view={{
+            state: 'ready',
+            lines: [
+              { kind: DiffLineKind.Hunk, text: '@@ -8,3 +8,3 @@' },
+              { kind: DiffLineKind.Context, old: 8, new: 8, text: 'export const checkoutPolicy = {' },
+              { kind: DiffLineKind.Removed, old: 9, text: '  maxRetries: 20,' },
+              { kind: DiffLineKind.Added, new: 9, text: '  maxRetries: 5, // manual change' },
+              { kind: DiffLineKind.Context, old: 10, new: 10, text: '}' },
+            ],
           }}
         />
       )}
@@ -83,6 +123,19 @@ export const Available: Story = {}
 export const Confirm: Story = { args: { asking: true } }
 export const Restoring: Story = { args: { asking: true, busy: true } }
 export const LaterEdit: Story = {
-  args: { asking: true, error: 'retry.ts changed after this turn. Keep or move those edits before undoing.' },
+  args: { asking: true, error: 'These files changed after the turn.', errorFiles: ['src/retry.ts'], errorKind: 'edited' },
+}
+export const Staged: Story = {
+  args: { asking: true, error: 'These files have staged changes.', errorFiles: ['src/retry.ts'], errorKind: 'staged' },
+}
+export const LongMessage: Story = {
+  args: {
+    asking: true,
+    prompt:
+      'Raise the retry limit to twenty and remove the exponential backoff in the checkout service. Keep the timeout behavior, preserve the existing error messages, and make sure we do not retry payment authorization. Update the provider adapter and the integration tests as well.',
+    error: 'These files changed after the turn.',
+    errorFiles: ['packages/runtime/src/providers/retry-policy/RetryWithExponentialBackoffAndJitter.ts'],
+    errorKind: 'edited',
+  },
 }
 export const Restored: Story = { args: { restored: true } }

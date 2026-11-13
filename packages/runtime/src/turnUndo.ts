@@ -181,6 +181,7 @@ export const undoConversation = (input: { readonly envelope: CommandEnvelope; re
             return yield* new UndoRefused({
               message: 'This file was edited between the turns being undone. Keep or move those edits first.',
               files: [path],
+              why: 'edited',
             })
           files.set(path, { before: prior?.before ?? point.before, after: point.after })
         }

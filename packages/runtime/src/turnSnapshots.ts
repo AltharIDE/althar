@@ -24,7 +24,8 @@ export interface RestorePlan {
   readonly paths: ReadonlyArray<string>
 }
 
-const refused = (message: string, files: ReadonlyArray<string> = []) => new UndoRefused({ message, files: [...files] })
+const refused = (message: string, files: ReadonlyArray<string> = [], why?: UndoRefused['why']) =>
+  new UndoRefused({ message, files: [...files], ...(why === undefined ? {} : { why }) })
 const names = (text: string) => text.split('\0').filter((path) => path !== '')
 const batches = (paths: ReadonlyArray<string>) =>
   Array.from({ length: Math.ceil(paths.length / 100) }, (_, n) => paths.slice(n * 100, n * 100 + 100))
@@ -106,10 +107,11 @@ const check = (cwd: string, expected: TurnSnapshot, paths: ReadonlyArray<string>
     const current = yield* treeOf(cwd)
     const conflicts = yield* changedPaths(cwd, expected.ref, current, paths)
     if (conflicts.length > 0)
-      return yield* refused('These files changed after the turn. Keep or move those edits before undoing.', conflicts)
+      return yield* refused('These files changed after the turn. Keep or move those edits before undoing.', conflicts, 'edited')
     for (const batch of batches(paths)) {
       const staged = names(yield* gitExactly(cwd, '--literal-pathspecs', 'diff', '--cached', '--name-only', '-z', '--', ...batch))
-      if (staged.length > 0) return yield* refused('Unstage these files before undoing. Their staged changes have been kept.', staged)
+      if (staged.length > 0)
+        return yield* refused('Unstage these files before undoing. Their staged changes have been kept.', staged, 'staged')
     }
   })
 

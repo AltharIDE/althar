@@ -121,6 +121,15 @@ describe('chat undo safety boundaries', () => {
     assert.strictEqual(format({}), message)
     assert.strictEqual(format({ files: [] }), message)
     assert.strictEqual(format({ files: ['README.md', 'src/retry.ts'] }), `${message} README.md, src/retry.ts`)
+    assert.deepStrictEqual(
+      words({ _tag: 'UndoRefused', message, files: ['src/retry.ts'], why: 'edited' }, (id) => id),
+      {
+        reason: 'UndoRefused',
+        message: `${message} src/retry.ts`,
+        why: 'edited',
+        detail: '["src/retry.ts"]',
+      },
+    )
   })
   it.live('leaves queued, missing and incompletely checkpointed messages intact', () =>
     Effect.gen(function* () {

@@ -487,6 +487,16 @@ export const words = (
         return agentSaid(error) ?? "Althar's runtime couldn't do that. Its log has the details."
     }
   })()
+  // Undo names its affected files separately, so the window can open their changes without parsing prose.
+  if (reason === 'UndoRefused') {
+    const files = fieldOf(error, 'files')
+    return {
+      reason,
+      message,
+      ...(text(error, 'why') === '' ? {} : { why: text(error, 'why') }),
+      ...(Array.isArray(files) && files.length > 0 ? { detail: JSON.stringify(files) } : {}),
+    }
+  }
   // A merge that conflicts says in which files, for the window to have the lead settle them, or say it is.
   if (reason === 'CantMerge') return { reason, message, why: text(error, 'why'), detail: text(error, 'detail') }
   // A push refused says why, for the window to offer what puts it right: bringing the remote's commits in.
