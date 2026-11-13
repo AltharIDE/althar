@@ -102,7 +102,7 @@ export type Part =
       readonly id: string
       readonly text: string
       readonly tone: 'info' | 'warning' | 'error'
-      /** What the line offers: parts set up twice, kept as a preset, or a review a lead or the coordinator offered a task. */
+      /** What the line offers: a review a lead or the coordinator offered a task. */
       readonly offer?: Offer
       /** For an agent's turn that failed: why, as the runtime classes it (`auth_required`…), and the agent's own words, apart. */
       readonly failure?: string
@@ -132,6 +132,20 @@ export type SettingChangeContent = Extract<ThreadItem, { kind: 'setting' }>['con
 export type SmallChangeContent = Extract<ThreadItem, { kind: 'small_change' }>['content']
 export type ModelMoveContent = Extract<ThreadItem, { kind: 'model_move' }>['content']
 export type MergeLineContent = Extract<ThreadItem, { kind: 'merge_line' }>['content']
+
+/**
+ * How a setup stands: under way; stopped as Althar quit; gone through; or
+ * failed, as its command did, or as it couldn't copy a file a recorded setup
+ * names (ADR-080), though its command exited 0. The one rule the thread's
+ * line for it and its round's fold both read.
+ */
+export const setupStanding = (setup: SetupContent): 'running' | 'stopped' | 'done' | 'failed' | 'missing' => {
+  const { ended } = setup
+  if (ended === null) return 'running'
+  if (ended.stopped) return 'stopped'
+  if (ended.code !== 0) return 'failed'
+  return (ended.missing?.length ?? 0) > 0 ? 'missing' : 'done'
+}
 
 export type Block =
   | {
@@ -189,7 +203,7 @@ export type Block =
     }
   /** The person stopped the agent's turn here. */
   | { readonly kind: 'interrupted'; readonly id: string }
-  /** What the coordinator offers to keep, such as parts set up twice as a preset (a task is a conversation plus parts): its line and button. */
+  /** A review a lead or the coordinator offers a task: its line and its buttons. */
   | {
       readonly kind: 'offer'
       readonly id: string
@@ -940,7 +954,7 @@ export const blocksOf = (
           blocks.push({ kind: 'interrupted', id: item.id })
           continue
         }
-        // What Althar offers to keep, such as a preset, stands on its own with its button.
+        // A review offered a task stands on its own with its buttons.
         if (item.content.offer !== undefined) {
           blocks.push({
             kind: 'offer',

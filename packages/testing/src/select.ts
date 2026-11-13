@@ -446,6 +446,16 @@ export const repository = (root = '.'): Repository => ({
   },
 })
 
+/** Full runtime coverage replaces its selected tests in the queue, while its checks still gate once. */
+export const coveredRuntime = (jobs: ReadonlyArray<Job>): ReadonlyArray<Job> =>
+  jobs.flatMap((job) => {
+    const parts = job.parts
+      .map((part): Part => (part.dir === 'packages/runtime' ? { dir: part.dir, check: part.check, tests: [] } : part))
+      .filter((part) => part.check || part.tests === 'all' || part.tests.length > 0)
+    if (parts.length === 0) return []
+    return [{ name: parts.every((part) => part.dir === 'packages/runtime') ? 'packages/runtime checks' : job.name, parts }]
+  })
+
 const describe = (part: Part) =>
   `${part.dir}: ${part.check ? 'checks, ' : ''}${part.tests === 'all' ? 'all its tests' : `${part.tests.length} of its tests`}${part.shard === undefined ? '' : `, part ${part.shard}`}`
 
@@ -489,11 +499,15 @@ if (
     .split('\n')
     .filter((line) => line.trim() !== '')
   const planned = plan(changed, repository(), workflow, { draft: process.env.DRAFT === 'true' })
+  const runtime = planned.jobs.some((job) => job.parts.some((part) => part.dir === 'packages/runtime'))
+  const covered = workflow === 'harness' && process.env.RUNTIME_COVERAGE === 'true' && runtime
+  const jobs = covered ? coveredRuntime(planned.jobs) : planned.jobs
   appendFileSync(
     output,
     [
-      `jobs=${JSON.stringify(planned.jobs)}`,
-      `any=${planned.jobs.length > 0}`,
+      `jobs=${JSON.stringify(jobs)}`,
+      `any=${jobs.length > 0}`,
+      `runtime=${runtime}`,
       `e2e=${planned.e2e}`,
       `windows-e2e=${planned.windowsE2e}`,
       '',
@@ -503,8 +517,9 @@ if (
     `### What ${workflow} runs`,
     '',
     ...planned.why.map((line) => `- ${line}`),
-    ...planned.jobs.flatMap((job) => job.parts.map((part) => `- ${describe(part)}`)),
-    ...(planned.jobs.length === 0 ? ['- No checks or tests: nothing it changed reaches them.'] : []),
+    ...jobs.flatMap((job) => job.parts.map((part) => `- ${describe(part)}`)),
+    ...(covered ? ['- The runtime’s full suite runs once with coverage; its selected tests are covered there.'] : []),
+    ...(jobs.length === 0 && !covered ? ['- No checks or tests: nothing it changed reaches them.'] : []),
     ...(LAYOUT[workflow].e2e
       ? [`- The end-to-end run: ${planned.e2e ? 'yes' : 'no'}. Windows' smoke test: ${planned.windowsE2e ? 'yes' : 'no'}.`]
       : []),

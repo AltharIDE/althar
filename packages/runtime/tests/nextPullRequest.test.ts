@@ -29,7 +29,19 @@ import { fakeConnectors, HOST, hosted, notices, runtime, until } from './support
 
 const runtimeWith = (github: FakeService) =>
   Queries.layer.pipe(
-    Layer.provideMerge(runtime(':memory:', {}, { connectors: fakeConnectors({ github }), listenEvery: Duration.hours(1) })),
+    Layer.provideMerge(
+      runtime(
+        ':memory:',
+        {},
+        {
+          connectors: fakeConnectors({ github }),
+          listenEvery: Duration.hours(1),
+          // What follows a lead's turn — reading its folders' branches, and the pull requests the host has — runs on its own
+          // after it; a test that counts git's runs wants only what the card's own read does.
+          idle: { reports: Duration.hours(1) },
+        },
+      ),
+    ),
   )
 
 const git = (cwd: string, ...args: Array<string>) =>

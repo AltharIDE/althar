@@ -393,8 +393,11 @@ describe('the home', () => {
     const { client } = fakeClient({ getHome: vi.fn(async () => busy()) })
     withServices(<Home />, client)
     const projects = await screen.findByRole('complementary', { name: 'Projects' })
-    // The work in progress is in its project's row, which says only what is off: the stopped one and the one waiting.
-    expect(within(projects).getByText('1 stopped · 1 waiting')).toBeTruthy()
+    // The work in progress is in its project's row, which says only what is off: the one waiting. The stopped one waits on the
+    // person, in Needs you, as on its board.
+    expect(within(projects).getByText('1 waiting')).toBeTruthy()
+    const needs = screen.getByRole('region', { name: /needs? you/ })
+    expect(within(within(needs).getByRole('article', { name: 'Stopped work' })).getByText('Stopped')).toBeTruthy()
     // Which agents are signed in is for settings, not the home.
     expect(within(projects).queryByText(/Claude Code|Codex|OpenCode/)).toBeNull()
   })
@@ -494,9 +497,9 @@ describe('the home', () => {
     withServices(<Home />, client)
     const needs = await screen.findByRole('region', { name: /needs? you/ })
     const projects = screen.getByRole('complementary', { name: 'Projects' })
-    expect(within(projects).getByText('1 stopped')).toBeTruthy()
+    expect(within(projects).queryByText(/waiting/)).toBeNull()
     await userEvent.click(within(needs).getByRole('button', { name: 'Allow once' }))
-    expect(await within(projects).findByText('1 stopped · 1 waiting')).toBeTruthy()
+    expect(await within(projects).findByText('1 waiting')).toBeTruthy()
   })
 
   it('says under its project what tasks waiting for a free agent wait for, and doesn’t count them as moving', async () => {

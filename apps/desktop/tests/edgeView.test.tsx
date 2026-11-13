@@ -125,7 +125,7 @@ describe('the edge', () => {
     expect(screen.getByText('1 in progress')).toBeTruthy()
   })
 
-  it('says why a stuck task waits and what a change is, and counts the work held and stopped', async () => {
+  it('says why a stuck task waits and what a change is, lists one stopped, and counts the work held', async () => {
     const host = fakeHost()
     const stuck: HomeCall = {
       ...permission,
@@ -151,7 +151,9 @@ describe('the edge', () => {
     expect(within(screen.getByRole('article', { name: 'Name the limits better' })).getByText(/#1191 · .+ · \+212 −41$/)).toBeTruthy()
     await userEvent.click(within(stalled).getByRole('button', { name: 'Open' }))
     expect(host.openInWindow).toHaveBeenCalledWith('th4')
-    expect(screen.getByText('3 in progress · 1 held · 1 stopped')).toBeTruthy()
+    // Stopped, it waits on the person, as on its board: not work in progress.
+    expect(within(screen.getByRole('article', { name: 'Left alone' })).getByText('Stopped')).toBeTruthy()
+    expect(screen.getByText('2 in progress · 1 held')).toBeTruthy()
   })
 
   it('brings back a call whose answer didn’t go through, and says why', async () => {
@@ -280,6 +282,18 @@ describe('the edge', () => {
     await waitFor(() => expect(within(region).getAllByText('Permission')).toHaveLength(2))
     expect(within(region).getAllByText('halyard')).toHaveLength(2)
     expect(screen.getByRole('button', { name: '1 needs you' })).toBeTruthy()
+  })
+
+  it('counts a task the person stopped, without saying it as it comes', async () => {
+    let tasks: ReadonlyArray<HomeTask> = [running]
+    const { client, emit } = fakeClient({ getHome: vi.fn(async () => home({ tasks, projects: [project, halyard] })) })
+    withServices(<Edge />, client)
+    await screen.findByRole('button', { name: 'Nothing needs you' })
+    tasks = [{ ...running, phase: 'stopped', stopped: { by: 'interrupted', at: '2026-10-07T09:30:00.000Z' } }]
+    act(() => emit(changed('card', running.taskId, running.threadId, running.projectId)))
+    expect(await screen.findByRole('button', { name: '1 needs you' })).toBeTruthy()
+    // On its line in the sheet, but nothing beside the notch.
+    expect(within(screen.getByRole('region', { name: 'Althar' })).getAllByText('Stopped')).toHaveLength(1)
   })
 
   it('opens as the pointer comes onto it, as the main process watches it, and says where it draws', async () => {

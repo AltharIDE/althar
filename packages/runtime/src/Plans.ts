@@ -77,8 +77,11 @@ export class Plans extends Context.Service<
       readonly here?: boolean
       /** A review of someone else's pull request, its one step its lead (`PlanParameters.reads`). */
       readonly reads?: boolean
-      /** No card in the coordinator's conversation: an aside's, which has a tab of its own there instead. */
-      readonly card?: false
+      /**
+       * An aside the person started (`PlanParameters.aside`): no card in the coordinator's conversation, where it has a pill of
+       * its own instead, and its first step ends with its lead's turn.
+       */
+      readonly aside?: boolean
       /** The fast lane: reviewed after it merges, not before (`PlanParameters.reviewAfterMerge`). */
       readonly reviewAfterMerge?: boolean
       /** Where it works (ADR-091), and why, where that isn't the project's default (`PlanParameters.worksIn`). */
@@ -183,6 +186,7 @@ export class Plans extends Context.Service<
           end?: TaskEnd | null
           endChosen?: boolean
           here?: boolean
+          aside?: boolean
           reads?: boolean
           worksIn?: WorksIn
           worksInWhy?: string | null
@@ -233,6 +237,7 @@ export class Plans extends Context.Service<
                     end: input.end ?? null,
                     ...(input.endChosen === true ? { endChosen: true } : {}),
                     ...(input.here === true ? { here: true } : {}),
+                    ...(input.aside === true ? { aside: true } : {}),
                     ...(input.reads === true ? { reads: true } : {}),
                     ...(input.reviewAfterMerge === true ? { reviewAfterMerge: true } : {}),
                     ...(input.worksIn === undefined ? {} : { worksIn: input.worksIn }),
@@ -255,7 +260,7 @@ export class Plans extends Context.Service<
                 })
               }),
             )
-            if (input.card !== false) yield* postCard(input.projectId, input.taskId)
+            if (input.aside !== true) yield* postCard(input.projectId, input.taskId)
             yield* Queue.offer(wake, undefined)
             return planId
           }),
@@ -274,11 +279,14 @@ export class Plans extends Context.Service<
           )
           const plan = yield* load(planId)
           const parameters = parametersOf(plan)
-          // The same parts set up twice running: the coordinator offers them as a preset, once (a task is a conversation plus parts).
+          // Parts the person set up themselves, alike a few times: its card offers them as a preset, once (a task is a conversation plus parts).
           if (accepted)
-            yield* offerPreset(plan.projectId, instance.coordinatorId).pipe(
-              Effect.catchCause((cause) => Effect.logWarning('Could not offer a preset', cause)),
-            )
+            yield* offerPreset({
+              projectId: plan.projectId,
+              taskId: plan.taskId,
+              personId: instance.personId,
+              actorId: instance.coordinatorId,
+            }).pipe(Effect.catchCause((cause) => Effect.logWarning('Could not offer a preset', cause)))
           if (parameters.reads === true) {
             // A review's lead starts in its thread; accepted before, it started then, or its thread says why it couldn't.
             const [lead] = parameters.steps
@@ -378,6 +386,7 @@ export class Plans extends Context.Service<
                   // A card sends the ending it shows with every change: only another one than the plan had is the person's choice.
                   ...(before.endChosen === true || (end !== undefined && end !== (before.end ?? null)) ? { endChosen: true } : {}),
                   ...(before.here === true ? { here: true } : {}),
+                  ...(before.aside === true ? { aside: true } : {}),
                   ...(before.reads === true ? { reads: true } : {}),
                   ...(where === undefined ? {} : { worksIn: where }),
                   ...(why == null ? {} : { worksInWhy: why }),

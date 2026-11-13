@@ -6,8 +6,8 @@ import s from './TaskMenu.module.css'
 
 /*
  * What you can do with a task as a whole, from its bar, by intent. First what
- * moves it on where it stands (start its plan now or change who does it, mark its draft pull
- * request ready, skip the review under way, resume it, reopen it) and what
+ * moves it on where it stands (start its plan now or change who does it, make a
+ * prototype or a chat a change, mark its draft pull request ready, skip the review under way, resume it, reopen it) and what
  * you do with it (rename it, open its folder in an editor, attach a pull
  * request it didn't open). Then its own two settings, changed in place:
  * whether its lead resolves a conflict with the default branch on its own,
@@ -43,6 +43,9 @@ export interface TaskMenuText {
   /** Takes its plan out of the line, or stops its countdown, until it is started. */
   hold: string
   changeTeam: string
+  /** Makes it a change in one move: a reviewer on, and a pull request to end in; and what that does, at the menu's foot. */
+  makeChange: string
+  makeChangeAbout: string
   markReady: string
   attach: string
   /** Its parts kept as a preset of the person's own (a task is a conversation plus parts). */
@@ -81,6 +84,8 @@ export const taskMenuText: TaskMenuText = {
   startNow: 'Start now',
   hold: 'Hold',
   changeTeam: 'Change the team…',
+  makeChange: 'Make it a change',
+  makeChangeAbout: 'Adds a reviewer and a pull request. Ship reviews it, then opens the pull request.',
   markReady: 'Mark ready for review',
   attach: 'Attach a pull request…',
   savePreset: 'Save as preset',
@@ -119,6 +124,8 @@ export interface TaskMenuProps {
   onHold?: () => void
   /** Changes who does its plan's steps, while nothing of it has begun: the consumer opens the team. */
   onChangeTeam?: () => void
+  /** Makes a prototype, a chat or a quick task a change: a reviewer on, and a pull request to end in. */
+  onMakeChange?: () => void
   /** Marks its draft pull request ready for review. */
   onMarkReady?: () => void
   /** Attaches it to an open pull request it didn't open; the consumer asks which. */
@@ -168,6 +175,7 @@ export function TaskMenu({
   onStartNow,
   onHold,
   onChangeTeam,
+  onMakeChange,
   onMarkReady,
   onAttach,
   onSavePreset,
@@ -213,6 +221,11 @@ export function TaskMenu({
     onChangeTeam && (
       <MenuItem key="team" icon="agents" onSelect={onChangeTeam}>
         {t.changeTeam}
+      </MenuItem>
+    ),
+    onMakeChange && (
+      <MenuItem key="make-change" icon="pr" description={t.makeChangeAbout} onSelect={onMakeChange}>
+        {t.makeChange}
       </MenuItem>
     ),
     onMarkReady && (

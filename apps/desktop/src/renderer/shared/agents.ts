@@ -1,7 +1,11 @@
-import type { AgentStatus, HeldForConnection, Queued } from '@althar/contracts'
+import type { AgentStatus, HeldForConnection, HeldForExternal, Queued } from '@althar/contracts'
 import { Brand, type PinnedDownload } from '@althar/ui'
 
 import { device } from './device'
+
+/** A quiet wait names the condition and when it will next be checked, without an idle work clock. */
+export const externalWaitWords = (wait: HeldForExternal, clock: (at: string) => string) =>
+  `Waiting: ${wait.reason}. ${wait.lastCheck === null ? 'Not checked yet' : `Last checked ${clock(wait.lastCheck)}`}; next check ${clock(wait.nextCheck)}.${wait.error === null ? '' : ` ${wait.error}`}`
 
 /*
  * How an agent is drawn: its mark, and its words. Who works is named by

@@ -195,6 +195,17 @@ describe('what a task hears', () => {
     await waitFor(() => expect(client.getThread).toHaveBeenCalledWith('th1', { limit: 0 }))
   })
 
+  it('says nothing of an item its thread keeps for Althar alone, such as what its lead could see: it draws nothing of it', async () => {
+    // Its lead's session starting writes a line of the skills it could see, which the window hears of but never shows.
+    const { result, emit, client } = reading({ items: [items.says('Hi.'), { ...items.says('Kept for Althar'), id: 'k1' }] })
+    await waitFor(() => expect(result.current.snapshot).not.toBeNull())
+    vi.mocked(client.getThreadItem).mockResolvedValue(null)
+    act(() => emit(changed('thread_item', 'k1')))
+    await waitFor(() => expect(result.current.snapshot?.items.map((item) => item.id)).not.toContain('k1'))
+    expect(client.getThreadItem).toHaveBeenCalledWith('th1', 'k1')
+    expect(result.current.error).toBeNull()
+  })
+
   it('reads again what still waits its turn once a message is delivered', async () => {
     const queued = { ...items.you('Then the docs', { state: 'queued', interrupting: false }), id: 'q1' }
     const { result, emit, client } = reading({ items: [items.says('On it.'), queued] })

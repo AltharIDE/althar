@@ -1,4 +1,13 @@
-import type { AgentStatus, BoardCall, BoardTask, ChangeSummary, HeldForShip, PlanStep, ReviewBrief } from '@althar/contracts'
+import {
+  type AgentStatus,
+  type BoardCall,
+  type BoardTask,
+  type ChangeSummary,
+  type HeldForShip,
+  issuesWordOf,
+  type PlanStep,
+  type ReviewBrief,
+} from '@althar/contracts'
 import {
   Board,
   BoardCard,
@@ -42,7 +51,7 @@ import { Fragment, type ReactNode, useEffect, useState } from 'react'
 
 import { pictureUrl } from '../../../main/pictureAddress'
 import { taskStatusOf } from '../../shared/taskStatus'
-import { busyWords, inLineWords, reconnectsWords, waitsWords } from '../../shared/agents'
+import { busyWords, externalWaitWords, inLineWords, reconnectsWords, waitsWords } from '../../shared/agents'
 import { localText } from '../../shared/local'
 import { askOf, callKindOf, isAnswered, isSettleable, kindWords, takesDone, whereOf } from '../../shared/calls'
 import { moreOf as questionMore } from '../../shared/questions'
@@ -66,7 +75,7 @@ import { text as stuckText } from '../task/StuckCall'
 import { canHold, teamChangeOf, TeamMenu } from '../team/Team'
 import { arrivesQuietly, markArrived, watch } from './arrived'
 import s from './Board.module.css'
-import { type Held, heldOf, holding, type Lanes, movesInLine, type Waiting } from './lanes'
+import { type Held, heldOf, holding, type Lanes, movesInLine, type Waiting, yoursOf } from './lanes'
 import type { LineActions } from './useBoard'
 import type { WorkActions } from './useWorkActions'
 
@@ -457,22 +466,24 @@ const runningCard = (work: BoardTask, now: string, name: (id: string | null) => 
   // stands is its card's, as its header and the home say it (`taskStatusOf`).
   const status = taskStatusOf(work)
   const still: Pick<Card, 'status' | 'word' | 'why'> | null =
-    status === TaskStatus.Paused && work.waits !== null
-      ? {
-          status,
-          word: text.status[status],
-          why: waitsWords(name(work.waits.agentId), clock(work.waits.until), undefined, work.waits.left),
-        }
-      : status === TaskStatus.Paused && work.reconnects != null
-        ? { status, word: text.status[status], why: reconnectsWords(work.reconnects, clock) }
-        : status === TaskStatus.Queued
-          ? { status, word: text.status[status], ...(work.queued === null ? {} : { why: busyWords(work.queued) }) }
-          : status === TaskStatus.Stopped
-            ? { status, word: text.status[status], ...(work.stopped?.by == null ? {} : { why: text.stoppedBy[work.stopped.by] }) }
-            : // Its folder set up before its lead starts: what holds it, in place of the step its lead hasn't begun.
-              work.settingUp != null
-              ? { status: TaskStatus.Running, word: text.settingUp[work.settingUp] }
-              : null
+    status === TaskStatus.Running && work.externalWait !== undefined
+      ? { status, word: 'Waiting', why: externalWaitWords(work.externalWait, clock) }
+      : status === TaskStatus.Paused && work.waits !== null
+        ? {
+            status,
+            word: text.status[status],
+            why: waitsWords(name(work.waits.agentId), clock(work.waits.until), undefined, work.waits.left),
+          }
+        : status === TaskStatus.Paused && work.reconnects != null
+          ? { status, word: text.status[status], why: reconnectsWords(work.reconnects, clock) }
+          : status === TaskStatus.Queued
+            ? { status, word: text.status[status], ...(work.queued === null ? {} : { why: busyWords(work.queued) }) }
+            : status === TaskStatus.Stopped
+              ? { status, word: text.status[status], ...(work.stopped?.by == null ? {} : { why: text.stoppedBy[work.stopped.by] }) }
+              : // Its folder set up before its lead starts: what holds it, in place of the step its lead hasn't begun.
+                work.settingUp != null
+                ? { status: TaskStatus.Running, word: text.settingUp[work.settingUp] }
+                : null
   const beforeWork = work.queued !== null && work.inLine === true
   const base = {
     kind: kindOf(work),
@@ -481,7 +492,7 @@ const runningCard = (work: BoardTask, now: string, name: (id: string | null) => 
     title: work.title,
     ...fromOf(work),
     // Waiting before its first step has had an agent, nothing has run: no clock.
-    ...(work.startedAt === null || beforeWork ? {} : { at: running(work.startedAt, now) }),
+    ...(work.startedAt === null || beforeWork || work.externalWait !== undefined ? {} : { at: running(work.startedAt, now) }),
   }
   switch (work.kind) {
     case 'plain':
@@ -627,6 +638,17 @@ export const waitingCardOf = ({ task, call }: Waiting, name: (id: string | null)
   })
 }
 
+/** A task that waits on issues its lead drafted, or changes it proposed to its issue: what to do, in its task, where they are. */
+export const issuesCardOf = (work: BoardTask): Card => ({
+  status: TaskStatus.Yours,
+  kind: kindOf(work),
+  ...localOf(work),
+  ...towardOf(work),
+  title: work.title,
+  ...fromOf(work),
+  word: issuesWordOf(work.issues),
+})
+
 /**
  * A ready task's card: a change to accept, with its pull request and checks; a review drafted; or a plain task that finished, with
  * what it handed back, or else its branch, where its lead wrote in the repository: on this Mac, as no pull request is coming.
@@ -700,7 +722,7 @@ const readyCard = (work: BoardTask, actions?: CardActions): Card => {
       return {
         ...base,
         // Handed back (a conflict its lead couldn't resolve) says so first; else commits in no pull request yet; as its header says.
-        word: readyWordOf(work, work.change),
+        word: readyWordOf(work),
         ...(object === null ? {} : { object }),
         // Nothing built: no accept to press; what its lead leaves to the person, and Done, which settles it where it is, in its corner.
         ...(work.nothingBuilt === true ? { ...(ask === null ? {} : { why: ask }), corner: settleWaysOf(work, actions) } : {}),
@@ -1247,7 +1269,7 @@ export function BoardView({
         ))}
       </BoardColumn>
 
-      <BoardColumn lane={BoardLane.Yours} count={asks.length + lanes.stopped.length + lanes.ready.length}>
+      <BoardColumn lane={BoardLane.Yours} count={yoursOf(lanes)}>
         {asks.map((ask) =>
           ask.waiting !== null ? (
             <BoardCard
@@ -1262,6 +1284,16 @@ export function BoardView({
             <CallCard key={ask.call.id} data-move={ask.call.id} {...callCardOf(ask.call, name)} onOpen={() => onOpen(ask.call.threadId)} />
           ),
         )}
+        {lanes.issues.map((work) => (
+          <BoardCard
+            key={work.taskId}
+            data-move={work.taskId}
+            {...issuesCardOf(work)}
+            {...parentOf(work, onOpen)}
+            errands={work.errands}
+            onOpen={() => onOpen(work.threadId)}
+          />
+        ))}
         {lanes.stopped.map((work) => (
           <BoardCard
             key={work.taskId}

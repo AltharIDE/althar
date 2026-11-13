@@ -1,13 +1,14 @@
+import { issuesWordOf, readyWordOf } from '@althar/contracts'
 import type { WorkNeed } from '@althar/ui'
 
-import { callKindOf, readyKindOf, whereOf } from '../../shared/calls'
+import { callKindOf, kindWords, whereOf } from '../../shared/calls'
 import { callCardOf, text } from './BoardView'
 import type { Lanes } from './lanes'
 
 /*
  * What waits on the person in a project, as the bar's count previews it:
- * every call, a task's once, then work ready to accept, in the board's
- * order.
+ * every call, a task's once, then what waits on issues to file, what
+ * stopped, then work ready to accept, in the board's order.
  * Each opens its task, where it is answered or accepted; the count itself
  * opens the first. On a task's screen (`here`, its thread), that task is
  * listed but opens nothing, and the count opens the first of the others.
@@ -43,9 +44,16 @@ export const needsOf = (
       onOpen: () => onTask(call.threadId),
     }
   }),
+  ...lanes.issues.map((work) => ({
+    id: work.taskId,
+    kind: issuesWordOf(work.issues),
+    title: work.title,
+    ...(work.threadId === here ? { here: true } : {}),
+    onOpen: () => onTask(work.threadId),
+  })),
   ...lanes.stopped.map((work) => ({
     id: work.taskId,
-    kind: text.status.stopped,
+    kind: kindWords.stopped,
     title: work.title,
     ...(work.stopped?.by == null ? {} : { meta: text.stoppedBy[work.stopped.by] }),
     ...(work.threadId === here ? { here: true } : {}),
@@ -62,7 +70,7 @@ export const needsOf = (
           : `${change.short} ${change.prefix}${change.number}`
     return {
       id: work.taskId,
-      kind: readyKindOf(work),
+      kind: readyWordOf(work),
       title: work.title,
       ...(work.checksBack != null
         ? { meta: work.checksBack }
@@ -82,6 +90,7 @@ export const firstNeedOf = (lanes: Lanes, here: string | null = null): string | 
   [
     ...lanes.waiting.map(({ task }) => task.threadId),
     ...lanes.calls.map((call) => call.threadId),
+    ...lanes.issues.map((work) => work.threadId),
     ...lanes.stopped.map((work) => work.threadId),
     ...lanes.ready.map((work) => work.threadId),
   ].find((threadId) => threadId !== here) ?? null
