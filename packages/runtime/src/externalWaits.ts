@@ -146,14 +146,17 @@ export const observeExternal = (condition: ExternalWait['conditions'][number]) =
     }
     const pull = yield* host.change(repository, target.number, { queue: true })
     const name = `${target.repository}#${target.number}`
+    if (pull.state === 'closed' && target.until !== 'changed')
+      return {
+        met: false,
+        seen: pull.state,
+        blocked: `${name} was closed without merging. Decide whether to reopen it or change the goal.`,
+      }
     if (target.until === 'merged')
       return {
         met: pull.state === 'merged',
         seen: pull.state,
         summary: `${name}: ${pull.state}.`,
-        ...(pull.state === 'closed'
-          ? { blocked: `${name} was closed without merging. Decide whether to reopen it or change the goal.` }
-          : {}),
       }
     if (target.until === 'changed') {
       const checks = pull.headSha === null ? [] : yield* host.checks(repository, pull.headSha, { strict: true })
@@ -176,8 +179,6 @@ export const observeExternal = (condition: ExternalWait['conditions'][number]) =
         summary: `${name} changed; read its current state before acting.`,
       }
     }
-    if (pull.state !== 'open')
-      return { met: true, seen: pull.state, summary: `${name} is ${pull.state}; there are no open-PR checks to wait for.` }
     if (pull.headSha === null) return { met: false, summary: `${name}: its head is not known yet.` }
     return observedChecks(target, yield* host.checks(repository, pull.headSha, { strict: true }), pull.headSha)
   }).pipe(Effect.timeout(Duration.seconds(30)))
