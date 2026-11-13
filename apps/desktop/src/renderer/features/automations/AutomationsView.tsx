@@ -11,6 +11,7 @@ import { useNow } from '../../shared/time'
 import { AutomationCardOf } from './AutomationCardOf'
 import { type AutomationModel, useAutomation, useAutomations, useNewAutomation } from './useAutomations'
 import {
+  activeRun,
   endsInPullRequest,
   inOrder,
   LATE,
@@ -56,7 +57,7 @@ const tileOf = (one: AutomationSummary, allPaused: boolean, now: Date): Automati
     tone: standing.tone,
     paused: standing.paused,
     prompt: one.prompt,
-    ...(standing.tone === 'yours' ? { why: one.pauseReason ?? text.why } : {}),
+    ...(one.state === 'paused' && one.pausedBy === 'itself' ? { why: one.pauseReason ?? text.why } : {}),
     runs: one.latest.map((run) => markOf(run, now)),
   }
 }
@@ -173,6 +174,7 @@ function Page({
     )
   const standing = standingOf(view, view.allPaused, now)
   const definition = view.definition
+  const currentTask = activeRun(view.runs)?.task
   return (
     <AutomationPage
       name={view.name}
@@ -184,13 +186,14 @@ function Page({
       on={view.state === 'on'}
       onSwitch={(on) => (on ? model.turnOn() : model.pause())}
       onRunNow={model.runNow}
+      {...(currentTask == null ? {} : { onOpenCurrentRun: () => onTask(currentTask.threadId) })}
       onTryOnce={model.runNow}
       onTurnOn={model.turnOn}
       onRename={(name) => model.change({ ...definition, name })}
       // oxlint-disable-next-line althar/press-at-once -- Not instant yet: a failed delete has nowhere to say so once its view is gone (foundations.md, The UI is instant).
       onDelete={() => void model.remove().then((removed) => removed && onBack())}
       onBack={onBack}
-      {...(standing.tone === 'yours' ? { pausedItself: view.pauseReason ?? text.why } : {})}
+      {...(view.state === 'paused' && view.pausedBy === 'itself' ? { pausedItself: view.pauseReason ?? text.why } : {})}
       card={
         <AutomationCardOf
           definition={definition}

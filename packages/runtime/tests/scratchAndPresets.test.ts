@@ -18,6 +18,7 @@ import { shelve } from '../src/scratch'
 import { Sessions } from '../src/Sessions'
 import { ToolServer, type ToolAccess } from '../src/ToolServer'
 import { callTool, fakeConnectors, HOST, hosted, items, runtime, until } from './support'
+import { knownModels } from './knownModels'
 
 /*
  * Chats on Scratch, the parts tools and presets (a task is a conversation
@@ -271,6 +272,7 @@ describe('presets', () => {
         }))
       const planned = (title: string, slug: string, preset: string, small?: boolean) =>
         Effect.gen(function* () {
+          yield* knownModels
           yield* callTool(coordinator, 'draft_task', { title })
           yield* callTool(coordinator, 'propose_plan', {
             task: slug,

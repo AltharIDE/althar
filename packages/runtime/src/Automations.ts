@@ -134,6 +134,7 @@ interface OccurrenceRow {
   readonly taskId: string | null
   readonly threadId: string | null
   readonly title: string | null
+  readonly waiting: number
 }
 
 /** What an automation's run found to do: a pull request to review, as its listing gave it, and how a review names it. */
@@ -1374,7 +1375,10 @@ export class Automations extends Context.Service<
         at: row.firedAt,
         subject: row.subjectTitle,
         reason: row.reason,
-        task: row.taskId === null || row.threadId === null ? null : { id: row.taskId, threadId: row.threadId, title: row.title ?? '' },
+        task:
+          row.taskId === null || row.threadId === null
+            ? null
+            : { id: row.taskId, threadId: row.threadId, title: row.title ?? '', needsYou: row.waiting > 0 },
       })
 
       /** An automation's runs, newest first: a slot that started reviews shows its reviews, and itself only where it has more to say. */
@@ -1383,7 +1387,8 @@ export class Automations extends Context.Service<
           const sql = yield* SqlClient.SqlClient
           const rows = yield* sql<OccurrenceRow>`
             SELECT o.id, o.cause, o.slot, o.subject, o.subject_title, o.state, o.reason, o.due_at, o.fired_at, o.task_id,
-              h.id AS thread_id, k.title
+              h.id AS thread_id, k.title,
+              EXISTS (SELECT 1 FROM attention_requests a WHERE a.task_id = k.id AND a.state = 'open') AS waiting
             FROM automation_occurrences o
             LEFT JOIN tasks k ON k.id = o.task_id LEFT JOIN threads h ON h.task_id = o.task_id AND h.kind = 'task'
             WHERE o.automation_id = ${automationId}
