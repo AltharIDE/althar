@@ -5,6 +5,7 @@ import type { RootProps } from '../../lib/props'
 import { Rhythm } from '../../lib/rhythm'
 import { AskCard } from '../../primitives/Ask/Ask'
 import { Button } from '../../primitives/Button/Button'
+import { MergeButton } from '../../primitives/MergeButton/MergeButton'
 import { HoverCard } from '../../primitives/HoverCard/HoverCard'
 import { LinkButton } from '../../primitives/LinkButton/LinkButton'
 import { Menu, MenuRadioGroup, MenuRadioItem } from '../../primitives/Menu/Menu'
@@ -150,6 +151,7 @@ export type SmallChangeProps = RootProps<
     onOpen?: () => void
     /** Merge asks first, as every merge does; offered once it is ready. */
     onMerge?: () => void
+    onBypassQueue?: () => void
     /** Changes when its review reads it, until it merges: before it makes it a full task. Without it, the stop is no button. */
     onReview?: (when: SmallChangeReviewWhen) => void
     /** Takes the person to what its review found, in the thread. */
@@ -172,6 +174,7 @@ export function SmallChange({
   explain,
   onOpen,
   onMerge,
+  onBypassQueue,
   onReview,
   onFindings,
   onOpenReview,
@@ -329,18 +332,20 @@ export function SmallChange({
         )}
       </ol>
       {/* What waits on the person sits under its stop: Merge under Merge, See findings under Review. */}
-      {ready && onMerge !== undefined ? (
+      {(ready && onMerge !== undefined) || (merge.state === 'queued' && onBypassQueue !== undefined) ? (
         <div className={s.foot} style={columns}>
-          <Button
+          <MergeButton
             size="small"
             variant="signal"
             className={s.act}
             style={under('merge')}
             busy={busy || merge.state === 'merging'}
-            onClick={onMerge}
+            onMerge={onMerge}
+            onBypassQueue={onBypassQueue}
+            queued={merge.state === 'queued'}
           >
             {t.merge}
-          </Button>
+          </MergeButton>
         </div>
       ) : found ? (
         <div className={s.foot} style={columns}>

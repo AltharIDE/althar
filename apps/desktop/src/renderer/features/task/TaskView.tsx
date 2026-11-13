@@ -961,7 +961,10 @@ export function TaskView({
       : {}),
     ...(snapshot.task.helpers === undefined ? {} : { stopHelper: (helper: string) => void model.stopHelper(helper) }),
     ...(snapshot.task.lines === undefined ? {} : { shipChange: (change: string) => void model.shipChange(change) }),
-    merge: (change) => (change.head === null ? undefined : void model.accept([{ head: change.head, url: change.url }])),
+    merge: (change, bypassQueue) =>
+      change.head === null
+        ? undefined
+        : void model.accept([{ head: change.head, url: change.url, ...(bypassQueue ? { bypassQueue: true } : {}) }]),
     postReview: (draftId) => void model.postReview(draftId),
     stopLaunch: (id) => void model.stopLaunch(id),
     openUrl: (url) => void window.open(url, '_blank'),

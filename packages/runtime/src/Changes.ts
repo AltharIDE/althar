@@ -872,7 +872,7 @@ export class Changes extends Context.Service<
      * on its branch wait for Ship: the person's word for them is Ship,
      * Review and merge, or Merge now, never a plain merge without them.
      */
-    merge(taskId: string, head: string, url?: string): Effect.Effect<void, unknown>
+    merge(taskId: string, head: string, url?: string, bypassQueue?: boolean): Effect.Effect<void, unknown>
     /** Whether this pull request leaves commits held for Ship behind if merged as it stands. Read under exclusive when acting. */
     waitsForShip(taskId: string, url?: string): Effect.Effect<boolean, unknown>
     /**
@@ -3505,7 +3505,7 @@ export class Changes extends Context.Service<
        * settles then: reading it back can still say open for a moment, and
        * what was said on it last is listened to after, not before.
        */
-      const merge = (taskId: string, head: string, url?: string): Effect.Effect<void, unknown, Store> =>
+      const merge = (taskId: string, head: string, url?: string, bypassQueue = false): Effect.Effect<void, unknown, Store> =>
         Effect.gen(function* () {
           const { link, snapshot, host, repository } = yield* current(taskId, url)
           if (snapshot.state !== 'open') return
@@ -3526,12 +3526,12 @@ export class Changes extends Context.Service<
             const after = yield* current(taskId, below.url)
             if (after.snapshot.state !== 'merged')
               return yield* sayOn(link, `${nameOf(snapshot)} merges once ${nameOf(under.snapshot)} below it has: press Merge again then.`)
-            return yield* merge(taskId, head, snapshot.url)
+            return yield* merge(taskId, head, snapshot.url, bypassQueue)
           }
           const read = yield* host.change(repository, snapshot.number, { queue: true })
           // In its merge queue already, put there from outside Althar before a turn heard it, it isn't merged again: it is kept
           // in it, and its thread says so where it hasn't.
-          if (read.state === 'open' && read.queued === true) {
+          if (read.state === 'open' && read.queued === true && !bypassQueue) {
             yield* seenNow(link, snapshot, read)
             if (snapshot.queued !== true) yield* sayOn(link, queuedNote(nameOf(snapshot), snapshot.target))
           } else if (read.state === 'open') {
@@ -3543,10 +3543,21 @@ export class Changes extends Context.Service<
               target: `${host.product}:${snapshot.repository.join('/')}`,
               operation: 'merge',
               // A merge at another head is another merge, as is one after the merge queue took it out.
-              key: `merge:${link.id}:${head}${snapshot.leftQueue === undefined ? '' : `:${snapshot.leftQueue}`}`,
-              request: { number: snapshot.number, head },
+              key: `merge:${link.id}:${head}${snapshot.leftQueue === undefined ? '' : `:${snapshot.leftQueue}`}${bypassQueue ? ':without_queue' : ''}`,
+              request: { number: snapshot.number, head, ...(bypassQueue ? { bypassQueue: true } : {}) },
               retryable: false,
-              perform: host.merge(repository, { ...read, headSha: head }).pipe(
+              perform: (bypassQueue
+                ? host.mergeWithoutQueue === undefined
+                  ? Effect.fail(
+                      new ConnectorFailed({
+                        product: host.product,
+                        reason: 'rejected',
+                        message: 'This host does not support merging without its queue.',
+                      }),
+                    )
+                  : host.mergeWithoutQueue(repository, { ...read, headSha: head })
+                : host.merge(repository, { ...read, headSha: head })
+              ).pipe(
                 // GitHub says 409 when the head moved while it merged.
                 Effect.catchIf(
                   (error) => error instanceof ConnectorFailed && error.status === 409,
@@ -9429,7 +9440,7 @@ export class Changes extends Context.Service<
               return false
             }),
           ),
-        merge: (taskId, head, url) =>
+        merge: (taskId, head, url, bypassQueue) =>
           provide(
             locked(taskId)(
               Effect.gen(function* () {
@@ -9437,7 +9448,7 @@ export class Changes extends Context.Service<
                 // Merged as it stands, the pull request would leave out what waits for Ship, unreviewed: Ship, Review and merge, or
                 // Merge now, each the person's word for them, take it.
                 if (yield* waitsForShip(taskId, link, snapshot)) return yield* new ShipRefused({ taskId, why: 'held' })
-                yield* merge(taskId, head, url)
+                yield* merge(taskId, head, url, bypassQueue)
               }),
             ),
           ),

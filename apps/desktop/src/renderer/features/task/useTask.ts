@@ -225,7 +225,9 @@ export interface TaskModel {
    * the person saw, and stops at the first that is refused, so the rest
    * wait; pending throughout.
    */
-  readonly accept: (changes: ReadonlyArray<{ readonly head: string; readonly url: string }>) => Promise<void>
+  readonly accept: (
+    changes: ReadonlyArray<{ readonly head: string; readonly url: string; readonly bypassQueue?: boolean }>,
+  ) => Promise<void>
   /**
    * Merge, with commits not shipped (a task is a conversation plus parts): `review`, Review and merge, one review of what
    * waits, then it goes up and merges; `now`, Merge now, up and merged at once, reviewed after the merge.
@@ -864,7 +866,12 @@ export const useTask = (threadId: string): TaskModel => {
           for (const [at, change] of changes.entries()) {
             setMerging(change.url)
             try {
-              await merge({ taskId: snapshot.task.id, head: change.head, url: change.url })
+              await merge({
+                taskId: snapshot.task.id,
+                head: change.head,
+                url: change.url,
+                ...(change.bypassQueue ? { bypassQueue: true } : {}),
+              })
             } catch (failure) {
               setMergeFailed(change.url)
               throw failure

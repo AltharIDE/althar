@@ -536,8 +536,13 @@ export const changeOf = (value: unknown, product: string, listening: boolean): C
     diverged: null,
   }
   // What merging it needs, as its host last said, with what Althar knows of it (DEV-204); what is left to push is counted later.
-  const needs = mergeNeedsOf(seen, Option.getOrNull(decodeRules(field(value, 'rules'))))
-  return needs === undefined ? seen : { ...seen, needs }
+  const rules = Option.getOrNull(decodeRules(field(value, 'rules')))
+  const needs = mergeNeedsOf(seen, rules)
+  return {
+    ...seen,
+    ...(needs === undefined ? {} : { needs }),
+    ...(state === 'open' && rules?.canBypassQueue !== undefined ? { canBypassQueue: rules.canBypassQueue } : {}),
+  }
 }
 
 const decodeLinks = Schema.decodeUnknownOption(Schema.Array(Unfurl))
