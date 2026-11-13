@@ -47,7 +47,7 @@ import {
   uninstall,
 } from '@althar/skills'
 import { codeRootOf } from './code'
-import { FileRefused, NotFound, ProjectRefused, RetryRefused } from './errors'
+import { ChangeRefused, FileRefused, NotFound, ProjectRefused, RetryRefused } from './errors'
 import { contained, Failures, failuresLayer } from './Failures'
 import { type AgentEntry, Agents, RuntimeConfig } from './Config'
 import { modelNamer } from './coordinatorNews'
@@ -2064,15 +2064,17 @@ export const handlers = Api.toLayer(
           ),
         ),
       LeaveAfterMerge: ({ commandId, taskId, url }) => once(commandId, api(mergeReviews.leave(taskId, url))),
-      Merge: ({ commandId, taskId, head, url, how }) =>
+      Merge: ({ commandId, taskId, head, url, how, bypassQueue }) =>
         once(
           commandId,
           api(
-            how === undefined
-              ? pullRequests.merge(taskId, head, url)
-              : Effect.flatMap(envelope('task.merge', { taskId, how }, commandId), (said) =>
-                  runs.mergeWaiting({ envelope: said, taskId, how, ...(url === undefined ? {} : { url }) }),
-                ),
+            bypassQueue === true && how !== undefined
+              ? Effect.fail(new ChangeRefused({ message: 'Ship the waiting commits before merging without the queue.' }))
+              : how === undefined
+                ? pullRequests.merge(taskId, head, url, bypassQueue)
+                : Effect.flatMap(envelope('task.merge', { taskId, how }, commandId), (said) =>
+                    runs.mergeWaiting({ envelope: said, taskId, how, ...(url === undefined ? {} : { url }) }),
+                  ),
           ),
         ),
       ClosePullRequest: ({ commandId, taskId, url, deleteBranch }) =>

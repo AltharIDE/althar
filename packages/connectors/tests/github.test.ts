@@ -235,6 +235,52 @@ describe('GitHub as a code host', () => {
     }),
   )
 
+  it.effect('merges without the queue only on the explicit action and fresh bypass permission, at the head shown', () =>
+    Effect.gen(function* () {
+      let allowed = true
+      const { host, sent } = github([
+        ['GET', `${REPO}/pulls/12`, { json: pull({ draft: false }) }],
+        ['POST', `${API}/graphql`, () => ({ json: { data: { repository: { pullRequest: { viewerCanMergeAsAdmin: allowed } } } } })],
+        ['PUT', `${REPO}/pulls/12/merge`, { json: { merged: true } }],
+      ])
+      const open = yield* host.change(repository, 12)
+      assert.deepInclude(yield* host.mergeWithoutQueue!(repository, { ...open, queued: true }), { state: 'merged', queued: false })
+      assert.deepStrictEqual(sent.find((request) => request.method === 'PUT')?.body, { merge_method: 'squash', sha: 'abc' })
+      assert.isFalse(sent.some((request) => (JSON.stringify(request.body) ?? '').includes('enqueuePullRequest')))
+      allowed = false
+      assert.strictEqual((yield* Effect.flip(host.mergeWithoutQueue!(repository, open))).reason, 'forbidden')
+      assert.lengthOf(
+        sent.filter((request) => request.method === 'PUT'),
+        1,
+      )
+    }),
+  )
+
+  it.effect('never merges on an unknown bypass permission or queues a refused direct merge instead', () =>
+    Effect.gen(function* () {
+      const reading = github([['GET', `${REPO}/pulls/12`, { json: pull({ draft: false }) }]])
+      const open = yield* reading.host.change(repository, 12)
+      for (const answer of [
+        { json: { data: { repository: { pullRequest: null } } } },
+        { json: { data: { repository: { pullRequest: {} } } } },
+        { status: 403, json: { message: 'Not allowed' } },
+        { status: 502, json: {} },
+      ]) {
+        const { host, sent } = github([['POST', `${API}/graphql`, answer]])
+        yield* Effect.flip(host.mergeWithoutQueue!(repository, open))
+        assert.isFalse(sent.some((request) => request.method === 'PUT'))
+      }
+      for (const status of [405, 409]) {
+        const { host, sent } = github([
+          ['POST', `${API}/graphql`, { json: { data: { repository: { pullRequest: { viewerCanMergeAsAdmin: true } } } } }],
+          ['PUT', `${REPO}/pulls/12/merge`, { status, json: { message: 'Merge refused' } }],
+        ])
+        assert.strictEqual((yield* Effect.flip(host.mergeWithoutQueue!(repository, open))).status, status)
+        assert.lengthOf(sent, 2)
+      }
+    }),
+  )
+
   it.effect('uses the merge queue even when the account could merge directly', () =>
     Effect.gen(function* () {
       let enabled = false

@@ -1597,6 +1597,8 @@ export const ChangeSummary = Schema.Struct({
    * host doesn't read them, or hasn't yet.
    */
   needs: Schema.optional(Schema.Array(MergeNeed)),
+  /** The host explicitly allows this viewer to merge without its queue; the action rechecks it. */
+  canBypassQueue: Schema.optional(Schema.Boolean),
 })
 export type ChangeSummary = typeof ChangeSummary.Type
 
@@ -5493,6 +5495,8 @@ export const Api = RpcGroup.make(
       head: Schema.String,
       url: Schema.optional(Schema.String),
       how: Schema.optional(Schema.Literals(['review', 'now'])),
+      /** Explicitly merge without the host's queue, using the viewer's bypass permission. */
+      bypassQueue: Schema.optional(Schema.Boolean),
     },
     Schema.Void,
   ),

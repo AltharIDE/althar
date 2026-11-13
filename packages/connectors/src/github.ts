@@ -27,6 +27,7 @@ import type {
   IssuePage,
   IssueQuery,
   ListedChange,
+  MergeMethod,
   MergeRules,
   Person,
   BranchUpdate,
@@ -868,6 +869,25 @@ export const makeGitHub = (options: AdapterOptions): CodeHost & Tracker => {
       queues.set(queueKey(repository, target), { at: yield* Clock.currentTimeMillis, enabled: pull.isMergeQueueEnabled })
       return pull
     })
+
+  /** A direct merge, pinned to the head the person saw. GitHub remains the authority on every branch rule. */
+  const mergePlain = (repository: Repository, change: ChangeRequest, method?: MergeMethod) =>
+    Effect.gen(function* () {
+      const answer = yield* http.json(MergeAnswer, 'PUT', `${repo(repository)}/pulls/${change.number}/merge`, {
+        merge_method: method ?? repository.merges[0] ?? 'merge',
+        ...(change.headSha === null ? {} : { sha: change.headSha }),
+      })
+      const { conflicts: _, ...seen } = change
+      if (answer.merged === true)
+        return {
+          ...seen,
+          state: 'merged',
+          draft: false,
+          queued: false,
+          updatedAt: new Date(yield* Clock.currentTimeMillis).toISOString(),
+        } as const
+      return changeOf(yield* http.json(PullAnswer, 'GET', `${repo(repository)}/pulls/${change.number}`))
+    })
   /**
    * Validate a removal's candidate against merge-group workflow runs for this
    * PR's queue branch. Otherwise use the newest such build containing the PR
@@ -1632,32 +1652,43 @@ export const makeGitHub = (options: AdapterOptions): CodeHost & Tracker => {
           if (!queue.isInMergeQueue) yield* http.graphql(Schema.Unknown, graphqlUrl, ENQUEUE, { id: change.id, head: change.headSha })
           return { ...seen, state: 'open', queued: true, updatedAt: new Date(yield* Clock.currentTimeMillis).toISOString() } as const
         }
-        const answer = yield* http
-          .json(MergeAnswer, 'PUT', `${repo(repository)}/pulls/${change.number}/merge`, {
-            merge_method: how?.method ?? repository.merges[0] ?? 'merge',
-            // Only the head Althar last saw: a push since then isn't merged unseen.
-            ...(change.headSha === null ? {} : { sha: change.headSha }),
-          })
-          .pipe(
-            // The queue may have been turned on since the read above. GitHub refuses a direct merge (405): ask again and
-            // put it in the queue, which merges it once the queue's checks pass.
-            Effect.catchIf(
-              (error) => error.status === 405,
-              (refused) =>
-                Effect.gen(function* () {
-                  const queue = yield* queueOf(repository, change.number, change.target).pipe(Effect.mapError(() => refused))
-                  if (!queue.isMergeQueueEnabled) return yield* Effect.fail(refused)
-                  if (!queue.isInMergeQueue)
-                    yield* http.graphql(Schema.Unknown, graphqlUrl, ENQUEUE, { id: change.id, head: change.headSha })
-                  return null
-                }),
+        return yield* mergePlain(repository, change, how?.method).pipe(
+          // The queue may have been turned on since the read above. GitHub refuses a direct merge (405): ask again and
+          // put it in the queue, which merges it once the queue's checks pass.
+          Effect.catchIf(
+            (error) => error.status === 405,
+            (refused) =>
+              Effect.gen(function* () {
+                const queue = yield* queueOf(repository, change.number, change.target).pipe(Effect.mapError(() => refused))
+                if (!queue.isMergeQueueEnabled) return yield* Effect.fail(refused)
+                if (!queue.isInMergeQueue) yield* http.graphql(Schema.Unknown, graphqlUrl, ENQUEUE, { id: change.id, head: change.headSha })
+                return { ...seen, state: 'open', queued: true, updatedAt: new Date(yield* Clock.currentTimeMillis).toISOString() } as const
+              }),
+          ),
+        )
+      }),
+    mergeWithoutQueue: (repository, change) =>
+      Effect.gen(function* () {
+        const answer = yield* http.graphql(
+          Schema.Struct({
+            repository: Schema.NullOr(
+              Schema.Struct({ pullRequest: Schema.NullOr(Schema.Struct({ viewerCanMergeAsAdmin: Schema.Boolean })) }),
             ),
-          )
-        if (answer === null)
-          return { ...seen, state: 'open', queued: true, updatedAt: new Date(yield* Clock.currentTimeMillis).toISOString() } as const
-        if (answer.merged === true)
-          return { ...seen, state: 'merged', draft: false, updatedAt: new Date(yield* Clock.currentTimeMillis).toISOString() } as const
-        return changeOf(yield* http.json(PullAnswer, 'GET', `${repo(repository)}/pulls/${change.number}`))
+          }),
+          graphqlUrl,
+          `query($owner: String!, $name: String!, $number: Int!) {
+            repository(owner: $owner, name: $name) { pullRequest(number: $number) { viewerCanMergeAsAdmin } }
+          }`,
+          { owner: repository.path[0], name: repository.path[1], number: change.number },
+        )
+        if (answer.repository?.pullRequest?.viewerCanMergeAsAdmin !== true)
+          return yield* new ConnectorFailed({
+            product,
+            reason: 'forbidden',
+            message: 'GitHub does not allow you to bypass this merge queue. Use the merge queue instead.',
+          })
+        // No queue fallback: a refusal must not silently change the action the person chose.
+        return yield* mergePlain(repository, change)
       }),
     mergeWays: (repository, target) =>
       Effect.gen(function* () {

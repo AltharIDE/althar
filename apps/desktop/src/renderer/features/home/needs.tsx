@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react'
 
 import { type HomeCall, type HomeTask, issuesWordOf } from '@althar/contracts'
-import { Button, type EdgeWork, Fact, LinkButton, NeedLine, type ProjectRef } from '@althar/ui'
+import { Button, type EdgeWork, Fact, LinkButton, MergeButton, NeedLine, type ProjectRef } from '@althar/ui'
 
 import { commandOf, titleOf } from '../../shared/callCommand'
 import { askOf, callKindOf, isUnshipped, kindWords, whereOf } from '../../shared/calls'
@@ -351,7 +351,7 @@ export function needLineOf(
     /** A permission's answers, in place of Deny and Allow once. */
     answers?: (call: HomeCall, project: ProjectRef) => ReactNode
     /** Does a ready change's next thing; without it, its button opens the task to review. */
-    onNext?: (task: HomeTask, next: DoneHere) => void
+    onNext?: (task: HomeTask, next: DoneHere, bypassQueue?: boolean) => void
     /** Whether a task's next thing is under way, so its button says so and waits. */
     doing?: (taskId: string) => boolean
     /** What last failed for a task's push or merge, to say in its line and offer to try again. */
@@ -407,6 +407,20 @@ export function needLineOf(
           here === null ? (
             // Asking the lead to resolve or fix takes the lead: a link into the task, where it is told.
             <LinkButton onClick={open}>{nextWords(ready.next)}</LinkButton>
+          ) : here.kind === 'merge' ? (
+            <MergeButton
+              size="small"
+              aria-label={
+                ready.task.change === null
+                  ? undefined
+                  : labelWords(here, `${ready.task.change.prefix}${ready.task.change.number}`, why !== null)
+              }
+              busy={doing?.(ready.task.taskId) === true}
+              onMerge={() => onNext(ready.task, here)}
+              {...(ready.task.change?.canBypassQueue === true ? { onBypassQueue: () => onNext(ready.task, here, true) } : {})}
+            >
+              {doing?.(ready.task.taskId) === true ? doingWords(here) : why === null ? nextWords(here) : standingText.nextFailed.again}
+            </MergeButton>
           ) : (
             <Button
               size="small"

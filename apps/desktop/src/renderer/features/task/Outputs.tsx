@@ -12,6 +12,7 @@ import {
   Diverged,
   Menu,
   MenuItem,
+  MergeButton,
   type PullRequest,
   SplitButton,
   type TrackStanding,
@@ -78,6 +79,7 @@ export const text = {
   acceptLeft: (names: ReadonlyArray<string>) => `Accept and merge ${andOf(names)}`,
   /** Only the first of those left, the one the others build on. */
   mergeOnly: (repository: string) => `Merge ${repository} only`,
+  mergeWithoutQueue: (repository: string) => `Merge ${repository} without queue`,
   /** What else can be done, each repository on its own: the menu beside the press, read out. */
   eachAlone: 'Each on its own',
   markReady: 'Mark ready for review',
@@ -243,7 +245,7 @@ export function Outputs({
    * Accepts its pull requests: each merged on its host in turn, at the head shown, the next once the one before has landed,
    * stopping at the first refused.
    */
-  onAccept: (changes: ReadonlyArray<{ readonly head: string; readonly url: string }>) => void
+  onAccept: (changes: ReadonlyArray<{ readonly head: string; readonly url: string; readonly bypassQueue?: boolean }>) => void
   /** Of its pull requests being accepted in turn, the one merging now, by its address. */
   merging?: string | null
   /** The pull request whose merge the error is about, by its address: said on its own part of the card. */
@@ -366,7 +368,7 @@ export function Outputs({
           }))
           const checked = open.some((one) => one.checks != null)
           // What the lead committed since goes up first: accepting merges what the pull request has.
-          const accepting = (ready || task.mergeable === true) && state === ChangeState.Ready && pushes.length === 0
+          const accepting = (ready || task.mergeable === true) && state === ChangeState.Ready && pushes.length === 0 && !waitsForShip
           if (open.length > 1) return track(accepting)
           // Merge, with commits not shipped: Review and merge, or Merge now, beside Ship.
           const mergingWaiting =
@@ -410,15 +412,28 @@ export function Outputs({
               )),
             ...(accepting
               ? [
-                  <Button
+                  <MergeButton
                     key="accept"
                     variant="signal"
                     {...pressed(doing.accept)}
                     // In order, each at the head shown, so one that moved on since isn't merged unseen; the rest wait on a refusal.
-                    onClick={() => onAccept(open.flatMap((one) => (one.state === 'open' ? [{ head: one.head ?? '', url: one.url }] : [])))}
+                    onMerge={() => onAccept(open.flatMap((one) => (one.state === 'open' ? [{ head: one.head ?? '', url: one.url }] : [])))}
+                    {...(first.canBypassQueue === true
+                      ? { onBypassQueue: () => onAccept([{ head: first.head ?? '', url: first.url, bypassQueue: true }]) }
+                      : {})}
                   >
                     {text.accept(open.filter((one) => one.state === 'open').length)}
-                  </Button>,
+                  </MergeButton>,
+                ]
+              : []),
+            ...(first.queued === true && first.canBypassQueue === true && first.unpushed === 0 && !waitsForShip
+              ? [
+                  <MergeButton
+                    key="queued"
+                    queued
+                    {...pressed(doing.accept)}
+                    onBypassQueue={() => onAccept([{ head: first.head ?? '', url: first.url, bypassQueue: true }])}
+                  />,
                 ]
               : []),
             ...drafts.map((one) => (
@@ -494,13 +509,20 @@ export function Outputs({
     })
     const [next] = left
     const merge = (changes: ReadonlyArray<ChangeSummary>) => onAccept(changes.map((one) => ({ head: one.head ?? '', url: one.url })))
+    const bypass = () => (next === undefined ? undefined : onAccept([{ head: next.head ?? '', url: next.url, bypassQueue: true }]))
     // The next to merge still in its merge queue holds the rest: nothing to press until it has landed.
     const accept =
       accepting && next !== undefined && next.queued !== true ? (
         left.length === 1 ? (
-          <Button key="accept" variant="signal" {...pressed(doing.accept)} onClick={() => merge(left)}>
+          <MergeButton
+            key="accept"
+            variant="signal"
+            {...pressed(doing.accept)}
+            onMerge={() => merge(left)}
+            {...(next.canBypassQueue === true ? { onBypassQueue: bypass } : {})}
+          >
             {left.length === open.length ? text.accept(1) : text.acceptLeft([labelOf(next)])}
-          </Button>
+          </MergeButton>
         ) : (
           <SplitButton
             key="accept"
@@ -512,12 +534,20 @@ export function Outputs({
             menu={(trigger) => (
               <Menu trigger={trigger} label={text.eachAlone} align="end">
                 <MenuItem onSelect={() => merge([next])}>{text.mergeOnly(labelOf(next))}</MenuItem>
+                {next.canBypassQueue === true && <MenuItem onSelect={bypass}>{text.mergeWithoutQueue(labelOf(next))}</MenuItem>}
               </Menu>
             )}
           >
             {left.length === open.length ? text.accept(left.length) : text.acceptLeft(left.map((one) => labelOf(one)))}
           </SplitButton>
         )
+      ) : next?.queued === true && next.canBypassQueue === true && next.unpushed === 0 && !waitsForShip ? (
+        <MergeButton
+          queued
+          {...pressed(doing.accept)}
+          onBypassQueue={bypass}
+          text={{ withoutQueue: text.mergeWithoutQueue(labelOf(next)) }}
+        />
       ) : null
     const [draft] = drafts
     const markReady =

@@ -30,6 +30,7 @@ import {
   KeptRow,
   LinkButton,
   MenuItem,
+  MergeButton,
   NextLine,
   NextRow,
   NextStep,
@@ -583,15 +584,17 @@ export const stoppedCardOf = (work: BoardTask, now: string, actions?: CardAction
                 next: (
                   <>
                     {merges && (
-                      <NextStep
-                        signal
+                      <MergeButton
+                        strip
                         busy={actions?.merging?.has(work.taskId) ?? false}
-                        doing={doingWords({ kind: 'merge' })}
-                        label={labelWords({ kind: 'merge' }, `${work.change?.prefix ?? ''}${work.change?.number ?? ''}`)}
-                        onPress={() => void actions?.merge(work.taskId, work.change?.head ?? '', work.change?.url)}
+                        aria-label={labelWords({ kind: 'merge' }, `${work.change?.prefix ?? ''}${work.change?.number ?? ''}`)}
+                        onMerge={() => void actions?.merge(work.taskId, work.change?.head ?? '', work.change?.url)}
+                        {...(work.change?.canBypassQueue === true && work.change.unpushed === 0 && work.held === undefined
+                          ? { onBypassQueue: () => void actions?.merge(work.taskId, work.change?.head ?? '', work.change?.url, true) }
+                          : {})}
                       >
                         {nextWords({ kind: 'merge' })}
-                      </NextStep>
+                      </MergeButton>
                     )}
                     {sendBack !== undefined && (
                       <NextStep
@@ -952,6 +955,18 @@ const readyOf = (work: BoardTask, change: ChangeSummary, actions: CardActions | 
   const step =
     next === null || (next.kind === 'fix' && work.checksBack != null) ? null : here === null || actions === undefined ? (
       <NextStep>{nextWords(next)}</NextStep>
+    ) : here.kind === 'merge' ? (
+      <MergeButton
+        strip
+        busy={actions.merging.has(work.taskId)}
+        aria-label={labelWords(here, `${change.prefix}${change.number}`, failed !== null)}
+        onMerge={() => void actions.merge(work.taskId, change.head ?? '', change.url)}
+        {...(change.canBypassQueue === true
+          ? { onBypassQueue: () => void actions.merge(work.taskId, change.head ?? '', change.url, true) }
+          : {})}
+      >
+        {actions.merging.has(work.taskId) ? doingWords(here) : failed === null ? nextWords(here) : standingText.nextFailed.again}
+      </MergeButton>
     ) : (
       <NextStep
         signal
