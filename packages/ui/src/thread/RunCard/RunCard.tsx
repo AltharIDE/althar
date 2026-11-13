@@ -1,4 +1,4 @@
-import { Fragment, useRef } from 'react'
+import { Fragment, useLayoutEffect, useRef, type RefObject } from 'react'
 
 import { Icon } from '../../foundations/Icon/Icon'
 import { useControlled } from '../../lib/controlled'
@@ -253,6 +253,7 @@ function ReadCommand({ command }: { command: string }) {
 function Printed({ output, running, exit }: { output: RunOutput; running: boolean; exit: number | undefined }) {
   const box = useRef<HTMLDivElement>(null)
   const { atBottom, toBottom } = useStickToBottom(box, 12)
+  useTailPosition(box, output.text, atBottom, toBottom)
   const lines = (output.text ?? '').split('\n')
   // What follows the last newline is the line still being written.
   const writing = lines.pop() ?? ''
@@ -272,4 +273,55 @@ function Printed({ output, running, exit }: { output: RunOutput; running: boolea
       {!atBottom && <JumpToLatest onJump={toBottom} className={s.latest} />}
     </div>
   )
+}
+
+/** How much of the old tail survives at the start of the new one, including repeated lines. */
+function overlap(before: string[], after: string[]): number {
+  const joined = [...after, null, ...before]
+  const prefix: number[] = []
+  for (let i = 0; i < joined.length; i++) {
+    let n = prefix[i - 1] ?? 0
+    while (n > 0 && joined[i] !== joined[n]) n = prefix[n - 1] ?? 0
+    prefix[i] = i > 0 && joined[i] === joined[n] ? n + 1 : n
+  }
+  return prefix.at(-1) ?? 0
+}
+
+/** A rolling tail replaces rows without growing. Follow it explicitly, or keep a retained line at the reader's place. */
+function useTailPosition(ref: RefObject<HTMLDivElement | null>, text: string | undefined, atBottom: boolean, toBottom: () => void) {
+  const previous = useRef<{ lines: string[]; anchor: number; top: number } | null>(null)
+  useLayoutEffect(() => {
+    const el = ref.current
+    if (el === null) return
+    // Terminal's completed rows end in a newline; its live cursor row does not.
+    const rows = () => Array.from(el.querySelectorAll<HTMLElement>('pre > span')).filter((row) => row.textContent?.endsWith('\n'))
+    const current = rows()
+    const lines = current.map((row) => row.textContent ?? '')
+    const before = previous.current
+    if (atBottom) toBottom()
+    else if (before !== null) {
+      const kept = overlap(before.lines, lines)
+      const anchor = before.anchor - (before.lines.length - kept)
+      const row = anchor >= 0 ? current[anchor] : undefined
+      // If the reader's line has left the tail, the earliest retained line is all we can show.
+      if (kept === 0 || row === undefined) el.scrollTop = 0
+      else el.scrollTop += row.getBoundingClientRect().top - el.getBoundingClientRect().top - before.top
+    }
+    const remember = () => {
+      const shown = rows()
+      const top = el.getBoundingClientRect().top
+      const anchor = Math.max(
+        0,
+        shown.findIndex((row) => row.getBoundingClientRect().bottom > top),
+      )
+      previous.current = {
+        lines: shown.map((row) => row.textContent ?? ''),
+        anchor,
+        top: (shown[anchor]?.getBoundingClientRect().top ?? top) - top,
+      }
+    }
+    remember()
+    el.addEventListener('scroll', remember, { passive: true })
+    return () => el.removeEventListener('scroll', remember)
+  }, [ref, text, atBottom, toBottom])
 }
