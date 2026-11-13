@@ -3,7 +3,7 @@ import { useQuery } from '@tanstack/react-query'
 import { useNavigate } from '@tanstack/react-router'
 import { type ReactNode, useCallback, useEffect, useRef, useState } from 'react'
 
-import type { ThreadItem } from '@althar/contracts'
+import type { BoardTask, ThreadItem } from '@althar/contracts'
 
 import {
   Behind,
@@ -85,6 +85,7 @@ import {
   AsideQuote,
   AsidesBar,
   AskInAside,
+  useAsideClears,
   asideTitle,
   asideWords,
   asidesText,
@@ -145,6 +146,9 @@ export const text = {
  * How wide the conversation is beside the board, as the person last dragged it: this window's own, kept across launches.
  * `lane` is the least of the board worth leaving beside a file open over it.
  */
+/** No asides yet, the same each time, while the board is read. */
+const NO_TASKS: ReadonlyArray<BoardTask> = []
+
 const WIDTH = { key: 'althar.both', start: 560, min: 340, board: 480, lane: 240 } as const
 
 /*
@@ -323,6 +327,8 @@ export function ProjectView({
   }, [])
   // What the person writes to the coordinator, kept by the project while they are elsewhere, as are its images and what they dictate.
   const about = model.project?.id ?? model.coordinator?.project.id ?? null
+  // Asides the person cleared leave the pills at once, the runtime settling them behind.
+  const clears = useAsideClears(about, lanes?.scratch ?? NO_TASKS)
   const draftOf = draftKey.coordinator(about ?? '')
   const [draft, setDraft] = useDraft(draftOf)
   // A page beside the coordinator's conversation (ADR-100): the project goes to its conversation, the board stepping aside for it.
@@ -803,15 +809,21 @@ export function ProjectView({
                     {/* The coordinator first, then its asides: the conversation says who it is with. */}
                     {lanes !== null && (
                       <AsidesBar
-                        scratch={lanes.scratch}
+                        scratch={clears.scratch}
                         open={aside}
                         onOpen={setAside}
                         onClear={(ids) => {
-                          for (const id of ids) void client.markTaskDone(id)
+                          if (aside.kind === 'aside' && ids.includes(aside.taskId)) setAside(COORDINATOR)
+                          clears.clear(ids)
                         }}
                         board={board.board?.tasks ?? []}
                         now={Date.parse(now)}
                       />
+                    )}
+                    {clears.failed !== null && (
+                      <p className={s.asideFailed} role="alert">
+                        {clears.failed}
+                      </p>
                     )}
                     {aside.kind === 'aside' ? (
                       <AsideConversation

@@ -24,6 +24,7 @@ const meta = {
     current: null,
     onPick: fn(),
     onNew: fn(),
+    onClear: fn(),
     onClearOlder: fn(),
     newKbd: '⌘⇧N',
   },
@@ -42,8 +43,15 @@ export const OnTheCoordinator: Story = {
   },
 }
 
-/** An aside open. */
-export const AsideOpen: Story = { args: { current: 'a1' } }
+/** An aside open: its × shows on its pill, and on any other under the pointer. */
+export const AsideOpen: Story = {
+  args: { current: 'a1' },
+  play: async ({ canvasElement, args }) => {
+    await userEvent.click(within(canvasElement).getByRole('button', { name: 'Clear “Why does the retry back off twice?”' }))
+    await expect(args.onClear).toHaveBeenCalledWith('a1')
+    await expect(args.onPick).not.toHaveBeenCalled()
+  },
+}
 
 /** A new aside being started: its pill first among them. */
 export const Starting: Story = { args: { starting: true } }
@@ -65,7 +73,7 @@ export const None: Story = { args: { asides: [], older: [] } }
 export const Moves: StoryObj<typeof AsideMoves> = {
   render: () => (
     <div style={{ padding: 16, maxWidth: 520 }}>
-      <AsideMoves onMakeTask={fn()} onClear={fn()} note="Asked 4m ago" />
+      <AsideMoves onMakeTask={fn()} note="Asked 4m ago" />
     </div>
   ),
 }

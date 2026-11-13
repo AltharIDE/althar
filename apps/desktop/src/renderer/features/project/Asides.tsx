@@ -1,9 +1,11 @@
 import { type RefObject, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 
-import type { BoardTask } from '@althar/contracts'
+import type { BoardSnapshot, BoardTask } from '@althar/contracts'
 import { type Aside, AsideMoves, AsideTabs, Button, Icon, IconButton } from '@althar/ui'
 
+import { keys } from '../../data/reads'
+import { useServices } from '../../data/services'
 import { coordinatorSigned } from '../../shared/signed'
 import { ago } from '../../shared/time'
 import { TaskView } from '../task/TaskView'
@@ -14,7 +16,8 @@ import s from './Asides.module.css'
  * Asides (docs/decisions/tasks.md, "Asides"): the project's chats, the tasks
  * on Scratch, as pills over the coordinator's conversation. One open shows its
  * own conversation in the coordinator's place, with the composer every task
- * has, its runs over it and its own moves (Make it a task, Clear); a new one
+ * has, its runs over it and its own move (Make it a task); the × on its pill
+ * clears it, at once, the runtime settling it behind (useAsideClears); a new one
  * is started from the coordinator's composer, which sends to it instead.
  * Words the coordinator said, selected, start one about them. One that leaves
  * Scratch for the board, by its agent's work or the person's word, flies to
@@ -28,6 +31,7 @@ export const asidesText = {
   askAside: 'Ask in an aside',
   quoting: 'Quoting the coordinator',
   asked: (when: string) => `Asked ${when}`,
+  notCleared: (title: string) => `“${title}” wasn’t cleared: it still has something open, or its agent is at it.`,
 }
 
 /** What the coordinator's pane shows: its own conversation, a new aside being started, or an aside. */
@@ -71,6 +75,58 @@ export const asideWords = (words: string, quote: string | null) =>
         .map((line) => `> ${line}`)
         .join('\n')}\n\n${words}`
 
+/** On Scratch still, as a read of the board has it. */
+const onScratch = (task: BoardTask | undefined) => task !== undefined && task.scratch === true && task.phase !== 'settled'
+
+/**
+ * Clearing asides at once (docs/decisions/foundations.md, "The UI is instant"): a cleared
+ * one leaves the pills in the frame it is pressed, and the runtime settles it
+ * behind. It stays hidden until a read of the board no longer has it on
+ * Scratch, so a read from before the clear never brings it back for a moment;
+ * once the runtime has answered, the board is read again, and one it left on
+ * Scratch (still at work, or waiting on the person) comes back with a line.
+ */
+export function useAsideClears(projectId: string | null, scratch: ReadonlyArray<BoardTask>) {
+  const { client, cache } = useServices()
+  const [clearing, setClearing] = useState<ReadonlySet<string>>(() => new Set())
+  const [failed, setFailed] = useState<string | null>(null)
+  // A read without it says it is cleared: from then on it is the board's to show.
+  const held = [...clearing].filter((id) => scratch.some((task) => task.taskId === id))
+  if (held.length !== clearing.size) setClearing(new Set(held))
+  const unhold = (id: string) =>
+    setClearing((was) => {
+      const next = new Set(was)
+      next.delete(id)
+      return next
+    })
+  const clear = (ids: ReadonlyArray<string>) => {
+    setFailed(null)
+    setClearing((was) => new Set([...was, ...ids]))
+    for (const id of ids) {
+      const title = scratch.find((task) => task.taskId === id)?.title ?? ''
+      const back = () => {
+        unhold(id)
+        setFailed(asidesText.notCleared(title))
+      }
+      void client
+        .markTaskDone(id)
+        .then(async () => {
+          if (projectId === null) return
+          await cache.refetchQueries({ queryKey: keys.board(projectId), exact: true })
+          const board = cache.getQueryData<BoardSnapshot>(keys.board(projectId))
+          if (onScratch(board?.tasks.find((task) => task.taskId === id))) back()
+        })
+        .catch(back)
+    }
+  }
+  return {
+    scratch: clearing.size === 0 ? scratch : scratch.filter((task) => !clearing.has(task.taskId)),
+    clear,
+    failed,
+    dismiss: () => setFailed(null),
+  }
+}
+
 /** The pills over the coordinator's conversation, flying one that left for the board to its card there. */
 export function AsidesBar({
   scratch,
@@ -83,7 +139,7 @@ export function AsidesBar({
   scratch: ReadonlyArray<BoardTask>
   open: AsideOpen
   onOpen: (open: AsideOpen) => void
-  /** Settles asides: they leave the pills, and ⌘K still finds them. */
+  /** Settles asides, from a pill's × or the older ones together: they leave the pills, and ⌘K still finds them. */
   onClear: (taskIds: ReadonlyArray<string>) => void
   /** Every task on the board, to tell one that left for the board from one cleared. */
   board: ReadonlyArray<BoardTask>
@@ -108,6 +164,7 @@ export function AsidesBar({
       starting={open.kind === 'new'}
       onPick={pick}
       onNew={() => onOpen({ kind: 'new', quote: null })}
+      onClear={(id) => onClear([id])}
       onClearOlder={onClear}
     />
   )
@@ -179,7 +236,7 @@ export function AsideConversation({
   onOpenTask,
 }: {
   threadId: string
-  /** Back to the coordinator's conversation: once it is cleared. */
+  /** Back to the coordinator's conversation. */
   onBack: () => void
   onOpenTask: (threadId: string) => void
 }) {
@@ -198,7 +255,6 @@ export function AsideConversation({
             <AsideMoves
               busy={model.pending}
               onMakeTask={() => void model.shelve(null)}
-              onClear={() => void model.markDone().then(onBack)}
               {...(quoted ? { note: asidesText.quoting } : task.startedAt === null ? {} : { note: asidesText.asked(ago(task.startedAt)) })}
             />
           ),

@@ -93,7 +93,7 @@ const PLAIN: Readonly<Record<string, string>> = {
   'board/SettleWays/SettleWays.tsx': 'Done and the pin in a task’s header, segments of the chip that says where it stands',
   'board/ScratchShelf/ScratchShelf.tsx': 'a chat on Scratch, the whole of its row, its title, last words and when, which opens it',
   'thread/Asides/Asides.tsx':
-    'a pill over the coordinator’s conversation, a tab with its mark or a live dot, and the older ones’ pill, which opens their menu',
+    'a pill over the coordinator’s conversation, a tab with its mark or a live dot, the × inside an aside’s pill that clears it, and the older ones’ pill, which opens their menu',
   'coordinator/TaskLaunch/TaskLaunch.tsx': 'the preset, the kicker’s first word in the kicker’s own type, which opens the others',
   /* close to a primitive, not yet moved onto one */
   'chrome/BackCrumb/BackCrumb.tsx': 'a ChromeButton that is never pressed',

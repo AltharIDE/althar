@@ -43,6 +43,41 @@
   background: var(--n-0);
   box-shadow: 0 0 0 1px var(--line-2);
 }
+/* An aside's pill and its ×, which sits inside the pill's end: the room is kept, so showing it moves nothing. */
+.item {
+  position: relative;
+  display: inline-flex;
+  flex-shrink: 0;
+}
+.clearable .pill {
+  padding-right: 24px;
+}
+.clear {
+  position: absolute;
+  top: 50%;
+  right: 5px;
+  display: grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  margin-top: -8px;
+  border-radius: 999px;
+  color: var(--t-4);
+  opacity: 0;
+  transition:
+    opacity var(--fast) var(--ease),
+    background var(--fast) var(--ease),
+    color var(--fast) var(--ease);
+}
+.item:hover .clear,
+.item:focus-within .clear,
+.item:has(.pill[aria-selected='true']) .clear {
+  opacity: 1;
+}
+.clear:hover {
+  color: var(--t-1);
+  background: var(--sunk);
+}
 .coordinator {
   max-width: none;
   font-weight: 600;

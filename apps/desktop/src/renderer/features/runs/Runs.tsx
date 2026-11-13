@@ -295,12 +295,15 @@ export function RunDialogs({
               ...(repositories.length > 1 ? { repository: script.repository } : {}),
             })) ?? null
           }
+          // oxlint-disable-next-line althar/press-at-once -- A form the runtime checks: it stays open, busy, until kept, so a refusal lands at its field.
           onAdd={async ({ name, command, repository }) => {
             if (await model.keep({ name, command, ...(repository === null ? {} : { repository }) })) close()
           }}
+          // oxlint-disable-next-line althar/press-at-once -- A form the runtime checks: it stays open, busy, until kept, so a refusal lands at its field.
           onAddScripts={async (picked) => {
             if (await model.keepScripts((fresh ?? []).filter((script) => picked.includes(scriptId(script))))) close()
           }}
+          // oxlint-disable-next-line althar/press-at-once -- Not instant yet: the form keeps its error until the coordinator has the ask (foundations.md, The UI is instant).
           onAsk={async () => {
             if (await model.ask()) close()
           }}
@@ -330,9 +333,11 @@ export function RunDialogs({
           from={editing.from}
           repository={editing.repository}
           repositories={repositories.length > 0 ? repositories : [editing.repository]}
+          // oxlint-disable-next-line althar/press-at-once -- A form the runtime checks: it stays open, busy, until kept, so a refusal lands at its field.
           onSave={async ({ name, command, repository }) => {
             if (await model.keep({ id: editing.id, name, command, repository })) show(afterEdit)
           }}
+          // oxlint-disable-next-line althar/press-at-once -- Not instant yet: the list shows a removed run until it is read again (foundations.md, The UI is instant).
           onRemove={async () => {
             if (await model.drop(editing.id)) show(afterEdit)
           }}

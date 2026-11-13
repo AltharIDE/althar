@@ -109,10 +109,12 @@ export function PresetsSection() {
   const cache = useQueryClient()
   const presets = useQuery({ queryKey: PRESETS, queryFn: () => client.listPresets() }).data
   const [editing, setEditing] = useState<string | null>(null)
+  const [failed, setFailed] = useState<string | null>(null)
   if (presets === undefined) return null
   const own = presets.filter((one) => !one.builtin)
   return (
     <SettingList>
+      {failed !== null && <p role="alert">{failed}</p>}
       {presets.map((preset) => (
         <SettingRow
           key={preset.id}
@@ -132,7 +134,15 @@ export function PresetsSection() {
                 <Button
                   size="small"
                   variant="quiet"
-                  onClick={() => void client.removePreset(preset.id).then(() => cache.invalidateQueries({ queryKey: PRESETS }))}
+                  onClick={() => {
+                    // It goes at once; one the runtime kept comes back as the list is read again, with a line.
+                    setFailed(null)
+                    cache.setQueryData<typeof presets>(PRESETS, (was) => was?.filter((one) => one.id !== preset.id))
+                    void client
+                      .removePreset(preset.id)
+                      .catch((error: unknown) => setFailed(error instanceof Error ? error.message : String(error)))
+                      .finally(() => void cache.invalidateQueries({ queryKey: PRESETS }))
+                  }}
                 >
                   {presetsText.remove}
                 </Button>

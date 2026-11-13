@@ -145,15 +145,20 @@ leaves its conversation as it was.
   coordinator still starts one at once with `start_task`.
 - **Open,** it takes the coordinator's place in the pane: its conversation,
   and the composer every task has, with its own runs over it and its own
-  moves, Make it a task and Clear (`AsideMoves`).
+  move, Make it a task (`AsideMoves`).
 - **Made a task,** it moves to the board: by the person's Make it a task,
   from its menu, or by itself once it takes a worktree or an output (a
   branch of its own, a pull request, a drafted review) after it was put
   there, said in its thread. Its pill flies to its card on the board, and
   the coordinator's conversation keeps a line of it ("An aside became a
   task: …"). Nothing moves back by itself; the person can from its menu.
-- **Cleared,** it settles, leaves the pills, and ⌘K finds it. Those left a
-  week fold into one "N older" pill, which clears them together.
+- **Cleared** from the × on its pill (shown on the open one, and on any
+  other under the pointer), it settles, leaves the pills, and ⌘K finds it.
+  The pill goes, and an open one gives the pane back to the coordinator, in
+  the frame the × is pressed; the runtime settles it behind, and one it
+  didn't settle (still at work, or waiting on the person) comes back with a
+  line under the pills ([foundations](foundations.md#the-ui-is-instant)).
+  Those left a week fold into one "N older" pill, which clears them together.
 - A call of its that waits on the person still shows in Needs you. With the
   conversation closed, the board keeps the asides behind one chip at the
   head of Up next (`ScratchShelf`), opened in place.
@@ -611,3 +616,4 @@ optionally a model, an agent, an effort and the change.
 - 10 Nov 2026: the rest of it built (#739): each change shipped in a Ship of its own with its own review, the card's sentence and marks across changes, the header's row for each, stamped Shipped and Merged rows, where a turn's commits went; Keep them together, Drop it, a change that waits for another, removing a running task's workspace; Stop running it; picking another preset on the plan card, the coordinator planning from presets, editing them in Settings; Scratch's own shelf and a chat's copy made without setup. ADR-087 folded in whole and removed from `proposed/`: helpers in copies of their own, writing ones' commits, places, limits, retries, the hour, restarts, agents' own helpers switched off, and the thread, Graph face and usage by model.
 - 11 Nov 2026: chats are asides, pills over the coordinator's conversation with a composer and moves of their own, started there or from the coordinator's words; one made a task flies to the board and the coordinator's conversation notes it; the coordinator's turns are signed with Althar's mark ([Asides](#asides)).
 - 12 Nov 2026: commits that only bring the base branch in, as a clean merge of main, are never the task's work: no hold for Ship, no review, no round; they go up to the open pull request (#773's merge of main had started a second Review and Pull request).
+- 13 Nov 2026: an aside clears from the × on its pill, at once, rather than from Clear over its composer, which went back only once the runtime had settled it.

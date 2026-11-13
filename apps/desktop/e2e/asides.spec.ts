@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { expect, type Locator, type Page, test } from '@playwright/test'
 
 import { repository } from '../tests/repository'
-import { launch, openFirstProject, say, shown, still } from './support'
+import { holdRuntime, launch, openFirstProject, say, shown, still } from './support'
 
 /*
  * Asides (docs/decisions/tasks.md, "Asides"), in a real window with the fake
@@ -82,6 +82,26 @@ test('asides: started beside the coordinator, opened in its place with a compose
     await startAside(page, 'Shorten the retry wait\n[lead:finish] [lead:edit]')
     await expect(shown(page, 'An aside became a task: Shorten the retry wait')).toBeVisible()
     await expect(pills.getByRole('tab', { name: 'Shorten the retry wait' })).toHaveCount(0)
+
+    // Cleared from the × on its pill: it goes, the coordinator's conversation back in its place, while the runtime is held,
+    // and stays gone once the runtime has settled it (docs/decisions/foundations.md, "The UI is instant").
+    await startAside(page, 'Is the retry capped?\n[lead:finish] [lead:answered]')
+    const capped = pills.getByRole('tab', { name: 'Is the retry capped?' })
+    await expect(capped).toHaveAttribute('aria-selected', 'true')
+    await expect(shown(page, /Althar has your summary/).first()).toBeVisible()
+    await expect(page.locator('[data-aside] [class*="dot"]')).toHaveCount(0)
+    await expect(page.getByRole('button', { name: 'Clear', exact: true })).toHaveCount(0)
+    await shoot(page, pills, 'clear')
+    const release = await holdRuntime(page)
+    await pills.getByRole('button', { name: 'Clear “Is the retry capped?”' }).click()
+    await expect(capped).toHaveCount(0)
+    await expect(coordinator).toHaveAttribute('aria-selected', 'true')
+    await release()
+    // Settled, it is the board's: in its Settled lane, never back in the pills.
+    await expect(page.getByRole('region', { name: 'The project’s work' }).getByText('Is the retry capped?')).toBeAttached()
+    await expect(capped).toHaveCount(0)
+    await expect(shown(page, /wasn’t cleared/)).toHaveCount(0)
+    await shoot(page, pills, 'cleared')
 
     // Words the coordinator said, selected, start an aside about them, quoted over the composer.
     await answer.locator('p').first().click({ clickCount: 3 })
