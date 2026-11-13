@@ -22,6 +22,7 @@ test('searches real task text and files, morphs into actions without emptying, a
     await field.fill('retry')
     const task = dialog.getByRole('option', { name: /Add a retry to checkout/ }).first()
     await expect(task).toBeVisible()
+    await expect(task).toHaveAttribute('aria-selected', 'true')
     await dialog.screenshot({ path: 'test-results/search-light.png', scale: 'css' })
     await field.press('ArrowRight')
     await expect(dialog.getByRole('option', { name: 'Copy', exact: true })).toBeVisible()
