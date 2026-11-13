@@ -3057,9 +3057,21 @@ export const SmallChangeItem = Schema.Struct({
     review: Schema.optional(
       Schema.NullOr(Schema.Struct({ taskId: Schema.String, slug: Schema.String, threadId: Schema.String, title: Schema.String })),
     ),
-    /** The person made it a full task, reviewed before it merges: the card folds to the line saying what was made. */
+    /** The person made it a full task, reviewed before it merges: the review task it was given, before and after it merges. */
     fullTask: Schema.optional(
       Schema.NullOr(Schema.Struct({ taskId: Schema.String, slug: Schema.String, threadId: Schema.String, title: Schema.String })),
+    ),
+    /**
+     * Where that full task's review stands: reading, its draft approving or with nothing on its lines (`clear`), with
+     * findings on lines (`found`, how many), or its run over with no draft (`stopped`); when it drafted. Absent where it
+     * isn't a full task, and from a runtime before it.
+     */
+    reviewBefore: Schema.optional(
+      Schema.Struct({
+        state: Schema.Literals(['running', 'clear', 'found', 'stopped']),
+        findings: Schema.Number,
+        at: Schema.NullOr(Schema.String),
+      }),
     ),
     /**
      * What its review after the merge brings back: the project's rule (`afterMergeReview`), the task's own word over it (null
@@ -3071,6 +3083,22 @@ export const SmallChangeItem = Schema.Struct({
         project: AfterMergeRule,
         task: Schema.NullOr(Schema.Literals(['review', 'none'])),
         holds: AfterMergeRule,
+      }),
+    ),
+    /** Who reads it after it merges, as its plan names them; null where its plan names none. Absent from a runtime before it. */
+    reviewer: Schema.optional(Schema.NullOr(Schema.Struct({ agentId: Schema.String, model: Schema.NullOr(Schema.String) }))),
+    /**
+     * Its review after the merge, once one is owed: under way, nothing found, only what the rule keeps in the thread
+     * (`quiet`), what waits on the person (`found`), its lead fixing that, the person leaving it, or stopped; how many it
+     * found; and its report's item in this thread,
+     * where its findings are, once it reported. Absent before one is owed, and from a runtime before it.
+     */
+    reviewAfter: Schema.optional(
+      Schema.Struct({
+        state: Schema.Literals(['running', 'clear', 'quiet', 'found', 'fixing', 'left', 'stopped']),
+        findings: Schema.Number,
+        at: Schema.NullOr(Schema.String),
+        item: Schema.NullOr(Schema.String),
       }),
     ),
   }),
