@@ -19,10 +19,7 @@ export const fold = (text: string) => prepare(text).text
 
 function keep(text: string) {
   return Array.from(text, (char) => {
-    const plain = char
-      .toLowerCase()
-      .normalize('NFD')
-      .replace(/[̀-ͯ]/g, '')
+    const plain = char.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '')
     return plain.length === 1 ? plain.replace(/[’‘]/, "'").replace(/[“”]/, '"') : char.toLowerCase()
   }).join('')
 }

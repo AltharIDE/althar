@@ -15,3 +15,5 @@ export * from './lineComments'
 export * from './standing'
 export * from './waiting'
 export * from './toolWords'
+
+export * from './signInHost'

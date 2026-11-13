@@ -6,6 +6,7 @@ import { cx } from '../../lib/cx'
 import type { RootProps } from '../../lib/props'
 import { Rhythm } from '../../lib/rhythm'
 import { Spinner } from '../../primitives/Spinner/Spinner'
+import { LinkButton } from '../../primitives/LinkButton/LinkButton'
 import { useThreadShell, type ImageRef } from '../Shell/Shell'
 import s from './You.module.css'
 
@@ -23,6 +24,7 @@ export interface YouText {
   view: (name: string) => string
   open: (name: string) => string
   showPaste: (name: string) => string
+  undo: string
 }
 
 export const youText: YouText = {
@@ -33,6 +35,7 @@ export const youText: YouText = {
   view: (name) => `View ${name}`,
   open: (name) => `Open ${name}`,
   showPaste: (name) => `Show pasted text, ${name}`,
+  undo: 'Undo from here',
 }
 
 export type YouProps = RootProps<
@@ -50,6 +53,8 @@ export type YouProps = RootProps<
     unfurl?: ReactNode
     /** What you said of lines of the diff, each with its code (`CommentExcerpt`), in the bubble after your words. */
     comments?: ReactNode
+    /** Restores this turn's files and conversation. Offered only for a delivered, checkpointed message. */
+    onUndo?: () => void
     text?: Partial<YouText>
   }
 >
@@ -89,6 +94,7 @@ export function You({
   delivery = Delivery.Delivered,
   unfurl,
   comments,
+  onUndo,
   text,
   className,
   ...rest
@@ -124,6 +130,11 @@ export function You({
         </div>
       )}
       <span className={s.at}>
+        {onUndo !== undefined && delivery === Delivery.Delivered && (
+          <LinkButton className={s.undo} onClick={onUndo}>
+            {t.undo}
+          </LinkButton>
+        )}
         <Status delivery={delivery} at={at} t={t} />
       </span>
     </article>

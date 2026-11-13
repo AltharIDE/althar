@@ -1505,6 +1505,8 @@ export const handlers = Api.toLayer(
             yield* sessions.takeBack({ envelope: yield* envelope('thread.take_back', { itemId }, commandId), itemId })
           }),
         ),
+      UndoTurn: ({ commandId, itemId }) =>
+        api(Effect.flatMap(envelope('thread.undo_turn', { itemId }, commandId), (said) => sessions.undoTurn({ envelope: said, itemId }))),
       GetCoordinator: ({ projectId, before, limit }) =>
         api(queries.coordinator(projectId, { ...(before === undefined ? {} : { before }), ...(limit === undefined ? {} : { limit }) })),
       StartTask: ({ commandId, projectId, title, description, steps, issue, end, repositories, chat, taskId }) =>
@@ -1979,7 +1981,8 @@ export const handlers = Api.toLayer(
             }),
           ),
         ),
-      StartAccountSignIn: ({ commandId, accountId, way }) => once(commandId, api(accountSignIns.start({ accountId, way }))),
+      StartAccountSignIn: ({ commandId, accountId, way, host }) =>
+        once(commandId, api(accountSignIns.start({ accountId, way, ...(host === undefined ? {} : { host }) }))),
       GetAccountSignIn: ({ flowId }) => accountSignIns.get(flowId),
       PasteAccountSignInCode: ({ commandId, flowId, code }) => once(commandId, api(accountSignIns.paste(flowId, code))),
       CancelAccountSignIn: ({ commandId, flowId }) => once(commandId, api(accountSignIns.cancel(flowId))),

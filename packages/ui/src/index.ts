@@ -5,6 +5,7 @@
  */
 
 export * from './foundations/device'
+export * from './thread/UndoTurn/UndoTurnDialog'
 export * from './foundations/keys'
 export * from './foundations/vocabulary'
 export * from './foundations/vocabularyText'

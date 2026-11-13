@@ -554,8 +554,12 @@ export function ThreadBlocks({
   focusQuestion,
   project,
   signed,
+  undoable,
+  onUndoFrom,
 }: {
   blocks: ReadonlyArray<Block>
+  undoable?: ReadonlyArray<string> | undefined
+  onUndoFrom?: ((itemId: string) => void) | undefined
   /** The thread they are of: what a command printed and the documents an agent wrote are read by it. */
   threadId: string
   /** The worktree its paths are under, for the files a turn hands back. */
@@ -640,6 +644,7 @@ export function ThreadBlocks({
             data-item={block.id}
             at={block.at}
             delivery={block.delivery}
+            {...(onUndoFrom === undefined || !undoable?.includes(block.id) ? {} : { onUndo: () => onUndoFrom(block.id) })}
             {...(queued === undefined ? {} : { text: { queued } })}
             // The images sent with it, each opening full size with the others; then its files and folders, a chip each.
             {...(block.pictures.length + block.files.length === 0

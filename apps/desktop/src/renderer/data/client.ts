@@ -97,6 +97,7 @@ import {
   type TaskSummary,
   type ThreadItem,
   type ThreadSnapshot,
+  type UndoTurnResult,
   type TrackerContainer,
   type WatchEvent,
   type Launch,
@@ -440,6 +441,7 @@ export interface Client {
   }) => Promise<void>
   /** Takes back a message still waiting its turn, by its item. */
   readonly takeBack: (itemId: string) => Promise<void>
+  readonly undoTurn: (itemId: string) => Promise<UndoTurnResult>
   /** The person's answer to a permission; with `always`, kept in the project's rules by that scope, one of those offered. */
   readonly answer: (input: {
     readonly attentionId: string
@@ -596,6 +598,7 @@ export interface Client {
   readonly startAccountSignIn: (
     accountId: string,
     way: 'browser' | 'device',
+    host?: string,
   ) => Promise<{ readonly flowId: string; readonly state: AccountSignInState }>
   readonly getAccountSignIn: (flowId: string) => Promise<AccountSignInState>
   readonly pasteAccountSignInCode: (flowId: string, code: string) => Promise<void>
@@ -983,6 +986,7 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
     renameTask: (taskId, title) => command((commandId) => api.RenameTask({ commandId, taskId, title })),
     send: (input) => command((commandId) => api.Send({ commandId, ...input })),
     takeBack: (itemId) => command((commandId) => api.TakeBack({ commandId, itemId })),
+    undoTurn: (itemId) => command((commandId) => api.UndoTurn({ commandId, itemId })),
     answer: (input) => command((commandId) => api.Answer({ commandId, ...input })),
     answerQuestion: (input) => command((commandId) => api.AnswerQuestion({ commandId, ...input })),
     getCoordinator: (projectId, page = {}) => settle(api.GetCoordinator({ projectId, ...page })),
@@ -1056,7 +1060,8 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
     orderAccounts: (agentId, accountIds) => command((commandId) => api.OrderAccounts({ commandId, agentId, accountIds })),
     findAccounts: (agentId) => settle(api.FindAccounts({ agentId })).then((list) => list.found),
     signInAccount: (accountId) => command((commandId) => api.SignInAccount({ commandId, accountId })),
-    startAccountSignIn: (accountId, way) => command((commandId) => api.StartAccountSignIn({ commandId, accountId, way })),
+    startAccountSignIn: (accountId, way, host) =>
+      command((commandId) => api.StartAccountSignIn({ commandId, accountId, way, ...(host === undefined ? {} : { host }) })),
     getAccountSignIn: (flowId) => settle(api.GetAccountSignIn({ flowId })),
     pasteAccountSignInCode: (flowId, code) => command((commandId) => api.PasteAccountSignInCode({ commandId, flowId, code })),
     cancelAccountSignIn: (flowId) => command((commandId) => api.CancelAccountSignIn({ commandId, flowId })),

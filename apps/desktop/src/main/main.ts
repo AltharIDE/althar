@@ -259,7 +259,7 @@ const facts = factsAsker()
  * registered before the app is ready, as Electron asks.
  */
 protocol.registerSchemesAsPrivileged([
-  { scheme: PICTURE_SCHEME, privileges: { standard: true, secure: true } },
+  { scheme: PICTURE_SCHEME, privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true } },
   // An HTML canvas's files (ADR-104): an origin for each canvas, handled only in its project's canvas partition (canvases/views.ts).
   { scheme: CANVAS_SCHEME, privileges: { standard: true, secure: true, supportFetchAPI: true, codeCache: true } },
 ])

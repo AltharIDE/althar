@@ -170,6 +170,7 @@ export const ICONS = {
   sound: SoundHigh,
   /** Plays something once, to hear it. */
   play: Play,
+  pause: Pause,
   /** Waits for something else to merge first. */
   after: GitMerge,
   external: OpenNewWindow,

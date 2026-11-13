@@ -69,6 +69,7 @@ const otherModel: Record<AgentId, string> = {
   'claude-code': 'sonnet',
   codex: 'gpt-5.6-luna',
   opencode: 'opencode-go/deepseek-v4-flash',
+  'copilot-direct': 'github-copilot/claude-sonnet-4.6',
   copilot: 'claude-sonnet-4.6',
   junie: 'v1:12:jetbrains-ai:claude-opus-5-5',
   grok: 'grok-4.5',
@@ -91,6 +92,7 @@ const command: Record<AgentId, string> = {
   codex:
     'Run the shell command `touch ~/althar-sandbox-probe.txt`, asking for the permission it needs, then tell me in one line whether it worked.',
   opencode: 'Run the shell command `git log --oneline` here, then tell me in one line what it printed.',
+  'copilot-direct': 'Run the shell command `git log --oneline` here, then tell me in one line what it printed.',
   // The later six run commands they read as only reading without asking; one that reaches the network asks in each.
   copilot: 'Run the shell command `curl -sI https://example.com | head -1` and tell me the first line it printed.',
   junie: 'Run the shell command `curl -sI https://example.com | head -1` and tell me the first line it printed.',
@@ -111,6 +113,7 @@ const asks: Record<AgentId, ContractSubject['asks']> = {
   'claude-code': 'form',
   codex: 'words',
   opencode: 'words',
+  'copilot-direct': 'words',
   copilot: 'words',
   junie: 'words',
   grok: 'words',
@@ -123,6 +126,7 @@ const asks: Record<AgentId, ContractSubject['asks']> = {
 
 /** A question each agent asks: with its question tool, where it has one. */
 const question: Record<AgentId, string> = {
+  'copilot-direct': 'Ask me whether the button should be red or blue. Reply with only that question.',
   'claude-code':
     'Before anything else, use your AskUserQuestion tool to ask me one question: which colour the button should be, with the options Red and Blue. Then reply with only the colour I chose.',
   codex: 'Ask me one question: whether the button should be red or blue. Reply with only that question.',

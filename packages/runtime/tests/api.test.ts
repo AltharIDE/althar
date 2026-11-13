@@ -402,9 +402,9 @@ describe('the API', () => {
         const choosing = { commandId: commandId(), threadId: task.threadId, model: 'large' }
         yield* client.SetModel(choosing)
         yield* client.SetModel(choosing)
-        assert.strictEqual((yield* client.GetThread({ threadId: task.threadId })).session?.model, 'large')
+        yield* until(client.GetThread({ threadId: task.threadId }), (view) => view.session?.model === 'large')
         yield* client.SetEffort({ commandId: commandId(), threadId: task.threadId, effort: 'high' })
-        assert.strictEqual((yield* client.GetThread({ threadId: task.threadId })).session?.effort, 'high')
+        yield* until(client.GetThread({ threadId: task.threadId }), (view) => view.session?.effort === 'high')
         const offered = yield* client.GetModels({})
         assert.deepStrictEqual(
           offered.map((agent) => agent.agentId),

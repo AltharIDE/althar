@@ -82,6 +82,7 @@ import type { PullRequestFacts } from './pullRequestStanding'
 import { baseOf, changedBetween, type ChangedFile, changedFiles, fileDiff, type FileDiff, unchangedFileDiff } from './diffs'
 import { beforeShipReviewStep, changedWords, smallChangeOf, smallChangeSkips } from './smallChange'
 import { afterMergeNow } from './afterMergeReview'
+import { evidenceGallery, galleryUpdateIn } from './evidenceGallery'
 import { builtIn, descriptionsIn, evidenceOf, evidencePaths, keptViewsIn, shownOf, unverifiedIn } from './evidence'
 import { graphOf, type RunRows, type StepRow } from './graph'
 import { taskFindingsOf } from './taskFindings'
@@ -732,6 +733,7 @@ export const itemOf = (row: ItemRow): ThreadItem | undefined => {
           unverified: unverifiedIn(field(content, 'unverified')),
           ...descriptionsIn(field(content, 'descriptions')),
           ...keptViewsIn(field(content, 'keptViews')),
+          ...(galleryUpdateIn(field(content, 'gallery')) === undefined ? {} : { gallery: galleryUpdateIn(field(content, 'gallery')) }),
           // A review after a merge says which pull request it read.
           ...(text(field(content, 'afterMerge'), 'url') === ''
             ? {}
@@ -1182,6 +1184,7 @@ export class Queries extends Context.Service<
             LEFT JOIN provider_sessions s ON s.id = i.provider_session_id
             LEFT JOIN user_inputs u ON u.id = i.user_input_id
             WHERE i.thread_id = ${threadId}
+              AND i.undone_at IS NULL
               -- A message taken back takes no place on a page; read by id, it says it was taken back.
               AND ${where.itemId === undefined ? sql`(u.state IS NULL OR u.state <> 'withdrawn')` : sql`i.id = ${where.itemId}`}
               AND ${where.before === undefined ? sql`1 = 1` : sql`i.sequence < ${where.before}`}
@@ -3712,7 +3715,12 @@ export class Queries extends Context.Service<
           // What the store says comes first, together, so it is as of the cursor; git after.
           const { items, earlier, turns } = yield* pageOf(threadId, page, true)
           // Its steps' reports, whatever page they're on: the task's finished view is read from the lead's, its graph from all.
-          const reports = (yield* itemRows(threadId, { reports: true, limit: REPORTS })).items.map(itemOf)
+          const { reports, gallery } = yield* sql.withTransaction(
+            Effect.gen(function* () {
+              const reports = (yield* itemRows(threadId, { reports: true, limit: REPORTS })).items.map(itemOf)
+              return { reports, gallery: yield* evidenceGallery(threadId) }
+            }),
+          )
           // The tasks its lead started, all of them: its thread's page may not reach the line that says so.
           const started = yield* sql<{ taskId: string; slug: string; title: string; threadId: string }>`
             SELECT k.id AS task_id, k.slug AS slug, k.title AS title, t.id AS thread_id
@@ -3960,10 +3968,27 @@ export class Queries extends Context.Service<
             },
             session,
             retryable: yield* (yield* Sessions).retryable(threadId),
+            conversationVersion:
+              (yield* sql<{ version: number }>`SELECT conversation_version AS version FROM threads WHERE id = ${threadId}`)[0]?.version ??
+              1,
+            undoable: (yield* sql<{ id: string }>`
+              SELECT i.id FROM thread_items i
+              WHERE i.thread_id = ${threadId} AND i.kind = 'user_message' AND i.undone_at IS NULL
+                AND EXISTS (SELECT 1 FROM turn_delivery_inputs di JOIN turn_deliveries d ON d.id = di.delivery_id
+                  WHERE di.user_input_id = i.user_input_id AND d.checkpoints IS NOT NULL
+                    AND d.undone_at IS NULL AND d.state NOT IN ('pending', 'delivered')
+                    AND i.sequence = (SELECT min(first.sequence) FROM turn_delivery_inputs batch
+                      JOIN thread_items first ON first.user_input_id = batch.user_input_id
+                      WHERE batch.delivery_id = d.id AND first.undone_at IS NULL)
+                    AND json_array_length(d.checkpoints) > 0
+                    AND NOT EXISTS (SELECT 1 FROM json_each(d.checkpoints) c WHERE json_extract(c.value, '$.after') IS NULL))`).map(
+              (row) => row.id,
+            ),
             attention: attention.map(callOf),
             items,
             earlier,
             reports: reports.flatMap((item) => (item === undefined ? [] : [item])),
+            gallery,
             turns,
             started,
           } satisfies ThreadSnapshot
