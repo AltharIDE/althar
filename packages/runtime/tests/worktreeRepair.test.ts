@@ -57,6 +57,18 @@ const relativeWorktrees = (() => {
 
 const repaired = (main: string, folder: string) => Effect.runPromise(repairWorktree(main, folder))
 
+/**
+ * Rewrites a link file as a move would leave it. Git for Windows hides a worktree's `.git`, and Windows won't let
+ * a hidden file be opened to be replaced, so it goes first.
+ */
+const relink = (file: string, text: string) => {
+  rmSync(file, { force: true })
+  writeFileSync(file, text)
+}
+
+/** A path as git writes it into a link: with forward slashes, on Windows too. */
+const asGitWrites = (path: string) => path.replaceAll('\\', '/')
+
 describe('a worktree whose link broke', () => {
   it('says no secret a folder, a repository or a branch is named with', () => {
     const token = 'ghp_' + 'abcdefghijklmnopqrstuvwxyz0123456789'
@@ -86,7 +98,7 @@ describe('a worktree whose link broke', () => {
   it('whose .git names a place that isn’t there: git fails before, and works after the repair', async () => {
     const { at, main } = fixture(['bogus'])
     const folder = join(at, 'bogus')
-    writeFileSync(join(folder, '.git'), 'gitdir: /nowhere/althar/worktrees/orchy/.git/worktrees/bogus\n')
+    relink(join(folder, '.git'), 'gitdir: /nowhere/althar/worktrees/orchy/.git/worktrees/bogus\n')
     const before = tried(folder, 'rev-parse', 'HEAD')
     assert.isFalse(before.ok)
     assert.isTrue(linkBroke(before.stderr))
@@ -108,13 +120,13 @@ describe('a worktree whose link broke', () => {
     assert.match(said, /repair/)
     assert.deepStrictEqual(linkOf(folder), { state: 'fine' })
     assert.isTrue(tried(folder, 'status').ok)
-    assert.include(readFileSync(join(folder, '.git'), 'utf8'), now)
+    assert.include(readFileSync(join(folder, '.git'), 'utf8'), asGitWrites(now))
   })
 
   it('whose repository’s record names another place, which git would prune', async () => {
     const { at, main } = fixture(['elsewhere'])
     const folder = join(at, 'elsewhere')
-    writeFileSync(join(main, '.git', 'worktrees', 'elsewhere', 'gitdir'), `${join(at, 'gone', 'elsewhere', '.git')}\n`)
+    relink(join(main, '.git', 'worktrees', 'elsewhere', 'gitdir'), `${join(at, 'gone', 'elsewhere', '.git')}\n`)
     assert.include(tried(main, 'worktree', 'list').stdout, 'prunable')
     assert.deepInclude(linkOf(folder), { state: 'broken', why: 'back_link' })
     await repaired(main, folder)
@@ -125,7 +137,7 @@ describe('a worktree whose link broke', () => {
   it.skipIf(!relativeWorktrees)('made with relative paths, moved on its own', async () => {
     const { at, main } = fixture(['relative'], true)
     const folder = join(at, 'relative')
-    assert.notInclude(readFileSync(join(folder, '.git'), 'utf8'), at)
+    assert.notInclude(readFileSync(join(folder, '.git'), 'utf8'), asGitWrites(at))
     assert.deepStrictEqual(linkOf(folder), { state: 'fine' })
     mkdirSync(join(at, 'deeper'))
     const now = join(at, 'deeper', 'relative')
@@ -152,7 +164,7 @@ describe('a worktree whose link broke', () => {
     const [a, d] = [join(at, 'a'), join(at, 'd')]
     // As a prune leaves it: a's record gone, and its .git naming the record another worktree has now.
     rmSync(join(main, '.git', 'worktrees', 'a'), { recursive: true })
-    writeFileSync(join(a, '.git'), `gitdir: ${join(main, '.git', 'worktrees', 'd')}\n`)
+    relink(join(a, '.git'), `gitdir: ${join(main, '.git', 'worktrees', 'd')}\n`)
     assert.deepInclude(linkOf(a), { state: 'broken', why: 'back_link' })
     assert.deepStrictEqual(linkOf(d), { state: 'fine' })
     await repaired(main, a)
@@ -168,7 +180,7 @@ describe('a worktree whose link broke', () => {
     const before = readFileSync(join(records, 'd', 'gitdir'), 'utf8')
     // Its .git naming the other's record where it is, or, from before the repository moved, by its name.
     for (const named of [join(records, 'd'), '/nowhere/old-profile/.git/worktrees/d']) {
-      writeFileSync(join(a, '.git'), `gitdir: ${named}\n`)
+      relink(join(a, '.git'), `gitdir: ${named}\n`)
       assert.deepStrictEqual(takenFrom(a, linkOf(a), main, 'a'), { folder: d })
     }
     assert.strictEqual(readFileSync(join(records, 'd', 'gitdir'), 'utf8'), before)
@@ -185,7 +197,7 @@ describe('a worktree whose link broke', () => {
     const records = join(main, '.git', 'worktrees')
     rmSync(join(records, 'a'), { recursive: true })
     rmSync(join(d, '.git'))
-    writeFileSync(join(a, '.git'), `gitdir: ${join(records, 'd')}\n`)
+    relink(join(a, '.git'), `gitdir: ${join(records, 'd')}\n`)
     const before = readFileSync(join(records, 'd', 'gitdir'), 'utf8')
     // Detached, the record names no branch to tell it by: its folder being there is what says it is another's.
     assert.deepStrictEqual(takenFrom(a, linkOf(a), main, false), { folder: d })
@@ -199,7 +211,7 @@ describe('a worktree whose link broke', () => {
     const a = join(at, 'a')
     rmSync(join(main, '.git', 'worktrees', 'a'), { recursive: true })
     rmSync(join(at, 'e'), { recursive: true })
-    writeFileSync(join(a, '.git'), 'gitdir: /nowhere/old-profile/.git/worktrees/e\n')
+    relink(join(a, '.git'), 'gitdir: /nowhere/old-profile/.git/worktrees/e\n')
     assert.deepStrictEqual(takenFrom(a, linkOf(a), main, 'a'), { branch: 'e' })
     // A review's copy is never on a branch.
     assert.deepStrictEqual(takenFrom(a, linkOf(a), main, false), { branch: 'e' })
@@ -209,7 +221,7 @@ describe('a worktree whose link broke', () => {
   it('is its own to repair where the repository’s record of it names it, whatever its .git names', () => {
     const { at, main } = fixture(['a', 'd'])
     const a = join(at, 'a')
-    writeFileSync(join(a, '.git'), 'gitdir: /nowhere/old-profile/.git/worktrees/d\n')
+    relink(join(a, '.git'), 'gitdir: /nowhere/old-profile/.git/worktrees/d\n')
     assert.isNull(takenFrom(a, linkOf(a), main, 'a'))
   })
 
@@ -265,7 +277,7 @@ describe('a task’s worktree whose link broke, in the runtime', () => {
     Effect.gen(function* () {
       const task = yield* aTask
       const head = git(task.worktree, 'rev-parse', 'HEAD')
-      writeFileSync(join(task.worktree, '.git'), 'gitdir: /nowhere/flatpak/althar/worktrees/orchy/.git/worktrees/x\n')
+      relink(join(task.worktree, '.git'), 'gitdir: /nowhere/flatpak/althar/worktrees/orchy/.git/worktrees/x\n')
       assert.isFalse(tried(task.worktree, 'rev-parse', 'HEAD').ok)
       assert.strictEqual(yield* runtimeGit(task.worktree, 'rev-parse', 'HEAD'), head)
       assert.deepStrictEqual(linkOf(task.worktree), { state: 'fine' })
@@ -282,7 +294,7 @@ describe('a task’s worktree whose link broke, in the runtime', () => {
   it.live('repairs, and records, its repository’s other broken worktrees with it, as git repairs them together', () =>
     Effect.gen(function* () {
       const [first, second] = yield* tasks(['Fix the login', 'Fix the logout'])
-      for (const task of [first!, second!]) writeFileSync(join(task.worktree, '.git'), 'gitdir: /nowhere/old-profile/.git/worktrees/x\n')
+      for (const task of [first!, second!]) relink(join(task.worktree, '.git'), 'gitdir: /nowhere/old-profile/.git/worktrees/x\n')
       yield* runtimeGit(first!.worktree, 'status')
       assert.isTrue(tried(second!.worktree, 'status').ok)
       for (const task of [first!, second!]) {
@@ -302,8 +314,8 @@ describe('a task’s worktree whose link broke, in the runtime', () => {
       git(task.worktree, 'worktree', 'add', '-q', '--detach', copy)
       // The worktree's record in the repository names another place; the copy's .git names one that isn't there.
       const name = readFileSync(join(task.worktree, '.git'), 'utf8').trim().split('/').at(-1) ?? ''
-      writeFileSync(join(task.root, '.git', 'worktrees', name, 'gitdir'), '/nowhere/else/.git\n')
-      writeFileSync(join(copy, '.git'), 'gitdir: /nowhere/review/.git/worktrees/copy\n')
+      relink(join(task.root, '.git', 'worktrees', name, 'gitdir'), '/nowhere/else/.git\n')
+      relink(join(copy, '.git'), 'gitdir: /nowhere/review/.git/worktrees/copy\n')
       const done = yield* (yield* WorktreeRepair).sweep
       assert.deepStrictEqual(
         done.map((one) => [one.copy, one.why, one.repaired]),
@@ -361,7 +373,7 @@ describe('a task’s worktree whose link broke, in the runtime', () => {
       const records = join(moved!.root, '.git', 'worktrees')
       rmSync(join(records, nameOf(moved!)), { recursive: true })
       const other = join(records, nameOf(live!))
-      writeFileSync(join(moved!.worktree, '.git'), `gitdir: /nowhere/old-profile/.git/worktrees/${nameOf(live!)}\n`)
+      relink(join(moved!.worktree, '.git'), `gitdir: /nowhere/old-profile/.git/worktrees/${nameOf(live!)}\n`)
       const before = [readFileSync(join(other, 'gitdir'), 'utf8'), readFileSync(join(moved!.worktree, '.git'), 'utf8')]
       yield* Effect.flip(runtimeGit(moved!.worktree, 'status'))
       assert.deepStrictEqual([readFileSync(join(other, 'gitdir'), 'utf8'), readFileSync(join(moved!.worktree, '.git'), 'utf8')], before)
@@ -383,7 +395,7 @@ describe('a task’s worktree whose link broke, in the runtime', () => {
       const records = join(moved!.root, '.git', 'worktrees')
       rmSync(join(records, nameOf(moved!)), { recursive: true })
       const other = join(records, nameOf(live!))
-      writeFileSync(join(moved!.worktree, '.git'), `gitdir: ${other}\n`)
+      relink(join(moved!.worktree, '.git'), `gitdir: ${other}\n`)
       const before = readFileSync(join(other, 'gitdir'), 'utf8')
       const done = yield* (yield* WorktreeRepair).sweep
       assert.deepStrictEqual(
