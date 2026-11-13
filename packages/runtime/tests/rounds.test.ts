@@ -1241,6 +1241,11 @@ describe('changing the team of a task that has begun', () => {
       const next = yield* changeTeam(task.taskId, [step('implement', 'claude-code'), step('review', 'codex')])
       assert.deepStrictEqual([next.review?.step?.agentId, next.review?.when], ['codex', 'next_ship'])
       yield* changeTeam(task.taskId, [step('implement', 'claude-code'), step('review', 'claude-code', 'large')])
+      // A ready card may precede the turn's cleanup, which retires its lead. Keep a live lead to test its next pick.
+      yield* (yield* Sessions).stop(task.threadId)
+      yield* until((yield* Sessions).running(task.threadId), Option.isNone)
+      yield* (yield* Sessions).startLast(task.threadId)
+      yield* until((yield* Sessions).running(task.threadId), Option.isSome)
       assert.deepStrictEqual(
         (yield* changeTeam(task.taskId, [step('implement', 'codex'), step('review', 'claude-code', 'large')])).lead?.step.agentId,
         'codex',
