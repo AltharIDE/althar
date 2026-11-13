@@ -117,13 +117,20 @@ const opened = (working: string, markers: string, small = true) =>
     const coordinator = yield* Coordinator
     const project = yield* projects.open({ envelope: yield* Runtime.envelope('project.open', {}), path: working })
     const threadId = yield* coordinator.thread(project.projectId)
-    const body = `Add a retry. [coordinator:plan]${small ? ' [coordinator:plan-small]' : ''} [lead:finish] [lead:edit] ${markers}`
+    const body = `Add a retry. [coordinator:plan]${small ? ' [coordinator:plan-small] [coordinator:plan-no-review]' : ''} [lead:finish] [lead:edit] ${markers}`
     yield* coordinator.say({ envelope: yield* Runtime.envelope('thread.send', { body }), threadId, body, disposition: 'after_current' })
     const [ready] = yield* until(
       cards(project.projectId),
       (all) => all[0]?.change != null && all[0].change.state === 'open' && (small || all[0].phase === 'ready'),
     )
     const card = ready ?? assert.fail('no card')
+    // The after-merge cases explicitly defer their reviewer; normal cases retain their real before-Ship pass.
+    if (small)
+      yield* (yield* Runs).reshape({
+        taskId: card.taskId,
+        afterMerge: { key: 'review', agentId: 'codex', model: null, skipped: true },
+        actorId: instance.personId,
+      })
     yield* until(
       Effect.flatMap(Sessions, (sessions) => sessions.busy(card.threadId)),
       (busy) => !busy,
@@ -303,7 +310,13 @@ describe('the review after a merge, at its edges', () => {
       const found = yield* reviewOf(task.url)
       assert.strictEqual(found?.state, 'found')
       assert.deepStrictEqual(JSON.parse(found?.findings ?? '[]'), [
-        { severity: 'minor', title: 'Name the retry', claim: 'Name it for what it retries.', file: null, line: null },
+        {
+          severity: 'minor',
+          title: 'Name the retry',
+          claim: 'Name it for what it retries.',
+          file: null,
+          line: null,
+        },
         { severity: 'nit', file: 'README.md', claim: 'A typo in the heading.', line: null },
       ])
       // Its report in the task's thread names the reviewer it came from.
@@ -341,27 +354,25 @@ describe('the review after a merge, at its edges', () => {
   it.live('is under way from Fix it to the end of its lead’s turn: never Done, nor Stopped, in between', () => {
     const { working, bare, github } = onGitHub()
     const place = holds()
-    let holdFix = false
-    let fixAsked = false
+    let holdStartup: Promise<void> | undefined
+    let start = () => {}
     return Effect.gen(function* () {
       const task = yield* found(working, bare, github)
       const mergeReviews = yield* MergeReviews
+      const sql = yield* SqlClient.SqlClient
       // Found, its lead gone as a merged task's is: the person's, Fix it and Leave it beside it.
       yield* gone(task.threadId)
       assert.deepInclude(yield* standingOf(task.threadId), { phase: 'ready', afterMerge: 'found' })
 
-      // Hold only the new turn, even when the resumed fake reads just the prompt's final paragraph.
-      holdFix = true
       const watched = yield* watching(task.threadId)
-      const sent = yield* mergeReviews.fix(task.taskId, task.url)
-      // The instant it is answered: its lead held, the turn begun or not: under way, not Done, not Stopped.
+      holdStartup = new Promise<void>((resolve) => (start = resolve))
+      const fixing = yield* Effect.forkChild(mergeReviews.fix(task.taskId, task.url))
+      // Read the actual dispatch window, with startup held. A fake that answers immediately can finish before fix() returns.
+      yield* until(sql<{ state: string }>`SELECT state FROM merge_reviews WHERE url = ${task.url}`, (rows) => rows[0]?.state === 'fixing')
       assert.strictEqual((yield* standingOf(task.threadId)).phase, 'running')
-      yield* until(
-        Effect.sync(() => fixAsked),
-        Boolean,
-      )
       yield* until(watched.seen, (phases) => phases.includes('running'))
-      holdFix = false
+      start()
+      const sent = yield* Fiber.join(fixing)
       yield* mergeReviews.afterTurnOf(sent.threadId, sent.inputId)
       const phases = yield* watched.stop
       assert.notInclude(phases, 'settled', `Done showed while Fix it was taken: ${phases.join(' > ')}`)
@@ -371,15 +382,9 @@ describe('the review after a merge, at its edges', () => {
       assert.strictEqual((yield* until(standingOf(task.threadId), (now) => now.phase !== 'running')).phase, 'ready')
       place.open('[review:wait]')
     }).pipe(
+      Effect.ensuring(Effect.sync(() => start())),
       Effect.provide(
-        runtimeWith(github, {
-          holds: place,
-          connection: () => {
-            if (!holdFix) return undefined
-            fixAsked = true
-            return 'waits'
-          },
-        }),
+        runtimeWith(github, { holds: place }, { 'claude-code': { beforeNewSession: () => holdStartup ?? Promise.resolve() } }),
       ),
     )
   })

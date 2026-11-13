@@ -29,11 +29,12 @@ export interface ChecksSum {
 /** Sums up a head's checks: passed, failed, still running, and how they stand overall. */
 export const checksOf = (sha: string, checks: ReadonlyArray<Check>): ChecksSum => {
   const failed = checks.filter((check) => check.state === 'failed')
+  const cancelled = checks.some((check) => check.state === 'cancelled')
   const running = checks.filter((check) => check.state === 'queued' || check.state === 'running').length
   const passed = checks.filter((check) => check.state === 'passed').length
   return {
     sha,
-    outcome: checks.length === 0 ? 'none' : running > 0 ? 'running' : failed.length > 0 ? 'failed' : 'passed',
+    outcome: checks.length === 0 ? 'none' : running > 0 ? 'running' : failed.length > 0 || cancelled ? 'failed' : 'passed',
     passed,
     failed: failed.length,
     running,

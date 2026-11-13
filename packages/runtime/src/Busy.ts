@@ -513,7 +513,8 @@ export class Busy extends Context.Service<
         for (const session of yield* sessions.onTasks) {
           // Left running and idle, it is nothing to wait for; not yet read, it counts.
           const working = session.background && (sampled.get(session.threadId)?.working ?? true)
-          const turning = (session.turnRunning || told.has(session.threadId)) && !asking.has(session.threadId)
+          const turning =
+            (session.turnRunning || (session.acceptingTurns !== false && told.has(session.threadId))) && !asking.has(session.threadId)
           if (working || turning)
             take(session.taskId, session.reviewer, session.threadId, !turning, session.helper ? session.threadId : undefined)
         }

@@ -71,7 +71,7 @@ export const BUILT_IN: ReadonlyArray<Preset> = [
     name: 'Small change',
     builtin: true,
     projectId: null,
-    parts: { workspace: 'worktree', checked: 'after', shelf: 'board', lead: null, reviewer: null, brief: '' },
+    parts: { workspace: 'worktree', checked: 'before', shelf: 'board', lead: null, reviewer: null, brief: '' },
   },
   {
     id: 'builtin:review',
@@ -173,6 +173,7 @@ export const partsOfPlan = (
     readonly here?: boolean | undefined
     readonly reads?: boolean | undefined
     readonly reviewAfterMerge?: boolean | undefined
+    readonly smallChange?: boolean | undefined
     readonly worksIn?: string | undefined
   },
   shelf: string | null,
@@ -476,6 +477,7 @@ export interface PresetPlan {
   readonly here?: boolean | undefined
   readonly reads?: boolean | undefined
   readonly reviewAfterMerge?: boolean | undefined
+  readonly smallChange?: boolean | undefined
   readonly worksIn?: 'worktree' | 'checkout' | undefined
 }
 
@@ -543,7 +545,7 @@ export const planFromPreset = <P extends PresetPlan>(
             // After the merge, nothing waits on it before: skipped in the run, read once the work merged.
             skipped: parts.checked === 'after',
           }
-  const { reviewAfterMerge: _after, here: _here, worksIn: _worksIn, endChosen: _chosen, ...rest } = before
+  const { reviewAfterMerge: _after, smallChange: _small, here: _here, worksIn: _worksIn, endChosen: _chosen, ...rest } = before
   return {
     ...rest,
     steps: [...(implement === undefined ? [] : [implement]), ...(reviewing === undefined ? [] : [reviewing])],

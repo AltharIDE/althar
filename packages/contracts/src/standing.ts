@@ -61,6 +61,10 @@ export const goingUp = (change: Pick<ChangeSummary, 'pushing'>): boolean =>
 /** Whether the commits here wait on a branch held for Ship: Ship sends them up, after its review; no Push does. */
 export const forShip = (change: Pick<ChangeSummary, 'pushing'>): boolean => change.pushing?.ship === true
 
+/** A first or next pull request follows the task's ending through Ship, including its review, when there is committed work. */
+export const shipsToOpen = (task: { readonly end: string | null | undefined; readonly open: boolean; readonly commits: number }): boolean =>
+  (task.end === 'draft' || task.end === 'ready') && !task.open && task.commits > 0
+
 /** A head's checks without the skipped ones: they never ran, so they are neither passed nor missing from the total. */
 export const ranChecks = (checks: NonNullable<ChangeSummary['checks']>): { readonly passed: number; readonly total: number } => ({
   passed: checks.passed,

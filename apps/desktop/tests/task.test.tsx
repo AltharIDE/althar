@@ -1986,7 +1986,7 @@ describe('a task', () => {
     expect(screen.queryByRole('menuitem', { name: /Change the team…/ })).toBeNull()
   })
 
-  it('changes the team of a task at work from its menu, saving through the task', async () => {
+  it('opens the team of a task at work from its menu, and saves no change when nothing was edited', async () => {
     const running = {
       ...card({ taskId: 't1', threadId: 'th1', phase: 'running', step: 'implement', reviewerChange: 'now' }),
       state: 'open',
@@ -2006,7 +2006,8 @@ describe('a task', () => {
     expect(dialog.getByText('From its next turn.')).toBeTruthy()
     expect(dialog.queryByRole('button', { name: 'Start' })).toBeNull()
     await userEvent.click(dialog.getByRole('button', { name: 'Save' }))
-    await waitFor(() => expect(client.changeTeam).toHaveBeenCalledWith('t1', running.plan!.steps))
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Team' })).toBeNull())
+    expect(client.changeTeam).not.toHaveBeenCalled()
     expect(client.changePlan).not.toHaveBeenCalled()
   })
 

@@ -84,10 +84,10 @@ describe('new projects start with', () => {
     await choose(page, 'When a task is done', 'Push the branch only')
     expect(client.setNewProjectDefaults).toHaveBeenLastCalledWith({ end: 'none' })
     // A small change's review after it merges: Major only to start with, said under its line.
-    const afterMerge = within(page).getByRole('combobox', { name: 'Review after a small change merges' })
+    const afterMerge = within(page).getByRole('combobox', { name: 'When a review is set after merge' })
     expect(afterMerge.textContent).toBe('Bring back major findings')
     expect(within(page).getByText('Minor findings and nits stay in the task’s thread.')).toBeTruthy()
-    await choose(page, 'Review after a small change merges', 'Don’t review it')
+    await choose(page, 'When a review is set after merge', 'Don’t review it')
     expect(client.setNewProjectDefaults).toHaveBeenLastCalledWith({ afterMergeReview: 'none' })
   })
 

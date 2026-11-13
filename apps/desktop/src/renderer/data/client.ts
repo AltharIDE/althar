@@ -604,8 +604,8 @@ export interface Client {
   /** Gives a task another preset's parts at once, as Make it a change does with Change: its review, ending and worktree. */
   readonly shapeTask: (taskId: string, preset: string) => Promise<void>
   /**
-   * One small change's own word on its review after the merge, over its project's rule, until it merges: `review`, `none`,
-   * or null for the rule. Its card reads what holds (`afterMerge` on the small change's card).
+   * The person's explicit choice of review after merge, over its project's rule, until it merges: `review`, `none`,
+   * or null for the rule. Its card reads what holds (`afterMerge` on the explicitly configured after-merge card).
    */
   readonly setReviewAfterMerge: (taskId: string, review: 'review' | 'none' | null) => Promise<void>
   /** Merges the task's pull request at the head the person saw, as they said to; a draft is marked ready first. */

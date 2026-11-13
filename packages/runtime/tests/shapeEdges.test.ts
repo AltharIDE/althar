@@ -161,7 +161,7 @@ describe('a task’s shape, at its edges', () => {
       const task = yield* planned(working)
       assert.match(
         yield* callTool(task.lead, 'change_part', { part: 'ending', end: 'ready', why: 'the person asked' }),
-        /changed its parts: ending in a pull request ready for review\. .* Ship opens its pull request: call ship_task .*, and it ships once your turn ends;/,
+        /changed its parts: ending in a pull request ready for review\. .* Commit its work before Ship can open a pull request\./,
       )
       assert.match(yield* callTool(task.lead, 'remove_part', { part: 'ending' }), /changed its parts: ending with its branch\./)
       assert.strictEqual((yield* planOf(task.taskId)).end, 'none')
@@ -174,33 +174,34 @@ describe('a task’s shape, at its edges', () => {
     }).pipe(Effect.provide(runtimeWith(github)))
   })
 
-  it.live('moves its review to after the merge, keeps it there, and takes it off; a reviewer named with its effort goes on', () => {
+  it.live('keeps Small change’s review before Ship and can take it off or name its reviewer', () => {
     const { working, github } = onGitHub()
     return Effect.gen(function* () {
       // Its reviewer, Claude on another model than its lead's, is the one it keeps.
       const task = yield* planned(working, [LEAD, { key: 'review', agentId: 'claude-code', model: 'large', skipped: false }])
       const change = (args: Record<string, unknown>) => callTool(task.lead, 'change_part', { why: 'the person asked', ...args })
-      assert.match(yield* change({ part: 'preset', preset: 'Small change' }), /made it a Small change: reviewed by .+ after it merges/)
+      assert.match(yield* change({ part: 'preset', preset: 'Small change' }), /made it a Small change:/)
       const after = yield* planOf(task.taskId)
-      assert.isTrue(after.reviewAfterMerge)
+      assert.isUndefined(after.reviewAfterMerge)
+      assert.isTrue(after.smallChange)
       assert.deepStrictEqual(
         after.steps.map((step) => [step.key, step.model, step.skipped]),
         [
           ['implement', null, false],
-          ['review', 'large', true],
+          ['review', 'large', false],
         ],
       )
-      // The same again changes nothing; its ending changes with its review still after the merge.
+      // The same again changes nothing; the ending never changes its review timing.
       assert.match(yield* change({ part: 'preset', preset: 'Small change' }), /^Nothing changed: add-a-retry has those parts already\./)
       assert.match(yield* change({ part: 'ending', end: 'ready' }), /ending in a pull request ready for review/)
-      assert.deepStrictEqual([(yield* planOf(task.taskId)).end, (yield* planOf(task.taskId)).reviewAfterMerge], ['ready', true])
+      assert.deepStrictEqual([(yield* planOf(task.taskId)).end, (yield* planOf(task.taskId)).reviewAfterMerge], ['ready', undefined])
       // Taken off: nothing reads it after the merge either.
       assert.match(yield* callTool(task.lead, 'remove_part', { part: 'checked_by', why: 'the person said no review' }), /no review/)
       assert.isUndefined((yield* planOf(task.taskId)).reviewAfterMerge)
       // Put back, by the model and effort named.
       assert.match(
         yield* change({ part: 'checked_by', review: { agent: 'codex', model: 'large', effort: 'high' } }),
-        /changed its parts: reviewed by /,
+        /changed its parts: reviewer set to /,
       )
       const review = (yield* planOf(task.taskId)).steps.find((step) => step.key === 'review')
       assert.deepStrictEqual([review?.agentId, review?.model, review?.effort, review?.skipped], ['codex', 'large', 'high', false])
@@ -213,7 +214,7 @@ describe('a task’s shape, at its edges', () => {
         fromTaskId: null,
         actorId: instance.personId,
       })
-      assert.match(yield* change({ part: 'preset', preset: 'Quick fix' }), /made it a Quick fix: reviewed by .+ after it merges/)
+      assert.match(yield* change({ part: 'preset', preset: 'Quick fix' }), /made it a Quick fix: review after merge set to .+/)
       const quick = (yield* planOf(task.taskId)).steps.find((step) => step.key === 'review')
       assert.deepStrictEqual([quick?.agentId, quick?.skipped], ['claude-code', true])
     }).pipe(Effect.provide(runtimeWith(github)))
@@ -284,7 +285,7 @@ describe('a task’s shape, at its edges', () => {
       )
       yield* actions.shape(task.taskId, 'Change', personId)
       assert.lengthOf(yield* lines, 1)
-      assert.match(String((yield* lines)[0]), /^You made it a Change: reviewed by .+, ending in a draft pull request/)
+      assert.match(String((yield* lines)[0]), /^You made it a Change: reviewer set to .+, ending in a draft pull request/)
       // The same again changes nothing, and says nothing.
       yield* actions.shape(task.taskId, 'Change', personId)
       assert.lengthOf(yield* lines, 1)
@@ -323,7 +324,7 @@ describe('a task’s shape, at its edges', () => {
       const head = () => git(working, 'rev-parse', '--abbrev-ref', 'HEAD')
       assert.match(
         yield* change('On my checkout'),
-        /made it an On my checkout: Local, reviewed by .+, ending in a pull request ready for review/,
+        /made it an On my checkout: Local, reviewer set to .+, ending in a pull request ready for review/,
       )
       assert.strictEqual(head(), task.branch)
       assert.strictEqual((yield* planOf(task.taskId)).steps.find((step) => step.key === 'review')?.model, 'large')
@@ -335,9 +336,10 @@ describe('a task’s shape, at its edges', () => {
       assert.match(yield* change('On my checkout'), /made it an On my checkout: Local once it can/)
       assert.strictEqual(head(), 'main')
       assert.strictEqual(git(working, 'status', '--porcelain'), '?? Board.tsx')
-      // Its review, at work, moved to after the merge.
-      assert.match(yield* change('Small change'), /made it a Small change: reviewed by .+ after it merges/)
-      assert.isTrue((yield* planOf(task.taskId)).reviewAfterMerge)
+      // A size label keeps the configured review before Ship.
+      assert.match(yield* change('Small change'), /made it a Small change:/)
+      assert.isUndefined((yield* planOf(task.taskId)).reviewAfterMerge)
+      assert.isTrue((yield* planOf(task.taskId)).smallChange)
     }).pipe(Effect.provide(runtimeWith(github)))
   })
 

@@ -73,11 +73,12 @@ import { towardChoicesOf } from './towards'
 import { Agents, RuntimeConfig } from './Config'
 import { backgroundOf, questionTitle } from './Questions'
 import { Changes, STUCK_AFTER } from './Changes'
+import { checksAppearing } from './checksAppear'
 import { Coordinator } from './Coordinator'
 import { PullRequestScreenshots } from './PullRequestScreenshots'
 import type { PullRequestFacts } from './pullRequestStanding'
 import { baseOf, changedBetween, type ChangedFile, changedFiles, fileDiff, type FileDiff, unchangedFileDiff } from './diffs'
-import { changedWords, smallChangeOf, smallChangeSkips } from './smallChange'
+import { beforeShipReviewStep, changedWords, smallChangeOf, smallChangeSkips } from './smallChange'
 import { afterMergeNow } from './afterMergeReview'
 import { builtIn, descriptionsIn, evidenceOf, evidencePaths, keptViewsIn, shownOf, unverifiedIn } from './evidence'
 import { graphOf, type RunRows, type StepRow } from './graph'
@@ -102,6 +103,7 @@ import { commandIn, shortCommand } from './rules'
 import { reviewBriefOf } from './Reviews'
 import { partsOfPlan, presetOf, presetOfferOn, presetsIn } from './presets'
 import { Sessions } from './Sessions'
+import { teamLeadsOf } from './teamLead'
 import { spendingOf } from './Spending'
 import { timingsFrom } from './turnTimes'
 import { actionsOf, standingOf } from './Tasks'
@@ -2454,7 +2456,13 @@ export class Queries extends Context.Service<
           // Its commits going up on their own, or its checks running with nothing of the person's before them: under way (DEV-173).
           // Some failed while the rest still run, they go to its lead once they end, unless its tries are spent, the lead brought
           // them to the person, or the person stopped it since (ADR-070).
-          const going = task.runState === 'succeeded' ? byItself(shown, { failuresGo: fixing?.failuresGo === true }) : null
+          const appearing =
+            shown !== null &&
+            shown.head !== null &&
+            (shown.checks === null || shown.checks.outcome === 'none') &&
+            (yield* checksAppearing(taskId, shown.url, shown.head))
+          const going =
+            task.runState === 'succeeded' ? byItself(shown, { failuresGo: fixing?.failuresGo === true, checksAppearing: appearing }) : null
           // Not checks that ran too long, that Althar gave up on as so, or that it can't read (ADR-041): those are the person's. Commits made outside
           // a turn, which nothing pushes, aren't going up (`Changes.pushing`): those are the person's too.
           const goes = going === 'checks_running' && (yield* ranTooLong(taskId, shown?.head ?? null)) ? null : going
@@ -2570,6 +2578,17 @@ export class Queries extends Context.Service<
           const end = text(parameters, 'end')
           // How hard its lead thinks: what its session is on, which it says once started; until then the plan's, while its lead is the plan's.
           const implement = planned.find((step) => step.key === 'implement')
+          // A begun task's team is who leads from here, which may have changed through the composer without rewriting its plan.
+          const team =
+            task.planState === 'accepted' && implement !== undefined
+              ? yield* teamLeadsOf(
+                  task.threadId,
+                  implement,
+                  text(parameters, 'leadChanged') || task.proposedAt,
+                  Option.getOrUndefined(yield* (yield* Sessions).running(task.threadId)),
+                )
+              : null
+          const teamSteps = planned.map((step) => (step.key === 'implement' && team !== null ? team.next : step))
           const onPlan = task.lead === null || (task.lead === implement?.agentId && task.leadModel === implement.model)
           const leadEffort = task.leadEffort ?? (onPlan ? (implement?.effort ?? null) : null)
           // What it makes: its plan and its pull requests say so, whatever it wrote (a quick task stays plain until it is made a
@@ -2626,7 +2645,7 @@ export class Queries extends Context.Service<
                 ? null
                 : {
                     id: task.planId,
-                    steps: planned,
+                    steps: teamSteps,
                     startsAt: task.planState === 'proposed' ? task.startsAt : null,
                     ...(task.planState === 'proposed' && task.startsAt !== null && task.proposedAt !== null
                       ? { startsAfter: Math.max(0, Math.round((Date.parse(task.startsAt) - Date.parse(task.proposedAt)) / 1000)) }
@@ -2634,21 +2653,24 @@ export class Queries extends Context.Service<
                     reason: text(parameters, 'reason') || null,
                     end: end === 'draft' || end === 'ready' || end === 'none' ? end : null,
                     // The preset its parts are, which the card's kicker names first (a task is a conversation plus parts).
-                    preset: presetOf(
-                      yield* presetsIn(task.projectId),
-                      partsOfPlan(
-                        {
-                          steps: planned,
-                          end: end ?? null,
-                          here: field(parameters, 'here') === true,
-                          reads: field(parameters, 'reads') === true,
-                          reviewAfterMerge: field(parameters, 'reviewAfterMerge') === true,
-                          worksIn: text(parameters, 'worksIn'),
-                        },
-                        task.shelf,
-                        '',
-                      ),
-                    ),
+                    preset:
+                      field(parameters, 'smallChange') === true
+                        ? 'Small change'
+                        : presetOf(
+                            yield* presetsIn(task.projectId),
+                            partsOfPlan(
+                              {
+                                steps: planned,
+                                end: end ?? null,
+                                here: field(parameters, 'here') === true,
+                                reads: field(parameters, 'reads') === true,
+                                reviewAfterMerge: field(parameters, 'reviewAfterMerge') === true,
+                                worksIn: text(parameters, 'worksIn'),
+                              },
+                              task.shelf,
+                              '',
+                            ),
+                          ),
                     // Any agent may lead a review: the card offers them all.
                     ...(field(parameters, 'reads') === true
                       ? {}
@@ -2705,10 +2727,15 @@ export class Queries extends Context.Service<
                           : goes),
             followUp: (task.runState === 'running' && task.runPlan === null) || asked,
             summary: latest === undefined ? null : text(parse(latest.content), 'summary') || null,
-            lead: task.lead ?? (implement?.agentId || null),
+            lead: team?.current?.agentId ?? task.lead ?? (implement?.agentId || null),
             // Its session's model once one started; the plan's until then.
-            leadModel: task.lead === null ? (implement?.model ?? null) : task.leadModel,
-            leadEffort,
+            leadModel:
+              team?.current === undefined || team.current === null
+                ? task.lead === null
+                  ? (implement?.model ?? null)
+                  : task.leadModel
+                : team.current.model,
+            leadEffort: team?.current == null ? leadEffort : (team.current.effort ?? null),
             branch: task.branch,
             startedAt: task.attemptAt ?? task.runAt ?? task.firstSession,
             ...(task.local > 0 ? { local: true } : {}),
@@ -3208,6 +3235,20 @@ export class Queries extends Context.Service<
             SELECT state, json_array_length(findings) AS findings, verdict, json_extract(reviewer, '$.bringsBack') AS bringsBack,
               updated_at AS updatedAt FROM merge_reviews
             WHERE url = ${change?.url ?? ''}`
+          const [beforeReview] =
+            small.afterMerge || small.review == null || small.review.skipped
+              ? []
+              : yield* sql<{
+                  state: string
+                  endedAt: string | null
+                  verdict: string | null
+                  skipped: number | null
+                  findings: number | null
+                }>`
+            SELECT a.state, a.ended_at, json_extract(a.output, '$.verdict') AS verdict, json_extract(a.output, '$.skipped') AS skipped,
+              json_array_length(a.output, '$.findings') AS findings FROM node_attempts a JOIN nodes n ON n.id = a.node_id
+            JOIN workflow_executions e ON e.id = n.execution_id JOIN runs r ON r.id = e.run_id
+            WHERE r.task_id = ${task.id} AND n.node_key = 'review' ORDER BY a.admitted_at DESC, a.rowid DESC LIMIT 1`
           // Where the full task's review stands: its draft, where it drafted one, else whether its run is still going.
           const [draft] =
             reviewed === undefined
@@ -3221,7 +3262,7 @@ export class Queries extends Context.Service<
               ? []
               : yield* sql<{ state: string }>`
             SELECT state FROM runs WHERE task_id = ${reviewed.taskId} ORDER BY created_at DESC LIMIT 1`
-          const reviewBefore =
+          const externalReviewBefore =
             reviewed === undefined
               ? undefined
               : draft !== undefined
@@ -3231,6 +3272,24 @@ export class Queries extends Context.Service<
                 : reviewRun === undefined || reviewRun.state === 'running'
                   ? { state: 'running' as const, findings: 0, at: null }
                   : { state: 'stopped' as const, findings: 0, at: null }
+
+          // Ordinary Small changes use their own before-Ship pass, without creating a separate full-task review. Held/asked
+          // attempts keep the truthful step text; the card's adapter renders them waiting rather than claiming it is reading.
+          const ownReviewBefore =
+            beforeReview === undefined || beforeReview.state === 'held' || beforeReview.state === 'waiting_attention'
+              ? undefined
+              : {
+                  state:
+                    beforeReview.state === 'admitted' || beforeReview.state === 'running'
+                      ? ('running' as const)
+                      : beforeReview.state === 'succeeded' && beforeReview.verdict === 'pass'
+                        ? ('clear' as const)
+                        : beforeReview.state === 'succeeded' && beforeReview.verdict === 'changes_requested'
+                          ? ('found' as const)
+                          : ('stopped' as const),
+                  findings: beforeReview.findings ?? 0,
+                  at: beforeReview.endedAt,
+                }
           // What its review after the merge brings back: as the rule and its own word say now, and once owed, as it was kept then.
           const rule = yield* afterMergeNow(task.id)
           const holds: AfterMergeRule = review === undefined ? rule.holds : review.bringsBack === 'all' ? 'all' : 'major'
@@ -3289,7 +3348,9 @@ export class Queries extends Context.Service<
                 model: small.implement.model,
                 ...(small.implement.effort === undefined ? {} : { effort: small.implement.effort }),
               },
-              skips: smallChangeSkips(reviewsBefore ? null : small.review, holds),
+              skips: smallChangeSkips(reviewsBefore ? null : small.review, holds, small.afterMerge),
+              reviewAfterMerge: small.afterMerge,
+
               steps: [
                 { key: 'started', what: 'Started', at, done: true },
                 {
@@ -3298,6 +3359,7 @@ export class Queries extends Context.Service<
                   at: reported?.at ?? null,
                   done: reported !== undefined,
                 },
+                ...(small.afterMerge || small.review == null || small.review.skipped ? [] : [beforeShipReviewStep(beforeReview)]),
                 {
                   key: 'checks',
                   what: failed ? 'Checks failed' : passed ? 'Checks pass' : 'Checks',
@@ -3330,14 +3392,18 @@ export class Queries extends Context.Service<
               ...(reviewed === undefined || !afterMerge
                 ? {}
                 : { review: { taskId: reviewed.taskId, slug: reviewed.slug, threadId: reviewed.threadId, title: reviewed.title } }),
-              ...(reviewed === undefined || reviewBefore === undefined
+              ...(reviewed === undefined || externalReviewBefore === undefined
                 ? {}
                 : {
                     fullTask: { taskId: reviewed.taskId, slug: reviewed.slug, threadId: reviewed.threadId, title: reviewed.title },
-                    reviewBefore,
+                    reviewBefore: externalReviewBefore,
                   }),
-              afterMerge: { project: rule.project, task: rule.task, holds },
-              reviewer: small.review === null ? null : { agentId: small.review.agentId, model: small.review.model ?? null },
+              ...(ownReviewBefore === undefined || reviewed !== undefined ? {} : { reviewBefore: ownReviewBefore }),
+              ...(small.afterMerge || review !== undefined ? { afterMerge: { project: rule.project, task: rule.task, holds } } : {}),
+              reviewer:
+                small.review === null || (!small.afterMerge && small.review.skipped)
+                  ? null
+                  : { agentId: small.review.agentId, model: small.review.model ?? null },
               ...(review === undefined
                 ? {}
                 : {
@@ -3650,16 +3716,14 @@ export class Queries extends Context.Service<
           const links = yield* linksOf(head.taskId)
           const card: TaskCard | undefined = yield* cardFor(head.taskId, links)
           const session = yield* sessionOf(threadId)
-          // Who leads it when no lead runs: the last on its thread, else its plan's.
-          const [last] = yield* sql<{ agentId: string; model: string | null; account: string | null; startedAt: string }>`
-            SELECT s.agent_id, s.model, a.name AS account, s.started_at FROM provider_sessions s LEFT JOIN agent_accounts a ON a.id = s.account_id
-            WHERE s.thread_id = ${threadId} ORDER BY s.started_at DESC, s.rowid DESC LIMIT 1`
+          // The last lead that actually started, for its account or a thread that has no plan. A failed replacement isn't its lead.
+          const [last] = yield* sql<{ agentId: string; model: string | null; account: string | null }>`
+            SELECT s.agent_id, s.model, a.name AS account FROM provider_sessions s LEFT JOIN agent_accounts a ON a.id = s.account_id
+            WHERE s.thread_id = ${threadId} AND (s.id = ${session?.held === true ? session.id : ''} OR EXISTS (
+              SELECT 1 FROM record_events f WHERE f.aggregate_type = 'provider_session' AND f.aggregate_id = s.id
+                AND f.type = 'provider_session.active'))
+            ORDER BY s.started_at DESC, s.rowid DESC LIMIT 1`
           const planned = card?.plan?.steps.find((step) => step.key === 'implement')
-          // Its lead changed since its last session began, with no lead running to change: the plan's lead is who leads it next.
-          const [changedLead] = yield* sql<{ at: string | null }>`
-            SELECT json_extract(parameters, '$.leadChanged') AS at FROM task_plans
-            WHERE task_id = ${head.taskId} AND state IN ('proposed', 'accepted') ORDER BY proposed_at DESC LIMIT 1`
-          const leadMoved = last !== undefined && changedLead?.at != null && changedLead.at > last.startedAt && !session?.held
           // What the person can do to it as a whole, from where it stands.
           const standing = yield* standingOf(head.taskId)
           // Its folder, removed once it finished or on its way back (ADR-056).
@@ -3799,15 +3863,18 @@ export class Queries extends Context.Service<
                   ? { front: true }
                   : {}),
               steps: card?.plan?.steps ?? [],
+              end: card?.plan?.end ?? null,
               // Its graph is a part of its own: one that can't be read leaves the face out, not the thread.
               ...Option.match(graph, { onNone: () => ({}), onSome: (rounds) => ({ graph: rounds }) }),
               lead:
-                leadMoved && planned !== undefined
-                  ? { agentId: planned.agentId, model: planned.model, account: null }
+                planned !== undefined
+                  ? {
+                      agentId: planned.agentId,
+                      model: planned.model,
+                      account: planned.agentId === last?.agentId && planned.model === last.model ? last.account : null,
+                    }
                   : last === undefined
-                    ? planned === undefined
-                      ? null
-                      : { agentId: planned.agentId, model: planned.model, account: null }
+                    ? null
                     : { agentId: last.agentId, model: last.model, account: last.account },
               step: card?.step ?? null,
               startedAt: card?.startedAt ?? null,

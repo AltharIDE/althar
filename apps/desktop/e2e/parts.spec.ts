@@ -13,7 +13,7 @@ import { connectGitHub, launch, openFirstProject, say, shown, still, toConversat
  * person's note of 12 November), in a real window with the fake agent and the fake GitHub. Each direction is driven only by
  * what the person writes in the task's composer: the fake lead does what it is told, `[lead:call <tool> <json>]`, as a lead
  * acts on the person's word, and nothing asks them again. A prototype becomes a change, its reviewer and pull request ending on
- * at once, and Ship reviews it and opens the pull request; a change goes back to a prototype, its review off and its pull
+ * at once, and its visible Ship action reviews it and opens the pull request; a change goes back to a prototype, its review off and its pull
  * request closed; a chat becomes a change and a chat again; the review, the ending, the lead and where it works change. The
  * menu's Make it a change does the first in one press. Its shots are test-results/parts-*.png.
  */
@@ -89,15 +89,34 @@ test('a prototype becomes a change in one move on the person’s word, and Ship 
     await expect(page.getByText('PR #1')).toHaveCount(0)
 
     // "Yep, make it a real change": its lead does it at once, and says so in a line; nothing is asked of the person.
-    await tell(page, `Yep, make it a real change. ${call('change_part', { part: 'preset', preset: 'Change' })}`)
-    const made = line(page, /Its lead made it a Change: reviewed by .+, ending in a draft pull request/)
+    await tell(
+      page,
+      `Yep, make it a real change with Codex reviewing at medium. ${call('change_part', {
+        part: 'preset',
+        preset: 'Change',
+        review: { agent: 'codex', model: 'large', effort: 'medium' },
+      })}`,
+    )
+    const made = line(page, /Its lead made it a Change: reviewer set to .+ \(effort medium\), ending in a draft pull request/)
     await expect(made).toBeVisible()
     // No Add / No thanks offer: the person said it already.
     await expect(page.getByRole('button', { name: 'No thanks' })).toHaveCount(0)
     await shoot(page, made, 'prototype-to-change')
 
-    // "Ship it": the review runs over the whole branch, then the pull request opens.
-    await tell(page, `Ship it. ${call('ship_task')}`)
+    // The same Ship named by the lead is available in Outputs, and performs the configured review before opening the PR.
+    await page
+      .getByRole('radiogroup', { name: 'Face' })
+      .getByRole('radio', { name: /Outputs/ })
+      .click()
+    const ship = page.getByRole('button', { name: /^Ship \d+ commits?$/ })
+    await expect(ship).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Open a draft pull request', exact: true })).toHaveCount(0)
+    await expect(page.getByRole('button', { name: /^Push to origin/ })).toHaveCount(0)
+    await expect(page.getByRole('button', { name: 'Merge into main on this Mac', exact: true })).toHaveCount(0)
+    await still(page)
+    await ship.screenshot({ path: 'test-results/parts-ship-action.png', scale: 'css' })
+    await ship.click()
+    await toConversation(page)
     const passed = page.locator('[data-review]').filter({ hasText: 'Passed' })
     await expect(passed).toBeVisible()
     await expect(page.getByText('PR #1').first()).toBeVisible()
@@ -119,7 +138,7 @@ test('a change goes back to a prototype on the person’s word: ready first, ano
 
     // Its reviewer, once its review ran: another reads what ships next.
     await tell(page, `Have Claude review it from now on. ${call('change_part', { part: 'checked_by', review: { agent: 'claude-code' } })}`)
-    await expect(line(page, /Its lead changed its parts: reviewed by .+, reading what ships next/)).toBeVisible()
+    await expect(line(page, /Its lead changed its parts: reviewer set to .+, reading what ships next/)).toBeVisible()
 
     // Back to a prototype: no review, ending with its branch, the pull request closed and its branch kept.
     await tell(page, `Actually, keep it as a prototype. ${call('change_part', { part: 'preset', preset: 'Prototype' })}`)
@@ -142,7 +161,7 @@ test('a chat becomes a change on the person’s word, ships as one, and becomes 
     await expect(page.getByRole('radio', { name: /Conversation/ })).toHaveAttribute('aria-checked', 'true')
 
     await tell(page, `Let's keep this, make it a real change. ${call('change_part', { part: 'preset', preset: 'Change' })}`)
-    await expect(line(page, /Its lead made it a Change: reviewed by .+, ending in a draft pull request/)).toBeVisible()
+    await expect(line(page, /Its lead made it a Change: reviewer set to .+, ending in a draft pull request/)).toBeVisible()
     await tell(page, `Ship it. ${call('ship_task')}`)
     await expect(page.getByText('PR #1').first()).toBeVisible()
 
@@ -164,7 +183,7 @@ test('its review, its lead and where it works change both ways on the person’s
     await tell(page, `No review on this one. ${call('change_part', { part: 'checked_by', review: null })}`)
     await expect(line(page, /Its lead changed its parts: no review/)).toBeVisible()
     await tell(page, `On second thought, review it. ${call('add_part', { part: 'checked_by' })}`)
-    await expect(line(page, /Its lead changed its parts: reviewed by /)).toBeVisible()
+    await expect(line(page, /Its lead changed its parts: reviewer set to /)).toBeVisible()
 
     // Its own lead's model and effort, from its next turn.
     await tell(
@@ -200,7 +219,7 @@ test('the menu’s Make it a change makes a prototype a change in one press', as
     await still(page)
     await menu.screenshot({ path: 'test-results/parts-menu.png', scale: 'css', animations: 'disabled' })
     await item.click()
-    await expect(line(page, /You made it a Change: reviewed by .+, ending in a draft pull request/)).toBeVisible()
+    await expect(line(page, /You made it a Change: reviewer set to .+, ending in a draft pull request/)).toBeVisible()
     // Made a change, it isn't offered again.
     await page.getByRole('button', { name: 'More for this task' }).click()
     await expect(page.getByRole('menu').getByRole('menuitem', { name: 'Make it a change' })).toHaveCount(0)

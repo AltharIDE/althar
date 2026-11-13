@@ -18,27 +18,28 @@ import { Plans } from '../src/Plans'
 import { Projects } from '../src/Projects'
 import { Queries } from '../src/Queries'
 import { Sessions } from '../src/Sessions'
-import { changedWords, smallChangeOf, smallChangeSkips, smallChangeSteps } from '../src/smallChange'
+import { beforeShipReviewStep, changedWords, smallChangeOf, smallChangeSkips, smallChangeSteps } from '../src/smallChange'
 import { addItem } from '../src/threads'
 import * as Runtime from '../src/Runtime'
 import { repository, runtime, until } from './support'
 
 /** The fast lane (README section 6): a change of a few lines, its plan and the card its thread shows. */
 describe('a small change', () => {
-  it('plans one step, names who reviews it, and skips that review until it merges', () => {
+  it('keeps the configured reviewer before Ship, independently of size', () => {
     const steps = smallChangeSteps({
       lead: { agentId: 'claude-code', model: 'claude-sonnet-5', effort: 'low' },
       review: { agentId: 'codex', model: 'gpt-6-sol' },
     })
     assert.deepStrictEqual(steps, [
       { key: 'implement', agentId: 'claude-code', model: 'claude-sonnet-5', effort: 'low', skipped: false },
-      { key: 'review', agentId: 'codex', model: 'gpt-6-sol', skipped: true },
+      { key: 'review', agentId: 'codex', model: 'gpt-6-sol', skipped: false },
     ])
     // As the project's rule says: Major only by default, Everything, or no review after the merge.
-    assert.deepStrictEqual(smallChangeSkips(steps[1] ?? null), ['no plan', 'reviewed after it merges, major findings only'])
-    assert.deepStrictEqual(smallChangeSkips(steps[1] ?? null, 'all'), ['no plan', 'reviewed after it merges'])
-    assert.deepStrictEqual(smallChangeSkips(steps[1] ?? null, 'none'), ['no plan', 'no review'])
-    assert.deepStrictEqual(smallChangeSkips(null, 'major'), ['no plan'])
+    assert.deepStrictEqual(smallChangeSkips(steps[1] ?? null), ['no countdown', 'reviewed before it ships'])
+    assert.deepStrictEqual(smallChangeSkips(steps[1] ?? null, 'major', true), ['no plan', 'reviewed after it merges, major findings only'])
+    assert.deepStrictEqual(smallChangeSkips(steps[1] ?? null, 'all', true), ['no plan', 'reviewed after it merges'])
+    assert.deepStrictEqual(smallChangeSkips(steps[1] ?? null, 'none', true), ['no plan', 'no review'])
+    assert.deepStrictEqual(smallChangeSkips(null, 'major'), ['no countdown'])
   })
 
   it('reads a small change from its plan, and nothing else as one', () => {
@@ -55,6 +56,21 @@ describe('a small change', () => {
     assert.isUndefined(smallChangeOf(JSON.stringify({ steps: [{ key: 'implement', agentId: 'codex', skipped: false }] })))
     assert.isUndefined(smallChangeOf('not json'))
     assert.isUndefined(smallChangeOf(null))
+  })
+
+  it('shows a pass’s actual stopped, waiting or failed outcome without claiming it was reviewed', () => {
+    const at = '2026-11-13T00:00:00.000Z'
+    for (const [state, skipped, what] of [
+      ['cancelled', 1, 'Review skipped'],
+      ['cancelled', null, 'Review stopped'],
+      ['failed', null, 'Review failed'],
+      ['held', null, 'Review waiting'],
+      ['waiting_attention', null, 'Review needs attention'],
+      ['running', null, 'Reviewing before Ship'],
+    ] as const)
+      assert.deepStrictEqual(beforeShipReviewStep({ state, skipped, endedAt: at, verdict: null }), { key: 'review', what, at, done: false })
+    assert.isTrue(beforeShipReviewStep({ state: 'succeeded', skipped: null, endedAt: at, verdict: 'pass' }).done)
+    assert.isFalse(beforeShipReviewStep({ state: 'succeeded', skipped: null, endedAt: at, verdict: null }).done)
   })
 
   it('says what changed in a line: one file by its line count, several by their count', () => {
@@ -93,6 +109,7 @@ describe('a small change', () => {
         reason: null,
         actorId: instance.personId,
         reviewAfterMerge: true,
+        smallChange: true,
         startsIn: Duration.zero,
       })
       const thread = yield* (yield* Queries).thread(created.threadId, { limit: 50 })
@@ -138,6 +155,7 @@ describe('a small change', () => {
         reason: null,
         actorId: instance.personId,
         reviewAfterMerge: true,
+        smallChange: true,
         startsIn: Duration.zero,
       })
       const at = '2026-11-06T14:03:00.000Z'
@@ -485,6 +503,7 @@ describe('the fast lane at its edges', () => {
           reason: null,
           actorId: instance.personId,
           reviewAfterMerge: true,
+          smallChange: true,
           startsIn: Duration.hours(1),
         })
       // No plan at all, and a plan with no review step.
@@ -581,6 +600,7 @@ describe('the fast lane at its edges', () => {
             reason: null,
             actorId: instance.personId,
             reviewAfterMerge: true,
+            smallChange: true,
             startsIn: Duration.hours(1),
           })
           return created
@@ -658,7 +678,7 @@ describe('the fast lane at its edges', () => {
       smallChangeSteps({ lead: { agentId: 'claude-code', model: null }, review: null }).map((step) => step.key),
       ['implement'],
     )
-    assert.deepStrictEqual(smallChangeSkips(null), ['no plan'])
+    assert.deepStrictEqual(smallChangeSkips(null), ['no countdown'])
   })
 
   it('says what changed from the pull request’s numbers where the lead left none', () => {

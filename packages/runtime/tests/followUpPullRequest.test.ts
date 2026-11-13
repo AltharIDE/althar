@@ -17,6 +17,7 @@ import { Projects } from '../src/Projects'
 import { Queries } from '../src/Queries'
 import { Runs } from '../src/Runs'
 import * as Runtime from '../src/Runtime'
+import { Sessions } from '../src/Sessions'
 import { addItem } from '../src/threads'
 import { fakeConnectors, HOST, hosted, runtime, until } from './support'
 
@@ -70,10 +71,23 @@ const fixed = (working: string, bare: string, github: FakeService) =>
     const project = yield* (yield* Projects).open({ envelope: yield* Runtime.envelope('project.open', {}), path: working })
     const coordinator = yield* Coordinator
     const threadId = yield* coordinator.thread(project.projectId)
-    const body = 'Add a retry. [coordinator:plan] [coordinator:plan-small] [lead:finish] [lead:edit] [review:findings]'
+    const body =
+      'Add a retry. [coordinator:plan] [coordinator:plan-small] [coordinator:plan-no-review] [lead:finish] [lead:edit] [review:findings]'
     yield* coordinator.say({ envelope: yield* Runtime.envelope('thread.send', { body }), threadId, body, disposition: 'after_current' })
     const [ready] = yield* until(cards(project.projectId), (all) => all[0]?.change != null && all[0].change.state === 'open')
     const card = ready ?? assert.fail('no card')
+    const sql = yield* SqlClient.SqlClient
+    // A visible host PR precedes the workflow's completion. This fixture merges completed work, then starts its fix.
+    yield* until(
+      sql<{ state: string }>`SELECT state FROM runs WHERE task_id = ${card.taskId} ORDER BY created_at DESC, rowid DESC LIMIT 1`,
+      (rows) => rows[0]?.state === 'succeeded',
+    )
+    // This fixture explicitly defers its review; a Small change label alone now keeps the normal before-Ship timing.
+    yield* (yield* Runs).reshape({
+      taskId: card.taskId,
+      afterMerge: { key: 'review', agentId: 'codex', model: null, skipped: true },
+      actorId: instance.personId,
+    })
     const changes = yield* Changes
     // Its checks passed, so this repository's pull requests have had checks before.
     github.setChecks(1, [{ name: 'verify', state: 'passed' }])
@@ -83,13 +97,36 @@ const fixed = (working: string, bare: string, github: FakeService) =>
     yield* until(cards(project.projectId), (all) => all[0]?.afterMerge?.state === 'found')
     const sent = yield* (yield* MergeReviews).fix(card.taskId, card.change?.url)
     yield* (yield* MergeReviews).afterTurnOf(sent.threadId, sent.inputId)
-    const sql = yield* SqlClient.SqlClient
+    yield* until((yield* Sessions).busy(card.threadId), (busy) => !busy)
     const [workspace] = yield* sql<{ path: string }>`SELECT path FROM workspaces WHERE task_id = ${card.taskId}`
     const path = workspace?.path ?? ''
     appendFileSync(join(path, 'timing.txt'), 'summed once\n')
     git(path, 'add', '-A')
     git(path, 'commit', '-q', '-m', FIX, '-m', 'Each snapshot added the task’s whole timing again.')
     return { projectId: project.projectId, taskId: card.taskId, threadId: card.threadId }
+  })
+
+/** Publication must finish, rather than merely exposing its PR before its workflow settles. Fail with the actual stuck reason. */
+const published = (taskId: string, github: FakeService) =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient
+    const result = yield* until(
+      Effect.gen(function* () {
+        const [run] = yield* sql<{ id: string; state: string; parameters: string }>`
+          SELECT id, state, parameters FROM runs WHERE task_id = ${taskId} AND plan_id IS NULL ORDER BY created_at DESC, rowid DESC LIMIT 1`
+        const attempts = yield* sql<{ step: string; state: string; output: string | null }>`
+          SELECT n.node_key AS step, a.state, a.output FROM node_attempts a JOIN nodes n ON n.id = a.node_id
+          JOIN workflow_executions e ON e.id = n.execution_id WHERE e.run_id = ${run?.id ?? ''} ORDER BY a.rowid DESC`
+        const calls = yield* sql<{ payload: string }>`SELECT payload FROM attention_requests WHERE task_id = ${taskId} AND state = 'open'`
+        return { changes: github.changes, run, attempts, calls }
+      }),
+      (now) =>
+        now.run?.state === 'succeeded' ||
+        now.attempts.some((attempt) => ['failed', 'cancelled', 'waiting_attention'].includes(attempt.state)),
+    )
+    assert.strictEqual(result.run?.state, 'succeeded', JSON.stringify(result))
+    assert.lengthOf(result.changes, 2, JSON.stringify(result))
+    return result.changes[1] ?? assert.fail('no second pull request')
   })
 
 describe('a task whose first pull request merged and whose follow-up is open with checks running', () => {
@@ -103,11 +140,7 @@ describe('a task whose first pull request merged and whose follow-up is open wit
       const task = yield* fixed(working, bare, github)
       const changes = yield* Changes
       yield* (yield* Runs).ship({ envelope: yield* Runtime.envelope('task.ship', {}), taskId: task.taskId })
-      yield* until(
-        Effect.sync(() => github.changes),
-        (all) => all.length === 2,
-      )
-      const second = github.changes[1] ?? assert.fail('no second pull request')
+      const second = yield* published(task.taskId, github)
       // The title says what the fix does, after the pull request it follows, not what the task was called.
       assert.strictEqual(second.title, `After #1: ${FIX}`)
       // The description is the finding it answers, naming the pull request it follows, and the commit: never only that Althar opened it.
@@ -176,11 +209,7 @@ describe('a task whose first pull request merged and whose follow-up is open wit
         },
       })
       yield* (yield* Runs).ship({ envelope: yield* Runtime.envelope('task.ship', {}), taskId: task.taskId })
-      yield* until(
-        Effect.sync(() => github.changes),
-        (all) => all.length === 2,
-      )
-      const second = github.changes[1] ?? assert.fail('no second pull request')
+      const second = yield* published(task.taskId, github)
       assert.strictEqual(second.title, 'After #1: Count task timing once per snapshot')
       assert.include(second.body, 'Why: #1 summed timing into every snapshot.')
       assert.include(second.body, 'What stays: the card.')
@@ -188,7 +217,7 @@ describe('a task whose first pull request merged and whose follow-up is open wit
     }).pipe(Effect.provide(runtimeWith(github)))
   })
 
-  it('still says why it exists where its lead gave a summary and what it built, but no description', () => {
+  it.live('still says why it exists where its lead gave a summary and what it built, but no description', () => {
     const { working, bare } = hosted()
     const github = makeFakeService({ pushUrl: () => bare })
     github.addRepository(['meridian', 'api'])
@@ -205,11 +234,7 @@ describe('a task whose first pull request merged and whose follow-up is open wit
         built: 'The usage card shows its time breakdown again.',
       })
       yield* (yield* Runs).ship({ envelope: yield* Runtime.envelope('task.ship', {}), taskId: task.taskId })
-      yield* until(
-        Effect.sync(() => github.changes),
-        (all) => all.length === 2,
-      )
-      const second = github.changes[1] ?? assert.fail('no second pull request')
+      const second = yield* published(task.taskId, github)
       assert.include(second.body, 'The review after #1 merged found a problem in it')
       assert.include(second.body, 'README.md:1')
       assert.include(second.body, `- ${FIX}: Each snapshot added the task’s whole timing again.`)

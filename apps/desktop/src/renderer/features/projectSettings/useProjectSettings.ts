@@ -23,7 +23,7 @@ import { useServices } from '../../data/services'
 
 /** A rule the settings switch in place. */
 export type RuleSwitch = 'resolveConflicts' | 'pushCommits' | 'postScreenshots' | 'moveIssues' | 'repositoryFiles'
-/** A rule set from General: one of its switches, where new tasks start (ADR-091), or what a small change's review after it merges brings back. */
+/** A rule set from General: one of its switches, where new tasks start (ADR-091), or what an explicitly requested review after merge brings back. */
 export type GeneralRule = RuleSwitch | 'worksIn' | 'afterMergeReview'
 
 /** One of the three permissions for skill and OpenSpec files in its repositories. */
@@ -64,7 +64,7 @@ export interface ProjectSettingsModel {
   readonly setRepositoryFile: (file: RepositoryFile, on: boolean) => void
   /** Where new tasks start: Local, in the person's checkout, or a worktree of their own (ADR-091). */
   readonly setWorksIn: (worksIn: WorksIn) => void
-  /** What a small change's review after it merges brings back: only major findings, every one, or no review. */
+  /** What an explicitly requested review after merge brings back: only major findings, every one, or no review. */
   readonly setAfterMergeReview: (rule: AfterMergeRule) => void
   /** Which rule didn't hold, and why. */
   readonly ruleFailed: { readonly rule: GeneralRule; readonly message: string } | null

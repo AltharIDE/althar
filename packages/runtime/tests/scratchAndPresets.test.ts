@@ -195,7 +195,7 @@ describe('presets', () => {
       const { projectId, coordinator } = yield* opened(working)
       const sql = yield* SqlClient.SqlClient
       // The coordinator lists them, and plans from the one that fits.
-      assert.include(yield* callTool(coordinator, 'list_presets', {}), '- Small change: a worktree, reviewed after it merges')
+      assert.include(yield* callTool(coordinator, 'list_presets', {}), '- Small change: a worktree, reviewed before it ships')
       yield* callTool(coordinator, 'draft_task', { title: 'Fix a typo' })
       const said = yield* callTool(coordinator, 'propose_plan', {
         task: 'fix-a-typo',
@@ -216,12 +216,13 @@ describe('presets', () => {
       const first = yield* plan()
       yield* (yield* Plans).hold(first.id, (yield* Instance).personId)
       // Small change has no ending of its own: it ends as the project says (a draft where the project says nothing).
-      assert.deepInclude(first.parameters, { end: 'draft', reviewAfterMerge: true })
+      assert.deepInclude(first.parameters, { end: 'draft', smallChange: true })
+      assert.isUndefined(first.parameters.reviewAfterMerge)
       assert.deepStrictEqual(
         first.parameters.steps.map((step: { key: string; skipped: boolean }) => [step.key, step.skipped]),
         [
           ['implement', false],
-          ['review', true],
+          ['review', false],
         ],
       )
       const [card] = yield* until(cards(projectId), (all) => all[0]?.plan?.preset === 'Small change')
