@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 
-import { Model, SmallChange, type SmallChangeChecks, type SmallChangeReview, type SmallChangeReviewWhen } from '@althar/ui'
+import { Model, SmallChange, type SmallChangeChecks, type SmallChangeReview, type SmallChangeReviewWhen, Problem } from '@althar/ui'
 
 import { messageOf } from '../../data/client'
 import { useServices } from '../../data/services'
@@ -9,8 +9,7 @@ import type { SmallChangeContent } from '../../shared/thread'
 import s from './FastLaneOf.module.css'
 
 /*
- * A small change's card (docs/decisions/reviews.md, "A small change is
- * reviewed after it merges"): its route, read from the task as it stands.
+ * A small change's card (docs/decisions/reviews.md, "An explicit review after merge"): its route, read from the task as it stands.
  * Merge does what the task's own Merge does, and still asks. Its review stop
  * moves the review before the merge (Make it a full task), keeps it after,
  * or takes it off, at once, and goes back with a line where that fails. See
@@ -39,7 +38,17 @@ function checksOf(card: SmallChangeContent): SmallChangeChecks {
 
 /** When its review reads it: before the merge once it was made a full task, none where its rule or its own word says so. */
 const whenOf = (card: SmallChangeContent): SmallChangeReviewWhen =>
-  (card.fullTask ?? card.review) != null ? 'before' : card.reviewer === null || card.afterMerge?.holds === 'none' ? 'none' : 'after'
+  (card.fullTask ?? card.review) != null
+    ? 'before'
+    : card.reviewAfter !== undefined
+      ? 'after'
+      : card.reviewAfterMerge === false
+        ? card.reviewer === null
+          ? 'none'
+          : 'before'
+        : card.reviewer === null || card.afterMerge?.holds === 'none'
+          ? 'none'
+          : 'after'
 
 export function SmallChangeOf({
   card,
@@ -75,13 +84,25 @@ export function SmallChangeOf({
   // Its review task: kept as fullTask after the merge too, and as review where a runtime before that names it only there.
   const full = card.fullTask ?? card.review ?? null
   // A full task's review is its own task's, read before the merge and kept after it; else the review after the merge.
-  const before = full === null ? undefined : card.reviewBefore
+  const beforeShip = card.reviewAfterMerge === false && card.reviewAfter === undefined
+  const before = full === null && !beforeShip ? undefined : card.reviewBefore
+  const beforeStep = beforeShip ? stepOf(card, 'review') : undefined
   const when = chosen ?? kept
   const review: SmallChangeReview =
-    full !== null
+    full !== null || beforeShip
       ? {
           when,
-          state: before === undefined ? 'running' : before.state,
+          state:
+            before?.state ??
+            (beforeShip
+              ? beforeStep?.done === true
+                ? 'clear'
+                : beforeStep?.what === 'Reviewing before Ship'
+                  ? 'running'
+                  : beforeStep?.at != null
+                    ? 'stopped'
+                    : 'waiting'
+              : 'running'),
           findings: before?.findings ?? 0,
           at: before?.at ?? null,
         }
@@ -92,7 +113,7 @@ export function SmallChangeOf({
           at: after?.at ?? null,
         }
   // A full task merges once its review comes back clear, as its own task's review holds it.
-  const reviewed = when !== 'before' || before?.state === 'clear'
+  const reviewed = when !== 'before' || before?.state === 'clear' || (beforeShip && beforeStep?.what === 'Review skipped')
   const ready =
     change !== null && change.state === 'open' && head !== null && reviewed && (checks.state === 'passed' || checks.state === 'none')
   const choose = (next: SmallChangeReviewWhen) => {
@@ -111,21 +132,30 @@ export function SmallChangeOf({
   const lead = named(card.lead.agentId, card.lead.model)
   const reviewer = card.reviewer == null ? null : named(card.reviewer.agentId, card.reviewer.model)
   const holds = card.afterMerge?.holds ?? 'major'
-  const explain =
-    when === 'before' && reviewer !== null ? (
+  const explain = beforeShip ? (
+    reviewer === null ? (
       <>
-        Made a full task: <Model model={reviewer} short /> reads it before it merges.
-      </>
-    ) : when === 'none' || reviewer === null ? (
-      <>
-        Starts at once on <Model model={lead} short />, with no plan, and no review after it merges.
+        Starts at once on <Model model={lead} short />, with no countdown and no reviewer configured.
       </>
     ) : (
       <>
-        Starts at once on <Model model={lead} short />, with no plan. You merge it; <Model model={reviewer} short /> then reads what merged,
-        and {holds === 'all' ? 'what it finds comes back here' : 'only something major comes back here'}.
+        Starts at once on <Model model={lead} short />. <Model model={reviewer} short /> reads the change before Ship.
       </>
     )
+  ) : when === 'before' && reviewer !== null ? (
+    <>
+      Made a full task: <Model model={reviewer} short /> reads it before it merges.
+    </>
+  ) : when === 'none' || reviewer === null ? (
+    <>
+      Starts at once on <Model model={lead} short />, with no plan, and no review after it merges.
+    </>
+  ) : (
+    <>
+      Starts at once on <Model model={lead} short />, with no plan. You merge it; <Model model={reviewer} short /> then reads what merged,
+      and {holds === 'all' ? 'what it finds comes back here' : 'only something major comes back here'}.
+    </>
+  )
   const item = full === null ? (after?.item ?? null) : null
   return (
     <>
@@ -145,7 +175,17 @@ export function SmallChangeOf({
         explain={explain}
         busy={busy}
         {...(ready ? { onMerge: () => onMerge({ head, url: change.url }) } : {})}
-        {...(merged || full !== null ? {} : { onReview: choose })}
+        {...(beforeShip
+          ? {
+              text: {
+                fullTask: 'Small change',
+                beforeMerge: beforeStep?.what ?? 'Review before Ship',
+                stopped: beforeStep?.what ?? 'Review stopped',
+                clear: 'Reviewed before Ship',
+              },
+            }
+          : {})}
+        {...(card.reviewAfterMerge === false || merged || full !== null ? {} : { onReview: choose })}
         {...(full !== null
           ? onOpen === undefined
             ? {}
@@ -154,11 +194,7 @@ export function SmallChangeOf({
             ? {}
             : { onFindings: () => onShow(item) })}
       />
-      {error !== null && (
-        <p className={s.failure} role="alert">
-          {text.failed(error)}
-        </p>
-      )}
+      {error !== null && <Problem className={s.failure}>{text.failed(error)}</Problem>}
     </>
   )
 }

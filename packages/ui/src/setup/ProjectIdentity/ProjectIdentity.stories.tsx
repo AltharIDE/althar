@@ -145,12 +145,6 @@ export const ChoosingAnInk: Story = {
   },
 }
 
-/** A change that didn't hold says why. */
-export const Failed: Story = { args: { error: 'That project isn’t there any more.' } }
-
-/** A long name scrolls in its field. */
-export const LongName: Story = { args: { name: 'Payments platform, refunds and partner webhooks (2026 rewrite)' } }
-
 /*
  * The project's settings as the app composes them: a module for its name and
  * colour, which opens out to change them in place, one for each thing that
@@ -237,6 +231,7 @@ export const InSettings: Story = {
   },
 }
 
+/** Every state: at rest, a change that didn't hold saying why, another ink, and a long name scrolling in its field. */
 export const AllStates: Story = {
   render: (args) => (
     <States

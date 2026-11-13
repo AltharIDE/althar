@@ -36,7 +36,7 @@ Rules marked "prefer" are leanings; follow them unless the screen gives a reason
 - **Give motion a purpose:** where something came from or went, an answer to a press, or continuity. Nothing moves for decoration.
 - **Name motion by what happens:** `--enter` for what arrives or answers, `--exit` (quicker) for what goes, `--move` for what is on screen and goes elsewhere, `--fast` for hover and colour. Ease out; never ease in.
 - **Grow an overlay from what opened it,** from `--scale-pop` with a fade, never from nothing.
-- **Leave still what happens many times a day or by key:** switching tabs, projects and rooms, the command menu. Words as they stream don't move; they only fade in, dim to bright, so the text flows rather than pops ([ADR-099](docs/decisions/desktop-app.md#a-turn-at-work)).
+- **Leave still what happens many times a day or by key:** switching tabs, projects and rooms. The search palette's rows are there at once; only what keeps its identity across a step morphs (the chosen row's name into the field's chip and back, the box's height, the highlight), and no key or navigation waits on it. Words as they stream don't move; they only fade in, dim to bright, so the text flows rather than pops ([ADR-099](docs/decisions/desktop-app.md#a-turn-at-work)).
 - **Move only transform and opacity,** in a way that can turn back mid-way: transitions, or the browser's animations, not keyframes, for a state that flips.
 - **Move a list as a whole.** Give its items a `data-move` key inside a `ListMotion`: an item slides to its new place, travels to another lane, comes in and fades out ([ADR-069](docs/decisions/desktop-app.md#motion)).
 - **With reduced motion, nothing travels or grows;** what comes and goes only fades.
@@ -78,6 +78,7 @@ Rules marked "prefer" are leanings; follow them unless the screen gives a reason
 ## Interaction
 
 - **Act in place.** A one-click action (push, approve, allow) never sends the person to another screen; answer it from the board, the tab or the menu bar.
+- **Show the result of every press at once.** It changes in the frame it is pressed and the runtime catches up behind it; what fails comes back with a line. Never a press that shows nothing until a call answers, and never an older read flickering it back ([the rules](docs/decisions/foundations.md#the-ui-is-instant)).
 - **Switch instantly.** Changing project or view shows what was there last time and refreshes quietly; no skeleton flash for something already seen.
 - **Lose nothing on leaving a screen:** composer text, dictation, scroll position.
 - **Show a validation error at its field, and scroll to it.** A message at the top of a form only for an error that belongs to no field.

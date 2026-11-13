@@ -191,6 +191,13 @@ const stacked = (working: string, github: FakeService) =>
       Effect.sync(() => github.changes.length),
       (count) => count === 2,
     )
+    // A host-visible pull request precedes Ship's hold release and completion. Later fixture commits must start after
+    // that boundary; commits made while Ship still owns publication deliberately wait for another Ship.
+    yield* until(
+      (yield* SqlClient.SqlClient)<{ state: string }>`
+        SELECT state FROM runs WHERE task_id = ${task.taskId} ORDER BY created_at DESC, rowid DESC LIMIT 1`,
+      (rows) => rows[0]?.state === 'succeeded',
+    )
     return { ...task, above, url: github.changes[1]?.url ?? '' }
   })
 

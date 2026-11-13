@@ -1,3 +1,4 @@
+import { shipsToOpen } from '@althar/contracts'
 import type { ActorId, ProjectId } from '@althar/domain'
 import type { Ledger } from '@althar/persistence-sqlite'
 import { Context, type Crypto, Duration, Effect, Layer, Option, Schema } from 'effect'
@@ -12,8 +13,9 @@ import { ModelFacts } from './ModelFacts'
 import { Models } from './Models'
 import { SignIns } from './SignIns'
 import { StepPick, stepOf } from './stepPick'
-import { modelNamer } from './coordinatorNews'
+import { modelNamer, withEffort } from './coordinatorNews'
 import { presetsIn } from './presets'
+import { TITLES_FOLLOW_WORK } from './presetBrief'
 import { Agents } from './Config'
 import { envelope } from './envelope'
 import { Errands } from './Errands'
@@ -31,6 +33,7 @@ import { PlanUsage } from './PlanUsage'
 import { fact, timestamp } from './records'
 import { PlanParameters, type PlanStep, Runs, type StuckAnswer, type StuckInfo, type TaskEnd, type TaskEnding } from './Runs'
 import { Sessions } from './Sessions'
+import { teamLeadOf } from './teamLead'
 import { actionsOf, standingOf, Tasks } from './Tasks'
 import { addItem, updateItem } from './threads'
 import { touchTask } from './cards'
@@ -931,7 +934,7 @@ export class TaskActions extends Context.Service<
         to: Schema.optional(Schema.Literals(['worktree', 'checkout'])),
         toward: Schema.optional(Schema.NullOr(Schema.String)),
         shelf: Schema.optional(Schema.Literals(['scratch', 'board'])),
-        /* Checked by: its reviewer's model, or null for none; left out, the one its plan had or the project's rules pick. */
+        /* Checked by, or the preset's reviewer override: null for none; otherwise the model and effort requested. */
         review: Schema.optional(Schema.NullOr(StepPick)),
         /* How it ends. */
         end: Schema.optional(Schema.Literals(['here', 'branch', 'draft', 'ready'])),
@@ -1010,16 +1013,22 @@ export class TaskActions extends Context.Service<
         review: Schema.Literals(['review', 'none', 'project']),
         why: Schema.optional(Schema.String),
       })
-      /** One small change's own word on its review after the merge, as its card will offer it: on the person's word. */
+      /** The person's explicit choice of review after a merge; task size never requests one. */
       const reviewAfterMerge = (access: ToolAccess, input: unknown) =>
         Effect.gen(function* () {
           const asked = yield* read(ReviewAfterMerge, input)
           const task = yield* named(access, asked.task)
           const review = asked.review === 'project' ? null : asked.review
-          const now = yield* plainly(mergeReviews.choose(task.id, review, actorOf(access)), task.slug)
+          const now = yield* plainly(runs.setReviewAfterMerge({ taskId: task.id, review, actorId: actorOf(access) }), task.slug)
           const rule = { major: 'only blocking and major findings come back', all: 'any finding comes back', none: '' }
           const holds =
-            now.holds === 'none' ? 'it isn’t reviewed after it merges' : `it is reviewed after it merges, and ${rule[now.holds]}`
+            review === null
+              ? now.holds === 'none'
+                ? 'the project’s rule requests no review after the merge'
+                : `requested after-merge reviews follow the project’s rule: ${rule[now.holds]}`
+              : now.holds === 'none'
+                ? 'it isn’t reviewed after it merges'
+                : `it is reviewed after it merges, and ${rule[now.holds]}`
           yield* did(
             access,
             input,
@@ -1035,7 +1044,7 @@ export class TaskActions extends Context.Service<
                 ? 'kept a review after the merge'
                 : 'left its review after the merge to the project’s rule',
           )
-          return `${task.slug}: ${holds}${review === null ? ', as the project’s rule says' : ''}. ${threadsSaying(access, task)}.`
+          return `${task.slug}: ${holds}. ${threadsSaying(access, task)}.`
         })
 
       const shipTask = (access: ToolAccess, input: unknown) =>
@@ -1054,7 +1063,7 @@ export class TaskActions extends Context.Service<
             }),
             task.slug,
           )
-          yield* did(access, input, task, `Shipped “${task.title}”`, 'shipped this task')
+          yield* did(access, input, task, `Asked to ship “${task.title}”`, 'asked to ship this task')
           return `${own ? 'Althar ships this task once your turn ends' : `Shipping ${task.slug}`}: where its plan has a reviewer before the work ships, the review runs first, over everything since the last one, and the lead settles what it finds; then its commits go up, to the open pull request, or a new one after the last merged or closed. read_task shows where it stands. ${threadsSaying(access, task)}.`
         })
 
@@ -1094,8 +1103,17 @@ export class TaskActions extends Context.Service<
             return yield* new ToolRefused({
               message: `${task.slug} has no plan yet: propose_plan plans it, with its review and its ending.`,
             })
-          const lead = plan.parameters.steps.find((step) => step.key === 'implement')
-          if (lead === undefined) return yield* new ToolRefused({ message: `${task.slug} has no lead in its plan.` })
+          const plannedLead = plan.parameters.steps.find((step) => step.key === 'implement')
+          if (plannedLead === undefined) return yield* new ToolRefused({ message: `${task.slug} has no lead in its plan.` })
+          const lead =
+            plan.state !== 'accepted'
+              ? plannedLead
+              : yield* teamLeadOf(
+                  task.threadId,
+                  plannedLead,
+                  plan.parameters.leadChanged,
+                  Option.getOrUndefined(yield* sessions.running(task.threadId)),
+                )
           return { plan, lead, review: plan.parameters.steps.find((step) => step.key === 'review') }
         })
 
@@ -1133,7 +1151,7 @@ export class TaskActions extends Context.Service<
         }
       }
 
-      /** What a part became, in a few words: "reviewed by GPT-6.1 Terra", "ending with its branch". */
+      /** What a part became, in a few words: its reviewer configured, and how it ends. */
       const endingWords = (end: TaskEnding | null) =>
         end === null
           ? 'ending on its branch, its repository on no code host Althar knows'
@@ -1156,7 +1174,7 @@ export class TaskActions extends Context.Service<
             return yield* new ToolRefused({
               message: `${task.slug} reviews someone else’s pull request: it has no work of its own to review.`,
             })
-          const named = yield* modelNamer
+          const named = withEffort(yield* modelNamer)
           if (pick === null) {
             const after = plan.parameters.reviewAfterMerge === true
             if (plan.state === 'accepted')
@@ -1171,7 +1189,7 @@ export class TaskActions extends Context.Service<
             const changed = yield* plainly(
               runs.changeTeam({
                 taskId: task.id,
-                steps: [lead, ...(review === undefined ? [] : [{ ...review, skipped: true }])],
+                steps: review === undefined ? [] : [{ ...review, skipped: true }],
                 actorId,
               }),
               task.slug,
@@ -1184,7 +1202,7 @@ export class TaskActions extends Context.Service<
               message: 'No agent can review it now: each is out of usage or signed out. Name one with review, or try once one is back.',
             })
           const step: PlanStep = { key: 'review', ...pickedStep(reviewer), skipped: false }
-          const changed = yield* plainly(runs.changeTeam({ taskId: task.id, steps: [lead, step], actorId }), task.slug)
+          const changed = yield* plainly(runs.changeTeam({ taskId: task.id, steps: [step], actorId }), task.slug)
           if (changed.review === undefined) return []
           const when =
             changed.review.when === 'next_round'
@@ -1192,14 +1210,14 @@ export class TaskActions extends Context.Service<
               : changed.review.when === 'next_ship'
                 ? ', reading what ships next'
                 : ''
-          return [`reviewed by ${named(step)}${when}`]
+          return [`reviewer set to ${named(step)}${when}`]
         })
 
       /** Its review only once it merged (the fast lane's), by the model named or as `reviewerFor` picks it. */
       const reviewAfterMergeTo = (actorId: ActorId, task: Task, pick: typeof StepPick.Type | undefined) =>
         Effect.gen(function* () {
           const { plan, lead, review } = yield* teamOf(task)
-          const named = yield* modelNamer
+          const named = withEffort(yield* modelNamer)
           const reviewer = pick === undefined ? yield* reviewerFor(task, lead, review) : yield* stepOf(task.projectId, pick, 'the review')
           if (reviewer === undefined)
             return yield* new ToolRefused({
@@ -1207,14 +1225,15 @@ export class TaskActions extends Context.Service<
             })
           const step: PlanStep = { key: 'review', ...pickedStep(reviewer), skipped: true }
           if (plan.parameters.reviewAfterMerge === true && review !== undefined && named(review) === named(step)) return []
+          // Save the requested timing before stopping a pass: its completion may publish immediately.
+          yield* plainly(runs.reshape({ taskId: task.id, afterMerge: step, actorId }), task.slug)
           // Nothing waits on it before the merge: one under way stops.
           if (plan.state === 'accepted')
             yield* plainly(
               runs.skipReview({ envelope: yield* envelope('task.skip_review', { taskId: task.id }, undefined, actorId), taskId: task.id }),
               task.slug,
             )
-          yield* plainly(runs.reshape({ taskId: task.id, afterMerge: step, actorId }), task.slug)
-          return [`reviewed by ${named(step)} after it merges`]
+          return [`review after merge set to ${named(step)}`]
         })
 
       /**
@@ -1249,7 +1268,7 @@ export class TaskActions extends Context.Service<
        * its ending (a built-in preset's pull request as the project's "How a task ends" says), and where it sits. Its lead
        * stays, and its brief: it is under way. What changed, in a few words each.
        */
-      const presetTo = (actorId: ActorId, task: Task, asked: string) =>
+      const presetTo = (actorId: ActorId, task: Task, asked: string, reviewOverride?: typeof StepPick.Type | null) =>
         Effect.gen(function* () {
           const preset = (yield* presetsIn(task.projectId)).find(
             (one) => one.id === asked || one.name.toLowerCase() === asked.trim().toLowerCase(),
@@ -1264,6 +1283,8 @@ export class TaskActions extends Context.Service<
                   ? `${task.slug} reviews someone else’s pull request: to fix what it found here, add_part takes a worktree for it.`
                   : `Review a PR reads someone else’s pull request: add_review gives ${task.slug} one to review.`,
             })
+          // A named reviewer is resolved before changing the task: an invalid pick must not leave half a preset applied.
+          if (reviewOverride != null) yield* stepOf(task.projectId, reviewOverride, 'the review')
           const said: Array<string> = []
           if (preset.parts.workspace !== 'copy') {
             const made = yield* changes.exclusive(task.id, branchOnFirstWrite(task.id, [], true))
@@ -1305,12 +1326,26 @@ export class TaskActions extends Context.Service<
               : follows
                 ? yield* changes.endFor(task.projectId, task.id)
                 : own
+          yield* plainly(runs.reshape({ taskId: task.id, smallChange: preset.id === 'builtin:small-change', actorId }), task.slug)
           const ends = yield* endTo(actorId, task, end, !follows)
-          const reviewer = preset.parts.reviewer === null ? undefined : presetPick(preset.parts.reviewer)
+          const checked =
+            reviewOverride === undefined
+              ? preset.parts.checked
+              : reviewOverride === null
+                ? 'none'
+                : preset.parts.checked === 'after'
+                  ? 'after'
+                  : 'before'
+          const reviewer =
+            reviewOverride === undefined
+              ? preset.parts.reviewer === null
+                ? undefined
+                : presetPick(preset.parts.reviewer)
+              : (reviewOverride ?? undefined)
           said.push(
-            ...(preset.parts.checked === 'none'
+            ...(checked === 'none'
               ? yield* reviewTo(actorId, task, null)
-              : preset.parts.checked === 'after'
+              : checked === 'after'
                 ? yield* reviewAfterMergeTo(actorId, task, reviewer)
                 : yield* reviewTo(actorId, task, reviewer)),
             ...ends,
@@ -1334,9 +1369,20 @@ export class TaskActions extends Context.Service<
           const plan = yield* planOf(task.id)
           const end = plan?.parameters.end
           const reviewed = plan?.parameters.steps.some((step) => step.key === 'review' && !step.skipped) === true
-          if (end !== 'draft' && end !== 'ready') return ''
-          const open = (yield* changes.ofTask(task.id).pipe(Effect.orElseSucceed(() => []))).some((one) => one.state === 'open')
-          if (open) return ''
+          // These candidates have no open pull request of their own; an open sibling does not hide their Ship.
+          const commits = (yield* changes.unshipped(task.id).pipe(Effect.orElseSucceed(() => []))).reduce(
+            (count, workspace) => count + workspace.commits.length,
+            0,
+          )
+          const open =
+            commits === 0 && (yield* changes.ofTask(task.id).pipe(Effect.orElseSucceed(() => []))).some((one) => one.state === 'open')
+          if (!shipsToOpen({ end, open, commits }))
+            return shipsToOpen({ end, open, commits: 1 }) ? ' Commit its work before Ship can open a pull request.' : ''
+          const host = yield* changes.hostFor(task.projectId)
+          if (host?.connected !== true)
+            return host === null
+              ? ' Set up the repository’s code host before opening its pull request.'
+              : ` Connect ${host.name} before Ship can open its pull request.`
           return ` Ship ${reviewed ? 'runs its review, then opens' : 'opens'} its pull request: call ship_task (or pass ship) where the person asked for it to go up now${own ? ', and it ships once your turn ends' : ''}; else it waits for their Ship.`
         })
 
@@ -1363,10 +1409,11 @@ export class TaskActions extends Context.Service<
                   ),
                 )}`
               : ''
-          if (said.length === 0) return `Nothing changed: ${task.slug} has those parts already.${next}${shipping}`
+          const titleReview = ` Review ${task.slug}'s current title, “${task.title}”, against what it does now. If it no longer fits, call rename_task; its open pull request follows by the project's naming. Keep it if it still fits.`
+          if (said.length === 0) return `Nothing changed: ${task.slug} has those parts already.${titleReview}${next}${shipping}`
           const changed = `${did_}: ${said.join(', ')}`
           yield* did(access, input, task, `${changed.charAt(0).toUpperCase()}${changed.slice(1)} on “${task.title}”`, changed)
-          return `${task.slug}: ${changed}. ${threadsSaying(access, task)}.${next}${shipping}`
+          return `${task.slug}: ${changed}. ${threadsSaying(access, task)}.${titleReview}${next}${shipping}`
         })
 
       /** The ending a part's change asks for, as a plan keeps it. */
@@ -1396,7 +1443,7 @@ export class TaskActions extends Context.Service<
             default: {
               if (asked.preset === undefined || asked.preset.trim() === '')
                 return yield* new ToolRefused({ message: 'Name the preset (preset), as list_presets names it.' })
-              const { name, said } = yield* presetTo(actorOf(access), task, asked.preset)
+              const { name, said } = yield* presetTo(actorOf(access), task, asked.preset, asked.review)
               return yield* shapeSaid(access, input, task, asked, `made it ${/^[aeiou]/i.test(name) ? 'an' : 'a'} ${name}`, said)
             }
           }
@@ -1682,7 +1729,7 @@ export class TaskActions extends Context.Service<
           const asked = yield* read(Named, input)
           const task = yield* named(access, asked.task)
           yield* plainly(runs.publish(task.id), task.slug)
-          yield* did(access, input, task, `Opened a pull request for “${task.title}”`, 'opened a pull request for this task')
+          yield* did(access, input, task, `Requested a pull request for “${task.title}”`, 'requested a pull request for this task')
           return `Althar opens ${task.slug}'s pull request now, as its card's button does: read_task shows it once it is up. ${threadsSaying(access, task)}.`
         })
 
@@ -1777,7 +1824,7 @@ export class TaskActions extends Context.Service<
       const reviewPick = {
         type: ['object', 'null'],
         description:
-          'For checked_by: its reviewer’s model, as list_models writes it, with an effort where it matters; null takes the review off. Left out, the one its plan had, else the project’s rules pick, another maker’s than its lead’s.',
+          'For checked_by or preset: its reviewer’s model, as list_models writes it, with an effort where it matters; null takes the review off. With preset, this replaces the preset’s reviewer in the same call. Left out, the one its plan had, else the project’s rules pick, another maker’s than its lead’s.',
         properties: { model: { type: 'string' }, effort: { type: 'string' } },
         required: ['model'],
       }
@@ -1840,7 +1887,7 @@ export class TaskActions extends Context.Service<
         ),
         tool(
           'review_after_merge',
-          "Says whether one small change is reviewed after it merges, over its project's rule (read_settings project/tasks, afterMergeReview), on the person's word: review keeps a review after its merge where the rule has none (only blocking and major findings come back to the person, unless the rule says all); none drops it; project goes back to the rule. Only a small change, before it merges. To review it before it merges, make it a full task instead. It acts at once, with a line in your thread and the task's.",
+          "Changes review after a merge only on the person's explicit request: review requests a pass after the merge (only blocking and major findings come back, unless the project's afterMergeReview rule says all); none drops that review; project restores the project's rule for requested after-merge reviews. Before it merges, with a reviewer configured. A change being small never requests or proposes a post-merge review. It acts at once, with a line in your thread and the task's.",
           {
             type: 'object',
             properties: {
@@ -1943,7 +1990,7 @@ export class TaskActions extends Context.Service<
         ),
         tool(
           'change_part',
-          'Changes one of a task’s parts, with why, any task’s, your own included, either way and at any time, on the person’s word, in plain words or by voice (a task is a conversation plus parts): act at once, and say what you did in a line; never ask them again. preset gives it another preset’s parts all at once, by name as list_presets names it: a prototype the person wants built becomes a Change (a reviewer added, the project’s pull request ending, and a worktree with its branch where it had none), a change becomes a Prototype (no review, ending with its branch, an open pull request closed) or a Chat (no review, nothing going up, on Scratch), a chat becomes a Change; its lead stays (change_lead changes it). checked_by puts a review of its own work on before it ships, by review’s model or, left out, the one its plan had or the project’s rules pick, or changes its reviewer; null takes it off, one under way stopping. ending: here (nothing goes up until it ships), branch (its branch pushed, no pull request; an open one is closed, its branch staying), draft or ready (a pull request; an open draft is marked ready). Where the ending is a pull request and its work isn’t up, Ship runs its review and opens it: ship ships it now, as ship_task does, where the person asked for it to go up. workspace moves it between a worktree and Local (to: worktree or checkout; it waits for the lead’s turn to end, and asks the person before taking their checkout off a branch of their own) or points it at another branch to work toward (toward, null for the default); shelf puts it on Scratch or on the board. Running an outside author’s code is the person’s word alone: suggest Run it to them.',
+          `Changes one of a task’s parts, with why, any task’s, your own included, either way and at any time, on the person’s word, in plain words or by voice (a task is a conversation plus parts): act at once, and say what you did in a line; never ask them again. preset gives it another preset’s parts all at once, by name as list_presets names it: a prototype the person wants built becomes a Change (a reviewer added, the project’s pull request ending, and a worktree with its branch where it had none), a change becomes a Prototype (no review, ending with its branch, an open pull request closed) or a Chat (no review, nothing going up, on Scratch), a chat becomes a Change; its lead stays (change_lead changes it). When the person names a reviewer or effort while choosing a preset, pass review in this same call so no other reviewer is selected first. checked_by puts a review of its own work on before it ships, by review’s model or, left out, the one its plan had or the project’s rules pick, or changes its reviewer; null takes it off, one under way stopping. ending: here (nothing goes up until it ships), branch (its branch pushed, no pull request; an open one is closed, its branch staying), draft or ready (a pull request; an open draft is marked ready). Where the ending is a pull request and its work isn’t up, Ship runs its review and opens it: ship ships it now, as ship_task does, where the person asked for it to go up. workspace moves it between a worktree and Local (to: worktree or checkout; it waits for the lead’s turn to end, and asks the person before taking their checkout off a branch of their own) or points it at another branch to work toward (toward, null for the default); shelf puts it on Scratch or on the board. Running an outside author’s code is the person’s word alone: suggest Run it to them. ${TITLES_FOLLOW_WORK}`,
           {
             type: 'object',
             properties: {

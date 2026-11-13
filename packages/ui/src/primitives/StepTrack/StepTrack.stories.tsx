@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
-import { useState } from 'react'
+import { useState, type ReactNode } from 'react'
 import { expect, userEvent, within } from 'storybook/test'
 
 import { TaskStatus } from '../../foundations/vocabulary'
@@ -17,16 +17,6 @@ const meta = {
 } satisfies Meta<typeof StepTrack>
 export default meta
 type Story = StoryObj<typeof meta>
-
-/** On the third step, running. Without labels the names are read out, not shown. */
-export const Running: Story = {}
-export const Labelled: Story = { args: { labels: true } }
-/** Sent back from Verify to Implement: the steps it had reached stay, faintly. */
-export const SentBack: Story = { args: { steps: trackOf(STEPS, 1, 3), labels: true } }
-export const WaitingOnYou: Story = { args: { status: TaskStatus.Yours, labels: true } }
-export const Paused: Story = { args: { status: TaskStatus.Paused, labels: true } }
-export const Stopped: Story = { args: { status: TaskStatus.Stopped, labels: true } }
-export const Done: Story = { args: { steps: trackOf(STEPS, 4, 4, true), status: TaskStatus.Done, labels: true } }
 
 /** A step finishing: its bar fills with ink from its start, and the next one takes the task's colour. A track that loads with steps already done doesn't fill. */
 export const FinishingAStep: Story = {
@@ -48,19 +38,26 @@ export const FinishingAStep: Story = {
   },
 }
 
+/** As wide as the card it sits in. */
+const fill = (node: ReactNode) => <div style={{ flex: 1 }}>{node}</div>
+
+/**
+ * Running: on the third step; without labels the names are read out, not shown. Sent back: from Verify to
+ * Implement, the steps it had reached stay, faintly.
+ */
 export const AllStates: Story = {
   render: () => (
     <States
       size="wide"
       cells={[
-        { state: 'running', node: <StepTrack steps={trackOf(STEPS, 2)} /> },
-        { state: 'labelled', node: <StepTrack steps={trackOf(STEPS, 2)} labels /> },
-        { state: 'sent back', node: <StepTrack steps={trackOf(STEPS, 1, 3)} labels /> },
-        { state: 'waiting on you', node: <StepTrack steps={trackOf(STEPS, 2)} status={TaskStatus.Yours} labels /> },
-        { state: 'paused', node: <StepTrack steps={trackOf(STEPS, 2)} status={TaskStatus.Paused} labels /> },
-        { state: 'stopped', node: <StepTrack steps={trackOf(STEPS, 2)} status={TaskStatus.Stopped} labels /> },
-        { state: 'done', node: <StepTrack steps={trackOf(STEPS, 4, 4, true)} status={TaskStatus.Done} labels /> },
-        { state: 'just started', node: <StepTrack steps={trackOf(STEPS, 0)} labels fresh /> },
+        { state: 'running', node: fill(<StepTrack steps={trackOf(STEPS, 2)} />) },
+        { state: 'labelled', node: fill(<StepTrack steps={trackOf(STEPS, 2)} labels />) },
+        { state: 'sent back', node: fill(<StepTrack steps={trackOf(STEPS, 1, 3)} labels />) },
+        { state: 'waiting on you', node: fill(<StepTrack steps={trackOf(STEPS, 2)} status={TaskStatus.Yours} labels />) },
+        { state: 'paused', node: fill(<StepTrack steps={trackOf(STEPS, 2)} status={TaskStatus.Paused} labels />) },
+        { state: 'stopped', node: fill(<StepTrack steps={trackOf(STEPS, 2)} status={TaskStatus.Stopped} labels />) },
+        { state: 'done', node: fill(<StepTrack steps={trackOf(STEPS, 4, 4, true)} status={TaskStatus.Done} labels />) },
+        { state: 'just started', node: fill(<StepTrack steps={trackOf(STEPS, 0)} labels fresh />) },
       ]}
     />
   ),

@@ -129,6 +129,8 @@ import { presetModels } from './presetModels'
 import { usableModels } from './usableModels'
 import { Runs } from './Runs'
 import { findTasks } from './Search'
+import { searchDocuments } from './searchDocuments'
+import { searchFiles } from './searchFiles'
 import { Tasks } from './Tasks'
 import { Sessions } from './Sessions'
 import { makeRepository, placeRepository } from './newRepository'
@@ -750,7 +752,9 @@ export const handlers = Api.toLayer(
                       ? Stream.make({ _tag: 'Launches', projectId: event.projectId, launches: event.launches })
                       : event._tag === 'PlanUsage'
                         ? Stream.make({ _tag: 'PlanUsage', usage: event.usage })
-                        : Stream.empty,
+                        : event._tag === 'Drafting'
+                          ? Stream.make({ _tag: 'Drafting', threadId: event.threadId, drafts: event.drafts })
+                          : Stream.empty,
           ),
         ),
       ),
@@ -979,6 +983,14 @@ export const handlers = Api.toLayer(
           ),
         ),
       ListTasks: ({ projectId }) => api(queries.tasks(projectId)),
+      GetSearchDocuments: ({ after }) =>
+        api(
+          Effect.gen(function* () {
+            const working = new Set((yield* sessions.onTasks).flatMap((one) => (one.turnRunning ? [one.taskId] : [])))
+            return yield* searchDocuments(after, working)
+          }),
+        ),
+      GetSearchFiles: ({ threadId }) => api(Effect.flatMap(queries.codeRoots(threadId), searchFiles)),
       SearchTasks: ({ projectId, text, limit }) =>
         api(
           Effect.gen(function* () {
@@ -1544,6 +1556,7 @@ export const handlers = Api.toLayer(
         ),
       StartPlan: ({ commandId, planId }) => once(commandId, api(Effect.asVoid(plans.start(planId, instance.personId)))),
       HoldPlan: ({ commandId, planId }) => once(commandId, api(Effect.asVoid(plans.hold(planId, instance.personId)))),
+      HoldDraft: ({ commandId, threadId, key }) => once(commandId, api(coordinator.holdDraft(threadId, key, instance.personId))),
       ChangePlan: ({ commandId, planId, steps, end, worksIn, toward }) =>
         once(commandId, api(plans.change(planId, steps, instance.personId, end, worksIn, toward))),
       ApplyPreset: ({ commandId, planId, preset }) =>
@@ -2040,7 +2053,7 @@ export const handlers = Api.toLayer(
         once(commandId, api(policies.setUsageLimit(projectId, policy, instance.personId))),
       OpenChange: ({ commandId, taskId }) => once(commandId, api(runs.publish(taskId))),
       SetReviewAfterMerge: ({ commandId, taskId, review }) =>
-        once(commandId, api(Effect.asVoid(mergeReviews.choose(taskId, review, instance.personId)))),
+        once(commandId, api(Effect.asVoid(runs.setReviewAfterMerge({ taskId, review, actorId: instance.personId })))),
       ShapeTask: ({ commandId, taskId, preset }) => once(commandId, api(taskActions.shape(taskId, preset, instance.personId))),
       SkipReview: ({ commandId, taskId }) =>
         once(
@@ -2303,6 +2316,7 @@ export const handlers = Api.toLayer(
         ),
       StopLaunch: ({ commandId, id }) => once(commandId, api(launches.stop(id))),
       ClearLaunch: ({ commandId, id }) => once(commandId, api(launches.clear(id))),
+      ReadLaunchOutput: ({ id }) => api(launches.output(id)),
       Watch: ({ since }) => Stream.merge(changes(since), streaming),
     })
   }),

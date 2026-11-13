@@ -92,7 +92,7 @@ export const stepOf = (projectId: string, pick: typeof StepPick.Type, use?: stri
     const entry = agents.list.find((one) => one.definition.id === agentId)
     const agent = { id: agentId, name: entry?.definition.name ?? agentId }
     const offered = (yield* (yield* Models).catalog).find((one) => one.agentId === agentId)
-    // The model the agent offers by that name or id; refused, with the ones it offers, where it offers none such. An agent whose models aren't known takes it as named.
+    // The model must be one the agent has actually offered, even while its catalog is still loading.
     let model = pick.model
     let known = pick.model === undefined ? undefined : offered?.models.find((one) => one.id === pick.model)
     // A model the person switched off is off, whether or not the agent offers it: said so before what it offers.
@@ -103,6 +103,10 @@ export const stepOf = (projectId: string, pick: typeof StepPick.Type, use?: stri
     )
       return yield* new ToolRefused({
         message: `The person switched ${pick.model} off${keepAgent ? ` for ${agent.name}` : ''}. ${describeModels(yield* usableModels(projectId), yield* Clock.currentTimeMillis, use)}`,
+      })
+    if (pick.model !== undefined && (offered === undefined || offered.models.length === 0))
+      return yield* new ToolRefused({
+        message: `${agent.name}'s available models aren't known yet. Call list_models again before naming a model, or leave model out to use its own default.`,
       })
     if (pick.model !== undefined && offered !== undefined && offered.models.length > 0) {
       const wanted = pick.model.trim().toLowerCase()

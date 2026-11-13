@@ -29,30 +29,10 @@ type Story = StoryObj<typeof meta>
 
 /** The lead asked: what would go up, and Push. */
 export const Asked: Story = {}
-/** The person pressed Push; it is on its way. */
-export const Pushing: Story = { args: { pushing: true } }
-/** The branch changed since the lead asked: what is on it now, to look at again. */
-export const Moved: Story = {
-  args: { moved: true, commits: [COMMITS[0] ?? { sha: '', subject: '' }, { sha: 'c51e8a0', subject: 'Name the retry option, again' }] },
-}
-/** Moved so far that nothing on the branch is new to the pull request: nothing to push. */
-export const NothingNew: Story = { args: { moved: true, commits: [], count: 0 } }
-/** The branch changed under what the pull request has: why nothing can go up, and what would let it. No Push. */
-export const Rewritten: Story = { args: { moved: true, blocked: PushBlocked.Rewritten, commits: [], count: 0 } }
-/** The pull request has commits from elsewhere that the branch doesn't. */
-export const Behind: Story = { args: { moved: true, blocked: PushBlocked.Behind, commits: [], count: 0 } }
-/** Althar can't tell what the pull request has. */
-export const Unknown: Story = { args: { moved: true, blocked: PushBlocked.Unknown, commits: [], count: 0 } }
 /** Many commits: the first few, and how many more. */
 export const Many: Story = { args: { commits: COMMITS, count: 14 } }
 /** In a task of several repositories, the pull request by its repository. */
 export const OneOfSeveral: Story = { args: { where: 'web#3' } }
-/** Pushed: kept as a record, quiet. */
-export const Pushed: Story = { args: { state: PushState.Pushed, at: '2m ago' } }
-/** The lead asked again, with more, further down. */
-export const Replaced: Story = { args: { state: PushState.Replaced, at: '5m ago' } }
-/** The pull request merged or closed before anyone pushed. */
-export const Closed: Story = { args: { state: PushState.Closed, at: '1h ago' } }
 /** A long subject keeps to its line. */
 export const LongWords: Story = {
   args: {
@@ -101,7 +81,10 @@ export const AllStates: Story = {
         { state: 'asked', node: <PushRequest {...args} /> },
         { state: 'pushing', node: <PushRequest {...args} pushing /> },
         { state: 'moved', node: <PushRequest {...args} moved /> },
+        { state: 'nothing new', node: <PushRequest {...args} moved commits={[]} count={0} /> },
         { state: 'rewritten', node: <PushRequest {...args} moved blocked={PushBlocked.Rewritten} commits={[]} count={0} /> },
+        { state: 'behind', node: <PushRequest {...args} moved blocked={PushBlocked.Behind} commits={[]} count={0} /> },
+        { state: 'unknown', node: <PushRequest {...args} moved blocked={PushBlocked.Unknown} commits={[]} count={0} /> },
         { state: 'pushed', node: <PushRequest {...args} state={PushState.Pushed} at="2m ago" /> },
         { state: 'replaced', node: <PushRequest {...args} state={PushState.Replaced} at="5m ago" /> },
         { state: 'closed', node: <PushRequest {...args} state={PushState.Closed} at="1h ago" /> },

@@ -33,6 +33,8 @@ export interface ArrivedProps {
   /** A quiet line under it: what became of it, and what the person can do. */
   foot?: ReactNode
   text?: Partial<ArrivedText>
+  /** The id of the item it shows, which a place in the conversation is found by. */
+  'data-item'?: string
 }
 
 /**
@@ -40,11 +42,11 @@ export interface ArrivedProps {
  * its pull request, a change to its issue. Written by someone else, so it
  * reads as a quoted note, not as either side of the conversation.
  */
-export function Arrived({ from, verb, where, at, count, mark, children, foot, text }: ArrivedProps) {
+export function Arrived({ from, verb, where, at, count, mark, children, foot, text, ...rest }: ArrivedProps) {
   const t = { ...arrivedText, ...text }
   const did = verb ?? t.verb
   return (
-    <article className={s.arrived} aria-label={t.label(from, did, where)}>
+    <article className={s.arrived} aria-label={t.label(from, did, where)} {...rest}>
       <div className={s.head}>
         <span className={s.glyph}>{mark ? <BrandMark brand={mark} size={12} /> : <Icon name="globe" size={12} />}</span>
         {from && <b>{from}</b>}

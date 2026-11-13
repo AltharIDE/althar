@@ -204,7 +204,9 @@ leaves its conversation as it was.
 - **Both moves show at once:** the pill goes, and a card made a task is on
   the board, in the frame the press is painted in. The window keeps the
   move over the board's reads until they say so, and one the runtime
-  refuses comes back with a line over the composer saying why. Clear waited
+  refuses, or answers but leaves on Scratch (a read of the board after its
+  answer says so), comes back with a line over the composer saying why
+  ([foundations](foundations.md#the-ui-is-instant)). Clear waited
   on the runtime and then on the board's next read, so the pill went late
   and came back for a moment (12 Nov 2026).
 - A call of its that waits on the person still shows in Needs you, and is
@@ -323,7 +325,8 @@ The tools' `find_tasks` searches the same.
 A card opens its task. It says:
 
 - where the task stands, in a word and in its lane's colour;
-- its kind: Change, Review, or nothing for a plain task;
+- its kind where it isn't the usual: Review; nothing for a change, the usual
+  kind, or for a plain task;
 - its title;
 - one fact: a change's branch, pull request, checks or conflict; a review's
   pull request and findings; or a plain task's pictures or files.
@@ -398,7 +401,24 @@ sends the commits up: to the open pull request; after the last merged or
 closed, in the next ("After #N", on a new branch); where there was none, in
 the first, as the plan ends. The hold goes once they're up. A plan with no
 reviewer, or whose review runs after the merge, ships at once. A lead that
-calls `ship_task` in its own turn ships once that turn ends.
+calls `ship_task` in its own turn ships once that turn ends. Its thread records
+that request as a request; the ending records what actually shipped.
+
+An explicit Ship press can accept committed work from an interrupted or stopped
+task once its agents and pending turns are idle. Its stopped workflow is retired
+in the same transaction that admits Ship, so Implement cannot resume alongside
+it. The configured review still runs. Deferred requests and automatic follow-on
+Ships cannot override Stop; the person must press Ship again.
+
+**A Ship keeps the code it accepted.** Each worktree's committed endpoint is
+saved with the Ship before publication. A review replaces that endpoint with
+exactly the committed tree its copy read; tiny fixes, deliberately unchecked
+fixes and the person's Skip review accept their own endpoints. Later commits
+stay local and held for the next Ship, even when they arrive while the host
+answers. The same endpoints survive a restart or a publication retry, and
+apply to an existing, first, next or attached pull request and to a branch
+pushed without one. A next pull request's new branch keeps the later local
+commits too, while its remote receives only the accepted prefix.
 
 **Bringing the base branch in is never the task's work** (`baseOnly.ts`).
 New work is measured by the task's change against its base, from where its
@@ -439,7 +459,9 @@ uncommitted changes that aren't evidence.
     where the pull request couldn't open.
 
 The person can skip a round's review from the task's menu, Ship's included.
-Only that round loses its review; the next has it again.
+Only that round loses its review; the next has it again. New rounds read the
+task's current plan parts, including a deliberate reviewer change, rather
+than inheriting a previous round's Skip review.
 
 **A task has as many pull requests as it needs**, one per repository at a
 time.
@@ -510,41 +532,29 @@ they told it to answers with that, so nothing waits to be read.
 
 ## The small-change lane
 
-Small changes must be fast (the person's note of 6 November). A change of a
-few lines is the exception to the usual course of a change:
+Small changes start quickly, without changing their review policy. A plan
+marked `small_change`, or made from the built-in Small change preset,
+starts without a countdown, with a light lead where that fits the work.
+The configured reviewer reads before Ship, as for Change. Size never skips
+that reviewer, schedules a review after merge, or proposes an extra one.
+A light lead keeps the quick lane's extra place; its review uses the normal
+review places.
 
-- **One step, no countdown.** Its plan holds one step, with the lead on a
-  light, quick model (Sonnet at low effort, where the agent lists it). It
-  names a reviewer, but the review step is skipped before merge. It starts
-  at once, with no countdown to read.
-- **Reviewed after it merges, in the same task.** Its pull request merges on
-  the person's word, as every merge does, and the task settles. Its own
-  reviewer then reads what merged, in a thread of the task's, and reports in
-  the task's thread ([reviews.md](reviews.md#a-small-change-is-reviewed-after-it-merges)).
-  Nothing is posted on the merged pull request, and no second task is made.
-  Nothing blocks the merge. By the project's rule, only blocking and major
-  findings bring the task back (the default), every finding does, or there
-  is no review after the merge; one small change may keep or drop its own
-  ([reviews.md](reviews.md#what-the-review-after-a-merge-brings-back)). A
-  plan that named no reviewer gets no review after merge, and neither does a
-  pull request that was closed unmerged.
-- **One card opens its thread, with its route.** Its stops sit in a row,
-  each with its time or where it stands: Change, Checks, Merge, and Review,
-  drawn dashed while it waits for the merge. Merge, which still asks, sits
-  under its stop once checks pass. Pressing Review moves it before the
-  merge (**Make it a full task**), keeps it after, or takes it off; with
-  none, the route ends at Merge. Made a full task, its Review stop reads
-  the review task it was given (reading, nothing found, how many found,
-  stopped) before and after the merge; Merge waits until that review comes
-  back clear, and See findings opens that task. What a small change is waits behind its
-  name, as a hover. What its review after the merge found isn't listed on
-  the card: it says how many, and See findings opens the review's report in
-  the thread. The card is read from the task as it stands, never stored, so
-  it can't go stale.
+The thread's Small change card shows its steps and configured review before
+Ship. It offers no Make it a full task detour for that ordinary timing.
+The person may explicitly choose after-merge timing, including in a custom
+preset such as Quick fix; that choice and Merge now's recorded review debt
+still work ([reviews.md](reviews.md#an-explicit-review-after-merge)). Older
+stored timing and debt whose origin cannot be proved are preserved.
 
-The trade-off is that a small change merges unreviewed. A finding after the
-merge needs a fix of its own. Make it a full task is there for anything the
-person wants read first.
+The card opens its thread with a route: Change, Checks, Review, and Merge
+for the normal before-Ship timing. Each stop says where it stands; Merge
+still asks and appears once its review and checks permit it. An explicitly
+deferred review moves after Merge, drawn dashed while it waits, and keeps
+the Review timing control. What the review found stays in its report;
+See findings opens it. The card is read from the task as it stands, never
+stored, so it cannot go stale.
+
 
 **Auto moves a lead's next step to a lighter model of the same agent** when
 the plan's tightest window is 90% used or more. A line in the thread says
@@ -553,6 +563,19 @@ Keep turns it back, for the whole task; Undo puts the move back. How models
 are picked is in [agents.md](agents.md).
 
 ## Plan and review settings
+
+The Team dialog, task cards, thread and composer use the same runtime projection
+of the team. The agent doing the current work remains distinct from the choice
+for the next turn. A pending choice wins until it is applied, refused or
+cancelled; a failed replacement does not become the current lead. Durable
+records order choices, including changes made on the same clock tick, and keep
+an accepted next-turn choice through Stop and restart.
+
+Accepting or resolving a pending model or effort publishes the session and task
+change feeds immediately. Commands use the same projection as the views, so
+choosing an original lead again still changes a task that switched since its
+plan was made. Team saves contain only the steps the person edited. Pristine
+fields follow incoming updates while unsaved edits stay in the open dialog.
 
 Two settings, under Settings › Tasks › Every task:
 
@@ -583,7 +606,7 @@ made:
 - **Whether work tries an agent's next account first.**
 - **How a task ends:** a draft pull request (the default), one ready for
   review, or nothing.
-- **What a small change's review after it merges brings back:** only major
+- **What an explicitly configured review after merge brings back:** only major
   findings (the default), every finding, or no review
   ([reviews.md](reviews.md#what-the-review-after-a-merge-brings-back)).
 

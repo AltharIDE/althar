@@ -42,7 +42,7 @@ import { fileAttachments } from './files'
 import { sentAttachments } from './images'
 import { useModelNames } from './modelNames'
 import { useServices } from '../data/services'
-import { WayOut } from './WayOut'
+import { FailedTurn } from './WayOut'
 import { serverBrand } from './mcpServers'
 import { keyOf, pastedIn } from './pasted'
 import { RuleReceipt } from './RuleReceipt'
@@ -320,6 +320,8 @@ export function PartView({ part, threadId }: { part: Part; threadId: string }) {
     case 'notice':
       // A review a lead offered: its line asks, with its buttons, and says what came of it once answered.
       if (part.offer?.kind === 'review') return <ReviewOfferOf offer={part.offer} ask={part.text} />
+      // A turn that failed reads as a problem; the thread's last one has its ways out beside it (ThreadBlocks, TaskThread).
+      if (part.tone === 'error') return <FailedTurn text={part.text} detail={part.detail} failure={part.failure} />
       return (
         <>
           <p className={s[part.tone]}>{part.text}</p>
@@ -431,7 +433,9 @@ function ArrivalView({
   at,
   count,
   onPassOn,
+  'data-item': item,
 }: {
+  'data-item': string
   arrival: ArrivalContent
   at: string
   count: number
@@ -457,6 +461,7 @@ function ArrivalView({
       where={where}
       at={at}
       count={count}
+      data-item={item}
       mark={productBrand(arrival.source)}
       {...(foot === false ? {} : { foot })}
     >
@@ -652,6 +657,7 @@ export function ThreadBlocks({
         return (
           <ArrivalView
             key={block.id}
+            data-item={block.id}
             arrival={block.arrival}
             at={block.at}
             count={block.count}
@@ -727,6 +733,8 @@ export function ThreadBlocks({
             {...speaker(block.agentId, block.model)}
             at={block.at}
             {...(said === '' || block.live ? {} : { copy: said })}
+            // Every message it shows, so a search can bring the person to the one it found.
+            data-items={block.parts.flatMap((part) => (part.kind === 'message' ? [part.id] : [])).join(' ')}
           >
             {block.work.length > 0 && (
               <WorkedFor
@@ -753,16 +761,21 @@ export function ThreadBlocks({
               </WorkedFor>
             )}
             <RuleReceipt parts={block.parts} {...(project === undefined ? {} : { project })} />
-            {block.said.map((part) => (
-              <PartView key={part.id} part={part} threadId={threadId} />
-            ))}
-            {block.id === failed && ending?.kind === 'notice' && (
-              <WayOut
-                failure={ending.failure}
-                onTryAgain={retryable === true ? onTryAgain : undefined}
-                onSignIn={signInAs(block.agentId)}
-                onCompact={onCompact}
-              />
+            {block.said.map((part) =>
+              // The thread's last turn, where it failed: the problem with its ways out beside it.
+              block.id === failed && part === ending && ending.kind === 'notice' ? (
+                <FailedTurn
+                  key={part.id}
+                  text={ending.text}
+                  detail={ending.detail}
+                  failure={ending.failure}
+                  onTryAgain={retryable === true ? onTryAgain : undefined}
+                  onSignIn={signInAs(block.agentId)}
+                  onCompact={onCompact}
+                />
+              ) : (
+                <PartView key={part.id} part={part} threadId={threadId} />
+              ),
             )}
             <HandedBack handed={block.handed} threadId={threadId} versionOf={versionOf} {...(openFile === undefined ? {} : { openFile })} />
           </Turn>

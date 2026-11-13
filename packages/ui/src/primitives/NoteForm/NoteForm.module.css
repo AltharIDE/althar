@@ -2,12 +2,18 @@
   flex: 1;
   display: flex;
   flex-wrap: wrap;
-  align-items: center;
+  align-items: flex-start;
   gap: 8px;
 }
-.field {
+.entry {
   flex: 1 1 240px;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
 }
-.error {
-  flex-basis: 100%;
+.actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
 }

@@ -32,7 +32,6 @@ export const Default: Story = {
   },
 }
 export const Open: Story = { args: { defaultOpen: true } }
-export const Empty: Story = { args: { used: 0 } }
 export const NearlyFull: Story = {
   args: { used: 372, defaultOpen: true, note: 'Near the limit, the lead writes what it knows to the task and starts a fresh context.' },
 }

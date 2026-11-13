@@ -79,10 +79,6 @@ const meta = {
 export default meta
 type Story = StoryObj<typeof meta>
 
-export const Closed: Story = {
-  render: () => <Example />,
-}
-
 /** Changing the effort, making it the default, and switching model. */
 export const ChoosingAnother: Story = {
   render: () => <Example />,

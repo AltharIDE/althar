@@ -7,8 +7,9 @@ import { type AdapterOptions, authorizationOf } from './credential'
 import { updateInCopy } from './branchUpdate'
 import { ConnectorFailed } from './errors'
 import { ApprovalsAnswer, ApprovalStateAnswer, gitlabRulesOf, ProjectRules, RequestRules, ReviewersAnswer } from './gitlabRules'
-import { makeHttp, paged } from './http'
+import { makeHttp, paged, withoutTrailingSlashes } from './http'
 import { makeGitLabReleases } from './gitlabReleases'
+import { postHostReview } from './hostReviews'
 import { pageOfCursor, tail } from './github'
 import type {
   Account,
@@ -46,7 +47,6 @@ import {
   lacking,
   leftAsItIs,
   mergedForGood,
-  noReviews,
   pageAt,
   stillOpen,
   unchangeable,
@@ -129,7 +129,7 @@ const MergeAnswer = Schema.Struct({
   source_branch: Schema.String,
   target_branch: Schema.String,
   /** The project the branch is on: a fork's, for a merge request from one. */
-  source_project_id: Schema.optional(Schema.Number),
+  source_project_id: Schema.optional(Schema.NullOr(Schema.Number)),
   /** The project it goes into. */
   target_project_id: Schema.optional(Schema.Number),
   sha: Schema.optional(Schema.NullOr(Schema.String)),
@@ -142,6 +142,7 @@ const MergeAnswer = Schema.Struct({
   merge_when_pipeline_succeeds: Schema.optional(Schema.NullOr(Schema.Boolean)),
   head_pipeline: Schema.optional(Schema.NullOr(Pipeline)),
   updated_at: Schema.String,
+  diff_refs: Schema.optional(Schema.NullOr(Schema.Struct({ base_sha: Schema.String, head_sha: Schema.String, start_sha: Schema.String }))),
 })
 type MergeAnswer = typeof MergeAnswer.Type
 
@@ -598,8 +599,8 @@ const SIZES_KEPT = 1_000
 
 export const makeGitLab = (options: AdapterOptions): CodeHost & Tracker => {
   const product = 'gitlab' as const
-  const api = options.apiUrl.replace(/\/+$/, '')
-  const web = options.webUrl.replace(/\/+$/, '')
+  const api = withoutTrailingSlashes(options.apiUrl)
+  const web = withoutTrailingSlashes(options.webUrl)
   const http = makeHttp({ product, fetch: options.fetch, authorization: Effect.map(options.credential, authorizationOf) })
   const graphqlUrl = `${api.replace(/\/v4$/, '')}/graphql`
   const project = (repository: Repository | ReadonlyArray<string>) =>
@@ -854,15 +855,17 @@ export const makeGitLab = (options: AdapterOptions): CodeHost & Tracker => {
 
   /** The fork a merge request's branch is on, by its path; none where it is gone, and undefined where it is the project's own. */
   const forkOf = (request: MergeAnswer) =>
-    request.source_project_id === undefined || request.source_project_id === request.target_project_id
-      ? Effect.succeed(undefined)
-      : http.cached(ProjectAnswer, `${api}/projects/${request.source_project_id}`).pipe(
-          Effect.map((answer) => answer.path_with_namespace.split('/')),
-          Effect.catchIf(
-            (error) => error.reason === 'not_found',
-            () => Effect.succeed([]),
-          ),
-        )
+    request.source_project_id === null
+      ? Effect.succeed([])
+      : request.source_project_id === undefined || request.source_project_id === request.target_project_id
+        ? Effect.succeed(undefined)
+        : http.cached(ProjectAnswer, `${api}/projects/${request.source_project_id}`).pipe(
+            Effect.map((answer) => answer.path_with_namespace.split('/')),
+            Effect.catchIf(
+              (error) => error.reason === 'not_found',
+              () => Effect.succeed([]),
+            ),
+          )
 
   const pushTarget = (repository: Repository) =>
     Effect.map(options.credential, (credential) => ({
@@ -960,7 +963,7 @@ export const makeGitLab = (options: AdapterOptions): CodeHost & Tracker => {
       drafts: true,
       checkLogs: true,
       threads: true,
-      reviews: false,
+      reviews: true,
       pictures: true,
       reopen: true,
       rerun: true,
@@ -1220,6 +1223,7 @@ export const makeGitLab = (options: AdapterOptions): CodeHost & Tracker => {
       Effect.gen(function* () {
         const now = yield* read(repository, change.number)
         if (now.state === 'opened') return yield* stillOpen(product, { noun: 'merge request', short: 'MR', prefix: '!' }, change.number)
+        if (now.source_project_id === null) return
         // Its branch is in the project it came from: a fork's, for one from a fork.
         const on = now.source_project_id === undefined ? project(repository) : `${api}/projects/${now.source_project_id}`
         yield* mayNot(http.json(Schema.Unknown, 'DELETE', `${on}/repository/branches/${encodeURIComponent(now.source_branch)}`)).pipe(
@@ -1393,9 +1397,23 @@ export const makeGitLab = (options: AdapterOptions): CodeHost & Tracker => {
         http.json(NoteAnswer, 'PUT', `${project(repository)}/merge_requests/${number}/notes/${encodeURIComponent(commentId)}`, { body }),
         (note) => commentOf(repository, number, note, null, true),
       ),
-    // Reviews of a change Althar didn't open are GitHub's alone, for now.
-    changeToReview: () => Effect.fail(noReviews(product, { noun: 'merge request', short: 'MR', prefix: '!' })),
-    postReview: () => Effect.fail(noReviews(product, { noun: 'merge request', short: 'MR', prefix: '!' })),
+    changeToReview: (repository, number) =>
+      Effect.gen(function* () {
+        const one = yield* http.json(MergeAnswer, 'GET', `${project(repository)}/merge_requests/${number}`)
+        const fork = yield* forkOf(one)
+        return {
+          ...changeOf(one),
+          fork: fork ?? null,
+          baseSha: one.diff_refs?.start_sha ?? null,
+          member: one.author == null || one.source_project_id == null ? false : yield* memberOf(repository, one.author),
+        }
+      }),
+    postReview: (repository, number, review) =>
+      postHostReview(product, http, `${project(repository)}/merge_requests/${number}`, review, account, {
+        url: graphqlUrl,
+        project: repository.path.join('/'),
+        number,
+      }),
     pushTarget,
     issue: (ref) =>
       Effect.gen(function* () {
@@ -1512,8 +1530,8 @@ const dayOf = (day: string | null | undefined): string | null => {
 
 export const accessGitLab: Access = (input) =>
   Effect.gen(function* () {
-    const api = input.apiUrl.replace(/\/+$/, '')
-    const web = input.webUrl.replace(/\/+$/, '')
+    const api = withoutTrailingSlashes(input.apiUrl)
+    const web = withoutTrailingSlashes(input.webUrl)
     const ask = (url: string) => probe(input, url)
     const scope = (name: string): AccessReason => ({ kind: 'scope', scope: name, url: `${web}/-/user_settings/personal_access_tokens` })
     const lines: Array<AccessLine> = []

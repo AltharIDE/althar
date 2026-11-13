@@ -10,8 +10,6 @@ const meta = { title: 'Primitives/LinkButton', component: LinkButton, args: { ch
 export default meta
 type Story = StoryObj<typeof meta>
 
-export const Default: Story = {}
-export const Disabled: Story = { args: { disabled: true, children: 'Next status change' } }
 /** Hidden until the row it sits in is hovered, or it takes focus with the keyboard. */
 export const RevealOnHover: Story = {
   args: { reveal: true, children: 'Skip' },

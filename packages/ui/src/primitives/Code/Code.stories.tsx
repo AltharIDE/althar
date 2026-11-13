@@ -7,7 +7,6 @@ const meta = { title: 'Primitives/Code', component: Code, args: { children: 'wit
 export default meta
 type Story = StoryObj<typeof meta>
 
-export const Alone: Story = {}
 export const InText: Story = {
   render: (args) => (
     <p style={{ margin: 0, maxWidth: 520, fontSize: 14, lineHeight: 1.62 }}>
@@ -16,13 +15,23 @@ export const InText: Story = {
   ),
 }
 
+/** A path too long for its line breaks, its chip on every line. */
 export const AllStates: Story = {
   render: () => (
     <States
+      size="wide"
       cells={[
         { state: 'short', node: <Code>limit</Code> },
         { state: 'path', node: <Code>src/refunds/router.ts</Code> },
         { state: 'command', node: <Code>pnpm test refunds</Code> },
+        {
+          state: 'long path, narrow',
+          node: (
+            <p style={{ margin: 0, width: 220, fontSize: 13, lineHeight: 1.6 }}>
+              Moved to <Code>services/refunds-worker/src/limits/partnerBudget.ts</Code> today.
+            </p>
+          ),
+        },
         {
           state: 'on raised',
           node: (

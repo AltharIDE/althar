@@ -16,10 +16,7 @@ const meta = {
 export default meta
 type Story = StoryObj<typeof meta>
 
-export const Default: Story = {}
-/** A narrower key column, for short keys. */
-export const Narrow: Story = { args: { keyWidth: 64 } }
-
+/** Narrow keys: a narrower key column, for short keys. */
 export const AllStates: Story = {
   render: (args) => (
     <States

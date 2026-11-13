@@ -5,7 +5,7 @@ import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
 
 import { type CommandEnvelope, Ids, newId, type ProjectId, type WorksIn } from '@althar/domain'
-import { Commands, type CommandIdReused, Ledger, type RevisionConflict, type RowNotFound } from '@althar/persistence-sqlite'
+import { bumpRevision, Commands, type CommandIdReused, Ledger, type RevisionConflict, type RowNotFound } from '@althar/persistence-sqlite'
 import {
   adapterNode,
   type AgentConnection,
@@ -78,6 +78,7 @@ import { moveSession, Permissions, type RequestContext } from './Permissions'
 import { Questions } from './Questions'
 import { contained, Failures } from './Failures'
 import { touchCard, touchTask } from './cards'
+import { teamLeadOf } from './teamLead'
 import { BETWEEN_AGENTS_MS } from './needsYou'
 import { guardEnv, guardHolds } from './pushGuard'
 import { change, fact, timestamp } from './records'
@@ -146,6 +147,9 @@ export type Disposition = 'after_current' | 'interrupt_and_continue'
  * An agent that doesn't answer ACP startup must not leave a handover pending forever. The bound covers the whole startup, so it
  * also cuts off an agent that works but is slow: connecting, `session/new`, and setting the model and effort.
  */
+const INTEGRATION_BRIEF =
+  "For a complete issue discussion, read_issue_comments returns full bodies and IDs: follow every next cursor. Linear documents, projects, milestones, initiatives and updates have list_linear_resource, read_linear_resource and save_linear_resource; relationships have read_issue_relations and change_issue_relation. read_issue_attachments and upload_issue_attachment cover supported trackers, with file links in comments on GitHub/GitLab. edit_issue_comment edits existing comments; reply_to_issue_comment uses Linear roots or GitLab discussion IDs. search_pull_requests reaches beyond this project's repositories and pages searches; request_pull_request_reviewers, resolve_review_thread, mark_pull_request_draft and post_review cover code-host review controls. For anything without a typed tool, list_integrations identifies its connection and code_host_api or tracker_api calls its API. On Jira use namespace agile for boards/sprints, or service_desk for service requests. These additional writes take the person's message ID from read_turn or an errand: their request already gives their word, so don't ask for it again."
+
 const SESSION_START_TIMEOUT = Duration.minutes(2)
 
 /** No model named, the agent would start on one the person switched off, and offers no other they left on. */
@@ -413,12 +417,22 @@ interface Running {
   /** What its permission requests are decided by: its thread, task and rules. */
   readonly requestContext: RequestContext
   turnRunning: boolean
+  /** A failed delivery waits for an explicit retry, new words, or its account's reset; queued input alone is not work. */
+  deliveryHeld: 'transient' | 'usage_limit' | 'recovery' | null
+  /** Queued recovery may deliver fresh input, but cannot retry input that an earlier session already dispatched. */
+  blockedInputs: ReadonlySet<string> | undefined
+  /** The failed turn whose input waits, so a later person message can resume even when it arrived as that turn ended. */
+  heldTurn?: string | undefined
   /**
    * Told once the prompt of the turn running has reached the agent, which may stop it: between `turnRunning` and that
    * moment there is nothing for an interrupt to stop.
    */
   promptSent: Deferred.Deferred<void> | null
   stopping: boolean
+  /** The first stop intent survives a crash during cancellation and cannot be replaced by shutdown. */
+  stopIntent?: StopRequest
+  /** Concurrent shutdown waits until the first stop intent's durable write has finished before it interrupts anything. */
+  readonly stopRecorded: Deferred.Deferred<void>
   /** How full the agent's context is, in tokens, as it last said; null until it says (ACP's usage updates). */
   context: { readonly used: number; readonly size: number } | null
   /** Closes the message being said between turns. */
@@ -511,7 +525,10 @@ const heardContext = (running: Running, event: SessionEvent) => {
 /** The account asked for, where one was. */
 const accountOf = (input: { readonly accountId?: string }) => (input.accountId === undefined ? {} : { accountId: input.accountId })
 
-type StopRequest = { readonly state: 'completed' | 'lost' } | { readonly state: 'superseded'; readonly by: string }
+type StopRequest =
+  | { readonly state: 'completed'; readonly reason: 'stopped' | 'shutdown' | 'settled' }
+  | { readonly state: 'lost' }
+  | { readonly state: 'superseded'; readonly by: string }
 
 /**
  * Why a session's brief is written: a start, another agent taking over, or
@@ -887,8 +904,10 @@ export class Sessions extends Context.Service<
       readonly model?: string
       readonly effort?: string
     }): Effect.Effect<'later' | 'same', NoSession | Failure>
-    /** Delivers what waits in the thread's queue now, if an agent is on it: after a usage limit resets, say. */
+    /** Explicitly resumes retained input after a failed turn or a usage reset; an ordinary input-batch wake does not retry failures. */
     wake(threadId: string): Effect.Effect<void>
+    /** Starts the startup snapshot once Runtime has installed turn gates, recording hooks and tools. */
+    readonly recoverQueued: Effect.Effect<void>
     /**
      * Puts the thread's lead on another model, effort or agent from its next turn: never in the one it is in. Another agent
      * takes over as `switchAgent` hands over, with the work so far, when the next thing said to the thread is delivered; the
@@ -990,6 +1009,8 @@ export class Sessions extends Context.Service<
         readonly reviewer: boolean
         /** One of its lead's helpers (ADR-087): a place of its own. */
         readonly helper: boolean
+        /** Queued words can become a turn, rather than waiting for a failed delivery's retry or reset. */
+        readonly acceptingTurns?: boolean
         readonly turnRunning: boolean
         readonly background: boolean
         /** The agent's process, where it runs as one: what its left running is a part of, and is read for CPU (Busy.ts). */
@@ -1162,6 +1183,29 @@ export class Sessions extends Context.Service<
       // Sessions live in a scope of their own, closed only after the finalizer below has stopped each one and recorded it.
       const sessionsScope = yield* Scope.fork(yield* Effect.scope, 'sequential')
       const threads = new Map<string, Running>()
+      // Snapshot the old queue before callers can add new work. Only input never dispatched is replayable; an uncertain
+      // delivery belongs to the person or its workflow. First stop intent makes Stop durable even if cancellation crashed.
+      const recoverable = sessionsSql<{ threadId: string; sessionId: string; inputId: string; projectId: ProjectId }>`
+        SELECT t.id AS thread_id, s.id AS session_id, i.id AS input_id, t.project_id
+        FROM threads t JOIN projects p ON p.id = t.project_id
+        JOIN provider_sessions s ON s.id = (SELECT prior.id FROM provider_sessions prior WHERE prior.thread_id = t.id
+          ORDER BY (SELECT max(f.sequence) FROM record_events f WHERE f.aggregate_type = 'provider_session' AND f.aggregate_id = prior.id) DESC,
+            prior.started_at DESC, prior.rowid DESC LIMIT 1)
+        JOIN user_inputs i ON i.thread_id = t.id AND i.state = 'queued'
+        WHERE t.kind IN ('coordinator', 'task') AND p.archived_at IS NULL
+          AND NOT EXISTS (SELECT 1 FROM helpers h WHERE h.thread_id = t.id)
+          AND NOT EXISTS (SELECT 1 FROM tasks k WHERE k.id = t.task_id AND k.state = 'abandoned')
+          AND NOT EXISTS (SELECT 1 FROM runs r WHERE r.task_id = t.task_id AND r.state IN ('running', 'suspended'))
+          AND NOT EXISTS (SELECT 1 FROM turn_delivery_inputs di JOIN turn_deliveries d ON d.id = di.delivery_id
+            WHERE di.user_input_id = i.id AND d.delivered_at IS NOT NULL)
+          AND NOT EXISTS (SELECT 1 FROM record_events f WHERE f.aggregate_type = 'provider_session' AND f.aggregate_id = s.id AND f.type = 'provider_session.stop_requested'
+            AND (json_extract(f.payload, '$.state') <> 'completed' OR coalesce(json_extract(f.payload, '$.reason'), '') <> 'shutdown'))
+          AND ((s.state = 'completed' AND EXISTS (SELECT 1 FROM record_events f WHERE f.aggregate_type = 'provider_session' AND f.aggregate_id = s.id
+              AND f.type = 'provider_session.completed' AND json_extract(f.payload, '$.reason') = 'shutdown'))
+            OR (s.state IN ('lost', 'failed') AND EXISTS (SELECT 1 FROM record_events f WHERE f.aggregate_type = 'provider_session' AND f.aggregate_id = s.id
+              AND f.type IN ('provider_session.lost', 'provider_session.failed') AND json_extract(f.payload, '$.reason') = 'runtime_restarted')))`
+      const recovery = yield* recoverable.pipe(Effect.orDie)
+      const recoveryInputs = new Set(recovery.map((one) => one.inputId))
       /* What any turn of a task's lead starts, once Changes says (onLeadTurn): until then, nothing. */
       let leadTurn = (_lead: { readonly taskId: string; readonly threadId: string }): Effect.Effect<void> => Effect.void
       /* What a lead's turn that delivers the person's words starts, once Runs says (onPersonsTurn): until then, nothing. */
@@ -1747,6 +1791,41 @@ export class Sessions extends Context.Service<
           return waiting !== undefined
         })
 
+      /** Pending intent has a feed revision of its own; it never changes what the agent has actually accepted. */
+      const setLeadChoice = (
+        running: Running,
+        next: Running['nextLead'],
+        options?: {
+          readonly after?: NonNullable<Running['nextLead']>
+          readonly choice?: { readonly agentId: string; readonly model: string | null; readonly effort: string | null }
+          /** The agent accepted or refused this choice; clearing for a takeover has not resolved it yet. */
+          readonly resolved?: true
+          readonly onlyIfEmpty?: true
+        },
+      ) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          return yield* sql.withTransaction(
+            Effect.gen(function* () {
+              if (running.stopping || threads.get(running.thread.threadId) !== running) return false
+              if (options?.after !== undefined && running.nextLead !== options.after) return false
+              if (options?.onlyIfEmpty === true && running.nextLead !== undefined) return false
+              if (options?.choice === undefined && options?.resolved !== true && running.nextLead === next) return true
+              const [session] = yield* sql<{ revision: number }>`SELECT revision FROM provider_sessions WHERE id = ${running.sessionId}`
+              if (session === undefined) return yield* new NoSession({ threadId: running.thread.threadId })
+              const revision = yield* bumpRevision('provider_sessions', running.sessionId, session.revision)
+              yield* sessionFact(running.thread, running.sessionId, revision, 'provider_session.lead_choice_changed', {
+                nextLead: next ?? null,
+                ...(options?.choice === undefined ? {} : { choice: options.choice }),
+                ...(options?.resolved === true ? { resolved: true } : {}),
+              })
+              if (running.thread.role !== 'coordinator') yield* touchTask(running.thread.taskId)
+              running.nextLead = next
+              return true
+            }),
+          )
+        })
+
       /**
        * The same agent on another model or effort, set between turns as the composer sets them. One it won't take stays as it is,
        * said with why. Held under `leadLock` by whoever calls it, so two settings never cross.
@@ -1796,10 +1875,7 @@ export class Sessions extends Context.Service<
                 if (next === undefined || next.agentId !== running.entry.definition.id) return
                 yield* settleLead(running, next)
                 // Taken up once set, or refused: until then the thread says it leads from here. Chosen again meanwhile, that one next.
-                if (running.nextLead === next) {
-                  running.nextLead = undefined
-                  return
-                }
+                if (yield* setLeadChoice(running, undefined, { after: next, resolved: true })) return
               }
             }),
           )
@@ -1821,16 +1897,19 @@ export class Sessions extends Context.Service<
                 if (threads.get(previous.thread.threadId) !== previous) return Effect.void
                 previous.handover = 'none'
                 return Effect.andThen(
-                  addItem(
-                    { projectId: previous.thread.projectId, threadId: previous.thread.threadId, sessionId: previous.sessionId },
-                    'notice',
-                    {
-                      source: 'runtime',
-                      severity: 'warning',
-                      title: `${previous.entry.definition.name} carries on: the agent it was changed to couldn’t start.`,
-                    },
+                  setLeadChoice(previous, undefined, { resolved: true, onlyIfEmpty: true }),
+                  Effect.andThen(
+                    addItem(
+                      { projectId: previous.thread.projectId, threadId: previous.thread.threadId, sessionId: previous.sessionId },
+                      'notice',
+                      {
+                        source: 'runtime',
+                        severity: 'warning',
+                        title: `${previous.entry.definition.name} carries on: the agent it was changed to couldn’t start.`,
+                      },
+                    ),
+                    Queue.offer(previous.wake, undefined),
                   ),
-                  Queue.offer(previous.wake, undefined),
                 )
               }),
             ),
@@ -1920,7 +1999,7 @@ export class Sessions extends Context.Service<
           const { thread } = running
           // A coordinator or lead handing its work over takes no more turns. One whose context is filling up hands it over now,
           // between turns, never in one: what waits goes to the fresh session (ADR-031, ADR-038).
-          if (running.handover === 'under_way') return false
+          if (running.stopping || running.handover === 'under_way' || threads.get(thread.threadId) !== running) return false
           // A model or effort chosen from here is kept for the turn after this one: it is the lead as it stands now that goes out.
           running.leadHeld = true
           yield* inputBatches.ready(thread.threadId)
@@ -1930,7 +2009,7 @@ export class Sessions extends Context.Service<
           if (running.nextLead !== undefined && (yield* inputWaiting(thread.threadId))) {
             const next = running.nextLead
             if (next.agentId !== running.entry.definition.id) {
-              running.nextLead = undefined
+              if (!(yield* setLeadChoice(running, undefined, { after: next }))) return true
               running.handover = 'under_way'
               yield* Effect.forkIn(run(takeOver(running, next)), sessionsScope)
               return false
@@ -1940,10 +2019,7 @@ export class Sessions extends Context.Service<
               Effect.gen(function* () {
                 for (let current = running.nextLead; current !== undefined && current.agentId === running.entry.definition.id;) {
                   yield* settleLead(running, current)
-                  if (running.nextLead === current) {
-                    running.nextLead = undefined
-                    return
-                  }
+                  if (yield* setLeadChoice(running, undefined, { after: current, resolved: true })) return
                   current = running.nextLead
                 }
               }),
@@ -1962,7 +2038,7 @@ export class Sessions extends Context.Service<
             yield* Effect.forkIn(run(handOver(running)), sessionsScope)
             return false
           }
-          const queued = yield* sql<{
+          const waiting = yield* sql<{
             id: string
             body: string
             disposition: string
@@ -1986,6 +2062,13 @@ export class Sessions extends Context.Service<
             FROM user_inputs i JOIN actors a ON a.id = i.author_actor_id
             WHERE i.thread_id = ${thread.threadId} AND i.state IN ('queued', 'noted')
             ORDER BY i.sequence`
+          // While connecting, send has no Running to update. The accepted person message is the durable resume request:
+          // it survives another restart, while previously dispatched person input and quiet news never authorize replay.
+          if (running.blockedInputs !== undefined && waiting.some((input) => input.author === 'person' && input.given === 0)) {
+            running.blockedInputs = undefined
+            if (running.deliveryHeld === 'transient' || running.deliveryHeld === 'recovery') running.deliveryHeld = null
+          }
+          const queued = waiting.filter((input) => !running.blockedInputs?.has(input.id))
           // The images the person sent with each, read from the store for this turn: only an agent that takes images is sent them.
           const sent = yield* imagesFor(
             queued.map((input) => input.id),
@@ -2015,6 +2098,11 @@ export class Sessions extends Context.Service<
           const before = running.context
           // Notes alone start no turn: they are read with the next one, whatever starts it.
           const asking = inputs.some((input) => input.state === 'queued')
+          // Starting for an unsent message doesn't authorize another queued input, or a brief alone if that message was withdrawn.
+          if (!asking && running.blockedInputs !== undefined) {
+            if (waiting.some((input) => input.state === 'queued' && running.blockedInputs?.has(input.id))) running.deliveryHeld = 'recovery'
+            return false
+          }
           if (!asking && running.brief === undefined) return false
           // The coordinator speaks when spoken to: its brief waits for the person's first message. So does an aside opened with +.
           if (!asking && (thread.role === 'coordinator' || running.waitsForWords === true)) return false
@@ -2064,8 +2152,9 @@ export class Sessions extends Context.Service<
               Effect.gen(function* () {
                 // A message may have been withdrawn, or another arrived while the prompt was prepared.
                 // Read the whole burst again, including attachments still being prepared, before claiming it.
-                const still = yield* sql<{ id: string }>`SELECT id FROM user_inputs
+                const waiting = yield* sql<{ id: string }>`SELECT id FROM user_inputs
                   WHERE thread_id = ${thread.threadId} AND state IN ('queued', 'noted') ORDER BY sequence`
+                const still = waiting.filter((input) => !running.blockedInputs?.has(input.id))
                 if (
                   inputBatches.pending(thread.threadId) ||
                   still.length !== queued.length ||
@@ -2129,35 +2218,6 @@ export class Sessions extends Context.Service<
             yield* personsTurn({ taskId: thread.taskId, threadId: thread.threadId, sessionId: running.sessionId, deliveryId: turnId }).pipe(
               Effect.catchCause((cause) => Effect.logWarning('Could not keep where the person’s turn began', cause)),
             )
-          // Recorded as delivered before the prompt goes out: after a crash, a delivered turn may have acted.
-          yield* sql.withTransaction(
-            Effect.gen(function* () {
-              const revision = yield* change('turn_deliveries', turnId, { state: 'delivered', deliveredAt: yield* timestamp })
-              yield* fact({
-                projectId: thread.projectId,
-                aggregateType: 'turn_delivery',
-                aggregateId: turnId,
-                revision,
-                type: 'turn_delivery.delivered',
-                actorId: instance.systemId,
-              })
-              for (const input of inputs) {
-                const inputRevision = yield* change('user_inputs', input.id, { state: 'delivered' })
-                yield* fact({
-                  projectId: thread.projectId,
-                  aggregateType: 'user_input',
-                  aggregateId: input.id,
-                  revision: inputRevision,
-                  type: 'user_input.delivered',
-                  actorId: instance.systemId,
-                })
-              }
-              // How the thread shows it never stops the turn: each change to it is its own savepoint, undone where it fails.
-              yield* shownWhereRead(running, turnId, inputs).pipe(
-                Effect.catchCause((cause) => Effect.logWarning('Could not show what a turn gives the agent where it reads it', cause)),
-              )
-            }),
-          )
           if (!compacting) {
             running.brief = undefined
             running.waitsForWords = undefined
@@ -2197,20 +2257,49 @@ export class Sessions extends Context.Service<
           // Said once the agent has the prompt and its turn can be stopped: what hears it may stop it at once, as a spent budget of turns does.
           const promptSent = yield* Deferred.make<void>()
           running.promptSent = promptSent
-          const started = Effect.andThen(
-            live.publish({
-              _tag: 'TurnStarted',
-              threadId: thread.threadId,
-              turnId,
-              // Keep the stall watch's shown-message signal separate from asked-for authorization.
-              byPerson: inputs.some(
-                (input) =>
-                  input.shown === 1 ||
-                  (input.author === 'person' && (input.senderKind === 'window' || input.senderKind === 'paired_device')),
+          let received = false
+          const started = Effect.suspend(() => {
+            if (received) return Effect.void
+            received = true
+            return Effect.andThen(
+              sql
+                .withTransaction(
+                  Effect.gen(function* () {
+                    const [turn] = yield* sql<{ revision: number }>`SELECT revision FROM turn_deliveries WHERE id = ${turnId}`
+                    if (turn === undefined) return
+                    // A receipt is positive evidence even if it arrives late. It never changes the delivery's lifecycle state.
+                    const revision = yield* bumpRevision('turn_deliveries', turnId, turn.revision)
+                    yield* fact({
+                      projectId: thread.projectId,
+                      aggregateType: 'turn_delivery',
+                      aggregateId: turnId,
+                      revision,
+                      type: 'turn_delivery.prompt_sent',
+                      actorId: instance.systemId,
+                    })
+                  }),
+                )
+                .pipe(Effect.catchCause((cause) => Effect.logWarning('Could not record prompt receipt', cause))),
+              Effect.andThen(
+                Effect.suspend(() =>
+                  running.turnRunning && running.promptSent === promptSent && !running.stopping
+                    ? live.publish({
+                        _tag: 'TurnStarted',
+                        threadId: thread.threadId,
+                        turnId,
+                        // Keep the stall watch's shown-message signal separate from asked-for authorization.
+                        byPerson: inputs.some(
+                          (input) =>
+                            input.shown === 1 ||
+                            (input.author === 'person' && (input.senderKind === 'window' || input.senderKind === 'paired_device')),
+                        ),
+                      })
+                    : Effect.void,
+                ),
+                Effect.asVoid(Deferred.succeed(promptSent, undefined)),
               ),
-            }),
-            Effect.asVoid(Deferred.succeed(promptSent, undefined)),
-          )
+            )
+          }).pipe(Effect.ensuring(Deferred.succeed(promptSent, undefined)))
           // The app's log has each turn's start and end by its ids, never what was said (DEV-61).
           const turnLog = {
             turn: turnId,
@@ -2300,27 +2389,72 @@ export class Sessions extends Context.Service<
           yield* notingListening(running)
           // A turn that fails before its prompt reaches the agent never has one to stop: told either way, so an interrupt
           // waiting for it doesn't wait forever.
-          const streamed = yield* Stream.runForEach(running.agent.prompt(prompt, parts, started), (event) =>
-            Effect.gen(function* () {
-              if (event._tag === 'TurnEnded') ended = event
-              const heardAt = yield* Clock.currentTimeMillis
-              if (
-                first === undefined &&
-                (event._tag === 'AgentMessage' || event._tag === 'AgentThought' || event._tag === 'ToolCall') &&
-                running.turnStartedAt !== null
+          let prevented = false
+          const streamed = yield* Effect.suspend(() => {
+            // Preparation, the place's begun hook and the listening baseline can all yield. Ownership is checked at dispatch,
+            // so a stop or takeover during any of them never sends a prompt to the outgoing agent.
+            if (running.stopping || running.handover === 'under_way' || threads.get(thread.threadId) !== running) {
+              prevented = true
+              return Effect.void
+            }
+            return Effect.gen(function* () {
+              // Recorded as delivered before the prompt goes out: after a crash, a delivered turn may have acted.
+              yield* sql.withTransaction(
+                Effect.gen(function* () {
+                  const revision = yield* change('turn_deliveries', turnId, { state: 'delivered', deliveredAt: yield* timestamp })
+                  yield* fact({
+                    projectId: thread.projectId,
+                    aggregateType: 'turn_delivery',
+                    aggregateId: turnId,
+                    revision,
+                    type: 'turn_delivery.delivered',
+                    actorId: instance.systemId,
+                  })
+                  for (const input of inputs) {
+                    const inputRevision = yield* change('user_inputs', input.id, { state: 'delivered' })
+                    yield* fact({
+                      projectId: thread.projectId,
+                      aggregateType: 'user_input',
+                      aggregateId: input.id,
+                      revision: inputRevision,
+                      type: 'user_input.delivered',
+                      actorId: instance.systemId,
+                    })
+                  }
+                  // How the thread shows it never stops the turn: each change to it is its own savepoint, undone where it fails.
+                  yield* shownWhereRead(running, turnId, inputs).pipe(
+                    Effect.catchCause((cause) => Effect.logWarning('Could not show what a turn gives the agent where it reads it', cause)),
+                  )
+                }),
               )
-                first = Math.max(0, heardAt - running.turnStartedAt)
-              tools.heard(event, heardAt)
-              // An agent may say its compaction failed in a call of its own, and end its turn as usual (Claude Code).
-              if (compacting && event._tag === 'ToolCallUpdate' && event.status === 'failed') compactFailed = true
-              heardContext(running, event)
-              yield* heardPlan(running, event)
-              yield* record(event)
-              yield* heardBackground(running, event)
-              yield* live.publish({ _tag: 'Agent', threadId: thread.threadId, event })
-              if (event._tag === 'AgentMessage' || event._tag === 'AgentThought' || event._tag === 'ToolCallUpdate') yield* stream
-            }),
-          ).pipe(Effect.ensuring(Deferred.succeed(promptSent, undefined)), Effect.exit)
+              // Recording delivery and dispatch are one boundary: any crash from here may have reached the agent.
+              if (running.stopping || running.handover === 'under_way' || threads.get(thread.threadId) !== running) {
+                prevented = true
+                return
+              }
+              return yield* Stream.runForEach(running.agent.prompt(prompt, parts, run(started)), (event) =>
+                Effect.gen(function* () {
+                  if (event._tag === 'TurnEnded') ended = event
+                  const heardAt = yield* Clock.currentTimeMillis
+                  if (
+                    first === undefined &&
+                    (event._tag === 'AgentMessage' || event._tag === 'AgentThought' || event._tag === 'ToolCall') &&
+                    running.turnStartedAt !== null
+                  )
+                    first = Math.max(0, heardAt - running.turnStartedAt)
+                  tools.heard(event, heardAt)
+                  // An agent may say its compaction failed in a call of its own, and end its turn as usual (Claude Code).
+                  if (compacting && event._tag === 'ToolCallUpdate' && event.status === 'failed') compactFailed = true
+                  heardContext(running, event)
+                  yield* heardPlan(running, event)
+                  yield* record(event)
+                  yield* heardBackground(running, event)
+                  yield* live.publish({ _tag: 'Agent', threadId: thread.threadId, event })
+                  if (event._tag === 'AgentMessage' || event._tag === 'AgentThought' || event._tag === 'ToolCallUpdate') yield* stream
+                }),
+              )
+            })
+          }).pipe(Effect.ensuring(Deferred.succeed(promptSent, undefined)), Effect.exit)
           // What the turn left open is kept as far as it came: the message being written, and any command's output.
           yield* items.end.pipe(Effect.catchCause((cause) => Effect.logWarning('Could not record the end of a message', cause)))
           running.turnRunning = false
@@ -2371,7 +2505,15 @@ export class Sessions extends Context.Service<
           const lost = errorClass === 'session_lost'
           // Out of usage, or its service out of reach (ADR-060): nothing more goes to it until what carries the work on says so.
           const held = errorClass === 'usage_limit' || errorClass === 'transient'
-          const state = errorClass !== undefined ? 'failed' : ended?.stopReason === 'cancelled' ? 'interrupted' : 'completed'
+          const state = prevented
+            ? 'interrupted'
+            : errorClass !== undefined
+              ? 'failed'
+              : ended?.stopReason === 'cancelled'
+                ? 'interrupted'
+                : 'completed'
+          running.deliveryHeld = held ? errorClass : null
+          running.heldTurn = held ? turnId : undefined
           yield* sql.withTransaction(
             Effect.gen(function* () {
               const revision = yield* change('turn_deliveries', turnId, {
@@ -2379,6 +2521,7 @@ export class Sessions extends Context.Service<
                 stopReason: ended?.stopReason ?? null,
                 usage: ended?.usage === undefined ? null : JSON.stringify(ended.usage),
                 errorClass: errorClass ?? null,
+                ...(prevented ? { deliveredAt: null } : {}),
                 endedAt: yield* timestamp,
                 timings: JSON.stringify(timings),
               })
@@ -2393,13 +2536,7 @@ export class Sessions extends Context.Service<
               })
               // Refused, nothing was delivered. Out of usage, or its service out of reach, what the person said waits for the
               // agent that carries on; Althar's own prompts are given again by what carries the work on.
-              const back = refused
-                ? inputs
-                : lost
-                  ? inputs.filter((input) => input.body !== COMPACT)
-                  : held
-                    ? inputs.filter((input) => input.author === 'person')
-                    : []
+              const back = prevented || refused ? inputs : lost ? inputs.filter((input) => input.body !== COMPACT) : held ? inputs : []
               for (const input of back) {
                 // A note goes back to being one: it still starts no turn of its own.
                 const inputRevision = yield* change('user_inputs', input.id, { state: input.state === 'noted' ? 'noted' : 'queued' })
@@ -2416,10 +2553,15 @@ export class Sessions extends Context.Service<
           )
           // A brief the agent never read goes with the next turn: refused, or out of usage before it began.
           // A compaction left the brief where it was.
-          if ((refused || held) && !compacting) running.brief = brief
+          if ((prevented || refused || held) && !compacting) running.brief = brief
           // Refused, its prompt never went: what it spent before is the turn's that tries again.
           if (refused) running.before = spent
           running.retryBrief = state === 'failed' && !compacting ? brief : undefined
+          if (!held && running.blockedInputs !== undefined) {
+            const waiting = yield* sql<{ id: string }>`SELECT id FROM user_inputs
+              WHERE thread_id = ${thread.threadId} AND state = 'queued'`
+            if (waiting.length > 0 && waiting.every((input) => running.blockedInputs?.has(input.id))) running.deliveryHeld = 'recovery'
+          }
           if (refused) {
             // Tried again shortly, rather than straight away.
             yield* Effect.forkIn(Effect.delay(Queue.offer(running.wake, undefined), Duration.seconds(1)), running.scope)
@@ -2431,7 +2573,13 @@ export class Sessions extends Context.Service<
           // A usage limit is said by what carries the work on, as a step's lost connection is; a refused prompt is tried again.
           const failed = (Option.isSome(failure) && failure.value._tag === 'AgentRequestFailed') || ended?.failure !== undefined
           // A lost session is said where it is started afresh, or where it can't be.
-          const saidElsewhere = errorClass === 'usage_limit' || (errorClass === 'transient' && thread.role !== 'coordinator') || lost
+          const workflowOwnsFailure =
+            errorClass === 'transient' &&
+            (yield* sql`SELECT a.id FROM node_attempts a JOIN nodes n ON n.id = a.node_id
+              JOIN workflow_executions e ON e.id = n.execution_id JOIN runs r ON r.id = e.run_id
+              WHERE a.provider_session_id = ${running.sessionId} AND r.state = 'running'
+                AND (a.state IN ('admitted', 'running') OR (a.state = 'held' AND a.hold_reason = 'agent_unavailable')) LIMIT 1`).length > 0
+          const saidElsewhere = errorClass === 'usage_limit' || workflowOwnsFailure || lost
           if (failed && !saidElsewhere && !refused)
             yield* addItem(
               { projectId: thread.projectId, threadId: thread.threadId, sessionId: running.sessionId, deliveryId: turnId },
@@ -2490,7 +2638,7 @@ export class Sessions extends Context.Service<
             yield* Effect.forkIn(run(handOver(running, typeof said === 'string' ? said : '')), sessionsScope)
           }
           // Out of usage, or out of reach, nothing more goes to it until what carries the work on says so.
-          return !refused && !held && !lost
+          return !prevented && !refused && !held && !lost && running.deliveryHeld !== 'recovery'
         }).pipe(
           Effect.ensuring(
             Effect.suspend(() => {
@@ -2553,13 +2701,14 @@ export class Sessions extends Context.Service<
         ).pipe(Effect.orElseSucceed(() => false))
 
       /** Whether what the thread's agent is given next is a compaction (`COMPACT`), in the order turns take their input. */
-      const compactsNext = (threadId: string) =>
+      const compactsNext = (running: Running) =>
         run(
           Effect.gen(function* () {
             const sql = yield* SqlClient.SqlClient
-            const [next] = yield* sql<{ body: string }>`
-              SELECT body FROM user_inputs WHERE thread_id = ${threadId} AND state = 'queued'
-              ORDER BY sequence LIMIT 1`
+            const waiting = yield* sql<{ id: string; body: string }>`
+            SELECT id, body FROM user_inputs WHERE thread_id = ${running.thread.threadId} AND state = 'queued'
+            ORDER BY sequence`
+            const next = waiting.find((input) => !running.blockedInputs?.has(input.id))
             return next?.body === COMPACT
           }),
         ).pipe(Effect.orElseSucceed(() => false))
@@ -2588,6 +2737,40 @@ export class Sessions extends Context.Service<
               if (running.brief !== undefined) running.before.session += Math.max(0, (yield* Clock.currentTimeMillis) - from)
             }
             const { thread } = running
+            if (running.deliveryHeld === 'recovery') {
+              const waiting = yield* run(
+                Effect.gen(function* () {
+                  const sql = yield* SqlClient.SqlClient
+                  return yield* sql<{ id: string }>`SELECT id FROM user_inputs WHERE thread_id = ${thread.threadId} AND state = 'queued'`
+                }),
+              )
+              if (!waiting.some((input) => !running.blockedInputs?.has(input.id))) return
+              running.deliveryHeld = null
+            }
+            if (running.deliveryHeld === 'transient') {
+              const fresh = yield* run(
+                Effect.gen(function* () {
+                  const sql = yield* SqlClient.SqlClient
+                  return (yield* sql<{ id: string }>`SELECT i.id FROM user_inputs i JOIN actors a ON a.id = i.author_actor_id
+                  WHERE i.thread_id = ${thread.threadId} AND i.state = 'queued' AND a.kind = 'person'
+                    AND NOT EXISTS (SELECT 1 FROM turn_delivery_inputs di WHERE di.user_input_id = i.id
+                      AND di.delivery_id = ${running.heldTurn ?? ''})`).some((input) => !running.blockedInputs?.has(input.id))
+                }),
+              )
+              if (!fresh) return
+              running.deliveryHeld = null
+            }
+            if (running.deliveryHeld === 'usage_limit') {
+              const out = yield* run(limits.outAccount(running.account.id))
+              if (Option.isSome(out)) {
+                yield* Effect.sleep(
+                  Duration.millis(Math.min(1000, Math.max(1, Date.parse(out.value.until) - (yield* Clock.currentTimeMillis)))),
+                )
+                if (!running.stopping) yield* Queue.offer(running.wake, undefined)
+                return
+              }
+              running.deliveryHeld = null
+            }
             // A turn that couldn't be delivered is kept to that turn: the next message wakes the loop again.
             if (thread.role === 'coordinator')
               return yield* running.delivering.withPermits(1)(
@@ -2607,7 +2790,7 @@ export class Sessions extends Context.Service<
                 Effect.asVoid,
                 Effect.catchCause((cause) => Effect.logWarning('Could not deliver a turn', cause)),
               )
-            if (yield* compactsNext(thread.threadId)) return yield* delivered(running.delivering.withPermits(1)(deliver(running)))
+            if (yield* compactsNext(running)) return yield* delivered(running.delivering.withPermits(1)(deliver(running)))
             // News can start a stopped session outside a workflow step. Keep its input queued until
             // this account has usage again, before asking Busy for a place. The thread marker also
             // lets Busy restore this wait after a restart.
@@ -2622,6 +2805,7 @@ export class Sessions extends Context.Service<
             )
             const out = inWorkflow ? Option.none() : yield* run(limits.outAccount(running.account.id))
             if (Option.isSome(out)) {
+              running.deliveryHeld = 'usage_limit'
               yield* run(
                 Effect.gen(function* () {
                   const sql = yield* SqlClient.SqlClient
@@ -2650,7 +2834,8 @@ export class Sessions extends Context.Service<
               },
               (begun) =>
                 Effect.flatMap(Clock.currentTimeMillis, (given) => {
-                  if (running.stopping) return Effect.succeed(false)
+                  if (running.stopping || running.handover === 'under_way' || threads.get(thread.threadId) !== running)
+                    return Effect.succeed(false)
                   running.begun = begun
                   running.before.place += Math.max(0, given - asked)
                   return run(running.delivering.withPermits(1)(deliver(running)))
@@ -2681,7 +2866,7 @@ export class Sessions extends Context.Service<
           )
           ended = outcome === undefined ? 'lost' : outcome.state
           running.stopping = true
-          threads.delete(running.thread.threadId)
+          if (threads.get(running.thread.threadId) === running) threads.delete(running.thread.threadId)
           yield* running.revokeTools
           yield* permissions.withdrawAll(running.sessionId)
           // What it asked the person stays for them: the answer goes to the agent on the thread next.
@@ -2710,30 +2895,34 @@ export class Sessions extends Context.Service<
               // A turn cut short by the agent going leaves no end of its own.
               const open = yield* sql<{
                 id: string
-              }>`SELECT id FROM turn_deliveries WHERE provider_session_id = ${running.sessionId} AND state IN ('pending', 'delivered')`
+                state: string
+              }>`SELECT id, state FROM turn_deliveries WHERE provider_session_id = ${running.sessionId} AND state IN ('pending', 'delivered')`
               // The prompt's exit handler may have recorded its failure before supervision got here.
               const [last] = yield* sql<{ state: string; errorClass: string | null }>`
                 SELECT state, error_class FROM turn_deliveries WHERE provider_session_id = ${running.sessionId}
                 ORDER BY requested_at DESC, rowid DESC LIMIT 1`
               interrupted = open.length > 0 || (last?.state === 'failed' && last.errorClass === 'agent_exited')
               for (const turn of open) {
+                const stoppedBeforeDispatch = turn.state === 'pending' && outcome !== undefined
+                const turnState = stoppedBeforeDispatch ? 'interrupted' : 'failed'
+                const errorClass = stoppedBeforeDispatch ? null : 'agent_exited'
                 yield* Effect.logWarning('Turn ended').pipe(
                   Effect.annotateLogs({
                     turn: turn.id,
                     thread: running.thread.threadId,
                     session: running.sessionId,
                     agent: running.entry.definition.id,
-                    state: 'failed',
-                    errorClass: 'agent_exited',
+                    state: turnState,
+                    errorClass,
                   }),
                 )
-                const revision = yield* change('turn_deliveries', turn.id, { state: 'failed', errorClass: 'agent_exited', endedAt: at })
+                const revision = yield* change('turn_deliveries', turn.id, { state: turnState, errorClass, endedAt: at })
                 yield* fact({
                   projectId: running.thread.projectId,
                   aggregateType: 'turn_delivery',
                   aggregateId: turn.id,
                   revision,
-                  type: 'turn_delivery.failed',
+                  type: `turn_delivery.${turnState}`,
                   actorId: instance.systemId,
                 })
               }
@@ -2741,13 +2930,10 @@ export class Sessions extends Context.Service<
                 endedAt: at,
                 ...(outcome?.state === 'superseded' ? { supersededBySessionId: outcome.by } : {}),
               })
-              yield* sessionFact(
-                running.thread,
-                running.sessionId,
-                revision,
-                `provider_session.${state}`,
-                stop === undefined ? {} : { stop },
-              )
+              yield* sessionFact(running.thread, running.sessionId, revision, `provider_session.${state}`, {
+                ...(stop === undefined ? {} : { stop }),
+                ...(outcome?.state === 'completed' ? { reason: outcome.reason } : {}),
+              })
             }),
           )
           // An idle disconnect lost no work. Only an interrupted turn needs a warning and a way out.
@@ -3187,7 +3373,7 @@ export class Sessions extends Context.Service<
           Effect.onError(effect, (cause) => discard(connected, cause))
 
       /** The session takes over the thread: it is recorded as active, and delivers the brief and any waiting input. */
-      const activate = (connected: Connected, brief: Brief) => {
+      const activate = (connected: Connected, brief: Brief, blockedInputs?: ReadonlySet<string>) => {
         // Once it is supervised, ending it is supervise's: before, a failure lets it go here.
         let supervised = false
         return Effect.gen(function* () {
@@ -3227,6 +3413,7 @@ export class Sessions extends Context.Service<
             wake: yield* Queue.sliding<void>(1),
             delivering: yield* Semaphore.make(1),
             stopRequest: yield* Deferred.make<StopRequest>(),
+            stopRecorded: yield* Deferred.make<void>(),
             ended: yield* Deferred.make<void>(),
             // A lead is told what its sandbox lets through from the start, and how a command runs outside it, and of the
             // skills it was given.
@@ -3242,6 +3429,8 @@ export class Sessions extends Context.Service<
             revokeTools,
             requestContext,
             turnRunning: false,
+            deliveryHeld: null,
+            blockedInputs,
             promptSent: null,
             stopping: false,
             context: null,
@@ -3373,14 +3562,39 @@ export class Sessions extends Context.Service<
       const stopRunning = (running: Running, request: StopRequest) =>
         Effect.gen(function* () {
           running.stopping = true
+          if (running.stopIntent === undefined) {
+            running.stopIntent = request
+            yield* run(
+              Effect.gen(function* () {
+                const sql = yield* SqlClient.SqlClient
+                yield* sql.withTransaction(
+                  Effect.gen(function* () {
+                    const [session] = yield* sql<{ state: string }>`SELECT state FROM provider_sessions WHERE id = ${running.sessionId}`
+                    if (session === undefined) return
+                    const revision = yield* change('provider_sessions', running.sessionId, { state: session.state })
+                    yield* sessionFact(running.thread, running.sessionId, revision, 'provider_session.stop_requested', request)
+                  }),
+                )
+              }).pipe(
+                Effect.catchCause((cause) => Effect.logError('Could not persist session stop intent', cause)),
+                Effect.ensuring(Deferred.succeed(running.stopRecorded, undefined)),
+                Effect.uninterruptible,
+              ),
+            )
+          }
+          yield* Deferred.await(running.stopRecorded)
+          const intent = running.stopIntent
           // What it asked the person stays for them, though its turn ends now: the answer goes to the agent on the thread next.
           yield* questions.release(running.sessionId)
           const ended = yield* Effect.andThen(
-            Effect.ignore(running.agent.interrupt),
-            running.delivering.withPermits(1)(Deferred.succeed(running.stopRequest, request)),
+            Effect.suspend(() => {
+              const sent = running.promptSent
+              return sent === null ? Effect.void : Effect.andThen(Deferred.await(sent), Effect.ignore(running.agent.interrupt))
+            }),
+            running.delivering.withPermits(1)(Deferred.succeed(running.stopRequest, intent)),
           ).pipe(Effect.timeoutOption(stopGrace))
           if (Option.isNone(ended)) {
-            yield* Deferred.succeed(running.stopRequest, request)
+            yield* Deferred.succeed(running.stopRequest, intent)
             yield* Scope.close(running.scope, Exit.void)
           }
           yield* Deferred.await(running.ended)
@@ -3415,11 +3629,24 @@ export class Sessions extends Context.Service<
         readonly model?: string
         readonly effort?: string
         readonly accountId?: string
+        readonly recovering?: string
       }) =>
         exclusive(
           input.threadId,
           Effect.gen(function* () {
-            if (threads.has(input.threadId)) return yield* new SessionRunning({ threadId: input.threadId })
+            const current = threads.get(input.threadId)
+            if (current !== undefined) {
+              // A live request may have resumed it before startup recovery took the lock. That already owns the queue.
+              if (input.recovering !== undefined) return current.sessionId
+              return yield* new SessionRunning({ threadId: input.threadId })
+            }
+            if (
+              input.recovering !== undefined &&
+              !(yield* recoverable).some(
+                (one) => one.threadId === input.threadId && one.sessionId === input.recovering && recoveryInputs.has(one.inputId),
+              )
+            )
+              return input.recovering
             yield* inLiveProject(input.threadId)
             yield* notAbandoned(input.threadId)
             const thread = yield* loadThread(input.threadId)
@@ -3431,14 +3658,27 @@ export class Sessions extends Context.Service<
               ...accountOf(input),
               ...(input.model === undefined ? {} : { model: input.model }),
             })
+            const blocked =
+              input.recovering === undefined
+                ? undefined
+                : new Set(
+                    (yield* sessionsSql<{ id: string }>`
+              SELECT i.id FROM user_inputs i WHERE i.thread_id = ${input.threadId} AND i.state IN ('queued', 'noted')
+                AND EXISTS (SELECT 1 FROM turn_delivery_inputs di JOIN turn_deliveries d ON d.id = di.delivery_id
+                  WHERE di.user_input_id = i.id AND d.delivered_at IS NOT NULL)`).map((one) => one.id),
+                  )
             const sessionId = yield* createSession(thread, entry.definition.id, account, input.model)
             const connected = yield* connectSession(thread, sessionId, entry, account, input.model, input.effort)
             // Every session starts from a brief (ADR-005), even the first on a task.
             const brief = yield* briefFor(thread, { kind: 'start' }).pipe(beforeTakingOver(connected))
-            return yield* activate(connected, {
-              text: brief,
-              closing: thread.role === 'reviewer' ? 'Review the change.' : 'Start on the task.',
-            })
+            return yield* activate(
+              connected,
+              {
+                text: brief,
+                closing: thread.role === 'reviewer' ? 'Review the change.' : 'Start on the task.',
+              },
+              blocked,
+            )
           }),
         )
 
@@ -3624,6 +3864,11 @@ export class Sessions extends Context.Service<
               return { inputId, sequence }
             }),
           })
+          const running = threads.get(input.threadId)
+          if (running !== undefined && input.quiet !== true && input.envelope.actorId === instance.personId) {
+            running.blockedInputs = undefined
+            if (running.deliveryHeld === 'transient' || running.deliveryHeld === 'recovery') running.deliveryHeld = null
+          }
           // The person's word, said now: what waits on it hears it as they send, not when a turn takes it up. Althar's own
           // words, and what other tasks' leads and the coordinator pass on, are not the person's.
           if (input.quiet !== true && (input.sender?.kind === 'window' || input.sender?.kind === 'paired_device'))
@@ -4071,6 +4316,7 @@ export class Sessions extends Context.Service<
             // A lead tracks what is not its task's on the person's trackers, as a card or at once by what the person said (Coordinator.ts, IssueDrafts.ts).
             'Draft an issue with draft_issue only when the person asks you to track something ("file these follow-ups", "make an issue for that"), never on your own: check find_issues first (it searches by words, tracker, where, state, labels, status, assignee, project, milestone and the like, and keys, a page at a time), so you don\'t draft what is already tracked. Something out of this task\'s scope that you find goes in your report (finish_step or the summary) in a line, so the person or the coordinator can decide; a bug your brief covers is fixed in the task, never handed off as an issue. Before you draft an issue for something the person asked for that is outside your brief, check find_tasks (list_tasks lists them all) too: another task may be doing it already, as the person\'s one message can start several. When a task covers it, say so in your report instead of drafting. A draft is a card in this thread the person files, changes or discards, and you hear its key and link once they file it, to refer to in your summary or the pull request; where the project\'s notes say issues are filed at once, or the person just said to ("just file it"), pass file_now and it is filed there and then, its card the record. It goes beside the issue this task came from, unless you name a tracker and container. Set its fields with draft_issue (project, milestone, cycle, parent, assignee, priority, labels and the like), never in its description: Althar says what its tracker left off. Don\'t draft for ordinary work of the task, or for something you can fix within it.',
             // A lead keeps its own issue up to date, and those its task filed or the person named; changes are cards unless the person said otherwise (IssueChanges.ts).
+            INTEGRATION_BRIEF,
             "If this task came from an issue, keep that issue up to date: comment_on_issue comments on it at once, such as what you found or what changed for whoever follows it; link_pull_request links the task's pull request to it where Althar hasn't; and change_issue changes it, such as its status (In Review), priority, labels, assignees, milestone or description, as a card the person applies, or at once with at_once where the project's notes say so or the person just said to. You may change and comment on any of the project's issues as the coordinator does, by key, link or a run of keys, whoever filed it. Several at once take one call each: find_issues finds them, read_issue reads up to 25, and change_issue and comment_on_issue take them as issues, each said changed or not.",
             // Rewriting what was pushed leaves the pull request unable to take a plain push: Althar says whether it was, so the lead doesn't guess.
             [
@@ -4139,14 +4385,14 @@ export class Sessions extends Context.Service<
             "To get a change made, use Althar's tools:",
             `- draft_task, with a title that says what should change in a few words, at most 60 characters, and a description with what the lead needs: the context, where to look, constraints, and what done looks like.${repositories.length > 1 ? ' Name the repositories it changes, as repositories; its lead can still read the others.' : ''}`,
             '- list_models, for the models you can give work to now, with how each scores, whether a plan pays for it, and the efforts it takes.',
-            '- propose_plan, for the task you drafted: the model that implements it (its lead) and why, in a sentence, and the model that reviews it, or no review for something trivial; each with an effort where it matters. A change of a few lines is planned small, with no review and its lead at low effort, so it starts at once in a place kept for small tasks. The reviewer only reads; the lead then settles what it finds. The plan starts on its own after 25 seconds, unless the person changes or holds it.',
+            '- propose_plan, for the task you drafted: the model that implements it (its lead) and why, in a sentence, and the model that reviews it, or no review for something trivial; each with an effort where it matters. A change of a few lines may be planned small, with its lead at low effort, so it starts at once in a place kept for small tasks. Its configured review still runs before Ship; being small never schedules or proposes an extra review after merge. The reviewer only reads; the lead then settles what it finds. The plan starts on its own after 25 seconds, unless the person changes or holds it.',
             towardLine,
             `- works_in, on draft_task, propose_plan and start_task: where the task works. Local is the person's own checkout, with their builds, simulators and services, one task at a time and beside their own edits; a worktree is a folder of its own, side by side with other tasks, built from cold. This project starts tasks ${worksIn === 'checkout' ? 'Local' : 'in a worktree'} unless you say. When another task works Local, plan the next one in a worktree and say why in works_in_why, unless it needs the person's setup and can wait; the tools say who works Local now.`,
             '- screenshot, to see any HTTP page, such as what run_project runs or Storybook: Althar draws it headless and gives it back to you as a picture, at a viewport you choose, the whole page or one element.',
             "- page_snapshot, page_screenshot and page_logs, to read the page beside your conversation with the person, and page_open, page_click, page_type and the other page_ tools to drive it: it is the project's own page, in a session of its own, and the person sees you at work in it; you need not ask.",
             "- run_project, when the person wants to see the project running: Althar runs it itself, with no agent, in a fresh copy of the default branch, or with task in that task's worktree to see what it built, or with branch or pull_request in a copy of that branch or pull request, which Althar fetches itself, even one nobody has pulled; its default, or with run another of the things it runs. It shows over the composer with where it answers. When the person asks to start, run or try a branch or a pull request, use it with branch or pull_request, never a task: the person wants it running, not a report. When Althar can't tell how the project runs, or tells wrong, read the repository and keep how with set_run_command. When the person wants more to run than its default (Storybook, the app itself, tests in watch mode), read the repository and keep each worth running by hand with keep_run.",
             "- start_task, for something small to do now, with no plan: trying something out, checking how something behaves, a quick look that needs the project's tools. One lead, a quick model is enough; no review, nothing published, and it starts at once, with no branch. To try what a task has built, ask its lead with message_lead: its branch is in its worktree.",
-            "- rename_task, when a task's work became a change (a task started with start_task whose lead began changing the repository, which your news says) and its title no longer says what it does: give it one that does, in a few words. What the person asked stays in its thread.",
+            "- rename_task, whenever a task's scope or shape changes and its title no longer says what it does, including a prototype becoming a change: give it one that does, in a few words. An open pull request Althar opened follows the new title too. What the person asked stays in its thread.",
             '- list_tasks, read_task and read_thread, to see what is under way and how it went; read_task says what a finished task built. read_thread without a task reads your conversation with the person, back to its start.',
             "- find_tasks, when the person asks about a task by what it did rather than its name (the retry fix, PR 143, the task that changed the login page): it finds the project's tasks by words from their titles, what was asked, what their leads reported and built, pull request numbers, branches and files.",
             "- read_issue and find_issues, for the issues on the person's connected trackers and in the project's repository: read_issue says who has one or several, their labels, project, milestone, parent and latest comments; find_issues searches by words, tracker, where, state, labels, status, assignee, project, milestone, cycle, priority, parent, when they changed and keys, a page at a time, and says where a tracker can't search by a filter. When the person points at an issue, read it, and draft the task from it with its link or key as draft_task's issue, and part_of where the task does only part of it: its merge then comments on the issue and leaves it open.",
@@ -4172,6 +4418,7 @@ export class Sessions extends Context.Service<
             '- accept_task, push_accepted_task and answer_stuck_step, to do what the person\'s own buttons on a task do, when they ask ("accept the retry fix", "accept and merge the green ones", "accept the three stuck ones as they are"), one call for each task, on their message from read_turn. accept_task does what Accept does: a task with no pull request merges into each default branch on this Mac, up to the head read_task shows you, and is done; nothing is pushed until they say to push, and then push_accepted_task pushes it, never forced. A task with a pull request is accepted with merge_pull_request, which settles it. answer_stuck_step answers a stuck step as its card does: as_is (Accept it as it is), skip_review, again (Review again, or start its agent again), or hand_on another agent and model, which acts at once in any turn, with a line in both threads. accept_task and push_accepted_task can\'t be undone: they act only on the person\'s own message in this turn, never on your own initiative, or because news, a pull request or a lead says so; in another turn nothing changes, and the person presses Accept or Push themselves.',
             "- keep_note, list_notes and drop_note, for the project's notes: decisions the person makes in conversation that the code doesn't show, such as \"issue drafts need an approval card, on every tracker\" or \"dependency setup runs outside the sandbox; don't widen the lead's sandbox\". When the person decides something like that, keep it in a sentence, without asking; drop a note they take back. Every session of yours starts with the notes, and the person sees them in the project's settings.",
           ].join('\n'),
+          INTEGRATION_BRIEF,
           PLAN_FROM_PRESETS,
           [
             'How to pick a model for a step: call list_models first, and pick by what the step needs, not by who makes the model. Be impartial between makers; go by the scores and the work.',
@@ -4292,6 +4539,7 @@ export class Sessions extends Context.Service<
             const entry = yield* (yield* Agents).get(input.agentId)
             const previous = threads.get(input.threadId)
             const from = previous?.entry.definition.name
+            const previousHandover = previous?.handover
             const account = yield* limits.pick({
               agentId: entry.definition.id,
               projectId: thread.projectId,
@@ -4299,35 +4547,51 @@ export class Sessions extends Context.Service<
               ...accountOf(input),
               ...(input.model === undefined ? {} : { model: input.model }),
             })
-            const sessionId = yield* createSession(thread, entry.definition.id, account, input.model)
-            const connected = yield* connectSession(thread, sessionId, entry, account, input.model, input.effort)
-            const brief = yield* Effect.gen(function* () {
-              if (previous !== undefined) yield* stopRunning(previous, { state: 'superseded', by: sessionId })
-              yield* addItem({ projectId: thread.projectId, threadId: thread.threadId, sessionId }, 'notice', {
-                source: 'runtime',
-                severity: 'info',
-                title:
-                  input.said ??
-                  (from === undefined ? `${entry.definition.name} takes over.` : `Switched from ${from} to ${entry.definition.name}.`),
-                ...(input.about === undefined ? {} : { about: input.about }),
-              })
-              if (input.message !== undefined)
-                yield* send({
-                  envelope: input.message.envelope,
-                  threadId: input.threadId,
-                  body: input.message.body,
-                  ...(input.message.images === undefined ? {} : { images: input.message.images }),
-                  ...(input.message.files === undefined ? {} : { files: input.message.files }),
-                  ...(input.message.dictated === true ? { dictated: true } : {}),
-                  ...(input.message.comments === undefined ? {} : { comments: input.message.comments }),
+            // Starting a replacement can take arbitrarily long. Future input belongs to it from here, while the old turn may finish.
+            if (previous !== undefined) previous.handover = 'under_way'
+            return yield* Effect.gen(function* () {
+              const sessionId = yield* createSession(thread, entry.definition.id, account, input.model)
+              const connected = yield* connectSession(thread, sessionId, entry, account, input.model, input.effort)
+              const brief = yield* Effect.gen(function* () {
+                if (previous !== undefined) yield* stopRunning(previous, { state: 'superseded', by: sessionId })
+                yield* addItem({ projectId: thread.projectId, threadId: thread.threadId, sessionId }, 'notice', {
+                  source: 'runtime',
+                  severity: 'info',
+                  title:
+                    input.said ??
+                    (from === undefined ? `${entry.definition.name} takes over.` : `Switched from ${from} to ${entry.definition.name}.`),
+                  ...(input.about === undefined ? {} : { about: input.about }),
                 })
-              return yield* briefFor(thread, { kind: 'takeover', from })
-            }).pipe(beforeTakingOver(connected))
-            return yield* activate(connected, {
-              text: brief,
-              closing: 'Carry on with the task from where it stands.',
-              ...(input.byPerson === true ? { byPerson: true } : {}),
-            })
+                if (input.message !== undefined)
+                  yield* send({
+                    envelope: input.message.envelope,
+                    threadId: input.threadId,
+                    body: input.message.body,
+                    ...(input.message.images === undefined ? {} : { images: input.message.images }),
+                    ...(input.message.files === undefined ? {} : { files: input.message.files }),
+                    ...(input.message.dictated === true ? { dictated: true } : {}),
+                    ...(input.message.comments === undefined ? {} : { comments: input.message.comments }),
+                  })
+                return yield* briefFor(thread, { kind: 'takeover', from })
+              }).pipe(beforeTakingOver(connected))
+              return yield* activate(
+                connected,
+                {
+                  text: brief,
+                  closing: 'Carry on with the task from where it stands.',
+                  ...(input.byPerson === true ? { byPerson: true } : {}),
+                },
+                input.byPerson === true ? undefined : previous?.blockedInputs,
+              )
+            }).pipe(
+              Effect.onError(() =>
+                Effect.suspend(() => {
+                  if (previous === undefined || threads.get(input.threadId) !== previous || previous.stopping) return Effect.void
+                  previous.handover = previousHandover ?? 'none'
+                  return Effect.asVoid(Queue.offer(previous.wake, undefined))
+                }),
+              ),
+            )
           }),
         )
 
@@ -4410,14 +4674,18 @@ export class Sessions extends Context.Service<
                         : 'Started a fresh session.',
               }),
             ).pipe(beforeTakingOver(connected))
-            yield* activate(connected, {
-              text: brief.text,
-              closing:
-                thread.role === 'coordinator'
-                  ? 'Carry the conversation on from where it stands.'
-                  : 'Carry on with the task from where it stands.',
-              starting: 'handover',
-            })
+            yield* activate(
+              connected,
+              {
+                text: brief.text,
+                closing:
+                  thread.role === 'coordinator'
+                    ? 'Carry the conversation on from where it stands.'
+                    : 'Carry on with the task from where it stands.',
+                starting: 'handover',
+              },
+              previous.blockedInputs,
+            )
           }),
         ).pipe(
           Effect.catchCause((cause) =>
@@ -4451,14 +4719,15 @@ export class Sessions extends Context.Service<
             ...(said === '' ? {} : { description: said }),
             failure: 'session_lost',
           })
-          yield* stopRunning(previous, { state: 'completed' })
+          yield* stopRunning(previous, { state: 'completed', reason: 'settled' })
         }).pipe(Effect.catchCause((cause) => Effect.logWarning('Could not stop a lost session', cause)))
 
       // Quitting stops every session the way `stop` does: the turn ends, the process stops, and both are recorded.
       yield* Effect.addFinalizer(() =>
         Effect.forEach(
           [...threads.values()],
-          (running) => Effect.ignore(stopRunning(running, { state: 'completed' }).pipe(Effect.timeout(Duration.seconds(15)))),
+          (running) =>
+            Effect.ignore(stopRunning(running, { state: 'completed', reason: 'shutdown' }).pipe(Effect.timeout(Duration.seconds(15)))),
           {
             concurrency: 'unbounded',
             discard: true,
@@ -4466,30 +4735,77 @@ export class Sessions extends Context.Service<
         ),
       )
 
-      const startLast = (threadId: string) =>
+      const startLast = (threadId: string, recovering?: string) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
           const [last] = yield* sql<{ agentId: string; model: string | null; effort: string | null; startedAt: string }>`
-            SELECT agent_id, model, effort, started_at FROM provider_sessions WHERE thread_id = ${threadId} ORDER BY started_at DESC, rowid DESC LIMIT 1`
+            SELECT s.agent_id, s.model, s.effort, s.started_at FROM provider_sessions s WHERE s.thread_id = ${threadId}
+            ORDER BY (SELECT max(f.sequence) FROM record_events f WHERE f.aggregate_type = 'provider_session' AND f.aggregate_id = s.id) DESC,
+              s.started_at DESC, s.rowid DESC LIMIT 1`
           if (last === undefined) return false
-          // Its lead changed since that session began, with none running to change: the plan's lead is who starts (`changeLead`).
+          // Start on the same effective team every view shows, including a pick made after a prior change to its plan.
           const [changed] = yield* sql<{ at: string | null; agentId: string | null; model: string | null; effort: string | null }>`
-            SELECT json_extract(p.parameters, '$.leadChanged') AS at, json_extract(s.value, '$.agentId') AS agent_id,
+            SELECT coalesce(json_extract(p.parameters, '$.leadChanged'), p.proposed_at) AS at, json_extract(s.value, '$.agentId') AS agent_id,
               json_extract(s.value, '$.model') AS model, json_extract(s.value, '$.effort') AS effort
             FROM threads t JOIN task_plans p ON p.task_id = t.task_id AND p.state IN ('proposed', 'accepted'),
               json_each(p.parameters, '$.steps') s
             WHERE t.id = ${threadId} AND t.kind = 'task' AND json_extract(s.value, '$.key') = 'implement'
             ORDER BY p.proposed_at DESC LIMIT 1`
-          const moved = changed?.at != null && changed.agentId != null && changed.at > last.startedAt
-          const on = moved && changed.agentId != null ? { agentId: changed.agentId, model: changed.model, effort: changed.effort } : last
+          const on =
+            changed?.agentId == null
+              ? last
+              : yield* teamLeadOf(
+                  threadId,
+                  {
+                    key: 'implement',
+                    agentId: changed.agentId,
+                    model: changed.model,
+                    ...(changed.effort === null ? {} : { effort: changed.effort }),
+                    skipped: false,
+                  },
+                  changed.at,
+                  threads.get(threadId),
+                )
           yield* start({
             threadId,
             agentId: on.agentId,
+            ...(recovering === undefined ? {} : { recovering }),
             ...(on.model === null ? {} : { model: on.model }),
-            ...(on.effort === null ? {} : { effort: on.effort }),
+            ...(on.effort == null ? {} : { effort: on.effort }),
           })
           return true
         })
+
+      let recovering = false
+      const recoverQueued = Effect.suspend(() => {
+        if (recovering) return Effect.void
+        recovering = true
+        return Effect.asVoid(
+          Effect.forkIn(
+            Effect.forEach(
+              [...new Map(recovery.map((one) => [one.threadId, one])).values()],
+              (one) =>
+                run(startLast(one.threadId, one.sessionId)).pipe(
+                  Effect.catchCause((cause) =>
+                    Effect.andThen(
+                      Effect.logWarning('Could not resume queued input after restart', cause),
+                      run(
+                        addItem({ projectId: one.projectId, threadId: one.threadId }, 'notice', {
+                          source: 'runtime',
+                          severity: 'error',
+                          title: 'The waiting message could not resume.',
+                          description: 'Start the agent again to carry on. Your message is still queued.',
+                        }),
+                      ).pipe(Effect.ignore),
+                    ),
+                  ),
+                ),
+              { discard: true },
+            ),
+            sessionsScope,
+          ),
+        )
+      })
 
       const retryOf = (threadId: string) =>
         Effect.gen(function* () {
@@ -4507,13 +4823,20 @@ export class Sessions extends Context.Service<
             !running?.turnRunning &&
             last?.state !== 'pending' &&
             last?.state !== 'delivered'
-          return { last, retryable: ready && (last?.state === 'failed' || running === undefined) }
+          return { last, retryable: ready && (last?.state === 'failed' || running === undefined || running.deliveryHeld === 'recovery') }
         })
 
       const tryAgain = (threadId: string) =>
         Effect.gen(function* () {
           const { last, retryable } = yield* retryOf(threadId)
           if (!retryable) return false
+          const previous = threads.get(threadId)
+          if (previous?.deliveryHeld === 'recovery') {
+            previous.blockedInputs = undefined
+            previous.deliveryHeld = null
+            yield* Queue.offer(previous.wake, undefined)
+            return true
+          }
           // A lost idle session, including an error kept by an older version: start afresh from the thread's record.
           if (last?.state !== 'failed') return yield* startLast(threadId)
           const sql = yield* SqlClient.SqlClient
@@ -4541,6 +4864,8 @@ export class Sessions extends Context.Service<
           )
           const running = threads.get(threadId)
           if (running !== undefined && !running.stopping) {
+            running.blockedInputs = undefined
+            running.deliveryHeld = null
             if (running.retryBrief !== undefined) running.brief = running.retryBrief
             yield* Queue.offer(running.wake, undefined)
           } else return yield* startLast(threadId)
@@ -4548,6 +4873,7 @@ export class Sessions extends Context.Service<
         })
 
       return Sessions.of({
+        recoverQueued,
         start: (input) => run(start(input)),
         startLast: (threadId) => run(startLast(threadId)),
         tryAgain: (threadId) => run(tryAgain(threadId)),
@@ -4599,7 +4925,7 @@ export class Sessions extends Context.Service<
                 // Only a project's coordinator forgets: a task's lead is stopped by Stop, not by this.
                 yield* coordinatorRow(input.threadId)
                 const running = threads.get(input.threadId)
-                if (running !== undefined) yield* stopRunning(running, { state: 'completed' })
+                if (running !== undefined) yield* stopRunning(running, { state: 'completed', reason: 'stopped' })
                 yield* forgetItems({ envelope: input.envelope, threadId: input.threadId, ended: running !== undefined })
               }),
             ),
@@ -4613,32 +4939,49 @@ export class Sessions extends Context.Service<
               const running = threads.get(input.threadId)
               if (running === undefined || running.stopping) return yield* new NoSession({ threadId: input.threadId })
               const sql = yield* SqlClient.SqlClient
-              const [now] = yield* sql<{ model: string | null; effort: string | null }>`
+              const result = yield* sql.withTransaction(
+                Effect.gen(function* () {
+                  const [now] = yield* sql<{ model: string | null; effort: string | null }>`
                 SELECT model, effort FROM provider_sessions WHERE id = ${running.sessionId}`
-              const agentId = running.entry.definition.id
-              // What was chosen before and isn't set yet stands, but for what is chosen now.
-              const before = running.nextLead?.agentId === agentId ? running.nextLead : undefined
-              const model = input.model ?? before?.model
-              const effort = input.effort ?? before?.effort
-              const same = (model === undefined || model === now?.model) && (effort === undefined || effort === now?.effort)
-              // Back on what it is on, with nothing being set: nothing is left to take up. While one is being set it is kept, so it
-              // is set back after.
-              running.nextLead =
-                same && !running.settingLead
-                  ? undefined
-                  : {
-                      agentId,
-                      ...(model === undefined ? {} : { model }),
-                      ...(effort === undefined ? {} : { effort }),
-                    }
+                  const agentId = running.entry.definition.id
+                  // What was chosen before and isn't set yet stands, but for what is chosen now.
+                  const before = running.nextLead?.agentId === agentId ? running.nextLead : undefined
+                  const model = input.model ?? before?.model
+                  const effort = input.effort ?? before?.effort
+                  const same = (model === undefined || model === now?.model) && (effort === undefined || effort === now?.effort)
+                  // Back on what it is on, with nothing being set: nothing is left to take up. While one is being set it is kept, so it
+                  // is set back after.
+                  const next =
+                    same && !running.settingLead
+                      ? undefined
+                      : {
+                          agentId,
+                          ...(model === undefined ? {} : { model }),
+                          ...(effort === undefined ? {} : { effort }),
+                        }
+                  if (
+                    !(yield* setLeadChoice(running, next, {
+                      choice: {
+                        agentId,
+                        model: model ?? now?.model ?? null,
+                        effort: effort ?? now?.effort ?? null,
+                      },
+                    }))
+                  )
+                    return yield* new NoSession({ threadId: input.threadId })
+                  return same ? ('same' as const) : ('later' as const)
+                }),
+              )
               if (running.nextLead !== undefined) yield* Effect.forkIn(run(applyLead(running)), sessionsScope)
-              return same ? ('same' as const) : ('later' as const)
+              return result
             }),
           ),
         wake: (threadId) =>
           Effect.suspend(() => {
             const running = threads.get(threadId)
-            return running === undefined ? Effect.void : Queue.offer(running.wake, undefined).pipe(Effect.asVoid)
+            if (running === undefined) return Effect.void
+            if (running.deliveryHeld === 'transient') running.deliveryHeld = null
+            return Queue.offer(running.wake, undefined).pipe(Effect.asVoid)
           }),
         changeLead: (input) =>
           run(
@@ -4646,20 +4989,35 @@ export class Sessions extends Context.Service<
               const running = threads.get(input.threadId)
               if (running === undefined || running.stopping) return 'none' as const
               const sql = yield* SqlClient.SqlClient
-              const [now] = yield* sql<{ model: string | null; effort: string | null }>`
+              return yield* sql.withTransaction(
+                Effect.gen(function* () {
+                  const [now] = yield* sql<{ model: string | null; effort: string | null }>`
                 SELECT model, effort FROM provider_sessions WHERE id = ${running.sessionId}`
-              const same =
-                running.entry.definition.id === input.agentId &&
-                (input.model === undefined || input.model === now?.model) &&
-                (input.effort === undefined || input.effort === now?.effort)
-              running.nextLead = same
-                ? undefined
-                : {
-                    agentId: input.agentId,
-                    ...(input.model === undefined ? {} : { model: input.model }),
-                    ...(input.effort === undefined ? {} : { effort: input.effort }),
-                  }
-              return same ? ('same' as const) : ('later' as const)
+                  const same =
+                    running.entry.definition.id === input.agentId &&
+                    (input.model === undefined || input.model === now?.model) &&
+                    (input.effort === undefined || input.effort === now?.effort)
+                  const next = same
+                    ? undefined
+                    : {
+                        agentId: input.agentId,
+                        ...(input.model === undefined ? {} : { model: input.model }),
+                        ...(input.effort === undefined ? {} : { effort: input.effort }),
+                      }
+                  const sameAgent = running.entry.definition.id === input.agentId
+                  if (
+                    !(yield* setLeadChoice(running, next, {
+                      choice: {
+                        agentId: input.agentId,
+                        model: input.model ?? (sameAgent ? (now?.model ?? null) : null),
+                        effort: input.effort ?? (sameAgent ? (now?.effort ?? null) : null),
+                      },
+                    }))
+                  )
+                    return 'none' as const
+                  return same ? ('same' as const) : ('later' as const)
+                }),
+              )
             }).pipe(Effect.orDie),
           ),
         switchAgent: (input) => run(switchAgent(input)),
@@ -4686,7 +5044,9 @@ export class Sessions extends Context.Service<
             threadId,
             Effect.suspend(() => {
               const running = threads.get(threadId)
-              return running === undefined ? Effect.fail(new NoSession({ threadId })) : stopRunning(running, { state: 'completed' })
+              return running === undefined
+                ? Effect.fail(new NoSession({ threadId }))
+                : stopRunning(running, { state: 'completed', reason: 'stopped' })
             }),
           ),
         quiet: (threadId, effect) =>
@@ -4783,6 +5143,7 @@ export class Sessions extends Context.Service<
                     reviewer: running.thread.role === 'reviewer',
                     helper: running.thread.role === 'task' && running.thread.helper !== undefined,
                     turnRunning: running.turnRunning,
+                    acceptingTurns: !running.stopping && running.handover !== 'under_way' && running.deliveryHeld === null,
                     background: [...running.background.values()].some((left) => left.ended === null),
                     pid: running.connection.process?.pid ?? null,
                   },

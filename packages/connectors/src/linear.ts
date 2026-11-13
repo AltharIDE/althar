@@ -3,7 +3,7 @@ import { Effect, Option, Schema } from 'effect'
 import { type Access, type AccessReason, line } from './access'
 import { type AdapterOptions, authorizationOf } from './credential'
 import { ConnectorFailed } from './errors'
-import { makeHttp, paged } from './http'
+import { makeHttp, paged, withoutTrailingSlashes } from './http'
 import {
   type Account,
   cantChange,
@@ -429,7 +429,7 @@ export const changeInput = (
 
 export const makeLinear = (options: AdapterOptions): Tracker => {
   const product = 'linear' as const
-  const url = `${options.apiUrl.replace(/\/+$/, '')}/graphql`
+  const url = `${withoutTrailingSlashes(options.apiUrl)}/graphql`
   const http = makeHttp({ product, fetch: options.fetch, authorization: Effect.map(options.credential, authorizationOf) })
 
   // A token reaches one workspace: who it is there, and which, as its links name it.
@@ -760,7 +760,7 @@ const dataOf = <A>(schema: Schema.Codec<A, unknown>, answer: Answer): { readonly
 
 export const accessLinear: Access = (input) =>
   Effect.gen(function* () {
-    const url = `${input.apiUrl.replace(/\/+$/, '')}/graphql`
+    const url = `${withoutTrailingSlashes(input.apiUrl)}/graphql`
     const me = dataOf(Viewer, yield* probe(input, url, { query: `query { ${VIEWER} }` }))
     if ('reason' in me) return stopped([line('account', 'no', { reason: me.reason })])
     const { viewer, organization } = me.data

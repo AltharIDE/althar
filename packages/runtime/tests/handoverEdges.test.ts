@@ -1,3 +1,4 @@
+import { isoAfter } from '@althar/testing'
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { execFileSync } from 'node:child_process'
@@ -84,7 +85,7 @@ describe("a handover brief's open tasks, at their edges", () => {
           kind,
           payload: JSON.stringify(payload),
           state: 'open',
-          createdAt: `2099-10-11T00:00:0${n}.000Z`,
+          createdAt: isoAfter(86_400_000 + n * 1000),
         })}`
       yield* call(2, 'question', { fields: [{ question: '' }, { question: 'Postgres or SQLite?' }, { question: 'Which port?' }] })
       yield* call(3, 'question', { fields: [{ question: '' }], message: 42 })

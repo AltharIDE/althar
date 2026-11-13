@@ -301,7 +301,7 @@ describe('a review that never read what it is said to have read', () => {
   // skipped and concludes, but never marks the run's fixes unreviewed (only running out of rounds does, `carriedOn`): so the pull
   // request opens with the seal, "Reviewed by … in 1 pass", and no line that the last fixes weren't reviewed, though no review
   // read them. reviews.md: "Where the code changed after the last pass, there is no seal". Flips to passing when fixed.
-  it.live.fails('opens its pull request without the seal where the check of the fixes was skipped', () => {
+  it.live('opens its pull request without the seal where the check of the fixes was skipped', () => {
     const { working, github } = onGitHub()
     return Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
@@ -338,7 +338,7 @@ describe('a review that never read what it is said to have read', () => {
   // review at all, but its answer reads only the project's rule for after the merge: "It is reviewed after it merges, and only
   // blocking and major findings come back to the person", which the coordinator passes on. Nothing is ever owed
   // (MergeReviews.reviewerOf finds no review step). Flips to passing when fixed.
-  it.live.fails('doesn’t tell the coordinator a small change with no reviewer is reviewed after it merges', () =>
+  it.live('doesn’t tell the coordinator a small change with no reviewer is reviewed after it merges', () =>
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
       const { coordinator } = yield* opened(repository())

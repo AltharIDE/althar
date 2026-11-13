@@ -20,7 +20,6 @@ export default meta
 type Story = StoryObj<typeof meta>
 
 export const PageRead: Story = {}
-export const PageReadOpen: Story = { args: { defaultOpen: true } }
 export const PagesRead: Story = {
   render: () => (
     <WebReads

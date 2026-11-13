@@ -101,7 +101,7 @@ describe('a lead talked to between steps', () => {
   // Finding (sanity pass): a person's message to a lead outside a step (after its plan, or on a task with none) whose turn
   // fails on the agent's service is never said in the thread, never tried again, and offers no Try again: Sessions counts a
   // lead's transient failure as "said elsewhere", but Runs says it only for a step. Flips to passing when fixed.
-  it.live.fails('says so in its thread when its turn fails on the agent’s service, as the coordinator’s chat does', () =>
+  it.live('says so in its thread when its turn fails on the agent’s service, as the coordinator’s chat does', () =>
     Effect.gen(function* () {
       const sessions = yield* Sessions
       const { task: created } = yield* task()
@@ -128,7 +128,7 @@ describe('a lead talked to between steps', () => {
   // Finding (sanity pass), the same defect's other face: the person's words that failed turn put back in the queue count, for
   // Busy, as the lead's next turn on its way, so the idle lead holds a place among the agents at work (and Quit counts it as
   // a lead at work) for as long as its session lasts, though nothing will ever deliver them. Flips to passing when fixed.
-  it.live.fails('holds no place among the agents at work once that turn has failed and nothing is under way', () =>
+  it.live('holds no place among the agents at work once that turn has failed and nothing is under way', () =>
     Effect.gen(function* () {
       const sessions = yield* Sessions
       const busy = yield* Busy
@@ -153,7 +153,7 @@ describe('a lead handed to another agent', () => {
   // leaves the outgoing session taking turns until the new agent is up, unlike handOver and takeOver, which mark it
   // `under_way`: what the person says meanwhile becomes the old agent's turn, cut off as it stops, and the agent taking over
   // is told only to carry on. Flips to passing when fixed.
-  it.live.fails('gives what waits for the lead as the new agent starts to the new agent, not the one being stopped', () => {
+  it.live('gives what waits for the lead as the new agent starts to the new agent, not the one being stopped', () => {
     const held = holds()
     // The agent taking over is slow to make its session, as a real one starting is, until the test lets it.
     const starting: { gate: Promise<void> | undefined; open: () => void } = { gate: undefined, open: () => {} }
@@ -233,7 +233,7 @@ describe('a stop', () => {
   // the cancel lands on no turn; deliver never looks at `stopping` again, the prompt goes out after the stop, and the agent works
   // on it: to its end, or, a long one, until the stop's grace is up, when its turn is recorded as the agent dying (failed,
   // agent_exited). Flips to passing when fixed.
-  it.live.fails('that comes as a turn is being prepared stops it, rather than letting its prompt out after the stop', () => {
+  it.live('that comes as a turn is being prepared stops it, rather than letting its prompt out after the stop', () => {
     const prompts = { asked: 0 }
     return Effect.gen(function* () {
       const sessions = yield* Sessions

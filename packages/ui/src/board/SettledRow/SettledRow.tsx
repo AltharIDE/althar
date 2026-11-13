@@ -3,6 +3,7 @@ import { Outcome, unreachable } from '../../foundations/vocabulary'
 import { cx } from '../../lib/cx'
 import type { RootProps } from '../../lib/props'
 import { Button } from '../../primitives/Button/Button'
+import { Problem } from '../../primitives/Problem/Problem'
 import b from '../Board/Board.module.css'
 import { CardTitle } from '../Board/CardTitle'
 import s from './SettledRow.module.css'
@@ -115,9 +116,9 @@ export function SettledRow({
         </div>
       )}
       {error && (
-        <p className={s.error} role="alert">
+        <Problem size="small" className={s.error}>
           {error}
-        </p>
+        </Problem>
       )}
     </article>
   )

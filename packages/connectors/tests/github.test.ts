@@ -1667,7 +1667,7 @@ describe('GitHub as a tracker', () => {
         const { host, sent } = github([])
         const refused = (change: IssueChange) =>
           Effect.map(Effect.flip(host.update(open, change)), (error) => [error.reason, error.message])
-        assert.deepStrictEqual(yield* refused({ due: '2026-11-30' }), [
+        assert.deepStrictEqual(yield* refused({ due: '2025-11-30' }), [
           'rejected',
           'Althar can’t change an issue’s due here: GitHub’s issues have no due date; a project board’s date field is the board’s own',
         ])

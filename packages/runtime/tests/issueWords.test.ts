@@ -31,7 +31,7 @@ const ISSUE: Issue = {
   cycle: 'Cycle 4',
   parent: { key: 'MER-0', title: 'Reliability' },
   type: 'Bug',
-  due: '2026-11-30',
+  due: '2025-11-30',
   estimate: 3,
   components: ['api'],
 }
@@ -65,7 +65,7 @@ describe('a run of keys', () => {
 })
 
 describe('an issue in words', () => {
-  it('says all it is in and has, its description, and its latest comments, cut where long', () => {
+  it('keeps full comment bodies and Markdown, and points to the complete paginated discussion', () => {
     const long = 'x'.repeat(900)
     const words = issueWords(readOf(ISSUE), [
       { author: { id: 'u1', login: 'ada', name: 'Ada', bot: false }, body: 'Seen\n\nagain', at: '2026-11-01T09:00:00Z' },
@@ -76,10 +76,11 @@ describe('an issue in words', () => {
     assert.include(words, 'In Progress, High priority, in Meridian. https://linear.app/meridian/issue/MER-1')
     assert.include(
       words,
-      'Assigned to Ada, grace; labels bug, ui; project Uploads; milestone Beta; cycle Cycle 4; part of MER-0 (Reliability); type Bug; components api; estimate 3; due 2026-11-30.',
+      'Assigned to Ada, grace; labels bug, ui; project Uploads; milestone Beta; cycle Cycle 4; part of MER-0 (Reliability); type Bug; components api; estimate 3; due 2025-11-30.',
     )
-    assert.include(words, '- Ada, 2026-11-01: Seen again')
-    assert.include(words, `- grace, 2026-11-02: ${'x'.repeat(800)}…`)
+    assert.include(words, '- Ada, 2026-11-01: Seen\n\nagain')
+    assert.include(words, `- grace, 2026-11-02: ${long}`)
+    assert.include(words, 'read_issue_comments reads the complete discussion')
     assert.include(words, '- Someone, 2026-11-03: Me too')
   })
 

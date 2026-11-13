@@ -467,6 +467,8 @@ describe('the API', () => {
               PlaceRepository: () => Effect.die('unused'),
               MakeRepository: () => Effect.die('unused'),
               ListTasks: () => Effect.succeed({ cursor: 0, tasks: [] }),
+              GetSearchDocuments: () => Effect.succeed({ documents: [], next: null }),
+              GetSearchFiles: () => Effect.succeed({ files: [] }),
               SearchTasks: ({ text, projectId }) =>
                 Effect.succeed({
                   tasks: [
@@ -604,6 +606,7 @@ describe('the API', () => {
               StartTask: () => Effect.die('unused'),
               StartPlan: () => Effect.void,
               HoldPlan: () => Effect.void,
+              HoldDraft: () => Effect.void,
               ChangePlan: () => Effect.void,
               ChangeTeam: () => Effect.void,
               DeclineReview: () => Effect.void,
@@ -725,6 +728,7 @@ describe('the API', () => {
               GetRepositoryScripts: () => Effect.succeed([]),
               GetRunnableRefs: () => Effect.succeed([]),
               StopLaunch: () => Effect.void,
+              ReadLaunchOutput: () => Effect.succeed({ text: '', dropped: 0 }),
               ClearLaunch: () => Effect.void,
               PreferIssueCards: () => Effect.void,
               SetTaskIssuePart: () => Effect.void,

@@ -1,4 +1,5 @@
 import { LinkButton } from '../../primitives/LinkButton/LinkButton'
+import { Problem } from '../../primitives/Problem/Problem'
 import s from './ReviewOffer.module.css'
 
 /*
@@ -61,11 +62,7 @@ export function ReviewOffer({ who, ask, onAdd, onDecline, busy = false, error, a
           <span>{answered === null ? t.declined : t.added(answered)}</span>
         )}
       </p>
-      {error != null && error !== '' && (
-        <p className={s.error} role="alert">
-          {error}
-        </p>
-      )}
+      {error != null && error !== '' && <Problem size="small">{error}</Problem>}
     </div>
   )
 }

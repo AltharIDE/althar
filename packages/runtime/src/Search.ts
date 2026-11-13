@@ -306,7 +306,7 @@ export interface SearchInput {
  * that go with them, of its coordinator's thread (`ch`), its plan (`p`) and
  * its latest run (`n`).
  */
-const phaseRead = (sql: SqlClient.SqlClient) => ({
+export const phaseRead = (sql: SqlClient.SqlClient) => ({
   columns: sql`
     k.state, k.created_at, k.kept_at,
     -- Only the coordinator's own turn, which is the one that drafts a task: a lead's turn on another says nothing of its plan.
@@ -328,7 +328,7 @@ const phaseRead = (sql: SqlClient.SqlClient) => ({
 })
 
 /** `phaseOf` as of now, with how long a draft stays off the board: `working` is the tasks an agent is on. */
-const phasesNow = Effect.fn('Search.phasesNow')(function* () {
+export const phasesNow = Effect.fn('Search.phasesNow')(function* () {
   const config = yield* RuntimeConfig
   const now = yield* Clock.currentTimeMillis
   // How long a draft stays off the board, as its card reads it (DRAFTING_MS unless a test says otherwise).

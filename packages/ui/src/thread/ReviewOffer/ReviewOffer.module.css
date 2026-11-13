@@ -32,8 +32,3 @@
 .offer[data-busy] {
   opacity: 0.7;
 }
-.error {
-  margin: 0;
-  font-size: 11.5px;
-  color: var(--danger);
-}
