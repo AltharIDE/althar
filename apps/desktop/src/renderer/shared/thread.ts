@@ -12,7 +12,7 @@ import type {
 import { Delivery, headingOf, oneLine, PlanState, ToolKind, ToolState } from '@althar/ui'
 
 import { type Handed, handedBy, type OutputSoFar, type PartHanded, type Ran, ranOf } from './handed'
-import { isSending } from './items'
+import { isSending, messageMove } from './items'
 import { took } from './time'
 import { type Spent, spentOf, turnOfItems } from './turnTime'
 
@@ -136,6 +136,7 @@ export type ModelMoveContent = Extract<ThreadItem, { kind: 'model_move' }>['cont
 export type Block =
   | {
       readonly kind: 'you'
+      readonly move?: string
       readonly id: string
       readonly text: string
       readonly at: string
@@ -711,6 +712,7 @@ export const blocksOf = (
         blocks.push({
           kind: 'you',
           id: item.id,
+          move: messageMove(item),
           text: item.content.text,
           at: ago(item.createdAt),
           delivery,

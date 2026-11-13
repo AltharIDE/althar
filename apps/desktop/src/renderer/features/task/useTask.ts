@@ -19,7 +19,7 @@ import { messageOf, type StuckAnswer } from '../../data/client'
 import { useMerge } from '../../data/merges'
 import { keys, reads } from '../../data/reads'
 import { canPick } from '../../shared/agents'
-import { isSending, mergeItems, newestReads, sending, takenBack, unsent, waiting } from '../../shared/items'
+import { isSending, mergeItems, newestReads, queueShown, sending, takenBack, unsent, waiting } from '../../shared/items'
 import { headsOf } from '../../shared/mergeHere'
 import { type Choice, moveTo, runningOn, startOf } from '../../shared/models'
 import type { OutputSoFar } from '../../shared/handed'
@@ -534,7 +534,7 @@ export const useTask = (threadId: string): TaskModel => {
     action: (accepted: () => void) => Promise<unknown>,
     images: Outgoing | undefined,
     // Behind a turn running it waits its turn; handed to another agent, it is that one's first.
-    queued = disposition === 'interrupt_and_continue' || snapshot?.session?.turnRunning === true,
+    queued = disposition === 'interrupt_and_continue' || queueShown(snapshot?.session ?? null, true, snapshot?.accepting),
   ) => {
     let id = ''
     setSnapshot((current) => {

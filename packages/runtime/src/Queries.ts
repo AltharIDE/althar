@@ -1174,6 +1174,10 @@ export class Queries extends Context.Service<
           // The runtime's own session when it holds one, which a switch's newer, still-starting row is not; else the newest recorded one.
           const session = Option.isSome(running) ? (rows.find((row) => row.id === running.value.sessionId) ?? rows[0]) : rows[0]
           if (session === undefined) return null
+          // A turn is claimed before its prompt is prepared. Its durable record closes the
+          // gap before turnRunning is set, and includes compaction and handover prompts.
+          const [claimed] = yield* sql<{ one: number }>`SELECT 1 AS one FROM turn_deliveries
+            WHERE thread_id = ${threadId} AND state IN ('pending', 'delivered') LIMIT 1`
           const definition = Option.getOrUndefined(yield* Effect.option(agents.get(session.agentId)))
           const options = field(parse(session.config), 'options')
           const modelOption = Array.isArray(options)
@@ -1189,6 +1193,7 @@ export class Queries extends Context.Service<
             account: session.account,
             effort: session.effort,
             models: Array.isArray(values) ? values.filter((value): value is string => typeof value === 'string') : [],
+            accepting: claimed !== undefined || session.state === 'starting' ? ('queued' as const) : ('now' as const),
             turnRunning: Option.isSome(running) && running.value.sessionId === session.id && running.value.turnRunning,
             turnStartedAt:
               Option.isSome(running) && running.value.sessionId === session.id && running.value.turnStartedAt !== null
@@ -3542,6 +3547,10 @@ export class Queries extends Context.Service<
             WHERE w.task_id = ${head.taskId} AND w.moving_to IS NOT NULL LIMIT 1`
           return {
             threadId,
+            accepting:
+              card?.queued != null || card?.waits != null || (card?.phase === 'running' && session?.held !== true)
+                ? ('queued' as const)
+                : (session?.accepting ?? ('now' as const)),
             cursor: at,
             usage,
             ...(time === undefined ? {} : { time }),
@@ -3729,6 +3738,7 @@ export class Queries extends Context.Service<
           const usage = yield* spendingOf({ threadId, since: midnight.toISOString() }).pipe(Effect.orElseSucceed(() => []))
           return {
             threadId,
+            accepting: session?.accepting ?? ('now' as const),
             cursor: at,
             usage,
             project: { id: projectId, name: project.name },

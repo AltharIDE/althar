@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { expect, type Locator, type Page, test } from '@playwright/test'
 
 import { repository } from '../tests/repository'
-import { launch, openFirstProject, say, startTask, still, toConversation } from './support'
+import { holdRuntime, launch, openFirstProject, say, startTask, still, toConversation } from './support'
 
 /*
  * Between sending and the first word back, in a real window with the fake
@@ -277,6 +277,39 @@ test('lets go of Thinking when the turn ends with nothing said, interrupted or d
   try {
     await endsQuietly(page, page.getByRole('region', { name: 'Conversation' }), 'coordinator')
     await endsQuietly(page, await readyTask(page), 'task')
+  } finally {
+    await electronApp.close()
+  }
+})
+
+test('sends mid-turn straight to the queue before the runtime answers, in both chats', async () => {
+  const { electronApp, page } = await opened()
+  try {
+    const check = async (thread: Locator, name: string) => {
+      await say(page, 'Keep thinking. [answers-after:20s]')
+      await expect(thinkingIn(thread)).toBeVisible()
+      await expect(page.getByRole('textbox', { name: /^Add to the queue/ })).toBeVisible()
+      const release = await holdRuntime(page)
+      try {
+        await say(page, 'Then the changelog.')
+        const queue = page.getByRole('region', { name: /queued/i })
+        await expect(queue).toContainText('Then the changelog.')
+        await expect(thread.getByText('Then the changelog.', { exact: true })).toHaveCount(0)
+        await still(page)
+        await queue.screenshot({ path: `test-results/mid-turn-${name}-pending.png`, scale: 'css' })
+      } finally {
+        await release()
+      }
+      await expect(page.getByRole('region', { name: /queued/i })).toContainText('Then the changelog.')
+      await expect(page.locator('[data-item^="sending:"]')).toHaveCount(0)
+      await expect(thread.getByText('Then the changelog.', { exact: true })).toHaveCount(0)
+      await still(page)
+      await page.getByRole('region', { name: /queued/i }).screenshot({ path: `test-results/mid-turn-${name}-accepted.png`, scale: 'css' })
+      await page.getByRole('button', { name: /^Interrupt the/ }).click()
+      await expect(page.getByRole('region', { name: /queued/i })).toHaveCount(0)
+    }
+    await check(page.getByRole('region', { name: 'Conversation' }), 'coordinator')
+    await check(await readyTask(page), 'task')
   } finally {
     await electronApp.close()
   }

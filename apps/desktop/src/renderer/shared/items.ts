@@ -16,6 +16,10 @@ let sent = 0
 /** One of the window's own copies of what the person sent. */
 export const isSending = (id: string) => id.startsWith(SENDING)
 
+/** A message keeps its motion identity when the store replaces the optimistic copy. */
+const moves = new WeakMap<ThreadItem, string>()
+export const messageMove = (item: ThreadItem): string => moves.get(item) ?? `message:${item.id}`
+
 /** A message the window shows the moment it is sent, after what it holds, until the store's copy arrives. */
 export const sending = (
   items: ReadonlyArray<ThreadItem>,
@@ -75,6 +79,8 @@ export const inView = (view: ConversationView, held: ReadonlyArray<ThreadItem>, 
 export const mergeItems = (current: ReadonlyArray<ThreadItem>, incoming: ReadonlyArray<ThreadItem>): ReadonlyArray<ThreadItem> => {
   const byId = new Map(current.map((item) => [item.id, item]))
   for (const item of incoming) {
+    const previous = byId.get(item.id)
+    if (previous !== undefined && item.kind === 'user_message') moves.set(item, messageMove(previous))
     // A message new to the window, said since the copy was made (not an older page read), takes the copy's place.
     if (item.kind === 'user_message' && !byId.has(item.id)) {
       const copy = [...byId.values()].find(
@@ -84,7 +90,10 @@ export const mergeItems = (current: ReadonlyArray<ThreadItem>, incoming: Readonl
           held.content.text === item.content.text &&
           item.sequence > held.sequence - 1,
       )
-      if (copy !== undefined) byId.delete(copy.id)
+      if (copy !== undefined) {
+        moves.set(item, messageMove(copy))
+        byId.delete(copy.id)
+      }
     }
     byId.set(item.id, item)
   }
@@ -165,13 +174,17 @@ export const waiting = (items: ReadonlyArray<ThreadItem>): ReadonlyArray<string>
 /**
  * Whether what waits its turn shows in the composer's queue: behind a turn
  * running, or with no agent on the thread to take it, where it could wait
- * for long. With an agent idle there is nothing to wait behind, and while the
+ * for long. Sending never hides an existing queue. With an agent idle there
+ * is nothing to wait behind, and while the
  * person's own send is on its way (which may start the agent), what they just
  * sent is about to be read: it goes straight to the thread, rather than
  * flashing in the queue.
  */
-export const queueShown = (session: { readonly turnRunning: boolean } | null, sending: boolean): boolean =>
-  !sending && (session === null || session.turnRunning)
+export const queueShown = (
+  session: { readonly turnRunning: boolean; readonly accepting?: 'now' | 'queued' } | null,
+  sending: boolean,
+  accepting?: 'now' | 'queued',
+): boolean => accepting === 'queued' || session?.accepting === 'queued' || session?.turnRunning === true || (!sending && session === null)
 
 /**
  * Whether what waits after the agent's last reply is being read now, with
@@ -198,6 +211,7 @@ export const queuedOf = (
   shown: boolean,
 ): ReadonlyArray<{
   readonly id: string
+  readonly move?: string
   readonly text: string
   readonly attached?: string
   readonly pictures: ReadonlyArray<Picture>
@@ -207,10 +221,11 @@ export const queuedOf = (
   !shown
     ? []
     : items.flatMap((item) =>
-        item.kind === 'user_message' && item.input?.state === 'queued' && !item.input.interrupting && !isSending(item.id)
+        item.kind === 'user_message' && item.input?.state === 'queued' && !item.input.interrupting
           ? [
               {
                 id: item.id,
+                move: messageMove(item),
                 text: item.content.text,
                 ...(item.content.pictures.length + item.content.files.length === 0
                   ? {}

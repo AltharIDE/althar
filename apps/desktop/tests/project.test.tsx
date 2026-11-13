@@ -974,6 +974,23 @@ describe('the Talk room', () => {
     }
   })
 
+  it.each([false, true])('keeps a mid-turn send queued while the runtime accepts it (turnRunning=%s)', async (turnRunning) => {
+    let accept: () => void = () => undefined
+    const sent = new Promise<void>((resolve) => (accept = resolve))
+    const { client } = fakeClient({
+      getCoordinator: vi.fn(async () => coordinatorSnapshot({ session: { ...session, accepting: 'queued', turnRunning }, items: [] })),
+      send: vi.fn(async () => sent),
+    })
+    withServices(<Project room={Room.Talk} />, client)
+    const box = await screen.findByRole('textbox', { name: /^(Add to the queue|Tell Claude Code|Tell the coordinator)/ })
+    await userEvent.type(box, 'Then the changelog.{Enter}')
+    await waitFor(() => expect(client.send).toHaveBeenCalled())
+    const queue = screen.getByRole('region', { name: /queued/i })
+    expect(within(queue).getByText('Then the changelog.')).toBeTruthy()
+    expect(screen.getAllByText('Then the changelog.')).toHaveLength(1)
+    await act(async () => accept())
+  })
+
   it('shows the coordinator thinking on what waits for it idle, and the turn on it only once that is read as delivered', async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true })
     try {

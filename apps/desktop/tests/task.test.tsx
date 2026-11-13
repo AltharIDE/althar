@@ -1324,6 +1324,30 @@ describe('a task', () => {
     expect(client.push).toHaveBeenCalledTimes(1)
   })
 
+  it.each([false, true, null])('keeps a mid-turn send queued while the runtime accepts it (turnRunning=%s)', async (turnRunning) => {
+    let accept: () => void = () => undefined
+    const sent = new Promise<void>((resolve) => (accept = resolve))
+    const { client } = fakeClient({
+      getThread: vi.fn(async () => {
+        const value = running()
+        return {
+          ...value,
+          accepting: 'queued' as const,
+          session: turnRunning === null ? null : { ...value.session!, accepting: 'queued' as const, turnRunning },
+        }
+      }),
+      send: vi.fn(async () => sent),
+    })
+    withServices(<Task />, client)
+    const box = await screen.findByRole('textbox')
+    await userEvent.type(box, 'Then the changelog.{Enter}')
+    await waitFor(() => expect(client.send).toHaveBeenCalled())
+    const queue = screen.getByRole('region', { name: /queued/i })
+    expect(within(queue).getByText('Then the changelog.')).toBeTruthy()
+    expect(screen.getAllByText('Then the changelog.')).toHaveLength(1)
+    await act(async () => accept())
+  })
+
   it('talks to its lead: sends, queues while it works, sends now, and interrupts', async () => {
     const { client } = fakeClient({ getThread: vi.fn(async () => thread()) })
     const view = withServices(<Task />, client)

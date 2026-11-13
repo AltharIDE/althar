@@ -61,6 +61,8 @@ const SYSTEM_DEFAULT = ''
 /** Something you sent while the agent worked, waiting for it to finish what it is doing. */
 export interface QueuedMessage {
   id: string
+  /** Stable across the optimistic copy, stored item, queue and thread. */
+  move?: string
   text: string
   /** What you sent with it, in words, formatted: "2 images". */
   attached?: string
@@ -443,7 +445,7 @@ export function Composer({
             </span>
             <ol className={s.queueList}>
               {queued.map((q) => (
-                <li key={q.id} className={s.queued}>
+                <li key={q.id} data-item={q.id} data-move={q.move} className={s.queued}>
                   <span className={s.queuedText}>
                     {q.text}
                     {q.attached && <span className={s.queuedAttached}>{q.attached}</span>}
