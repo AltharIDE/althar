@@ -1,5 +1,12 @@
 import { errandLines } from './Errands'
-import { isAgentDefault, knownModelName, type MessageSender, type SentCanvasComment, standsFor } from '@althar/contracts'
+import {
+  isAgentDefault,
+  knownModelName,
+  type MessageSender,
+  type SentCanvasComment,
+  type UndoTurnResult,
+  standsFor,
+} from '@althar/contracts'
 import { existsSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
@@ -54,6 +61,7 @@ import { type CoordinatorFolder, coordinatorFolder } from './coordinatorFolder'
 import { coordinatorNews, type ModelNamer, modelNamer } from './coordinatorNews'
 import { coordinatorRow, forgetItems } from './chatView'
 import { type Accepting, acceptingOf } from './admission'
+import { checkpointBeforeTurn, checkpointAfterTurn, recoverTurnUndo, undoConversation, undoTarget, canUndoTask } from './turnUndo'
 import { dueForHandover, dueForLeadHandover, handoverRecord, notesSection, roomFor, shrinks } from './handover'
 import { notesOf } from './notes'
 import {
@@ -66,6 +74,7 @@ import {
   SessionFailed,
   SessionRunning,
   TaskRefused,
+  UndoRefused,
   type UnknownAgent,
 } from './errors'
 import { Instance } from './Instance'
@@ -893,6 +902,11 @@ export class Sessions extends Context.Service<
       readonly envelope: CommandEnvelope
       readonly itemId: string
     }): Effect.Effect<void, NotFound | AlreadyDelivered | Failure>
+    /** Undoes this delivered turn and the later conversation, restoring its worktrees and ending stale agent context. */
+    undoTurn(input: {
+      readonly envelope: CommandEnvelope
+      readonly itemId: string
+    }): Effect.Effect<UndoTurnResult, UndoRefused | NotFound | GitFailed | Failure>
     /** Changes the session's model; the session and its context carry on. */
     setModel(input: { readonly threadId: string; readonly model: string }): Effect.Effect<void, NoSession | ModelUnchanged | Failure>
     /** How hard the running session's agent thinks, from here on. */
@@ -1231,6 +1245,17 @@ export class Sessions extends Context.Service<
         work: (begun: Effect.Effect<void>) => Effect.Effect<void>,
       ) => Effect.as(work(Effect.void), true)
       const run = <A, E>(effect: Effect.Effect<A, E, Store>) => Effect.provideContext(effect, context)
+      // A crash between file writes and the command receipt restores the saved originals before sessions can start.
+      yield* run(
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const pending = yield* sql<{ threadId: string }>`SELECT DISTINCT thread_id FROM turn_undo_recoveries WHERE state = 'prepared'`
+          for (const row of pending)
+            yield* recoverTurnUndo(row.threadId).pipe(
+              Effect.catchCause((cause) => Effect.logError('An interrupted chat undo needs recovery', { threadId: row.threadId, cause })),
+            )
+        }),
+      ).pipe(Effect.orDie)
       const inputBatches = makeInputBatches(sessionsScope, (threadId) =>
         Effect.gen(function* () {
           const running = threads.get(threadId)
@@ -1996,10 +2021,16 @@ export class Sessions extends Context.Service<
         }).pipe(Effect.catchCause((cause) => Effect.as(Effect.logWarning('Could not brief an aside that became work', cause), null)))
 
       /** Delivers the queued input as one turn, and records it to its end. */
+      const undoing = new Map<string, Deferred.Deferred<void>>()
       const deliver = (running: Running) =>
         Effect.gen(function* () {
+          if (undoing.has(running.thread.threadId)) return false
           const sql = yield* SqlClient.SqlClient
           const { thread } = running
+          if (
+            (yield* sql`SELECT 1 FROM turn_undo_recoveries WHERE thread_id = ${thread.threadId} AND state = 'prepared' LIMIT 1`).length > 0
+          )
+            return false
           // A coordinator or lead handing its work over takes no more turns. One whose context is filling up hands it over now,
           // between turns, never in one: what waits goes to the fresh session (ADR-031, ADR-038).
           if (running.stopping || running.handover === 'under_way' || threads.get(thread.threadId) !== running) return false
@@ -2209,6 +2240,17 @@ export class Sessions extends Context.Service<
             )
             .pipe(Effect.catchTag('TakenBack', () => Effect.succeed(false)))
           if (!claimed) return true
+          // System-only plan turns before the person speaks have no chat message to undo.
+          // Once chat undo is available, keep later system turns in the same restorable suffix.
+          if (
+            thread.role === 'task' &&
+            (inputs.some((input) => input.author === 'person' && input.shown === 1) ||
+              (yield* sql`SELECT 1 FROM turn_deliveries WHERE thread_id = ${thread.threadId} AND checkpoints IS NOT NULL AND undone_at IS NULL LIMIT 1`)
+                .length > 0)
+          )
+            yield* checkpointBeforeTurn(thread.threadId, turnId).pipe(
+              Effect.catchCause((cause) => Effect.logWarning('Could not checkpoint a chat turn', cause)),
+            )
           // What the person committed by hand since the lead's last turn is held before the lead reads anything, so it can't commit
           // on top of it first.
           if (thread.role === 'task')
@@ -2460,6 +2502,10 @@ export class Sessions extends Context.Service<
           }).pipe(Effect.ensuring(Deferred.succeed(promptSent, undefined)), Effect.exit)
           // What the turn left open is kept as far as it came: the message being written, and any command's output.
           yield* items.end.pipe(Effect.catchCause((cause) => Effect.logWarning('Could not record the end of a message', cause)))
+          if (thread.role === 'task')
+            yield* checkpointAfterTurn(turnId).pipe(
+              Effect.catchCause((cause) => Effect.logWarning('Could not finish a chat checkpoint', cause)),
+            )
           running.turnRunning = false
           running.promptSent = null
           running.turnEndedAt = yield* Clock.currentTimeMillis
@@ -3687,6 +3733,16 @@ export class Sessions extends Context.Service<
             yield* inLiveProject(input.threadId)
             yield* notAbandoned(input.threadId)
             const thread = yield* loadThread(input.threadId)
+            const sql = yield* SqlClient.SqlClient
+            const [recovery] =
+              yield* sql`SELECT 1 FROM turn_undo_recoveries WHERE thread_id = ${input.threadId} AND state = 'prepared' LIMIT 1`
+            if (recovery !== undefined)
+              return yield* new SessionFailed({
+                agentId: input.agentId,
+                reason: 'A chat undo recovery is still prepared.',
+                summary:
+                  'An interrupted chat undo needs recovery. Keep or move later file edits, then retry Undo from here before starting the agent.',
+              })
             const entry = yield* (yield* Agents).get(input.agentId)
             const account = yield* limits.pick({
               agentId: entry.definition.id,
@@ -3782,6 +3838,8 @@ export class Sessions extends Context.Service<
           const images = input.images ?? []
           const files = input.files ?? []
           const disposition = input.disposition ?? 'after_current'
+          const undo = undoing.get(input.threadId)
+          if (undo !== undefined) yield* Deferred.await(undo)
           const [thread] = yield* sql<{ projectId: ProjectId }>`SELECT project_id FROM threads WHERE id = ${input.threadId}`
           if (thread === undefined) return yield* new NotFound({ kind: 'thread', id: input.threadId })
           const accepted = yield* commands.execute({
@@ -4966,6 +5024,41 @@ export class Sessions extends Context.Service<
             ),
           ),
         takeBack: (input) => run(takeBack(input)),
+        undoTurn: (input) =>
+          run(
+            Effect.gen(function* () {
+              const sql = yield* SqlClient.SqlClient
+              const [item] = yield* sql<{ threadId: string }>`SELECT thread_id FROM thread_items WHERE id = ${input.itemId}`
+              if (item === undefined) return yield* new NotFound({ kind: 'message', id: input.itemId })
+              return yield* exclusive(
+                item.threadId,
+                Effect.gen(function* () {
+                  const [receipt] =
+                    yield* sql`SELECT 1 FROM command_receipts WHERE actor_id = ${input.envelope.actorId} AND command_id = ${input.envelope.commandId}`
+                  if (receipt !== undefined) return yield* undoConversation(input)
+                  const target = yield* undoTarget(input.itemId)
+                  yield* canUndoTask(target.taskId, target.threadId)
+                  const running = threads.get(item.threadId)
+                  if (running !== undefined && (running.turnRunning || running.background.size > 0 || running.callsOpen.size > 0))
+                    return yield* new UndoRefused({ message: 'Stop the agent and its background commands before undoing.', files: [] })
+                  const gate = yield* Deferred.make<void>()
+                  undoing.set(item.threadId, gate)
+                  return yield* Effect.gen(function* () {
+                    if (running !== undefined) yield* stopRunning(running, { state: 'completed', reason: 'stopped' })
+                    yield* recoverTurnUndo(item.threadId)
+                    return yield* undoConversation(input)
+                  }).pipe(
+                    Effect.ensuring(
+                      Effect.andThen(
+                        Effect.sync(() => undoing.delete(item.threadId)),
+                        Deferred.succeed(gate, undefined),
+                      ),
+                    ),
+                  )
+                }),
+              )
+            }),
+          ),
         setModel: (input) => run(setModel(input)),
         setEffort: (input) => run(setEffort(input)),
         chooseLead: (input) =>

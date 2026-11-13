@@ -45,6 +45,8 @@ yield* Effect.forkScoped(Layer.launch(connection(emitterPort(port))).pipe(Effect
 
 Commands from a person carry a `CommandEnvelope` (`Runtime.envelope` makes one), so a retry is answered from its receipt instead of running again.
 
+`Sessions.undoTurn` restores a delivered task message and the later conversation to its saved file boundary. It needs idle, private task worktrees and refuses overlapping later edits. Commits remain in history; restored files become local changes. A durable recovery journal protects interrupted restores, and the next agent starts from the retained transcript. See [Undo from a task message](../../docs/decisions/desktop-app.md#undo-from-a-task-message).
+
 ## Work on it
 
 From `packages/runtime`:

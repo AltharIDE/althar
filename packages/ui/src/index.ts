@@ -5,6 +5,7 @@
  */
 
 export * from './foundations/device'
+export * from './thread/UndoTurn/UndoTurnDialog'
 export * from './foundations/keys'
 export * from './foundations/vocabulary'
 export * from './foundations/vocabularyText'
@@ -58,6 +59,7 @@ export * from './primitives/Select/Select'
 export * from './primitives/Skeleton/Skeleton'
 export * from './primitives/Spinner/Spinner'
 export * from './primitives/SplitButton/SplitButton'
+export * from './primitives/MergeButton/MergeButton'
 export * from './primitives/Stream/Stream'
 export * from './primitives/VisuallyHidden/VisuallyHidden'
 export * from './board/Board/Board'

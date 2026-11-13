@@ -90,19 +90,6 @@
   grid-row: 1;
   visibility: hidden;
 }
-/* Usage sits below the model's name, with long account names wrapping inside the row. */
-.room {
-  grid-column: 1 / -1;
-  max-width: 100%;
-  white-space: normal;
-  overflow-wrap: anywhere;
-  text-align: left;
-}
-/* under a model drawn with its mark, the line starts where the name does: the mark and its gap in */
-.roomMarked {
-  padding-left: calc(14px + 5px);
-}
-
 /* A pick that asks first: what it would do, and the answer. */
 .ask {
   display: flex;

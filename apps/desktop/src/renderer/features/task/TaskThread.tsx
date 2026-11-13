@@ -385,10 +385,24 @@ const RoundView = memo(function RoundView({
 
 /** What the person said, which draws from nothing but itself. */
 const YouView = memo(
-  function YouView({ block, threadId }: { block: Block; threadId: string }) {
-    return <ThreadBlocks threadId={threadId} blocks={[block]} />
+  function YouView({
+    block,
+    threadId,
+    undoable,
+    onUndoFrom,
+  }: {
+    block: Block
+    threadId: string
+    undoable: boolean
+    onUndoFrom?: ((id: string) => void) | undefined
+  }) {
+    return <ThreadBlocks threadId={threadId} blocks={[block]} undoable={undoable ? [block.id] : []} onUndoFrom={onUndoFrom} />
   },
-  (before, after) => before.threadId === after.threadId && same(before.block, after.block),
+  (before, after) =>
+    before.threadId === after.threadId &&
+    before.undoable === after.undoable &&
+    before.onUndoFrom === after.onUndoFrom &&
+    same(before.block, after.block),
 )
 
 /** What the thread says of a task this task's lead started, before its title, which opens it. */
@@ -568,7 +582,15 @@ export function TaskThread({
           </div>
         )
       case 'you':
-        return <YouView key={block.id} block={block} threadId={threadId} />
+        return (
+          <YouView
+            key={block.id}
+            block={block}
+            threadId={threadId}
+            undoable={shared.undoable?.includes(block.id) === true}
+            onUndoFrom={shared.onUndoFrom}
+          />
+        )
       default:
         return <ThreadBlocks key={block.id} {...shared} blocks={[block as Block]} />
     }

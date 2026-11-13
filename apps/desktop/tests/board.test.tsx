@@ -1121,6 +1121,29 @@ describe('the board', () => {
     await waitFor(() => expect(answer).toHaveBeenCalledWith({ attentionId: 'a1', decision: 'allow' }))
   })
 
+  it('sends the dock’s explicit queue bypass through the shared merge action', async () => {
+    const merge = vi.fn(async () => {})
+    const { client } = fakeClient({
+      merge,
+      getBoard: vi.fn(async () => {
+        const read = board()
+        return {
+          ...read,
+          tasks: read.tasks.map((task) =>
+            task.taskId === 't4' && task.change !== null ? { ...task, change: { ...task.change, canBypassQueue: true } } : task,
+          ),
+        }
+      }),
+      getThread: vi.fn(async () => snapshot({ session: null, task: { ...snapshot().task, id: 't4' } })),
+    })
+    withServices(<Docked target={{ kind: 'task', id: 't4' }} />, client)
+    const dock = await screen.findByRole('complementary', { name: 'Beside the board' })
+    await userEvent.click(await within(dock).findByRole('button', { name: 'Other ways to merge' }))
+    expect(merge).not.toHaveBeenCalled()
+    await userEvent.click(screen.getByRole('menuitem', { name: 'Merge without queue' }))
+    await waitFor(() => expect(merge).toHaveBeenCalledWith('t4', 'abc123', 'https://github.com/meridian/api/pull/12', undefined, true))
+  })
+
   it('accepts a pull request by merging it, or sends it back with a note, and says when the host won’t', async () => {
     const merge = vi
       .fn<(taskId: string) => Promise<void>>()

@@ -493,6 +493,13 @@ export const AFTER_MERGE_REVIEWS = ['major', 'all', 'none'] as const
 export const AfterMergeRule = Schema.Literals(AFTER_MERGE_REVIEWS)
 export type AfterMergeRule = typeof AfterMergeRule.Type
 
+/** How new conversations choose an agent's account; `first` keeps automatic switching off. */
+export const AccountStrategy = Schema.Literals(['first', 'most_room', 'least_room', 'random', 'in_order'])
+export type AccountStrategy = typeof AccountStrategy.Type
+
+/** Shared by the runtime and the window's optimistic settings. */
+export const rotatesAccounts = (strategy: AccountStrategy): boolean => strategy !== 'first'
+
 /**
  * What a project's rules start from when it is made. A project made earlier keeps its own rules, and each is changed in a
  * project afterwards on its rules screen.
@@ -502,6 +509,7 @@ export const NewProjectDefaults = Schema.Struct({
   usageLimit: Schema.Literals(['move', 'wait', 'ask']),
   /** Whether work goes on with an agent's next account before the limit applies. */
   rotateAccounts: Schema.Boolean,
+  accountStrategy: AccountStrategy,
   /** How a task ends when its plan doesn't say. */
   end: Schema.Literals(['draft', 'ready', 'none']),
   /** Whether a lead's commits go up to its pull request on their own. */
@@ -523,7 +531,8 @@ export type NewProjectDefaultsChange = { readonly [Key in keyof NewProjectDefaul
 /** What a project's rules are made with when the person has chosen nothing. */
 export const NEW_PROJECT_DEFAULTS: NewProjectDefaults = {
   usageLimit: 'move',
-  rotateAccounts: false,
+  rotateAccounts: true,
+  accountStrategy: 'most_room',
   end: 'draft',
   pushCommits: true,
   postScreenshots: false,
@@ -1144,6 +1153,7 @@ export const ProjectRulesView = Schema.Struct({
   leadsReachWeb: Schema.Boolean,
   usageLimit: UsageLimit,
   rotateAccounts: Schema.Boolean,
+  accountStrategy: AccountStrategy,
   onlyAccounts: Schema.NullOr(Schema.Record(Schema.String, Schema.Array(Schema.String))),
   /** The person's patterns for branches and titles (`names.ts`), over what each repository says; null without one. */
   branchPattern: Schema.NullOr(Schema.String),
@@ -1597,6 +1607,8 @@ export const ChangeSummary = Schema.Struct({
    * host doesn't read them, or hasn't yet.
    */
   needs: Schema.optional(Schema.Array(MergeNeed)),
+  /** The host explicitly allows this viewer to merge without its queue; the action rechecks it. */
+  canBypassQueue: Schema.optional(Schema.Boolean),
 })
 export type ChangeSummary = typeof ChangeSummary.Type
 
@@ -3774,6 +3786,11 @@ export const ThreadSnapshot = Schema.Struct({
   accepting: Schema.optional(Schema.Literals(['now', 'queued'])),
   /** The complete visual collection, read independently of the thread's report limit. */
   gallery: Schema.optional(EvidenceGallery),
+
+  /** Changes when undo rewrites the visible conversation; pages from an older version must be dropped. */
+  conversationVersion: Schema.optional(Schema.Int),
+  /** Delivered messages with a complete file checkpoint, eligible for Undo from here. */
+  undoable: Schema.optional(Schema.Array(Schema.String)),
   cursor: Cursor,
   /** What the task used of each account its agents ran on, in every thread of it, its reviews' too (ADR-084). */
   usage: Schema.optional(Schema.Array(AccountUse)),
@@ -4576,6 +4593,14 @@ const socketCalls = new Set<string>([
 
 export const Disposition = Schema.Literals(['after_current', 'interrupt_and_continue'])
 
+/** The prompt returned to the composer after its turn and later conversation were undone. */
+export const UndoTurnResult = Schema.Struct({
+  prompt: Schema.String,
+  restored: Schema.Int,
+  messages: Schema.Array(UserMessageItem.fields.content),
+})
+export type UndoTurnResult = typeof UndoTurnResult.Type
+
 const call = <const Tag extends string, P extends Schema.Struct.Fields, S extends Schema.Top>(tag: Tag, payload: P, success: S) =>
   Rpc.make(tag, { payload, success, error: ApiError }).annotate(SocketAllowed, socketCalls.has(tag))
 
@@ -5130,6 +5155,7 @@ export const Api = RpcGroup.make(
     {
       usageLimit: Schema.optional(NewProjectDefaults.fields.usageLimit),
       rotateAccounts: Schema.optional(NewProjectDefaults.fields.rotateAccounts),
+      accountStrategy: Schema.optional(AccountStrategy),
       end: Schema.optional(NewProjectDefaults.fields.end),
       pushCommits: Schema.optional(NewProjectDefaults.fields.pushCommits),
       postScreenshots: Schema.optional(NewProjectDefaults.fields.postScreenshots),
@@ -5270,6 +5296,8 @@ export const Api = RpcGroup.make(
   ),
   /** Takes back a message still waiting its turn, by its item: to edit it, or to drop it. One the agent already has stays. */
   command('TakeBack', { itemId: Schema.String }, Schema.Void),
+  /** Restores the files and conversation before this delivered message, retaining the original record. */
+  command('UndoTurn', { itemId: Schema.String }, UndoTurnResult),
   /**
    * The person's answer to a step that needs them: tell its agent what to do,
    * hand it to an agent (on an account and model, where they picked one), or
@@ -5469,6 +5497,7 @@ export const Api = RpcGroup.make(
       leadsReachWeb: Schema.optional(Schema.Boolean),
       usageLimit: Schema.optional(UsageLimit),
       rotateAccounts: Schema.optional(Schema.Boolean),
+      accountStrategy: Schema.optional(AccountStrategy),
       onlyAccounts: Schema.optional(Schema.NullOr(Schema.Record(Schema.String, Schema.Array(Schema.String)))),
       /** Null goes back to what each repository says. */
       branchPattern: Schema.optional(Schema.NullOr(Schema.String)),
@@ -5551,6 +5580,8 @@ export const Api = RpcGroup.make(
       head: Schema.String,
       url: Schema.optional(Schema.String),
       how: Schema.optional(Schema.Literals(['review', 'now'])),
+      /** Explicitly merge without the host's queue, using the viewer's bypass permission. */
+      bypassQueue: Schema.optional(Schema.Boolean),
     },
     Schema.Void,
   ),

@@ -7,6 +7,7 @@ import { isAbsolute, join, resolve, sep } from 'node:path'
 
 import {
   type AfterMergeRule,
+  NEW_PROJECT_DEFAULTS,
   CheckoutAsk,
   AllowedBy,
   AttachedFile,
@@ -535,8 +536,13 @@ export const changeOf = (value: unknown, product: string, listening: boolean): C
     diverged: null,
   }
   // What merging it needs, as its host last said, with what Althar knows of it (DEV-204); what is left to push is counted later.
-  const needs = mergeNeedsOf(seen, Option.getOrNull(decodeRules(field(value, 'rules'))))
-  return needs === undefined ? seen : { ...seen, needs }
+  const rules = Option.getOrNull(decodeRules(field(value, 'rules')))
+  const needs = mergeNeedsOf(seen, rules)
+  return {
+    ...seen,
+    ...(needs === undefined ? {} : { needs }),
+    ...(state === 'open' && rules?.canBypassQueue !== undefined ? { canBypassQueue: rules.canBypassQueue } : {}),
+  }
 }
 
 const decodeLinks = Schema.decodeUnknownOption(Schema.Array(Unfurl))
@@ -659,6 +665,8 @@ export const itemOf = (row: ItemRow): ThreadItem | undefined => {
       }
     }
     case 'notice': {
+      // Quota belongs in Plan usage. Blocking work keeps its actionable task state.
+      if (text(content, 'source') === 'runtime' && text(content, 'about') === 'limit') return undefined
       const severity = text(content, 'severity')
       const description = text(content, 'description')
       const role = text(content, 'role')
@@ -1090,7 +1098,7 @@ export class Queries extends Context.Service<
                 AND EXISTS (SELECT 1 FROM node_attempts a JOIN nodes n ON n.id = a.node_id JOIN workflow_executions e ON e.id = n.execution_id
                   WHERE e.run_id = r.id AND a.state IN ('admitted', 'running', 'held'))) AS working,
             coalesce((SELECT json_extract(r.rules, '$.usageLimit') FROM policies r WHERE r.project_id = p.id ORDER BY r.revision DESC LIMIT 1), 'move') AS usage_limit,
-            coalesce((SELECT json_extract(r.rules, '$.accounts.rotate') FROM policies r WHERE r.project_id = p.id ORDER BY r.revision DESC LIMIT 1), 0) AS rotate_accounts,
+            coalesce((SELECT json_extract(r.rules, '$.accounts.rotate') FROM policies r WHERE r.project_id = p.id ORDER BY r.revision DESC LIMIT 1), ${NEW_PROJECT_DEFAULTS.rotateAccounts ? 1 : 0}) AS rotate_accounts,
             (SELECT json_extract(r.rules, '$.accounts.only') FROM policies r WHERE r.project_id = p.id ORDER BY r.revision DESC LIMIT 1) AS only_accounts,
             (SELECT t.id FROM threads t WHERE t.project_id = p.id AND t.kind = 'coordinator' AND t.owner_actor_id = ${instance.personId}) AS coordinator_thread_id
           FROM projects p WHERE p.archived_at IS NULL ORDER BY p.created_at DESC, p.id DESC`
@@ -1174,6 +1182,7 @@ export class Queries extends Context.Service<
             LEFT JOIN provider_sessions s ON s.id = i.provider_session_id
             LEFT JOIN user_inputs u ON u.id = i.user_input_id
             WHERE i.thread_id = ${threadId}
+              AND i.undone_at IS NULL
               -- A message taken back takes no place on a page; read by id, it says it was taken back.
               AND ${where.itemId === undefined ? sql`(u.state IS NULL OR u.state <> 'withdrawn')` : sql`i.id = ${where.itemId}`}
               AND ${where.before === undefined ? sql`1 = 1` : sql`i.sequence < ${where.before}`}
@@ -3135,7 +3144,7 @@ export class Queries extends Context.Service<
             FROM thread_items i JOIN threads t ON t.id = i.thread_id AND t.kind = 'task' JOIN tasks k ON k.id = t.task_id
             JOIN projects p ON p.id = i.project_id
             WHERE p.archived_at IS NULL AND i.created_at > ${from}
-              AND (i.kind = 'step_result' OR (i.kind = 'notice' AND json_extract(i.content, '$.about') IN ('limit', 'stall')))
+              AND (i.kind = 'step_result' OR (i.kind = 'notice' AND json_extract(i.content, '$.about') = 'stall'))
             ORDER BY i.created_at DESC, i.sequence DESC LIMIT ${EVENTS}`
           const events: Array<HomeEvent> = items.flatMap((row): ReadonlyArray<HomeEvent> => {
             const base = {
@@ -3948,6 +3957,22 @@ export class Queries extends Context.Service<
             },
             session: session === null ? null : { ...session, accepting },
             retryable: yield* (yield* Sessions).retryable(threadId),
+            conversationVersion:
+              (yield* sql<{ version: number }>`SELECT conversation_version AS version FROM threads WHERE id = ${threadId}`)[0]?.version ??
+              1,
+            undoable: (yield* sql<{ id: string }>`
+              SELECT i.id FROM thread_items i
+              WHERE i.thread_id = ${threadId} AND i.kind = 'user_message' AND i.undone_at IS NULL
+                AND EXISTS (SELECT 1 FROM turn_delivery_inputs di JOIN turn_deliveries d ON d.id = di.delivery_id
+                  WHERE di.user_input_id = i.user_input_id AND d.checkpoints IS NOT NULL
+                    AND d.undone_at IS NULL AND d.state NOT IN ('pending', 'delivered')
+                    AND i.sequence = (SELECT min(first.sequence) FROM turn_delivery_inputs batch
+                      JOIN thread_items first ON first.user_input_id = batch.user_input_id
+                      WHERE batch.delivery_id = d.id AND first.undone_at IS NULL)
+                    AND json_array_length(d.checkpoints) > 0
+                    AND NOT EXISTS (SELECT 1 FROM json_each(d.checkpoints) c WHERE json_extract(c.value, '$.after') IS NULL))`).map(
+              (row) => row.id,
+            ),
             attention: attention.map(callOf),
             items,
             earlier,

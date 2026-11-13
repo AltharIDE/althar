@@ -141,7 +141,7 @@ export const ChoosingAccounts: Story = {
     await userEvent.click(await page.findByRole('menuitemcheckbox', { name: 'Personal' }))
     await expect(args.onAllowedChange).toHaveBeenCalledWith('claude-code', ['work'])
     await expect(page.getByRole('menuitemcheckbox', { name: 'Work' })).toHaveAttribute('aria-disabled', 'true')
-    await userEvent.click(page.getByRole('menuitemradio', { name: 'Go on with the next' }))
+    await userEvent.click(page.getByRole('menuitemradio', { name: 'Least depleted first' }))
     await expect(args.onRotateChange).toHaveBeenCalledWith(true)
   },
 }
