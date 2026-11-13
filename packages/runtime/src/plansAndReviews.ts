@@ -1,5 +1,7 @@
 import {
   AFTER_MERGE_REVIEWS,
+  AccountStrategy,
+  rotatesAccounts,
   PLANS_AND_REVIEWS,
   type PlansAndReviews,
   type PlansAndReviewsChange,
@@ -31,6 +33,7 @@ const ROUNDS_OUT = 'review_rounds_out'
 
 const USAGE_LIMIT = 'new_project_usage_limit'
 const ROTATE = 'new_project_rotate_accounts'
+const ACCOUNT_STRATEGY = 'new_project_account_strategy'
 const END = 'new_project_end'
 const PUSH_COMMITS = 'new_project_push_commits'
 const POST_SCREENSHOTS = 'new_project_post_screenshots'
@@ -44,6 +47,7 @@ const ALL = [
   ROUNDS_OUT,
   USAGE_LIMIT,
   ROTATE,
+  ACCOUNT_STRATEGY,
   END,
   PUSH_COMMITS,
   POST_SCREENSHOTS,
@@ -93,6 +97,7 @@ export const roundsOutNow = Effect.map(plansAndReviewsOf, (settings) => settings
 export const newProjectDefaultsOf = Effect.map(rowsOf, (kept): NewProjectDefaults => ({
   usageLimit: choiceOf(kept.get(USAGE_LIMIT), ['move', 'wait', 'ask'], NEW_PROJECT_DEFAULTS.usageLimit),
   rotateAccounts: kept.get(ROTATE) === 'on',
+  accountStrategy: choiceOf(kept.get(ACCOUNT_STRATEGY), AccountStrategy.literals, kept.get(ROTATE) === 'on' ? 'most_room' : 'first'),
   end: choiceOf(kept.get(END), ['draft', 'ready', 'none'], NEW_PROJECT_DEFAULTS.end),
   pushCommits: switchOf(kept.get(PUSH_COMMITS), NEW_PROJECT_DEFAULTS.pushCommits),
   postScreenshots: switchOf(kept.get(POST_SCREENSHOTS), NEW_PROJECT_DEFAULTS.postScreenshots),
@@ -125,7 +130,14 @@ export const setPlansAndReviews = (change: PlansAndReviewsChange) =>
 export const setNewProjectDefaults = (change: NewProjectDefaultsChange) =>
   Effect.gen(function* () {
     if (change.usageLimit !== undefined) yield* keep(USAGE_LIMIT, unlessDefault(change.usageLimit, NEW_PROJECT_DEFAULTS.usageLimit))
-    if (change.rotateAccounts !== undefined) yield* keep(ROTATE, change.rotateAccounts ? 'on' : null)
+    if (change.accountStrategy !== undefined) {
+      yield* keep(ACCOUNT_STRATEGY, unlessDefault(change.accountStrategy, NEW_PROJECT_DEFAULTS.accountStrategy))
+      yield* keep(ROTATE, rotatesAccounts(change.accountStrategy) ? 'on' : null)
+    } else if (change.rotateAccounts !== undefined) {
+      yield* keep(ROTATE, change.rotateAccounts ? 'on' : null)
+      // Older callers still set the switch alone: turning it off must leave a matching strategy in Settings.
+      if (!change.rotateAccounts) yield* keep(ACCOUNT_STRATEGY, null)
+    }
     if (change.end !== undefined) yield* keep(END, unlessDefault(change.end, NEW_PROJECT_DEFAULTS.end))
     if (change.afterMergeReview !== undefined)
       yield* keep(AFTER_MERGE_REVIEW, unlessDefault(change.afterMergeReview, NEW_PROJECT_DEFAULTS.afterMergeReview))

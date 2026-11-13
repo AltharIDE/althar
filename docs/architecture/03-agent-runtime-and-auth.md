@@ -749,8 +749,11 @@ support is built, and checked again by the contract suite.
   off until the person turns it on (ADR-012).
 - A conversation stays on the account it runs on, for its session and its
   prompt cache.
-- A new session takes the first account, in the person's order, that is
-  allowed for the project, signed in, and not out of usage.
+- A new conversation chooses an allowed account by the project's strategy:
+  first account, least depleted, most depleted, random, or Settings order
+  ([the decision](../decisions/agents.md#accounts)). Signed-out and exhausted
+  accounts are skipped where switching is enabled; a conversation with room
+  stays on its account.
 - The account is not picked per message. Pinning a conversation to one
   account can come later.
 

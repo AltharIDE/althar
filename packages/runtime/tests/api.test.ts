@@ -1103,6 +1103,7 @@ describe('finished tasks’ folders, through the API', () => {
         assert.deepStrictEqual(before.newProjects, {
           usageLimit: 'move',
           rotateAccounts: false,
+          accountStrategy: 'first',
           end: 'draft',
           pushCommits: true,
           postScreenshots: false,
@@ -1117,6 +1118,7 @@ describe('finished tasks’ folders, through the API', () => {
         assert.deepStrictEqual(after.newProjects, {
           usageLimit: 'wait',
           rotateAccounts: true,
+          accountStrategy: 'most_room',
           end: 'draft',
           pushCommits: true,
           postScreenshots: false,
@@ -1229,6 +1231,7 @@ describe('project rules, through the API', () => {
           leadsReachWeb: true,
           usageLimit: 'move',
           rotateAccounts: false,
+          accountStrategy: 'first',
           onlyAccounts: null,
           branchPattern: null,
           titlePattern: null,

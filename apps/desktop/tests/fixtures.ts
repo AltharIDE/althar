@@ -78,6 +78,7 @@ export const projectRules: ProjectRulesView = {
   leadsReachWeb: true,
   usageLimit: 'move',
   rotateAccounts: false,
+  accountStrategy: 'first',
   onlyAccounts: null,
   branchPattern: null,
   titlePattern: null,
@@ -1188,6 +1189,7 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
       newProjects: {
         usageLimit: 'move',
         rotateAccounts: false,
+        accountStrategy: 'first',
         end: 'draft',
         pushCommits: true,
         postScreenshots: false,

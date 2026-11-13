@@ -77,6 +77,7 @@ import { missedReports } from './missedReports'
 import { PullRequestScreenshots } from './PullRequestScreenshots'
 import {
   accountsOf,
+  accountStrategyOf,
   allowsEverything,
   modeOf,
   movesIssues,
@@ -589,6 +590,7 @@ export const handlers = Api.toLayer(
         leadsReachWeb: rules.leadsReachWeb ?? true,
         usageLimit: usageLimitOf(rules),
         rotateAccounts: accounts.rotate,
+        accountStrategy: accountStrategyOf(rules),
         onlyAccounts: accounts.only ?? null,
         branchPattern: rules.branchPattern ?? null,
         titlePattern: rules.titlePattern ?? null,

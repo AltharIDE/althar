@@ -1,4 +1,11 @@
-import { type AfterMergeRule, commandStartOf, hostOf, NEW_PROJECT_DEFAULTS, type NewProjectDefaults } from '@althar/contracts'
+import {
+  AccountStrategy,
+  type AfterMergeRule,
+  commandStartOf,
+  hostOf,
+  NEW_PROJECT_DEFAULTS,
+  type NewProjectDefaults,
+} from '@althar/contracts'
 import { type ActorId, Ids, newId, type ProjectId, WorksIn } from '@althar/domain'
 import type { Ledger } from '@althar/persistence-sqlite'
 import { Context, type Crypto, Effect, Layer, Schema } from 'effect'
@@ -126,6 +133,7 @@ export const ProjectRules = Schema.Struct({
   accounts: Schema.optional(
     Schema.Struct({
       rotate: Schema.Boolean,
+      strategy: Schema.optional(AccountStrategy),
       only: Schema.optional(Schema.Record(Schema.String, Schema.Array(Schema.String))),
     }),
   ),
@@ -250,6 +258,12 @@ const sandboxWith = (rules: ProjectRules, change: NonNullable<ProjectRules['sand
 /** What a revision's rules say of accounts: no rotation, and every account, unless the person said otherwise. */
 export const accountsOf = (rules: ProjectRules): AccountRule => rules.accounts ?? { rotate: false }
 
+/** Older rules chose the most room when switching was on, and the first account when it was off. */
+export const accountStrategyOf = (rules: ProjectRules): AccountStrategy => {
+  const accounts = accountsOf(rules)
+  return accounts.rotate ? (accounts.strategy === undefined || accounts.strategy === 'first' ? 'most_room' : accounts.strategy) : 'first'
+}
+
 type Store = SqlClient.SqlClient | Ledger | Crypto.Crypto | Instance
 
 /** Writes a revision of a project's rules, recorded as a fact by whoever made it. */
@@ -284,7 +298,9 @@ export const insertRevision = (projectId: ProjectId, revision: number, rules: Pr
 export const startingRules = (defaults: NewProjectDefaults): ProjectRules => {
   const chosen: Partial<ProjectRules> = {
     ...(defaults.usageLimit === NEW_PROJECT_DEFAULTS.usageLimit ? {} : { usageLimit: defaults.usageLimit }),
-    ...(defaults.rotateAccounts ? { accounts: { rotate: true } } : {}),
+    ...(defaults.rotateAccounts
+      ? { accounts: { rotate: true, ...(defaults.accountStrategy === 'first' ? {} : { strategy: defaults.accountStrategy }) } }
+      : {}),
     ...(defaults.end === NEW_PROJECT_DEFAULTS.end ? {} : { end: defaults.end }),
     ...(defaults.pushCommits === NEW_PROJECT_DEFAULTS.pushCommits ? {} : { pushCommits: defaults.pushCommits }),
     ...(defaults.postScreenshots === NEW_PROJECT_DEFAULTS.postScreenshots ? {} : { postScreenshots: defaults.postScreenshots }),
