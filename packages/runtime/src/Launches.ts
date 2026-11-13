@@ -15,7 +15,8 @@ import { thisDevice } from './device'
 import { Fetches, type Wanted } from './Fetches'
 import { Instance } from './Instance'
 import { makeKeyedLock } from './keyedLock'
-import { endingLine, printedMore, servingAt, uncoloured } from './leftRunning'
+import { NotFound } from './errors'
+import { endingLine, printedMore, readable, servingAt, uncoloured } from './leftRunning'
 import { WORK, workOf } from './machine'
 import { addItem, updateItem } from './threads'
 import { Live } from './Live'
@@ -130,6 +131,8 @@ const SERVING_TRIES = 1_200
 const ANSWERING_WITHIN = Duration.seconds(30)
 /** How many of the last lines a run printed an agent reads, when it ended at once. */
 const LAST_LINES = 15
+/** How many runs that left the list, stopped, cleared or run again, still say what they printed: their cards stay in the thread. */
+const KEPT_AFTER = 24
 
 interface Binding {
   readonly id: string
@@ -186,6 +189,12 @@ export class Launches extends Context.Service<
     stop(id: string): Effect.Effect<void>
     /** Clears a run that ended by itself from the list. */
     clear(id: string): Effect.Effect<void>
+    /**
+     * What a run has printed, both streams, without colours: the end of it.
+     * It stays readable a while after the run leaves the list, for its card;
+     * none outlives Althar.
+     */
+    output(id: string): Effect.Effect<{ readonly text: string; readonly dropped: number }, NotFound>
     /**
      * Stops every run of the project, or only the task's, and clears those
      * that ended: the project is removed, or the task settled, and nothing is
@@ -249,6 +258,18 @@ export class Launches extends Context.Service<
       // Every run lives in this scope: closed, as Althar stops, each run's process group is stopped.
       const launchesScope = yield* Scope.fork(yield* Effect.scope, 'sequential')
       const launches = new Map<string, Launch>()
+      // Runs that left the list, the latest last: what each printed is still read from its card.
+      const leftBehind = new Map<string, Launch>()
+      /** Takes a run off the list, keeping what it printed to read, and what it prints still as its group stops. */
+      const forget = (launch: Launch) => {
+        launches.delete(launch.id)
+        leftBehind.delete(launch.id)
+        leftBehind.set(launch.id, launch)
+        for (const old of leftBehind.keys()) {
+          if (leftBehind.size <= KEPT_AFTER) break
+          leftBehind.delete(old)
+        }
+      }
       // A run's card an earlier launch left open says its run stopped: none outlives Althar.
       yield* provide(
         Effect.gen(function* () {
@@ -586,7 +607,7 @@ export class Launches extends Context.Service<
                         ended.runnableId === chosen.kept.id &&
                         ended.ended !== null
                       )
-                        launches.delete(ended.id)
+                        forget(ended)
                     const { binding } = chosen
                     const copy = input.taskId === null ? yield* runCopy(input.projectId, binding) : null
                     const at = copy?.path ?? places.find((place) => place.binding.id === binding.id)?.root ?? ''
@@ -842,7 +863,7 @@ export class Launches extends Context.Service<
                       ended.runnableId === chosen.id &&
                       ended.ended !== null
                     )
-                      launches.delete(ended.id)
+                      forget(ended)
                   return yield* launchIn({
                     id,
                     projectId: input.projectId,
@@ -875,7 +896,7 @@ export class Launches extends Context.Service<
           Effect.gen(function* () {
             const launch = launches.get(id)
             if (launch === undefined) return
-            launches.delete(id)
+            forget(launch)
             if (launch.ended === null) {
               yield* Scope.close(launch.scope, Exit.void)
               const at = yield* timestamp
@@ -892,7 +913,7 @@ export class Launches extends Context.Service<
         Effect.gen(function* () {
           const launch = launches.get(id)
           if (launch === undefined || launch.ended === null) return
-          launches.delete(id)
+          forget(launch)
           yield* told(launch.projectId)
         })
 
@@ -1464,6 +1485,13 @@ export class Launches extends Context.Service<
         start,
         stop,
         clear,
+        output: (id) =>
+          Effect.suspend(() => {
+            const launch = launches.get(id) ?? leftBehind.get(id)
+            return launch === undefined
+              ? Effect.fail(new NotFound({ kind: 'run', id }))
+              : Effect.succeed({ text: readable(launch.printed), dropped: 0 })
+          }),
         stopAll,
         ofProject: (projectId) => Effect.sync(() => ofProject(projectId)),
         processes: () =>

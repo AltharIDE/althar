@@ -895,7 +895,6 @@ export function ProjectView({
                                 run={(run) => (
                                   <RunOf
                                     run={run}
-                                    now={now}
                                     onStop={(id) => void model.stopLaunch(id)}
                                     onRunAgain={(taskId, runnableId, ref) => void model.runProject(taskId, runnableId, ref)}
                                   />

@@ -1,137 +1,274 @@
+import { Fragment, useRef } from 'react'
+
 import { Icon } from '../../foundations/Icon/Icon'
+import { useControlled } from '../../lib/controlled'
 import { cx } from '../../lib/cx'
+import { commandAtGlance, type CommandOption, readCommand } from '../../lib/runCommand'
+import { useStickToBottom } from '../../lib/stick'
+import { Button } from '../../primitives/Button/Button'
+import { CopyButton } from '../../primitives/CopyButton/CopyButton'
+import { IconButton } from '../../primitives/IconButton/IconButton'
 import { LinkButton } from '../../primitives/LinkButton/LinkButton'
 import { LiveDot } from '../../primitives/LiveDot/LiveDot'
+import { Popover } from '../../primitives/Popover/Popover'
 import { Spinner } from '../../primitives/Spinner/Spinner'
+import { JumpToLatest } from '../Furniture/Furniture'
+import { Terminal } from '../Terminal/Terminal'
 import s from './RunCard.module.css'
 
 /*
  * A run of the project Althar started itself, in the thread it was asked for
- * in: where it runs, the command, and where it answers, to open, with Stop.
- * It follows the run: starting until it says where it answers, then up, then
- * how it ended, by itself with the line that says why, or stopped, with Run
- * again. It stays in the thread once the run is over. Calm: its dot stays
- * still. What the project keeps it as leads, the command under it, quiet; each
- * keeps to a line, the whole on hover.
+ * in. At a glance, only what the person acts on: what runs, where it answers,
+ * to open, and Stop; how it ended, once it has, with the line that says why,
+ * and Run again. Its dot stays still. The command and what it printed are a
+ * press away, in a console over the card: the command at its head, read for
+ * a person, and its output under it, following the end until the person
+ * scrolls up. It stays in the thread once the run is over.
  */
 
 export interface RunCardText {
-  running: string
-  ran: string
-  /** Before it says where it answers. */
   starting: string
-  up: (since: string) => string
-  exited: (code: number | null) => string
-  stopped: (since: string) => string
+  failed: string
+  finished: string
+  stopped: string
   stop: string
-  stopLabel: (command: string) => string
+  stopLabel: (called: string) => string
   again: string
-  againLabel: (command: string) => string
+  againLabel: (called: string) => string
   openLabel: (url: string) => string
+  output: string
+  outputOf: (called: string) => string
+  copy: string
   label: (where: string) => string
 }
 
 export const runCardText: RunCardText = {
-  running: 'Running',
-  ran: 'Ran',
   starting: 'Starting',
-  up: (since) => `up for ${since}`,
-  exited: (code) => (code === null ? 'ended' : `exited ${code}`),
-  stopped: (since) => `stopped ${since}`,
+  failed: 'Failed',
+  finished: 'Finished',
+  stopped: 'Stopped',
   stop: 'Stop',
-  stopLabel: (command) => `Stop ${command}`,
+  stopLabel: (called) => `Stop ${called}`,
   again: 'Run again',
-  againLabel: (command) => `Run ${command} again`,
+  againLabel: (called) => `Run ${called} again`,
   openLabel: (url) => `Open ${url}`,
+  output: 'Output',
+  outputOf: (called) => `Output of ${called}`,
+  copy: 'Copy command',
   label: (where) => `Run of ${where}`,
 }
 
+/** What it printed, for its console: read while the console is open. */
+export interface RunOutput {
+  /** What it printed so far, the end of it; absent while it is read. */
+  readonly text?: string
+  /** It couldn't be read, in words. */
+  readonly error?: string
+}
+
 export interface RunCardProps {
-  /** Where it runs, in words: the task's title, or the default branch. */
+  /** Where it runs, in words: the task's title, the default branch, a branch. It names the card, and shows unless `ownThread`. */
   where: string
-  /** What the project keeps it as, in its Run list: Storybook. It leads, the command quiet under it. Without it, the command leads. */
+  /** It is in its own task's thread, whose header says where it runs already. */
+  ownThread?: boolean
+  /** What the project keeps it as, in its Run list: Storybook. Without it, what the command runs, at a glance. */
   name?: string
   command: string
   /** Where it answers, as the card says it: localhost:5173. Without it, it is starting. */
   url?: string
-  /** How long it has run, or when it ended: 2m, 4m ago. */
-  since: string
-  /** It ended: by itself, with its exit code where known and its last line; or stopped. */
+  /** It ended: by itself, with its exit code where known and the line that says why; or stopped. */
   ended?: { readonly code: number | null; readonly stopped: boolean; readonly last?: string }
-  /** Open where it answers, in the person's browser. Without it, the address is plain text. */
+  /** Open where it answers. Without it, the address is plain text. */
   onOpen?: () => void
   /** Stop it. Without it, no Stop. */
   onStop?: () => void
   /** Run it again, once it ended. Without it, no Run again. */
   onRunAgain?: () => void
+  /** What it printed. Without it, no console. */
+  output?: RunOutput
+  /** Its console is open: to read what it printed only while it is. */
+  outputOpen?: boolean
+  defaultOutputOpen?: boolean
+  onOutputOpenChange?: (open: boolean) => void
   className?: string
   text?: Partial<RunCardText>
 }
 
-export function RunCard({ where, name, command, url, since, ended, onOpen, onStop, onRunAgain, className, text }: RunCardProps) {
+type Phase = 'starting' | 'up' | 'failed' | 'finished' | 'stopped'
+
+const phaseOf = (url: string | undefined, ended: RunCardProps['ended']): Phase =>
+  ended === undefined ? (url === undefined ? 'starting' : 'up') : ended.stopped ? 'stopped' : ended.code === 0 ? 'finished' : 'failed'
+
+export function RunCard({
+  where,
+  ownThread = false,
+  name,
+  command,
+  url,
+  ended,
+  onOpen,
+  onStop,
+  onRunAgain,
+  output,
+  outputOpen,
+  defaultOutputOpen = false,
+  onOutputOpenChange,
+  className,
+  text,
+}: RunCardProps) {
   const t = { ...runCardText, ...text }
-  const bad = ended !== undefined && !ended.stopped && ended.code !== 0
+  const [open, setOpen] = useControlled(outputOpen, defaultOutputOpen, onOutputOpenChange)
+  const phase = phaseOf(url, ended)
+  const called = name ?? commandAtGlance(command)
+  const why = phase === 'failed' ? ended?.last : undefined
   return (
     <article className={cx(s.card, ended !== undefined && s.ended, className)} aria-label={t.label(where)}>
-      <div className={s.head}>
-        <span className={s.kicker}>
-          {ended === undefined ? <LiveDot /> : <Icon name="terminal" size={11} className={s.still} />}
-          <span>
-            {ended === undefined ? t.running : t.ran} · <span className={s.where}>{where}</span>
-          </span>
+      <span className={s.mark} aria-hidden="true">
+        {phase === 'starting' && <Spinner size="small" />}
+        {phase === 'up' && <LiveDot />}
+        {phase === 'failed' && <Icon name="close" size={11} className={s.bad} />}
+        {phase === 'finished' && <Icon name="check" size={11} />}
+        {phase === 'stopped' && <Icon name="square" size={10} className={s.faint} />}
+      </span>
+      <span className={s.main}>
+        <span className={cx(s.name, name === undefined && s.mono)} title={called}>
+          {called}
         </span>
-        {name === undefined ? (
-          <code className={s.command} title={command}>
-            {command}
-          </code>
-        ) : (
-          <>
-            <span className={s.name} title={name}>
-              {name}
-            </span>
-            <code className={s.sub} title={command}>
-              {command}
-            </code>
-          </>
-        )}
-      </div>
-      {ended !== undefined && !ended.stopped && ended.last !== undefined && (
-        <code className={s.last} title={ended.last}>
-          {ended.last}
-        </code>
-      )}
-      <div className={s.foot}>
-        {ended === undefined && url === undefined && (
-          <span className={s.status}>
-            <Spinner size="small" /> {t.starting}
-          </span>
-        )}
-        {ended === undefined && url !== undefined && (
-          <>
-            {onOpen ? (
-              <LinkButton className={s.open} aria-label={t.openLabel(url)} onClick={onOpen}>
-                {url} <Icon name="external" size={11} />
+        <span className={s.sub}>
+          {phase === 'up' && url !== undefined ? (
+            onOpen ? (
+              <LinkButton className={s.address} aria-label={t.openLabel(url)} onClick={onOpen}>
+                {url}
+                <Icon name="external" size={11} />
               </LinkButton>
             ) : (
-              <span className={s.open}>{url}</span>
-            )}
-            <span className={s.quiet}>{t.up(since)}</span>
-          </>
-        )}
-        {ended?.stopped === true && <span className={s.quiet}>{t.stopped(since)}</span>}
-        {ended !== undefined && !ended.stopped && <span className={cx(s.status, bad && s.bad)}>{t.exited(ended.code)}</span>}
-        <span className={s.gap} />
-        {ended === undefined && onStop && (
-          <LinkButton className={s.act} aria-label={t.stopLabel(command)} onClick={onStop}>
-            {t.stop}
-          </LinkButton>
-        )}
-        {ended !== undefined && onRunAgain && (
-          <LinkButton className={s.act} aria-label={t.againLabel(command)} onClick={onRunAgain}>
-            {t.again}
-          </LinkButton>
-        )}
-      </div>
+              <span className={s.address}>{url}</span>
+            )
+          ) : (
+            <span className={cx(s.word, phase === 'failed' && s.bad)}>{t[phase === 'up' ? 'starting' : phase]}</span>
+          )}
+          {why !== undefined &&
+            (output === undefined ? (
+              <code className={s.why} title={why}>
+                {why}
+              </code>
+            ) : (
+              <button type="button" className={cx(s.why, s.press)} title={why} aria-haspopup="dialog" onClick={() => setOpen(true)}>
+                {why}
+              </button>
+            ))}
+          {!ownThread && (
+            <span className={s.where} title={where}>
+              {where}
+            </span>
+          )}
+        </span>
+      </span>
+      {ended === undefined && onStop && (
+        <Button size="small" variant="quiet" className={s.act} aria-label={t.stopLabel(called)} onClick={onStop}>
+          {t.stop}
+        </Button>
+      )}
+      {ended !== undefined && onRunAgain && (
+        <Button size="small" className={s.act} aria-label={t.againLabel(called)} onClick={onRunAgain}>
+          {t.again}
+        </Button>
+      )}
+      {output !== undefined && (
+        <Popover
+          label={t.outputOf(called)}
+          trigger={<IconButton icon="terminal" label={t.output} size="small" tooltipAlign="end" aria-pressed={open} />}
+          placement="below"
+          align="end"
+          width={544}
+          padded={false}
+          open={open}
+          onOpenChange={setOpen}
+        >
+          <div className={s.console}>
+            <div className={s.head}>
+              <ReadCommand command={command} />
+              <CopyButton value={command} ghost text={{ copy: t.copy }} className={s.copy} />
+            </div>
+            <Printed output={output} running={ended === undefined} exit={phase === 'failed' ? (ended?.code ?? undefined) : undefined} />
+          </div>
+        </Popover>
+      )}
     </article>
+  )
+}
+
+/** An option with its value, kept to a line where it fits. */
+function Option({ option }: { option: CommandOption }) {
+  return (
+    <span className={s.part}>
+      <span className={s.flag}>{option.flag}</span>
+      {option.value !== undefined && (
+        <>
+          {option.joined === true ? <span className={s.eq}>=</span> : ' '}
+          <span className={s.value}>{option.value}</span>
+        </>
+      )}
+    </span>
+  )
+}
+
+/** The command as a prompt: the folder it runs in, quiet, then what it runs, in the syntax inks; long, it wraps under its own start. */
+function ReadCommand({ command }: { command: string }) {
+  const read = readCommand(command)
+  return (
+    <span className={s.prompt}>
+      {read.dir !== undefined && (
+        <span className={s.dir} title={read.dir}>
+          {read.dir}
+        </span>
+      )}
+      <code className={s.typed}>
+        {read.env.map(([key, value]) => (
+          <Fragment key={key}>
+            <span className={s.part}>
+              <span className={s.env}>{key}</span>
+              <span className={s.eq}>=</span>
+              <span className={s.value}>{value}</span>
+            </span>{' '}
+          </Fragment>
+        ))}
+        <span className={s.program}>{read.program}</span>
+        {read.words.map((word, i) => (
+          <Fragment key={i}> {word}</Fragment>
+        ))}
+        {read.options.map((option, i) => (
+          <Fragment key={i}>
+            {' '}
+            <Option option={option} />
+          </Fragment>
+        ))}
+      </code>
+    </span>
+  )
+}
+
+/** What it printed, following the end as more comes; scrolled up, it stays put, and Latest goes back down. */
+function Printed({ output, running, exit }: { output: RunOutput; running: boolean; exit: number | undefined }) {
+  const box = useRef<HTMLDivElement>(null)
+  const { atBottom, toBottom } = useStickToBottom(box, 12)
+  const lines = (output.text ?? '').split('\n')
+  // What follows the last newline is the line still being written.
+  const writing = lines.pop() ?? ''
+  if (!running && writing !== '') lines.push(writing)
+  const reading = output.text === undefined && output.error === undefined
+  return (
+    <div className={s.printed}>
+      <div ref={box} className={s.scroll}>
+        <Terminal
+          lines={lines}
+          {...(running && !reading ? { live: writing } : {})}
+          {...(reading ? { loading: true } : {})}
+          {...(output.error === undefined ? {} : { error: output.error })}
+          {...(exit === undefined ? {} : { exit })}
+        />
+      </div>
+      {!atBottom && <JumpToLatest onJump={toBottom} className={s.latest} />}
+    </div>
   )
 }

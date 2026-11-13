@@ -723,6 +723,7 @@ describe('the API', () => {
               GetRepositoryScripts: () => Effect.succeed([]),
               GetRunnableRefs: () => Effect.succeed([]),
               StopLaunch: () => Effect.void,
+              ReadLaunchOutput: () => Effect.succeed({ text: '', dropped: 0 }),
               ClearLaunch: () => Effect.void,
               PreferIssueCards: () => Effect.void,
               SetTaskIssuePart: () => Effect.void,
