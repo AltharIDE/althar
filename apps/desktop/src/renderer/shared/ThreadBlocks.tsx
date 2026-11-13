@@ -442,7 +442,9 @@ function ArrivalView({
   at,
   count,
   onPassOn,
+  'data-item': item,
 }: {
+  'data-item': string
   arrival: ArrivalContent
   at: string
   count: number
@@ -468,6 +470,7 @@ function ArrivalView({
       where={where}
       at={at}
       count={count}
+      data-item={item}
       mark={productBrand(arrival.source)}
       {...(foot === false ? {} : { foot })}
     >
@@ -661,6 +664,7 @@ export function ThreadBlocks({
         return (
           <ArrivalView
             key={block.id}
+            data-item={block.id}
             arrival={block.arrival}
             at={block.at}
             count={block.count}
