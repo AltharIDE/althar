@@ -239,6 +239,13 @@ export class Accounts extends Context.Service<
       const env = (account: Account): Readonly<Record<string, string>> => {
         const definition = definitionOf(account.agentId)
         if (definition === undefined) return {}
+        if (account.home === null && definition.home.managed === true) {
+          const home =
+            config.accountsRoot === undefined
+              ? definition.home.usual(process.env, homedir())
+              : join(config.accountsRoot, `${account.agentId}-usual`)
+          return { [definition.home.variable]: home }
+        }
         // The host Claude CLI cannot see the Flatpak's fresh home. Keep its
         // usual account in Althar's persistent profile and point both the
         // host CLI and bundled ACP at that same config directory.
@@ -330,6 +337,10 @@ export class Accounts extends Context.Service<
           Effect.sync(() => {
             const definition = definitionOf(account.agentId)
             const made = madeHere(account)
+            if (definition?.home.managed === true && account.home === null) {
+              const home = env(account)[definition.home.variable]
+              if (home !== undefined) mkdirSync(home, { recursive: true, mode: 0o700 })
+            }
             if (definition !== undefined && made !== undefined) link(definition, made)
             else if (
               definition !== undefined &&

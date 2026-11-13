@@ -1966,7 +1966,8 @@ export const handlers = Api.toLayer(
             }),
           ),
         ),
-      StartAccountSignIn: ({ commandId, accountId, way }) => once(commandId, api(accountSignIns.start({ accountId, way }))),
+      StartAccountSignIn: ({ commandId, accountId, way, host }) =>
+        once(commandId, api(accountSignIns.start({ accountId, way, ...(host === undefined ? {} : { host }) }))),
       GetAccountSignIn: ({ flowId }) => accountSignIns.get(flowId),
       PasteAccountSignInCode: ({ commandId, flowId, code }) => once(commandId, api(accountSignIns.paste(flowId, code))),
       CancelAccountSignIn: ({ commandId, flowId }) => once(commandId, api(accountSignIns.cancel(flowId))),

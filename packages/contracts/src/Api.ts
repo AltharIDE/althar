@@ -5389,7 +5389,7 @@ export const Api = RpcGroup.make(
   /** Signs an account in inside Althar, this way: its id, to ask how it stands. */
   command(
     'StartAccountSignIn',
-    { accountId: Schema.String, way: Schema.Literals(['browser', 'device']) },
+    { accountId: Schema.String, way: Schema.Literals(['browser', 'device']), host: Schema.optional(Schema.String) },
     Schema.Struct({ flowId: Schema.String, state: AccountSignInState }),
   ),
   call('GetAccountSignIn', { flowId: Schema.String }, AccountSignInState),

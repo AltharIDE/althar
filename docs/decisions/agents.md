@@ -24,7 +24,7 @@ An agent joins where Althar sees every command before it runs and can stop it. T
 3. **It was read at the version the ACP registry lists,** with permission options of known kinds.
 4. **Its vendor lets a third-party app use its sign-in,** or publishes it for any ACP client. Where the two disagree, the person is told before they sign in.
 
-Ten agents join: Claude Code, Codex, OpenCode, GitHub Copilot, Junie, Grok Build, Kimi Code, Mistral Vibe, Qwen Code and Google Antigravity. Each is the person's own install, except Copilot, which Althar can download because its license lets anyone install it. Each entry's `knownGaps` says what it does differently.
+Eleven connections join: Claude Code, Codex, OpenCode, GitHub Copilot, GitHub Copilot CLI, Junie, Grok Build, Kimi Code, Mistral Vibe, Qwen Code and Google Antigravity. The person's own install normally runs where present; native Copilot uses a managed OpenCode engine. Althar can download engines whose licenses allow it. Each entry's `knownGaps` says what it does differently.
 
 - **Google Antigravity** runs Google's own ACP server (`agy_acp_server.par`), as Orca runs it. Althar downloads it from Google only when the person asks, pinned by sha256, and there is no Windows build. Google's terms may count signing in from a third-party app as a breach, while Google lists the server for other editors. The sign-in says so before the person picks it.
 - **What holds an agent is data in its registry entry,** not code of its own. For example:
@@ -57,6 +57,22 @@ The packaged app ships the official Node build, at Electron's own Node version. 
 - **In dev and tests** the adapters run on Electron's binary as Node, with the fuse on there.
 
 The cost is about 120 MB unpacked (about 40 MB to download), and one more runtime to patch. A Node security release means raising `NODE_VERSION` and its digests, and raising Electron means raising Node with it.
+
+## Copilot without Copilot CLI
+
+**Decision, 13 November 2026. Owner: repository maintainers.** GitHub Copilot is a native connection in Althar, backed by a managed OpenCode engine. GitHub supplies the models; OpenCode supplies OAuth and the agent loop, over Althar's existing ACP boundary. It does not run GitHub Copilot CLI. The existing `copilot` connection stays as **GitHub Copilot CLI**, so existing accounts and work keep their identity. The new connection is `copilot-direct`.
+
+- **Sign in inside Althar.** Continue with GitHub uses github.com for personal and work accounts alike. A separate enterprise-address field accepts a hostname or HTTPS origin only. OpenCode's own non-interactive `auth login github-copilot --standalone --method device --answer …` owns the device flow and credentials. The code is shown and copyable while the browser opens. The screen says GitHub will ask to authorize OpenCode.
+- **Prepare it at the person's asking.** Continuing downloads a verified OpenCode 2.x engine where needed, through the existing installer. A personal OpenCode install never stands in for this engine. Cancelling during preparation prevents OAuth from starting afterwards; a failed preparation stays in the sign-in with a way to try again.
+- **Keep accounts apart.** Its usual account is under Althar's accounts root, and additional accounts each have their own home. No OpenCode credential or configuration file is copied into them. Both OAuth and work use private engine processes. The engine's cache and ordinary global configuration still follow OpenCode's normal locations.
+- **Offer only Copilot.** Inline `enabled_providers: ['github-copilot']` is preserved when adding skills, web permissions or review hardening. OpenCode turns this into provider-use policies, discovers the account's endpoint and allowed models, and applies GitHub's access decisions. Every command and edit still reaches Althar's normal permission handling.
+- **Confirm completion.** A successful login process is followed by a fresh account status read before the screen says it is signed in. An unrelated provider's credential does not establish Copilot access.
+
+This avoids a dependency on the enterprise's **Copilot CLI** permission. It does not override enterprise restrictions on OAuth applications, Copilot Chat, models, SSO or network access. Each organization may need to approve OpenCode's application. A live login and prompt on a CLI-disabled enterprise account remain a release validation step where no such account is available in development.
+
+**Alternatives:** owning a model loop would duplicate OpenCode's tools and approval integration; using the Copilot SDK would retain its runtime and an unverified policy dependency. Revisit the managed engine when GitHub publishes a suitable standalone model integration or maintaining the engine costs more than a native runtime.
+
+Reference: [OpenCode's Copilot provider](https://github.com/anomalyco/opencode/blob/f91b88efac039856f284979984ac43cd93bce8f5/packages/core/src/plugin/provider/github-copilot.ts), read against OpenCode 2.3.0's CLI and configuration. OpenCode is [MIT licensed](https://github.com/anomalyco/opencode/blob/f91b88efac039856f284979984ac43cd93bce8f5/LICENSE).
 
 ## Accounts
 

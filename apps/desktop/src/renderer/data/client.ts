@@ -589,6 +589,7 @@ export interface Client {
   readonly startAccountSignIn: (
     accountId: string,
     way: 'browser' | 'device',
+    host?: string,
   ) => Promise<{ readonly flowId: string; readonly state: AccountSignInState }>
   readonly getAccountSignIn: (flowId: string) => Promise<AccountSignInState>
   readonly pasteAccountSignInCode: (flowId: string, code: string) => Promise<void>
@@ -1048,7 +1049,8 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
     orderAccounts: (agentId, accountIds) => command((commandId) => api.OrderAccounts({ commandId, agentId, accountIds })),
     findAccounts: (agentId) => settle(api.FindAccounts({ agentId })).then((list) => list.found),
     signInAccount: (accountId) => command((commandId) => api.SignInAccount({ commandId, accountId })),
-    startAccountSignIn: (accountId, way) => command((commandId) => api.StartAccountSignIn({ commandId, accountId, way })),
+    startAccountSignIn: (accountId, way, host) =>
+      command((commandId) => api.StartAccountSignIn({ commandId, accountId, way, ...(host === undefined ? {} : { host }) })),
     getAccountSignIn: (flowId) => settle(api.GetAccountSignIn({ flowId })),
     pasteAccountSignInCode: (flowId, code) => command((commandId) => api.PasteAccountSignInCode({ commandId, flowId, code })),
     cancelAccountSignIn: (flowId) => command((commandId) => api.CancelAccountSignIn({ commandId, flowId })),

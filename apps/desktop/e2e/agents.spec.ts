@@ -24,15 +24,25 @@ test('shows every agent: those on this computer first, the rest to download or i
   const repo = repository(home)
   const { electronApp, page } = await launch(home, { ALTHAR_FAKE_EVERY_AGENT: '1' })
   try {
-    // The first screen, past the tour: the two on this computer in rows, the other eight in tiles, those Althar can fetch first.
+    // The first screen: the two installed agents and native Copilot in rows, the other eight in tiles.
     await pastTheTour(page)
     const rows = page.getByRole('list', { name: `Agents on ${here}` })
     await expect(rows.getByRole('listitem').filter({ hasText: 'Claude Code' }).first()).toBeVisible()
     const away = page.getByRole('list', { name: `Agents not on ${here}` })
     await expect(away.getByRole('listitem')).toHaveCount(8)
     await expect(away.getByRole('listitem').first()).toContainText('OpenCode')
-    await expect(away.getByRole('button', { name: /^Download GitHub Copilot, / })).toBeVisible()
+    await expect(away.getByRole('button', { name: /^Download GitHub Copilot CLI, / })).toBeVisible()
     await expect(away.getByRole('button', { name: 'How to install Junie' })).toBeVisible()
+    // Native Copilot starts with sign-in, including the enterprise form, without a separate download step.
+    const copilot = rows.getByRole('listitem').filter({ hasText: 'GitHub Copilot' }).first()
+    await copilot.getByRole('button', { name: 'Sign in', exact: true }).click()
+    await expect(copilot.getByRole('button', { name: 'Continue with GitHub', exact: true })).toBeVisible()
+    await expect(copilot.getByText('GitHub will ask you to authorize OpenCode. Usage is on your Copilot subscription.')).toBeVisible()
+    await copilot.getByRole('button', { name: 'Use a GitHub Enterprise address…' }).click()
+    await copilot.getByRole('textbox', { name: 'GitHub Enterprise address' }).fill('http://company.ghe.com')
+    await copilot.getByRole('button', { name: 'Continue', exact: true }).click()
+    await expect(copilot.getByText('Enter your GitHub Enterprise hostname, such as company.ghe.com.')).toBeVisible()
+    await copilot.getByRole('button', { name: 'Cancel signing in' }).click()
     await still(page)
     await page.screenshot({ path: 'test-results/agents-start.png', animations: 'disabled' })
 
@@ -42,7 +52,7 @@ test('shows every agent: those on this computer first, the rest to download or i
     await page.keyboard.press('ControlOrMeta+Shift+Comma')
     await page.getByRole('navigation', { name: 'Settings' }).getByRole('button', { name: 'Agents' }).click()
     const tabs = page.getByRole('tablist', { name: 'Agents' })
-    await expect(tabs.getByRole('tab')).toHaveCount(10)
+    await expect(tabs.getByRole('tab')).toHaveCount(11)
     await expect(tabs.getByRole('tab').first()).toHaveAccessibleName(/^Claude Code/)
     await expect(tabs.getByRole('tab').nth(1)).toHaveAccessibleName(/^Codex/)
     // The rest, after them and quieter, say they aren't here.
