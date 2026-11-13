@@ -649,6 +649,7 @@ describe('the API', () => {
                   ? Effect.void
                   : Effect.fail(new ApiError({ reason: 'Echo', message: `${body}: ${images.map((image) => image.name ?? '').join(',')}` })),
               TakeBack: () => Effect.die('unused'),
+              UndoTurn: () => Effect.die('unused'),
               AnswerQuestion: () => Effect.void,
               Answer: () => Effect.void,
               ListSkills: () => Effect.die('unused'),

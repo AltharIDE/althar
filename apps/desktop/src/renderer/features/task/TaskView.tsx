@@ -1,5 +1,6 @@
 import { EarlierTurns } from '../../shared/EarlierTurns'
 import { ThreadWaysContext } from '../../shared/ThreadBlocks'
+import { useTurnUndo } from './useTurnUndo'
 import { useNavigate } from '@tanstack/react-router'
 import { type CSSProperties, type ReactNode, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 
@@ -430,6 +431,12 @@ export function TaskView({
   const { client, host: servicesHost } = useServices()
   // Images and files to send with what the person says, and which agents take images.
   const images = useAttachments(kept, servicesHost)
+  const turnUndo = useTurnUndo(
+    model,
+    images,
+    (prompt) => setDraft((current) => withQueued(current, prompt)),
+    () => voice.inputRef.current,
+  )
   const models = useModels()
   // Whether the person has their team's reviews posted once drafted: what a review's reach says it posts.
   const postsTeamReviews = usePostTeamReviews()?.on === true
@@ -791,6 +798,7 @@ export function TaskView({
   const submit = (body: string, now: boolean) => {
     const own = images.take(receiver)
     if (own === null) return
+    turnUndo.dismiss()
     // The comments made beside the conversation go after the person's words, their crops after the person's own pictures where pictures go.
     const gathered = takeAll(kept)
     const pictures = receiver.takes !== false
@@ -1084,9 +1092,10 @@ export function TaskView({
         carried={<CarriedOver here={kept} />}
         // The lines about who answers go on the composer's edge, under the chip, so neither covers the other.
         notice={
-          model.error !== null || conflict !== null || line !== null || aside?.notice != null ? (
+          model.error !== null || conflict !== null || line !== null || aside?.notice != null || turnUndo.notice !== null ? (
             <>
               {aside?.notice}
+              {turnUndo.notice}
               {model.error !== null && (
                 <Problem
                   as="div"
@@ -1465,6 +1474,8 @@ export function TaskView({
                       {...(openFile === undefined ? {} : { openFile })}
                       session={session}
                       retryable={snapshot.retryable}
+                      undoable={snapshot.undoable}
+                      onUndoFrom={busy || model.pending ? undefined : turnUndo.ask}
                       project={snapshot.project.name}
                       // A failed turn is tried again here, unless its step waits on the person, whose call has its ways on.
                       {...(busy || stuckOpen ? {} : { onTryAgain: () => void model.tryAgain(), onCompact: () => void model.compact() })}
@@ -1592,6 +1603,7 @@ export function TaskView({
             </TaskFace>
           )}
           {host.lightbox}
+          {turnUndo.dialog}
           {changingTeam && (
             <ChangeTeam projectId={snapshot.project.id} task={teamed} agents={model.agents} onClose={() => setChangingTeam(false)} />
           )}

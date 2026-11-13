@@ -86,6 +86,12 @@ export class NothingToClear extends Schema.TaggedError<NothingToClear>()('Nothin
 
 export class RetryRefused extends Schema.TaggedError<RetryRefused>()('RetryRefused', {}) {}
 
+/** Undo could lose newer work, or has no complete checkpoint to restore. */
+export class UndoRefused extends Schema.TaggedError<UndoRefused>()('UndoRefused', {
+  message: Schema.String,
+  files: Schema.Array(Schema.String),
+}) {}
+
 /** The agent could not be started, or its session could not be set up. */
 export class SessionFailed extends Schema.TaggedError<SessionFailed>()('SessionFailed', {
   agentId: Schema.String,

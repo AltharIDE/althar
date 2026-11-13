@@ -302,6 +302,8 @@ export const words = (
         return 'An agent is already working on this task.'
       case 'RetryRefused':
         return 'There is no failed turn or lost connection to try again.'
+      case 'UndoRefused':
+        return `${text(error, 'message')}${Array.isArray(fieldOf(error, 'files')) ? ` ${(fieldOf(error, 'files') as unknown[]).join(', ')}` : ''}`.trim()
       case 'NoSession':
         return 'The task isn’t running.'
       case 'NothingToClear':
@@ -676,6 +678,7 @@ export const expected = new Set([
   'SessionRunning',
   'NoSession',
   'RetryRefused',
+  'UndoRefused',
   'NothingToClear',
   'AttentionClosed',
   'AlwaysNotOffered',

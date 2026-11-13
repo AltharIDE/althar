@@ -3770,6 +3770,11 @@ export const ThreadSnapshot = Schema.Struct({
   threadId: Schema.String,
   /** The complete visual collection, read independently of the thread's report limit. */
   gallery: Schema.optional(EvidenceGallery),
+
+  /** Changes when undo rewrites the visible conversation; pages from an older version must be dropped. */
+  conversationVersion: Schema.optional(Schema.Int),
+  /** Delivered messages with a complete file checkpoint, eligible for Undo from here. */
+  undoable: Schema.optional(Schema.Array(Schema.String)),
   cursor: Cursor,
   /** What the task used of each account its agents ran on, in every thread of it, its reviews' too (ADR-084). */
   usage: Schema.optional(Schema.Array(AccountUse)),
@@ -4570,6 +4575,14 @@ const socketCalls = new Set<string>([
 
 export const Disposition = Schema.Literals(['after_current', 'interrupt_and_continue'])
 
+/** The prompt returned to the composer after its turn and later conversation were undone. */
+export const UndoTurnResult = Schema.Struct({
+  prompt: Schema.String,
+  restored: Schema.Int,
+  messages: Schema.Array(UserMessageItem.fields.content),
+})
+export type UndoTurnResult = typeof UndoTurnResult.Type
+
 const call = <const Tag extends string, P extends Schema.Struct.Fields, S extends Schema.Top>(tag: Tag, payload: P, success: S) =>
   Rpc.make(tag, { payload, success, error: ApiError }).annotate(SocketAllowed, socketCalls.has(tag))
 
@@ -5264,6 +5277,8 @@ export const Api = RpcGroup.make(
   ),
   /** Takes back a message still waiting its turn, by its item: to edit it, or to drop it. One the agent already has stays. */
   command('TakeBack', { itemId: Schema.String }, Schema.Void),
+  /** Restores the files and conversation before this delivered message, retaining the original record. */
+  command('UndoTurn', { itemId: Schema.String }, UndoTurnResult),
   /**
    * The person's answer to a step that needs them: tell its agent what to do,
    * hand it to an agent (on an account and model, where they picked one), or

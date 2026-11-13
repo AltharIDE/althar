@@ -1,0 +1,27 @@
+.prompt {
+  margin: 0 0 16px;
+  padding: 12px 16px;
+  border: 1px solid var(--line-2);
+  border-radius: 10px;
+  background: var(--you-bubble);
+  color: var(--t-1);
+  font-family: var(--font-prose);
+  font-size: var(--prose-size);
+  line-height: 1.5;
+  max-height: 160px;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.note {
+  margin: 8px 0 0;
+  color: var(--t-3);
+  font-size: 12px;
+  line-height: 1.55;
+}
+.error {
+  margin: 16px 0 0;
+  color: var(--danger);
+  font-size: 12px;
+  line-height: 1.55;
+}

@@ -1174,6 +1174,7 @@ export class Queries extends Context.Service<
             LEFT JOIN provider_sessions s ON s.id = i.provider_session_id
             LEFT JOIN user_inputs u ON u.id = i.user_input_id
             WHERE i.thread_id = ${threadId}
+              AND i.undone_at IS NULL
               -- A message taken back takes no place on a page; read by id, it says it was taken back.
               AND ${where.itemId === undefined ? sql`(u.state IS NULL OR u.state <> 'withdrawn')` : sql`i.id = ${where.itemId}`}
               AND ${where.before === undefined ? sql`1 = 1` : sql`i.sequence < ${where.before}`}
@@ -3943,6 +3944,22 @@ export class Queries extends Context.Service<
             },
             session,
             retryable: yield* (yield* Sessions).retryable(threadId),
+            conversationVersion:
+              (yield* sql<{ version: number }>`SELECT conversation_version AS version FROM threads WHERE id = ${threadId}`)[0]?.version ??
+              1,
+            undoable: (yield* sql<{ id: string }>`
+              SELECT i.id FROM thread_items i
+              WHERE i.thread_id = ${threadId} AND i.kind = 'user_message' AND i.undone_at IS NULL
+                AND EXISTS (SELECT 1 FROM turn_delivery_inputs di JOIN turn_deliveries d ON d.id = di.delivery_id
+                  WHERE di.user_input_id = i.user_input_id AND d.checkpoints IS NOT NULL
+                    AND d.undone_at IS NULL AND d.state NOT IN ('pending', 'delivered')
+                    AND i.sequence = (SELECT min(first.sequence) FROM turn_delivery_inputs batch
+                      JOIN thread_items first ON first.user_input_id = batch.user_input_id
+                      WHERE batch.delivery_id = d.id AND first.undone_at IS NULL)
+                    AND json_array_length(d.checkpoints) > 0
+                    AND NOT EXISTS (SELECT 1 FROM json_each(d.checkpoints) c WHERE json_extract(c.value, '$.after') IS NULL))`).map(
+              (row) => row.id,
+            ),
             attention: attention.map(callOf),
             items,
             earlier,

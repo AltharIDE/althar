@@ -337,6 +337,7 @@ describe('the client', () => {
           ReopenTask: () => Effect.die('unused'),
           Send: () => Effect.die('unused'),
           TakeBack: () => Effect.die('unused'),
+          UndoTurn: () => Effect.die('unused'),
           Answer: () => Effect.die('unused'),
           AnswerQuestion: () => Effect.die('unused'),
           GetCoordinator: () => Effect.die('unused'),
