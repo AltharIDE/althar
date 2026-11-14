@@ -518,24 +518,63 @@ written Match the system follows the system. There is one dark, a warm one.
 ## The window on each desktop
 
 The window is dressed for the desktop it sits on, decided by Althar, not by a
-setting: the person asked that it belong without having to pick. The main
-process reads the desktop (`main/desktop.ts`, `main/desktopChrome.ts`) from
-the environment, the Settings portal, D-Bus, KDE's config files and, on X11,
-the window manager's name. The only programs it ever runs are `gdbus`,
-`xprop` and `gsettings`, with a timeout and no shell. Desktop programs
+setting: the person asked that it belong without having to pick. On Linux it
+has one bar wherever it can: Althar's own strip, with the window's buttons
+drawn at its end (or start) in the desktop's manner, as GNOME's own apps
+have it, on KDE and every other stacking desktop too. The person asked for
+this over the window manager's title bar above Althar's strip, for a more
+unified look. The main process reads the desktop (`main/desktop.ts`,
+`main/desktopChrome.ts`) from the environment, the Settings portal, D-Bus,
+gsettings, the desktop's config files and, on X11, the window manager's name
+and what it supports. The only programs it ever runs are `gdbus`, `xprop`
+and `gsettings`, with a timeout and no shell. Desktop programs
 (`plasmashell`, `kreadconfig6`) crash without a display or open dialogs, so a
 test holds the list.
 
-| Desktop | Frame | Althar's buttons |
-| --- | --- | --- |
-| macOS | inset title bar | none: the system's traffic lights |
-| Windows | frameless | Windows' manner, the bar's full height |
-| A tiling window manager | frameless | none |
-| GNOME and its family (Ubuntu, Pop, Budgie, Pantheon…) | frameless | GNOME's, in its `button-layout` order and side |
-| KDE Plasma | the window manager's | none |
-| Other stacking window managers on X11, and Wayland compositors that frame windows | the window manager's | none |
-| Anything else | frameless | GNOME's, plain, on the right |
+| Desktop | Frame | Althar's buttons | Side and order out of the box | Its own setting, read from |
+| --- | --- | --- | --- | --- |
+| macOS | inset title bar | none: the system's traffic lights | left | |
+| Windows | frameless | Windows' manner, the bar's full height | right: minimize, maximize, close | |
+| A tiling window manager | frameless | none | | |
+| GNOME and its remixes (Ubuntu, Pop, Zorin) | frameless | GNOME's | right: close | `org.gnome.desktop.wm.preferences button-layout`, through the portal, else gsettings |
+| Budgie | frameless | GNOME's, plain | right: minimize, maximize, close | the same key |
+| Pantheon | frameless | GNOME's, plain | close left, maximize right | the same key |
+| Unity | frameless | GNOME's, plain | left: close, minimize, maximize | the same key |
+| KDE Plasma | frameless | KDE's | right: minimize, maximize, close | kwinrc `ButtonsOnLeft`, `ButtonsOnRight` |
+| LXQt | frameless | KDE's | right: minimize, maximize, close | Openbox's `lxqt-rc.xml` on X11, or kwinrc where KWin runs |
+| Deepin | frameless | KDE's | right: minimize, maximize, close | |
+| Cinnamon | frameless | GNOME's, plain | right: minimize, maximize, close | `org.cinnamon.desktop.wm.preferences button-layout` |
+| MATE | frameless | GNOME's, plain | right: minimize, maximize, close | `org.mate.Marco.general button-layout` |
+| Xfce | frameless | GNOME's, plain | right: minimize, maximize, close | xfwm4's xfconf file, `button_layout` |
+| LXDE, Openbox | frameless | GNOME's, plain | right: minimize, maximize, close | Openbox's `lxde-rc.xml` or `rc.xml`, `titleLayout` |
+| COSMIC | frameless | GNOME's, plain | right: minimize, maximize, close | its toolkit's `show_minimize`, `show_maximize` |
+| labwc | frameless | GNOME's, plain | right: minimize, maximize, close | `rc.xml`, `<titlebar><layout>` |
+| Wayfire | frameless | GNOME's, plain | right: minimize, maximize, close | `wayfire.ini`, `[decoration] button_order` |
+| Another stacking window manager, or none known | frameless | GNOME's, plain | right: minimize, maximize, close | where its window manager is one above, there |
+| An X11 window manager that can't move a window on its asking | the window manager's | none | | |
 
+- **The system's frame stays in one case only:** an X11 window manager that
+  doesn't list `_NET_WM_MOVERESIZE` in `_NET_SUPPORTED`. A frameless window
+  is moved and resized by asking the window manager to do it, and such a one
+  wouldn't, so the window could be neither dragged nor resized. Every Wayland
+  compositor does it (`xdg_toplevel.move` and `resize` are xdg-shell's own),
+  and so do all the X11 window managers named above. A display with no
+  window manager that says so (none at all, or one from before EWMH) is
+  frameless: there is nothing to draw a frame.
+- **What the frame gave, the strip gives:** its empty stretches drag the
+  window, through the window manager; a double-click there maximizes and
+  restores (Chromium does it, by GTK's titlebar setting); the window resizes
+  from a few pixels inside its edges (Electron's frameless border); and the
+  buttons are real, named buttons reached by keyboard. The window manager's
+  right-click window menu isn't there yet: Electron doesn't ask for it on
+  Linux. Nor does a double-click follow KWin's own titlebar action, which
+  Chromium doesn't read.
+- **The buttons go where the desktop puts them:** its own setting where it
+  can be read, its own default where it can't, never a generic set. The
+  setting is read where the window manager that runs keeps it, so Xfce on
+  Mutter reads GNOME's key, LXQt on KWin kwinrc. A setting kept by a desktop
+  other than the one running (GNOME's key on Xfce, which the portal also
+  answers) is passed over. The first window waits for these quick reads.
 - **The frame is decided as the first window opens,** since Electron fixes
   it then. Slow reads don't hold the launch: what they found last time is
   cached in the profile (`window-chrome.json`) for the same desktop, so on
@@ -550,7 +589,8 @@ test holds the list.
   Althar keeps its own and says why.
 
 **Not built yet:** Windows' own caption buttons (`titleBarOverlay`), left
-until the build is checked on a real Windows machine.
+until the build is checked on a real Windows machine. The window manager's
+right-click menu on the strip, on Linux.
 
 ## Motion
 
@@ -601,3 +641,4 @@ A delivered task message with a complete checkpoint offers **Undo from here**. T
 - 10 Nov 2026: Scratch is a shelf of its own, by each chat's latest exchange, with Clear; the board card says one sentence across a task's changes with a mark for each; Shipped, Merged and Helper rows in the thread, a helper's opening in place to its work, and helpers' lanes on the Graph face; the plan card's preset picks another; Settings edits presets ([tasks](tasks.md#asides)).
 - 11 Nov 2026: asides over the coordinator's conversation replace Scratch's chip beside it; the chip stays with the board alone ([tasks](tasks.md#asides)).
 - 13 Nov 2026: the cache is patched by what the person does, at once, and held until a read confirms it ([foundations § The UI is instant](foundations.md#the-ui-is-instant)); it used to say the cache was never patched.
+- 14 Nov 2026: one bar on every Linux desktop but a tiling one, KDE and the other frame-drawing desktops included, with the buttons where each desktop puts them; the system's frame only where an X11 window manager can't move a frameless window ([The window on each desktop](#the-window-on-each-desktop)).
