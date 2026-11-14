@@ -1,11 +1,11 @@
 import { generateKeyPairSync, randomBytes, sign } from 'node:crypto'
-import { mkdtempSync, readFileSync, statSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, statSync, symlinkSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import { Api, clientProtocol } from '@althar/contracts'
 import { assert, describe, it } from '@effect/vitest'
-import { Deferred, Effect, Exit, Fiber, Layer, Option, Stream } from 'effect'
+import { Deferred, Effect, Exit, Fiber, Layer, Option, Scope, Stream } from 'effect'
 import { RpcClient } from 'effect/rpc'
 import { SqlClient } from 'effect/sql'
 
@@ -35,6 +35,37 @@ const client = (port: Parameters<typeof clientProtocol>[0]) =>
   })
 
 describe('the authenticated private API', () => {
+  it.live.skipIf(process.platform === 'win32')('refuses a symlink in place of its private endpoint directory', () =>
+    Effect.gen(function* () {
+      const profile = mkdtempSync(join(tmpdir(), 'althar-api-profile-'))
+      const external = mkdtempSync(join(tmpdir(), 'althar-api-external-'))
+      symlinkSync(external, join(profile, 'api'), 'dir')
+      const error = yield* Effect.flip(listenLocalApi(profile))
+      assert.strictEqual(error.reason, 'SocketUnavailable')
+      assert.isFalse(existsSync(join(external, 'endpoint.json')))
+    }).pipe(Effect.scoped, Effect.provide(environment)),
+  )
+
+  it.live('retires a launch’s socket and clients without deleting a newer endpoint descriptor', () =>
+    Effect.gen(function* () {
+      const profile = mkdtempSync(join(tmpdir(), 'althar-api-profile-'))
+      mkdirSync(join(profile, 'api'), { mode: 0o755 })
+      const launch = yield* Scope.make()
+      yield* Effect.addFinalizer(() => Scope.close(launch, Exit.void))
+      const first = yield* listenLocalApi(profile).pipe(Scope.provide(launch))
+      const port = yield* openApiSocket(first.address)
+      yield* authenticateApiClient(port, first.homeId, { kind: 'secret', secret: first.secret })
+      const api = yield* client(port)
+      yield* api.GetConnectionInfo({})
+      const second = yield* listenLocalApi(profile)
+      assert.notStrictEqual(first.secret, second.secret)
+      yield* Scope.close(launch, Exit.void)
+      assert.isTrue(Exit.isFailure(yield* Effect.exit(api.GetConnectionInfo({}))))
+      assert.deepStrictEqual(JSON.parse(readFileSync(join(profile, 'api', 'endpoint.json'), 'utf8')), second)
+      assert.strictEqual((yield* Effect.flip(openApiSocket(first.address))).reason, 'SocketUnavailable')
+    }).pipe(Effect.scoped, Effect.provide(environment)),
+  )
+
   it.live('publishes a private endpoint and gives a launch-secret client only socket authority', () =>
     Effect.gen(function* () {
       const profile = mkdtempSync(join(tmpdir(), 'althar-api-profile-'))

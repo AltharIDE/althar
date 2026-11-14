@@ -28,6 +28,78 @@ const keys = () => {
 }
 
 describe('authenticated client identities', () => {
+  it.effect('refuses malformed enrollment, unknown devices and forged home, actor or authority claims', () =>
+    Effect.gen(function* () {
+      const identities = yield* ClientIdentities
+      const instance = yield* Instance
+      const pair = keys()
+      const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_'
+      const noncanonical = pair.publicKey.slice(0, -1) + alphabet[alphabet.indexOf(pair.publicKey.at(-1) ?? '') + 1]
+      for (const input of [
+        { name: 'Bad key', publicKey: 'bad' },
+        { name: 'Noncanonical key', publicKey: noncanonical },
+        { name: '  ', publicKey: pair.publicKey },
+      ]) {
+        assert.strictEqual((yield* Effect.flip(identities.register({ ...input, role: 'socket' }))).reason, 'AuthenticationFailed')
+      }
+      const device = yield* identities.register({ name: 'CLI', publicKey: pair.publicKey, role: 'socket' })
+      const identity = { homeId: instance.homeId, actorId: instance.personId, deviceId: instance.deviceId, role: 'window' as const }
+      yield* identities.check(identity)
+      assert.strictEqual(
+        (yield* Effect.flip(identities.check({ ...identity, homeId: `home_${'0'.repeat(32)}` }))).reason,
+        'AuthenticationFailed',
+      )
+      assert.strictEqual(
+        (yield* Effect.flip(identities.check({ ...identity, actorId: `act_${'0'.repeat(32)}` }))).reason,
+        'AuthenticationFailed',
+      )
+      assert.strictEqual(
+        (yield* Effect.flip(identities.check({ ...identity, deviceId: device.deviceId, role: 'paired_device' }))).reason,
+        'ClientRevoked',
+      )
+      assert.strictEqual(
+        (yield* Effect.flip(identities.check({ ...identity, deviceId: device.deviceId, role: 'socket', actorId: `act_${'0'.repeat(32)}` })))
+          .reason,
+        'ClientRevoked',
+      )
+      assert.strictEqual((yield* Effect.flip(identities.challenge(instance.deviceId))).reason, 'AuthenticationFailed')
+      assert.strictEqual((yield* Effect.flip(identities.revoke(instance.deviceId))).reason, 'ClientNotFound')
+      const challenge = yield* identities.challenge(device.deviceId)
+      assert.strictEqual((yield* Effect.flip(identities.authenticate(challenge, 'malformed'))).reason, 'AuthenticationFailed')
+      yield* identities.revoke(device.deviceId)
+      yield* identities.revoke(device.deviceId)
+      assert.strictEqual((yield* identities.list()).clients[0]?.revision, 2)
+      assert.strictEqual(
+        (yield* Effect.flip(identities.register({ name: 'Reused revoked key', publicKey: pair.publicKey, role: 'socket' }))).reason,
+        'ClientAlreadyRegistered',
+      )
+    }).pipe(Effect.provide(env)),
+  )
+
+  it.effect('bounds enrollment and pending challenges across devices and reclaims expired or revoked capacity', () =>
+    Effect.gen(function* () {
+      const identities = yield* ClientIdentities
+      const devices = yield* Effect.forEach(
+        Array.from({ length: 100 }, (_, i) => i),
+        (i) => identities.register({ name: `Device ${i}`, publicKey: keys().publicKey, role: 'socket' }),
+      )
+      const extra = { name: 'Extra', publicKey: keys().publicKey, role: 'socket' as const }
+      assert.strictEqual((yield* Effect.flip(identities.register(extra))).reason, 'ClientLimit')
+      yield* Effect.forEach(devices.slice(0, 64), (device) =>
+        Effect.forEach(Array.from({ length: 8 }), () => identities.challenge(device.deviceId)),
+      )
+      const next = devices[64]
+      const first = devices[0]
+      if (next === undefined || first === undefined) throw new Error('Missing enrolled devices')
+      assert.strictEqual((yield* Effect.flip(identities.challenge(next.deviceId))).reason, 'AuthenticationFailed')
+      yield* TestClock.adjust('31 seconds')
+      yield* identities.challenge(next.deviceId)
+      yield* identities.revoke(first.deviceId)
+      yield* identities.register(extra)
+      assert.lengthOf((yield* identities.list({ limit: 100 })).clients, 100)
+    }).pipe(Effect.provide(env)),
+  )
+
   it.effect('paginates registered and revoked devices without dropping audit entries', () =>
     Effect.gen(function* () {
       const identities = yield* ClientIdentities
