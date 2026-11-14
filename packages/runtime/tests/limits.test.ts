@@ -39,6 +39,17 @@ import type { ToolAccess } from '../src/ToolServer'
 
 const HOUR = 60 * 60 * 1000
 
+it.live('returns unknown usage when a saved account no longer exists', () =>
+  Effect.gen(function* () {
+    const accounts = yield* Accounts
+    const limits = yield* Limits
+    const account = yield* accounts.add({ agentId: 'codex', name: 'temporary', folder: mkdtempSync(join(tmpdir(), 'althar-usage-')) })
+    yield* accounts.remove(account.id)
+    assert.isTrue(Option.isNone(yield* limits.room(account.id)))
+    assert.isTrue(Option.isNone(yield* limits.outAccount(account.id)))
+  }).pipe(Effect.provide(runtime())),
+)
+
 describe('automatic model selection', () => {
   it.live('does not reuse a failed session’s model while the available models are unknown', () =>
     Effect.gen(function* () {
