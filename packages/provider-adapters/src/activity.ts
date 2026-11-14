@@ -26,6 +26,8 @@ export interface SubAgentCall {
   readonly label: string
   readonly type?: string
   readonly model?: string
+  /** Its label stands in for what it was asked, which its input doesn't say yet: what a later update says replaces it. */
+  readonly guessed?: true
 }
 
 const record = (value: unknown): Readonly<Record<string, unknown>> | undefined =>
@@ -92,7 +94,7 @@ const codexWeb = (input: Readonly<Record<string, unknown>>): WebCall | undefined
 }
 
 /** The web call a tool call is, from what it says it is and its input; undefined for any other. */
-export const webCallOf = (kind: ToolKind | undefined, rawInput: unknown, meta?: unknown): WebCall | undefined => {
+export const webCallOf = (kind: ToolKind | undefined, rawInput: unknown, meta?: unknown, title?: string): WebCall | undefined => {
   const input = record(rawInput)
   // Claude Code's updates after the first name the tool again without its input: what the first said stands.
   if (input === undefined) return undefined
@@ -100,6 +102,8 @@ export const webCallOf = (kind: ToolKind | undefined, rawInput: unknown, meta?: 
   if (tool === 'WebSearch') return search(words(input['query'])) ?? { action: 'search', query: '' }
   if (tool === 'WebFetch') return fetched(words(input['url']))
   if (input['type'] === 'webSearch') return codexWeb(input)
+  // OpenCode's search, titled by its tool and of no kind of its own; its fetch is a fetch.
+  if (title?.trim().toLowerCase() === 'websearch') return search(words(input['query'])) ?? { action: 'search', query: '' }
   // Any other agent's fetch, by the address it reads.
   if (kind === 'fetch') return fetched(words(input['url'])) ?? search(words(input['query']))
   return undefined
@@ -111,7 +115,12 @@ export const subAgentOf = (title: string, rawInput: unknown, meta?: unknown): Su
   // Codex's: the call that spawns one, with what it was asked where it says.
   if (title === 'spawnAgent') {
     const model = words(input?.['model'])
-    return { label: line(words(input?.['prompt']) ?? 'Sub-agent'), ...(model === undefined ? {} : { model }) }
+    const asked = words(input?.['prompt'])
+    return {
+      label: line(asked ?? 'Sub-agent'),
+      ...(model === undefined ? {} : { model }),
+      ...(asked === undefined ? { guessed: true } : {}),
+    }
   }
   // As for a web call: an update without its input says nothing new of what it was asked.
   if (input === undefined) return undefined
@@ -120,14 +129,15 @@ export const subAgentOf = (title: string, rawInput: unknown, meta?: unknown): Su
   const model = words(input['model'])
   const described = words(input['description'])
   const asked = words(input['prompt'])
-  const of = (label: string): SubAgentCall => ({
-    label: line(label),
+  const of = (label: string | undefined): SubAgentCall => ({
+    label: line(label ?? (title.trim() === '' ? 'Sub-agent' : title)),
+    ...(label === undefined ? { guessed: true as const } : {}),
     ...(type === undefined ? {} : { type }),
     ...(model === undefined ? {} : { model }),
   })
   // Claude Code's Task, named Agent in later versions; and any agent's tool that names the kind of sub-agent it starts.
   if (tool === 'Task' || tool === 'Agent' || (type !== undefined && (described !== undefined || asked !== undefined)))
-    return of(described ?? asked ?? (title.trim() === '' ? 'Sub-agent' : title))
+    return of(described ?? asked)
   return undefined
 }
 

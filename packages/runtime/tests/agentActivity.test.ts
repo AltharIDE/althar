@@ -84,6 +84,49 @@ describe('what an agent does beyond the repository, in the thread', () => {
     }).pipe(Effect.provide(runtime())),
   )
 
+  it.live('lets what a sub-agent was asked replace the label that stood in for it, and a search keep its query', () =>
+    Effect.gen(function* () {
+      const where = yield* place
+      const record = recorder(where)
+      const subAgent = (toolCallId: string) =>
+        Effect.map(
+          row(where.threadId, toolCallId),
+          (one) => read('tool_call', one?.content)?.['subAgent'] as Record<string, unknown> | undefined,
+        )
+      // Claude Code's first call, before its input streamed in, then the update with it.
+      yield* record.record({
+        _tag: 'ToolCall',
+        toolCallId: 'task',
+        title: 'Task',
+        kind: 'think',
+        status: 'pending',
+        subAgent: { label: 'Task', guessed: true },
+      })
+      assert.strictEqual((yield* subAgent('task'))?.['label'], 'Task')
+      yield* record.record({
+        _tag: 'ToolCallUpdate',
+        toolCallId: 'task',
+        status: 'in_progress',
+        subAgent: { label: 'Find the readers', type: 'Explore' },
+      })
+      assert.deepStrictEqual(yield* subAgent('task'), { label: 'Find the readers', type: 'Explore' })
+      // A web search said with its query, then by an update with none.
+      yield* record.record({
+        _tag: 'ToolCall',
+        toolCallId: 'search',
+        title: 'Search',
+        kind: 'fetch',
+        status: 'pending',
+        web: { action: 'search', query: 'effect schema' },
+      })
+      yield* record.record({ _tag: 'ToolCallUpdate', toolCallId: 'search', status: 'completed', web: { action: 'search', query: '' } })
+      assert.deepStrictEqual(read('tool_call', (yield* row(where.threadId, 'search'))?.content)?.['web'], {
+        action: 'search',
+        query: 'effect schema',
+      })
+    }).pipe(Effect.provide(runtime())),
+  )
+
   it.live('keeps a fetch’s title without the query or fragment of the address it reads, refused or failed too', () =>
     Effect.gen(function* () {
       const where = yield* place
@@ -203,10 +246,11 @@ describe('what an agent does beyond the repository, in the thread', () => {
         _tag: 'ToolCallUpdate',
         toolCallId: 'task',
         status: 'completed',
-        subAgent: { label: 'Sub-agent' },
+        subAgent: { label: 'Sub-agent', guessed: true },
       })
       const after = read('tool_call', (yield* row(where.threadId, 'task'))?.content)?.['subAgent'] as Record<string, unknown> | undefined
       assert.strictEqual(after?.['label'], 'Find the readers')
+      assert.notProperty(after, 'guessed')
       const all = yield* items(where.threadId)
       const parentItem = all.findIndex((one) => one.toolCallId === 'task')
       const ids = yield* Effect.gen(function* () {

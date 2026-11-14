@@ -2630,7 +2630,7 @@ export class Sessions extends Context.Service<
           // A compaction the agent reported as one has its own line already: how far it took the context goes under it.
           const reported = compacting && state === 'completed' ? items.compaction() : undefined
           const span = compactedSpan(before, running.context)
-          if (reported !== undefined && span !== null) yield* Effect.ignore(items.describeCompaction(span))
+          if (reported === 'completed' && span !== null) yield* Effect.ignore(items.describeCompaction(span))
           // Otherwise a compaction says how far it took the context, as the agent says it; or that it didn't.
           if (compacting && state === 'completed' && reported === undefined)
             yield* addItem(

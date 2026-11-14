@@ -1029,7 +1029,8 @@ export const blocksOf = (
   const endOf = (index: number, span: { from: string; to: string }) => {
     const ended = source.turnEnded
     if (index !== lastOver || index === live || ended == null || Date.parse(ended) <= Date.parse(span.to)) return span.to
-    const since = merged.slice(index + 1).every((block) => block.kind === 'step')
+    // The line that says the person stopped it comes after it too.
+    const since = merged.slice(index + 1).every((block) => block.kind === 'step' || block.kind === 'interrupted')
     return since && (askedWhen == null || Date.parse(askedWhen) <= Date.parse(span.to)) ? ended : span.to
   }
   // Each item's turn, by which a block over is told where its time went.

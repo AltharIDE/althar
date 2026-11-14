@@ -437,7 +437,7 @@ export const normalize = (update: acp.SessionUpdate): SessionEvent => {
         ...defined(
           'web',
           anyMcpCallOf(update.title, update._meta) === undefined
-            ? webCallOf(asToolKind(update.kind), update.rawInput, update._meta)
+            ? webCallOf(asToolKind(update.kind), update.rawInput, update._meta, update.title)
             : undefined,
         ),
         ...defined('subAgent', subAgentOf(update.title, update.rawInput, update._meta)),
@@ -461,7 +461,7 @@ export const normalize = (update: acp.SessionUpdate): SessionEvent => {
         ...defined(
           'web',
           anyMcpCallOf(update.title ?? '', update._meta) === undefined
-            ? webCallOf(update.kind == null ? undefined : asToolKind(update.kind), update.rawInput, update._meta)
+            ? webCallOf(update.kind == null ? undefined : asToolKind(update.kind), update.rawInput, update._meta, update.title ?? undefined)
             : undefined,
         ),
         ...defined('subAgent', subAgentOf(update.title ?? '', update.rawInput, update._meta)),

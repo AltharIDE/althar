@@ -52,6 +52,15 @@ describe('webCallOf', () => {
     })
   })
 
+  it('reads OpenCode’s websearch, titled by its tool and of no kind of its own, by its query', () => {
+    assert.deepStrictEqual(webCallOf('other', { query: 'iana example domains' }, undefined, 'websearch'), {
+      action: 'search',
+      query: 'iana example domains',
+    })
+    assert.deepStrictEqual(webCallOf('search', {}, undefined, 'websearch'), { action: 'search', query: '' })
+    assert.isUndefined(webCallOf('other', { query: 'x' }, undefined, 'grep'))
+  })
+
   it('reads any other agent’s fetch by the address it reads, as OpenCode’s webfetch', () => {
     assert.deepStrictEqual(webCallOf('fetch', { url: 'https://opencode.ai/docs', format: 'markdown' }), {
       action: 'fetch',
@@ -99,7 +108,8 @@ describe('subAgentOf', () => {
     // Without its input, as its updates say it: nothing, so what it was asked stands.
     assert.isUndefined(subAgentOf('Task', undefined, claude('Task')))
     assert.isUndefined(subAgentOf('', undefined, claude('Agent')))
-    assert.deepStrictEqual(subAgentOf('Task', {}, claude('Task')), { label: 'Task' })
+    // Its first call, before its input streamed in: a label that stands in, which what it was asked replaces once said.
+    assert.deepStrictEqual(subAgentOf('Task', {}, claude('Task')), { label: 'Task', guessed: true })
     assert.deepStrictEqual(
       subAgentOf('Find the readers', { description: 'Find the readers', prompt: 'Look for…', subagent_type: 'Explore' }, claude('Agent')),
       { label: 'Find the readers', type: 'Explore' },
@@ -124,7 +134,7 @@ describe('subAgentOf', () => {
         model: 'gpt-5.5',
       },
     )
-    assert.deepStrictEqual(subAgentOf('spawnAgent', undefined), { label: 'Sub-agent' })
+    assert.deepStrictEqual(subAgentOf('spawnAgent', undefined), { label: 'Sub-agent', guessed: true })
   })
 
   it('is nothing for any other call, and for Codex’s other collab tools', () => {

@@ -97,14 +97,25 @@ const subAgentKept = (
         .join('\n')
         .trim()
     : ''
+  // What it was asked, as the agent last said it; a label that only stands in for it (`guessed`) never replaces one it had.
+  const { guessed, ...said } = event.subAgent ?? { guessed: true }
   return {
     subAgent: {
-      // What the first call said it was asked stands: a later update may say less of it.
-      ...event.subAgent,
-      ...had,
+      ...(guessed === true ? { ...said, ...had } : { ...had, ...said }),
       ...(report === '' ? {} : { said: report.length > REPORT_KEPT ? `${report.slice(0, REPORT_KEPT - 1)}…` : report }),
     },
   }
+}
+
+/** A web call as it stands: a search an update says no query of keeps the query it had. */
+const webKept = (
+  event: Extract<SessionEvent, { _tag: 'ToolCall' | 'ToolCallUpdate' }>,
+  stored: Readonly<Record<string, unknown>> | undefined,
+): { readonly web?: unknown } => {
+  if (event.web === undefined) return {}
+  const had = stored?.web as { readonly action?: unknown; readonly query?: unknown } | undefined
+  const empty = event.web.action === 'search' && event.web.query === ''
+  return empty && had?.action === 'search' && typeof had.query === 'string' && had.query !== '' ? {} : { web: event.web }
 }
 
 /** What the thread says of a compaction, as it stands: its line draws its own words, and a transcript reads these. */
@@ -694,7 +705,7 @@ export const recorder = (place: ItemPlace & { readonly sessionId: string }) => {
             ...(event.skill === undefined ? {} : { skill: { names: [event.skill], reported: true } }),
             ...mcpKept(event, existing?.content),
             ...serverDown(event),
-            ...(event.web === undefined ? {} : { web: event.web }),
+            ...webKept(event, existing?.content),
             ...subAgentKept(event, existing?.content),
             ...(typeof existing?.content.parent === 'string' ? {} : yield* parentKept(event)),
           }
