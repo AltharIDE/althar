@@ -70,7 +70,7 @@ describe('a conflict its pull request’s host reports, and a lead waiting on it
           Effect.flatMap(Sessions, (sessions) => sessions.running(threadId)),
           (running) => Option.exists(running, (session) => session.background.some((job) => job.ended === null)),
         )
-        yield* TestClock.adjust(Duration.seconds(61))
+        yield* TestClock.adjust(Duration.seconds(11))
         held.open('[tests:complete]')
         yield* titled(threadId, 'The lead resolved the conflict with main, in change.txt, and pushed the merge to PR #1.')
         yield* titled(threadId, 'The checks passed on PR #1.')
@@ -81,7 +81,7 @@ describe('a conflict its pull request’s host reports, and a lead waiting on it
         const [round] = yield* rounds(taskId)
         assert.deepStrictEqual([round?.state, round?.attempt], ['resolved', 1])
         assert.isFalse(conflictsIn(bare, 'main', 'althar/add-a-retry'))
-      }).pipe(Effect.provide(runtimeWith({ github }, { reports: Duration.minutes(1) }, undefined, { holds: held }))),
+      }).pipe(Effect.provide(runtimeWith({ github }, { reports: Duration.seconds(10) }, undefined, { holds: held }))),
     )
   })
 
