@@ -60,6 +60,20 @@ describe('what a whole-file diff says of a markdown file', () => {
     expect([...(marked?.marks.removed ?? [])]).toEqual([[3, ['`[guide]: https://old.example`']]])
   })
 
+  it('shows a definition replaced together with a fenced block, and leaves what is inside the fence as it was', () => {
+    const marked = markChanges(
+      diffOf(
+        '\n # Title\n\n See the [Guide][guide].\n\n-[guide]: https://old.example\n-```md\n-[inside]: https://in.example\n-```\n+[guide]: https://new.example\n+```md\n+[inside]: https://in.example\n+```\n',
+      ),
+    )
+    const gone = [...(marked?.marks.removed.values() ?? [])].flat().join('\n')
+    expect(gone).toContain('`[guide]: https://old.example`')
+    // The definition inside the fence is code, not a definition, and is not wrapped.
+    expect(gone).toContain('```md\n[inside]: https://in.example\n```')
+    expect(gone).not.toContain('`[inside]')
+    expect([...(marked?.marks.added ?? [])]).toContain(1)
+  })
+
   it('marks the links through a definition that was taken out, and one that is new', () => {
     const gone = markChanges(diffOf('\n # Title\n\n A [link][a] here.\n\n-[a]: https://a.example\n'))
     expect([...(gone?.marks.added ?? [])]).toEqual([1])
@@ -202,6 +216,8 @@ describe('a document in the side panel', () => {
     expect(screen.getByRole('radio', { name: /Source/ })).toBeChecked()
     expect(screen.queryByRole('group', { name: 'Added' })).toBeNull()
     expect(screen.queryByRole('heading', { name: 'Limits and reasons' })).toBeNull()
+    // Its source is what the task changed, as a diff.
+    expect(screen.getByRole('group', { name: 'README.md' })).toBeInTheDocument()
     fireEvent.click(screen.getByRole('radio', { name: /Rendered/ }))
     expect(screen.getByRole('heading', { name: 'Limits and reasons' })).toBeInTheDocument()
   })

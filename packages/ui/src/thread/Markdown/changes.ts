@@ -59,9 +59,23 @@ const refersTo = (block: string, label: string): boolean => {
 
 /** A removed run as markdown that can be read: a definition is no block of its own, so each is shown as the line it was. */
 const showingDefinitions = (lines: readonly string[]): string => {
-  if (lines.some((line) => /^ {0,3}(```|~~~)/.test(line))) return lines.join('\n')
+  // What is inside a fenced block is code, whatever it looks like; only a definition outside any is shown as the line it was.
+  let fence: { readonly mark: string; readonly size: number } | null = null
   return lines
-    .map((line) => (DEFINITION.test(line) ? `${line.includes('`') ? '`` ' : '`'}${line.trim()}${line.includes('`') ? ' ``' : '`'}` : line))
+    .map((line) => {
+      const edge = /^ {0,3}(`{3,}|~{3,})/.exec(line)?.[1]
+      if (fence !== null) {
+        if (edge !== undefined && edge[0] === fence.mark && edge.length >= fence.size && line.trim() === edge) fence = null
+        return line
+      }
+      if (edge !== undefined) {
+        fence = { mark: edge[0] ?? '`', size: edge.length }
+        return line
+      }
+      if (!DEFINITION.test(line)) return line
+      const ticks = line.includes('`')
+      return `${ticks ? '`` ' : '`'}${line.trim()}${ticks ? ' ``' : '`'}`
+    })
     .join('\n')
 }
 

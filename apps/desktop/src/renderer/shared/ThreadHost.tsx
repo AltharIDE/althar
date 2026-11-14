@@ -1,4 +1,4 @@
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { type CSSProperties, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 
 import {
@@ -24,6 +24,8 @@ import { PageView } from '../features/browser/PageView'
 import { CanvasHost, type OpenCanvas } from '../features/canvases/CanvasHost'
 import { type BenchWidth, PAGE_BENCH, useBenchWidth } from './code/bench'
 import { pictureOf } from './code/FilePicture'
+import { foundRead } from './code/finds'
+import { wholePath } from './handed'
 import { type CodeOpen, useChangedFile, useCodeHost } from './code/CodeHost'
 
 /*
@@ -243,6 +245,7 @@ const text = { beside: '(opens beside the conversation)' } as const
 export function DocumentPanel({
   threadId,
   taskId,
+  worktree = null,
   doc,
   version,
   onClose,
@@ -251,6 +254,8 @@ export function DocumentPanel({
   threadId: string
   /** The task whose folder the document is in, for what it changed there; null for none. */
   taskId?: string | null
+  /** The task's first worktree, which a path a card shows is from; null where it has none. */
+  worktree?: string | null
   doc: DocRef
   /** What the document was last changed by in the thread: a new one reads it again. */
   version: string
@@ -267,12 +272,23 @@ export function DocumentPanel({
     enabled: source !== undefined,
     refetchOnMount: 'always',
   })
-  // A markdown file the task changed shows what changed, read as the document is: by its path in the task's folder, again as it is edited.
-  const inTask = doc.path !== undefined && !doc.path.startsWith('/') && isMarkdownPath(doc.path)
-  const change = useChangedFile(taskId ?? null, doc.path ?? '', inTask && taskId != null, version)
+  // Which file it is where the thread's agent works, by its whole path: a task of several repositories names its files by their
+  // repository's name, and a card shows a path from the first one's worktree (or whole, for another's), so neither is the path read by.
+  const cache = useQueryClient()
+  const whole = source === undefined ? null : wholePath(source, worktree)
+  const markdown = whole !== null && isMarkdownPath(whole)
+  const located = useQuery({
+    ...foundRead(client, cache, threadId, null, [whole ?? '']),
+    enabled: markdown,
+  }).data?.get(whole ?? '')
+  const file = located?.kind === 'file' ? located : null
+  // A markdown file the task changed shows what changed, read as the document is, again as it is edited.
+  const change = useChangedFile(taskId ?? null, file?.path ?? '', file !== null && file.changed !== null && taskId != null, version)
   const code = useThreadShell().code
   const box = useRef<HTMLDivElement>(null)
-  const folder = doc.path === undefined ? '' : doc.path.slice(0, Math.max(0, doc.path.lastIndexOf('/')))
+  // Its pictures and links are beside it, where it is.
+  const where = file?.path ?? (doc.path === undefined || doc.path.startsWith('/') ? undefined : doc.path)
+  const folder = where === undefined ? null : where.slice(0, Math.max(0, where.lastIndexOf('/')))
   return (
     <div ref={box} style={{ display: 'contents' }}>
       <DocPanel
@@ -282,7 +298,7 @@ export function DocumentPanel({
         {...(onOpen === undefined ? {} : { onOpen })}
         {...(read.isError ? { error: messageOf(read.error) } : {})}
         // Its pictures are beside it, in the task's folder.
-        {...(doc.path === undefined
+        {...(folder === null
           ? {}
           : {
               file: {

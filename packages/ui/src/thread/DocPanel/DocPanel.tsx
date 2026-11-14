@@ -5,8 +5,9 @@ import { CopyButton, type CopyButtonText } from '../../primitives/CopyButton/Cop
 import { Problem } from '../../primitives/Problem/Problem'
 import { Skeleton } from '../../primitives/Skeleton/Skeleton'
 import { Segmented } from '../../primitives/Segmented/Segmented'
+import { DiffLineKind } from '../../foundations/vocabulary'
 import { CodeLines } from '../Code/CodeLines'
-import type { DiffLine } from '../Diff/Diff'
+import { Diff, type DiffLine } from '../Diff/Diff'
 import { isMarkdownPath, markChanges } from '../Markdown/changes'
 import { Markdown, type MarkdownFile } from '../Markdown/Markdown'
 import type { DocRef } from '../Shell/Shell'
@@ -66,6 +67,8 @@ export function DocPanel({ doc, onClose, onOpen, loading = false, error, file, c
   const [way, setWay] = useState<'rendered' | 'source'>('rendered')
   const page = doc.path !== undefined && isMarkdownPath(doc.path)
   const marked = change == null ? null : markChanges(change)
+  // Its source is what the task changed in it, as a diff, where it changed it; the file's lines as they are, where it didn't.
+  const diff = change?.some((line) => line.kind === DiffLineKind.Added || line.kind === DiffLineKind.Removed) ? change : null
   const keys = (event: KeyboardEvent<HTMLElement>) => {
     if (!page || event.key !== t.showKey || event.metaKey || event.ctrlKey || event.altKey || event.defaultPrevented) return
     const target = event.target as HTMLElement
@@ -121,6 +124,8 @@ export function DocPanel({ doc, onClose, onOpen, loading = false, error, file, c
           <Problem banner className={s.problem}>
             {error}
           </Problem>
+        ) : readable && page && way === 'source' && diff !== null ? (
+          <Diff lines={diff} label={doc.path ?? ''} path={doc.path ?? ''} fold={4} oldNumbers />
         ) : readable && page && way === 'source' ? (
           <CodeLines path={doc.path ?? ''} read={{ text: doc.body, from: 1, total: doc.body.split('\n').length, cut: false }} />
         ) : readable ? (

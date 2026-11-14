@@ -246,8 +246,10 @@ peeks at the lines; pressing it opens the whole file beside the conversation;
   marks the blocks that link through it and shows the old line where it stood;
   a markdown file moved with nothing else changed is read as it is and opens as
   a page. A document an agent handed back opens in the side panel the same way:
-  Rendered or Source, what the task changed marked, a link to a file opening on
-  top of it. A relative image or link is the file's
+  Rendered or Source (what the task changed, as a diff), what the task changed
+  marked, a link to a file opening on top of it; the file is found by its whole
+  path where the task works, so a task of several repositories names it, its
+  change and what it links to by their repository. A relative image or link is the file's
   neighbour: its path is resolved from the file's folder, an image is read
   from where the task works (`ReadCode` with `image`, only an image, only
   inside the task's folders, not past 8 MB) and drawn in place of its words, and
