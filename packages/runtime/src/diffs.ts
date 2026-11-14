@@ -131,7 +131,7 @@ export const baseOf = (worktree: string, baseRef: string | null, started: string
 
 /**
  * The files git tracks that a task changed since `base`, committed or not:
- * without reading any of them. Its three diffs run at once. With `head`, a
+ * without reading any of them. Names and sizes come from one diff. With `head`, a
  * commit, what changed between the two in a repository rather than a
  * worktree, as for a task whose folder was removed (ADR-056): nothing is
  * uncommitted there, and the working tree, the person's own, isn't read.
@@ -139,16 +139,24 @@ export const baseOf = (worktree: string, baseRef: string | null, started: string
 const trackedFiles = (worktree: string, base: string, head?: string) =>
   Effect.gen(function* () {
     const range = head === undefined ? [base] : [base, head]
-    const [named, numbered, uncommitted] = yield* Effect.all(
+    const [tracked, uncommitted] = yield* Effect.all(
       [
-        git(worktree, 'diff', '--name-status', '-z', '-M', ...range),
-        git(worktree, 'diff', '--numstat', '-z', '-M', ...range),
+        gitExactly(worktree, 'diff', '--raw', '--numstat', '-z', '-M', ...range),
         head === undefined ? git(worktree, 'diff', '--name-only', '-z', 'HEAD') : Effect.succeed(''),
       ],
       { concurrency: 'unbounded' },
     )
-    const statuses = reader(named)
-    const counts = reader(numbered)
+    const output = split(tracked)
+    const named: Array<{ readonly code: string; readonly path: string; readonly from: string | null }> = []
+    let at = 0
+    while (output[at]?.startsWith(':')) {
+      const code = (output[at++] ?? '').split(' ').at(-1) ?? ''
+      const first = output[at++] ?? ''
+      const from = code.startsWith('R') || code.startsWith('C') ? first : null
+      const path = from === null ? first : (output[at++] ?? '')
+      named.push({ code, path, from })
+    }
+    const counts = reader(output.slice(at).join('\0'))
     const dirty = new Set(split(uncommitted))
 
     // Sizes, by the path a file has now: `add del path`, or for a move `add del` then its old and new paths.
@@ -164,12 +172,10 @@ const trackedFiles = (worktree: string, base: string, head?: string) =>
     }
 
     const files: Array<ChangedFile> = []
-    while (statuses.more()) {
-      const code = statuses.next()
-      const from = code.startsWith('R') || code.startsWith('C') ? statuses.next() : null
-      const path = statuses.next()
+    for (const { code, from, path } of named) {
       // Both lists come from the same diff, so every file has its size.
-      const size = sizes.get(path) as { readonly add: number; readonly del: number; readonly binary: boolean }
+      const size = sizes.get(path)
+      if (size === undefined) return yield* Effect.fail(new Error(`Git reported no size for ${path}.`))
       files.push({
         path,
         from: code.startsWith('R') ? from : null,

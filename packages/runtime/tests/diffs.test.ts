@@ -5,9 +5,11 @@ import { join } from 'node:path'
 
 import { assert, describe, it } from '@effect/vitest'
 import { Effect } from 'effect'
+import { vi } from 'vitest'
 
 import { baseOf, changedBetween, changedFiles, changedStretch, fileDiff, parseDiff, unchangedFileDiff } from '../src/diffs'
 import { NotFound } from '../src/errors'
+import * as spawner from '../src/spawner'
 
 /** Windows, where what some tests stand on isn't (each says what). */
 const windows = process.platform === 'win32'
@@ -51,6 +53,51 @@ const changed = () => {
 }
 
 describe('what a task changed', () => {
+  it.effect('keeps filenames and their sizes together while an agent changes the worktree during a read', () =>
+    Effect.gen(function* () {
+      const root = mkdtempSync(join(tmpdir(), 'althar-diff-changing-'))
+      const git = (...args: Array<string>) => execFileSync('git', args, { cwd: root }).toString()
+      git('init', '-q')
+      writeFileSync(join(root, 'file.txt'), 'before\n')
+      git('add', '.')
+      git('-c', 'user.name=T', '-c', 'user.email=t@t.test', 'commit', '-q', '-m', 'Before')
+      const base = git('rev-parse', 'HEAD').trim()
+      writeFileSync(join(root, 'file.txt'), 'after\n')
+      const named = git('diff', '--name-status', '-z', base)
+      const spawn = spawner.startApart
+      const changed = () => writeFileSync(join(root, 'file.txt'), 'before\n')
+      const mocked = vi.spyOn(spawner, 'startApart').mockImplementation((...args) => {
+        const [command] = args
+        if (command.command === 'git' && command.args.includes('diff')) {
+          // A writer restores the file between separate name and size reads. A single combined read
+          // has both from the same snapshot, even when the file changes before the caller gets it.
+          if (command.args.includes('--name-status'))
+            return {
+              result: Promise.resolve({ code: 0, signal: null, error: null, over: false, stdout: named, stderr: '' }),
+              stop: () => undefined,
+            }
+          if (command.args.includes('--numstat')) {
+            if (!command.args.includes('--raw')) changed()
+            const running = spawn(...args)
+            return {
+              ...running,
+              result: running.result.then((result) => {
+                changed()
+                return result
+              }),
+            }
+          }
+        }
+        return spawn(...args)
+      })
+      const files = yield* changedFiles(root, base).pipe(Effect.ensuring(Effect.sync(() => mocked.mockRestore())))
+      assert.deepStrictEqual(
+        files.map(({ path, add, del, binary }) => ({ path, add, del, binary })),
+        [{ path: 'file.txt', add: 1, del: 1, binary: false }],
+      )
+    }),
+  )
+
   it.effect('lists each file with how it changed, how much, and whether all of it is committed', () =>
     Effect.gen(function* () {
       const { root, base } = changed()

@@ -23,6 +23,7 @@ import { Queries } from '../src/Queries'
 import { Runs } from '../src/Runs'
 import * as Runtime from '../src/Runtime'
 import { Sessions } from '../src/Sessions'
+import { removeWorktree } from '../src/worktreeRemoval'
 import { callTool, fakeConnectors, HOST, hosted, items, runtime, until } from './support'
 
 /*
@@ -785,7 +786,7 @@ describe('following what a lead does with git', () => {
         // A change whose folder the person removed is left as it is.
         yield* callTool(task.lead, 'start_change', { name: 'Gone' })
         const gone = yield* changeOf(task.taskId, 'Gone')
-        git(working, 'worktree', 'remove', '--force', gone.path)
+        yield* removeWorktree(working, gone.path)
         git(colours.path, 'switch', '-q', '-c', 'althar/lane-colours-2')
         yield* say(task.threadId, 'And now?')
         const [made] = yield* until(
