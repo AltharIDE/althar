@@ -130,6 +130,28 @@ const openCodeLike = (agentId: string): AgentDefinition => {
 }
 
 describe('the models each agent offers', () => {
+  it.live('asks again when an agent connection is replaced while the runtime stays open', () =>
+    Effect.gen(function* () {
+      const agents = yield* Agents
+      const models = yield* Models
+      const original = yield* until(models.catalog, (all) => all.every((one) => !one.probing))
+      assert.deepStrictEqual(
+        original[0]?.models.map((one) => one.id),
+        ['small', 'large'],
+      )
+      const entry = yield* agents.get('example')
+      agents.register?.({
+        ...entry,
+        transport: () => ({ _tag: 'InProcess', agent: fakeAgent({ models: [{ id: 'replacement', name: 'Replacement' }] }) }),
+      })
+      assert.isTrue((yield* models.catalog)[0]?.probing)
+      const replaced = yield* until(models.catalog, (all) => all.every((one) => !one.probing))
+      assert.deepStrictEqual(
+        replaced[0]?.models.map((one) => one.id),
+        ['replacement'],
+      )
+    }).pipe(Effect.provide(withAgents(['example'], definition))),
+  )
   it.live('are asked of an agent never run, once, in the background, then known', () =>
     Effect.gen(function* () {
       const models = yield* Models

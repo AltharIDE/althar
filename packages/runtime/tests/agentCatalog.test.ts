@@ -10,6 +10,7 @@ import { Effect, Layer } from 'effect'
 import { SqlClient } from 'effect/sql'
 import { until } from '@althar/testing/effect'
 import { Ids, newId } from '@althar/domain'
+import { compatibilityAgentMain } from '@althar/provider-adapters/testing'
 
 import { AgentCatalog } from '../src/AgentCatalog'
 import { Agents } from '../src/Config'
@@ -52,6 +53,51 @@ afterEach(() => {
 })
 
 describe('the person’s saved ACP connections', () => {
+  it.live('refuses saves when the runtime has a fixed agent list', () =>
+    Effect.gen(function* () {
+      const catalog = yield* AgentCatalog
+      const failed = yield* Effect.flip(catalog.save(connection()))
+      assert.include(failed.message, 'does not support adding agents')
+      assert.isEmpty((yield* catalog.read()).connections)
+    }).pipe(Effect.provide(baseRuntime())),
+  )
+  it.live('qualifies a real child process, records its exit, registers its version, then revokes qualification on edit', () =>
+    Effect.gen(function* () {
+      const catalog = yield* AgentCatalog
+      const agents = yield* Agents
+      const sql = yield* SqlClient.SqlClient
+      const spec = { ...connection(), command: 'bun', args: [compatibilityAgentMain] }
+      yield* catalog.save(spec)
+      yield* catalog.check(spec.id)
+      const result = yield* until(catalog.read(), (state) => state.connections[0]?.state !== 'checking')
+      assert.deepInclude(result.connections[0], { state: 'ready', version: '1.2.3', reason: null })
+      const transport = (yield* agents.get(spec.id)).transport(tmpdir())
+      if (transport._tag === 'Process') assert.strictEqual(transport.expectedVersion, '1.2.3')
+      const [process] = yield* sql<{
+        pid: number | null
+        state: string
+        endedAt: string | null
+      }>`SELECT pid, state, ended_at FROM processes WHERE purpose = 'probe'`
+      assert.isNotNull(process?.pid)
+      assert.strictEqual(process?.state, 'exited')
+      assert.isNotNull(process?.endedAt)
+      yield* catalog.save({ ...spec, name: 'Edited' })
+      assert.strictEqual((yield* catalog.read()).connections[0]?.state, 'unchecked')
+      assert.strictEqual((yield* Effect.flip(agents.get(spec.id)))._tag, 'UnknownAgent')
+    }).pipe(Effect.provide(runtime())),
+  )
+
+  it.live('reports the advertised modes when a real agent rejects the configured reader mode', () =>
+    Effect.gen(function* () {
+      const catalog = yield* AgentCatalog
+      const spec = { ...connection(), command: 'bun', args: [compatibilityAgentMain], readerMode: 'not-offered' }
+      yield* catalog.save(spec)
+      yield* catalog.check(spec.id)
+      const result = yield* until(catalog.read(), (state) => state.connections[0]?.state !== 'checking')
+      assert.strictEqual(result.connections[0]?.state, 'failed')
+      assert.include(result.connections[0]?.reason ?? '', 'offers: ask, read, bypass')
+    }).pipe(Effect.provide(runtime())),
+  )
   it.live('keeps connections unchanged while their conversations are active', () =>
     Effect.gen(function* () {
       const catalog = yield* AgentCatalog
@@ -221,6 +267,29 @@ describe('the person’s saved ACP connections', () => {
 })
 
 describe('registry metadata', () => {
+  it.live('coalesces concurrent refreshes and explains a network refusal without dropping the profiles', () => {
+    let rejectRemote: (reason: unknown) => void = () => undefined
+    const remote = new Promise<Response>((_resolve, reject) => {
+      rejectRemote = reject
+    })
+    void remote.catch(() => undefined)
+    const fetch = vi.fn(() => remote)
+    vi.stubGlobal('fetch', fetch)
+    return Effect.gen(function* () {
+      const catalog = yield* AgentCatalog
+      assert.isTrue((yield* catalog.read(true)).refreshing)
+      assert.isTrue((yield* catalog.read(true)).refreshing)
+      yield* until(
+        Effect.sync(() => fetch.mock.calls.length),
+        (count) => count === 1,
+      )
+      rejectRemote('offline')
+      const result = yield* until(catalog.read(), (state) => !state.refreshing)
+      assert.strictEqual(fetch.mock.calls.length, 1)
+      assert.include(result.problem ?? '', 'offline')
+      assert.isTrue(result.items.some((one) => one.id === 'cursor'))
+    }).pipe(Effect.provide(runtime()))
+  })
   for (const [name, response] of [
     ['an oversized advertised response', () => new Response('{}', { headers: { 'content-length': '2000001' } })],
     ['an oversized streamed response', () => new Response('x'.repeat(2000001))],
