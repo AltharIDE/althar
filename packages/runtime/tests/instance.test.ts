@@ -21,6 +21,8 @@ const database = () => join(mkdtempSync(join(tmpdir(), 'althar-profile-')), 'alt
 const alive = (pid: number) => {
   try {
     process.kill(pid, 0)
+    // Container init may leave an orphan's zombie unreaped. It has stopped executing and cannot be killed again.
+    if (process.platform === 'linux' && readFileSync(`/proc/${pid}/stat`, 'utf8').split(') ').at(-1)?.startsWith('Z')) return false
     return true
   } catch {
     return false
@@ -52,12 +54,38 @@ describe('the runtime instance', () => {
       const second = yield* launch
       assert.strictEqual(first.deviceId, second.deviceId)
       assert.strictEqual(first.personId, second.personId)
+      assert.strictEqual(first.homeId, second.homeId)
       assert.notStrictEqual(first.id, second.id)
       const ended = yield* Effect.gen(function* () {
         const sql = yield* SqlClient.SqlClient
         return yield* sql<{ id: string; endedAt: string | null }>`SELECT id, ended_at FROM runtime_instances ORDER BY started_at, id`
       }).pipe(Effect.provide(runtime(file)))
       assert.isTrue(ended.slice(0, 2).every((row) => row.endedAt !== null))
+    }),
+  )
+
+  it.live('pins the host device even when an older client device exists, including on upgrade', () =>
+    Effect.gen(function* () {
+      const file = database()
+      const first = yield* Effect.gen(function* () {
+        const instance = yield* Instance
+        const sql = yield* SqlClient.SqlClient
+        yield* sql`INSERT INTO devices ${sql.insert({ id: yield* newId(Ids.device), name: 'Older remote device', createdAt: '2000-01-01T00:00:00.000Z' })}`
+        return instance
+      }).pipe(Effect.provide(runtime(file)))
+      const second = yield* Effect.gen(function* () {
+        const instance = yield* Instance
+        assert.strictEqual(instance.homeId, first.homeId)
+        assert.strictEqual(instance.deviceId, first.deviceId)
+        // Simulate a profile from before home identities were recorded.
+        yield* (yield* SqlClient.SqlClient)`DELETE FROM runtime_homes`
+        return instance
+      }).pipe(Effect.provide(runtime(file)))
+      const upgraded = yield* Effect.gen(function* () {
+        return yield* Instance
+      }).pipe(Effect.provide(runtime(file)))
+      assert.strictEqual(upgraded.deviceId, second.deviceId)
+      assert.strictEqual(upgraded.personId, second.personId)
     }),
   )
 

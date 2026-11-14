@@ -45,6 +45,18 @@ describe('bumpRevision', () => {
     }).pipe(Effect.provide(Env)),
   )
 
+  it.effect('finds a registered client by its device and rejects a stale credential revision', () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const { deviceId, actorId, createdAt } = yield* seed
+      yield* sql`INSERT INTO client_devices ${sql.insert({ deviceId, actorId, publicKey: 'A'.repeat(43), role: 'socket', createdAt })}`
+      assert.strictEqual(yield* bumpRevision('client_devices', deviceId, 1), 2)
+      const stale = yield* Effect.flip(bumpRevision('client_devices', deviceId, 1))
+      assert.instanceOf(stale, RevisionConflict)
+      assert.strictEqual(stale.actual, 2)
+    }).pipe(Effect.provide(Env)),
+  )
+
   // Policies and graph revisions are immutable rows; their `revision` numbers a version, not a concurrency check.
   it.effect('covers exactly the tables with a revision column', () =>
     Effect.gen(function* () {

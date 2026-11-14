@@ -1,4 +1,4 @@
-import { randomBytes } from 'node:crypto'
+import { generateKeyPairSync, randomBytes } from 'node:crypto'
 import { execFileSync } from 'node:child_process'
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -46,6 +46,7 @@ import { Projects } from '../src/Projects'
 import * as Runtime from '../src/Runtime'
 import { ALWAYS } from '../src/sandboxReach'
 import { Folders } from '../src/Folders'
+import { ClientIdentities } from '../src/ClientIdentities'
 import { listProcesses, marksOf, WORK } from '../src/machine'
 import { itemOf, stuckOf } from '../src/Queries'
 import { agentSaid, summarize, words } from '../src/words'
@@ -111,12 +112,19 @@ const connected = (
         checksAppear: Duration.zero,
       }),
     )
+    let boundSender: MessageSender = options.sender ?? { kind: 'window' }
+    if (boundSender.kind === 'paired_device') {
+      const publicKey = generateKeyPairSync('ed25519').publicKey.export({ format: 'jwk' }).x
+      if (publicKey === undefined) throw new Error('Missing Ed25519 public key')
+      const registered = yield* Context.get(context, ClientIdentities).register({ name: 'Test phone', publicKey, role: 'paired_device' })
+      boundSender = { kind: 'paired_device', deviceId: registered.deviceId }
+    }
     // Each window's connection runs on a fiber of its own, as in the app: it ends when its client goes.
     yield* Effect.forkScoped(
       Layer.launch(
         connection(
           emitterPort(channel.port1, (data) => data),
-          options.sender ?? { kind: 'window' },
+          boundSender,
         ),
       ).pipe(Effect.provideContext(context)),
     )
@@ -126,7 +134,7 @@ const connected = (
     const grant = (path: string) => Context.get(context, Folders).allow(path)
     /** Reads or writes the runtime's store directly, for what no client does. */
     const store = <A, E>(effect: Effect.Effect<A, E, SqlClient.SqlClient>) => effect.pipe(Effect.provideContext(context))
-    return { client, grant, store, context }
+    return { client, grant, store, context, boundSender }
   })
 
 /** The fake agents, with one of them changed: to make what Althar asks of it fail. */
@@ -3303,7 +3311,7 @@ describe('connection authority', () => {
     it.live(`keeps ${sender.kind} as the source when the person tells a stuck lead what to do`, () =>
       Effect.scoped(
         Effect.gen(function* () {
-          const { client, grant, context, store } = yield* connected({ sender })
+          const { client, grant, context, store, boundSender } = yield* connected({ sender })
           const project = yield* client.OpenProject({ commandId: commandId(), grant: yield* grant(repository()) })
           const task = yield* client.StartTask({
             commandId: commandId(),
@@ -3335,7 +3343,7 @@ describe('connection authority', () => {
             (rows) => rows.length === 1,
           )
           assert.strictEqual(rows[0]?.senderKind, sender.kind)
-          assert.strictEqual(rows[0]?.senderDeviceId, sender.kind === 'paired_device' ? sender.deviceId : null)
+          assert.strictEqual(rows[0]?.senderDeviceId, boundSender.kind === 'paired_device' ? boundSender.deviceId : null)
           assert.strictEqual(rows[0]?.origin, 'person')
           const turn = JSON.parse(
             yield* Effect.provideContext(
@@ -3356,7 +3364,7 @@ describe('connection authority', () => {
     it.live(`records ${sender.kind} from its connection and delivers its explicit turn origin`, () =>
       Effect.scoped(
         Effect.gen(function* () {
-          const { client, context, store } = yield* connected({ sender })
+          const { client, context, store, boundSender } = yield* connected({ sender })
           // Seed the project internally, since a socket is not allowed to open folders on the person's behalf.
           const project = yield* Effect.provideContext(
             Effect.gen(function* () {
@@ -3395,7 +3403,7 @@ describe('connection authority', () => {
           assert.isTrue(
             rows.every((row) => row.senderKind === sender.kind && row.origin === (sender.kind === 'socket' ? 'system' : 'person')),
           )
-          assert.strictEqual(rows[0]?.senderDeviceId, sender.kind === 'paired_device' ? sender.deviceId : null)
+          assert.strictEqual(rows[0]?.senderDeviceId, boundSender.kind === 'paired_device' ? boundSender.deviceId : null)
           // The message travelled over RPC and Sessions opened this live delivery; no turn rows are seeded.
           let acts = 0
           const first = rows[0]!

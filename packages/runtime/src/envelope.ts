@@ -1,7 +1,8 @@
-import { type ActorId, CommandEnvelope, CommandId, Ids, newId, now } from '@althar/domain'
+import { ActorId, CommandEnvelope, CommandId, DeviceId, Ids, newId, now } from '@althar/domain'
 import { Effect, Schema } from 'effect'
 
 import { Instance } from './Instance'
+import { CurrentClient } from './ClientContext'
 
 /**
  * A command, ready to send: from the person using this profile unless another
@@ -11,13 +12,15 @@ import { Instance } from './Instance'
 export const envelope = (commandType: string, payload: unknown, commandId?: string, actorId?: ActorId) =>
   Effect.gen(function* () {
     const instance = yield* Instance
+    const client = yield* CurrentClient
     return new CommandEnvelope({
       commandId:
         commandId === undefined ? yield* newId(Ids.command) : yield* Effect.orDie(Schema.decodeUnknownEffect(CommandId)(commandId)),
       commandType,
       schemaVersion: 1,
-      actorId: actorId ?? instance.personId,
-      deviceId: instance.deviceId,
+      actorId:
+        actorId ?? (client === undefined ? instance.personId : yield* Effect.orDie(Schema.decodeUnknownEffect(ActorId)(client.actorId))),
+      deviceId: client === undefined ? instance.deviceId : yield* Effect.orDie(Schema.decodeUnknownEffect(DeviceId)(client.deviceId)),
       issuedAt: yield* now,
       payload,
     })

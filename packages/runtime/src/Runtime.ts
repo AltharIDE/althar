@@ -58,6 +58,8 @@ import { SignIns } from './SignIns'
 import { Errands } from './Errands'
 import { MergeLine } from './MergeLine'
 import { ToolServer } from './ToolServer'
+import { ApiCommands } from './ApiCommands'
+import { ClientIdentities } from './ClientIdentities'
 
 export interface RuntimeLayerOptions extends RuntimeOptions {
   /** The profile's database file, or `:memory:` for tests. */
@@ -101,7 +103,15 @@ export const layer = (options: RuntimeLayerOptions) => {
     Layer.provideMerge(WebCrypto),
   )
   const base = Layer.mergeAll(
-    ToolServer.layer.pipe(Layer.provideMerge(Errands.layer.pipe(Layer.provideMerge(startupLayer('instance', Instance.layer))))),
+    ToolServer.layer.pipe(
+      Layer.provideMerge(
+        Errands.layer.pipe(
+          Layer.provideMerge(
+            Layer.mergeAll(ApiCommands.layer, ClientIdentities.layer).pipe(Layer.provideMerge(startupLayer('instance', Instance.layer))),
+          ),
+        ),
+      ),
+    ),
     Live.layer,
     startupLayer('modelfacts', ModelFacts.layer),
     Artifacts.layer,

@@ -416,12 +416,76 @@ They have different compatibility and retention requirements.
 ## Local transport
 
 The desktop uses `MessagePort` channels: main creates each channel and hands
-one end to the runtime and the other to a renderer. Holding the port is the
-only credential. The CLI and a headless host will speak the same contract over
-a local socket in the profile (DEV-121, DEV-123), and a phone through a relay
-the runtime dials out to (DEV-131); none exists yet
-([ADR-048](../decisions/foundations.md#where-the-runtime-runs-and-who-may-reach-it)).
-The domain API must not depend on any transport.
+one end to the runtime and the other to a renderer. Main also owns an internal
+API connection for `WatchAttention`; nudges, badge counts and work state no
+longer use a separate untyped parent message. Main assigns the connection's
+authority. Ordinary RPC payloads cannot choose their actor or device.
+
+The runtime also exports `listenLocalApi`, `openApiSocket` and
+`authenticateApiClient`. The desktop enables its listener only with
+`ALTHAR_API_SOCKET=1`. It publishes `<profile>/api/endpoint.json`: protocol,
+home, API version, launch address and launch secret. The directory is private
+and the descriptor is owner-readable/writable (0700/0600 on POSIX); the Unix
+socket lives in a fresh short private temporary directory, or a random Windows
+named pipe. Shutdown removes that launch's descriptor and socket. No TCP
+interface is opened. The launch secret grants the restricted socket role.
+
+`socketPort` adapts Node sockets to `PortLike`: a four-byte big-endian length
+and a versioned portable value envelope (`wire.ts`), preserving bytes and
+request ids without collisions with user objects. Frames are limited to
+16 KiB before authentication and 96 MiB afterwards, allowing the existing
+bounded image-message payload. There are at most 32 socket connections,
+32 queued messages per connection, a frame-sized receive queue, and a
+128 MiB write-buffer limit. Invalid framing, UTF-8, value envelopes or RPC
+metadata close the connection. Fragmented frames and the handshake-to-RPC
+handoff are buffered. Pending client calls fail when the port closes.
+
+Device attachment uses a registered Ed25519 public key. A signed challenge
+binds the protocol, home, client device, API version, random nonce and expiry.
+Challenges expire after 30 seconds, are consumed once, and are bounded to
+eight per device and 512 per home. Attachment times out after ten seconds.
+`ClientIdentities` checks current authority before each request and signals
+live revocation. The same authentication helper can run over an SSH-protected
+port; SSH/relay bootstrap and encryption are separate work and are not
+provided by the portable framing protocol itself.
+
+`runtime_homes` pins the profile owner and host device independently of
+`client_devices`. `GetConnectionInfo` reports both authenticated client and
+execution host. `CurrentClient` supplies actor/device provenance to command
+envelopes; filesystem and process operations retain the execution device.
+Registered clients are owner devices, not a membership system.
+
+`ApiCommands` commits an admission before invoking a command carrying
+`commandId`, outside any database transaction. It binds the method, canonical
+decoded payload and identity, joins concurrent retries, and records encoded
+success or `ApiError`. Its runtime scope survives the request's cancellation.
+Admission is limited to 128 active commands per home and 16 per device;
+completion frees capacity. A pending intent from a prior launch is marked
+uncertain and never automatically executed. Receipts are retained with the
+profile so an old retry cannot become a new action. Domain transaction
+receipts remain the authority for atomic database mutations.
+
+Restoring an older database can also remove receipts for external effects
+that happened after that backup. A future host recovery procedure must fence
+old writers and invalidate outstanding client command retries before serving
+the restored home. Feed checkpoints detect projection divergence; they do not
+make an external push or deployment transactional with SQLite.
+
+Snapshots carrying a cursor also carry an optional `position` for additive
+compatibility: home, cursor and a random persistent checkpoint for that exact
+change-log entry. New clients save the snapshot's position and use
+`WatchFrom`, advancing it with each durable `Changed` event's checkpoint.
+`SnapshotRequired` means discard the saved projection and read fresh
+snapshots, then resume from their positions. Cursor zero has a null checkpoint.
+Home mismatch, a cursor ahead of the database, missing retained history or a
+checkpoint mismatch refuses resume. The checkpoint detects divergent regrowth
+after restoring a backup even if numeric cursors are reused. Transient token
+and attention events are not replayed; asks remain in snapshots and threads.
+Legacy local `Watch` keeps its numeric cursor behavior.
+
+The CLI still starts its own runtime. A headless host, SSH bootstrap, phone,
+relay and project-scoped multiplayer access remain future work
+([authority decision](../decisions/foundations.md#where-the-runtime-runs-and-who-may-reach-it)).
 
 Agents run as the person's OS user, so whatever a socket client can read, an
 agent can too, and a per-launch secret doesn't tell them apart. A socket client

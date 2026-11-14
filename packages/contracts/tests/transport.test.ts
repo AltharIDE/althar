@@ -62,6 +62,43 @@ const client = (port: PortLike) =>
 const settled = (check: () => boolean) => until(Effect.sync(check), (done) => done)
 
 describe('the transport', () => {
+  it.live('ends a connection with malformed envelope metadata and releases its listeners', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        for (const message of [
+          null,
+          [0, null],
+          [0, { _tag: 'Unknown' }],
+          [0, { _tag: 'Request', id: {}, tag: 'Echo', headers: [] }],
+          [0, { _tag: 'Request', id: '1', tag: 'Echo', headers: 'forged' }],
+        ]) {
+          const channel = new MessageChannel()
+          yield* Effect.addFinalizer(() => Effect.sync(() => channel.port2.close()))
+          const server = watched(emitterPort(channel.port1))
+          const serving = yield* serve(server.port)
+          assert.isTrue(yield* settled(() => server.seen.listening === 1))
+          channel.port2.postMessage(message)
+          yield* Fiber.await(serving)
+          assert.deepStrictEqual(server.seen, { listening: 0, watchingClose: 0 })
+        }
+      }),
+    ),
+  )
+
+  it.live('fails a pending call when its connection disappears', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const channel = new MessageChannel()
+        yield* Effect.addFinalizer(() => Effect.sync(() => channel.port2.close()))
+        channel.port1.postMessage([0])
+        const echo = yield* client(emitterPort(channel.port2))
+        const pending = yield* Effect.forkChild(echo.Echo({ text: 'unanswered' }))
+        channel.port1.close()
+        assert.isTrue(Exit.isFailure(yield* Fiber.await(pending)))
+      }),
+    ),
+  )
+
   it.live('carries a call, a typed failure and a stream over a message port', () =>
     Effect.scoped(
       Effect.gen(function* () {

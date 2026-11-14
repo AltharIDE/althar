@@ -15,7 +15,7 @@ import {
   Failures,
   Folders,
   MachineLoad,
-  Nudges,
+  listenLocalApi,
   Secrets,
   ToolServer,
   services,
@@ -214,8 +214,12 @@ const machineIn = (named: string | undefined) => {
 }
 
 /* Ports and folders that arrive before the runtime is ready wait here. */
-const early: Array<Port> = []
-let accept = (port: Port) => void early.push(port)
+interface ClientPort {
+  readonly port: Port
+  readonly role: 'window' | 'internal'
+}
+const early: Array<ClientPort> = []
+let accept = (port: Port, role: ClientPort['role']) => void early.push({ port, role })
 /* Everything the runtime's services provide, for the main process's requests to reach. */
 type Ready = Context.Context<Layer.Success<ReturnType<typeof services>>>
 let isReady: (context: Ready) => void = () => {}
@@ -324,10 +328,12 @@ const program = Effect.gen(function* () {
   yield* Effect.logInfo('Runtime ready').pipe(Effect.annotateLogs({ version: options.appVersion, pid: process.pid }))
   // A development build's log says when the runtime's thread ran late, and which window's calls took long (lag.ts).
   if (lagLogged()) yield* watchLag()
-  // What needs the person goes to the main process, which notifies them and keeps the Dock's count.
-  yield* Effect.forkScoped(
-    Stream.runForEach(Context.get(context, Nudges).events, (event) => Effect.sync(() => parent.postMessage({ type: 'nudge', event }))),
-  )
+  // Socket access is opt-in; its private descriptor grants only the restricted socket role.
+  if (process.env.ALTHAR_API_SOCKET === '1')
+    yield* listenLocalApi(profile).pipe(
+      Effect.provideContext(context),
+      Effect.catch((error) => Effect.logWarning('The private local API could not start', error)),
+    )
   yield* Effect.forkScoped(
     Stream.runForEach(Context.get(context, UsageData).events, (usage) => Effect.sync(() => parent.postMessage({ type: 'usage', usage }))),
   )
@@ -343,13 +349,13 @@ const program = Effect.gen(function* () {
       Effect.sync(() => parent.postMessage({ type: 'crash', crash: handledOf(failure) })),
     ),
   )
-  const ports = yield* Queue.unbounded<Port>()
-  accept = (port) => void Queue.offerUnsafe(ports, port)
-  for (const port of early.splice(0)) accept(port)
+  const ports = yield* Queue.unbounded<ClientPort>()
+  accept = (port, role) => void Queue.offerUnsafe(ports, { port, role })
+  for (const client of early.splice(0)) accept(client.port, client.role)
   for (;;) {
-    const port = yield* Queue.take(ports)
+    const { port, role } = yield* Queue.take(ports)
     // Each window's connection lives until its port closes, as when it reloads.
-    yield* Effect.forkScoped(Layer.launch(connection(emitterPort(port), { kind: 'window' })).pipe(Effect.provideContext(context)))
+    yield* Effect.forkScoped(Layer.launch(connection(emitterPort(port), { kind: role })).pipe(Effect.provideContext(context)))
   }
 })
 
@@ -433,6 +439,7 @@ const tellLoad = (on: boolean) => void ready.then((context) => Effect.runPromise
 parent.on('message', (message) => {
   const data = message.data as {
     readonly type?: string
+    readonly role?: string
     readonly requestId?: string
     readonly path?: string
     readonly value?: string
@@ -452,7 +459,7 @@ parent.on('message', (message) => {
   if (data?.type === 'screenshot-taken' && data.requestId !== undefined) screenshots.answer(data.requestId, data as Taken)
   if (data?.type === 'page-done' && data.requestId !== undefined) pages.answer(data.requestId, data as PageDone)
   if (data?.type === 'first-screen') Effect.runSync(Deferred.succeed(firstScreen, undefined))
-  if (data?.type === 'connect' && port !== undefined) accept(port)
+  if (data?.type === 'connect' && port !== undefined) accept(port, data.role === 'internal' ? 'internal' : 'window')
   if (data?.type === 'allow-folder' && data.requestId !== undefined && data.path !== undefined) allowFolder(data.requestId, data.path)
   if (data?.type === 'facts' && data.requestId !== undefined) tellFacts(data.requestId, data.threadId ?? null)
   if (data?.type === 'names' && data.requestId !== undefined) tellNames(data.requestId)
