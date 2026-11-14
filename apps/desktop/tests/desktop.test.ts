@@ -3,21 +3,29 @@ import { describe, expect, it } from 'vitest'
 import {
   chromeFromArgs,
   CHROME_ARG,
+  cosmicLayout,
   decideChrome,
   decideFor,
+  defaultLayout,
   type DesktopFacts,
   factsFromEnv,
   kdeFacts,
   kwinLayout,
+  layoutSource,
   parseGnomeLayout,
   parseHexAccent,
   parseIni,
+  parseLabwcLayout,
+  parseOpenboxLayout,
   parsePortalAccent,
   parseShellVersion,
   parseThemeName,
+  parseXfwmLayout,
+  parseXpropMoves,
   parseXpropName,
   parseXpropWindow,
   sessionOf,
+  wayfireLayout,
   withFacts,
   wmFromName,
 } from '../src/main/desktop'
@@ -99,6 +107,14 @@ describe('the desktop, from the environment', () => {
 })
 
 describe('the X11 window manager, by its own name', () => {
+  it('reads whether it moves and resizes a window on its asking', () => {
+    expect(parseXpropMoves('_NET_SUPPORTED = _NET_SUPPORTED, _NET_WM_NAME, _NET_WM_MOVERESIZE, _NET_ACTIVE_WINDOW')).toBe(true)
+    expect(parseXpropMoves('_NET_SUPPORTED(ATOM) = _NET_SUPPORTED, _NET_WM_NAME, _NET_ACTIVE_WINDOW')).toBe(false)
+    expect(parseXpropMoves('_NET_SUPPORTED = _NET_WM_MOVERESIZE_CANCEL')).toBe(false)
+    expect(parseXpropMoves('_NET_SUPPORTED:  not found.')).toBe(false)
+    expect(parseXpropMoves('xprop: unable to open display')).toBeUndefined()
+  })
+
   it('reads xprop’s window id and name', () => {
     expect(parseXpropWindow('_NET_SUPPORTING_WM_CHECK: window id # 0x1a00003\n')).toBe('0x1a00003')
     expect(parseXpropWindow('_NET_SUPPORTING_WM_CHECK:  not found.')).toBeUndefined()
@@ -152,23 +168,28 @@ describe('how the window is dressed, by desktop', () => {
     expect(on({ XDG_CURRENT_DESKTOP: 'GNOME' }, { gtkTheme: 'Adwaita' })).toMatchObject({ tone: 'adwaita' })
   })
 
-  it('leaves the frame to a window manager that draws a good one: KWin on both sessions, xfwm4, Marco, Openbox, Muffin on X11', () => {
-    expect(wayland('KDE')).toEqual({ kind: 'frame' })
-    expect(x11('KDE')).toEqual({ kind: 'frame' })
-    expect(x11('XFCE')).toEqual({ kind: 'frame' })
-    expect(x11('MATE')).toEqual({ kind: 'frame' })
-    expect(x11('LXDE')).toEqual({ kind: 'frame' })
-    expect(x11('LXQt')).toEqual({ kind: 'frame' })
-    expect(x11('X-Cinnamon')).toEqual({ kind: 'frame' })
-    expect(x11('Unity')).toEqual({ kind: 'frame' })
-    expect(wayland('COSMIC')).toEqual({ kind: 'frame' })
-    expect(wayland('labwc')).toEqual({ kind: 'frame' })
+  it('draws one bar on every stacking desktop that would frame the window: KDE’s manner on the Qt ones, GNOME’s plain on the rest', () => {
+    const kde = { kind: 'drawn', look: 'kde' }
+    const plain = { kind: 'drawn', look: 'gnome', tone: 'legacy' }
+    expect(wayland('KDE')).toEqual(kde)
+    expect(x11('KDE')).toEqual(kde)
+    expect(x11('LXQt')).toEqual(kde)
+    expect(wayland('LXQt')).toEqual(kde)
+    expect(wayland('Deepin')).toEqual(kde)
+    for (const desktop of ['XFCE', 'MATE', 'LXDE', 'X-Cinnamon', 'Unity', 'openbox', 'fluxbox', 'icewm'])
+      expect(x11(desktop)).toEqual(plain)
+    for (const desktop of ['X-Cinnamon', 'COSMIC', 'labwc', 'wayfire', 'XFCE']) expect(wayland(desktop)).toEqual(plain)
+    // Wherever KWin runs, its manner.
+    expect(on({ XDG_CURRENT_DESKTOP: 'XFCE', XDG_SESSION_TYPE: 'x11' }, { wm: 'kwin' })).toEqual(kde)
   })
 
-  it('draws them where the desktop would frame the window but its Wayland compositor can’t', () => {
-    expect(wayland('X-Cinnamon')).toEqual({ kind: 'drawn', look: 'gnome', tone: 'legacy' })
-    // Qt's desktops on a compositor not known to frame windows: KDE's manner.
-    expect(on({ XDG_CURRENT_DESKTOP: 'LXQt', XDG_SESSION_TYPE: 'wayland' }, { wm: 'mystery' })).toEqual({ kind: 'drawn', look: 'kde' })
+  it('keeps the system’s frame only where an X11 window manager can’t move or resize a frameless window', () => {
+    expect(on({ XDG_CURRENT_DESKTOP: 'XFCE', XDG_SESSION_TYPE: 'x11' }, { wmMoves: false })).toEqual({ kind: 'frame' })
+    expect(on({ XDG_SESSION_TYPE: 'x11' }, { wm: 'evilwm', wmMoves: false })).toEqual({ kind: 'frame' })
+    expect(on({ XDG_CURRENT_DESKTOP: 'XFCE', XDG_SESSION_TYPE: 'x11' }, { wmMoves: true })).toMatchObject({ kind: 'drawn' })
+    // Every Wayland compositor moves a window on its asking (xdg-shell), and a tiling one has no buttons whatever it says.
+    expect(on({ XDG_CURRENT_DESKTOP: 'KDE', XDG_SESSION_TYPE: 'wayland' }, { wmMoves: false })).toMatchObject({ kind: 'drawn' })
+    expect(on({ XDG_SESSION_TYPE: 'x11' }, { wm: 'i3', wmMoves: false })).toEqual({ kind: 'bare' })
   })
 
   it('draws GNOME’s where GNOME’s window manager runs under another desktop’s name', () => {
@@ -183,16 +204,104 @@ describe('how the window is dressed, by desktop', () => {
   it('draws neutral ones on a desktop it doesn’t know', () => {
     expect(wayland('Foo')).toEqual({ kind: 'drawn', look: 'gnome', tone: 'legacy' })
     expect(on({ XDG_SESSION_TYPE: 'x11' })).toEqual({ kind: 'drawn', look: 'gnome', tone: 'legacy' })
-    // An X11 window manager it knows draws the frame, whatever the desktop.
-    expect(on({ XDG_SESSION_TYPE: 'x11' }, { wm: 'openbox' })).toEqual({ kind: 'frame' })
+    expect(on({ XDG_SESSION_TYPE: 'x11' }, { wm: 'openbox' })).toEqual({ kind: 'drawn', look: 'gnome', tone: 'legacy' })
   })
 
   it('keeps a window’s frame as it opened: framed stays framed, unframed draws its desktop’s buttons', () => {
     const kde = linux({ XDG_CURRENT_DESKTOP: 'KDE', XDG_SESSION_TYPE: 'wayland' })
     expect(decideFor(kde, true)).toEqual({ kind: 'frame' })
     expect(decideFor(kde, false)).toEqual({ kind: 'drawn', look: 'kde' })
+    // The X11 window manager's word came after an unframed window opened: it draws its buttons still.
+    const xfce = { ...linux({ XDG_CURRENT_DESKTOP: 'XFCE', XDG_SESSION_TYPE: 'x11' }), wmMoves: false }
+    expect(decideFor(xfce, false)).toEqual({ kind: 'drawn', look: 'gnome', tone: 'legacy' })
     const gnome = linux({ XDG_CURRENT_DESKTOP: 'GNOME', XDG_SESSION_TYPE: 'wayland' })
     expect(decideFor(gnome, false)).toEqual({ kind: 'drawn', look: 'gnome', tone: 'adwaita' })
+  })
+})
+
+describe('where the buttons go out of the box', () => {
+  const right = { start: [], end: ['minimize', 'maximize', 'close'] }
+
+  it('puts them where each desktop does: GNOME close alone on the right, Pantheon close left and maximize right, Unity all left', () => {
+    expect(defaultLayout('gnome')).toEqual({ start: [], end: ['close'] })
+    expect(defaultLayout('pantheon')).toEqual({ start: ['close'], end: ['maximize'] })
+    expect(defaultLayout('unity')).toEqual({ start: ['close', 'minimize', 'maximize'], end: [] })
+    expect(defaultLayout('mac')).toEqual({ start: ['close', 'minimize', 'maximize'], end: [] })
+  })
+
+  it('puts minimize, maximize and close on the right on KDE and every other desktop that does, and one it doesn’t know', () => {
+    for (const family of ['kde', 'xfce', 'mate', 'cinnamon', 'budgie', 'cosmic', 'lxqt', 'lxde', 'deepin', 'unknown', 'windows'] as const) {
+      expect(defaultLayout(family)).toEqual(right)
+    }
+  })
+
+  it('reads each desktop’s layout where its window manager keeps it', () => {
+    const where = (desktop: string, session: string, more: Partial<DesktopFacts> = {}) =>
+      layoutSource({ ...linux({ XDG_CURRENT_DESKTOP: desktop, XDG_SESSION_TYPE: session }), ...more })
+    expect(where('GNOME', 'wayland')).toBe('gnome')
+    expect(where('Budgie:GNOME', 'x11')).toBe('gnome')
+    expect(where('Pantheon', 'wayland')).toBe('gnome')
+    expect(where('Unity', 'x11')).toBe('gnome')
+    expect(where('KDE', 'wayland')).toBe('kwin')
+    expect(where('X-Cinnamon', 'x11')).toBe('cinnamon')
+    expect(where('MATE', 'x11')).toBe('marco')
+    expect(where('XFCE', 'x11')).toBe('xfwm4')
+    expect(where('LXDE', 'x11')).toBe('openbox')
+    expect(where('LXQt', 'x11')).toBe('openbox')
+    expect(where('COSMIC', 'wayland')).toBe('cosmic')
+    expect(where('labwc', 'wayland')).toBe('labwc')
+    expect(where('wayfire', 'wayland')).toBe('wayfire')
+    // The window manager, where something names it, over the desktop's own: LXQt on KWin, Xfce on Mutter.
+    expect(where('LXQt', 'x11', { wm: 'kwin' })).toBe('kwin')
+    expect(where('XFCE', 'x11', { wm: 'mutter' })).toBe('gnome')
+    // Where it isn't known or read: the default stands.
+    expect(where('LXQt', 'wayland')).toBeUndefined()
+    expect(where('Deepin', 'wayland')).toBeUndefined()
+    expect(where('Foo', 'wayland')).toBeUndefined()
+    expect(layoutSource(factsFromEnv('win32', {}))).toBeUndefined()
+  })
+})
+
+describe('each desktop’s own layout, as its window manager keeps it', () => {
+  it('reads Xfwm4’s letters from its xfconf file, the title’s bar between the sides', () => {
+    const file = (value: string) =>
+      `<?xml version="1.0"?>\n<channel name="xfwm4" version="1.0">\n  <property name="general" type="empty">\n    <property name="button_layout" type="string" value="${value}"/>\n  </property>\n</channel>\n`
+    expect(parseXfwmLayout(file('O|HMC'))).toEqual({ start: [], end: ['minimize', 'maximize', 'close'] })
+    expect(parseXfwmLayout(file('CHM|O'))).toEqual({ start: ['close', 'minimize', 'maximize'], end: [] })
+    expect(parseXfwmLayout(file('C|STHM'))).toEqual({ start: ['close'], end: ['minimize', 'maximize'] })
+    expect(parseXfwmLayout('<channel name="xfwm4"/>')).toBeUndefined()
+    expect(parseXfwmLayout(file('O|H|C'))).toBeUndefined()
+    expect(parseXfwmLayout(file('<script>'))).toBeUndefined()
+  })
+
+  it('reads Openbox’s titleLayout, the label between the sides', () => {
+    const rc = (layout: string) =>
+      `<openbox_config><theme><name>Clearlooks</name><titleLayout>${layout}</titleLayout></theme></openbox_config>`
+    expect(parseOpenboxLayout(rc('NLIMC'))).toEqual({ start: [], end: ['minimize', 'maximize', 'close'] })
+    expect(parseOpenboxLayout(rc('CIMLN'))).toEqual({ start: ['close', 'minimize', 'maximize'], end: [] })
+    expect(parseOpenboxLayout(rc('CMI'))).toEqual({ start: ['close', 'maximize', 'minimize'], end: [] })
+    expect(parseOpenboxLayout('<openbox_config/>')).toBeUndefined()
+    expect(parseOpenboxLayout(rc('N L C'))).toBeUndefined()
+  })
+
+  it('reads labwc’s titlebar layout, in GNOME’s form with its own names', () => {
+    const rc = (layout: string) => `<labwc_config><theme><titlebar>\n<layout>${layout}</layout>\n</titlebar></theme></labwc_config>`
+    expect(parseLabwcLayout(rc('icon:iconify,max,close'))).toEqual({ start: [], end: ['minimize', 'maximize', 'close'] })
+    expect(parseLabwcLayout(rc('close,iconify:max'))).toEqual({ start: ['close', 'minimize'], end: ['maximize'] })
+    expect(parseLabwcLayout('<labwc_config><theme/></labwc_config>')).toBeUndefined()
+    expect(parseLabwcLayout(rc('close;max'))).toBeUndefined()
+  })
+
+  it('reads Wayfire’s button order, all on the right', () => {
+    expect(wayfireLayout([parseIni('[decoration]\nbutton_order = close maximize\n')])).toEqual({ start: [], end: ['close', 'maximize'] })
+    expect(wayfireLayout([parseIni('[core]\nplugins = decoration\n')])).toBeUndefined()
+  })
+
+  it('reads COSMIC’s shown buttons, close always and last', () => {
+    expect(cosmicLayout('true', 'true')).toEqual({ start: [], end: ['minimize', 'maximize', 'close'] })
+    expect(cosmicLayout('false\n', undefined)).toEqual({ start: [], end: ['maximize', 'close'] })
+    expect(cosmicLayout(undefined, 'false')).toEqual({ start: [], end: ['minimize', 'close'] })
+    expect(cosmicLayout(undefined, undefined)).toBeUndefined()
   })
 })
 
