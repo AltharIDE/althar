@@ -10,7 +10,9 @@ import s from './TaskFolderLocation.module.css'
  * as it stands, and Change, which opens a folder picker. It says what the
  * choice leaves alone: folders already made stay where they are. Where the
  * environment sets the folder (ALTHAR_WORKTREES), the row says so and Change
- * is off. A chosen folder that can't be used now is a lasting state, said calmly
+ * is off. In the Flatpak, where every pick comes through the file portal,
+ * which task folders can't use (ADR-027), there is no choice to make: the row
+ * is the folder and one line saying why, with no Change. A chosen folder that can't be used now is a lasting state, said calmly
  * in a line of its own that Use the default answers; a pick Althar refused is the
  * answer to what the person just did, in red, and goes with the next try.
  */
@@ -27,22 +29,27 @@ export interface TaskFolderLocationText {
   useDefault: string
   /** Under the folder, where the environment sets it. */
   fromEnvironment: string
+  /** In the Flatpak, in place of the note: why the folder stays where it is. */
+  sandboxed: string
   /** After the note, where the person chose a folder: what the default is. */
   theDefault: (folder: string) => string
 }
 
 export const taskFolderLocationText: TaskFolderLocationText = {
   title: 'Task folders',
-  note: 'New tasks’ folders are made here, in a folder named Althar inside the one you choose. Folders already made stay where they are, with their copies; the command line keeps using the default.',
+  note: 'New tasks’ folders are made here, in a folder named Althar inside the one you choose. Folders already made stay where they are, with their copies.',
   change: 'Change',
   useDefault: 'Use the default',
   fromEnvironment: 'Set by ALTHAR_WORKTREES in the environment, so it can’t be changed here.',
+  sandboxed: 'In the Flatpak they stay here: a folder you pick arrives through the file portal, which task folders can’t use.',
   theDefault: (folder) => `The default is ${folder}.`,
 }
 
 export interface TaskFolderLocationProps {
   folder: string
   from: TaskFolderFrom
+  /** In the Flatpak: every pick comes through the file portal, which task folders can't use, so there is no Change. */
+  sandboxed?: boolean
   /** Where the platform keeps them, to say what Use the default goes back to. */
   defaultFolder?: string
   onChange: () => void
@@ -60,6 +67,7 @@ export interface TaskFolderLocationProps {
 export function TaskFolderLocation({
   folder,
   from,
+  sandboxed = false,
   defaultFolder,
   onChange,
   onUseDefault,
@@ -78,11 +86,15 @@ export function TaskFolderLocation({
       title={text.title}
       glyph={<Icon name="folder" size={15} />}
       note={
-        <>
-          {text.note}
-          {fixed && <span className={s.line}>{text.fromEnvironment}</span>}
-          {from === 'setting' && defaultFolder !== undefined && <span className={s.line}>{text.theDefault(defaultFolder)}</span>}
-        </>
+        sandboxed ? (
+          text.sandboxed
+        ) : (
+          <>
+            {text.note}
+            {fixed && <span className={s.line}>{text.fromEnvironment}</span>}
+            {from === 'setting' && defaultFolder !== undefined && <span className={s.line}>{text.theDefault(defaultFolder)}</span>}
+          </>
+        )
       }
       under={
         (problem !== undefined || refusal !== undefined) && (
@@ -107,19 +119,21 @@ export function TaskFolderLocation({
           <code className={s.folder} title={folder}>
             {folder}
           </code>
-          <Button
-            size="small"
-            variant={problem === undefined ? 'default' : 'quiet'}
-            onClick={onChange}
-            disabled={fixed || busy}
-            busy={busy}
-            id={changeId}
-            aria-labelledby={`${ids.labelledBy} ${changeId}`}
-            aria-describedby={[ids.describedBy, problem === undefined ? undefined : problemId].filter(Boolean).join(' ')}
-          >
-            {text.change}
-          </Button>
-          {from === 'setting' && onUseDefault !== undefined && (
+          {!sandboxed && (
+            <Button
+              size="small"
+              variant={problem === undefined ? 'default' : 'quiet'}
+              onClick={onChange}
+              disabled={fixed || busy}
+              busy={busy}
+              id={changeId}
+              aria-labelledby={`${ids.labelledBy} ${changeId}`}
+              aria-describedby={[ids.describedBy, problem === undefined ? undefined : problemId].filter(Boolean).join(' ')}
+            >
+              {text.change}
+            </Button>
+          )}
+          {!sandboxed && from === 'setting' && onUseDefault !== undefined && (
             <Button
               size="small"
               variant={problem === undefined ? 'quiet' : 'default'}

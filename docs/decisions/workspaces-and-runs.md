@@ -237,12 +237,25 @@ tasks' folders go after a wait, and come back when the task needs them.
   | A merged change | 3 days |
   | A done quick task | A week |
   | An abandoned one | 2 weeks |
-  | Any, below 10% of the disk free | Sooner, oldest first, until 15% is free |
+  | Any, below 10% of its disk free | Sooner, the oldest on that disk first, until 15% of it is free |
 
   Or one wait for all (a day, a week, a month), or only on Clean up. The wait
   runs from the latest of: when it settled, when its screen was last opened,
   and when its folder was last opened from Althar. A sweep runs two minutes
   after Althar starts and every hour.
+- **Each disk on its own.** The person can move where new tasks' folders go
+  (Settings › Task folders), and those made before stay where they were. A
+  folder counts on the disk its own path is on, by device, never on the
+  root's. Smart's low-disk pass runs per disk: a disk below 10% free has only
+  its own finished folders swept, oldest first, until it is at 15%; a roomy
+  disk's folders keep their wait, whatever another disk does.
+- **Folders under an earlier root** are found by the path the store keeps
+  for each, not by looking under the root, so they are listed, held back,
+  removed by their wait and brought back where they were like the rest. As
+  Althar starts, it removes what nothing reads again in an earlier root's
+  project folders: runs' copies (`.run`, `.runs`) and the coordinator's
+  mirrors. The coordinator's copies stay, because files sent to the
+  coordinator are read from there.
 - **What goes:** the folder, its review copy (`.review/<task>`), and the
   task's folder once empty. The branch stays, and the folder's last commit is
   kept under `refs/althar/kept/<workspace>`. The thread says so in a line
@@ -268,7 +281,9 @@ tasks' folders go after a wait, and come back when the task needs them.
   never comes back, and its lead that can't start says the folder is gone,
   not that the agent isn't installed.
 - **The Settings row** shows the disk as one bar, with what's held back and
-  what could go now. Its list says why each folder is held, and offers
+  what could go now; where task folders are on several disks, a bar each,
+  the disk new folders go to first, each named by the folder they are in
+  there. Its list says why each folder is held, and offers
   Remove. Clean up takes what nothing holds, and says what it freed.
 - **It is housekeeping:** nothing in Needs you, no notifications.
 

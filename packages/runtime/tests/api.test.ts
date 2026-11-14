@@ -1145,7 +1145,8 @@ describe('finished tasks’ folders, through the API', () => {
           [[task.id, task.threadId, 'Add a retry', 'merged', null]],
         )
         assert.isTrue((listed.folders[0]?.bytes ?? 0) > 0)
-        assert.isNotNull(listed.disk)
+        assert.strictEqual(listed.disks.length, 1)
+        assert.strictEqual(listed.folders[0]?.disk, listed.disks[0]?.id)
         const removed = yield* client.RemoveTaskFolder({ commandId: commandId(), taskId: task.id, seen: null })
         assert.strictEqual(removed.failed, 0)
         assert.isFalse(existsSync(worktree))

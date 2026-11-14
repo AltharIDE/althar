@@ -1,6 +1,10 @@
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+
 import { assert, describe, it } from '@effect/vitest'
 
-import { databaseIn, defaultProfile, defaultWorktrees } from '../src/locations'
+import { chosenWorktrees, databaseIn, defaultProfile, defaultWorktrees, usableNow, worktreesFrom } from '../src/locations'
 
 /** Windows, where what some tests stand on isn't (each says what). */
 const windows = process.platform === 'win32'
@@ -48,5 +52,46 @@ describe.skipIf(windows)('where Althar keeps things', () => {
     )
     assert.strictEqual(defaultProfile({}, 'darwin', '/Users/ada', both), '/Users/ada/Library/Application Support/Althar')
     assert.strictEqual(databaseIn('/p', both), '/p/althar.sqlite')
+  })
+})
+
+describe('the folder chosen for task folders, which the app and the command line both read', () => {
+  const kept = (text: string) => () => text
+
+  it('is the app’s choice kept in the profile, and none where it isn’t a full path or can’t be read', () => {
+    assert.strictEqual(chosenWorktrees('/p', kept('{"worktrees":"/Volumes/Ext/Althar","keepAwake":true}')), '/Volumes/Ext/Althar')
+    assert.isNull(chosenWorktrees('/p', kept('{"worktrees":null}')))
+    assert.isNull(chosenWorktrees('/p', kept('{"worktrees":"relative/Althar"}')))
+    assert.isNull(chosenWorktrees('/p', kept('[]')))
+    assert.isNull(chosenWorktrees('/p', kept('{not json')))
+    assert.isNull(
+      chosenWorktrees('/p', () => {
+        throw new Error('ENOENT')
+      }),
+    )
+  })
+
+  it('reads desktop.json in the profile', () => {
+    const profile = mkdtempSync(join(tmpdir(), 'althar-profile-'))
+    writeFileSync(join(profile, 'desktop.json'), JSON.stringify({ worktrees: '/data/Althar' }))
+    assert.strictEqual(chosenWorktrees(profile), '/data/Althar')
+    rmSync(profile, { recursive: true, force: true })
+  })
+
+  it('comes after the environment and before the default', () => {
+    assert.deepStrictEqual(worktreesFrom({}, null, '/d'), { folder: '/d', from: 'default' })
+    assert.deepStrictEqual(worktreesFrom({}, '/c', '/d'), { folder: '/c', from: 'setting' })
+    assert.deepStrictEqual(worktreesFrom({ ALTHAR_WORKTREES: '/e' }, '/c', '/d'), { folder: '/e', from: 'environment' })
+    assert.deepStrictEqual(worktreesFrom({ ALTHAR_WORKTREES: '' }, '/c', '/d'), { folder: '/c', from: 'setting' })
+  })
+
+  it('is usable now only where it is a folder that is there', () => {
+    const root = mkdtempSync(join(tmpdir(), 'althar-usable-'))
+    mkdirSync(join(root, 'Althar'))
+    writeFileSync(join(root, 'file'), '')
+    assert.isTrue(usableNow(join(root, 'Althar')))
+    assert.isFalse(usableNow(join(root, 'gone')))
+    assert.isFalse(usableNow(join(root, 'file')))
+    rmSync(root, { recursive: true, force: true })
   })
 })

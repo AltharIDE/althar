@@ -7,7 +7,7 @@ import { join, sep } from 'node:path'
 import { assert, describe, it } from '@effect/vitest'
 import { Effect } from 'effect'
 
-import { earlierRoots, freshCopy, readsOf } from '../src/coordinatorFolder'
+import { earlierProjectFolders, earlierRoots, freshCopy, readsOf } from '../src/coordinatorFolder'
 
 /*
  * The coordinator's copies of the project's repositories (ADR-058): each a
@@ -270,5 +270,12 @@ describe('the earlier roots', () => {
   it('never name a filesystem or drive root, or home or what holds it', () => {
     assert.deepEqual(earlierRoots(['/srv/foo', '/workspace/foo', '/foo', '/a/foo'], '/data/tasks', '/home/ada'), [])
     assert.deepEqual(earlierRoots(['/home/ada/meridian/t1/app', '/home/p/t/app'], '/data/tasks', '/home/ada'), [])
+  })
+})
+
+describe('the project folders under earlier roots', () => {
+  it('are those the worktrees were made in, once each, and none under the root now, home or a filesystem root', () => {
+    const worktrees = ['/old/meridian/t1/app', '/old/meridian/t2/app', '/old/site/t3/web', '/data/tasks/meridian/t4/app', '/srv/t5/app']
+    assert.deepEqual(earlierProjectFolders(worktrees, '/data/tasks', '/home/ada'), ['/old/meridian', '/old/site'])
   })
 })

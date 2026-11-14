@@ -146,7 +146,7 @@ export interface RuntimeOptions {
   readonly leftEvery?: Duration.Duration
   /** How full the disk a folder is on is read, in bytes: the system's own figures unless a test says, so none depends on the Mac it runs on. */
   readonly disk?: (path: string) => Effect.Effect<{ readonly total: number; readonly free: number; readonly used: number } | null>
-  /** Which device a path is on (null where unknown): the system's own unless a test says. Smart's low-disk pass only sweeps folders on the device it measures. */
+  /** Which device a path is on (null where unknown): the system's own unless a test says. Finished tasks' folders are counted, and Smart's low-disk pass run, a disk at a time (ADR-056). */
   readonly device?: (path: string) => Effect.Effect<number | null>
   /**
    * How long after a change's work comes back its pull request may show no checks before Althar takes it to have none: a

@@ -8,16 +8,24 @@ import { backupsIn, databaseIn, type Instance, Live, Permissions, Projects, Runt
 import { Cause, type Crypto, Effect, Exit, Option, Queue, References, Stream } from 'effect'
 
 import { type Action, HELP, parseLine } from './input'
-import { defaultProfile, defaultWorktrees, parseOptions, USAGE } from './options'
+import { defaultProfile, defaultWorktrees, parseOptions, taskFolders, USAGE } from './options'
 import { printer } from './printer'
 
 const write = (text: string) => {
   if (text !== '') process.stdout.write(text)
 }
 
+// New tasks' folders go where the app's Settings says, as the app's do; a chosen folder that can't be used now is never made.
 const parsed = parseOptions(process.argv.slice(2), {
   profile: defaultProfile(process.env, process.platform),
-  worktrees: defaultWorktrees(process.env),
+  worktrees: (profile) => {
+    const { folder, unusable } = taskFolders(process.env, profile, defaultWorktrees({}))
+    if (unusable !== undefined)
+      process.stderr.write(
+        `The task folder chosen in Althar's Settings, ${unusable}, can't be used now, so this task's folder is made in ${folder}.\n`,
+      )
+    return folder
+  },
 })
 if ('error' in parsed) {
   process.stderr.write(`${parsed.error}\n\n${USAGE}\n`)

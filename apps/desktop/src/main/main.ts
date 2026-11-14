@@ -1047,15 +1047,21 @@ ipcMain.handle('althar:set-preference', async (_event, key: unknown, value: unkn
 
 // Where new tasks' worktrees go, who decided, and the person's choice of another: asked for in a folder dialog, checked, kept, and told to the runtime at once.
 const environmentSets = 'ALTHAR_WORKTREES sets this folder; it can’t be changed here.'
+/** In the Flatpak every pick comes through the file portal, a path task folders can't use (ADR-027): there is no choice to make. */
+const sandboxed = process.env.FLATPAK_ID !== undefined
 /** The folder as it stands; where the person's choice has gone missing or can't be written, why, so the row can say so. */
 const taskFolderState = () => {
   const { folder, from, profile } = taskFolderNow()
   const refusal = from === 'setting' ? refusalOf(folder, profile) : null
   tellRuntimeTaskFolder()
   const defaultFolder = defaultTaskFolder()
-  return refusal === null
-    ? { folder, from, defaultFolder }
-    : { folder, from, defaultFolder, problem: statusOf(folder, refusal, defaultFolder) }
+  return {
+    folder,
+    from,
+    defaultFolder,
+    ...(refusal === null ? {} : { problem: statusOf(folder, refusal, defaultFolder) }),
+    ...(sandboxed ? { sandboxed: true as const } : {}),
+  }
 }
 /** The root the runtime was last told; told again when it changes, as a drive comes back or goes. */
 let toldRoot: string | undefined
@@ -1083,6 +1089,7 @@ ipcMain.handle('althar:use-default-task-folder', async () => {
 ipcMain.handle('althar:choose-task-folder', async (event) => {
   await preferencesRead
   if (taskFolderNow().from === 'environment') return { refused: environmentSets }
+  if (sandboxed) return { refused: refusals.portal }
   const window = BrowserWindow.fromWebContents(event.sender)
   const options = {
     properties: ['openDirectory' as const, 'createDirectory' as const],
