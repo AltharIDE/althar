@@ -17,7 +17,16 @@ const models = {
     },
   ],
 }
-const fixture = (options: { host?: string; user?: unknown; denied?: boolean; configured?: boolean } = {}) => {
+const fixture = (
+  options: {
+    host?: string
+    user?: unknown
+    denied?: boolean
+    configured?: boolean
+    challenge?: Record<string, unknown>
+    modelList?: unknown
+  } = {},
+) => {
   const host = options.host ?? 'github.com'
   const kept = new Map<string, string>()
   const calls: Array<{ url: string; body: string; authorization: string | null }> = []
@@ -34,11 +43,12 @@ const fixture = (options: { host?: string; user?: unknown; denied?: boolean; con
         verification_uri: `https://${host}/login/device`,
         expires_in: 900,
         interval: 1,
+        ...options.challenge,
       })
     if (url.endsWith('/login/oauth/access_token'))
       return Response.json(options.denied ? { error: 'access_denied' } : { access_token: 'test-access-token', scope: 'read:user' })
     if (url.endsWith('/copilot_internal/user')) return Response.json(options.user ?? { chat_enabled: true })
-    if (url.endsWith('/models')) return Response.json(models)
+    if (url.endsWith('/models')) return Response.json(options.modelList ?? models)
     throw new Error(`Unexpected test request: ${url}`)
   }
   const layer = Copilot.layer({
@@ -140,6 +150,74 @@ describe('Althar’s Copilot account', () => {
       expect(calls).toEqual([])
     }).pipe(Effect.provide(layer))
   })
+
+  it.effect.each([
+    { verification_uri: 'not a URL' },
+    { verification_uri: 'https://unrecognized.example/login/device' },
+    { verification_uri: 'https://github.com/login/device?unexpected=true' },
+    { verification_uri: 'https://github.com/login/device#unexpected' },
+    { user_code: '' },
+    { interval: 0 },
+    { interval: 301 },
+  ])('rejects an invalid device challenge before opening a page or polling (%j)', (challenge) => {
+    const { layer, calls, kept } = fixture({ challenge })
+    return Effect.gen(function* () {
+      let shown = false
+      const result = yield* Effect.exit(
+        (yield* Copilot).signIn('account-a', undefined, () => {
+          shown = true
+        }),
+      )
+      expect(Exit.isFailure(result)).toBe(true)
+      expect(shown).toBe(false)
+      expect(calls).toHaveLength(1)
+      expect(kept.size).toBe(0)
+    }).pipe(Effect.provide(layer))
+  })
+
+  it.effect.each([{ denied: true }, { modelList: { data: [] } }])(
+    'preserves the previous credential after denied authorization or unavailable models (%j)',
+    (options) => {
+      const { layer, kept } = fixture(options)
+      kept.set('copilot-account-a', 'previously-sealed-account')
+      return Effect.gen(function* () {
+        const result = yield* Effect.exit(login(yield* Copilot))
+        expect(Exit.isFailure(result)).toBe(true)
+        expect(kept.get('copilot-account-a')).toBe('previously-sealed-account')
+      }).pipe(Effect.provide(layer), onTestClock)
+    },
+  )
+
+  const saved = {
+    host: 'github.com',
+    clientId: 'althar-public-id',
+    api: 'https://api.githubcopilot.com',
+    token: { accessToken: 'test-access', refreshToken: null, expiresAt: null, scope: 'read:user' },
+  }
+  it.each([
+    'unreadable credential',
+    JSON.stringify({ ...saved, host: 'https://github.com' }),
+    JSON.stringify({ ...saved, api: 'https://unrecognized.example' }),
+    JSON.stringify({ ...saved, token: { ...saved.token, accessToken: '' } }),
+  ])('does not authenticate requests using a damaged or unsafe saved credential (%#)', async (credential) => {
+    const { layer, kept, calls } = fixture()
+    kept.set('copilot-account-a', credential)
+    const copilot = await Effect.runPromise(Copilot.pipe(Effect.provide(layer)))
+    expect(await Effect.runPromise(copilot.status('account-a'))).toEqual({ status: 'unknown', paidBy: 'unknown' })
+    await expect(copilot.provider('account-a').models(new AbortController().signal)).rejects.toThrow('Sign in again')
+    expect(calls).toEqual([])
+  })
+
+  it.each([null, JSON.stringify({ ...saved, token: { ...saved.token, expiresAt: '2020-01-01T00:00:00Z' } })])(
+    'requires fresh sign-in for a missing or expired credential that cannot refresh (%#)',
+    async (credential) => {
+      const { layer, kept, calls } = fixture()
+      if (credential !== null) kept.set('copilot-account-a', credential)
+      const copilot = await Effect.runPromise(Copilot.pipe(Effect.provide(layer)))
+      await expect(copilot.provider('account-a').models(new AbortController().signal)).rejects.toThrow('authentication required')
+      expect(calls).toEqual([])
+    },
+  )
 
   it('accepts GitHub-owned account endpoints and refuses unrelated or unsafe ones', () => {
     expect(copilotApi('github.com', 'https://api.business.githubcopilot.com')).toBe('https://api.business.githubcopilot.com')
