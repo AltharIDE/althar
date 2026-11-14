@@ -3,6 +3,7 @@ import { writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 import { type FakeCheck, type FakeService, makeFakeService } from '@althar/connectors/testing'
+import type { FakeAgentOptions } from '@althar/provider-adapters/testing'
 import { Duration, Effect, Layer, Option } from 'effect'
 import { SqlClient } from 'effect/sql'
 
@@ -26,19 +27,16 @@ export const runtimeWith = (
   idle: IdleOptions = {},
   /** How long checks may run before Althar gives up on them; its own default unless a test says. */
   checksStuck?: Duration.Duration,
+  agent: FakeAgentOptions = {},
 ) =>
   Queries.layer.pipe(
     Layer.provideMerge(
-      runtime(
-        ':memory:',
-        {},
-        {
-          connectors: fakeConnectors(services),
-          listenEvery: Duration.millis(100),
-          idle: { quiet: Duration.millis(300), ...idle },
-          ...(checksStuck === undefined ? {} : { checksStuck }),
-        },
-      ),
+      runtime(':memory:', agent, {
+        connectors: fakeConnectors(services),
+        listenEvery: Duration.millis(100),
+        idle: { quiet: Duration.millis(300), ...idle },
+        ...(checksStuck === undefined ? {} : { checksStuck }),
+      }),
     ),
   )
 

@@ -456,10 +456,12 @@ describe('a task that goes back to work', () => {
       squashMerge(bare, 'althar/add-a-retry')
       github.mergeByHand(1)
       yield* (yield* Changes).refresh(taskId)
-      const [after] = yield* until(cards(project.projectId), (all) => all[0]?.unshipped != null)
+      const [after] = yield* until(cards(project.projectId), (all) => all[0]?.change?.state === 'merged' && all[0].unshipped != null)
       assert.deepStrictEqual([after?.phase, after?.unshipped], ['ready', { commits: 1, add: 1, del: 0 }])
       assert.strictEqual((yield* taskRow(taskId))?.state, 'open')
-      assert.isTrue((yield* notices(ready?.threadId ?? '')).some((notice) => notice.title === 'Not done yet: 1 commit in no pull request.'))
+      yield* until(notices(ready?.threadId ?? ''), (all) =>
+        all.some((notice) => notice.title === 'Not done yet: 1 commit in no pull request.'),
+      )
       yield* runs.publish(taskId)
       assert.strictEqual(github.changes[1]?.source, 'althar/add-a-retry-2')
       assert.strictEqual(git(bare, 'log', '-1', '--format=%s', 'althar/add-a-retry-2'), 'Later')
