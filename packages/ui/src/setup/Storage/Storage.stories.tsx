@@ -85,6 +85,20 @@ export const Approximate: Story = {
   },
 }
 
+/** Some entries couldn't be read: the size is a lower bound, and the count of what was left out shows under it. */
+export const Unreadable: Story = {
+  args: {
+    places: places({
+      worktrees: { state: 'done', bytes: 12 * GB, unreadable: 3 },
+    }),
+  },
+  play: async ({ canvasElement }) => {
+    const view = within(canvasElement)
+    await expect(view.getByText('at least 12 GB')).toBeInTheDocument()
+    await expect(view.getByText('3 items couldn’t be read')).toBeInTheDocument()
+  },
+}
+
 /** A folder that isn't there yet, such as task folders before the first task: no size, and nothing to show. */
 export const MissingFolder: Story = {
   args: {
