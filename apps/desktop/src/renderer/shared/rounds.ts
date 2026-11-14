@@ -2,10 +2,21 @@ import type { ThreadItem, TurnTime } from '@althar/contracts'
 import { ToolKind, ToolState } from '@althar/ui'
 
 import { type Handed, handedBy, type OutputSoFar } from './handed'
-import { type Block, blocksOf, carriedOn, type Doing, doingOf, type Part, relayed, type StepResult, type Streamed } from './thread'
+import {
+  type Block,
+  blocksOf,
+  carriedOn,
+  type Doing,
+  doingOf,
+  type Part,
+  relayed,
+  setupStanding,
+  type StepResult,
+  type Streamed,
+} from './thread'
 import { text as threadText } from './ThreadBlocks'
 import { took } from './time'
-import { type Spent, spentOf, turnOfItems } from './turnTime'
+import { duration, type Spent, spentOf, turnOfItems } from './turnTime'
 
 /*
  * A task's thread in rounds (ADR-042). A round starts with an ask: what the
@@ -406,8 +417,7 @@ export const roundsOf = (
       }
       case 'setup': {
         // Set up as it should be, it is Althar's housekeeping: with the next round's work. Under way or failed, it stands alone.
-        const ended = block.setup.ended
-        if (ended !== null && !ended.stopped && ended.code === 0) {
+        if (setupStanding(block.setup) === 'done') {
           const aside = { kind: 'aside' as const, id: block.id, text: threadText.setup.done(block.setup) }
           if (open !== null) open.steps.push(aside)
           else pending.push(aside)
@@ -523,6 +533,7 @@ const roundOf = (
   const lastStep = work.at(-1)
   const until = result === undefined ? (reported ?? (lastStep === undefined ? start : time(lastStep.id))) : time(result.id)
   const iso = (ms: number) => new Date(ms).toISOString()
+  const spent = live ? null : spending(open.steps.map((step) => step.id))
   return {
     kind: 'round',
     id: open.id,
@@ -537,7 +548,10 @@ const roundOf = (
         : {
             id: `work:${open.id}`,
             steps: work,
-            took: took(iso(work[0] === undefined ? start : time(work[0].id)), live && !answered ? now : iso(until)),
+            took:
+              spent === null
+                ? took(iso(work[0] === undefined ? start : time(work[0].id)), live && !answered ? now : iso(until))
+                : duration(spent.work),
             live,
             counts: countsOf(work),
             doing: live
@@ -546,7 +560,7 @@ const roundOf = (
                   writing !== undefined,
                 )
               : null,
-            spent: live ? null : spending(open.steps.map((step) => step.id)),
+            spent,
           },
     result: result === undefined ? null : said(result, true),
     writing: writing === undefined ? null : said(writing, false),

@@ -47,6 +47,7 @@ export const pieceOf = (evidence: Evidence, id: string): EvidencePiece => {
       shot: {
         name: picture.name ?? evidence.caption,
         alt: evidence.caption,
+        ...(picture.mediaType === 'image/gif' ? { animated: true } : {}),
         ...(picture.digest === null
           ? { status: 'failed' as const, meta: handedText.unkept[picture.unkept ?? 'unkept'] }
           : { src: pictureUrl(picture.digest), thumb: pictureUrl(picture.digest, true), meta: facts.join(' · ') }),

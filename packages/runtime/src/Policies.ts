@@ -1,4 +1,11 @@
-import { type AfterMergeRule, commandStartOf, hostOf, NEW_PROJECT_DEFAULTS, type NewProjectDefaults } from '@althar/contracts'
+import {
+  AccountStrategy,
+  type AfterMergeRule,
+  commandStartOf,
+  hostOf,
+  NEW_PROJECT_DEFAULTS,
+  type NewProjectDefaults,
+} from '@althar/contracts'
 import { type ActorId, Ids, newId, type ProjectId, WorksIn } from '@althar/domain'
 import type { Ledger } from '@althar/persistence-sqlite'
 import { Context, type Crypto, Effect, Layer, Schema } from 'effect'
@@ -106,8 +113,7 @@ export const ProjectRules = Schema.Struct({
   ),
   moveIssues: Schema.optional(Schema.Boolean),
   /**
-   * What a small change's review after it merges brings back (docs/decisions/reviews.md, "A small change is reviewed after it
-   * merges"): `major`, only blocking and major findings put the task in Needs you, the rest stay in the thread; `all`, any
+   * What an explicitly configured review after merge brings back (docs/decisions/reviews.md, "An explicit review after merge"): `major`, only blocking and major findings put the task in Needs you, the rest stay in the thread; `all`, any
    * finding does; `none`, no review is owed after the merge. `major` without it, a project made before it included.
    */
   afterMergeReview: Schema.optional(Schema.Literals(['major', 'all', 'none'])),
@@ -121,12 +127,12 @@ export const ProjectRules = Schema.Struct({
   usageLimit: Schema.optional(Schema.Literals(['move', 'wait', 'ask'])),
   /**
    * An agent's accounts here (ADR-012): whether work moves on to the agent's
-   * next account when one runs out, which the person turns on (off without
-   * it), and which accounts each agent may use, by agent (every one without).
+   * next account when one runs out, on by default unless the person keeps the first account, and which accounts each agent may use, by agent (every one without).
    */
   accounts: Schema.optional(
     Schema.Struct({
       rotate: Schema.Boolean,
+      strategy: Schema.optional(AccountStrategy),
       only: Schema.optional(Schema.Record(Schema.String, Schema.Array(Schema.String))),
     }),
   ),
@@ -213,7 +219,7 @@ export const usageLimitOf = (rules: ProjectRules): UsageLimit => rules.usageLimi
 /** Whether a revision's rules move a task's issue to In Progress as the task starts: they do unless the person turned it off. */
 export const movesIssues = (rules: ProjectRules): boolean => rules.moveIssues ?? true
 
-/** What a revision's rules have a small change's review after its merge bring back: only major findings, unless the person chose. */
+/** What a revision's rules have an explicitly requested review after merge bring back: only major findings, unless the person chose. */
 export const afterMergeReviewOf = (rules: ProjectRules): AfterMergeRule => rules.afterMergeReview ?? 'major'
 
 /** Where a revision's rules start new tasks (ADR-091): in a worktree of their own unless the person chose Local. */
@@ -248,8 +254,14 @@ const sandboxWith = (rules: ProjectRules, change: NonNullable<ProjectRules['sand
   ...(change.hosts === undefined ? {} : { hosts: keptEdits(change.hosts, hostOf) }),
 })
 
-/** What a revision's rules say of accounts: no rotation, and every account, unless the person said otherwise. */
-export const accountsOf = (rules: ProjectRules): AccountRule => rules.accounts ?? { rotate: false }
+/** What a revision's rules say of accounts: rotation and every account, unless the person said otherwise. */
+export const accountsOf = (rules: ProjectRules): AccountRule => rules.accounts ?? { rotate: NEW_PROJECT_DEFAULTS.rotateAccounts }
+
+/** Older rules chose the most room when switching was on, and the first account when it was off. */
+export const accountStrategyOf = (rules: ProjectRules): AccountStrategy => {
+  const accounts = accountsOf(rules)
+  return accounts.rotate ? (accounts.strategy === undefined || accounts.strategy === 'first' ? 'most_room' : accounts.strategy) : 'first'
+}
 
 type Store = SqlClient.SqlClient | Ledger | Crypto.Crypto | Instance
 
@@ -285,7 +297,11 @@ export const insertRevision = (projectId: ProjectId, revision: number, rules: Pr
 export const startingRules = (defaults: NewProjectDefaults): ProjectRules => {
   const chosen: Partial<ProjectRules> = {
     ...(defaults.usageLimit === NEW_PROJECT_DEFAULTS.usageLimit ? {} : { usageLimit: defaults.usageLimit }),
-    ...(defaults.rotateAccounts ? { accounts: { rotate: true } } : {}),
+    ...(!defaults.rotateAccounts
+      ? { accounts: { rotate: false } }
+      : defaults.accountStrategy !== 'first' && defaults.accountStrategy !== 'most_room'
+        ? { accounts: { rotate: true, strategy: defaults.accountStrategy } }
+        : {}),
     ...(defaults.end === NEW_PROJECT_DEFAULTS.end ? {} : { end: defaults.end }),
     ...(defaults.pushCommits === NEW_PROJECT_DEFAULTS.pushCommits ? {} : { pushCommits: defaults.pushCommits }),
     ...(defaults.postScreenshots === NEW_PROJECT_DEFAULTS.postScreenshots ? {} : { postScreenshots: defaults.postScreenshots }),

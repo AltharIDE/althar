@@ -1,3 +1,4 @@
+import { copilotDefinition } from './copilot'
 import type { InAppSignIn } from './signInFlow'
 import { spawnSync } from 'node:child_process'
 import { existsSync } from 'node:fs'
@@ -38,6 +39,7 @@ export type AgentId =
   | 'codex'
   | 'opencode'
   | 'copilot'
+  | 'copilot-direct'
   | 'junie'
   | 'grok'
   | 'kimi'
@@ -244,6 +246,8 @@ export interface AgentDefinition {
    * Althar makes, so every account works the same; never a sign-in.
    */
   readonly home: {
+    /** Its usual account belongs to Althar, separately from the engine’s own accounts. */
+    readonly managed?: boolean
     readonly variable: string
     readonly usual: (env: Readonly<Record<string, string | undefined>>, homeDir: string) => string
     readonly shared: (names: ReadonlyArray<string>) => ReadonlyArray<string>
@@ -488,6 +492,8 @@ export const excludedCommandsOf = (commands: ReadonlyArray<string>): ReadonlyArr
   commands.flatMap((command) => [command, `${command} *`])
 
 export interface AgentCli {
+  /** Use Althar’s verified engine; an unrelated or older personal install cannot replace it. */
+  readonly managed?: boolean
   /** The command by name, as on the person's PATH; `.exe` is added on Windows. */
   readonly name: string
   /**
@@ -909,6 +915,7 @@ export const claudeSandboxStarts = (): boolean => {
     const onPath = (name: string) =>
       (process.env.PATH ?? '').split(delimiter).some((folder) => folder !== '' && existsSync(join(folder, name)))
     if (!onPath('bwrap') || !onPath('socat')) return false
+    // oxlint-disable-next-line althar/off-the-thread -- Not off the thread yet: once a launch, on Linux with bubblewrap, up to 5 s (foundations.md).
     const tried = spawnSync('bwrap', ['--ro-bind', '/', '/', '--dev', '/dev', '--unshare-user', '--unshare-net', 'true'], {
       stdio: 'ignore',
       timeout: 5_000,
@@ -1022,7 +1029,7 @@ const claudeJudges = {
   },
 }
 
-export const agents: Readonly<Record<AgentId, AgentDefinition>> = {
+const cliAgents: Readonly<Record<Exclude<AgentId, 'copilot-direct'>, AgentDefinition>> = {
   'claude-code': {
     id: 'claude-code',
     name: 'Claude Code',
@@ -1418,7 +1425,7 @@ export const agents: Readonly<Record<AgentId, AgentDefinition>> = {
     id: 'copilot',
     ownHelpers: { off: true, how: '--excluded-tools task', kept: 'none: one tool runs both ways' },
     skills: null,
-    name: 'GitHub Copilot',
+    name: 'GitHub Copilot CLI',
     service: { name: 'GitHub', url: 'https://api.githubcopilot.com' },
     source: 'user_installed',
     /*
@@ -1892,4 +1899,13 @@ export const agents: Readonly<Record<AgentId, AgentDefinition>> = {
       'It unpacks about 1 GB into a temporary folder each time it starts, removed when it stops.',
     ],
   },
+}
+
+/** Native Copilot keeps its identity and credentials separate from the existing CLI connection. */
+const { 'claude-code': firstClaude, codex: firstCodex, ...otherAgents } = cliAgents
+export const agents: Readonly<Record<AgentId, AgentDefinition>> = {
+  'claude-code': firstClaude,
+  codex: firstCodex,
+  'copilot-direct': copilotDefinition(cliAgents.opencode),
+  ...otherAgents,
 }

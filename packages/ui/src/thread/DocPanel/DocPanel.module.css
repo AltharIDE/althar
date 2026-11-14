@@ -14,7 +14,11 @@
   gap: 12px;
   max-width: 620px;
 }
-/* what the document says of itself in its place: nothing in it, or it couldn't be read */
+/* it couldn't be read: in its place, at the document's width */
+.problem {
+  max-width: 620px;
+}
+/* what the document says of itself in its place: nothing in it */
 .said {
   margin: 0;
   font-size: 13px;

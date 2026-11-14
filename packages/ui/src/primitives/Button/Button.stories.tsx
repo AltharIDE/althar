@@ -12,19 +12,9 @@ const meta = {
 export default meta
 type Story = StoryObj<typeof meta>
 
-export const Default: Story = {}
-/** Violet is only for answering something that waits on you. */
-export const Signal: Story = { args: { variant: 'signal', children: 'Allow', kbd: '↵' } }
-export const Quiet: Story = { args: { variant: 'quiet', children: 'Hold' } }
-/** Red words, for the one press that ends or throws something away, as a dialog's last word. */
-export const Danger: Story = { args: { variant: 'danger', children: 'Remove project' } }
-export const Ink: Story = { args: { variant: 'ink', children: 'Put Althar back on your commits' } }
-/** Inside a row of a thread or a card, beside 11–12px text. */
-export const Small: Story = { args: { size: 'small', children: 'Undo' } }
 export const WithIcon: Story = { args: { icon: 'plus', children: 'New task' } }
 export const WithTrailingIcon: Story = { args: { trailingIcon: 'arrow', children: 'Open task' } }
 export const WithShortcut: Story = { args: { kbd: '↵', children: 'Send' } }
-export const Disabled: Story = { args: { disabled: true } }
 export const Busy: Story = {
   args: { busy: true, children: 'Starting' },
   play: async ({ args, canvasElement }) => {

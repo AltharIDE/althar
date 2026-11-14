@@ -442,7 +442,7 @@ describe('a task’s lead that is signed out', () => {
   const signedOut = items.notice({
     severity: 'error',
     title: 'Claude Code is signed out.',
-    description: 'Authentication required',
+    description: 'The key for the work account was revoked.',
     failure: 'auth_required',
   })
   const show = (overrides: Partial<ThreadSnapshot> = {}) => {
@@ -457,8 +457,8 @@ describe('a task’s lead that is signed out', () => {
   it('says so plainly, with the agent’s words under it, and offers Sign in again first, for that agent', async () => {
     const { onSignIn } = show()
     expect(await screen.findByText('Claude Code is signed out.')).toBeTruthy()
-    expect(screen.getByText('Authentication required')).toBeTruthy()
-    const [first, second] = within(screen.getByText('Sign in again').closest('p') as HTMLElement).getAllByRole('button')
+    expect(screen.getByText('The key for the work account was revoked.')).toBeTruthy()
+    const [first, second] = within(screen.getByText('Sign in again').closest('[role=alert]') as HTMLElement).getAllByRole('button')
     expect(first?.textContent).toBe('Sign in again')
     expect(second?.textContent).toBe('Try again')
     await userEvent.click(screen.getByRole('button', { name: 'Sign in again' }))
@@ -518,7 +518,7 @@ describe('a task’s thread in rounds, on its screen', () => {
     expect(screen.getByRole('button', { name: 'Show less' })).toBeTruthy()
   })
 
-  it('shows each report’s screenshots large, not again when a later report takes the same view, and drops the table listing them', async () => {
+  it('shows the latest collection in full, keeps earlier reports as history, and drops the table listing the pictures', async () => {
     show([
       items.you('Prototype it'),
       items.tool({}),
@@ -536,8 +536,10 @@ describe('a task’s thread in rounds, on its screen', () => {
     ])
     expect(await screen.findByRole('heading', { name: 'A · Quiet' })).toBeTruthy()
     expect(screen.getByRole('button', { name: 'View S1 · The switcher full size' })).toBeTruthy()
-    // The same view taken again is counted in a line, and opens on a click.
-    expect(screen.getByRole('button', { name: 'Also retook 1 shown earlier' })).toBeTruthy()
+    // The latest handoff shows its complete collection, including retaken views.
+    expect(screen.getByRole('button', { name: 'View A1 · Quiet, from the switcher full size' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'View A1 · Quiet: the first full size' })).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Also retook 1 shown earlier' })).toBeNull()
     expect(screen.queryByRole('columnheader', { name: 'Caption' })).toBeNull()
   })
 

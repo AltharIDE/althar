@@ -1,5 +1,5 @@
 import { Dialog } from 'radix-ui'
-import { useCallback, useState, type CSSProperties, type KeyboardEvent } from 'react'
+import { useCallback, useEffect, useState, type CSSProperties, type KeyboardEvent } from 'react'
 
 import { cx } from '../../lib/cx'
 import { useControlled } from '../../lib/controlled'
@@ -7,6 +7,7 @@ import { ActionButton } from '../../primitives/ActionButton/ActionButton'
 import { VisuallyHidden } from '../../primitives/VisuallyHidden/VisuallyHidden'
 import type { ImageRef } from '../Shell/Shell'
 import s from './Lightbox.module.css'
+import { recordingPoster } from './poster'
 
 export interface ImageViewText {
   /** Said in the picture's place when it couldn't be shown. */
@@ -21,6 +22,8 @@ export interface ImageViewProps {
   fit?: 'contain' | 'cover'
   /** `thumb` draws the smaller copy where there is one, as Shots does. */
   size?: 'full' | 'thumb'
+  /** Animated images are still until their lightbox explicitly plays them. */
+  animate?: boolean
   text?: Partial<ImageViewText>
   /** Told the picture's own size once it has loaded, for where the box wasn't given one. */
   onSize?: (width: number, height: number) => void
@@ -32,14 +35,46 @@ export interface ImageViewProps {
  * main thread, and only once it nears the screen; its box keeps its shape
  * until then, so nothing below it moves when it arrives.
  */
-export function ImageView({ image, className, fit = 'contain', size = 'full', text, onSize }: ImageViewProps) {
+export function ImageView({ image, className, fit = 'contain', size = 'full', animate = false, text, onSize }: ImageViewProps) {
   const src = size === 'thumb' ? (image.thumb ?? image.src) : image.src
   /* keyed by the picture, so another one starts loading afresh */
   if (image.status === 'loading') return <span className={cx(s.waiting, className)} data-state="loading" aria-hidden="true" />
+  if (src && image.status !== 'failed' && image.animated && !animate && image.poster === undefined)
+    return <StillPicture key={src} src={src} image={image} fit={fit} className={className} text={text} onSize={onSize} />
   if (src && image.status !== 'failed')
-    return <Picture key={src} src={src} image={image} fit={fit} className={className} text={text} onSize={onSize} />
+    return (
+      <Picture
+        key={src}
+        src={image.animated && !animate ? (image.poster ?? src) : src}
+        image={image}
+        fit={fit}
+        className={className}
+        text={text}
+        onSize={onSize}
+      />
+    )
   if (image.view && image.status !== 'failed') return <span className={className}>{image.view}</span>
   return <Unshown image={image} className={className} text={text} />
+}
+
+function StillPicture(props: Parameters<typeof Picture>[0]) {
+  const { src, image, className, text } = props
+  const [poster, setPoster] = useState<string | null>()
+  useEffect(() => {
+    let live = true
+    let url: string | undefined
+    void recordingPoster(src, image.width, image.height).then((blob) => {
+      if (!live) return
+      url = blob === null ? undefined : URL.createObjectURL(blob)
+      setPoster(url ?? null)
+    })
+    return () => {
+      live = false
+      if (url !== undefined) URL.revokeObjectURL(url)
+    }
+  }, [src, image.width, image.height])
+  if (poster === undefined) return <span className={cx(s.waiting, className)} data-state="loading" aria-hidden="true" />
+  return poster === null ? <Unshown image={image} className={className} text={text} /> : <Picture key={poster} {...props} src={poster} />
 }
 
 function Picture({
@@ -100,6 +135,8 @@ function Unshown({ image, className, text }: { image: ImageRef; className: strin
 }
 
 export interface LightboxText {
+  play: string
+  pause: string
   open: string
   close: string
   closeKey: string
@@ -113,7 +150,9 @@ export interface LightboxText {
 }
 
 export const lightboxText: LightboxText = {
-  open: 'Open in Preview',
+  play: 'Play recording',
+  pause: 'Pause recording',
+  open: 'Open in viewer',
   close: 'Close',
   closeKey: 'esc',
   previous: 'Previous image',
@@ -158,6 +197,8 @@ export function Lightbox({ images, index, defaultIndex = 0, onIndexChange, onClo
   const [measured, setMeasured] = useState<{ src: string | undefined; width: number; height: number }>()
   /* the one at actual size, until another shows */
   const [actual, setActual] = useState<ImageRef>()
+  // Motion is opt-in, including with reduced motion. Changing images stops playback.
+  const [playing, setPlaying] = useState<ImageRef>()
   const move = (by: number) => {
     if (several) setAt((shown + by + count) % count)
   }
@@ -172,6 +213,7 @@ export function Lightbox({ images, index, defaultIndex = 0, onIndexChange, onClo
   if (seen !== image) {
     setSeen(image)
     setActual(undefined)
+    setPlaying(undefined)
   }
   const zoomed = actual === image && known !== undefined
   /* given both ways up front, the frame takes the picture's shape; otherwise it stays, and the picture is capped at its measured size inside it */
@@ -229,8 +271,9 @@ export function Lightbox({ images, index, defaultIndex = 0, onIndexChange, onClo
               onClick={zoom}
             >
               <ImageView
-                key={image.src}
-                image={image}
+                key={playing === image ? image.src : (image.thumb ?? image.src)}
+                image={image.animated && playing !== image && image.thumb ? { ...image, src: image.thumb } : image}
+                animate={playing === image}
                 text={t.image}
                 onSize={(width, height) => setMeasured({ src: image.src, width, height })}
               />
@@ -240,6 +283,16 @@ export function Lightbox({ images, index, defaultIndex = 0, onIndexChange, onClo
               {image.meta && <span className={s.meta}>{image.meta}</span>}
               {several && <span className={s.position}>{t.position(shown + 1, count)}</span>}
               <span className={s.actions}>
+                {image.animated && (
+                  <ActionButton
+                    tone="onDark"
+                    icon={playing === image ? 'pause' : 'play'}
+                    aria-pressed={playing === image}
+                    onClick={() => setPlaying(playing === image ? undefined : image)}
+                  >
+                    {playing === image ? t.pause : t.play}
+                  </ActionButton>
+                )}
                 {several && (
                   <>
                     <ActionButton tone="onDark" icon="chevronL" aria-label={t.previous} onClick={() => move(-1)} />

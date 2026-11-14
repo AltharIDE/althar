@@ -20,7 +20,8 @@ ADR-069,
 ADR-083,
 ADR-098,
 ADR-099,
-ADR-100
+ADR-100,
+ADR-105
 
 ## How the window reads
 
@@ -56,9 +57,12 @@ saw came from screens starting empty, not from slow reads.
 - **Reads stay cheap.** What Home, a board and a thread read from git is kept
   per worktree, and read again only when the worktree moves.
 
-The cache is never patched, only read again or marked. A full replica of the
-store in the window, as Linear keeps, isn't worth a second copy of the domain
-while the runtime is on the same machine.
+The cache is patched only by what the person does, at once, before the runtime
+answers ([foundations § The UI is instant](foundations.md#the-ui-is-instant)).
+That change holds until a read that has it lands, and is taken back with a
+line where it failed; otherwise the cache is only read again or marked. A full
+replica of the store in the window, as Linear keeps, isn't worth a second copy
+of the domain while the runtime is on the same machine.
 [ADR-103](proposed/103-projects-live-locally-or-on-a-host-and-place-work-in-pools.md)
 would change that premise.
 
@@ -125,7 +129,8 @@ The runtime pages it the same way, so a task opens on whole rounds.
   delivered in, and drawn on the person's side under "From the coordinator".
   What the person says while a turn runs moves to where the lead read it.
 - **The lead's work folds under one line,** and what it says last stands open
-  under it, with its report: every screenshot it handed in, large, with its
+  under it, with its report: at the latest handoff the task’s complete visual
+  collection, at earlier handoffs the screenshots handed then, large, with each
   whole caption, grouped by their names; a view it showed before and took
   again named in a line, not shown twice; then what it checked and what it
   couldn't. No step cards, and no card closes the thread. A picture the
@@ -560,7 +565,11 @@ way of what is done often. The tokens and their values are in
   uses `--slide`. The springs are sampled as CSS `linear()` curves
   (`lib/spring.ts`), with the same values in `lib/motion.ts` for script.
 - **Overlays grow from what opened them,** and dialogs from their middle. The
-  command menu, opened by key many times a day, is there at once.
+  search palette, opened by key many times a day, is there at once, and so
+  is each list a key brings. Only what keeps its identity across a step
+  glides (the chosen row's name into the field's chip and back, the box's
+  height, the highlight), with nothing real hidden meanwhile; neither typing
+  nor navigation waits on motion.
 - **Lists move as a whole** (`ListMotion`): an item keyed by `data-move`
   slides when its place changes, and a board card that changes lanes travels
   there as a copy above the board. The board, Home's calls, the tabs and the
@@ -573,6 +582,17 @@ way of what is done often. The tokens and their values are in
   a task, anything done by key, and anything that repeats.
 - **Reduced motion:** nothing travels, grows or slides; lists only fade.
 
+## Undo from a task message
+
+A delivered task message with a complete checkpoint offers **Undo from here**. The person confirms the prompt and the scope: that message and everything after it leave the conversation, and the files touched by those turns return to their contents before the first turn. Prompts and attachments return beside any unsent draft. Messages delivered together are one turn, so the action belongs to the first message of that batch.
+
+- File boundaries are captured immediately before delivery and after the turn ends, including shell writes, untracked files and commits. Private Git refs keep those trees without moving HEAD, a branch or the person's index. Ignored files and external actions are outside this boundary. Existing commits stay in history; restored contents appear as local changes.
+- Undo needs the task's own worktrees, with its plan, helpers and background commands stopped. Local checkouts, shared folders and turns without complete checkpoints do not support it. All workspaces are checked before any file changes. Overlapping later edits, affected staged files, a moved folder or branch, links and submodules refuse the entire undo. Unrelated manual edits, including those between turns, stay.
+- A prepared recovery journal and private recovery refs precede file writes. Conversation changes, the command receipt and the completed journal commit together. An interrupted attempt restores its saved originals before another session starts; recovery preserves unexpected later manual edits and stays pending for an explicit retry.
+- Undone items and deliveries remain as audit records, omitted from the visible transcript, search and future agent context. The idle provider session ends; the next message starts a fresh session with the retained transcript. A conversation version makes every window discard removed pages and streamed content. Retrying a successful command reads its original receipt.
+
+[The T3 and Paradev research](../research/chat-turn-undo.md) informed the worktree boundary, selective file checks and prompt restoration. Althar refuses a conflicting restore as a whole, so the conversation and files cannot silently diverge through a partial undo. There is no redo control in this slice; recovery refs support interrupted operations rather than a second conversation branch.
+
 ## Changes
 
 - 8 Nov 2026: written from the ADRs under Replaces.
@@ -580,3 +600,4 @@ way of what is done often. The tokens and their values are in
 - 10 Nov 2026: a thread marks a new change as a stamped row of its own; the board keeps chats on Scratch behind one chip; the plan card's kicker names its preset; the header's parts move a task, point it elsewhere, run a review's code and stop a helper ([tasks](tasks.md#changing-parts)).
 - 10 Nov 2026: Scratch is a shelf of its own, by each chat's latest exchange, with Clear; the board card says one sentence across a task's changes with a mark for each; Shipped, Merged and Helper rows in the thread, a helper's opening in place to its work, and helpers' lanes on the Graph face; the plan card's preset picks another; Settings edits presets ([tasks](tasks.md#asides)).
 - 11 Nov 2026: asides over the coordinator's conversation replace Scratch's chip beside it; the chip stays with the board alone ([tasks](tasks.md#asides)).
+- 13 Nov 2026: the cache is patched by what the person does, at once, and held until a read confirms it ([foundations § The UI is instant](foundations.md#the-ui-is-instant)); it used to say the cache was never patched.

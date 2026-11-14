@@ -1,4 +1,5 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
+import type { ReactNode } from 'react'
 import { expect, fn, userEvent, within } from 'storybook/test'
 
 import { States } from '../../storybook/States'
@@ -74,20 +75,107 @@ export const Going: Story = {
   },
 }
 
+/** Commits wait on the branch for Ship: Ship, which reviews them first, and never Accept or Push without them. */
+export const Held: Story = {
+  args: { held: 2, onShip: fn(), unpushed: 2, onPush: fn() },
+  play: async ({ args, canvasElement }) => {
+    const c = within(canvasElement)
+    await expect(c.getByText('2 commits aren’t shipped yet')).toBeInTheDocument()
+    await expect(c.queryByRole('button', { name: 'Accept and merge' })).toBeNull()
+    await expect(c.queryByRole('button', { name: 'Push' })).toBeNull()
+    await userEvent.click(c.getByRole('button', { name: 'Ship' }))
+    await expect(args.onShip).toHaveBeenCalledOnce()
+  },
+}
+
+/** A peek in a cell of the grid as it is in the dock: its parts down a column, as wide as the cell. */
+const Peek = ({ children }: { children: ReactNode }) => <div style={{ width: '100%' }}>{children}</div>
+
 export const AllStates: Story = {
   render: (args) => (
     <States
       size="wide"
       cells={[
-        { state: 'default', node: <AcceptPeek {...args} /> },
-        { state: 'plain', node: <AcceptPeek {...args} {...Plain.args} /> },
-        { state: 'a check still running', node: <AcceptPeek {...args} checks={CHECKS_RUNNING} /> },
-        { state: 'accepting', node: <AcceptPeek {...args} accepting /> },
-        { state: 'sending back', node: <AcceptPeek {...args} sendingBack /> },
-        { state: 'a commit to push', node: <AcceptPeek {...args} unpushed={1} onPush={() => {}} /> },
-        { state: 'pushing', node: <AcceptPeek {...args} unpushed={2} onPush={() => {}} pushing /> },
-        { state: 'a commit going up', node: <AcceptPeek {...args} going={1} /> },
-        { state: 'accept failed', node: <AcceptPeek {...args} error="GitHub refused the merge: the branch is behind main." /> },
+        {
+          state: 'default',
+          node: (
+            <Peek>
+              <AcceptPeek {...args} />
+            </Peek>
+          ),
+        },
+        {
+          state: 'plain',
+          node: (
+            <Peek>
+              <AcceptPeek {...args} {...Plain.args} />
+            </Peek>
+          ),
+        },
+        {
+          state: 'a check still running',
+          node: (
+            <Peek>
+              <AcceptPeek {...args} checks={CHECKS_RUNNING} />
+            </Peek>
+          ),
+        },
+        {
+          state: 'accepting',
+          node: (
+            <Peek>
+              <AcceptPeek {...args} accepting />
+            </Peek>
+          ),
+        },
+        {
+          state: 'sending back',
+          node: (
+            <Peek>
+              <AcceptPeek {...args} sendingBack />
+            </Peek>
+          ),
+        },
+        {
+          state: 'a commit to push',
+          node: (
+            <Peek>
+              <AcceptPeek {...args} unpushed={1} onPush={() => {}} />
+            </Peek>
+          ),
+        },
+        {
+          state: 'pushing',
+          node: (
+            <Peek>
+              <AcceptPeek {...args} unpushed={2} onPush={() => {}} pushing />
+            </Peek>
+          ),
+        },
+        {
+          state: 'a commit going up',
+          node: (
+            <Peek>
+              <AcceptPeek {...args} going={1} />
+            </Peek>
+          ),
+        },
+        {
+          state: 'commits held for Ship',
+          node: (
+            <Peek>
+              <AcceptPeek {...args} held={2} onShip={() => {}} />
+            </Peek>
+          ),
+        },
+        {
+          state: 'accept failed',
+          node: (
+            <Peek>
+              <AcceptPeek {...args} error="GitHub refused the merge: the branch is behind main." />
+            </Peek>
+          ),
+        },
       ]}
     />
   ),

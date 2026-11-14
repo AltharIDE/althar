@@ -7,6 +7,7 @@ import { ListMotion } from '../../lib/ListMotion'
 import type { HeadingLevel } from '../../primitives/Heading/Heading'
 import { Button } from '../../primitives/Button/Button'
 import { Dialog } from '../../primitives/Dialog/Dialog'
+import { Problem } from '../../primitives/Problem/Problem'
 import { ControlToggle } from '../ControlCenter/ControlCenter'
 import {
   AddTile,
@@ -133,7 +134,7 @@ export function SkillTiles({
   const sorted = (list: readonly SkillTileModel[]) =>
     list
       .map((skill, at) => ({ skill, at }))
-      .sort((a, b) => Number(b.skill.update) - Number(a.skill.update) || a.at - b.at)
+      .sort((a, b) => Number(b.skill.update) - Number(a.skill.update) || a.skill.name.localeCompare(b.skill.name))
       .map((one) => one.skill)
   const same = (
     <div className={s.cell}>
@@ -180,11 +181,7 @@ export function SkillTiles({
             {same}
           </TileGrid>
         )}
-        {errors.length > 0 && (
-          <p className={s.errors} role="alert">
-            {errors.join(' ')}
-          </p>
-        )}
+        {errors.length > 0 && <Problem>{errors.join(' ')}</Problem>}
         {repositories.map((project) => (
           <ToolGroup
             key={project}

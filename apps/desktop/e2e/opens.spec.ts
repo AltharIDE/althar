@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { expect, test } from '@playwright/test'
 
 import { repository } from '../tests/repository'
-import { launch, openFirstProject, planTask, say } from './support'
+import { launch, openFirstProject, planTask, say, showPanes } from './support'
 
 /*
  * Where a task opens from the board: a change that is ready opens on its
@@ -20,7 +20,7 @@ test('opens a change on its outputs and a quick task on its conversation', async
   const { electronApp, page } = await launch(home)
   try {
     await openFirstProject(electronApp, page, repository(projects))
-    await page.getByRole('radio', { name: 'Home' }).click()
+    await showPanes(page, { conversation: true, board: true })
     const work = page.getByRole('region', { name: 'The project’s work' })
 
     await planTask(page, 'Retry webhook deliveries with backoff', '[lead:finish] [lead:edit]')

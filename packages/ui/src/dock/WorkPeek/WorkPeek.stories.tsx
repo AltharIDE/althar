@@ -1,4 +1,5 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
+import type { ReactNode } from 'react'
 
 import { STEPS_418 } from '../../fixtures/chrome'
 import { OPUS } from '../../fixtures/models'
@@ -50,17 +51,62 @@ export const Settled: Story = {
   render: () => <SettledPeek title="Add idempotency keys to the refund endpoint" meta="PR 1184 · 2 review rounds" />,
 }
 
+/** A peek in a cell of the grid as it is in the dock: its parts down a column, as wide as the cell. */
+const Peek = ({ children }: { children: ReactNode }) => <div style={{ width: '100%' }}>{children}</div>
+
 export const AllStates: Story = {
   render: (args) => (
     <States
       size="wide"
       cells={[
-        { state: 'running', node: <WorkPeek {...args} /> },
-        { state: 'waiting on you', node: <WorkPeek {...args} {...WaitingOnYou.args} /> },
-        { state: 'paused', node: <WorkPeek {...args} status={TaskStatus.Paused} /> },
-        { state: 'sent back', node: <WorkPeek {...args} steps={SENT_BACK} /> },
-        { state: 'not started', node: <WorkPeek {...args} {...NotStarted.args} /> },
-        { state: 'settled', node: <SettledPeek title="Add idempotency keys to the refund endpoint" meta="PR 1184 · 2 review rounds" /> },
+        {
+          state: 'running',
+          node: (
+            <Peek>
+              <WorkPeek {...args} />
+            </Peek>
+          ),
+        },
+        {
+          state: 'waiting on you',
+          node: (
+            <Peek>
+              <WorkPeek {...args} {...WaitingOnYou.args} />
+            </Peek>
+          ),
+        },
+        {
+          state: 'paused',
+          node: (
+            <Peek>
+              <WorkPeek {...args} status={TaskStatus.Paused} />
+            </Peek>
+          ),
+        },
+        {
+          state: 'sent back',
+          node: (
+            <Peek>
+              <WorkPeek {...args} steps={SENT_BACK} />
+            </Peek>
+          ),
+        },
+        {
+          state: 'not started',
+          node: (
+            <Peek>
+              <WorkPeek {...args} {...NotStarted.args} />
+            </Peek>
+          ),
+        },
+        {
+          state: 'settled',
+          node: (
+            <Peek>
+              <SettledPeek title="Add idempotency keys to the refund endpoint" meta="PR 1184 · 2 review rounds" />
+            </Peek>
+          ),
+        },
       ]}
     />
   ),

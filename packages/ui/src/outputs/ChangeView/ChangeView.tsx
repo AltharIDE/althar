@@ -6,6 +6,7 @@ import { cx } from '../../lib/cx'
 import { ActionButton } from '../../primitives/ActionButton/ActionButton'
 import { Button } from '../../primitives/Button/Button'
 import { Delta } from '../../primitives/FileChanges/FileChanges'
+import { Problem } from '../../primitives/Problem/Problem'
 import { Spinner } from '../../primitives/Spinner/Spinner'
 import { Diff, type DiffLine, type DiffNote } from '../../thread/Diff/Diff'
 import { FindingNote, heavyWeight, type NotedFinding } from '../../thread/Reviewer/FindingNote'
@@ -438,13 +439,22 @@ function FileBody({
       return (
         <>
           {alone}
-          <div className={s.failed} role="alert">
-            <p>{view.message ?? t.failed}</p>
-            {onRetry && (
-              <Button variant="quiet" onClick={onRetry}>
-                {t.tryAgain}
-              </Button>
-            )}
+          <div className={s.failed}>
+            <Problem
+              as="div"
+              banner
+              {...(onRetry === undefined
+                ? {}
+                : {
+                    action: (
+                      <Button size="small" onClick={onRetry}>
+                        {t.tryAgain}
+                      </Button>
+                    ),
+                  })}
+            >
+              {view.message ?? t.failed}
+            </Problem>
           </div>
         </>
       )

@@ -13,7 +13,7 @@ import { limitWords, planOf, roomOf, windowName } from '../src/renderer/features
 import { waitsWords } from '../src/renderer/shared/agents'
 import { ModelChoice } from '../src/renderer/shared/ModelChoice'
 import { clock } from '../src/renderer/shared/time'
-import { agents, changed, fakeClient, fakeHost, planUsage, project, usageAccount } from './fixtures'
+import { agents, fakeClient, fakeHost, planUsage, project, usageAccount } from './fixtures'
 import { withServices } from './render'
 
 /*
@@ -25,6 +25,54 @@ import { withServices } from './render'
 const NOW = new Date('2026-10-15T10:05:00.000Z')
 const RESET = '2026-10-15T15:00:00.000Z'
 const WEEK = '2026-10-19T09:00:00.000Z'
+
+describe('usage from a provider with no built-in mark', () => {
+  const account = () =>
+    usageAccount({
+      agentId: 'local-agent',
+      agentName: 'Local agent',
+      plan: 'Local plan',
+      windows: [{ kind: 'monthly', label: null, usedPercent: 20, resetsAt: null }],
+    })
+
+  it('names monthly and provider-defined windows, and keeps an unknown reset time unknown', () => {
+    expect(windowName({ kind: 'monthly', label: null })).toBe('Month')
+    expect(windowName({ kind: 'other', label: 'Credits' })).toBe('Credits')
+    expect(windowName({ kind: 'other', label: null })).toBe('')
+    const row = planOf(planUsage([account()]), NOW).agents[0]
+    expect(row).toMatchObject({ id: 'local-agent', name: 'Local agent', left: 80, until: null })
+    expect(row).not.toHaveProperty('brand')
+    expect(row?.accounts[0]?.windows[0]).toMatchObject({ label: 'Month', until: null })
+    const room: ModelRoom = {
+      agentId: 'local-agent',
+      model: 'large',
+      accountId: 'acc',
+      accountName: 'main',
+      several: false,
+      leftPercent: 80,
+      resetsAt: null,
+      kind: 'monthly',
+      label: null,
+    }
+    expect(roomOf({ id: 'local-agent:large' }, [room], planUsage([account()]), NOW)).toEqual({ left: 80, until: null, account: null })
+  })
+
+  it('keeps an unread plan connected, a signed-out one stopped, and an expired reading unnumbered', () => {
+    const unread = { ...account(), windows: [], noReading: 'Not published yet.' }
+    const connected = planOf(planUsage([unread]), NOW).agents[0]
+    expect(connected).toMatchObject({ connected: 'Connected', left: 0 })
+    expect(connected).not.toHaveProperty('brand')
+    const signedOut = { ...account(), fault: { kind: 'sign_in_again' as const, message: 'Sign in again.' } }
+    const stopped = planOf(planUsage([signedOut]), NOW).agents[0]
+    expect(stopped).toMatchObject({ stopped: 'Signed out', signIn: true })
+    expect(stopped).not.toHaveProperty('brand')
+    const other = { ...unread, accountId: 'another' }
+    expect(planOf(planUsage([signedOut, other]), NOW).agents[0]).toMatchObject({ connected: 'Connected' })
+    const reset = planOf(planUsage([{ ...unread, resetSince: true }]), NOW).agents[0]
+    expect(reset).toMatchObject({ unread: 'Not read since reset' })
+    expect(reset).not.toHaveProperty('brand')
+  })
+})
 
 // The window reads its windows at NOW, as the plan's own tests do: a window past its reset is no longer shown.
 beforeEach(() => {
@@ -500,24 +548,9 @@ describe('the plan gauge in the bar', () => {
   })
 })
 
-describe('each model’s room in the pickers', () => {
-  it('reads the rooms for the project, and shows them on each model and beside the chip once nearly out', async () => {
-    const fake = fakeClient({
-      getPlanUsage: vi.fn(async () => planUsage([codexWork, claude])),
-      getModelRooms: vi.fn(async () => [
-        {
-          agentId: 'codex',
-          model: 'gpt-5.2-codex',
-          accountId: 'acc_codex_work',
-          accountName: 'work',
-          several: false,
-          leftPercent: 3,
-          resetsAt: RESET,
-          kind: 'five_hour' as const,
-          label: null,
-        },
-      ]),
-    })
+describe('the model picker', () => {
+  it('shows models and effort without account names or usage and does not read account rooms', async () => {
+    const fake = fakeClient({ getPlanUsage: vi.fn(async () => planUsage([codexWork, codexSide, claude])) })
     withServices(
       <ModelChoice
         owner="Lead"
@@ -528,49 +561,12 @@ describe('each model’s room in the pickers', () => {
       />,
       fake.client,
     )
-    await screen.findByText(`3% left · until ${clock(RESET)}`)
-    expect(fake.client.getModelRooms).toHaveBeenCalledWith('p1')
-    await userEvent.click(screen.getByRole('button', { name: /^Lead: / }))
-    expect((await screen.findByRole('radio', { name: /gpt-5\.2-codex/ })).textContent).toContain(`3% · until ${clock(RESET)}`)
-  })
-
-  it('reads a shown picker’s rooms again as its project’s rules or an agent’s accounts change', async () => {
-    const room = (accountName: string, leftPercent: number) => ({
-      agentId: 'codex',
-      model: 'gpt-5.2-codex',
-      accountId: `acc_codex_${accountName}`,
-      accountName,
-      several: true,
-      leftPercent,
-      resetsAt: RESET,
-      kind: 'five_hour' as const,
-      label: null,
-    })
-    const getModelRooms = vi.fn(async () => [room('side', 80)])
-    const fake = fakeClient({ getPlanUsage: vi.fn(async () => planUsage([codexWork, codexSide])), getModelRooms })
-    withServices(
-      <ModelChoice
-        owner="Lead"
-        agents={agents.filter((agent) => agent.signIn !== 'signed_out')}
-        projectId="p1"
-        value={{ agentId: 'codex', model: 'gpt-5.2-codex', effort: null }}
-        onChange={vi.fn()}
-      />,
-      fake.client,
-    )
-    await userEvent.click(screen.getByRole('button', { name: /^Lead: / }))
-    await waitFor(() => expect(screen.getByRole('radio', { name: /gpt-5\.2-codex/ }).textContent).toContain('80%'))
-    // The project stops moving work through Codex's accounts: new work starts on Work, at 3%.
-    getModelRooms.mockImplementation(async () => [room('work', 3)])
-    act(() => fake.emit(changed('policy', 'p1', null, 'p1')))
-    await waitFor(() => expect(screen.getByRole('radio', { name: /gpt-5\.2-codex/ }).textContent).toContain('3%'))
-    // Another project's rules leave it be; Work held for a limit reads it again.
-    const reads = getModelRooms.mock.calls.length
-    act(() => fake.emit(changed('policy', 'p2', null, 'p2')))
-    getModelRooms.mockImplementation(async () => [room('side', 80)])
-    act(() => fake.emit(changed('account_status', 'acc_codex_work', null, null)))
-    await waitFor(() => expect(screen.getByRole('radio', { name: /gpt-5\.2-codex/ }).textContent).toContain('80%'))
-    expect(getModelRooms.mock.calls.length).toBe(reads + 1)
+    await userEvent.click(await screen.findByRole('button', { name: /^Lead: / }))
+    const model = await screen.findByRole('radio', { name: /gpt-5\.2-codex/ })
+    expect(model.textContent).not.toMatch(/%|work|side|until/)
+    expect(screen.queryByText(/% left/)).toBeNull()
+    expect(fake.client.getModelRooms).not.toHaveBeenCalled()
+    expect(fake.client.getPlanUsage).not.toHaveBeenCalled()
   })
 })
 

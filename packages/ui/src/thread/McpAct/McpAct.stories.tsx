@@ -4,6 +4,7 @@ import { Brand } from '../../foundations/brands/brands'
 import { ToolKind, ToolState } from '../../foundations/vocabulary'
 import { threadDecorator } from '../../storybook/ThreadFrame'
 import { Tool } from '../Tool/Tool'
+import { Turn } from '../Turn/Turn'
 import { McpAct, McpServer } from './McpAct'
 
 const meta = {
@@ -30,7 +31,7 @@ export const Moved: Story = { args: { server: 'linear', brand: Brand.Linear, did
 /** Reads stay rows of the work, each with its server; an act stands out under them. */
 export const InTheWork: Story = {
   render: (args) => (
-    <>
+    <Turn voice="Opus 5">
       <Tool
         kind={ToolKind.Mcp}
         verb="Get"
@@ -47,6 +48,6 @@ export const InTheWork: Story = {
         meta={<McpServer name="github" brand={Brand.GitHub} />}
       />
       <McpAct {...args} />
-    </>
+    </Turn>
   ),
 }

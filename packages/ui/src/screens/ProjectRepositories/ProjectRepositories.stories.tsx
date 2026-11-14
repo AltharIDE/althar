@@ -128,16 +128,18 @@ export const Narrow: Story = {
   decorators: [(Story) => <div style={{ width: 640 }}>{Story()}</div>],
 }
 
+/** Each at the narrowest a project's settings give it, so the map's two sides and its wires show. */
 export const AllStates: Story = {
   render: (args) => (
     <States
-      size="wide"
+      size="thread"
       cells={[
         { state: 'three repositories', node: <ProjectRepositories {...args} /> },
         { state: 'one, a fork', node: <ProjectRepositories {...args} {...OneFork.args} /> },
         { state: 'adding', node: <ProjectRepositories {...args} {...Adding.args} /> },
         { state: 'failed', node: <ProjectRepositories {...args} {...Failed.args} /> },
         { state: 'no adding', node: <ProjectRepositories {...args} {...NoAdding.args} /> },
+        { state: 'none yet', node: <ProjectRepositories {...args} {...NoneYet.args} /> },
       ]}
     />
   ),

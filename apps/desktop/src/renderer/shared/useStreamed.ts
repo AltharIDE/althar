@@ -33,6 +33,7 @@ export const useStreamed = (
   threadId: string | null,
   items: ReadonlyArray<ThreadItem>,
   view?: ConversationView,
+  conversationVersion?: number,
 ): ReadonlyMap<string, Streamed> => {
   const { feed } = useServices()
   const [streaming, setStreaming] = useState<ReadonlyMap<string, Streamed>>(NONE)
@@ -63,7 +64,7 @@ export const useStreamed = (
 
   // Another thread's words aren't this one's.
   // Nor are the words of a thread before its view changed.
-  const version = view?.version
+  const version = conversationVersion ?? view?.version
   const [shownFor, setShownFor] = useState({ threadId, version })
   const another = shownFor.threadId !== threadId || shownFor.version !== version
   if (another) {

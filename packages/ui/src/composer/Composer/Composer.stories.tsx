@@ -71,6 +71,9 @@ const DOCUMENTS: ComposerFile[] = [
 const PICTURE_TYPES = ['image/png', 'image/jpeg', 'image/gif', 'image/webp']
 const sizeOf = (bytes: number) => (bytes < 1024 ? `${bytes} B` : `${Math.round(bytes / 1024)} KB`)
 
+/* Each file added in a story a name of its own, even after one is taken off. */
+let addedSoFar = 0
+
 function Example(
   props: Partial<ComposerProps> & {
     /** The share left of the model's tightest window. */
@@ -160,13 +163,13 @@ function Example(
                 const others = taken.filter((file) => !PICTURE_TYPES.includes(file.type))
                 setImages((now) => [
                   ...now,
-                  ...pictured.map((file, i) => ({ id: `added-${now.length + i}`, name: file.name, src: SHOT_BEFORE.src })),
+                  ...pictured.map((file) => ({ id: `added-${(addedSoFar += 1)}`, name: file.name, src: SHOT_BEFORE.src })),
                 ])
                 setFiles((now) => [
                   ...now,
-                  ...others.map((file, i) => {
+                  ...others.map((file) => {
                     const folder = file.type === '' && !file.name.includes('.')
-                    return { id: `file-${now.length + i}`, name: file.name, meta: folder ? '3 files · 2 KB' : sizeOf(file.size), folder }
+                    return { id: `file-${(addedSoFar += 1)}`, name: file.name, meta: folder ? '3 files · 2 KB' : sizeOf(file.size), folder }
                   }),
                 ])
               },
@@ -299,12 +302,6 @@ const meta = {
 export default meta
 type Story = StoryObj<typeof meta>
 
-export const Empty: Story = { render: () => <Example /> }
-export const Drafting: Story = { render: () => <Example initial="Keep the limiter where it is, and add the test first." /> }
-export const MultiLine: Story = {
-  render: () => <Example initial={'Two things:\n1. keep the limiter where it is\n2. add the test first'} />,
-}
-/** The lead is working: an empty composer offers to interrupt it. The task keeps going; the lead waits for you. */
 /** A finished task's likely next word, in grey: Tab takes it into the field, Enter then sends it. */
 export const Suggesting: Story = {
   render: () => <Example suggestion="Mark this as done" />,
@@ -317,11 +314,7 @@ export const Suggesting: Story = {
     await expect(field).toHaveValue('Mark this as done')
   },
 }
-export const Busy: Story = { render: () => <Example busy onStopAgent={() => {}} /> }
-/** The lead is working and you have written something: Enter queues it, and Send now interrupts the lead with it instead. */
-export const BusyWithDraft: Story = { render: () => <Example busy initial="Also check the webhook retry path." /> }
-/** The foot from 300 to 900px, in each state: the picker gives way first, then the recording gets compact; send stays on the row at the right. */
-/** A model nearly out, beside its chip: one muted run, warmer as it runs down. */
+/** Legacy quota props leave the composer quiet, at every remaining share. */
 export const NearlyOut: Story = {
   render: () => (
     <div style={{ display: 'grid', gap: 16, width: 520 }}>
@@ -331,7 +324,7 @@ export const NearlyOut: Story = {
     </div>
   ),
 }
-/** The same at the narrowest feet: the note is cut, never wrapped, and send stays put. */
+/** The same at the narrowest feet: models and effort only, and send stays put. */
 export const NearlyOutNarrow: Story = {
   render: () => (
     <div style={{ display: 'grid', gap: 16 }}>
@@ -343,6 +336,7 @@ export const NearlyOutNarrow: Story = {
     </div>
   ),
 }
+/** The foot from 300 to 900px, in each state: the picker gives way first, then the recording gets compact; send stays on the row at the right. */
 export const NarrowFoot: Story = {
   render: () => (
     <div style={{ display: 'grid', gap: 24 }}>
@@ -377,8 +371,6 @@ export const SendingNow: Story = {
     await expect(args.onSendNow).toHaveBeenLastCalledWith('And keep the test.')
   },
 }
-/** Your voice drawn as bars while you talk; stopping puts what was heard in the field. */
-export const Dictating: Story = { render: () => <Example recording /> }
 /** A transcriber that streams: the words arrive faint in the field as you say them. */
 export const DictatingWordByWord: Story = { render: () => <Example recording streaming initial="Keep the limiter where it is." /> }
 /** Stopping dictation puts the words in the field, and it is the size the same text typed would be: one row for a short transcript. */
@@ -662,10 +654,6 @@ export const DictatingMidSentence: Story = {
     await expect(field).toHaveAttribute('readonly')
   },
 }
-/** Sent while the lead worked: it waits until the lead is done with what it is doing, and can be taken back or out. */
-export const Queued: Story = {
-  render: () => <Example busy onStopAgent={() => {}} waiting={['Also check the webhook retry path.']} />,
-}
 /** Queueing another, taking one out, and editing the one left. */
 export const QueueingAndEditing: Story = {
   render: () => <Example busy onStopAgent={() => {}} waiting={['Also check the webhook retry path.']} />,
@@ -699,19 +687,6 @@ export const SendingQueuedNow: Story = {
     await expect(c.getByText('Queued')).toBeInTheDocument()
     await expect(c.queryByText('Use the fixture log, not staging.')).toBeNull()
   },
-}
-export const SeveralQueued: Story = {
-  render: () => (
-    <Example
-      busy
-      onStopAgent={() => {}}
-      waiting={[
-        'Also check the webhook retry path.',
-        'Use the fixture log, not staging.',
-        'And say what the headers look like on a 429 once it passes.',
-      ]}
-    />
-  ),
 }
 const long =
   "Okay, so there's a few bits and bars that um we would need to fix. Number one, I've attached a screenshot just here of the passcard, which is just a bit convoluted. Like you can see that some things are just not fitting."
@@ -799,18 +774,12 @@ export const BehindAndNoticeNarrow: Story = {
   ),
   play: apart,
 }
-/** Nothing in the lower row but send: no picker, no meter, no dictation. */
-export const Minimal: Story = { render: () => <Example picker={undefined} meter={undefined} dictation={undefined} hint={undefined} /> }
 
 /** The context's detail open, as pointing at the ring opens it: the numbers, and Compact under them. */
 export const ContextDetail: Story = {
   render: () => <Example meter={<ContextRing used={412} total={1000} model={model('claude-opus-5')} onCompact={() => {}} defaultOpen />} />,
 }
 
-/** Images to send with what you write, drawn small above the field, each with a way off. */
-export const WithImages: Story = {
-  render: () => <Example takesFiles pictures={SHOTS} initial="The refund button moved; put it back where it was." />,
-}
 /** Images alone are something to send: the button shows, and Enter sends them with nothing written. */
 export const ImagesOnly: Story = {
   args: { onSubmit: fn() },
@@ -902,7 +871,7 @@ export const FileRefused: Story = {
     const c = within(canvasElement)
     const files = [new File(['zip'], 'huge-export.zip', { type: 'application/zip' }), new File(['png'], 'shot.png', { type: 'image/png' })]
     await fireEvent.drop(c.getByRole('textbox', { name: 'Tell the lead' }), { dataTransfer: { types: ['Files'], files } })
-    await expect(c.getByRole('status')).toHaveTextContent(refusedNote('huge-export.zip'))
+    await expect(c.getByRole('alert')).toHaveTextContent(refusedNote('huge-export.zip'))
     await expect(c.getByRole('list', { name: '1 attachment to send' })).toBeInTheDocument()
   },
 }

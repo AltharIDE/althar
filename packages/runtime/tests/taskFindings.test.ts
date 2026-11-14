@@ -3,15 +3,17 @@ import { writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 import { assert, describe, it } from '@effect/vitest'
-import { Effect, Layer } from 'effect'
+import { Effect, Fiber, Layer } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { NotFound } from '../src/errors'
+import { Models } from '../src/Models'
 import { Plans } from '../src/Plans'
 import { Projects } from '../src/Projects'
 import { Queries } from '../src/Queries'
 import { reviewCopyOf } from '../src/reviewCopy'
 import { titleOf } from '../src/Runs'
+import { Sessions } from '../src/Sessions'
 import * as Runtime from '../src/Runtime'
 import { carriedLine, hunksOf, placeIn } from '../src/taskFindings'
 import type { ToolAccess } from '../src/ToolServer'
@@ -99,8 +101,10 @@ describe('a finding’s title', () => {
 const withQueries = (...args: Parameters<typeof runtime>) => Queries.layer.pipe(Layer.provideMerge(runtime(...args)))
 
 describe('a task’s findings', () => {
-  it.live('are placed in its change as it is now, a file it left alone readable whole', () =>
-    Effect.gen(function* () {
+  it.live('are placed in its change as it is now, a file it left alone readable whole', () => {
+    let held: Promise<void> | undefined
+    let release = () => {}
+    return Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
       const plans = yield* Plans
       const projects = yield* Projects
@@ -139,15 +143,22 @@ describe('a task’s findings', () => {
         sessionId: reviewer?.sessionId ?? '',
         taskId: task.taskId,
       }
-      yield* callTool(access, 'report_review', {
-        verdict: 'changes_requested',
-        summary: 'Two things.',
-        findings: [
-          { severity: 'major', title: 'The heading names the old project', file: 'README.md', line: 1, claim: 'It still says Meridian.' },
-          { severity: 'minor', claim: 'No screenshot of the page.' },
-          { severity: 'minor', title: 'The third line says too much', file: 'notes.md', line: 3, claim: 'Cut it.' },
-        ],
-      })
+      // Keep the settle lead from starting while this test edits the files its findings are placed in.
+      yield* until((yield* Models).catalog, (all) => all.every((agent) => !agent.probing))
+      yield* (yield* Sessions).stop(task.threadId)
+      held = new Promise<void>((resolve) => (release = resolve))
+      const reporting = yield* Effect.forkChild(
+        callTool(access, 'report_review', {
+          verdict: 'changes_requested',
+          summary: 'Two things.',
+          findings: [
+            { severity: 'major', title: 'The heading names the old project', file: 'README.md', line: 1, claim: 'It still says Meridian.' },
+            { severity: 'minor', claim: 'No screenshot of the page.' },
+            { severity: 'minor', title: 'The third line says too much', file: 'notes.md', line: 3, claim: 'Cut it.' },
+          ],
+        }),
+      )
+      yield* until(sql<{ n: number }>`SELECT count(*) AS n FROM findings`, (rows) => rows[0]?.n === 3)
 
       // As the review read it: the file the change left alone, at its line.
       const [first, loose] = (yield* queries.findings(task.taskId)).findings
@@ -221,6 +232,11 @@ describe('a task’s findings', () => {
       assert.deepStrictEqual(yield* placedAt(JSON.stringify({ file: 'README.md:3' })), ['README.md', 3])
       assert.deepStrictEqual(yield* placedAt(JSON.stringify({ file: 'README.md:9', line: 3 })), ['README.md', 3])
       assert.deepStrictEqual(yield* placedAt('null'), [null, null])
-    }).pipe(Effect.provide(withQueries())),
-  )
+      release()
+      yield* Fiber.join(reporting)
+    }).pipe(
+      Effect.ensuring(Effect.sync(() => release())),
+      Effect.provide(withQueries(':memory:', {}, { each: { 'claude-code': { beforeNewSession: () => held ?? Promise.resolve() } } })),
+    )
+  })
 })

@@ -83,7 +83,7 @@ export const CARDS = new Set(['card', 'provider_session', 'attention_request', '
  * Each moves the Automations tab, the page of the automation it is of, and
  * the automation's cards in the coordinator's thread, which say where it stands.
  */
-export const AUTOMATIONS = new Set(['automation', 'automation_occurrence'])
+export const AUTOMATIONS = new Set(['automation', 'automation_occurrence', 'attention_request'])
 
 export interface Feed {
   /** Calls `listener` with every change from now on, until the returned function is called. */

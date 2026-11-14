@@ -38,11 +38,8 @@
   display: flex;
   margin-top: 1px;
 }
+/* what went wrong, above the row's own button, so its words can be selected */
 .error {
   position: relative;
   z-index: 1;
-  margin: 0;
-  font-size: 11.5px;
-  line-height: 1.45;
-  color: var(--danger);
 }

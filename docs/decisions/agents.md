@@ -24,7 +24,7 @@ An agent joins where Althar sees every command before it runs and can stop it. T
 3. **It was read at the version the ACP registry lists,** with permission options of known kinds.
 4. **Its vendor lets a third-party app use its sign-in,** or publishes it for any ACP client. Where the two disagree, the person is told before they sign in.
 
-Ten agents join: Claude Code, Codex, OpenCode, GitHub Copilot, Junie, Grok Build, Kimi Code, Mistral Vibe, Qwen Code and Google Antigravity. Each is the person's own install, except Copilot, which Althar can download because its license lets anyone install it. Each entry's `knownGaps` says what it does differently.
+Eleven connections join: Claude Code, Codex, OpenCode, GitHub Copilot, GitHub Copilot CLI, Junie, Grok Build, Kimi Code, Mistral Vibe, Qwen Code and Google Antigravity. The person's own install normally runs where present; native Copilot uses a managed OpenCode engine. Althar can download engines whose licenses allow it. Each entry's `knownGaps` says what it does differently.
 
 - **Google Antigravity** runs Google's own ACP server (`agy_acp_server.par`), as Orca runs it. Althar downloads it from Google only when the person asks, pinned by sha256, and there is no Windows build. Google's terms may count signing in from a third-party app as a breach, while Google lists the server for other editors. The sign-in says so before the person picks it.
 - **What holds an agent is data in its registry entry,** not code of its own. For example:
@@ -58,6 +58,22 @@ The packaged app ships the official Node build, at Electron's own Node version. 
 
 The cost is about 120 MB unpacked (about 40 MB to download), and one more runtime to patch. A Node security release means raising `NODE_VERSION` and its digests, and raising Electron means raising Node with it.
 
+## Copilot without Copilot CLI
+
+**Decision, 13 November 2026. Owner: repository maintainers.** GitHub Copilot is a native connection in Althar, backed by a managed OpenCode engine. GitHub supplies the models; OpenCode supplies OAuth and the agent loop, over Althar's existing ACP boundary. It does not run GitHub Copilot CLI. The existing `copilot` connection stays as **GitHub Copilot CLI**, so existing accounts and work keep their identity. The new connection is `copilot-direct`.
+
+- **Sign in inside Althar.** Continue with GitHub uses github.com for personal and work accounts alike. A separate enterprise-address field accepts a hostname or HTTPS origin only. OpenCode's own non-interactive `auth login github-copilot --standalone --method device --answer …` owns the device flow and credentials. The code is shown and copyable while the browser opens. The screen says GitHub will ask to authorize OpenCode.
+- **Prepare it at the person's asking.** Continuing downloads a verified OpenCode 2.x engine where needed, through the existing installer. A personal OpenCode install never stands in for this engine. Cancelling during preparation prevents OAuth from starting afterwards; a failed preparation stays in the sign-in with a way to try again.
+- **Keep accounts apart.** Its usual account is under Althar's accounts root, and additional accounts each have their own home. No OpenCode credential or configuration file is copied into them. Both OAuth and work use private engine processes. The engine's cache and ordinary global configuration still follow OpenCode's normal locations.
+- **Offer only Copilot.** Inline `enabled_providers: ['github-copilot']` is preserved when adding skills, web permissions or review hardening. OpenCode turns this into provider-use policies, discovers the account's endpoint and allowed models, and applies GitHub's access decisions. Every command and edit still reaches Althar's normal permission handling.
+- **Confirm completion.** A successful login process is followed by a fresh account status read before the screen says it is signed in. An unrelated provider's credential does not establish Copilot access.
+
+This avoids a dependency on the enterprise's **Copilot CLI** permission. It does not override enterprise restrictions on OAuth applications, Copilot Chat, models, SSO or network access. Each organization may need to approve OpenCode's application. A live login and prompt on a CLI-disabled enterprise account remain a release validation step where no such account is available in development.
+
+**Alternatives:** owning a model loop would duplicate OpenCode's tools and approval integration; using the Copilot SDK would retain its runtime and an unverified policy dependency. Revisit the managed engine when GitHub publishes a suitable standalone model integration or maintaining the engine costs more than a native runtime.
+
+Reference: [OpenCode's Copilot provider](https://github.com/anomalyco/opencode/blob/f91b88efac039856f284979984ac43cd93bce8f5/packages/core/src/plugin/provider/github-copilot.ts), read against OpenCode 2.3.0's CLI and configuration. OpenCode is [MIT licensed](https://github.com/anomalyco/opencode/blob/f91b88efac039856f284979984ac43cd93bce8f5/LICENSE).
+
 ## Accounts
 
 An **account** is one sign-in of an agent, in its own folder: its **home**. The agent's usual folder is its first account, so someone with one sign-in sees no change. Each session starts with its account's home in the agent's environment (`CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `XDG_DATA_HOME` for OpenCode), and records which account it ran on. Many people have a work and a personal plan, or a plan per client, and this lets several run at once without swapping one sign-in.
@@ -68,8 +84,8 @@ An **account** is one sign-in of an agent, in its own folder: its **home**. The 
 - **Removing an account** Althar made signs it out with the agent's own tool and deletes the folder. A home another tool made is adopted as it is, and left alone when removed.
 - **Switchers that swap one live sign-in** are the person's to run. Whatever they made active is the first account, and the sign-in check records a swap. Switchers that rotate inside the agent or in front of it work unchanged, as one account.
 - **Every account the person adds can run work. A project may narrow that** to some accounts per agent, such as a client's repository to the client's plan.
-- **Rotation is off until the person turns it on, per project,** in the project's rules ("Go on with the next"). With it on, work moves to the same agent's next allowed account when one runs out, on the same model, in a new session from a brief. Then, or without rotation, it moves to the next agent. Failing over between someone's personal plans is something providers' terms tend to restrict, so Althar doesn't do it unasked.
-- **Picking an account:** a conversation stays on its account. A new session takes the first account, in the person's order, that is allowed for the project, signed in and not out of usage.
+- **Automatic account switching starts with least depleted first.** The project's account rules can choose another strategy or stay on the first account explicitly. With it on, work moves to the same agent's next allowed account when one runs out, on the same model, in a new session from a brief. Then, or without rotation, it moves to the next agent. Failing over between someone's personal plans is something providers' terms tend to restrict, so Althar doesn't do it unasked.
+- **Picking an account:** Settings → Tasks offers five strategies for new projects, with an action to apply a choice to existing projects: stay on the first account, least depleted first, most depleted first, random, or account order. Each project can choose its own strategy. Projects without an explicit account rule use least depleted first; an explicit first-account rule stays fixed. The other strategies skip accounts that are signed out or out of usage. Before automatically lowering a requested model at 10% remaining, Althar tries an allowed account with more room, respecting the selected strategy. Usage is measured by the model's tightest live window. Unread accounts remain usable. Settings order breaks quota ties. Random chooses once for a new conversation, not per message. A running conversation stays on its account while it has room.
 - **Another agent takes work over unasked only on an account a plan pays for.** The same agent's other accounts take it over whatever pays for them, since the person added each one. The thread names the account on both sides of a move.
 
 ## Briefs, and switching agent or model
@@ -95,7 +111,7 @@ People choose who does work by model, not by the tool that runs it. The coordina
 - **What is known of models comes from OpenRouter's public list:** Artificial Analysis's indices, price and context size, matched by id or name. It is read at start and fetched again in the background, and nothing waits for it. The scores are for the coordinator, and the window doesn't show them.
 - **Agents are routes.** Althar reaches a named model the best way there is: on an agent whose account a plan pays for before one on a key, then in the agents' order.
 - **When a step's agent runs out,** the step goes to the strongest free model on a plan. A different maker wins within five points of the strongest. Althar never spends on a key unasked ([scheduling.md](scheduling.md)).
-- **The person can switch models off,** per agent, in Settings and from the model browser. A model switched off is never planned, and no picker offers it.
+- **The person can switch models off,** per agent, in Settings and from the model browser. A model switched off is never planned, and no picker offers it. Work that names no model, only its agent, never starts on one: where the agent's own default is a model switched off, its session starts on the agent's model a takeover would pick, or, before Althar has read the agent's models, the first other one it lists. With none left on, it doesn't start, and says why.
 - **The window names who works by model,** as people know it, such as "Claude Sonnet 5.5", with its maker's mark. The agent and account show on hover. Agent names appear only where the agent is what's meant, such as signing in.
 
 ## Keeping context small
@@ -150,3 +166,5 @@ People asked what a task cost. What they want to know is how much of each subscr
 - 9 Nov 2026: a lead starts afresh only once its context is full, never at a break (a task is a conversation plus parts, [tasks](tasks.md#changing-parts)).
 - 10 Nov 2026: a lead's helpers, on any model it picks with `list_models`, each handed one of its task's changes ([tasks](tasks.md#helpers)).
 - 10 Nov 2026: each agent's own helpers that would work in the background are switched off at its launch, and a task's usage says each model's tokens (ADR-087, [tasks § Helpers](tasks.md#helpers)).
+
+- 13 Nov 2026: account selection is a choice of strategies in Settings and project rules. Model pickers show models and effort; account quota stays in Plan usage. Keep model records its next-turn choice immediately; a work headline excludes queue and startup time and never joins separate model turns across an idle gap.

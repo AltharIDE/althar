@@ -5,6 +5,7 @@ import { cx } from '../../lib/cx'
 import type { RootProps } from '../../lib/props'
 import { ActionButton } from '../../primitives/ActionButton/ActionButton'
 import { CopyButton, type CopyButtonText } from '../../primitives/CopyButton/CopyButton'
+import { Problem } from '../../primitives/Problem/Problem'
 import { Skeleton } from '../../primitives/Skeleton/Skeleton'
 import { Markdown } from '../Markdown/Markdown'
 import { useThreadShell } from '../Shell/Shell'
@@ -127,7 +128,9 @@ export function FileArtifact({
           <Skeleton width="86%" />
         </div>
       ) : error !== undefined ? (
-        <p className={s.said}>{error}</p>
+        <Problem size="small" className={s.failed}>
+          {error}
+        </Problem>
       ) : body === undefined ? null : body.trim() === '' ? (
         <p className={s.said}>{t.empty}</p>
       ) : (

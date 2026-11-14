@@ -350,6 +350,13 @@ export const usagePairs: ReadonlyArray<UsagePair> = deepFreeze([
   { agent: 'grok', provider: 'xai', pays: 'plan', classification: 'status', sources: [grokEndpoint] },
   { agent: 'kimi', provider: 'moonshot', pays: 'plan', classification: 'token', sources: [kimiEndpoint] },
   {
+    agent: 'copilot-direct',
+    provider: 'github',
+    pays: 'plan',
+    classification: 'status',
+    sources: [none('The OpenCode engine does not report Copilot plan usage. Check your GitHub settings.')],
+  },
+  {
     agent: 'copilot',
     provider: 'github',
     pays: 'plan',

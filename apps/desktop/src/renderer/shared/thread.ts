@@ -96,7 +96,7 @@ export type Part =
       readonly id: string
       readonly text: string
       readonly tone: 'info' | 'warning' | 'error'
-      /** What the line offers: parts set up twice, kept as a preset, or a review a lead or the coordinator offered a task. */
+      /** What the line offers: a review a lead or the coordinator offered a task. */
       readonly offer?: Offer
       /** For an agent's turn that failed: why, as the runtime classes it (`auth_required`…), and the agent's own words, apart. */
       readonly failure?: string
@@ -126,6 +126,20 @@ export type SettingChangeContent = Extract<ThreadItem, { kind: 'setting' }>['con
 export type SmallChangeContent = Extract<ThreadItem, { kind: 'small_change' }>['content']
 export type ModelMoveContent = Extract<ThreadItem, { kind: 'model_move' }>['content']
 export type MergeLineContent = Extract<ThreadItem, { kind: 'merge_line' }>['content']
+
+/**
+ * How a setup stands: under way; stopped as Althar quit; gone through; or
+ * failed, as its command did, or as it couldn't copy a file a recorded setup
+ * names (ADR-080), though its command exited 0. The one rule the thread's
+ * line for it and its round's fold both read.
+ */
+export const setupStanding = (setup: SetupContent): 'running' | 'stopped' | 'done' | 'failed' | 'missing' => {
+  const { ended } = setup
+  if (ended === null) return 'running'
+  if (ended.stopped) return 'stopped'
+  if (ended.code !== 0) return 'failed'
+  return (ended.missing?.length ?? 0) > 0 ? 'missing' : 'done'
+}
 
 export type Block =
   | {
@@ -168,7 +182,7 @@ export type Block =
       readonly spent: Spent | null
     }
   | { readonly kind: 'divider'; readonly id: string; readonly text: string }
-  /** What the coordinator offers to keep, such as parts set up twice as a preset (a task is a conversation plus parts): its line and button. */
+  /** A review a lead or the coordinator offers a task: its line and its buttons. */
   | {
       readonly kind: 'offer'
       readonly id: string
@@ -703,12 +717,22 @@ export const blocksOf = (
   let restartedAt = -1
   /** When each turn began and last grew, by its id. */
   const spans = new Map<string, { from: string; to: string }>()
+  const deliveryOf = new Map<string, string | undefined>()
   /** When each part was first heard, by its id: how long a thought took is read from them. */
   const atOf = new Map<string, string>()
-  const add = (agentId: string | null, at: string, part: Part, model: string | null = null) => {
+  const add = (agentId: string | null, at: string, part: Part, model: string | null = null, delivery?: string) => {
     atOf.set(part.id, at)
     const last = blocks.at(-1)
-    if (last?.kind === 'turn' && last.agentId === agentId) {
+    if (
+      last?.kind === 'turn' &&
+      last.agentId === agentId &&
+      (model === null || last.model === null || last.model === model) &&
+      (delivery === undefined || deliveryOf.get(last.id) === delivery) &&
+      (source.turnStarted == null ||
+        Date.parse(at) < Date.parse(source.turnStarted) ||
+        Date.parse(spans.get(last.id)?.to ?? at) >= Date.parse(source.turnStarted))
+    ) {
+      if (delivery !== undefined) deliveryOf.set(last.id, delivery)
       blocks[blocks.length - 1] = { ...last, parts: [...last.parts, part] }
       const span = spans.get(last.id)
       if (span !== undefined) spans.set(last.id, { ...span, to: at })
@@ -731,6 +755,7 @@ export const blocksOf = (
       spent: null,
     })
     spans.set(part.id, { from: at, to: at })
+    deliveryOf.set(part.id, delivery)
   }
   for (const item of source.items) {
     const before = newest
@@ -829,7 +854,7 @@ export const blocksOf = (
       case 'notice':
         // A restart is Althar's business, not the person's; earlier versions said so in the thread.
         if (item.content.source === 'runtime' && item.content.title === RESTARTED) continue
-        // What Althar offers to keep, such as a preset, stands on its own with its button.
+        // A review offered a task stands on its own with its buttons.
         if (item.content.offer !== undefined) {
           blocks.push({
             kind: 'offer',
@@ -852,7 +877,7 @@ export const blocksOf = (
           continue
         }
     }
-    add(item.agentId, item.createdAt, partOf(item, streaming, turnRunning, worktree, outputs), item.model ?? null)
+    add(item.agentId, item.createdAt, partOf(item, streaming, turnRunning, worktree, outputs), item.model ?? null, item.turn)
   }
   // A message the store has placed but the window hasn't read yet shows from its first words.
   const read = new Set(source.items.map((item) => item.id))
@@ -869,14 +894,18 @@ export const blocksOf = (
   // The turn running is the last one, unless what the agent was last asked came after it: then the last is over, and the
   // running one hasn't said anything yet; or none runs yet, as the agent starts to read it.
   const lastTurn = blocks.findLastIndex((block) => block.kind === 'turn')
+  const lastBlock = blocks[lastTurn]
+  const lastSpan = lastBlock?.kind === 'turn' ? spans.get(lastBlock.id) : undefined
+  const startingTurn =
+    turnRunning && source.turnStarted != null && lastSpan !== undefined && Date.parse(source.turnStarted) > Date.parse(lastSpan.to)
   const askedId = asked?.id
   // Where what it was last asked stands: among the blocks, or before them all, where it opens the thread from outside it.
   const askedAt = askedId !== undefined ? blocks.findLastIndex((block) => block.id === askedId) : source.openedAt == null ? null : -0.5
-  const askedWhen = asked?.createdAt ?? source.openedAt
+  const askedWhen = startingTurn ? source.turnStarted : (asked?.createdAt ?? source.openedAt)
   // Between turns it is waited on only on its way to the agent, or given to it with no turn ended since: a turn that ended on it,
   // interrupted or with nothing said, has answered it as far as it will.
   const over = !onItsWay && source.turnEnded != null && askedWhen != null && Date.parse(source.turnEnded) >= Date.parse(askedWhen)
-  const waiting = askedAt !== null && askedAt > lastTurn && (turnRunning || (source.reading === true && !over))
+  const waiting = startingTurn || (askedAt !== null && askedAt > lastTurn && (turnRunning || (source.reading === true && !over)))
   // Nor where Althar carried the step on after it, after a restart: the turn running is a later one that has said nothing yet.
   const runningTurn = turnRunning && !waiting && restartedAt < lastTurn ? lastTurn : -1
   // What an agent says after its step's result, closing its turn, folds with the work that led to it. A run it starts on its own after, with tool calls or a plan, is work of its own: it folds under its own time, and its last message shows.
@@ -889,6 +918,10 @@ export const blocksOf = (
       step?.kind === 'step' &&
       before?.kind === 'turn' &&
       before.agentId === block.agentId &&
+      (before.model === null || block.model === null || before.model === block.model) &&
+      (deliveryOf.get(before.id) === undefined ||
+        deliveryOf.get(block.id) === undefined ||
+        deliveryOf.get(before.id) === deliveryOf.get(block.id)) &&
       !block.parts.some((part) => part.kind === 'tool' || part.kind === 'plan')
     if (!closing || index === runningTurn) return void merged.push(block)
     const span = spans.get(before.id)
@@ -943,8 +976,9 @@ export const blocksOf = (
   // Counted from when it was asked, through the agent's start where it starts for it. Where it waited behind something first,
   // as what the person sent while the agent was at work, or a task's request behind its setup, from when the turn on it started,
   // or from when it was asked where that is later, as when the turn heard of is the one before; uncounted until then.
-  const since =
-    asked !== null && !waitedBehind
+  const since = startingTurn
+    ? Date.parse(askedWhen!)
+    : asked !== null && !waitedBehind
       ? Date.parse(askedWhen)
       : source.turnStarted == null || !turnRunning
         ? null

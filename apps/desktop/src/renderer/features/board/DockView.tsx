@@ -2,17 +2,17 @@ import { useQuery } from '@tanstack/react-query'
 import { useEffect } from 'react'
 
 import type { AgentStatus, BoardTask, ThreadSnapshot } from '@althar/contracts'
-import { AcceptPeek, ActionButton, Dock, type PeekStep, TaskStatus, TrackStep, WorkPeek } from '@althar/ui'
+import { AcceptPeek, ActionButton, Dock, type PeekStep, TaskStatus, TrackStep, WorkPeek, Problem } from '@althar/ui'
 
 import { keys, reads } from '../../data/reads'
 import { useServices } from '../../data/services'
-import { queuedWords, reconnectsWords, waitsWords } from '../../shared/agents'
+import { externalWaitWords, queuedWords, reconnectsWords, waitsWords } from '../../shared/agents'
 import { useModelNames } from '../../shared/modelNames'
 import { callKindOf, whereOf } from '../../shared/calls'
 import { checkOf } from '../../shared/checks'
 import { mergeHereLabel } from '../../shared/mergeHere'
 import { productBrand, productName } from '../../shared/products'
-import { personPushes } from '../../shared/standing'
+import { goingUp, personPushes } from '../../shared/standing'
 import { ago, clock } from '../../shared/time'
 import { PermissionCall } from '../task/PermissionCall'
 import { StuckCall } from '../task/StuckCall'
@@ -173,14 +173,21 @@ export function DockView({
           checks={(change.checks?.list ?? []).map(checkOf)}
           // The head the dock showed: a pull request that moved on since isn't merged unseen.
           onAccept={() => void model.merge(task.taskId, change.head ?? '', change.url)}
+          {...(change.canBypassQueue === true
+            ? { onBypassQueue: () => void model.merge(task.taskId, change.head ?? '', change.url, true) }
+            : {})}
           onSendBack={(note) => void model.sendBack(task, note)}
           // What the lead committed since, up to the head the dock showed: pushed first, as the person says.
           // Going up on their own as the lead's turn ends, where the project's rules say so, they aren't the person's (ADR-072),
-          // and nothing is accepted until they're on it.
+          // and nothing is accepted until they're on it. Held for Ship, they are neither: Ship sends them.
           unpushed={change.localHead === null || !personPushes(change) ? 0 : change.unpushed}
-          going={change.localHead === null || personPushes(change) ? 0 : change.unpushed}
+          going={change.localHead === null || !goingUp(change) ? 0 : change.unpushed}
           onPush={() => void model.push(task.taskId, change.localHead ?? '', change.url)}
           pushing={model.pushing.has(task.taskId)}
+          // Waiting for Ship, whatever kind it is: Ship, which reviews them first, never Accept without them.
+          {...(task.held === undefined || task.kind === 'review'
+            ? {}
+            : { held: task.held.commits, onShip: () => void model.ship(task.taskId), shipping: model.shipping.has(task.taskId) })}
           onOpenFile={(path) => onChanges(task, path)}
           accepting={model.merging.has(task.taskId)}
           sendingBack={model.sending.has(task.taskId)}
@@ -220,15 +227,17 @@ export function DockView({
         title={task.title}
         {...(waiting !== null
           ? { note: waiting }
-          : task.queued !== null
-            ? { note: queuedWords(task.queued) }
-            : task.waits !== null
-              ? { note: waitsWords(name(task.waits.agentId), clock(task.waits.until), task.step, task.waits.left) }
-              : task.reconnects != null
-                ? { note: reconnectsWords(task.reconnects, clock) }
-                : task.summary === null
-                  ? {}
-                  : { note: task.summary.split('\n')[0] ?? '' })}
+          : task.externalWait !== undefined
+            ? { note: externalWaitWords(task.externalWait, clock) }
+            : task.queued !== null
+              ? { note: queuedWords(task.queued) }
+              : task.waits !== null
+                ? { note: waitsWords(name(task.waits.agentId), clock(task.waits.until), task.step, task.waits.left) }
+                : task.reconnects != null
+                  ? { note: reconnectsWords(task.reconnects, clock) }
+                  : task.summary === null
+                    ? {}
+                    : { note: task.summary.split('\n')[0] ?? '' })}
         status={
           task.phase === 'waiting'
             ? TaskStatus.Yours
@@ -245,11 +254,7 @@ export function DockView({
         steps={stepsOf(task)}
         lead={lead}
       />
-      {model.error !== null && (
-        <p className={s.failure} role="alert">
-          {model.error}
-        </p>
-      )}
+      {model.error !== null && <Problem className={s.failure}>{model.error}</Problem>}
       <div className={s.actions}>
         {task.phase === 'ready' && task.nothingBuilt !== true && (
           <ActionButton icon="file" onClick={() => onChanges(task)}>

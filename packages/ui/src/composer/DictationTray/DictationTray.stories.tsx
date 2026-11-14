@@ -41,21 +41,6 @@ type Story = StoryObj<typeof meta>
 
 /** The first press, with no speech model on this Mac: what it is, its size, and the way to get it. */
 export const Offer: Story = {}
-/** macOS is asking whether Althar may use the microphone; the tray waits with it. */
-export const Asking: Story = { args: { state: { kind: DictationSetup.Asking } } }
-/** Coming down: the tray's bottom edge is the bar. The field under it stays yours. */
-export const Downloading: Story = { args: { state: DOWNLOADING } }
-/** Down, and being checked and loaded before it listens. */
-export const Preparing: Story = { args: { state: { kind: DictationSetup.Preparing } } }
-/** The connection dropped partway; it carries on from where it stopped. */
-export const Stopped: Story = { args: { state: STOPPED } }
-/** The disk hasn't room for what is left of the model. */
-export const NoRoom: Story = { args: { state: { kind: DictationSetup.NoRoom, need: '670 MB', free: '212 MB' } } }
-/** The microphone was refused before: only System Settings can change it. */
-export const Denied: Story = { args: { state: { kind: DictationSetup.Denied } } }
-export const NoMicrophone: Story = { args: { state: { kind: DictationSetup.NoMicrophone } } }
-/** What was said couldn't be written down; the recording is kept to try again. */
-export const Failed: Story = { args: { state: { kind: DictationSetup.Failed, said: '0:12' } } }
 /** Without callbacks there is nothing to press: the tray only says where things stand. */
 export const NoActions: Story = {
   args: {
@@ -123,12 +108,17 @@ export const KeepsTyping: Story = {
   },
 }
 
-/* The buttons inside are the kit's own, with their hover, focus and pressed states in their stories. */
+/*
+ * Each at the composer's width, as it sits on it. The buttons inside are the
+ * kit's own, with their hover, focus and pressed states in their stories.
+ * Asking waits on the system's question; stopped carries on from where the
+ * connection dropped; denied can only change in the system's settings.
+ */
 export const AllStates: Story = {
   parameters: statesParameters,
   render: (args) => (
     <States
-      size="wide"
+      size="thread"
       cells={[
         { state: 'offer', node: <DictationTray {...args} state={OFFER} /> },
         { state: 'asking', node: <DictationTray {...args} state={{ kind: DictationSetup.Asking }} /> },

@@ -4,6 +4,7 @@ import type { CoordinatorSnapshot, ThreadSnapshot } from '@althar/contracts'
 
 import { mergeItems, settled } from '../shared/items'
 import type { Client } from './client'
+import { readModelsAgain } from './models'
 
 /*
  * What the window reads from the runtime, each by a key, kept in one cache
@@ -41,7 +42,6 @@ export const keys = {
   planUsage: ['planUsage'] as const,
   /** Each model's room where work on it would start, in a project or (null) anywhere: read again as plan usage changes. */
   modelRooms: (projectId: string | null) => ['modelRooms', projectId] as const,
-  missedReports: ['missedReports'] as const,
   /** A project's automations, for its Automations tab and the dot on it. */
   automations: (projectId: string) => ['automations', projectId] as const,
   /** One automation, for its own page. */
@@ -98,6 +98,7 @@ export const continued = <S extends ThreadSnapshot | CoordinatorSnapshot>(was: S
   if (was.items.some((item) => item.sequence < first.sequence && !settled(item))) return fresh
   // The view was cleared, opened or restored, or the conversation forgotten, since the pages held were read: they are of another thread.
   if ('view' in was && 'view' in fresh && was.view.version !== fresh.view.version) return fresh
+  if ('conversationVersion' in was && 'conversationVersion' in fresh && was.conversationVersion !== fresh.conversationVersion) return fresh
   return { ...fresh, items: mergeItems(was.items, fresh.items), earlier: was.earlier }
 }
 
@@ -164,8 +165,6 @@ export const reads = (client: Client) => ({
       queryFn: () => client.getModelRooms(projectId),
       staleTime: 30_000,
     }),
-  // Shared by every picker in the window: a week's count, which a step without its report adds to now and then.
-  missedReports: () => queryOptions({ queryKey: keys.missedReports, queryFn: () => client.getMissedReports(), staleTime: 60_000 }),
   automations: (projectId: string) =>
     queryOptions({ queryKey: keys.automations(projectId), queryFn: () => client.getAutomations(projectId) }),
   automation: (automationId: string) =>
@@ -218,10 +217,14 @@ export const reads = (client: Client) => ({
 
 export type Reads = ReturnType<typeof reads>
 
-/** Asks every agent again rather than trust the runtime's last answer, and keeps what they say. */
+/**
+ * Asks every agent again rather than trust the runtime's last answer, and keeps what they say; then their models, which
+ * one just found signed in or installed may only now say.
+ */
 export const recheckStatus = (client: Client, cache: QueryClient) =>
   client.status({ recheck: true }).then((status) => {
     cache.setQueryData(keys.status, status)
+    readModelsAgain(client)
     return status
   })
 

@@ -248,6 +248,8 @@ export type HostNeed = typeof HostNeed.Type
 export const MergeRules = Schema.Struct({
   requiredChecks: Schema.Union([Schema.Literal('all'), Schema.Array(Schema.String), Schema.Null]),
   needs: Schema.Array(HostNeed),
+  /** GitHub explicitly allows this viewer to bypass the queue; absent where unknown or there is no queue. */
+  canBypassQueue: Schema.optional(Schema.Boolean),
 })
 export type MergeRules = typeof MergeRules.Type
 
@@ -518,6 +520,8 @@ export interface CodeHost extends HostReleases {
    * comes back open and `queued` too.
    */
   merge(repository: Repository, change: ChangeRequest, how?: MergeHow): Effect.Effect<ChangeRequest, ConnectorFailed>
+  /** The person's explicit choice to merge without the queue. Rechecks the host's bypass permission and pins the head. */
+  mergeWithoutQueue?(repository: Repository, change: ChangeRequest): Effect.Effect<ChangeRequest, ConnectorFailed>
   /** How changes into a branch merge on the host: its queue or train, auto-merge, or plainly. Read when asked; kept a while. */
   mergeWays(repository: Repository, target: string): Effect.Effect<MergeWays, ConnectorFailed>
   /**
@@ -540,11 +544,14 @@ export interface CodeHost extends HostReleases {
   contains(repository: Repository, change: ChangeRequest, sha: string): Effect.Effect<boolean, ConnectorFailed>
   /**
    * Whether a change's head now is the merge `updateBranch` made from the
-   * head `from`, a merge whose first parent is it: GitHub's update-branch
-   * lands in the background, so the head it says may be null, or someone
-   * else's push. Present on GitHub alone; the others know the commit they pushed.
+   * head `from`, a merge whose first parent is it, and whose second is
+   * `base`, the target's head asked to merge in, where that is known, or a
+   * later head of the target, where it moved on before the merge: GitHub's
+   * update-branch lands in the background, so the head it says may be null,
+   * or someone else's push. Present on GitHub alone; the others know the
+   * commit they pushed.
    */
-  madeFrom?(repository: Repository, change: ChangeRequest, from: string): Effect.Effect<boolean, ConnectorFailed>
+  madeFrom?(repository: Repository, change: ChangeRequest, from: string, base?: string): Effect.Effect<boolean, ConnectorFailed>
   /**
    * Closes a change without merging it, because the person said to: never
    * on an agent's word. Read back as the host has it after; one already

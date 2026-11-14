@@ -51,6 +51,12 @@
   font-variant-numeric: tabular-nums;
 }
 
+/* what is in the way: the mark and the headline in the danger colour */
+.problem .icon,
+.problem .head {
+  color: var(--danger);
+}
+
 .note {
   margin: 0;
   font-size: 11.5px;

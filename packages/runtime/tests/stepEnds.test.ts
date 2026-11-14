@@ -12,6 +12,7 @@ import { Sessions } from '../src/Sessions'
 import { Tasks } from '../src/Tasks'
 import type { ToolAccess } from '../src/ToolServer'
 import { callTool, items, repository, runtime, turns, until } from './support'
+import { knownModels } from './knownModels'
 
 /*
  * How a step's turn or session ending is read, where coordinator.test.ts,
@@ -128,6 +129,7 @@ describe("a quick task's turn after its plan", () => {
       const sql = yield* SqlClient.SqlClient
       const projectId = yield* opened
       const threadId = yield* (yield* Coordinator).thread(projectId)
+      yield* knownModels
       const access: ToolAccess = { role: 'coordinator', projectId, threadId, sessionId: 'none', taskId: null }
       yield* callTool(access, 'start_task', {
         title: 'Look around',

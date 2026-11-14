@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import { type ActorId, Ids, newId, type ProjectId } from '@althar/domain'
 import { bumpRevision, Ledger } from '@althar/persistence-sqlite'
 import { cleanUp, removeFully, spawnOwned } from '@althar/provider-adapters'
-import { Clock, Context, Crypto, Deferred, Duration, Effect, Exit, Layer, Schema, Scope } from 'effect'
+import { Clock, Context, Crypto, Deferred, Duration, Effect, Exit, Fiber, Layer, Schema, Scope } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { RuntimeConfig } from './Config'
@@ -15,7 +15,8 @@ import { thisDevice } from './device'
 import { Fetches, type Wanted } from './Fetches'
 import { Instance } from './Instance'
 import { makeKeyedLock } from './keyedLock'
-import { endingLine, printedMore, servingAt, uncoloured } from './leftRunning'
+import { NotFound } from './errors'
+import { endingLine, printedMore, readable, servingAt, uncoloured } from './leftRunning'
 import { WORK, workOf } from './machine'
 import { addItem, updateItem } from './threads'
 import { Live } from './Live'
@@ -24,6 +25,7 @@ import { shortCommand } from './rules'
 import { lineOf, type RunCommand, runOf, type Script, scriptsIn, setupIn } from './runCommand'
 import { endedHow, installedAsLocked, runSpec } from './runProcess'
 import { shotOf, shotWords, VIEWPORT } from './screenshots'
+import { ASIDE_BUILDS, onScratch } from './scratch'
 import { Setups } from './Setups'
 import { POOL, type Tool, type ToolAccess, ToolRefused, ToolServer } from './ToolServer'
 
@@ -117,8 +119,8 @@ interface Launch {
 
 /** Why the project can't run that way, in words for the person or an agent. */
 export class LaunchRefused extends Schema.TaggedError<LaunchRefused>()('LaunchRefused', {
-  /** `unknown`: nothing says how it runs; `elsewhere`: no copy here to run it in; `which`: the repository or runnable named isn't one, or none was in a project of several; `fetch`: the branch or pull request asked for couldn't be fetched. */
-  why: Schema.Literals(['unknown', 'elsewhere', 'which', 'fetch']),
+  /** `unknown`: nothing says how it runs; `elsewhere`: no copy here to run it in; `which`: the repository or runnable named isn't one, or none was in a project of several; `fetch`: the branch or pull request asked for couldn't be fetched; `aside`: an aside, which never sets its copy up to run. */
+  why: Schema.Literals(['unknown', 'elsewhere', 'which', 'fetch', 'aside']),
   message: Schema.String,
 }) {}
 
@@ -129,6 +131,8 @@ const SERVING_TRIES = 1_200
 const ANSWERING_WITHIN = Duration.seconds(30)
 /** How many of the last lines a run printed an agent reads, when it ended at once. */
 const LAST_LINES = 15
+/** How many runs that left the list, stopped, cleared or run again, still say what they printed: their cards stay in the thread. */
+const KEPT_AFTER = 24
 
 interface Binding {
   readonly id: string
@@ -185,6 +189,12 @@ export class Launches extends Context.Service<
     stop(id: string): Effect.Effect<void>
     /** Clears a run that ended by itself from the list. */
     clear(id: string): Effect.Effect<void>
+    /**
+     * What a run has printed, both streams, without colours: the end of it.
+     * It stays readable a while after the run leaves the list, for its card;
+     * none outlives Althar.
+     */
+    output(id: string): Effect.Effect<{ readonly text: string; readonly dropped: number }, NotFound>
     /**
      * Stops every run of the project, or only the task's, and clears those
      * that ended: the project is removed, or the task settled, and nothing is
@@ -248,6 +258,18 @@ export class Launches extends Context.Service<
       // Every run lives in this scope: closed, as Althar stops, each run's process group is stopped.
       const launchesScope = yield* Scope.fork(yield* Effect.scope, 'sequential')
       const launches = new Map<string, Launch>()
+      // Runs that left the list, the latest last: what each printed is still read from its card.
+      const leftBehind = new Map<string, Launch>()
+      /** Takes a run off the list, keeping what it printed to read, and what it prints still as its group stops. */
+      const forget = (launch: Launch) => {
+        launches.delete(launch.id)
+        leftBehind.delete(launch.id)
+        leftBehind.set(launch.id, launch)
+        for (const old of leftBehind.keys()) {
+          if (leftBehind.size <= KEPT_AFTER) break
+          leftBehind.delete(old)
+        }
+      }
       // A run's card an earlier launch left open says its run stopped: none outlives Althar.
       yield* provide(
         Effect.gen(function* () {
@@ -524,8 +546,15 @@ export class Launches extends Context.Service<
                   input.taskId,
                   Effect.gen(function* () {
                     const sql = yield* SqlClient.SqlClient
+                    // An aside's copy is never set up, so nothing of the project runs from it: running it makes it a task (cards.ts).
+                    if (input.taskId !== null && (yield* onScratch(input.taskId)))
+                      return yield* new LaunchRefused({
+                        why: 'aside',
+                        message:
+                          'An aside doesn’t run the project: nothing is installed in its copy, so it answers fast. Make it a task to run it.',
+                      })
                     // A task's folder is set up before anything runs from it, however it came back: here, or as it opened, or before (ADR-056).
-                    if (input.taskId !== null) yield* setups.ready(input.taskId, true)
+                    if (input.taskId !== null) yield* setups.ready(input.taskId)
                     const places = yield* placesOf(input.projectId, input.taskId, input.repository)
                     if (places.length === 0)
                       return yield* new LaunchRefused({
@@ -578,7 +607,7 @@ export class Launches extends Context.Service<
                         ended.runnableId === chosen.kept.id &&
                         ended.ended !== null
                       )
-                        launches.delete(ended.id)
+                        forget(ended)
                     const { binding } = chosen
                     const copy = input.taskId === null ? yield* runCopy(input.projectId, binding) : null
                     const at = copy?.path ?? places.find((place) => place.binding.id === binding.id)?.root ?? ''
@@ -720,7 +749,7 @@ export class Launches extends Context.Service<
                 cardOf(launch),
               ).pipe(Effect.catchCause((cause) => Effect.as(Effect.logWarning('Could not post a run’s card', cause), null)))
             // What it prints is read as it comes, so it never waits on a full pipe.
-            yield* Effect.forkIn(
+            const output = yield* Effect.forkIn(
               Effect.promise(async () => {
                 const reader = owned.stdout.getReader()
                 const decoder = new TextDecoder()
@@ -730,7 +759,7 @@ export class Launches extends Context.Service<
                   print(decoder.decode(value, { stream: true }))
                 }
               }),
-              scope,
+              launchesScope,
             )
             yield* Effect.forkIn(watchServing(launch), scope)
             // Ended by itself, it stays, to say how, and anything it left behind is stopped with its group.
@@ -738,13 +767,16 @@ export class Launches extends Context.Service<
               provide(
                 Effect.gen(function* () {
                   const exit = yield* Deferred.await(owned.exited)
+                  // Exit can precede the last pipe read. Stop descendants that kept it open, then drain it before
+                  // recording the final card; closing the process scope must not interrupt this reader.
+                  yield* Scope.close(scope, Exit.void)
+                  yield* Fiber.join(output)
                   if (!launches.has(id)) return
                   const at = yield* timestamp
                   launch.ended = { at, code: exit.code, signal: exit.signal }
                   yield* change('processes', id, { state: 'exited', exitCode: exit.code, signal: exit.signal, endedAt: at })
                   yield* toldCard(launch)
                   yield* told(input.projectId)
-                  yield* Scope.close(scope, Exit.void)
                 }),
               ),
               launchesScope,
@@ -834,7 +866,7 @@ export class Launches extends Context.Service<
                       ended.runnableId === chosen.id &&
                       ended.ended !== null
                     )
-                      launches.delete(ended.id)
+                      forget(ended)
                   return yield* launchIn({
                     id,
                     projectId: input.projectId,
@@ -867,7 +899,7 @@ export class Launches extends Context.Service<
           Effect.gen(function* () {
             const launch = launches.get(id)
             if (launch === undefined) return
-            launches.delete(id)
+            forget(launch)
             if (launch.ended === null) {
               yield* Scope.close(launch.scope, Exit.void)
               const at = yield* timestamp
@@ -884,7 +916,7 @@ export class Launches extends Context.Service<
         Effect.gen(function* () {
           const launch = launches.get(id)
           if (launch === undefined || launch.ended === null) return
-          launches.delete(id)
+          forget(launch)
           yield* told(launch.projectId)
         })
 
@@ -1317,6 +1349,9 @@ export class Launches extends Context.Service<
             provide(
               Effect.gen(function* () {
                 const asked = yield* read(Asked, input)
+                // An aside's lead runs nothing, its own copy, a task's worktree or a branch's: each is set up to run (an install).
+                if (access.role === 'lead' && access.taskId !== null && (yield* onScratch(access.taskId)))
+                  return yield* new ToolRefused({ message: ASIDE_BUILDS })
                 if ([asked.task, asked.branch, asked.pull_request].filter((one) => one !== undefined).length > 1)
                   return yield* new ToolRefused({ message: 'Give one of task, branch or pull_request.' })
                 const ref: Exclude<Wanted, { readonly kind: 'tag' }> | undefined =
@@ -1453,6 +1488,13 @@ export class Launches extends Context.Service<
         start,
         stop,
         clear,
+        output: (id) =>
+          Effect.suspend(() => {
+            const launch = launches.get(id) ?? leftBehind.get(id)
+            return launch === undefined
+              ? Effect.fail(new NotFound({ kind: 'run', id }))
+              : Effect.succeed({ text: readable(launch.printed), dropped: 0 })
+          }),
         stopAll,
         ofProject: (projectId) => Effect.sync(() => ofProject(projectId)),
         processes: () =>

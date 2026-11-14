@@ -3,6 +3,7 @@ import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 
 import type { ThreadItem } from '@althar/contracts'
+import { turnsById } from '../src/renderer/shared/turnTime'
 
 import { heardVerb, logLines, ThreadBlocks } from '../src/renderer/shared/ThreadBlocks'
 import { blocksOf } from '../src/renderer/shared/thread'
@@ -160,6 +161,19 @@ describe('an agent’s question', () => {
 })
 
 describe('a turn’s work', () => {
+  it('counts work in the headline and leaves a fifty-hour wait in the expanded timing details', async () => {
+    const thread = [
+      { ...items.thinks('Checking the implementation'), id: 'thought', turn: 't1' },
+      { ...items.says('The change is ready'), id: 'answer', turn: 't1' },
+    ]
+    const turns = turnsById([{ id: 't1', place: 50 * 60 * 60 * 1000, session: 60_000, starting: 'start', work: 20_000, tools: 0 }])
+    const blocks = blocksOf({ items: thread, turnRunning: false, worktree: null, turns }, new Map(), () => 'just now')
+    withServices(<ThreadBlocks blocks={blocks} threadId="th1" />, fakeClient().client)
+    const worked = screen.getByRole('button', { name: 'Worked for 20s' })
+    expect(worked.textContent).not.toMatch(/50h/)
+    await userEvent.click(worked)
+    expect(await screen.findByText(/50h 0m waiting for a place/)).toBeTruthy()
+  })
   it('says what the project’s rules let through, by the project’s name, each by its command or what it touched', async () => {
     show(
       [
@@ -260,14 +274,41 @@ describe('a coordinator that is signed out', () => {
     const onTryAgain = vi.fn()
     show([items.you('What is left on the checkout?'), signedOut], { onSignIn, onTryAgain })
     expect(screen.getByText('Claude Code is signed out.')).toBeTruthy()
-    // The agent's own words stand under it, not as its headline.
-    expect(screen.getByText('Authentication required')).toBeTruthy()
+    // The agent's words only restate it, so they aren't said again under it.
+    expect(screen.queryByText('Authentication required')).toBeNull()
+    expect(screen.getByRole('alert').textContent).toContain('Claude Code is signed out.')
     const ways = screen.getAllByRole('button').filter((button) => ['Sign in again', 'Try again'].includes(button.textContent ?? ''))
     expect(ways.map((button) => button.textContent)).toEqual(['Sign in again', 'Try again'])
     await userEvent.click(screen.getByRole('button', { name: 'Sign in again' }))
     expect(onSignIn).toHaveBeenCalledWith('claude-code')
     await userEvent.click(screen.getByRole('button', { name: 'Try again' }))
     expect(onTryAgain).toHaveBeenCalledOnce()
+  })
+
+  it('keeps a sign-in retry as a separate turn, with recovery actions only on the latest failure', () => {
+    show(
+      [
+        items.you('What is left on the checkout?'),
+        { ...signedOut, id: 'first-failure', turn: 'first-attempt' },
+        { ...signedOut, id: 'retry-failure', turn: 'retry-attempt', createdAt: '2026-09-29T12:01:00.000Z' },
+      ],
+      { onSignIn: vi.fn(), onTryAgain: vi.fn() },
+    )
+    expect(screen.getAllByText('Claude Code is signed out.')).toHaveLength(2)
+    expect(screen.getAllByRole('button', { name: 'Sign in again' })).toHaveLength(1)
+    expect(screen.getAllByRole('button', { name: 'Try again' })).toHaveLength(1)
+    expect(screen.queryByText(/^Worked for/)).toBeNull()
+  })
+
+  it('keeps the agent’s own words under it where they say more', () => {
+    const revoked = items.notice({
+      severity: 'error',
+      title: 'Claude Code is signed out.',
+      description: 'The key for the work account was revoked.',
+      failure: 'auth_required',
+    })
+    show([items.you('Hi'), revoked], { onSignIn: vi.fn() })
+    expect(screen.getByText('The key for the work account was revoked.')).toBeTruthy()
   })
 
   it('offers no Sign in again for a turn that failed for another reason', () => {

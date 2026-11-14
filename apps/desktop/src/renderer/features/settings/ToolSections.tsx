@@ -12,6 +12,7 @@ import {
   SkillSheet,
   SkillTiles,
   type ToolRoleId,
+  Problem,
 } from '@althar/ui'
 
 import { reads } from '../../data/reads'
@@ -110,9 +111,9 @@ export function ServersSection({ start }: { start: StartModel }) {
   return (
     <>
       {model.error !== null && (
-        <p role="alert" className={s.failed}>
+        <Problem size="small" className={s.failed}>
           {model.error}
-        </p>
+        </Problem>
       )}
       <ServerTiles
         servers={servers}
@@ -188,9 +189,9 @@ export function SkillsSection({ start }: { start: StartModel }) {
   return (
     <>
       {(model.error ?? skills.error) !== null && skills.card === null && !adding && (
-        <p role="alert" className={s.failed}>
+        <Problem size="small" className={s.failed}>
           {model.error ?? skills.error}
-        </p>
+        </Problem>
       )}
       <SkillTiles
         skills={tiles}

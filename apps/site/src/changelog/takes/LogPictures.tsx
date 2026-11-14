@@ -666,37 +666,43 @@ const SEAL = `data:image/svg+xml,${encodeURIComponent(sealSvg('ring', { model: '
  * the third finds nothing left, and the pull request takes its seal. Then
  * it holds, and clears for the next loop.
  */
-const BEATS = [0, 1300, 2100, 3400, 4300, 5100, 6400, 7900, 13600] as const
-const LOOP = 14400
-const SEALED = 7
+const REVIEWED: Timeline = { beats: [0, 1300, 2100, 3400, 4300, 5100, 6400, 7900, 13600], loop: 14400, rest: 7 }
+const SEALED = REVIEWED.rest
 const SCANS: readonly number[] = [0, 3, 6]
 
-/** The beat it is on: it plays only while on screen, in a shown tab, with motion allowed; otherwise it rests sealed. */
-function useBeat(ref: { readonly current: HTMLElement | null }): number {
-  const [beat, setBeat] = useState(SEALED)
+/** A picture's loop: when each beat starts, in ms; how long the loop is; and the beat it rests on, its most telling. */
+interface Timeline {
+  readonly beats: readonly number[]
+  readonly loop: number
+  readonly rest: number
+}
+
+/** The beat it is on: it plays only while on screen, in a shown tab, with motion allowed; otherwise it rests on `rest`. */
+function useBeat(ref: { readonly current: HTMLElement | null }, { beats, loop, rest }: Timeline): number {
+  const [beat, setBeat] = useState(rest)
   useEffect(() => {
     const el = ref.current
     if (el === null) return
     const still = matchMedia('(prefers-reduced-motion: reduce)')
-    // It starts where the drawing rests, sealed, so nothing jumps when it wakes.
-    let t: number = BEATS[SEALED]
+    // It starts where the drawing rests, so nothing jumps when it wakes.
+    let t: number = beats[rest] ?? 0
     let since = 0
     let timer = 0
     let seen = false
     const step = () => {
       const now = performance.now()
-      t = (t + now - since) % LOOP
+      t = (t + now - since) % loop
       since = now
-      const at = BEATS.findLastIndex((start) => start <= t)
+      const at = beats.findLastIndex((start) => start <= t)
       setBeat(at)
-      timer = window.setTimeout(step, (BEATS[at + 1] ?? LOOP) - t + 1)
+      timer = window.setTimeout(step, (beats[at + 1] ?? loop) - t + 1)
     }
     const sync = () => {
       window.clearTimeout(timer)
       if (seen && !document.hidden && !still.matches) {
         since = performance.now()
         step()
-      } else if (still.matches) setBeat(SEALED)
+      } else if (still.matches) setBeat(rest)
     }
     const io = new IntersectionObserver((seen_) => {
       seen = seen_.at(-1)?.isIntersecting ?? false
@@ -711,14 +717,14 @@ function useBeat(ref: { readonly current: HTMLElement | null }): number {
       document.removeEventListener('visibilitychange', sync)
       still.removeEventListener('change', sync)
     }
-  }, [ref])
+  }, [ref, beats, loop, rest])
   return beat
 }
 
 function Findings() {
   const ref = useRef<HTMLDivElement>(null)
-  const beat = useBeat(ref)
-  const out = beat === BEATS.length - 1
+  const beat = useBeat(ref, REVIEWED)
+  const out = beat === REVIEWED.beats.length - 1
   const pass = beat < 3 || out ? 1 : beat < 6 ? 2 : 3
   const shown = (from: number) => beat >= from && !out
   const notes = [
@@ -815,7 +821,230 @@ function Findings() {
   )
 }
 
+/* ---- 0.8.0: a browser built in ---- */
+
+/*
+ * The beats: the payment page as the lead built it; the person points at its
+ * Refund button; their comment goes, its pin left on the button; the lead
+ * types the amount into the page; the button says it; the lead presses it, and
+ * the page says it went; the lead answers. Then it holds, and clears.
+ */
+const BROWSED: Timeline = { beats: [0, 1400, 2800, 4400, 5800, 7200, 8600, 13000], loop: 13800, rest: 6 }
+
+/** What the lead is doing in the page, beat by beat, as its one live line says it. */
+const AT_WORK: Readonly<Record<number, string>> = {
+  3: 'Typing 40.00 in Amount',
+  4: 'Reading the page again',
+  5: 'Clicking Refund €40.00',
+}
+
+function Browser() {
+  const ref = useRef<HTMLDivElement>(null)
+  const beat = useBeat(ref, BROWSED)
+  const out = beat === BROWSED.beats.length - 1
+  const at = (from: number) => beat >= from && !out
+  // Who points at what: the person at the button, then the lead at the field, then at the button.
+  const on = beat === 1 || beat === 2 ? 'button' : beat === 3 ? 'amount' : beat === 4 || beat === 5 ? 'button' : null
+  const lead = beat >= 3 && beat <= 5
+  const named = at(4)
+  return (
+    <Frame
+      label="A task’s app open beside its conversation: the person comments on the Refund button, and the lead types the amount, presses the button and says the page refunded €40.00"
+      w={66}
+      n={34}
+      foot
+    >
+      <div ref={ref} className={cx(p.win, p.brWin)}>
+        <Bar>
+          <Tabs />
+        </Bar>
+        <div className={p.brBody}>
+          <div className={p.brTalk}>
+            <div className={p.brTask}>
+              <b>Refund from a payment’s page</b>
+              <code>althar/refund-button</code>
+            </div>
+            <div className={p.brLead}>
+              <span className={p.mk}>
+                <AgentMark agent={Agent.Claude} size={13} />
+              </span>
+              <p>Built the refund form. It’s running beside us.</p>
+            </div>
+            <div className={p.brYou} data-shown={at(2)}>
+              <p>Say the amount on it.</p>
+              <span className={p.brChip}>
+                <i>1</i>
+                Refund button
+              </span>
+            </div>
+            <div className={p.brAfter}>
+              <div className={p.brLive} data-shown={lead}>
+                <i />
+                <span key={beat}>{AT_WORK[beat] ?? ''}</span>
+              </div>
+              <div className={p.brLead} data-shown={at(6)}>
+                <span className={p.mk}>
+                  <AgentMark agent={Agent.Claude} size={13} />
+                </span>
+                <p>
+                  The button says the amount now. I typed 40.00, pressed it, and the page said <b>Refunded €40.00</b>.
+                </p>
+              </div>
+            </div>
+          </div>
+          <div className={p.brPage}>
+            <div className={p.brPageBar}>
+              <span className={p.brNav}>
+                <Icon name="chevronL" size={12} />
+                <Icon name="chevron" size={12} />
+                <Icon name="reload" size={12} />
+              </span>
+              <span className={p.brAddress}>
+                <Icon name="lock" size={10} />
+                localhost:5173/payments/pay_8Hk2
+              </span>
+              <span className={p.brTool} data-on={beat === 1 || beat === 2}>
+                <Icon name="comment" size={12} />
+                Comment
+              </span>
+            </div>
+            <div className={p.brWho} data-shown={lead}>
+              Opus 5.5 is using the page
+            </div>
+            <div className={p.brSite}>
+              <div className={p.brSiteNav}>
+                <b>
+                  <i />
+                  tally
+                </b>
+                <span>Payments</span>
+                <span>Payouts</span>
+              </div>
+              <div className={p.brPay}>
+                <span>Payment pay_8Hk2</span>
+                <b>€120.00</b>
+                <em>Paid 11 Nov · Halyard Coffee</em>
+              </div>
+              <div className={p.brForm}>
+                <span className={p.brLabel}>Amount to refund</span>
+                <span className={p.brField} data-at={on === 'amount'} data-lead={lead}>
+                  <span>€</span>
+                  <span className={p.brValue} data-typed={at(3)}>
+                    {at(3) ? '40.00' : '0.00'}
+                  </span>
+                </span>
+                <span className={p.brButton} data-at={on === 'button'} data-lead={lead}>
+                  <span key={String(named)} className={p.brButtonWords}>
+                    {named ? 'Refund €40.00' : 'Refund'}
+                  </span>
+                  {at(2) && <i className={p.brPin}>1</i>}
+                </span>
+                <div className={p.brNote} data-shown={beat === 1}>
+                  Say the amount on it.
+                </div>
+              </div>
+              <div className={p.brToast} data-shown={at(5)}>
+                <Icon name="check" size={11} />
+                Refunded €40.00
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </Frame>
+  )
+}
+
+/* ---- 0.8.0: canvases ---- */
+
+/*
+ * The beats: version 2 of a launch page the lead drew; the person's comment
+ * pinned on its headline; the lead drawing version 3; version 3, its headline
+ * bigger and bolder, the comment answered, and the thread's line for it. Then
+ * it holds, and clears.
+ */
+const DRAWN: Timeline = { beats: [0, 1500, 3100, 4500, 10200], loop: 11000, rest: 3 }
+
+function Canvas() {
+  const ref = useRef<HTMLDivElement>(null)
+  const beat = useBeat(ref, DRAWN)
+  const out = beat === DRAWN.beats.length - 1
+  const at = (from: number) => beat >= from && !out
+  const v3 = at(3)
+  return (
+    <Frame
+      label="A launch page the lead drew on a canvas: a comment pinned on its headline, and version 3 answering it with a bigger, bolder headline"
+      w={50}
+      n={32}
+    >
+      <div ref={ref} className={p.cvStage}>
+        <div className={p.cvBehind} data-shown={v3} />
+        <div className={cx(p.win, p.cvWin)}>
+          <div className={p.cvBar}>
+            <span className={p.mk}>
+              <Icon name="canvas" size={12} />
+            </span>
+            <b>Payouts launch page</b>
+            <span key={String(v3)} className={p.cvVer}>
+              {v3 ? 'v3' : 'v2'}
+            </span>
+            <span className={p.cvDrawing} data-shown={beat === 2}>
+              Drawing v3
+            </span>
+            <span className={p.cvComment}>
+              <Icon name="comment" size={12} />
+              Comment
+            </span>
+          </div>
+          <div className={p.cvPage} data-drawing={beat === 2}>
+            <div className={p.cvMesh} />
+            <div className={p.cvNav}>
+              <b>
+                <i />
+                tally
+              </b>
+              <em>Start</em>
+            </div>
+            <div className={p.cvHero}>
+              <h4 className={p.cvHead} data-v3={v3}>
+                Payouts in
+                <br />
+                forty seconds.
+              </h4>
+              <span className={p.cvCta}>Get started</span>
+            </div>
+            <div className={p.cvPayout}>
+              <span>Arriving today</span>
+              <b>€12,480.00</b>
+              <div className={p.cvBars}>
+                {[38, 52, 44, 70, 58, 86, 64, 100].map((h, i) => (
+                  <i key={i} style={{ '--h': `${h}%` } as CSSProperties} />
+                ))}
+              </div>
+            </div>
+            <div className={p.cvPin} data-shown={at(1)} data-done={v3}>
+              <i>1</i>
+              <span>
+                Bigger, bolder headline.
+                <em>Done in v3</em>
+              </span>
+            </div>
+          </div>
+        </div>
+        <div className={p.cvLine} data-shown={v3}>
+          <Icon name="canvas" size={12} />
+          <span>
+            Drew <b>Payouts launch page</b>, version 3
+          </span>
+        </div>
+      </div>
+    </Frame>
+  )
+}
+
 const PICTURES: Record<Picture, () => ReactNode> = {
+  browser: Browser,
+  canvas: Canvas,
   findings: Findings,
   plans: Plans,
   windows: Windows,
