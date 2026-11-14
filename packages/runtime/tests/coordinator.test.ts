@@ -1790,8 +1790,9 @@ describe('the coordinator, a trusted reader in its own copies (ADR-058)', () => 
       assert.strictEqual(contained?.folder, folder)
       const real = (path: string) => realpathSync(path)
       const { allowed = [], denied = [] } = contained?.reads ?? {}
-      // Ordinary files are readable; only secret paths are denied.
+      // Ordinary files are readable; only secret paths and the task folders' root (every project's) are denied.
       assert.notInclude(denied, real(homedir()))
+      assert.include(denied, real(config.worktreeRoot))
       const [checkout] = yield* sql<{ path: string }>`SELECT path FROM repository_locations`
       assert.notInclude(denied, real(checkout?.path ?? ''))
       assert.include(denied, join(homedir(), '.ssh'))

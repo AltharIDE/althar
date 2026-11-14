@@ -1,6 +1,6 @@
 import { execFile } from 'node:child_process'
 import { existsSync, readdirSync } from 'node:fs'
-import { lstat, readdir, rmdir, statfs } from 'node:fs/promises'
+import { lstat, readdir, rmdir, stat, statfs } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 
 import type { FolderHeld, FolderKind, FolderWait, FoldersFreed, TaskFolders } from '@althar/contracts'
@@ -239,6 +239,19 @@ export const diskOf = (path: string) =>
     ),
   )
 
+/** The device a path is on: that of its nearest parent that exists; null where none can be read. */
+export const deviceOf = (path: string): Effect.Effect<number | null> =>
+  Effect.promise(async () => {
+    for (let at = path; ; at = dirname(at)) {
+      const found = await stat(at).then(
+        (stats) => stats.dev,
+        () => null,
+      )
+      if (found !== null) return found
+      if (dirname(at) === at) return null
+    }
+  })
+
 /** A size for the thread: 2.3 GB, 14 GB, 640 MB, under 1 MB. */
 export const sizeWords = (bytes: number) => {
   const gb = bytes / 1024 ** 3
@@ -341,6 +354,7 @@ export class FolderCleanup extends Context.Service<
       const changes = yield* Changes
       const scope = yield* Scope.fork(yield* Effect.scope, 'sequential')
       const diskAt = config.disk ?? diskOf
+      const deviceAt = config.device ?? deviceOf
       const facts = new Map<string, Facts>()
       let measuring = false
       // One sweep, clean-up or removal at a time.
@@ -695,11 +709,15 @@ export class FolderCleanup extends Context.Service<
           const disk = yield* diskAt(config.worktreeRoot)
           if (disk === null || disk.free / disk.total >= LOW) return
           const tried = new Set(up.map((candidate) => candidate.taskId))
-          const rest = yield* free(
-            oldest.filter((candidate) => !tried.has(candidate.taskId)),
-            'low',
-            chosen,
-          )
+          // Only what is on the disk that ran low frees it: a folder on another device (a root moved in Settings leaves earlier ones behind) keeps its wait.
+          const here = yield* deviceAt(config.worktreeRoot)
+          const onHere: Candidate[] = []
+          for (const candidate of oldest) {
+            if (tried.has(candidate.taskId)) continue
+            const first = candidate.workspaces[0]
+            if (here === null || first === undefined || (yield* deviceAt(first.path)) === here) onHere.push(candidate)
+          }
+          const rest = yield* free(onHere, 'low', chosen)
           yield* removeAll(rest, instance.systemId, () =>
             diskAt(config.worktreeRoot).pipe(Effect.map((now) => now === null || now.free / now.total >= ROOMY)),
           )

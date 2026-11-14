@@ -7,7 +7,7 @@ import { join, sep } from 'node:path'
 import { assert, describe, it } from '@effect/vitest'
 import { Effect } from 'effect'
 
-import { freshCopy, readsOf } from '../src/coordinatorFolder'
+import { earlierRoots, freshCopy, readsOf } from '../src/coordinatorFolder'
 
 /*
  * The coordinator's copies of the project's repositories (ADR-058): each a
@@ -188,7 +188,12 @@ describe("the coordinator's copies", () => {
   it('may read git’s config files but never its credential store, which is in the same folder', () => {
     const home = realpathSync(mkdtempSync(join(tmpdir(), 'althar-home-')))
     const projectFolder = join(home, 'worktrees', 'meridian')
-    const place = { home, projectFolder, folder: join(projectFolder, '.coordinator'), mirrors: join(projectFolder, '.coordinator-mirrors') }
+    const place = {
+      home,
+      root: join(home, 'worktrees'),
+      folder: join(projectFolder, '.coordinator'),
+      mirrors: join(projectFolder, '.coordinator-mirrors'),
+    }
     const within = (path: string, places: ReadonlyArray<string>) =>
       places.some((given) => path === given || path.startsWith(`${given}${sep}`))
     const holds = (gitConfig: string, xdgConfig?: string) => {
@@ -199,9 +204,10 @@ describe("the coordinator's copies", () => {
       assert.isFalse(within(join(gitConfig, 'credentials'), allowed), 'the credential store is given back')
       assert.isTrue(within(join(gitConfig, 'credentials'), denied), 'the credential store isn’t held from it')
       assert.isTrue(within(join(gitConfig, 'config'), allowed), 'git’s config isn’t given back')
-      for (const ordinary of [join(home, 'Documents'), place.projectFolder, join(home, 'Projects', 'meridian')])
+      for (const ordinary of [join(home, 'Documents'), join(home, 'Projects', 'meridian')])
         assert.isFalse(within(ordinary, denied), 'ordinary files are readable')
       assert.isTrue(within(join(home, '.ssh', 'id_ed25519'), denied), 'secret files remain blocked')
+      assert.isTrue(within(projectFolder, denied), 'the task folders’ root isn’t held from it')
       // gh and glab start in its commands with the person's sign-in, as its brief says.
       for (const tool of ['gh', 'glab-cli'])
         assert.isFalse(within(join(home, '.config', tool, 'config.yml'), denied), `${tool} is held from it`)
@@ -212,5 +218,57 @@ describe("the coordinator's copies", () => {
     holds(join(elsewhere, 'git'), elsewhere)
     removeTreeSync(home)
     removeTreeSync(elsewhere)
+  })
+
+  it('denies the whole of the root and of an earlier one, outside home, with two projects, and gives back only the coordinator’s own folder', () => {
+    const home = realpathSync(mkdtempSync(join(tmpdir(), 'althar-home-')))
+    const before = realpathSync(mkdtempSync(join(tmpdir(), 'althar-before-')))
+    const now = realpathSync(mkdtempSync(join(tmpdir(), 'althar-now-')))
+    const projectFolder = join(now, 'meridian')
+    const { allowed, denied } = readsOf({
+      home,
+      root: now,
+      earlier: [before],
+      folder: join(projectFolder, '.coordinator'),
+      mirrors: join(projectFolder, '.coordinator-mirrors'),
+      objects: [],
+      repositories: [],
+    })
+    assert.isTrue(denied.includes(before), 'the earlier root isn’t denied')
+    assert.isTrue(denied.includes(now), 'the current root isn’t denied, so another project’s task folders are readable')
+    assert.isTrue(allowed.includes(join(projectFolder, '.coordinator')), 'its own folder isn’t given back')
+    assert.isFalse(allowed.some((path) => path === now || path.startsWith(before)))
+    for (const folder of [home, before, now]) rmSync(folder, { recursive: true, force: true })
+  })
+
+  it('does not give back a toolchain folder that holds the task folders', () => {
+    const home = realpathSync(mkdtempSync(join(tmpdir(), 'althar-home-')))
+    mkdirSync(join(home, '.bun'))
+    const root = join(home, '.bun', 'tasks')
+    const { allowed, denied } = readsOf({
+      home,
+      root,
+      earlier: [],
+      folder: join(root, 'meridian', '.coordinator'),
+      mirrors: join(root, 'meridian', '.coordinator-mirrors'),
+      objects: [],
+      repositories: [],
+    })
+    assert.isFalse(allowed.includes(join(home, '.bun')), 'the toolchain folder that holds the task folders is allowed whole')
+    assert.isTrue(denied.includes(root))
+    rmSync(home, { recursive: true, force: true })
+  })
+})
+
+describe('the earlier roots', () => {
+  it('are the roots of the worktrees, once each, and never the root now or what is in it', () => {
+    const now = '/data/tasks'
+    const worktrees = ['/old/meridian/t1/app', '/old/meridian/t2/app', '/old/meridian/t2/docs', `${now}/meridian/t3/app`]
+    assert.deepEqual(earlierRoots(worktrees, now, '/home/ada'), ['/old'])
+  })
+
+  it('never name a filesystem or drive root, or home or what holds it', () => {
+    assert.deepEqual(earlierRoots(['/srv/foo', '/workspace/foo', '/foo', '/a/foo'], '/data/tasks', '/home/ada'), [])
+    assert.deepEqual(earlierRoots(['/home/ada/meridian/t1/app', '/home/p/t/app'], '/data/tasks', '/home/ada'), [])
   })
 })

@@ -162,12 +162,26 @@ const failingUpdate =
     ? { extraMigrations: [{ key: '9999_fails_on_purpose', statements: ['INSERT INTO no_such_table VALUES (1)'] }] }
     : {}
 
+/*
+ * Where new tasks' worktrees go. The person may choose another folder while the app runs (Settings › Work on
+ * this computer), and the main process says so: the next worktree made is there. Those already made stay where
+ * they are; the store holds their paths.
+ */
+let worktreeRoot = required('ALTHAR_WORKTREES')
+
+/**
+ * The options with `worktreeRoot` read when used, so a change reaches every service. It holds only while the object itself is what readers
+ * keep and they read `config.worktreeRoot` where they use it: a spread (`{ ...config }`) calls the getter and copies the value, freezing the root.
+ */
+const withLiveRoot = <T extends object>(given: T): T =>
+  Object.defineProperty({ ...given }, 'worktreeRoot', { get: () => worktreeRoot, enumerable: true, configurable: true })
+
 const options = {
   database: databaseIn(profile),
   // A copy of the store before an update migrates it, the newest three.
   backups: backupsIn(profile),
   ...failingUpdate,
-  worktreeRoot: required('ALTHAR_WORKTREES'),
+  worktreeRoot,
   accountsRoot: join(profile, 'accounts'),
   // Pictures agents hand back and what commands print, by digest; the main process serves the pictures from here.
   artifactsRoot: join(profile, 'artifacts'),
@@ -287,18 +301,20 @@ const program = Effect.gen(function* () {
     'services',
     Layer.build(
       services(
-        fake === undefined
-          ? {
-              ...(device === undefined ? options : { ...options, onDevice: device.onDevice, probeRoot: join(profile, 'probe') }),
-              clientIds,
-              ...(githubApp === undefined ? {} : { githubApp }),
-              secrets,
-              fetch: appFetch,
-              // What is known of models, for the coordinator to weigh (ADR-015): fetched as the runtime starts, kept in the profile.
-              modelFacts: { url: MODEL_LIST, cache: join(profile, 'model-facts.json'), fetch: appFetch },
-              ...fakeHost,
-            }
-          : { ...options, ...fake },
+        withLiveRoot(
+          fake === undefined
+            ? {
+                ...(device === undefined ? options : { ...options, onDevice: device.onDevice, probeRoot: join(profile, 'probe') }),
+                clientIds,
+                ...(githubApp === undefined ? {} : { githubApp }),
+                secrets,
+                fetch: appFetch,
+                // What is known of models, for the coordinator to weigh (ADR-015): fetched as the runtime starts, kept in the profile.
+                modelFacts: { url: MODEL_LIST, cache: join(profile, 'model-facts.json'), fetch: appFetch },
+                ...fakeHost,
+              }
+            : { ...options, ...fake },
+        ),
       ),
     ).pipe(
       Effect.catchTags({
@@ -442,6 +458,7 @@ parent.on('message', (message) => {
     readonly threadId?: string
     readonly shot?: unknown
     readonly online?: boolean
+    readonly root?: string
     readonly on?: boolean
     readonly owners?: unknown
   } | null
@@ -457,6 +474,7 @@ parent.on('message', (message) => {
   if (data?.type === 'facts' && data.requestId !== undefined) tellFacts(data.requestId, data.threadId ?? null)
   if (data?.type === 'names' && data.requestId !== undefined) tellNames(data.requestId)
   if (data?.type === 'work' && data.requestId !== undefined) tellWork(data.requestId)
+  if (data?.type === 'worktrees' && typeof data.root === 'string' && data.root !== '') worktreeRoot = data.root
   if (data?.type === 'settled-among' && data.requestId !== undefined && Array.isArray(data.owners))
     tellSettled(
       data.requestId,

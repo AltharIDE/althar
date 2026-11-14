@@ -1,11 +1,12 @@
 import { isStartupStage, type StartupStage } from '../startup'
 import { randomUUID } from 'node:crypto'
-import { readFileSync } from 'node:fs'
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { stat } from 'node:fs/promises'
 import { homedir, hostname, userInfo } from 'node:os'
-import { join } from 'node:path'
+import { join, resolve } from 'node:path'
 
-import { locations as locationsOf } from './locations'
+import { locations as locationsOf, taskFolder as taskFolderOf } from './locations'
+import { refusalOf, refusals, ROOT_MARKER, statusOf, taskFolderRefusal, taskRootIn } from './taskFolderCheck'
 
 import { type AppIcon, DEFAULT_APP_ICON, isAppIcon, readAppIcon, writeAppIcon } from './appIcon'
 import { type AppPreferences, DEFAULT_PREFERENCES, doNotTrack, isPreferenceKey } from './appPreferences'
@@ -174,7 +175,21 @@ let storeFailure: StoreFailure | undefined
 let retrying = false
 
 /** The profile and worktrees, as the command-line client has them: a Flatpak's home is a fresh empty one each run, so it keeps worktrees beside its profile (locations.ts). */
-const locations = () => locationsOf(process.env, process.platform, homedir())
+const locations = () => ({
+  ...locationsOf(process.env, process.platform, homedir(), undefined, preferences.worktrees),
+  worktrees: taskFolderUsed(),
+})
+/** Where new tasks' worktrees go now, and who decided: the environment, the person's choice in Settings, or the platform (locations.ts). */
+const taskFolderNow = () => taskFolderOf(process.env, process.platform, homedir(), undefined, preferences.worktrees)
+const defaultTaskFolder = () => taskFolderOf(process.env, process.platform, homedir(), undefined, null).folder
+/**
+ * Where new tasks' worktrees are made: the folder now, but where the person chose it and it can't be used (an unmounted drive, a folder gone),
+ * the platform's default, so the runtime never creates it where it isn't.
+ */
+const taskFolderUsed = () => {
+  const now = taskFolderNow()
+  return now.from === 'setting' && refusalOf(now.folder, now.profile) !== null ? defaultTaskFolder() : now.folder
+}
 
 // Althar is the name windows, window managers and the desktop see, whichever way the app was started.
 app.setName('Althar')
@@ -588,6 +603,7 @@ const meterLoad = (child: UtilityProcess | undefined) => child?.postMessage({ ty
 
 const startRuntime = () => {
   const { profile, worktrees } = locations()
+  toldRoot = worktrees
   startupMark('runtime-start')
   const child = utilityProcess.fork(join(here, '../runtime/runtime.js'), [], {
     serviceName: 'Althar runtime',
@@ -1014,6 +1030,8 @@ ipcMain.handle('althar:preferences', async () => {
 })
 ipcMain.handle('althar:set-preference', async (_event, key: unknown, value: unknown) => {
   if (!isPreferenceKey(key)) throw new Error(`Althar has no preference ${String(key)}.`)
+  // Checked before it is kept, so it goes through choose-task-folder.
+  if (key === 'worktrees') throw new Error('The task folder is chosen with its own dialog.')
   await preferencesRead
   // Merged into the preferences as they stand once it is kept, so changes made together each stay.
   const kept = await writeAppPreference(locations().profile, key, value)
@@ -1025,6 +1043,75 @@ ipcMain.handle('althar:set-preference', async (_event, key: unknown, value: unkn
   if (key === 'showLoad') meterLoad(runtime)
   app.setBadgeCount(dockCount(waiting, preferences))
   return preferences
+})
+
+// Where new tasks' worktrees go, who decided, and the person's choice of another: asked for in a folder dialog, checked, kept, and told to the runtime at once.
+const environmentSets = 'ALTHAR_WORKTREES sets this folder; it can’t be changed here.'
+/** The folder as it stands; where the person's choice has gone missing or can't be written, why, so the row can say so. */
+const taskFolderState = () => {
+  const { folder, from, profile } = taskFolderNow()
+  const refusal = from === 'setting' ? refusalOf(folder, profile) : null
+  tellRuntimeTaskFolder()
+  const defaultFolder = defaultTaskFolder()
+  return refusal === null
+    ? { folder, from, defaultFolder }
+    : { folder, from, defaultFolder, problem: statusOf(folder, refusal, defaultFolder) }
+}
+/** The root the runtime was last told; told again when it changes, as a drive comes back or goes. */
+let toldRoot: string | undefined
+const tellRuntimeTaskFolder = () => {
+  const root = taskFolderUsed()
+  if (root === toldRoot) return
+  toldRoot = root
+  runtime?.postMessage({ type: 'worktrees', root })
+}
+/** Keeps the person's choice (null for the platform's default) and tells the runtime: the next task's worktree goes there, those made stay where they are. */
+const keepTaskFolder = async (chosen: string | null) => {
+  const kept = await writeAppPreference(locations().profile, 'worktrees', chosen)
+  preferences = { ...preferences, worktrees: kept }
+  return taskFolderState()
+}
+ipcMain.handle('althar:task-folder', async () => {
+  await preferencesRead
+  return taskFolderState()
+})
+ipcMain.handle('althar:use-default-task-folder', async () => {
+  await preferencesRead
+  if (taskFolderNow().from === 'environment') return { refused: environmentSets }
+  return keepTaskFolder(null)
+})
+ipcMain.handle('althar:choose-task-folder', async (event) => {
+  await preferencesRead
+  if (taskFolderNow().from === 'environment') return { refused: environmentSets }
+  const window = BrowserWindow.fromWebContents(event.sender)
+  const options = {
+    properties: ['openDirectory' as const, 'createDirectory' as const],
+    title: 'Choose where task folders go',
+    message: 'Althar makes a folder named Althar in the one you choose, and makes new tasks’ folders in it',
+    defaultPath: taskFolderNow().folder,
+  }
+  const result = window === null ? await dialog.showOpenDialog(options) : await dialog.showOpenDialog(window, options)
+  const picked = result.canceled ? undefined : result.filePaths[0]
+  if (picked === undefined) return null
+  // Where the platform keeps them is no choice to check: it is the default, kept as none.
+  if (resolve(picked) === resolve(taskFolderOf(process.env, process.platform, homedir(), undefined, null).folder))
+    return keepTaskFolder(null)
+  // The root chosen already, picked again: nothing to change.
+  if (taskFolderNow().from === 'setting' && resolve(picked) === resolve(taskFolderNow().folder)) return taskFolderState()
+  const refused = taskFolderRefusal(picked, locations().profile)
+  if (refused !== null) return { refused }
+  // Althar owns what it makes in the folder (it clears runs and keeps the coordinator's copies there), so it makes them in a folder of its own
+  // in the pick, never among the person's own, whatever the pick is named; a marker says it is one, so no later pick lands inside it.
+  const root = taskRootIn(picked)
+  try {
+    mkdirSync(root, { recursive: true })
+    writeFileSync(join(root, ROOT_MARKER), 'Althar keeps task folders in this folder.\n')
+  } catch {
+    return { refused: refusals.readOnly }
+  }
+  const refusedRoot = refusalOf(root, locations().profile)
+  if (refusedRoot !== null) return { refused: refusedRoot }
+  return keepTaskFolder(root)
 })
 
 // An editor's icon, as Finder draws it, by its id; null for one not found. Only editors Althar knows are drawn.
@@ -1148,7 +1235,8 @@ void ready.then(() => {
   powerMonitor.on('on-ac', awake.powerChanged)
   // Linux may not say when the power source changes, so there it is looked at again each minute too.
   if (process.platform === 'linux') setInterval(awake.powerChanged, 60_000).unref()
-  if (!noRuntime) startRuntime()
+  // After the preferences are read, as the person's choice of task folder is one of them.
+  if (!noRuntime) void preferencesRead.then(() => startRuntime())
   // A packaged app looks for updates, and tells every window as one is ready.
   // electron-updater supports the Mac's zip, Windows' NSIS installer and the Linux AppImage; deb/rpm use their package managers.
   if (

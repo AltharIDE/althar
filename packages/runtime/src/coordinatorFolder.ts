@@ -1,6 +1,6 @@
 import { copyFileSync, existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { basename, dirname, join, resolve } from 'node:path'
+import { basename, dirname, join, resolve, sep } from 'node:path'
 
 import { removeFully, SANDBOX_SECRETS } from '@althar/provider-adapters'
 import { Effect, Option } from 'effect'
@@ -10,6 +10,7 @@ import { RuntimeConfig } from './Config'
 import { GitFailed, NotFound } from './errors'
 import { commitOf, git, gitWithin } from './git'
 import { Instance } from './Instance'
+import { TOOLCHAINS } from './locations'
 import { startOf } from './Projects'
 
 /*
@@ -58,21 +59,7 @@ export interface CoordinatorFolder {
  * Python's, and git's config file. Never a folder that holds a key: only
  * `~/.cargo/bin` of `~/.cargo`, whose credentials are beside it.
  */
-export const TOOLCHAINS = [
-  '.bun',
-  '.nvm',
-  '.volta',
-  '.fnm',
-  '.local/share/fnm',
-  '.local/share/mise',
-  '.asdf',
-  '.deno',
-  '.cargo/bin',
-  '.rustup',
-  '.pyenv',
-  '.local/bin',
-  '.gitconfig',
-]
+export { TOOLCHAINS }
 
 /**
  * Git's files in its config folder a command may read, named one by one:
@@ -100,11 +87,14 @@ const real = (path: string): string => {
 export const readsOf = (place: {
   readonly home: string
   readonly xdgConfig?: string | undefined
-  readonly projectFolder: string
+  /** Where every project's task folders are made now (ADR-058: the coordinator reads none of them, other projects' included). */
+  readonly root: string
   readonly folder: string
   readonly mirrors: string
   readonly objects: ReadonlyArray<string>
   readonly repositories: ReadonlyArray<string>
+  /** The roots task folders were made in before the person moved it (Settings can): what is in them stays where it is, and stays denied. */
+  readonly earlier?: ReadonlyArray<string>
 }) => {
   const gitConfig = join(place.xdgConfig === undefined || place.xdgConfig === '' ? join(place.home, '.config') : place.xdgConfig, 'git')
   const allowed = [
@@ -115,8 +105,12 @@ export const readsOf = (place: {
     // Whether or not they are there: git reading one held from it fails rather than going without.
     ...GIT_CONFIG_FILES.map((file) => join(gitConfig, file)),
   ].map(real)
-  const denied = [...SANDBOX_SECRETS.map((secret) => join(place.home, secret)), join(gitConfig, 'credentials')].map(real)
-  return { allowed: [...new Set(allowed)], denied: [...new Set(denied)] }
+  const taskFolders = [place.root, ...(place.earlier ?? [])].map(real)
+  const denied = [...SANDBOX_SECRETS.map((secret) => join(place.home, secret)), ...taskFolders, join(gitConfig, 'credentials')].map(real)
+  // A place that holds task folders is not given back whole: a task root chosen in Settings may sit in a toolchain's folder (~/.bun), and
+  // the broader allowance would otherwise override the denial of the task folders in it.
+  const holdsTaskFolder = (path: string) => taskFolders.some((folder) => folder === path || folder.startsWith(path + sep))
+  return { allowed: [...new Set(allowed.filter((path) => !holdsTaskFolder(path)))], denied: [...new Set(denied)] }
 }
 
 /** What a copy's fetch brings from the person's repository: its branches, each remote's as last fetched, and its tags. */
@@ -291,6 +285,15 @@ export const coordinatorFolder = (projectId: string) =>
       WHERE b.project_id = ${projectId} AND b.detached_at IS NULL
       ORDER BY b.created_at, b.rowid`
     const projectFolder = join(config.worktreeRoot, project.slug)
+    // Task folders made under another root, before the person moved it (Settings › Task folders), are still there.
+    const earlier = earlierRoots(
+      (yield* sql<{ path: string }>`
+        SELECT path FROM workspaces WHERE project_id = ${projectId} AND device_id = ${instance.deviceId} AND kind IS NULL`).map(
+        (workspace) => workspace.path,
+      ),
+      config.worktreeRoot,
+      homedir(),
+    )
     const folder = coordinatorFolderAt(config.worktreeRoot, project.slug)
     // Beside the coordinator's folder, never in it: what its commands may write is only that folder.
     const mirrors = join(projectFolder, '.coordinator-mirrors')
@@ -314,7 +317,8 @@ export const coordinatorFolder = (projectId: string) =>
     const reads = readsOf({
       home: homedir(),
       xdgConfig: process.env.XDG_CONFIG_HOME,
-      projectFolder,
+      root: config.worktreeRoot,
+      earlier,
       folder,
       mirrors,
       objects: yield* Effect.forEach(bindings, (binding) => objectsOf(binding.repository)),
@@ -322,3 +326,18 @@ export const coordinatorFolder = (projectId: string) =>
     })
     return { folder, repositories, reads } satisfies CoordinatorFolder
   })
+
+/**
+ * The earlier roots task folders were made in, from the paths of the project's worktrees (root/project/task/repository). The person's own
+ * checkouts (kind 'checkout') aren't asked for. A root that is a filesystem or drive root, or home or holds it, is skipped (it would deny
+ * everything), as is the current root and what is in it.
+ */
+export const earlierRoots = (worktrees: ReadonlyArray<string>, root: string, home: string): ReadonlyArray<string> => {
+  const roots = worktrees.map((path) => dirname(dirname(dirname(path)))).filter((path) => dirname(path) !== path)
+  // Compared resolved, so a path written with forward slashes meets its own separators on Windows too; the roots are given as they were.
+  const [homeAt, rootAt] = [resolve(home), resolve(root)]
+  return [...new Set(roots)].filter((path) => {
+    const at = resolve(path)
+    return at !== homeAt && !homeAt.startsWith(at + sep) && at !== rootAt && !at.startsWith(rootAt + sep)
+  })
+}

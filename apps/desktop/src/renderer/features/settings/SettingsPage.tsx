@@ -36,6 +36,7 @@ import {
   SettingsLayout,
   SettingsNav,
   SettingSwitch,
+  TaskFolderLocation,
   TaskFolders,
   UpdateReady,
   UsageData,
@@ -82,6 +83,7 @@ import { type EdgePlaceModel, useEdgePlace } from './useEdgePlace'
 import { PresetsSection, presetsText } from './PresetsSection'
 import { usePostTeamReviews } from './usePostTeamReviews'
 import { type RunOutside, useRunOutside } from './useRunOutside'
+import { useTaskFolderLocation } from './useTaskFolderLocation'
 import { useTaskFolders } from './useTaskFolders'
 import { ServersSection, SkillsSection } from './ToolSections'
 
@@ -351,6 +353,7 @@ function ThisMacSection({ onTask }: { onTask?: (threadId: string) => void }) {
   const atOnce = useAgentsAtOnce()
   const paused = useAutomationsPaused()
   const folders = useTaskFolders(onTask)
+  const taskFolder = useTaskFolderLocation()
   return (
     <>
       <SettingList>
@@ -393,6 +396,19 @@ function ThisMacSection({ onTask }: { onTask?: (threadId: string) => void }) {
             glyph={<Icon name="hold" size={15} />}
             checked={paused.on}
             onChange={paused.set}
+          />
+        )}
+        {/* Where new tasks' folders go; those already made stay where they are. */}
+        {taskFolder !== null && (
+          <TaskFolderLocation
+            folder={taskFolder.folder}
+            from={taskFolder.from}
+            {...(taskFolder.defaultFolder === undefined ? {} : { defaultFolder: taskFolder.defaultFolder })}
+            onChange={taskFolder.change}
+            onUseDefault={taskFolder.useDefault}
+            {...(taskFolder.problem === undefined ? {} : { problem: taskFolder.problem })}
+            busy={taskFolder.busy}
+            {...(taskFolder.refusal === null ? {} : { refusal: taskFolder.refusal })}
           />
         )}
         {/* When finished tasks' folders go, and what of this computer's disk they take (ADR-056). */}
