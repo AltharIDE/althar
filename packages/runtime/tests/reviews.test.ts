@@ -18,6 +18,7 @@ import { Connections } from '../src/Connections'
 import { Coordinator } from '../src/Coordinator'
 import { git as althar, gitOutcome } from '../src/git'
 import { Instance } from '../src/Instance'
+import { LeftBehind } from '../src/LeftBehind'
 import { Nudges } from '../src/Nudges'
 import { Plans } from '../src/Plans'
 import { Projects } from '../src/Projects'
@@ -687,7 +688,14 @@ describe('reviewing someone else’s pull request', () => {
         Effect.gen(function* () {
           const before = (yield* said(threadId)).length
           yield* tasks.bringBack(taskId)
-          yield* sessions.send({ envelope: yield* Runtime.envelope('thread.send', { threadId, body }), threadId, body })
+          yield* sessions.send({
+            envelope: yield* Runtime.envelope('thread.send', { threadId, body }),
+            threadId,
+            body,
+            sender: { kind: 'window' },
+          })
+          // The window starts the last lead after queuing the message when settling has stopped it.
+          if (Option.isNone(yield* sessions.running(threadId))) yield* sessions.startLast(threadId)
           yield* until(said(threadId), (all) => all.length > before)
           yield* turnOver
         })
@@ -695,8 +703,10 @@ describe('reviewing someone else’s pull request', () => {
         Effect.gen(function* () {
           const draft = (yield* cardsIn(threadId)).at(-1)
           assert.strictEqual((yield* reviews.post(draft?.draftId ?? '', instance.personId)).state, 'posted')
+          // Posting settles the task; wait for that fixture's agent cleanup before reopening it.
+          yield* until((yield* LeftBehind).stopping, (tasks) => !tasks.has(taskId))
           assert.strictEqual((yield* reviewTask(projectId)).task?.state, 'done')
-          assert.strictEqual((yield* card()).phase, 'settled')
+          yield* until(card(), (one) => one.phase === 'settled')
         })
 
       // Its lead reads the pull request first, once its plan starts, then drafts.

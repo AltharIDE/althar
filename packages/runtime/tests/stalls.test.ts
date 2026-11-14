@@ -151,7 +151,12 @@ describe('outside a step', () => {
         (yield* notices(task.threadId)).filter((notice) => notice.about === 'stall'),
         [],
       )
-    }).pipe(Effect.provide(withQueries(undefined, undefined, { stalls: { ...FAST, turns: 1 } }))),
+    }).pipe(
+      // This exercises the turn budget, independently of how long a busy machine takes to answer.
+      Effect.provide(
+        withQueries(undefined, undefined, { stalls: { ...FAST, turns: 1, quiet: Duration.infinity, quietInTool: Duration.infinity } }),
+      ),
+    ),
   )
 
   it.live('starts an agent that stalls again afresh on the model and effort it had', () =>

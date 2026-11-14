@@ -128,17 +128,24 @@ const start = (job, lane) => {
     running.set(job.id, { stop: () => undefined })
     return finish({ error: { message: String(error && error.message || error), code: error && error.code || null } })
   }
+  let stopped = false
+  const closePipes = () => {
+    child.stdin.destroy()
+    child.stdout.destroy()
+    child.stderr.destroy()
+  }
+  child.once('exit', () => { if (stopped) closePipes() })
   const stop = () => {
+    stopped = true
     try {
       if (job.detached && child.pid !== undefined) process.kill(-child.pid, 'SIGTERM')
       else child.kill()
     } catch {
       child.kill()
     }
-    // A descendant may keep the pipes after this root exits. Cancel our reads too, so close frees its lane.
-    child.stdin.destroy()
-    child.stdout.destroy()
-    child.stderr.destroy()
+    // A descendant may keep the pipes after this root exits. Wait for Node to record its exit before closing
+    // our reads: on Windows, closing them first can emit close with a null code even when the root exited 0.
+    if (child.exitCode !== null || child.signalCode !== null || child.pid === undefined) closePipes()
   }
   running.set(job.id, { stop })
   const collect = (into) => (chunk) => {
@@ -264,17 +271,25 @@ export const startHere = (command: Command): Started => {
     detached: command.detached,
     windowsHide: true,
   })
+  let stopped = false
+  const closePipes = () => {
+    child.stdin.destroy()
+    child.stdout.destroy()
+    child.stderr.destroy()
+  }
+  child.once('exit', () => {
+    if (stopped) closePipes()
+  })
   const stop = () => {
+    stopped = true
     try {
       if (command.detached && child.pid !== undefined) process.kill(-child.pid, 'SIGTERM')
       else child.kill()
     } catch {
       child.kill()
     }
-    // A descendant may keep the pipes after this root exits. Cancel our reads too, as on the runner thread.
-    child.stdin.destroy()
-    child.stdout.destroy()
-    child.stderr.destroy()
+    // As on the runner thread, preserve the root's exit code before closing pipes held by descendants.
+    if (child.exitCode !== null || child.signalCode !== null || child.pid === undefined) closePipes()
   }
   const collect = (into: Array<Buffer>) => (chunk: Buffer) => {
     size += chunk.length
