@@ -1,3 +1,4 @@
+import { slashPath } from '@althar/testing'
 import { execFileSync } from 'node:child_process'
 import { existsSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -298,7 +299,7 @@ describe('keeping a task’s changes together', () => {
       assert.include(joined, 'Kept “Docs” together with “Lane colours”')
       assert.strictEqual(refusals, 2)
       assert.strictEqual(missingRoot, 1)
-      assert.notInclude(git(working, 'worktree', 'list', '--porcelain'), docs.path)
+      assert.notInclude(git(working, 'worktree', 'list', '--porcelain'), slashPath(docs.path))
       assert.strictEqual(git(colours.path, 'log', '-2', '--format=%s'), 'More docs\nDocs')
       assert.isFalse(existsSync(docs.path))
       assert.include(yield* notices(task.threadId), "Kept together: Docs's 2 commits are on althar/lane-colours now.")
@@ -349,7 +350,7 @@ describe('dropping one of a task’s changes', () => {
       assert.strictEqual(refusals, 4)
       assert.isTrue(existsSync(docs.path))
       assert.strictEqual((yield* changeOf(task.taskId, 'Refused docs')).state, 'ready')
-      assert.include(git(working, 'worktree', 'list', '--porcelain'), docs.path)
+      assert.include(git(working, 'worktree', 'list', '--porcelain'), slashPath(docs.path))
     }).pipe(Effect.provide(runtimeWith(github)))
   })
 
@@ -380,7 +381,7 @@ describe('dropping one of a task’s changes', () => {
       assert.strictEqual(refusals, 2)
       assert.isFalse(existsSync(docs.path))
       assert.strictEqual((yield* changeOf(task.taskId, 'Busy docs')).state, 'cleaned')
-      assert.notInclude(git(working, 'worktree', 'list', '--porcelain'), docs.path)
+      assert.notInclude(git(working, 'worktree', 'list', '--porcelain'), slashPath(docs.path))
       assert.strictEqual(git(working, 'show', `${docs.branch}:docs.md`), 'Keep this draft.')
     }).pipe(Effect.provide(runtimeWith(github)))
   })
