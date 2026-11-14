@@ -25,6 +25,19 @@ import { MOTION, reducedMotion, SCALE } from './motion'
  * afresh isn't an arrival. With reduced motion nothing travels; what comes
  * and goes only fades.
  *
+ * Where the page sets the list's room (`steady`), as it does a board's beside
+ * the conversation, an update in which the list itself moved or changed size
+ * (a divider dragged beside it, the window resized, something drawn above it)
+ * moves nothing either: its items went with it. What of ours was moving them
+ * stops where they are laid out, as a copy on its way to where the item stood
+ * on the page before would land off it, and what came or went in that update
+ * shows, or goes, at once. A divider dragged beside the
+ * board moves the board with each step, and React draws whatever else the
+ * board had to draw (its clock, its tasks, a lane turned to a rail) in the
+ * same commit as the divider's next width; taken for the items' own moves,
+ * that would set every card sliding from where the board was, off its lane,
+ * and each such commit would set it off again from where it showed.
+ *
  * A list that changes by state of its own, such as the line up next, is
  * wrapped in a ListMotion of its own; within another, that one hands its
  * updates to the outer one, which takes and moves what is in both, once an
@@ -45,6 +58,11 @@ export interface ListMotionProps {
   readonly enter?: ListEnter
   /** While true, its items are a drag's to move, not ours: what moves them stops, and the update that ends it moves nothing. */
   readonly still?: boolean
+  /**
+   * Its room is the page's, not its items' (a board's lanes): an update in which `within` moved or changed size, as a
+   * divider dragged beside it has it do, moves nothing, its items having gone with it, and stops what of ours moved them.
+   */
+  readonly steady?: boolean
   readonly children?: ReactNode
 }
 
@@ -60,6 +78,8 @@ interface Snapshot {
   readonly stood: ReadonlyMap<string, Stood>
   /** The lists within that were still: their items are left as they are. */
   readonly held: ReadonlyArray<HTMLElement>
+  /** Where `within` stood, where its room is the page's (`steady`). */
+  readonly room: DOMRect | null
 }
 
 /** The outermost ListMotion around, which moves what is in those within it. */
@@ -117,7 +137,7 @@ export class ListMotion extends Component<ListMotionProps> {
     const stood = new Map<string, Stood>()
     for (const el of itemsIn(root, held))
       stood.set(el.dataset.move!, { el, rect: running.get(el)?.shown() ?? el.getBoundingClientRect(), list: listOf(el) })
-    this.taken = { stood, held }
+    this.taken = { stood, held, room: this.props.steady === true ? root.getBoundingClientRect() : null }
     return true
   }
 
@@ -127,6 +147,13 @@ export class ListMotion extends Component<ListMotionProps> {
     this.taken = null
     const root = this.props.within.current
     if (before === null || root === null || !moves(root)) return
+    // The list itself moved, or its room changed size: its items went with it, by none of their own, and what of ours
+    // moved them stops where they are laid out.
+    if (before.room !== null && changed(before.room, root.getBoundingClientRect())) {
+      // Those taken before as well as those there now: one drawn again elsewhere is another element, its copy the old one's.
+      for (const el of new Set([...[...before.stood.values()].map((was) => was.el), ...itemsIn(root)])) running.get(el)?.stop()
+      return
+    }
     const items = itemsIn(root, before.held)
     // Read everything, then write: where each is laid out now, whatever of ours moves it.
     const to = items.map((el) => running.get(el)?.place() ?? el.getBoundingClientRect())
@@ -191,6 +218,7 @@ const listOf = (el: HTMLElement) => {
 const moved = (from: DOMRect, to: DOMRect) => Math.abs(from.left - to.left) >= 0.5 || Math.abs(from.top - to.top) >= 0.5
 const same = (one: DOMRect, other: DOMRect) => !moved(one, other)
 const resized = (from: DOMRect, to: DOMRect) => Math.abs(from.width - to.width) >= 1
+const changed = (from: DOMRect, to: DOMRect) => moved(from, to) || resized(from, to) || Math.abs(from.height - to.height) >= 1
 const offscreen = (r: DOMRect) => r.bottom < 0 || r.right < 0 || r.top > window.innerHeight || r.left > window.innerWidth
 
 const clear = (color: string) => color === 'transparent' || color === 'rgba(0, 0, 0, 0)'
