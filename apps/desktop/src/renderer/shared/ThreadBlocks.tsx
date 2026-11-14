@@ -42,6 +42,7 @@ import { sentAttachments } from './images'
 import { useModelNames } from './modelNames'
 import { FailedTurn } from './WayOut'
 import { serverBrand } from './mcpServers'
+import { linkedWords } from './noteLinks'
 import { keyOf, pastedIn } from './pasted'
 import { RuleReceipt } from './RuleReceipt'
 import { SaidIn } from './code/CodeHost'
@@ -657,8 +658,8 @@ export function ThreadBlocks({
         )
       case 'divider':
         return (
-          <ThreadDivider key={block.id} icon="agents">
-            {block.text}
+          <ThreadDivider key={block.id} icon="agents" {...(block.details === undefined ? {} : { details: block.details })}>
+            {linkedWords(block.text, block.links)}
           </ThreadDivider>
         )
       case 'offer':

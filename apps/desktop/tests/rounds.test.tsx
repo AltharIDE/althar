@@ -237,6 +237,21 @@ describe('a task’s thread in rounds', () => {
     expect(again.map((block) => block.kind)).toEqual(['you', 'round', 'you', 'waiting'])
     expect(roundOf(again)).toMatchObject({ live: false, result: { text: 'Done.' }, work: { live: false, took: '1m 0s' } })
     expect(again.at(-1)).toMatchObject({ took: '12s', slow: false })
+    // A step's note keeps its raw answer apart from its line, and its links by label: both reach the line that draws it.
+    const note = items.notice(
+      {
+        source: 'runtime',
+        title: 'Asked ana to review #698',
+        links: [{ label: '#698', url: 'https://github.com/a/b/pull/698' }],
+        details: '{\n  "status": 200\n}',
+      },
+      null,
+    )
+    expect(asked([...answered, items.step(), when(note, 50)]).find((block) => block.kind === 'althar')).toMatchObject({
+      text: 'Asked ana to review #698',
+      links: [{ label: '#698', url: 'https://github.com/a/b/pull/698' }],
+      details: '{\n  "status": 200\n}',
+    })
     // What the coordinator passed on is waited on as well, after a report too.
     const passed = items.notice({ source: 'runtime', title: 'From the coordinator:', description: 'Ship it.', role: 'relayed' }, null)
     expect(asked([...answered, items.step(), when(passed, 50)]).map((block) => block.kind)).toEqual(['you', 'round', 'relayed', 'waiting'])

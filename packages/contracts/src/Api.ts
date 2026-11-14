@@ -1947,6 +1947,10 @@ export const NoticeItem = Schema.Struct({
     severity: Schema.Literals(['info', 'warning', 'error']),
     title: Schema.String,
     description: Schema.NullOr(Schema.String),
+    /** What the line is built on, kept apart from it: a host's raw answer, pretty-printed, drawn folded under "Details". */
+    details: Schema.optional(Schema.String),
+    /** Words in the title that are links, by their label (#698, DEV-145): each is drawn as a link to its address. */
+    links: Schema.optional(Schema.Array(Schema.Struct({ label: Schema.String, url: Schema.String }))),
     /**
      * How the thread draws it, where not as Althar's own line: an aside in the
      * work, what the coordinator relayed, or its task's folder going or coming

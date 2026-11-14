@@ -181,7 +181,14 @@ export type Block =
       /** Once it is over, where its time went, as the runtime kept it for its turns; null where none of them did. */
       readonly spent: Spent | null
     }
-  | { readonly kind: 'divider'; readonly id: string; readonly text: string }
+  | {
+      readonly kind: 'divider'
+      readonly id: string
+      readonly text: string
+      /** Words in the text that are links, and what the line is built on, folded under it. */
+      readonly links?: ReadonlyArray<{ readonly label: string; readonly url: string }>
+      readonly details?: string
+    }
   /** A review a lead or the coordinator offers a task: its line and its buttons. */
   | {
       readonly kind: 'offer'
@@ -867,7 +874,13 @@ export const blocksOf = (
         }
         // What Althar itself says, such as a change of agent, is a line across the thread.
         if (item.content.source === 'runtime') {
-          blocks.push({ kind: 'divider', id: item.id, text: noticeText(item.content) })
+          blocks.push({
+            kind: 'divider',
+            id: item.id,
+            text: noticeText(item.content),
+            ...(item.content.links === undefined ? {} : { links: item.content.links }),
+            ...(item.content.details === undefined ? {} : { details: item.content.details }),
+          })
           if (carriedOn(item.content)) restartedAt = blocks.length - 1
           if (relayed(item.content)) {
             asked = item
