@@ -130,15 +130,13 @@
   background: var(--paper);
   border-radius: 6px;
 }
-/* where mermaid couldn't draw it, its words under the source */
+/* where mermaid couldn't draw it, a problem under the source, with mermaid's own words under that */
 .diagramError {
   margin-top: 6px;
   padding: 0 2px;
-  font-size: 12px;
-  color: var(--t-3);
 }
 .diagramError pre {
-  margin: 4px 0 0;
+  margin: 4px 0 0 17px;
   padding: 0;
   background: none;
   box-shadow: none;

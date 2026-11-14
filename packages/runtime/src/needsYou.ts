@@ -26,12 +26,19 @@ export type ByItself = 'pushing' | 'checks_running'
  * once the checks end (`failuresGo`), some failed while the rest still run
  * are on their way too: nothing is the person's yet.
  */
-export const byItself = (change: ChangeSummary | null, how: { readonly failuresGo?: boolean } = {}): ByItself | null => {
+export const byItself = (
+  change: ChangeSummary | null,
+  how: { readonly failuresGo?: boolean; readonly checksAppearing?: boolean } = {},
+): ByItself | null => {
   if (change === null || change.state !== 'open' || change.diverged !== null) return null
   const unpushed = change.localHead !== null && change.unpushed > 0
   if (unpushed) return change.pushing !== undefined && change.pushing.held === null ? 'pushing' : null
   const checks = change.checks
-  if (change.conflicts === true || checks === null || (checks.failed > 0 && how.failuresGo !== true)) return null
+  if (change.conflicts === true || (checks !== null && checks.failed > 0 && how.failuresGo !== true)) return null
+  // A recorded push in a repository with CI may have no check read at all yet, or an empty first read. Permission failures
+  // never set this flag: their recovery remains the person's rather than waiting for checks that Althar cannot read.
+  if ((checks === null || checks.outcome === 'none') && how.checksAppearing === true) return 'checks_running'
+  if (checks === null) return null
   // Run again by Althar (a cancelled check), they are running before its host shows them so.
   return checks.running > 0 || checks.outcome === 'running' ? 'checks_running' : null
 }

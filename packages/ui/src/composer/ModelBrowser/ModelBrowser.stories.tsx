@@ -60,9 +60,7 @@ export const Default: Story = {
 }
 
 /**
- * Each model's room after its name: the figure alone, so the name keeps its
- * room, and until when on hover. Opus counts its own week; models on a key
- * have nothing to say.
+ * Account usage stays in Plan usage, even when supplied by an older caller.
  */
 export const Room: Story = {
   args: {
@@ -77,12 +75,8 @@ export const Room: Story = {
   },
   play: async () => {
     const page = within(document.body)
-    const row = (id: string) => within(document.querySelector<HTMLElement>(`[data-id="${id}"]`)!)
-    await expect(row('claude-opus-5').getByText('19%')).toHaveAttribute('title', '19% · until Mon 09:00')
-    await expect(row('claude-sonnet-5').getByText('56%')).not.toHaveAttribute('title')
-    await expect(row('gpt-5.2').getByText('Side · 3%')).toHaveAttribute('title', 'Side · 3% · until 14:00')
-    await expect(row('gemini-3-pro').queryByText(/%/)).toBeNull()
-    await expect(page.getAllByText(/%$/).length).toBeGreaterThan(0)
+    await expect(page.queryByText('Usage')).toBeNull()
+    await expect(page.queryByText(/19%|56%|Side · 3%/)).toBeNull()
   },
 }
 
@@ -315,8 +309,8 @@ export const OpenCodeSignedOut: Story = {
   play: async () => {
     const body = within(document.body)
     await expect(body.getAllByText('signed out').length).toBeGreaterThan(0)
-    await expect(body.getByText('Usage')).toBeInTheDocument()
-    await expect(body.getByText('18%')).toBeInTheDocument()
+    await expect(body.queryByText('Usage')).toBeNull()
+    await expect(body.queryByText('18%')).toBeNull()
   },
 }
 

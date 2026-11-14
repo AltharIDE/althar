@@ -1,3 +1,4 @@
+import { removeTreeSync } from '@althar/testing'
 import { execFileSync } from 'node:child_process'
 import { appendFileSync, chmodSync, existsSync, linkSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -196,7 +197,7 @@ describe('finished tasks’ folders', () => {
       assert.isAbove(freed.freed, bytes! + 4 * MB - 1)
       assert.isBelow(freed.freed, bytes! + 5 * MB)
       assert.isFalse(existsSync(task.worktree))
-      rmSync(store, { recursive: true, force: true })
+      removeTreeSync(store)
     }).pipe(Effect.provide(withCleanup())),
   )
 
@@ -514,7 +515,7 @@ describe('a removed folder put back', () => {
       // Removed again with nothing at all left to start it from: refused, and still removed.
       yield* (yield* FolderCleanup).sweep
       yield* sql`UPDATE workspaces SET state = 'cleaned', base_commit = NULL WHERE id = ${task.workspaceId}`
-      rmSync(task.worktree, { recursive: true, force: true })
+      removeTreeSync(task.worktree)
       git(task.root, 'worktree', 'prune')
       git(task.root, 'update-ref', '-d', `${KEPT}${task.workspaceId}`)
       assert.deepInclude(yield* Effect.flip(bringBack(task.taskId, yield* person)), { _tag: 'TaskRefused', why: 'branch_gone' })
@@ -699,7 +700,7 @@ describe('the words for a folder going', () => {
     mkdirSync(next)
     linkSync(join(folder, 'own'), join(next, 'own-there'))
     const bytes = await ownedBytes([folder, next])
-    rmSync(root, { recursive: true, force: true })
+    removeTreeSync(root)
     assert.isAtLeast(bytes, MB)
     assert.isBelow(bytes, MB + 64 * 1024)
   })
@@ -715,7 +716,7 @@ describe('the words for a folder going', () => {
       () => true,
     )
     chmodSync(locked, 0o755)
-    rmSync(root, { recursive: true, force: true })
+    removeTreeSync(root)
     assert.isTrue(failed)
   })
 })

@@ -77,6 +77,11 @@ export interface RuntimeOptions {
    * Without it, the system's temporary folder (`Models.ts`).
    */
   readonly probeRoot?: string
+  /**
+   * How long after an agent couldn't say its models (it wasn't signed in yet, or didn't start in time) the next read of
+   * them asks it again: a minute unless a test says otherwise (`Models.ts`). An agent found signed in is asked again at once.
+   */
+  readonly modelsAgain?: Duration.Duration
   /** Opens a line in a terminal for the person to run, such as an agent's own sign-in; whether it could. Without it, the person runs it. */
   readonly openTerminal?: (line: string) => Effect.Effect<boolean>
   /**
@@ -126,6 +131,8 @@ export interface RuntimeOptions {
   readonly drafting?: Duration.Duration
   /** How often a task's pull requests are asked for news while it listens: 30 seconds unless a test says otherwise. */
   readonly listenEvery?: Duration.Duration
+  /** How often durable external waits read their code hosts; 30 seconds by default. Time waits wake at their time. */
+  readonly externalWaitEvery?: Duration.Duration
   /** How often the merge line is swept, and whether at all (not with an infinite one): 30 seconds unless a test says otherwise (MergeLine.ts). */
   readonly mergeLineEvery?: Duration.Duration
   /** When finished tasks' folders are first swept after Althar starts, and how often after: 2 minutes and an hour unless a test says otherwise (ADR-056). */

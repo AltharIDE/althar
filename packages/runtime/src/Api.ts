@@ -6,6 +6,7 @@ import { basename, dirname, isAbsolute, join, type posix, relative, resolve, sep
 import {
   type AccountStatus,
   API_VERSION,
+  NEW_PROJECT_DEFAULTS,
   apiVersionRefusal,
   ClientAuthority,
   SocketAllowed,
@@ -47,7 +48,7 @@ import {
   uninstall,
 } from '@althar/skills'
 import { codeRootOf } from './code'
-import { NotFound, ProjectRefused, RetryRefused } from './errors'
+import { ChangeRefused, FileRefused, NotFound, ProjectRefused, RetryRefused } from './errors'
 import { contained, Failures, failuresLayer } from './Failures'
 import { type AgentEntry, Agents, RuntimeConfig } from './Config'
 import { modelNamer } from './coordinatorNews'
@@ -77,6 +78,7 @@ import { missedReports } from './missedReports'
 import { PullRequestScreenshots } from './PullRequestScreenshots'
 import {
   accountsOf,
+  accountStrategyOf,
   allowsEverything,
   modeOf,
   movesIssues,
@@ -120,7 +122,7 @@ import { IssueDrafts } from './IssueDrafts'
 import { postTeamReviews, Reviews, runOutside, setPostTeamReviews, setRunOutside } from './Reviews'
 import { shelve } from './scratch'
 import { Helpers } from './Helpers'
-import { describe as describePreset, editPreset, partsOfTask, presetsIn, removePreset, savePreset } from './presets'
+import { declinePresetOffer, describe as describePreset, editPreset, partsOfTask, presetsIn, removePreset, savePreset } from './presets'
 import { FastLane } from './fastLane'
 import { MergeReviews } from './MergeReviews'
 import { Plans } from './Plans'
@@ -128,10 +130,12 @@ import { presetModels } from './presetModels'
 import { usableModels } from './usableModels'
 import { Runs } from './Runs'
 import { findTasks } from './Search'
+import { searchDocuments } from './searchDocuments'
+import { searchFiles } from './searchFiles'
 import { Tasks } from './Tasks'
 import { Sessions } from './Sessions'
 import { makeRepository, placeRepository } from './newRepository'
-import { type InputFile, keepFiles } from './sentFiles'
+import { checkFiles, copyFiles, type InputFile } from './sentFiles'
 import { type InputImage, keepSent } from './sentImages'
 import { anyOf, SignIns } from './SignIns'
 import { endingOf } from './signInEnding'
@@ -276,16 +280,25 @@ export const handlers = Api.toLayer(
     const cleanup = yield* FolderCleanup
     const setups = yield* Setups
     /**
-     * A task's folder about to open: brought back first, where it was removed
-     * to free the disk, and set up again; and kept as opened before anything
-     * can remove it again, which holds it back from removal for a day and
-     * restarts its wait (ADR-056).
+     * A task's folder about to open, or to take files sent to its lead:
+     * brought back first, where it was removed to free the disk or deleted by
+     * hand, and set up again; then `then`, and the task kept as opened, before
+     * anything can remove it again, which holds it back from removal for a day
+     * and restarts its wait (ADR-056).
      */
-    const openingFolder = (taskId: string) =>
+    const holdingFolder = <A, E>(taskId: string, then: Effect.Effect<A, E>) =>
       Effect.gen(function* () {
         const opened = Effect.flatMap(timestamp, (at) => sql`UPDATE tasks SET opened_at = ${at} WHERE id = ${taskId}`)
-        if (yield* Effect.provideContext(bringBackThen(taskId, instance.personId, opened), folderStore)) yield* setups.begin(taskId)
+        const held = bringBackThen(
+          taskId,
+          instance.personId,
+          Effect.tap(then, () => opened),
+        )
+        const { back, value } = yield* Effect.provideContext(held, folderStore)
+        if (back) yield* setups.begin(taskId)
+        return value
       })
+    const openingFolder = (taskId: string) => holdingFolder(taskId, Effect.void)
     const agents = yield* Agents
     const config = yield* RuntimeConfig
     const connections = yield* Connections
@@ -317,12 +330,27 @@ export const handlers = Api.toLayer(
     const filesFor = (threadId: string, files: ReadonlyArray<SentFile> | undefined) =>
       files === undefined || files.length === 0
         ? Effect.succeed([])
-        : keepFiles(threadId, files).pipe(
-            Effect.provideService(Folders, folders),
-            Effect.provideService(SqlClient.SqlClient, sql),
-            Effect.provideService(RuntimeConfig, config),
-            Effect.provideService(Instance, instance),
-          )
+        : Effect.gen(function* () {
+            const provided = <A, E>(effect: Effect.Effect<A, E, Folders | SqlClient.SqlClient | RuntimeConfig | Instance>) =>
+              effect.pipe(
+                Effect.provideService(Folders, folders),
+                Effect.provideService(SqlClient.SqlClient, sql),
+                Effect.provideService(RuntimeConfig, config),
+                Effect.provideService(Instance, instance),
+              )
+            // Checked first: a message refused for its files brings nothing back, and sets nothing up.
+            const checked = yield* provided(checkFiles(threadId, files))
+            const copied = provided(copyFiles(threadId, checked))
+            const [thread] = yield* sql<{ taskId: string | null }>`
+              SELECT task_id FROM threads WHERE id = ${threadId} AND kind <> 'coordinator'`
+            if (thread?.taskId == null) return yield* copied
+            // Its task's folder comes back first, as for its agent starting, and is held for its lead to read them (ADR-056).
+            return yield* holdingFolder(thread.taskId, copied).pipe(
+              Effect.catchTag('TaskRefused', (refused) =>
+                Effect.fail(new FileRefused({ reason: refused.why === 'folder_in_way' ? 'in_way' : 'gone', name: null })),
+              ),
+            )
+          })
     /** What a message's command says of its files: how many, never their names or paths; nothing where it has none. */
     const filesSaid = (kept: ReadonlyArray<InputFile>) => (kept.length === 0 ? {} : { files: kept.length })
 
@@ -563,6 +591,7 @@ export const handlers = Api.toLayer(
         leadsReachWeb: rules.leadsReachWeb ?? true,
         usageLimit: usageLimitOf(rules),
         rotateAccounts: accounts.rotate,
+        accountStrategy: accountStrategyOf(rules),
         onlyAccounts: accounts.only ?? null,
         branchPattern: rules.branchPattern ?? null,
         titlePattern: rules.titlePattern ?? null,
@@ -721,7 +750,9 @@ export const handlers = Api.toLayer(
                       ? Stream.make({ _tag: 'Launches', projectId: event.projectId, launches: event.launches })
                       : event._tag === 'PlanUsage'
                         ? Stream.make({ _tag: 'PlanUsage', usage: event.usage })
-                        : Stream.empty,
+                        : event._tag === 'Drafting'
+                          ? Stream.make({ _tag: 'Drafting', threadId: event.threadId, drafts: event.drafts })
+                          : Stream.empty,
           ),
         ),
       ),
@@ -801,11 +832,10 @@ export const handlers = Api.toLayer(
                 worktrees: null,
                 tasks: 0,
                 running: 0,
-                waiting: 0,
+                yours: 0,
                 working: 0,
-                ready: 0,
                 usageLimit: 'move' as const,
-                rotateAccounts: false,
+                rotateAccounts: NEW_PROJECT_DEFAULTS.rotateAccounts,
                 onlyAccounts: null,
               }
             )
@@ -951,6 +981,14 @@ export const handlers = Api.toLayer(
           ),
         ),
       ListTasks: ({ projectId }) => api(queries.tasks(projectId)),
+      GetSearchDocuments: ({ after }) =>
+        api(
+          Effect.gen(function* () {
+            const working = new Set((yield* sessions.onTasks).flatMap((one) => (one.turnRunning ? [one.taskId] : [])))
+            return yield* searchDocuments(after, working)
+          }),
+        ),
+      GetSearchFiles: ({ threadId }) => api(Effect.flatMap(queries.codeRoots(threadId), searchFiles)),
       SearchTasks: ({ projectId, text, limit }) =>
         api(
           Effect.gen(function* () {
@@ -984,7 +1022,7 @@ export const handlers = Api.toLayer(
             ...(fresh === true ? { fresh } : {}),
           }),
         ),
-      GetThreadItem: ({ threadId, itemId }) => api(queries.item(threadId, itemId)),
+      GetThreadItem: ({ threadId, itemId }) => api(queries.shown(threadId, itemId)),
       ReadOutput: ({ threadId, itemId }) => api(queries.output(threadId, itemId)),
       ReadDocument: ({ threadId, path }) => api(queries.document(threadId, path)),
       ListCanvases: ({ projectId, archived }) => api(canvases.list(projectId, archived === true)),
@@ -1378,7 +1416,10 @@ export const handlers = Api.toLayer(
           commandId,
           api(
             Effect.asVoid(
-              Effect.flatMap(envelope('task.mark_done', { taskId }, commandId), (said) => tasks.markDone({ envelope: said, taskId })),
+              // The person's own press: an aside settles as it stands, as its pill's × says (Tasks.markDone's `clear`).
+              Effect.flatMap(envelope('task.mark_done', { taskId }, commandId), (said) =>
+                tasks.markDone({ envelope: said, taskId, clear: true }),
+              ),
             ),
           ),
         ),
@@ -1454,14 +1495,17 @@ export const handlers = Api.toLayer(
             yield* sessions.takeBack({ envelope: yield* envelope('thread.take_back', { itemId }, commandId), itemId })
           }),
         ),
+      UndoTurn: ({ commandId, itemId }) =>
+        api(Effect.flatMap(envelope('thread.undo_turn', { itemId }, commandId), (said) => sessions.undoTurn({ envelope: said, itemId }))),
       GetCoordinator: ({ projectId, before, limit }) =>
         api(queries.coordinator(projectId, { ...(before === undefined ? {} : { before }), ...(limit === undefined ? {} : { limit }) })),
-      StartTask: ({ commandId, projectId, title, description, steps, issue, end, repositories, chat }) =>
+      StartTask: ({ commandId, projectId, title, description, steps, issue, end, repositories, chat, taskId }) =>
         once(
           commandId,
           api(
             Effect.gen(function* () {
               const from = yield* issueFor(projectId, issue)
+              const aside = chat === true
               const created = yield* projects.createTask({
                 envelope: yield* envelope('task.create', { projectId, title, description, issue }, commandId),
                 projectId,
@@ -1470,14 +1514,16 @@ export const handlers = Api.toLayer(
                 draft: true,
                 ...(from === undefined ? {} : { issueKey: from.key }),
                 ...(repositories === undefined ? {} : { repositories }),
-                // An aside's words are the person's, whole: its thread opens with them.
-                ...(chat === true ? { plain: true, request: description ?? title } : requestOf(title, description, issue)),
+                ...(taskId === undefined ? {} : { taskId }),
+                // An aside is made on Scratch, beside the coordinator's conversation, never on the board even for a moment. Its words
+                // are the person's, whole, where it was started with them; started with +, they come as its first message.
+                ...(aside
+                  ? { plain: true, shelf: 'scratch' as const, ...(description?.trim() ? { request: description } : {}) }
+                  : requestOf(title, description, issue)),
               })
               if (issue !== undefined) yield* issues.attach({ projectId: projectId as ProjectId, taskId: created.taskId, issue })
-              // An aside sits on Scratch from the start, beside the coordinator's conversation rather than on the board.
-              if (chat === true) yield* Effect.provideContext(shelve(created.taskId, 'scratch', instance.personId), folderStore)
               // A task you start yourself is planned like any other, and starts at once; its card shows in the coordinator's thread.
-              const projectEnd = chat === true ? null : yield* pullRequests.endFor(projectId, created.taskId)
+              const projectEnd = aside ? null : yield* pullRequests.endFor(projectId, created.taskId)
               const planId = yield* plans.propose({
                 projectId: projectId as ProjectId,
                 taskId: created.taskId,
@@ -1485,9 +1531,10 @@ export const handlers = Api.toLayer(
                 reason: null,
                 actorId: instance.personId,
                 startsIn: Duration.zero,
-                // An aside, as a chat the coordinator starts: nothing of it goes outside the project when it is done.
-                ...(chat === true
-                  ? { end: null, here: true, card: false as const }
+                // An aside, as a chat the coordinator starts: nothing of it goes outside the project when it is done; it has its pill
+                // rather than a card, and the coordinator hears nothing of it.
+                ...(aside
+                  ? { end: null, here: true, aside: true }
                   : {
                       end: end === undefined ? projectEnd : end,
                       // The form sends the ending it shows: another than the project's is the person's choice.
@@ -1501,6 +1548,7 @@ export const handlers = Api.toLayer(
         ),
       StartPlan: ({ commandId, planId }) => once(commandId, api(Effect.asVoid(plans.start(planId, instance.personId)))),
       HoldPlan: ({ commandId, planId }) => once(commandId, api(Effect.asVoid(plans.hold(planId, instance.personId)))),
+      HoldDraft: ({ commandId, threadId, key }) => once(commandId, api(coordinator.holdDraft(threadId, key, instance.personId))),
       ChangePlan: ({ commandId, planId, steps, end, worksIn, toward }) =>
         once(commandId, api(plans.change(planId, steps, instance.personId, end, worksIn, toward))),
       ApplyPreset: ({ commandId, planId, preset }) =>
@@ -1672,7 +1720,7 @@ export const handlers = Api.toLayer(
             ),
           ),
         ),
-      SavePreset: ({ commandId, name, taskId, parts, projectOnly }) =>
+      SavePreset: ({ commandId, name, taskId, parts, projectOnly, asNew }) =>
         once(
           commandId,
           api(
@@ -1688,19 +1736,25 @@ export const handlers = Api.toLayer(
                   projectId: projectOnly === true ? (from?.projectId ?? null) : null,
                   fromTaskId: taskId ?? null,
                   actorId: instance.personId,
+                  asNew,
                 })
               }),
               folderStore,
             ),
           ),
         ),
-      RemovePreset: ({ commandId, id }) => once(commandId, api(removePreset(id).pipe(Effect.provideService(SqlClient.SqlClient, sql)))),
+      RemovePreset: ({ commandId, id }) => once(commandId, api(Effect.provideContext(removePreset(id), folderStore))),
+      DeclinePresetOffer: ({ commandId, taskId }) =>
+        once(commandId, api(Effect.provideContext(declinePresetOffer(taskId, instance.personId), folderStore))),
       ShelveTask: ({ commandId, taskId, shelf }) =>
         once(
           commandId,
           api(
             Effect.flatMap(envelope('task.shelve', { taskId, shelf }, commandId), (said) =>
-              Effect.provideContext(shelve(taskId, shelf, said.actorId), folderStore),
+              Effect.provideContext(shelve(taskId, shelf, said.actorId), folderStore).pipe(
+                // An aside made a task is work now: its copy, never set up as an aside, is set up behind, before its next turn.
+                Effect.andThen(shelf === null ? setups.begin(taskId) : Effect.void),
+              ),
             ),
           ),
         ),
@@ -1917,7 +1971,8 @@ export const handlers = Api.toLayer(
             }),
           ),
         ),
-      StartAccountSignIn: ({ commandId, accountId, way }) => once(commandId, api(accountSignIns.start({ accountId, way }))),
+      StartAccountSignIn: ({ commandId, accountId, way, host }) =>
+        once(commandId, api(accountSignIns.start({ accountId, way, ...(host === undefined ? {} : { host }) }))),
       GetAccountSignIn: ({ flowId }) => accountSignIns.get(flowId),
       PasteAccountSignInCode: ({ commandId, flowId, code }) => once(commandId, api(accountSignIns.paste(flowId, code))),
       CancelAccountSignIn: ({ commandId, flowId }) => once(commandId, api(accountSignIns.cancel(flowId))),
@@ -1991,7 +2046,8 @@ export const handlers = Api.toLayer(
         once(commandId, api(policies.setUsageLimit(projectId, policy, instance.personId))),
       OpenChange: ({ commandId, taskId }) => once(commandId, api(runs.publish(taskId))),
       SetReviewAfterMerge: ({ commandId, taskId, review }) =>
-        once(commandId, api(Effect.asVoid(mergeReviews.choose(taskId, review, instance.personId)))),
+        once(commandId, api(Effect.asVoid(runs.setReviewAfterMerge({ taskId, review, actorId: instance.personId })))),
+      ShapeTask: ({ commandId, taskId, preset }) => once(commandId, api(taskActions.shape(taskId, preset, instance.personId))),
       SkipReview: ({ commandId, taskId }) =>
         once(
           commandId,
@@ -2024,15 +2080,17 @@ export const handlers = Api.toLayer(
           ),
         ),
       LeaveAfterMerge: ({ commandId, taskId, url }) => once(commandId, api(mergeReviews.leave(taskId, url))),
-      Merge: ({ commandId, taskId, head, url, how }) =>
+      Merge: ({ commandId, taskId, head, url, how, bypassQueue }) =>
         once(
           commandId,
           api(
-            how === undefined
-              ? pullRequests.merge(taskId, head, url)
-              : Effect.flatMap(envelope('task.merge', { taskId, how }, commandId), (said) =>
-                  runs.mergeWaiting({ envelope: said, taskId, how, ...(url === undefined ? {} : { url }) }),
-                ),
+            bypassQueue === true && how !== undefined
+              ? Effect.fail(new ChangeRefused({ message: 'Ship the waiting commits before merging without the queue.' }))
+              : how === undefined
+                ? pullRequests.merge(taskId, head, url, bypassQueue)
+                : Effect.flatMap(envelope('task.merge', { taskId, how }, commandId), (said) =>
+                    runs.mergeWaiting({ envelope: said, taskId, how, ...(url === undefined ? {} : { url }) }),
+                  ),
           ),
         ),
       ClosePullRequest: ({ commandId, taskId, url, deleteBranch }) =>
@@ -2253,6 +2311,7 @@ export const handlers = Api.toLayer(
         ),
       StopLaunch: ({ commandId, id }) => once(commandId, api(launches.stop(id))),
       ClearLaunch: ({ commandId, id }) => once(commandId, api(launches.clear(id))),
+      ReadLaunchOutput: ({ id }) => api(launches.output(id)),
       Watch: ({ since }) => Stream.merge(changes(since), streaming),
     })
   }),

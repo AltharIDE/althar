@@ -107,8 +107,9 @@ describe('the coordinator tagging', () => {
       const said = yield* callTool(coordinator, 'push_tag', { tag: 'v0.7.0', message: word })
       assert.include(said, `Pushed the tag v0.7.0 on ${head.slice(0, 8)} on meridian/api`)
       assert.deepStrictEqual(host.tagsPushed, [{ name: 'v0.7.0', commit: head, moved: false }])
+      // Its note is the one short line, not the person's words again.
       assert.isTrue(
-        (yield* lines(coordinator)).some((line) => line.startsWith('push tag: meridian/api tag v0.7.0') && line.includes('"Tag 0.7.0"')),
+        (yield* lines(coordinator)).some((line) => line.startsWith('Pushed the tag v0.7.0 on ') && !line.includes('Tag 0.7.0"')),
       )
       // Asked again, it is done already: nothing more is pushed.
       yield* callTool(coordinator, 'push_tag', { tag: 'v0.7.0', message: word })

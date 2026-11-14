@@ -1,7 +1,11 @@
-import type { AgentStatus, HeldForConnection, Queued } from '@althar/contracts'
+import type { AgentStatus, HeldForConnection, HeldForExternal, Queued } from '@althar/contracts'
 import { Brand, type PinnedDownload } from '@althar/ui'
 
 import { device } from './device'
+
+/** A quiet wait names the condition and when it will next be checked, without an idle work clock. */
+export const externalWaitWords = (wait: HeldForExternal, clock: (at: string) => string) =>
+  `Waiting: ${wait.reason}. ${wait.lastCheck === null ? 'Not checked yet' : `Last checked ${clock(wait.lastCheck)}`}; next check ${clock(wait.nextCheck)}.${wait.error === null ? '' : ` ${wait.error}`}`
 
 /*
  * How an agent is drawn: its mark, and its words. Who works is named by
@@ -16,6 +20,7 @@ const BRANDS: Readonly<Record<string, Brand>> = {
   codex: Brand.OpenAI,
   opencode: Brand.OpenCode,
   copilot: Brand.GitHubCopilot,
+  'copilot-direct': Brand.GitHubCopilot,
   junie: Brand.Junie,
   grok: Brand.XAI,
   kimi: Brand.Moonshot,
@@ -89,6 +94,7 @@ export const queuedOfWords = (n: number, { busy, atOnce }: Queued) =>
 const SIGN_IN: Readonly<Record<string, { readonly plan: string; readonly host: string }>> = {
   'claude-code': { plan: 'Claude', host: 'claude.ai' },
   codex: { plan: 'ChatGPT', host: 'chatgpt.com' },
+  'copilot-direct': { plan: 'GitHub', host: 'github.com' },
   antigravity: { plan: 'Google', host: 'accounts.google.com' },
 }
 
@@ -104,6 +110,7 @@ export const signInCautionOf = (agentId: string): string | undefined => CAUTIONS
 
 /** Who makes an agent, as Settings says it under its name; none for one that runs anyone's models. */
 const MAKERS: Readonly<Record<string, string>> = {
+  'copilot-direct': 'OpenCode',
   'claude-code': 'Anthropic',
   codex: 'OpenAI',
   grok: 'xAI',

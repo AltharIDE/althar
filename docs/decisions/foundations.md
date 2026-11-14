@@ -1,6 +1,6 @@
 # Foundations
 
-How Althar is put together: the shell and the runtime, how it stays quick while the computer is busy, the code's style on each side, how failures are kept small, what CI gates, and the rule that a feature ships for every service that can have it.
+How Althar is put together: the shell and the runtime, how the UI stays instant and quick while the computer is busy, the code's style on each side, how failures are kept small, what CI gates, and the rule that a feature ships for every service that can have it.
 
 **Replaces:** ADR-003, ADR-008, ADR-009, ADR-010, ADR-047, ADR-048, ADR-074, ADR-082
 
@@ -33,6 +33,59 @@ Today the runtime runs in the app, one per profile. Work outlives the window, bu
 Not built yet: the socket listener itself, a headless host on plain Node, pairing a phone, and a relay the runtime dials out to. The gate above is in place for when they come.
 
 **Proposed:** [ADR-103](proposed/103-projects-live-locally-or-on-a-host-and-place-work-in-pools.md) would let a project live on this computer, on a host the person runs, or on a managed one. It would add a persistent headless host, SSH beside a relay, and pools of workers that take work on leases. It keeps one writer per profile and keeps paired input apart from what a socket or an agent may do. Until it is accepted, the state above is the current one.
+
+## The UI is instant
+
+Everything the person does shows its result in the frame they do it. The runtime, git, agents and the network catch up behind it, and what fails is taken back with a line saying why. This holds for every screen, on every platform, idle or under load. It was decided on 12 Nov 2026, after a day of bugs that all had one shape: the window waited for something before it showed what the person did, or let an older read take back what it had shown.
+
+| What the person saw | What waited, or what took it back |
+|---|---|
+| Clear in an aside went back late, and its pill flickered away later still | The press waited for the runtime to settle the task (`markDone().then(onBack)`), and the pill waited for the board to be read again |
+| A model picked in the composer showed about 30 s later | The picker awaited the agent's own set-model; #786 records the pick at once (`Sessions.chooseLead`) and sets it on the agent behind |
+| A message sent mid-turn showed as sent, then snapped back into the queue | The window guessed "queued" by a rule of its own from a stale snapshot, and the runtime decided by another |
+| Ship spun for seconds with the Mac busy | Ship waited for its reviewer's agent and the push, git started on the runtime's thread, and reads scanned tables that grow (#800) |
+| Pills flickered | A read from before an action landed after it, and drew the old state again for a moment |
+
+These are the rules. Review holds every change to them, and where a rule can be checked mechanically, a lint or a test checks it.
+
+1. **A press changes the window first.** A handler changes what shows synchronously (state, the cache, a move, a close), then `void`s the call. Nothing is awaited, and nothing waits in a `.then`, before the first visible change. Leaving a screen never waits on a call. *Checked by* `althar/press-at-once` (`lint/press.js`) for handlers written in place. Review checks named handlers and view models' intents, which the lint doesn't read.
+2. **What the window showed holds until a read confirms it.** An optimistic change is kept beside the cache, as a pick, a set of cleared ids or a message being sent. It stays until a read that includes it lands, not just until the call answers, and each change is held by its own id, so overlapping ones never undo each other (`useAsideMoves` for an aside cleared or made a task, `useGoneAtOnce` for a removed preset). A read from before the change never takes it back; once one has confirmed it, the reads say what shows. Where the window checks what the runtime did, it reads afresh after the answer, never whichever read happens to be in the cache. *Checked by* a test for each optimistic action that lands an older read after the press, and overlapping ones, and expects no change (`asides.test.ts`, `presets.test.tsx`, the picker's in `useTask.test.tsx`).
+3. **What failed is taken back, with a line.** The line is in words, where the person pressed, never silent, and no spinner is left behind. Where the runtime answers but did nothing, the window reads again and says so, as an aside the runtime didn't clear comes back with a line over its composer.
+4. **One rule decides, on both sides.** Where the window predicts what the runtime will do (queued or sent now, settled or not, which model the next turn runs on), it uses the same function the runtime does (`@althar/domain`, `@althar/contracts`), or a field the runtime sends. It never uses a guess of its own.
+5. **The runtime records what the person wants, answers, and works behind.** A window call answers once the choice is recorded. It never waits on an agent, a remote, a process starting or ending, or a lock that background work holds. Long work shows as progress on what it's about. Examples are `chooseLead` and Ship answering once its run is admitted. The budget is 100 ms for a window call with the Mac busy, and a development build logs any over 250 ms (`lag.ts`). *Checked by* `keyReads.test.ts`, which fails if Ship waits for its reviewer's agent.
+6. **Nothing heavy on a thread that answers the person.** That means the runtime's thread, the main process, and the renderer's thread on a press. Processes start on the runner (`spawner.ts`). No synchronous child process and no recursive copy runs on the runtime's or the main process's thread. What is read on every change is found by an index. In the renderer, a press does no work that grows with a thread or a board: lists draw what changed, item by item, and heavy parsing (diffs, highlighting, large output) runs off the press, idle or in a worker. *Checked by* `althar/off-the-thread` (`lint/thread.js`) and `keyReads.test.ts`, the lag log for the runtime, and review with the profiler for the renderer.
+7. **The window names what it makes.** A new project is made under the id the window gave it ([desktop-app.md](desktop-app.md#a-new-project)), so the window can show it, and go to it, before the runtime answers. Every command carries a command id, so sending it again is safe (`once`).
+8. **Still while it changes.** Nothing jumps as a result arrives. Room is kept for what may appear: an aside's × sits in room its pill always keeps, and streamed words come in place. A read that changes nothing draws nothing, and a list moves as a whole (`ListMotion`). A screen never draws empty what it has read before ([desktop-app.md](desktop-app.md#how-the-window-reads)).
+9. **Fast on every platform.** The budgets are the same on macOS, Windows and Linux, and hold on the slowest path each has. Windows starts processes slower and holds folders a moment after them. Linux probes its sandbox, and the Flatpak starts everything through its spawn helper. A platform's slow path is fixed, never accepted as that platform's.
+10. **Measured, and guarded once fixed.** A slow path is timed before and after its fix, on a store of the person's size, idle and with every core and the disk busy (`tests/real/responsiveness.test.ts`). The fix comes with a test or a bench that fails on the old behaviour.
+
+**Where waiting is the point,** the press still shows in the same frame that it is under way (its button busy), and the lint's disable line says why: a dialog of the system's, a form only the runtime or a code host can check, whose error goes at its field, or opening what only the answer names. A line that waits for any other reason is a bug, said so on the line ("Not instant yet") and listed below.
+
+How a press runs:
+
+```mermaid
+sequenceDiagram
+  participant P as Person
+  participant W as Window
+  participant R as Runtime
+  participant B as Behind (agent, git, network)
+  P->>W: press
+  W->>W: show the result (state, cache, held beside it)
+  W-)R: command, with its id
+  R->>R: record what the person wants
+  R--)W: answered (≤ 100 ms)
+  R-)B: the work
+  R--)W: change feed: read again
+  W->>W: the read has it: let go of what was held
+  Note over W: failed, or did nothing: take it back, with a line
+```
+
+Not built yet:
+
+- **Claude Code's sandbox probe:** it runs bubblewrap with `spawnSync` once a launch, on Linux only, for up to 5 s (`claudeSandboxStarts`). It should be probed asynchronously as the runtime starts.
+- **Presses that still wait on the runtime:** deleting an automation, removing a run from its editor, and asking the coordinator what the project runs. Each is marked "Not instant yet" on its line.
+- **A message sent mid-turn** still decides "queued" by the window's own rule, until its task lands.
+- **Intents inside view models** that wait before they change anything, which the lint doesn't read. They are found in review, as they are touched.
 
 ## The window answers while the computer is busy
 
@@ -97,6 +150,7 @@ A merge is gated on Linux, and a release on every platform. Windows' jobs were t
 - **A pull request runs what its change reaches, on Linux.** That means the checks of the packages it changes and of those that build on them, and the unit tests whose imports reach a changed file (`packages/testing/src/select.ts`). Once it is ready for review and reaches the app, it also runs the desktop app's whole end-to-end run. A change any test may rest on (the lockfile, root config, lint rules, patches, `@althar/testing`, a workflow) runs everything. Docs run nothing.
 - **Its new and changed tests run many times over** (`stress`). The one Windows job is the end-to-end smoke test, for code that behaves differently there.
 - **The merge queue checks each pull request again on main as it will be,** up to three at once. `merge queue` is the one check main's rules require.
+- **Schedule the same work efficiently.** Runtime and desktop E2E shards use per-file duration history, with every selected file assigned exactly once and unknown files included. When the queue runs full runtime coverage, that execution also satisfies its selected runtime tests; lint and type checks still gate, along with every coverage part and the merged coverage threshold. PR-head stress and Windows smoke requirements must finish successfully or be explicitly inapplicable; missing, cancelled and timed-out work cannot pass the gate.
 - **A failing test runs once more.** One that passes only then files a `flaky` issue, and is quarantined while the issue is open: it still runs, but its failure goes on the issue instead of failing the job.
 - **After merge, `post-merge` runs everything else on main:** Windows, coverage, the end-to-end run, the installer and the Linux packages. `nightly` runs the whole suite shuffled, and the day's changed tests many times on Windows.
 - **Main may be red on Windows or coverage between merges; a release never is.** A failed `post-merge` opens "Main is red", and `release` tags only a commit `post-merge` passed on.
@@ -124,3 +178,4 @@ Not built yet:
 
 - 8 Nov 2026: written from the ADRs under Replaces.
 - 12 Nov 2026: the window answers while the computer is busy: agents in the background, nothing waiting on the runtime's thread, the store's commits not waiting for the disk, key reads by index, Ship answering once admitted.
+- 13 Nov 2026: the UI is instant: ten rules for what a press shows and what never runs on a thread that answers the person, the bugs they came from, and the lint rules and tests that check them (`althar/press-at-once`, `althar/off-the-thread`).

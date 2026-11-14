@@ -75,8 +75,8 @@ describe('new projects start with', () => {
     expect(within(page).getByText('Changing one here leaves the projects you have as they are.')).toBeTruthy()
     await choose(page, 'When an account runs out', 'Wait for the reset')
     expect(client.setNewProjectDefaults).toHaveBeenLastCalledWith({ usageLimit: 'wait' })
-    await userEvent.click(within(page).getByRole('switch', { name: 'Try an agent’s other accounts first' }))
-    expect(client.setNewProjectDefaults).toHaveBeenLastCalledWith({ rotateAccounts: true })
+    await choose(page, 'Account strategy', 'Most depleted first')
+    expect(client.setNewProjectDefaults).toHaveBeenLastCalledWith({ accountStrategy: 'least_room' })
     await userEvent.click(within(page).getByRole('switch', { name: 'Post screenshots to pull requests automatically' }))
     expect(client.setNewProjectDefaults).toHaveBeenLastCalledWith({ postScreenshots: true })
     await userEvent.click(within(page).getByRole('switch', { name: 'Move issues along with their tasks' }))
@@ -84,10 +84,10 @@ describe('new projects start with', () => {
     await choose(page, 'When a task is done', 'Push the branch only')
     expect(client.setNewProjectDefaults).toHaveBeenLastCalledWith({ end: 'none' })
     // A small change's review after it merges: Major only to start with, said under its line.
-    const afterMerge = within(page).getByRole('combobox', { name: 'Review after a small change merges' })
+    const afterMerge = within(page).getByRole('combobox', { name: 'When a review is set after merge' })
     expect(afterMerge.textContent).toBe('Bring back major findings')
     expect(within(page).getByText('Minor findings and nits stay in the task’s thread.')).toBeTruthy()
-    await choose(page, 'Review after a small change merges', 'Don’t review it')
+    await choose(page, 'When a review is set after merge', 'Don’t review it')
     expect(client.setNewProjectDefaults).toHaveBeenLastCalledWith({ afterMergeReview: 'none' })
   })
 
@@ -128,5 +128,22 @@ describe('new projects start with', () => {
     await within(page).findByRole('combobox', { name: 'When a task is done' })
     await waitFor(() => expect(client.getProjectRules).toHaveBeenCalled())
     expect(within(page).queryByRole('button', { name: 'Use this in every project' })).toBeNull()
+  })
+
+  it('offers a saved account strategy to existing projects in the strategy row', async () => {
+    const { client } = fakeClient({
+      getProjectRules: vi.fn(async (projectId: string) => ({
+        ...(await fakeClient().client.getProjectRules(projectId)),
+        resolveConflicts: true,
+      })),
+    })
+    withServices(<Settings section="tasks" />, client)
+    const page = screen.getByRole('main')
+    await within(page).findByRole('combobox', { name: 'Account strategy' })
+    await choose(page, 'Account strategy', 'Random')
+    expect(client.setNewProjectDefaults).toHaveBeenLastCalledWith({ accountStrategy: 'random' })
+    const apply = await within(page).findByRole('button', { name: 'Use this in every project' })
+    await userEvent.click(apply)
+    await waitFor(() => expect(client.setProjectRules).toHaveBeenCalledWith({ projectId: 'p1', accountStrategy: 'random' }))
   })
 })

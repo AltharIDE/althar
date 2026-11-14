@@ -126,7 +126,7 @@ const screensChanges = () => {
     const source = readFileSync(file, 'utf8')
     const where = relative(renderer, file)
     // What the screens call: anything that isn't only a read.
-    for (const [, call] of source.matchAll(/client\.([a-zA-Z]+)\(/g))
+    for (const [, call] of source.matchAll(/client\s*\.([a-zA-Z]+)\(/g))
       if (call !== undefined && !/^(get|list|read|find|search|watch|status|check|look)/.test(call)) made.set(call, where)
     // The window's own preferences, set by name, and those a map names.
     for (const [, key] of source.matchAll(/\bset\('([a-zA-Z]+)'/g)) if (key !== undefined) made.set(key, where)

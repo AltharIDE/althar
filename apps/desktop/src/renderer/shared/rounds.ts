@@ -2,10 +2,21 @@ import type { ThreadItem, TurnTime } from '@althar/contracts'
 import { ToolKind, ToolState } from '@althar/ui'
 
 import { type Handed, handedBy, type OutputSoFar } from './handed'
-import { type Block, blocksOf, carriedOn, type Doing, doingOf, type Part, relayed, type StepResult, type Streamed } from './thread'
+import {
+  type Block,
+  blocksOf,
+  carriedOn,
+  type Doing,
+  doingOf,
+  type Part,
+  relayed,
+  setupStanding,
+  type StepResult,
+  type Streamed,
+} from './thread'
 import { text as threadText } from './ThreadBlocks'
 import { took } from './time'
-import { type Spent, spentOf, turnOfItems } from './turnTime'
+import { duration, type Spent, spentOf, turnOfItems } from './turnTime'
 
 /*
  * A task's thread in rounds (ADR-042). A round starts with an ask: what the
@@ -107,6 +118,9 @@ export type RoundBlock =
       readonly id: string
       readonly text: string
       readonly tone: 'info' | 'warning'
+      readonly links?: ReadonlyArray<{ readonly label: string; readonly url: string }>
+      /** What the line is built on, such as a host's raw answer: folded under it. */
+      readonly details?: string
       /** A task the line is about, which it links to: one this task's lead started (ADR-097), in one line. */
       readonly task?: { readonly threadId: string; readonly title: string }
     }
@@ -400,14 +414,15 @@ export const roundsOf = (
           id: block.id,
           text: shorter(block.text),
           tone: content.severity === 'info' ? 'info' : 'warning',
+          ...(block.links === undefined ? {} : { links: block.links }),
+          ...(block.details === undefined ? {} : { details: block.details }),
           ...(content.task === undefined ? {} : { task: { threadId: content.task.threadId, title: content.task.title } }),
         })
         return
       }
       case 'setup': {
         // Set up as it should be, it is Althar's housekeeping: with the next round's work. Under way or failed, it stands alone.
-        const ended = block.setup.ended
-        if (ended !== null && !ended.stopped && ended.code === 0) {
+        if (setupStanding(block.setup) === 'done') {
           const aside = { kind: 'aside' as const, id: block.id, text: threadText.setup.done(block.setup) }
           if (open !== null) open.steps.push(aside)
           else pending.push(aside)
@@ -523,6 +538,7 @@ const roundOf = (
   const lastStep = work.at(-1)
   const until = result === undefined ? (reported ?? (lastStep === undefined ? start : time(lastStep.id))) : time(result.id)
   const iso = (ms: number) => new Date(ms).toISOString()
+  const spent = live ? null : spending(open.steps.map((step) => step.id))
   return {
     kind: 'round',
     id: open.id,
@@ -537,7 +553,10 @@ const roundOf = (
         : {
             id: `work:${open.id}`,
             steps: work,
-            took: took(iso(work[0] === undefined ? start : time(work[0].id)), live && !answered ? now : iso(until)),
+            took:
+              spent === null
+                ? took(iso(work[0] === undefined ? start : time(work[0].id)), live && !answered ? now : iso(until))
+                : duration(spent.work),
             live,
             counts: countsOf(work),
             doing: live
@@ -546,7 +565,7 @@ const roundOf = (
                   writing !== undefined,
                 )
               : null,
-            spent: live ? null : spending(open.steps.map((step) => step.id)),
+            spent,
           },
     result: result === undefined ? null : said(result, true),
     writing: writing === undefined ? null : said(writing, false),

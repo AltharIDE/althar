@@ -1,11 +1,13 @@
 import { Button } from '../../primitives/Button/Button'
 import { Dialog } from '../../primitives/Dialog/Dialog'
+import { Problem } from '../../primitives/Problem/Problem'
 import s from './RemoveProject.module.css'
 
 /*
  * Taking a project out of Althar, asked first: what stops, what goes and what
  * stays. It is the one step; nothing goes until it is pressed, and Cancel,
- * first, has focus as it opens.
+ * first, has focus as it opens. One that didn't go says why, and Remove
+ * project stays to try again.
  */
 
 export interface RemoveProjectText {
@@ -59,15 +61,13 @@ export function RemoveProject({ project, working, worktrees, onRemove, onClose, 
         </>
       }
     >
-      <ul className={s.list}>
-        {working > 0 && <li>{t.working(working)}</li>}
-        <li>{worktrees === null ? t.keptFolders : t.kept}</li>
-      </ul>
-      {error !== undefined && (
-        <p className={s.error} role="alert">
-          {error}
-        </p>
-      )}
+      <div className={s.body}>
+        <ul className={s.list}>
+          {working > 0 && <li>{t.working(working)}</li>}
+          <li>{worktrees === null ? t.keptFolders : t.kept}</li>
+        </ul>
+        {error !== undefined && <Problem>{error}</Problem>}
+      </div>
     </Dialog>
   )
 }

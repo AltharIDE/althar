@@ -3,6 +3,7 @@ import { Fragment, type KeyboardEvent, type ReactNode, useEffect, useId, useRef,
 import { CommandMatch, LimitPolicy, PermissionPolicy, RuleKind, RulePlace, TaskEnd } from '../../foundations/vocabulary'
 import type { ChoiceWords } from '../../foundations/vocabularyText'
 import { cx } from '../../lib/cx'
+import { accountStrategies, type AccountStrategy } from '../../setup/Accounts/strategy'
 import type { RootProps } from '../../lib/props'
 import { Heading, type HeadingLevel } from '../../primitives/Heading/Heading'
 import { Menu, MenuCheckboxItem, MenuGroup, MenuRadioGroup, MenuRadioItem, MenuSeparator } from '../../primitives/Menu/Menu'
@@ -214,6 +215,7 @@ export interface ProjectRulesText {
   sandbox: {
     runs: string
     outside: string
+    anyWay: string
     noCommands: string
     reach: string
     withoutAsking: string
@@ -396,6 +398,8 @@ export const projectRulesText: ProjectRulesText = {
   sandbox: {
     runs: 'Leads run ',
     outside: ' outside their sandbox from the start',
+    /** After the commands, where some are run more than one way: npx vite as vite. */
+    anyWay: ', however they’re run',
     noCommands: 'Leads run every command in their sandbox first.',
     reach: ' They reach ',
     withoutAsking: ' without asking',
@@ -479,15 +483,15 @@ export const projectRulesText: ProjectRulesText = {
   },
   accounts: {
     works: (agent) => ` ${agent} works on `,
-    andThen: ', then ',
+    andThen: ' or ',
     label: (agent) => `${agent} accounts this project may use`,
     uses: 'Works on',
-    rotation: 'When one runs out',
+    rotation: 'Account strategy',
     rotate: {
       first: { title: 'Stay on the first', note: 'Then the work does as the limit says' },
       next: { title: 'Go on with the next', note: 'The agent’s next account here, then as the limit says' },
     },
-    note: 'In your order from Settings',
+    note: 'Choose the accounts this project may use and how new conversations pick one',
   },
   token: {},
   hint: {},
@@ -617,6 +621,41 @@ function DraftHint({ typed, ...rest }: Omit<NewCommandHintProps, 'pattern'> & { 
 }
 
 /** Things in a list, as a sentence has them: a, b and c; with how the sentence ends kept on the line of the last. */
+/* How a command is run through a package manager or runner: npx vite is vite. */
+const RUNNER = /^(?:npx|bunx|bun x|pnpm exec|pnpm dlx|yarn exec|yarn dlx) /
+/* A package's script, by whichever manager: npm run dev, pnpm dev, yarn dev. */
+const SCRIPT = /^(?:npm|pnpm|yarn|bun)(?: run)? (\S+)$/
+
+/** One of the commands leads run outside their sandbox, as the sentence says it: the tool, and every way it is run. */
+export interface SandboxGroup {
+  readonly label: string
+  readonly members: readonly string[]
+}
+
+/**
+ * The commands leads run outside their sandbox, one per tool however it is run, so the sentence names each once: vite for
+ * vite, npx vite, bunx vite, pnpm exec vite and yarn vite; npm run dev for a package's dev script by any manager. A
+ * command run only one way keeps its own words. In the order they first come.
+ */
+export const sandboxGroups = (commands: readonly string[]): readonly SandboxGroup[] => {
+  const bare = new Set(commands.map((command) => command.replace(RUNNER, '')))
+  const keyOf = (command: string): string => {
+    const run = command.replace(RUNNER, '')
+    if (run !== command) return run
+    // yarn vite runs the vite a package has, as npx does; yarn dev runs its script.
+    const yarn = /^yarn (.+)$/.exec(command)?.[1]
+    if (yarn !== undefined && bare.has(yarn) && yarn !== command && !SCRIPT.test(yarn)) return yarn
+    const script = SCRIPT.exec(command)?.[1]
+    return script === undefined ? command : `npm run ${script}`
+  }
+  const groups = new Map<string, string[]>()
+  for (const command of commands) {
+    const key = keyOf(command)
+    groups.set(key, [...(groups.get(key) ?? []), command])
+  }
+  return [...groups].map(([key, members]) => ({ label: members.length === 1 ? (members[0] ?? key) : key, members }))
+}
+
 const join = (items: readonly ReactNode[], last: string, end?: ReactNode) =>
   items.map((item, index) => (
     <Fragment key={index}>
@@ -857,18 +896,21 @@ export function ProjectRules({
           />
         )),
     )
-  /** One of the sandbox's lists, with what is being added at its end. */
+  /** One of the sandbox's lists, with what is being added at its end: commands one per tool, however they are run. */
   const listed = (list: SandboxList) =>
     withDraft(
       list,
-      (sandbox?.[list] ?? []).map((value, index) => (
+      (list === 'commands'
+        ? sandboxGroups(sandbox?.commands ?? [])
+        : (sandbox?.hosts ?? []).map((host) => ({ label: host, members: [host] }))
+      ).map((group, index) => (
         <CommandToken
-          key={value}
-          pattern={value}
+          key={group.label}
+          pattern={group.label}
           text={t.token}
           onRemove={() => {
             refocus.current = { place: list, index }
-            sandbox?.onRemove(list, value)
+            for (const value of group.members) sandbox?.onRemove(list, value)
           }}
         />
       )),
@@ -1133,7 +1175,9 @@ export function ProjectRules({
                     outsideCommands,
                     t.and,
                     <>
-                      {t.sandbox.outside}.{adding('commands')}
+                      {t.sandbox.outside}
+                      {sandboxGroups(sandbox.commands).some((group) => group.members.length > 1) ? t.sandbox.anyWay : ''}.
+                      {adding('commands')}
                     </>,
                   )}
                 </>
@@ -1210,6 +1254,8 @@ export type ProjectTaskRulesProps = RootProps<
     /** Whether work goes on with an agent's next account when one runs out. */
     rotate: boolean
     onRotateChange: (rotate: boolean) => void
+    accountStrategy?: AccountStrategy
+    onAccountStrategyChange?: (strategy: AccountStrategy) => void
     /** The accounts the project may use, by agent; an agent not named may use every one. */
     allowed: Readonly<Record<string, readonly string[]>>
     onAllowedChange: (agentId: string, accountIds: readonly string[]) => void
@@ -1234,6 +1280,8 @@ export function ProjectTaskRules({
   agentAccounts = [],
   rotate,
   onRotateChange,
+  accountStrategy,
+  onAccountStrategyChange,
   allowed,
   onAllowedChange,
   text,
@@ -1329,15 +1377,18 @@ export function ProjectTaskRules({
                     <MenuSeparator />
                     <MenuRadioGroup
                       label={t.accounts.rotation}
-                      value={rotate ? 'next' : 'first'}
-                      onChange={(value) => onRotateChange(value === 'next')}
+                      value={accountStrategy ?? (rotate ? 'most_room' : 'first')}
+                      onChange={(value) => {
+                        const strategy = value as AccountStrategy
+                        if (onAccountStrategyChange) onAccountStrategyChange(strategy)
+                        else onRotateChange(strategy !== 'first')
+                      }}
                     >
-                      <MenuRadioItem value="first" description={t.accounts.rotate.first.note}>
-                        {t.accounts.rotate.first.title}
-                      </MenuRadioItem>
-                      <MenuRadioItem value="next" description={t.accounts.rotate.next.note}>
-                        {t.accounts.rotate.next.title}
-                      </MenuRadioItem>
+                      {Object.entries(accountStrategies).map(([value, words]) => (
+                        <MenuRadioItem key={value} value={value} description={words.note}>
+                          {words.label}
+                        </MenuRadioItem>
+                      ))}
                     </MenuRadioGroup>
                   </Menu>
                   .

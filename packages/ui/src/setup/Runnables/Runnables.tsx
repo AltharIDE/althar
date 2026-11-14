@@ -10,6 +10,7 @@ import { FormRow } from '../../primitives/FormRow/FormRow'
 import type { HeadingLevel } from '../../primitives/Heading/Heading'
 import { IconButton } from '../../primitives/IconButton/IconButton'
 import { LinkButton } from '../../primitives/LinkButton/LinkButton'
+import { Problem } from '../../primitives/Problem/Problem'
 import { Segmented } from '../../primitives/Segmented/Segmented'
 import { Select } from '../../primitives/Select/Select'
 import { Spinner } from '../../primitives/Spinner/Spinner'
@@ -219,11 +220,7 @@ export function AddRunnable({
             </>
           ))}
         {way === 'ask' && <p className={s.quiet}>{t.askAbout}</p>}
-        {error !== undefined && (
-          <p className={s.error} role="alert">
-            {error}
-          </p>
-        )}
+        {error !== undefined && <Problem>{error}</Problem>}
       </div>
     </Dialog>
   )
@@ -349,11 +346,7 @@ export function EditRunnable({
           </FormRow>
         )}
       </div>
-      {error !== undefined && (
-        <p className={s.error} role="alert">
-          {error}
-        </p>
-      )}
+      {error !== undefined && <Problem>{error}</Problem>}
     </Dialog>
   )
 }
@@ -608,11 +601,7 @@ export function RunnableList({ runnables, onOrder, onDefault, onEdit, onRemove, 
           })}
         </ol>
       )}
-      {error !== undefined && (
-        <p className={s.error} role="alert">
-          {error}
-        </p>
-      )}
+      {error !== undefined && <Problem>{error}</Problem>}
     </>
   )
 }

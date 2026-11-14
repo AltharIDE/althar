@@ -13,6 +13,7 @@ import {
   type ReviewVerdict,
   type ThreadItem,
   type ThreadSnapshot,
+  type UndoTurnResult,
 } from '@althar/contracts'
 
 import { messageOf, type StuckAnswer } from '../../data/client'
@@ -21,6 +22,7 @@ import { keys, reads } from '../../data/reads'
 import { canPick } from '../../shared/agents'
 import { isSending, mergeItems, newestReads, sending, takenBack, unsent, waiting } from '../../shared/items'
 import { headsOf } from '../../shared/mergeHere'
+import { commitsToShip } from '../../shared/shipping'
 import { type Choice, moveTo, runningOn, startOf, upcomingOn } from '../../shared/models'
 import type { OutputSoFar } from '../../shared/handed'
 import { type Outgoing, sentWith } from '../../shared/useAttachments'
@@ -111,6 +113,7 @@ export interface TaskModel {
   readonly sendNow: (body: string, images?: Outgoing) => Promise<boolean>
   /** Takes back a message still waiting its turn; false, having said why, when the agent already has it. */
   readonly takeBack: (itemId: string) => Promise<boolean>
+  readonly undoTurn: (itemId: string) => Promise<UndoTurnResult>
   readonly interrupt: () => Promise<void>
   /** Has the agent on the task compact its context, after what it was told before. */
   readonly compact: () => Promise<void>
@@ -125,6 +128,8 @@ export interface TaskModel {
   readonly stop: () => Promise<void>
   /** Skips the review of the work under way: ready once its lead is done. */
   readonly skipReview: () => Promise<void>
+  /** Makes it a change in one move: a reviewer on, and its pull request ending (a task is a conversation plus parts). */
+  readonly makeChange: () => Promise<void>
   /** Carries the task on from the step it stopped on, with its last lead. */
   readonly resume: () => Promise<void>
   /** Whether its lead resolves conflicts on its own, otherwise than its project says; null goes back to the project. */
@@ -220,7 +225,9 @@ export interface TaskModel {
    * the person saw, and stops at the first that is refused, so the rest
    * wait; pending throughout.
    */
-  readonly accept: (changes: ReadonlyArray<{ readonly head: string; readonly url: string }>) => Promise<void>
+  readonly accept: (
+    changes: ReadonlyArray<{ readonly head: string; readonly url: string; readonly bypassQueue?: boolean }>,
+  ) => Promise<void>
   /**
    * Merge, with commits not shipped (a task is a conversation plus parts): `review`, Review and merge, one review of what
    * waits, then it goes up and merges; `now`, Merge now, up and merged at once, reviewed after the merge.
@@ -293,7 +300,7 @@ export const useTask = (threadId: string): TaskModel => {
   const status = useQuery(read.status()).data
   const agents = useMemo(() => status?.agents.filter(canPick) ?? [], [status])
   // What its lead is still saying, while the window hears it.
-  const streaming = useStreamed(threadId, snapshot?.items ?? NO_ITEMS)
+  const streaming = useStreamed(threadId, snapshot?.items ?? NO_ITEMS, undefined, snapshot?.conversationVersion)
   // What its commands have printed so far, while they run.
   const outputs = useOutputs(threadId, snapshot?.items ?? NO_ITEMS, snapshot?.session?.turnRunning ?? false)
   const [failed, setError] = useState<string | null>(null)
@@ -363,13 +370,28 @@ export const useTask = (threadId: string): TaskModel => {
   )
 
   /** What the window holds of the thread now, for a read that lands later. */
-  const held = useRef<ReadonlyArray<ThreadItem>>([])
-  held.current = snapshot?.items ?? []
+  const held = useCallback(() => cache.getQueryData<ThreadSnapshot>(keys.thread(threadId))?.items ?? [], [cache, threadId])
 
   const readItems = useCallback(
     (ids: Iterable<string>) =>
-      Promise.all([...ids].map((itemId) => newest(itemId, client.getThreadItem(threadId, itemId), (item) => arrived([item]), fail))),
-    [client, threadId, newest, arrived, fail],
+      Promise.all(
+        [...ids].map((itemId) => {
+          const version = cache.getQueryData<ThreadSnapshot>(keys.thread(threadId))?.conversationVersion
+          return newest(
+            itemId,
+            client.getThreadItem(threadId, itemId),
+            // One the thread keeps for Althar alone, such as what its lead could see, is nothing to draw, and nothing wrong.
+            (item) => {
+              if (cache.getQueryData<ThreadSnapshot>(keys.thread(threadId))?.conversationVersion !== version) return
+              return item === null
+                ? setSnapshot((current) => ({ ...current, items: current.items.filter((one) => one.id !== itemId) }))
+                : arrived([item])
+            },
+            fail,
+          )
+        }),
+      ),
+    [client, cache, threadId, newest, arrived, fail, setSnapshot],
   )
 
   // What the lead was last picked to, until the thread says it: a pick made before the last one was taken goes from there.
@@ -386,14 +408,22 @@ export const useTask = (threadId: string): TaskModel => {
     (also: Iterable<string> = []) =>
       newest(
         'head',
-        client.getThread(threadId, { limit: 0 }).finally(() => readItems(new Set([...also, ...waiting(held.current)]))),
-        (head) =>
-          cache.setQueryData<ThreadSnapshot>(keys.thread(threadId), (current) =>
+        client.getThread(threadId, { limit: 0 }).finally(() => readItems(new Set([...also, ...waiting(held())]))),
+        (head) => {
+          const current = cache.getQueryData<ThreadSnapshot>(keys.thread(threadId))
+          if ((head.conversationVersion ?? 1) < (current?.conversationVersion ?? 1)) return
+          if (current !== undefined && head.conversationVersion !== current.conversationVersion) {
+            void newest('head', client.getThread(threadId), (fresh) => cache.setQueryData(keys.thread(threadId), fresh), fail)
+            return
+          }
+          cache.setQueryData<ThreadSnapshot>(
+            keys.thread(threadId),
             current === undefined ? head : { ...head, items: current.items, earlier: current.earlier },
-          ),
+          )
+        },
         fail,
       ),
-    [client, cache, threadId, newest, readItems, fail],
+    [client, cache, threadId, newest, readItems, held, fail],
   )
 
   /** Whether its pull request at `url` has merged, as the runtime has it now. */
@@ -424,7 +454,7 @@ export const useTask = (threadId: string): TaskModel => {
 
   useWatch((event) => {
     // A command's output as far as it has come is useOutputs'; plan usage is the plan gauge's and the pickers'.
-    if (event._tag === 'Output' || event._tag === 'PlanUsage') return
+    if (event._tag === 'Output' || event._tag === 'PlanUsage' || event._tag === 'Drafting') return
     // What its lead is still saying is useStreamed's.
     if (event._tag === 'Streaming') return
     // What Althar runs of the project, whole each time: this task's, which the pill over the composer shows.
@@ -452,7 +482,7 @@ export const useTask = (threadId: string): TaskModel => {
     if (event.aggregateType === 'thread_item') changed.current.items.add(event.aggregateId)
     else changed.current.head = true
     // A message delivered changes its input, not its item: read again what still shows as queued.
-    if (event.aggregateType === 'user_input') for (const id of waiting(snapshot?.items ?? [])) changed.current.items.add(id)
+    if (event.aggregateType === 'user_input') for (const id of waiting(held())) changed.current.items.add(id)
     timer.current ??= setTimeout(readChanged, GATHER)
   })
 
@@ -475,7 +505,7 @@ export const useTask = (threadId: string): TaskModel => {
         .getThread(threadId, { before: first.sequence, limit: PAGE })
         .then((page) => {
           setSnapshot((current) =>
-            current.threadId === page.threadId
+            current.threadId === page.threadId && current.conversationVersion === page.conversationVersion
               ? { ...current, items: mergeItems(current.items, page.items), earlier: page.earlier }
               : current,
           )
@@ -616,6 +646,16 @@ export const useTask = (threadId: string): TaskModel => {
         () => client.send({ threadId, body, disposition: 'interrupt_and_continue', ...sentWith(images) }),
         images,
       ),
+    undoTurn: async (itemId) => {
+      setPending(true)
+      try {
+        const result = await client.undoTurn(itemId)
+        cache.setQueryData(keys.thread(threadId), await client.getThread(threadId))
+        return result
+      } finally {
+        setPending(false)
+      }
+    },
     takeBack: async (itemId) => {
       // What is still on its way has nothing to take back yet.
       if (isSending(itemId)) return false
@@ -666,6 +706,7 @@ export const useTask = (threadId: string): TaskModel => {
       shown(body, 'after_current', () => client.switchAgent({ ...startOf(threadId, choice), body, ...sentWith(images) }), images, false),
     stop: () => onTask((taskId) => client.stopTask(taskId)),
     skipReview: () => onTask((taskId) => client.skipReview(taskId)),
+    makeChange: () => onTask((taskId) => client.shapeTask(taskId, 'Change')),
     resume: () => onTask((taskId) => client.resumeTask({ taskId })),
     setResolveConflicts: (on) => onTask((taskId) => client.setTaskResolveConflicts({ taskId, resolveConflicts: on })),
     resolveConflictsNow: () => onTask((taskId) => client.resolveConflictsNow(taskId)),
@@ -763,7 +804,16 @@ export const useTask = (threadId: string): TaskModel => {
         if (snapshot === null) return
         for (const url of urls) await client.markReady(snapshot.task.id, url)
       }, doing.markAllReady),
-    openChange: () => act(async () => (snapshot === null ? undefined : client.openChange(snapshot.task.id)), doing.openChange),
+    openChange: () =>
+      act(
+        async () =>
+          snapshot === null
+            ? undefined
+            : commitsToShip(snapshot.task) > 0
+              ? client.ship(snapshot.task.id)
+              : client.openChange(snapshot.task.id),
+        snapshot !== null && commitsToShip(snapshot.task) > 0 ? doing.ship : doing.openChange,
+      ),
     ship: () => act(async () => (snapshot === null ? undefined : client.ship(snapshot.task.id)), doing.ship),
     shipChange: (change) => act(async () => (snapshot === null ? undefined : client.ship(snapshot.task.id, change)), doing.ship),
     fixAfterMerge: () =>
@@ -816,7 +866,12 @@ export const useTask = (threadId: string): TaskModel => {
           for (const [at, change] of changes.entries()) {
             setMerging(change.url)
             try {
-              await merge({ taskId: snapshot.task.id, head: change.head, url: change.url })
+              await merge({
+                taskId: snapshot.task.id,
+                head: change.head,
+                url: change.url,
+                ...(change.bypassQueue ? { bypassQueue: true } : {}),
+              })
             } catch (failure) {
               setMergeFailed(change.url)
               throw failure

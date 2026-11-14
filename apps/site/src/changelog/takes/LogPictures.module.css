@@ -509,3 +509,130 @@
   .rvScan { display: none; }
   .rvPr[data-shown='true'] .rvSeal { animation: none; }
 }
+
+/* ---- 0.8.0: a browser built in ---- */
+
+/* The task: its conversation on the left, its app's page beside it. Every row of the conversation keeps its room, so what arrives fades in and nothing moves. */
+.brWin { margin: 0 1.6em; }
+.brBody { display: grid; grid-template-columns: minmax(0, 0.86fr) minmax(0, 1fr); height: 26em; }
+.brTalk { display: flex; flex-direction: column; gap: 1.1em; padding: 1.3em 1.4em; border-right: 1px solid var(--line); font-size: 0.9em; }
+.brTask { display: grid; gap: 0.2em; padding-bottom: 0.9em; border-bottom: 1px solid var(--line); }
+.brTask b { font-size: 1.02em; letter-spacing: -0.01em; }
+.brTask code { font-size: 0.8em; color: var(--t4); }
+.brLead { display: grid; grid-template-columns: 1.6em minmax(0, 1fr); gap: 0.6em; align-items: start; color: var(--t2); transition: opacity 0.6s, transform 0.7s var(--ease-out); }
+.brLead .mk { width: 1.6em; height: 1.6em; border-radius: 0.45em; background: var(--raised); box-shadow: inset 0 0 0 1px var(--line-2); }
+.brLead p, .brYou p { margin: 0; }
+.brLead b { color: var(--t1); }
+.brYou { display: grid; justify-items: end; gap: 0.45em; margin-left: 2.4em; opacity: 0; transform: translateY(0.4em); transition: opacity 0.6s, transform 0.7s var(--ease-out); }
+.brYou p { padding: 0.55em 0.85em; border-radius: 0.7em 0.7em 0.2em 0.7em; background: var(--paper); box-shadow: inset 0 0 0 1px var(--line-2); color: var(--t1); }
+.brChip { display: inline-flex; align-items: center; gap: 0.45em; height: 1.9em; padding: 0 0.7em 0 0.35em; border-radius: 0.5em; background: var(--raised); box-shadow: inset 0 0 0 1px rgba(150, 160, 255, 0.35); font-size: 0.82em; color: var(--t2); }
+.brChip i, .brPin { display: inline-grid; place-items: center; width: 1.35em; height: 1.35em; border-radius: 50%; background: var(--live); color: #0c0e2a; font-size: 0.8em; font-style: normal; font-weight: 700; }
+.brYou[data-shown='true'] { opacity: 1; transform: none; }
+/* The lead's live line, then its answer, in the same room. */
+.brAfter { display: grid; margin-top: auto; }
+.brAfter > * { grid-area: 1 / 1; align-self: end; }
+.brLive { display: flex; align-items: center; gap: 0.6em; color: var(--live); font-size: 0.92em; opacity: 0; transition: opacity 0.5s; }
+.brLive i { width: 0.5em; height: 0.5em; border-radius: 50%; background: var(--live); box-shadow: 0 0 0.8em var(--live); animation: brBreathe 1.4s ease-in-out infinite; }
+.brLive span { animation: rvIn 0.45s var(--ease-out) both; }
+.brLive[data-shown='true'] { opacity: 1; }
+.brAfter .brLead { opacity: 0; transform: translateY(0.4em); }
+.brAfter .brLead[data-shown='true'] { opacity: 1; transform: none; }
+@keyframes brBreathe { 50% { opacity: 0.35; } }
+
+/* The page beside it: its bar, the one quiet line under it, and the app as the lead built it. */
+.brPage { position: relative; display: flex; flex-direction: column; min-width: 0; background: var(--bar); }
+.brPageBar { display: flex; align-items: center; gap: 0.7em; height: 2.6em; padding: 0 0.9em; border-bottom: 1px solid var(--line); font-size: 0.8em; color: var(--t3); white-space: nowrap; }
+.brNav { display: inline-flex; gap: 0.55em; color: var(--t4); }
+.brAddress { display: inline-flex; align-items: center; gap: 0.45em; overflow: hidden; flex: 1; min-width: 0; height: 1.9em; padding: 0 0.7em; border-radius: 0.45em; background: var(--raised); color: var(--t2); text-overflow: ellipsis; }
+.brTool { display: inline-flex; align-items: center; gap: 0.4em; padding: 0.25em 0.5em; border-radius: 0.4em; transition: color 0.4s, background 0.4s; }
+.brTool[data-on='true'] { color: #dfe2ff; background: rgba(90, 104, 255, 0.22); }
+.brWho { height: 1.9em; padding: 0 1em; line-height: 1.9em; font-size: 0.76em; color: var(--live); border-bottom: 1px solid transparent; opacity: 0; transition: opacity 0.5s; }
+.brWho[data-shown='true'] { opacity: 1; border-bottom-color: var(--line); }
+/* The app: Tally's light page, in the dark window. */
+.brSite { position: relative; flex: 1; margin: 0 0.9em 0.9em; padding: 1.1em 1.3em; border-radius: 0.5em; background: #f6f2ea; color: #1c1a17; font-size: 0.86em; }
+.brSiteNav { display: flex; align-items: center; gap: 1.4em; padding-bottom: 0.9em; border-bottom: 1px solid rgba(28, 26, 23, 0.08); color: #6e695f; font-size: 0.86em; }
+.brSiteNav b { display: inline-flex; align-items: center; gap: 0.4em; margin-right: auto; color: #1c1a17; font-size: 1.1em; letter-spacing: -0.02em; }
+.brSiteNav b i { width: 0.8em; height: 0.8em; border-radius: 0.25em; background: #2f6f7a; }
+.brPay { display: grid; gap: 0.15em; padding: 1em 0 0.9em; }
+.brPay span, .brPay em { font-size: 0.84em; font-style: normal; color: #6e695f; }
+.brPay b { font-size: 1.8em; letter-spacing: -0.03em; }
+.brForm { position: relative; display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 0.5em 0.8em; padding: 1em; border-radius: 0.55em; background: #fff; box-shadow: 0 0 0 1px rgba(28, 26, 23, 0.08); }
+.brLabel { grid-column: 1 / -1; font-size: 0.82em; color: #6e695f; }
+.brField { display: flex; align-items: center; gap: 0.3em; height: 2.4em; padding: 0 0.8em; border-radius: 0.45em; box-shadow: inset 0 0 0 1px rgba(28, 26, 23, 0.16); color: #958f84; font-family: var(--mono); font-size: 0.92em; }
+.brValue { transition: color 0.3s; }
+.brValue[data-typed='true'] { color: #1c1a17; }
+.brButton { position: relative; display: inline-flex; align-items: center; justify-content: center; min-width: 9.4em; height: 2.6em; padding: 0 1em; border-radius: 0.5em; background: #1c1a17; color: #f6f2ea; font-weight: 600; white-space: nowrap; }
+.brButtonWords { animation: rvIn 0.45s var(--ease-out) both; }
+.brPin { position: absolute; top: -0.65em; right: -0.65em; box-shadow: 0 0 0 0.2em #fff, 0 0 1em rgba(90, 104, 255, 0.6); animation: cvPop 0.5s cubic-bezier(0.3, 1.4, 0.5, 1) both; }
+/* What is pointed at: outlined in our light, by the person, then the lead. */
+.brField, .brButton { outline: 0.14em solid transparent; outline-offset: 0.22em; transition: outline-color 0.35s; }
+.brField[data-at='true'], .brButton[data-at='true'] { outline-color: var(--live); }
+.brField[data-lead='true'][data-at='true'], .brButton[data-lead='true'][data-at='true'] { outline-style: dashed; }
+/* The comment the person writes, over the page beside what they pointed at. */
+.brNote { position: absolute; right: 0.4em; bottom: calc(100% + 0.5em); padding: 0.55em 0.8em; border-radius: 0.55em; background: #25231f; color: var(--t1); font-size: 0.9em; box-shadow: 0 0 0 1px rgba(150, 160, 255, 0.4), 0 1em 2em -0.8em rgba(0, 0, 0, 0.6); opacity: 0; transform: translateY(0.3em); transition: opacity 0.45s, transform 0.6s var(--ease-out); }
+.brNote[data-shown='true'] { opacity: 1; transform: none; }
+.brToast { position: absolute; left: 50%; bottom: 1.1em; display: inline-flex; align-items: center; gap: 0.45em; padding: 0.55em 0.9em; border-radius: 0.55em; background: #1c1a17; color: #f6f2ea; font-size: 0.88em; font-weight: 550; white-space: nowrap; opacity: 0; transform: translate(-50%, 0.5em); transition: opacity 0.45s, transform 0.6s var(--ease-out); }
+.brToast svg { color: #8fe0a6; }
+.brToast[data-shown='true'] { opacity: 1; transform: translate(-50%, 0); }
+
+/* Narrow: the conversation over the page, each in a height of its own. */
+@container (max-width: 560px) {
+  .brWin { margin: 0; }
+  .brBody { grid-template-columns: minmax(0, 1fr); grid-template-rows: 17em 22em; height: auto; }
+  .brTalk { border-right: 0; border-bottom: 1px solid var(--line); }
+  .brTask { display: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .brLive i, .brPin { animation: none; }
+}
+
+/* ---- 0.8.0: canvases ---- */
+
+/* A canvas: the page the lead drew, at its version; the one before it behind, once there is a newer. */
+.cvStage { position: relative; padding-bottom: 3em; }
+.cvWin { position: relative; z-index: 1; }
+.cvBehind { position: absolute; inset: -0.9em 1.6em 3.6em; border-radius: 0.8em; background: #171513; box-shadow: 0 0 0 1px rgba(255, 240, 215, 0.07); opacity: 0; transform: translateY(0.6em); transition: opacity 0.7s, transform 0.9s var(--ease-out); }
+.cvBehind[data-shown='true'] { opacity: 1; transform: none; }
+.cvBar { display: flex; align-items: center; gap: 0.6em; height: 2.7em; padding: 0 1em; border-bottom: 1px solid var(--line); background: var(--bar); font-size: 0.86em; color: var(--t2); white-space: nowrap; }
+.cvBar b { color: var(--t1); font-weight: 550; }
+.cvVer { padding: 0.1em 0.5em; border-radius: 0.4em; box-shadow: inset 0 0 0 1px var(--line-3); font-size: 0.86em; color: var(--t3); animation: rvIn 0.45s var(--ease-out) both; }
+.cvDrawing { color: var(--live); opacity: 0; transition: opacity 0.4s; }
+.cvDrawing[data-shown='true'] { opacity: 1; }
+.cvComment { display: inline-flex; align-items: center; gap: 0.4em; margin-left: auto; color: var(--t3); }
+/* The page: a launch page, light, its headline the one thing that changes. */
+.cvPage { position: relative; overflow: hidden; height: 21em; padding: 1.2em 1.6em; background: #f6f2ea; color: #1c1a17; transition: filter 0.5s; }
+.cvPage[data-drawing='true'] { filter: saturate(0.6) brightness(0.92); }
+.cvMesh { position: absolute; inset: 0; background: radial-gradient(ellipse 50% 60% at 85% 20%, rgba(47, 111, 122, 0.18), transparent 70%), radial-gradient(ellipse 40% 50% at 10% 90%, rgba(180, 83, 42, 0.12), transparent 70%); }
+.cvNav { position: relative; display: flex; align-items: center; justify-content: space-between; font-size: 0.86em; }
+.cvNav b { display: inline-flex; align-items: center; gap: 0.4em; font-size: 1.1em; letter-spacing: -0.02em; }
+.cvNav b i { width: 0.8em; height: 0.8em; border-radius: 0.25em; background: #2f6f7a; }
+.cvNav em { font-style: normal; padding: 0.3em 0.8em; border-radius: 0.4em; background: #1c1a17; color: #f6f2ea; font-weight: 600; }
+.cvHero { position: relative; display: grid; justify-items: start; gap: 1em; margin-top: 2.2em; }
+/* Bigger and bolder by scale, so its box, and the page, keep their size. */
+.cvHead { margin: 0; font-size: 1.9em; font-weight: 500; line-height: 1.08; letter-spacing: -0.035em; transform-origin: 0 100%; transition: transform 0.9s var(--ease-out), font-weight 0.6s; }
+.cvHead[data-v3='true'] { font-weight: 750; transform: scale(1.22); }
+.cvCta { padding: 0.5em 1em; border-radius: 0.45em; background: #2f6f7a; color: #fff; font-size: 0.86em; font-weight: 600; }
+.cvPayout { position: absolute; right: 1.6em; bottom: 1.4em; display: grid; gap: 0.2em; width: 12em; padding: 0.9em 1em; border-radius: 0.6em; background: #fff; box-shadow: 0 0 0 1px rgba(28, 26, 23, 0.08), 0 1em 2em -1em rgba(28, 26, 23, 0.25); font-size: 0.84em; }
+.cvPayout span { color: #6e695f; font-size: 0.86em; }
+.cvPayout b { font-size: 1.3em; letter-spacing: -0.02em; }
+.cvBars { display: flex; align-items: flex-end; gap: 0.3em; height: 3em; margin-top: 0.4em; }
+.cvBars i { flex: 1; height: var(--h); border-radius: 0.15em; background: rgba(47, 111, 122, 0.55); }
+/* The person's comment, pinned on the headline; answered by the version that met it. */
+.cvPin { position: absolute; top: 3.6em; left: 15.4em; display: flex; align-items: flex-start; gap: 0.5em; opacity: 0; transform: translateY(0.3em); transition: opacity 0.5s, transform 0.6s var(--ease-out); }
+.cvPin > i { display: inline-grid; place-items: center; flex: none; width: 1.5em; height: 1.5em; border-radius: 50%; background: var(--live); color: #0c0e2a; font-size: 0.8em; font-style: normal; font-weight: 700; box-shadow: 0 0 0 0.2em #f6f2ea, 0 0 1em rgba(90, 104, 255, 0.6); }
+.cvPin > span { display: grid; gap: 0.15em; padding: 0.5em 0.75em; border-radius: 0.55em; background: #25231f; color: #efeae1; font-size: 0.84em; white-space: nowrap; box-shadow: 0 0 0 1px rgba(150, 160, 255, 0.4), 0 1em 2em -0.8em rgba(0, 0, 0, 0.5); }
+.cvPin em { font-style: normal; font-size: 0.86em; color: var(--ok); max-height: 0; overflow: hidden; opacity: 0; transition: opacity 0.5s 0.3s; }
+.cvPin[data-done='true'] em { max-height: 1.5em; opacity: 1; }
+.cvPin[data-shown='true'] { opacity: 1; transform: none; }
+/* The thread's line for the new version, under the canvas, in room kept for it. */
+.cvLine { position: absolute; left: 0.2em; bottom: 0.6em; display: inline-flex; align-items: center; gap: 0.5em; font-size: 0.86em; color: var(--t3); opacity: 0; transform: translateY(0.3em); transition: opacity 0.6s 0.2s, transform 0.7s 0.2s var(--ease-out); }
+.cvLine b { color: var(--t1); font-weight: 550; }
+.cvLine svg { color: var(--live); }
+.cvLine[data-shown='true'] { opacity: 1; transform: none; }
+@keyframes cvPop { from { opacity: 0; transform: scale(0.4); } }
+
+@container (max-width: 560px) {
+  .cvPage { height: 19em; padding: 1em 1.1em; }
+  .cvPayout { display: none; }
+  .cvPin { left: auto; right: 0.6em; top: 9.6em; }
+}

@@ -22,7 +22,7 @@ function usePicker(
 ) {
   const prefs = useModelPrefs()
   const [efforts, setEfforts] = useState<Record<string, string>>({})
-  return ({ step, agent, k, owner }: LaunchPick) => {
+  return ({ step, agent, k, owner, onOpenChange, skip }: LaunchPick) => {
     const key = `${step.id}:${k}`
     return (
       <ModelPick
@@ -38,12 +38,14 @@ function usePicker(
           setSteps(steps.map((st) => (st.id === step.id ? { ...st, agents: st.agents.map((a, i) => (i === k ? model(id) : a)) } : st)))
         }
         onEffort={(level) => setEfforts({ ...efforts, [key]: level })}
-        /* a step with several agents can go down to one; its reason was about the pair, so it goes too */
+        onOpenChange={onOpenChange}
+        /* a step with several agents can go down to one; one that can be skipped is skipped from here, as the app does */
         onRemove={
           step.agents.length > 1
             ? () => setSteps(steps.map((st) => (st.id === step.id ? { ...st, agents: st.agents.filter((_, i) => i !== k) } : st)))
-            : undefined
+            : skip?.onSkip
         }
+        {...(step.agents.length === 1 && skip !== undefined ? { text: { remove: skip.label } } : {})}
       />
     )
   }
@@ -142,17 +144,18 @@ export const OneReviewerInsteadOfTwo: Story = {
   },
 }
 
-/** Hold stops the clock; it starts when you say. Skipping a step strikes it through, and Add back undoes it. */
+/** Hold stops the clock; it starts when you say. Skipping a step, from its dropdown, strikes it through, and Add back undoes it. */
 export const Held: Story = {
   render: () => <Launch />,
   play: async ({ canvasElement }) => {
     const c = within(canvasElement)
     await userEvent.click(c.getByRole('button', { name: 'Hold' }))
     await expect(c.getByText('Held')).toBeInTheDocument()
-    const [skip] = c.getAllByRole('button', { name: 'Skip' })
-    if (!skip) throw new Error('no Skip')
-    await userEvent.click(skip)
-    await expect(c.getByText('skipped')).toBeInTheDocument()
+    await userEvent.click(c.getByRole('button', { name: /Dry run on a copy/ }))
+    await userEvent.click(await within(document.body).findByRole('button', { name: 'Skip the dry run on a copy' }))
+    await expect(await c.findByText('skipped')).toBeInTheDocument()
+    await userEvent.click(c.getByRole('button', { name: 'Add back: Dry run on a copy' }))
+    await waitFor(() => expect(c.queryByText('skipped')).not.toBeInTheDocument())
   },
 }
 
@@ -209,12 +212,12 @@ export const AReview: Story = {
   },
 }
 
-/** The reviewer's model nearly out: its note sits beside the chip, a quiet aside, and the plan still starts. */
+/** The reviewer's usage stays out of its model picker. */
 const reviewerNearly = (left: number): Story => ({
   render: () => <Launch plan={PLAN_ASKED} room={(x) => (x.runtime === CODEX.runtime ? { left, until: '18:05', account: null } : null)} />,
   play: async ({ canvasElement }) => {
     const said = left === 0 ? 'Out · until 18:05' : `${left}% left · until 18:05`
-    await expect(within(canvasElement).getByText(said)).toBeInTheDocument()
+    await expect(within(canvasElement).queryByText(said)).toBeNull()
   },
 })
 export const ReviewerNearlyOut: Story = reviewerNearly(4)

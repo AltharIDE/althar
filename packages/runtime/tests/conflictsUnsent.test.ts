@@ -1,5 +1,6 @@
+import { removeTreeSync } from '@althar/testing'
 import { randomBytes } from 'node:crypto'
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -387,7 +388,7 @@ describe('a branch merging here, with no pull request', () => {
         Effect.map(sessions.running(task?.threadId ?? ''), (live) => [Option.isNone(live)]),
         ([stopped]) => stopped === true,
       )
-      rmSync((yield* worktreeOf(taskId)).path, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 })
+      removeTreeSync((yield* worktreeOf(taskId)).path)
       yield* (yield* Changes).resolveNow({ taskId }, true)
       assert.strictEqual(yield* uncheckedOf(projectId), 'Its folder isn’t on this computer, so Althar can’t merge main into it here.')
       assert.isNull(yield* unsentOf(projectId))

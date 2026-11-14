@@ -1,4 +1,5 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
+import type { ReactNode } from 'react'
 import { expect, fn, userEvent, within } from 'storybook/test'
 
 import { States } from '../../storybook/States'
@@ -31,15 +32,46 @@ export const Recording: Story = {
   },
 }
 
+/** A peek in a cell of the grid as it is in the dock: its parts down a column, as wide as the cell. */
+const Peek = ({ children }: { children: ReactNode }) => <div style={{ width: '100%' }}>{children}</div>
+
 export const AllStates: Story = {
   render: (args) => (
     <States
       size="wide"
       cells={[
-        { state: 'default', node: <CallPeek {...args} /> },
-        { state: 'bare', node: <CallPeek {...args} {...Bare.args} /> },
-        { state: 'recording', node: <CallPeek {...args} defaultChoice="fail" recording /> },
-        { state: 'record failed', node: <CallPeek {...args} defaultChoice="fail" error="Couldn’t reach the coordinator. Try again." /> },
+        {
+          state: 'default',
+          node: (
+            <Peek>
+              <CallPeek {...args} />
+            </Peek>
+          ),
+        },
+        {
+          state: 'bare',
+          node: (
+            <Peek>
+              <CallPeek {...args} {...Bare.args} />
+            </Peek>
+          ),
+        },
+        {
+          state: 'recording',
+          node: (
+            <Peek>
+              <CallPeek {...args} defaultChoice="fail" recording />
+            </Peek>
+          ),
+        },
+        {
+          state: 'record failed',
+          node: (
+            <Peek>
+              <CallPeek {...args} defaultChoice="fail" error="Couldn’t reach the coordinator. Try again." />
+            </Peek>
+          ),
+        },
       ]}
     />
   ),

@@ -2,6 +2,7 @@ import type { Meta, StoryObj } from '@storybook/react-vite'
 import { expect, fn, userEvent, within } from 'storybook/test'
 
 import { COMMENTS } from '../../fixtures/pages'
+import { States, statesParameters } from '../../storybook/States'
 import { Composer } from '../Composer/Composer'
 import { CommentCard, CommentChip } from './Comments'
 
@@ -17,7 +18,6 @@ type Story = StoryObj<typeof meta>
 
 /** A comment waiting in the composer: its crop small, its number and words, where it is. */
 export const Chip: Story = {}
-export const ChipDark: Story = { ...Chip, globals: { theme: 'dark' } }
 
 /** Pointed at: its card, the crop, what was said, then the element as the page drew it. */
 export const Card: Story = {
@@ -27,7 +27,6 @@ export const Card: Story = {
     </div>
   ),
 }
-export const CardDark: Story = { ...Card, globals: { theme: 'dark' } }
 
 /** Hovering the chip opens the card over it. */
 export const Hovered: Story = {
@@ -73,3 +72,25 @@ export const InTheComposer: Story = {
   },
 }
 export const InTheComposerDark: Story = { ...InTheComposer, globals: { theme: 'dark' } }
+
+export const AllStates: Story = {
+  parameters: statesParameters,
+  render: (args) => (
+    <States
+      size="wide"
+      cells={[
+        ...['rest', 'hover', 'focus', 'pressed'].map((state) => ({ state, node: <CommentChip {...args} /> })),
+        { state: 'only read', node: <CommentChip comment={first} /> },
+        { state: 'long words', node: <CommentChip {...args} comment={COMMENTS[1] ?? first} /> },
+        {
+          state: 'card',
+          node: (
+            <div style={{ width: 316, padding: 12, background: 'var(--paper)', boxShadow: 'var(--lift-pop)', borderRadius: 10 }}>
+              <CommentCard comment={first} />
+            </div>
+          ),
+        },
+      ]}
+    />
+  ),
+}

@@ -54,7 +54,7 @@ export interface WorkActions {
   /** Takes a finished task that isn't a change out of Needs you, kept for later; whether it went through. */
   readonly keep: (taskId: string) => Promise<boolean>
   /** Merges a ready task's pull request at the head the person saw; whether it went through. */
-  readonly merge: (taskId: string, head: string, url?: string) => Promise<boolean>
+  readonly merge: (taskId: string, head: string, url?: string, bypassQueue?: boolean) => Promise<boolean>
   /** Merges a ready task's repositories without a pull request into their default branches here, up to the heads the dock showed; whether it went through. */
   readonly mergeHere: (task: BoardTask) => Promise<boolean>
   /** Pushes a task's branch to its pull request, up to the commit the person saw; whether it went through. */
@@ -212,12 +212,12 @@ export const useWorkActions = (tasks: ReadonlyArray<BoardTask> | null = null): W
     ),
     // Its card says why it didn't merge (`failures`), as the window keeps it.
     merge: useCallback(
-      async (taskId, head, url) => {
+      async (taskId, head, url, bypassQueue) => {
         setError(null)
         setFailed(({ [taskId]: _, ...rest }) => rest)
         const from = inNeeds(taskId)
         try {
-          await merge({ taskId, head, url })
+          await merge({ taskId, head, url, ...(bypassQueue ? { bypassQueue: true } : {}) })
           return pressed(from, true, { taskId, action: 'merge' })
         } catch (failure) {
           fail(failure)

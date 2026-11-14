@@ -133,7 +133,7 @@ let quitting = false
 let quitConfirmed = false
 /* Quit asked what it stops and is waiting on the person: another Quit meanwhile is their yes. */
 let quitAsking: { readonly settle: (answer: QuitAnswer) => void } | undefined
-/* The person chose to keep working in the background: closing the last window doesn't quit, until a window opens again. */
+/* The person chose to keep working in the background: closing the last window doesn't quit, even after reopening it. */
 let keepingOn = false
 let dictation: ReturnType<typeof startDictation> | undefined
 
@@ -274,7 +274,7 @@ const facts = factsAsker()
  * registered before the app is ready, as Electron asks.
  */
 protocol.registerSchemesAsPrivileged([
-  { scheme: PICTURE_SCHEME, privileges: { standard: true, secure: true } },
+  { scheme: PICTURE_SCHEME, privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true } },
   // An HTML canvas's files (ADR-104): an origin for each canvas, handled only in its project's canvas partition (canvases/views.ts).
   { scheme: CANVAS_SCHEME, privileges: { standard: true, secure: true, supportFetchAPI: true, codeCache: true } },
 ])
@@ -361,6 +361,7 @@ if (process.platform === 'linux') {
 
 const preferencesRead = readAppPreferences(locations().profile).then((kept) => {
   preferences = kept
+  keepingOn = kept.keepWorkingOnClose
   awake.wants(kept)
   applyAppearance()
   // A count the runtime gave before the file was read is shown again as the person has it.
@@ -790,8 +791,9 @@ nativeTheme.on('updated', paintPaper)
 /*
  * The desktop the windows sit on, and how they are dressed for it (desktopChrome.ts, ADR-098): read once the app is ready, handed
  * to each window as it opens so its first frame draws its buttons where they go, and sent to every window as the desktop changes.
- * Whether the windows have the window manager's own frame is decided as the first one opens, from what is known then: a window's
- * frame can't change once it is open, and every window of a run has the same.
+ * On Linux every window is frameless with Althar's own bar, but where an X11 window manager can't move a frameless one (desktop.ts):
+ * that is decided as the first window opens, from what is known then, since a window's frame can't change once it is open, and
+ * every window of a run has the same.
  */
 let desktopLook: FollowedChrome | undefined
 let framed: boolean | undefined
@@ -844,8 +846,8 @@ const openWindow = () => {
     minWidth: 880,
     minHeight: 600,
     show: false,
-    // Off a Mac the window is frameless, its own strip is the chrome (windowOptions.ts), but where a Linux window manager draws a good
-    // frame of its own (desktop.ts); there it carries Althar's icon.
+    // Off a Mac the window is frameless, its own strip is the chrome (windowOptions.ts), but where an X11 window manager couldn't
+    // move it so (desktop.ts); there the system's frame carries Althar's icon.
     ...windowOptions(process.platform, windowIcon(), nativeTheme.shouldUseDarkColors, framedNow()),
     webPreferences: {
       preload: join(here, '../preload/preload.cjs'),
@@ -864,7 +866,6 @@ const openWindow = () => {
   }
   windows.add(window)
   window.on('focus', () => focusedLast(windows, window))
-  keepingOn = false
   // The window's own buttons say maximize or restore by what the window is (windowOptions.ts).
   window.on('maximize', () => window.webContents.send('althar:maximized', true))
   window.on('unmaximize', () => window.webContents.send('althar:maximized', false))
@@ -1036,6 +1037,7 @@ ipcMain.handle('althar:set-preference', async (_event, key: unknown, value: unkn
   const kept = await writeAppPreference(locations().profile, key, value)
   preferences = { ...preferences, [key]: kept }
   if (key === 'openAtLogin') startAtLogin(preferences.openAtLogin)
+  if (key === 'keepWorkingOnClose') keepingOn = preferences.keepWorkingOnClose
   awake.wants(preferences)
   if (key === 'appearance') applyAppearance()
   if (key === 'showLoad') meterLoad(runtime)
@@ -1407,11 +1409,19 @@ const askToQuit = async () => {
       answer = await askInWindow({ work: work ?? NOT_COUNTED, background, update: updates?.glance().ready ?? null }, asked)
     }
     if (answer === 'quit') {
+      preferences = { ...preferences, keepWorkingOnClose: false }
+      await writeAppPreference(locations().profile, 'keepWorkingOnClose', false).catch((error: unknown) =>
+        logs.error('Could not remember the close choice', { error: String(error) }),
+      )
       quitConfirmed = true
       app.quit()
     } else if (answer === 'background') {
       keepingOn = true
+      preferences = { ...preferences, keepWorkingOnClose: true }
       for (const window of windows) window.close()
+      await writeAppPreference(locations().profile, 'keepWorkingOnClose', true).catch((error: unknown) =>
+        logs.error('Could not remember the close choice', { error: String(error) }),
+      )
     } else if (windows.size === 0 && process.platform !== 'darwin') {
       // The window that asked was closed, which is a Cancel; with no edge page either, Althar would be left with nothing to see.
       bringForward()

@@ -4,11 +4,12 @@ import { Icon, type IconName } from '../../foundations/Icon/Icon'
 import { LinkButton } from '../../primitives/LinkButton/LinkButton'
 import { Select } from '../../primitives/Select/Select'
 import { SettingList, SettingRow, SettingSwitch } from '../Preferences/Preferences'
+import { accountStrategies, type AccountStrategy } from '../Accounts/strategy'
 
 /*
  * What the rules of a project start with when it is made, as rows of the
  * Settings tab: how a task ends, what it pushes, posts, resolves and moves
- * along, what a small change's review after it merges brings back, what an account running out does and whether work tries an agent's
+ * along, what an explicitly requested review after merge brings back, what an account running out does and whether work tries an agent's
  * next account first. Only a project made from now on starts with them; every
  * project changes its own in its Tasks, and one made earlier keeps what it
  * has. Allowing everything is the default of every project, so no request is
@@ -20,7 +21,7 @@ import { SettingList, SettingRow, SettingSwitch } from '../Preferences/Preferenc
 export type NewUsageLimit = 'move' | 'wait' | 'ask'
 /** How a task ends when its plan doesn't say. */
 export type NewTaskEnd = 'draft' | 'ready' | 'none'
-/** What a small change's review after it merges brings back: only major findings, every one, or no review. */
+/** What an explicitly requested review after merge brings back: only major findings, every one, or no review. */
 export type AfterMergeReview = 'major' | 'all' | 'none'
 
 export interface NewProjectDefaultsValue {
@@ -31,6 +32,7 @@ export interface NewProjectDefaultsValue {
   moveIssues: boolean
   usageLimit: NewUsageLimit
   rotateAccounts: boolean
+  accountStrategy: AccountStrategy
   afterMergeReview: AfterMergeReview
 }
 
@@ -42,7 +44,8 @@ export const newProjectDefault: NewProjectDefaultsValue = {
   resolveConflicts: true,
   moveIssues: true,
   usageLimit: 'move',
-  rotateAccounts: false,
+  rotateAccounts: true,
+  accountStrategy: 'most_room',
   afterMergeReview: 'major',
 }
 
@@ -59,6 +62,7 @@ export interface NewProjectDefaultsText {
   moveIssues: { title: string; note: string }
   usageLimit: { title: string; options: Record<NewUsageLimit, Worded> }
   rotate: { title: string; note: string }
+  accountStrategy: { title: string; options: typeof accountStrategies }
   afterMergeReview: { title: string; options: Record<AfterMergeReview, Worded> }
   /** Goes back to what a project starts with, named. */
   reset: (label: string) => string
@@ -86,12 +90,13 @@ export const newProjectDefaultsText: NewProjectDefaultsText = {
     },
   },
   rotate: { title: 'Try an agent’s other accounts first', note: '' },
+  accountStrategy: { title: 'Account strategy', options: accountStrategies },
   afterMergeReview: {
-    title: 'Review after a small change merges',
+    title: 'When a review is set after merge',
     options: {
       major: { label: 'Bring back major findings', note: 'Minor findings and nits stay in the task’s thread.' },
       all: { label: 'Bring back every finding', note: 'Any finding puts the task back in Needs you.' },
-      none: { label: 'Don’t review it', note: 'Make it a full task to have it reviewed before it merges.' },
+      none: { label: 'Don’t review it', note: 'A review configured before Ship is unaffected.' },
     },
   },
   reset: (label) => `Use ${label}`,
@@ -106,6 +111,7 @@ const GLYPHS: Readonly<Record<keyof NewProjectDefaultsValue, IconName>> = {
   moveIssues: 'issues',
   usageLimit: 'load',
   rotateAccounts: 'reload',
+  accountStrategy: 'reload',
   afterMergeReview: 'after',
 }
 
@@ -134,7 +140,11 @@ export function NewProjectDefaults({ value, onChange, differs = {}, text }: NewP
     )
   }
   /** A row with a choice of words at the end. */
-  const row = <V extends string>(key: 'end' | 'usageLimit' | 'afterMergeReview', title: string, options: Record<V, Worded>) => {
+  const row = <V extends string>(
+    key: 'end' | 'usageLimit' | 'afterMergeReview' | 'accountStrategy',
+    title: string,
+    options: Record<V, Worded>,
+  ) => {
     const chosen = value[key] as string as V
     const start = newProjectDefault[key] as string as V
     return (
@@ -187,7 +197,7 @@ export function NewProjectDefaults({ value, onChange, differs = {}, text }: NewP
       {toggle('moveIssues', t.moveIssues)}
       {row('afterMergeReview', t.afterMergeReview.title, t.afterMergeReview.options)}
       {row('usageLimit', t.usageLimit.title, t.usageLimit.options)}
-      {toggle('rotateAccounts', t.rotate)}
+      {row('accountStrategy', t.accountStrategy.title, t.accountStrategy.options)}
     </SettingList>
   )
 }

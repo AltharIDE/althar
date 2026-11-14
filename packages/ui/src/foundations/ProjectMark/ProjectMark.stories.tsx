@@ -16,7 +16,7 @@ type Story = StoryObj<typeof meta>
 
 export const Mark: Story = {}
 
-/** The projects on this Mac, as a list of projects shows them: running, waiting on you, both, or quiet. */
+/** The projects on this computer, as a list of projects shows them: running, waiting on you, both, or quiet. */
 export const Projects: Story = {
   render: () => (
     <ul className={s.list}>

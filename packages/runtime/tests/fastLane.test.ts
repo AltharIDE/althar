@@ -4,7 +4,8 @@ import { join } from 'node:path'
 
 import { assert, describe, it } from '@effect/vitest'
 import type { ProjectId } from '@althar/domain'
-import { Duration, Effect, Layer } from 'effect'
+import { isoAfter } from '@althar/testing'
+import { Duration, Effect, Layer, Option } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { FastLane } from '../src/fastLane'
@@ -17,27 +18,28 @@ import { Plans } from '../src/Plans'
 import { Projects } from '../src/Projects'
 import { Queries } from '../src/Queries'
 import { Sessions } from '../src/Sessions'
-import { changedWords, smallChangeOf, smallChangeSkips, smallChangeSteps } from '../src/smallChange'
+import { beforeShipReviewStep, changedWords, smallChangeOf, smallChangeSkips, smallChangeSteps } from '../src/smallChange'
 import { addItem } from '../src/threads'
 import * as Runtime from '../src/Runtime'
 import { repository, runtime, until } from './support'
 
 /** The fast lane (README section 6): a change of a few lines, its plan and the card its thread shows. */
 describe('a small change', () => {
-  it('plans one step, names who reviews it, and skips that review until it merges', () => {
+  it('keeps the configured reviewer before Ship, independently of size', () => {
     const steps = smallChangeSteps({
       lead: { agentId: 'claude-code', model: 'claude-sonnet-5', effort: 'low' },
       review: { agentId: 'codex', model: 'gpt-6-sol' },
     })
     assert.deepStrictEqual(steps, [
       { key: 'implement', agentId: 'claude-code', model: 'claude-sonnet-5', effort: 'low', skipped: false },
-      { key: 'review', agentId: 'codex', model: 'gpt-6-sol', skipped: true },
+      { key: 'review', agentId: 'codex', model: 'gpt-6-sol', skipped: false },
     ])
     // As the project's rule says: Major only by default, Everything, or no review after the merge.
-    assert.deepStrictEqual(smallChangeSkips(steps[1] ?? null), ['no plan', 'reviewed after it merges, major findings only'])
-    assert.deepStrictEqual(smallChangeSkips(steps[1] ?? null, 'all'), ['no plan', 'reviewed after it merges'])
-    assert.deepStrictEqual(smallChangeSkips(steps[1] ?? null, 'none'), ['no plan', 'no review'])
-    assert.deepStrictEqual(smallChangeSkips(null, 'major'), ['no plan'])
+    assert.deepStrictEqual(smallChangeSkips(steps[1] ?? null), ['no countdown', 'reviewed before it ships'])
+    assert.deepStrictEqual(smallChangeSkips(steps[1] ?? null, 'major', true), ['no plan', 'reviewed after it merges, major findings only'])
+    assert.deepStrictEqual(smallChangeSkips(steps[1] ?? null, 'all', true), ['no plan', 'reviewed after it merges'])
+    assert.deepStrictEqual(smallChangeSkips(steps[1] ?? null, 'none', true), ['no plan', 'no review'])
+    assert.deepStrictEqual(smallChangeSkips(null, 'major'), ['no countdown'])
   })
 
   it('reads a small change from its plan, and nothing else as one', () => {
@@ -54,6 +56,21 @@ describe('a small change', () => {
     assert.isUndefined(smallChangeOf(JSON.stringify({ steps: [{ key: 'implement', agentId: 'codex', skipped: false }] })))
     assert.isUndefined(smallChangeOf('not json'))
     assert.isUndefined(smallChangeOf(null))
+  })
+
+  it('shows a pass’s actual stopped, waiting or failed outcome without claiming it was reviewed', () => {
+    const at = '2026-11-13T00:00:00.000Z'
+    for (const [state, skipped, what] of [
+      ['cancelled', 1, 'Review skipped'],
+      ['cancelled', null, 'Review stopped'],
+      ['failed', null, 'Review failed'],
+      ['held', null, 'Review waiting'],
+      ['waiting_attention', null, 'Review needs attention'],
+      ['running', null, 'Reviewing before Ship'],
+    ] as const)
+      assert.deepStrictEqual(beforeShipReviewStep({ state, skipped, endedAt: at, verdict: null }), { key: 'review', what, at, done: false })
+    assert.isTrue(beforeShipReviewStep({ state: 'succeeded', skipped: null, endedAt: at, verdict: 'pass' }).done)
+    assert.isFalse(beforeShipReviewStep({ state: 'succeeded', skipped: null, endedAt: at, verdict: null }).done)
   })
 
   it('says what changed in a line: one file by its line count, several by their count', () => {
@@ -92,6 +109,7 @@ describe('a small change', () => {
         reason: null,
         actorId: instance.personId,
         reviewAfterMerge: true,
+        smallChange: true,
         startsIn: Duration.zero,
       })
       const thread = yield* (yield* Queries).thread(created.threadId, { limit: 50 })
@@ -137,6 +155,7 @@ describe('a small change', () => {
         reason: null,
         actorId: instance.personId,
         reviewAfterMerge: true,
+        smallChange: true,
         startsIn: Duration.zero,
       })
       const at = '2026-11-06T14:03:00.000Z'
@@ -216,7 +235,6 @@ describe('keeping the model Auto moved from', () => {
   it.effect('records the keep for the task, and Undo takes it back', () =>
     Effect.gen(function* () {
       const projects = yield* Projects
-      const instance = yield* Instance
       const sql = yield* SqlClient.SqlClient
       const project = yield* projects.open({ envelope: yield* Runtime.envelope('project.open', {}), path: repository() })
       const created = yield* projects.createTask({
@@ -241,9 +259,13 @@ describe('keeping the model Auto moved from', () => {
         SELECT agent_id AS agentId, model FROM task_model_keeps WHERE task_id = ${created.taskId}`
       assert.deepStrictEqual(kept, { agentId: 'claude-code', model: 'large' })
       // Keep puts the lead that is running back too, not only the steps after it.
-      const [now] = yield* sql<{ model: string | null }>`
-        SELECT model FROM provider_sessions WHERE thread_id = ${created.threadId} ORDER BY started_at DESC, rowid DESC LIMIT 1`
-      assert.strictEqual(now?.model, 'large')
+      const live = yield* sessions.running(created.threadId)
+      if (Option.isSome(live) && live.value.nextLead !== undefined) assert.strictEqual(live.value.nextLead.model, 'large')
+      else {
+        const [now] = yield* sql<{ model: string | null }>`
+          SELECT model FROM provider_sessions WHERE thread_id = ${created.threadId} ORDER BY started_at DESC, rowid DESC LIMIT 1`
+        assert.strictEqual(now?.model, 'large')
+      }
       const afterKeep = yield* (yield* Queries).item(created.threadId, itemId)
       assert.strictEqual(afterKeep.kind === 'model_move' && afterKeep.content.kept, true)
       yield* fastLane.undoTheModelMove(itemId)
@@ -300,7 +322,7 @@ describe('Auto’s lighter model', () => {
 
   it.live('moves a lead whose session is still running when its plan crosses the mark, and says why once', () => {
     // A day from now, whenever it runs: a reset already past is a plan with its week back, and nothing moves.
-    const resetsAt = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString()
+    const resetsAt = isoAfter(24 * 60 * 60 * 1000)
     const cache = join(mkdtempSync(join(tmpdir(), 'althar-facts-')), 'models.json')
     writeFileSync(
       cache,
@@ -484,6 +506,7 @@ describe('the fast lane at its edges', () => {
           reason: null,
           actorId: instance.personId,
           reviewAfterMerge: true,
+          smallChange: true,
           startsIn: Duration.hours(1),
         })
       // No plan at all, and a plan with no review step.
@@ -526,6 +549,31 @@ describe('the fast lane at its edges', () => {
       const [made] = yield* sql<{ n: number }>`
         SELECT count(*) AS n FROM external_links WHERE kind = 'review' AND url = ${url}`
       assert.strictEqual(made?.n, 1)
+      // As the host keeps it, for the card to read.
+      const kept = (state: string) => JSON.stringify({ state, number: 641, url, title: 'Reviewed' })
+      yield* sql`UPDATE external_links SET snapshot = ${kept('open')} WHERE kind = 'change' AND url = ${url}`
+
+      // Its card reads the full task's review: reading, then what its draft says, kept once the change merges.
+      const cardOf = Effect.gen(function* () {
+        const thread = yield* (yield* Queries).thread(reviewed.threadId, { limit: 50 })
+        const card = thread.items.find((item) => item.kind === 'small_change')
+        return card?.kind === 'small_change' ? card.content : assert.fail('no small change card')
+      })
+      assert.strictEqual((yield* cardOf).fullTask?.taskId, reviewed.taskId)
+      assert.deepInclude((yield* cardOf).reviewBefore, { state: 'running', findings: 0 })
+      const drafted = (suggested: string, comments: number, sequence: number) =>
+        sql`
+          INSERT INTO thread_items (id, project_id, thread_id, sequence, kind, content, created_at)
+          VALUES (${`item_${String(sequence).padStart(32, '0')}`}, ${project.projectId}, ${reviewed.threadId}, ${sequence}, 'review_draft',
+            ${JSON.stringify({ suggested, comments: Array.from({ length: comments }, (_, i) => ({ id: `c${i}` })) })}, ${when})`
+      yield* drafted('changes_requested', 2, 900)
+      assert.deepInclude((yield* cardOf).reviewBefore, { state: 'found', findings: 2 })
+      yield* drafted('approved', 0, 901)
+      assert.deepInclude((yield* cardOf).reviewBefore, { state: 'clear', findings: 0 })
+      yield* sql`UPDATE external_links SET snapshot = ${kept('merged')} WHERE kind = 'change' AND url = ${url}`
+      const merged = yield* cardOf
+      assert.strictEqual(merged.fullTask?.taskId, reviewed.taskId)
+      assert.deepInclude(merged.reviewBefore, { state: 'clear' })
     }).pipe(Effect.provide(layer)),
   )
 
@@ -555,6 +603,7 @@ describe('the fast lane at its edges', () => {
             reason: null,
             actorId: instance.personId,
             reviewAfterMerge: true,
+            smallChange: true,
             startsIn: Duration.hours(1),
           })
           return created
@@ -632,7 +681,7 @@ describe('the fast lane at its edges', () => {
       smallChangeSteps({ lead: { agentId: 'claude-code', model: null }, review: null }).map((step) => step.key),
       ['implement'],
     )
-    assert.deepStrictEqual(smallChangeSkips(null), ['no plan'])
+    assert.deepStrictEqual(smallChangeSkips(null), ['no countdown'])
   })
 
   it('says what changed from the pull request’s numbers where the lead left none', () => {

@@ -139,6 +139,11 @@ describe('a step whose connection is lost', () => {
       assert.deepStrictEqual(reconnects, { agentId: 'claude-code', service: 'Anthropic', offline: true, next: null })
       assert.include([recorded.claude.offline.title, 'Reconnecting to Claude, attempt 1 of 10.'], failure)
       assert.include(yield* notices(task.threadId), 'Lost the connection to Anthropic.')
+      assert.notInclude(
+        yield* notices(task.threadId),
+        "Fake claude-code couldn't answer.",
+        'the workflow owns this failure; Sessions must not add a second error notice',
+      )
       // Waited out a while offline, it is still only waiting: no reminder, no call for the person.
       yield* Effect.sleep(Duration.millis(300))
       assert.lengthOf(yield* turnsOf(task.threadId), 1)

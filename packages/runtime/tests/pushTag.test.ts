@@ -1,5 +1,6 @@
+import { removeTreeSync } from '@althar/testing'
 import { execFileSync } from 'node:child_process'
-import { chmodSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { chmodSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { createServer } from 'node:http'
 import type { AddressInfo } from 'node:net'
 import { tmpdir } from 'node:os'
@@ -184,7 +185,7 @@ describe('push_tag, where the tag doesn’t go up at once', () => {
       assert.strictEqual(yield* allowed(access, 'v2.0.0'), 'origin refused v2.0.0: Tags are made by the release job. Tell the person.')
       assert.strictEqual(git(remote, 'tag', '--list'), '')
       // The remote gone: git's own last word.
-      rmSync(remote, { recursive: true, force: true })
+      removeTreeSync(remote)
       tagged(worktree, 'v2.0.1')
       assert.strictEqual(yield* allowed(access, 'v2.0.1'), 'Pushing v2.0.1 failed: and the repository exists.')
     }).pipe(Effect.provide(runtime())),

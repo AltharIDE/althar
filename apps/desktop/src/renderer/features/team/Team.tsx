@@ -1,8 +1,8 @@
 import { useQuery } from '@tanstack/react-query'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 
 import type { AgentStatus, BoardTask, PlanStep, TaskEnd as End } from '@althar/contracts'
-import { IconButton, Menu, MenuItem, modelRoomText, TeamDialog, UsageTone, usageTone } from '@althar/ui'
+import { IconButton, Menu, MenuItem, TeamDialog } from '@althar/ui'
 
 import { messageOf } from '../../data/client'
 import { keys, reads } from '../../data/reads'
@@ -11,7 +11,6 @@ import { useEffortNames, useModelNames } from '../../shared/modelNames'
 import { ModelChoice } from '../../shared/ModelChoice'
 import type { Choice } from '../../shared/models'
 import { stepText } from '../../shared/steps'
-import { useModelRooms } from '../usage/usePlan'
 import { ENDS, endOf } from '../project/Card'
 
 /*
@@ -23,9 +22,9 @@ import { ENDS, endOf } from '../project/Card'
  * free agent, nothing of it begun, can still change (`planWaits`), as its
  * card says. Once it has begun, its team still changes until it is settled, through
  * ChangeTeam: its lead from its next turn, its reviewer until its review round
- * starts, from the next round during one, and not once a review of it ran to its end:
- * a review that was skipped, or never planned, is not a done one, and can be added
- * until the task merges. Merged, it stays as it is.
+ * starts, from the next round during one, and once a review of it ran to its end or
+ * it merged, for what ships next: a review that was skipped, or never planned, is not
+ * a done one, and can be added at any time.
  */
 
 export const text = {
@@ -39,15 +38,15 @@ export const text = {
   team: (lead: string, review: string | null) => (review === null ? lead : `${lead}, ${review}`),
   reviews: (name: string) => `${name} reviews`,
   noReview: 'no review',
-  /** Its team can't change any more: it started with the team it had. */
-  begun: 'It started with the team it had.',
+  /** The task is no longer available to change. */
+  begun: 'This task is no longer available to change.',
   /** A task that has begun: when each change takes effect. */
   nextTurn: 'From its next turn.',
   nextRound: 'From the next round.',
-  reviewDone: 'The review is done, so the reviewer stays.',
+  /** Its review ran, or it merged: the reviewer named reads what it ships next. */
+  nextShip: 'It reads what ships next.',
   /** A review added to a change whose work is up already: it starts on saving. */
   readsNow: 'Its review starts now, on the change as it stands.',
-  merged: 'It’s merged, so its team stays.',
   settled: 'It’s settled, so its team stays.',
 }
 
@@ -88,26 +87,16 @@ export const useTeamed = (projectId: string | null, taskId: string | null): Team
   return task === undefined || teamChangeOf(task) === null ? null : task
 }
 
-/** Its team in a line: who leads, how hard, with how much is left of its plan where that is nearly out, and who reviews. */
-const useTeamLine = (plan: Plan, projectId: string) => {
+/** Its team in a line: who leads, how hard, and who reviews. */
+const useTeamLine = (plan: Plan) => {
   const named = useModelNames()
   const effortOf = useEffortNames()
-  const roomOf = useModelRooms(projectId)
   const lead = plan.steps.find((step) => step.key === 'implement')
   const review = plan.steps.find((step) => step.key === 'review')
   if (lead === undefined) return null
   const leadInfo = named(lead.agentId, lead.model)
   const effort = effortOf(lead.agentId, lead.model, lead.effort ?? null)
-  const room = roomOf(leadInfo)
-  // Said as the picker's chip says it, once nearly out: 9% left · until 17:10, Out · until 18:00.
-  const low =
-    room == null ||
-    usageTone(room.left) === UsageTone.Plenty ||
-    usageTone(room.left) === UsageTone.Half ||
-    usageTone(room.left) === UsageTone.Low
-      ? null
-      : `${room.left === 0 ? modelRoomText.chipOut : modelRoomText.chipLeft(room.left)}${room.until === null ? '' : ` · ${modelRoomText.until(room.until)}`}`
-  const leadWords = `${leadInfo.name}${effort === null ? '' : ` · ${effort}`}${low === null ? '' : ` (${low})`}`
+  const leadWords = `${leadInfo.name}${effort === null ? '' : ` · ${effort}`}`
   return text.team(
     leadWords,
     review === undefined ? null : review.skipped ? text.noReview : text.reviews(named(review.agentId, review.model).name),
@@ -116,7 +105,6 @@ const useTeamLine = (plan: Plan, projectId: string) => {
 
 /** A row's menu, up next: who's on it, then Start where it starts now, Hold where it can be held, and Change the team…. */
 export function TeamMenu({
-  projectId,
   task,
   onStart,
   onHold,
@@ -128,7 +116,7 @@ export function TeamMenu({
   onHold?: () => void
   onChange: () => void
 }) {
-  const line = useTeamLine(task.plan!, projectId)
+  const line = useTeamLine(task.plan!)
   return (
     <Menu
       trigger={<IconButton icon="more" size="small" label={text.more} />}
@@ -178,34 +166,32 @@ export function ChangeTeam({
   onClose: () => void
 }) {
   const { client, cache } = useServices()
-  const named = useModelNames()
   // The task as it opened: what the dialog shows once it can no longer change.
   const [first] = useState(task)
   const [edits, setEdits] = useState<Edits>({})
   const [end, setEnd] = useState<End | null | undefined>(undefined)
-  const [busy, setBusy] = useState(false)
+  const [busy, setBusy] = useState<'save' | 'start' | null>(null)
+  const saving = useRef(false)
+  const holding = useRef<Promise<void> | null>(null)
   const [error, setError] = useState<string | null>(null)
   const firstPlan = first?.plan ?? null
   useEffect(() => {
     // Its countdown stops while its team is changed: held, it starts when the person says.
-    if (first?.phase === 'planned' && firstPlan !== null) void client.holdPlan(firstPlan.id).catch(() => undefined)
+    if (first?.phase === 'planned' && firstPlan !== null && holding.current === null) {
+      holding.current = client.holdPlan(firstPlan.id)
+      void holding.current.catch((failure: unknown) => setError(messageOf(failure)))
+    }
   }, [client, first, firstPlan])
   if (first === null || firstPlan === null) return null
   const now = task ?? first
   const plan = now.plan ?? firstPlan
   const how = task === null ? null : teamChangeOf(task)
   // A task that has begun changes through ChangeTeam, until it is merged or settled.
-  const begun = teamChangeOf(first) === 'begun'
-  const merged = begun && now.change?.state === 'merged'
-  const gone = how === null || merged
+  const begun = how === 'begun' || teamChangeOf(first) === 'begun'
+  const gone = how === null
   // A plan made with no review has no review step: a change that can still have one shows it, off, for the person to add.
   const lead = plan.steps.find((step) => step.key === 'implement')
-  const addable =
-    begun &&
-    now.kind === 'change' &&
-    now.reviewing == null &&
-    now.reviewerChange !== 'never' &&
-    !plan.steps.some((step) => step.key === 'review')
+  const addable = begun && now.kind === 'change' && now.reviewing == null && !plan.steps.some((step) => step.key === 'review')
   const given: ReadonlyArray<PlanStep> =
     addable && lead !== undefined
       ? [
@@ -224,11 +210,18 @@ export function ChangeTeam({
   const ending = end === undefined ? plan.end : end
   const put = (key: PlanStep['key'], patch: Partial<PlanStep>) => setEdits((was) => ({ ...was, [key]: { ...was[key], ...patch } }))
   const save = async (andStart: boolean) => {
-    setBusy(true)
+    if (saving.current) return
+    saving.current = true
+    setBusy(andStart ? 'start' : 'save')
     setError(null)
     try {
-      if (begun) await client.changeTeam(now.taskId, steps)
-      else {
+      // Opening the dialog pauses its countdown. That hold must finish before this Start can run.
+      await holding.current
+      if (begun) {
+        // A live session may have moved since this dialog opened. Only the steps the person touched are a new choice.
+        const changed = steps.filter((step) => edits[step.key] !== undefined)
+        if (changed.length > 0) await client.changeTeam(now.taskId, changed)
+      } else {
         await client.changePlan(plan.id, steps, ending)
         if (andStart) await client.startPlan(plan.id)
       }
@@ -236,12 +229,13 @@ export function ChangeTeam({
       onClose()
     } catch (failure) {
       setError(messageOf(failure))
-      setBusy(false)
+      setBusy(null)
+    } finally {
+      saving.current = false
     }
   }
   // A review its task has, or a change that can still have one; a plain task or a review shows only what it has.
-  const reviewShown = (step: PlanStep) =>
-    !begun || (now.reviewing == null && (!step.skipped ? true : now.kind === 'change' && now.reviewerChange !== 'never'))
+  const reviewShown = (step: PlanStep) => !begun || (now.reviewing == null && (!step.skipped ? true : now.kind === 'change'))
   const reviews = now.reviewing != null
   const label = (key: PlanStep['key']) => stepText.label[reviews ? 'review' : key]
   return (
@@ -250,7 +244,6 @@ export function ChangeTeam({
       steps={steps
         .filter((step) => step.key !== 'review' || reviewShown(step))
         .map((step) => {
-          const locked = begun && step.key === 'review' && now.reviewerChange === 'never'
           return {
             id: step.key,
             label: label(step.key),
@@ -266,34 +259,35 @@ export function ChangeTeam({
                 placement="below"
               />
             ),
-            ...(locked ? { locked: named(step.agentId, step.model).name } : {}),
             ...(begun
               ? {
-                  why: locked
-                    ? text.reviewDone
-                    : step.key === 'implement'
+                  why:
+                    step.key === 'implement'
                       ? text.nextTurn
                       : now.reviewerChange === 'next_round'
                         ? text.nextRound
-                        : step.key === 'review' && !step.skipped && wasUnreviewed && now.change?.state === 'open'
-                          ? text.readsNow
-                          : undefined,
+                        : now.reviewerChange === 'next_ship' || now.change?.state === 'merged'
+                          ? text.nextShip
+                          : step.key === 'review' && !step.skipped && wasUnreviewed && now.change?.state === 'open'
+                            ? text.readsNow
+                            : undefined,
                 }
               : step.key === 'implement' && plan.reason !== null
                 ? { why: plan.reason }
                 : {}),
             skipped: step.skipped,
-            ...(step.key === 'review' && !locked ? { onAdd: () => put('review', { skipped: false }) } : {}),
+            ...(step.key === 'review' ? { onAdd: () => put('review', { skipped: false }) } : {}),
           }
         })}
       // Where the repository's host isn't connected, the task ends on its branch, and there is no ending to pick; a task
       // that has begun keeps the ending it has.
       {...(ending === null || begun ? {} : { end: { value: ENDS[ending], onChange: (next) => setEnd(endOf(next)) } })}
-      {...(gone ? {} : { onSave: () => void save(false) })}
-      {...(!gone && how === 'starts' ? { onStart: () => void save(true) } : {})}
+      {...(gone && busy === null ? {} : { onSave: () => void save(false) })}
+      {...((!gone && how === 'starts') || busy === 'start' ? { onStart: () => void save(true) } : {})}
       onClose={onClose}
       busy={busy}
-      error={merged ? text.merged : how === null ? (begun ? text.settled : text.begun) : error}
+      // A task no longer available is said quietly; starting it ourselves is still in progress.
+      {...(how === null && busy === null ? { settled: begun ? text.settled : text.begun } : { error })}
     />
   )
 }

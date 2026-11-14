@@ -1,5 +1,6 @@
+import { removeTreeSync } from '@althar/testing'
 import { execFileSync } from 'node:child_process'
-import { realpathSync, rmSync, writeFileSync } from 'node:fs'
+import { realpathSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 import { type FakeService, makeFakeService } from '@althar/connectors/testing'
@@ -18,7 +19,7 @@ import { Queries } from '../src/Queries'
 import { ReviewRefused, Reviews } from '../src/Reviews'
 import * as Runtime from '../src/Runtime'
 import type { ToolAccess } from '../src/ToolServer'
-import { callTool, fakeConnectors, HOST, hosted, notices, runtime } from './support'
+import { callTool, fakeConnectors, HOST, hosted, notices, runtime, until } from './support'
 
 /*
  * A project of two repositories on the same connected host, api and web:
@@ -162,7 +163,7 @@ describe('a project of two repositories on one connected host', () => {
       const [own] = yield* sql<{ path: string }>`
         SELECT w.path FROM workspaces w JOIN repository_bindings b ON b.id = w.binding_id
         WHERE w.task_id = ${task.taskId} ORDER BY b.created_at, b.rowid LIMIT 1`
-      rmSync(own?.path ?? '', { recursive: true, force: true })
+      removeTreeSync(own?.path ?? '')
       const attached = yield* (yield* Changes).attach({ taskId: task.taskId, pullRequest: '#2', start: true, actorId: personId })
       assert.strictEqual(attached.kind === 'attached' ? attached.change.url : '', 'https://github.com/meridian/web/pull/2')
       assert.include(
@@ -200,6 +201,7 @@ describe('a project of two repositories on one connected host', () => {
       github.mergeByHand(1)
       github.mergeByHand(3)
       yield* changes.refresh(task.taskId)
+      yield* until(changes.ofTask(task.taskId), (all) => all.length === 2 && all.every((one) => one.state === 'merged'))
       assert.strictEqual(
         yield* callTool(lead, 'push_to_pull_request', {}),
         "None of this task's pull requests is open, so there's nothing to push to. What you committed goes in a new pull request, which Althar opens as a draft once you call finish_step: if you haven't, call it with your summary.",

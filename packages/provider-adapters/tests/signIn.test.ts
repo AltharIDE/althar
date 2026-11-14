@@ -36,7 +36,7 @@ describe('reading sign-in status', () => {
         analyticsDisabled: false,
         projectsDirectory: '/home/u/.claude/projects',
         configDirectory: '/home/u/.claude',
-        loginExpiresAt: '2026-12-01T09:14:03.000Z',
+        loginExpiresAt: '2025-12-01T09:14:03.000Z',
         email: 'you@meridian.dev',
         orgId: '0f6c2a51-8d3e-4b7a-9c14-5e2d7f80a3b9',
         orgName: 'you@meridian.dev’s Organization',
@@ -47,7 +47,7 @@ describe('reading sign-in status', () => {
       null,
       2,
     )
-    assert.strictEqual(claude?.(signedIn), '2026-12-01T09:14:03.000Z')
+    assert.strictEqual(claude?.(signedIn), '2025-12-01T09:14:03.000Z')
     assert.isUndefined(claude?.('{"loggedIn": false, "authMethod": "none", "loginExpiresAt": null}'))
     // A key, and Claude Code before 2.1.318, say none; nor does output that isn't its JSON.
     assert.isUndefined(claude?.('{"loggedIn": true, "authMethod": "api_key", "loginExpiresAt": null}'))
@@ -66,12 +66,12 @@ describe('reading sign-in status', () => {
           ...agents['claude-code'].signIn,
           status: () => ({
             command: 'bun',
-            args: ['-e', 'console.log(JSON.stringify({loggedIn:true,authMethod:"claude.ai",loginExpiresAt:"2026-12-01T09:14:03.000Z"}))'],
+            args: ['-e', 'console.log(JSON.stringify({loggedIn:true,authMethod:"claude.ai",loginExpiresAt:"2025-12-01T09:14:03.000Z"}))'],
           }),
         },
       }
       const check = yield* signInCheck(claude, process.execPath)
-      assert.deepStrictEqual(check, { status: 'signed_in', paidBy: 'plan', endsAt: '2026-12-01T09:14:03.000Z' })
+      assert.deepStrictEqual(check, { status: 'signed_in', paidBy: 'plan', endsAt: '2025-12-01T09:14:03.000Z' })
     }),
   )
 
@@ -221,6 +221,8 @@ describe('reading sign-in status', () => {
       [
         'claude auth login',
         'codex login',
+        // Native Copilot signs in inside Althar, without a terminal command.
+        '',
         'opencode auth login --standalone',
         'copilot login',
         'junie',
@@ -245,6 +247,7 @@ describe('an agent’s homes', () => {
     assert.deepStrictEqual(usual({}), [
       ['CLAUDE_CONFIG_DIR', join('/Users/me', '.claude')],
       ['CODEX_HOME', join('/Users/me', '.codex')],
+      ['XDG_DATA_HOME', join('/Users/me', '.local', 'share', 'althar', 'copilot')],
       ['XDG_DATA_HOME', join('/Users/me', '.local', 'share')],
       ['COPILOT_HOME', join('/Users/me', '.copilot')],
       ['JUNIE_HOME', join('/Users/me', '.junie')],
@@ -267,7 +270,7 @@ describe('an agent’s homes', () => {
         QWEN_HOME: '/q',
         GEMINI_HOME: '/m',
       }).map(([, folder]) => folder),
-      ['/c', '/x', '/d', '/p', '/j', '/g', '/k', '/v', '/q', '/m'],
+      ['/c', '/x', join('/Users/me', '.local', 'share', 'althar', 'copilot'), '/d', '/p', '/j', '/g', '/k', '/v', '/q', '/m'],
     )
   })
 
@@ -277,6 +280,7 @@ describe('an agent’s homes', () => {
       for (const name of agent.home.shared(PRESENT)) assert.notMatch(name, /auth|credential|token|\.claude\.json|keychain/i, agent.id)
     assert.deepStrictEqual(agents['claude-code'].home.shared(PRESENT), ['settings.json', 'CLAUDE.md'])
     assert.deepStrictEqual(agents.codex.home.shared(PRESENT), ['config.toml', 'AGENTS.md'])
+    assert.deepStrictEqual(agents['copilot-direct'].home.shared(PRESENT), [])
     // OpenCode's home is the data folder every program uses: only its own stays apart.
     assert.deepStrictEqual(
       agents.opencode.home.shared(PRESENT),

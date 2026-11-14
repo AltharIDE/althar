@@ -4,6 +4,7 @@ import { useControlled } from '../../lib/controlled'
 import { Button } from '../../primitives/Button/Button'
 import { Choices } from '../../primitives/Choices/Choices'
 import { FieldError } from '../../primitives/Field/Field'
+import { Problem } from '../../primitives/Problem/Problem'
 import { PeekDetail, PeekFoot, PeekHead, PeekSection } from '../Dock/Dock'
 import s from './CallPeek.module.css'
 
@@ -117,9 +118,9 @@ export function CallPeek({
         </Button>
         {missing ? <FieldError id={missingId}>{t.missing}</FieldError> : releases && <span>{releases}</span>}
         {error && (
-          <span className={s.error} role="alert">
+          <Problem as="span" size="small" className={s.problem}>
             {error}
-          </span>
+          </Problem>
         )}
       </PeekFoot>
     </>

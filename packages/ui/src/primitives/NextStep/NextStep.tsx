@@ -1,9 +1,10 @@
-import type { ReactNode } from 'react'
+import type { ReactElement, ReactNode } from 'react'
 
 import { Icon } from '../../foundations/Icon/Icon'
 import { cx } from '../../lib/cx'
 import type { RootProps } from '../../lib/props'
 import { Button } from '../Button/Button'
+import { SplitButton } from '../SplitButton/SplitButton'
 import s from './NextStep.module.css'
 
 /*
@@ -40,12 +41,15 @@ export type NextStepProps = RootProps<
     label?: string
     /** The step is under way: the button says `doing` and ignores presses, but stays focusable. */
     busy?: boolean
+    disabled?: boolean
     /** The words while it is under way: Pushing 13 commits. */
     doing?: ReactNode
     /** Violet, for the person's own to do (push, merge, answer); in ink otherwise. */
     signal?: boolean
     /** It goes somewhere, as a task's Open does: an arrow after its words, as a link's have. */
     arrow?: boolean
+    menu?: (trigger: ReactElement) => ReactNode
+    moreLabel?: string
   }
 >
 
@@ -62,9 +66,12 @@ export function NextStep({
   onPress,
   label,
   busy = false,
+  disabled = false,
   doing,
   signal = false,
   arrow = false,
+  menu,
+  moreLabel,
   ...rest
 }: NextStepProps) {
   if (onPress === undefined)
@@ -74,23 +81,40 @@ export function NextStep({
         <Icon name="arrow" size={11} />
       </span>
     )
+  const main = {
+    busy,
+    disabled,
+    ...(label === undefined ? {} : { 'aria-label': label }),
+    onClick: (e: React.MouseEvent<HTMLButtonElement>) => {
+      e.stopPropagation()
+      onPress()
+    },
+    children: busy && doing !== undefined ? doing : children,
+  }
   return (
     <span className={cx(s.step, s.act, className)} {...rest}>
-      <Button
-        size="small"
-        variant="quiet"
-        busy={busy}
-        {...(arrow ? { trailingIcon: 'arrow' as const } : {})}
-        {...(label === undefined ? {} : { 'aria-label': label })}
-        className={cx(s.press, signal && s.signal)}
-        onClick={(e) => {
-          // The card is the button to the task, and this isn't.
-          e.stopPropagation()
-          onPress()
-        }}
-      >
-        {busy && doing !== undefined ? doing : children}
-      </Button>
+      {menu !== undefined && moreLabel !== undefined ? (
+        <SplitButton
+          {...main}
+          size="small"
+          variant="quiet"
+          className={s.split}
+          mainClassName={cx(s.press, signal && s.signal)}
+          moreClassName={cx(s.press, s.more, signal && s.signal)}
+          menu={menu}
+          moreLabel={moreLabel}
+        />
+      ) : (
+        <Button
+          {...main}
+          size="small"
+          variant="quiet"
+          {...(arrow ? { trailingIcon: 'arrow' as const } : {})}
+          className={cx(s.press, signal && s.signal)}
+        >
+          {main.children}
+        </Button>
+      )}
     </span>
   )
 }

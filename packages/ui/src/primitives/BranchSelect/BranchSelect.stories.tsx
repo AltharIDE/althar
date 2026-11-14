@@ -41,16 +41,11 @@ const meta = {
 export default meta
 type Story = StoryObj<typeof meta>
 
-export const Quiet: Story = { render: () => <Example /> }
 export const Filled: Story = { render: () => <Example variant="filled" value="release/0.8.0" /> }
-export const FilledDark: Story = { ...Filled, globals: { theme: 'dark' } }
-
 /** Open, with a line under the list on what picking one changes. */
 export const Open: Story = {
   render: () => <Example defaultOpen note="New tasks start from it. Tasks already made keep theirs." />,
 }
-export const OpenDark: Story = { ...Open, globals: { theme: 'dark' } }
-
 /** Typing finds a branch by any part of its name; the arrows move, Enter picks. */
 export const Finding: Story = {
   render: () => <Example />,

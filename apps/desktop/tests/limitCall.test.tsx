@@ -1,3 +1,4 @@
+import { isoAfter } from '@althar/testing'
 import { screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
@@ -16,7 +17,7 @@ import { withServices } from './render'
  * the reset, which offers the same as a way on.
  */
 
-const BACK = '2099-01-01T14:00:00.000Z'
+const BACK = isoAfter(24 * 3_600_000)
 
 /** Claude Code with a second account, Codex signed in on its plan, OpenCode signed out. */
 const now: ReadonlyArray<AgentStatus> = agents.map((agent) =>
@@ -91,11 +92,11 @@ describe('a step a usage limit stopped', () => {
         ? {
             ...agent,
             accounts: agent.accounts.map((account) =>
-              account.id === 'acc_work' ? { ...account, outUntil: '2099-01-02T10:00:00.000Z' } : account,
+              account.id === 'acc_work' ? { ...account, outUntil: isoAfter(44 * 3_600_000) } : account,
             ),
           }
         : agent.id === 'codex'
-          ? { ...agent, accounts: [{ ...usual('acc_codex', 'signed_in'), outUntil: '2099-01-01T10:00:00.000Z' }] }
+          ? { ...agent, accounts: [{ ...usual('acc_codex', 'signed_in'), outUntil: isoAfter(20 * 3_600_000) }] }
           : agent,
     )
     const { client } = fakeClient({ status: vi.fn(async () => ({ ...status, agents: out })) })
@@ -189,9 +190,9 @@ describe('a usage limit, in words', () => {
 
 describe('a new step on an agent nearly out', () => {
   it('says how little it has left, not that it ran out, with the agent itself among the ways on', () => {
-    expect(limitText.what('Codex', '14:00', 3.4)).toBe('Codex has 3% of its usage left, until 14:00.')
-    expect(limitText.what('Codex', null, 2)).toBe('Codex has 2% of its usage left.')
-    expect(limitText.held('Codex', '14:00', 3)).toBe('Codex has 3% of its usage left, until 14:00.')
+    expect(limitText.what('Codex', '14:00', 3.4)).toBe('Waiting for Codex.')
+    expect(limitText.what('Codex', null, 2)).toBe('Waiting for Codex.')
+    expect(limitText.held('Codex', '14:00', 3)).toBe('Waiting for Codex until 14:00.')
     // Out, as before.
     expect(limitText.held('Codex', '14:00')).toBe('Codex is out of usage until 14:00.')
   })

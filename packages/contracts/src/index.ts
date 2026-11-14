@@ -11,4 +11,8 @@ export * from './pictures'
 export * from './sandbox'
 export * from './screenshots'
 export * from './settings'
+export * from './standing'
+export * from './waiting'
 export * from './toolWords'
+
+export * from './signInHost'

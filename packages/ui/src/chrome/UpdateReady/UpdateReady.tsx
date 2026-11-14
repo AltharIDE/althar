@@ -1,6 +1,7 @@
 import { cx } from '../../lib/cx'
 import type { RootProps } from '../../lib/props'
 import { LinkButton } from '../../primitives/LinkButton/LinkButton'
+import { Problem } from '../../primitives/Problem/Problem'
 import s from './UpdateReady.module.css'
 
 /*
@@ -8,7 +9,7 @@ import s from './UpdateReady.module.css'
  * bar or Settings' foot, never a banner. Restart is there only when the
  * consumer may restart now; while work runs there is none, and the line
  * says the update installs as Althar quits. A restart that didn't happen
- * says why, and Restart stays to try again.
+ * says why, as a problem, with Restart beside it to try again.
  */
 
 export interface UpdateReadyText {
@@ -51,12 +52,19 @@ export function UpdateReady({ version, onRestart, restarting = false, error, tex
       <span className={s.ready}>{t.ready(version)}</span>
       {restarting ? (
         <span>{t.restarting}</span>
+      ) : error !== undefined ? (
+        <Problem
+          as="span"
+          size="small"
+          {...(onRestart === undefined ? {} : { action: <LinkButton onClick={onRestart}>{t.restart}</LinkButton> })}
+        >
+          {t.failed(error)}
+        </Problem>
       ) : onRestart === undefined ? (
         <span>{t.onQuit}</span>
       ) : (
         <LinkButton onClick={onRestart}>{t.restart}</LinkButton>
       )}
-      {error !== undefined && !restarting && <span className={s.error}>{t.failed(error)}</span>}
     </output>
   )
 }

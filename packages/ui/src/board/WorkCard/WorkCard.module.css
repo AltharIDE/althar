@@ -11,12 +11,9 @@
 .you .status {
   color: var(--signal);
 }
+/* how long, quiet as on every card: a number that changes isn't what to look at */
 .elapsed {
   color: var(--t-3);
-}
-.running .elapsed {
-  color: var(--live);
-  font-weight: 500;
 }
 
 .track {

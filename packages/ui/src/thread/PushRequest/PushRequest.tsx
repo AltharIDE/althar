@@ -2,8 +2,10 @@ import { Icon } from '../../foundations/Icon/Icon'
 import { PushBlocked, PushState } from '../../foundations/vocabulary'
 import { cx } from '../../lib/cx'
 import type { RootProps } from '../../lib/props'
+import { Rhythm } from '../../lib/rhythm'
 import { Button } from '../../primitives/Button/Button'
 import { LinkButton } from '../../primitives/LinkButton/LinkButton'
+import { Problem } from '../../primitives/Problem/Problem'
 import s from './PushRequest.module.css'
 
 /*
@@ -129,7 +131,7 @@ export function PushRequest({
     [PushState.Closed]: t.closed,
   }[state]
   return (
-    <article className={cx(s.card, !open && s.settled, className)} aria-label={t.label(where)} {...rest}>
+    <article className={cx(s.card, !open && s.settled, className)} aria-label={t.label(where)} data-rhythm={Rhythm.Card} {...rest}>
       <div className={s.head}>
         <span className={s.kicker}>
           <Icon name={state === PushState.Pushed ? 'check' : 'up'} size={11} className={s.glyph} />
@@ -145,8 +147,13 @@ export function PushRequest({
           </span>
           {at !== undefined && <span className={s.at}>{at}</span>}
         </span>
-        {open && moved && !stopped && <p className={s.moved}>{t.moved}</p>}
-        {stopped && <p className={s.moved}>{t.blocked[blocked](where)}</p>}
+        {/* "this is what is on it now" only over what is on it: with nothing new, the note under says so alone */}
+        {open && moved && !stopped && listed.length > 0 && <p className={s.moved}>{t.moved}</p>}
+        {stopped && (
+          <Problem size="small" className={s.blocked}>
+            {t.blocked[blocked](where)}
+          </Problem>
+        )}
       </div>
       {listed.length > 0 ? (
         <ol className={s.commits}>

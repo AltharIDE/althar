@@ -88,6 +88,8 @@ export interface FakeServiceOptions {
   readonly conflictsOf?: (number: number) => boolean | undefined
   /** What merging a change needs, as the host says now (DEV-204); without it, the host doesn't read it at all. */
   readonly rulesOf?: (number: number) => MergeRules
+  /** The viewer's current permission for the explicit GitHub queue bypass. False unless given. */
+  readonly canBypassQueue?: () => boolean
   /** The checks a change's commit has, by the commit, as a host runs them on each; without it, or where it says nothing, those `setChecks` gave. */
   readonly checksFor?: (number: number, sha: string) => ReadonlyArray<FakeCheck> | undefined
   /** The checks a commit that is no change's head has, such as its default branch's latest: none without it. */
@@ -100,7 +102,7 @@ export interface FakeServiceOptions {
   readonly listReads?: number
   /** Whether the host can run a check again; it can, unless a test says. A check run again is in `reruns`. */
   readonly reruns?: boolean
-  /** Whether it reads changes to review: as GitHub does, unless said, and no other. */
+  /** Whether it reads and posts reviews: every code host does unless a test says otherwise. */
   readonly reviews?: boolean
   /** Whether it takes pictures in its conversations: as GitHub and GitLab do, unless said, and no other. */
   readonly pictures?: boolean
@@ -618,7 +620,7 @@ export const makeFakeService = (options: FakeServiceOptions = {}): FakeService =
       drafts: true,
       checkLogs: true,
       threads: true,
-      reviews: options.reviews ?? product === 'github',
+      reviews: options.reviews ?? ['github', 'gitlab', 'bitbucket_cloud', 'bitbucket_dc'].includes(product),
       pictures: options.pictures ?? (product === 'github' || product === 'gitlab'),
       // As each adapter declares: a declined Bitbucket Cloud pull request is final, and Data Center's builds are another service's.
       reopen: product !== 'bitbucket_cloud',
@@ -801,6 +803,23 @@ export const makeFakeService = (options: FakeServiceOptions = {}): FakeService =
         if (!landsLater) land(change.number)
         return Effect.succeed(changeNumbered(change.number))
       }),
+    ...(product === 'github'
+      ? {
+          mergeWithoutQueue: (_repository: Repository, change: ChangeRequest) =>
+            Effect.andThen(called('mergeWithoutQueue'), () => {
+              if (options.canBypassQueue?.() !== true)
+                return Effect.fail(new ConnectorFailed({ product, reason: 'forbidden', message: 'Queue bypass is not allowed' }))
+              const now = changeNumbered(change.number)
+              if (now.draft || now.state !== 'open')
+                return Effect.fail(new ConnectorFailed({ product, reason: 'rejected', message: 'Pull request is not mergeable' }))
+              if (change.headSha !== (options.headOf?.(change.number) ?? now.headSha))
+                return Effect.fail(new ConnectorFailed({ product, reason: 'rejected', status: 409, message: 'Head branch was modified' }))
+              mergesAsked.push({ number: change.number, how: 'merge', method: null, head: change.headSha })
+              land(change.number)
+              return Effect.succeed({ ...changeNumbered(change.number), queued: false })
+            }),
+        }
+      : {}),
     mergeWays: () =>
       Effect.andThen(called('mergeWays'), () =>
         Effect.succeed({
@@ -849,8 +868,15 @@ export const makeFakeService = (options: FakeServiceOptions = {}): FakeService =
     // As GitHub's alone, which merges in the background: whether a head is the merge its update made from another.
     ...(product === 'github'
       ? {
-          madeFrom: (_repository: Repository, change: ChangeRequest, from: string) =>
-            Effect.andThen(called('madeFrom'), () => Effect.succeed(change.headSha?.startsWith(`${from}+`) === true)),
+          madeFrom: (repository: Repository, change: ChangeRequest, from: string, base?: string) =>
+            Effect.andThen(called('madeFrom'), () => {
+              if (change.headSha?.startsWith(`${from}+`) !== true) return Effect.succeed(false)
+              if (base === undefined) return Effect.succeed(true)
+              // Its target's head asked for, or a later one, where the target moved on before the merge.
+              const merged = change.headSha.slice(from.length + 1)
+              const history = historyOf(repository.id, change.target)
+              return Effect.succeed(merged === base || (history.includes(base) && history.indexOf(merged) >= history.indexOf(base)))
+            }),
         }
       : {}),
     closeChange: (_repository, change) =>

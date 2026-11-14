@@ -282,6 +282,8 @@ export const NewProject: Story = {
     mode: PermissionPolicy.Rules,
     kinds: Object.fromEntries(Object.values(RuleKind).map((kind) => [kind, RulePlace.Ask])) as Record<RuleKind, RulePlace>,
     commands: [],
+    // new, it has asked nothing yet
+    tally: [],
   },
 }
 
@@ -324,6 +326,29 @@ export const LongCommands: Story = {
 
 /** What leads' sandboxes let through while the rest is allowed: known commands outside it, known hosts without asking. */
 export const Sandbox: Story = { args: { mode: PermissionPolicy.Rules } }
+
+/* The commands a project with every usual tool lets out of the sandbox: each by itself and through npx, bunx, pnpm exec and yarn. */
+const EVERY_WAY = [
+  'ps',
+  'env -i',
+  ...['vite', 'next dev', 'next start', 'astro dev', 'storybook dev', 'vitest', 'jest', 'playwright'].flatMap((tool) => [
+    tool,
+    `npx ${tool}`,
+    `bunx ${tool}`,
+    `pnpm exec ${tool}`,
+    `yarn ${tool}`,
+  ]),
+  ...['dev', 'start', 'test'].flatMap((script) => [`npm run ${script}`, `pnpm ${script}`, `yarn run ${script}`]),
+]
+
+/** A sandbox that lets out every usual tool, however it is run: each named once, not once for each runner. */
+export const CrowdedSandbox: Story = {
+  args: { mode: PermissionPolicy.Rules, sandbox: { commands: EVERY_WAY, hosts: MERIDIAN_SANDBOX.hosts, onAdd: fn(), onRemove: fn() } },
+  play: async ({ canvasElement }) => {
+    const clause = within(canvasElement).getByText(/outside their sandbox from the start, however they’re run\./)
+    await expect(within(clause).queryByText('npx vite')).toBeNull()
+  },
+}
 
 /** Adding a host: typed where it will sit, Enter adds it, and focus goes back to the +. */
 export const AddingAHost: Story = {

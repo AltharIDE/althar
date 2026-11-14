@@ -4,6 +4,7 @@ import { Brand } from '../../foundations/brands/brands'
 import { Icon, type IconName } from '../../foundations/Icon/Icon'
 import { BrandMark } from '../../foundations/Marks/Marks'
 import { Button } from '../../primitives/Button/Button'
+import { MergeButton } from '../../primitives/MergeButton/MergeButton'
 import { KeyValues } from '../../primitives/KeyValues/KeyValues'
 import { Popover } from '../../primitives/Popover/Popover'
 import s from './TaskParts.module.css'
@@ -25,6 +26,7 @@ export type PartTone = 'you' | 'bad' | 'live'
 export interface PartAction {
   label: string
   onClick: () => void
+  onBypassQueue?: () => void
   variant?: 'signal' | 'quiet' | 'danger' | 'default'
   icon?: IconName
   /** It loses something: it says what first, with a way to keep it. */
@@ -105,6 +107,17 @@ const waits = (part: TaskPartModel) => part.tone === 'you' || part.tone === 'bad
 /** One action of an open part; one that loses something asks first, in place. */
 function Act({ action, sure, onSure }: { action: PartAction; sure: boolean; onSure: (on: boolean) => void }) {
   const variant = action.variant ?? 'default'
+  if (action.onBypassQueue !== undefined)
+    return (
+      <MergeButton
+        size="small"
+        variant={variant === 'danger' ? 'default' : variant}
+        onMerge={action.onClick}
+        onBypassQueue={action.onBypassQueue}
+      >
+        {action.label}
+      </MergeButton>
+    )
   return (
     <Button
       size="small"

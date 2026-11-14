@@ -115,11 +115,12 @@ describe('a sign-in a provider within the agent refused', () => {
     provider: 'opencode-go',
   })
 
-  it('names the provider and the model, with the agent’s own words under it, and signs in to that provider', async () => {
+  it('names the provider and the model, and signs in to that provider', async () => {
     const onSignIn = vi.fn()
     show(refused, undefined, onSignIn)
     expect(await screen.findByText('OpenCode Go refused the sign-in for DeepSeek V4.1 Flash.')).toBeTruthy()
-    expect(screen.getByText('Authentication required: provider authentication required')).toBeTruthy()
+    // Its words only restate the headline, so they aren't said again.
+    expect(screen.queryByText('Authentication required: provider authentication required')).toBeNull()
     expect(screen.queryByText(/is signed out/)).toBeNull()
     await userEvent.click(screen.getByRole('button', { name: 'Sign in to OpenCode Go' }))
     expect(onSignIn).toHaveBeenCalledWith('codex')
@@ -130,10 +131,10 @@ describe('a sign-in a provider within the agent refused', () => {
     expect(await screen.findByRole('button', { name: 'Sign in to opencode-go' })).toBeTruthy()
   })
 
-  it('says the agent is signed out where no provider is named, still with its words under it', async () => {
-    show({ ...refused, model: undefined, provider: undefined }, undefined, vi.fn())
+  it('says the agent is signed out where no provider is named, with its words under it where they say more', async () => {
+    show({ ...refused, model: undefined, provider: undefined, detail: 'The key for the work account was revoked.' }, undefined, vi.fn())
     expect(await screen.findByText('Codex is signed out.')).toBeTruthy()
-    expect(screen.getByText('Authentication required: provider authentication required')).toBeTruthy()
+    expect(screen.getByText('The key for the work account was revoked.')).toBeTruthy()
     expect(screen.getByRole('button', { name: 'Sign in again' })).toBeTruthy()
   })
 })

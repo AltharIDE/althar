@@ -191,13 +191,16 @@ export class FastLane extends Context.Service<
           yield* sql`
             INSERT INTO task_model_keeps ${sql.insert({ taskId, agentId, model, keptAt: yield* timestamp })}
             ON CONFLICT (task_id) DO UPDATE SET agent_id = excluded.agent_id, model = excluded.model, kept_at = excluded.kept_at`
-          yield* updateItem(found.projectId, itemId, { ...found.content, kept: true })
-          // The lead on it now goes back too, not only the steps after it.
+          // Record the choice at once, as the composer does. A running turn keeps its actual model;
+          // the next turn takes this choice, without blocking on a mid-turn set-model request.
           const threadId = yield* threadOf(taskId)
-          if (threadId !== undefined && Option.isSome(yield* sessions.running(threadId)))
-            yield* sessions
-              .setModel({ threadId, model })
-              .pipe(Effect.catchCause((cause) => Effect.logWarning('Could not move a running lead back to its kept model', cause)))
+          if (threadId !== undefined) {
+            const running = yield* sessions.running(threadId)
+            if (Option.isSome(running) && running.value.agentId === agentId)
+              yield* sessions.chooseLead({ threadId, model }).pipe(Effect.catchTag('NoSession', () => Effect.void))
+            else yield* sessions.changeLead({ threadId, agentId, model })
+          }
+          yield* updateItem(found.projectId, itemId, { ...found.content, kept: true })
         })
 
       const undoTheModelMove = (itemId: string) =>
@@ -210,7 +213,7 @@ export class FastLane extends Context.Service<
         })
 
       /**
-       * Every review after a merge still owed, and one a restart cut short (MergeReviews.ts); and every merged small change with
+       * Every review after a merge still owed, and one a restart cut short (MergeReviews.ts); and every merged task configured for after-merge review with
        * no review owed and none made, which a stop between the merge's snapshot and its owing leaves: the merge is read again
        * and the review is owed from there.
        */
