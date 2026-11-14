@@ -191,6 +191,42 @@ describe('install_dependencies, for the coordinator', () => {
 describe('run_project and stop_project, for a lead', () => {
   const withQueries = () => Queries.layer.pipe(Layer.provideMerge(runtime()))
 
+  it.live('refuses stale task targets and stops only the named command before a blank selector stops the rest', () =>
+    Effect.gen(function* () {
+      const { project, task, lead, coordinator } = yield* taskIn(served())
+      const launches = yield* Launches
+      assert.strictEqual(
+        yield* callTool(coordinator, 'run_project', { task: 'gone' }),
+        'This project has no task gone. list_tasks shows them.',
+      )
+      assert.strictEqual(
+        yield* callTool({ ...lead, taskId: 'task_gone' }, 'run_project', {}),
+        'Althar can’t find this task. Tell the person.',
+      )
+      assert.strictEqual(
+        yield* callTool(lead, 'run_project', { task: task.taskId, branch: 'main' }),
+        'Give one of task, branch or pull_request.',
+      )
+      assert.match(yield* callTool(lead, 'run_project', {}), /^Running `npm run dev`/)
+      // Blank names select the default; a command name is matched without case. Both reuse the same run.
+      for (const run of ['  ', 'NPM RUN DEV']) assert.match(yield* callTool(lead, 'run_project', { run }), /^Running `npm run dev`/)
+      assert.lengthOf(yield* launches.ofProject(project.projectId), 1)
+      assert.match(yield* callTool(coordinator, 'keep_run', { name: 'Storybook', command: 'npm run storybook' }), /^Kept:/)
+      assert.match(yield* callTool(lead, 'run_project', { run: 'storybook' }), /^Running `npm run storybook`/)
+      assert.lengthOf(yield* launches.ofProject(project.projectId), 2)
+      assert.strictEqual(
+        yield* callTool(lead, 'stop_project', { run: 'NPM RUN STORYBOOK' }),
+        'Stopped `npm run storybook` in your worktree.',
+      )
+      assert.deepStrictEqual(
+        (yield* launches.ofProject(project.projectId)).map((run) => run.command),
+        ['npm run dev'],
+      )
+      assert.strictEqual(yield* callTool(lead, 'stop_project', { run: '  ' }), 'Stopped `npm run dev` in your worktree.')
+      assert.lengthOf(yield* launches.ofProject(project.projectId), 0)
+    }).pipe(Effect.provide(withQueries())),
+  )
+
   it.live('runs the project in the lead’s worktree as the person’s run, shown in its thread, and stops only its task’s runs', () =>
     Effect.gen(function* () {
       const launches = yield* Launches
@@ -203,10 +239,13 @@ describe('run_project and stop_project, for a lead', () => {
         yield* callTool(lead, 'stop_project', { task: 'no-such-task' }),
         'This project has no task no-such-task. list_tasks shows them.',
       )
-      // Its default, in its worktree, once it says where it answers.
-      const ran = yield* callTool(lead, 'run_project', {})
-      assert.match(ran, /^Running `npm run dev` in your worktree, at http:\/\/localhost:5199\/\. Read it there, or take a screenshot of it/)
-      const [running] = yield* launches.ofProject(projectId)
+      // Starting can answer before a slow process prints its address. The run stays visible until it does.
+      assert.match(yield* callTool(lead, 'run_project', {}), /^Running `npm run dev` in your worktree/)
+      const [running] = yield* until(launches.ofProject(projectId), (runs) => runs[0]?.url === 'http://localhost:5199/')
+      assert.match(
+        yield* callTool(lead, 'run_project', {}),
+        /^Running `npm run dev` in your worktree, at http:\/\/localhost:5199\/\. Read it there, or take a screenshot of it/,
+      )
       assert.deepInclude(running, { taskId: task.taskId, where: 'Retry checkout', url: 'http://localhost:5199/' })
       // The same run the person sees: its card in the task's thread, in the pill with the project's runs.
       const { items: shown } = yield* Effect.orDie(queries.thread(task.threadId))
