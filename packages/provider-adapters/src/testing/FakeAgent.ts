@@ -384,7 +384,7 @@ export interface FakeAgentOptions {
 
 /** The holds a test opens, by marker, for an agent to go on from (`FakeAgentOptions.holds`). */
 export interface Holds {
-  /** A file-backed hold may name only some markers; other markers keep their usual behaviour. */
+  /** Names only some markers; others keep their usual behaviour. Background tests use only explicitly named holds. */
   readonly has?: (marker: string) => boolean
   /** Lets what waits on the marker go on, now and from now on. */
   readonly open: (marker: string) => void
@@ -834,6 +834,19 @@ const leaveTests = async (
     readonly again?: boolean
   },
 ) => {
+  // Explicit background holds leave the ordinary turn holds alone. A test can report a job after its turn
+  // has ended, or keep it running while it advances the runtime's clock beyond the report window.
+  const later = (marker: string, milliseconds: number, run: () => void) => {
+    const held = session.holds?.has?.(marker) === true ? session.holds : undefined
+    if (held === undefined) {
+      setTimeout(run, milliseconds).unref()
+      return
+    }
+    void (async () => {
+      while (!session.closed && !held.opened(marker)) await pause(10)
+      if (!session.closed) run()
+    })()
+  }
   const notify = (update: Record<string, unknown>) =>
     client.notify(acp.methods.client.session.update, { sessionId, update: update as unknown as acp.SessionUpdate })
   session.served += 1
@@ -866,7 +879,7 @@ const leaveTests = async (
     await notify({ sessionUpdate: 'async_task_progress', asyncTaskId: id, outputFilePath: outputPath })
     await notify({ sessionUpdate: 'tool_call_update', toolCallId, status: 'completed' })
     if (plan.lasts === undefined) return
-    const timer = setTimeout(() => {
+    later('[tests:complete]', plan.lasts, () => {
       // Stopped meanwhile, they have ended already.
       if (!session.background.delete(id)) return
       appendFileSync(outputPath, 'all passed\n[exited with code 0]\n')
@@ -896,11 +909,10 @@ const leaveTests = async (
         await notify({ sessionUpdate: 'tool_call_update', toolCallId: call, status: 'completed' })
         await notify({ sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'Committed.' } })
       })()
-    }, plan.lasts)
-    timer.unref()
+    })
   }
   if (plan.reportsAfter === undefined) await report()
-  else setTimeout(() => void report(), plan.reportsAfter).unref()
+  else later('[tests:report]', plan.reportsAfter, () => void report())
 }
 
 /**

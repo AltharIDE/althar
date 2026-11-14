@@ -1,11 +1,14 @@
+import { holds } from '@althar/provider-adapters/testing'
 import { assert, describe, it } from '@effect/vitest'
-import { Duration, Effect } from 'effect'
+import { Duration, Effect, Option } from 'effect'
 import { SqlClient } from 'effect/sql'
+import { TestClock } from 'effect/testing'
 
 import { Instance } from '../src/Instance'
 import { Policies } from '../src/Policies'
 import { Queries } from '../src/Queries'
-import { hosted, notices, until } from './support'
+import { Sessions } from '../src/Sessions'
+import { hosted, notices, onTestClock, turns, until } from './support'
 import {
   runtimeWith,
   git,
@@ -51,21 +54,35 @@ describe('a conflict its pull request’s host reports, and a lead waiting on it
     }).pipe(Effect.provide(runtimeWith({ github })))
   })
 
-  it.live('waits for a lead whose tests Codex reports only after its turn, asking it once', () => {
+  it.effect('waits for a lead whose tests Codex reports only after its turn, asking it once', () => {
     const { working, bare } = hosted()
     const github = hostOf(bare, () => PASSED)
-    return Effect.gen(function* () {
-      const { taskId, threadId } = yield* opened(working, '[lead:resolve-tests-codex]')
-      moveHostMainOn(working, bare)
-      yield* titled(threadId, 'The checks passed on PR #1.')
-      // Not judged at the end of its turn: the tests were reported just after, and it was woken by them.
-      const said = yield* given(threadId)
-      assert.strictEqual(said.filter((body) => body.includes('Bring the branch up to date')).length, 1)
-      assert.isFalse(said.some((body) => body.includes('Try once more') || body.includes('not committed: commit')))
-      const [round] = yield* rounds(taskId)
-      assert.deepStrictEqual([round?.state, round?.attempt], ['resolved', 1])
-      assert.isFalse(conflictsIn(bare, 'main', 'althar/add-a-retry'))
-    }).pipe(Effect.provide(runtimeWith({ github }, { reports: Duration.seconds(1) })))
+    const held = { ...holds(), has: (marker: string) => marker.startsWith('[tests:') }
+    return onTestClock(
+      Effect.gen(function* () {
+        const { taskId, threadId } = yield* opened(working, '[lead:resolve-tests-codex]')
+        moveHostMainOn(working, bare)
+        yield* until(turns(threadId), (all) =>
+          all.some((turn) => turn.prompt?.includes('Bring the branch up to date') === true && turn.state === 'completed'),
+        )
+        held.open('[tests:report]')
+        yield* until(
+          Effect.flatMap(Sessions, (sessions) => sessions.running(threadId)),
+          (running) => Option.exists(running, (session) => session.background.some((job) => job.ended === null)),
+        )
+        yield* TestClock.adjust(Duration.seconds(11))
+        held.open('[tests:complete]')
+        yield* titled(threadId, 'The lead resolved the conflict with main, in change.txt, and pushed the merge to PR #1.')
+        yield* titled(threadId, 'The checks passed on PR #1.')
+        // Not judged at the end of its turn: the tests were reported just after, and it was woken by them.
+        const said = yield* given(threadId)
+        assert.strictEqual(said.filter((body) => body.includes('Bring the branch up to date')).length, 1)
+        assert.isFalse(said.some((body) => body.includes('Try once more') || body.includes('not committed: commit')))
+        const [round] = yield* rounds(taskId)
+        assert.deepStrictEqual([round?.state, round?.attempt], ['resolved', 1])
+        assert.isFalse(conflictsIn(bare, 'main', 'althar/add-a-retry'))
+      }).pipe(Effect.provide(runtimeWith({ github }, { reports: Duration.seconds(10) }, undefined, { holds: held }))),
+    )
   })
 
   it.live('waits for a lead that is slow to be woken by its tests, longer than it is quiet, asking it once', () => {
@@ -113,26 +130,30 @@ describe('a conflict its pull request’s host reports, and a lead waiting on it
     }).pipe(Effect.provide(runtimeWith({ github })))
   })
 
-  it.live('waits for tests that print a local address as they run, then asks the lead nothing', () => {
+  it.effect('waits for tests that print a local address as they run, then asks the lead nothing', () => {
     const { working, bare } = hosted()
     const github = hostOf(bare, () => PASSED)
-    return Effect.gen(function* () {
-      const { taskId, threadId } = yield* opened(working, '[lead:resolve-tests-url]')
-      moveHostMainOn(working, bare)
-      // Its turn over and the tests still running, well past the report window: the round is still open.
-      yield* until(
-        Effect.map(inTurn(threadId), (turn) => [turn]),
-        ([turn]) => turn === false,
-      )
-      yield* Effect.sleep(Duration.millis(1200))
-      const [during] = yield* rounds(taskId)
-      assert.deepStrictEqual([during?.state, during?.attempt], ['resolving', 1])
-      yield* titled(threadId, 'The checks passed on PR #1.')
-      const said = yield* given(threadId)
-      assert.isFalse(said.some((body) => body.includes('Try once more') || body.includes('not committed: commit')))
-      const [round] = yield* rounds(taskId)
-      assert.deepStrictEqual([round?.state, round?.attempt], ['resolved', 1])
-    }).pipe(Effect.provide(runtimeWith({ github }, { reports: Duration.millis(200) })))
+    const held = { ...holds(), has: (marker: string) => marker === '[tests:complete]' }
+    return onTestClock(
+      Effect.gen(function* () {
+        const { taskId, threadId } = yield* opened(working, '[lead:resolve-tests-url]')
+        moveHostMainOn(working, bare)
+        // Its turn over and the tests still running, well past the report window: the round is still open.
+        yield* until(turns(threadId), (all) =>
+          all.some((turn) => turn.prompt?.includes('Bring the branch up to date') === true && turn.state === 'completed'),
+        )
+        yield* TestClock.adjust(Duration.millis(1200))
+        const [during] = yield* rounds(taskId)
+        assert.deepStrictEqual([during?.state, during?.attempt], ['resolving', 1])
+        held.open('[tests:complete]')
+        yield* titled(threadId, 'The lead resolved the conflict with main, in change.txt, and pushed the merge to PR #1.')
+        yield* titled(threadId, 'The checks passed on PR #1.')
+        const said = yield* given(threadId)
+        assert.isFalse(said.some((body) => body.includes('Try once more') || body.includes('not committed: commit')))
+        const [round] = yield* rounds(taskId)
+        assert.deepStrictEqual([round?.state, round?.attempt], ['resolved', 1])
+      }).pipe(Effect.provide(runtimeWith({ github }, { reports: Duration.millis(200) }, undefined, { holds: held }))),
+    )
   })
 
   it.live('pushes the merge with the one fix the lead committed after it, whether it made it at once or once the tests ended', () => {
