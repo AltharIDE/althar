@@ -1245,16 +1245,27 @@ export class Reviews extends Context.Service<
             const row = marked.row
             const verdict = row.verdict ?? row.suggested
             const kept = Schema.decodeUnknownSync(Comments)(row.comments).filter((comment) => comment.kept)
+            let postedVerdict: ReviewVerdict = verdict
+            let postedSummary = row.summary
             const made = yield* connections.adapters(row.connectionId).pipe(
               Effect.flatMap((adapters): Effect.Effect<PostedReview, unknown> => {
                 const host = adapters.host
                 // Wanting its sign-in again, or gone, the host isn't asked: it would refuse.
                 if (host === undefined || adapters.info.state !== 'ready')
                   return Effect.fail(new ConnectorFailed({ product: row.product, reason: 'unauthorized', message: '' }))
+                // GitHub refuses approvals and change requests from the pull request's author. Preserve the chosen
+                // verdict in the review text, while posting the inline findings as a comment review.
+                const own = row.product === 'github' && row.author.toLowerCase() === adapters.info.account.login.toLowerCase()
+                const comment = own && verdict !== 'comment'
+                const summary = comment
+                  ? `**${verdict === 'approve' ? 'Approved' : 'Changes requested'}** (posted as a comment because GitHub does not allow authors to approve or request changes on their own pull requests).\n\n${row.summary}`
+                  : row.summary
+                postedVerdict = comment ? 'comment' : verdict
+                postedSummary = summary
                 return Effect.flatMap(host.repository(row.repository.split('/')), (repository) =>
                   host.postReview(repository, row.number, {
-                    event: EVENTS[verdict],
-                    body: signed(row.summary, row.drafter, row.automationName),
+                    event: comment ? 'comment' : EVENTS[verdict],
+                    body: signed(summary, row.drafter, row.automationName),
                     commit: row.headCommit,
                     comments: kept.map((comment) => ({ path: comment.path, line: comment.line, body: comment.body })),
                   }),
@@ -1267,11 +1278,19 @@ export class Reviews extends Context.Service<
               (now) => now.state === 'posting',
               (_, at) =>
                 made._tag === 'Success'
-                  ? { state: 'posted', reviewRef: made.success.id, reviewUrl: made.success.url ?? row.url, decidedAt: at }
+                  ? {
+                      state: 'posted',
+                      verdict: postedVerdict,
+                      summary: postedSummary,
+                      reviewRef: made.success.id,
+                      reviewUrl: made.success.url ?? row.url,
+                      decidedAt: at,
+                    }
                   : { state: uncertain(made.failure) ? 'uncertain' : 'failed', error: failureWords(made.failure, row.product) },
               made._tag === 'Success' ? 'review_draft.posted' : uncertain(made.failure) ? 'review_draft.uncertain' : 'review_draft.failed',
               actorId,
-              (now) => (now.state === 'posted' ? { url: now.reviewUrl, verdict, comments: kept.length } : { error: now.error }),
+              (now) =>
+                now.state === 'posted' ? { url: now.reviewUrl, verdict: now.verdict, comments: kept.length } : { error: now.error },
               // Posted, the review task is done, in the same transaction: a crash between them can't leave a posted review open.
               (now) => (now.state === 'posted' ? settle(now, actorId) : Effect.void),
             )
