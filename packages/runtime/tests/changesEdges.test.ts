@@ -1,3 +1,4 @@
+import { slashPath } from '@althar/testing'
 import { execFileSync } from 'node:child_process'
 import { existsSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -8,6 +9,9 @@ import type { ProjectId } from '@althar/domain'
 import { assert, describe, it } from '@effect/vitest'
 import { Duration, Effect, Layer } from 'effect'
 import { SqlClient } from 'effect/sql'
+import { vi } from 'vitest'
+
+import * as spawner from '../src/spawner'
 
 import { Changes } from '../src/Changes'
 import { Connections } from '../src/Connections'
@@ -260,10 +264,42 @@ describe('keeping a task’s changes together', () => {
       const docs = yield* changeOf(task.taskId, 'Docs')
       commit(docs.path, 'docs.md', 'how lanes look', 'Docs')
       commit(docs.path, 'more.md', 'and why', 'More docs')
-      assert.include(
-        yield* callTool(task.lead, 'join_changes', { change: 'Docs', into: 'Lane colours' }),
-        'Kept “Docs” together with “Lane colours”',
+      // A missing common-directory lookup falls back to the destination repository; busy removal still retries.
+      const spawn = spawner.startApart
+      let refusals = 0
+      let missingRoot = 0
+      const refusing = vi.spyOn(spawner, 'startApart').mockImplementation((...args) => {
+        const [command] = args
+        if (command.command === 'git' && command.cwd === docs.path && command.args.includes('--git-common-dir')) {
+          missingRoot++
+          return {
+            result: Promise.resolve({
+              code: 128,
+              signal: null,
+              error: null,
+              over: false,
+              stdout: '',
+              stderr: 'Common directory unavailable',
+            }),
+            stop: () => undefined,
+          }
+        }
+        if (command.command === 'git' && command.args.includes('remove') && command.args.includes(docs.path)) {
+          refusals++
+          return {
+            result: Promise.resolve({ code: 128, signal: null, error: null, over: false, stdout: '', stderr: 'Permission denied' }),
+            stop: () => undefined,
+          }
+        }
+        return spawn(...args)
+      })
+      const joined = yield* callTool(task.lead, 'join_changes', { change: 'Docs', into: 'Lane colours' }).pipe(
+        Effect.ensuring(Effect.sync(() => refusing.mockRestore())),
       )
+      assert.include(joined, 'Kept “Docs” together with “Lane colours”')
+      assert.strictEqual(refusals, 2)
+      assert.strictEqual(missingRoot, 1)
+      assert.notInclude(git(working, 'worktree', 'list', '--porcelain'), slashPath(docs.path))
       assert.strictEqual(git(colours.path, 'log', '-2', '--format=%s'), 'More docs\nDocs')
       assert.isFalse(existsSync(docs.path))
       assert.include(yield* notices(task.threadId), "Kept together: Docs's 2 commits are on althar/lane-colours now.")
@@ -277,6 +313,101 @@ describe('keeping a task’s changes together', () => {
 })
 
 describe('dropping one of a task’s changes', () => {
+  it.live('leaves folders and rows alone when git refuses cleanup for an unrelated reason', () => {
+    const { working, github } = onGitHub()
+    return Effect.gen(function* () {
+      const task = yield* opened(working)
+      yield* callTool(task.lead, 'start_change', { name: 'Kept docs' })
+      yield* callTool(task.lead, 'start_change', { name: 'Refused docs' })
+      const docs = yield* changeOf(task.taskId, 'Refused docs')
+      const spawn = spawner.startApart
+      let refusals = 0
+      const refusing = vi.spyOn(spawner, 'startApart').mockImplementation((...args) => {
+        const [command] = args
+        if (command.command === 'git' && command.args.includes('remove') && command.args.includes(docs.path)) {
+          refusals++
+          return {
+            result: Promise.resolve({
+              code: 128,
+              signal: null,
+              error: null,
+              over: false,
+              stdout: '',
+              stderr: 'fatal: refusing to remove worktree',
+            }),
+            stop: () => undefined,
+          }
+        }
+        return spawn(...args)
+      })
+      yield* Effect.gen(function* () {
+        assert.include(yield* callTool(task.lead, 'join_changes', { change: 'Refused docs', into: 'Kept docs' }), 'Nothing was done')
+        assert.include(
+          yield* callTool(task.lead, 'remove_part', { part: 'workspace', name: 'Refused docs', why: 'Not needed.' }),
+          'Nothing was done',
+        )
+      }).pipe(Effect.ensuring(Effect.sync(() => refusing.mockRestore())))
+      assert.strictEqual(refusals, 4)
+      assert.isTrue(existsSync(docs.path))
+      assert.strictEqual((yield* changeOf(task.taskId, 'Refused docs')).state, 'ready')
+      assert.include(git(working, 'worktree', 'list', '--porcelain'), slashPath(docs.path))
+    }).pipe(Effect.provide(runtimeWith(github)))
+  })
+
+  it.live('removes a busy dropped worktree while keeping its uncommitted work on its branch', () => {
+    const { working, github } = onGitHub()
+    return Effect.gen(function* () {
+      const task = yield* opened(working)
+      yield* callTool(task.lead, 'start_change', { name: 'Busy docs' })
+      const docs = yield* changeOf(task.taskId, 'Busy docs')
+      writeFileSync(join(docs.path, 'docs.md'), 'Keep this draft.\n')
+      const spawn = spawner.startApart
+      let refusals = 0
+      const refusing = vi.spyOn(spawner, 'startApart').mockImplementation((...args) => {
+        const [command] = args
+        if (command.command === 'git' && command.args.includes('remove') && command.args.includes(docs.path)) {
+          refusals++
+          return {
+            result: Promise.resolve({ code: 128, signal: null, error: null, over: false, stdout: '', stderr: 'Directory not empty' }),
+            stop: () => undefined,
+          }
+        }
+        return spawn(...args)
+      })
+      const dropped = yield* callTool(task.lead, 'remove_part', { part: 'workspace', name: 'Busy docs', why: 'Not needed.' }).pipe(
+        Effect.ensuring(Effect.sync(() => refusing.mockRestore())),
+      )
+      assert.include(dropped, 'Dropped “Busy docs”')
+      assert.strictEqual(refusals, 2)
+      assert.isFalse(existsSync(docs.path))
+      assert.strictEqual((yield* changeOf(task.taskId, 'Busy docs')).state, 'cleaned')
+      assert.notInclude(git(working, 'worktree', 'list', '--porcelain'), slashPath(docs.path))
+      assert.strictEqual(git(working, 'show', `${docs.branch}:docs.md`), 'Keep this draft.')
+    }).pipe(Effect.provide(runtimeWith(github)))
+  })
+
+  it.live('preserves worktree locks even when their reason mentions a filesystem error', () => {
+    const { working, github } = onGitHub()
+    return Effect.gen(function* () {
+      const task = yield* opened(working)
+      yield* callTool(task.lead, 'start_change', { name: 'Unlocked docs' })
+      yield* callTool(task.lead, 'start_change', { name: 'Locked docs' })
+      const docs = yield* changeOf(task.taskId, 'Locked docs')
+      for (const reason of ['permission denied', 'resource busy', 'directory not empty']) {
+        git(working, 'worktree', 'lock', '--reason', reason, docs.path)
+        for (const [tool, args] of [
+          ['join_changes', { change: 'Locked docs', into: 'Unlocked docs' }],
+          ['remove_part', { part: 'workspace', name: 'Locked docs', why: 'Not needed.' }],
+        ] as const) {
+          assert.include(yield* callTool(task.lead, tool, args), 'Nothing was done')
+          assert.isTrue(existsSync(docs.path))
+          assert.strictEqual((yield* changeOf(task.taskId, 'Locked docs')).state, 'ready')
+        }
+        git(working, 'worktree', 'unlock', docs.path)
+      }
+    }).pipe(Effect.provide(runtimeWith(github)))
+  })
+
   it.live('refuses one it doesn’t have and the only one, and stops following the pull request of one dropped', () => {
     const { working, bare, github } = onGitHub()
     return Effect.gen(function* () {
