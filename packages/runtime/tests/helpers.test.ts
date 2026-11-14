@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os'
 import { join, sep } from 'node:path'
 
 import { type FakeService, makeFakeService } from '@althar/connectors/testing'
+import { holds } from '@althar/provider-adapters/testing'
 import { assert, describe, it } from '@effect/vitest'
 import { Duration, Effect, Layer } from 'effect'
 import { SqlClient } from 'effect/sql'
@@ -229,8 +230,12 @@ describe('a lead’s helpers', () => {
     const github = makeFakeService({ pushUrl: () => bare })
     github.addRepository(['meridian', 'api'])
     const file = join(mkdtempSync(join(tmpdir(), 'althar-helpers-')), 'althar.sqlite')
+    // Keep the helper at work until shutdown, regardless of how long the restart setup takes.
+    const helper = holds()
     const launch = () =>
-      Queries.layer.pipe(Layer.provideMerge(runtime(file, {}, { connectors: fakeConnectors({ github }), listenEvery: Duration.hours(1) })))
+      Queries.layer.pipe(
+        Layer.provideMerge(runtime(file, { holds: helper }, { connectors: fakeConnectors({ github }), listenEvery: Duration.hours(1) })),
+      )
     return Effect.gen(function* () {
       const threadId = yield* Effect.gen(function* () {
         const sql = yield* SqlClient.SqlClient
