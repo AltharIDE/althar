@@ -179,12 +179,45 @@ Switch labs whenever you like: your projects, their history and their decisions 
 
 ## How it compares
 
-| If you use | Althar is |
-| --- | --- |
-| A terminal manager | A project you talk to, not a grid of terminals to watch. |
-| A chat front-end | One coordinator and a board, not more tabs. |
-| A lab's own app | Every lab's agents, on your own plans, one reviewing the other. |
-| An AI editor | Built round projects and tasks rather than files; open source, and tied to no lab. |
+<table>
+  <tr>
+    <th align="left">If you use</th>
+    <th align="left">Such as</th>
+    <th align="left">Althar is</th>
+  </tr>
+  <tr>
+    <td valign="top">A terminal manager</td>
+    <td valign="top">
+      <img src=".github/readme/compare/cmux.png" width="20" height="20" alt="" /> cmux<br />
+      <img src=".github/readme/compare/paradev.png" width="20" height="20" alt="" /> Paradev
+    </td>
+    <td valign="top">A project you talk to, not a grid of terminals to watch.</td>
+  </tr>
+  <tr>
+    <td valign="top">A chat front-end</td>
+    <td valign="top">
+      <picture><source media="(prefers-color-scheme: dark)" srcset=".github/readme/compare/openwebui-dark.svg" /><img src=".github/readme/compare/openwebui.svg" width="20" height="20" alt="" /></picture> Open WebUI<br />
+      <picture><source media="(prefers-color-scheme: dark)" srcset=".github/readme/compare/cherrystudio-dark.svg" /><img src=".github/readme/compare/cherrystudio.svg" width="20" height="20" alt="" /></picture> Cherry Studio
+    </td>
+    <td valign="top">One coordinator and a board, not more tabs.</td>
+  </tr>
+  <tr>
+    <td valign="top">A lab's own app</td>
+    <td valign="top">
+      <picture><source media="(prefers-color-scheme: dark)" srcset=".github/readme/compare/claude-dark.svg" /><img src=".github/readme/compare/claude.svg" width="20" height="20" alt="" /></picture> Claude app<br />
+      <picture><source media="(prefers-color-scheme: dark)" srcset=".github/readme/compare/codex-dark.svg" /><img src=".github/readme/compare/codex.svg" width="20" height="20" alt="" /></picture> Codex app
+    </td>
+    <td valign="top">Every lab's agents, on your own plans, one reviewing the other.</td>
+  </tr>
+  <tr>
+    <td valign="top">An AI editor</td>
+    <td valign="top">
+      <picture><source media="(prefers-color-scheme: dark)" srcset=".github/readme/compare/cursor-dark.svg" /><img src=".github/readme/compare/cursor.svg" width="20" height="20" alt="" /></picture> Cursor<br />
+      <picture><source media="(prefers-color-scheme: dark)" srcset=".github/readme/compare/windsurf-dark.svg" /><img src=".github/readme/compare/windsurf.svg" width="20" height="20" alt="" /></picture> Windsurf
+    </td>
+    <td valign="top">Built round projects and tasks rather than files; open source, and tied to no lab.</td>
+  </tr>
+</table>
 
 ## Get started
 
@@ -235,4 +268,4 @@ The most useful thing you can do right now is use Althar on real work and tell u
 
 Althar is open source under the [Apache License 2.0](LICENSE). See [NOTICE](NOTICE).
 
-Claude, ChatGPT, Codex, Gemini, Google, Antigravity, OpenCode, GitHub, Copilot, JetBrains, Junie, Grok, Kimi, Mistral, Qwen, Cursor, GitLab, Bitbucket, Linear, Jira and Trello are trademarks of their owners. Althar isn't affiliated with or endorsed by them.
+Claude, ChatGPT, Codex, Gemini, Google, Antigravity, OpenCode, GitHub, Copilot, JetBrains, Junie, Grok, Kimi, Mistral, Qwen, Cursor, Windsurf, cmux, Paradev, Open WebUI, Cherry Studio, GitLab, Bitbucket, Linear, Jira and Trello are trademarks of their owners. Althar isn't affiliated with or endorsed by them.
