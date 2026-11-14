@@ -19,6 +19,7 @@ const PLAIN: Readonly<Record<string, string>> = {
     'the line of its checks among its needs, which folds their list; its met needs’ line, which folds them',
   'outputs/WhatItMade/WhatItMade.tsx': 'a picture, which opens full size',
   'thread/External/External.tsx': 'the row of an external call',
+  'thread/NoteDetails/NoteDetails.tsx': 'the Details row of a note, which folds the raw answer under it',
   'thread/FileArtifact/FileArtifact.tsx': 'the preview, which opens the file',
   'thread/StartedTask/StartedTask.tsx': 'a started task’s chip, the whole of which opens that task',
   'thread/Canvas/CanvasLine.tsx': 'a canvas’s title and version in its line, which opens it beside the conversation',
