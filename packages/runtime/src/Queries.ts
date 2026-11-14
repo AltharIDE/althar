@@ -92,7 +92,7 @@ import { repliedAt } from './replied'
 import { BETWEEN_AGENTS_MS, betweenAgents, byItself, DRAFTING_MS, isMergeable, stillAsked, stillDrafting } from './needsYou'
 import { mergeNeedsOf, withPushed } from './mergeNeeds'
 import { documentKept, documentText, outputText } from './reading'
-import { type CodeRoot, type CodeRoots, findCode, readCode } from './code'
+import { type CodeRoot, type CodeRoots, findCode, readCode, readCodeImage } from './code'
 import type { Artifacts } from './Artifacts'
 import { type DocumentRefused, GitFailed, NotFound } from './errors'
 import { folderOf, KEPT } from './bringBack'
@@ -1023,6 +1023,7 @@ export class Queries extends Context.Service<
     >
     /** A file there, as findCode named it: as it is now, or at a commit its default branch was at when a message was said. */
     readCode(threadId: string, path: string, commit?: string, line?: number): Effect.Effect<CodeText, SqlError.SqlError | NotFound>
+    readCodeImage(threadId: string, path: string): Effect.Effect<CodeText, SqlError.SqlError | NotFound>
     /** A task's card, as its board shows it: where it stands and what it makes. */
     card(taskId: string): Effect.Effect<TaskCard, unknown>
     /** A project's board: its tasks, by card, and the calls that wait on the person. */
@@ -4276,6 +4277,7 @@ export class Queries extends Context.Service<
         findCode: (threadId, messages) => run(codeFound(threadId, messages)),
         readCode: (threadId, path, commit, line) =>
           run(Effect.flatMap(codeRoots(threadId), (place) => readCode(place, path, commit, line))),
+        readCodeImage: (threadId, path) => run(Effect.flatMap(codeRoots(threadId), (place) => readCodeImage(place, path))),
         card: (taskId) =>
           run(
             Effect.flatMap(cardFor(taskId), (found) =>

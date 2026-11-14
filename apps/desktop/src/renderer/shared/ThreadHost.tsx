@@ -1,5 +1,5 @@
-import { useQuery } from '@tanstack/react-query'
-import { type CSSProperties, useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { type CSSProperties, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 
 import {
   type CanvasRef,
@@ -9,7 +9,9 @@ import {
   type ImageRef,
   Lightbox,
   type ThreadShell,
+  isMarkdownPath,
   ThreadShellProvider,
+  useThreadShell,
   Workbench,
 } from '@althar/ui'
 
@@ -21,7 +23,10 @@ import { pages, usePage } from '../features/browser/pages'
 import { PageView } from '../features/browser/PageView'
 import { CanvasHost, type OpenCanvas } from '../features/canvases/CanvasHost'
 import { type BenchWidth, PAGE_BENCH, useBenchWidth } from './code/bench'
-import { type CodeOpen, useCodeHost } from './code/CodeHost'
+import { pictureOf } from './code/FilePicture'
+import { foundRead } from './code/finds'
+import { wholePath } from './handed'
+import { type CodeOpen, useChangedFile, useCodeHost } from './code/CodeHost'
 
 /*
  * What a thread's screen offers the parts in it (the kit's ThreadShell): a
@@ -239,12 +244,18 @@ const text = { beside: '(opens beside the conversation)' } as const
 /** A document in the side panel: as it was when it opened, then as it is now, read again at each `version`. */
 export function DocumentPanel({
   threadId,
+  taskId,
+  worktree = null,
   doc,
   version,
   onClose,
   onOpen,
 }: {
   threadId: string
+  /** The task whose folder the document is in, for what it changed there; null for none. */
+  taskId?: string | null
+  /** The task's first worktree, which a path a card shows is from; null where it has none. */
+  worktree?: string | null
   doc: DocRef
   /** What the document was last changed by in the thread: a new one reads it again. */
   version: string
@@ -261,12 +272,43 @@ export function DocumentPanel({
     enabled: source !== undefined,
     refetchOnMount: 'always',
   })
+  // Which file it is where the thread's agent works, by its whole path: a task of several repositories names its files by their
+  // repository's name, and a card shows a path from the first one's worktree (or whole, for another's), so neither is the path read by.
+  const cache = useQueryClient()
+  const whole = source === undefined ? null : wholePath(source, worktree)
+  const markdown = whole !== null && isMarkdownPath(whole)
+  const located = useQuery({
+    ...foundRead(client, cache, threadId, null, [whole ?? '']),
+    enabled: markdown,
+  }).data?.get(whole ?? '')
+  const file = located?.kind === 'file' ? located : null
+  // A markdown file the task changed shows what changed, read as the document is, again as it is edited.
+  const change = useChangedFile(taskId ?? null, file?.path ?? '', file !== null && file.changed !== null && taskId != null, version)
+  const code = useThreadShell().code
+  const box = useRef<HTMLDivElement>(null)
+  // Its pictures and links are beside it, where it is.
+  const where = file?.path ?? (doc.path === undefined || doc.path.startsWith('/') ? undefined : doc.path)
+  const folder = where === undefined ? null : where.slice(0, Math.max(0, where.lastIndexOf('/')))
   return (
-    <DocPanel
-      doc={{ ...doc, body: read.data?.body ?? doc.body }}
-      onClose={onClose}
-      {...(onOpen === undefined ? {} : { onOpen })}
-      {...(read.isError ? { error: messageOf(read.error) } : {})}
-    />
+    <div ref={box} style={{ display: 'contents' }}>
+      <DocPanel
+        doc={{ ...doc, body: read.data?.body ?? doc.body }}
+        {...(change == null ? {} : change.whole ? { change: change.lines } : {})}
+        onClose={onClose}
+        {...(onOpen === undefined ? {} : { onOpen })}
+        {...(read.isError ? { error: messageOf(read.error) } : {})}
+        // Its pictures are beside it, in the task's folder.
+        {...(folder === null
+          ? {}
+          : {
+              file: {
+                folder,
+                image: pictureOf(threadId),
+                // A file it links to opens on top of it, with Back, as one named in the document's words does.
+                ...(code?.openByName === undefined ? {} : { open: (path: string) => code.openByName?.(path, box.current) }),
+              },
+            })}
+      />
+    </div>
   )
 }

@@ -585,6 +585,7 @@ describe('the client’s calls', () => {
     await client.getTaskFindings('t1', 'review1')
     expect((await client.readCode('th1', 'src/retry.ts')).text).toBe('const tries = 3')
     await client.readCode('th1', 'src/retry.ts', { commit: 'abc123', line: 7 })
+    await client.readCode('th1', 'docs/flow.png', { image: true })
     await client.getFileDiff('t1', 'src/retry.ts')
     await client.getFileDiff('t1', 'src/retry.ts', true)
     await client.getPlanUsage()
@@ -602,6 +603,7 @@ describe('the client’s calls', () => {
       ['GetTaskFindings', { taskId: 't1', review: 'review1' }],
       ['ReadCode', { threadId: 'th1', path: 'src/retry.ts' }],
       ['ReadCode', { threadId: 'th1', path: 'src/retry.ts', commit: 'abc123', line: 7 }],
+      ['ReadCode', { threadId: 'th1', path: 'docs/flow.png', image: true }],
       ['GetFileDiff', { taskId: 't1', path: 'src/retry.ts' }],
       ['GetFileDiff', { taskId: 't1', path: 'src/retry.ts', untouched: true }],
       ['GetPlanUsage', {}],

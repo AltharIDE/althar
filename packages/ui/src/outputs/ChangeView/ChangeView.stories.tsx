@@ -3,6 +3,7 @@ import { useState } from 'react'
 import { expect, fn, userEvent, waitFor, within } from 'storybook/test'
 
 import { DiffLineKind } from '../../foundations/vocabulary'
+import { GONE_README_DIFF, NEW_README_DIFF, README_DIFF } from '../../fixtures/diffs'
 import { ROUTER_DIFF } from '../../fixtures/meridian'
 import { REVIEW_DIFFS, REVIEW_FILES, REVIEW_FINDINGS, REVIEW_FINDINGS_SETTLED, REVIEW_LOOSE } from '../../fixtures/reviewFindings'
 import { Button } from '../../primitives/Button/Button'
@@ -327,5 +328,110 @@ export const FindingsWithNoFiles: Story = {
     await expect(body.getByRole('region', { name: 'Not in the code' })).toBeInTheDocument()
     await expect(body.getByRole('article')).toHaveTextContent('No picture of the settled note and Usage layout')
     await expect(body.queryByText('Nothing has changed yet.')).toBeNull()
+  },
+}
+
+/** A drawn picture standing in for a file's own, as the host draws it from the task's folder. */
+const picture: NonNullable<ChangeViewProps['markdown']>['image'] = ({ alt, path }) => (
+  <img
+    src={`data:image/svg+xml,${encodeURIComponent(
+      '<svg xmlns="http://www.w3.org/2000/svg" width="420" height="90"><rect width="420" height="90" rx="10" fill="#efe9dd"/><text x="20" y="52" font-family="sans-serif" font-size="15" fill="#5f574b">' +
+        path +
+        '</text></svg>',
+    )}`}
+    alt={alt}
+  />
+)
+
+const MARKDOWN_FILES: ViewedFile[] = [
+  { path: 'README.md', status: 'modified', add: 36, del: 7 },
+  { path: 'docs/retries.md', status: 'added', add: 9, del: 0 },
+  { path: 'docs/hosting.md', status: 'deleted', add: 0, del: 5 },
+  { path: 'src/refunds/router.ts', status: 'modified', add: 12, del: 1 },
+]
+
+const markdown = {
+  args: {
+    files: MARKDOWN_FILES,
+    selected: 'README.md',
+    view: { state: 'ready', lines: README_DIFF, whole: true },
+    markdown: { image: picture, open: fn() },
+  },
+} satisfies Story
+
+/** A markdown file opens as a page: what the change added tinted, what it took out drawn where it was, its picture and links beside it. */
+export const Markdown: Story = {
+  ...markdown,
+  render: (args) => <Choosing {...args} />,
+  play: async ({ canvasElement }) => {
+    const body = within(canvasElement.ownerDocument.body)
+    await expect(body.getByRole('radio', { name: /Rendered/ })).toBeChecked()
+    await expect(body.getByRole('heading', { name: 'Limits and reasons' })).toBeInTheDocument()
+    await expect(body.getAllByRole('group', { name: 'Added' }).length).toBeGreaterThan(0)
+    await expect(body.getAllByRole('group', { name: 'Removed' }).length).toBeGreaterThan(0)
+    await expect(body.getByRole('img', { name: 'How a refund moves' })).toBeInTheDocument()
+    await expect(body.getByRole('table')).toBeInTheDocument()
+  },
+}
+
+/** Source is the diff, as for any file; M goes between the two. */
+export const MarkdownSource: Story = {
+  ...markdown,
+  render: (args) => <Choosing {...args} />,
+  play: async ({ canvasElement }) => {
+    const body = within(canvasElement.ownerDocument.body)
+    await userEvent.click(body.getByRole('radio', { name: /Source/ }))
+    await expect(body.queryByRole('heading', { name: 'Limits and reasons' })).toBeNull()
+    await expect(body.getByRole('group', { name: 'README.md' })).toBeInTheDocument()
+    await userEvent.keyboard('m')
+    await expect(body.getByRole('radio', { name: /Rendered/ })).toBeChecked()
+    await expect(body.getByRole('heading', { name: 'Limits and reasons' })).toBeInTheDocument()
+  },
+}
+
+/** A new markdown file is a page, with nothing to tell its change from; one that is gone is all taken out. */
+export const MarkdownNewAndGone: Story = {
+  ...markdown,
+  render: function Render(args) {
+    const [selected, setSelected] = useState('docs/retries.md')
+    return (
+      <ChangeView
+        {...args}
+        selected={selected}
+        onSelect={setSelected}
+        view={{ state: 'ready', lines: selected === 'docs/retries.md' ? NEW_README_DIFF : GONE_README_DIFF, whole: true }}
+      />
+    )
+  },
+  play: async ({ canvasElement }) => {
+    const body = within(canvasElement.ownerDocument.body)
+    await expect(body.getByRole('heading', { name: 'Retries' })).toBeInTheDocument()
+    await expect(body.queryByRole('group', { name: 'Added' })).toBeNull()
+    await userEvent.click(body.getByRole('button', { name: /hosting\.md/ }))
+    await expect(body.getByRole('group', { name: 'Removed' })).toBeInTheDocument()
+    await expect(body.getByRole('heading', { name: 'Hosting' })).toBeInTheDocument()
+  },
+}
+
+/** Too long to read whole, a markdown file stays a diff, though its first hunk starts at its first line: only the host says its lines are all of the file. */
+export const MarkdownInHunks: Story = {
+  ...markdown,
+  args: {
+    ...markdown.args,
+    view: {
+      state: 'ready',
+      lines: [
+        { kind: DiffLineKind.Hunk, text: '@@ -1,3 +1,3 @@' },
+        { kind: DiffLineKind.Context, old: 1, new: 1, text: '# Refunds' },
+        { kind: DiffLineKind.Removed, old: 2, text: '**20** times a day.' },
+        { kind: DiffLineKind.Added, new: 2, text: 'as often as the plan allows.' },
+        { kind: DiffLineKind.Context, old: 3, new: 3, text: 'The rest of the file is not here.' },
+      ],
+    },
+  },
+  play: async ({ canvasElement }) => {
+    const body = within(canvasElement.ownerDocument.body)
+    await expect(body.queryByRole('radio', { name: /Rendered/ })).toBeNull()
+    await expect(body.getByRole('group', { name: 'README.md' })).toBeInTheDocument()
   },
 }

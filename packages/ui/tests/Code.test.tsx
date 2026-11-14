@@ -1,9 +1,11 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { Lexer } from 'marked'
 import { describe, expect, it, vi } from 'vitest'
 
 import {
+  decisionChange,
   decisionFound,
+  decisionRead,
   limitFn,
   limitsFound,
   limitsMissing,
@@ -12,12 +14,14 @@ import {
   limitsRewritten,
   modelSeveral,
 } from '../src/fixtures/code'
+import { DiffLineKind } from '../src/foundations/vocabulary'
 import { isProse, languageOf, useColoured } from '../src/lib/syntax'
 import {
   codeKey,
   copyOf,
   firstMode,
   type FoundCode,
+  panelMode,
   type FoundFile,
   lineToOpen,
   markOf,
@@ -26,6 +30,7 @@ import {
   withoutLines,
 } from '../src/thread/Code/code'
 import { CodeLines } from '../src/thread/Code/CodeLines'
+import { CodePanel, modesOf } from '../src/thread/Code/CodeView'
 import { codeNamesIn, Markdown } from '../src/thread/Markdown/Markdown'
 import { type CodeShell, ThreadShellProvider } from '../src/thread/Shell/Shell'
 
@@ -247,5 +252,88 @@ describe('names in a message, with a host that finds code', () => {
   it('without a host that finds code, is code text as ever', () => {
     render(<Markdown source="In `src/refunds/limits.ts:22-33`." />)
     expect(screen.queryByRole('button')).not.toBeInTheDocument()
+  })
+})
+
+describe('a markdown file in the panel beside the conversation', () => {
+  const where = { kind: 'task', branch: 'althar/refund-limits' } as const
+  const panel = (more: Partial<Parameters<typeof CodePanel>[0]> = {}) =>
+    render(
+      <CodePanel
+        found={decisionFound}
+        where={where}
+        mode="rendered"
+        onMode={() => {}}
+        read={decisionRead}
+        change={decisionChange}
+        onGo={() => {}}
+        onClose={() => {}}
+        {...more}
+      />,
+    )
+
+  it('opens as a page unless the lines named in it are what was asked for', () => {
+    expect(panelMode(decisionFound)).toBe('rendered')
+    expect(panelMode({ ...decisionFound, line: 4, end: 6 })).toBe('now')
+    expect(panelMode(limitsFound)).toBe('now')
+    expect(panelMode({ ...decisionFound, content: 'binary' })).toBe('now')
+  })
+
+  it('offers the page first, then its source, as it was when said, and what the task changed', () => {
+    expect(modesOf(decisionFound).map((mode) => mode.label)).toEqual(['Rendered', 'Source', 'Change +14 −0'])
+    expect(modesOf({ ...decisionFound, changed: null }).map((mode) => mode.label)).toEqual(['Rendered', 'Source'])
+    expect(modesOf(limitsFound).map((mode) => mode.label)).toEqual(['File', 'Change +41 −3'])
+  })
+
+  it('shows the page with what the task changed marked, and its pictures where the host draws them', () => {
+    panel({
+      read: { ...decisionRead, text: 'Intro.\n# Plan\n![flow](flow.png)' },
+      change: [
+        { kind: DiffLineKind.Hunk, text: '@@ -1,1 +1,3 @@' },
+        { kind: DiffLineKind.Context, old: 1, new: 1, text: 'Intro.' },
+        { kind: DiffLineKind.Added, new: 2, text: '# Plan' },
+        { kind: DiffLineKind.Added, new: 3, text: '![flow](flow.png)' },
+      ],
+      changeWhole: true,
+      markdown: { image: ({ path, alt }) => <img src={`x://${path}`} alt={alt} /> },
+    })
+    expect(screen.getByRole('radio', { name: 'Rendered' })).toBeChecked()
+    expect(within(screen.getByRole('group', { name: 'Added' })).getByRole('heading', { name: 'Plan' })).toBeInTheDocument()
+    expect(screen.getByRole('img', { name: 'flow' })).toHaveAttribute('src', 'x://docs/decisions/flow.png')
+  })
+
+  it('marks nothing where what the task changed is only in hunks, though it starts at the first line', () => {
+    panel({
+      read: { ...decisionRead, text: 'Intro.\n# Plan' },
+      change: [
+        { kind: DiffLineKind.Hunk, text: '@@ -1,1 +1,2 @@' },
+        { kind: DiffLineKind.Context, old: 1, new: 1, text: 'Intro.' },
+        { kind: DiffLineKind.Added, new: 2, text: '# Plan' },
+      ],
+    })
+    expect(screen.getByRole('heading', { name: 'Plan' })).toBeInTheDocument()
+    expect(screen.queryByRole('group', { name: 'Added' })).toBeNull()
+  })
+
+  it('waits for what the task changed before it shows the page, and shows it as it is where that could not be read', () => {
+    const { unmount } = panel({ change: undefined })
+    expect(document.querySelector('[aria-busy="true"]')).not.toBeNull()
+    expect(screen.queryByRole('heading', { name: /Refunds are limited/ })).toBeNull()
+    unmount()
+    panel({ change: null })
+    expect(screen.getByRole('heading', { name: /Refunds are limited/ })).toBeInTheDocument()
+    expect(screen.queryByRole('group', { name: 'Added' })).toBeNull()
+  })
+
+  it('opens another file in the panel when the page links to one', () => {
+    const onGo = vi.fn()
+    panel({ read: { ...decisionRead, text: '[the limiter](../../src/refunds/limits.ts)' }, change: null, onGo })
+    fireEvent.click(screen.getByRole('button', { name: 'the limiter' }))
+    expect(onGo).toHaveBeenCalledWith('src/refunds/limits.ts')
+  })
+
+  it('says it could not read the file, as for any other', () => {
+    panel({ read: null })
+    expect(screen.getByRole('alert')).toHaveTextContent('Couldn’t read this file.')
   })
 })

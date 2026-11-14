@@ -200,7 +200,11 @@ export interface Client {
     messages: ReadonlyArray<{ readonly itemId?: string; readonly names: ReadonlyArray<string> }>,
   ) => Promise<{ readonly place: CodePlace; readonly messages: ReadonlyArray<{ readonly found: ReadonlyArray<CodeFound> }> }>
   /** A file a thread's agent named, by its path as findCode named it: as it is now, or at the commit it was when a message was said. */
-  readonly readCode: (threadId: string, path: string, at?: { readonly commit?: string; readonly line?: number }) => Promise<CodeText>
+  readonly readCode: (
+    threadId: string,
+    path: string,
+    at?: { readonly commit?: string; readonly line?: number; readonly image?: boolean },
+  ) => Promise<CodeText>
   /** A project's board: its tasks, by card, and the calls that wait on the person. */
   readonly getBoard: (projectId: string) => Promise<BoardSnapshot>
   /** The next page of a project's settled tasks, older than the one settled at `before` (`taskId` breaking a tie). */
@@ -866,6 +870,7 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
           path,
           ...(at.commit === undefined ? {} : { commit: at.commit }),
           ...(at.line === undefined ? {} : { line: at.line }),
+          ...(at.image === true ? { image: true } : {}),
         }),
       ),
     getBoard: (projectId) => settle(api.GetBoard({ projectId })),
