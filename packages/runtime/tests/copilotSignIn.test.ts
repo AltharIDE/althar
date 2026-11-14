@@ -21,7 +21,7 @@ import { Instance } from '../src/Instance'
 import { fakeConnectors, items, onTestClock, task, turns } from './support'
 
 const fixture = (
-  withCommand = false,
+  withCommand: boolean | string = false,
   options: { failure?: 'copilot' | 'keyring' | 'storage' | 'defect' | 'remove'; openBrowser?: boolean; sharedIdentity?: boolean } = {},
 ) => {
   const root = mkdtempSync(join(tmpdir(), 'althar-copilot-'))
@@ -79,7 +79,16 @@ const fixture = (
           complete: async (request) => {
             if (withCommand && !prompted.has(request.sessionId)) {
               prompted.add(request.sessionId)
-              return { text: '', tools: [{ id: 'native-command', name: 'run_command', input: { command: 'echo native-command' } }] }
+              return {
+                text: '',
+                tools: [
+                  {
+                    id: 'native-command',
+                    name: 'run_command',
+                    input: { command: typeof withCommand === 'string' ? withCommand : 'echo native-command' },
+                  },
+                ],
+              }
             }
             return { text: 'Ready', tools: [] }
           },
@@ -307,6 +316,30 @@ describe('native Copilot sign-in in the runtime', () => {
       expect(processes[0]).toMatchObject({ state: 'exited', purpose: 'other' })
       expect(processes[0]?.pid).toBeGreaterThan(0)
     }).pipe(Effect.provide(layer), onTestClock)
+  })
+
+  it.live('stops an active native command and records its owned process as killed', () => {
+    const { layer } = fixture(`${process.platform === 'win32' ? '' : 'exec '}node -e "setInterval(() => {}, 1000)"`)
+    return Effect.gen(function* () {
+      const account = yield* (yield* Accounts).add({ agentId: 'copilot-direct', name: 'Work' })
+      const signing = yield* AccountSignIns
+      const { flowId } = yield* signing.start({ accountId: account.id, way: 'browser' })
+      yield* until(signing.get(flowId), (state) => state.state === 'done')
+      const { task: created, project } = yield* task('Stop a native command')
+      yield* (yield* Policies).set(project.projectId, { allowEverything: true }, (yield* Instance).personId)
+      const sessions = yield* Sessions
+      yield* sessions.start({ threadId: created.threadId, agentId: 'copilot-direct' })
+      const sql = yield* SqlClient.SqlClient
+      const children = sql<{ state: string; endedAt: string | null; signal: string | null }>`
+        SELECT p.state, p.ended_at, p.signal FROM processes p JOIN provider_sessions s ON s.id = p.provider_session_id
+        WHERE s.thread_id = ${created.threadId}`
+      yield* until(children, (rows) => rows.some((row) => row.state === 'running'))
+      yield* sessions.stop(created.threadId)
+      const stopped = yield* until(children, (rows) => rows.some((row) => row.state === 'killed'))
+      expect(stopped).toHaveLength(1)
+      expect(stopped[0]?.endedAt).not.toBeNull()
+      expect(stopped[0]?.signal).not.toBe('none')
+    }).pipe(Effect.provide(layer))
   })
   it.effect('owns the device flow and stores the selected account securely without an external engine', () => {
     const { layer, kept, opened } = fixture()
