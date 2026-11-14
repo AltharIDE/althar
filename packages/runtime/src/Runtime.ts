@@ -88,6 +88,7 @@ export interface RuntimeLayerOptions extends RuntimeOptions {
  * can't be copied or migrated fails the build, so nothing runs on it.
  */
 export const layer = (options: RuntimeLayerOptions) => {
+  const copilotClientId = options.copilotClientId ?? options.clientIds?.github
   const store = Layer.mergeAll(Ledger.layer, Commands.layer).pipe(
     Layer.provideMerge(
       startupLayer(
@@ -112,9 +113,7 @@ export const layer = (options: RuntimeLayerOptions) => {
     Layer.provideMerge(options.agents ?? Agents.registry(options.agentStderr)),
     Layer.provideMerge(
       Copilot.layer({
-        ...((options.copilotClientId ?? options.clientIds?.github)
-          ? { clientId: options.copilotClientId ?? options.clientIds?.github }
-          : {}),
+        ...(copilotClientId ? { clientId: copilotClientId } : {}),
         ...(options.copilotEnterpriseClientIds === undefined ? {} : { enterpriseClientIds: options.copilotEnterpriseClientIds }),
         ...(options.fetch === undefined ? {} : { fetch: options.fetch }),
         appVersion: options.appVersion,

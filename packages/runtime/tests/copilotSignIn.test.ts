@@ -117,6 +117,21 @@ const fixture = (
 }
 
 describe('native Copilot sign-in in the runtime', () => {
+  it.live('requires Althar sign-in when no native account provider is connected, without launching an external engine', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const cwd = mkdtempSync(join(tmpdir(), 'althar-native-no-auth-'))
+        const entry = Agents.fromRegistry().list.find((entry) => entry.definition.native === 'copilot')
+        if (!entry) throw new Error('Missing native Copilot')
+        const transport = entry.transport(cwd)
+        expect(transport._tag).toBe('InProcess')
+        const connection = yield* connect({ transport, onPermission: () => Effect.die(new Error('No tools should run while signed out.')) })
+        const error = yield* Effect.flip(connection.newSession({ cwd, mode: 'ask' }))
+        expect(JSON.stringify(error)).toContain('authentication required. Sign in through Althar.')
+      }),
+    ),
+  )
+
   it.effect.each([
     ['copilot', 'This account does not have Copilot Chat access.'],
     ['keyring', 'Unlock your keychain and try again.'],
