@@ -7,7 +7,7 @@ import { Cause, Context, Crypto, Effect, Layer, Option } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { touchTask } from './cards'
-import { stepNote, type StepNote } from './errandNotes'
+import { failedNote, stepNote, type StepNote } from './errandNotes'
 import { Instance } from './Instance'
 import { makeKeyedLock } from './keyedLock'
 import { outward } from './outward'
@@ -509,6 +509,17 @@ export class Errands extends Context.Service<
                   })
                 }),
               )
+            // A step that did not go through says so, plainly, in a line: refused (nothing happened), or not known either way.
+            const sayFailure = (error: unknown) =>
+              Effect.gen(function* () {
+                const message =
+                  typeof error === 'object' && error !== null && 'message' in error && typeof error.message === 'string'
+                    ? error.message
+                    : 'It did not go through.'
+                const note = failedNote(tool, action.target, action.request, message, !(error instanceof ActionNotPerformed))
+                if (errand !== undefined) yield* say(errand, note)
+                else yield* addItem({ projectId: access.projectId as ProjectId, threadId: access.threadId }, 'notice', noteContent(note))
+              }).pipe(Effect.catch(() => Effect.void))
             const answer =
               fresh.state === 'done' && receipt !== undefined
                 ? (fresh.answer ?? 'Already done.')
@@ -551,7 +562,7 @@ export class Errands extends Context.Service<
                             typeof value.answer === 'string'
                           ? { pending: true as const, answer: value.answer }
                           : undefined,
-                  })
+                  }).pipe(Effect.tapError(sayFailure))
             if (typeof answer !== 'string') {
               yield* sql.withTransaction(
                 Effect.gen(function* () {

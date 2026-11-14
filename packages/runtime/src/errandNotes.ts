@@ -32,6 +32,8 @@ export const labelOf = (target: string): NoteLink | null => {
   if (pull !== null) return { label: `#${pull[1]}`, url }
   const request = /\/merge_requests\/(\d+)/.exec(url)
   if (request !== null) return { label: `!${request[1]}`, url }
+  const release = /\/releases\/tag\/([^/?#\s]+)/.exec(url)
+  if (release !== null) return { label: decodeURIComponent(release[1]!), url }
   const key = /\/(?:issue|browse)\/([A-Z][A-Z0-9]*-\d+)/.exec(url)
   if (key !== null) return { label: key[1]!, url }
   return null
@@ -88,6 +90,37 @@ const parse = (answer: string): Parsed | null => {
   return { status, shown: trimmed(JSON.stringify(value, null, 2), DETAILS_MOST), message }
 }
 
+/**
+ * A sentence's addresses as linked labels: "Opened PR #7 (https://…/pull/7)" keeps its own "#7", linked, and loses the address;
+ * any other address becomes its label, or its last part. Each label is a link, so no long address stays in the line.
+ */
+export const linkProse = (prose: string): { readonly text: string; readonly links: ReadonlyArray<NoteLink> } => {
+  const links: Array<NoteLink> = []
+  const add = (link: NoteLink) => {
+    if (!links.some((one) => one.label === link.label)) links.push(link)
+  }
+  const URL = /(\s*\()?(https?:\/\/[^\s)]+?)([.,;:]*)(\)|(?=\s|$))/g
+  const text = prose.replace(URL, (all, open: string | undefined, url: string, tail: string, close: string) => {
+    const label = labelOf(url)
+    const wrapped = open !== undefined && close === ')'
+    if (label !== null && wrapped && prose.includes(label.label)) {
+      add(label)
+      return tail
+    }
+    const last = decodeURIComponent(
+      url
+        .replace(/[?#].*$/, '')
+        .replace(/\/+$/, '')
+        .split('/')
+        .pop() ?? url,
+    )
+    const chosen = label ?? { label: last.length > 0 && last.length <= 40 ? last : url.replace(/^https?:\/\//, '').slice(0, 40), url }
+    add(chosen)
+    return `${wrapped ? `${open}${chosen.label})` : `${open ?? ''}${chosen.label}`}${tail}`
+  })
+  return { text, links }
+}
+
 /** The line a known tool gets, from what it was asked: undefined where the tool has no phrase of its own. */
 const phrase = (tool: string, request: Readonly<Record<string, unknown>>, at: string): string | undefined => {
   switch (tool) {
@@ -135,12 +168,17 @@ export const stepNote = (tool: string, target: string, request: Readonly<Record<
   const links = link === null ? [] : [link]
   const parsed = parse(answer)
   if (parsed === null) {
-    const prose = answer.trim().replace(/\s+/g, ' ')
-    if (prose === '') return { title: `${asWords(tool)}: ${shortTarget(at)}: done`, links }
-    if (prose.length <= TITLE_MOST) return { title: prose, links }
+    const said = answer.trim().replace(/\s+/g, ' ')
+    if (said === '') return { title: `${asWords(tool)}: ${shortTarget(at)}: done`, links }
+    const short = linkProse(said)
+    const all = [...links, ...short.links.filter((one) => !links.some((own) => own.label === one.label))]
+    const prose = short.text
+    // Where it had addresses, the whole sentence is kept for the fold, addresses and all.
+    const whole = short.text === said ? undefined : trimmed(said, DETAILS_MOST)
+    if (prose.length <= TITLE_MOST) return { title: prose, links: all, ...(whole === undefined ? {} : { details: whole }) }
     const cut = prose.lastIndexOf(' ', TITLE_MOST)
     const end = cut > TITLE_MOST / 2 ? cut : TITLE_MOST
-    return { title: `${prose.slice(0, end).trimEnd()}…`, links, details: trimmed(prose, DETAILS_MOST) }
+    return { title: `${prose.slice(0, end).trimEnd()}…`, links: all, details: whole ?? trimmed(said, DETAILS_MOST) }
   }
   const failed = parsed.status !== null && parsed.status >= 400
   const named = phrase(tool, request, link?.label ?? shortTarget(at))
@@ -149,4 +187,26 @@ export const stepNote = (tool: string, target: string, request: Readonly<Record<
     ? `${named === undefined ? `${asWords(tool)}: ${shortTarget(at)}` : `Couldn’t do this: ${named.charAt(0).toLowerCase()}${named.slice(1)}`} — failed: ${parsed.message ?? 'the host refused it'}${status}`
     : (named ?? `${asWords(tool)}: ${shortTarget(at)} — done${status}`)
   return { title, links, details: parsed.shown }
+}
+
+/**
+ * The note for a step that did not go through: what it was, and plainly why. A refusal the host or Althar made proves nothing was
+ * done; anything else is not known to have happened or not, and says so.
+ */
+export const failedNote = (
+  tool: string,
+  target: string,
+  request: Readonly<Record<string, unknown>>,
+  message: string,
+  uncertain: boolean,
+): StepNote => {
+  const at = subject(target)
+  const link = labelOf(at)
+  const named = phrase(tool, request, link?.label ?? shortTarget(at)) ?? `${asWords(tool)} ${shortTarget(at)}`
+  const what = `${named.charAt(0).toLowerCase()}${named.slice(1)}`
+  const why = message.trim().replace(/\s+/g, ' ')
+  const line = uncertain ? `Not sure this went through: ${what} — ${why}` : `Couldn’t do this: ${what} — failed: ${why}`
+  const shown = linkProse(line.length > TITLE_MOST ? `${line.slice(0, TITLE_MOST - 1).trimEnd()}…` : line)
+  const links = link === null ? shown.links : [link, ...shown.links.filter((one) => one.label !== link.label)]
+  return { title: shown.text, links }
 }

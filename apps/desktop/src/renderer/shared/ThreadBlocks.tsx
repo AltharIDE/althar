@@ -20,7 +20,6 @@ import {
   Reasoning,
   Terminal,
   Thinking,
-  NoteDetails,
   ThreadDivider,
   Tool,
   ToolKind,
@@ -659,10 +658,9 @@ export function ThreadBlocks({
         )
       case 'divider':
         return (
-          <div key={block.id} className={s.note}>
-            <ThreadDivider icon="agents">{linkedWords(block.text, block.links)}</ThreadDivider>
-            {block.details !== undefined && <NoteDetails>{block.details}</NoteDetails>}
-          </div>
+          <ThreadDivider key={block.id} icon="agents" {...(block.details === undefined ? {} : { details: block.details })}>
+            {linkedWords(block.text, block.links)}
+          </ThreadDivider>
         )
       case 'offer':
         return (

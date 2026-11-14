@@ -145,3 +145,11 @@
 .jump:active {
   background: var(--hover-paper);
 }
+
+/* a line with its raw answer folded under it: the fold keeps to the column */
+.withDetails {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
