@@ -26,6 +26,7 @@ export interface CatalogAgent {
   readonly id: string
   readonly name: string
   readonly description: string
+  readonly problem?: string | undefined
   readonly version: string | null
   readonly guide: string | null
   readonly command: string | null
@@ -189,7 +190,7 @@ export function AgentCatalog({
                     <strong>{item.name}</strong>
                     <span>{item.description}</span>
                     {item.version !== null && <span>{item.version}</span>}
-                    {item.command === null && <span>No distribution for this device</span>}
+                    {item.command === null && <span>{item.problem ?? 'No distribution for this device'}</span>}
                   </div>
                   <div className={s.actions}>
                     {item.guide !== null && (

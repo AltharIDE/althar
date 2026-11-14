@@ -40,6 +40,10 @@ qualification requirements in [agents](../decisions/agents.md): a built-in adapt
 still needs version-specific evidence for all its command paths, repository
 allow rules, reader tools and native helpers.
 
+Devin, Factory Droid and Auggie retain their existing qualification blockers.
+Their registry rows explain the blocker and cannot be connected; recognized
+custom launches cannot bypass it by omitting their registry identifier.
+
 ## Upstream evidence and remaining qualification
 
 The profile set comes from the requested first and second integration groups.

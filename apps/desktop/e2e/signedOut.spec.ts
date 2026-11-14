@@ -52,7 +52,7 @@ test('a signed-out coordinator leads to its sign-in in Settings, and back to try
 
     await conversation.getByRole('button', { name: 'Sign in again' }).click()
     // Settings, on the agent, its sign-in started where its account is.
-    await expect(page.getByRole('heading', { name: 'Agents' })).toBeVisible()
+    await expect(page.getByRole('heading', { name: 'Agents', exact: true })).toBeVisible()
     const accounts = page.getByRole('list', { name: /accounts$/ })
     await expect(accounts.getByRole('button', { name: 'Cancel signing in' })).toBeVisible()
     await still(page)

@@ -27,7 +27,7 @@ export function AgentCatalogSection({ start, active = true }: { start: StartMode
   }
   const read = useQuery({
     queryKey: key,
-    queryFn: async () => take(await client.agentCatalog()),
+    queryFn: async () => take(await client.getAgentCatalog()),
     refetchOnMount: 'always',
     refetchInterval: (query) =>
       query.state.data?.refreshing === true ||
@@ -42,8 +42,12 @@ export function AgentCatalogSection({ start, active = true }: { start: StartMode
     .map((one) => `${one.connection.id}:${one.version}`)
     .join(',')
   const recheck = start.recheck
+  const previousReady = useRef<string | undefined>(undefined)
   useEffect(() => {
-    if (ready !== undefined) void recheck()
+    if (ready === undefined) return
+    const previous = previousReady.current
+    previousReady.current = ready
+    if (previous !== undefined && previous !== ready) void recheck()
   }, [ready, recheck])
   useEffect(() => {
     if (data === undefined) return
@@ -92,15 +96,14 @@ export function AgentCatalogSection({ start, active = true }: { start: StartMode
       onSave={save}
       onCheck={(id) => {
         const value = connections.get(id)
-        if (value !== undefined)
-          change(id, { ...value, state: 'checking', reason: null, version: null }, () => client.checkAcpConnection(id))
+        if (value !== undefined) change(id, { ...value, state: 'checking', reason: null, version: null }, () => client.startAcpCheck(id))
       }}
       onRemove={(id) => change(id, null, () => client.removeAcpConnection(id))}
       onRefresh={() => {
         setRefreshing(true)
         setError(null)
         void client
-          .agentCatalog(true)
+          .getAgentCatalog(true)
           .then(
             (next) => {
               cache.setQueryData(key, take(next))

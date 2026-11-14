@@ -10,6 +10,8 @@ import {
 import {
   ACP_PROFILES,
   ACP_REGISTRY_URL,
+  ACP_BLOCKED,
+  acpBlocker,
   externalDefinition,
   qualifyAcp,
   registryCommand,
@@ -119,10 +121,13 @@ export class AgentCatalog extends Context.Service<
       for (const row of rows) {
         try {
           const value = decode(row.value)
+          const blocked = acpBlocker(value.connection)
           const kept =
-            value.state === 'checking'
-              ? { ...value, state: 'unchecked' as const, reason: 'The compatibility check was interrupted. Check again.' }
-              : value
+            blocked !== undefined
+              ? { ...value, state: 'failed' as const, version: null, reason: blocked }
+              : value.state === 'checking'
+                ? { ...value, state: 'unchecked' as const, reason: 'The compatibility check was interrupted. Check again.' }
+                : value
           saved.set(kept.connection.id, kept)
           if (kept.state === 'ready' && kept.version !== null) agents.register?.(entryOf(kept.connection, kept.version))
         } catch {
@@ -132,7 +137,9 @@ export class AgentCatalog extends Context.Service<
       const [cache] = yield* sql<{ value: string }>`SELECT value FROM settings WHERE key = ${cachedKey}`
       if (cache !== undefined) {
         try {
-          items = Schema.decodeUnknownSync(Schema.fromJsonString(CatalogSchema.fields.items))(cache.value)
+          items = Schema.decodeUnknownSync(Schema.fromJsonString(CatalogSchema.fields.items))(cache.value).map((item) =>
+            ACP_BLOCKED[item.id] === undefined ? item : { ...item, command: null, problem: ACP_BLOCKED[item.id] },
+          )
         } catch {
           problem = 'The saved agent catalog could not be read. Refresh the registry to replace it.'
         }
@@ -180,9 +187,10 @@ export class AgentCatalog extends Context.Service<
             id: agent.id,
             name: agent.name,
             description: agent.description ?? '',
+            ...(ACP_BLOCKED[agent.id] === undefined ? {} : { problem: ACP_BLOCKED[agent.id] }),
             version: agent.version,
             guide: agent.website ?? agent.repository ?? null,
-            command: launch?.command ?? null,
+            command: ACP_BLOCKED[agent.id] === undefined ? (launch?.command ?? null) : null,
             args: launch?.args ?? [],
             env: { ...('env' in (profile ?? {}) ? (profile as { env: Record<string, string> }).env : {}), ...launch?.env },
             modeOption: profile !== undefined && 'modeOption' in profile ? profile.modeOption : 'mode',
@@ -266,6 +274,8 @@ export class AgentCatalog extends Context.Service<
             Effect.gen(function* () {
               const value = saved.get(id)
               if (value === undefined) return yield* refused('Save the connection before checking it.')
+              const blocked = acpBlocker(value.connection)
+              if (blocked !== undefined) return yield* refused(blocked)
               if (value.state === 'checking') return revision
               yield* inactive(id)
               const checking = { ...value, state: 'checking' as const, reason: null, version: null }

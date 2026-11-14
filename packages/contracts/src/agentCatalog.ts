@@ -24,6 +24,7 @@ export const AcpCatalogItem = Schema.Struct({
   id: Schema.String,
   name: Schema.String,
   description: Schema.String,
+  problem: Schema.optional(Schema.String),
   version: Schema.NullOr(Schema.String),
   guide: Schema.NullOr(Schema.String),
   command: Schema.NullOr(Schema.String),

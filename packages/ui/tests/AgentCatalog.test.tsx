@@ -78,4 +78,11 @@ describe('the agent catalog', () => {
     expect(screen.getByRole('alert')).toHaveTextContent('could not be reached')
     expect(screen.getByRole('button', { name: 'Refresh registry' })).toBeEnabled()
   })
+  it('explains a qualification blocker without describing it as a missing platform', () => {
+    render(<AgentCatalog {...props()} items={[{ ...item, command: null, problem: 'This agent’s Script tool bypasses permissions.' }]} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Browse agents' }))
+    expect(screen.getByText('This agent’s Script tool bypasses permissions.')).toBeVisible()
+    expect(screen.queryByText('No distribution for this device')).toBeNull()
+    expect(screen.getByRole('button', { name: 'Connect Goose' })).toBeDisabled()
+  })
 })

@@ -54,6 +54,29 @@ const manifest = z.object({
 
 export const ACP_REGISTRY_URL = 'https://cdn.agentclientprotocol.com/registry/v1/latest/registry.json'
 
+/** Existing qualification blockers are not waived by a generic behavioral check. */
+export const ACP_BLOCKED: Readonly<Record<string, string>> = {
+  devin: 'Devin has no qualified mode that asks before edits.',
+  'factory-droid': 'Factory Droid’s Script tool can run without asking Althar.',
+  auggie: 'Auggie needs tool-specific permission configuration and a licensing review before joining Althar.',
+}
+export const acpBlocker = (connection: Pick<AcpConnection, 'command' | 'args' | 'registryId'>): string | undefined => {
+  if (connection.registryId !== null && ACP_BLOCKED[connection.registryId] !== undefined) return ACP_BLOCKED[connection.registryId]
+  const executable = basename(connection.command.replaceAll('\\', '/'))
+    .replace(/\.(?:exe|cmd)$/i, '')
+    .toLowerCase()
+  const named = executable === 'droid' ? 'factory-droid' : executable
+  if (ACP_BLOCKED[named] !== undefined) return ACP_BLOCKED[named]
+  if (['npx', 'bunx', 'uvx'].includes(executable)) {
+    for (const argument of connection.args) {
+      if (/^droid(?:@|==|$)/.test(argument)) return ACP_BLOCKED['factory-droid']
+      if (/^@augmentcode\/auggie(?:@|$)/.test(argument)) return ACP_BLOCKED.auggie
+      if (/^devin(?:@|==|$)/.test(argument)) return ACP_BLOCKED.devin
+    }
+  }
+  return undefined
+}
+
 /** Only metadata is read here. Looking through the registry never installs or starts an agent. */
 export const registryIn = (input: unknown) => {
   const parsed = z.union([z.array(manifest).max(1000), z.object({ agents: z.array(manifest).max(1000) })]).parse(input)

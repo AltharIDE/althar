@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { ACP_PROFILES, externalDefinition, registryCommand, registryIn, type AcpConnection } from '../src/catalog'
+import { ACP_PROFILES, acpBlocker, externalDefinition, registryCommand, registryIn, type AcpConnection } from '../src/catalog'
 
 const manifest = (distribution: unknown, more = {}) => ({ id: 'example', name: 'Example', version: '1.2.3', distribution, ...more })
 const read = (distribution: unknown) => registryIn({ agents: [manifest(distribution)] })[0]!
@@ -42,6 +42,14 @@ describe('ACP registry discovery', () => {
 })
 
 describe('external ACP connections', () => {
+  it('retains the known blockers for registry entries, direct commands and package runners', () => {
+    const spec = { registryId: null, command: 'droid', args: [] }
+    expect(acpBlocker(spec)).toContain('Script')
+    expect(acpBlocker({ ...spec, command: '/tools/devin.exe' })).toContain('edits')
+    expect(acpBlocker({ ...spec, command: 'npx', args: ['--yes', '@augmentcode/auggie@0.37.0', '--acp'] })).toContain('licensing')
+    expect(acpBlocker({ ...spec, command: 'renamed', registryId: 'factory-droid' })).toContain('Script')
+    expect(acpBlocker({ ...spec, command: 'goose' })).toBeUndefined()
+  })
   const connection: AcpConnection = {
     id: 'acp-example',
     name: 'Example',

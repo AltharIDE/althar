@@ -41,7 +41,7 @@ describe('agent connection changes in Settings', () => {
     const ack = Promise.withResolvers<number>()
     const older = Promise.withResolvers<AcpCatalog>()
     const read = vi.fn(async () => before)
-    vi.spyOn(client, 'agentCatalog').mockImplementation(read)
+    vi.spyOn(client, 'getAgentCatalog').mockImplementation(read)
     vi.spyOn(client, 'removeAcpConnection').mockImplementation(() => ack.promise)
     const services = servicesFor(client)
     render(
@@ -71,7 +71,7 @@ describe('agent connection changes in Settings', () => {
 
   it('restores a failed removal and reports the failure beside the connections', async () => {
     const { client } = fakeClient()
-    vi.spyOn(client, 'agentCatalog').mockImplementation(async () => before)
+    vi.spyOn(client, 'getAgentCatalog').mockImplementation(async () => before)
     vi.spyOn(client, 'removeAcpConnection').mockImplementation(async () => {
       throw new ApiError({ reason: 'AcpConnectionRefused', message: 'Close the active conversation first.' })
     })

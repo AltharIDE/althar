@@ -9,12 +9,16 @@ import { afterEach, vi } from 'vitest'
 import { Effect, Layer } from 'effect'
 import { SqlClient } from 'effect/sql'
 import { until } from '@althar/testing/effect'
+import { Ids, newId } from '@althar/domain'
 
 import { AgentCatalog } from '../src/AgentCatalog'
 import { Agents } from '../src/Config'
 import { Instance } from '../src/Instance'
 import { Models } from '../src/Models'
-import { runtime as baseRuntime, fakeAgents } from './support'
+import { Projects } from '../src/Projects'
+import { Coordinator } from '../src/Coordinator'
+import * as Runtime from '../src/Runtime'
+import { runtime as baseRuntime, fakeAgents, repository } from './support'
 const mutableAgents = Layer.effect(
   Agents,
   Effect.map(Agents, (all) => Agents.from(all.list)),
@@ -48,6 +52,63 @@ afterEach(() => {
 })
 
 describe('the person’s saved ACP connections', () => {
+  it.live('keeps connections unchanged while their conversations are active', () =>
+    Effect.gen(function* () {
+      const catalog = yield* AgentCatalog
+      const spec = connection()
+      yield* catalog.save(spec)
+      const project = yield* (yield* Projects).open({ envelope: yield* Runtime.envelope('project.open', {}), path: repository() })
+      const threadId = yield* (yield* Coordinator).thread(project.projectId)
+      const sql = yield* SqlClient.SqlClient
+      const id = yield* newId(Ids.providerSession)
+      yield* sql`INSERT INTO provider_sessions ${sql.insert({ id, projectId: project.projectId, threadId, agentId: spec.id, state: 'active', startedAt: new Date().toISOString() })}`
+      for (const action of [catalog.save({ ...spec, name: 'Changed' }), catalog.check(spec.id), catalog.remove(spec.id)]) {
+        const failed = yield* Effect.flip(action)
+        assert.include(failed.message, 'active conversations')
+      }
+      assert.strictEqual((yield* catalog.read()).connections[0]?.connection.name, spec.name)
+    }).pipe(Effect.provide(runtime())),
+  )
+
+  it.live('recovers interrupted checks and isolates corrupt saved metadata without enabling blocked agents', () => {
+    const file = database()
+    const spec = connection()
+    const seed = Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const instance = yield* Instance
+      for (const [key, value] of [
+        [`acp:${instance.deviceId}:${spec.id}`, JSON.stringify({ connection: spec, state: 'checking', reason: null, version: null })],
+        [
+          `acp:${instance.deviceId}:acp-blocked`,
+          JSON.stringify({ connection: { ...spec, id: 'acp-blocked', command: 'devin' }, state: 'ready', reason: null, version: '1' }),
+        ],
+        [`acp:${instance.deviceId}:acp-broken`, 'invalid'],
+        [`acp-registry:${instance.deviceId}`, '{}'],
+        [`acp-revision:${instance.deviceId}`, 'invalid'],
+      ])
+        yield* sql`INSERT INTO settings ${sql.insert({ key, value, updatedAt: new Date().toISOString() })} ON CONFLICT(key) DO UPDATE SET value = excluded.value`
+    }).pipe(Effect.provide(runtime(file)))
+    const read = Effect.gen(function* () {
+      const state = yield* (yield* AgentCatalog).read()
+      assert.strictEqual(state.revision, 0)
+      assert.strictEqual(state.connections.find((one) => one.connection.id === spec.id)?.state, 'unchecked')
+      assert.strictEqual(state.connections.find((one) => one.connection.id === 'acp-blocked')?.state, 'failed')
+      assert.include(state.problem ?? '', 'catalog could not be read')
+      assert.strictEqual((yield* Effect.flip((yield* Agents).get('acp-blocked')))._tag, 'UnknownAgent')
+    }).pipe(Effect.provide(runtime(file)))
+    return Effect.andThen(seed, read)
+  })
+  it.live('refuses a known blocked custom command before starting a compatibility process', () =>
+    Effect.gen(function* () {
+      const catalog = yield* AgentCatalog
+      const spec = { ...connection(), command: 'npx', args: ['--yes', 'droid@1.12.1', 'exec', '--output-format', 'acp-daemon'] }
+      yield* catalog.save(spec)
+      const failed = yield* Effect.flip(catalog.check(spec.id))
+      assert.include(failed.message, 'Script')
+      const sql = yield* SqlClient.SqlClient
+      assert.deepStrictEqual(yield* sql`SELECT id FROM processes WHERE purpose = 'probe'`, [])
+    }).pipe(Effect.provide(runtime())),
+  )
   it.live('restores a qualified connection with its version gate, and a newly registered agent reaches the model catalog', () => {
     const file = database()
     const spec = connection()
@@ -114,6 +175,9 @@ describe('the person’s saved ACP connections', () => {
       const catalog = yield* AgentCatalog
       const spec = connection()
       yield* catalog.save(spec)
+      for (const command of ['\0', ` ${spec.command}`])
+        assert.include((yield* Effect.flip(catalog.save({ ...spec, command }))).message, 'executable')
+      assert.include((yield* Effect.flip(catalog.check('acp-missing'))).message, 'Save the connection')
       const bad = yield* Effect.flip(catalog.save({ ...spec, mode: 'bypassPermissions' }))
       assert.include(bad.message, 'Choose modes')
       yield* Effect.flip(catalog.save({ ...spec, id: '../not-a-connection' }))
@@ -139,7 +203,9 @@ describe('the person’s saved ACP connections', () => {
       const sql = yield* SqlClient.SqlClient
       const spec = { ...connection(), command: 'bun', args: ['-e', 'setInterval(() => {}, 1000)'] }
       yield* catalog.save(spec)
-      yield* catalog.check(spec.id)
+      const revision = yield* catalog.check(spec.id)
+      assert.strictEqual(yield* catalog.check(spec.id), revision)
+      assert.include((yield* Effect.flip(catalog.save(spec))).message, 'Cancel the compatibility check')
       yield* until(sql<{ state: string }>`SELECT state FROM processes WHERE purpose = 'probe'`, (rows) =>
         rows.some((row) => row.state === 'launching'),
       )
@@ -155,6 +221,70 @@ describe('the person’s saved ACP connections', () => {
 })
 
 describe('registry metadata', () => {
+  for (const [name, response] of [
+    ['an oversized advertised response', () => new Response('{}', { headers: { 'content-length': '2000001' } })],
+    ['an oversized streamed response', () => new Response('x'.repeat(2000001))],
+    ['an empty response', () => new Response(null)],
+    ['invalid metadata', () => new Response('not json')],
+  ] as const)
+    it.live(`retains the setup profiles after ${name}`, () => {
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(async () => response()),
+      )
+      return Effect.gen(function* () {
+        const catalog = yield* AgentCatalog
+        yield* catalog.read(true)
+        const result = yield* until(catalog.read(), (state) => !state.refreshing)
+        assert.isNotNull(result.problem)
+        assert.isTrue(result.items.some((one) => one.id === 'cursor'))
+        assert.isEmpty(result.connections)
+      }).pipe(Effect.provide(runtime()))
+    })
+
+  it.live('preserves mode-less profiles, environment and mode options, platform gaps and known blockers across a restart', () => {
+    const file = database()
+    const agents = ['pi-acp', 'muse-code', 'letta', 'devin'].map((id) => ({
+      id,
+      name: id,
+      version: '1.2.3',
+      repository: 'https://example.test/source',
+      distribution: { npx: { package: `${id}@1.2.3`, env: { EXTRA: 'kept' } } },
+    }))
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(
+        async () =>
+          new Response(
+            JSON.stringify({
+              agents: [
+                ...agents,
+                {
+                  id: 'unsupported',
+                  name: 'Unsupported',
+                  version: '1',
+                  website: 'https://example.test/setup',
+                  distribution: { binary: { 'missing-platform': { cmd: 'missing' } } },
+                },
+              ],
+            }),
+          ),
+      ),
+    )
+    const verify = (refresh: boolean) =>
+      Effect.gen(function* () {
+        const catalog = yield* AgentCatalog
+        if (refresh) yield* catalog.read(true)
+        const result = yield* until(catalog.read(), (state) => !state.refreshing)
+        assert.strictEqual(result.items.find((one) => one.id === 'pi-acp')?.mode, null)
+        assert.strictEqual(result.items.find((one) => one.id === 'letta')?.modeOption, 'permissions')
+        assert.deepInclude(result.items.find((one) => one.id === 'muse-code')?.env, { EXTRA: 'kept', MUSE_EXPERIMENTAL_ACP: 'on' })
+        assert.strictEqual(result.items.find((one) => one.id === 'unsupported')?.command, null)
+        assert.include(result.items.find((one) => one.id === 'devin')?.problem ?? '', 'edits')
+        assert.strictEqual(result.items.find((one) => one.id === 'devin')?.command, null)
+      }).pipe(Effect.provide(runtime(file)))
+    return Effect.andThen(verify(true), verify(false))
+  })
   const index = {
     agents: [
       {
