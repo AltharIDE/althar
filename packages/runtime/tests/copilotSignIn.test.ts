@@ -22,7 +22,12 @@ import { fakeConnectors, items, onTestClock, task, turns } from './support'
 
 const fixture = (
   withCommand: boolean | string = false,
-  options: { failure?: 'copilot' | 'keyring' | 'storage' | 'defect' | 'remove'; openBrowser?: boolean; sharedIdentity?: boolean } = {},
+  options: {
+    failure?: 'copilot' | 'keyring' | 'storage' | 'defect' | 'remove'
+    openBrowser?: boolean
+    sharedIdentity?: boolean
+    enterpriseApps?: Readonly<Record<string, string>>
+  } = {},
 ) => {
   const root = mkdtempSync(join(tmpdir(), 'althar-copilot-'))
   const kept = new Map<string, string>()
@@ -37,6 +42,7 @@ const fixture = (
     worktreeRoot: join(root, 'worktrees'),
     accountsRoot: join(root, 'accounts'),
     ...(options.sharedIdentity ? { clientIds: { github: 'althar-shared-app' } } : { copilotClientId: 'althar-test-app' }),
+    ...(options.enterpriseApps === undefined ? {} : { copilotEnterpriseClientIds: options.enterpriseApps }),
     ...(options.openBrowser === false
       ? {}
       : {
@@ -368,7 +374,7 @@ describe('native Copilot sign-in in the runtime', () => {
   })
 
   it.effect('validates the enterprise address and cancels the selected flow without keeping credentials', () => {
-    const { layer, kept, calls, opened } = fixture()
+    const { layer, kept, calls, opened, bodies } = fixture(false, { enterpriseApps: { 'company.ghe.com': 'althar-enterprise-app' } })
     return Effect.gen(function* () {
       const account = yield* (yield* Accounts).add({ agentId: 'copilot-direct', name: 'Work' })
       const signIns = yield* AccountSignIns
@@ -379,6 +385,7 @@ describe('native Copilot sign-in in the runtime', () => {
       expect(yield* until(signIns.get(flowId), (state) => state.state === 'device')).toMatchObject({
         page: 'https://company.ghe.com/login/device',
       })
+      expect(bodies[0]).toContain('client_id=althar-enterprise-app')
       yield* signIns.cancel(flowId)
       yield* TestClock.adjust(Duration.seconds(5))
       expect(yield* signIns.get(flowId)).toMatchObject({ state: 'failed' })
