@@ -1,6 +1,7 @@
 import { type KeyboardEvent, type ReactNode, useId, useRef, useState } from 'react'
 
 import { Icon } from '../../foundations/Icon/Icon'
+import { Button } from '../../primitives/Button/Button'
 import { Problem } from '../../primitives/Problem/Problem'
 import s from './RepositorySetups.module.css'
 
@@ -12,13 +13,22 @@ import s from './RepositorySetups.module.css'
  * coloured shell, and what is typed laid letter for letter over the colours.
  * A change is kept as the person leaves the lines, and only where it changed;
  * Escape puts them back. Until a lead records a repository's setup, its lines
- * are empty and say so.
+ * are empty and say so. Under them: who has it as it is, an agent or the
+ * person (an agent asks before replacing the person's), that new tasks use
+ * it while worktrees made already keep theirs, and a button that clears it
+ * so an agent sets it again.
  */
 
 export const repositorySetupsText = {
   commands: 'Commands',
   copy: 'Copied from your checkout',
-  unrecorded: 'The first task’s lead fills this in.',
+  unrecorded: 'None yet: the first task’s agent sets it.',
+  byAgent: 'Set by an agent.',
+  byPerson: 'Edited by you; an agent asks before replacing it.',
+  newTasks: 'New tasks use this; existing worktrees keep theirs.',
+  clear: 'Clear',
+  sure: 'Clear this setup? The next task’s agent sets it again.',
+  cancel: 'Cancel',
   nothing: 'Needs nothing.',
   noFiles: 'No files.',
   noCheckout: 'No checkout on this computer',
@@ -29,6 +39,8 @@ export const repositorySetupsText = {
 export interface FolderSetup {
   readonly copy: ReadonlyArray<string>
   readonly commands: ReadonlyArray<string>
+  /** Who has it as it is; absent for one the person is typing. */
+  readonly by?: 'agent' | 'person'
 }
 
 export interface SetupRepository {
@@ -44,6 +56,8 @@ export interface RepositorySetupsProps {
   repositories: ReadonlyArray<SetupRepository>
   /** A repository's setup as the person changed it: the whole of it, its lines tidied. */
   onChange: (repositoryId: string, setup: FolderSetup) => void
+  /** The person clears a repository's setup, for an agent to set it again. */
+  onClear: (repositoryId: string) => void
   /** Why the last change didn't hold. */
   error?: string | undefined
 }
@@ -172,8 +186,9 @@ export function SetupLines({ lines, label, placeholder, colour, onSave }: LinesP
   )
 }
 
-export function RepositorySetups({ repositories, onChange, error }: RepositorySetupsProps) {
+export function RepositorySetups({ repositories, onChange, onClear, error }: RepositorySetupsProps) {
   const [chosen, setChosen] = useState<string | null>(null)
+  const [clearing, setClearing] = useState<string | null>(null)
   const tabs = useRef<HTMLDivElement>(null)
   const base = useId()
   const repository = repositories.find((one) => one.id === chosen) ?? repositories[0]
@@ -195,6 +210,14 @@ export function RepositorySetups({ repositories, onChange, error }: RepositorySe
   const setup = repository.setup
   const save = (change: Partial<FolderSetup>) =>
     onChange(repository.id, { copy: setup?.copy ?? [], commands: setup?.commands ?? [], ...change })
+  const who =
+    setup === null
+      ? null
+      : setup.by === 'person'
+        ? repositorySetupsText.byPerson
+        : setup.by === 'agent'
+          ? repositorySetupsText.byAgent
+          : null
   return (
     <div className={s.root}>
       <section className={s.card}>
@@ -237,6 +260,40 @@ export function RepositorySetups({ repositories, onChange, error }: RepositorySe
             onSave={(copy) => save({ copy })}
           />
         </div>
+        {setup !== null && (
+          <div className={s.foot}>
+            {clearing === repository.id ? (
+              <>
+                <span className={s.note}>{repositorySetupsText.sure}</span>
+                <span className={s.actions}>
+                  <Button size="small" onClick={() => setClearing(null)}>
+                    {repositorySetupsText.cancel}
+                  </Button>
+                  <Button
+                    size="small"
+                    variant="danger"
+                    onClick={() => {
+                      setClearing(null)
+                      onClear(repository.id)
+                    }}
+                  >
+                    {repositorySetupsText.clear}
+                  </Button>
+                </span>
+              </>
+            ) : (
+              <>
+                <span className={s.note}>
+                  {who === null ? '' : `${who} `}
+                  {repositorySetupsText.newTasks}
+                </span>
+                <Button size="small" onClick={() => setClearing(repository.id)}>
+                  {repositorySetupsText.clear}
+                </Button>
+              </>
+            )}
+          </div>
+        )}
       </section>
       {error !== undefined && <Problem>{error}</Problem>}
     </div>

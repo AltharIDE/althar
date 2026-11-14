@@ -69,6 +69,25 @@
 .part:first-child {
   border-top: 0;
 }
+.foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 14px;
+  border-top: 1px solid var(--line);
+  background: var(--paper-plain);
+}
+.actions {
+  display: flex;
+  gap: 8px;
+  flex: none;
+}
+.note {
+  font-size: 12px;
+  color: var(--t-3);
+}
+
 /* Lines of code, numbered, coloured with the kit's syntax tokens, set like CodeBlock. */
 .lines {
   display: grid;

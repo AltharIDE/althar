@@ -471,9 +471,10 @@ describe('each section of the settings, as agents change it', () => {
       assert.include(running, '"commands":["bun install"]')
       assert.include(yield* callTool(lead, 'read_settings', { section: 'project/tasks' }), '- branchPattern (Branch names): "work/{slug}"')
       assert.strictEqual((yield* rulesNow(projectId)).branchPattern, 'work/{slug}')
-      // Null puts back what Althar works out: no copies, no commands.
+      // Null puts back what Althar works out: nothing kept.
+      // Null clears what was kept; the next lead records it again.
       yield* callTool(lead, 'change_settings', { section: 'project/running', change: { setup: { [name]: null } } })
-      assert.deepStrictEqual((yield* (yield* Projects).repositories(projectId))[0]?.setup, { copy: [], commands: [] })
+      assert.deepStrictEqual((yield* (yield* Projects).repositories(projectId))[0]?.setup, null)
     }).pipe(Effect.provide(withQueries())),
   )
 

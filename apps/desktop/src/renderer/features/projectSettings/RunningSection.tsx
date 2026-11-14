@@ -82,6 +82,7 @@ export function RunningSection({
               setup: setups.shown(repository.id, repository.setup),
             }))}
             onChange={setups.change}
+            onClear={(id) => setups.change(id, null)}
             error={setups.failed ?? undefined}
           />
         </SettingGroup>

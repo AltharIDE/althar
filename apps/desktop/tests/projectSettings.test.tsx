@@ -195,11 +195,17 @@ describe('a project’s settings', () => {
         setup: { copy: ['.env'], commands: ['bun install --frozen-lockfile', 'bunx playwright install chromium'] },
       }),
     )
+    // Clearing hands it back: the call is made and the lines say nothing is kept.
+    await userEvent.click(screen.getByRole('button', { name: 'Clear' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Clear' }))
+    await waitFor(() =>
+      expect(client.setRepository).toHaveBeenCalledWith({ projectId: 'p1', repositoryId: repositories[0]?.id, setup: null }),
+    )
     // A repository no lead has set up yet says who fills it in.
     await userEvent.click(screen.getByRole('tab', { name: 'meridian-web' }))
     expect(screen.getByRole('textbox', { name: 'meridian-web: commands' })).toHaveProperty(
       'placeholder',
-      'The first task’s lead fills this in.',
+      'None yet: the first task’s agent sets it.',
     )
   })
 
@@ -256,9 +262,13 @@ describe('a project’s settings', () => {
   it('sends a repository’s changes to its setup one after another, and shows the newest until it is kept', async () => {
     let kept = repositories
     let release = () => {}
-    const setRepository = vi.fn(async (input: { repositoryId: string; setup?: RepositorySetup }) => {
+    const setRepository = vi.fn(async (input: { repositoryId: string; setup?: RepositorySetup | null }) => {
       if (setRepository.mock.calls.length === 1) await new Promise<void>((resolve) => (release = resolve))
-      kept = kept.map((each) => (each.id === input.repositoryId && input.setup !== undefined ? { ...each, setup: input.setup } : each))
+      kept = kept.map((each) =>
+        each.id === input.repositoryId && input.setup !== undefined
+          ? { ...each, setup: input.setup === null ? null : { ...input.setup, by: 'person' as const } }
+          : each,
+      )
     })
     const { cache } = windowAt('/projects/p1?room=settings&section=running', {
       setRepository,
@@ -286,7 +296,7 @@ describe('a project’s settings', () => {
       setup: { copy: ['.env', '.env.local'], commands: ['bun install --frozen-lockfile', 'make'] },
     })
     await waitFor(() =>
-      expect(kept[0]?.setup).toEqual({ copy: ['.env', '.env.local'], commands: ['bun install --frozen-lockfile', 'make'] }),
+      expect(kept[0]?.setup).toEqual({ copy: ['.env', '.env.local'], commands: ['bun install --frozen-lockfile', 'make'], by: 'person' }),
     )
     expect(files).toHaveProperty('value', '.env\n.env.local')
   })
@@ -294,9 +304,13 @@ describe('a project’s settings', () => {
   it('keeps a repository’s changes to its setup in order across leaving Running and coming back', async () => {
     let kept = repositories
     let release = () => {}
-    const setRepository = vi.fn(async (input: { repositoryId: string; setup?: RepositorySetup }) => {
+    const setRepository = vi.fn(async (input: { repositoryId: string; setup?: RepositorySetup | null }) => {
       if (setRepository.mock.calls.length === 1) await new Promise<void>((resolve) => (release = resolve))
-      kept = kept.map((each) => (each.id === input.repositoryId && input.setup !== undefined ? { ...each, setup: input.setup } : each))
+      kept = kept.map((each) =>
+        each.id === input.repositoryId && input.setup !== undefined
+          ? { ...each, setup: input.setup === null ? null : { ...input.setup, by: 'person' as const } }
+          : each,
+      )
     })
     windowAt('/projects/p1?room=settings&section=running', { setRepository, getRepositories: vi.fn(async () => kept) })
     const commandsOf = () => screen.getByRole('textbox', { name: 'meridian-api: commands' })

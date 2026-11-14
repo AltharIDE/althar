@@ -1190,7 +1190,8 @@ Superset, Conductor and Codex do, before the lead starts
   whose path it is given) and to record what worked; Althar copies the files
   it names into its folder at once. A later lead whose replay failed is told
   what failed and asked to record the setup that works, which replaces the
-  old one. The person reads it in the project's settings, and changes or
+  old one, unless the person edited it: then `record_setup` has Althar ask them,
+  waits for their answer, and replaces it only if they agree, telling them in the thread. The person reads it in the project's settings, and changes or
   clears it there. Secret files such as `.env` are copied as any other.
 - **When:** as the task's worktrees are made (a draft's too, so it is ready
   by the time its plan starts), and again for a worktree a reopened task
