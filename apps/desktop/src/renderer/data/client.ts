@@ -1,4 +1,5 @@
 import type { SearchDocuments } from '@althar/contracts'
+import type { AcpCatalog, AcpConnection } from '@althar/contracts'
 
 import {
   type CanvasDetail,
@@ -640,6 +641,10 @@ export interface Client {
   readonly getMissedReports: () => Promise<ReadonlyArray<MissedReports>>
   /** Downloads an agent for the person, checks it, and keeps it for Althar to run; done once it is ready. */
   readonly installAgent: (agentId: string) => Promise<void>
+  readonly getAgentCatalog: (refresh?: boolean) => Promise<AcpCatalog>
+  readonly saveAcpConnection: (connection: AcpConnection) => Promise<number>
+  readonly startAcpCheck: (agentId: string) => Promise<number>
+  readonly removeAcpConnection: (agentId: string) => Promise<number>
   /** Opens a task's folder in an editor, at one of its files and a line; whether it could. */
   readonly openInEditor: (input: {
     readonly taskId: string
@@ -1090,6 +1095,10 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
     openInEditor: (input) => command((commandId) => api.OpenInEditor({ commandId, ...input })),
     openCode: (input) => command((commandId) => api.OpenCode({ commandId, ...input })),
     installAgent: (agentId) => command((commandId) => api.InstallAgent({ commandId, agentId })),
+    getAgentCatalog: (refresh = false) => settle(api.GetAgentCatalog({ refresh })),
+    saveAcpConnection: (connection) => command((commandId) => api.SaveAcpConnection({ commandId, connection })),
+    startAcpCheck: (agentId) => command((commandId) => api.CheckAcpConnection({ commandId, agentId })),
+    removeAcpConnection: (agentId) => command((commandId) => api.RemoveAcpConnection({ commandId, agentId })),
     push: (taskId, head, url) => command((commandId) => api.Push({ commandId, taskId, head, ...(url === undefined ? {} : { url }) })),
     ship: (taskId, change) => command((commandId) => api.Ship({ commandId, taskId, ...(change === undefined ? {} : { change }) })),
     fixAfterMerge: (taskId, url) => command((commandId) => api.FixAfterMerge({ commandId, taskId, ...(url === undefined ? {} : { url }) })),

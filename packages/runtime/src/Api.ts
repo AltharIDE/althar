@@ -12,6 +12,7 @@ import {
   SocketAllowed,
   type MessageSender,
   Api,
+  CoreApi,
   ApiError,
   type AgentStatus,
   type Attachment,
@@ -29,6 +30,7 @@ import { RpcServer } from 'effect/rpc'
 import { SqlClient } from 'effect/sql'
 
 import { type Account, Accounts } from './Accounts'
+import { agentCatalogHandlers } from './AgentCatalog'
 import { AccountSignIns } from './AccountSignIns'
 import { Artifacts } from './Artifacts'
 import { Automations } from './Automations'
@@ -235,7 +237,7 @@ export const ConnectionSender = Context.Reference<MessageSender>('@althar/runtim
   defaultValue: () => ({ kind: 'internal' }),
 })
 
-export const handlers = Api.toLayer(
+const coreHandlers = CoreApi.toLayer(
   Effect.gen(function* () {
     const context = yield* Effect.context<Instance | Crypto.Crypto>()
     const sender = yield* ConnectionSender
@@ -758,7 +760,7 @@ export const handlers = Api.toLayer(
       ),
     )
 
-    return Api.of({
+    return CoreApi.of({
       Status: ({ recheck }) =>
         Effect.map(
           api(
@@ -2318,6 +2320,8 @@ export const handlers = Api.toLayer(
     })
   }),
 )
+
+export const handlers = Layer.mergeAll(coreHandlers, agentCatalogHandlers)
 
 /** Whether a file is in a folder, as this system writes paths (`C:\\…` on Windows): not the folder itself, nor out of it by `..`. */
 export const isInside = (

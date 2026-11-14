@@ -26,6 +26,8 @@ An agent joins where Althar sees every command before it runs and can stop it. T
 
 Eleven connections join: Claude Code, Codex, OpenCode, GitHub Copilot, GitHub Copilot CLI, Junie, Grok Build, Kimi Code, Mistral Vibe, Qwen Code and Google Antigravity. The person's own install normally runs where present; native Copilot uses a managed OpenCode engine. Althar can download engines whose licenses allow it. Each entry's `knownGaps` says what it does differently.
 
+Settings also offers [external ACP connections](../plans/acp-catalog.md): registry discovery and custom commands, including twelve setup profiles. These are unavailable until a person runs a version-bound compatibility check. A profile's presence does not qualify its agent as a built-in adapter or waive the requirements above. Generic connections have one existing sign-in, no selected skills or permission-judge role, and cannot lead untrusted repository reviews.
+
 - **Google Antigravity** runs Google's own ACP server (`agy_acp_server.par`), as Orca runs it. Althar downloads it from Google only when the person asks, pinned by sha256, and there is no Windows build. Google's terms may count signing in from a third-party app as a breach, while Google lists the server for other editors. The sign-in says so before the person picks it.
 - **What holds an agent is data in its registry entry,** not code of its own. For example:
   - `options.held` keeps an option at a value for the session's life, such as Copilot's `allow_all` or Junie's `brave_mode`.

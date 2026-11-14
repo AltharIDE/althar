@@ -84,6 +84,7 @@ import { usePostTeamReviews } from './usePostTeamReviews'
 import { type RunOutside, useRunOutside } from './useRunOutside'
 import { useTaskFolders } from './useTaskFolders'
 import { ServersSection, SkillsSection } from './ToolSections'
+import { AgentCatalogSection } from './AgentCatalogSection'
 
 /*
  * Althar's settings, as a tab of the window beside the home's. Down the
@@ -184,6 +185,9 @@ export function SettingsPage({ start, section, onSection, onTask, signIn, accoun
         {...(asked === undefined ? {} : { asked })}
         {...(onTask === undefined ? {} : { onTask })}
       />
+      <div hidden={section !== 'agents'}>
+        <AgentCatalogSection start={start} active={section === 'agents'} />
+      </div>
     </SettingsLayout>
   )
 }

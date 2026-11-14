@@ -1,0 +1,97 @@
+.catalog {
+  display: grid;
+  gap: 14px;
+  padding-top: 24px;
+  border-top: 1px solid var(--line);
+}
+.head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+.head h2 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+}
+.actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.note {
+  margin: 0;
+  color: var(--t-3);
+  font-size: 12px;
+  line-height: 1.55;
+}
+.list,
+.results {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+.results {
+  max-height: 50vh;
+  overflow: auto;
+}
+.row {
+  display: flex;
+  gap: 16px;
+  justify-content: space-between;
+  align-items: start;
+  padding: 14px 0;
+  border-bottom: 1px solid var(--line);
+}
+.words {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+  flex: 1;
+}
+.words strong {
+  font-size: 13px;
+  color: var(--t-1);
+  overflow-wrap: anywhere;
+}
+.words span {
+  color: var(--t-3);
+  font-size: 12px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+.field {
+  display: grid;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--t-2);
+  margin-bottom: 14px;
+  min-width: 0;
+}
+.code {
+  font-family: var(--mono);
+}
+.pair {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 12px;
+}
+.options {
+  padding-top: 14px;
+}
+.catalog summary {
+  font-size: 12px;
+  cursor: pointer;
+}
+@media (max-width: 540px) {
+  .row {
+    flex-direction: column;
+  }
+  .pair {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0;
+  }
+}
