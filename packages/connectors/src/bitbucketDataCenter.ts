@@ -65,6 +65,17 @@ const RepositoryAnswer = Schema.Struct({
   name: Schema.String,
   project: Schema.Struct({ key: Schema.String }),
   links: Schema.optional(Schema.Struct({ self: Schema.optional(Schema.Array(Schema.Struct({ href: Schema.String }))) })),
+  // The repository it was forked from, given only for a fork.
+  origin: Schema.optional(
+    Schema.NullOr(
+      Schema.Struct({
+        slug: Schema.String,
+        project: Schema.Struct({ key: Schema.String }),
+        // Its addresses to clone it by, over HTTP (with scm/) and SSH.
+        links: Schema.optional(Schema.Struct({ clone: Schema.optional(Schema.Array(Schema.Struct({ href: Schema.String }))) })),
+      }),
+    ),
+  ),
 })
 
 const Strategy = Schema.Struct({ id: Schema.String, enabled: Schema.optional(Schema.Boolean) })
@@ -561,6 +572,15 @@ export const makeBitbucketDataCenter = (options: AdapterOptions): CodeHost => {
           webUrl: answer.links?.self?.[0]?.href.replace(/\/browse\/?$/, '') ?? `${web}/projects/${answer.project.key}/repos/${answer.slug}`,
           canPush: writable.values.some((found) => found.id === answer.id),
           merges: mergesOf(enabled, chosen),
+          parent:
+            answer.origin == null
+              ? null
+              : {
+                  path: [answer.origin.project.key, answer.origin.slug],
+                  ...((answer.origin.links?.clone ?? []).length === 0
+                    ? {}
+                    : { addresses: (answer.origin.links?.clone ?? []).map((link) => link.href) }),
+                },
         }
       }),
     findChange,

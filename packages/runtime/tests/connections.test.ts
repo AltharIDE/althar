@@ -458,6 +458,9 @@ describe('a connection', () => {
       assert.strictEqual(connection.webUrl, 'https://git.meridian.dev')
       assert.isNull(yield* connections.hostOf(['https://github.com/meridian/api.git', '/a/local/path']))
       assert.deepStrictEqual((yield* connections.hostOf(['git@git.meridian.dev:meridian/api.git']))?.path, ['meridian', 'api'])
+      // It says which remote reached it, as given: a mirror's where origin's host isn't connected, whose answer is none of origin's.
+      const mirrored = yield* connections.hostOf(['https://github.com/you/api.git', 'git@git.meridian.dev:you/api.git'])
+      assert.strictEqual(mirrored?.remote, 'git@git.meridian.dev:you/api.git')
       // Where a remote is: a hosted service Althar knows, an instance the person connected, a host it doesn't know, or none.
       assert.deepStrictEqual(yield* connections.placeOf('https://github.com/meridian/api.git'), {
         host: 'github.com',

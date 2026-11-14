@@ -200,12 +200,46 @@ describe('GitLab as a code host', () => {
         canPush: true,
         // Squashing allowed, off by default: the project's own way first.
         merges: ['merge', 'squash'],
+        parent: null,
       })
       const outside = yield* host.repository(['gitlab-org', 'cli'])
       assert.deepStrictEqual([outside.canPush, outside.merges], [false, ['merge']])
       const empty = yield* host.repository(['meridian', 'empty'])
       assert.deepStrictEqual([empty.defaultBranch, empty.canPush], ['main', false])
       assert.strictEqual(sent[0]?.url, `${API}/projects/meridian%2Fpayments%2Fapi`)
+    }),
+  )
+
+  it.effect('says the project a fork was forked from, and that one with none given is no fork', () =>
+    Effect.gen(function* () {
+      const project = { id: 7, path_with_namespace: 'dana/payments/api', web_url: 'https://gitlab.com/dana/payments/api' }
+      const { host } = gitlab([
+        [
+          'GET',
+          `${API}/projects/dana%2Fpayments%2Fapi`,
+          { json: { ...project, forked_from_project: { id: 3, path_with_namespace: 'meridian/payments/api' } } },
+        ],
+        ['GET', `${API}/projects/meridian%2Fpayments%2Fapi`, { json: { ...project, id: 3, path_with_namespace: 'meridian/payments/api' } }],
+      ])
+      assert.deepStrictEqual((yield* host.repository(['dana', 'payments', 'api'])).parent, { path: ['meridian', 'payments', 'api'] })
+      assert.isNull((yield* host.repository(['meridian', 'payments', 'api'])).parent)
+    }),
+  )
+
+  it.effect('says the addresses to clone a fork’s parent by, as a server under a path of its own writes them', () =>
+    Effect.gen(function* () {
+      const project = { id: 7, path_with_namespace: 'alice/api', web_url: 'https://git.example.com/gitlab/alice/api' }
+      const parent = {
+        id: 3,
+        path_with_namespace: 'group/api',
+        http_url_to_repo: 'https://git.example.com/gitlab/group/api.git',
+        ssh_url_to_repo: 'git@git.example.com:group/api.git',
+      }
+      const { host } = gitlab([['GET', `${API}/projects/alice%2Fapi`, { json: { ...project, forked_from_project: parent } }]])
+      assert.deepStrictEqual((yield* host.repository(['alice', 'api'])).parent, {
+        path: ['group', 'api'],
+        addresses: ['https://git.example.com/gitlab/group/api.git', 'git@git.example.com:group/api.git'],
+      })
     }),
   )
 

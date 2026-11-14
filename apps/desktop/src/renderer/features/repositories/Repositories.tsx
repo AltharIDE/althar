@@ -80,6 +80,7 @@ export const entryOf = (repository: ProjectRepository): MapRepository => ({
                 upstream: repository.fork.upstream,
                 target: TARGETS[repository.fork.target],
                 ...(repository.fork.canPush === null ? {} : { canPush: repository.fork.canPush }),
+                remote: repository.fork.remote,
               },
             }),
       }),
@@ -128,6 +129,7 @@ export function Repositories({
       adding={model.adding}
       onRoleChange={model.setRole}
       onTargetChange={model.setTarget}
+      onAddRemote={(id) => void model.addParentRemote(id)}
       onLeaveOut={(id) => void model.leaveOut(id)}
       onAdd={() => void model.add()}
       onDrop={(files) => void model.addDropped(files)}

@@ -444,7 +444,15 @@ describe('the Talk room', () => {
     const [api, forked] = repositories
     const offering = {
       ...forked!,
-      fork: { fork: 'you/meridian-web', upstream: 'meridian/web', target: 'upstream' as const, canPush: true, offer: true },
+      fork: {
+        fork: 'you/meridian-web',
+        upstream: 'meridian/web',
+        remote: 'upstream',
+        by: 'names' as const,
+        target: 'upstream' as const,
+        canPush: true,
+        offer: true,
+      },
     }
     const { client } = fakeClient({ getCoordinator: vi.fn(async () => talk()), getRepositories: vi.fn(async () => [api!, offering]) })
     withServices(<Project room={Room.Talk} onTask={vi.fn()} />, client)

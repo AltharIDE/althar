@@ -48,7 +48,16 @@ export type ProjectRepositoriesProps = RootProps<
   'section',
   Pick<
     RepositoryMapProps,
-    'repositories' | 'hosts' | 'reading' | 'worktrees' | 'onRoleChange' | 'onTargetChange' | 'onLeaveOut' | 'onOpen' | 'onConnect'
+    | 'repositories'
+    | 'hosts'
+    | 'reading'
+    | 'worktrees'
+    | 'onRoleChange'
+    | 'onTargetChange'
+    | 'onAddRemote'
+    | 'onLeaveOut'
+    | 'onOpen'
+    | 'onConnect'
   > & {
     project: string
     /** Opens the system's folder picker. Without it, nothing is added here. */
@@ -81,6 +90,7 @@ export function ProjectRepositories({
   worktrees,
   onRoleChange,
   onTargetChange,
+  onAddRemote,
   onLeaveOut,
   onOpen,
   onConnect,
@@ -128,6 +138,7 @@ export function ProjectRepositories({
           className={s.map}
           {...(reading === undefined ? {} : { reading })}
           {...(worktrees === undefined ? {} : { worktrees })}
+          {...(onAddRemote === undefined ? {} : { onAddRemote })}
           {...(onLeaveOut === undefined ? {} : { onLeaveOut })}
           {...(onOpen === undefined ? {} : { onOpen })}
           {...(onConnect === undefined ? {} : { onConnect })}

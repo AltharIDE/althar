@@ -1390,6 +1390,7 @@ export const SCREEN_CHANGES: Readonly<Record<string, string>> = {
   setRepository: 'project/code.repositories',
   addRepositories: 'person: adding a repository is the person’s (project/code says so)',
   leaveOutRepository: 'person: leaving a repository out is the person’s (project/code says so)',
+  addParentRemote: 'person: adds a remote to the person’s clone, for the repository a fork came from; never done for them',
   // project/rules
   setProjectRules: 'project/rules.never',
   // project/notes

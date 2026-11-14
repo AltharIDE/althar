@@ -10,6 +10,7 @@ import { SqlClient } from 'effect/sql'
 import { Changes } from '../src/Changes'
 import { coAuthorLine } from '../src/credit'
 import { NotFound } from '../src/errors'
+import { forgetTold, tell } from '../src/forks'
 import { applyMerge, applyMerges, checkedOut, conflictsOf, planMerge, undoMerge } from '../src/localMerge'
 import { Projects } from '../src/Projects'
 import { Queries } from '../src/Queries'
@@ -125,6 +126,29 @@ describe('merging a task here', () => {
       ])
       assert.strictEqual(git(fork, 'rev-parse', branch), git(worktree, 'rev-parse', 'HEAD'))
     }).pipe(Effect.provide(withQueries()))
+  })
+
+  it.live('never sends a fork’s branch to the fork where the person chose its parent and none of its remotes is that', () => {
+    const root = repository()
+    const fork = mkdtempSync(join(tmpdir(), 'althar-remote-'))
+    git(fork, 'init', '-q', '--bare', '-b', 'main')
+    git(root, 'remote', 'add', 'origin', 'git@github.com:alice/api.git')
+    git(root, 'remote', 'set-url', '--push', 'origin', fork)
+    // Its host said it is a fork of acme/api, which the clone has no remote for.
+    tell('git@github.com:alice/api.git', { path: ['acme', 'api'] }, Date.now())
+    return Effect.gen(function* () {
+      const { task, worktrees } = yield* taskIn([root], root)
+      const worktree = worktrees[0]?.path ?? ''
+      const branch = git(worktree, 'rev-parse', '--abbrev-ref', 'HEAD').toString().trim()
+      const head = commit(worktree, 'retry.ts', 'retry\n')
+      yield* (yield* SqlClient.SqlClient)`UPDATE repository_bindings SET change_target = 'upstream_branch'`
+      // Pushing it isn't offered, and asked anyway, it is refused for want of a remote, and nothing goes anywhere.
+      const seen = yield* Effect.map((yield* Queries).thread(task.threadId, {}), (snapshot) => snapshot.task.here[0]?.remote)
+      assert.isNotOk(seen)
+      const refused = yield* Effect.flip((yield* Changes).pushBranch(task.taskId, [{ repository: worktrees[0]?.slug ?? '', head }]))
+      assert.deepInclude(refused, { _tag: 'NotFound', kind: 'remote' })
+      assert.strictEqual(git(fork, 'branch', '--list', branch).toString(), '')
+    }).pipe(Effect.provide(withQueries()), Effect.ensuring(Effect.sync(forgetTold)))
   })
 
   it.live('says a push address that isn’t a repository, where the person chose to push upstream', () => {

@@ -338,6 +338,11 @@ does.
 - A pull request from the repository's own branch is fetched into
   `origin/<branch>`. A fork's comes from the host's ref (`refs/pull/N/head`,
   `refs/merge-requests/N/head`) into `refs/althar/pull/N`.
+- A fork's own pull requests open on the repository it was forked from, so
+  they are listed and fetched there, by the remote that has it. Where none
+  does, Althar reaches it at its address through its host's connection and
+  fetches into `refs/althar/pull/N`, or says to add it as a remote
+  ([code hosts](code-hosts.md#a-forks-branches)).
 - The picker lists the remote's open pull requests (the newest fifty, and a
   search beyond that), then its branches. A number it didn't list still runs
   that pull request. An unknown branch is refused with the names like it.

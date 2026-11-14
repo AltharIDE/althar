@@ -553,6 +553,8 @@ export interface Client {
   /** Adds the repositories at the folder a grant names. */
   readonly addRepositories: (projectId: string, grant: string) => Promise<void>
   readonly leaveOutRepository: (projectId: string, repositoryId: string) => Promise<void>
+  /** Adds the repository a fork was forked from as a remote of its clone, where none of its remotes is that repository. */
+  readonly addParentRemote: (projectId: string, repositoryId: string) => Promise<void>
   readonly setRepository: (input: {
     readonly projectId: string
     readonly repositoryId: string
@@ -1037,6 +1039,7 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
     getRepositories: (projectId) => settle(api.GetRepositories({ projectId })),
     addRepositories: (projectId, grant) => command((commandId) => api.AddRepositories({ commandId, projectId, grant })),
     leaveOutRepository: (projectId, repositoryId) => command((commandId) => api.LeaveOutRepository({ commandId, projectId, repositoryId })),
+    addParentRemote: (projectId, repositoryId) => command((commandId) => api.AddParentRemote({ commandId, projectId, repositoryId })),
     setRepository: (input) => command((commandId) => api.SetRepository({ commandId, ...input })),
     createBranch: (input) => command((commandId) => api.CreateBranch({ commandId, ...input })),
     getProjectRules: (projectId) => settle(api.GetProjectRules({ projectId })),

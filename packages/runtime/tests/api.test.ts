@@ -16,6 +16,7 @@ import {
 } from '@althar/provider-adapters'
 import { holds, scenarios } from '@althar/provider-adapters/testing'
 import { assert, describe, it } from '@effect/vitest'
+import { afterEach } from 'vitest'
 import { Cause, Context, Duration, Effect, Fiber, Layer, Option, Queue, Stream } from 'effect'
 import { RpcClient } from 'effect/rpc'
 import { SqlClient } from 'effect/sql'
@@ -42,6 +43,7 @@ import {
   TaskRefused,
 } from '../src/errors'
 import { NotConnected } from '../src/Connections'
+import { forgetTold } from '../src/forks'
 import { Projects } from '../src/Projects'
 import * as Runtime from '../src/Runtime'
 import { ALWAYS } from '../src/sandboxReach'
@@ -1646,6 +1648,8 @@ describe('a project’s menu, through the API', () => {
         assert.deepStrictEqual(docs?.fork, {
           fork: 'you/refund-docs',
           upstream: 'meridian/refund-docs',
+          remote: 'upstream',
+          by: 'names',
           target: 'fork',
           canPush: null,
           offer: false,
@@ -1906,6 +1910,192 @@ describe('a fork’s branches upstream, through the API', () => {
           client.SetRepository({ commandId: commandId(), projectId, repositoryId, changeTarget: 'upstream_branch' }),
         )
         assert.strictEqual(refused.reason, 'ProjectRefused')
+      }),
+    ),
+  )
+})
+
+describe('a fork as its host says, through the API', () => {
+  afterEach(() => forgetTold())
+
+  /** A clone of you/site with these remotes besides origin, opened with GitHub connected, its host saying what it was forked from. */
+  const siteOpened = (
+    remotes: ReadonlyArray<string>,
+    parent: ReadonlyArray<string> | null | undefined,
+    more?: { readonly source?: ReadonlyArray<string> },
+  ) =>
+    Effect.gen(function* () {
+      const github = makeFakeService()
+      github.addRepository(['you', 'site'])
+      github.addRepository(['meridian', 'site'])
+      if (parent !== undefined) github.forkFrom(['you', 'site'], parent, more)
+      const { client, grant } = yield* connected({ connectors: fakeConnectors({ github }) })
+      yield* client.ConnectToken({ commandId: commandId(), product: 'github', webUrl: HOST, token: 'ghp_x' })
+      const folder = folderWith({ site: [`origin=${HOST}/you/site.git`, ...remotes] })
+      const project = yield* client.OpenProject({ commandId: commandId(), grant: yield* grant(join(folder, 'site')) })
+      const read = Effect.map(client.GetRepositories({ projectId: project.id }), ([one]) => one)
+      return { client, github, projectId: project.id, path: join(folder, 'site'), read }
+    })
+
+  const remotesOf = (path: string) => execFileSync('git', ['remote', '-v'], { cwd: path }).toString()
+
+  it.live('finds the repository it was forked from among its remotes by its address, whatever it is called', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { read } = yield* siteOpened([`base=${HOST}/Meridian/site`, `dana=${HOST}/dana/site.git`], ['meridian', 'site'])
+        assert.deepInclude((yield* read)?.fork, { fork: 'you/site', upstream: 'meridian/site', remote: 'base', by: 'host', target: 'fork' })
+      }),
+    ),
+  )
+
+  it.live('offers to add it where none of its remotes has it, and adds it beside them, leaving theirs as they were', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { client, projectId, path, read } = yield* siteOpened([`dana=${HOST}/dana/site.git`], ['meridian', 'site'])
+        const before = yield* read
+        assert.deepInclude(before?.fork, { upstream: 'meridian/site', remote: null, by: 'host' })
+        const had = remotesOf(path)
+        yield* client.AddParentRemote({ commandId: commandId(), projectId, repositoryId: before?.id ?? '' })
+        assert.strictEqual(
+          remotesOf(path),
+          `${had}upstream\t${HOST}/meridian/site.git (fetch)\nupstream\t${HOST}/meridian/site.git (push)\n`,
+        )
+        assert.deepInclude((yield* read)?.fork, { remote: 'upstream', by: 'host' })
+        // Asked again, there is nothing more to add.
+        yield* client.AddParentRemote({ commandId: commandId(), projectId, repositoryId: before?.id ?? '' })
+        assert.strictEqual(
+          remotesOf(path)
+            .split('\n')
+            .filter((line) => line.startsWith('upstream')).length,
+          2,
+        )
+      }),
+    ),
+  )
+
+  it.live('adds it once when asked several times at once', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { client, projectId, path, read } = yield* siteOpened([], ['meridian', 'site'])
+        const repositoryId = (yield* read)?.id ?? ''
+        yield* Effect.all(
+          Array.from({ length: 5 }, () => client.AddParentRemote({ commandId: commandId(), projectId, repositoryId })),
+          {
+            concurrency: 'unbounded',
+          },
+        )
+        assert.strictEqual(execFileSync('git', ['remote'], { cwd: path }).toString(), 'origin\nupstream\n')
+      }),
+    ),
+  )
+
+  it.live('sets the default branch of the remote it adds, where it could fetch it', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { client, projectId, path, read } = yield* siteOpened([], ['meridian', 'site'])
+        // The parent's address reaches a repository on disk here, as a host's would.
+        const bare = mkdtempSync(join(tmpdir(), 'althar-parent-'))
+        execFileSync('git', ['clone', '-q', '--bare', path, bare])
+        execFileSync('git', ['config', `url.${bare}.insteadOf`, `${HOST}/meridian/site.git`], { cwd: path })
+        // As a git before 2.48 fetches, which leaves a new remote without its HEAD.
+        yield* Effect.acquireRelease(
+          Effect.sync(() => {
+            Object.assign(process.env, {
+              GIT_CONFIG_COUNT: '1',
+              GIT_CONFIG_KEY_0: 'remote.upstream.followRemoteHEAD',
+              GIT_CONFIG_VALUE_0: 'never',
+            })
+          }),
+          () =>
+            Effect.sync(() => {
+              delete process.env.GIT_CONFIG_COUNT
+              delete process.env.GIT_CONFIG_KEY_0
+              delete process.env.GIT_CONFIG_VALUE_0
+            }),
+        )
+        yield* client.AddParentRemote({ commandId: commandId(), projectId, repositoryId: (yield* read)?.id ?? '' })
+        // Its HEAD, so a task started from it needn't ask the remote for its default branch.
+        const current = execFileSync('git', ['branch', '--show-current'], { cwd: path }).toString().trim()
+        assert.strictEqual(
+          execFileSync('git', ['symbolic-ref', 'refs/remotes/upstream/HEAD'], { cwd: path }).toString().trim(),
+          `refs/remotes/upstream/${current}`,
+        )
+      }),
+    ),
+  )
+
+  it.live('takes `parent` for it where `upstream` names another repository', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        // GitHub says the root of its forks: meridian/site, so someone/site is neither its parent nor its root.
+        const { client, projectId, path, read } = yield* siteOpened([`upstream=${HOST}/someone/site.git`], ['meridian', 'site'], {
+          source: ['meridian', 'site'],
+        })
+        const before = yield* read
+        assert.deepInclude(before?.fork, { upstream: 'meridian/site', remote: null })
+        yield* client.AddParentRemote({ commandId: commandId(), projectId, repositoryId: before?.id ?? '' })
+        assert.include(remotesOf(path), `upstream\t${HOST}/someone/site.git (fetch)`)
+        assert.include(remotesOf(path), `parent\t${HOST}/meridian/site.git (fetch)`)
+        assert.deepInclude((yield* read)?.fork, { remote: 'parent' })
+      }),
+    ),
+  )
+
+  it.live('is no fork where its host says it isn’t and its remotes don’t, and nothing is added', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { client, projectId, read } = yield* siteOpened([`base=${HOST}/meridian/site.git`], null)
+        const one = yield* read
+        assert.isNull(one?.fork)
+        const refused = yield* Effect.flip(client.AddParentRemote({ commandId: commandId(), projectId, repositoryId: one?.id ?? '' }))
+        assert.strictEqual(refused.reason, 'ProjectRefused')
+      }),
+    ),
+  )
+
+  it.live('goes by its remotes’ names where its host can’t be reached, and doesn’t ask it again on every read', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { github, read } = yield* siteOpened([`upstream=${HOST}/meridian/site.git`], undefined)
+        const asks = () => github.calls.filter((call) => call === 'repository').length
+        github.failNext('repository', 'unreachable')
+        assert.deepInclude((yield* read)?.fork, { upstream: 'meridian/site', remote: 'upstream', by: 'names' })
+        // One that failed, or hung until it was given up on, holds up the next reads no more: it is asked again only later.
+        const asked = asks()
+        github.forkFrom(['you', 'site'], ['meridian', 'site'])
+        assert.deepInclude((yield* read)?.fork, { remote: 'upstream', by: 'names' })
+        assert.strictEqual(asks(), asked)
+      }),
+    ),
+  )
+
+  it.live('asks its host once, and goes by what it said until its answer is old', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { github, read } = yield* siteOpened([`upstream=${HOST}/meridian/site.git`], ['meridian', 'site'])
+        assert.deepInclude((yield* read)?.fork, { remote: 'upstream', by: 'host' })
+        const asked = github.calls.filter((call) => call === 'repository').length
+        yield* read
+        assert.strictEqual(github.calls.filter((call) => call === 'repository').length, asked)
+      }),
+    ),
+  )
+
+  it.live('as a fork of a fork, takes its `upstream` at the root of its forks for the repository it goes to', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        // GitHub says you/site is a fork of ninemate/site, itself forked from meridian/site, which the clone has as upstream.
+        const { read } = yield* siteOpened([`upstream=${HOST}/meridian/site.git`], ['ninemate', 'site'], { source: ['meridian', 'site'] })
+        assert.deepInclude((yield* read)?.fork, { upstream: 'meridian/site', remote: 'upstream', by: 'host' })
+      }),
+    ),
+  )
+
+  it.live('as a fork of a fork whose root its host doesn’t say, takes its `upstream` as its remotes’ names do', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { read } = yield* siteOpened([`upstream=${HOST}/meridian/site.git`], ['ninemate', 'site'])
+        assert.deepInclude((yield* read)?.fork, { upstream: 'meridian/site', remote: 'upstream', by: 'names' })
       }),
     ),
   )

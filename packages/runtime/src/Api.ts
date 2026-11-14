@@ -68,6 +68,8 @@ import { Fetches } from './Fetches'
 import { Launches } from './Launches'
 import { LeftBehind } from './LeftBehind'
 import { localTasksIn } from './local'
+import { PARENT_KEPT, tellOf, toldOf } from './forks'
+import { namedRemotes } from './git'
 import { MachineLoad } from './MachineLoad'
 import { modelRooms } from './modelRooms'
 import { PlanUsage } from './PlanUsage'
@@ -177,6 +179,9 @@ const PUSHABLE_KEPT = 5 * 60_000
 
 /** How long a repository's page waits for a host to say who can push: it reads on without. */
 const PUSHABLE_WAIT = Duration.seconds(5)
+
+/** How long a host that didn't say whether a repository is a fork (it failed, took too long, or doesn't say) isn't asked again. */
+const PARENT_RETRY = 5 * 60_000
 
 /** A path as the file system has it, without symbolic links; as given, where it can't be read. */
 /** What an issue card's Always file at once and Always ask first say: to the coordinator, as the person, and to a task's lead. */
@@ -493,6 +498,52 @@ export const handlers = Api.toLayer(
         return can
       })
 
+    /** When each `origin` last had no answer from its host, by its address: asked again only after PARENT_RETRY. */
+    const unanswered = new Map<string, number>()
+
+    /**
+     * Asks the host of a repository's `origin` whether it is a fork, and of
+     * which repository, through the connection that reaches it, and keeps the
+     * answer (forks.ts) for PARENT_KEPT, so reading the project again doesn't
+     * ask again. A host that can't be reached, or doesn't say, leaves what was
+     * known: the remotes' names, or what a host said before; and isn't asked
+     * again for PARENT_RETRY, so one that hangs holds up reading a project's
+     * repositories once, not every time. True where the answer is new.
+     */
+    const askParent = (path: string | null) =>
+      Effect.gen(function* () {
+        if (path === null) return false
+        const origin = (yield* namedRemotes(path).pipe(Effect.orElseSucceed(() => []))).find((remote) => remote.name === 'origin')
+        if (origin === undefined) return false
+        const now = yield* Clock.currentTimeMillis
+        const kept = toldOf(origin.url)
+        if (kept !== undefined && now - kept.at < PARENT_KEPT) return false
+        const missed = unanswered.get(origin.url)
+        if (missed !== undefined && now - missed < PARENT_RETRY) return false
+        const found = yield* Effect.orElseSucceed(connections.hostOf([origin.url]), () => null)
+        if (found === null) return false
+        const read = yield* found.host.repository(found.path).pipe(
+          Effect.timeout(PUSHABLE_WAIT),
+          Effect.orElseSucceed(() => null),
+        )
+        const changed = read !== null && tellOf(origin.url, read, now, found.host.product)
+        if (toldOf(origin.url)?.at === now) unanswered.delete(origin.url)
+        else unanswered.set(origin.url, now)
+        return changed
+      })
+
+    /**
+     * A project's repositories as its page shows them, each fork as its host says, asked first, all at once: where a host's answer
+     * is new, they are read again with it.
+     */
+    const repositoriesShown = (projectId: string) =>
+      Effect.gen(function* () {
+        const first = yield* projects.repositories(projectId)
+        const asked = yield* Effect.forEach(first, (repository) => askParent(repository.path), { concurrency: 'unbounded' })
+        const list = asked.some(Boolean) ? yield* projects.repositories(projectId) : first
+        return yield* Effect.forEach(list, repositoryOf, { concurrency: 'unbounded' })
+      })
+
     /**
      * A repository as its page shows it: where its work goes, from its
      * remote, with the code host Althar knows there and who it is signed in
@@ -508,6 +559,8 @@ export const handlers = Api.toLayer(
             : yield* Effect.map(canPushTo(forked.upstreamUrl), (canPush) => ({
                 fork: forked.fork,
                 upstream: forked.upstream,
+                remote: forked.upstreamRemote,
+                by: forked.by,
                 target: forked.target,
                 canPush,
                 offer: canPush === true && forked.target !== 'upstream_branch' && !forked.offered,
@@ -915,8 +968,7 @@ export const handlers = Api.toLayer(
             }),
           ),
         ),
-      GetRepositories: ({ projectId }) =>
-        api(Effect.flatMap(projects.repositories(projectId), (list) => Effect.forEach(list, repositoryOf))),
+      GetRepositories: ({ projectId }) => api(repositoriesShown(projectId)),
       AddRepositories: ({ commandId, projectId, grant }) =>
         once(
           commandId,
@@ -963,6 +1015,16 @@ export const handlers = Api.toLayer(
                 ...(workToward === undefined ? {} : { workToward }),
                 commandId: said.commandId,
               })
+            }),
+          ),
+        ),
+      AddParentRemote: ({ commandId, projectId, repositoryId }) =>
+        once(
+          commandId,
+          api(
+            Effect.gen(function* () {
+              const said = yield* envelope('project.add_parent_remote', { projectId, repositoryId }, commandId)
+              yield* projects.addParentRemote(projectId, repositoryId, said.commandId)
             }),
           ),
         ),

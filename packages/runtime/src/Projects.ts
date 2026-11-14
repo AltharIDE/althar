@@ -23,7 +23,8 @@ import { postCard } from './cards'
 import { RuntimeConfig } from './Config'
 import { branchFor, conventionsOnBase, ruleOf } from './conventions'
 import { BranchNotFound, ChangeRefused, type GitFailed, NotARepository, NotFound, ProjectRefused, RepositoriesNeeded } from './errors'
-import { type Fork, forkOf } from './forks'
+import { type Fork, forkOf, onRemote, parentRemote } from './forks'
+import { makeKeyedLock } from './keyedLock'
 import { makeScratch } from './firstWrite'
 import {
   addDetachedWorktree,
@@ -33,6 +34,7 @@ import {
   currentBranch,
   defaultBranch,
   fetchBranch,
+  fetchRemote,
   git,
   gitOutcome,
   namedRemotes,
@@ -212,6 +214,10 @@ export interface ProjectRepository {
     readonly fork: string
     readonly upstream: string
     readonly upstreamUrl: string
+    /** The clone's remote the repository it was forked from is on, by whatever name; null where none is, which can be added. */
+    readonly upstreamRemote: string | null
+    /** Who said it is a fork: its host, or its remotes' names alone. */
+    readonly by: 'host' | 'names'
     readonly target: ChangeTarget
     readonly offered: boolean
   } | null
@@ -255,12 +261,11 @@ export const freeSlug = (slug: string, taken: ReadonlyArray<string>) => {
   for (let n = 2; ; n += 1) if (!taken.includes(`${slug}-${n}`)) return `${slug}-${n}`
 }
 
-/** A branch as it is named, without `refs/heads/` or the remote it was spelled with. */
-export const branchName = (named: string) =>
-  named
-    .trim()
-    .replace(/^refs\/(heads|remotes\/[^/]+)\//, '')
-    .replace(/^(origin|upstream)\//, '')
+/** A branch as it is named, without `refs/heads/` or the remote it was spelled with: `origin`, `upstream`, or one of `remotes`. */
+export const branchName = (named: string, remotes: ReadonlyArray<string> = []) => {
+  const plain = named.trim().replace(/^refs\/(heads|remotes\/[^/]+)\//, '')
+  return onRemote(plain, remotes)?.branch ?? plain
+}
 
 /**
  * Where a task starts in a repository: the branch it works toward, else its
@@ -275,11 +280,14 @@ export const startOf = (binding: {
   readonly toward?: string | null
 }) =>
   Effect.gen(function* () {
+    // From the repository it was forked from, by whatever name the clone has it; one the clone hasn't as a remote, from origin.
     const upstream =
-      (binding.changeTarget === 'upstream' || binding.changeTarget === 'upstream_branch') && (yield* forkAt(binding.repository)) !== null
+      binding.changeTarget === 'upstream' || binding.changeTarget === 'upstream_branch'
+        ? parentRemote(yield* forkAt(binding.repository))
+        : null
     const toward = binding.toward ?? null
-    return upstream
-      ? { remote: 'upstream', base: toward ?? (yield* defaultBranch(binding.repository, 'upstream')) }
+    return upstream !== null
+      ? { remote: upstream, base: toward ?? (yield* defaultBranch(binding.repository, upstream)) }
       : { remote: 'origin', base: toward ?? binding.base ?? 'main' }
   })
 
@@ -554,6 +562,16 @@ export class Projects extends Context.Service<
       readonly workToward?: string | null
       readonly commandId?: CommandId
     }): Effect.Effect<void, NotFound | ProjectRefused | BranchNotFound | GitFailed | Failure>
+    /**
+     * Adds the repository a fork was forked from as a remote of its clone, where its host says it is one and none of its remotes
+     * has it: as `upstream`, or `parent` where that name is taken, then fetched. Answers the remote's name. No remote of the
+     * person's is renamed or removed; one already there is left as it is.
+     */
+    addParentRemote(
+      projectId: string,
+      repositoryId: string,
+      commandId?: CommandId,
+    ): Effect.Effect<string, NotFound | ProjectRefused | GitFailed | Failure>
     /**
      * Removes a project from Althar: it leaves the window, its plans stop
      * counting down, its runs end and its calls are withdrawn. Its folders,
@@ -1223,6 +1241,8 @@ export class Projects extends Context.Service<
                         fork: fork.fork.path.join('/'),
                         upstream: fork.upstream.path.join('/'),
                         upstreamUrl: fork.upstream.url,
+                        upstreamRemote: fork.upstream.remote,
+                        by: fork.by,
                         target: row.changeTarget ?? 'fork',
                         offered: row.upstreamOfferAt !== null,
                       },
@@ -1479,6 +1499,42 @@ export class Projects extends Context.Service<
           )
         })
 
+      /** One add of a parent remote at a time in a clone, so two asked at once add it once: the second finds it there. */
+      const parentAdds = makeKeyedLock()
+
+      const addParentRemote = (projectId: string, repositoryId: string, commandId?: CommandId) =>
+        Effect.gen(function* () {
+          const binding = yield* bindingOf(projectId, repositoryId)
+          if (binding.path === null) return yield* new ProjectRefused({ reason: 'not_a_fork' })
+          const path = binding.path
+          return yield* parentAdds.withLock(
+            path,
+            Effect.gen(function* () {
+              const sql = yield* SqlClient.SqlClient
+              const remotes = yield* namedRemotes(path).pipe(Effect.orElseSucceed(() => []))
+              const fork = forkOf(remotes)
+              if (fork === null) return yield* new ProjectRefused({ reason: 'not_a_fork' })
+              if (fork.upstream.remote !== null) return fork.upstream.remote
+              const taken = new Set(remotes.map((remote) => remote.name))
+              const name = taken.has('upstream') ? freeSlug('parent', [...taken]) : 'upstream'
+              yield* git(path, 'remote', 'add', name, fork.upstream.url)
+              // Its branches, to start tasks from; where it can't be reached now, the next fetch brings them. Its default branch
+              // too, as refs/remotes/<name>/HEAD, so starting a task from it needn't ask the remote each time.
+              if (yield* fetchRemote(path, name))
+                yield* git(path, 'remote', 'set-head', name, '--auto').pipe(Effect.orElseSucceed(() => ''))
+              yield* sql.withTransaction(
+                changed(
+                  projectId,
+                  'project.repository_changed',
+                  { repository: binding.name, parentRemote: name, url: fork.upstream.url },
+                  commandId,
+                ),
+              )
+              return name
+            }),
+          )
+        })
+
       const remove = (projectId: string, commandId?: CommandId) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
@@ -1568,6 +1624,7 @@ export class Projects extends Context.Service<
         addRepositories: (projectId, path, commandId) => run(addRepositories(projectId, real(path), commandId)),
         leaveOut: (projectId, repositoryId, commandId) => run(leaveOut(projectId, repositoryId, commandId)),
         setRepository: (input) => run(setRepository(input)),
+        addParentRemote: (projectId, repositoryId, commandId) => run(addParentRemote(projectId, repositoryId, commandId)),
         remove: (projectId, commandId) => run(remove(projectId, commandId)),
       })
     }),
