@@ -68,6 +68,7 @@ import { useAutomationActions, useAutomations } from '../automations/useAutomati
 import { BoardView } from '../board/BoardView'
 import { ChangeTeam, teamChangeOf } from '../team/Team'
 import type { SettingsWays } from '../settings/open'
+import { useSendMidTurn } from '../settings/useSendMidTurn'
 import { useFolds } from '../board/folds'
 import { useClosePullRequests } from '../board/useClosePullRequests'
 import { lanesOf, yoursOf } from '../board/lanes'
@@ -138,6 +139,7 @@ export const text = {
   queued: 'Queued',
   queue: (n: number) => (n === 1 ? 'Queued' : `${n} queued`),
   placeholderBusy: 'Add to the queue, or interrupt the coordinator',
+  placeholderBusySteer: 'Steer the coordinator, or add to the queue',
   /** Whose usage the composer's ring says, under the context. */
   usageHeading: 'Today',
   signedOut: (agent: string, instead: string) => `${agent} isn't signed in. Using ${instead}.`,
@@ -458,6 +460,7 @@ export function ProjectView({
   const session = coordinator?.session ?? null
   const suggested = coordinator?.suggested ?? null
   const busy = session?.turnRunning ?? false
+  const steers = useSendMidTurn()?.to === 'steer'
   const queue = queueShown(session, model.pending, coordinator?.accepting)
   const agentName = (id: string | null) =>
     model.agents.find((agent) => agent.id === id)?.name ?? (id === session?.agentId ? session.agentName : (id ?? ''))
@@ -692,6 +695,7 @@ export function ProjectView({
         }
         onSubmit={(body) => send(body, false)}
         onSendNow={(body) => send(body, true)}
+        steer={steers}
         {...images.props(receiver)}
         comments={comments.map((comment, index) => composerComment(comment, index + 1))}
         onOpenComment={(id) => {
@@ -715,7 +719,9 @@ export function ProjectView({
               ? asidesText.newPlaceholder
               : asidesText.quotePlaceholder
             : busy
-              ? text.placeholderBusy
+              ? steers
+                ? text.placeholderBusySteer
+                : text.placeholderBusy
               : text.placeholder
         }
         // A new aside has used nothing of the coordinator's context.

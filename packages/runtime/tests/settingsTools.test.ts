@@ -194,6 +194,17 @@ describe('settings, for the coordinator and leads', () => {
       const ink = ProjectInk.literals.find((one) => !before.includes(`- ink (Colour): "${one}"`)) ?? 'moss'
       assert.match(yield* callTool(coordinator, 'change_settings', { section: 'project/general', change: { ink } }), /^Changed General/)
       assert.include(yield* callTool(coordinator, 'read_settings', { section: 'project/general' }), `- ink (Colour): "${ink}"`)
+      // What sending does mid-turn queues until it is set to steer, and goes back.
+      assert.include(
+        yield* callTool(coordinator, 'read_settings', { section: 'althar/tasks' }),
+        '- sendMidTurn (What sending does while an agent is mid-turn): "queue"',
+      )
+      assert.match(
+        yield* callTool(coordinator, 'change_settings', { section: 'althar/tasks', change: { sendMidTurn: 'steer' } }),
+        /sending does while an agent is mid-turn: queue → steer/,
+      )
+      assert.include(yield* callTool(coordinator, 'read_settings', { section: 'althar/tasks' }), 'mid-turn): "steer"')
+      yield* callTool(coordinator, 'change_settings', { section: 'althar/tasks', change: { sendMidTurn: 'queue' } })
     }).pipe(Effect.provide(withQueries())),
   )
 

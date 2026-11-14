@@ -84,6 +84,7 @@ import { DraftCard } from '../../shared/DraftCard'
 import { PermissionCalls } from './PermissionCall'
 import { reachOf, reachText, ReviewCard, reviewedUnfurl } from './ReviewCard'
 import { usePostTeamReviews } from '../settings/usePostTeamReviews'
+import { useSendMidTurn } from '../settings/useSendMidTurn'
 import { HeldLimit } from './LimitCall'
 import { StuckCall } from './StuckCall'
 import { coordinatorSigned } from '../../shared/signed'
@@ -155,6 +156,7 @@ export const text = {
   noLead: 'No lead yet',
   lead: 'Lead',
   placeholderBusy: 'Add to the queue, or interrupt the lead',
+  placeholderBusySteer: 'Steer the lead, or add to the queue',
   /** Whose usage the composer's ring says, under the context. */
   usageHeading: 'This task',
   placeholder: (lead: string) => (lead === '' ? 'Tell the lead something' : `Tell ${lead} something`),
@@ -435,6 +437,7 @@ export function TaskView({
   const models = useModels()
   // Whether the person has their team's reviews posted once drafted: what a review's reach says it posts.
   const postsTeamReviews = usePostTeamReviews()?.on === true
+  const steers = useSendMidTurn()?.to === 'steer'
   const [pick, setPick] = useState<Choice | null>(null)
   // A model or effort of the lead's own agent, picked and not yet taken by the runtime.
   const [moving, setMoving] = useState<Choice | null>(null)
@@ -1166,6 +1169,7 @@ export function TaskView({
         }
         onSubmit={(body) => submit(body, false)}
         onSendNow={(body) => submit(body, true)}
+        steer={steers}
         {...images.props(receiver)}
         comments={comments.map((comment, index) => composerComment(comment, index + 1))}
         onOpenComment={(id) => {
@@ -1183,7 +1187,9 @@ export function TaskView({
         onSendQueuedNow={(id) => void sendQueuedNow(id)}
         onUnqueue={(id) => void model.takeBack(id)}
         // An aside's is the coordinator's, in a word: its lead is named in the picker.
-        placeholder={busy ? text.placeholderBusy : embedded ? text.reply : text.placeholder(receiver.name)}
+        placeholder={
+          busy ? (steers ? text.placeholderBusySteer : text.placeholderBusy) : embedded ? text.reply : text.placeholder(receiver.name)
+        }
         meter={contextMeter(session, named, model.compact, { usage: snapshot.usage, heading: text.usageHeading })}
         // Another agent's model hands the task to that agent.
         picker={

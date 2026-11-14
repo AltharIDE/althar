@@ -129,6 +129,8 @@ export interface ComposerText {
   sendNow: string
   /** What Send now does, in its tooltip. */
   sendNowNote: string
+  /** What Queue does, in its tooltip, while Enter sends now instead. */
+  queueNote: string
   sendNowKey: string
   newlineNote: string
   dictate: string
@@ -180,6 +182,7 @@ export const composerText: ComposerText = {
   stopKey: modKey('.'),
   sendNow: 'Send now',
   sendNowNote: 'Interrupts the lead',
+  queueNote: 'Waits for the lead to finish',
   sendNowKey: modKey(keys.enter),
   newlineNote: 'Shift+Enter for a new line',
   dictate: 'Dictate',
@@ -212,6 +215,8 @@ export interface ComposerProps {
   onSubmit: (text: string) => void
   /** While the agent works: send now instead of queueing, with ⌘Enter or the Send now beside the note. Without it, text only queues. */
   onSendNow?: (text: string) => void
+  /** While the agent works, Enter sends now (steers) and the other button and key queue, instead of the other way round. Needs onSendNow. */
+  steer?: boolean
   /** Also the field's accessible name. */
   placeholder: string
   /** The start of the lower row: which model, how hard. A ModelPick. */
@@ -293,6 +298,7 @@ export function Composer({
   onChange,
   onSubmit,
   onSendNow,
+  steer = false,
   placeholder,
   picker,
   meter,
@@ -420,7 +426,9 @@ export function Composer({
     if (now) onSendNow?.(out)
     else onSubmit(out)
   }
-  const submit = (e?: FormEvent, now = false) => {
+  /* Whether Enter, and the arrow, send now: set to steer, while the agent works and there is a way to. */
+  const steering = steer && busy && onSendNow !== undefined
+  const submit = (e?: FormEvent, now = steering) => {
     e?.preventDefault()
     if (finishing !== null) return
     setNotSent(false)
@@ -466,7 +474,8 @@ export function Composer({
      to stop it; text you send waits until it is done with what it is doing, rather than cutting in. */
   const action = (() => {
     if (finishing !== null) return <IconButton icon="up" label={t.finishing} tone="fill" type="submit" busy />
-    if (drafted) return <IconButton icon="up" label={busy ? t.queue : t.send} tone="fill" type="submit" kbd={t.sendKey} />
+    if (drafted)
+      return <IconButton icon="up" label={busy ? (steering ? t.sendNow : t.queue) : t.send} tone="fill" type="submit" kbd={t.sendKey} />
     if (busy && onStopAgent) return <IconButton icon="square" label={t.stop} tone="fill" onClick={onStopAgent} kbd={t.stopKey} />
     if (suggested !== null) return <Kbd className={s.kbd}>{t.takeKey}</Kbd>
     if (hint) return <Kbd className={s.kbd}>{hint}</Kbd>
@@ -662,7 +671,7 @@ export function Composer({
               }
               if (e.key !== 'Enter' || e.shiftKey || e.nativeEvent.isComposing) return
               /* Enter while dictating ends it and waits for what was said, then sends it with the rest (submit). */
-              submit(e, commandDown(e) && sendNowByKey)
+              submit(e, sendNowByKey ? commandDown(e) !== steering : false)
             }}
           />
         </div>
@@ -675,9 +684,14 @@ export function Composer({
               </span>
             )}
             {canSendNow && (
-              <Tooltip label={t.sendNowNote}>
-                <ActionButton className={s.sendNow} onClick={() => submit(undefined, true)} kbd={t.sendNowKey} aria-label={t.sendNow}>
-                  <span className={s.sendNowLabel}>{t.sendNow}</span>
+              <Tooltip label={steering ? t.queueNote : t.sendNowNote}>
+                <ActionButton
+                  className={s.sendNow}
+                  onClick={() => submit(undefined, !steering)}
+                  kbd={t.sendNowKey}
+                  aria-label={steering ? t.queue : t.sendNow}
+                >
+                  <span className={s.sendNowLabel}>{steering ? t.queue : t.sendNow}</span>
                 </ActionButton>
               </Tooltip>
             )}

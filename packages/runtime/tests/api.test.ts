@@ -1031,6 +1031,19 @@ describe('settings, through the API', () => {
     ),
   )
 
+  it.live('queues what is sent mid-turn unless the person sets it to steer', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { client } = yield* connected()
+        assert.strictEqual((yield* client.GetSettings({})).sendMidTurn, 'queue')
+        yield* client.SetSendMidTurn({ commandId: commandId(), to: 'steer' })
+        assert.strictEqual((yield* client.GetSettings({})).sendMidTurn, 'steer')
+        yield* client.SetSendMidTurn({ commandId: commandId(), to: 'queue' })
+        assert.strictEqual((yield* client.GetSettings({})).sendMidTurn, 'queue')
+      }),
+    ),
+  )
+
   it.live('posts the team’s reviews without asking only once the person turns it on, and takes review drafts’ commands', () =>
     Effect.scoped(
       Effect.gen(function* () {

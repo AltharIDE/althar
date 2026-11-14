@@ -1,9 +1,21 @@
-import { newProjectDefaultsText, NewProjectDefaults, PlansAndReviews, SettingGroup, DiffersLine, Problem } from '@althar/ui'
+import {
+  newProjectDefaultsText,
+  NewProjectDefaults,
+  PlansAndReviews,
+  SettingGroup,
+  SettingList,
+  SettingRow,
+  Segmented,
+  Icon,
+  DiffersLine,
+  Problem,
+} from '@althar/ui'
 import type { NewProjectDefaultsValue } from '@althar/ui'
 
 import { type DefaultKey, useDifferingProjects } from './useDifferingProjects'
 import { useNewProjectDefaults } from './useNewProjectDefaults'
 import { usePlansAndReviews } from './usePlansAndReviews'
+import { type SendMidTurn, useSendMidTurn } from './useSendMidTurn'
 import s from './Settings.module.css'
 import { text } from './text'
 
@@ -29,6 +41,7 @@ const worded = (key: DefaultKey, value: unknown): string => {
 
 export function TasksSection() {
   const plans = usePlansAndReviews()
+  const sending = useSendMidTurn()
   const defaults = useNewProjectDefaults()
   const { differing, inEveryProject, busy, failed } = useDifferingProjects(defaults?.value ?? null)
   return (
@@ -37,6 +50,23 @@ export function TasksSection() {
         <SettingGroup title={text.everyTask} headingLevel={2}>
           <PlansAndReviews value={plans.value} onChange={plans.set} />
         </SettingGroup>
+      )}
+      {sending !== null && (
+        <SettingList>
+          <SettingRow title={text.sendMidTurnTitle} note={text.sendMidTurnNote} glyph={<Icon name="up" size={15} />}>
+            {() => (
+              <Segmented<SendMidTurn>
+                label={text.sendMidTurnTitle}
+                value={sending.to}
+                onChange={sending.set}
+                options={[
+                  { value: 'queue', label: text.sendMidTurnQueue },
+                  { value: 'steer', label: text.sendMidTurnSteer },
+                ]}
+              />
+            )}
+          </SettingRow>
+        </SettingList>
       )}
       {defaults !== null && (
         <SettingGroup title={text.newProjects} note={text.newProjectsNote} headingLevel={2}>
@@ -58,7 +88,9 @@ export function TasksSection() {
           />
         </SettingGroup>
       )}
-      {(plans?.failed === true || defaults?.failed === true) && <Problem className={s.failed}>{text.failed}</Problem>}
+      {(plans?.failed === true || defaults?.failed === true || sending?.failed === true) && (
+        <Problem className={s.failed}>{text.failed}</Problem>
+      )}
     </>
   )
 }
