@@ -98,13 +98,14 @@ describe('a changed markdown file, in the task’s changes', () => {
     // Source is the diff, as any file's; M goes back.
     await userEvent.click(within(view).getByRole('radio', { name: /Source/ }))
     expect(within(view).queryByRole('heading', { name: 'Retries' })).toBeNull()
-    expect(within(view).getByText('Tried 2 times.')).toBeTruthy()
+    // Highlighting splits a line into pieces as it lands, so its words are read from the whole.
+    expect(view.textContent).toContain('Tried 2 times.')
     await userEvent.keyboard('m')
     expect(await within(view).findByRole('heading', { name: 'Retries' })).toBeTruthy()
 
     // A file that isn't markdown is its diff, with no way to choose.
     await userEvent.click(within(view).getByRole('button', { name: /limit\.ts/ }))
-    await waitFor(() => expect(within(view).getByText('const tries = 5')).toBeTruthy())
+    await waitFor(() => expect(view.textContent).toContain('const tries = 5'))
     expect(within(view).queryByRole('radio', { name: /Rendered/ })).toBeNull()
   })
 })

@@ -347,7 +347,7 @@ describe('what an agent hands back, on a task', () => {
       ).toBe('true'),
     )
     expect(within(panel).queryByRole('group', { name: 'Added' })).toBeNull()
-    expect(within(panel).getByText('Refunds are paid by hand.')).toBeTruthy()
+    expect(panel.textContent).toContain('Refunds are paid by hand.')
     await user.keyboard('m')
     // A file it links to opens in the panel on top of it, from the document's folder, with Back.
     await user.click(await within(panel).findByRole('button', { name: 'the guide' }))

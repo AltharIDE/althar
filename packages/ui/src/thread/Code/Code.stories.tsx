@@ -157,6 +157,7 @@ function Stateful({
       onMode={setMode}
       read={read}
       change={change}
+      changeWhole
       actions={actions}
       nav={{ at: 2, of: 5, onStep: fn() }}
       onGo={fn()}
