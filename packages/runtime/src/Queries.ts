@@ -3730,8 +3730,12 @@ export class Queries extends Context.Service<
           // Where it stands, from its card, which shows its links too: the header reads those with git, below.
           // Its links are read first and given to it: its kind, and where it opens, depend on its pull requests.
           const links = yield* linksOf(head.taskId)
-          const card: TaskCard | undefined = yield* cardFor(head.taskId, links)
-          const session = yield* sessionOf(threadId)
+          const sessions = yield* Sessions
+          const [found, session, accepting] = yield* Effect.all(
+            [cardFor(head.taskId, links), sessionOf(threadId), sessions.placement(threadId)],
+            { concurrency: 'unbounded' },
+          )
+          const card: TaskCard | undefined = found
           // The last lead that actually started, for its account or a thread that has no plan. A failed replacement isn't its lead.
           const [last] = yield* sql<{ agentId: string; model: string | null; account: string | null }>`
             SELECT s.agent_id, s.model, a.name AS account FROM provider_sessions s LEFT JOIN agent_accounts a ON a.id = s.account_id
@@ -3801,6 +3805,7 @@ export class Queries extends Context.Service<
             WHERE w.task_id = ${head.taskId} AND w.moving_to IS NOT NULL LIMIT 1`
           return {
             threadId,
+            accepting,
             cursor: at,
             usage,
             project: { id: head.projectId, name: head.projectName },
@@ -3950,7 +3955,7 @@ export class Queries extends Context.Service<
               allowEverything: { task: head.allowEverything === 1, project: head.projectAllows === 1 },
               review: yield* reviewBriefOf(head.taskId),
             },
-            session,
+            session: session === null ? null : { ...session, accepting },
             retryable: yield* (yield* Sessions).retryable(threadId),
             conversationVersion:
               (yield* sql<{ version: number }>`SELECT conversation_version AS version FROM threads WHERE id = ${threadId}`)[0]?.version ??
@@ -4002,13 +4007,15 @@ export class Queries extends Context.Service<
           const mark = yield* markOf(threadId)
           const within = mark === null ? {} : mark.earlierShown ? { until: mark.from } : { from: mark.from }
           // Its cards, the agent on it, the one it would start on and the project's host, read at the same time.
-          const [read, session, suggested, host, view] = yield* Effect.all(
+          const sessions = yield* Sessions
+          const [read, session, suggested, host, view, accepting] = yield* Effect.all(
             [
               pageOf(threadId, { ...page, ...within }),
               sessionOf(threadId),
               coordinators.suggested(projectId),
               hostOf(projectId),
               viewOf(threadId),
+              sessions.placement(threadId),
             ],
             { concurrency: 'unbounded' },
           )
@@ -4026,10 +4033,11 @@ export class Queries extends Context.Service<
           const usage = yield* spendingOf({ threadId, since: midnight.toISOString() }).pipe(Effect.orElseSucceed(() => []))
           return {
             threadId,
+            accepting,
             cursor: at,
             usage,
             project: { id: projectId, name: project.name },
-            session,
+            session: session === null ? null : { ...session, accepting },
             retryable: yield* (yield* Sessions).retryable(threadId),
             suggested,
             items,

@@ -1,3 +1,4 @@
+import { MessageMotion } from '../../shared/MessageMotion'
 import { EarlierTurns } from '../../shared/EarlierTurns'
 import { ThreadWaysContext } from '../../shared/ThreadBlocks'
 import { useTurnUndo } from './useTurnUndo'
@@ -692,7 +693,7 @@ export function TaskView({
   const busy = session?.turnRunning ?? false
   // A step that waits on the person: its call, not the thread, has the ways on.
   const stuckOpen = snapshot.attention.some((request) => request.kind === 'stuck')
-  const queue = queueShown(session, model.pending)
+  const queue = queueShown(session, model.pending, snapshot?.accepting)
   const listening = listeningOf(snapshot)
   const wait = waitOf(snapshot.task, upNextWords)
   // What its lead left running, and what Althar runs of it itself (ADR-096); a run's output is in its card.
@@ -1256,7 +1257,7 @@ export function TaskView({
   return (
     <PageOpenerProvider value={opener}>
       <OpenFinding.Provider value={changes.showFindings}>
-        <div className={embedded ? s.aside : s.window}>
+        <MessageMotion className={embedded ? s.aside : s.window}>
           {/* The bar is the header: the way back and which task, then where it stands, its faces and what it opens. */}
           {!embedded && (
             <TitleBar
@@ -1734,7 +1735,7 @@ export function TaskView({
               }
             />
           )}
-        </div>
+        </MessageMotion>
       </OpenFinding.Provider>
     </PageOpenerProvider>
   )

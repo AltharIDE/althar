@@ -3406,6 +3406,8 @@ export const SessionSummary = Schema.Struct({
   effort: Schema.NullOr(Schema.String),
   /** The models the agent offers for this session. */
   models: Schema.Array(Schema.String),
+  /** Whether a new message waits behind work already claimed, including a turn still preparing its prompt. */
+  accepting: Schema.optional(Schema.Literals(['now', 'queued'])),
   turnRunning: Schema.Boolean,
   /** When the turn running started, by the runtime's clock; null between turns. What the wait for its first word is counted from. */
   turnStartedAt: Schema.NullOr(Schema.String),
@@ -3784,6 +3786,8 @@ export type GraphRound = typeof GraphRound.Type
 /** A task's thread: its task and project, the agent working on it, the calls waiting on the person, and a page of its items. */
 export const ThreadSnapshot = Schema.Struct({
   threadId: Schema.String,
+  /** The runtime's placement for a new message, including work between sessions. */
+  accepting: Schema.optional(Schema.Literals(['now', 'queued'])),
   /** The complete visual collection, read independently of the thread's report limit. */
   gallery: Schema.optional(EvidenceGallery),
 
@@ -4117,6 +4121,8 @@ export type ConversationView = typeof ConversationView.Type
  */
 export const CoordinatorSnapshot = Schema.Struct({
   threadId: Schema.String,
+  /** The runtime's placement for a new message, including work between sessions. */
+  accepting: Schema.optional(Schema.Literals(['now', 'queued'])),
   cursor: Cursor,
   /** What the coordinator used today, since this computer's midnight, of each account it ran on (ADR-084). */
   usage: Schema.optional(Schema.Array(AccountUse)),

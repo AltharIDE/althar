@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -6,7 +6,7 @@ import { fileHolds } from '@althar/provider-adapters/testing'
 import { expect, type Locator, type Page, test } from '@playwright/test'
 
 import { repository } from '../tests/repository'
-import { launch, openFirstProject, say, startTask, still, toConversation } from './support'
+import { holdRuntime, launch, openFirstProject, say, startTask, still, toConversation } from './support'
 
 /*
  * Between sending and the first word back, in a real window with the fake
@@ -56,6 +56,11 @@ const shoot = async (page: Page, thread: Locator, name: string) => {
   const clip = { x, y: from.y - 16, width: right - x, height: to.y + to.height + 20 - (from.y - 16) }
   await page.screenshot({ path: `test-results/first-word-${name}.png`, clip, scale: 'css', animations: 'disabled' })
 }
+
+/* The place is read to the pixel, and layout may round an element either way between two reads: a pixel apart is still
+ * the place it stood in, where Thinking's own place is taken by what comes next. */
+const samePlace = (now: { readonly name: number; readonly first: number }, before: { readonly name: number; readonly first: number }) =>
+  Math.abs(now.name - before.name) <= 1 && Math.abs(now.first - before.first) <= 1
 
 /** From now on, frame by frame, whatever the window shows saying Queued: when, where, and what. */
 const watchQueued = (page: Page) =>
@@ -126,7 +131,7 @@ const handedOff = async (
   gates.open(marker)
   await expect(thinking).toHaveCount(0)
   // The name stays where it stood, and what it shows first starts where Thinking was: its words, or a thought or a call.
-  expect(await placeOf(thread)).toEqual(before)
+  expect(samePlace(await placeOf(thread), before)).toBe(true)
   if (first === 'words') await expect(thread.getByRole('article').last().locator('header + *')).toContainText(ANSWER)
   await still(page)
   await shoot(page, thread, `${name}-${first === 'words' ? 'words' : 'first'}`)
@@ -194,7 +199,16 @@ const opened = async (env: Record<string, string> = {}) => {
   const gates = fileHolds(files)
   const launched = await launch(home, { ALTHAR_FAKE_AGENT_HELD: JSON.stringify(files), ...env })
   await openFirstProject(launched.electronApp, launched.page, repository(projects))
-  return { ...launched, gates }
+  return { ...launched, home, gates }
+}
+
+/** How many turns the runtime has ended, from its own log: a signal the window hasn't heard, while its line is held. */
+const turnsEnded = (home: string) => {
+  try {
+    return (readFileSync(join(home, 'profile', 'logs', 'runtime.log'), 'utf8').match(/Turn ended/g) ?? []).length
+  } catch {
+    return 0
+  }
 }
 
 test('holds the reply’s place, thinking, until its first words take it: in the coordinator’s thread and a task’s', async () => {
@@ -324,6 +338,86 @@ test('lets go of Thinking when the turn ends with nothing said, interrupted or d
   try {
     await endsQuietly(page, page.getByRole('region', { name: 'Conversation' }), 'coordinator', gates)
     await endsQuietly(page, await readyTask(page), 'task', gates)
+  } finally {
+    await electronApp.close()
+  }
+})
+
+test('sends mid-turn straight to the queue before the runtime answers, in both chats', async () => {
+  const { electronApp, page } = await opened()
+  try {
+    const check = async (thread: Locator, name: string) => {
+      await say(page, 'Keep thinking. [answers-after:20s]')
+      await expect(thinkingIn(thread)).toBeVisible()
+      await expect(page.getByRole('textbox', { name: /^Add to the queue/ })).toBeVisible()
+      const release = await holdRuntime(page)
+      try {
+        await say(page, 'Then the changelog.')
+        const queue = page.getByRole('region', { name: /queued/i })
+        await expect(queue).toContainText('Then the changelog.')
+        await expect(thread.getByText('Then the changelog.', { exact: true })).toHaveCount(0)
+        await still(page)
+        await queue.screenshot({ path: `test-results/mid-turn-${name}-pending.png`, scale: 'css' })
+      } finally {
+        await release()
+      }
+      await expect(page.getByRole('region', { name: /queued/i })).toContainText('Then the changelog.')
+      await expect(page.locator('[data-item^="sending:"]')).toHaveCount(0)
+      await expect(thread.getByText('Then the changelog.', { exact: true })).toHaveCount(0)
+      await still(page)
+      await page.getByRole('region', { name: /queued/i }).screenshot({ path: `test-results/mid-turn-${name}-accepted.png`, scale: 'css' })
+      await page.getByRole('button', { name: /^Interrupt the/ }).click()
+      await expect(page.getByRole('region', { name: /queued/i })).toHaveCount(0)
+    }
+    await check(page.getByRole('region', { name: 'Conversation' }), 'coordinator')
+    await check(await readyTask(page), 'task')
+  } finally {
+    await electronApp.close()
+  }
+})
+
+test('corrects a queued guess into the thread without a jump when the turn ended unseen, in both chats', async () => {
+  const { electronApp, page, home } = await opened()
+  try {
+    const check = async (thread: Locator, name: string) => {
+      await say(page, 'Nearly done. [answers-after:8s]')
+      const thinking = thinkingIn(thread)
+      await expect(thinking).toBeVisible()
+      // Its countdown says a turn of its own runs, so the first send has reached the runtime before the line is held.
+      await expect(thinking).toContainText(/Thinking\s*(?:[3-9]|\d{2,})s/)
+      const ended = turnsEnded(home)
+      const release = await holdRuntime(page)
+      try {
+        // The runtime ends the turn while its line to the window is held: the cached snapshot still says mid-turn.
+        await expect.poll(() => turnsEnded(home)).toBeGreaterThan(ended)
+        await say(page, 'Then the changelog.')
+        const queue = page.getByRole('region', { name: /queued/i })
+        await expect(queue).toContainText('Then the changelog.')
+        await expect(thread.getByText('Then the changelog.', { exact: true })).toHaveCount(0)
+        const move = await queue.locator('li[data-move]').last().getAttribute('data-move')
+        await still(page)
+        await queue.screenshot({ path: `test-results/mid-turn-${name}-corrected-before.png`, scale: 'css' })
+        await release()
+        // Taken now: it moves into the thread, one copy, under the same motion identity, so nothing jumps.
+        await expect(page.getByRole('region', { name: /queued/i })).toHaveCount(0)
+        await expect(thread.getByText('Then the changelog.', { exact: true })).toHaveCount(1)
+        const said = thread.getByRole('article', { name: /^You/ }).last()
+        await expect(said).toHaveAttribute('data-move', move ?? '')
+        await still(page)
+        const box = await said.boundingBox()
+        if (box === null) throw new Error('Nothing to shoot')
+        await page.screenshot({
+          path: `test-results/mid-turn-${name}-corrected-after.png`,
+          clip: { x: box.x - 20, y: box.y - 16, width: box.width + 40, height: box.height + 32 },
+          scale: 'css',
+          animations: 'disabled',
+        })
+      } finally {
+        await release()
+      }
+    }
+    await check(page.getByRole('region', { name: 'Conversation' }), 'coordinator')
+    await check(await readyTask(page), 'task')
   } finally {
     await electronApp.close()
   }

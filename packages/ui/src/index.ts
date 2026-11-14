@@ -289,5 +289,7 @@ export * from './setup/SettingsNav/SettingsNav'
 export * from './setup/SettingsLayout/SettingsLayout'
 export * from './setup/EdgeMini/EdgeMini'
 export * from './lib/commandGlance'
+
+export { ListMotion } from './lib/ListMotion'
 /* The kit's timings, for motion the app writes itself (ADR-069): the search palette's morphs. */
 export { MOTION, reducedMotion, SCALE } from './lib/motion'

@@ -248,24 +248,27 @@ describe('what the person sends', () => {
 })
 
 describe('the composer queue', () => {
-  it('leaves what the person is sending out of the queue, while what waited before it is there', () => {
+  it('shows what the person is sending in the queue with what waited before it', () => {
     const onItsWay = sending([{ ...items.you('Add a retry'), sequence: 4 }], {
       text: 'Retry',
       queued: true,
       interrupting: false,
     })
-    expect(queuedOf(onItsWay.items, true)).toEqual([])
+    expect(queuedOf(onItsWay.items, true).map((one) => one.text)).toEqual(['Retry'])
     const waited = { ...items.you('Also this'), id: 'i5', sequence: 5, input: { state: 'queued' as const, interrupting: false } }
-    expect(queuedOf([...onItsWay.items, waited], true).map((one) => one.text)).toEqual(['Also this'])
+    expect(queuedOf([...onItsWay.items, waited], true).map((one) => one.text)).toEqual(['Retry', 'Also this'])
   })
 
-  it('shows behind a turn running, or with no agent to take what waits, but not while the person is sending', () => {
+  it('shows behind a turn running, or with no agent to take what waits, including while the person is sending behind a running turn', () => {
     expect(queueShown({ turnRunning: true }, false)).toBe(true)
     expect(queueShown({ turnRunning: false }, false)).toBe(false)
     expect(queueShown(null, false)).toBe(true)
     expect(queueShown(null, true)).toBe(false)
-    // What the person just sent goes straight to the thread though a turn runs, rather than flash in the queue.
-    expect(queueShown({ turnRunning: true }, true)).toBe(false)
+    // Sending behind a running turn never puts the message in the thread.
+    expect(queueShown({ turnRunning: true }, true)).toBe(true)
+    // The runtime's accepting is enough, even when the cached turnRunning is stale.
+    expect(queueShown({ turnRunning: false }, true, 'queued')).toBe(true)
+    expect(queueShown({ turnRunning: false }, true, 'now')).toBe(false)
   })
 
   it('has what waits read now while the person sends, or the agent holds the thread or starts, but not behind a turn or a wait', () => {
