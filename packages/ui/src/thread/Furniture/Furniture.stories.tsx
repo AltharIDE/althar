@@ -6,7 +6,7 @@ import { threadDecorator } from '../../storybook/ThreadFrame'
 import { Prose, Turn } from '../Turn/Turn'
 import { expect, fn, userEvent, within } from 'storybook/test'
 
-import { Interrupted, JumpToLatest, LeadLine, LimitMoved, ModelSwap, Restarted, ThreadDivider, ThreadEmpty } from './Furniture'
+import { Compacted, Interrupted, JumpToLatest, LeadLine, LimitMoved, ModelSwap, Restarted, ThreadDivider, ThreadEmpty } from './Furniture'
 import { States, statesOn } from '../../storybook/States'
 
 const meta = {
@@ -19,6 +19,21 @@ export default meta
 type Story = StoryObj<typeof meta>
 
 export const ContextCompacted: Story = {}
+/** As the agent reports a compaction itself: its line, and the summary it kept, opened. */
+export const ContextCompactedSummary: Story = {
+  render: () => (
+    <Compacted
+      defaultOpen
+      summary={
+        <p style={{ margin: 0 }}>
+          We were fixing the checkout retry: a 429 now waits out its Retry-After, in seconds or as a date, and retries once.
+        </p>
+      }
+    >
+      Context compacted · 212k → 38k tokens
+    </Compacted>
+  ),
+}
 /** You interrupted a turn with the composer's square; the task kept going. */
 export const InterruptedByYou: Story = {
   render: () => (

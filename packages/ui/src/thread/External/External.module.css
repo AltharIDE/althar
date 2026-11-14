@@ -23,6 +23,11 @@
 .row:active {
   background: var(--paper);
 }
+/* a row that doesn't open: nothing answers the pointer */
+.plain:hover,
+.plain:active {
+  background: none;
+}
 .fav {
   display: grid;
   place-items: center;

@@ -481,6 +481,11 @@ describe('thinking, as it goes and once it is done', () => {
     const ended = after(items.says(''), 14).createdAt
     expect(parts(turnOf(ended)).at(-1)).toMatchObject({ kind: 'thought', took: '12s' })
     expect(turnOf(ended)).toMatchObject({ took: '13s' })
+    // The person stopped it: the line that says so comes after it, and its thought still ran until then.
+    const stopped = [...thread, after(items.notice({ source: 'runtime', role: 'interrupted', title: 'Interrupted by you.' }, null), 14)]
+    const interrupted = blocksOf({ ...source(stopped), turnEnded: ended }, new Map(), at)
+    expect(interrupted.map((block) => block.kind)).toContain('interrupted')
+    expect(parts(interrupted.find((block) => block.kind === 'turn')).at(-1)).toMatchObject({ kind: 'thought', took: '12s' })
     // Not known, it says only that it thought.
     expect(parts(turnOf(null)).at(-1)).toMatchObject({ took: null })
     // Asked again since, the end said is a later turn's.

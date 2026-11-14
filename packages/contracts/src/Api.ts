@@ -1866,6 +1866,28 @@ export const ToolCallItem = Schema.Struct({
         link: Schema.optional(Schema.String),
       }),
     ),
+    /** A search on the web, by its query, or a page the agent read, by its address without its query: what the thread shows of it. */
+    web: Schema.optional(
+      Schema.Union([
+        Schema.Struct({ action: Schema.Literal('search'), query: Schema.String }),
+        Schema.Struct({ action: Schema.Literal('fetch'), url: Schema.String }),
+      ]),
+    ),
+    /**
+     * A sub-agent the agent started: what it was asked to do, in a line, its
+     * kind and model where the agent says, and the start of what it reported
+     * back once it ended.
+     */
+    subAgent: Schema.optional(
+      Schema.Struct({
+        label: Schema.String,
+        type: Schema.optional(Schema.String),
+        model: Schema.optional(Schema.String),
+        said: Schema.optional(Schema.String),
+      }),
+    ),
+    /** The sub-agent's call that made it, by that call's item, where the agent says which (Claude Code): it stands under it. */
+    parent: Schema.optional(Schema.String),
     ...handedFields,
     output: Schema.NullOr(CommandOutput),
     exit: Schema.NullOr(Schema.Number),
@@ -1954,9 +1976,22 @@ export const NoticeItem = Schema.Struct({
     /**
      * How the thread draws it, where not as Althar's own line: an aside in the
      * work, what the coordinator relayed, or its task's folder going or coming
-     * back, a line across the thread (ADR-056).
+     * back, a line across the thread (ADR-056); the agent's context compacted,
+     * a line with its summary behind it; or its turn interrupted by the person.
      */
-    role: Schema.optional(Schema.Literals(['aside', 'relayed', 'folder'])),
+    role: Schema.optional(Schema.Literals(['aside', 'relayed', 'folder', 'compacted', 'interrupted'])),
+    /**
+     * For the agent compacting its context (`compacted`): how it stands, the
+     * summary it kept where it said one, and why it failed. Its description
+     * says how far it took the context, where Althar knows.
+     */
+    compaction: Schema.optional(
+      Schema.Struct({
+        status: Schema.Literals(['in_progress', 'completed', 'failed', 'cancelled']),
+        summary: Schema.optional(Schema.String),
+        error: Schema.optional(Schema.String),
+      }),
+    ),
     /** A task the line is about, which it links to: one this task's lead started (ADR-097), once. */
     task: Schema.optional(Schema.Struct({ taskId: Schema.String, slug: Schema.String, title: Schema.String, threadId: Schema.String })),
     /**

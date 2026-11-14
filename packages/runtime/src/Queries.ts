@@ -268,6 +268,51 @@ const mcpOf = (kept: unknown) => {
   }
 }
 
+/** A search on the web or a page read, as `threads.ts` keeps it; nothing for anything else. */
+const webOf = (kept: unknown) => {
+  const action = text(kept, 'action')
+  if (action === 'search') return { web: { action: 'search' as const, query: text(kept, 'query') } }
+  const url = text(kept, 'url')
+  return action === 'fetch' && /^https?:\/\//.test(url) ? { web: { action: 'fetch' as const, url } } : {}
+}
+
+/** A sub-agent the agent started, as `threads.ts` keeps it, and the call that made a sub-agent's call. */
+const subAgentOf = (kept: unknown, parent: unknown) => {
+  const label = text(kept, 'label')
+  const type = text(kept, 'type')
+  const model = text(kept, 'model')
+  const said = text(kept, 'said')
+  return {
+    ...(label === ''
+      ? {}
+      : {
+          subAgent: {
+            label,
+            ...(type === '' ? {} : { type }),
+            ...(model === '' ? {} : { model }),
+            ...(said === '' ? {} : { said }),
+          },
+        }),
+    ...(typeof parent === 'string' && parent !== '' ? { parent } : {}),
+  }
+}
+
+const COMPACTION_STATUSES = ['in_progress', 'completed', 'failed', 'cancelled'] as const
+
+/** How a compaction stood, as `threads.ts` keeps it on its notice. */
+const compactionOf = (kept: unknown) => {
+  const said = text(kept, 'status')
+  const status = COMPACTION_STATUSES.find((one) => one === said)
+  if (status === undefined) return {}
+  const summary = text(kept, 'summary')
+  const error = text(kept, 'error')
+  return { compaction: { status, ...(summary === '' ? {} : { summary }), ...(error === '' ? {} : { error }) } }
+}
+
+const ROLES = new Set(['aside', 'relayed', 'folder', 'compacted', 'interrupted'] as const)
+type Role = typeof ROLES extends Set<infer R> ? R : never
+const isRole = (role: string): role is Role => ROLES.has(role as Role)
+
 const skillOf = (skill: unknown) => {
   const names = field(skill, 'names')
   return Array.isArray(names) && names.length > 0
@@ -644,6 +689,8 @@ export const itemOf = (row: ItemRow): ThreadItem | undefined => {
           ...(allowedBy === undefined ? {} : { allowedBy }),
           ...skillOf(field(content, 'skill')),
           ...mcpOf(field(content, 'mcp')),
+          ...webOf(field(content, 'web')),
+          ...subAgentOf(field(content, 'subAgent'), field(content, 'parent')),
           pictures: picturesOf(field(content, 'pictures')),
           files: filesOf(field(content, 'files')),
           output: outputOf(field(content, 'output')),
@@ -692,7 +739,8 @@ export const itemOf = (row: ItemRow): ThreadItem | undefined => {
           severity: severity === 'error' || severity === 'warning' ? severity : 'info',
           title: text(content, 'title'),
           description: description === '' ? null : description,
-          ...(role === 'aside' || role === 'relayed' || role === 'folder' ? { role } : {}),
+          ...(isRole(role) ? { role } : {}),
+          ...(role === 'compacted' ? compactionOf(field(content, 'compaction')) : {}),
           ...(failure === undefined || failure === '' ? {} : { failure }),
           ...Option.match(decodeNoticeTask(field(content, 'task')), { onNone: () => ({}), onSome: (task) => ({ task }) }),
           ...Option.match(decodeNoticeOffer(field(content, 'offer')), {

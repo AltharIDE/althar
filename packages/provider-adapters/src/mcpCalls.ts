@@ -61,12 +61,17 @@ const BARE = /^althar[./:]([A-Za-z0-9_-]+)$/i
  * undefined for anything else, and for Althar's own server.
  */
 export const mcpCallOf = (title: string, meta?: unknown): McpCall | undefined => {
+  const call = anyMcpCallOf(title, meta)
+  return call === undefined || ALTHAR.test(call.server) ? undefined : call
+}
+
+/** The MCP call a tool call is, to any server, Althar's own too (its page tools): a call that is never anything else. */
+export const anyMcpCallOf = (title: string, meta?: unknown): McpCall | undefined => {
   const claude = record(record(meta)?.['claudeCode'])
   const toolName = typeof claude?.['toolName'] === 'string' ? claude['toolName'] : undefined
   const server = record(claude?.['mcpServer'])?.['name']
   const named = fromName(toolName ?? title) ?? (toolName === undefined ? undefined : fromName(title))
-  const call =
-    typeof server === 'string' && server !== '' ? { server, tool: named?.tool ?? toolName?.replace(/^mcp__.*?__/, '') ?? title } : named
-  if (call === undefined || ALTHAR.test(call.server)) return undefined
-  return call
+  return typeof server === 'string' && server !== ''
+    ? { server, tool: named?.tool ?? toolName?.replace(/^mcp__.*?__/, '') ?? title }
+    : named
 }

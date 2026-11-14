@@ -45,6 +45,14 @@
   line-height: 1.55;
 }
 
+/* What a sub-agent reported back, under its calls. */
+.reported {
+  margin-top: 6px;
+  color: var(--t-2);
+  font-size: 13px;
+  line-height: 1.55;
+}
+
 /* A review offered a task: its line and its buttons. */
 .offer {
   display: flex;

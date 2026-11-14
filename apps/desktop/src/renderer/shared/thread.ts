@@ -85,6 +85,12 @@ export type Part =
       readonly touches: ReadonlyArray<string>
       /** A call to one of the person's MCP servers: which, and what it did; one that acted outside stands out as a card (ADR-097). */
       readonly mcp?: ToolMcp
+      /** A search on the web, by its query, or a page the agent read, by its address: drawn as from outside the repository. */
+      readonly web?: NonNullable<ToolContent['web']>
+      /** A sub-agent it started, with the calls it made under it (`nested`), and the start of what it reported back. */
+      readonly subAgent?: ToolSubAgent
+      /** The sub-agent's call that made it, by its item: it stands under that call, where that is in the same turn. */
+      readonly parent?: string
     } & HandedParts)
   | {
       readonly kind: 'plan'
@@ -189,6 +195,21 @@ export type Block =
       readonly links?: ReadonlyArray<{ readonly label: string; readonly url: string }>
       readonly details?: string
     }
+  /**
+   * The agent compacting its context, as it reported it: a line across the
+   * thread, with the summary it kept behind Show summary, and how far it took
+   * the context, where Althar knows.
+   */
+  | {
+      readonly kind: 'compacted'
+      readonly id: string
+      readonly status: 'in_progress' | 'completed' | 'failed' | 'cancelled'
+      readonly summary: string | null
+      readonly span: string | null
+      readonly error: string | null
+    }
+  /** The person stopped the agent's turn here. */
+  | { readonly kind: 'interrupted'; readonly id: string }
   /** A review a lead or the coordinator offers a task: its line and its buttons. */
   | {
       readonly kind: 'offer'
@@ -240,6 +261,15 @@ export type Block =
    * has been once that is worth saying, and whether that is longer than usual.
    */
   | { readonly kind: 'waiting'; readonly id: string; readonly took: string | null; readonly slow: boolean }
+
+/** A sub-agent the agent started, as its row says it, and the calls it made, under it. */
+export interface ToolSubAgent {
+  readonly label: string
+  readonly type?: string
+  readonly model?: string
+  readonly said?: string
+  readonly calls: ReadonlyArray<Extract<Part, { kind: 'tool' }>>
+}
 
 /** What a call to one of the person's MCP servers did, as its row and card say it. */
 export interface ToolMcp {
@@ -468,8 +498,16 @@ const partOf = (
           },
         }
       }
-      const ranKind = toolKindOf(item.content.toolKind)
-      const { skill } = item.content
+      const { skill, web, subAgent, parent } = item.content
+      // A web call is a search, or a page read; a sub-agent's, the agent it started: whatever kind its agent gave it.
+      const ranKind =
+        web !== undefined
+          ? web.action === 'search'
+            ? ToolKind.Search
+            : ToolKind.Fetch
+          : subAgent !== undefined
+            ? ToolKind.Agent
+            : toolKindOf(item.content.toolKind)
       // A load is a row of its own, naming the skill; a command that printed one stays what it ran, and says so.
       const toolKind = skill !== undefined && ranKind !== ToolKind.Run ? ToolKind.Skill : ranKind
       const state = toolStateOf(item.content.status, turnRunning, item.content.declined)
@@ -500,8 +538,17 @@ const partOf = (
               : ''
             : toolKind === ToolKind.Skill && skill !== undefined
               ? skill.names.join(', ')
-              : targetOf(item.content, worktree),
+              : web !== undefined
+                ? web.action === 'search'
+                  ? text.web(web.query)
+                  : web.url
+                : subAgent !== undefined
+                  ? subAgent.label
+                  : targetOf(item.content, worktree),
         ...(skill === undefined ? {} : { skills: skill }),
+        ...(web === undefined ? {} : { web }),
+        ...(subAgent === undefined ? {} : { subAgent: { ...subAgent, calls: [] } }),
+        ...(parent === undefined ? {} : { parent }),
         state,
         command: item.content.command,
         ...(item.content.label === undefined ? {} : { label: item.content.label }),
@@ -700,7 +747,53 @@ export const foldArrival = (last: Block | undefined, next: Extract<Block, { kind
   return same ? { ...next, id: last.id, count: last.count + 1 } : next
 }
 
-export const text = { thinking: 'Thinking' }
+export const text = {
+  thinking: 'Thinking',
+  /** A web search's row, while it runs or where it didn't go through: what it searched for. */
+  web: (query: string) => (query === '' ? 'the web' : `the web for “${query}”`),
+}
+
+/**
+ * A turn's parts with each sub-agent's calls under it: a call made by a
+ * sub-agent of the same turn (`parent`) goes from the turn's own steps into
+ * its sub-agent's, in order. One whose sub-agent isn't in the turn stays
+ * where it is.
+ */
+export const nested = (parts: ReadonlyArray<Part>): ReadonlyArray<Part> => {
+  const agents = new Set(parts.flatMap((part) => (part.kind === 'tool' && part.subAgent !== undefined ? [part.id] : [])))
+  if (agents.size === 0) return parts
+  const parentOf = new Map(
+    parts.flatMap((part) =>
+      part.kind === 'tool' && part.parent !== undefined && agents.has(part.parent) ? [[part.id, part.parent] as const] : [],
+    ),
+  )
+  // A call goes under its sub-agent where following its sub-agents up ends at one of the turn's own steps: calls that
+  // name each other in a ring stay where they are, all of them shown.
+  const rooted = (id: string) => {
+    const seen = new Set([id])
+    for (let up = parentOf.get(id); up !== undefined; up = parentOf.get(up)) {
+      if (seen.has(up)) return false
+      seen.add(up)
+    }
+    return true
+  }
+  const under = new Map<string, Array<Extract<Part, { kind: 'tool' }>>>()
+  const top: Array<Part> = []
+  for (const part of parts) {
+    const parent = parentOf.get(part.id)
+    if (part.kind === 'tool' && parent !== undefined && rooted(part.id)) {
+      const calls = under.get(parent) ?? []
+      calls.push(part)
+      under.set(parent, calls)
+    } else top.push(part)
+  }
+  // A sub-agent's own sub-agents keep theirs under them, as deep as they go: what is nested is a tree, so this ends.
+  const withCalls = <P extends Part>(part: P): P =>
+    part.kind === 'tool' && part.subAgent !== undefined
+      ? { ...part, subAgent: { ...part.subAgent, calls: (under.get(part.id) ?? []).map(withCalls) } }
+      : part
+  return top.map(withCalls)
+}
 
 /** The blocks of a thread, oldest first, with what is still being written but not yet read at the end. */
 export const blocksOf = (
@@ -861,6 +954,24 @@ export const blocksOf = (
       case 'notice':
         // A restart is Althar's business, not the person's; earlier versions said so in the thread.
         if (item.content.source === 'runtime' && item.content.title === RESTARTED) continue
+        // The agent's context compacted: a line of its own, with what it kept behind it.
+        if (item.content.role === 'compacted') {
+          const { compaction } = item.content
+          blocks.push({
+            kind: 'compacted',
+            id: item.id,
+            status: compaction?.status ?? 'completed',
+            summary: compaction?.summary ?? null,
+            span: item.content.description,
+            error: compaction?.error ?? null,
+          })
+          continue
+        }
+        // The person stopped the turn: said where it stopped.
+        if (item.content.role === 'interrupted') {
+          blocks.push({ kind: 'interrupted', id: item.id })
+          continue
+        }
         // A review offered a task stands on its own with its buttons.
         if (item.content.offer !== undefined) {
           blocks.push({
@@ -950,7 +1061,8 @@ export const blocksOf = (
   const endOf = (index: number, span: { from: string; to: string }) => {
     const ended = source.turnEnded
     if (index !== lastOver || index === live || ended == null || Date.parse(ended) <= Date.parse(span.to)) return span.to
-    const since = merged.slice(index + 1).every((block) => block.kind === 'step')
+    // The line that says the person stopped it comes after it too.
+    const since = merged.slice(index + 1).every((block) => block.kind === 'step' || block.kind === 'interrupted')
     return since && (askedWhen == null || Date.parse(askedWhen) <= Date.parse(span.to)) ? ended : span.to
   }
   // Each item's turn, by which a block over is told where its time went.
@@ -960,7 +1072,7 @@ export const blocksOf = (
     const known = spans.get(block.id)
     const span = known === undefined ? undefined : { ...known, to: endOf(index, known) }
     const running = index === live
-    const parts = timed(block.parts, atOf, running, span?.to)
+    const parts = nested(timed(block.parts, atOf, running, span?.to))
     const { work, said } = splitOf(parts, !running && merged[index + 1]?.kind === 'step', running)
     // Running, what it writes after its work may be its answer: its work is over then, as long as it took until it began it.
     const writing = running ? parts.at(-1) : undefined
