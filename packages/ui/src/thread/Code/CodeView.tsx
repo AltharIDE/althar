@@ -10,6 +10,8 @@ import { Segmented, type SegmentedOption } from '../../primitives/Segmented/Segm
 import { SidePanel } from '../../primitives/SidePanel/SidePanel'
 import { Skeleton } from '../../primitives/Skeleton/Skeleton'
 import { Diff, type DiffLine } from '../Diff/Diff'
+import { folderOfPath, markChanges } from '../Markdown/changes'
+import { Markdown } from '../Markdown/Markdown'
 import {
   type CodeMode,
   type CodeRead,
@@ -18,6 +20,7 @@ import {
   folderOf,
   type FoundCode,
   type FoundFile,
+  isMarkdown,
   linesOf,
   markOf,
   nameOf,
@@ -71,6 +74,11 @@ export interface CodeViewText {
   large: (size: string) => string
   unreadable: string
   unchanged: string
+  rendered: string
+  renderedTip: string
+  source: string
+  /** The key between a markdown file as a page and its source. */
+  showKey: string
   copy: string
   beside: string
   inEditor: (editor: string) => string
@@ -115,6 +123,10 @@ export const codeViewText: CodeViewText = {
   large: (size) => `It is ${size}. Open it in your editor.`,
   unreadable: 'Couldn’t read this file.',
   unchanged: 'The task didn’t change this file.',
+  rendered: 'Rendered',
+  renderedTip: 'As a page, with what the task changed marked',
+  source: 'Source',
+  showKey: 'm',
   copy: 'Copy path',
   beside: 'Open beside',
   inEditor: (editor) => `Open in ${editor}`,
@@ -174,6 +186,14 @@ export const modesOf = (found: FoundCode, t: CodeViewText = codeViewText): Reado
     if (modes.length === 0) modes.push({ value: 'now', label: t.file })
     modes.push({ value: 'change', label: `${t.change} +${found.changed.add} −${found.changed.del}`, tooltip: { label: t.changeTip } })
   }
+  // A markdown file is a page first; the rest are its source, as it is, as it was, and what changed.
+  if (isMarkdown(found))
+    return [
+      { value: 'rendered', label: t.rendered, tooltip: { label: t.renderedTip, kbd: t.showKey } },
+      ...(modes.length === 0
+        ? [{ value: 'now' as const, label: t.source }]
+        : modes.map((mode) => (mode.value === 'now' ? { ...mode, label: t.source } : mode))),
+    ]
   return modes.length > 1 ? modes : []
 }
 
@@ -327,6 +347,12 @@ function Reading() {
   )
 }
 
+/** What a markdown file's images need of the host: the files it names beside it, by their paths as the panel names them. */
+export interface CodeMarkdown {
+  /** Draws an image the file names. Without it, an image's words stand in. */
+  image?: (image: { readonly path: string; readonly alt: string; readonly title?: string }) => ReactNode
+}
+
 function Body({
   found,
   where,
@@ -334,6 +360,7 @@ function Body({
   read,
   change,
   around,
+  markdown,
   onGo,
   t,
 }: {
@@ -343,6 +370,7 @@ function Body({
   read: CodeRead | null | undefined
   change?: readonly DiffLine[] | null | undefined
   around?: number
+  markdown?: CodeMarkdown | undefined
   onGo: (path: string) => void
   t: CodeViewText
 }) {
@@ -393,6 +421,25 @@ function Body({
         <Problem as="div">{t.unreadable}</Problem>
       </div>
     )
+  if (mode === 'rendered') {
+    // What the task changed is marked in it, read from the file's diff: asked for while it is read, and read as it is where it couldn't be.
+    if (found.changed !== null && change === undefined) return <Reading />
+    const marked = found.changed === null || change == null ? null : markChanges(change)
+    return (
+      <div className={s.page}>
+        <Markdown
+          source={marked?.source ?? read.text}
+          size="panel"
+          {...(marked === null ? {} : { marks: marked.marks })}
+          file={{
+            folder: folderOfPath(found.path),
+            ...(markdown?.image === undefined ? {} : { image: markdown.image }),
+            open: onGo,
+          }}
+        />
+      </div>
+    )
+  }
   return (
     <CodeLines
       key={`${found.path}\u0000${mode}`}
@@ -498,6 +545,8 @@ export interface CodePanelProps {
   onKeyDown?: (event: KeyboardEvent<HTMLElement>) => void
   /** Narrow: the reference's count leaves the head to the file's name. */
   compact?: boolean
+  /** What a markdown file shown as a page needs of the host. */
+  markdown?: CodeMarkdown
   text?: Partial<CodeViewText>
   className?: string
 }
@@ -517,6 +566,7 @@ export function CodePanel({
   onClose,
   onKeyDown,
   compact = false,
+  markdown,
   text,
   className,
 }: CodePanelProps) {
@@ -546,7 +596,7 @@ export function CodePanel({
       <Meta found={found} where={where} mode={mode} onMode={onMode} t={t} />
       {found.kind === 'file' && <Notes found={found} mode={mode} read={read} onMode={onMode} t={t} />}
       <div className={s.panelBody}>
-        <Body found={found} where={where} mode={mode} read={read} change={change} onGo={onGo} t={t} />
+        <Body found={found} where={where} mode={mode} read={read} change={change} markdown={markdown} onGo={onGo} t={t} />
       </div>
     </SidePanel>
   )

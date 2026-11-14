@@ -144,6 +144,64 @@ describe('the code a lead names, on a task’s screen', () => {
     expect(screen.getByRole('complementary', { name: 'model.ts' })).toBeTruthy()
   })
 
+  it('opens a markdown file as a page, what the task changed marked and its picture read from the task’s folder; M shows its source', async () => {
+    const readme: CodeFound = {
+      kind: 'file',
+      name: 'README.md',
+      path: 'README.md',
+      byName: false,
+      bytes: 60,
+      lines: 5,
+      content: 'text',
+      changed: { add: 1, del: 1 },
+      since: null,
+    }
+    const readCode = vi.fn(async (_threadId: string, path: string, at?: { readonly image?: boolean }) =>
+      at?.image === true
+        ? { path, text: '', from: 1, total: 0, cut: false, image: { type: 'image/png', data: 'iVBORw0KGgo=' } }
+        : { path, text: '# Retries\n\nTried **3** times.\n\n![flow](docs/flow.png)\n', from: 1, total: 5, cut: false },
+    )
+    const { client } = fakeClient({
+      getThread: vi.fn(async () => snapshot({ items: [items.you('Notes?'), items.says('See `README.md`.')] })),
+      findCode: vi.fn(async (_threadId: string, messages: ReadonlyArray<{ readonly names: ReadonlyArray<string> }>) => ({
+        place: { kind: 'task' as const, repositories: [{ slug: 'meridian', name: 'meridian', branch: 'althar/add-a-retry' }] },
+        messages: messages.map(() => ({ found: [readme] })),
+      })),
+      readCode,
+      getFileDiff: vi.fn(async (_taskId: string, path: string) => ({
+        file: { path, from: null, status: 'modified' as const, add: 1, del: 1, binary: false, uncommitted: false },
+        lines: [
+          { kind: 'hunk' as const, text: '@@ -1,5 +1,5 @@' },
+          { kind: 'context' as const, old: 1, new: 1, text: '# Retries' },
+          { kind: 'context' as const, old: 2, new: 2, text: '' },
+          { kind: 'removed' as const, old: 3, text: 'Tried 2 times.' },
+          { kind: 'added' as const, new: 3, text: 'Tried **3** times.' },
+          { kind: 'context' as const, old: 4, new: 4, text: '' },
+          { kind: 'context' as const, old: 5, new: 5, text: '![flow](docs/flow.png)' },
+        ],
+        truncated: false,
+      })),
+    })
+    withServices(<Task />, client)
+    await userEvent.click(await screen.findByRole('button', { name: 'Open README.md' }))
+    const panel = await screen.findByRole('complementary', { name: 'README.md' })
+    expect(await within(panel).findByRole('heading', { name: 'Retries' })).toBeTruthy()
+    expect(within(panel).getByRole('radio', { name: 'Rendered' }).getAttribute('aria-checked')).toBe('true')
+    expect(within(panel).getByRole('group', { name: 'Added' })).toBeTruthy()
+    expect(within(panel).getByRole('group', { name: 'Removed' }).textContent).toContain('Tried 2 times.')
+    expect(client.getFileDiff).toHaveBeenCalledWith('t1', 'README.md')
+    // Its picture is the task's own file, drawn where it was read.
+    const picture = await within(panel).findByRole('img', { name: 'flow' })
+    expect(picture.getAttribute('src')).toBe('data:image/png;base64,iVBORw0KGgo=')
+    expect(readCode).toHaveBeenCalledWith('th1', 'docs/flow.png', { image: true })
+
+    fireEvent.keyDown(panel, { key: 'm' })
+    await waitFor(() => expect(within(panel).getByRole('radio', { name: 'Source' }).getAttribute('aria-checked')).toBe('true'))
+    expect(within(panel).queryByRole('heading', { name: 'Retries' })).toBeNull()
+    fireEvent.keyDown(panel, { key: 'm' })
+    expect(await within(panel).findByRole('heading', { name: 'Retries' })).toBeTruthy()
+  })
+
   it('⌘-press on a name opens it in the editor, without opening it beside', async () => {
     const { client } = fakeClient({
       getThread: vi.fn(async () => snapshot({ items: [items.says('In `src/retry.ts:2`.')] })),

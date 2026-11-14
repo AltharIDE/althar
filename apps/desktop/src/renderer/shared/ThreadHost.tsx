@@ -21,6 +21,7 @@ import { pages, usePage } from '../features/browser/pages'
 import { PageView } from '../features/browser/PageView'
 import { CanvasHost, type OpenCanvas } from '../features/canvases/CanvasHost'
 import { type BenchWidth, PAGE_BENCH, useBenchWidth } from './code/bench'
+import { pictureOf } from './code/FilePicture'
 import { type CodeOpen, useCodeHost } from './code/CodeHost'
 
 /*
@@ -267,6 +268,10 @@ export function DocumentPanel({
       onClose={onClose}
       {...(onOpen === undefined ? {} : { onOpen })}
       {...(read.isError ? { error: messageOf(read.error) } : {})}
+      // Its pictures are beside it, in the task's folder.
+      {...(doc.path === undefined
+        ? {}
+        : { file: { folder: doc.path.slice(0, Math.max(0, doc.path.lastIndexOf('/'))), image: pictureOf(threadId) } })}
     />
   )
 }

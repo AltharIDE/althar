@@ -157,3 +157,81 @@ export const LONG_DIFF: DiffLine[] = diffOf(
     }).join('\n'),
   ).join('\n'),
 )
+
+/**
+ * A whole README's diff, as the window reads it for a markdown file: every line of the file, what changed marked. A section is
+ * added (a table, a task list, a diagram), a heading and a sentence are rewritten, a paragraph and a section are taken out,
+ * and what stays has a table-free code block, a link and a picture beside it.
+ */
+export const README_DIFF = diffOf(`
+@@ -1,26 +1,48 @@
+ # Refunds
+
+-Gives back what a merchant charged, in part or whole.
++Gives back what a merchant charged, in part or whole. The [decision behind its limits](docs/decisions/012-refund-limits.md) says why; the picture shows the flow.
++
++![How a refund moves](docs/flow.svg)
+
+-## Limits
++## Limits and reasons
+
+-A merchant may refund **20** times a day.
++A merchant may refund as often as \`limitOf(merchant)\` allows, and must say *why*:
++
++- \`duplicate\`
++- \`fraud\`
++- \`asked\`
++
++| Reason | Counts toward the limit |
++| --- | --- |
++| duplicate | no |
++| fraud | no |
++| asked | yes |
++
++## Before it ships
++
++- [x] A reason is required
++- [ ] The reason shows on the receipt
++
++## How a refund moves
++
++\`\`\`mermaid
++flowchart LR
++  A[Refund asked] --> B{Under the limit?}
++  B -- yes --> C[Refund]
++  B -- no --> D[Refused]
++\`\`\`
+
+ ## Trying it
+
+ \`\`\`ts
+ await refund(charge, { reason: 'duplicate' })
+ \`\`\`
+-
+-## Hosting notes
+-
+-Refunds ran on one box. See \`ops/hosting.md\`.
+`)
+
+/** A README that is new: every block of it added. */
+export const NEW_README_DIFF = diffOf(`
+@@ -0,0 +1,9 @@
++# Retries
++
++A charge that fails is tried again, a little later each time.
++
++- First after one second
++- Then two, then four
++
++Give up after \`maxTries\` and say so.
+`)
+
+/** A README that is gone: all of it taken out. */
+export const GONE_README_DIFF = diffOf(`
+@@ -1,5 +0,0 @@
+-# Hosting
+-
+-Refunds ran on one box.
+-
+-It is gone now.
+`)

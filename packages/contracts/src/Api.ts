@@ -4330,6 +4330,8 @@ export const CodeText = Schema.Struct({
   from: CodeLine,
   total: Schema.Number,
   cut: Schema.Boolean,
+  /** Asked for as a picture: its bytes in base64 and their kind, with no text. */
+  image: Schema.optional(Schema.Struct({ type: Schema.String, data: Schema.String })),
 })
 export type CodeText = typeof CodeText.Type
 
@@ -4834,11 +4836,19 @@ export const Api = RpcGroup.make(
   /**
    * A file where a thread's agent works, by its path as FindCode named it:
    * as it is now, or at the commit it was when a message was said. Whole,
-   * or past a size, the lines around `line`.
+   * or past a size, the lines around `line`. With `image`, a picture a task's
+   * markdown file names beside it, as it is now: only an image, only from
+   * inside the task's folders, and not past a size.
    */
   call(
     'ReadCode',
-    { threadId: Schema.String, path: Schema.String, commit: Schema.optional(Schema.String), line: Schema.optional(CodeLine) },
+    {
+      threadId: Schema.String,
+      path: Schema.String,
+      commit: Schema.optional(Schema.String),
+      line: Schema.optional(CodeLine),
+      image: Schema.optional(Schema.Boolean),
+    },
     CodeText,
   ),
   /** The project's coordinator thread, made the first time it is asked for. */

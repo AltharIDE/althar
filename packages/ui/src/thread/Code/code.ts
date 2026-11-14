@@ -1,3 +1,5 @@
+import { isMarkdownPath } from '../Markdown/changes'
+
 /*
  * The code an agent names in what it says, as the host found it where the
  * thread's agent works: what a name names, how a file was read, and the
@@ -68,7 +70,7 @@ export interface CodeWhere {
 }
 
 /** How a file is shown: as it is, as it was when the message was said, or what its task changed in it. */
-export type CodeMode = 'now' | 'then' | 'change'
+export type CodeMode = 'rendered' | 'now' | 'then' | 'change'
 
 export const nameOf = (path: string) => path.replace(/\/$/, '').split('/').pop() ?? path
 
@@ -93,6 +95,13 @@ export const sizeOf = (bytes: number) =>
 
 /** How it opens first: as it was when said, where the lines it named were rewritten since; else as it is. */
 export const firstMode = (found: FoundCode): CodeMode => (found.kind === 'file' && found.since?.now === null ? 'then' : 'now')
+
+/** A markdown file the panel can show as a page. */
+export const isMarkdown = (found: FoundCode): found is FoundFile =>
+  found.kind === 'file' && found.content === 'text' && isMarkdownPath(found.path)
+
+/** How the panel first shows a file: a markdown file as a page, unless the lines named in it are what was asked for. */
+export const panelMode = (found: FoundCode): CodeMode => (isMarkdown(found) && found.line === undefined ? 'rendered' : firstMode(found))
 
 /** The lines to mark in what is shown: those named, followed to where they are now; none past the file's end, nor rewritten. */
 export const markOf = (found: FoundFile, mode: CodeMode): { readonly line: number; readonly end: number } | null => {

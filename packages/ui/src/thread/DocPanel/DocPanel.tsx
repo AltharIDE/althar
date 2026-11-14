@@ -2,7 +2,7 @@ import { ActionButton } from '../../primitives/ActionButton/ActionButton'
 import { CopyButton, type CopyButtonText } from '../../primitives/CopyButton/CopyButton'
 import { Problem } from '../../primitives/Problem/Problem'
 import { Skeleton } from '../../primitives/Skeleton/Skeleton'
-import { Markdown } from '../Markdown/Markdown'
+import { Markdown, type MarkdownFile } from '../Markdown/Markdown'
 import type { DocRef } from '../Shell/Shell'
 import { SidePanel, SidePanelBody, SidePanelTitle, sidePanelText, type SidePanelText } from '../../primitives/SidePanel/SidePanel'
 import s from './DocPanel.module.css'
@@ -26,10 +26,12 @@ export interface DocPanelProps {
   loading?: boolean
   /** The document couldn't be read, in words: shown in its place. */
   error?: string
+  /** Where the document is, so the pictures it names beside it can be drawn. */
+  file?: MarkdownFile
   text?: Partial<DocPanelText>
 }
 
-export function DocPanel({ doc, onClose, onOpen, loading = false, error, text }: DocPanelProps) {
+export function DocPanel({ doc, onClose, onOpen, loading = false, error, file, text }: DocPanelProps) {
   const t = { ...docPanelText, ...text }
   const name = (doc.path ? doc.path.split('/').pop() : doc.title) ?? ''
   const readable = !loading && error === undefined && doc.body.trim() !== ''
@@ -68,7 +70,7 @@ export function DocPanel({ doc, onClose, onOpen, loading = false, error, text }:
             {error}
           </Problem>
         ) : readable ? (
-          <Markdown source={doc.body} size="panel" />
+          <Markdown source={doc.body} size="panel" {...(file === undefined ? {} : { file })} />
         ) : (
           <p className={s.said}>{t.empty}</p>
         )}

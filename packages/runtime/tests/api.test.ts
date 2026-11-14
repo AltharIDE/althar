@@ -1517,6 +1517,20 @@ describe('editors, through the API', () => {
           ],
         )
         assert.deepInclude(yield* client.ReadCode({ threadId: task.threadId, path: 'src/retry.ts' }), { from: 1, total: 3, cut: false })
+        // A picture a markdown file names beside it: the task's own, by its name, and never one out of its folder.
+        mkdirSync(join(worktree, 'docs'))
+        writeFileSync(join(worktree, 'docs', 'flow.png'), Buffer.from([0x89, 0x50, 0x4e, 0x47]))
+        writeFileSync(join(worktree, 'docs', 'notes.txt'), 'not a picture')
+        symlinkSync(join(tmpdir(), 'elsewhere.png'), join(worktree, 'docs', 'link.png'))
+        assert.deepStrictEqual((yield* client.ReadCode({ threadId: task.threadId, path: 'docs/flow.png', image: true })).image, {
+          type: 'image/png',
+          data: Buffer.from([0x89, 0x50, 0x4e, 0x47]).toString('base64'),
+        })
+        for (const path of ['docs/notes.txt', 'docs/link.png', 'docs/none.png', '../flow.png'])
+          assert.strictEqual(
+            (yield* Effect.flip(client.ReadCode({ threadId: task.threadId, path, image: true }))).message,
+            "That file isn't there any more.",
+          )
         assert.strictEqual(
           (yield* Effect.flip(client.ReadCode({ threadId: task.threadId, path: '../outside.ts' }))).message,
           "That file isn't there any more.",

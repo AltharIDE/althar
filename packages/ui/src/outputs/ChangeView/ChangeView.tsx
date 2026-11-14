@@ -7,8 +7,11 @@ import { ActionButton } from '../../primitives/ActionButton/ActionButton'
 import { Button } from '../../primitives/Button/Button'
 import { Delta } from '../../primitives/FileChanges/FileChanges'
 import { Problem } from '../../primitives/Problem/Problem'
+import { Segmented } from '../../primitives/Segmented/Segmented'
 import { Spinner } from '../../primitives/Spinner/Spinner'
 import { Diff, type DiffLine, type DiffNote } from '../../thread/Diff/Diff'
+import { folderOfPath, isMarkdownPath, markChanges, type MarkedMarkdown } from '../../thread/Markdown/changes'
+import { Markdown } from '../../thread/Markdown/Markdown'
 import { FindingNote, heavyWeight, type NotedFinding } from '../../thread/Reviewer/FindingNote'
 import type { FindingWeight } from '../../thread/Reviewer/Reviewer'
 import s from './ChangeView.module.css'
@@ -18,6 +21,11 @@ import s from './ChangeView.module.css'
  * left, with how each changed and how much, and the one you're on as a diff
  * beside them. What isn't committed yet says so, since only commits are
  * pushed. Escape closes it; j and k, or the arrows, go through the files.
+ *
+ * A markdown file opens rendered, with what the change added tinted and what
+ * it took out drawn where it was; Source is its diff, as any file's. M goes
+ * between them. A finding's line is in the source, so the file a finding is
+ * jumped to opens there.
  *
  * With a review's findings, each is a note under the line it is about, and
  * the files they name come first, worst finding first, each saying how many
@@ -87,6 +95,14 @@ export interface ChangeViewText {
   /** Where findings about no file of the change are. */
   loose: string
   untouched: string
+  /** A markdown file's two ways to show: as a page, with its change marked; or as its diff. */
+  show: string
+  rendered: string
+  renderedTip: string
+  source: string
+  sourceTip: string
+  /** The key between them. */
+  showKey: string
 }
 
 export const changeViewText: ChangeViewText = {
@@ -115,6 +131,20 @@ export const changeViewText: ChangeViewText = {
   findingCount: (count) => (count === 1 ? '1 finding' : `${count} findings`),
   loose: 'Not in the code',
   untouched: 'Unchanged',
+  show: 'Show',
+  rendered: 'Rendered',
+  renderedTip: 'As a page, with what changed marked',
+  source: 'Source',
+  sourceTip: 'The diff',
+  showKey: 'm',
+}
+
+/** What the host gives a markdown file's images and links: the files it names beside it, by their paths as the list names them. */
+export interface ChangeViewMarkdown {
+  /** Draws an image the file names. Without it, an image's words stand in. */
+  image?: (image: { readonly path: string; readonly alt: string; readonly title?: string }) => ReactNode
+  /** Opens a file the file links to that the change doesn't hold (one it does is picked here). Without it, a link is only its words. */
+  open?: (path: string) => void
 }
 
 export interface ChangeViewProps {
@@ -137,6 +167,8 @@ export interface ChangeViewProps {
   onFinding?: (id: string) => void
   /** What else opens it, beside Close: an editor, at the file. */
   actions?: ReactNode
+  /** What a markdown file's images and links need of the host. */
+  markdown?: ChangeViewMarkdown
   /**
    * space: the system draws its lights over the window's top row, as on
    * macOS, so the view stays below that row; none: it may reach the top.
@@ -173,6 +205,7 @@ export function ChangeView({
   finding = null,
   onFinding,
   actions,
+  markdown,
   lights = 'none',
   text,
 }: ChangeViewProps) {
@@ -210,6 +243,16 @@ export function ChangeView({
   const fixed = findings.filter((one) => one.state === 'fixed').length
   const add = files.reduce((sum, file) => sum + file.add, 0)
   const del = files.reduce((sum, file) => sum + file.del, 0)
+  // A markdown file as a page, unless asked for as its diff (or a finding's note is in it, which sits under a diff's line).
+  const [chosen, setChosen] = useState<ReadonlyMap<string, 'rendered' | 'source'>>(new Map())
+  const markdownFile = current !== undefined && isMarkdownPath(current.path) && current.binary !== true && current.generated !== true
+  const marked = markdownFile && view.state === 'ready' && view.truncated !== true && view.lines.length > 0 ? markChanges(view.lines) : null
+  const way =
+    current === undefined ? undefined : (chosen.get(current.path) ?? (notes.some((note) => note.key === finding) ? 'source' : 'rendered'))
+  const asPage = marked !== null && way === 'rendered'
+  const show = (next: 'rendered' | 'source') => {
+    if (current !== undefined) setChosen(new Map(chosen).set(current.path, next))
+  }
   const code = useRef<HTMLDivElement>(null)
   const dialog = useRef<HTMLDivElement>(null)
   // A new file starts at its top.
@@ -247,6 +290,7 @@ export function ChangeView({
     else if (event.key === 'k' || event.key === 'ArrowUp') step(-1)
     else if (event.key === ']' && findings.length > 0) goFinding(1)
     else if (event.key === '[' && findings.length > 0) goFinding(-1)
+    else if (event.key === t.showKey && marked !== null) show(asPage ? 'source' : 'rendered')
     else return
     event.preventDefault()
   }
@@ -357,6 +401,18 @@ export function ChangeView({
                   <div className={s.fileHead}>
                     <span className={s.filePath}>{current.path}</span>
                     {current.from && <span className={s.from}>{t.movedFrom(current.from)}</span>}
+                    {marked !== null && (
+                      <Segmented<'rendered' | 'source'>
+                        label={t.show}
+                        value={way ?? 'rendered'}
+                        onChange={show}
+                        className={s.ways}
+                        options={[
+                          { value: 'rendered', label: t.rendered, tooltip: { label: t.renderedTip, kbd: t.showKey } },
+                          { value: 'source', label: t.source, tooltip: { label: t.sourceTip, kbd: t.showKey } },
+                        ]}
+                      />
+                    )}
                   </div>
                   {current.uncommitted && <p className={s.note}>{t.uncommittedNote}</p>}
                   <FileBody
@@ -364,6 +420,10 @@ export function ChangeView({
                     file={current}
                     view={view}
                     notes={notes}
+                    page={asPage ? marked : null}
+                    {...(markdown === undefined ? {} : { markdown })}
+                    onPick={pick}
+                    has={(path) => files.some((file) => file.path === path && file.untouched !== true)}
                     t={t}
                     {...(onRetry === undefined ? {} : { onRetry })}
                   />
@@ -392,12 +452,22 @@ function FileBody({
   file,
   view,
   notes,
+  page,
+  markdown,
+  onPick,
+  has,
   t,
   onRetry,
 }: {
   file: ViewedFile
   view: FileView
   notes: readonly DiffNote[]
+  /** A markdown file as a page, with its change marked; null where it shows as its diff. */
+  page: MarkedMarkdown | null
+  markdown?: ChangeViewMarkdown
+  onPick: (path: string) => void
+  /** Whether a path is a file of the change. */
+  has: (path: string) => boolean
   t: ChangeViewText
   onRetry?: () => void
 }) {
@@ -464,6 +534,23 @@ function FileBody({
           <>
             {alone}
             <p className={s.quiet}>{file.from ? t.moved(file.from) : t.empty}</p>
+          </>
+        )
+      if (page !== null)
+        return (
+          <>
+            {alone}
+            <Markdown
+              source={page.source}
+              marks={page.marks}
+              size="panel"
+              className={s.page}
+              file={{
+                folder: folderOfPath(file.path),
+                ...(markdown?.image === undefined ? {} : { image: markdown.image }),
+                ...(markdown?.open === undefined ? {} : { open: (path: string) => (has(path) ? onPick(path) : markdown.open?.(path)) }),
+              }}
+            />
           </>
         )
       return (

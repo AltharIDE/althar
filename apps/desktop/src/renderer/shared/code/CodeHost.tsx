@@ -13,10 +13,12 @@ import {
   DiffLineKind,
   firstMode,
   type FoundCode,
+  isMarkdown,
   lineToOpen,
   markOf,
   Menu,
   MenuItem,
+  panelMode,
   SplitButton,
   Button,
 } from '@althar/ui'
@@ -26,6 +28,7 @@ import { text as openInText, useEditorList } from '../OpenIn'
 import { ago } from '../time'
 import { usePreferences } from '../usePreferences'
 import { CODE_FRESH, codeKeys, foundRead, placeRead } from './finds'
+import { pictureOf } from './FilePicture'
 
 /*
  * The code a thread's agent names, as the thread's screen offers it to the
@@ -233,9 +236,10 @@ function CodePanelOf({
   const { client } = useServices()
   const { found } = open
   const [kept, setKept] = useState<{ readonly key: string; readonly mode: CodeMode } | null>(null)
-  const mode = kept !== null && kept.key === codeKey(found) ? kept.mode : firstMode(found)
+  const mode = kept !== null && kept.key === codeKey(found) ? kept.mode : panelMode(found)
   const read = useCodeRead(threadId, found, mode, true)
-  const change = useCodeChange(taskId, found, mode === 'change')
+  // What the task changed, for Change and for marking it in a markdown file shown as a page.
+  const change = useCodeChange(taskId, found, mode === 'change' || (mode === 'rendered' && found.kind === 'file' && found.changed !== null))
   const place = useQuery(placeRead(client, threadId)).data
   const { main, open: inEditor } = useCodeEditors(threadId)
   // Where it is among the thread's names, as the thread is drawn: they are drawn before what they open.
@@ -243,6 +247,12 @@ function CodePanelOf({
   const at = placeAmong(names, open)
   const nav = at < 0 ? null : { at: at + 1, of: names.length }
   const keys = (event: KeyboardEvent<HTMLElement>) => {
+    // M: a markdown file as a page, or as its source.
+    if (event.key === 'm' && !event.metaKey && !event.ctrlKey && !event.altKey && isMarkdown(found)) {
+      event.preventDefault()
+      setKept({ key: codeKey(found), mode: mode === 'rendered' ? firstMode(found) : 'rendered' })
+      return
+    }
     if (event.key !== 'Enter' || !(event.metaKey || event.ctrlKey) || main === undefined || found.kind === 'several') return
     event.preventDefault()
     inEditor(main.id, found)
@@ -255,6 +265,7 @@ function CodePanelOf({
       onMode={(next) => setKept({ key: codeKey(found), mode: next })}
       {...(read === undefined ? {} : { read })}
       {...(change === undefined ? {} : { change })}
+      markdown={{ image: pictureOf(threadId) }}
       actions={<OpenCodeIn found={found} threadId={threadId} compact={width < 400} />}
       {...(nav === null ? {} : { nav: { ...nav, onStep: (by: -1 | 1) => stepFrom(open, by) } })}
       onGo={onGo}

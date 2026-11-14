@@ -503,3 +503,36 @@ export const readCode = (place: CodeRoots, path: string, commit?: string, line?:
       .join('\n')
     return { path, text, from, total, cut: true }
   })
+
+/** The pictures a markdown file names beside it, by what their names end in. */
+const IMAGE_TYPES: Readonly<Record<string, string>> = {
+  png: 'image/png',
+  jpg: 'image/jpeg',
+  jpeg: 'image/jpeg',
+  gif: 'image/gif',
+  webp: 'image/webp',
+  avif: 'image/avif',
+  svg: 'image/svg+xml',
+}
+
+/** Past this a picture isn't sent: a page of text is no place for it. */
+export const IMAGE_AT_MOST = 8 * 1024 * 1024
+
+/**
+ * A picture a task's markdown file names beside it, as it is now in the task's folder: only an image by its name, only from
+ * inside the folders the agent works in (a link out of them is no picture), and not past IMAGE_AT_MOST. Not read from a
+ * repository's default branch, where files are read at a commit: the coordinator's pages show a picture's words.
+ */
+export const readCodeImage = (place: CodeRoots, path: string): Effect.Effect<CodeText, NotFound> =>
+  Effect.gen(function* () {
+    const found = codeRootOf(place, path)
+    const type = IMAGE_TYPES[(/\.([a-z0-9]+)$/i.exec(path)?.[1] ?? '').toLowerCase()]
+    if (found === null || type === undefined || found.root.commit !== null) return yield* new NotFound({ kind: 'file', id: path })
+    const real = yield* inside(join(found.root.path, found.path), [found.root.path])
+    if (real === null) return yield* new NotFound({ kind: 'file', id: path })
+    const info = yield* Effect.promise(() => stat(real).catch(() => null))
+    if (info === null || !info.isFile() || info.size > IMAGE_AT_MOST) return yield* new NotFound({ kind: 'file', id: path })
+    const bytes = yield* Effect.promise(() => readFile(real).catch(() => null))
+    if (bytes === null) return yield* new NotFound({ kind: 'file', id: path })
+    return { path, text: '', from: 1, total: 0, cut: false, image: { type, data: bytes.toString('base64') } }
+  })

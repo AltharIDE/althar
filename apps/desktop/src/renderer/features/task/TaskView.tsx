@@ -126,6 +126,7 @@ import { reveal } from './reveal'
 import { useSearchReveal } from '../finder/revealSearch'
 import { turnsById } from '../../shared/turnTime'
 import { ReadFailed } from '../../shared/ReadFailed'
+import { pictureOf } from '../../shared/code/FilePicture'
 
 /*
  * A task, with its faces under its header, as in the prototype: the
@@ -1731,6 +1732,8 @@ export function TaskView({
               view={changes.view}
               onRetry={changes.retry}
               onClose={changes.close}
+              // A markdown file's pictures are read where the task works; a file it links to that isn't in the change opens in the editor.
+              markdown={{ image: pictureOf(snapshot.threadId), ...(openFile === undefined ? {} : { open: openFile }) }}
               // An editor opens the task's folder there, at the file and its first change.
               actions={
                 <OpenIn

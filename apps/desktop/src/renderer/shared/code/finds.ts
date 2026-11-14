@@ -20,6 +20,7 @@ export const codeKeys = {
   place: (threadId: string) => ['code-place', threadId] as const,
   text: (threadId: string, path: string, commit: string | null, line: number | null) =>
     ['code-text', threadId, path, commit ?? 'now', line ?? 0] as const,
+  image: (threadId: string, path: string) => ['code-image', threadId, path] as const,
   change: (taskId: string, path: string) => ['code-change', taskId, path] as const,
 }
 
