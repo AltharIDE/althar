@@ -59,6 +59,20 @@ import { until } from '@althar/testing/effect'
 import { callTool, fakeAgents, fakeConnectors, HOST, hosted, repository, ROOMY, ROOMY_DISK } from './support'
 
 const commandId = () => `cmd_${randomBytes(16).toString('hex')}`
+const externalConnection = {
+  id: 'acp-rpc',
+  name: 'RPC agent',
+  command: 'althar-no-such-acp-agent',
+  args: [],
+  mode: 'ask',
+  readerMode: 'read',
+  modeOption: 'mode',
+  modelOption: 'model',
+  effortOption: null,
+  held: {},
+  registryId: null,
+  registryVersion: null,
+}
 
 /** Lines the runtime would have opened in Terminal. */
 const opened: Array<string> = []
@@ -157,6 +171,56 @@ const idle = (thread: ThreadSnapshot) => thread.session !== null && !thread.sess
 const texts = (thread: ThreadSnapshot) => thread.items.map((item) => ('text' in item.content ? item.content.text : item.kind))
 
 describe('the API', () => {
+  it.live('keeps external ACP command retries idempotent through the window RPC, including after removal', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const mutable = Layer.effect(
+          Agents,
+          Effect.map(Agents, (all) => Agents.from(all.list)),
+        ).pipe(Layer.provide(fakeAgents()))
+        const { client } = yield* connected({ agents: mutable })
+        const saveId = commandId()
+        const revision = yield* client.SaveAcpConnection({ commandId: saveId, connection: externalConnection })
+        assert.strictEqual(yield* client.SaveAcpConnection({ commandId: saveId, connection: externalConnection }), revision)
+        assert.strictEqual((yield* client.GetAgentCatalog({})).connections.length, 1)
+        const checkId = commandId()
+        const checking = yield* client.CheckAcpConnection({ commandId: checkId, agentId: externalConnection.id })
+        assert.strictEqual(yield* client.CheckAcpConnection({ commandId: checkId, agentId: externalConnection.id }), checking)
+        const failed = yield* until(client.GetAgentCatalog({}), (read) => read.connections[0]?.state === 'failed')
+        assert.isNotNull(failed.connections[0]?.reason)
+        const removeId = commandId()
+        const removed = yield* client.RemoveAcpConnection({ commandId: removeId, agentId: externalConnection.id })
+        assert.strictEqual(yield* client.RemoveAcpConnection({ commandId: removeId, agentId: externalConnection.id }), removed)
+        assert.strictEqual(yield* client.SaveAcpConnection({ commandId: saveId, connection: externalConnection }), revision)
+        assert.isEmpty((yield* client.GetAgentCatalog({})).connections)
+        const missingId = commandId()
+        for (let attempt = 0; attempt < 2; attempt += 1) {
+          const error = yield* Effect.flip(client.CheckAcpConnection({ commandId: missingId, agentId: externalConnection.id }))
+          assert.instanceOf(error, ApiError)
+          if (error instanceof ApiError) assert.include(error.message, 'Save the connection')
+        }
+      }),
+    ),
+  )
+
+  it.live('keeps external ACP executable configuration and checks inside the person’s window', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { client } = yield* connected({ sender: { kind: 'socket' } })
+        const calls: ReadonlyArray<Effect.Effect<unknown, unknown>> = [
+          client.GetAgentCatalog({}),
+          client.SaveAcpConnection({ commandId: commandId(), connection: externalConnection }),
+          client.CheckAcpConnection({ commandId: commandId(), agentId: externalConnection.id }),
+          client.RemoveAcpConnection({ commandId: commandId(), agentId: externalConnection.id }),
+        ]
+        for (const call of calls) {
+          const error = yield* Effect.flip(call)
+          assert.instanceOf(error, ApiError)
+          if (error instanceof ApiError) assert.strictEqual(error.reason, 'PersonRequired')
+        }
+      }),
+    ),
+  )
   it.live('Try again refuses visibly when there is no failed turn or ended session', () =>
     Effect.gen(function* () {
       const { client, grant } = yield* connected()
