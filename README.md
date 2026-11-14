@@ -9,7 +9,7 @@
 
 <p align="center">
   <b>Stop babysitting terminals.</b><br />
-  Tell Althar's coordinator what you want. It puts agents to work, has a model from another lab review them, and brings you back finished work, with the proof.
+  Tell Althar's coordinator what you want. It puts agents to work, can have a model from another lab review them, and brings you back finished work, with the proof.
 </p>
 
 <p align="center">
@@ -39,9 +39,9 @@ Change its plan, or hold it. Leave it, and it starts.
 
 ## A second opinion, built in.
 
-Any change can be checked by a model from another lab: Claude's work reviewed by GPT, or the other way round. The lead fixes each finding or sets it aside with its reason.
+Any change can be checked by a model from another lab, where you have one signed in: Claude's work reviewed by GPT, or the other way round. The lead fixes each finding or sets it aside with its reason.
 
-The task lands in Needs you with its diff, its checks, screenshots of it working, and the reviewer's findings with how each was settled. You decide whether it merges.
+The task lands in Needs you with its diff, its checks, screenshots of it working, and, where it was reviewed, the findings with how each was settled. You decide whether it merges.
 
 Review is optional: change the reviewer, skip a round, or take it off.
 
