@@ -457,6 +457,42 @@ files and folders, each at most 50 MB (a folder's files together, at most
 A message with files can't go to a task whose folder isn't on this computer
 right now; the composer says so.
 
+## Comments on the diff
+
+In a task's diff (Outputs → Review the diff, ⌘D) the person picks a line or a
+range, writes about it, gathers several, and Send delivers them to the lead in
+one message. Posting them to the code host as a review is not built; the
+shape is close enough to a review comment to be mapped later.
+
+- **A comment is a value of its own (`LineComment`):** a file as the Changes
+  view names it (the repository's slug first in a task of several), a side
+  (`new` for the file as the task has it, `old` for lines the change only took
+  out, with `under` the new line they were taken out after), a first and last
+  line, the code as it showed (each line unchanged, added or removed) and what
+  the person said. `LINE_COMMENTS` limits a message to 30 and a comment to 80
+  quoted lines.
+- **It rides on a message.** `Send` and `SwitchAgent` take `comments`; no call
+  sends them on their own, so a message and its comments are one input and
+  one turn. The command's envelope says how many there are, not what they say.
+- **The lead reads text.** After the person's words come "N comments on the
+  diff:", then each comment's file and lines ("as the file was before the
+  change" for a removed line), its code fenced in the file's language, or as a
+  diff where a line was taken out, in a fence longer than any run of backticks
+  in it, and what the person said. No agent needs to know a new shape, and
+  older clients need nothing: the field is optional.
+- **The thread shows them on the person's message.** `UserMessageItem`'s
+  content has an optional `comments` (`SentLineComment`, the comment with an
+  id); the bubble shows each one's excerpt after the words, and an excerpt
+  opens the diff at its line.
+- **Addressed is worked out, never stored.** The runtime keeps each comment
+  with its worktree's tree and HEAD as they were when it was sent.
+  `GetLineComments` reads them back with where each one's lines are now,
+  carried past what changed since. A comment is `addressed` once a commit
+  since it was sent changed its lines, and they are still changed as the
+  files are now; what isn't committed doesn't count. One whose lines no longer
+  show in the change is listed above its file; one whose worktree is gone has
+  no place and is never addressed.
+
 ## Dictation
 
 Dictation is local, always. Speech is turned into text on this machine and
@@ -655,6 +691,7 @@ A delivered task message with a complete checkpoint offers **Undo from here**. T
 
 - 8 Nov 2026: written from the ADRs under Replaces.
 - 8 Nov 2026: what stands open after a turn folds carries everything the person needs, never "see above" (#699).
+- 8 Nov 2026: comments on lines of the diff go to the lead with their file, lines and code, and show addressed once a commit changes their lines (DEV-175).
 - 10 Nov 2026: a thread marks a new change as a stamped row of its own; the board keeps chats on Scratch behind one chip; the plan card's kicker names its preset; the header's parts move a task, point it elsewhere, run a review's code and stop a helper ([tasks](tasks.md#changing-parts)).
 - 10 Nov 2026: Scratch is a shelf of its own, by each chat's latest exchange, with Clear; the board card says one sentence across a task's changes with a mark for each; Shipped, Merged and Helper rows in the thread, a helper's opening in place to its work, and helpers' lanes on the Graph face; the plan card's preset picks another; Settings edits presets ([tasks](tasks.md#asides)).
 - 11 Nov 2026: asides over the coordinator's conversation replace Scratch's chip beside it; the chip stays with the board alone ([tasks](tasks.md#asides)).

@@ -21,6 +21,7 @@ import {
   type ProjectRulesView,
   type SentFile,
   type SentImage,
+  type LineComment,
 } from '@althar/contracts'
 import type { ProjectId } from '@althar/domain'
 import { Commands, Ledger } from '@althar/persistence-sqlite'
@@ -353,6 +354,10 @@ export const handlers = Api.toLayer(
           })
     /** What a message's command says of its files: how many, never their names or paths; nothing where it has none. */
     const filesSaid = (kept: ReadonlyArray<InputFile>) => (kept.length === 0 ? {} : { files: kept.length })
+    /** A message's comments on the diff, kept with the files as they are now (decisions: desktop-app § Comments on the diff); none where it has none. */
+    const commentsFor = (threadId: string, comments: ReadonlyArray<LineComment> | undefined) =>
+      comments === undefined || comments.length === 0 ? Effect.succeed([]) : queries.keepLineComments(threadId, comments)
+    const commentsSaid = (kept: ReadonlyArray<unknown>) => (kept.length === 0 ? {} : { comments: kept.length })
 
     const failures = yield* Failures
     /** The call being answered, by the name the RPC server gives its span: `Status`, `ListProjects`. */
@@ -1032,6 +1037,7 @@ export const handlers = Api.toLayer(
       ReadCode: ({ threadId, path, commit, line }) => api(queries.readCode(threadId, path, commit, line)),
       GetFileDiff: ({ taskId, path, untouched }) => api(queries.fileDiff(taskId, path, untouched === true)),
       GetTaskFindings: ({ taskId, review }) => api(queries.findings(taskId, review)),
+      GetLineComments: ({ taskId }) => api(queries.lineComments(taskId)),
       GetBoard: ({ projectId }) => api(queries.board(projectId)),
       GetOlderSettled: ({ projectId, before, taskId }) =>
         api(Effect.map(queries.olderSettled(projectId, before, taskId), (tasks) => ({ tasks }))),
@@ -1053,7 +1059,7 @@ export const handlers = Api.toLayer(
             sessions.start({ threadId, agentId, ...(model === undefined ? {} : { model }), ...(effort === undefined ? {} : { effort }) }),
           ),
         ),
-      SwitchAgent: ({ commandId, threadId, agentId, model, effort, body, images, files, dictated }) =>
+      SwitchAgent: ({ commandId, threadId, agentId, model, effort, body, images, files, dictated, comments }) =>
         once(
           commandId,
           api(
@@ -1061,6 +1067,7 @@ export const handlers = Api.toLayer(
               // Its images and files are read and kept first, outside any transaction; one that can't be sent refuses the switch.
               const kept = body === undefined || images === undefined || images.length === 0 ? [] : yield* keptFor(threadId, images)
               const copied = body === undefined ? [] : yield* filesFor(threadId, files)
+              const commented = body === undefined ? [] : yield* commentsFor(threadId, comments)
               // What the person said with it is said to the thread, under a command of its own.
               const message =
                 body === undefined
@@ -1075,6 +1082,7 @@ export const handlers = Api.toLayer(
                           disposition: 'after_current',
                           ...imagesSaid(kept),
                           ...filesSaid(copied),
+                          ...commentsSaid(commented),
                           ...(dictated === true ? { dictated } : {}),
                         },
                         `cmd_${createHash('sha256').update(`${commandId}\u0000said`).digest('hex').slice(0, 32)}`,
@@ -1083,6 +1091,7 @@ export const handlers = Api.toLayer(
                       sender,
                       ...(kept.length === 0 ? {} : { images: kept }),
                       ...(copied.length === 0 ? {} : { files: copied }),
+                      ...(commented.length === 0 ? {} : { comments: commented }),
                       ...(dictated === true ? { dictated: true } : {}),
                     }
               // Written to again with the switch, a task kept for later is back, as when it is sent on its own.
@@ -1444,7 +1453,7 @@ export const handlers = Api.toLayer(
           commandId,
           api(Effect.flatMap(envelope('task.reopen', { taskId }, commandId), (said) => tasks.reopen({ envelope: said, taskId }))),
         ),
-      Send: ({ commandId, threadId, body, disposition, images, files, dictated, canvasComments }) =>
+      Send: ({ commandId, threadId, body, disposition, images, files, dictated, comments, canvasComments }) =>
         api(
           sessions.accepting(
             threadId,
@@ -1452,8 +1461,10 @@ export const handlers = Api.toLayer(
               // Its images and files are read, checked and kept first, outside the command's transaction: one that can't be sent refuses the message.
               const kept = images === undefined || images.length === 0 ? [] : yield* keptFor(threadId, images)
               const copied = yield* filesFor(threadId, files)
+              // Its comments on the diff, each with the files as they are now, so a commit since can be told to change their lines.
+              const commented = yield* commentsFor(threadId, comments)
               const message = {
-                // The command says its images by their digests, never their bytes, and how many files, never their paths.
+                // The command says its images by their digests, never their bytes, and how many files and comments, never their paths.
                 envelope: yield* envelope(
                   'thread.send',
                   {
@@ -1462,6 +1473,7 @@ export const handlers = Api.toLayer(
                     disposition,
                     ...imagesSaid(kept),
                     ...filesSaid(copied),
+                    ...commentsSaid(commented),
                     ...(dictated === true ? { dictated } : {}),
                     ...(canvasComments === undefined || canvasComments.length === 0 ? {} : { canvasComments }),
                   },
@@ -1473,6 +1485,7 @@ export const handlers = Api.toLayer(
                 disposition,
                 ...(kept.length === 0 ? {} : { images: kept }),
                 ...(copied.length === 0 ? {} : { files: copied }),
+                ...(commented.length === 0 ? {} : { comments: commented }),
                 ...(dictated === true ? { dictated } : {}),
                 ...(canvasComments === undefined || canvasComments.length === 0 ? {} : { canvasComments }),
               }

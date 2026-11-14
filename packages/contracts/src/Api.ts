@@ -5,6 +5,7 @@ import { CanvasDetail, CanvasKind, CanvasSummary, CanvasText, SentCanvasComment 
 import { MESSAGE_FILES } from './files'
 import { AutomationCard, AutomationDefinition, AutomationSnapshot, AutomationsSnapshot, FromAutomation } from './automations'
 import { MESSAGE_IMAGES } from './pictures'
+import { LineComments, SentLineComment, TaskLineComments } from './lineComments'
 import { SettingChangeCard, SettingChanged } from './settings'
 
 /*
@@ -1763,6 +1764,8 @@ export const UserMessageItem = Schema.Struct({
     links: Schema.Array(Unfurl),
     pictures: Schema.Array(Picture),
     files: Schema.Array(AttachedFile),
+    /** What they said of lines of the task's diff, each with the code it is on (decisions: desktop-app § Comments on the diff). */
+    comments: Schema.optional(Schema.Array(SentLineComment)),
   }),
   input: Schema.NullOr(
     Schema.Struct({
@@ -4569,6 +4572,7 @@ const socketCalls = new Set<string>([
   'ReadCode',
   'GetFileDiff',
   'GetTaskFindings',
+  'GetLineComments',
   'GetBoard',
   'GetOlderSettled',
   'GetHome',
@@ -4765,6 +4769,12 @@ export const Api = RpcGroup.make(
    * `review`, a thread item; without it, the latest run that found anything.
    */
   call('GetTaskFindings', { taskId: Schema.String, review: Schema.optional(Schema.String) }, TaskFindings),
+  /**
+   * The comments the person sent on lines of a task's diff (decisions: desktop-app § Comments on the diff), each
+   * where its lines are in the change now, and addressed once a commit since
+   * it was made changed them.
+   */
+  call('GetLineComments', { taskId: Schema.String }, TaskLineComments),
   /** A project's board: its tasks, by card, and the calls that wait on the person. */
   call('GetBoard', { projectId: Schema.String }, BoardSnapshot),
   /** The next page of a project's settled tasks, as cards, older than the one settled at `before` (`taskId` breaking a tie), most recent first. */
@@ -4964,6 +4974,8 @@ export const Api = RpcGroup.make(
       files: Schema.optional(SentFiles),
       /** Any of what the person said came from dictation. */
       dictated: Schema.optional(Schema.Boolean),
+      /** Comments on lines of the task's diff sent with what the person said (decisions: desktop-app § Comments on the diff). */
+      comments: Schema.optional(LineComments),
     },
     Schema.String,
   ),
@@ -5293,6 +5305,8 @@ export const Api = RpcGroup.make(
       files: Schema.optional(SentFiles),
       /** Any of its words came from dictation, even if the person edited them after: the agent is told, so it reads past what was misheard. */
       dictated: Schema.optional(Schema.Boolean),
+      /** Comments on lines of a task's diff (decisions: desktop-app § Comments on the diff): the agent reads each with its file, its lines and the code quoted, after the words. */
+      comments: Schema.optional(LineComments),
       /** The person's comments on canvases (ADR-104), kept with the message and in the same command: until it is sent, each is only the person's draft. */
       canvasComments: Schema.optional(Schema.Array(SentCanvasComment).check(Schema.isMaxLength(50))),
     },

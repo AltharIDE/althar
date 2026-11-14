@@ -58,6 +58,8 @@ import {
   domPort,
   type FileDiff,
   type TaskFindings,
+  type TaskLineComments,
+  type LineComment,
   type FolderHeld,
   type FolderReading,
   type MadeRepository,
@@ -194,6 +196,8 @@ export interface Client {
   readonly getFileDiff: (taskId: string, path: string, untouched?: boolean) => Promise<FileDiff>
   /** What the reviews of a task's run found, each where it is in the change now: the run of the review reported in `review`, else the latest. */
   readonly getTaskFindings: (taskId: string, review?: string) => Promise<TaskFindings>
+  /** The comments the person sent on lines of a task's diff, each where it is now and whether a commit since addressed it (decisions: desktop-app § Comments on the diff). */
+  readonly getLineComments: (taskId: string) => Promise<TaskLineComments>
   /** What the names in a thread's messages name where its agent works, each message by its item where it has one. */
   readonly findCode: (
     threadId: string,
@@ -221,6 +225,7 @@ export interface Client {
       readonly images?: ReadonlyArray<SentImage>
       readonly files?: ReadonlyArray<SentFile>
       readonly dictated?: boolean
+      readonly comments?: ReadonlyArray<LineComment>
     },
   ) => Promise<string>
   readonly setModel: (input: { readonly threadId: string; readonly model: string }) => Promise<void>
@@ -429,6 +434,8 @@ export interface Client {
     readonly files?: ReadonlyArray<SentFile>
     /** Any of its words came from dictation, even if edited after. */
     readonly dictated?: boolean
+    /** Comments on lines of the task's diff, each with its file, lines and code (decisions: desktop-app § Comments on the diff). */
+    readonly comments?: ReadonlyArray<LineComment>
     /** The person's comments on canvases, kept with it (ADR-104). */
     readonly canvasComments?: ReadonlyArray<SentCanvasComment>
   }) => Promise<void>
@@ -857,6 +864,7 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
     readCanvasText: (canvasId, version) => settle(api.ReadCanvasText({ canvasId, version })),
     getFileDiff: (taskId, path, untouched) => settle(api.GetFileDiff({ taskId, path, ...(untouched === true ? { untouched } : {}) })),
     getTaskFindings: (taskId, review) => settle(api.GetTaskFindings({ taskId, ...(review === undefined ? {} : { review }) })),
+    getLineComments: (taskId) => settle(api.GetLineComments({ taskId })),
     findCode: (threadId, messages) => settle(api.FindCode({ threadId, messages })),
     readCode: (threadId, path, at = {}) =>
       settle(

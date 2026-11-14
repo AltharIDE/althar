@@ -1,5 +1,15 @@
 import { plainTitle, toolWordsOf } from '@althar/contracts'
-import type { AllowedBy, AttachedFile, FileMention, Picture, ShownPicture, ThreadItem, TurnTime, Unfurl } from '@althar/contracts'
+import type {
+  AllowedBy,
+  AttachedFile,
+  FileMention,
+  Picture,
+  SentLineComment,
+  ShownPicture,
+  ThreadItem,
+  TurnTime,
+  Unfurl,
+} from '@althar/contracts'
 import { Delivery, headingOf, oneLine, PlanState, ToolKind, ToolState } from '@althar/ui'
 
 import { type Handed, handedBy, type OutputSoFar, type PartHanded, type Ran, ranOf } from './handed'
@@ -155,6 +165,8 @@ export type Block =
       readonly pictures: ReadonlyArray<Picture>
       /** The files and folders the person sent with it. */
       readonly files: ReadonlyArray<AttachedFile>
+      /** What they said of lines of the task's diff, each with its code (decisions: desktop-app § Comments on the diff). */
+      readonly comments?: ReadonlyArray<SentLineComment>
     }
   | {
       readonly kind: 'turn'
@@ -791,6 +803,7 @@ export const blocksOf = (
           links: item.content.links,
           pictures: item.content.pictures,
           files: item.content.files,
+          ...(item.content.comments === undefined || item.content.comments.length === 0 ? {} : { comments: item.content.comments }),
         })
         if (delivery === Delivery.Delivered) {
           asked = item

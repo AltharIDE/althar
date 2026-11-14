@@ -493,6 +493,7 @@ describe('the API', () => {
               GetThread: () => Effect.die('unused'),
               GetFileDiff: () => Effect.die('unused'),
               GetTaskFindings: () => Effect.die('unused'),
+              GetLineComments: () => Effect.die('unused'),
               GetBoard: () => Effect.die('unused'),
               GetOlderSettled: () => Effect.die('unused'),
               GetHome: () => Effect.die('unused'),
