@@ -307,6 +307,24 @@ describe('a task’s worktree whose link broke, in the runtime', () => {
     }).pipe(Effect.provide(withRepair())),
   )
 
+  it.live('leaves alone, and runs nothing again for, a folder that isn’t there, isn’t broken or isn’t Althar’s', () =>
+    Effect.gen(function* () {
+      const task = yield* aTask
+      const repair = yield* WorktreeRepair
+      assert.isFalse(yield* repair.mend(join(tmpdir(), 'althar-nowhere', 'at-all')))
+      assert.isFalse(yield* repair.mend(task.worktree))
+      const stranger = mkdtempSync(join(tmpdir(), 'althar-stranger-'))
+      writeFileSync(join(stranger, '.git'), 'gitdir: /nowhere/old/.git/worktrees/x\n')
+      assert.isFalse(yield* repair.mend(stranger))
+      assert.deepStrictEqual(linkOf(stranger), { state: 'broken', why: 'gitdir', gitdir: '/nowhere/old/.git/worktrees/x' })
+      // Repaired since the command began: it runs again.
+      relink(join(task.worktree, '.git'), 'gitdir: /nowhere/old-profile/.git/worktrees/x\n')
+      assert.isTrue(yield* repair.mend(task.worktree, 0))
+      assert.isTrue(yield* repair.mend(task.worktree, 0))
+      assert.isFalse(yield* repair.mend(task.worktree, Number.MAX_SAFE_INTEGER))
+    }).pipe(Effect.provide(withRepair())),
+  )
+
   it.live('is looked at with the copy its reviews read, as at startup, and repaired', () =>
     Effect.gen(function* () {
       const task = yield* aTask

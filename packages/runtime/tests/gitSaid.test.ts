@@ -107,6 +107,11 @@ describe('a git failure in a line', () => {
     )
   })
 
+  it('says “git” and “failed” where it knows neither the subcommand nor how it ended', () => {
+    assert.strictEqual(gitSummary(failed([], '', {}), HOME), 'git: failed')
+    assert.strictEqual(subcommandOf(['--no-pager', 'core.x=1']), '')
+  })
+
   it('finds the subcommand past options before it', () => {
     assert.strictEqual(subcommandOf(['-c', 'core.hooksPath=/dev/null', 'status', '--short']), 'status')
     assert.strictEqual(subcommandOf(['--git-dir', '/x/.git', '--work-tree', '/x', 'diff']), 'diff')
@@ -119,6 +124,8 @@ describe('a git failure in a line', () => {
   })
 
   it('shortens the home folder only where it is one', () => {
+    assert.strictEqual(homeShortened('/a/b', '/'), '/a/b')
+    assert.strictEqual(homeShortened('/a/b', ''), '/a/b')
     assert.strictEqual(homeShortened(`${HOME}/a and ${HOME}-other/b`, HOME), `~/a and ${HOME}-other/b`)
   })
 
