@@ -334,7 +334,10 @@ export const coordinatorFolder = (projectId: string) =>
  */
 export const earlierRoots = (worktrees: ReadonlyArray<string>, root: string, home: string): ReadonlyArray<string> => {
   const roots = worktrees.map((path) => dirname(dirname(dirname(path)))).filter((path) => dirname(path) !== path)
-  return [...new Set(roots)].filter(
-    (path) => path !== home && !home.startsWith(path + sep) && path !== root && !path.startsWith(root + sep),
-  )
+  // Compared resolved, so a path written with forward slashes meets its own separators on Windows too; the roots are given as they were.
+  const [homeAt, rootAt] = [resolve(home), resolve(root)]
+  return [...new Set(roots)].filter((path) => {
+    const at = resolve(path)
+    return at !== homeAt && !homeAt.startsWith(at + sep) && at !== rootAt && !at.startsWith(rootAt + sep)
+  })
 }
