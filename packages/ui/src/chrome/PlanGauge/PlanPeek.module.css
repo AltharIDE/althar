@@ -158,7 +158,7 @@ ul.windows {
 }
 .window {
   display: grid;
-  grid-template-columns: 74px minmax(40px, 1fr) 34px 66px;
+  grid-template-columns: 74px minmax(40px, 1fr) 34px 72px;
   align-items: center;
   column-gap: 8px;
   font-size: 11.5px;
@@ -177,8 +177,24 @@ ul.windows {
   color: var(--t-1);
   font-weight: 600;
 }
-.windowUntil {
+.windowUnknown {
+  grid-column: span 2;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
   white-space: nowrap;
+}
+/* when it resets, at the row's end: the time left, with the exact time on hover */
+.windowUntil {
+  min-width: 0;
+  overflow: hidden;
+  text-align: right;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.window[data-unread] .windowUnknown {
+  color: var(--t-2);
 }
 
 @media (prefers-reduced-motion: reduce) {

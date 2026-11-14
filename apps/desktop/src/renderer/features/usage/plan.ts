@@ -3,7 +3,7 @@ import type { ModelInfo, ModelRoom, PlanAccount, PlanAgent, PlanWindow } from '@
 
 import { brandOf } from '../../shared/agents'
 import { choiceOf } from '../../shared/models'
-import { ago, clock } from '../../shared/time'
+import { ago, clock, timeLeft } from '../../shared/time'
 
 /*
  * Plan usage as the window shows it (docs/plans/plan-usage.md): a gauge in
@@ -33,6 +33,16 @@ export const text = {
   unread: 'Not read since reset',
   /** A plan signed in and able to run, whose usage nothing reads (OpenCode Go without a Console sign-in). */
   connected: 'Connected',
+  /** Hover on it: when the window resets, and the time left. */
+  resetsAt: (at: string, left: string | null) => (left === null ? `Resets ${at}` : `Resets ${at} · ${left}`),
+  /** Where a bar would be, for a window that has reset since it was read and not been read again. */
+  notRead: 'not read since',
+  /** The end of such a row: when it reset, short; and in full on hover. */
+  resetAt: (at: string) => `reset ${at}`,
+  resetAtFull: (at: string) => `Reset at ${at} · not read since`,
+  /** The provider gave no reset time for the window. */
+  noReset: 'no reset time',
+  noResetFull: 'The provider gave no reset time for this window.',
 }
 
 /** The providers within an agent that are a plan of their own, as the registry has them: a model through one is on it. */
@@ -91,7 +101,18 @@ const tightest = (account: AccountUsage): UsageWindow | undefined => {
 /** A read that failed for a moment (a rate limit, no answer, an error) and will pass on its own: nothing the person can do, so the peek keeps to the last numbers and how old they are. */
 const passing = (account: AccountUsage) => account.fault?.kind === 'unreachable'
 
-const accountOf = (account: AccountUsage, several: boolean, now: Date): PlanAccount => ({
+/** What the end of a window's row says of when it resets, and in full on hover: the time left, that it reset and wasn't read since, or that no time is known. */
+const resetsOf = (window: UsageWindow, now: Date, reset: boolean): Pick<PlanWindow, 'resets' | 'resetsTitle' | 'note'> => {
+  const at = window.resetsAt === null ? '' : clock(window.resetsAt, now)
+  if (at === '' || window.resetsAt === null)
+    return { resets: text.noReset, resetsTitle: text.noResetFull, ...(reset ? { note: text.notRead } : {}) }
+  if (reset) return { resets: text.resetAt(at), resetsTitle: text.resetAtFull(at), note: text.notRead }
+  const left = timeLeft(window.resetsAt, now)
+  return { resets: left ?? at, resetsTitle: text.resetsAt(at, left) }
+}
+
+/** `account` has only the windows not reset since; `read` is as it was read, to show those that have, as not read since. */
+const accountOf = (account: AccountUsage, several: boolean, now: Date, read: AccountUsage = account): PlanAccount => ({
   id: account.accountId,
   name: several ? account.accountName : null,
   // Old numbers say how old; so do any that a passing fault left unrefreshed, as the fault itself isn't shown.
@@ -100,12 +121,18 @@ const accountOf = (account: AccountUsage, several: boolean, now: Date): PlanAcco
       ? text.read(ago(account.observedAt, now))
       : null,
   fault: passing(account) ? null : (account.fault?.message ?? null),
-  windows: account.windows.map((window): PlanWindow => ({
-    id: window.label === null ? window.kind : `${window.kind}:${window.label}`,
-    label: windowName(window),
-    left: leftOf(window),
-    until: window.resetsAt === null ? null : clock(window.resetsAt, now),
-  })),
+  windows: [...read.windows, ...(read.resetWindows ?? [])].map((window): PlanWindow => {
+    // Reset by the runtime's clock (sent apart), or by this one, which has moved on since it was sent.
+    const reset = (read.resetWindows ?? []).includes(window) || past(window.resetsAt, now)
+    return {
+      id: window.label === null ? window.kind : `${window.kind}:${window.label}`,
+      label: windowName(window),
+      left: reset ? 0 : leftOf(window),
+      until: window.resetsAt === null ? null : clock(window.resetsAt, now),
+      ...resetsOf(window, now, reset),
+      ...(reset ? { unread: true } : {}),
+    }
+  }),
 })
 
 /** Every agent read, least room first. */
@@ -115,9 +142,11 @@ export const planOf = (usage: PlanUsage | null, now: Date): { readonly agents: P
   // The accounts that had windows when they were read, though every one may have reset since: by the runtime's clock, which
   // then sends none, or by the window's own, which leaves out what has reset since it was sent.
   const wasRead = new Set<string>()
+  const asRead = new Map<string, AccountUsage>()
   for (const read of usage?.accounts ?? []) {
+    asRead.set(read.accountId, read)
     const account = current(read, now)
-    if (read.resetSince || read.windows.length > 0) wasRead.add(account.accountId)
+    if (read.resetSince || (read.resetWindows?.length ?? 0) > 0 || read.windows.length > 0) wasRead.add(account.accountId)
     byAgent.set(account.agentId, [...(byAgent.get(account.agentId) ?? []), account])
   }
   for (const [agentId, accounts] of byAgent) {
@@ -146,7 +175,7 @@ export const planOf = (usage: PlanUsage | null, now: Date): { readonly agents: P
         until: null,
         account: null,
         accounts: shown.map((account) => ({
-          ...accountOf(account, several, now),
+          ...accountOf(account, several, now, asRead.get(account.accountId)),
           fault: account.fault?.message ?? account.noReading ?? null,
         })),
         ...(out ? { stopped: text.signedOut, signIn: true } : reset.length > 0 ? { unread: text.unread } : { connected: text.connected }),
@@ -156,8 +185,13 @@ export const planOf = (usage: PlanUsage | null, now: Date): { readonly agents: P
     // Another account on the plan, connected but unread (a fresh OpenCode Go key in a new account), is in the detail too.
     const named = accounts.filter((account) => !wasRead.has(account.accountId) && namedUnread(account))
     const each = [
-      ...read.toSorted((a, b) => leftOf(a.window) - leftOf(b.window)).map(({ account }) => accountOf(account, several, now)),
-      ...named.map((account) => ({ ...accountOf(account, several, now), fault: account.fault?.message ?? account.noReading ?? null })),
+      ...read
+        .toSorted((a, b) => leftOf(a.window) - leftOf(b.window))
+        .map(({ account }) => accountOf(account, several, now, asRead.get(account.accountId))),
+      ...named.map((account) => ({
+        ...accountOf(account, several, now, asRead.get(account.accountId)),
+        fault: account.fault?.message ?? account.noReading ?? null,
+      })),
     ]
     // The figure is of the account new work would start on: one signed out keeps its last numbers in the peek, but runs nothing, as the runtime skips it.
     const usable = read.filter(({ account }) => account.fault?.kind !== 'sign_in_again')

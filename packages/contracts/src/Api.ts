@@ -261,6 +261,11 @@ export const AccountUsage = Schema.Struct({
   /** The plan as the agent names it: plus, pro, max. */
   plan: Schema.NullOr(Schema.String),
   windows: Schema.Array(UsageWindow),
+  /**
+   * The windows last read of it that have reset since, as last read: not in `windows`, and their `usedPercent` is what it was
+   * then, not now. Until they are read again they are only a reset to show.
+   */
+  resetWindows: Schema.optional(Schema.Array(UsageWindow)),
   /** Why the numbers are missing or old, where they are; the windows shown are the last ones then. */
   fault: Schema.NullOr(Schema.Struct({ kind: UsageFaultKind, message: Schema.String })),
   /** Why Althar reads no usage for it, where the agent reports none anyone can read: shown calmly, not as a fault. */
