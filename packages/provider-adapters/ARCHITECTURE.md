@@ -16,6 +16,8 @@ The agent adapter of [docs/architecture/03](../../docs/architecture/03-agent-run
 | `events.ts` | Normalizes the agent's updates into Althar's events: words, what a message or a tool call hands back (pictures, links, resources), the files a call writes (a path, and whether it is new, never the text), and a command's output and exit from `_meta` |
 | `failures.ts` | Classifies what went wrong, and reads when a usage limit resets |
 | `signIn.ts` | Checks sign-in with each agent's documented status command |
+| `native/agent.ts`, `native/tools.ts` | Althar's in-process agent loop, bounded context and compaction, file/command tools and MCP clients; tools use the existing ACP permission boundary and owned processes |
+| `native/copilot.ts` | Copilot model catalog and streaming inference compatibility for Chat Completions, Responses and Messages; credentials and authenticated HTTP remain in the runtime |
 | `testing/` | The scripted fake agent, in process and as a process |
 
 ## Principles
@@ -33,7 +35,7 @@ The agent adapter of [docs/architecture/03](../../docs/architecture/03-agent-run
 - **Althar asks for command output** (`terminal_output_delta` in its client capabilities, beside the AIR failure extension that makes both bundled adapters treat it as JetBrains AIR, which hears no output unless it asks): Codex streams it in chunks, Claude Code sends it whole when the command ends, each with its exit code; OpenCode says it as the tool's own text content (ADR-020).
 - **Althar hears what an agent leaves running** (`background.ts`, ADR-022): `asyncTasks` beside `sessionFailure` in its AIR capabilities, and the `async_task_*` updates taken off the stream before the SDK, whose schema doesn't have them and drops them. Only commands are heard, as `BackgroundStarted`, `BackgroundOutput` and `BackgroundEnded`, in the session's order; a session stops one with `stopBackground`, and closing it stops every one it left running first, since they sit outside the agent's process group. Althar also declares that it shows notices, so what an agent says of itself is a `Notice`.
 - **Never fatal on the unknown.** An update type or field this version doesn't know is kept as `Other`, with its raw payload.
-- **The agent's own tool owns sign-in.** Status comes from documented commands (`claude auth status`, `codex login status`, `opencode auth list`), never from reading a credential store. When signed out, Althar names the agent's own login command.
+- **External agents own their sign-in.** Status comes from documented commands (`claude auth status`, `codex login status`, `opencode auth list`), never from reading their credential stores. Native Copilot is Althar-owned: the runtime supplies a credential-free provider interface and owns its OAuth and encrypted account storage. It launches no external agent or sign-in process.
 - **Processes are owned.** Each agent runs in its own process group, with only an allowlist of Althar's environment; provider API keys are not on it. Stopping always signals the group, even after the agent has exited: TERM, a grace period, then KILL, and survivors are reported. A process is never found by name; its OS start time is recorded to tell it from a later process with the same pid.
 
 ## Checks
