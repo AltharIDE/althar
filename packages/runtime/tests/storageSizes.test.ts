@@ -1,3 +1,5 @@
+import { resolve } from 'node:path'
+
 import { describe, expect, it } from 'vitest'
 
 import type { StorageSize } from '@althar/contracts'
@@ -61,8 +63,9 @@ describe('the sizes kept for a session', () => {
     )
     await sizes.size('profile')
     await sizes.size('logs')
-    expect(calls['/data/althar']).toEqual(['/data/althar/logs', '/data/althar/worktrees'])
-    expect(calls['/data/althar/logs']).toEqual([])
+    // The walk is given where a place really is, which on Windows has a drive.
+    expect(calls[resolve('/data/althar')]).toEqual([resolve('/data/althar/logs'), resolve('/data/althar/worktrees')])
+    expect(calls[resolve('/data/althar/logs')]).toEqual([])
   })
 })
 
@@ -86,7 +89,7 @@ describe('giving up on a size', () => {
     await new Promise((go) => setTimeout(go, 5))
     stop.abort()
     await expect(asked).rejects.toThrow('Stopped measuring.')
-    expect(stopped).toEqual(['/w'])
+    expect(stopped).toEqual([resolve('/w')])
   })
 
   it('lets the walk go on while another still waits on it', async () => {
