@@ -188,18 +188,11 @@ export class AccountSignIns extends Context.Service<
                       // with it, so a warning that the old sign-in was ending goes from the bar at once (DEV-196).
                       Effect.runFork(
                         signIns.account(account, true).pipe(
-                          Effect.flatMap((checked) =>
+                          Effect.flatMap(() =>
                             planUsage.retell.pipe(
                               Effect.ensuring(
                                 Effect.sync(() => {
-                                  flow.state =
-                                    entry.definition.id === 'copilot-direct' && checked.status !== 'signed_in'
-                                      ? {
-                                          state: 'failed',
-                                          message:
-                                            'GitHub sign-in finished, but Copilot access could not be confirmed. Try signing in again.',
-                                        }
-                                      : { state: 'done', who: event.who, plan: event.plan }
+                                  flow.state = { state: 'done', who: event.who, plan: event.plan }
                                 }),
                               ),
                             ),

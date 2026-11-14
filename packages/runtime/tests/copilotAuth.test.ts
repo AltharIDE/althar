@@ -25,7 +25,7 @@ const fixture = (
     configured?: boolean
     challenge?: Record<string, unknown>
     modelList?: unknown
-    failure?: 'start' | 'poll' | 'account' | 'account-json' | 'models'
+    failure?: 'start' | 'poll' | 'account' | 'account-json' | 'models' | 'poll-timeout' | 'account-timeout' | 'model-timeout'
   } = {},
 ) => {
   const host = options.host ?? 'github.com'
@@ -42,6 +42,22 @@ const fixture = (
     if (options.failure === 'account' && url.endsWith('/copilot_internal/user')) return Response.json({}, { status: 403 })
     if (options.failure === 'account-json' && url.endsWith('/copilot_internal/user')) return new Response('unreadable account')
     if (options.failure === 'models' && url.endsWith('/models')) throw new Error('Internal network details')
+    if (
+      (options.failure === 'poll-timeout' && url.endsWith('/login/oauth/access_token')) ||
+      (options.failure === 'account-timeout' && url.endsWith('/copilot_internal/user'))
+    )
+      return new Promise<Response>((_resolve, reject) => {
+        input?.signal?.addEventListener('abort', () => reject(new Error('Request aborted')), { once: true })
+      })
+    if (options.failure === 'model-timeout' && url.endsWith('/models'))
+      return new Response(
+        new ReadableStream({
+          start(controller) {
+            input?.signal?.addEventListener('abort', () => controller.error(new Error('Response aborted')), { once: true })
+          },
+        }),
+        { headers: { 'content-type': 'application/json' } },
+      )
     if (url.endsWith('/login/device/code'))
       return Response.json({
         device_code: 'test-device',
@@ -65,7 +81,7 @@ const fixture = (
   return { kept, calls, layer }
 }
 
-const login = (copilot: typeof Copilot.Service, host?: string) =>
+const login = (copilot: typeof Copilot.Service, host?: string, advance = 1) =>
   Effect.gen(function* () {
     const shown = yield* Deferred.make<void>()
     const fiber = yield* Effect.forkChild(
@@ -74,7 +90,7 @@ const login = (copilot: typeof Copilot.Service, host?: string) =>
       }),
     )
     yield* Deferred.await(shown)
-    yield* TestClock.adjust(Duration.seconds(1))
+    yield* TestClock.adjust(Duration.seconds(advance))
     yield* Fiber.join(fiber)
   })
 
@@ -155,6 +171,29 @@ describe('Althar’s Copilot account', () => {
       expect(Exit.isFailure(outcome)).toBe(true)
       expect(calls).toEqual([])
     }).pipe(Effect.provide(layer))
+  })
+
+  it.effect('refuses an invalid enterprise host before sending an authorization request', () => {
+    const { layer, calls } = fixture()
+    return Effect.gen(function* () {
+      const error = yield* Effect.flip((yield* Copilot).signIn('account-a', 'http://wrong.example', () => undefined))
+      expect(error).toMatchObject({ _tag: 'CopilotFailed', message: expect.stringContaining('hostname or HTTPS') })
+      expect(calls).toEqual([])
+    }).pipe(Effect.provide(layer))
+  })
+
+  it.effect.each([
+    ['poll-timeout', 901, 'code expired'],
+    ['account-timeout', 46, 'did not answer in time'],
+    ['model-timeout', 46, 'did not confirm model access in time'],
+  ] as const)('ends a stalled %s request with guidance and preserves the previous account', ([failure, advance, message]) => {
+    const { layer, kept } = fixture({ failure })
+    kept.set('copilot-account-a', 'previously-sealed-account')
+    return Effect.gen(function* () {
+      const error = yield* Effect.flip(login(yield* Copilot, undefined, advance))
+      expect(error).toMatchObject({ _tag: 'CopilotFailed', message: expect.stringContaining(message) })
+      expect(kept.get('copilot-account-a')).toBe('previously-sealed-account')
+    }).pipe(Effect.provide(layer), onTestClock)
   })
 
   it.effect.each([
