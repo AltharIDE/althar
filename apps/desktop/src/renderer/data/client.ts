@@ -1,6 +1,8 @@
 import type { SearchDocuments } from '@althar/contracts'
 
 import {
+  type PlaceId,
+  type StorageSize,
   type CanvasDetail,
   type CanvasSummary,
   type CanvasText,
@@ -269,6 +271,8 @@ export interface Client {
   readonly setPlansAndReviews: (change: PlansAndReviewsChange) => Promise<void>
   /** What the rules of projects made from now on start with; what isn't given stays. */
   readonly setNewProjectDefaults: (change: NewProjectDefaultsChange) => Promise<void>
+  /** What a place Althar keeps data in takes on disk (About › Storage), kept for the session by the runtime, or measured again on a refresh; `signal` gives up on it, which stops the walk when no one else waits. */
+  readonly getStorageSize: (place: PlaceId, refresh: boolean, signal?: AbortSignal) => Promise<StorageSize>
   /** Finished tasks' folders on this computer, with the disk they are on. */
   readonly getTaskFolders: () => Promise<TaskFolders>
   /** Removes every finished task's folder nothing holds; what it freed, measured after. */
@@ -793,8 +797,8 @@ const uuidV7 = (now: number) => {
 }
 
 /** Runs a call and settles its promise with the call's own failure, not Effect's wrapper around it. */
-const settle = <A>(effect: Effect.Effect<A, unknown>): Promise<A> =>
-  Effect.runPromiseExit(effect).then((exit) => {
+const settle = <A>(effect: Effect.Effect<A, unknown>, signal?: AbortSignal): Promise<A> =>
+  Effect.runPromiseExit(effect, signal === undefined ? undefined : { signal }).then((exit) => {
     if (Exit.isSuccess(exit)) return exit.value
     throw Cause.squash(exit.cause)
   })
@@ -954,6 +958,7 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
     setFolderWait: (wait) => command((commandId) => api.SetFolderWait({ commandId, wait })),
     setPlansAndReviews: (change) => command((commandId) => api.SetPlansAndReviews({ commandId, ...change })),
     setNewProjectDefaults: (change) => command((commandId) => api.SetNewProjectDefaults({ commandId, ...change })),
+    getStorageSize: (place, refresh, signal) => settle(api.GetStorageSize({ place, refresh }), signal),
     getTaskFolders: () => settle(api.GetTaskFolders({})),
     cleanUpFolders: () => command((commandId) => api.CleanUpFolders({ commandId })),
     removeTaskFolder: (taskId, seen) => command((commandId) => api.RemoveTaskFolder({ commandId, taskId, seen })),

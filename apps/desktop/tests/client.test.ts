@@ -306,6 +306,7 @@ describe('the client', () => {
           SetPlansAndReviews: () => Effect.die('unused'),
           SetNewProjectDefaults: () => Effect.die('unused'),
           GetTaskFolders: () => Effect.die('unused'),
+          GetStorageSize: () => Effect.die('unused'),
           CleanUpFolders: () => Effect.die('unused'),
           RemoveTaskFolder: () => Effect.die('unused'),
           MoveInLine: () => Effect.die('unused'),

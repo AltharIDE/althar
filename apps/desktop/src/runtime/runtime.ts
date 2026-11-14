@@ -168,6 +168,10 @@ const options = {
   backups: backupsIn(profile),
   ...failingUpdate,
   worktreeRoot: required('ALTHAR_WORKTREES'),
+  // About › Storage measures the profile and the logs beside the worktrees.
+  ...(process.env.ALTHAR_LOGS === undefined || process.env.ALTHAR_LOGS === ''
+    ? {}
+    : { storage: { profile, logs: process.env.ALTHAR_LOGS } }),
   accountsRoot: join(profile, 'accounts'),
   // Pictures agents hand back and what commands print, by digest; the main process serves the pictures from here.
   artifactsRoot: join(profile, 'artifacts'),

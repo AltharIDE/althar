@@ -48,6 +48,8 @@ export interface Screenshot {
 export interface RuntimeOptions {
   /** Where task worktrees go: `<root>/<project>/<task>/<repository>` (ADR-006). */
   readonly worktreeRoot: string
+  /** The profile and the logs, which About › Storage measures beside the worktrees; without them it says it can't. */
+  readonly storage?: { readonly profile: string; readonly logs: string }
   /** Where the homes of accounts Althar makes go (ADR-012): `<root>/<account>`. Without it, it makes none. */
   readonly accountsRoot?: string
   /**

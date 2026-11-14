@@ -1245,6 +1245,7 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
     setFolderWait: vi.fn(async () => {}),
     setPlansAndReviews: vi.fn(async () => {}),
     setNewProjectDefaults: vi.fn(async () => {}),
+    getStorageSize: vi.fn(async () => ({ state: 'done' as const, bytes: 3 * 1024 ** 3, approximate: false, unreadable: 0 })),
     getTaskFolders: vi.fn(async () => ({ disk: null, folders: [], measuring: false })),
     cleanUpFolders: vi.fn(async () => ({ freed: 0, failed: 0 })),
     removeTaskFolder: vi.fn(async () => ({ freed: 0, failed: 0 })),
@@ -1475,6 +1476,14 @@ export const fakeHost = (overrides: Partial<Host> = {}): Host => ({
   onOpen: vi.fn(() => () => {}),
   onStoreFailed: vi.fn(() => () => {}),
   showBackup: vi.fn(async () => {}),
+  storage: {
+    places: vi.fn(async () => ({
+      profile: '/home/me/.local/share/althar',
+      logs: '/home/me/.local/share/althar/logs',
+      worktrees: '/home/me/Althar',
+    })),
+    show: vi.fn(async () => {}),
+  },
   tryAgain: vi.fn(async () => {}),
   appIcon: vi.fn(async () => 'cobalt'),
   setAppIcon: vi.fn(async () => {}),

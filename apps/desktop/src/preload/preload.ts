@@ -216,6 +216,10 @@ contextBridge.exposeInMainWorld('althar', {
     return () => void storeFailed.delete(listener)
   },
   showBackup: (): Promise<void> => ipcRenderer.invoke('althar:show-backup'),
+  storage: {
+    places: (): Promise<Record<string, string>> => ipcRenderer.invoke('althar:storage-places'),
+    show: (place: string): Promise<void> => ipcRenderer.invoke('althar:storage-show', place),
+  },
   tryAgain: (): Promise<void> => ipcRenderer.invoke('althar:try-again'),
   // Report a problem (DEV-61): the page's dialog opens, about what it was asked from; main takes the screenshot as it opens, gathers the rest, and sends or saves it.
   reportProblem: (about: unknown): void => reportAsked(about),

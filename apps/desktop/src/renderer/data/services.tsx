@@ -169,6 +169,16 @@ export interface WindowError {
   readonly source?: string
 }
 
+/** A place Althar keeps data, by id. */
+export type StoragePlace = 'profile' | 'logs' | 'worktrees'
+
+export interface StorageHost {
+  /** The path of each place. */
+  readonly places: () => Promise<Record<StoragePlace, string>>
+  /** Opens it in the system's file manager. */
+  readonly show: (place: StoragePlace) => Promise<void>
+}
+
 export interface Host {
   readonly onStartupStage?: (listener: (stage: StartupStage) => void) => () => void
   readonly startup?: (stage: string, duration?: number) => void
@@ -220,6 +230,8 @@ export interface Host {
   readonly onStoreFailed: (listener: (failure: StoreFailure) => void) => () => void
   /** Shows the copy from before that update in the system's file manager. */
   readonly showBackup: () => Promise<void>
+  /** Where Althar keeps its data and where each is and a way to open it (About › Storage); the sizes are the runtime's (`getStorageSize`). */
+  readonly storage: StorageHost
   /** Starts the runtime again on a profile that was open elsewhere, once the person has closed that; the window reloads. */
   readonly tryAgain: () => Promise<void>
   /** Calls `listener` with the thread a notification the person clicked is about, until the returned function is called. */
