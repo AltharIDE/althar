@@ -110,7 +110,7 @@ export const signInCautionOf = (agentId: string): string | undefined => CAUTIONS
 
 /** Who makes an agent, as Settings says it under its name; none for one that runs anyone's models. */
 const MAKERS: Readonly<Record<string, string>> = {
-  'copilot-direct': 'OpenCode',
+  'copilot-direct': 'Althar',
   'claude-code': 'Anthropic',
   codex: 'OpenAI',
   grok: 'xAI',

@@ -10,7 +10,7 @@ import { Deferred, Effect, Exit, Fiber } from 'effect'
 import { TestClock } from 'effect/testing'
 import { zipSync } from 'fflate'
 
-import { DOWNLOAD_WITHIN, Installs, type InstallsOptions, RELEASE_WITHIN } from '../src/Installs'
+import { DOWNLOAD_WITHIN, Installs, type InstallsOptions, isInstalled, RELEASE_WITHIN } from '../src/Installs'
 
 /** Windows, where what some tests stand on isn't (each says what). */
 const windows = process.platform === 'win32'
@@ -73,7 +73,7 @@ const using = (options: Partial<InstallsOptions>) => {
 }
 
 describe('downloading an agent', () => {
-  it('keeps native Copilot on its verified engine even when a personal OpenCode install is present', async () => {
+  it('needs no engine or download, and ignores an old managed OpenCode copy', async () => {
     const personal = mkdtempSync(join(tmpdir(), 'althar-personal-engine-'))
     const name = process.platform === 'win32' ? 'opencode.exe' : 'opencode'
     writeFileSync(join(personal, name), 'unrelated engine')
@@ -84,12 +84,13 @@ describe('downloading an agent', () => {
       Effect.gen(function* () {
         const installs = yield* Installs
         expect(installs.locate(native)).toBeNull()
-        // Discovery only: the shared download tests exercise verification and execution of release archives.
+        expect(isInstalled(installs, native)).toBe(true)
+        expect((yield* installs.state(native)).downloadable).toBe(false)
         const managed = join(root, 'copilot-direct', 'current')
         mkdirSync(managed, { recursive: true })
         writeFileSync(join(managed, name), 'managed engine')
         chmodSync(join(managed, name), 0o755)
-        expect(installs.locate(native)).toEqual({ command: join(managed, name), whose: 'althar' })
+        expect(installs.locate(native)).toBeNull()
       }),
     )
     expect(Exit.isSuccess(result)).toBe(true)

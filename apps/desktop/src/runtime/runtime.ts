@@ -291,6 +291,7 @@ const program = Effect.gen(function* () {
           ? {
               ...(device === undefined ? options : { ...options, onDevice: device.onDevice, probeRoot: join(profile, 'probe') }),
               clientIds,
+              ...(process.env.ALTHAR_COPILOT_CLIENT_ID ? { copilotClientId: process.env.ALTHAR_COPILOT_CLIENT_ID } : {}),
               ...(githubApp === undefined ? {} : { githubApp }),
               secrets,
               fetch: appFetch,

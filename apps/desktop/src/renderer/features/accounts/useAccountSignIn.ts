@@ -268,11 +268,6 @@ export const useAccountSignIn = (start: StartModel): AccountSignInModel => {
     host?: string,
   ) => {
     try {
-      if (agentId === 'copilot-direct' && agentOf(agentId)?.installed === false) {
-        await client.installAgent(agentId)
-        if (mine !== token.current) return
-        void start.recheck()
-      }
       const accountId = await accountFor(agentId, name, grant, mine)
       if (accountId === null) return
       if (how === 'terminal') return await terminal(accountId, mine)

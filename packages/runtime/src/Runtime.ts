@@ -7,6 +7,7 @@ import { Accounts } from './Accounts'
 import { Artifacts } from './Artifacts'
 import { Automations } from './Automations'
 import { AccountSignIns } from './AccountSignIns'
+import { Copilot } from './Copilot'
 import { Busy } from './Busy'
 import { Changes } from './Changes'
 import { Agents, Connectors, RuntimeConfig, type RuntimeOptions, WebCrypto } from './Config'
@@ -109,6 +110,16 @@ export const layer = (options: RuntimeLayerOptions) => {
     Layer.provideMerge(store),
     Layer.provideMerge(Layer.succeed(RuntimeConfig, options)),
     Layer.provideMerge(options.agents ?? Agents.registry(options.agentStderr)),
+    Layer.provideMerge(
+      Copilot.layer({
+        ...((options.copilotClientId ?? options.clientIds?.github)
+          ? { clientId: options.copilotClientId ?? options.clientIds?.github }
+          : {}),
+        ...(options.copilotEnterpriseClientIds === undefined ? {} : { enterpriseClientIds: options.copilotEnterpriseClientIds }),
+        ...(options.fetch === undefined ? {} : { fetch: options.fetch }),
+        appVersion: options.appVersion,
+      }),
+    ),
     // Agents Althar downloads at the person's asking, where it keeps them; the registry's point at them where the person has none.
     Layer.provideMerge(
       Installs.layer({ root: options.agentsRoot, fetch: options.fetch, onDevice: options.onDevice, search: options.agentSearch }),

@@ -1,5 +1,6 @@
 import { copilotDefinition } from './copilot'
 import type { InAppSignIn } from './signInFlow'
+import type { NativeProcessHooks } from './native/tools'
 import { spawnSync } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import { createRequire } from 'node:module'
@@ -119,6 +120,8 @@ export const REFUSAL_META = 'althar/refusal'
 
 export interface AgentDefinition {
   readonly id: AgentId
+  /** Althar owns the account and agent loop; no external executable is started. */
+  readonly native?: 'copilot'
   readonly name: string
   /** Bundled adapters ship with Althar at pinned versions; user-installed agents are found on the machine. */
   readonly source: 'bundled' | 'user_installed'
@@ -405,6 +408,7 @@ export interface AgentDefinition {
  * from the start, where the agent's settings can say it.
  */
 export interface SessionOptions {
+  readonly nativeProcesses?: NativeProcessHooks
   /** Native web tools, for project leads and reviewers; never an offline review or coordinator. */
   readonly web?: boolean
   readonly offline?: boolean
@@ -1906,6 +1910,6 @@ const { 'claude-code': firstClaude, codex: firstCodex, ...otherAgents } = cliAge
 export const agents: Readonly<Record<AgentId, AgentDefinition>> = {
   'claude-code': firstClaude,
   codex: firstCodex,
-  'copilot-direct': copilotDefinition(cliAgents.opencode),
+  'copilot-direct': copilotDefinition,
   ...otherAgents,
 }

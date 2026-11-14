@@ -1,5 +1,4 @@
 import { type ChildProcessWithoutNullStreams, execFile, spawn } from 'node:child_process'
-import { stripVTControlCharacters } from 'node:util'
 
 import { Effect } from 'effect'
 
@@ -14,8 +13,7 @@ import type { AgentDefinition, LaunchSpec } from './registry'
  * another, a code pasted back, done and who as, or why it stopped.
  *
  * Four kinds, as the agents offer them:
- * - OpenCode's Copilot login takes its provider form answers as arguments,
- *   prints GitHub's device challenge, and completes OAuth without a terminal.
+ * Native Copilot's device flow runs in the runtime, without a child process.
  * - Claude Code's `claude auth login` opens the browser itself and comes back
  *   to its own callback; it also prints a page that ends in a code, which it
  *   reads from stdin, for a browser that can't reach back.
@@ -34,9 +32,8 @@ export type SignInWay = 'browser' | 'device'
 /** How an agent's sign-in runs inside Althar, where it can. */
 export type InAppSignIn =
   | {
-      readonly kind: 'opencode-copilot'
+      readonly kind: 'copilot-device'
       readonly ways: ReadonlyArray<SignInWay>
-      readonly run: (node: string, host?: string) => LaunchSpec
     }
   | {
       readonly kind: 'claude-login'
@@ -132,9 +129,9 @@ export const startSignInFlow = (
   options: SignInFlowOptions,
 ): SignInFlowHandle | null => {
   const inApp = agent.signIn.inApp
-  if (inApp === undefined || !inApp.ways.includes(options.way)) return null
+  if (inApp === undefined || inApp.kind === 'copilot-device' || !inApp.ways.includes(options.way)) return null
   const node = options.node ?? adapterNode()
-  const spec = inApp.kind === 'opencode-copilot' ? inApp.run(node, options.host) : inApp.run(node)
+  const spec = inApp.run(node)
   // Its own environment too, for an agent started as a session is (ACP's `authenticate`), and a temporary folder of its own where it asks.
   const temp = privateTemp(spec)
   const env = { ...process.env, ...asNode({ command: spec.command, args: spec.args }), ...spec.env, ...temp?.env, ...options.home }
@@ -177,11 +174,9 @@ export const startSignInFlow = (
   const driven =
     inApp.kind === 'claude-login'
       ? claude(agent, child, saying, end, env)
-      : inApp.kind === 'opencode-copilot'
-        ? copilot(child, saying, end, opening)
-        : inApp.kind === 'codex-app-server'
-          ? codex(child, saying, end, opening)
-          : acpAuthenticate(agent, inApp, child, saying, end, opening)
+      : inApp.kind === 'codex-app-server'
+        ? codex(child, saying, end, opening)
+        : acpAuthenticate(agent, inApp, child, saying, end, opening)
   return {
     paste: (code) => {
       if (!over) driven.paste(code)
@@ -394,38 +389,3 @@ const refusedWords = (agent: AgentDefinition, said: string) =>
       : /access_denied|denied access|cancelled/i.test(said)
         ? 'The sign-in wasn’t approved.'
         : (lastLine(said) ?? said)
-
-/** The engine's non-interactive OAuth command prints the device challenge and owns its entire credential lifecycle. */
-const copilot = (child: ChildProcessWithoutNullStreams, say: (event: SignInFlowEvent) => void, end: End, options: SignInFlowOptions) => {
-  let stdout = ''
-  let stderr = ''
-  let shown = false
-  const read = () => {
-    if (shown) return
-    const text = `${stdout}\n${stderr}`
-    const code = /Enter code:\s*([A-Z0-9]{4}-[A-Z0-9]{4})\b/i.exec(text)?.[1]
-    const page = text
-      .match(/https:\/\/[a-z0-9.-]+\/login\/device\b/gi)
-      ?.find((url) => new URL(url).hostname === (options.host ?? 'github.com'))
-    if (code === undefined || page === undefined) return
-    shown = true
-    say({ kind: 'device', code, page, minutes: 15 })
-    options.openUrl?.(page)
-  }
-  child.stdout.on('data', (chunk: Buffer) => {
-    stdout = (stdout + stripVTControlCharacters(String(chunk))).slice(-32_768)
-    read()
-  })
-  child.stderr.on('data', (chunk: Buffer) => {
-    stderr = (stderr + stripVTControlCharacters(String(chunk))).slice(-32_768)
-    read()
-  })
-  child.on('exit', (code) => {
-    end(
-      code === 0
-        ? { kind: 'done', who: null, plan: 'Copilot subscription' }
-        : { kind: 'failed', message: lastLine(stderr) ?? lastLine(stdout) ?? 'GitHub did not finish signing in. Try again.' },
-    )
-  })
-  return { paste: (_code: string) => {}, cancel: () => {} }
-}

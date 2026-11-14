@@ -233,7 +233,7 @@ Claude Code, Codex, GitHub Copilot and Google Antigravity sign in from inside Al
 opencode auth login
 ```
 
-Copilot signs in inside Althar, for personal and work accounts. Its optional CLI connection uses `copilot login`.
+Copilot signs in inside Althar, for personal and work accounts. Althar owns its authentication, tools and agent loop; no OpenCode or Copilot CLI install is needed. Its optional CLI connection uses `copilot login`. The native connection requires an Althar OAuth app configured in the build and remains subject to your organization's application and model policies.
 
 And `junie`, `grok login`, `kimi login`, `vibe --setup`, and `qwen` then `/auth`.
 

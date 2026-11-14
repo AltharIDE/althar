@@ -42,6 +42,7 @@ The runtime of [docs/architecture/02](../../docs/architecture/02-desktop-runtime
 | `cards.ts` | Each task's card in the coordinator's thread: posted once, touched when what it shows changes |
 | `ToolServer.ts` | Althar's tools, served to sessions over MCP on this machine, each with a token that says who is calling |
 | `Accounts.ts` | Each agent's accounts on this Mac (ADR-012): its usual folder first, homes Althar makes, folders switchers made, found by name |
+| `Copilot.ts` | Althar's native Copilot OAuth device flow and encrypted per-account credentials, validated API origins, serialized refresh and authenticated inference; requires Althar's own OAuth app ID, never an external agent's identity |
 | `SignIns.ts` | Whether each account is signed in, from its agent's own status command run in its home, at most once a minute; an agent is signed in where any account is. It says when an agent is found signed in, once a launch, or signs in again, for usage data |
 | `Limits.ts` | Which accounts are out of usage and until when, the account a session runs on, and the best free plan model to move work on to |
 | `Policies.ts` | A project's rules by revision (ADR-013, ADR-018): its mode, what always asks, what is never allowed and what is always allowed, commands named by how they start or exactly, how a task ends, how branches and titles are named, what a usage limit does, and agents' accounts; the rule an "always" answer keeps |
