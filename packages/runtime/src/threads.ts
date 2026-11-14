@@ -986,7 +986,7 @@ export const transcript = (
       FROM thread_items i
       LEFT JOIN provider_sessions s ON s.id = i.provider_session_id
       LEFT JOIN attention_requests a ON i.kind = 'question' AND a.id = json_extract(i.content, '$.attentionId')
-      WHERE i.thread_id = ${threadId}${
+      WHERE i.thread_id = ${threadId} AND i.undone_at IS NULL${
         options.waiting === false
           ? sql` AND NOT EXISTS (SELECT 1 FROM user_inputs u WHERE u.id = i.user_input_id AND u.state IN ('queued', 'noted'))`
           : sql``

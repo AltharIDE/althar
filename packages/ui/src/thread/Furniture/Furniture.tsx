@@ -9,6 +9,7 @@ import { LinkButton } from '../../primitives/LinkButton/LinkButton'
 import { LiveDot } from '../../primitives/LiveDot/LiveDot'
 import { Spinner } from '../../primitives/Spinner/Spinner'
 import { VisuallyHidden } from '../../primitives/VisuallyHidden/VisuallyHidden'
+import { NoteDetails } from '../NoteDetails/NoteDetails'
 import s from './Furniture.module.css'
 import { Rhythm } from '../../lib/rhythm'
 
@@ -17,12 +18,14 @@ export type ThreadDividerProps = RootProps<
   {
     icon: IconName
     children: ReactNode
+    /** What the line is built on, such as a host's raw answer: folded under it as Details. */
+    details?: string
   } & ({ action: string; onAction: () => void } | { action?: undefined; onAction?: undefined })
 >
 
 /** A line across the thread that marks a change of scene: the lead changed, the task resumed. It may carry one action. */
-export function ThreadDivider({ icon, children, action, onAction, className, ...rest }: ThreadDividerProps) {
-  return (
+export function ThreadDivider({ icon, children, details, action, onAction, className, ...rest }: ThreadDividerProps) {
+  const line = (
     /* not role=separator: a separator's content is hidden from assistive technology, and this one says something */
     <div className={cx(s.divider, className)} {...rest}>
       <Icon name={icon} size={11} />
@@ -33,6 +36,13 @@ export function ThreadDivider({ icon, children, action, onAction, className, ...
           {action}
         </LinkButton>
       )}
+    </div>
+  )
+  if (details === undefined) return line
+  return (
+    <div className={s.withDetails}>
+      {line}
+      <NoteDetails>{details}</NoteDetails>
     </div>
   )
 }

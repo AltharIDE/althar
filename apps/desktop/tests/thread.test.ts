@@ -41,6 +41,46 @@ describe('an automation’s card in a thread', () => {
 })
 
 describe('a thread as blocks', () => {
+  it('starts a fresh turn clock after two idle days before its first words arrive', () => {
+    const old = { ...items.says('Earlier answer', 'codex'), createdAt: '2026-10-01T08:00:00.000Z' }
+    const thread = { ...source([old], true), turnStarted: '2026-10-03T10:20:00.000Z' }
+    const blocks = blocksOf(thread, new Map(), at, '2026-10-03T10:20:20.000Z')
+    expect(blocks[0]).toMatchObject({ kind: 'turn', live: false, took: '0s' })
+    expect(blocks[1]).toMatchObject({ kind: 'waiting', took: '20s' })
+    const streaming = new Map([
+      ['new', { agentId: 'codex', kind: 'agent_thought' as const, text: 'Starting now', sequence: 2, at: '2026-10-03T10:20:01.000Z' }],
+    ])
+    const heard = blocksOf(thread, streaming, at, '2026-10-03T10:20:20.000Z')
+    expect(heard[0]).toMatchObject({ kind: 'turn', live: false })
+    expect(heard[1]).toMatchObject({ kind: 'turn', live: true, took: '19s' })
+  })
+  it('separates deliveries and model changes from the same agent instead of counting the idle gap as work', () => {
+    const old = {
+      ...items.says('Earlier answer', 'codex'),
+      id: 'old',
+      turn: 'before',
+      model: 'gpt-6.1-terra',
+      createdAt: '2026-10-01T08:00:00.000Z',
+    }
+    const thought = {
+      ...items.thinks('New work', 'codex'),
+      id: 'new-thought',
+      turn: 'after',
+      model: 'gpt-6.1-sol',
+      createdAt: '2026-10-03T10:20:00.000Z',
+    }
+    const answer = {
+      ...items.says('New answer', 'codex'),
+      id: 'new-answer',
+      turn: 'after',
+      model: 'gpt-6.1-sol',
+      createdAt: '2026-10-03T10:20:20.000Z',
+    }
+    const blocks = blocksOf(source([old, thought, answer]), new Map(), at)
+    expect(blocks).toHaveLength(2)
+    expect(blocks[0]).toMatchObject({ kind: 'turn', model: 'gpt-6.1-terra' })
+    expect(blocks[1]).toMatchObject({ kind: 'turn', model: 'gpt-6.1-sol', took: '20s' })
+  })
   it('groups what one agent does in a row into one turn, and marks changes of scene', () => {
     const thread = [
       items.you('Add a retry'),

@@ -44,6 +44,18 @@
 .queued .at {
   animation: appear 160ms var(--ease) 1s both;
 }
+.undo {
+  opacity: 0;
+}
+.you:hover .undo,
+.you:focus-within .undo {
+  opacity: 1;
+}
+@media (hover: none) {
+  .undo {
+    opacity: 1;
+  }
+}
 @keyframes appear {
   from {
     opacity: 0;

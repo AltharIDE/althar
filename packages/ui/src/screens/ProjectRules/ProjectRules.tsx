@@ -3,6 +3,7 @@ import { Fragment, type KeyboardEvent, type ReactNode, useEffect, useId, useRef,
 import { CommandMatch, LimitPolicy, PermissionPolicy, RuleKind, RulePlace, TaskEnd } from '../../foundations/vocabulary'
 import type { ChoiceWords } from '../../foundations/vocabularyText'
 import { cx } from '../../lib/cx'
+import { accountStrategies, type AccountStrategy } from '../../setup/Accounts/strategy'
 import type { RootProps } from '../../lib/props'
 import { Heading, type HeadingLevel } from '../../primitives/Heading/Heading'
 import { Menu, MenuCheckboxItem, MenuGroup, MenuRadioGroup, MenuRadioItem, MenuSeparator } from '../../primitives/Menu/Menu'
@@ -482,15 +483,15 @@ export const projectRulesText: ProjectRulesText = {
   },
   accounts: {
     works: (agent) => ` ${agent} works on `,
-    andThen: ', then ',
+    andThen: ' or ',
     label: (agent) => `${agent} accounts this project may use`,
     uses: 'Works on',
-    rotation: 'When one runs out',
+    rotation: 'Account strategy',
     rotate: {
       first: { title: 'Stay on the first', note: 'Then the work does as the limit says' },
       next: { title: 'Go on with the next', note: 'The agent’s next account here, then as the limit says' },
     },
-    note: 'In your order from Settings',
+    note: 'Choose the accounts this project may use and how new conversations pick one',
   },
   token: {},
   hint: {},
@@ -1253,6 +1254,8 @@ export type ProjectTaskRulesProps = RootProps<
     /** Whether work goes on with an agent's next account when one runs out. */
     rotate: boolean
     onRotateChange: (rotate: boolean) => void
+    accountStrategy?: AccountStrategy
+    onAccountStrategyChange?: (strategy: AccountStrategy) => void
     /** The accounts the project may use, by agent; an agent not named may use every one. */
     allowed: Readonly<Record<string, readonly string[]>>
     onAllowedChange: (agentId: string, accountIds: readonly string[]) => void
@@ -1277,6 +1280,8 @@ export function ProjectTaskRules({
   agentAccounts = [],
   rotate,
   onRotateChange,
+  accountStrategy,
+  onAccountStrategyChange,
   allowed,
   onAllowedChange,
   text,
@@ -1372,15 +1377,18 @@ export function ProjectTaskRules({
                     <MenuSeparator />
                     <MenuRadioGroup
                       label={t.accounts.rotation}
-                      value={rotate ? 'next' : 'first'}
-                      onChange={(value) => onRotateChange(value === 'next')}
+                      value={accountStrategy ?? (rotate ? 'most_room' : 'first')}
+                      onChange={(value) => {
+                        const strategy = value as AccountStrategy
+                        if (onAccountStrategyChange) onAccountStrategyChange(strategy)
+                        else onRotateChange(strategy !== 'first')
+                      }}
                     >
-                      <MenuRadioItem value="first" description={t.accounts.rotate.first.note}>
-                        {t.accounts.rotate.first.title}
-                      </MenuRadioItem>
-                      <MenuRadioItem value="next" description={t.accounts.rotate.next.note}>
-                        {t.accounts.rotate.next.title}
-                      </MenuRadioItem>
+                      {Object.entries(accountStrategies).map(([value, words]) => (
+                        <MenuRadioItem key={value} value={value} description={words.note}>
+                          {words.label}
+                        </MenuRadioItem>
+                      ))}
                     </MenuRadioGroup>
                   </Menu>
                   .

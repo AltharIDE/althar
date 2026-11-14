@@ -1,8 +1,8 @@
-import { screen, waitFor } from '@testing-library/react'
+import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 
-import type { ThreadItem } from '@althar/contracts'
+import { ApiError, type ThreadItem } from '@althar/contracts'
 
 import { TaskView } from '../src/renderer/features/task/TaskView'
 import { useTask } from '../src/renderer/features/task/useTask'
@@ -11,7 +11,9 @@ import type { SmallChangeContent } from '../src/renderer/shared/thread'
 import { act } from 'react'
 
 import { change, changed, fakeClient, items, snapshot } from './fixtures'
-import { withServices } from './render'
+import { servicesFor, withServices } from './render'
+import { ServicesProvider } from '../src/renderer/data/services'
+import { ModelMoveOf } from '../src/renderer/features/task/ModelMoveOf'
 
 /*
  * The fast lane on a task's screen (README sections 6 and 7): a small
@@ -374,8 +376,60 @@ describe('the fast lane on a task’s screen', () => {
   it('puts a kept move again from Undo', async () => {
     const { client } = fakeClient({ getThread: vi.fn(async () => snapshot({ items: [modelMove(true)] })) })
     withServices(<Task />, client)
-    expect(await screen.findByText(/Back on Claude Opus for this task/)).toBeTruthy()
+    expect(await screen.findByText(/Claude Opus from the next turn/)).toBeTruthy()
     await userEvent.click(screen.getByRole('button', { name: 'Undo' }))
     await waitFor(() => expect(client.undoTheModelMove).toHaveBeenCalledWith('i-move'))
+  })
+})
+
+describe('a kept model before the runtime answers', () => {
+  const named = (id: string | null, model?: string | null) => ({
+    id: id ?? '',
+    name: model ?? '',
+    short: model ?? '',
+    runtime: id ?? '',
+    efforts: [],
+  })
+
+  it('holds Keep across a pending call and stale reads, then accepts the confirmed value', async () => {
+    let finish!: () => void
+    const pending = new Promise<void>((resolve) => {
+      finish = resolve
+    })
+    const { client } = fakeClient({ keepTheModel: vi.fn(() => pending) })
+    const services = servicesFor(client)
+    const show = (kept: boolean) => {
+      const item = modelMove(kept)
+      if (item.kind !== 'model_move') throw new Error('Expected a model move')
+      return (
+        <ServicesProvider value={services}>
+          <ModelMoveOf move={item.content} itemId={item.id} named={named} />
+        </ServicesProvider>
+      )
+    }
+    const view = render(show(false))
+    await userEvent.click(screen.getByRole('button', { name: 'Keep opus' }))
+    expect(screen.getByText('opus from the next turn.')).toBeTruthy()
+    view.rerender(show(false))
+    expect(screen.getByText('opus from the next turn.')).toBeTruthy()
+    await act(async () => finish())
+    expect(screen.getByText('opus from the next turn.')).toBeTruthy()
+    view.rerender(show(true))
+    view.rerender(show(false))
+    expect(screen.getByRole('button', { name: 'Keep opus' })).toBeTruthy()
+  })
+
+  it('takes back a failed Keep with an error beside the choice', async () => {
+    const { client } = fakeClient({
+      keepTheModel: vi.fn(async () => {
+        throw new ApiError({ reason: 'Busy', message: 'Could not save the choice.' })
+      }),
+    })
+    const item = modelMove()
+    if (item.kind !== 'model_move') throw new Error('Expected a model move')
+    withServices(<ModelMoveOf move={item.content} itemId={item.id} named={named} />, client)
+    await userEvent.click(screen.getByRole('button', { name: 'Keep opus' }))
+    expect((await screen.findByRole('alert')).textContent).toContain('Could not save the choice.')
+    expect(screen.getByRole('button', { name: 'Keep opus' })).toBeTruthy()
   })
 })

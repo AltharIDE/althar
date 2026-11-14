@@ -3,6 +3,9 @@ import { join } from 'node:path'
 
 import { ConnectorFailed } from '@althar/connectors'
 import {
+  GalleryUpdate,
+  pictureViewKey,
+  viewOfKey,
   type CheckoutAnswer,
   type CheckoutAsk,
   type CheckoutWait,
@@ -103,6 +106,7 @@ import {
   EVIDENCE_KINDS,
   EvidenceGiven,
   evidenceFiles,
+  evidenceOf,
   evidenceForReview,
   evidencePaths,
   keepEvidence,
@@ -123,6 +127,7 @@ import { type GiveUp, watchStalls } from './Stalls'
 import type { Tried } from './stallWatch'
 import { addItem } from './threads'
 import { coordinatorFolderAt } from './coordinatorFolder'
+import { evidenceGallery, galleryEditProblem } from './evidenceGallery'
 import { POOL, ToolRefused, ToolServer, type Tool, type ToolAccess } from './ToolServer'
 import { stuckWhyOf, summarize, words } from './words'
 
@@ -347,6 +352,8 @@ const Finished = Schema.Struct({
   unverified: Schema.optional(Schema.Array(Schema.String)),
   /** The views an earlier step pictured that still show the work as it is, beside this step's pictures. */
   kept_views: Schema.optional(Schema.Array(Schema.String)),
+  gallery: Schema.optional(GalleryUpdate),
+  expected_gallery_revision: Schema.optional(Schema.Int),
   /** A round of work where the person only asked something, and what the lead committed came with answering: it opens no pull request. */
   answered: Schema.optional(Schema.Boolean),
   /** When settling a review: what became of each finding, by its id. */
@@ -4094,11 +4101,13 @@ export class Runs extends Context.Service<
             planModel !== null && Option.isSome(live) && !spent && (yield* modelOf(live.value.sessionId)) === planModel
               ? yield* lighterModel(run, live.value.agentId, planModel)
               : undefined
+          const nextAccountId = accountId ?? moved?.accountId
+          const nextModel = moved?.model ?? model
           if (
             Option.isSome(live) &&
             !spent &&
             (agentId === undefined || live.value.agentId === agentId) &&
-            (accountId === undefined || live.value.accountId === accountId)
+            (nextAccountId === undefined || live.value.accountId === nextAccountId)
           ) {
             // Kept, it moves to a model asked for now, or the lighter one Auto picked; the plan's, or one the person set on it since, stays.
             // One that won't move starts afresh.
@@ -4111,15 +4120,23 @@ export class Runs extends Context.Service<
               ...(wantedModel == null ? {} : { model: wantedModel }),
             })
           }
-          if (Option.isSome(live))
+          if (Option.isSome(live)) {
+            // Moving the same model to another account also keeps the person's effort choice.
+            const sql = yield* SqlClient.SqlClient
+            const [current] =
+              moved?.accountId !== undefined && effort == null
+                ? yield* sql<{ effort: string | null }>`SELECT effort FROM provider_sessions WHERE id = ${live.value.sessionId}`
+                : []
+            const nextEffort = effort ?? current?.effort
             return yield* sessions.switchAgent({
               threadId: run.threadId,
               agentId: wanted,
-              ...(model == null ? {} : { model }),
-              ...(effort == null ? {} : { effort }),
+              ...(nextModel == null ? {} : { model: nextModel }),
+              ...(nextEffort == null ? {} : { effort: nextEffort }),
               ...(said === undefined ? {} : { said, about }),
-              ...(accountId === undefined ? {} : { accountId }),
+              ...(nextAccountId === undefined ? {} : { accountId: nextAccountId }),
             })
+          }
           if (said !== undefined) yield* sayOut(run.threadId, run.projectId, said, about)
           // The plan's lead, unless it is out of usage and the project moves on: the next free agent instead.
           const instead = agentId === undefined && implement !== undefined ? yield* insteadOf(run, implement) : undefined
@@ -4130,12 +4147,13 @@ export class Runs extends Context.Service<
           const chosenAccount = accountId ?? instead?.accountId
           // Nearly out, the lead's next step moves to a lighter model of its agent, and the thread says why (README 7).
           const auto = planned ? yield* lighterModel(run, wanted, chosen) : undefined
+          const startingAccountId = chosenAccount ?? auto?.accountId
           return yield* sessions.start({
             threadId: run.threadId,
             agentId: instead?.agentId ?? auto?.agentId ?? wanted,
             ...((auto?.model ?? chosen) === null ? {} : { model: (auto?.model ?? chosen) as string }),
             ...(thinks === null ? {} : { effort: thinks }),
-            ...(chosenAccount === undefined ? {} : { accountId: chosenAccount }),
+            ...(startingAccountId === undefined ? {} : { accountId: startingAccountId }),
           })
         })
 
@@ -5445,9 +5463,18 @@ export class Runs extends Context.Service<
             evidence: handed = [],
             unverified,
             kept_views: keptViews,
+            gallery: givenGallery,
+            expected_gallery_revision: expectedGalleryRevision,
             built: said,
             answered: answering = false,
           } = yield* read(Finished, input)
+          const gallery = givenGallery ?? { mode: 'patch' as const }
+          const validateCollection = () =>
+            Effect.gen(function* () {
+              const current = yield* evidenceGallery(access.threadId)
+              const problem = galleryEditProblem(current, gallery, expectedGalleryRevision)
+              if (problem !== null) return yield* new ToolRefused({ message: problem })
+            })
           const built = builtIn(said)
           const words = titled === undefined || titled.trim() === '' ? null : titled.trim()
           const builds = { ...(built === null ? {} : { built }), ...(words === null ? {} : { title: words }) }
@@ -5474,11 +5501,27 @@ export class Runs extends Context.Service<
             // "What it checked". Every other piece is kept, a note of what an answer found included.
             const shown = evidence.filter((piece) => !saysNothing(piece.given))
             const kept = yield* keepEvidence({ projectId: access.projectId as ProjectId, itemId, folders: [] }, shown)
+            const views = new Set<string>()
+            for (const piece of evidenceOf(kept)) {
+              if (piece.picture === null) continue
+              const view = pictureViewKey(piece)
+              if (view === null) continue
+              if (views.has(view))
+                return yield* new ToolRefused({
+                  message: `Two images name the same view “${view}”. Give each state a distinct view ID, or submit one image for it.`,
+                })
+              views.add(view)
+              if ([...(gallery.remove ?? []), ...(gallery.invalidate ?? [])].includes(viewOfKey(view)))
+                return yield* new ToolRefused({
+                  message: `View “${view}” cannot be updated and removed or invalidated in the same handoff.`,
+                })
+            }
             // A list given is kept even empty: what an earlier step couldn't show, this one may have.
             return {
               ...(kept.length === 0 ? {} : { evidence: kept }),
               ...(unverified === undefined ? {} : { unverified: unverifiedOf(unverified) }),
               ...keptViewsIn(keptViews),
+              gallery,
             }
           })
           // What it gave before Althar sent the step back, and what it gives now.
@@ -5505,18 +5548,23 @@ export class Runs extends Context.Service<
             const made =
               planned !== undefined && access.taskId !== null && (yield* madeSince(access.taskId, yield* restedOf(access.taskId)))
             if ((planned === undefined || made) && built === null && !plain) return yield* new ToolRefused({ message: builtAsk(false) })
-            yield* addItem(
-              { projectId: access.projectId as ProjectId, threadId: access.threadId },
-              'step_result',
-              {
-                step: 'implement',
-                summary,
-                ...builds,
-                ...descriptions,
-                ...(model === null ? {} : { model }),
-                ...(yield* shows),
-              },
-              { id: itemId },
+            yield* sql.withTransaction(
+              Effect.gen(function* () {
+                yield* validateCollection()
+                yield* addItem(
+                  { projectId: access.projectId as ProjectId, threadId: access.threadId },
+                  'step_result',
+                  {
+                    step: 'implement',
+                    summary,
+                    ...builds,
+                    ...descriptions,
+                    ...(model === null ? {} : { model }),
+                    ...(yield* shows),
+                  },
+                  { id: itemId },
+                )
+              }),
             )
             yield* describe(Object.keys(kept).length === 0 ? undefined : kept, built)
             if (planned === undefined) return reply('Althar has your summary.')
@@ -5597,6 +5645,7 @@ export class Runs extends Context.Service<
             Effect.gen(function* () {
               // Read before the looks at git above: stopped and resumed meanwhile, the report is dropped.
               if (!(yield* keeps(current, attempt.id, { step, summary }))) return false
+              yield* validateCollection()
               yield* ended(current, attempt, 'succeeded', { summary, ...(answered ? { answered } : {}) })
               yield* result(
                 current,
@@ -5876,6 +5925,12 @@ export class Runs extends Context.Service<
 
       yield* toolServer.serve('lead', [
         tool(
+          'read_gallery',
+          'Reads this task’s complete visual collection, including its revision, stable view IDs, captions and report times. Use its revision for explicit removal, invalidation or replacement in finish_step. A new image with the same view updates it; unrelated views stay.',
+          { type: 'object', properties: {} },
+          (access) => Effect.map(evidenceGallery(access.threadId), (collection) => JSON.stringify(collection)),
+        ),
+        tool(
           'finish_step',
           "Tells Althar you have done your step: the task, or settling a review's findings. Don't call it while the work isn't done because it waits on the person: call wait_for_person with your question instead. The summary is what the person reads instead of your whole turn: a few lines on what you changed, how you checked it, and anything left open. In `built`, what the task has built as it stands now, which the person reads at its end. Where the task ends in a pull request, its description in `descriptions`, for whoever reviews it on the code host. With it, the evidence you gathered that the change does what it should, and in `unverified` what you couldn't show.",
           {
@@ -5930,10 +5985,25 @@ export class Runs extends Context.Service<
                   required: ['kind', 'caption'],
                 },
               },
+              gallery: {
+                type: 'object',
+                description:
+                  'An explicit edit to the persistent visual collection. Default: patch, keeping every unrelated view. replace starts a new collection deliberately; remove retires view IDs; invalidate keeps them visible as needing a new capture. Call read_gallery first and supply expected_gallery_revision for these edits.',
+                properties: {
+                  mode: { type: 'string', enum: ['patch', 'replace'] },
+                  remove: { type: 'array', items: { type: 'string' } },
+                  invalidate: { type: 'array', items: { type: 'string' } },
+                },
+                required: ['mode'],
+              },
+              expected_gallery_revision: {
+                type: 'integer',
+                description: 'The revision returned by read_gallery; required when removing, invalidating or replacing views.',
+              },
               kept_views: {
                 type: 'array',
                 description:
-                  "The views you pictured in an earlier step that still show the work as it is, by their names, where this step pictures something new. A step's pictures replace the earlier ones in Outputs and on the pull request, but for the views it takes again and those named here; a step that only takes known views again leaves the others as they were.",
+                  'The views you pictured in an earlier step that still show the work as it is, by their names, where this step pictures something new. Earlier views now stay automatically. This legacy field is accepted for compatibility; use gallery.remove to retire a view explicitly.',
                 items: { type: 'string' },
               },
               answered: {

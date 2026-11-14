@@ -139,7 +139,10 @@ export function WhatItMade({
                   ) : (
                     <span className={s.image}>{frame}</span>
                   )}
-                  <figcaption className={s.caption}>{shot.caption}</figcaption>
+                  <figcaption className={s.caption}>
+                    {shot.caption}
+                    {shot.note !== undefined && <span className={s.note}>{shot.note}</span>}
+                  </figcaption>
                 </figure>
               )
             })}

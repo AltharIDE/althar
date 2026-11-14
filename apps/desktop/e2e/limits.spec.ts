@@ -1,6 +1,7 @@
 import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { DatabaseSync } from 'node:sqlite'
 
 import { expect, type Page, test } from '@playwright/test'
 
@@ -64,7 +65,7 @@ const startWhileOut = async (out: string, { asks = false, waits = false }: { rea
     await backToWork(page)
   }
   await page.getByRole('button', { name: 'Start', exact: true }).click()
-  return { electronApp, page }
+  return { electronApp, page, home }
 }
 
 const openTask = async (page: Page) => {
@@ -74,7 +75,7 @@ const openTask = async (page: Page) => {
 }
 
 test('hands the task to the next free agent when its lead is out of usage', async () => {
-  const { electronApp, page } = await startWhileOut('claude-code:3600')
+  const { electronApp, page, home } = await startWhileOut('claude-code:3600')
   try {
     // Codex took the step over and finished it.
     await expect(shown(page, 'Ready', { exact: true })).toBeVisible()
@@ -82,11 +83,22 @@ test('hands the task to the next free agent when its lead is out of usage', asyn
     await openTask(page)
     await expect(
       shown(page, /^Claude Code ran out of usage while working on the task, until .+\. Codex takes the work over(, on .+)?\.$/),
-    ).toBeVisible()
+    ).toHaveCount(0)
     await expect(shown(page, /Checkout retries once when the payment call fails/).first()).toBeVisible()
     await page.screenshot({ path: 'test-results/limit-moved.png', animations: 'disabled' })
   } finally {
     await electronApp.close()
+  }
+  const store = new DatabaseSync(join(home, 'profile', 'althar.sqlite'), { readOnly: true })
+  try {
+    const lead = store
+      .prepare(`
+      SELECT s.agent_id AS agent FROM provider_sessions s JOIN threads t ON t.id = s.thread_id
+      WHERE t.kind = 'task' ORDER BY s.started_at DESC, s.rowid DESC LIMIT 1`)
+      .get()
+    expect(lead).toEqual({ agent: 'codex' })
+  } finally {
+    store.close()
   }
 })
 
@@ -103,11 +115,11 @@ test('waits for the reset where no other agent is free, and says so on its card,
     await page.getByRole('button', { name: 'Add a retry to the checkout call' }).click()
     await expect(
       shown(page, /^Claude Code ran out of usage while working on the task, until .+\. Codex takes the work over(, on .+)?\.$/),
-    ).toBeVisible()
-    // It moves work on, but nothing else was free: it says so, and that the person can pick another model.
+    ).toHaveCount(0)
+    // Passive quota notices stay out of the thread; its actionable waiting state still offers another model.
     await expect(
       shown(page, /^Codex ran out of usage while working on the task\. No other model is free: the work waits until .+\.$/),
-    ).toBeVisible()
+    ).toHaveCount(0)
     // Its header says so too, rather than that it is idle.
     await expect(shown(page, /^The work waits: Codex is out of usage until /)).toBeVisible()
     await expect(shown(page, 'Idle', { exact: true })).toHaveCount(0)
@@ -127,7 +139,7 @@ test('asks the person when the reset isn’t known and no other agent is free', 
     await openTask(page)
     await expect(
       shown(page, /^Claude Code ran out of usage while working on the task\. Codex takes the work over(, on .+)?\.$/),
-    ).toBeVisible()
+    ).toHaveCount(0)
     await expect(shown(page, 'Codex is out of usage.')).toBeVisible()
     // Telling an agent that is out anything would hit the same limit. Claude Code ran out first, and nothing else is free: it is tried again.
     await expect(shown(page, 'Out of usage', { exact: true })).toBeVisible()
@@ -188,8 +200,8 @@ test('lets the person hand a step held for the reset to another model, from the 
     await page
       .locator('header[aria-label="Add a retry to the checkout call"]')
       .screenshot({ path: 'test-results/limit-held-header.png', scale: 'css' })
-    // The thread says it, and offers the models that could carry it on now, though nothing waits on the person.
-    await expect(shown(page, /^Claude Code ran out of usage while working on the task\. The work waits until .+\.$/)).toBeVisible()
+    // No passive quota notice: the actionable waiting state offers models that could carry it on now.
+    await expect(shown(page, /^Claude Code ran out of usage while working on the task\. The work waits until .+\.$/)).toHaveCount(0)
     const offer = shown(page, /^Claude Code is out of usage until .+\.$/)
     await expect(offer).toBeVisible()
     await expect(page.getByRole('button', { name: /^Wait until / })).toBeVisible()

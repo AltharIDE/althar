@@ -26,3 +26,16 @@
 .line a:hover {
   text-decoration: underline;
 }
+/* long words and addresses break at the column, never push the line sideways */
+.words,
+.line .problem {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.with {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  padding-left: 0;
+}

@@ -33,12 +33,19 @@ export interface Merge {
   readonly taskId: string
   readonly head: string
   readonly url?: string | undefined
+  readonly bypassQueue?: boolean
 }
 
 /** Merges a task's pull request, as every screen in the window sees it go; fails as the runtime said. */
 export const useMerge = (): ((merge: Merge) => Promise<void>) => {
   const { client } = useServices()
-  return useMutation({ mutationKey: KEY, mutationFn: (merge: Merge) => client.merge(merge.taskId, merge.head, merge.url) }).mutateAsync
+  return useMutation({
+    mutationKey: KEY,
+    mutationFn: (merge: Merge) =>
+      merge.bypassQueue === true
+        ? client.merge(merge.taskId, merge.head, merge.url, undefined, true)
+        : client.merge(merge.taskId, merge.head, merge.url),
+  }).mutateAsync
 }
 
 export interface Merging {

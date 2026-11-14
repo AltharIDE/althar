@@ -98,6 +98,7 @@ export const continued = <S extends ThreadSnapshot | CoordinatorSnapshot>(was: S
   if (was.items.some((item) => item.sequence < first.sequence && !settled(item))) return fresh
   // The view was cleared, opened or restored, or the conversation forgotten, since the pages held were read: they are of another thread.
   if ('view' in was && 'view' in fresh && was.view.version !== fresh.view.version) return fresh
+  if ('conversationVersion' in was && 'conversationVersion' in fresh && was.conversationVersion !== fresh.conversationVersion) return fresh
   return { ...fresh, items: mergeItems(was.items, fresh.items), earlier: was.earlier }
 }
 

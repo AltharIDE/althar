@@ -14,20 +14,39 @@ import s from './SplitButton.module.css'
 
 export interface SplitButtonProps extends Omit<ButtonProps, 'variant'> {
   /** Signal for the one way on an ask offers first; both halves take it. */
-  variant?: 'default' | 'signal'
+  variant?: 'default' | 'signal' | 'quiet'
+  mainClassName?: string
+  moreClassName?: string
   /** The chevron's accessible name: what choosing does, such as "Choose another model". */
   moreLabel: string
   /** Renders the menu of alternatives around the given trigger, usually a Menu. */
   menu: (trigger: ReactElement) => ReactNode
 }
 
-export function SplitButton({ moreLabel, menu, variant = 'default', size = 'medium', className, ...main }: SplitButtonProps) {
+export function SplitButton({
+  moreLabel,
+  menu,
+  variant = 'default',
+  size = 'medium',
+  className,
+  style,
+  mainClassName,
+  moreClassName,
+  ...main
+}: SplitButtonProps) {
   return (
-    <span role="group" className={cx(s.split, size === 'small' && s.small, variant === 'signal' && s.signal, className)}>
-      <Button {...main} variant={variant} size={size} className={s.main} />
+    <span role="group" style={style} className={cx(s.split, size === 'small' && s.small, variant === 'signal' && s.signal, className)}>
+      <Button {...main} variant={variant} size={size} className={cx(s.main, mainClassName)} />
       {menu(
         /* while the main action works, its alternatives wait too */
-        <Button variant={variant} size={size} className={s.more} aria-label={moreLabel} disabled={main.disabled || main.busy}>
+        <Button
+          variant={variant}
+          size={size}
+          className={cx(s.more, moreClassName)}
+          aria-label={moreLabel}
+          disabled={main.disabled || main.busy}
+          onClick={(event) => event.stopPropagation()}
+        >
           <Icon name="chevronD" size={10} />
         </Button>,
       )}

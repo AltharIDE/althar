@@ -88,6 +88,8 @@ export interface FakeServiceOptions {
   readonly conflictsOf?: (number: number) => boolean | undefined
   /** What merging a change needs, as the host says now (DEV-204); without it, the host doesn't read it at all. */
   readonly rulesOf?: (number: number) => MergeRules
+  /** The viewer's current permission for the explicit GitHub queue bypass. False unless given. */
+  readonly canBypassQueue?: () => boolean
   /** The checks a change's commit has, by the commit, as a host runs them on each; without it, or where it says nothing, those `setChecks` gave. */
   readonly checksFor?: (number: number, sha: string) => ReadonlyArray<FakeCheck> | undefined
   /** The checks a commit that is no change's head has, such as its default branch's latest: none without it. */
@@ -801,6 +803,23 @@ export const makeFakeService = (options: FakeServiceOptions = {}): FakeService =
         if (!landsLater) land(change.number)
         return Effect.succeed(changeNumbered(change.number))
       }),
+    ...(product === 'github'
+      ? {
+          mergeWithoutQueue: (_repository: Repository, change: ChangeRequest) =>
+            Effect.andThen(called('mergeWithoutQueue'), () => {
+              if (options.canBypassQueue?.() !== true)
+                return Effect.fail(new ConnectorFailed({ product, reason: 'forbidden', message: 'Queue bypass is not allowed' }))
+              const now = changeNumbered(change.number)
+              if (now.draft || now.state !== 'open')
+                return Effect.fail(new ConnectorFailed({ product, reason: 'rejected', message: 'Pull request is not mergeable' }))
+              if (change.headSha !== (options.headOf?.(change.number) ?? now.headSha))
+                return Effect.fail(new ConnectorFailed({ product, reason: 'rejected', status: 409, message: 'Head branch was modified' }))
+              mergesAsked.push({ number: change.number, how: 'merge', method: null, head: change.headSha })
+              land(change.number)
+              return Effect.succeed({ ...changeNumbered(change.number), queued: false })
+            }),
+        }
+      : {}),
     mergeWays: () =>
       Effect.andThen(called('mergeWays'), () =>
         Effect.succeed({

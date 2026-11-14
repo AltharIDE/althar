@@ -237,6 +237,21 @@ describe('a task’s thread in rounds', () => {
     expect(again.map((block) => block.kind)).toEqual(['you', 'round', 'you', 'waiting'])
     expect(roundOf(again)).toMatchObject({ live: false, result: { text: 'Done.' }, work: { live: false, took: '1m 0s' } })
     expect(again.at(-1)).toMatchObject({ took: '12s', slow: false })
+    // A step's note keeps its raw answer apart from its line, and its links by label: both reach the line that draws it.
+    const note = items.notice(
+      {
+        source: 'runtime',
+        title: 'Asked ana to review #698',
+        links: [{ label: '#698', url: 'https://github.com/a/b/pull/698' }],
+        details: '{\n  "status": 200\n}',
+      },
+      null,
+    )
+    expect(asked([...answered, items.step(), when(note, 50)]).find((block) => block.kind === 'althar')).toMatchObject({
+      text: 'Asked ana to review #698',
+      links: [{ label: '#698', url: 'https://github.com/a/b/pull/698' }],
+      details: '{\n  "status": 200\n}',
+    })
     // What the coordinator passed on is waited on as well, after a report too.
     const passed = items.notice({ source: 'runtime', title: 'From the coordinator:', description: 'Ship it.', role: 'relayed' }, null)
     expect(asked([...answered, items.step(), when(passed, 50)]).map((block) => block.kind)).toEqual(['you', 'round', 'relayed', 'waiting'])
@@ -518,7 +533,7 @@ describe('a task’s thread in rounds, on its screen', () => {
     expect(screen.getByRole('button', { name: 'Show less' })).toBeTruthy()
   })
 
-  it('shows each report’s screenshots large, not again when a later report takes the same view, and drops the table listing them', async () => {
+  it('shows the latest collection in full, keeps earlier reports as history, and drops the table listing the pictures', async () => {
     show([
       items.you('Prototype it'),
       items.tool({}),
@@ -536,8 +551,10 @@ describe('a task’s thread in rounds, on its screen', () => {
     ])
     expect(await screen.findByRole('heading', { name: 'A · Quiet' })).toBeTruthy()
     expect(screen.getByRole('button', { name: 'View S1 · The switcher full size' })).toBeTruthy()
-    // The same view taken again is counted in a line, and opens on a click.
-    expect(screen.getByRole('button', { name: 'Also retook 1 shown earlier' })).toBeTruthy()
+    // The latest handoff shows its complete collection, including retaken views.
+    expect(screen.getByRole('button', { name: 'View A1 · Quiet, from the switcher full size' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'View A1 · Quiet: the first full size' })).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Also retook 1 shown earlier' })).toBeNull()
     expect(screen.queryByRole('columnheader', { name: 'Caption' })).toBeNull()
   })
 

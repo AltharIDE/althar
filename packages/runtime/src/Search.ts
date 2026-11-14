@@ -83,11 +83,13 @@ export const indexTask = Effect.fn('Search.indexTask')(function* (taskId: string
     SELECT u.body, u.accepted_at AS at FROM user_inputs u
     JOIN threads t ON t.id = u.thread_id AND t.kind = 'task'
     JOIN actors a ON a.id = u.author_actor_id AND a.kind = 'person'
-    WHERE t.task_id = ${taskId} AND u.state IN ('queued', 'delivered') ORDER BY u.sequence`
+    WHERE t.task_id = ${taskId} AND u.state IN ('queued', 'delivered')
+      AND NOT EXISTS (SELECT 1 FROM thread_items i WHERE i.user_input_id = u.id AND i.undone_at IS NOT NULL)
+    ORDER BY u.sequence`
   const reports = yield* sql<{ summary: string | null; built: string | null; at: string }>`
     SELECT json_extract(i.content, '$.summary') AS summary, json_extract(i.content, '$.built') AS built, i.created_at AS at
     FROM thread_items i JOIN threads t ON t.id = i.thread_id
-    WHERE t.task_id = ${taskId} AND i.kind = 'step_result' AND json_extract(i.content, '$.step') IN ('implement', 'settle')
+    WHERE t.task_id = ${taskId} AND i.undone_at IS NULL AND i.kind = 'step_result' AND json_extract(i.content, '$.step') IN ('implement', 'settle')
     ORDER BY i.created_at, i.sequence`
   const links = yield* sql<{ key: string; ref: string; at: string }>`
     SELECT key, ref, created_at AS at FROM external_links WHERE task_id = ${taskId} ORDER BY created_at`
@@ -100,7 +102,7 @@ export const indexTask = Effect.fn('Search.indexTask')(function* (taskId: string
   const touched = yield* sql<{ path: string }>`
     SELECT json_extract(l.value, '$.path') AS path FROM threads t
     JOIN thread_items i ON i.thread_id = t.id AND i.kind = 'tool_call', json_each(i.content, '$.locations') l
-    WHERE t.task_id = ${taskId} AND json_extract(i.content, '$.toolKind') IN ('edit', 'delete', 'move')
+    WHERE t.task_id = ${taskId} AND i.undone_at IS NULL AND json_extract(i.content, '$.toolKind') IN ('edit', 'delete', 'move')
       AND json_extract(i.content, '$.declined') IS NOT 1 AND json_type(l.value, '$.path') = 'text'
     GROUP BY 1 ORDER BY max(i.created_at) DESC`
   const files = new Set<string>()

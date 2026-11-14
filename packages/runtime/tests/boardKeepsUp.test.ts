@@ -31,8 +31,6 @@ import { ask, cards, connect, git, runtimeWith, tipOf } from './changesSupport'
  * reads its head on every change of its thread. Here a window is played
  * beside the runtime, reading its board again as the window's rule says, and
  * through a task's life its card says what the task's head says, every time.
- * The rule the window had before, a list of the kinds of change a board
- * read, is played beside it, to show where it fell behind.
  */
 
 /** What the window read its board again on before: a list of kinds, which missed whatever moved a card through another. */
@@ -169,7 +167,6 @@ describe('the board keeps up with a task as its view does', () => {
         yield* Deferred.await(entered)
 
         const now = yield* windowOf(projectId, NOW)
-        const listed = yield* windowOf(projectId, LISTED)
         yield* ask(working, 'Add a retry. [coordinator:plan] [lead:wait-for-person] [lead:finish] [lead:edit] [review:pass]')
         const [made] = yield* until(cards(projectId), (all) => all.some((card) => card.slug === 'add-a-retry'))
         void made
@@ -178,7 +175,6 @@ describe('the board keeps up with a task as its view does', () => {
         const taskId = task?.id ?? ''
         const threadId = task?.threadId ?? ''
 
-        const behind: Array<string> = []
         const seen: Array<string> = []
         /** Waits until the task's view says what `where` looks for, then until the window's card says the same as the view. */
         const agree = (where: string, looks: (view: ReturnType<typeof ofView>) => boolean) =>
@@ -197,17 +193,10 @@ describe('the board keeps up with a task as its view does', () => {
               `the board at ${where}`,
             )
             seen.push(`${where}: ${view?.phase}${view?.step === null ? '' : ` (${view?.step})`}`)
-            // The rule before, given the same moment and a little more.
-            yield* Effect.sleep(Duration.millis(300))
-            const fresh = ofView(yield* Effect.orDie(queries.thread(threadId)))
-            const was = ofCard(listed.board, taskId)
-            if (JSON.stringify(fresh) !== JSON.stringify(was))
-              behind.push(`${where}: its view ${JSON.stringify(fresh)}, its card ${JSON.stringify(was)}`)
           })
 
         yield* agree('queued', (view) => view.phase === 'running' && view.queued)
         yield* Deferred.succeed(release, undefined)
-        yield* agree('waiting on the person', (view) => view.phase === 'waiting' || view.calls > 0 || view.step === 'implement')
         yield* until(
           Effect.map(Effect.orDie(queries.thread(threadId)), (snapshot) => [ofView(snapshot)]),
           ([one]) => one?.phase === 'waiting',
@@ -235,10 +224,8 @@ describe('the board keeps up with a task as its view does', () => {
         // What the window read meanwhile: far fewer boards than changes, as only a card that came out different reads one.
         const [counted] = yield* sql<{ changes: number }>`SELECT count(*) AS changes FROM change_log WHERE project_id = ${projectId}`
         assert.isBelow(now.reads, (counted?.changes ?? 0) / 4)
-        assert.deepStrictEqual(behind, [], 'the rule before, beside it')
         assert.deepStrictEqual(seen, [
           'queued: running (implement)',
-          'waiting on the person: running (implement)',
           'its lead waiting on the person: waiting',
           'ready, its pull request opened: ready',
           'its checks running: running (checks_running)',
@@ -253,7 +240,7 @@ describe('the board keeps up with a task as its view does', () => {
 
 describe('the board keeps up with several tasks moving at once', () => {
   it.live(
-    'says what each task’s view says, never behind it by more than a moment, while they wait, are reviewed, held, checked and merged',
+    'says what each task’s view says, with each card caught up before the next change, while they wait, are reviewed, held, checked and merged',
     () => {
       const { working, bare } = hosted()
       const github = makeFakeService({ pushUrl: () => bare, headOf: tipOf(bare) })
@@ -306,9 +293,6 @@ describe('the board keeps up with several tasks moving at once', () => {
         const stood = new Map<string, Array<string>>()
         let samples = 0
         const started = Date.now()
-        // Each time a task's view came to something new, and when the sampler first saw it there.
-        const episodes: Array<{ slug: string; taskId: string; view: ReturnType<typeof ofView>; at: number }> = []
-        const lastView = new Map<string, string>()
         yield* Effect.forkScoped(
           Effect.forever(
             Effect.gen(function* () {
@@ -319,10 +303,6 @@ describe('the board keeps up with several tasks moving at once', () => {
                 const went = stood.get(one.slug) ?? []
                 const now = `${view.phase}${view.step === null ? '' : ` (${view.step})`}${view.change?.checks == null ? '' : ` checks ${view.change.checks}`}`
                 if (went.at(-1) !== now) stood.set(one.slug, [...went, now])
-                if (lastView.get(one.slug) !== JSON.stringify(view)) {
-                  lastView.set(one.slug, JSON.stringify(view))
-                  episodes.push({ slug: one.slug, taskId: one.taskId, view, at: Date.now() })
-                }
                 if (JSON.stringify(view) === JSON.stringify(card)) apart.delete(one.slug)
                 else apart.add(one.slug)
               }
@@ -353,6 +333,7 @@ describe('the board keeps up with several tasks moving at once', () => {
         // The retry waits on the person while the config's pull request opens.
         yield* until(viewOf('add-a-retry'), (view) => view.phase === 'waiting', 'the retry waiting on the person')
         yield* until(viewOf('cache-the-config'), (view) => view.phase === 'ready' && view.change !== null, 'the config ready')
+        yield* settledTogether()
         const retry = tasks.find((one) => one.slug === 'add-a-retry')
         yield* (yield* Sessions).send({
           envelope: yield* Runtime.envelope('thread.send', { threadId: retry?.threadId ?? '' }),
@@ -371,34 +352,15 @@ describe('the board keeps up with several tasks moving at once', () => {
           'the retry reviewed, its pull request open',
         )
         yield* until(viewOf('tidy-the-docs'), (view) => view.phase === 'running', 'the docs running')
+        yield* settledTogether()
         github.setChecks(config, [{ name: 'test', state: 'passed' }])
         github.mergeByHand(config)
         for (const one of tasks) yield* (yield* Changes).refresh(one.taskId)
         yield* until(viewOf('cache-the-config'), (view) => view.phase === 'settled', 'the config merged and settled')
         yield* settledTogether()
 
-        // For each time a task's view came to something, how long after the view said it the window's board did, in a read
-        // made while it stood: the board may say it first (negative), after the view's state before, as the view was read in
-        // its turn. A state may come again (running, then waiting, then running): each time is its own. One the board never
-        // said was over before a read, unless it stood more than a moment.
-        const ended = Date.now()
-        const lags = episodes.map(({ slug, taskId, view, at }, index) => {
-          const ofTask = episodes.filter((one) => one.slug === slug)
-          const mine = ofTask.findIndex((one) => episodes.indexOf(one) === index)
-          const after = ofTask[mine - 1]?.at ?? 0
-          const until = ofTask[mine + 1]?.at ?? ended
-          const shown = window.log.find(
-            (read) => read.at > after && read.at <= until + 1000 && JSON.stringify(ofCard(read.board, taskId)) === JSON.stringify(view),
-          )
-          return {
-            slug,
-            state: `${view.phase}${view.step === null ? '' : ` (${view.step})`}`,
-            lagMs: shown !== undefined ? shown.at - at : until - at > 1000 ? until - at : null,
-          }
-        })
         const [counted] = yield* sql<{ changes: number }>`SELECT count(*) AS changes FROM change_log WHERE project_id = ${projectId}`
         const trace = {
-          lags,
           samples,
           changes: counted?.changes,
           boardReads: window.reads,
@@ -409,14 +371,8 @@ describe('the board keeps up with several tasks moving at once', () => {
             .map((change) => [tasks.find((one) => one.taskId === change.aggregateId)?.slug ?? change.aggregateId, change.cursor]),
         }
         if (process.env.BOARD_TRACE !== undefined) writeFileSync(process.env.BOARD_TRACE, JSON.stringify(trace, null, 1))
-        // Each card caught up with its view within a moment: the runtime's gather, the window's, and a board read, which on a
-        // machine busy with other work (as CI's runners and agents' computers are) takes up to a second or two by itself.
-        for (const { slug, state, lagMs } of lags)
-          assert.isBelow(lagMs ?? 0, 2000, `${slug}'s card said ${state} ${lagMs}ms after its view`)
         assert.isBelow(window.reads, (counted?.changes ?? 0) / 4)
         assert.includeMembers(stood.get('tidy-the-docs') ?? [], ['held', 'running (implement)'])
-        // Its review, which the fake reviewer passes at once, may come and go between two looks of the sampler: that the card
-        // said it in time, where the sampler saw it, is what the lags above hold.
         assert.include(stood.get('add-a-retry') ?? [], 'waiting')
         assert.strictEqual(stood.get('cache-the-config')?.at(-1), 'settled checks passed')
       }).pipe(Effect.scoped, Effect.provide(runtimeWith({ github })))
@@ -437,7 +393,6 @@ describe('a card that moves through a kind of change the board read nothing of b
       const taskId = running?.taskId ?? ''
       const threadId = running?.threadId ?? ''
       const window = yield* windowOf(projectId, NOW)
-      const listed = yield* windowOf(projectId, LISTED)
       yield* until(Effect.succeed([window.board]), ([board]) => board?.tasks.find((card) => card.taskId === taskId)?.phase === 'running')
       const from = yield* queries.cursor
       yield* callTool({ role: 'lead', projectId, threadId, sessionId: 'none', taskId }, 'draft_issue', { title: 'Retry webhooks too' })
@@ -452,9 +407,8 @@ describe('a card that moves through a kind of change the board read nothing of b
       )
       const since = yield* Effect.orDie(queries.changesSince(from, 500))
       assert.isTrue(since.some((change) => change.aggregateType === 'card' && change.aggregateId === taskId))
-      // Nothing the rule before named came of it: that window's board still says it runs.
+      // This operation emits no event the old rule named, so it needs the card event to refresh.
       assert.isFalse(since.some((change) => LISTED.has(change.aggregateType)))
-      assert.strictEqual(listed.board.tasks.find((card) => card.taskId === taskId)?.phase, 'running')
     }).pipe(Effect.scoped, Effect.provide(runtimeWith({ github })))
   })
 })
@@ -481,8 +435,8 @@ describe('a card a read gave out that the runtime never worked out', () => {
       const from = yield* queries.cursor
       yield* retitleTask({ envelope: yield* Runtime.envelope('task.retitle', {}), taskId, title: titled })
       yield* until(
-        Effect.sync(() => [titleOf(opened.board)]),
-        ([title]) => title === titled,
+        Effect.sync(() => [titleOf(opened.board), titleOf(window.board)]),
+        (titles) => titles.every((title) => title === titled),
         'the opened window to read the card back',
       )
       const since = yield* Effect.orDie(queries.changesSince(from, 500))

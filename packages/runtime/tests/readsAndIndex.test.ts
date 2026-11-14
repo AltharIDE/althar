@@ -116,7 +116,7 @@ describe('a quick plan changed before it starts', () => {
 })
 
 describe('what the loop dealt with, as the home shows it', () => {
-  it.live('says a usage limit it dealt with as one, and a step that went quiet as that', () =>
+  it.live('keeps quota notices out of home and shows a step that went quiet', () =>
     Effect.gen(function* () {
       const queries = yield* Queries
       const since = new Date(Date.now() - 1000).toISOString()
@@ -127,10 +127,7 @@ describe('what the loop dealt with, as the home shows it', () => {
       const { events } = yield* queries.home(since)
       assert.deepStrictEqual(
         events.flatMap((event) => (event.kind === 'dealt' ? [[event.about, event.title]] : [])),
-        [
-          ['stall', 'The lead went quiet'],
-          ['limit', 'Codex ran out of usage'],
-        ],
+        [['stall', 'The lead went quiet']],
       )
     }).pipe(Effect.provide(Queries.layer.pipe(Layer.provideMerge(runtime())))),
   )

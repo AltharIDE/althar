@@ -80,15 +80,14 @@ export const usableModels = (projectId?: string) =>
         Effect.map(Option.isSome),
         Effect.orElseSucceed(() => false),
       )
-      if (yield* isOut) {
-        // Marked out of usage: the person may have reset it since, so its plan is read again, only now, and only its accounts.
-        const marked: string[] = []
-        for (const account of yield* accounts.of(agent.id).pipe(Effect.orElseSucceed(() => []))) {
-          if (Option.isSome(yield* limits.outAccount(account.id).pipe(Effect.orElseSucceed(() => Option.none())))) marked.push(account.id)
-        }
-        yield* planUsage.refresh(marked).pipe(Effect.ignore)
-        if (yield* isOut) continue
+      // A healthy sibling keeps the agent usable, but must not hide an account reset since it ran out.
+      // Ask only marked accounts again; healthy accounts keep their last reading.
+      const marked: string[] = []
+      for (const account of yield* accounts.of(agent.id).pipe(Effect.orElseSucceed(() => []))) {
+        if (Option.isSome(yield* limits.outAccount(account.id).pipe(Effect.orElseSucceed(() => Option.none())))) marked.push(account.id)
       }
+      if (marked.length > 0) yield* planUsage.refresh(marked).pipe(Effect.ignore)
+      if (yield* isOut) continue
       const offered = catalog.find((one) => one.agentId === agent.id)
       if (offered === undefined) continue
       for (const model of offered.models) {

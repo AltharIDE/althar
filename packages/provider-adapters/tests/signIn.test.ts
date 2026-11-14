@@ -221,6 +221,8 @@ describe('reading sign-in status', () => {
       [
         'claude auth login',
         'codex login',
+        // Native Copilot signs in inside Althar, without a terminal command.
+        '',
         'opencode auth login --standalone',
         'copilot login',
         'junie',
@@ -245,6 +247,7 @@ describe('an agent’s homes', () => {
     assert.deepStrictEqual(usual({}), [
       ['CLAUDE_CONFIG_DIR', join('/Users/me', '.claude')],
       ['CODEX_HOME', join('/Users/me', '.codex')],
+      ['XDG_DATA_HOME', join('/Users/me', '.local', 'share', 'althar', 'copilot')],
       ['XDG_DATA_HOME', join('/Users/me', '.local', 'share')],
       ['COPILOT_HOME', join('/Users/me', '.copilot')],
       ['JUNIE_HOME', join('/Users/me', '.junie')],
@@ -267,7 +270,7 @@ describe('an agent’s homes', () => {
         QWEN_HOME: '/q',
         GEMINI_HOME: '/m',
       }).map(([, folder]) => folder),
-      ['/c', '/x', '/d', '/p', '/j', '/g', '/k', '/v', '/q', '/m'],
+      ['/c', '/x', join('/Users/me', '.local', 'share', 'althar', 'copilot'), '/d', '/p', '/j', '/g', '/k', '/v', '/q', '/m'],
     )
   })
 
@@ -277,6 +280,7 @@ describe('an agent’s homes', () => {
       for (const name of agent.home.shared(PRESENT)) assert.notMatch(name, /auth|credential|token|\.claude\.json|keychain/i, agent.id)
     assert.deepStrictEqual(agents['claude-code'].home.shared(PRESENT), ['settings.json', 'CLAUDE.md'])
     assert.deepStrictEqual(agents.codex.home.shared(PRESENT), ['config.toml', 'AGENTS.md'])
+    assert.deepStrictEqual(agents['copilot-direct'].home.shared(PRESENT), [])
     // OpenCode's home is the data folder every program uses: only its own stays apart.
     assert.deepStrictEqual(
       agents.opencode.home.shared(PRESENT),

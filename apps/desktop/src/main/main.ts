@@ -259,7 +259,7 @@ const facts = factsAsker()
  * registered before the app is ready, as Electron asks.
  */
 protocol.registerSchemesAsPrivileged([
-  { scheme: PICTURE_SCHEME, privileges: { standard: true, secure: true } },
+  { scheme: PICTURE_SCHEME, privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true } },
   // An HTML canvas's files (ADR-104): an origin for each canvas, handled only in its project's canvas partition (canvases/views.ts).
   { scheme: CANVAS_SCHEME, privileges: { standard: true, secure: true, supportFetchAPI: true, codeCache: true } },
 ])
@@ -774,8 +774,9 @@ nativeTheme.on('updated', paintPaper)
 /*
  * The desktop the windows sit on, and how they are dressed for it (desktopChrome.ts, ADR-098): read once the app is ready, handed
  * to each window as it opens so its first frame draws its buttons where they go, and sent to every window as the desktop changes.
- * Whether the windows have the window manager's own frame is decided as the first one opens, from what is known then: a window's
- * frame can't change once it is open, and every window of a run has the same.
+ * On Linux every window is frameless with Althar's own bar, but where an X11 window manager can't move a frameless one (desktop.ts):
+ * that is decided as the first window opens, from what is known then, since a window's frame can't change once it is open, and
+ * every window of a run has the same.
  */
 let desktopLook: FollowedChrome | undefined
 let framed: boolean | undefined
@@ -828,8 +829,8 @@ const openWindow = () => {
     minWidth: 880,
     minHeight: 600,
     show: false,
-    // Off a Mac the window is frameless, its own strip is the chrome (windowOptions.ts), but where a Linux window manager draws a good
-    // frame of its own (desktop.ts); there it carries Althar's icon.
+    // Off a Mac the window is frameless, its own strip is the chrome (windowOptions.ts), but where an X11 window manager couldn't
+    // move it so (desktop.ts); there the system's frame carries Althar's icon.
     ...windowOptions(process.platform, windowIcon(), nativeTheme.shouldUseDarkColors, framedNow()),
     webPreferences: {
       preload: join(here, '../preload/preload.cjs'),
