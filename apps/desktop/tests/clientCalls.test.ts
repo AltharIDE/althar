@@ -138,6 +138,12 @@ describe('what the client sends', () => {
     const url = 'https://github.com/meridian/web/pull/4'
     expect((await sent(heard, client.markReady('t1'))).payload).toEqual({ taskId: 't1' })
     expect((await sent(heard, client.merge('t1', 'abc'))).payload).toEqual({ taskId: 't1', head: 'abc' })
+    expect((await sent(heard, client.merge('t1', 'abc', 'https://github.com/meridian/api/pull/12', undefined, true))).payload).toEqual({
+      taskId: 't1',
+      head: 'abc',
+      url: 'https://github.com/meridian/api/pull/12',
+      bypassQueue: true,
+    })
     expect((await sent(heard, client.push('t1', 'abc'))).payload).toEqual({ taskId: 't1', head: 'abc' })
     expect((await sent(heard, client.push('t1', 'abc', url))).payload).toEqual({ taskId: 't1', head: 'abc', url })
     expect(await sent(heard, client.replacePullRequest('t1', 'abc', 'def'))).toEqual({

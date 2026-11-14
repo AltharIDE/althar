@@ -13,13 +13,14 @@ import {
   type ReviewVerdict,
   type ThreadItem,
   type ThreadSnapshot,
+  type UndoTurnResult,
 } from '@althar/contracts'
 
 import { messageOf, type StuckAnswer } from '../../data/client'
 import { useMerge } from '../../data/merges'
 import { keys, reads } from '../../data/reads'
 import { canPick } from '../../shared/agents'
-import { isSending, mergeItems, newestReads, sending, takenBack, unsent, waiting } from '../../shared/items'
+import { isSending, mergeItems, newestReads, queueShown, sending, takenBack, unsent, waiting } from '../../shared/items'
 import { headsOf } from '../../shared/mergeHere'
 import { commitsToShip } from '../../shared/shipping'
 import { type Choice, moveTo, runningOn, startOf, upcomingOn } from '../../shared/models'
@@ -112,6 +113,7 @@ export interface TaskModel {
   readonly sendNow: (body: string, images?: Outgoing) => Promise<boolean>
   /** Takes back a message still waiting its turn; false, having said why, when the agent already has it. */
   readonly takeBack: (itemId: string) => Promise<boolean>
+  readonly undoTurn: (itemId: string) => Promise<UndoTurnResult>
   readonly interrupt: () => Promise<void>
   /** Has the agent on the task compact its context, after what it was told before. */
   readonly compact: () => Promise<void>
@@ -223,7 +225,9 @@ export interface TaskModel {
    * the person saw, and stops at the first that is refused, so the rest
    * wait; pending throughout.
    */
-  readonly accept: (changes: ReadonlyArray<{ readonly head: string; readonly url: string }>) => Promise<void>
+  readonly accept: (
+    changes: ReadonlyArray<{ readonly head: string; readonly url: string; readonly bypassQueue?: boolean }>,
+  ) => Promise<void>
   /**
    * Merge, with commits not shipped (a task is a conversation plus parts): `review`, Review and merge, one review of what
    * waits, then it goes up and merges; `now`, Merge now, up and merged at once, reviewed after the merge.
@@ -296,7 +300,7 @@ export const useTask = (threadId: string): TaskModel => {
   const status = useQuery(read.status()).data
   const agents = useMemo(() => status?.agents.filter(canPick) ?? [], [status])
   // What its lead is still saying, while the window hears it.
-  const streaming = useStreamed(threadId, snapshot?.items ?? NO_ITEMS)
+  const streaming = useStreamed(threadId, snapshot?.items ?? NO_ITEMS, undefined, snapshot?.conversationVersion)
   // What its commands have printed so far, while they run.
   const outputs = useOutputs(threadId, snapshot?.items ?? NO_ITEMS, snapshot?.session?.turnRunning ?? false)
   const [failed, setError] = useState<string | null>(null)
@@ -371,20 +375,23 @@ export const useTask = (threadId: string): TaskModel => {
   const readItems = useCallback(
     (ids: Iterable<string>) =>
       Promise.all(
-        [...ids].map((itemId) =>
-          newest(
+        [...ids].map((itemId) => {
+          const version = cache.getQueryData<ThreadSnapshot>(keys.thread(threadId))?.conversationVersion
+          return newest(
             itemId,
             client.getThreadItem(threadId, itemId),
             // One the thread keeps for Althar alone, such as what its lead could see, is nothing to draw, and nothing wrong.
-            (item) =>
-              item === null
+            (item) => {
+              if (cache.getQueryData<ThreadSnapshot>(keys.thread(threadId))?.conversationVersion !== version) return
+              return item === null
                 ? setSnapshot((current) => ({ ...current, items: current.items.filter((one) => one.id !== itemId) }))
-                : arrived([item]),
+                : arrived([item])
+            },
             fail,
-          ),
-        ),
+          )
+        }),
       ),
-    [client, threadId, newest, arrived, fail, setSnapshot],
+    [client, cache, threadId, newest, arrived, fail, setSnapshot],
   )
 
   // What the lead was last picked to, until the thread says it: a pick made before the last one was taken goes from there.
@@ -402,10 +409,18 @@ export const useTask = (threadId: string): TaskModel => {
       newest(
         'head',
         client.getThread(threadId, { limit: 0 }).finally(() => readItems(new Set([...also, ...waiting(held())]))),
-        (head) =>
-          cache.setQueryData<ThreadSnapshot>(keys.thread(threadId), (current) =>
+        (head) => {
+          const current = cache.getQueryData<ThreadSnapshot>(keys.thread(threadId))
+          if ((head.conversationVersion ?? 1) < (current?.conversationVersion ?? 1)) return
+          if (current !== undefined && head.conversationVersion !== current.conversationVersion) {
+            void newest('head', client.getThread(threadId), (fresh) => cache.setQueryData(keys.thread(threadId), fresh), fail)
+            return
+          }
+          cache.setQueryData<ThreadSnapshot>(
+            keys.thread(threadId),
             current === undefined ? head : { ...head, items: current.items, earlier: current.earlier },
-          ),
+          )
+        },
         fail,
       ),
     [client, cache, threadId, newest, readItems, held, fail],
@@ -490,7 +505,7 @@ export const useTask = (threadId: string): TaskModel => {
         .getThread(threadId, { before: first.sequence, limit: PAGE })
         .then((page) => {
           setSnapshot((current) =>
-            current.threadId === page.threadId
+            current.threadId === page.threadId && current.conversationVersion === page.conversationVersion
               ? { ...current, items: mergeItems(current.items, page.items), earlier: page.earlier }
               : current,
           )
@@ -554,7 +569,7 @@ export const useTask = (threadId: string): TaskModel => {
     action: (accepted: () => void) => Promise<unknown>,
     images: Outgoing | undefined,
     // Behind a turn running it waits its turn; handed to another agent, it is that one's first.
-    queued = disposition === 'interrupt_and_continue' || snapshot?.session?.turnRunning === true,
+    queued = disposition === 'interrupt_and_continue' || queueShown(snapshot?.session ?? null, true, snapshot?.accepting),
   ) => {
     let id = ''
     setSnapshot((current) => {
@@ -631,6 +646,16 @@ export const useTask = (threadId: string): TaskModel => {
         () => client.send({ threadId, body, disposition: 'interrupt_and_continue', ...sentWith(images) }),
         images,
       ),
+    undoTurn: async (itemId) => {
+      setPending(true)
+      try {
+        const result = await client.undoTurn(itemId)
+        cache.setQueryData(keys.thread(threadId), await client.getThread(threadId))
+        return result
+      } finally {
+        setPending(false)
+      }
+    },
     takeBack: async (itemId) => {
       // What is still on its way has nothing to take back yet.
       if (isSending(itemId)) return false
@@ -841,7 +866,12 @@ export const useTask = (threadId: string): TaskModel => {
           for (const [at, change] of changes.entries()) {
             setMerging(change.url)
             try {
-              await merge({ taskId: snapshot.task.id, head: change.head, url: change.url })
+              await merge({
+                taskId: snapshot.task.id,
+                head: change.head,
+                url: change.url,
+                ...(change.bypassQueue ? { bypassQueue: true } : {}),
+              })
             } catch (failure) {
               setMergeFailed(change.url)
               throw failure

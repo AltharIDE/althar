@@ -27,6 +27,7 @@ import {
 
 import { piecesOf, shotsOf } from '../../shared/evidence'
 import { handedBy } from '../../shared/handed'
+import { linkedWords } from '../../shared/noteLinks'
 import { HandedBack } from '../../shared/HandedBack'
 import { useModelNames } from '../../shared/modelNames'
 import { type Round as RoundModel, type RoundBlock, type Said, type Shown, type WorkStep, withoutShotList } from '../../shared/rounds'
@@ -385,10 +386,24 @@ const RoundView = memo(function RoundView({
 
 /** What the person said, which draws from nothing but itself. */
 const YouView = memo(
-  function YouView({ block, threadId }: { block: Block; threadId: string }) {
-    return <ThreadBlocks threadId={threadId} blocks={[block]} />
+  function YouView({
+    block,
+    threadId,
+    undoable,
+    onUndoFrom,
+  }: {
+    block: Block
+    threadId: string
+    undoable: boolean
+    onUndoFrom?: ((id: string) => void) | undefined
+  }) {
+    return <ThreadBlocks threadId={threadId} blocks={[block]} undoable={undoable ? [block.id] : []} onUndoFrom={onUndoFrom} />
   },
-  (before, after) => before.threadId === after.threadId && same(before.block, after.block),
+  (before, after) =>
+    before.threadId === after.threadId &&
+    before.undoable === after.undoable &&
+    before.onUndoFrom === after.onUndoFrom &&
+    same(before.block, after.block),
 )
 
 /** What the thread says of a task this task's lead started, before its title, which opens it. */
@@ -486,13 +501,13 @@ export function TaskThread({
       case 'althar':
         if (block.task !== undefined && started !== undefined) return <Fragment key={block.id}>{started(block.task)}</Fragment>
         return (
-          <AltharLine key={block.id} tone={block.tone}>
+          <AltharLine key={block.id} tone={block.tone} {...(block.details === undefined ? {} : { details: block.details })}>
             {block.task !== undefined && onOpenTask !== undefined ? (
               <>
                 {STARTED} <LinkButton onClick={() => onOpenTask(block.task?.threadId ?? '')}>{block.task.title}</LinkButton>
               </>
             ) : (
-              block.text
+              linkedWords(block.text, block.links)
             )}
           </AltharLine>
         )
@@ -568,7 +583,15 @@ export function TaskThread({
           </div>
         )
       case 'you':
-        return <YouView key={block.id} block={block} threadId={threadId} />
+        return (
+          <YouView
+            key={block.id}
+            block={block}
+            threadId={threadId}
+            undoable={shared.undoable?.includes(block.id) === true}
+            onUndoFrom={shared.onUndoFrom}
+          />
+        )
       default:
         return <ThreadBlocks key={block.id} {...shared} blocks={[block as Block]} />
     }

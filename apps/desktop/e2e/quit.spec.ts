@@ -1,4 +1,4 @@
-import { mkdtempSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
@@ -22,9 +22,13 @@ const ASKS = { ALTHAR_QUIT_WITHOUT_ASKING: '0' }
 
 /** Quits with work running, as a second Quit does: it says yes to the question the first asks. */
 const quitAnyway = async (electronApp: ElectronApplication) => {
-  const exited = new Promise<void>((resolve) => electronApp.process().once('exit', () => resolve()))
-  await electronApp.evaluate(({ app }) => app.quit())
+  const child = electronApp.process()
+  if (child.exitCode !== null || child.signalCode !== null) return
+  const exited = new Promise<void>((resolve) => child.once('exit', () => resolve()))
+  // Teardown may reach an app already quitting; either Quit can close the transport before its evaluation answers.
   await electronApp.evaluate(({ app }) => app.quit()).catch(() => undefined)
+  if (child.exitCode === null && child.signalCode === null) await electronApp.evaluate(({ app }) => app.quit()).catch(() => undefined)
+  // An evaluation failing is not enough: the process must actually exit.
   await exited
 }
 
@@ -150,6 +154,13 @@ test('Keep working in the background closes the windows and leaves the lead work
     const again = await mainWindow(electronApp)
     await expect(again.getByText('1 task moving in 1 project.')).toBeVisible()
     await expect(again.getByRole('dialog')).toHaveCount(0)
+    // Reopening doesn't forget the choice: close again, then return to work with no extra Quit question.
+    await again.close()
+    expect(electronApp.process().exitCode).toBeNull()
+    await electronApp.evaluate(({ app }) => app.emit('activate'))
+    const reopened = await mainWindow(electronApp)
+    await expect(reopened.getByText('1 task moving in 1 project.')).toBeVisible()
+    await expect(reopened.getByRole('dialog')).toHaveCount(0)
   } finally {
     await quitAnyway(electronApp)
   }
@@ -179,6 +190,37 @@ test('Closing the last window with work running asks once, and quits only when t
     await expect(back.getByRole('navigation', { name: 'Projects' })).toBeVisible()
     await expect(back.getByRole('dialog')).toHaveCount(0)
     expect(electronApp.process().exitCode).toBeNull()
+  } finally {
+    await quitAnyway(electronApp)
+  }
+})
+
+test('remembers background closing across launch and reopening, while an explicit Quit still asks', async () => {
+  const home = mkdtempSync(join(tmpdir(), 'althar-e2e-'))
+  mkdirSync(join(home, 'profile'))
+  const kept = join(home, 'profile', 'desktop.json')
+  writeFileSync(kept, JSON.stringify({ keepWorkingOnClose: true }))
+  const { electronApp, page } = await launch(home, ASKS)
+  try {
+    await openFirstProject(electronApp, page, repository(home))
+    await startTask(page, 'Keep the session alive', '[lead:wait]')
+    await expect(page.getByText('Running', { exact: true }).first()).toBeVisible()
+    await page.close()
+    expect(electronApp.process().exitCode).toBeNull()
+    await electronApp.evaluate(({ app }) => app.emit('activate'))
+    const again = await mainWindow(electronApp)
+    await expect(again.getByRole('navigation', { name: 'Projects' })).toBeVisible()
+    await expect(again.getByRole('dialog')).toHaveCount(0)
+    await again.close()
+    expect(electronApp.process().exitCode).toBeNull()
+    await electronApp.evaluate(({ app }) => app.quit())
+    const asking = await mainWindow(electronApp)
+    const dialog = asking.getByRole('dialog', { name: 'Quit Althar?' })
+    await expect(dialog).toContainText('Quitting stops 1 lead at work.')
+    const exited = new Promise<void>((resolve) => electronApp.process().once('exit', () => resolve()))
+    await dialog.getByRole('button', { name: 'Quit anyway' }).click()
+    await exited
+    expect(JSON.parse(readFileSync(kept, 'utf8'))).toMatchObject({ keepWorkingOnClose: false })
   } finally {
     await quitAnyway(electronApp)
   }

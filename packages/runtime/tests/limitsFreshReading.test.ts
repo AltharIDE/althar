@@ -309,4 +309,21 @@ describe('the model list, asking the plans again', () => {
       assert.isTrue(Option.isNone(yield* (yield* Limits).outAccount(second.id)))
     }).pipe(Effect.provide(runtime(':memory:', {}, { usage: asking(() => ({ kind: 'failed', message: 'Down.' })) })))
   })
+
+  it.live('takes a reset account back even while another account keeps the agent usable', () => {
+    homes.length = 0
+    return Effect.gen(function* () {
+      const projectId = yield* ready
+      const accounts = yield* Accounts
+      const [first] = yield* accounts.of('codex')
+      yield* accounts.add({ agentId: 'codex', name: 'Work' })
+      yield* limitedAt(first!.id, ago(MINUTE), from(DAY))
+      const offered = yield* usableModels(projectId)
+      assert.strictEqual(homes.length, 1)
+      assert.isTrue(Option.isNone(yield* (yield* Limits).outAccount(first!.id)))
+      assert.isTrue(offered.some((model) => model.routes.some((route) => route.agentId === 'codex' && route.room?.leftPercent === 80)))
+      yield* usableModels(projectId)
+      assert.strictEqual(homes.length, 1)
+    }).pipe(Effect.provide(runtime(':memory:', {}, { usage: asking(() => reading(80)) })))
+  })
 })

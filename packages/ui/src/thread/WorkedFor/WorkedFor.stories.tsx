@@ -58,6 +58,20 @@ type Story = StoryObj<typeof meta>
 /** Done: the turn's work is its header alone, how long it worked; its answer stands under it. */
 export const Folded: Story = {}
 
+/** A long queue wait stays in the details; the headline is the work itself. */
+export const AfterLongWait: Story = {
+  args: {
+    took: '20s',
+    most: undefined,
+    spent: ['50h 0m waiting for a place', '1m 0s starting', '20s thinking and writing'],
+  },
+  play: async ({ canvasElement }) => {
+    const c = within(canvasElement)
+    await expect(c.getByRole('button', { name: 'Worked for 20s' })).toBeInTheDocument()
+    await expect(c.queryByText(/50h/)).toBeNull()
+  },
+}
+
 /** Opening it shows the whole trail: what it said on the way, its thoughts, its tools. */
 export const Opening: Story = {
   play: async ({ canvasElement }) => {

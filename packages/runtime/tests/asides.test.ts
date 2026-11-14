@@ -306,51 +306,58 @@ describe('an aside opened with +', () => {
             chat: true,
             taskId,
           })
-          const turns = () =>
-            store(
-              sqlOf(
-                (sql) => sql<{ prompt: string; state: string }>`
-                SELECT prompt, state FROM turn_deliveries WHERE thread_id = ${aside.threadId} ORDER BY requested_at`,
-              ),
-            )
-          const said = (body: string, count: number) =>
+          const said = (body: string) =>
             Effect.gen(function* () {
               yield* client.Send({ commandId: commandId(), threadId: aside.threadId, body, disposition: 'after_current' })
-              const all = yield* until(turns(), (rows) => rows.length === count && rows[count - 1]?.state === 'completed')
-              return all[count - 1]?.prompt ?? ''
+              const delivered = store(
+                sqlOf(
+                  (sql) => sql<{ prompt: string; state: string }>`
+                    SELECT d.prompt, d.state FROM turn_deliveries d JOIN turn_delivery_inputs i ON i.delivery_id = d.id
+                    JOIN user_inputs u ON u.id = i.user_input_id
+                    WHERE u.thread_id = ${aside.threadId} AND u.body = ${body} ORDER BY d.requested_at DESC`,
+                ),
+              )
+              const [turn] = yield* until(delivered, (rows) => rows[0]?.state === 'completed')
+              return turn?.prompt ?? ''
             })
           const SANDBOX = 'Your sandbox reaches any host without asking'
           const WORK = 'This aside is a task now'
 
           // Its first words go out with its light brief, the project's notes in it, but not what its sandbox lets through.
-          const hi = yield* said('Where is the retry?', 1)
+          const hi = yield* said('Where is the retry?')
           assert.include(hi, "You are an aside of this project's coordinator")
           assert.include(hi, 'Retries live in the queue package.')
           assert.notInclude(hi, SANDBOX)
 
           // Its session lost, a fresh one carries it on, lightly still, with its thread.
-          const lost = yield* said('And the backoff? [lead:lost-once]', 3)
+          const lost = yield* said('And the backoff? [lead:lost-once]')
           assert.match(lost, /^You are carrying on an aside of this project's coordinator.+because the session before was lost\./)
           assert.include(lost, 'The thread so far')
           assert.notInclude(lost, 'gather evidence')
           assert.isTrue(lost.endsWith('And the backoff? [lead:lost-once]'))
 
           // Words to it while it is an aside still are only the words; its context full, the next goes to a fresh session.
-          const again = yield* said('Look again. [context:25/1000000]', 4)
+          const again = yield* said('Look again. [context:25/1000000]')
           assert.strictEqual(again, 'Look again. [context:25/1000000]')
-          const fresh = yield* said('And now?', 5)
+          const fresh = yield* said('And now? [context:1/1000000]')
           assert.match(fresh, /^You are carrying on an aside of this project's coordinator.+to keep your context small\./)
           assert.notInclude(fresh, WORK)
 
           // Made a task, its next turn is told a lead's whole brief and its sandbox, but not the thread, which it has; once.
           yield* client.ShelveTask({ commandId: commandId(), taskId, shelf: null })
-          const work = yield* said('Fix it then.', 6)
+          const work = yield* said('Fix it then.')
           assert.isTrue(work.startsWith(WORK))
           assert.include(work, 'gather evidence')
           assert.include(work, SANDBOX)
           assert.notInclude(work, 'The thread so far')
           assert.isTrue(work.endsWith('Fix it then.'))
-          assert.strictEqual(yield* said('And the tests?', 7), 'And the tests?')
+          // A report reminder can share this turn with the person's words; the full brief must not be repeated.
+          const next = yield* said('And the tests?')
+          assert.isTrue(next.endsWith('And the tests?'))
+          assert.notInclude(next, WORK)
+          assert.notInclude(next, SANDBOX)
+          assert.notInclude(next, 'gather evidence')
+          assert.notInclude(next, 'You are taking over a task')
         }),
       ),
   )

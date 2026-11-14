@@ -26,7 +26,7 @@ import { useOutputs } from '../../shared/useOutputs'
 import { useDrafts } from '../../shared/useDrafts'
 import { useStreamed } from '../../shared/useStreamed'
 import { canPick } from '../../shared/agents'
-import { inView, isSending, mergeItems, newestReads, sending, takenBack, unsent, waiting } from '../../shared/items'
+import { inView, isSending, mergeItems, newestReads, queueShown, sending, takenBack, unsent, waiting } from '../../shared/items'
 import { type Choice, moveTo, runningOn, startOf, upcomingOn } from '../../shared/models'
 import type { Streamed } from '../../shared/thread'
 
@@ -401,7 +401,7 @@ export const useProject = (projectId: string): ProjectModel => {
     disposition: 'after_current' | 'interrupt_and_continue',
     action: () => Promise<unknown>,
     images: Outgoing | undefined,
-    queued = disposition === 'interrupt_and_continue' || coordinator?.session?.turnRunning === true,
+    queued = disposition === 'interrupt_and_continue' || queueShown(coordinator?.session ?? null, true, coordinator?.accepting),
   ) => {
     let id = ''
     setCoordinator((current) => {

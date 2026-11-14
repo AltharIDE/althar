@@ -52,6 +52,24 @@ const refs = new Map([['p1', refOf(project)]])
 const agentName = () => ''
 
 describe('a ready task’s line', () => {
+  it('offers queue bypass only as the explicit secondary action', async () => {
+    const work = task({
+      kind: 'change',
+      change: change({
+        draft: false,
+        canBypassQueue: true,
+        checks: { outcome: 'passed', passed: 1, failed: 0, running: 0, total: 1, failing: [], list: [] },
+      }),
+    })
+    const [need] = needsOf({ calls: [], ready: [work], refs, agentName })
+    const next = vi.fn()
+    render(<>{needLineOf(need!, { onOpen: vi.fn(), onAnswer: vi.fn(), onNext: next })}</>)
+    await userEvent.click(screen.getByRole('button', { name: 'Other ways to merge' }))
+    expect(next).not.toHaveBeenCalled()
+    await userEvent.click(screen.getByRole('menuitem', { name: 'Merge without queue' }))
+    expect(next).toHaveBeenCalledWith(work, { kind: 'merge' }, true)
+  })
+
   it('says its commits in no pull request, one or more', () => {
     const merged = change({ state: 'merged' })
     expect(briefOf(task({ change: merged, unshipped: { commits: 1, add: 5, del: 1 } }))).toBe('1 commit in no pull request · +5 −1')

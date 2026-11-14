@@ -6,6 +6,7 @@ import { basename, dirname, isAbsolute, join, type posix, relative, resolve, sep
 import {
   type AccountStatus,
   API_VERSION,
+  NEW_PROJECT_DEFAULTS,
   apiVersionRefusal,
   ClientAuthority,
   SocketAllowed,
@@ -47,7 +48,7 @@ import {
   uninstall,
 } from '@althar/skills'
 import { codeRootOf } from './code'
-import { FileRefused, NotFound, ProjectRefused, RetryRefused } from './errors'
+import { ChangeRefused, FileRefused, NotFound, ProjectRefused, RetryRefused } from './errors'
 import { contained, Failures, failuresLayer } from './Failures'
 import { type AgentEntry, Agents, RuntimeConfig } from './Config'
 import { modelNamer } from './coordinatorNews'
@@ -77,6 +78,7 @@ import { missedReports } from './missedReports'
 import { PullRequestScreenshots } from './PullRequestScreenshots'
 import {
   accountsOf,
+  accountStrategyOf,
   allowsEverything,
   modeOf,
   movesIssues,
@@ -589,6 +591,7 @@ export const handlers = Api.toLayer(
         leadsReachWeb: rules.leadsReachWeb ?? true,
         usageLimit: usageLimitOf(rules),
         rotateAccounts: accounts.rotate,
+        accountStrategy: accountStrategyOf(rules),
         onlyAccounts: accounts.only ?? null,
         branchPattern: rules.branchPattern ?? null,
         titlePattern: rules.titlePattern ?? null,
@@ -832,7 +835,7 @@ export const handlers = Api.toLayer(
                 yours: 0,
                 working: 0,
                 usageLimit: 'move' as const,
-                rotateAccounts: false,
+                rotateAccounts: NEW_PROJECT_DEFAULTS.rotateAccounts,
                 onlyAccounts: null,
               }
             )
@@ -1494,6 +1497,8 @@ export const handlers = Api.toLayer(
             yield* sessions.takeBack({ envelope: yield* envelope('thread.take_back', { itemId }, commandId), itemId })
           }),
         ),
+      UndoTurn: ({ commandId, itemId }) =>
+        api(Effect.flatMap(envelope('thread.undo_turn', { itemId }, commandId), (said) => sessions.undoTurn({ envelope: said, itemId }))),
       GetCoordinator: ({ projectId, before, limit }) =>
         api(queries.coordinator(projectId, { ...(before === undefined ? {} : { before }), ...(limit === undefined ? {} : { limit }) })),
       StartTask: ({ commandId, projectId, title, description, steps, issue, end, repositories, chat, taskId }) =>
@@ -2077,15 +2082,17 @@ export const handlers = Api.toLayer(
           ),
         ),
       LeaveAfterMerge: ({ commandId, taskId, url }) => once(commandId, api(mergeReviews.leave(taskId, url))),
-      Merge: ({ commandId, taskId, head, url, how }) =>
+      Merge: ({ commandId, taskId, head, url, how, bypassQueue }) =>
         once(
           commandId,
           api(
-            how === undefined
-              ? pullRequests.merge(taskId, head, url)
-              : Effect.flatMap(envelope('task.merge', { taskId, how }, commandId), (said) =>
-                  runs.mergeWaiting({ envelope: said, taskId, how, ...(url === undefined ? {} : { url }) }),
-                ),
+            bypassQueue === true && how !== undefined
+              ? Effect.fail(new ChangeRefused({ message: 'Ship the waiting commits before merging without the queue.' }))
+              : how === undefined
+                ? pullRequests.merge(taskId, head, url, bypassQueue)
+                : Effect.flatMap(envelope('task.merge', { taskId, how }, commandId), (said) =>
+                    runs.mergeWaiting({ envelope: said, taskId, how, ...(url === undefined ? {} : { url }) }),
+                  ),
           ),
         ),
       ClosePullRequest: ({ commandId, taskId, url, deleteBranch }) =>

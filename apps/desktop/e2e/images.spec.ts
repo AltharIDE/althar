@@ -87,7 +87,8 @@ test('sends images dropped on a composer to the coordinator and to a lead, which
     await expect(page.getByRole('list', { name: '1 attachment to send' }).getByRole('img', { name: 'refunds.png' })).toBeVisible()
     await page.screenshot({ path: 'test-results/images-coordinator-composer.png' })
     await startTask(page, 'Fix the refunds layout')
-    await expect(page.getByText(/saw images: image\/png \d+ B/).first()).toBeVisible()
+    // The completed coordinator turn can already be folded into its work. Its reply still proves it read the image.
+    await expect(page.getByText(/saw images: image\/png \d+ B/).first()).toBeAttached()
     await expect(page.getByRole('button', { name: 'View refunds.png' })).toBeVisible()
     await expect(page.getByRole('list', { name: /to send/ })).toHaveCount(0)
 

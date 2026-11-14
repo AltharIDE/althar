@@ -95,6 +95,7 @@ import {
   type TaskSummary,
   type ThreadItem,
   type ThreadSnapshot,
+  type UndoTurnResult,
   type TrackerContainer,
   type WatchEvent,
   type Launch,
@@ -434,6 +435,7 @@ export interface Client {
   }) => Promise<void>
   /** Takes back a message still waiting its turn, by its item. */
   readonly takeBack: (itemId: string) => Promise<void>
+  readonly undoTurn: (itemId: string) => Promise<UndoTurnResult>
   /** The person's answer to a permission; with `always`, kept in the project's rules by that scope, one of those offered. */
   readonly answer: (input: {
     readonly attentionId: string
@@ -617,7 +619,7 @@ export interface Client {
    */
   readonly setReviewAfterMerge: (taskId: string, review: 'review' | 'none' | null) => Promise<void>
   /** Merges the task's pull request at the head the person saw, as they said to; a draft is marked ready first. */
-  readonly merge: (taskId: string, head: string, url?: string, how?: 'review' | 'now') => Promise<void>
+  readonly merge: (taskId: string, head: string, url?: string, how?: 'review' | 'now', bypassQueue?: boolean) => Promise<void>
   /** Merges a task without a pull request into its repositories' default branches on this Mac, up to the commit the person saw in each. */
   readonly mergeHere: (taskId: string, heads: ReadonlyArray<{ readonly repository: string; readonly head: string }>) => Promise<void>
   /** Pushes the default branches the task merged into here to their remotes, with the person's own git sign-in. */
@@ -978,6 +980,7 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
     renameTask: (taskId, title) => command((commandId) => api.RenameTask({ commandId, taskId, title })),
     send: (input) => command((commandId) => api.Send({ commandId, ...input })),
     takeBack: (itemId) => command((commandId) => api.TakeBack({ commandId, itemId })),
+    undoTurn: (itemId) => command((commandId) => api.UndoTurn({ commandId, itemId })),
     answer: (input) => command((commandId) => api.Answer({ commandId, ...input })),
     answerQuestion: (input) => command((commandId) => api.AnswerQuestion({ commandId, ...input })),
     getCoordinator: (projectId, page = {}) => settle(api.GetCoordinator({ projectId, ...page })),
@@ -1063,9 +1066,16 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
     skipReview: (taskId) => command((commandId) => api.SkipReview({ commandId, taskId })),
     shapeTask: (taskId, preset) => command((commandId) => api.ShapeTask({ commandId, taskId, preset })),
     setReviewAfterMerge: (taskId, review) => command((commandId) => api.SetReviewAfterMerge({ commandId, taskId, review })),
-    merge: (taskId, head, url, how) =>
+    merge: (taskId, head, url, how, bypassQueue) =>
       command((commandId) =>
-        api.Merge({ commandId, taskId, head, ...(url === undefined ? {} : { url }), ...(how === undefined ? {} : { how }) }),
+        api.Merge({
+          commandId,
+          taskId,
+          head,
+          ...(url === undefined ? {} : { url }),
+          ...(how === undefined ? {} : { how }),
+          ...(bypassQueue === true ? { bypassQueue: true } : {}),
+        }),
       ),
     mergeHere: (taskId, heads) => command((commandId) => api.MergeHere({ commandId, taskId, heads })),
     pushHere: (taskId) => command((commandId) => api.PushHere({ commandId, taskId })),

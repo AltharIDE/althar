@@ -1,4 +1,5 @@
 import type { ActorId, ProjectId } from '@althar/domain'
+import { type AccountStrategy, rotatesAccounts } from '@althar/contracts'
 import { Effect } from 'effect'
 
 import { Changes } from './Changes'
@@ -9,6 +10,7 @@ import { PullRequestScreenshots } from './PullRequestScreenshots'
 /** A change to a project's rules as the rules screen sends it: the rules, and the accounts its work runs on. */
 export type RulesSent = RulesChange & {
   readonly rotateAccounts?: boolean | undefined
+  readonly accountStrategy?: AccountStrategy | undefined
   readonly onlyAccounts?: Readonly<Record<string, ReadonlyArray<string>>> | null | undefined
 }
 
@@ -23,14 +25,21 @@ export type RulesSent = RulesChange & {
 export const applyRules = (projectId: string, sent: RulesSent, actorId: ActorId, expectedRevision?: number) =>
   Effect.gen(function* () {
     const policies = yield* Policies
-    const { rotateAccounts, onlyAccounts, ...change } = sent
+    const { rotateAccounts, accountStrategy, onlyAccounts, ...change } = sent
     const was = (yield* policies.current(projectId as ProjectId)).rules
     const now = accountsOf(was)
     const only = onlyAccounts === undefined ? now.only : onlyAccounts
+    const strategy = accountStrategy ?? now.strategy
     const accounts =
-      rotateAccounts === undefined && onlyAccounts === undefined
+      rotateAccounts === undefined && onlyAccounts === undefined && accountStrategy === undefined
         ? {}
-        : { accounts: { rotate: rotateAccounts ?? now.rotate, ...(only == null ? {} : { only }) } }
+        : {
+            accounts: {
+              rotate: accountStrategy === undefined ? (rotateAccounts ?? now.rotate) : rotatesAccounts(accountStrategy),
+              ...(strategy === undefined ? {} : { strategy }),
+              ...(only == null ? {} : { only }),
+            },
+          }
     yield* policies.set(projectId, { ...change, ...accounts }, actorId, expectedRevision)
     yield* (yield* Permissions).reconsider(projectId)
     const kept = yield* policies.current(projectId as ProjectId)

@@ -1,3 +1,4 @@
+import { MessageMotion } from '../../shared/MessageMotion'
 import { useSearchReveal } from '../finder/revealSearch'
 import { reveal } from '../task/reveal'
 import { EarlierTurns } from '../../shared/EarlierTurns'
@@ -460,7 +461,7 @@ export function ProjectView({
   const suggested = coordinator?.suggested ?? null
   const busy = session?.turnRunning ?? false
   const steers = useSendMidTurn()?.to === 'steer'
-  const queue = queueShown(session, model.pending)
+  const queue = queueShown(session, model.pending, coordinator?.accepting)
   const agentName = (id: string | null) =>
     model.agents.find((agent) => agent.id === id)?.name ?? (id === session?.agentId ? session.agentName : (id ?? ''))
   // Whatever it ran on last, while that agent can; otherwise the first that can.
@@ -834,7 +835,7 @@ export function ProjectView({
 
   return (
     <PageOpenerProvider value={opener}>
-      <div className={s.window}>
+      <MessageMotion className={s.window}>
         {header}
         {room === Room.Automations ? (
           <AutomationsView
@@ -1092,7 +1093,7 @@ export function ProjectView({
             )}
           </div>
         )}
-      </div>
+      </MessageMotion>
     </PageOpenerProvider>
   )
 }

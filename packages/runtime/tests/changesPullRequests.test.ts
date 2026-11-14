@@ -98,11 +98,12 @@ describe('a pull request, by the person and the lead', () => {
       return Effect.gen(function* () {
         yield* connect('github', HOST)
         const projectId = yield* ask(working, 'Add a retry. [coordinator:plan-no-review] [coordinator:plan] [lead:finish] [lead:edit]')
-        const [ready] = yield* until(cards(projectId), (all) => all[0]?.phase === 'ready')
+        const [ready] = yield* until(cards(projectId), (all) => all[0]?.phase === 'ready' && all[0].change != null)
         const taskId = ready?.taskId ?? ''
         const threadId = ready?.threadId ?? ''
         const sessions = yield* Sessions
         const changes = yield* Changes
+        yield* until(sessions.busy(threadId), (busy) => !busy)
         if (news === 'queue') {
           yield* changes.merge(taskId, ready?.change?.head ?? '')
           yield* changes.refresh(taskId)
@@ -582,7 +583,11 @@ describe('a branch that parted from its pull request', () => {
       const threadId = ready?.threadId ?? ''
       const [workspace] = yield* (yield* SqlClient.SqlClient)<{
         branch: string
-      }>`SELECT branch FROM workspaces WHERE task_id = ${ready?.taskId ?? ''}`
+        path: string
+      }>`SELECT branch, path FROM workspaces WHERE task_id = ${ready?.taskId ?? ''}`
+      yield* until((yield* Sessions).busy(threadId), (busy) => !busy)
+      const head = git(workspace?.path ?? '', 'rev-parse', 'HEAD')
+      yield* until(cards(projectId), (all) => all[0]?.change?.head === head)
       const before = (yield* turns(threadId)).length
       yield* (yield* Sessions).switchAgent({ threadId, agentId: 'opencode' })
       const briefed = yield* until(
@@ -591,7 +596,7 @@ describe('a branch that parted from its pull request', () => {
       )
       assert.include(
         briefed.at(before)?.prompt ?? '',
-        `The branch ${workspace?.branch ?? ''} is published: its pull request, ${ready?.change?.url ?? ''}, has it at ${(ready?.change?.head ?? '').slice(0, 12)}.`,
+        `The branch ${workspace?.branch ?? ''} is published: its pull request, ${ready?.change?.url ?? ''}, has it at ${head.slice(0, 12)}.`,
       )
     }).pipe(Effect.provide(runtimeWith({ github })))
   })
