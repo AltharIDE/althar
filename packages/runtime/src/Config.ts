@@ -391,7 +391,11 @@ export class Agents extends Context.Service<
               return {
                 _tag: 'InProcess',
                 agent: nativeAgent(provider, {
-                  env: { ...agentGit, ...env },
+                  env: {
+                    ...agentGit,
+                    ...(options.untrusted === true ? { ...withoutSignIns(signedOut), ...readingUntrusted } : {}),
+                    ...env,
+                  },
                   ...(options.skills === undefined ? {} : { skills: options.skills }),
                   ...(options.untrusted === undefined ? {} : { untrusted: options.untrusted }),
                   ...(options.offline === undefined ? {} : { offline: options.offline }),

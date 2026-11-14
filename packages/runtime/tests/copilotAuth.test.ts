@@ -95,7 +95,7 @@ describe('Althar’s Copilot account', () => {
       expect(calls[0]?.body).toContain('client_id=althar-enterprise-id')
       expect(calls.some((call) => call.url === 'https://api.company.ghe.com/copilot_internal/user')).toBe(true)
       expect(calls.some((call) => call.url === 'https://copilot-api.company.ghe.com/models')).toBe(true)
-      expect(calls.some((call) => call.url.includes('api.github.com') || call.url.includes('api.githubcopilot.com'))).toBe(false)
+      expect(calls.some((call) => ['api.github.com', 'api.githubcopilot.com'].includes(new URL(call.url).hostname))).toBe(false)
       expect(kept.size).toBe(1)
     }).pipe(Effect.provide(layer), onTestClock)
   })
@@ -110,7 +110,7 @@ describe('Althar’s Copilot account', () => {
       const outcome = yield* Effect.exit(login(yield* Copilot))
       expect(Exit.isFailure(outcome)).toBe(true)
       expect(kept.size).toBe(0)
-      expect(calls.some((call) => call.url.includes('steal.example'))).toBe(false)
+      expect(calls.some((call) => new URL(call.url).hostname === 'steal.example')).toBe(false)
     }).pipe(Effect.provide(layer), onTestClock)
   })
 

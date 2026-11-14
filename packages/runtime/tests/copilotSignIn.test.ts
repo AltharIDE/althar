@@ -3,8 +3,9 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import { until } from '@althar/testing/effect'
+import { connect } from '@althar/provider-adapters'
 import { describe, expect, it } from '@effect/vitest'
-import { Duration, Effect, Layer } from 'effect'
+import { Duration, Effect, Layer, Stream } from 'effect'
 import { TestClock } from 'effect/testing'
 import { SqlClient } from 'effect/sql'
 
@@ -83,6 +84,49 @@ const fixture = (withCommand = false) => {
 }
 
 describe('native Copilot sign-in in the runtime', () => {
+  it.live('carries Althar’s Git guards into native shell commands and removes personal configuration for untrusted reviews', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const cwd = mkdtempSync(join(tmpdir(), 'althar-native-git-'))
+        for (const untrusted of [false, true]) {
+          let result = ''
+          let count = 0
+          const entry = Agents.fromRegistry(undefined, undefined, () => ({
+            models: async () => [{ id: 'test', name: 'Test', context: 32_000, output: 4096, images: false }],
+            complete: async (request) => {
+              if (++count === 1)
+                return {
+                  text: '',
+                  tools: [
+                    {
+                      id: 'git-guard',
+                      name: 'run_command',
+                      input: { command: 'git config --get branch.autoSetupMerge && git config --get safe.bareRepository' },
+                    },
+                  ],
+                }
+              const content = request.messages.at(-1)?.content
+              result =
+                typeof content === 'string'
+                  ? content
+                  : (content?.flatMap((part) => (part.type === 'text' ? [part.text] : [])).join('\n') ?? '')
+              return { text: 'Checked.', tools: [] }
+            },
+          })).list.find((entry) => entry.definition.native === 'copilot')
+          if (!entry) throw new Error('Missing native Copilot')
+          const connection = yield* connect({
+            transport: entry.transport(cwd, {}, { untrusted }),
+            onPermission: () => Effect.succeed({ decision: 'allow' as const }),
+          })
+          const session = yield* connection.newSession({ cwd, mode: 'ask' })
+          yield* Stream.runDrain(session.prompt('Check Git settings.'))
+          expect(result).toContain('false')
+          if (untrusted) expect(result).toContain('explicit')
+        }
+      }),
+    ),
+  )
+
   it.effect('has no external default account and leaves none behind after removal', () => {
     const { layer } = fixture()
     return Effect.gen(function* () {

@@ -93,36 +93,45 @@ export const copilotFailure = async (response: Response): Promise<never> => {
   throw new Error(`GitHub Copilot rejected this request (HTTP ${response.status}). Check the selected model and account access.`)
 }
 
-const chatMessages = (messages: NativeRequest['messages']) =>
-  messages.flatMap((message): unknown[] => {
+const chatMessages = (messages: NativeRequest['messages']) => {
+  const result: unknown[] = []
+  let images: unknown[] = []
+  const flushImages = () => {
+    if (images.length) result.push({ role: 'user', content: images })
+    images = []
+  }
+  for (const message of messages) {
     if (message.role === 'tool') {
-      const images = parts(message.content).flatMap((part) =>
-        part.type === 'image' ? [{ type: 'image_url', image_url: { url: imageURL(part) } }] : [],
+      images.push(
+        ...parts(message.content).flatMap((part) =>
+          part.type === 'image' ? [{ type: 'image_url', image_url: { url: imageURL(part) } }] : [],
+        ),
       )
-      return [
-        { role: 'tool', tool_call_id: message.toolCallId, content: words(message.content) },
-        ...(images.length ? [{ role: 'user', content: images }] : []),
-      ]
+      result.push({ role: 'tool', tool_call_id: message.toolCallId, content: words(message.content) })
+      continue
     }
-    return [
-      {
-        role: message.role,
-        content:
-          typeof message.content === 'string'
-            ? message.content
-            : message.content.map((part) => (part.type === 'text' ? part : { type: 'image_url', image_url: { url: imageURL(part) } })),
-        ...(message.tools?.length
-          ? {
-              tool_calls: message.tools.map((call) => ({
-                id: call.id,
-                type: 'function',
-                function: { name: call.name, arguments: JSON.stringify(call.input) },
-              })),
-            }
-          : {}),
-      },
-    ]
-  })
+    // Chat requires every pending tool receipt before another user message, including tool images.
+    flushImages()
+    result.push({
+      role: message.role,
+      content:
+        typeof message.content === 'string'
+          ? message.content
+          : message.content.map((part) => (part.type === 'text' ? part : { type: 'image_url', image_url: { url: imageURL(part) } })),
+      ...(message.tools?.length
+        ? {
+            tool_calls: message.tools.map((call) => ({
+              id: call.id,
+              type: 'function',
+              function: { name: call.name, arguments: JSON.stringify(call.input) },
+            })),
+          }
+        : {}),
+    })
+  }
+  flushImages()
+  return result
+}
 
 const responseMessages = (request: NativeRequest) =>
   request.messages.flatMap((message): unknown[] => {

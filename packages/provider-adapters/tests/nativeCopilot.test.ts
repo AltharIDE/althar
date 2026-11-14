@@ -111,6 +111,40 @@ describe('Althar’s direct Copilot model connection', () => {
     })
   })
 
+  it('returns all Chat tool receipts before forwarding their images as user content', () => {
+    const encoded = copilotRequest(
+      request('chat', {
+        messages: [
+          {
+            role: 'assistant',
+            content: '',
+            tools: [
+              { id: 'picture', name: 'take_picture', input: {} },
+              { id: 'read', name: 'read_file', input: { path: 'README.md' } },
+            ],
+          },
+          {
+            role: 'tool',
+            toolCallId: 'picture',
+            content: [
+              { type: 'text', text: 'Picture taken.' },
+              { type: 'image', data: 'aW1hZ2U=', mimeType: 'image/png' },
+            ],
+          },
+          { role: 'tool', toolCallId: 'read', content: 'Actual README.' },
+        ],
+      }),
+    )
+    expect(encoded.body).toMatchObject({
+      messages: [
+        { role: 'assistant' },
+        { role: 'tool', tool_call_id: 'picture', content: 'Picture taken.' },
+        { role: 'tool', tool_call_id: 'read', content: 'Actual README.' },
+        { role: 'user', content: [{ type: 'image_url', image_url: { url: 'data:image/png;base64,aW1hZ2U=' } }] },
+      ],
+    })
+  })
+
   it('preserves signed Anthropic thinking while returning actual tool results', async () => {
     const reply = await copilotReply(
       stream(
