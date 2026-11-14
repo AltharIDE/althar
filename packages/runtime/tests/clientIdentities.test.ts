@@ -2,7 +2,7 @@ import { generateKeyPairSync, sign } from 'node:crypto'
 import { tmpdir } from 'node:os'
 
 import { clientChallengeMessage } from '@althar/contracts'
-import { Database, Ledger } from '@althar/persistence-sqlite'
+import { bumpRevision, Database, Ledger } from '@althar/persistence-sqlite'
 import { assert, describe, it } from '@effect/vitest'
 import { Effect, Layer } from 'effect'
 import { TestClock } from 'effect/testing'
@@ -28,6 +28,21 @@ const keys = () => {
 }
 
 describe('authenticated client identities', () => {
+  it.effect('rejects a proof made before the credential revision changed, while a fresh challenge still authenticates', () =>
+    Effect.gen(function* () {
+      const identities = yield* ClientIdentities
+      const pair = keys()
+      const device = yield* identities.register({ name: 'Desktop', publicKey: pair.publicKey, role: 'paired_device' })
+      const before = yield* identities.challenge(device.deviceId)
+      yield* bumpRevision('client_devices', device.deviceId, device.revision)
+      const signChallenge = (challenge: Parameters<typeof clientChallengeMessage>[0]) =>
+        sign(null, Buffer.from(clientChallengeMessage(challenge)), pair.privateKey).toString('base64url')
+      assert.strictEqual((yield* Effect.flip(identities.authenticate(before, signChallenge(before)))).reason, 'AuthenticationFailed')
+      const after = yield* identities.challenge(device.deviceId)
+      assert.strictEqual((yield* identities.authenticate(after, signChallenge(after))).deviceId, device.deviceId)
+    }).pipe(Effect.provide(env)),
+  )
+
   it.effect('refuses malformed enrollment, unknown devices and forged home, actor or authority claims', () =>
     Effect.gen(function* () {
       const identities = yield* ClientIdentities

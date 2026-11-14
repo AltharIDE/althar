@@ -2,8 +2,9 @@ import { generateKeyPairSync, randomBytes, sign } from 'node:crypto'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, statSync, symlinkSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { MessageChannel } from 'node:worker_threads'
 
-import { Api, clientProtocol } from '@althar/contracts'
+import { API_VERSION, Api, clientProtocol, emitterPort } from '@althar/contracts'
 import { assert, describe, it } from '@effect/vitest'
 import { Deferred, Effect, Exit, Fiber, Layer, Option, Scope, Stream } from 'effect'
 import { RpcClient } from 'effect/rpc'
@@ -35,6 +36,73 @@ const client = (port: Parameters<typeof clientProtocol>[0]) =>
   })
 
 describe('the authenticated private API', () => {
+  it.live('never signs a challenge for another home, device or API version', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const homeId = `home_${'1'.repeat(32)}`
+        const deviceId = `dev_${'2'.repeat(32)}`
+        const challenge = { protocol: 1, homeId, deviceId, apiVersion: API_VERSION, nonce: 'A'.repeat(43), expiresAt: Date.now() + 30_000 }
+        for (const changed of [
+          { homeId: `home_${'3'.repeat(32)}` },
+          { deviceId: `dev_${'4'.repeat(32)}` },
+          { apiVersion: API_VERSION + 1 },
+        ]) {
+          const channel = new MessageChannel()
+          yield* Effect.addFinalizer(() =>
+            Effect.sync(() => {
+              channel.port1.close()
+              channel.port2.close()
+            }),
+          )
+          channel.port1.on('message', () => channel.port1.postMessage({ ...challenge, ...changed }))
+          let signed = false
+          const refused = yield* Effect.flip(
+            authenticateApiClient(emitterPort(channel.port2), homeId, {
+              kind: 'device',
+              deviceId,
+              sign: () =>
+                Effect.sync(() => {
+                  signed = true
+                  return 'A'.repeat(86)
+                }),
+            }),
+          )
+          assert.strictEqual(refused.reason, 'AuthenticationFailed')
+          assert.isFalse(signed)
+        }
+      }),
+    ),
+  )
+
+  it.live('rejects a successful handshake for another home or version, or one that upgrades launch-secret authority', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const homeId = `home_${'1'.repeat(32)}`
+        const identity = { homeId, actorId: `act_${'2'.repeat(32)}`, deviceId: `dev_${'3'.repeat(32)}`, role: 'socket' }
+        for (const changed of [
+          { identity: { ...identity, homeId: `home_${'4'.repeat(32)}` } },
+          { apiVersion: API_VERSION + 1 },
+          { identity: { ...identity, role: 'window' } },
+        ]) {
+          const channel = new MessageChannel()
+          yield* Effect.addFinalizer(() =>
+            Effect.sync(() => {
+              channel.port1.close()
+              channel.port2.close()
+            }),
+          )
+          channel.port1.on('message', () =>
+            channel.port1.postMessage({ type: 'Authenticated', identity, apiVersion: API_VERSION, ...changed }),
+          )
+          const refused = yield* Effect.flip(
+            authenticateApiClient(emitterPort(channel.port2), homeId, { kind: 'secret', secret: '0'.repeat(64) }),
+          )
+          assert.strictEqual(refused.reason, 'AuthenticationFailed')
+        }
+      }),
+    ),
+  )
+
   it.live.skipIf(process.platform === 'win32')('refuses a symlink in place of its private endpoint directory', () =>
     Effect.gen(function* () {
       const profile = mkdtempSync(join(tmpdir(), 'althar-api-profile-'))
@@ -196,6 +264,28 @@ describe('the authenticated private API', () => {
       yield* sql`UPDATE change_log SET checkpoint = lower(hex(randomblob(16))) WHERE cursor = ${saved.cursor}`
       const refused = yield* Effect.flip(Stream.runHead(api.WatchFrom({ position: saved })))
       assert.strictEqual(refused.reason, 'SnapshotRequired')
+    }).pipe(Effect.scoped, Effect.provide(environment)),
+  )
+
+  it.live('requires a new snapshot when saved history was pruned or a zero cursor claims a checkpoint', () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const endpoint = yield* listenLocalApi(mkdtempSync(join(tmpdir(), 'althar-api-profile-')))
+      const port = yield* openApiSocket(endpoint.address)
+      yield* authenticateApiClient(port, endpoint.homeId, { kind: 'secret', secret: endpoint.secret })
+      const api = yield* client(port)
+      const zero = { homeId: endpoint.homeId, cursor: 0, checkpoint: null }
+      const invalid = yield* Effect.flip(Stream.runHead(api.WatchFrom({ position: { ...zero, checkpoint: '0'.repeat(32) } })))
+      assert.strictEqual(invalid.reason, 'SnapshotRequired')
+      yield* sql`INSERT INTO change_log (aggregate_type, aggregate_id, aggregate_revision, changed_at) VALUES ('project', 'first', 1, '2026-11-14T00:00:00.000Z')`
+      const position = (yield* api.GetConnectionInfo({})).position
+      yield* sql`INSERT INTO change_log (aggregate_type, aggregate_id, aggregate_revision, changed_at) VALUES ('project', 'second', 1, '2026-11-14T00:00:00.000Z')`
+      yield* sql`DELETE FROM change_log WHERE cursor = ${position.cursor}`
+      const missing = yield* Effect.flip(Stream.runHead(api.WatchFrom({ position })))
+      assert.strictEqual(missing.reason, 'SnapshotRequired')
+      yield* sql`DELETE FROM change_log WHERE cursor < (SELECT max(cursor) FROM change_log)`
+      const pruned = yield* Effect.flip(Stream.runHead(api.WatchFrom({ position: zero })))
+      assert.strictEqual(pruned.reason, 'SnapshotRequired')
     }).pipe(Effect.scoped, Effect.provide(environment)),
   )
 })

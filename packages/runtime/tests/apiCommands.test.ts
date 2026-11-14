@@ -32,6 +32,24 @@ const identity = Effect.map(Instance, (instance): ClientIdentity => ({
 }))
 
 describe('durable API command admission', () => {
+  it.effect('rejects invalid command ids and unencodable payloads before admitting an external effect', () =>
+    Effect.gen(function* () {
+      const commands = yield* ApiCommands
+      const commandId = yield* newId(Ids.command)
+      const request = {
+        identity: yield* identity,
+        commandId,
+        method: 'Publish',
+        payload: {},
+        result: Schema.String,
+        handle: Effect.die('invalid request executed'),
+      }
+      assert.strictEqual((yield* Effect.flip(commands.execute({ ...request, commandId: 'not-a-command' }))).reason, 'InvalidCommand')
+      assert.strictEqual((yield* Effect.flip(commands.execute({ ...request, payload: { unsupported: 1n } }))).reason, 'InvalidCommand')
+      assert.strictEqual(yield* commands.execute({ ...request, handle: Effect.succeed('admitted once valid') }), 'admitted once valid')
+    }).pipe(Effect.provide(environment())),
+  )
+
   it.effect('preserves portable encoded results, including bytes, bigint and explicit undefined, in receipts', () =>
     Effect.gen(function* () {
       const commands = yield* ApiCommands
