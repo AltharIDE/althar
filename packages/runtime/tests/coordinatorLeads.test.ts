@@ -2,7 +2,7 @@ import { removeTreeSync } from '@althar/testing'
 import {} from 'node:fs'
 
 import { assert, describe, it } from '@effect/vitest'
-import { Effect } from 'effect'
+import { Effect, Option } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { Coordinator } from '../src/Coordinator'
@@ -149,6 +149,12 @@ describe('the buttons on a task’s lead, as tools', () => {
         "Nothing changed: sketch-the-settings's lead's last turn didn't fail.",
       )
 
+      // Changing the lead answers before its replacement session starts. Compact needs that session, not just the recorded choice.
+      const sessions = yield* Sessions
+      yield* until(
+        Effect.map(sessions.running(one.threadId), (running) => (Option.isSome(running) ? [running.value.agentId] : [])),
+        (agents) => agents[0] === 'claude-code',
+      )
       // Compact, from another task's lead, signed with its task.
       assert.match(yield* callTool(lead, 'compact_lead', { task: one.slug, why: 'its context is full' }), /lead compacts its context/)
       assert.include(yield* titles(one.threadId), 'The lead of “Read the logs” had its lead compact its context: its context is full')
