@@ -208,6 +208,9 @@ describe('run_project and stop_project, for a lead', () => {
         'Give one of task, branch or pull_request.',
       )
       assert.match(yield* callTool(lead, 'run_project', {}), /^Running `npm run dev`/)
+      // Blank names select the default; a command name is matched without case. Both reuse the same run.
+      for (const run of ['  ', 'NPM RUN DEV']) assert.match(yield* callTool(lead, 'run_project', { run }), /^Running `npm run dev`/)
+      assert.lengthOf(yield* launches.ofProject(project.projectId), 1)
       assert.match(yield* callTool(coordinator, 'keep_run', { name: 'Storybook', command: 'npm run storybook' }), /^Kept:/)
       assert.match(yield* callTool(lead, 'run_project', { run: 'storybook' }), /^Running `npm run storybook`/)
       assert.lengthOf(yield* launches.ofProject(project.projectId), 2)
