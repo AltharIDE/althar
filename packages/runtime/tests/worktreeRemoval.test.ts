@@ -26,6 +26,52 @@ const worktree = () => {
 }
 
 describe('removing a worktree before its checkout takes the branch', () => {
+  it.effect('removes a clean worktree and keeps the branch available', () =>
+    Effect.gen(function* () {
+      const { root, path, git } = worktree()
+      yield* removeWorktree(root, path)
+      assert.isFalse(existsSync(path))
+      assert.strictEqual(git('show', 'task:kept.txt'), 'Keep this work.')
+      assert.notInclude(git('worktree', 'list', '--porcelain'), path.replaceAll('\\', '/'))
+    }),
+  )
+
+  it.effect('uses forced removal for generated files while retaining the committed work', () =>
+    Effect.gen(function* () {
+      const { root, path, git } = worktree()
+      writeFileSync(join(path, 'generated.log'), 'A generated build log.\n')
+      yield* removeWorktree(root, path)
+      assert.isFalse(existsSync(path))
+      assert.strictEqual(git('show', 'task:kept.txt'), 'Keep this work.')
+      assert.notInclude(git('worktree', 'list', '--porcelain'), path.replaceAll('\\', '/'))
+    }),
+  )
+
+  it.effect('preserves a worktree locked between the first removal and its forced retry', () =>
+    Effect.gen(function* () {
+      const { root, path, git } = worktree()
+      const spawn = spawner.startApart
+      let first = true
+      const mocked = vi.spyOn(spawner, 'startApart').mockImplementation((...args) => {
+        const [command] = args
+        if (first && command.command === 'git' && command.args.includes('remove') && command.args.includes(path)) {
+          first = false
+          git('worktree', 'lock', '--reason', 'Permission denied while in use', path)
+          return {
+            result: Promise.resolve({ code: 128, signal: null, error: null, over: false, stdout: '', stderr: 'Permission denied' }),
+            stop: () => undefined,
+          }
+        }
+        return spawn(...args)
+      })
+      const error = yield* Effect.flip(removeWorktree(root, path)).pipe(Effect.ensuring(Effect.sync(() => mocked.mockRestore())))
+      if (error._tag !== 'GitFailed') assert.fail(`Expected GitFailed, got ${error._tag}`)
+      assert.include(error.stderr, 'locked working tree')
+      assert.isTrue(existsSync(path))
+      assert.include(git('worktree', 'list', '--porcelain'), 'locked Permission denied while in use')
+    }),
+  )
+
   for (const refusal of ['Permission denied', 'Resource busy', 'Directory not empty', 'is not a working tree'])
     it.effect(`finishes removing the folder after git reports ${refusal}`, () =>
       Effect.gen(function* () {

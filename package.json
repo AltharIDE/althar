@@ -19,13 +19,18 @@
     "prepare": "vp config --no-agent",
     "fix": "bun --filter '*' fix"
   },
+  "dependencies": {
+    "@hono/node-server": "^2.1.8",
+    "dompurify": "^3.4.18",
+    "hono": "^4.13.18"
+  },
   "devDependencies": {
-    "vite-plus": "1.5.0"
+    "vite-plus": "1.6.0"
   },
   "overrides": {
-    "@posthog/core": "1.64.1",
-    "@posthog/types": "1.421.1",
-    "vite": "npm:@voidzero-dev/vite-plus-core@1.5.0",
+    "@posthog/core": "1.67.3",
+    "@posthog/types": "1.425.1",
+    "vite": "npm:@voidzero-dev/vite-plus-core@1.6.0",
     "vitest": "5.1.0",
     "zod": "4.6.7"
   },

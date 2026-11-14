@@ -71,6 +71,7 @@ const reader = (output: string) => {
   let at = 0
   return {
     more: () => at < parts.length,
+    peek: () => parts[at],
     // `more` says there is one.
     next: () => parts[at++] as string,
   }
@@ -146,17 +147,15 @@ const trackedFiles = (worktree: string, base: string, head?: string) =>
       ],
       { concurrency: 'unbounded' },
     )
-    const output = split(tracked)
+    const counts = reader(tracked)
     const named: Array<{ readonly code: string; readonly path: string; readonly from: string | null }> = []
-    let at = 0
-    while (output[at]?.startsWith(':')) {
-      const code = (output[at++] ?? '').split(' ').at(-1) ?? ''
-      const first = output[at++] ?? ''
+    while (counts.peek()?.startsWith(':')) {
+      const code = counts.next().split(' ').at(-1) as string
+      const first = counts.next()
       const from = code.startsWith('R') || code.startsWith('C') ? first : null
-      const path = from === null ? first : (output[at++] ?? '')
+      const path = from === null ? first : counts.next()
       named.push({ code, path, from })
     }
-    const counts = reader(output.slice(at).join('\0'))
     const dirty = new Set(split(uncommitted))
 
     // Sizes, by the path a file has now: `add del path`, or for a move `add del` then its old and new paths.

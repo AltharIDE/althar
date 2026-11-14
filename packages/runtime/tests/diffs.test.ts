@@ -219,6 +219,43 @@ const started = () => {
 }
 
 describe('what a task changed, carefully', () => {
+  it.effect('refuses an incomplete tracked-file diff instead of returning files with missing sizes', () =>
+    Effect.gen(function* () {
+      const { root, base } = started()
+      const spawn = spawner.startApart
+      const mocked = vi.spyOn(spawner, 'startApart').mockImplementation((...args) => {
+        const [command] = args
+        if (command.command === 'git' && command.args.includes('--raw'))
+          return {
+            result: Promise.resolve({
+              code: 0,
+              signal: null,
+              error: null,
+              over: false,
+              stderr: '',
+              stdout: ':100644 100644 1234567 0000000 M\0README.md\0',
+            }),
+            stop: () => undefined,
+          }
+        return spawn(...args)
+      })
+      const error = yield* Effect.flip(changedFiles(root, base)).pipe(Effect.ensuring(Effect.sync(() => mocked.mockRestore())))
+      assert.instanceOf(error, Error)
+      assert.include((error as Error).message, 'Git reported no size for README.md.')
+    }),
+  )
+
+  it.effect('lists a staged permission change with zero added or deleted lines', () =>
+    Effect.gen(function* () {
+      const { root, git, base } = started()
+      git('config', 'core.filemode', 'false')
+      git('update-index', '--chmod=+x', 'README.md')
+      assert.deepStrictEqual(yield* changedFiles(root, base), [
+        { path: 'README.md', from: null, status: 'modified', add: 0, del: 0, binary: false, uncommitted: true },
+      ])
+    }),
+  )
+
   // Not on Windows: it makes a named pipe (mkfifo) and a symbolic link, which Windows has neither of as git sees them.
   it.effect.skipIf(windows)(
     'shows a new link as git would add it, its target, never what it points at; and reads nothing that isn’t a file',
