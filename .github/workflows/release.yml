@@ -183,6 +183,7 @@ jobs:
           ALTHAR_POSTHOG_HOST: ${{ secrets.ALTHAR_POSTHOG_HOST }}
           # Where Report a problem posts: the reports Worker (apps/report), baked into the build. Unset, a report goes by mail.
           ALTHAR_REPORT_URL: ${{ secrets.ALTHAR_REPORT_URL }}
+          ALTHAR_COPILOT_CLIENT_ID: ${{ vars.ALTHAR_COPILOT_CLIENT_ID || vars.ALTHAR_GITHUB_CLIENT_ID }}
         run: |
           for name in ALTHAR_POSTHOG_KEY ALTHAR_POSTHOG_HOST ALTHAR_REPORT_URL; do
             if [ -z "${!name}" ]; then echo "::error::$name is empty: the release environment has no secret of that name."; exit 1; fi
@@ -248,6 +249,7 @@ jobs:
           ALTHAR_POSTHOG_KEY: ${{ secrets.ALTHAR_POSTHOG_KEY }}
           ALTHAR_POSTHOG_HOST: ${{ secrets.ALTHAR_POSTHOG_HOST }}
           ALTHAR_REPORT_URL: ${{ secrets.ALTHAR_REPORT_URL }}
+          ALTHAR_COPILOT_CLIENT_ID: ${{ vars.ALTHAR_COPILOT_CLIENT_ID || vars.ALTHAR_GITHUB_CLIENT_ID }}
         run: |
           for name in ALTHAR_POSTHOG_KEY ALTHAR_POSTHOG_HOST ALTHAR_REPORT_URL; do
             if [ -z "${!name}" ]; then echo "::error::$name is empty: the release environment has no secret of that name."; exit 1; fi
@@ -304,6 +306,7 @@ jobs:
           ALTHAR_POSTHOG_KEY: ${{ secrets.ALTHAR_POSTHOG_KEY }}
           ALTHAR_POSTHOG_HOST: ${{ secrets.ALTHAR_POSTHOG_HOST }}
           ALTHAR_REPORT_URL: ${{ secrets.ALTHAR_REPORT_URL }}
+          ALTHAR_COPILOT_CLIENT_ID: ${{ vars.ALTHAR_COPILOT_CLIENT_ID || vars.ALTHAR_GITHUB_CLIENT_ID }}
         run: |
           for name in ALTHAR_POSTHOG_KEY ALTHAR_POSTHOG_HOST ALTHAR_REPORT_URL; do
             if [ -z "${!name}" ]; then echo "::error::$name is empty: the release environment has no secret of that name."; exit 1; fi

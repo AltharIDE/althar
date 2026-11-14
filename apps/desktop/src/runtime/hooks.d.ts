@@ -3,6 +3,8 @@ declare const __ALTHAR_TEST_HOOKS__: boolean
 
 /** Althar's reports service, the Worker in apps/report, as the build was given it (ALTHAR_REPORT_URL); empty for none. */
 declare const __ALTHAR_REPORT_URL__: string
+/** Althar's public OAuth application ID, supplied by the build. */
+declare const __ALTHAR_COPILOT_CLIENT_ID__: string
 
 /** Where a report goes by mail when there is no Worker (ALTHAR_REPORT_EMAIL at build time). */
 declare const __ALTHAR_REPORT_EMAIL__: string

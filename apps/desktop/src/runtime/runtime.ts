@@ -115,6 +115,7 @@ const clientIds = Object.fromEntries(
     ] as const
   ).flatMap(([product, id]) => (id === undefined || id === '' ? [] : [[product, id]])),
 )
+const copilotClientId = process.env.ALTHAR_COPILOT_CLIENT_ID || process.env.ALTHAR_GITHUB_CLIENT_ID || __ALTHAR_COPILOT_CLIENT_ID__
 
 /** Althar's GitHub App, by its slug, for where it is installed on an owner; with its id, GitHub's browser sign-in asks to be let in. */
 const githubApp =
@@ -291,7 +292,7 @@ const program = Effect.gen(function* () {
           ? {
               ...(device === undefined ? options : { ...options, onDevice: device.onDevice, probeRoot: join(profile, 'probe') }),
               clientIds,
-              ...(process.env.ALTHAR_COPILOT_CLIENT_ID ? { copilotClientId: process.env.ALTHAR_COPILOT_CLIENT_ID } : {}),
+              ...(copilotClientId ? { copilotClientId } : {}),
               ...(githubApp === undefined ? {} : { githubApp }),
               secrets,
               fetch: appFetch,
