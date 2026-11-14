@@ -22,9 +22,13 @@ const ASKS = { ALTHAR_QUIT_WITHOUT_ASKING: '0' }
 
 /** Quits with work running, as a second Quit does: it says yes to the question the first asks. */
 const quitAnyway = async (electronApp: ElectronApplication) => {
-  const exited = new Promise<void>((resolve) => electronApp.process().once('exit', () => resolve()))
-  await electronApp.evaluate(({ app }) => app.quit())
+  const child = electronApp.process()
+  if (child.exitCode !== null || child.signalCode !== null) return
+  const exited = new Promise<void>((resolve) => child.once('exit', () => resolve()))
+  // Teardown may reach an app already quitting; either Quit can close the transport before its evaluation answers.
   await electronApp.evaluate(({ app }) => app.quit()).catch(() => undefined)
+  if (child.exitCode === null && child.signalCode === null) await electronApp.evaluate(({ app }) => app.quit()).catch(() => undefined)
+  // An evaluation failing is not enough: the process must actually exit.
   await exited
 }
 
