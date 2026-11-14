@@ -203,10 +203,13 @@ describe('run_project and stop_project, for a lead', () => {
         yield* callTool(lead, 'stop_project', { task: 'no-such-task' }),
         'This project has no task no-such-task. list_tasks shows them.',
       )
-      // Its default, in its worktree, once it says where it answers.
-      const ran = yield* callTool(lead, 'run_project', {})
-      assert.match(ran, /^Running `npm run dev` in your worktree, at http:\/\/localhost:5199\/\. Read it there, or take a screenshot of it/)
-      const [running] = yield* launches.ofProject(projectId)
+      // Starting can answer before a slow process prints its address. The run stays visible until it does.
+      assert.match(yield* callTool(lead, 'run_project', {}), /^Running `npm run dev` in your worktree/)
+      const [running] = yield* until(launches.ofProject(projectId), (runs) => runs[0]?.url === 'http://localhost:5199/')
+      assert.match(
+        yield* callTool(lead, 'run_project', {}),
+        /^Running `npm run dev` in your worktree, at http:\/\/localhost:5199\/\. Read it there, or take a screenshot of it/,
+      )
       assert.deepInclude(running, { taskId: task.taskId, where: 'Retry checkout', url: 'http://localhost:5199/' })
       // The same run the person sees: its card in the task's thread, in the pill with the project's runs.
       const { items: shown } = yield* Effect.orDie(queries.thread(task.threadId))
