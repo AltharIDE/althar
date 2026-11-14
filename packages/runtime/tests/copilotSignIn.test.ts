@@ -13,18 +13,22 @@ import { Accounts } from '../src/Accounts'
 import { AccountSignIns, NoSignInHere } from '../src/AccountSignIns'
 import { Agents } from '../src/Config'
 import * as Runtime from '../src/Runtime'
-import { Secrets } from '../src/Secrets'
+import { Secrets, SecretsUnavailable } from '../src/Secrets'
 import { SignIns } from '../src/SignIns'
 import { Sessions } from '../src/Sessions'
 import { Policies } from '../src/Policies'
 import { Instance } from '../src/Instance'
 import { fakeConnectors, items, onTestClock, task, turns } from './support'
 
-const fixture = (withCommand = false) => {
+const fixture = (
+  withCommand = false,
+  options: { failure?: 'copilot' | 'keyring' | 'storage' | 'defect' | 'remove'; openBrowser?: boolean; sharedIdentity?: boolean } = {},
+) => {
   const root = mkdtempSync(join(tmpdir(), 'althar-copilot-'))
   const kept = new Map<string, string>()
   const opened: string[] = []
   const calls: string[] = []
+  const bodies: string[] = []
   const prompted = new Set<string>()
   const layer = Runtime.layer({
     database: ':memory:',
@@ -32,14 +36,19 @@ const fixture = (withCommand = false) => {
     deviceName: 'Test computer',
     worktreeRoot: join(root, 'worktrees'),
     accountsRoot: join(root, 'accounts'),
-    copilotClientId: 'althar-test-app',
-    openUrl: (url) =>
-      Effect.sync(() => {
-        opened.push(url)
-        return true
-      }),
-    fetch: async (url) => {
+    ...(options.sharedIdentity ? { clientIds: { github: 'althar-shared-app' } } : { copilotClientId: 'althar-test-app' }),
+    ...(options.openBrowser === false
+      ? {}
+      : {
+          openUrl: (url: string) =>
+            Effect.sync(() => {
+              opened.push(url)
+              return true
+            }),
+        }),
+    fetch: async (url, input) => {
       calls.push(url)
+      bodies.push(typeof input?.body === 'string' ? input.body : '')
       if (url.endsWith('/login/device/code'))
         return Response.json({
           device_code: 'test-device',
@@ -49,7 +58,7 @@ const fixture = (withCommand = false) => {
           interval: 1,
         })
       if (url.endsWith('/login/oauth/access_token')) return Response.json({ access_token: 'test-token', scope: 'read:user' })
-      if (url.endsWith('/copilot_internal/user')) return Response.json({ chat_enabled: true })
+      if (url.endsWith('/copilot_internal/user')) return Response.json({ chat_enabled: options.failure !== 'copilot' })
       if (url.endsWith('/models'))
         return Response.json({
           data: [
@@ -77,13 +86,116 @@ const fixture = (withCommand = false) => {
         })).list.filter((entry) => entry.definition.id === 'copilot-direct'),
       ),
     ),
-    secrets: Secrets.memory(kept),
+    secrets:
+      options.failure === undefined || options.failure === 'copilot'
+        ? Secrets.memory(kept)
+        : Layer.succeed(
+            Secrets,
+            Secrets.of({
+              get: () => Effect.succeed(null),
+              set: () =>
+                options.failure === 'remove'
+                  ? Effect.void
+                  : options.failure === 'defect'
+                    ? Effect.die(new Error('Internal storage defect'))
+                    : Effect.fail(
+                        new SecretsUnavailable({
+                          reason:
+                            options.failure === 'keyring'
+                              ? 'Unlock your keychain and try again.'
+                              : 'Internal storage path must not be shown.',
+                          ...(options.failure === 'keyring' ? { keyring: true } : {}),
+                        }),
+                      ),
+              remove: () =>
+                options.failure === 'remove' ? Effect.fail(new SecretsUnavailable({ reason: 'Storage refused removal.' })) : Effect.void,
+            }),
+          ),
     connectors: fakeConnectors({}),
   })
-  return { layer, kept, opened, calls, root }
+  return { layer, kept, opened, calls, bodies, root }
 }
 
 describe('native Copilot sign-in in the runtime', () => {
+  it.effect.each([
+    ['copilot', 'This account does not have Copilot Chat access.'],
+    ['keyring', 'Unlock your keychain and try again.'],
+    ['storage', 'Althar could not keep this sign-in securely. Try again.'],
+    ['defect', 'Althar could not complete Copilot sign-in. Try again.'],
+  ] as const)('shows an actionable sign-in failure after %s fails, without exposing internal storage details', ([failure, message]) => {
+    const { layer, kept } = fixture(false, { failure })
+    return Effect.gen(function* () {
+      const account = yield* (yield* Accounts).add({ agentId: 'copilot-direct', name: 'Work' })
+      const signing = yield* AccountSignIns
+      const { flowId } = yield* signing.start({ accountId: account.id, way: 'browser' })
+      yield* until(signing.get(flowId), (state) => state.state === 'device')
+      yield* TestClock.adjust(Duration.seconds(1))
+      const state = yield* until(signing.get(flowId), (state) => state.state === 'failed')
+      expect(state).toMatchObject({ state: 'failed', message: expect.stringContaining(message) })
+      expect(JSON.stringify(state)).not.toContain('Internal storage')
+      expect(kept.size).toBe(0)
+    }).pipe(Effect.provide(layer), onTestClock)
+  })
+
+  it.effect('replaces a pending device flow and still offers its code when opening a browser is unavailable', () => {
+    const { layer, calls, opened } = fixture(false, { openBrowser: false })
+    return Effect.gen(function* () {
+      const account = yield* (yield* Accounts).add({ agentId: 'copilot-direct', name: 'Work' })
+      const signing = yield* AccountSignIns
+      expect(yield* Effect.flip(signing.start({ accountId: account.id, way: 'device' }))).toBeInstanceOf(NoSignInHere)
+      const first = yield* signing.start({ accountId: account.id, way: 'browser' })
+      yield* until(signing.get(first.flowId), (state) => state.state === 'device')
+      const second = yield* signing.start({ accountId: account.id, way: 'browser' })
+      expect(second.flowId).not.toBe(first.flowId)
+      expect(yield* until(signing.get(second.flowId), (state) => state.state === 'device')).toMatchObject({
+        code: 'ABCD-1234',
+        page: 'https://github.com/login/device',
+      })
+      expect(yield* signing.get(first.flowId)).toMatchObject({ state: 'failed' })
+      yield* signing.cancel(second.flowId)
+      yield* TestClock.adjust(Duration.seconds(5))
+      expect(opened).toEqual([])
+      expect(calls.some((url) => url.endsWith('/login/oauth/access_token'))).toBe(false)
+    }).pipe(Effect.provide(layer), onTestClock)
+  })
+
+  it.effect('keeps an account removable when deleting its secure credential fails, and explains how to retry', () => {
+    const { layer } = fixture(false, { failure: 'remove' })
+    return Effect.gen(function* () {
+      const accounts = yield* Accounts
+      const account = yield* accounts.add({ agentId: 'copilot-direct', name: 'Work' })
+      expect(yield* Effect.flip(accounts.remove(account.id))).toMatchObject({
+        _tag: 'SignOutFailed',
+        line: 'Remove this account again in Althar.',
+      })
+      expect((yield* accounts.get(account.id)).name).toBe('Work')
+    }).pipe(Effect.provide(layer))
+  })
+
+  it.effect('removes a retired engine’s usual account directly, even before it has been listed and migrated', () => {
+    const { layer } = fixture()
+    return Effect.gen(function* () {
+      const accounts = yield* Accounts
+      const account = yield* accounts.add({ agentId: 'copilot-direct', name: 'Previous account' })
+      const sql = yield* SqlClient.SqlClient
+      yield* sql`UPDATE agent_accounts SET home = NULL WHERE id = ${account.id}`
+      yield* accounts.remove(account.id)
+      expect(yield* accounts.of('copilot-direct')).toEqual([])
+    }).pipe(Effect.provide(layer))
+  })
+
+  it.effect('can use Althar’s shared GitHub application identity when no separate Copilot identity is supplied', () => {
+    const { layer, bodies } = fixture(false, { sharedIdentity: true })
+    return Effect.gen(function* () {
+      const account = yield* (yield* Accounts).add({ agentId: 'copilot-direct', name: 'Work' })
+      const signing = yield* AccountSignIns
+      const { flowId } = yield* signing.start({ accountId: account.id, way: 'browser' })
+      yield* until(signing.get(flowId), (state) => state.state === 'device')
+      expect(bodies[0]).toContain('client_id=althar-shared-app')
+      yield* signing.cancel(flowId)
+    }).pipe(Effect.provide(layer), onTestClock)
+  })
+
   it.live('carries Althar’s Git guards into native shell commands and removes personal configuration for untrusted reviews', () =>
     Effect.scoped(
       Effect.gen(function* () {

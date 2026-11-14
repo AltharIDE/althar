@@ -25,6 +25,7 @@ const fixture = (
     configured?: boolean
     challenge?: Record<string, unknown>
     modelList?: unknown
+    failure?: 'start' | 'poll' | 'account' | 'account-json' | 'models'
   } = {},
 ) => {
   const host = options.host ?? 'github.com'
@@ -36,6 +37,11 @@ const fixture = (
       body: typeof input?.body === 'string' ? input.body : '',
       authorization: new Headers(input?.headers).get('authorization'),
     })
+    if (options.failure === 'start' && url.endsWith('/login/device/code')) throw new Error('Internal network details')
+    if (options.failure === 'poll' && url.endsWith('/login/oauth/access_token')) return Response.json({ error: 'expired_token' })
+    if (options.failure === 'account' && url.endsWith('/copilot_internal/user')) return Response.json({}, { status: 403 })
+    if (options.failure === 'account-json' && url.endsWith('/copilot_internal/user')) return new Response('unreadable account')
+    if (options.failure === 'models' && url.endsWith('/models')) throw new Error('Internal network details')
     if (url.endsWith('/login/device/code'))
       return Response.json({
         device_code: 'test-device',
@@ -188,6 +194,33 @@ describe('Althar’s Copilot account', () => {
     },
   )
 
+  it.effect('fails safely when GitHub cannot start authorization, without opening a page', () => {
+    const { layer, kept } = fixture({ failure: 'start' })
+    return Effect.gen(function* () {
+      const error = yield* Effect.flip(
+        (yield* Copilot).signIn('account-a', undefined, () => {
+          throw new Error('No page should open')
+        }),
+      )
+      expect(error).toMatchObject({ _tag: 'CopilotFailed', message: expect.stringContaining('could not start sign-in') })
+      expect(kept.size).toBe(0)
+    }).pipe(Effect.provide(layer))
+  })
+
+  it.effect.each(['poll', 'account', 'account-json', 'models'] as const)(
+    'preserves the previous sign-in after a failed %s response',
+    (failure) => {
+      const { layer, kept } = fixture({ failure })
+      kept.set('copilot-account-a', 'previously-sealed-account')
+      return Effect.gen(function* () {
+        const error = yield* Effect.flip(login(yield* Copilot))
+        expect(error).toMatchObject({ _tag: 'CopilotFailed' })
+        expect(JSON.stringify(error)).not.toContain('Internal network details')
+        expect(kept.get('copilot-account-a')).toBe('previously-sealed-account')
+      }).pipe(Effect.provide(layer), onTestClock)
+    },
+  )
+
   const saved = {
     host: 'github.com',
     clientId: 'althar-public-id',
@@ -225,6 +258,94 @@ describe('Althar’s Copilot account', () => {
     expect(copilotApi('github.com', 'https://api.githubcopilot.com.evil.example')).toBeNull()
     expect(copilotApi('github.com', 'https://api.githubcopilot.com/path')).toBeNull()
     expect(copilotApi('company.ghe.com')).toBe('https://copilot-api.company.ghe.com')
+    for (const endpoint of [
+      'not a URL',
+      'https://user@api.githubcopilot.com',
+      'https://:password@api.githubcopilot.com',
+      'https://api.githubcopilot.com:1234',
+      'https://api.githubcopilot.com?unexpected=true',
+      'https://api.githubcopilot.com#unexpected',
+      'https://unrecognized.example',
+    ])
+      expect(copilotApi('github.com', endpoint)).toBeNull()
+  })
+
+  it.effect('uses the selected Enterprise Server REST endpoint rather than github.com', () => {
+    const { layer, calls } = fixture({ host: 'git.company.example' })
+    return Effect.gen(function* () {
+      yield* login(yield* Copilot, 'git.company.example')
+      expect(calls.some((call) => call.url === 'https://git.company.example/api/v3/copilot_internal/user')).toBe(true)
+      expect(calls.some((call) => new URL(call.url).hostname === 'api.github.com')).toBe(false)
+    }).pipe(Effect.provide(layer), onTestClock)
+  })
+
+  it('leaves the expired credential intact and requests fresh sign-in after refresh is refused', async () => {
+    const credential = JSON.stringify({
+      ...saved,
+      token: { ...saved.token, expiresAt: '2020-01-01T00:00:00Z', refreshToken: 'expired-refresh' },
+    })
+    const kept = new Map([['copilot-account-a', credential]])
+    const requested: string[] = []
+    const layer = Copilot.layer({
+      fetch: async (url) => {
+        requested.push(url)
+        return Response.json({ error: 'bad_refresh_token' }, { status: 400 })
+      },
+    }).pipe(Layer.provideMerge(Secrets.memory(kept)))
+    const copilot = await Effect.runPromise(Copilot.pipe(Effect.provide(layer)))
+    await expect(copilot.provider('account-a').models(new AbortController().signal)).rejects.toThrow('authentication required')
+    expect(kept.get('copilot-account-a')).toBe(credential)
+    expect(requested).toEqual(['https://github.com/login/oauth/access_token'])
+  })
+
+  it('authenticates image and compaction requests to the advertised Messages API', async () => {
+    const kept = new Map([['copilot-account-a', JSON.stringify(saved)]])
+    const headers: Headers[] = []
+    const layer = Copilot.layer({
+      appVersion: '0.8.0-test',
+      fetch: async (url, input) => {
+        expect(url).toBe('https://api.githubcopilot.com/v1/messages')
+        headers.push(new Headers(input?.headers))
+        return Response.json({
+          type: 'message',
+          content: [{ type: 'text', text: 'Seen.' }],
+          stop_reason: 'end_turn',
+          usage: { input_tokens: 10, output_tokens: 2 },
+        })
+      },
+    }).pipe(Layer.provideMerge(Secrets.memory(kept)))
+    const provider = (await Effect.runPromise(Copilot.pipe(Effect.provide(layer)))).provider('account-a')
+    const model = {
+      id: 'messages-model',
+      name: 'Messages model',
+      context: 32_000,
+      output: 4096,
+      images: true,
+      protocol: 'messages' as const,
+    }
+    const base = {
+      model,
+      tools: [],
+      initiator: 'agent' as const,
+      sessionId: 'task-a',
+      signal: new AbortController().signal,
+      onText: () => undefined,
+    }
+    expect(
+      (
+        await provider.complete({
+          ...base,
+          messages: [{ role: 'user', content: [{ type: 'image', data: 'aW1hZ2U=', mimeType: 'image/png' }] }],
+        })
+      ).text,
+    ).toBe('Seen.')
+    await provider.complete({ ...base, purpose: 'compaction', messages: [{ role: 'user', content: 'Summarize the work.' }] })
+    expect(headers[0]?.get('copilot-vision-request')).toBe('true')
+    expect(headers[0]?.get('anthropic-version')).toBe('2023-06-01')
+    expect(headers[0]?.get('authorization')).toBe('Bearer test-access')
+    expect(headers[0]?.get('user-agent')).toBe('Althar/0.8.0-test')
+    expect(headers[1]?.get('x-interaction-type')).toBe('conversation-compaction')
+    expect(headers[1]?.has('copilot-vision-request')).toBe(false)
   })
 
   it('refreshes an expired account once for concurrent model requests and authenticates inference inside Althar', async () => {
