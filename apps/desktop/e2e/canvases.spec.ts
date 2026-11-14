@@ -20,9 +20,9 @@ import { launch, openFirstProject, say, shown, startTask, still, toConversation 
  * change's own evidence (test-results/canvas-*.png).
  */
 
-/** The canvas view laid over the window: its bounds, the address it shows, and a picture of it as the person sees it, at 1×. */
-const canvasView = (electronApp: ElectronApplication) =>
-  electronApp.evaluate(async ({ BrowserWindow }) => {
+/** The canvas view's metadata; only a screenshot needs its composited picture, at 1×. */
+const canvasView = (electronApp: ElectronApplication, capture = false) =>
+  electronApp.evaluate(async ({ BrowserWindow }, capture) => {
     const window = BrowserWindow.getAllWindows().find((one) => one.webContents.getURL().includes('/renderer/index.html'))
     const view = window?.contentView.children.find(
       (child): child is Electron.WebContentsView =>
@@ -32,15 +32,16 @@ const canvasView = (electronApp: ElectronApplication) =>
     )
     if (view === undefined) return null
     const bounds = view.getBounds()
-    const picture = await view.webContents.capturePage()
-    const sized = picture.getSize().width > bounds.width ? picture.resize({ width: bounds.width }) : picture
+    // A view can have its address before its compositor has a frame. Metadata polling must not request a screenshot.
+    const picture = capture ? await view.webContents.capturePage() : null
+    const sized = picture !== null && picture.getSize().width > bounds.width ? picture.resize({ width: bounds.width }) : picture
     return {
       bounds,
       address: view.webContents.getURL(),
-      png: sized.toPNG().toString('base64'),
+      png: sized?.toPNG().toString('base64') ?? null,
       partition: view.webContents.session.storagePath ?? '',
     }
-  })
+  }, capture)
 
 /** Runs a script in the canvas's own page, as its scripts run. */
 const inCanvas = <T>(electronApp: ElectronApplication, code: string) =>
@@ -55,7 +56,7 @@ const inCanvas = <T>(electronApp: ElectronApplication, code: string) =>
  * window's own screenshot leaves out, so its picture is laid where it is first.
  */
 const shoot = async (page: Page, electronApp: ElectronApplication, of: Locator | Page, path: string) => {
-  const view = await canvasView(electronApp)
+  const view = await canvasView(electronApp, true)
   if (view !== null)
     await page.evaluate((drawn) => {
       const picture = document.createElement('img')
