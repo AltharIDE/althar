@@ -11,7 +11,10 @@ import {
   ClientAuthority,
   SocketAllowed,
   type MessageSender,
+  type ClientIdentity,
   Api,
+  type ApiHandlers,
+  apiLayer,
   ApiError,
   type AgentStatus,
   type Attachment,
@@ -22,10 +25,10 @@ import {
   type SentFile,
   type SentImage,
 } from '@althar/contracts'
-import type { ProjectId } from '@althar/domain'
+import { ActorId, type ProjectId } from '@althar/domain'
 import { Commands, Ledger } from '@althar/persistence-sqlite'
-import { Cause, Clock, Context, Crypto, Deferred, Duration, Effect, Exit, Layer, Option, Stream } from 'effect'
-import { RpcServer } from 'effect/rpc'
+import { Cause, Clock, Context, Crypto, Duration, Effect, Layer, Option, Schema, Stream } from 'effect'
+import { RpcServer, type RpcMiddleware } from 'effect/rpc'
 import { SqlClient } from 'effect/sql'
 
 import { type Account, Accounts } from './Accounts'
@@ -94,12 +97,16 @@ import {
   afterMergeReviewOf,
 } from './Policies'
 import { Models } from './Models'
+import { ModelFacts } from './ModelFacts'
 import { Installs } from './Installs'
 import { Permissions } from './Permissions'
 import { dropNote, editNote, notesOf } from './notes'
 import { Questions } from './Questions'
 import { type ProjectRepository, Projects } from './Projects'
 import { Nudges } from './Nudges'
+import { ApiCommands } from './ApiCommands'
+import { ClientIdentities } from './ClientIdentities'
+import { CurrentClient } from './ClientContext'
 import { projectTracker } from './projectTracker'
 import { applyRules } from './rulesChange'
 import { UsageData } from './UsageData'
@@ -169,9 +176,6 @@ const withSync = (step: (io: mcpSync.SyncIo & skillSync.SkillIo) => Promise<unkn
 /** How often the change feed is read when nothing says it grew: a fallback, not the way changes arrive. */
 const FEED_FALLBACK = '1 second'
 
-/** How many session commands' results are kept for retries, per launch. */
-const RECENT_COMMANDS = 1_000
-
 /** How long what a host said about who can push to a repository is kept: opening a project again soon after doesn't ask again. */
 const PUSHABLE_KEPT = 5 * 60_000
 
@@ -235,9 +239,21 @@ export const ConnectionSender = Context.Reference<MessageSender>('@althar/runtim
   defaultValue: () => ({ kind: 'internal' }),
 })
 
-export const handlers = Api.toLayer(
+export const handlers = apiLayer(
   Effect.gen(function* () {
     const context = yield* Effect.context<Instance | Crypto.Crypto>()
+    type QueryServices =
+      | SqlClient.SqlClient
+      | RuntimeConfig
+      | Accounts
+      | Agents
+      | Installs
+      | Limits
+      | ModelFacts
+      | Models
+      | PlanUsage
+      | SignIns
+    const queryContext = yield* Effect.context<QueryServices>()
     const sender = yield* ConnectionSender
     const artifacts = yield* Artifacts
     const projects = yield* Projects
@@ -271,6 +287,15 @@ export const handlers = Api.toLayer(
     const coordinator = yield* Coordinator
     const canvases = yield* Canvases
     const instance = yield* Instance
+    const identity = (yield* CurrentClient) ?? {
+      homeId: instance.homeId,
+      actorId: instance.personId,
+      deviceId: instance.deviceId,
+      role: sender.kind,
+    }
+    const identities = yield* ClientIdentities
+    const nudges = yield* Nudges
+    const actorId = yield* Effect.orDie(Schema.decodeUnknownEffect(ActorId)(identity.actorId))
     const sql = yield* SqlClient.SqlClient
     const ledger = yield* Ledger
     // What writes a project's notes needs, as the services have it.
@@ -291,7 +316,7 @@ export const handlers = Api.toLayer(
         const opened = Effect.flatMap(timestamp, (at) => sql`UPDATE tasks SET opened_at = ${at} WHERE id = ${taskId}`)
         const held = bringBackThen(
           taskId,
-          instance.personId,
+          actorId,
           Effect.tap(then, () => opened),
         )
         const { back, value } = yield* Effect.provideContext(held, folderStore)
@@ -371,29 +396,26 @@ export const handlers = Api.toLayer(
     const timedCall = lagLogged()
       ? <A, E, R>(effect: Effect.Effect<A, E, R>) => slowCall(callName, effect)
       : <A, E, R>(effect: Effect.Effect<A, E, R>) => effect
-    const api = <A, E, R>(effect: Effect.Effect<A, E, R>): Effect.Effect<A, ApiError, R> =>
-      Effect.catchCause(timedCall(Effect.provideService(effect, Foreground, true)), (cause) => {
-        if (Cause.hasInterruptsOnly(cause)) return Effect.interrupt
-        const error = Cause.findErrorOption(cause)
-        // Refused by the call itself, in the window's own words already: as it is, and nothing went wrong.
-        if (Option.isSome(error) && error.value instanceof ApiError) return Effect.fail(error.value)
-        const said = words(Option.getOrUndefined(error), agentName)
-        const told =
-          Option.isSome(error) && expected.has(said.reason)
-            ? Effect.void
-            : Effect.andThen(
-                Effect.logWarning('A call from the window did not succeed', cause),
-                Effect.flatMap(callName, (call) => failures.report(cause, call)),
-              )
-        return Effect.andThen(told, Effect.fail(new ApiError(said)))
-      })
+    const api = <A, E, R>(effect: Effect.Effect<A, E, R>): Effect.Effect<A, ApiError, Exclude<R, QueryServices>> =>
+      Effect.provideContext(
+        Effect.catchCause(timedCall(Effect.provideService(effect, Foreground, true)), (cause) => {
+          if (Cause.hasInterruptsOnly(cause)) return Effect.interrupt
+          const error = Cause.findErrorOption(cause)
+          // Refused by the call itself, in the window's own words already: as it is, and nothing went wrong.
+          if (Option.isSome(error) && error.value instanceof ApiError) return Effect.fail(error.value)
+          const said = words(Option.getOrUndefined(error), agentName)
+          const told =
+            Option.isSome(error) && expected.has(said.reason)
+              ? Effect.void
+              : Effect.andThen(
+                  Effect.logWarning('A call from the window did not succeed', cause),
+                  Effect.flatMap(callName, (call) => failures.report(cause, call)),
+                )
+          return Effect.andThen(told, Effect.fail(new ApiError(said)))
+        }),
+        queryContext,
+      )
 
-    /*
-     * Session commands have no receipts in the store yet (they start and stop
-     * processes, outside any transaction), so a retry within the launch gets
-     * the first one's result from here. One interrupted before it finished
-     * may run again.
-     */
     /* GitHub as the skills page reaches it: over the app's own network, unauthenticated, for public repositories. */
     const github: GitHubAccess = config.fetch === undefined ? {} : { fetch: config.fetch }
     /**
@@ -441,19 +463,8 @@ export const handlers = Api.toLayer(
       ...(install.ref === undefined ? {} : { ref: install.ref }),
       ...(install.sha === undefined ? {} : { sha: install.sha }),
     })
-    const recent = new Map<string, Deferred.Deferred<unknown, ApiError>>()
-    const once = <A>(commandId: string, effect: Effect.Effect<A, ApiError>): Effect.Effect<A, ApiError> =>
-      Effect.suspend(() => {
-        const seen = recent.get(commandId)
-        if (seen !== undefined) return Deferred.await(seen as Deferred.Deferred<A, ApiError>)
-        const result = Deferred.makeUnsafe<A, ApiError>()
-        recent.set(commandId, result as Deferred.Deferred<unknown, ApiError>)
-        const oldest = recent.keys().next().value
-        if (recent.size > RECENT_COMMANDS && oldest !== undefined) recent.delete(oldest)
-        return Effect.onExit(effect, (exit) =>
-          Exit.hasInterrupts(exit) ? Effect.sync(() => recent.delete(commandId)) : Deferred.done(result, exit),
-        )
-      })
+    // The connection middleware admits and records mutations across all connections and runtime restarts.
+    const once = <A>(_commandId: string, effect: Effect.Effect<A, ApiError>): Effect.Effect<A, ApiError> => effect
 
     const connectionOf = (info: ConnectionInfo) => ({
       id: info.id,
@@ -704,7 +715,7 @@ export const handlers = Api.toLayer(
      * so it is quick when something happens and idle when nothing does, and
      * once a second in case a signal is ever missed.
      */
-    const changes = (since: number | undefined): Stream.Stream<WatchEvent, ApiError> =>
+    const changes = (since: number | undefined, checked = false): Stream.Stream<WatchEvent, ApiError> =>
       Stream.unwrap(
         api(
           Effect.gen(function* () {
@@ -716,7 +727,11 @@ export const handlers = Api.toLayer(
                 Effect.gen(function* () {
                   const batch = yield* queries.changesSince(cursor, 500)
                   if (batch.length === 0) yield* Effect.raceFirst(grown, Effect.sleep(FEED_FALLBACK))
-                  const events: ReadonlyArray<WatchEvent> = batch.map((change) => ({ _tag: 'Changed', ...change }))
+                  const events: ReadonlyArray<WatchEvent> = batch.map(({ checkpoint, ...change }) => ({
+                    _tag: 'Changed',
+                    ...change,
+                    ...(checked ? { checkpoint } : {}),
+                  }))
                   return [events, Option.some(batch.at(-1)?.cursor ?? cursor)] as const
                 }),
               ),
@@ -758,7 +773,51 @@ export const handlers = Api.toLayer(
       ),
     )
 
-    return Api.of({
+    const implemented: ApiHandlers = {
+      WatchAttention: () => nudges.events,
+      GetConnectionInfo: () =>
+        api(
+          Effect.map(
+            sql<{ cursor: number; checkpoint: string }>`SELECT cursor, checkpoint FROM change_log ORDER BY cursor DESC LIMIT 1`,
+            ([last]) => ({
+              identity,
+              hostDeviceId: instance.deviceId,
+              apiVersion: API_VERSION,
+              appVersion: config.appVersion,
+              position: { homeId: instance.homeId, cursor: last?.cursor ?? 0, checkpoint: last?.checkpoint ?? null },
+            }),
+          ),
+        ),
+      ListClientDevices: (options) => identities.list(options),
+      RegisterClientDevice: ({ name, publicKey, role }) => identities.register({ name, publicKey, role }),
+      RevokeClientDevice: ({ deviceId }) => identities.revoke(deviceId),
+      WatchFrom: ({ position }) =>
+        Stream.unwrap(
+          Effect.gen(function* () {
+            const latest = yield* api(cursorNow)
+            if (position.homeId !== instance.homeId || position.cursor > latest)
+              return yield* new ApiError({
+                reason: 'SnapshotRequired',
+                message: 'This saved position belongs to another home or a newer database. Read a fresh snapshot before watching again.',
+              })
+            const [entry] = yield* api(sql<{ checkpoint: string }>`SELECT checkpoint FROM change_log WHERE cursor = ${position.cursor}`)
+            if (
+              (position.cursor === 0 && position.checkpoint !== null) ||
+              (position.cursor > 0 && (position.checkpoint === null || entry === undefined || entry.checkpoint !== position.checkpoint))
+            )
+              return yield* new ApiError({
+                reason: 'SnapshotRequired',
+                message: 'The saved position does not match this home’s current history. Read a fresh snapshot before watching again.',
+              })
+            const [oldest] = yield* api(sql<{ cursor: number }>`SELECT min(cursor) AS cursor FROM change_log`)
+            if (oldest?.cursor != null && position.cursor < oldest.cursor - 1)
+              return yield* new ApiError({
+                reason: 'SnapshotRequired',
+                message: 'This saved position is older than the available change history. Read a fresh snapshot before watching again.',
+              })
+            return Stream.merge(changes(position.cursor, true), streaming)
+          }),
+        ),
       Status: ({ recheck }) =>
         Effect.map(
           api(
@@ -1035,11 +1094,11 @@ export const handlers = Api.toLayer(
       GetBoard: ({ projectId }) => api(queries.board(projectId)),
       GetOlderSettled: ({ projectId, before, taskId }) =>
         api(Effect.map(queries.olderSettled(projectId, before, taskId), (tasks) => ({ tasks }))),
-      GetHome: ({ since }) => api(queries.home(since)),
+      GetHome: ({ since }) => api(queries.home(since, identity.deviceId)),
       LeftHome: () =>
         api(
           Effect.gen(function* () {
-            yield* sql`UPDATE devices SET home_looked_at = ${yield* timestamp} WHERE id = ${instance.deviceId}`
+            yield* sql`UPDATE devices SET home_looked_at = ${yield* timestamp} WHERE id = ${identity.deviceId}`
           }),
         ),
       // The person opened a task: when, kept. It moves nothing: a finished task waits for them to settle it.
@@ -1232,18 +1291,17 @@ export const handlers = Api.toLayer(
       SetNewProjectDefaults: ({ commandId, ...change }) =>
         once(commandId, api(setNewProjectDefaults(change)).pipe(Effect.provideService(SqlClient.SqlClient, sql))),
       GetTaskFolders: () => api(cleanup.list),
-      CleanUpFolders: ({ commandId }) => once(commandId, api(cleanup.cleanUp(instance.personId))),
-      RemoveTaskFolder: ({ commandId, taskId, seen }) => once(commandId, api(cleanup.remove(taskId, seen, instance.personId))),
+      CleanUpFolders: ({ commandId }) => once(commandId, api(cleanup.cleanUp(actorId))),
+      RemoveTaskFolder: ({ commandId, taskId, seen }) => once(commandId, api(cleanup.remove(taskId, seen, actorId))),
       // One that no longer waits up next, started or held meanwhile, moves nowhere: the board shows the line as it is.
-      MoveInLine: ({ commandId, taskId, to }) =>
-        once(commandId, api(Effect.asVoid(upNextMove(busy, plans, sql)(taskId, to, instance.personId)))),
+      MoveInLine: ({ commandId, taskId, to }) => once(commandId, api(Effect.asVoid(upNextMove(busy, plans, sql)(taskId, to, actorId)))),
       LineOldestFirst: ({ commandId, projectId }) => once(commandId, api(busy.oldestFirst(projectId))),
       SetPostTeamReviews: ({ commandId, on }) =>
         once(commandId, api(setPostTeamReviews(on)).pipe(Effect.provideService(SqlClient.SqlClient, sql))),
       SetSendMidTurn: ({ commandId, to }) => once(commandId, api(setSendMidTurn(to)).pipe(Effect.provideService(SqlClient.SqlClient, sql))),
       SetRunOutside: ({ commandId, to }) => once(commandId, api(setRunOutside(to)).pipe(Effect.provideService(SqlClient.SqlClient, sql))),
       RunIt: ({ commandId, taskId, how }) => once(commandId, api(reviews.runIt({ taskId, ...(how === undefined ? {} : { how }) }))),
-      StopRunning: ({ commandId, taskId }) => once(commandId, api(reviews.stopRunning({ taskId, actorId: instance.personId }))),
+      StopRunning: ({ commandId, taskId }) => once(commandId, api(reviews.stopRunning({ taskId, actorId: actorId }))),
       GetAutomations: ({ projectId }) =>
         api(
           Effect.gen(function* () {
@@ -1263,29 +1321,27 @@ export const handlers = Api.toLayer(
           commandId,
           api(
             Effect.map(
-              automations.make({ projectId, definition, ...(on === undefined ? {} : { on }), actorId: instance.personId }),
+              automations.make({ projectId, definition, ...(on === undefined ? {} : { on }), actorId: actorId }),
               (automationId) => ({ automationId }),
             ),
           ),
         ),
       ChangeAutomation: ({ commandId, automationId, definition }) =>
-        once(commandId, api(automations.change(automationId, definition, instance.personId))),
-      TurnOnAutomation: ({ commandId, automationId, itemId }) =>
-        once(commandId, api(automations.turnOn(automationId, instance.personId, itemId))),
-      PauseAutomation: ({ commandId, automationId }) => once(commandId, api(automations.pause(automationId, instance.personId))),
-      RunAutomationNow: ({ commandId, automationId, itemId }) =>
-        once(commandId, api(automations.runNow(automationId, instance.personId, itemId))),
-      DeleteAutomation: ({ commandId, automationId }) => once(commandId, api(automations.remove(automationId, instance.personId))),
-      AnswerTaskAsk: ({ commandId, itemId, yes }) => once(commandId, api(taskActions.answer(itemId, yes, instance.personId))),
+        once(commandId, api(automations.change(automationId, definition, actorId))),
+      TurnOnAutomation: ({ commandId, automationId, itemId }) => once(commandId, api(automations.turnOn(automationId, actorId, itemId))),
+      PauseAutomation: ({ commandId, automationId }) => once(commandId, api(automations.pause(automationId, actorId))),
+      RunAutomationNow: ({ commandId, automationId, itemId }) => once(commandId, api(automations.runNow(automationId, actorId, itemId))),
+      DeleteAutomation: ({ commandId, automationId }) => once(commandId, api(automations.remove(automationId, actorId))),
+      AnswerTaskAsk: ({ commandId, itemId, yes }) => once(commandId, api(taskActions.answer(itemId, yes, actorId))),
       MakeItAFullTask: ({ commandId, taskId }) => once(commandId, api(fastLane.makeFullTask(taskId))),
       KeepTheModel: ({ commandId, itemId }) => once(commandId, api(fastLane.keepTheModel(itemId))),
       UndoTheModelMove: ({ commandId, itemId }) => once(commandId, api(fastLane.undoTheModelMove(itemId))),
-      UndoAutomationChange: ({ commandId, itemId }) => once(commandId, api(automations.undo(itemId, instance.personId))),
+      UndoAutomationChange: ({ commandId, itemId }) => once(commandId, api(automations.undo(itemId, actorId))),
       AnswerSettingChange: ({ commandId, itemId, yes }) => once(commandId, api(settingsTools.answer(itemId, yes))),
       UndoSettingChange: ({ commandId, itemId }) => once(commandId, api(settingsTools.undo(itemId))),
       GetSettingChanges: ({ projectId }) => api(settingsTools.changed(projectId)),
       SetAutomationPostsReviews: ({ commandId, automationId, on }) =>
-        once(commandId, api(automations.setPostsReviews(automationId, on, instance.personId))),
+        once(commandId, api(automations.setPostsReviews(automationId, on, actorId))),
       SetAutomationsPaused: ({ commandId, paused }) => once(commandId, api(automations.setAllPaused(paused))),
       // Interrupted by the person, a conflict its lead was resolving is theirs (ADR-030): handed over first, so the turn's end doesn't ask the lead again.
       // A lead between turns, a turn Althar asked of it waiting for a place up next: that turn is let go (stop_task with turn).
@@ -1531,7 +1587,7 @@ export const handlers = Api.toLayer(
                 taskId: created.taskId,
                 steps,
                 reason: null,
-                actorId: instance.personId,
+                actorId: actorId,
                 startsIn: Duration.zero,
                 // An aside, as a chat the coordinator starts: nothing of it goes outside the project when it is done; it has its pill
                 // rather than a card, and the coordinator hears nothing of it.
@@ -1543,16 +1599,16 @@ export const handlers = Api.toLayer(
                       ...(end !== undefined && end !== projectEnd ? { endChosen: true } : {}),
                     }),
               })
-              yield* plans.start(planId, instance.personId)
+              yield* plans.start(planId, actorId)
               return yield* queries.task(created.taskId)
             }),
           ),
         ),
-      StartPlan: ({ commandId, planId }) => once(commandId, api(Effect.asVoid(plans.start(planId, instance.personId)))),
-      HoldPlan: ({ commandId, planId }) => once(commandId, api(Effect.asVoid(plans.hold(planId, instance.personId)))),
-      HoldDraft: ({ commandId, threadId, key }) => once(commandId, api(coordinator.holdDraft(threadId, key, instance.personId))),
+      StartPlan: ({ commandId, planId }) => once(commandId, api(Effect.asVoid(plans.start(planId, actorId)))),
+      HoldPlan: ({ commandId, planId }) => once(commandId, api(Effect.asVoid(plans.hold(planId, actorId)))),
+      HoldDraft: ({ commandId, threadId, key }) => once(commandId, api(coordinator.holdDraft(threadId, key, actorId))),
       ChangePlan: ({ commandId, planId, steps, end, worksIn, toward }) =>
-        once(commandId, api(plans.change(planId, steps, instance.personId, end, worksIn, toward))),
+        once(commandId, api(plans.change(planId, steps, actorId, end, worksIn, toward))),
       ApplyPreset: ({ commandId, planId, preset }) =>
         once(
           commandId,
@@ -1563,7 +1619,7 @@ export const handlers = Api.toLayer(
                 taskId: string
               }>`SELECT project_id, task_id FROM task_plans WHERE id = ${planId}`
               const end = plan === undefined ? undefined : yield* pullRequests.endFor(plan.projectId, plan.taskId)
-              return yield* plans.applyPreset(planId, preset, instance.personId, end)
+              return yield* plans.applyPreset(planId, preset, actorId, end)
             }),
           ),
         ),
@@ -1572,7 +1628,7 @@ export const handlers = Api.toLayer(
           commandId,
           api(
             Effect.gen(function* () {
-              const changed = yield* runs.changeTeam({ taskId, steps, actorId: instance.personId })
+              const changed = yield* runs.changeTeam({ taskId, steps, actorId: actorId })
               const named = yield* modelNamer.pipe(Effect.provideService(Agents, agents), Effect.provideService(Models, models))
               const [thread] = yield* sql<{ id: string; projectId: ProjectId }>`
                 SELECT id, project_id FROM threads WHERE task_id = ${taskId} AND kind = 'task'`
@@ -1597,15 +1653,14 @@ export const handlers = Api.toLayer(
             issueDrafts.change(
               draftId,
               { title, body, labels, ...(priority === undefined ? {} : { priority: priority ?? 'none' }) },
-              instance.personId,
+              actorId,
             ),
           ),
         ),
-      FileIssueDraft: ({ commandId, draftId }) => once(commandId, api(Effect.asVoid(issueDrafts.file(draftId, instance.personId)))),
-      DiscardIssueDraft: ({ commandId, draftId }) => once(commandId, api(issueDrafts.discard(draftId, instance.personId))),
-      ApplyIssueChanges: ({ commandId, changesId }) =>
-        once(commandId, api(Effect.asVoid(issueChanges.apply(changesId, instance.personId)))),
-      DiscardIssueChanges: ({ commandId, changesId }) => once(commandId, api(issueChanges.discard(changesId, instance.personId))),
+      FileIssueDraft: ({ commandId, draftId }) => once(commandId, api(Effect.asVoid(issueDrafts.file(draftId, actorId)))),
+      DiscardIssueDraft: ({ commandId, draftId }) => once(commandId, api(issueDrafts.discard(draftId, actorId))),
+      ApplyIssueChanges: ({ commandId, changesId }) => once(commandId, api(Effect.asVoid(issueChanges.apply(changesId, actorId)))),
+      DiscardIssueChanges: ({ commandId, changesId }) => once(commandId, api(issueChanges.discard(changesId, actorId))),
       PreferIssueCards: ({ commandId, threadId, atOnce }) =>
         once(
           commandId,
@@ -1656,12 +1711,12 @@ export const handlers = Api.toLayer(
                 ...(summary === undefined ? {} : { summary }),
                 ...(comments === undefined ? {} : { comments }),
               },
-              instance.personId,
+              actorId,
             ),
           ),
         ),
-      PostReviewDraft: ({ commandId, draftId }) => once(commandId, api(Effect.asVoid(reviews.post(draftId, instance.personId)))),
-      DiscardReviewDraft: ({ commandId, draftId }) => once(commandId, api(reviews.discard(draftId, instance.personId))),
+      PostReviewDraft: ({ commandId, draftId }) => once(commandId, api(Effect.asVoid(reviews.post(draftId, actorId)))),
+      DiscardReviewDraft: ({ commandId, draftId }) => once(commandId, api(reviews.discard(draftId, actorId))),
       AnswerStuck: ({ commandId, attentionId, answer }) =>
         once(
           commandId,
@@ -1737,7 +1792,7 @@ export const handlers = Api.toLayer(
                   parts: kept,
                   projectId: projectOnly === true ? (from?.projectId ?? null) : null,
                   fromTaskId: taskId ?? null,
-                  actorId: instance.personId,
+                  actorId: actorId,
                   asNew,
                 })
               }),
@@ -1747,7 +1802,7 @@ export const handlers = Api.toLayer(
         ),
       RemovePreset: ({ commandId, id }) => once(commandId, api(Effect.provideContext(removePreset(id), folderStore))),
       DeclinePresetOffer: ({ commandId, taskId }) =>
-        once(commandId, api(Effect.provideContext(declinePresetOffer(taskId, instance.personId), folderStore))),
+        once(commandId, api(Effect.provideContext(declinePresetOffer(taskId, actorId), folderStore))),
       ShelveTask: ({ commandId, taskId, shelf }) =>
         once(
           commandId,
@@ -1762,8 +1817,8 @@ export const handlers = Api.toLayer(
         ),
       WorkToward: ({ commandId, taskId, toward }) => once(commandId, api(runs.workToward({ taskId, toward }))),
       JoinChanges: ({ commandId, taskId, change, into }) =>
-        once(commandId, api(pullRequests.joinChanges(taskId, change, into ?? null, instance.personId))),
-      DropChange: ({ commandId, taskId, change }) => once(commandId, api(pullRequests.dropChange(taskId, change, instance.personId))),
+        once(commandId, api(pullRequests.joinChanges(taskId, change, into ?? null, actorId))),
+      DropChange: ({ commandId, taskId, change }) => once(commandId, api(pullRequests.dropChange(taskId, change, actorId))),
       StopHelper: ({ commandId, taskId, helper }) => once(commandId, api(Effect.asVoid(helpers.stop({ taskId, helper, by: 'person' })))),
       DropMove: ({ commandId, taskId }) =>
         once(
@@ -1815,8 +1870,7 @@ export const handlers = Api.toLayer(
                         // A call already closed, here or by a run that started since, starts nothing. The run that "Run it now"
                         // starts is the record of that answer, and takes the call back; "Leave it" answers it.
                         if (on.state !== 'open') return
-                        if (answers.next?.values.includes('run') === true)
-                          return yield* automations.runNow(on.automationId, instance.personId)
+                        if (answers.next?.values.includes('run') === true) return yield* automations.runNow(on.automationId, actorId)
                         yield* questions.answer({ envelope: said, attentionId, answers })
                         return
                       }
@@ -1889,7 +1943,7 @@ export const handlers = Api.toLayer(
           api(
             connections.startSignIn({
               product,
-              actorId: instance.personId,
+              actorId: actorId,
               ...(webUrl === undefined ? {} : { webUrl }),
               ...(connectionId === undefined ? {} : { connectionId }),
             }),
@@ -1905,7 +1959,7 @@ export const handlers = Api.toLayer(
               connections.connectToken({
                 product,
                 token,
-                actorId: instance.personId,
+                actorId: actorId,
                 ...(webUrl === undefined ? {} : { webUrl }),
                 ...(user === undefined ? {} : { user }),
                 ...(key === undefined ? {} : { key }),
@@ -1925,7 +1979,7 @@ export const handlers = Api.toLayer(
               connections.connectCli({
                 product,
                 webUrl,
-                actorId: instance.personId,
+                actorId: actorId,
                 ...(connectionId === undefined ? {} : { connectionId }),
               }),
               connectionOf,
@@ -1933,7 +1987,7 @@ export const handlers = Api.toLayer(
           ),
         ),
       CheckConnection: ({ connectionId }) => api(connections.check(connectionId)),
-      Disconnect: ({ commandId, connectionId }) => once(commandId, api(connections.remove(connectionId, instance.personId))),
+      Disconnect: ({ commandId, connectionId }) => once(commandId, api(connections.remove(connectionId, actorId))),
       ListIssues: ({ projectId }) => api(Effect.map(issues.mine(projectId), (found) => ({ issues: found }))),
       MarkReady: ({ commandId, taskId, url }) => once(commandId, api(pullRequests.markReady(taskId, url))),
       PostScreenshots: ({ commandId, taskId, url, leftOut }) => once(commandId, api(screenshots.post({ taskId, url, leftOut }))),
@@ -2032,7 +2086,7 @@ export const handlers = Api.toLayer(
           commandId,
           api(
             Effect.gen(function* () {
-              const kept = yield* applyRules(projectId, sent, instance.personId, expectedRevision).pipe(
+              const kept = yield* applyRules(projectId, sent, actorId, expectedRevision).pipe(
                 Effect.provideService(Policies, policies),
                 Effect.provideService(Permissions, permissions),
                 Effect.provideService(Changes, pullRequests),
@@ -2043,19 +2097,18 @@ export const handlers = Api.toLayer(
           ),
         ),
       SetProjectAccounts: ({ commandId, projectId, rotate, only }) =>
-        once(commandId, api(policies.setAccounts(projectId, only === null ? { rotate } : { rotate, only }, instance.personId))),
-      SetUsageLimit: ({ commandId, projectId, policy }) =>
-        once(commandId, api(policies.setUsageLimit(projectId, policy, instance.personId))),
+        once(commandId, api(policies.setAccounts(projectId, only === null ? { rotate } : { rotate, only }, actorId))),
+      SetUsageLimit: ({ commandId, projectId, policy }) => once(commandId, api(policies.setUsageLimit(projectId, policy, actorId))),
       OpenChange: ({ commandId, taskId }) => once(commandId, api(runs.publish(taskId))),
       SetReviewAfterMerge: ({ commandId, taskId, review }) =>
-        once(commandId, api(Effect.asVoid(runs.setReviewAfterMerge({ taskId, review, actorId: instance.personId })))),
-      ShapeTask: ({ commandId, taskId, preset }) => once(commandId, api(taskActions.shape(taskId, preset, instance.personId))),
+        once(commandId, api(Effect.asVoid(runs.setReviewAfterMerge({ taskId, review, actorId: actorId })))),
+      ShapeTask: ({ commandId, taskId, preset }) => once(commandId, api(taskActions.shape(taskId, preset, actorId))),
       SkipReview: ({ commandId, taskId }) =>
         once(
           commandId,
           api(Effect.flatMap(envelope('task.skip_review', { taskId }, commandId), (said) => runs.skipReview({ envelope: said, taskId }))),
         ),
-      DeclineReview: ({ commandId, taskId }) => once(commandId, api(runs.declineReview(taskId, instance.personId))),
+      DeclineReview: ({ commandId, taskId }) => once(commandId, api(runs.declineReview(taskId, actorId))),
       Ship: ({ commandId, taskId, change }) =>
         once(
           commandId,
@@ -2175,19 +2228,17 @@ export const handlers = Api.toLayer(
         once(
           commandId,
           api(
-            Effect.map(
-              pullRequests.attach({ taskId, pullRequest, start: start === true, actorId: instance.personId }),
-              (done): Attachment =>
-                done.kind === 'start'
-                  ? { kind: 'start', name: done.name, source: done.source, started: false, kept: 0, own: done.own }
-                  : {
-                      kind: 'attached',
-                      name: `${done.change.words.short} ${done.change.words.prefix}${done.change.number}`,
-                      source: done.change.source ?? '',
-                      started: done.started,
-                      kept: done.kept,
-                      own: done.kept,
-                    },
+            Effect.map(pullRequests.attach({ taskId, pullRequest, start: start === true, actorId: actorId }), (done): Attachment =>
+              done.kind === 'start'
+                ? { kind: 'start', name: done.name, source: done.source, started: false, kept: 0, own: done.own }
+                : {
+                    kind: 'attached',
+                    name: `${done.change.words.short} ${done.change.words.prefix}${done.change.number}`,
+                    source: done.change.source ?? '',
+                    started: done.started,
+                    kept: done.kept,
+                    own: done.kept,
+                  },
             ),
           ),
         ),
@@ -2224,16 +2275,15 @@ export const handlers = Api.toLayer(
                 name,
                 command,
                 ...(repository === undefined ? {} : { repository }),
-                actorId: instance.personId,
+                actorId: actorId,
               }),
               (kept) => ({ id: kept.id }),
             ),
           ),
         ),
-      DropRunnable: ({ commandId, projectId, id }) =>
-        once(commandId, api(launches.dropRunnable({ projectId, id, actorId: instance.personId }))),
+      DropRunnable: ({ commandId, projectId, id }) => once(commandId, api(launches.dropRunnable({ projectId, id, actorId: actorId }))),
       OrderRunnables: ({ commandId, projectId, ids }) =>
-        once(commandId, api(launches.orderRunnables({ projectId, ids, actorId: instance.personId }))),
+        once(commandId, api(launches.orderRunnables({ projectId, ids, actorId: actorId }))),
       GetRepositoryScripts: ({ projectId }) => api(launches.scripts(projectId)),
       ListSkills: () =>
         config.skills === undefined ? Effect.succeed({ enabled: false, skills: [] }) : skills((store) => listSkills(store)),
@@ -2315,7 +2365,8 @@ export const handlers = Api.toLayer(
       ClearLaunch: ({ commandId, id }) => once(commandId, api(launches.clear(id))),
       ReadLaunchOutput: ({ id }) => api(launches.output(id)),
       Watch: ({ since }) => Stream.merge(changes(since), streaming),
-    })
+    }
+    return implemented
   }),
 )
 
@@ -2339,21 +2390,110 @@ export const services = (options: Runtime.RuntimeLayerOptions) =>
   )
 
 /** One client's connection: the API served over its port, until the port closes. Each window gets one. */
-export const connection = (port: PortLike, sender: MessageSender) =>
-  RpcServer.layer(Api).pipe(
-    Layer.provide(handlers.pipe(Layer.provide(Layer.succeed(ConnectionSender, sender)))),
-    Layer.provide(
-      Layer.succeed(ClientAuthority, (effect, { rpc, headers }) => {
-        const refusal = apiVersionRefusal(headers)
-        if (refusal !== undefined) return Effect.fail(refusal)
-        return sender.kind === 'socket' && !Context.get(rpc.annotations, SocketAllowed)
-          ? Effect.fail(
-              new ApiError({ reason: 'PersonRequired', message: 'This call needs the person in the window or on a paired device.' }),
-            )
-          : effect
-      }),
-    ),
-    Layer.provide(serverProtocol(port)),
+export const connection = (port: PortLike, sender: MessageSender, authenticated?: ClientIdentity) =>
+  Layer.unwrap(
+    Effect.gen(function* () {
+      const instance = yield* Instance
+      const identities = yield* ClientIdentities
+      const commands = yield* ApiCommands
+      const sql = yield* SqlClient.SqlClient
+      const identity: ClientIdentity = Object.freeze({
+        ...(authenticated ?? {
+          homeId: instance.homeId,
+          actorId: instance.personId,
+          deviceId: sender.kind === 'paired_device' ? sender.deviceId : instance.deviceId,
+          role: sender.kind,
+        }),
+      })
+      // Provenance follows the verified identity, even if an adapter supplied an inconsistent sender.
+      const authority: MessageSender =
+        identity.role === 'paired_device' ? { kind: 'paired_device', deviceId: identity.deviceId } : { kind: identity.role }
+      let revoked = false
+      const closing = new Set<() => void>()
+      const guarded: PortLike = {
+        post: (message) => {
+          if (!revoked) port.post(message)
+        },
+        listen: (handler) =>
+          port.listen((message) => {
+            if (!revoked) handler(message)
+          }),
+        closed: (handler) => {
+          closing.add(handler)
+          const stop = port.closed?.(handler)
+          return () => {
+            closing.delete(handler)
+            stop?.()
+          }
+        },
+        close: () => port.close?.(),
+      }
+      const revoke = yield* identities.watchRevocation(identity.deviceId)
+      yield* Effect.forkScoped(
+        Effect.andThen(
+          revoke,
+          Effect.sync(() => {
+            revoked = true
+            port.close?.()
+            for (const close of closing) close()
+            closing.clear()
+          }),
+        ),
+      )
+      return RpcServer.layer(Api).pipe(
+        Layer.provide(
+          handlers.pipe(Layer.provide(Layer.merge(Layer.succeed(ConnectionSender, authority), Layer.succeed(CurrentClient, identity)))),
+        ),
+        Layer.provide(
+          Layer.succeed(ClientAuthority, (effect, { rpc, headers, payload }) =>
+            Effect.gen(function* () {
+              const refusal = apiVersionRefusal(headers)
+              if (refusal !== undefined) return yield* refusal
+              yield* identities.check(identity)
+              if (identity.role === 'socket' && !Context.get(rpc.annotations, SocketAllowed))
+                return yield* new ApiError({
+                  reason: 'PersonRequired',
+                  message: 'This call needs the person in the window or on a paired device.',
+                })
+              const positioned = Effect.flatMap(effect, (value) => {
+                if (typeof value !== 'object' || value === null || !('cursor' in value) || typeof value.cursor !== 'number')
+                  return Effect.succeed(value)
+                const cursor = value.cursor
+                return Effect.gen(function* () {
+                  const [entry] = yield* sql<{ checkpoint: string }>`SELECT checkpoint FROM change_log WHERE cursor = ${cursor}`.pipe(
+                    Effect.mapError(
+                      () =>
+                        new ApiError({ reason: 'SnapshotRequired', message: 'Althar could not confirm this snapshot’s history position.' }),
+                    ),
+                  )
+                  if (cursor > 0 && entry === undefined)
+                    return yield* new ApiError({
+                      reason: 'SnapshotRequired',
+                      message: 'The change history moved while this snapshot was read. Read it again.',
+                    })
+                  return { ...value, position: { homeId: instance.homeId, cursor, checkpoint: entry?.checkpoint ?? null } }
+                })
+              })
+              if (typeof payload !== 'object' || payload === null || !('commandId' in payload) || typeof payload.commandId !== 'string')
+                return yield* positioned
+              // Effect RPC erases the handler's success type in middleware. The schema and effect come from the same validated RPC definition.
+              const result = rpc.successSchema as Schema.Codec<RpcMiddleware.SuccessValue, unknown>
+              const handle = Effect.andThen(identities.check(identity), positioned).pipe(
+                Effect.catch((error) =>
+                  Effect.fail(
+                    error instanceof ApiError
+                      ? error
+                      : new ApiError({ reason: 'RequestFailed', message: 'Althar could not complete this action.' }),
+                  ),
+                ),
+              )
+              return yield* commands.execute({ identity, commandId: payload.commandId, method: rpc._tag, payload, result, handle })
+            }),
+          ),
+        ),
+        Layer.provide(serverProtocol(guarded)),
+      )
+    }),
   )
 
 /**

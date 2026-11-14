@@ -943,6 +943,7 @@ export const itemOf = (row: ItemRow): ThreadItem | undefined => {
 /** A change from the store's feed, with the thread it belongs to, when it belongs to one. */
 export interface ThreadChange {
   readonly cursor: number
+  readonly checkpoint: string
   readonly aggregateType: string
   readonly aggregateId: string
   readonly projectId: string | null
@@ -1030,7 +1031,7 @@ export class Queries extends Context.Service<
     /** The next page of a project's settled tasks, as cards: the ones settled before `before` (`taskId` breaking a tie), most recent first. */
     olderSettled(projectId: string, before: string, taskId: string): Effect.Effect<ReadonlyArray<BoardSnapshot['tasks'][number]>, unknown>
     /** The home: every project, and across them what waits on the person, what runs, and what the loop did since `since` or they last left it. */
-    home(since?: string): Effect.Effect<HomeSnapshot, unknown>
+    home(since?: string, deviceId?: string): Effect.Effect<HomeSnapshot, unknown>
     /**
      * What waits on the person, across every project not archived: each task the home shows, as the card watcher last worked
      * its card out, and the calls that wait. What the Dock's badge and the notifications go by; it works no card out.
@@ -3097,13 +3098,13 @@ export class Queries extends Context.Service<
        * what runs, and what the loop did since `since`, or since they last left
        * the home here, or, before they ever did, over the last day.
        */
-      const home = (since?: string) =>
+      const home = (since?: string, deviceId: string = instance.deviceId) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
           const at = yield* cursor
           const [device] = yield* sql<{
             looked: string | null
-          }>`SELECT home_looked_at AS looked FROM devices WHERE id = ${instance.deviceId}`
+          }>`SELECT home_looked_at AS looked FROM devices WHERE id = ${deviceId}`
           const looked = device?.looked ?? null
           const from = since ?? looked ?? new Date((yield* Clock.currentTimeMillis) - FIRST_LOOK).toISOString()
           const { open, tasks } = yield* homeTasks
@@ -4073,7 +4074,7 @@ export class Queries extends Context.Service<
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
           return yield* sql<ThreadChange>`
-            SELECT c.cursor, c.aggregate_type, c.aggregate_id, c.project_id,
+            SELECT c.cursor, c.checkpoint, c.aggregate_type, c.aggregate_id, c.project_id,
               CASE c.aggregate_type
                 WHEN 'thread' THEN c.aggregate_id
                 WHEN 'thread_item' THEN (SELECT thread_id FROM thread_items WHERE id = c.aggregate_id)
@@ -4284,7 +4285,7 @@ export class Queries extends Context.Service<
           ),
         board: (projectId) => run(board(projectId)),
         olderSettled: (projectId, before, taskId) => run(olderSettled(projectId, before, taskId)),
-        home: (since) => run(home(since)),
+        home: (since, deviceId) => run(home(since, deviceId)),
         waiting: run(waiting),
         item: (threadId, itemId) => run(item(threadId, itemId)),
         shown: (threadId, itemId) => run(shown(threadId, itemId)),

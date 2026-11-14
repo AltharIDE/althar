@@ -27,7 +27,8 @@ import { dockCount, notificationsShown, soundOf, tells } from './notify'
 import { idle, isQuitAnswer, type QuitAnswer, type QuitQuestion, type Work, workIn } from './quitWork'
 import { readAppPreferences, writeAppPreference } from './preferences'
 import { PICTURE_SCHEME } from './pictureAddress'
-import { CANVAS_SCHEME } from '@althar/contracts'
+import { CANVAS_SCHEME, emitterPort, type AttentionEvent } from '@althar/contracts'
+import { watchRuntimeAttention } from './runtimeAttention'
 import { handleCanvases } from './canvases/ipc'
 import { canvasTokens } from './canvases/tokens'
 import { type Canvases, startCanvases } from './canvases/views'
@@ -293,15 +294,6 @@ interface RuntimeMessage {
   readonly owners?: unknown
   /** The ports the runtime listens on, which no canvas may reach (ADR-104). */
   readonly ports?: unknown
-  readonly event?: {
-    readonly _tag?: string
-    readonly kind?: unknown
-    readonly count?: unknown
-    readonly working?: unknown
-    readonly title?: unknown
-    readonly body?: unknown
-    readonly threadId?: unknown
-  }
 }
 
 /* Notifications the person may still click: kept, so they aren't collected before then. */
@@ -505,7 +497,7 @@ const openThread = (threadId: string) => {
  * and how many things wait, on the Dock while its count is on. Never for
  * progress. And whether any work runs, to keep the Mac awake by.
  */
-const nudged = (event: NonNullable<RuntimeMessage['event']>) => {
+const nudged = (event: AttentionEvent) => {
   if (event._tag === 'Working' && typeof event.working === 'boolean') {
     // Nothing restarts into an update while work runs.
     updates?.working(event.working)
@@ -607,6 +599,11 @@ const startRuntime = () => {
     },
   })
   logs.keepOutput(child)
+  const attention = new MessageChannelMain()
+  const stopAttention = watchRuntimeAttention(emitterPort(attention.port1), nudged, (reason) => {
+    if (runtime === child && !quitting) logs.error('Runtime attention connection failed', { reason })
+  })
+  child.postMessage({ type: 'connect', role: 'internal' }, [attention.port2])
   child.once('spawn', () => logs.info('Runtime started', { pid: child.pid }))
   // Whether the computer is online, so work waits out a lost connection rather than fail on it (ADR-060).
   const stopWatchingOnline = watchOnline(
@@ -649,7 +646,6 @@ const startRuntime = () => {
     if (message.type === 'facts') return facts.answer(message)
     if (message.type === 'names') return names.answer(message)
     if (message.type === 'work') return works.answer(message)
-    if (message.type === 'nudge' && message.event !== undefined) return nudged(message.event)
     if (message.type === 'usage') return recordUsage(message.usage)
     if (message.type === 'crash') return reportCrash((sender) => sender.fromRuntime(message.crash))
     if (message.type === 'store-failed' || message.type === 'profile-in-use') {
@@ -667,6 +663,7 @@ const startRuntime = () => {
     granting.delete(message.requestId)
   })
   child.once('exit', (code) => {
+    stopAttention()
     stopWatchingOnline()
     runtime = undefined
     if (quitting) logs.info('Runtime exited', { code })

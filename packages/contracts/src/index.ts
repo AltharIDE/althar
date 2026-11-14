@@ -16,3 +16,6 @@ export * from './waiting'
 export * from './toolWords'
 
 export * from './signInHost'
+export * from './identities'
+export * from './wire'
+export * from './attention'

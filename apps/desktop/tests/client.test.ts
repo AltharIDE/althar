@@ -3,7 +3,17 @@ import { mkdtempSync, realpathSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { ClientAuthority, Api, ApiError, type DomMessagePort, emitterPort, serverProtocol, type WatchEvent } from '@althar/contracts'
+import {
+  apiLayer,
+  type ApiHandlers,
+  ClientAuthority,
+  Api,
+  ApiError,
+  type DomMessagePort,
+  emitterPort,
+  serverProtocol,
+  type WatchEvent,
+} from '@althar/contracts'
 import { connection, Folders, services } from '@althar/runtime'
 import { Context, Effect, Exit, Layer, Scope, Stream } from 'effect'
 import { RpcServer } from 'effect/rpc'
@@ -190,13 +200,14 @@ describe('the client', () => {
       "Althar only gives gh's sign-in to a server it knows, over HTTPS. http://github.com isn't one.",
     )
     // A connection to sign in again, or to check, that isn't there.
-    for (const call of [
-      client.connectCli('github', 'https://github.com', 'conn_gone'),
-      client.startSignIn('github', 'https://github.com', 'conn_gone'),
-      client.checkConnection('conn_gone'),
-      client.connectToken({ product: 'linear', token: 'lin_api_x', connectionId: 'conn_gone' }),
-    ])
-      await expect(call).rejects.toBeInstanceOf(ApiError)
+    await Promise.all(
+      [
+        client.connectCli('github', 'https://github.com', 'conn_gone'),
+        client.startSignIn('github', 'https://github.com', 'conn_gone'),
+        client.checkConnection('conn_gone'),
+        client.connectToken({ product: 'linear', token: 'lin_api_x', connectionId: 'conn_gone' }),
+      ].map((call) => expect(call).rejects.toBeInstanceOf(ApiError)),
+    )
     await expect(client.startSignIn('trello')).rejects.toBeInstanceOf(ApiError)
     await client.close()
   })
@@ -207,9 +218,15 @@ describe('the client', () => {
     const watches: Array<number | undefined> = []
     const refuse = (): Effect.Effect<never, ApiError> =>
       Effect.fail(new ApiError({ reason: 'NoSession', message: 'No agent is working on this task.' }))
-    const handlers = Api.toLayer(
+    const handlers = apiLayer(
       Effect.succeed(
         Api.of({
+          WatchAttention: () => Stream.die('unused'),
+          GetConnectionInfo: () => Effect.die('unused'),
+          ListClientDevices: () => Effect.die('unused'),
+          RegisterClientDevice: () => Effect.die('unused'),
+          RevokeClientDevice: () => Effect.die('unused'),
+          WatchFrom: () => Stream.die('unused'),
           Status: () => Effect.die('unused'),
           GetFileDiff: () => Effect.die('unused'),
           GetTaskFindings: () => Effect.die('unused'),
@@ -548,7 +565,7 @@ describe('the client’s calls', () => {
     // Handlers made on the fly need nothing, as their type can't say.
     const server: Layer.Layer<never> = RpcServer.layer(Api).pipe(
       Layer.provide(Layer.succeed(ClientAuthority, (effect) => effect)),
-      Layer.provide(Api.toLayer(Effect.succeed(Api.of(handlers as Parameters<typeof Api.of>[0])))),
+      Layer.provide(apiLayer(handlers as ApiHandlers)),
       Layer.provide(serverProtocol(emitterPort(channel.port1 as never, (data) => data))),
     ) as Layer.Layer<never>
     await serving(server)
