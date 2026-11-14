@@ -263,11 +263,26 @@ describe('keeping a task’s changes together', () => {
       const docs = yield* changeOf(task.taskId, 'Docs')
       commit(docs.path, 'docs.md', 'how lanes look', 'Docs')
       commit(docs.path, 'more.md', 'and why', 'More docs')
-      // Simulate git failing to remove a busy Windows worktree, including its forced retry.
+      // A missing common-directory lookup falls back to the destination repository; busy removal still retries.
       const spawn = spawner.startApart
       let refusals = 0
+      let missingRoot = 0
       const refusing = vi.spyOn(spawner, 'startApart').mockImplementation((...args) => {
         const [command] = args
+        if (command.command === 'git' && command.cwd === docs.path && command.args.includes('--git-common-dir')) {
+          missingRoot++
+          return {
+            result: Promise.resolve({
+              code: 128,
+              signal: null,
+              error: null,
+              over: false,
+              stdout: '',
+              stderr: 'Common directory unavailable',
+            }),
+            stop: () => undefined,
+          }
+        }
         if (command.command === 'git' && command.args.includes('remove') && command.args.includes(docs.path)) {
           refusals++
           return {
@@ -282,6 +297,7 @@ describe('keeping a task’s changes together', () => {
       )
       assert.include(joined, 'Kept “Docs” together with “Lane colours”')
       assert.strictEqual(refusals, 2)
+      assert.strictEqual(missingRoot, 1)
       assert.notInclude(git(working, 'worktree', 'list', '--porcelain'), docs.path)
       assert.strictEqual(git(colours.path, 'log', '-2', '--format=%s'), 'More docs\nDocs')
       assert.isFalse(existsSync(docs.path))
