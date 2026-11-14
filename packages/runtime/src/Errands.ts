@@ -7,6 +7,7 @@ import { Cause, Context, Crypto, Effect, Layer, Option } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { touchTask } from './cards'
+import { stepNote, type StepNote } from './errandNotes'
 import { Instance } from './Instance'
 import { makeKeyedLock } from './keyedLock'
 import { outward } from './outward'
@@ -250,18 +251,23 @@ export class Errands extends Context.Service<
           if (row === undefined || access.role === 'reviewer') return yield* refused('This errand does not belong to this thread.')
           return row
         })
-      const say = (row: ErrandRow, title: string) =>
+      const noteContent = (note: StepNote) => ({
+        source: 'runtime',
+        severity: 'info',
+        title: note.title,
+        description: null,
+        ...(note.links.length === 0 ? {} : { links: note.links }),
+        ...(note.details === undefined ? {} : { details: note.details }),
+      })
+      const say = (row: ErrandRow, said: string | StepNote) =>
         Effect.gen(function* () {
-          yield* addItem({ projectId: row.projectId, threadId: row.threadId }, 'notice', { source: 'runtime', severity: 'info', title })
+          const note: StepNote = typeof said === 'string' ? { title: said, links: [] } : said
+          yield* addItem({ projectId: row.projectId, threadId: row.threadId }, 'notice', noteContent(note))
           const tasks = yield* sql<{ taskId: string; threadId: string }>`SELECT DISTINCT s.task_id, t.id AS thread_id FROM errand_steps s
         JOIN threads t ON t.task_id = s.task_id AND t.kind = 'task' WHERE s.errand_id = ${row.id}`
           for (const task of tasks) {
             if (task.threadId !== row.threadId)
-              yield* addItem({ projectId: row.projectId, threadId: task.threadId }, 'notice', {
-                source: 'runtime',
-                severity: 'info',
-                title,
-              })
+              yield* addItem({ projectId: row.projectId, threadId: task.threadId }, 'notice', noteContent(note))
             yield* touchTask(task.taskId)
           }
         })
@@ -421,18 +427,14 @@ export class Errands extends Context.Service<
                     saidAt: string | null
                   }>`SELECT id, said_at FROM mutation_receipts WHERE project_id = ${access.projectId} AND idempotency_key = ${key} AND state = 'confirmed' ORDER BY created_at DESC, rowid DESC LIMIT 1`
                   if (kept === undefined) return
-                  const title = `${tool.replaceAll('_', ' ')}: ${action.target}${head === undefined ? '' : ` at ${head}`}. Asked: ${JSON.stringify(words)}. ${answer}`
+                  const note = stepNote(tool, action.target, action.request, answer)
                   if (errand !== undefined && step !== undefined) {
                     yield* sql`UPDATE errand_steps SET state = 'done' WHERE errand_id = ${errand.id} AND step_key = ${step.stepKey}`
-                    if (kept.saidAt === null) yield* say(errand, title)
+                    if (kept.saidAt === null) yield* say(errand, note)
                     if (errand.state !== 'done' && (yield* stepsOf(errand.id)).every((s) => s.state === 'done'))
                       yield* set(errand, 'done', null)
                   } else if (kept.saidAt === null)
-                    yield* addItem({ projectId: access.projectId as ProjectId, threadId: access.threadId }, 'notice', {
-                      source: 'runtime',
-                      severity: 'info',
-                      title,
-                    })
+                    yield* addItem({ projectId: access.projectId as ProjectId, threadId: access.threadId }, 'notice', noteContent(note))
                   yield* change('mutation_receipts', kept.id, { saidAt: yield* timestamp })
                 }),
               )
@@ -561,14 +563,9 @@ export class Errands extends Context.Service<
                     yield* change('mutation_receipts', pending.id, { state: 'uncertain', confirmedAt: null, saidAt: yield* timestamp })
                     yield* change('work_items', pending.workItemId, { state: 'uncertain', updatedAt: yield* timestamp })
                   }
-                  const title = `${tool.replaceAll('_', ' ')}: ${action.target}${fresh.head === undefined ? '' : ` at ${fresh.head}`}. Asked: ${JSON.stringify(words)}. ${answer.answer}`
-                  if (errand !== undefined) yield* say(errand, title)
-                  else
-                    yield* addItem({ projectId: access.projectId as ProjectId, threadId: access.threadId }, 'notice', {
-                      source: 'runtime',
-                      severity: 'info',
-                      title,
-                    })
+                  const note = stepNote(tool, action.target, action.request, answer.answer)
+                  if (errand !== undefined) yield* say(errand, note)
+                  else yield* addItem({ projectId: access.projectId as ProjectId, threadId: access.threadId }, 'notice', noteContent(note))
                 }),
               )
               return answer.answer

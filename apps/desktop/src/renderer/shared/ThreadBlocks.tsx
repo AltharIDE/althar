@@ -20,6 +20,7 @@ import {
   Reasoning,
   Terminal,
   Thinking,
+  NoteDetails,
   ThreadDivider,
   Tool,
   ToolKind,
@@ -42,6 +43,7 @@ import { sentAttachments } from './images'
 import { useModelNames } from './modelNames'
 import { FailedTurn } from './WayOut'
 import { serverBrand } from './mcpServers'
+import { linkedWords } from './noteLinks'
 import { keyOf, pastedIn } from './pasted'
 import { RuleReceipt } from './RuleReceipt'
 import { SaidIn } from './code/CodeHost'
@@ -657,9 +659,10 @@ export function ThreadBlocks({
         )
       case 'divider':
         return (
-          <ThreadDivider key={block.id} icon="agents">
-            {block.text}
-          </ThreadDivider>
+          <div key={block.id} className={s.note}>
+            <ThreadDivider icon="agents">{linkedWords(block.text, block.links)}</ThreadDivider>
+            {block.details !== undefined && <NoteDetails>{block.details}</NoteDetails>}
+          </div>
         )
       case 'offer':
         return (

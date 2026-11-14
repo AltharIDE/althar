@@ -52,3 +52,11 @@
   align-items: flex-start;
   gap: 4px;
 }
+
+/* a line of Althar's with its raw answer folded under it: the line wraps, the fold keeps to the column */
+.note {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
