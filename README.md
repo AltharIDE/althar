@@ -8,8 +8,8 @@
 </p>
 
 <p align="center">
-  Althar is an open-source IDE where you manage the project, not the agents.<br />
-  Say what you want: a coordinator plans it and puts agents on it, and a model from another lab checks their work.
+  <b>Stop babysitting terminals.</b><br />
+  Tell Althar's coordinator what you want. It puts agents to work, has a model from another lab review them, and brings you back finished work, with the proof.
 </p>
 
 <p align="center">
@@ -20,104 +20,44 @@
 </p>
 
 <p align="center">
-  <sub>Open source · Your own agents and plans · Local, no Althar account · Several accounts, swapped as one runs out · macOS, Windows and Linux</sub>
+  <sub>Open source · Your own agents and plans · Runs on your computer · macOS, Windows and Linux</sub>
 </p>
 
 <br />
 
 <img src="brand/export/screenshots/framed/project-home.jpg" width="100%" alt="A project's home: you ask for a fix to the VAT rate on EU invoices and the coordinator answers with a plan, one agent implementing and another reviewing, starting on its own. Beside it, the board: what's up next, what's running, and what needs you." />
 
-## Stop babysitting terminals.
+## You manage the project. Not the agents.
 
-You manage the project, not the agents. Every project has a coordinator: say what you want done, and it reads the repositories and your rules, turns the ask into tasks, and picks a lead to build each one and a model to review it.
+Eight terminals, eight chats, and you in the middle: approving, re-explaining, checking. Agents got good; working with them didn't.
 
-Change any of it, or hold it. Leave it, and it starts. The coordinator plans and hands out the work; it doesn't write the code itself.
+In Althar you organise your work in projects, each one repository or many. On top of each sits a coordinator, and you talk to it as you would to any project manager. It turns what you say into tasks, picks a lead for each, keeps the board, and comes back to you only when something needs your decision.
+
+Change its plan, or hold it. Leave it, and it starts.
 
 <img src="brand/export/screenshots/framed/plan.jpg" width="100%" alt="You ask for a fix to the VAT rate on EU invoices; the coordinator answers with one task: one agent implements, another reviews, then a draft pull request. It starts on its own unless changed or held." />
 
-## A second opinion, from another lab.
+## A second opinion, built in.
 
-By default, a task's work is reviewed by a model from a different lab than the one that wrote it, wherever you have one signed in. The lead fixes each finding or sets it aside with its reason, and it goes round until the review is clean.
+Any change can be checked by a model from another lab: Claude's work reviewed by GPT, or the other way round. The lead fixes each finding or sets it aside with its reason.
 
-What comes back to you is the change with the lead's screenshots of what it built, its pull request's checks, and every finding settled. You step in to merge.
+The task lands in Needs you with its diff, its checks, screenshots of it working, and the reviewer's findings with how each was settled. You decide whether it merges.
 
-Review is optional, like every part of a task: change the reviewer, skip a round, or take it off.
+Review is optional: change the reviewer, skip a round, or take it off.
 
 <img src="brand/export/screenshots/framed/review.jpg" width="100%" alt="A review settled: what two reviewers found, by severity and file, and what the lead fixed in the second round or set aside, with its reason." />
 
-## Fall in love with building again.
+## One board. No sidebar full of chats.
 
-<table>
-  <tr>
-    <td width="44%" valign="top">
-      <h3>Every agent's work. One board.</h3>
-      <p>Up next, running, needs you, settled: every task in the project, whichever agent has it.</p>
-    </td>
-    <td width="56%" valign="top">
-      <img src="brand/export/screenshots/framed/board.jpg" width="100%" alt="A project's board: up next, running, needs you, and settled, with each running task's steps and its lead." />
-    </td>
-  </tr>
-  <tr>
-    <td valign="top">
-      <h3>It draws it out. You mark it up.</h3>
-      <p>Leads draw pages and diagrams on the canvas.</p>
-      <p>Comment on a version, and the next one answers it.</p>
-    </td>
-    <td valign="top">
-      <img src="brand/export/screenshots/framed/canvas.jpg" width="100%" alt="A task with its canvas open beside it: the payouts launch page its lead drew, at version 3, after you asked for a bigger, bolder headline." />
-    </td>
-  </tr>
-  <tr>
-    <td valign="top">
-      <h3>See it running.</h3>
-      <p>The page a task is building opens beside it, in a session of its own.</p>
-      <p>The lead tries its fix there; a click from you stops it.</p>
-    </td>
-    <td valign="top">
-      <img src="brand/export/screenshots/framed/browser.jpg" width="100%" alt="A task with the browser beside it: the refunds page its run serves, the failed refund now refunded, while the lead tries the fix it just made." />
-    </td>
-  </tr>
-  <tr>
-    <td valign="top">
-      <h3>Work that starts itself.</h3>
-      <p>Ask once, for a time or for when something happens. It runs on your computer while Althar is open, and not until you turn it on.</p>
-    </td>
-    <td valign="top">
-      <img src="brand/export/screenshots/framed/automations.jpg" width="100%" alt="Automations: a nightly dependency bump running now, a morning review of new pull requests, a Sunday end-to-end run that paused itself, each with how its last runs went." />
-    </td>
-  </tr>
-  <tr>
-    <td valign="top">
-      <h3>Say it. Don't type it.</h3>
-      <p>Dictate to the coordinator or any task, transcribed on your computer.</p>
-    </td>
-    <td valign="top">
-      <img src="brand/export/screenshots/framed/dictation.jpg" width="100%" alt="Dictating to a lead: what was said so far is in the field, the newest words arriving faint, and the voice drawn as bars." />
-    </td>
-  </tr>
-  <tr>
-    <td valign="top">
-      <h3>Wherever you are, still in reach.</h3>
-      <p>On a Mac, Althar sits round the notch or in the menu bar; on Windows and Linux, in the tray.</p>
-      <p>Point at it to answer a permission or open a pull request, and carry on.</p>
-    </td>
-    <td valign="top">
-      <img src="brand/export/reels/island.gif" width="100%" alt="The island round the notch: two calls wait, and pointing at it drops it open to answer them." />
-    </td>
-  </tr>
-</table>
+Up next, running, needs you, settled: every task in the project, whichever lab's agent has it. When one plan runs out of usage, the work moves to another account, on the same thread and the same branch.
 
-
-## How it differs
-
-- **Terminal managers** run several agents side by side, and you still drive each one. In Althar you say what you want once, and the coordinator plans the work, picks who does it and starts it.
-- **Chat front-ends** put many models in one window, and you still paste one's answer into another to have it checked. Here review is part of the task.
-- **The labs' own apps** run their own lab's models, so the same lab writes the work and checks it. Althar runs agents from many labs, on the plans you already have.
-- **AI editors** are built round the file you're editing, with an agent beside you. Althar is built round the project and its tasks, each in a worktree of its own, ending in a pull request.
+<img src="brand/export/screenshots/framed/board.jpg" width="100%" alt="A project's board: up next, running, needs you, and settled, with each running task's steps and its lead." />
 
 ## Bring the agents you already pay for.
 
 Althar runs each one under your own sign-in: your Claude plan, your ChatGPT plan, your keys. No new account, no new bill, nothing of ours between you and the model. When one runs out of usage, the next picks up the same thread, on the same branch.
+
+Switch labs whenever you like: your projects, their history and their decisions stay with you, on your computer.
 
 <table>
   <tr>
@@ -215,6 +155,36 @@ Althar runs each one under your own sign-in: your Claude plan, your ChatGPT plan
     </td>
   </tr>
 </table>
+
+## And everything around it
+
+- **See it running.** The page a task is building opens beside it, in a browser session of its own, and the lead tries its work there.
+- **Canvases.** Leads draw pages and diagrams; comment on a version, and the next one answers it.
+- **Your tracker.** Issues come in from Linear, Jira, Trello or GitHub; pull requests go out to GitHub, GitLab or Bitbucket.
+- **Merge line.** Pull requests merge one at a time, in the order you asked, or through the host's own merge queue.
+- **Automations.** Ask once, for a time of day: it runs on your computer while Althar is open, once you turn it on.
+- **Voice.** Dictate to the coordinator or any task, transcribed on your computer.
+- **Always in reach.** Round the notch or in the menu bar on a Mac, in the tray on Windows and Linux: answer a permission or open a pull request without leaving what you're in.
+
+<table>
+  <tr>
+    <td width="50%" valign="top">
+      <img src="brand/export/screenshots/framed/browser.jpg" width="100%" alt="A task with the browser beside it: the refunds page its run serves, the failed refund now refunded, while the lead tries the fix it just made." />
+    </td>
+    <td width="50%" valign="top">
+      <img src="brand/export/reels/island.gif" width="100%" alt="The island round the notch: two calls wait, and pointing at it drops it open to answer them." />
+    </td>
+  </tr>
+</table>
+
+## How it compares
+
+| If you use | Althar is |
+| --- | --- |
+| A terminal manager | A project you talk to, not a grid of terminals to watch. |
+| A chat front-end | One coordinator and a board, not more tabs. |
+| A lab's own app | Every lab's agents, on your own plans, one reviewing the other. |
+| An AI editor | Built round projects and tasks rather than files; open source, and tied to no lab. |
 
 ## Get started
 
