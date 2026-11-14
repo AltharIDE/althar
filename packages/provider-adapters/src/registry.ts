@@ -117,8 +117,8 @@ export interface PermissionMeanings {
 /** The key in a permission answer's `_meta` that carries why Althar refused, for an agent that reads it (`reasonInBand`). */
 export const REFUSAL_META = 'althar/refusal'
 
-export interface AgentDefinition {
-  readonly id: AgentId
+export interface AgentDefinition<Id extends string = string> {
+  readonly id: Id
   readonly name: string
   /** Bundled adapters ship with Althar at pinned versions; user-installed agents are found on the machine. */
   readonly source: 'bundled' | 'user_installed'
@@ -302,6 +302,8 @@ export interface AgentDefinition {
    * folder, whatever Althar's rules let it ask for.
    */
   readonly contains?: () => boolean
+  /** False until its launch can suppress an untrusted repository's config, hooks and credentials. */
+  readonly untrustedRepositories?: false
   /**
    * Its session settings take what a lead's sandbox lets through from the
    * start (`SessionOptions.sandbox`): commands it runs outside it, and hosts
@@ -1029,7 +1031,7 @@ const claudeJudges = {
   },
 }
 
-const cliAgents: Readonly<Record<Exclude<AgentId, 'copilot-direct'>, AgentDefinition>> = {
+const cliAgents: Readonly<Record<Exclude<AgentId, 'copilot-direct'>, AgentDefinition<AgentId>>> = {
   'claude-code': {
     id: 'claude-code',
     name: 'Claude Code',
@@ -1903,7 +1905,7 @@ const cliAgents: Readonly<Record<Exclude<AgentId, 'copilot-direct'>, AgentDefini
 
 /** Native Copilot keeps its identity and credentials separate from the existing CLI connection. */
 const { 'claude-code': firstClaude, codex: firstCodex, ...otherAgents } = cliAgents
-export const agents: Readonly<Record<AgentId, AgentDefinition>> = {
+export const agents: Readonly<Record<AgentId, AgentDefinition<AgentId>>> = {
   'claude-code': firstClaude,
   codex: firstCodex,
   'copilot-direct': copilotDefinition(cliAgents.opencode),

@@ -18,7 +18,7 @@ import {
   type AgentConnection,
   type AgentDefinition,
   type AgentExited,
-  type AgentRequestFailed,
+  AgentRequestFailed,
   type AgentSession,
   connect,
   type ConfigOption,
@@ -3216,6 +3216,13 @@ export class Sessions extends Context.Service<
           })
           const started = yield* Effect.exit(
             Effect.gen(function* () {
+              if (untrusted && definition.untrustedRepositories === false)
+                return yield* new AgentRequestFailed({
+                  method: 'session/new',
+                  failure: 'invalid_request',
+                  message:
+                    'This custom agent has not been configured to ignore untrusted repository hooks and settings. Choose another agent for this review.',
+                })
               const connection = yield* connect({
                 transport,
                 onPermission: (request) => permissions.decide(held, request),

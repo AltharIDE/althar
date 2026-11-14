@@ -3,7 +3,7 @@ import type { AgentDefinition, LaunchSpec } from './registry'
 import { openCodeCredentials } from './usageSources'
 
 /** A first-class Copilot connection. OpenCode owns OAuth and the agent loop; no Copilot CLI is involved. */
-export const copilotDefinition = (engine: AgentDefinition): AgentDefinition => {
+export const copilotDefinition = (engine: AgentDefinition): AgentDefinition<'copilot-direct'> => {
   const { usageLimits: _openCodeGoLimits, ...runtime } = engine
   const onlyCopilot = (spec: LaunchSpec): LaunchSpec => ({
     ...spec,

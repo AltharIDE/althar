@@ -165,6 +165,12 @@ const wholeReads = (cache: QueryClient, event: Changed): ReadonlyArray<Due> => [
           .map((query) => ({ key: query.queryKey, offScreen: false })),
       ]
     : []),
+  ...(event.aggregateType === 'setting' && event.aggregateId.startsWith('acp-catalog:')
+    ? [
+        { key: keys.agentCatalog, offScreen: false },
+        { key: keys.status, offScreen: true },
+      ]
+    : []),
   // The project's canvases and the one that changed (ADR-104): a version published, a comment sent or answered, one archived.
   ...(event.projectId !== null && event.aggregateType === 'canvas'
     ? [

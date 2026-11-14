@@ -4,6 +4,7 @@ import { Context, Layer } from 'effect'
 import { startupLayer } from './startup'
 
 import { Accounts } from './Accounts'
+import { AgentCatalog } from './AgentCatalog'
 import { Artifacts } from './Artifacts'
 import { Automations } from './Automations'
 import { AccountSignIns } from './AccountSignIns'
@@ -119,7 +120,8 @@ export const layer = (options: RuntimeLayerOptions) => {
   // Each project's rules; each agent's accounts, whether each is signed in, and which are out of usage until their reset (ADR-012).
   // The models each agent offers, read from its sessions, or asked of it once: sessions name them to the coordinator.
   // Whether the computer is online, as the app says, and whether an agent's service answers (ADR-060).
-  const connected = startupLayer('connectivity', Connectivity.layer).pipe(Layer.provideMerge(base))
+  const catalog = AgentCatalog.layer.pipe(Layer.provideMerge(base))
+  const connected = startupLayer('connectivity', Connectivity.layer).pipe(Layer.provideMerge(catalog))
   const able = Layer.mergeAll(
     startupLayer('limits', Limits.layer),
     startupLayer('planusage', PlanUsage.layer),

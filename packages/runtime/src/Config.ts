@@ -323,17 +323,29 @@ export class Agents extends Context.Service<
     /** Every agent the runtime can start. */
     readonly list: ReadonlyArray<AgentEntry>
     get(agentId: string): Effect.Effect<AgentEntry, UnknownAgent>
+    readonly register?: (entry: AgentEntry) => void
+    readonly remove?: (agentId: string) => void
   }
 >()('@althar/runtime/Agents') {
   /** Agents from a list of entries. */
-  static readonly from = (entries: ReadonlyArray<AgentEntry>) =>
-    Agents.of({
-      list: entries,
+  static readonly from = (entries: ReadonlyArray<AgentEntry>) => {
+    const current = new Map(entries.map((entry) => [entry.definition.id as string, entry]))
+    return Agents.of({
+      get list() {
+        return [...current.values()]
+      },
+      register: (entry) => {
+        current.set(entry.definition.id, entry)
+      },
+      remove: (agentId) => {
+        current.delete(agentId)
+      },
       get: (agentId) => {
-        const entry = entries.find((candidate) => candidate.definition.id === agentId)
+        const entry = current.get(agentId)
         return entry === undefined ? Effect.fail(new UnknownAgent({ agentId })) : Effect.succeed(entry)
       },
     })
+  }
 
   /**
    * The registry's agents, carrying the person's own code-host sign-ins (ADR-097).
@@ -362,47 +374,47 @@ export class Agents extends Context.Service<
   static readonly fromRegistry = (
     located: (definition: AgentDefinition) => AgentDefinition = (definition) => definition,
     stderr?: AgentStderr,
+    definitions: ReadonlyArray<AgentDefinition> = Object.values(agents),
   ) => {
-    const signedOut = mkdtempSync(join(tmpdir(), 'althar-no-sign-in-'))
+    let signedOut: string | undefined
     return Agents.from(
-      Object.values(agents)
-        .map(located)
-        .map((definition) => ({
-          definition,
-          transport: (cwd: string, env: Readonly<Record<string, string>> = {}, options: SessionOptions = {}) => {
-            const spec = definition.launch(adapterNode())
-            const own =
-              definition.withoutOwnTools?.({
-                env: { ...process.env, ...env },
-                homeDir: homedir(),
-                cwd,
-                inSandbox: inFlatpakSandbox(spec),
-              }) ?? {}
-            const held = options.untrusted === true ? { ...readingUntrusted, ...definition.reviewing?.env?.({ ...spec.env, ...own }) } : {}
-            // The run's skills, where the agent finds them through its environment: what it would have, with the folder added.
-            const via = definition.skills?.via
-            const skills =
-              options.skills !== undefined && via?.kind === 'env' ? via.env(options.skills, { ...spec.env, ...own, ...held }) : {}
-            return {
-              _tag: 'Process' as const,
-              spec: {
-                ...spec,
-                env: {
-                  ...spec.env,
-                  ...agentGit,
-                  ...(options.untrusted === true ? withoutSignIns(signedOut) : {}),
-                  ...own,
-                  ...held,
-                  ...skills,
-                  ...definition.sessionEnv?.({ ...spec.env, ...own, ...held, ...skills }, options),
-                  ...env,
-                },
-              },
+      definitions.map(located).map((definition) => ({
+        definition,
+        transport: (cwd: string, env: Readonly<Record<string, string>> = {}, options: SessionOptions = {}) => {
+          if (options.untrusted === true) signedOut ??= mkdtempSync(join(tmpdir(), 'althar-no-sign-in-'))
+          const spec = definition.launch(adapterNode())
+          const own =
+            definition.withoutOwnTools?.({
+              env: { ...process.env, ...env },
+              homeDir: homedir(),
               cwd,
-              ...(stderr === undefined ? {} : { stderr: (chunk: string, pid: number) => stderr(definition.id, chunk, pid) }),
-            }
-          },
-        })),
+              inSandbox: inFlatpakSandbox(spec),
+            }) ?? {}
+          const held = options.untrusted === true ? { ...readingUntrusted, ...definition.reviewing?.env?.({ ...spec.env, ...own }) } : {}
+          // The run's skills, where the agent finds them through its environment: what it would have, with the folder added.
+          const via = definition.skills?.via
+          const skills =
+            options.skills !== undefined && via?.kind === 'env' ? via.env(options.skills, { ...spec.env, ...own, ...held }) : {}
+          return {
+            _tag: 'Process' as const,
+            spec: {
+              ...spec,
+              env: {
+                ...spec.env,
+                ...agentGit,
+                ...(signedOut !== undefined && options.untrusted === true ? withoutSignIns(signedOut) : {}),
+                ...own,
+                ...held,
+                ...skills,
+                ...definition.sessionEnv?.({ ...spec.env, ...own, ...held, ...skills }, options),
+                ...env,
+              },
+            },
+            cwd,
+            ...(stderr === undefined ? {} : { stderr: (chunk: string, pid: number) => stderr(definition.id, chunk, pid) }),
+          }
+        },
+      })),
     )
   }
 }

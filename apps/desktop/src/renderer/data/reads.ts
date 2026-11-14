@@ -36,6 +36,7 @@ export const keys = {
   /** Where issues can be filed on a tracker connected: its teams. */
   containers: (connectionId: string) => ['containers', connectionId] as const,
   settings: ['settings'] as const,
+  agentCatalog: ['agentCatalog'] as const,
   /** The settings an agent changed last, with who and when: a project's, or (null) Althar's own (ADR-097). */
   settingChanges: (projectId: string | null) => ['settingChanges', projectId] as const,
   /** Every account's plan usage: kept whole as the runtime sends it. */

@@ -41,7 +41,7 @@ export type EndpointRead =
 
 /** The account a read is for: bound to its agent and provider, so a source is only used for its own pair. */
 export interface UsageAccount {
-  readonly agent: AgentId
+  readonly agent: string
   readonly provider: string
   /** The account's home folder. */
   readonly home: string

@@ -1,4 +1,5 @@
 import { Context, Schema } from 'effect'
+import { AcpCatalog, AcpConnection } from './agentCatalog'
 import { Rpc, RpcGroup, RpcMiddleware } from 'effect/rpc'
 
 import { CanvasDetail, CanvasKind, CanvasSummary, CanvasText, SentCanvasComment } from './canvases'
@@ -4608,7 +4609,7 @@ const command = <const Tag extends string, P extends Schema.Struct.Fields, S ext
 
 const limit = Schema.optional(Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: 500 })))
 
-export const Api = RpcGroup.make(
+export const CoreApi = RpcGroup.make(
   /** The runtime's version and the agents on this machine. Sign-in is checked at most once a minute, unless `recheck`. */
   call('Status', { recheck: Schema.optional(Schema.Boolean) }, Status),
   Rpc.make('ListProjects', { success: ProjectList, error: ApiError }).annotate(SocketAllowed, true),
@@ -5777,4 +5778,14 @@ export const Api = RpcGroup.make(
     true,
   ),
 ).middleware(ClientAuthority)
+
+/** External ACP connections share the API's authority boundary, with a small handler group of their own. */
+export const AcpApi = RpcGroup.make(
+  call('GetAgentCatalog', { refresh: Schema.optional(Schema.Boolean) }, AcpCatalog),
+  command('SaveAcpConnection', { connection: AcpConnection }, Schema.Number),
+  command('CheckAcpConnection', { agentId: Schema.String }, Schema.Number),
+  command('RemoveAcpConnection', { agentId: Schema.String }, Schema.Number),
+).middleware(ClientAuthority)
+
+export const Api = CoreApi.merge(AcpApi)
 export type Api = typeof Api

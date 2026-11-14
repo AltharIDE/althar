@@ -217,6 +217,7 @@ export class Models extends Context.Service<
       const scope = yield* Effect.scope
       /* What asking each agent found this launch; an agent being asked has no entry yet. */
       const probed = new Map<string, Offered | null>()
+      const lastEntries = new Map<string, AgentEntry>()
       /* When each agent that couldn't say was asked, so it is asked again a while on. */
       const failedAt = new Map<string, number>()
       const askAgain = Duration.toMillis(config.modelsAgain ?? ASK_AGAIN)
@@ -321,6 +322,13 @@ export class Models extends Context.Service<
       const of = (entry: AgentEntry) =>
         Effect.gen(function* () {
           const { definition } = entry
+          const previous = lastEntries.get(definition.id)
+          if (previous !== undefined && previous !== entry) {
+            probed.delete(definition.id)
+            failedAt.delete(definition.id)
+            probing.delete(definition.id)
+          }
+          lastEntries.set(definition.id, entry)
           const defaults = yield* defaultEffortsOf(definition.id)
           const blocked = yield* blockedModelsOf(definition.id)
           // Its settings as the session started; what it is on now, as the person last set it.
@@ -356,7 +364,10 @@ export class Models extends Context.Service<
         })
 
       return Models.of({
-        catalog: Effect.provide(Effect.forEach(agents.list, of), context),
+        catalog: Effect.provide(
+          Effect.suspend(() => Effect.forEach(agents.list, of)),
+          context,
+        ),
         setDefaultEffort: (input) =>
           Effect.gen(function* () {
             const entry = yield* agents.get(input.agentId)

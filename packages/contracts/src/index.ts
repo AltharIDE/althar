@@ -16,3 +16,4 @@ export * from './waiting'
 export * from './toolWords'
 
 export * from './signInHost'
+export * from './agentCatalog'

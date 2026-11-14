@@ -7,6 +7,8 @@ import { RpcClient, RpcServer } from 'effect/rpc'
 import {
   AgentsAtOnce,
   Api,
+  CoreApi,
+  AcpApi,
   ApiError,
   ClientAuthority,
   API_VERSION,
@@ -457,9 +459,9 @@ describe('the API', () => {
       Effect.gen(function* () {
         const channel = new MessageChannel()
         yield* Effect.addFinalizer(() => Effect.sync(() => channel.port1.close()))
-        const handlers = Api.toLayer(
+        const coreHandlers = CoreApi.toLayer(
           Effect.succeed(
-            Api.of({
+            CoreApi.of({
               Status: ({ recheck }) => Effect.succeed({ apiVersion: 1, appVersion: recheck === true ? 'rechecked' : 'cached', agents: [] }),
               ListProjects: () => Effect.succeed({ cursor: 0, projects: [] }),
               OpenProject: ({ grant }) => Effect.fail(new ApiError({ reason: 'NotFound', message: `No folder was chosen as ${grant}.` })),
@@ -743,6 +745,15 @@ describe('the API', () => {
                 }),
             }),
           ),
+        )
+        const handlers = Layer.mergeAll(
+          coreHandlers,
+          AcpApi.toLayer({
+            GetAgentCatalog: () => Effect.succeed({ revision: 0, items: [], connections: [], problem: null, refreshing: false }),
+            SaveAcpConnection: () => Effect.succeed(1),
+            CheckAcpConnection: () => Effect.succeed(1),
+            RemoveAcpConnection: () => Effect.succeed(1),
+          }),
         )
         yield* Effect.forkScoped(
           Layer.launch(
