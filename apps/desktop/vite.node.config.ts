@@ -30,7 +30,7 @@ export default defineConfig(({ mode }) => ({
     __ALTHAR_COPILOT_CLIENT_ID__: JSON.stringify(
       (() => {
         const env = loadEnv(mode, import.meta.dirname, 'ALTHAR_')
-        return env.ALTHAR_COPILOT_CLIENT_ID || env.ALTHAR_GITHUB_CLIENT_ID || ''
+        return env.ALTHAR_COPILOT_CLIENT_ID || env.ALTHAR_GITHUB_CLIENT_ID || 'Ov23liI3MfkqFXCKYuNh'
       })(),
     ),
   },
