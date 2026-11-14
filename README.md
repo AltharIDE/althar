@@ -189,23 +189,23 @@ Switch labs whenever you like: your projects, their history and their decisions 
     <td valign="top">A terminal manager</td>
     <td valign="top">
       <img src=".github/readme/compare/cmux.png" width="20" height="20" alt="" /> cmux<br />
-      <img src=".github/readme/compare/paradev.png" width="20" height="20" alt="" /> Paradev
+      <img src=".github/readme/compare/claude-squad.png" width="20" height="20" alt="" /> Claude Squad
     </td>
     <td valign="top">A project you talk to, not a grid of terminals to watch.</td>
   </tr>
   <tr>
-    <td valign="top">A chat front-end</td>
+    <td valign="top">A chat front-end for agents</td>
     <td valign="top">
-      <picture><source media="(prefers-color-scheme: dark)" srcset=".github/readme/compare/openwebui-dark.svg" /><img src=".github/readme/compare/openwebui.svg" width="20" height="20" alt="" /></picture> Open WebUI<br />
-      <picture><source media="(prefers-color-scheme: dark)" srcset=".github/readme/compare/cherrystudio-dark.svg" /><img src=".github/readme/compare/cherrystudio.svg" width="20" height="20" alt="" /></picture> Cherry Studio
+      <img src=".github/readme/compare/t3code.png" width="20" height="20" alt="" /> T3 Code<br />
+      <img src=".github/readme/compare/conductor.png" width="20" height="20" alt="" /> Conductor
     </td>
-    <td valign="top">One coordinator and a board, not more tabs.</td>
+    <td valign="top">One coordinator and a board, not a chat to keep up with for every agent.</td>
   </tr>
   <tr>
     <td valign="top">A lab's own app</td>
     <td valign="top">
       <picture><source media="(prefers-color-scheme: dark)" srcset=".github/readme/compare/claude-dark.svg" /><img src=".github/readme/compare/claude.svg" width="20" height="20" alt="" /></picture> Claude app<br />
-      <picture><source media="(prefers-color-scheme: dark)" srcset=".github/readme/compare/openai-dark.svg" /><img src=".github/readme/compare/openai.svg" width="20" height="20" alt="" /></picture> ChatGPT app, in Codex mode
+      <picture><source media="(prefers-color-scheme: dark)" srcset=".github/readme/compare/openai-dark.svg" /><img src=".github/readme/compare/openai.svg" width="20" height="20" alt="" /></picture> ChatGPT app (Codex)
     </td>
     <td valign="top">Every lab's agents, on your own plans, one reviewing the other.</td>
   </tr>
@@ -213,9 +213,9 @@ Switch labs whenever you like: your projects, their history and their decisions 
     <td valign="top">An AI editor</td>
     <td valign="top">
       <picture><source media="(prefers-color-scheme: dark)" srcset=".github/readme/compare/cursor-dark.svg" /><img src=".github/readme/compare/cursor.svg" width="20" height="20" alt="" /></picture> Cursor<br />
-      <picture><source media="(prefers-color-scheme: dark)" srcset=".github/readme/compare/devin-dark.svg" /><img src=".github/readme/compare/devin.svg" width="20" height="20" alt="" /></picture> Devin Desktop, formerly Windsurf
+      <picture><source media="(prefers-color-scheme: dark)" srcset=".github/readme/compare/copilot-dark.svg" /><img src=".github/readme/compare/copilot.svg" width="20" height="20" alt="" /></picture> VS Code with Copilot
     </td>
-    <td valign="top">Open source, running each lab's agent on the plan you already pay for, not a subscription of its own.</td>
+    <td valign="top">Where you manage the work, not an editor with an agent beside your code.</td>
   </tr>
 </table>
 
@@ -268,4 +268,4 @@ The most useful thing you can do right now is use Althar on real work and tell u
 
 Althar is open source under the [Apache License 2.0](LICENSE). See [NOTICE](NOTICE).
 
-Claude, ChatGPT, Codex, Gemini, Google, Antigravity, OpenCode, GitHub, Copilot, JetBrains, Junie, Grok, Kimi, Mistral, Qwen, Cursor, Devin, Windsurf, cmux, Paradev, Open WebUI, Cherry Studio, GitLab, Bitbucket, Linear, Jira and Trello are trademarks of their owners. Althar isn't affiliated with or endorsed by them.
+Claude, ChatGPT, Codex, Gemini, Google, Antigravity, OpenCode, GitHub, Copilot, JetBrains, Junie, Grok, Kimi, Mistral, Qwen, Cursor, Visual Studio Code, cmux, Claude Squad, T3 Code, Conductor, GitLab, Bitbucket, Linear, Jira and Trello are trademarks of their owners. Althar isn't affiliated with or endorsed by them.
