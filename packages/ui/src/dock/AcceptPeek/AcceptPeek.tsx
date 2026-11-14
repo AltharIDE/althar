@@ -7,6 +7,7 @@ import { Model, ModelList, type ModelInfo } from '../../primitives/Model/Model'
 import { useRefocus } from '../../lib/refocus'
 import { safeHref } from '../../lib/safeHref'
 import { Button } from '../../primitives/Button/Button'
+import { MergeButton } from '../../primitives/MergeButton/MergeButton'
 import { Tooltip } from '../../primitives/HoverCard/HoverCard'
 import { Checks, type ChangeCheck } from '../../primitives/Checks/Checks'
 import { CheckState } from '../../foundations/vocabulary'
@@ -89,6 +90,7 @@ export interface AcceptPeekProps {
   files: readonly ChangedFile[]
   checks: readonly ChangeCheck[]
   onAccept: () => void
+  onBypassQueue?: () => void
   onSendBack: (note: string) => void
   /** Commits on the task's branch that aren't on the pull request yet: pushed first, with `onPush`. */
   unpushed?: number
@@ -127,6 +129,7 @@ export function AcceptPeek({
   files,
   checks,
   onAccept,
+  onBypassQueue,
   onSendBack,
   unpushed = 0,
   onPush,
@@ -218,9 +221,9 @@ export function AcceptPeek({
             ) : going > 0 ? (
               <span className={s.wait}>{t.going(going)}</span>
             ) : passed ? (
-              <Button variant="signal" busy={accepting} onClick={onAccept}>
+              <MergeButton variant="signal" busy={accepting} onMerge={onAccept} onBypassQueue={onBypassQueue}>
                 {t.accept}
-              </Button>
+              </MergeButton>
             ) : (
               <span className={s.wait}>{t.checksFirst}</span>
             )}

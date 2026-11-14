@@ -19,7 +19,18 @@ export const PUBLISHED: Record<string, string> = {
 }
 
 /** The pictures the highlights are shown with (LogPictures.tsx). */
-export type Picture = 'findings' | 'automations' | 'plans' | 'windows' | 'reviewer' | 'report' | 'run' | 'evidence' | 'plan'
+export type Picture =
+  | 'browser'
+  | 'canvas'
+  | 'findings'
+  | 'automations'
+  | 'plans'
+  | 'windows'
+  | 'reviewer'
+  | 'report'
+  | 'run'
+  | 'evidence'
+  | 'plan'
 
 export interface Highlight {
   /** The feature, named plainly. */
@@ -36,6 +47,20 @@ export interface Highlight {
  * opens the page, so its entry shows the rest and keeps the lead's lines.
  */
 export const HIGHLIGHTS: Record<string, readonly Highlight[]> = {
+  '0.8.0': [
+    {
+      title: 'A browser, built in',
+      why: 'Your task’s app opens beside the conversation. Point at anything on the page and comment on it, and the lead clicks, types and takes screenshots in that same page to check what it built.',
+      picture: 'browser',
+      covers: [0, 1, 2],
+    },
+    {
+      title: 'Canvases',
+      why: 'Leads draw pages, mockups, diagrams and charts beside the conversation. Comment on one, and the next version answers it. Every version stays in the project’s Artifacts.',
+      picture: 'canvas',
+      covers: [3, 4],
+    },
+  ],
   '0.7.0': [
     {
       title: 'Reviews, supercharged',

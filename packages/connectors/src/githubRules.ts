@@ -23,7 +23,7 @@ import type { HostNeed, MergeMethod, MergeRules } from './model'
 export const mergeRulesQuery = (full: boolean) => `query($owner: String!, $name: String!, $number: Int!) {
   repository(owner: $owner, name: $name) {
     pullRequest(number: $number) {
-      isDraft mergeStateStatus reviewDecision ${full ? 'isMergeQueueEnabled isInMergeQueue' : ''}
+      isDraft mergeStateStatus reviewDecision ${full ? 'isMergeQueueEnabled isInMergeQueue viewerCanMergeAsAdmin' : ''}
       ${
         full
           ? `baseRef { refUpdateRule { requiredApprovingReviewCount requiredStatusCheckContexts requiresCodeOwnerReviews
@@ -80,6 +80,7 @@ export const PullRules = Schema.Struct({
   reviewDecision: Schema.optional(Schema.NullOr(Schema.String)),
   isMergeQueueEnabled: Schema.optional(Schema.Boolean),
   isInMergeQueue: Schema.optional(Schema.Boolean),
+  viewerCanMergeAsAdmin: Schema.optional(Schema.Boolean),
   baseRef: Schema.optional(Schema.NullOr(Schema.Struct({ refUpdateRule: Schema.optional(Schema.NullOr(RefUpdateRule)) }))),
   reviewRequests: Schema.optional(
     Schema.NullOr(nodes(Schema.Struct({ asCodeOwner: Schema.Boolean, requestedReviewer: Schema.NullOr(Reviewer) }))),
@@ -298,5 +299,9 @@ export const mergeRulesOf = (input: {
   if (pull.mergeStateStatus === 'BLOCKED' && !explained) needs.push({ kind: 'other', state: 'unmet' })
 
   // Protected, or with checks GitHub calls required, it names the required ones; with neither, none is.
-  return { requiredChecks: required, needs }
+  return {
+    requiredChecks: required,
+    needs,
+    ...(queue && pull.viewerCanMergeAsAdmin !== undefined ? { canBypassQueue: pull.viewerCanMergeAsAdmin } : {}),
+  }
 }

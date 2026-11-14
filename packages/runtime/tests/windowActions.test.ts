@@ -27,6 +27,7 @@ const OWN = [
   'make_it_a_change',
   'push_to_pull_request',
   'read_checks',
+  'read_gallery',
   'record_setup',
   'run_it',
   'start_helper',

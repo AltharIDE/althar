@@ -62,7 +62,7 @@ export function SmallChangeOf({
   named: NameModel
   busy: boolean
   /** Merges its open change, as the task's header does, which asks first. */
-  onMerge: (change: { readonly head: string; readonly url: string }) => void
+  onMerge: (change: { readonly head: string; readonly url: string; readonly bypassQueue?: boolean }) => void
   /** Opens another task, by its thread: the review it became a full task with. */
   onOpen?: (threadId: string) => void
   /** Brings an item of this thread into view: its review's report. */
@@ -175,6 +175,9 @@ export function SmallChangeOf({
         explain={explain}
         busy={busy}
         {...(ready ? { onMerge: () => onMerge({ head, url: change.url }) } : {})}
+        {...(ready && change.canBypassQueue === true && change.unpushed === 0
+          ? { onBypassQueue: () => onMerge({ head, url: change.url, bypassQueue: true }) }
+          : {})}
         {...(beforeShip
           ? {
               text: {

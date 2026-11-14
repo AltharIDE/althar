@@ -3,7 +3,8 @@ import { mkdirSync, mkdtempSync, readdirSync, realpathSync, writeFileSync } from
 import { tmpdir } from 'node:os'
 import { basename, dirname, join } from 'node:path'
 
-import { makeFakeService } from '@althar/connectors/testing'
+import { ConnectorFailed } from '@althar/connectors'
+import { type FakeService, makeFakeService } from '@althar/connectors/testing'
 import { assert, describe, it } from '@effect/vitest'
 import { Effect, Layer, Stream } from 'effect'
 import { SqlClient } from 'effect/sql'
@@ -411,6 +412,7 @@ describe('a task of several repositories', () => {
     }
     /** A pull request whose checks the host breaks on reading, where a test says. */
     let breaks: number | null = null
+    let forbidden: number | null = null
     const github = makeFakeService({
       pushUrl: (path) => bares[path.at(-1) ?? ''] ?? '',
       checksFor: (number) => {
@@ -418,6 +420,13 @@ describe('a task of several repositories', () => {
         return undefined
       },
     })
+    const host: FakeService = {
+      ...github,
+      change: (repository, number, options) =>
+        number === forbidden
+          ? Effect.fail(new ConnectorFailed({ product: 'github', reason: 'forbidden', message: 'The fake change failed' }))
+          : github.change(repository, number, options),
+    }
     github.addRepository(['meridian', 'api'])
     github.addRepository(['meridian', 'web'])
     const folder = folderOf('api', 'web')
@@ -492,8 +501,9 @@ describe('a task of several repositories', () => {
       // Numbers repeat across repositories, so the lead names one by its repository too.
       assert.include(read, `web#${web?.number ?? 0}: `)
       // One that can't be read says so on its own, and the other is read as ever: the host's answer as it gave it.
-      github.failNext('change', 'forbidden')
+      forbidden = api?.number ?? 0
       const partly = yield* callTool(lead, 'read_pull_request', {})
+      forbidden = null
       assert.match(partly, new RegExp(`^api#${api?.number ?? 0}: Althar couldn’t read it \\(The code host said: .+\\)\\.\n\n`))
       assert.include(partly, `web#${web?.number ?? 0}: PR #${web?.number ?? 0}, "`)
       // What Althar didn't expect is in its words too, and reported; the host's own answer isn't.
@@ -565,7 +575,7 @@ describe('a task of several repositories', () => {
       yield* changes.refresh(task.taskId)
       yield* until(state, (rows) => rows[0]?.state === 'done')
     }).pipe(
-      Effect.provide(withQueries(':memory:', {}, { connectors: fakeConnectors({ github }) })),
+      Effect.provide(withQueries(':memory:', {}, { connectors: fakeConnectors({ github: host }) })),
       Effect.provideService(Failures, {
         report: (cause, where, agent) => Effect.sync(() => void reported.push(failureOf(cause, where, agent ?? null))),
         events: Stream.empty,

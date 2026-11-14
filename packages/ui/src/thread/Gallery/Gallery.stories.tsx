@@ -6,6 +6,7 @@ import { SHOT_AFTER, SHOT_BEFORE, SHOT_NOT_KEPT } from '../../fixtures/shots'
 import { States } from '../../storybook/States'
 import { threadDecorator } from '../../storybook/ThreadFrame'
 import { Gallery, type GalleryShot } from './Gallery'
+import recording from '../../fixtures/recording.gif?url'
 
 const shot = (id: string, caption: string, from = SHOT_AFTER, size?: { width: number; height: number }): GalleryShot => ({
   ...from,
@@ -14,6 +15,24 @@ const shot = (id: string, caption: string, from = SHOT_AFTER, size?: { width: nu
   name: `${id}.png`,
   ...size,
 })
+
+/** The browser generates a still poster; the lightbox plays the original GIF on request. */
+export const Recording: Story = {
+  args: {
+    shots: [
+      {
+        id: 'opening',
+        name: 'opening.gif',
+        caption: 'The button moves from Ready through Working to Done',
+        src: recording,
+        thumb: recording,
+        animated: true,
+        width: 240,
+        height: 100,
+      },
+    ],
+  },
+}
 
 /* Named as leads name them: a letter for each direction, a number for each state, the first saying what the direction is. */
 const NAMED: GalleryShot[] = [

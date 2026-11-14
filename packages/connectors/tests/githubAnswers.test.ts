@@ -132,7 +132,22 @@ describe('GitHub answers that leave things out', () => {
   it.effect('merges a pull request seen without its head as it is now, without pinning a commit', () =>
     Effect.gen(function* () {
       const { host, sent } = github([
-        ['POST', `${API}/graphql`, { json: { data: { search: { issueCount: 1, nodes: [listed({ headRefOid: null })] } } } }],
+        [
+          'POST',
+          `${API}/graphql`,
+          (request) =>
+            JSON.stringify(request.body).includes('isMergeQueueEnabled')
+              ? {
+                  json: {
+                    data: {
+                      repository: {
+                        pullRequest: { isMergeQueueEnabled: false, isInMergeQueue: false, timelineItems: { nodes: [] } },
+                      },
+                    },
+                  },
+                }
+              : { json: { data: { search: { issueCount: 1, nodes: [listed({ headRefOid: null })] } } } },
+        ],
         ['PUT', `${REPO}/pulls/12/merge`, { json: { merged: true } }],
         ['GET', `${REPO}/pulls/12`, { json: pull({ state: 'closed', merged_at: '2026-10-13T10:00:00Z' }) }],
       ])

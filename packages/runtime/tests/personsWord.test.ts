@@ -342,6 +342,14 @@ describe('the person’s word through the tool boundary', () => {
         ['failed'],
       )
       assert.strictEqual((yield* s.sql<{ state: string }>`SELECT state FROM errands WHERE id = ${id}`)[0]?.state, 'open')
+      // The refusal is a short line in the thread, too: what it was, and why it wasn't done.
+      const notes = (yield* s.sql<{ content: string }>`SELECT content FROM thread_items WHERE kind = 'notice'`).map(
+        (row) => (JSON.parse(row.content) as { title: string }).title,
+      )
+      assert.isTrue(
+        notes.some((title) => /^Couldn’t do this: .* — failed: Not mergeable; no write was made\.$/.test(title)),
+        notes.join(' | '),
+      )
       assert.strictEqual(yield* callTool(s.access, 'test_asked', args), 'Did it once.')
       assert.deepStrictEqual(s.counts(), { acts: 2, reads: 2 })
     }).pipe(Effect.provide(runtime())),
@@ -357,6 +365,13 @@ describe('the person’s word through the tool boundary', () => {
       assert.strictEqual(
         (yield* s.sql<{ state: string }>`SELECT state FROM mutation_receipts WHERE operation = 'test_asked'`)[0]?.state,
         'uncertain',
+      )
+      const said = (yield* s.sql<{ content: string }>`SELECT content FROM thread_items WHERE kind = 'notice'`).map(
+        (row) => (JSON.parse(row.content) as { title: string }).title,
+      )
+      assert.isTrue(
+        said.some((title) => /^Not sure this went through: .* — The answer was lost\.$/.test(title)),
+        said.join(' | '),
       )
       assert.match(yield* callTool(s.access, 'test_asked', args), /will not be acted on twice/)
       s.set({ state: 'done', head: 'head-a', branch: 'main', answer: 'Read back: done.' })

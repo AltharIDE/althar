@@ -20,7 +20,8 @@ ADR-069,
 ADR-083,
 ADR-098,
 ADR-099,
-ADR-100
+ADR-100,
+ADR-105
 
 ## How the window reads
 
@@ -128,7 +129,8 @@ The runtime pages it the same way, so a task opens on whole rounds.
   delivered in, and drawn on the person's side under "From the coordinator".
   What the person says while a turn runs moves to where the lead read it.
 - **The lead's work folds under one line,** and what it says last stands open
-  under it, with its report: every screenshot it handed in, large, with its
+  under it, with its report: at the latest handoff the task’s complete visual
+  collection, at earlier handoffs the screenshots handed then, large, with each
   whole caption, grouped by their names; a view it showed before and took
   again named in a line, not shown twice; then what it checked and what it
   couldn't. No step cards, and no card closes the thread. A picture the
@@ -516,29 +518,86 @@ written Match the system follows the system. There is one dark, a warm one.
 ## The window on each desktop
 
 The window is dressed for the desktop it sits on, decided by Althar, not by a
-setting: the person asked that it belong without having to pick. The main
-process reads the desktop (`main/desktop.ts`, `main/desktopChrome.ts`) from
-the environment, the Settings portal, D-Bus, KDE's config files and, on X11,
-the window manager's name. The only programs it ever runs are `gdbus`,
-`xprop` and `gsettings`, with a timeout and no shell. Desktop programs
+setting: the person asked that it belong without having to pick. On Linux it
+has one bar wherever it can: Althar's own strip, with the window's buttons
+drawn at its end (or start) in the desktop's manner, as GNOME's own apps
+have it, on KDE and every other stacking desktop too. The person asked for
+this over the window manager's title bar above Althar's strip, for a more
+unified look. The main process reads the desktop (`main/desktop.ts`,
+`main/desktopChrome.ts`) from the environment, the Settings portal, D-Bus,
+gsettings, the desktop's config files and, on X11, the window manager's name
+and what it supports. The only programs it ever runs are `gdbus`, `xprop`
+and `gsettings`, with a timeout and no shell. Desktop programs
 (`plasmashell`, `kreadconfig6`) crash without a display or open dialogs, so a
 test holds the list.
 
-| Desktop | Frame | Althar's buttons |
-| --- | --- | --- |
-| macOS | inset title bar | none: the system's traffic lights |
-| Windows | frameless | Windows' manner, the bar's full height |
-| A tiling window manager | frameless | none |
-| GNOME and its family (Ubuntu, Pop, Budgie, Pantheon…) | frameless | GNOME's, in its `button-layout` order and side |
-| KDE Plasma | the window manager's | none |
-| Other stacking window managers on X11, and Wayland compositors that frame windows | the window manager's | none |
-| Anything else | frameless | GNOME's, plain, on the right |
+| Desktop | Frame | Althar's buttons | Side and order out of the box | Its own setting, read from |
+| --- | --- | --- | --- | --- |
+| macOS | inset title bar | none: the system's traffic lights | left | |
+| Windows | frameless | Windows' manner, the bar's full height | right: minimize, maximize, close | |
+| A tiling window manager | frameless | none | | |
+| GNOME and its remixes (Ubuntu, Pop, Zorin) | frameless | GNOME's | right: close | `org.gnome.desktop.wm.preferences button-layout`, through the portal, else gsettings |
+| Budgie | frameless | GNOME's, plain | right: minimize, maximize, close | the same key |
+| Pantheon | frameless | GNOME's, plain | close left, maximize right | the same key |
+| Unity | frameless | GNOME's, plain | left: close, minimize, maximize | the same key |
+| KDE Plasma | frameless | KDE's | right: minimize, maximize, close | kwinrc `ButtonsOnLeft`, `ButtonsOnRight` |
+| LXQt | frameless | KDE's | right: minimize, maximize, close | Openbox's `lxqt-rc.xml` on X11, or kwinrc where KWin runs |
+| Deepin | frameless | KDE's | right: minimize, maximize, close | |
+| Cinnamon | frameless | GNOME's, plain | right: minimize, maximize, close | `org.cinnamon.desktop.wm.preferences button-layout` |
+| MATE | frameless | GNOME's, plain | right: minimize, maximize, close | `org.mate.Marco.general button-layout` |
+| Xfce | frameless | GNOME's, plain | right: minimize, maximize, close | xfwm4's xfconf file, `button_layout` |
+| LXDE, Openbox | frameless | GNOME's, plain | right: minimize, maximize, close | Openbox's `lxde-rc.xml` or `rc.xml`, `titleLayout` |
+| COSMIC | frameless | GNOME's, plain | right: minimize, maximize, close | its toolkit's `show_minimize`, `show_maximize` |
+| labwc | frameless | GNOME's, plain | right: minimize, maximize, close | `rc.xml`, `<titlebar><layout>` |
+| Wayfire | frameless | GNOME's, plain | right: minimize, maximize, close | `wayfire.ini`, `[decoration] button_order` |
+| Another stacking window manager, or none known | frameless | GNOME's, plain | right: minimize, maximize, close | where its window manager is one above, there |
+| An X11 window manager that can't move a window on its asking | the window manager's | none | | |
+| KWin, Xfwm4, Marco or Muffin with a title bar double-click set to other than maximize | the window manager's | none | | kwinrc `TitlebarDoubleClickCommand`, xfwm4's `double_click_action`, `action-double-click-titlebar` |
 
+- **The system's frame stays in two cases only.** First, an X11 window
+  manager that can't move a window on its asking: one that doesn't list
+  `_NET_WM_MOVERESIZE` in `_NET_SUPPORTED`, or one from before EWMH, known by
+  its marks on the root window (Motif's `_MOTIF_WM_INFO`, GNOME 1's
+  `_WIN_SUPPORTING_WM_CHECK`, Window Maker's, CDE's). A frameless window is
+  moved and resized by asking the window manager to do it, and such a one
+  wouldn't, so the window could be neither dragged nor resized. Every Wayland
+  compositor does it (`xdg_toplevel.move` and `resize` are xdg-shell's own),
+  and so do all the X11 window managers named above. A display with no
+  window manager and no such marks stays frameless: either there is none,
+  with no frame to draw, or it is one like twm, which frames every window
+  whatever it asks, so the window still moves by that frame. Second, a
+  window manager whose title bar double-click the person set to something
+  other than maximize (shade, minimize, lower, nothing): Chromium's frameless
+  bar can only maximize, by GTK's setting, which KDE doesn't sync, so the
+  window manager's frame keeps the person's choice. It is read where the
+  window manager keeps it: KWin's kwinrc, Xfwm4's xfconf file, Marco's and
+  Muffin's gsettings keys. GNOME's key is the one Chromium follows.
+  Openbox's, labwc's, Wayfire's and COSMIC's aren't read, and their default
+  (maximize) stands.
+- **What the frame gave, the strip gives:** its empty stretches drag the
+  window, through the window manager; a double-click there maximizes and
+  restores (Chromium does it, by GTK's titlebar setting); the window resizes
+  from a few pixels inside its edges (Electron's frameless border); and the
+  buttons are real, named buttons reached by keyboard. The window manager's
+  right-click window menu isn't there yet: Electron doesn't ask for it on
+  Linux.
+- **The buttons go where the desktop puts them:** its own setting where it
+  can be read, its own default where it can't, never a generic set. The
+  setting is read where the window manager that runs keeps it, so Xfce on
+  Mutter reads GNOME's key, LXQt on KWin kwinrc. A setting kept by a desktop
+  other than the one running (GNOME's key on Xfce, which the portal also
+  answers) is passed over. The first window waits for these quick reads.
 - **The frame is decided as the first window opens,** since Electron fixes
-  it then. Slow reads don't hold the launch: what they found last time is
-  cached in the profile (`window-chrome.json`) for the same desktop, so on
-  X11 the first launch may go by the environment alone and the second is
-  right.
+  it then, so the first window waits for what it hangs on: on X11 xprop's
+  word on the window manager, past the launch's usual wait if need be, up to
+  xprop's own timeouts (a live display answers at once); and the
+  double-click setting beside the button layout. Where xprop can't answer
+  (not installed, or the display not answering), what was cached of this
+  desktop decides, and else the desktop's name: every stacking window
+  manager it names moves a frameless window. The slow reads (GNOME
+  Shell's version, KDE's decoration) don't hold the launch: what they found
+  last time is cached in the profile (`window-chrome.json`) for the same
+  desktop, and what X11 says now replaces what was cached of it.
 - **The buttons are Althar's own drawing** (`WindowButtons`), in each
   desktop's manner, never its artwork. Each is a real, named button reached
   by keyboard, its glyph always shown.
@@ -548,7 +607,8 @@ test holds the list.
   Althar keeps its own and says why.
 
 **Not built yet:** Windows' own caption buttons (`titleBarOverlay`), left
-until the build is checked on a real Windows machine.
+until the build is checked on a real Windows machine. The window manager's
+right-click menu on the strip, on Linux.
 
 ## Motion
 
@@ -580,6 +640,17 @@ way of what is done often. The tokens and their values are in
   a task, anything done by key, and anything that repeats.
 - **Reduced motion:** nothing travels, grows or slides; lists only fade.
 
+## Undo from a task message
+
+A delivered task message with a complete checkpoint offers **Undo from here**. The person confirms the prompt and the scope: that message and everything after it leave the conversation, and the files touched by those turns return to their contents before the first turn. Prompts and attachments return beside any unsent draft. Messages delivered together are one turn, so the action belongs to the first message of that batch.
+
+- File boundaries are captured immediately before delivery and after the turn ends, including shell writes, untracked files and commits. Private Git refs keep those trees without moving HEAD, a branch or the person's index. Ignored files and external actions are outside this boundary. Existing commits stay in history; restored contents appear as local changes.
+- Undo needs the task's own worktrees, with its plan, helpers and background commands stopped. Local checkouts, shared folders and turns without complete checkpoints do not support it. All workspaces are checked before any file changes. Overlapping later edits, affected staged files, a moved folder or branch, links and submodules refuse the entire undo. Unrelated manual edits, including those between turns, stay.
+- A prepared recovery journal and private recovery refs precede file writes. Conversation changes, the command receipt and the completed journal commit together. An interrupted attempt restores its saved originals before another session starts; recovery preserves unexpected later manual edits and stays pending for an explicit retry.
+- Undone items and deliveries remain as audit records, omitted from the visible transcript, search and future agent context. The idle provider session ends; the next message starts a fresh session with the retained transcript. A conversation version makes every window discard removed pages and streamed content. Retrying a successful command reads its original receipt.
+
+[The T3 and Paradev research](../research/chat-turn-undo.md) informed the worktree boundary, selective file checks and prompt restoration. Althar refuses a conflicting restore as a whole, so the conversation and files cannot silently diverge through a partial undo. There is no redo control in this slice; recovery refs support interrupted operations rather than a second conversation branch.
+
 ## Changes
 
 - 8 Nov 2026: written from the ADRs under Replaces.
@@ -588,3 +659,4 @@ way of what is done often. The tokens and their values are in
 - 10 Nov 2026: Scratch is a shelf of its own, by each chat's latest exchange, with Clear; the board card says one sentence across a task's changes with a mark for each; Shipped, Merged and Helper rows in the thread, a helper's opening in place to its work, and helpers' lanes on the Graph face; the plan card's preset picks another; Settings edits presets ([tasks](tasks.md#asides)).
 - 11 Nov 2026: asides over the coordinator's conversation replace Scratch's chip beside it; the chip stays with the board alone ([tasks](tasks.md#asides)).
 - 13 Nov 2026: the cache is patched by what the person does, at once, and held until a read confirms it ([foundations § The UI is instant](foundations.md#the-ui-is-instant)); it used to say the cache was never patched.
+- 14 Nov 2026: one bar on every Linux desktop but a tiling one, KDE and the other frame-drawing desktops included, with the buttons where each desktop puts them; the system's frame only where an X11 window manager can't move a frameless window ([The window on each desktop](#the-window-on-each-desktop)).

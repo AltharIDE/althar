@@ -237,5 +237,12 @@ describe('What merging a change needs, as one list (DEV-204)', () => {
     // Kept before Althar read them, or one the host doesn't read: no list.
     assert.isUndefined(changeOf({ ...kept, rules: undefined }, 'github', true)?.needs)
     assert.isUndefined(changeOf({ ...kept, rules: { needs: 'nonsense' } }, 'github', true)?.needs)
+    for (const canBypassQueue of [true, false]) {
+      assert.strictEqual(changeOf({ ...kept, rules: { ...kept.rules, canBypassQueue } }, 'github', true)?.canBypassQueue, canBypassQueue)
+    }
+    assert.isUndefined(changeOf(kept, 'github', true)?.canBypassQueue)
+    assert.isUndefined(
+      changeOf({ ...kept, state: 'merged', rules: { ...kept.rules, canBypassQueue: true } }, 'github', true)?.canBypassQueue,
+    )
   })
 })

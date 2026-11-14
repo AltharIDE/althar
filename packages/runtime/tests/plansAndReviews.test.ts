@@ -7,7 +7,7 @@ import { SqlClient } from 'effect/sql'
 import { Instance } from '../src/Instance'
 import { plansAndReviewsOf, roundsOutNow, newProjectDefaultsOf, setPlansAndReviews, setNewProjectDefaults } from '../src/plansAndReviews'
 import { Plans } from '../src/Plans'
-import { afterMergeReviewOf, Policies } from '../src/Policies'
+import { accountsOf, afterMergeReviewOf, Policies } from '../src/Policies'
 import { Projects } from '../src/Projects'
 import { Queries } from '../src/Queries'
 import * as Runtime from '../src/Runtime'
@@ -169,7 +169,7 @@ describe('the rules a new project starts with', () => {
         [
           made.source,
           made.usageLimit,
-          made.accounts?.rotate,
+          accountsOf(made).rotate,
           made.end,
           made.pushCommits,
           made.postScreenshots,

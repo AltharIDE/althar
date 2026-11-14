@@ -78,6 +78,27 @@ const contexts = (...nodes: ReadonlyArray<Record<string, unknown>>) => ({
 })
 
 describe('What GitHub needs before a pull request merges', () => {
+  it.effect('offers queue bypass only when GitHub explicitly allows it for this viewer', () =>
+    Effect.gen(function* () {
+      for (const allowed of [true, false, undefined]) {
+        const { host, sent } = github([
+          [
+            'POST',
+            `${API}/graphql`,
+            answered(rules({ isMergeQueueEnabled: true, ...(allowed === undefined ? {} : { viewerCanMergeAsAdmin: allowed }) })),
+          ],
+          ['GET', `${REPO}/rules/branches/main`, { json: [] }],
+        ])
+        assert.strictEqual((yield* host.mergeRules!(repository, change)).canBypassQueue, allowed)
+        assert.include(JSON.stringify(sent[0]?.body), 'viewerCanMergeAsAdmin')
+      }
+      const { host } = github([
+        ['POST', `${API}/graphql`, answered(rules({ viewerCanMergeAsAdmin: true }))],
+        ['GET', `${REPO}/rules/branches/main`, { json: [] }],
+      ])
+      assert.isUndefined((yield* host.mergeRules!(repository, change)).canBypassQueue)
+    }),
+  )
   it.effect('a missing approval, a required check still running and a branch behind its target, each said', () =>
     Effect.gen(function* () {
       const { host, sent } = github([
