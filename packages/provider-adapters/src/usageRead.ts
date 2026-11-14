@@ -1,7 +1,6 @@
 import { join } from 'node:path'
 
 import { type KeychainRead, readClaudeKeychainField, readTokenField, type TokenLocation } from './credentialStore'
-import type { AgentId } from './registry'
 import type { AccountUsage } from './usage'
 import { allowedEndpoints, type EndpointSource, endpointProblem, type TokenSource, type UsagePair, usagePairs } from './usageSources'
 

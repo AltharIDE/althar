@@ -320,6 +320,7 @@ export class AgentCatalog extends Context.Service<
         remove: (id) =>
           write(
             Effect.gen(function* () {
+              if (!saved.has(id)) return revision
               yield* inactive(id)
               const next = yield* sql.withTransaction(
                 Effect.gen(function* () {

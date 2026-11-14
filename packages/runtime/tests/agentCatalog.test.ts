@@ -76,6 +76,8 @@ describe('the person’s saved ACP connections', () => {
     Effect.gen(function* () {
       const catalog = yield* AgentCatalog
       const agents = yield* Agents
+      yield* catalog.remove('claude-code')
+      assert.strictEqual((yield* agents.get('claude-code')).definition.id, 'claude-code')
       const spec = connection()
       const revision = yield* catalog.save(spec)
       const read = yield* catalog.read()
