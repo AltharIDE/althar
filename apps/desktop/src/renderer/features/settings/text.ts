@@ -57,7 +57,7 @@ export const text = {
   pauseAllNote: 'Runs under way finish.',
   /* Tasks. */
   sendMidTurnTitle: 'When I send while an agent is working',
-  sendMidTurnNote: 'Enter does this one; the other is one click, or ⌘Enter, away.',
+  sendMidTurnNote: 'Enter does this one; the other is a click or ⌘Enter away.',
   sendMidTurnQueue: 'Queue it',
   sendMidTurnSteer: 'Steer the agent',
   /* Reviews and pull requests. */
