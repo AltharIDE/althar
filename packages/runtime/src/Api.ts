@@ -90,9 +90,11 @@ import {
   pushesCommits,
   postsScreenshots,
   ruleSetOf,
+  trustedBotsOf,
   usageLimitOf,
   afterMergeReviewOf,
 } from './Policies'
+import { botLogin, botName } from './reviewerBots'
 import { Models } from './Models'
 import { Installs } from './Installs'
 import { Permissions } from './Permissions'
@@ -566,13 +568,23 @@ export const handlers = Api.toLayer(
         }
         // How each kind of ask and refusal went lately, so the person can drop one that mostly gets worked around (ADR-071).
         const tally = yield* tallyOf(projectId).pipe(Effect.provideService(SqlClient.SqlClient, sql))
-        return { ...rulesFields(projectId, rules), revision, conventions, sandbox, tally }
+        // The review and triage bots that spoke on its tasks' pull requests, the latest first, but those it trusts (code-hosts § Review and triage bots).
+        const spoke = yield* sql<{ login: string | null; name: string | null }>`
+          SELECT json_extract(payload, '$.login') AS login, json_extract(payload, '$.name') AS name FROM observations
+          WHERE project_id = ${projectId} AND kind = 'bot_spoke' ORDER BY observed_at DESC, rowid DESC`
+        const trusted = new Set(trustedBotsOf(rules).map(botLogin))
+        const suggested = new Map<string, { readonly login: string; readonly name: string }>()
+        for (const one of spoke)
+          if (one.login !== null && !trusted.has(one.login) && !suggested.has(one.login))
+            suggested.set(one.login, { login: one.login, name: one.name ?? botName(one.login) })
+        const suggestedBots = [...suggested.values()]
+        return { ...rulesFields(projectId, rules), suggestedBots, revision, conventions, sandbox, tally }
       })
 
     const rulesFields = (
       projectId: string,
       rules: ProjectRules,
-    ): Omit<ProjectRulesView, 'conventions' | 'revision' | 'sandbox' | 'tally'> => {
+    ): Omit<ProjectRulesView, 'conventions' | 'revision' | 'sandbox' | 'tally' | 'suggestedBots'> => {
       const set = ruleSetOf(rules)
       const accounts = accountsOf(rules)
       return {
@@ -588,6 +600,7 @@ export const handlers = Api.toLayer(
         resolveConflicts: resolvesConflicts(rules),
         pushCommits: pushesCommits(rules),
         postScreenshots: postsScreenshots(rules),
+        trustedBots: trustedBotsOf(rules).map((login) => ({ login, name: botName(login) })),
         leadsReachWeb: rules.leadsReachWeb ?? true,
         usageLimit: usageLimitOf(rules),
         rotateAccounts: accounts.rotate,
@@ -2037,6 +2050,25 @@ export const handlers = Api.toLayer(
                 Effect.provideService(PullRequestScreenshots, screenshots),
               )
               return yield* rulesView(projectId, kept)
+            }),
+          ),
+        ),
+      TrustBot: ({ commandId, taskId, login }) =>
+        once(
+          commandId,
+          api(
+            Effect.gen(function* () {
+              const [task] = yield* sql<{ projectId: string }>`SELECT project_id FROM tasks WHERE id = ${taskId}`
+              if (task === undefined) return yield* new NotFound({ kind: 'task', id: taskId })
+              const { rules } = yield* policies.current(task.projectId as ProjectId)
+              const trusted = trustedBotsOf(rules)
+              if (trusted.map(botLogin).includes(botLogin(login))) return
+              yield* applyRules(task.projectId, { trustedBots: [...trusted, login] }, instance.personId).pipe(
+                Effect.provideService(Policies, policies),
+                Effect.provideService(Permissions, permissions),
+                Effect.provideService(Changes, pullRequests),
+                Effect.provideService(PullRequestScreenshots, screenshots),
+              )
             }),
           ),
         ),

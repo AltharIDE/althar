@@ -32,6 +32,7 @@ import {
   McpServer,
 } from '@althar/ui'
 
+import { messageOf } from '../data/client'
 import { CommandOutput } from './CommandOutput'
 import { SettingChangeOf } from './SettingChangeOf'
 import { shotsOf } from './evidence'
@@ -126,6 +127,14 @@ export const text = {
   failing: (names: ReadonlyArray<string>) => (names.length > 2 ? `${names.length} failed` : `Failed: ${names.join(', ')}`),
   outsider: (from: string) => `Not passed to the lead: ${from} can’t write to the repository.`,
   passOn: 'Pass it on',
+  /** A review or triage bot's words (code-hosts § Review and triage bots): passed to the lead as findings where the project trusts it, else not, with a way to. */
+  bot: {
+    heard: (name: string) => `Passed to the lead as findings from ${name}, to weigh.`,
+    quiet: (name: string) => `The lead doesn’t hear ${name}: this project doesn’t trust it yet.`,
+    trust: (name: string) => `Trust ${name}`,
+    trusting: 'Trusting…',
+    trusted: (name: string) => `Trusted. The lead hears what ${name} says from now on.`,
+  },
   /** Althar setting up a repository's worktree: installing the dependencies its lockfile names, or the setup kept for it. */
   setup: {
     running: (setup: SetupContent) => (setup.kept ? `Setting up ${setup.repository}…` : `Installing dependencies in ${setup.repository}…`),
@@ -422,6 +431,7 @@ function ArrivalView({
   at,
   count,
   onPassOn,
+  onTrustBot,
   'data-item': item,
 }: {
   'data-item': string
@@ -429,19 +439,24 @@ function ArrivalView({
   at: string
   count: number
   onPassOn?: (words: string) => void
+  onTrustBot?: (login: string) => Promise<void>
 }) {
   const where =
     arrival.path === null ? arrival.where : `${arrival.where} · ${arrival.path}${arrival.line === null ? '' : `:${arrival.line}`}`
   const verb = heardVerb(arrival)
   const body = arrival.kind === 'checks' ? (arrival.failing.length > 0 ? text.failing(arrival.failing) : null) : arrival.text
   const from = arrival.from ?? ''
-  const foot = arrival.outsider && (
+  const foot = arrival.outsider ? (
     <>
       <span>{text.outsider(from)}</span>
       {onPassOn !== undefined && body !== null && body !== '' && (
         <LinkButton onClick={() => onPassOn(text.passed(`${from} ${verb} ${where}`, body))}>{text.passOn}</LinkButton>
       )}
     </>
+  ) : arrival.bot === undefined ? (
+    false
+  ) : (
+    <BotFoot bot={arrival.bot} {...(onTrustBot === undefined ? {} : { onTrustBot })} />
   )
   return (
     <Arrived
@@ -466,6 +481,36 @@ function ArrivalView({
         />
       )}
     </Arrived>
+  )
+}
+
+/**
+ * Under a review or triage bot's words (code-hosts § Review and triage bots): that its lead heard them as
+ * findings, where the project trusts it; else that it doesn't, once, with a
+ * way to trust it from here, which says how it went in place.
+ */
+function BotFoot({ bot, onTrustBot }: { bot: NonNullable<ArrivalContent['bot']>; onTrustBot?: (login: string) => Promise<void> }) {
+  const [trust, setTrust] = useState<'idle' | 'trusting' | 'trusted' | { readonly failed: string }>('idle')
+  if (bot.trusted) return <span>{text.bot.heard(bot.name)}</span>
+  if (trust === 'trusted') return <span>{text.bot.trusted(bot.name)}</span>
+  return (
+    <>
+      <span>{typeof trust === 'object' ? trust.failed : text.bot.quiet(bot.name)}</span>
+      {onTrustBot !== undefined && (
+        <LinkButton
+          disabled={trust === 'trusting'}
+          onClick={() => {
+            setTrust('trusting')
+            onTrustBot(bot.login).then(
+              () => setTrust('trusted'),
+              (failure: unknown) => setTrust({ failed: messageOf(failure) }),
+            )
+          }}
+        >
+          {trust === 'trusting' ? text.bot.trusting : text.bot.trust(bot.name)}
+        </LinkButton>
+      )}
+    </>
   )
 }
 
@@ -539,6 +584,7 @@ export function ThreadBlocks({
   onSignIn,
   onCompact,
   onPassOn,
+  onTrustBot,
   onAnswerQuestion,
   focusQuestion,
   project,
@@ -563,6 +609,8 @@ export function ThreadBlocks({
   signed?: { readonly voice: string; readonly mark: ReactNode }
   /** Sends what someone outside said to the lead, in the person's name. */
   onPassOn?: (words: string) => void
+  /** Trusts a review or triage bot in the task's project, from where it spoke (code-hosts § Review and triage bots). */
+  onTrustBot?: (login: string) => Promise<void>
   /** Answers an agent's question; what went wrong, in words, or null. Without it, a question can't be answered here. */
   onAnswerQuestion?: (attentionId: string, answers: Readonly<Record<string, FieldAnswer>>) => Promise<string | null>
   /** The question waiting as the thread opened, by its call: the person was brought here to answer it, so it takes focus. */
@@ -655,6 +703,7 @@ export function ThreadBlocks({
             at={block.at}
             count={block.count}
             {...(onPassOn === undefined ? {} : { onPassOn })}
+            {...(onTrustBot === undefined ? {} : { onTrustBot })}
           />
         )
       case 'divider':

@@ -1486,6 +1486,7 @@ export function TaskView({
                       {...(busy || stuckOpen ? {} : { onTryAgain: () => void model.tryAgain(), onCompact: () => void model.compact() })}
                       {...(onSignIn === undefined || stuckOpen ? {} : { onSignIn })}
                       onPassOn={(words) => void model.send(words)}
+                      onTrustBot={(login) => client.trustBot(snapshot.task.id, login)}
                       {...(onOpenTask === undefined ? {} : { onOpenTask })}
                       {...(reading === null
                         ? {}

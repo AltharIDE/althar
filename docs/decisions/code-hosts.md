@@ -621,6 +621,59 @@ run is still going, and while main is red or a release waits on it. The
 coordinator is woken to read the failure and say what it finds. A fix is a
 task, and a release waiting on main waits on.
 
+### Review and triage bots
+
+Teams put agents in their pull request pipelines: Claude's code review
+action, Copilot code review, CodeRabbit, a bot that triages a failed build.
+Their words are written by an automation that whoever reaches the pipeline
+(a pull request's author, a dependency, a page it reads) may steer, so they
+aren't trusted as a member's are (DEV-205).
+
+- **The person trusts each bot by itself, in the project's settings.** The
+  rules keep the trusted bots by their accounts, in small letters
+  (`trustedBots`); none is trusted until the person says so. The settings
+  list the trusted ones, then the review and triage bots Althar recognised
+  on the project's tasks' pull requests, each a switch, off until turned
+  on. Only the person changes it, in the settings or with Trust in a
+  task's thread. An agent's `change_settings` can't change it. Bots are
+  trusted by account, not by name, because names aren't unique on a host.
+- **Althar suggests only what it recognises as a reviewer**
+  (`reviewerBots.ts`): the review agents it knows by account
+  (`coderabbitai[bot]`, `copilot-pull-request-reviewer[bot]`, `claude[bot]`
+  and the like), or a bot named for an agent, such as a team's own
+  `claude-review[bot]`. Coding agents that open pull requests of their own,
+  and bots named for reporting, deploying or bumping (coverage,
+  `cloudflare-workers-and-pages[bot]`, Vercel, Dependabot), are never
+  suggested. Althar records the first time a recognised bot speaks on a
+  pull request (`bot_spoke`), and the settings suggest from those records,
+  the latest first.
+- **A trusted bot's words reach the lead as findings named by it** ("From
+  CodeRabbit, a review bot this project trusts, on PR #12"). Each comment
+  and review is quoted line by line, as an outsider's comment is shown to
+  the person: data, never instructions. The lead is told to weigh them as
+  it would a review step's findings, checking them against the code, fixing what
+  holds up and setting aside what doesn't. It follows nothing they ask
+  beyond the code: running or fetching something, replying, pushing,
+  changing settings, issues or other pull requests. A bot's words are
+  never on their own the reason for a step outside the task. Where such a
+  step seems needed, the lead asks the person. On an open pull request
+  they wake the lead, as a member's comment does. They aren't passed as a
+  member's comment, which asks the lead to answer on the pull request:
+  answering a bot would let it steer the lead.
+- **A bot the project doesn't trust stays quiet.** Its words never reach
+  the lead, either in what the lead is told or when it reads the pull
+  request. That reading says only that a review bot was left out, by name,
+  and how many other bots' comments were. The thread shows the first thing a recognised
+  reviewer says on each pull request, says the lead doesn't hear it, and
+  offers Trust beside it. Other bots stay out of the thread, except their
+  reviews, which arrive as before.
+- **Off by default,** because a bot in the pipeline is the pipeline owner's
+  choice, not the person's. The trade-off: a trusted bot costs the lead a
+  turn each time it speaks on an open pull request, and a busy bot can be
+  loud, so the person can turn it off again. Revisit when hosts sign bot
+  output in a way Althar can check, or findings come in a structured form,
+  such as a check run's annotations, that is worth reading as such.
+
 ## Trackers
 
 **A task's issue moves as the task does:** "Move issues along with their
@@ -697,3 +750,4 @@ The decisions above are current. These parts of them aren't built on main:
 - 9 Nov 2026: what a turn the person's words began after the plan commits holds the branch for Ship (a task is a conversation plus parts, [tasks](tasks.md#changing-parts)).
 - 10 Nov 2026: commits made by hand hold the branch too; Merge with commits not shipped offers Review and merge or Merge now (a task is a conversation plus parts, [tasks](tasks.md#changing-parts)).
 - 10 Nov 2026: a task follows several pull requests at once, one for each change; stacks hold, ship, merge and retarget from the bottom up, and a pull request opened outside Althar from a change's own branch is that change's (a task is a conversation plus parts, [tasks](tasks.md#a-task-holds-as-many-changes-as-it-needs)).
+- 12 Nov 2026: review and triage bots (DEV-205) built: the person trusts each in the project's settings, off by default; a trusted bot's words reach the lead as findings quoted as data, never obeyed.

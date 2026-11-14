@@ -21,6 +21,7 @@ import {
   type Product,
   products,
   type Repository,
+  type Review,
   parseRemote,
 } from '@althar/connectors'
 import { knownModelName, PushRequestItem, standsFor } from '@althar/contracts'
@@ -122,6 +123,7 @@ import { onlyBase, ownCommits } from './baseOnly'
 import { outward, reconcileOutward } from './outward'
 import {
   answerHint,
+  botFindingsForLead,
   baseChecksForLead,
   bodyOf,
   checksForLead,
@@ -145,6 +147,7 @@ import {
   sendBackHint,
   nameOf,
   outsidersLine,
+  quietBotsLine,
   queuedNote,
   reviewForLead,
   reviewLine,
@@ -164,7 +167,8 @@ import { type Answers, answersOf, followUpBody, followUpWords } from './followUp
 import { indexTask } from './Search'
 import { IssueChanges } from './IssueChanges'
 import { FastLane } from './fastLane'
-import { Policies, pushesCommits, resolvesConflictsFor, ruleSetOf } from './Policies'
+import { Policies, pushesCommits, resolvesConflictsFor, ruleSetOf, trustedBotsOf } from './Policies'
+import { reviewerBot, trusts } from './reviewerBots'
 import { guardPush } from './repositoryGuard'
 import { pushDetailOf, pushFailureOf } from './pushFailure'
 import { Sessions } from './Sessions'
@@ -4777,14 +4781,36 @@ export class Changes extends Context.Service<
           }
           const activity = yield* host.activity(repository, snapshot.number, null)
           const replies = yield* repliesOf(link.id)
-          // What anyone else said isn't read to the lead: on a public repository, anyone can comment.
-          const reviews = activity.reviews.filter((review) => voiceOf(review, account, replies) !== 'outsider')
+          const trusted = trustedBotsOf((yield* (yield* Policies).current(link.projectId)).rules)
+          // What anyone else said isn't read to the lead: on a public repository, anyone can comment. Nor what a bot the project
+          // doesn't trust said; a trusted one's words are its findings, named by it and framed as data (code-hosts § Review and triage bots).
+          const quiet = new Set<string>()
+          let otherBots = 0
+          const heardBots = new Map<string, { readonly name: string; readonly said: Array<Comment | Review> }>()
+          const sorted = (said: Comment | Review, voice: ReturnType<typeof voiceOf>): 'say' | 'bot' | 'out' => {
+            if (voice === 'outsider') return 'out'
+            if (voice !== 'bot') return 'say'
+            const recognised = reviewerBot(said.author.login)
+            if (!trusts(trusted, said.author.login)) {
+              if (recognised === null) otherBots += 1
+              else quiet.add(recognised.name)
+              return 'bot'
+            }
+            const name = recognised?.name ?? said.author.login
+            const heard = heardBots.get(said.author.login) ?? { name, said: [] }
+            heard.said.push(said)
+            heardBots.set(said.author.login, heard)
+            return 'bot'
+          }
+          const reviews = activity.reviews.filter((review) => sorted(review, voiceOf(review, account, replies)) === 'say')
+          let outsiders = activity.reviews.filter((review) => voiceOf(review, account, replies) === 'outsider').length
           const comments = activity.comments.flatMap((comment) => {
             const voice = voiceOf(comment, account, replies)
-            if (voice === 'outsider') return []
+            const where = sorted(comment, voice)
+            if (where === 'out') outsiders += 1
+            if (where !== 'say') return []
             return [{ at: comment.at, text: commentLine(comment, voice === 'althar' ? 'you, through Althar' : undefined) }]
           })
-          const outsiders = activity.reviews.length - reviews.length + activity.comments.length - comments.length
           const said = [...reviews.map((review) => ({ at: review.at, text: reviewLine(review) })), ...comments]
             .toSorted((a, b) => (a.at < b.at ? -1 : 1))
             .slice(-COMMENTS_SHOWN)
@@ -4793,7 +4819,12 @@ export class Changes extends Context.Service<
               ? 'Nobody has said anything on it.'
               : `What people said, oldest first:\n${said.map((entry) => entry.text).join('\n')}`,
           )
+          for (const bot of heardBots.values())
+            lines.push(
+              botFindingsForLead(bot.name, nameOf(snapshot), bot.said.toSorted((a, b) => (a.at < b.at ? -1 : 1)).slice(-COMMENTS_SHOWN)),
+            )
           if (outsiders > 0) lines.push(outsidersLine(outsiders))
+          if (quiet.size > 0 || otherBots > 0) lines.push(quietBotsLine([...quiet], otherBots))
           return lines.join('\n\n')
         })
 
@@ -5420,11 +5451,36 @@ export class Changes extends Context.Service<
           }
           const activity = yield* host.activity(repository, before.number, link.cursor)
           const replies = activity.comments.length === 0 ? new Set<string>() : yield* repliesOf(link.id)
-          // Only new words from the person or members, or a queue return, wake a stopped lead.
-          // Approvals, bots, outsiders and state/check updates alone leave a merged task asleep.
+          const trusted = trustedBotsOf((yield* (yield* Policies).current(link.projectId)).rules)
+          // What each bot the project trusts said that its lead hears, by its account, as findings framed as data (code-hosts § Review and triage bots).
+          const fromBots = new Map<string, { readonly name: string; readonly said: Array<Comment | Review> }>()
+          /*
+           * How a bot that spoke is heard (code-hosts § Review and triage bots): trusted, its words go to the lead as findings; a review or triage agent
+           * Althar recognises but the project doesn't trust stays quiet, and the thread says once, per pull request, that it
+           * spoke, with a way to trust it, where it is suggested in the project's settings too; any other bot stays quiet.
+           */
+          const botOf = (said: Comment | Review) =>
+            Effect.gen(function* () {
+              const login = said.author.login.trim().toLowerCase()
+              const recognised = reviewerBot(login)
+              const trustedNow = trusts(trusted, login)
+              const name = recognised?.name ?? said.author.login
+              const first = recognised === null ? false : yield* heard(link, 'bot_spoke', `bot:${login}`, { login, name: recognised.name })
+              return { login, name, trusted: trustedNow, recognised: recognised !== null, first }
+            })
+          const fromBot = (bot: { readonly login: string; readonly name: string }, said: Comment | Review) => {
+            const heard = fromBots.get(bot.login) ?? { name: bot.name, said: [] }
+            heard.said.push(said)
+            fromBots.set(bot.login, heard)
+          }
+          // Only new words from the person, members or a trusted bot, or a queue return, wake a stopped lead.
+          // Approvals, other bots, outsiders and state/check updates alone leave a merged task asleep.
           let addressed = false
           for (const review of activity.reviews) {
             const voice = voiceOf(review, account, replies)
+            const bot = voice === 'bot' ? yield* botOf(review) : null
+            // A trusted bot's bare approval asks nothing: it isn't passed on, and its card doesn't say it was.
+            const passes = bot?.trusted === true && (review.verdict !== 'approved' || review.body.trim() !== '')
             if (
               voice === 'althar' ||
               !(yield* heard(link, 'review', `review:${review.id}`, {
@@ -5443,15 +5499,22 @@ export class Changes extends Context.Service<
               text: review.body,
               url: review.url,
               outsider: voice === 'outsider',
+              ...(bot === null || !(passes || (!bot.trusted && bot.first))
+                ? {}
+                : { bot: { login: bot.login, name: bot.name, trusted: bot.trusted } }),
             })
             if ((voice === 'person' || voice === 'member') && review.verdict !== 'approved') {
               addressed = true
               forLead.push(reviewForLead(review, name))
             }
+            if (bot !== null && passes) fromBot(bot, review)
           }
           for (const comment of activity.comments) {
             const voice = voiceOf(comment, account, replies)
-            if (voice === 'althar' || voice === 'bot') continue
+            if (voice === 'althar') continue
+            const bot = voice === 'bot' ? yield* botOf(comment) : null
+            // A bot the project doesn't trust stays quiet; one Althar recognises as a reviewer is shown once, to be trusted.
+            if (bot !== null && !bot.trusted && !bot.first) continue
             if (!(yield* heard(link, 'comment', `comment:${comment.id}`, { author: comment.author.login }))) continue
             happened = true
             yield* arrive(link, {
@@ -5463,13 +5526,20 @@ export class Changes extends Context.Service<
               line: comment.line,
               url: comment.url,
               outsider: voice === 'outsider',
+              ...(bot === null ? {} : { bot: { login: bot.login, name: bot.name, trusted: bot.trusted } }),
             })
             if (voice === 'person' || voice === 'member') {
               addressed = true
               forLead.push(commentForLead(comment, name))
             }
+            if (bot?.trusted === true) fromBot(bot, comment)
           }
           if (forLead.some((part) => !part.startsWith('Checks failed'))) forLead.push(answerHint)
+          // A trusted bot's findings come after the hint for what people said: they are weighed, not answered as asked.
+          for (const bot of fromBots.values()) {
+            if (now.state === 'open') addressed = true
+            forLead.push(botFindingsForLead(bot.name, name, bot.said))
+          }
           // Out of its merge queue as it merged, though read open still a moment, it is in it until a read says merged. Out of it
           // otherwise, open, the queue took it out unmerged: it is the person's to merge again. Where the host didn't say, it is
           // where it was. Put in from outside Althar, it is in it as one Althar put there, said once.

@@ -224,7 +224,13 @@ export interface FakeControls {
     body: string,
     options?: { readonly path?: string; readonly line?: number; readonly bot?: boolean; readonly member?: boolean },
   ): Comment
-  reviewAs(number: number, author: string, verdict: Verdict, body?: string, options?: { readonly member?: boolean }): Review
+  reviewAs(
+    number: number,
+    author: string,
+    verdict: Verdict,
+    body?: string,
+    options?: { readonly member?: boolean; readonly bot?: boolean },
+  ): Review
   setChecks(number: number, checks: ReadonlyArray<FakeCheck>): void
   /** Someone merges a change on the host itself. */
   mergeByHand(number: number): void
@@ -1275,7 +1281,7 @@ export const makeFakeService = (options: FakeServiceOptions = {}): FakeService =
     reviewAs: (number, author, verdict, body = '', reviewOptions = {}) => {
       const review: Review = {
         id: nextId(),
-        author: person(author),
+        author: person(author, reviewOptions.bot === true),
         member: reviewOptions.member ?? true,
         verdict,
         body,

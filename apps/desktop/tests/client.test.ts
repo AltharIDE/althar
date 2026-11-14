@@ -212,6 +212,7 @@ describe('the client', () => {
         Api.of({
           Status: () => Effect.die('unused'),
           GetFileDiff: () => Effect.die('unused'),
+          TrustBot: () => Effect.die('unused'),
           GetTaskFindings: () => Effect.die('unused'),
           GetBoard: () => Effect.die('unused'),
           GetOlderSettled: () => Effect.die('unused'),

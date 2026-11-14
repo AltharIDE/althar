@@ -642,6 +642,7 @@ describe('the API', () => {
               KeepTaskForLater: () => Effect.void,
               SettledWithOnePress: () => Effect.void,
               RenameTask: () => Effect.void,
+              TrustBot: () => Effect.void,
               ReopenTask: () => Effect.void,
               // What was sent, said back in the error, so the test reads what crossed the port.
               Send: ({ body, images }) =>

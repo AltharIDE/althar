@@ -6,6 +6,7 @@ import { Changes } from './Changes'
 import { Permissions } from './Permissions'
 import { accountsOf, Policies, postsScreenshots, pushesCommits, resolvesConflicts, type RulesChange } from './Policies'
 import { PullRequestScreenshots } from './PullRequestScreenshots'
+import { botLogin } from './reviewerBots'
 
 /** A change to a project's rules as the rules screen sends it: the rules, and the accounts its work runs on. */
 export type RulesSent = RulesChange & {
@@ -25,7 +26,12 @@ export type RulesSent = RulesChange & {
 export const applyRules = (projectId: string, sent: RulesSent, actorId: ActorId, expectedRevision?: number) =>
   Effect.gen(function* () {
     const policies = yield* Policies
-    const { rotateAccounts, accountStrategy, onlyAccounts, ...change } = sent
+    const { rotateAccounts, accountStrategy, onlyAccounts, ...sentRules } = sent
+    // Bots by their accounts, in small letters, each once (code-hosts § Review and triage bots).
+    const change =
+      sentRules.trustedBots == null
+        ? sentRules
+        : { ...sentRules, trustedBots: [...new Set(sentRules.trustedBots.map(botLogin).filter((login) => login !== ''))] }
     const was = (yield* policies.current(projectId as ProjectId)).rules
     const now = accountsOf(was)
     const only = onlyAccounts === undefined ? now.only : onlyAccounts
