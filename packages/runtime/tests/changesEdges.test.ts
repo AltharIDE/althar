@@ -221,7 +221,7 @@ describe('keeping a task’s changes together', () => {
       )
       // Named, by its branch, it is refused all the same: changes go together only before either ships.
       assert.strictEqual(
-        yield* callTool(task.lead, 'join_changes', { change: 'Lane heights', into: 'Unlocked docs' }),
+        yield* callTool(task.lead, 'join_changes', { change: 'Lane heights', into: 'althar/add-a-retry' }),
         'the task’s first change has a pull request already: changes go together only before either ships.',
       )
       assert.lengthOf(
