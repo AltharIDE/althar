@@ -205,11 +205,11 @@ describe('reviewing someone else’s pull request', () => {
     })
 
   for (const product of ['gitlab', 'bitbucket_cloud', 'bitbucket_dc'] as const)
-    it.live(`fetches ${product}'s review ref into a read-only review task`, () => {
+    it.live(`fetches ${product}'s review ref and preserves its own-author change request`, () => {
       const at = hosted()
       const host = makeFakeService({ product, pushUrl: () => at.bare })
       host.addRepository(['meridian', 'api'])
-      const { head, pull } = pullRequest(at, host)
+      const { head, pull } = pullRequest(at, host, { author: 'YOU' })
       git(
         at.bare,
         'update-ref',
@@ -226,9 +226,23 @@ describe('reviewing someone else’s pull request', () => {
           yield* callTool(coordinator, 'review_pull_request', { pull_request: '#1', lead: { agent: 'claude-code' } }),
           'Planned',
         )
-        const { workspace } = yield* reviewTask(projectId)
+        const { task, workspace } = yield* reviewTask(projectId)
         assert.deepInclude(workspace, { access: 'read', state: 'ready' })
         assert.strictEqual(git(workspace?.path ?? '', 'rev-parse', 'HEAD'), head)
+        const summary = 'Keep the retry bounded.'
+        yield* callTool(lead(projectId, task?.threadId ?? '', task?.id ?? ''), 'draft_review', {
+          verdict: 'changes',
+          summary,
+          comments: [],
+        })
+        const [draft] = yield* cardsIn(task?.threadId ?? '')
+        const reviews = yield* Reviews
+        const person = (yield* Instance).personId
+        yield* reviews.change(draft?.draftId ?? '', { verdict: 'changes' }, person)
+        const posted = yield* reviews.post(draft?.draftId ?? '', person)
+        assert.deepInclude(posted, { state: 'posted', verdict: 'changes', summary })
+        assert.deepInclude(host.reviewsPosted[0]?.review, { event: 'request_changes', commit: head })
+        assert.notInclude(host.reviewsPosted[0]?.review.body ?? '', 'posted as a comment because')
       }).pipe(Effect.provide(withQueries(host)))
     })
   it.live('fetches a Bitbucket Cloud review from its fork and the base from the target repository', () => {
