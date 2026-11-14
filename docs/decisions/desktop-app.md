@@ -552,23 +552,35 @@ test holds the list.
 | Wayfire | frameless | GNOME's, plain | right: minimize, maximize, close | `wayfire.ini`, `[decoration] button_order` |
 | Another stacking window manager, or none known | frameless | GNOME's, plain | right: minimize, maximize, close | where its window manager is one above, there |
 | An X11 window manager that can't move a window on its asking | the window manager's | none | | |
+| KWin, Xfwm4, Marco or Muffin with a title bar double-click set to other than maximize | the window manager's | none | | kwinrc `TitlebarDoubleClickCommand`, xfwm4's `double_click_action`, `action-double-click-titlebar` |
 
-- **The system's frame stays in one case only:** an X11 window manager that
-  doesn't list `_NET_WM_MOVERESIZE` in `_NET_SUPPORTED`. A frameless window
-  is moved and resized by asking the window manager to do it, and such a one
+- **The system's frame stays in two cases only.** First, an X11 window
+  manager that can't move a window on its asking: one that doesn't list
+  `_NET_WM_MOVERESIZE` in `_NET_SUPPORTED`, or one from before EWMH, known by
+  its marks on the root window (Motif's `_MOTIF_WM_INFO`, GNOME 1's
+  `_WIN_SUPPORTING_WM_CHECK`, Window Maker's, CDE's). A frameless window is
+  moved and resized by asking the window manager to do it, and such a one
   wouldn't, so the window could be neither dragged nor resized. Every Wayland
   compositor does it (`xdg_toplevel.move` and `resize` are xdg-shell's own),
   and so do all the X11 window managers named above. A display with no
-  window manager that says so (none at all, or one from before EWMH) is
-  frameless: there is nothing to draw a frame.
+  window manager and no such marks stays frameless: either there is none,
+  with no frame to draw, or it is one like twm, which frames every window
+  whatever it asks, so the window still moves by that frame. Second, a
+  window manager whose title bar double-click the person set to something
+  other than maximize (shade, minimize, lower, nothing): Chromium's frameless
+  bar can only maximize, by GTK's setting, which KDE doesn't sync, so the
+  window manager's frame keeps the person's choice. It is read where the
+  window manager keeps it: KWin's kwinrc, Xfwm4's xfconf file, Marco's and
+  Muffin's gsettings keys. GNOME's key is the one Chromium follows.
+  Openbox's, labwc's, Wayfire's and COSMIC's aren't read, and their default
+  (maximize) stands.
 - **What the frame gave, the strip gives:** its empty stretches drag the
   window, through the window manager; a double-click there maximizes and
   restores (Chromium does it, by GTK's titlebar setting); the window resizes
   from a few pixels inside its edges (Electron's frameless border); and the
   buttons are real, named buttons reached by keyboard. The window manager's
   right-click window menu isn't there yet: Electron doesn't ask for it on
-  Linux. Nor does a double-click follow KWin's own titlebar action, which
-  Chromium doesn't read.
+  Linux.
 - **The buttons go where the desktop puts them:** its own setting where it
   can be read, its own default where it can't, never a generic set. The
   setting is read where the window manager that runs keeps it, so Xfce on
@@ -576,10 +588,12 @@ test holds the list.
   other than the one running (GNOME's key on Xfce, which the portal also
   answers) is passed over. The first window waits for these quick reads.
 - **The frame is decided as the first window opens,** since Electron fixes
-  it then. Slow reads don't hold the launch: what they found last time is
-  cached in the profile (`window-chrome.json`) for the same desktop, so on
-  X11 the first launch may go by the environment alone and the second is
-  right.
+  it then, so the first window waits for what it hangs on: on X11 xprop's
+  word on the window manager, which a live display gives at once, and the
+  double-click setting beside the button layout. The slow reads (GNOME
+  Shell's version, KDE's decoration) don't hold the launch: what they found
+  last time is cached in the profile (`window-chrome.json`) for the same
+  desktop, and what X11 says now replaces what was cached of it.
 - **The buttons are Althar's own drawing** (`WindowButtons`), in each
   desktop's manner, never its artwork. Each is a real, named button reached
   by keyboard, its glyph always shown.

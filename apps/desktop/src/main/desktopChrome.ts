@@ -12,10 +12,12 @@ import {
   type DesktopFacts,
   factsFromEnv,
   kdeFacts,
+  kwinDoubleClickMaximizes,
   kwinLayout,
   type LayoutSource,
   layoutSource,
   parseGnomeLayout,
+  parseGsettingsDoubleClick,
   parseIni,
   parseLabwcLayout,
   parseOpenboxLayout,
@@ -23,9 +25,11 @@ import {
   parseQuoted,
   parseShellVersion,
   parseThemeName,
+  parseXfwmDoubleClick,
   parseXfwmLayout,
   parseXpropMoves,
   parseXpropName,
+  parseXpropOlderWm,
   parseXpropWindow,
   type Rgb,
   wayfireLayout,
@@ -214,8 +218,8 @@ export const followDesktopChrome = (sources: ChromeSources): FollowedChrome => {
     return read
   }
   const cascadeInis = async (name: string) => (await cascadeTexts(name)).map(parseIni)
-  // The first of the files, in order, whose text says a layout.
-  const firstLayoutIn = async (names: readonly string[], parse: (text: string) => ButtonLayout | undefined) => {
+  // The first of the files, in order, whose text says what is asked.
+  const firstIn = async <T>(names: readonly string[], parse: (text: string) => T | undefined) => {
     for (const name of names)
       for (const text of await cascadeTexts(name)) {
         const layout = parse(text)
@@ -230,15 +234,36 @@ export const followDesktopChrome = (sources: ChromeSources): FollowedChrome => {
     kwin: async () => kwinLayout(await cascadeInis('kwinrc')),
     cinnamon: () => gsettingsLayout('org.cinnamon.desktop.wm.preferences'),
     marco: () => gsettingsLayout('org.mate.Marco.general'),
-    xfwm4: () => firstLayoutIn(['xfce4/xfconf/xfce-perchannel-xml/xfwm4.xml'], parseXfwmLayout),
-    openbox: () => firstLayoutIn([...openboxFiles, 'openbox/rc.xml'], parseOpenboxLayout),
-    labwc: () => firstLayoutIn(['labwc/rc.xml'], parseLabwcLayout),
+    xfwm4: () => firstIn([xfwmFile], parseXfwmLayout),
+    openbox: () => firstIn([...openboxFiles, 'openbox/rc.xml'], parseOpenboxLayout),
+    labwc: () => firstIn(['labwc/rc.xml'], parseLabwcLayout),
     wayfire: async () => wayfireLayout(await cascadeInis('wayfire.ini')),
     cosmic: async () =>
       cosmicLayout(
         await firstText('cosmic/com.system76.CosmicTk/v1/show_minimize'),
         await firstText('cosmic/com.system76.CosmicTk/v1/show_maximize'),
       ),
+  }
+  // Whether a double-click on the title bar maximizes, where the window manager keeps it beside its layout. GNOME's key is the one
+  // Chromium itself follows, so it is never against it; the others are their window manager's own.
+  const xfwmFile = 'xfce4/xfconf/xfce-perchannel-xml/xfwm4.xml'
+  const gsettingsDoubleClick = async (schema: string) => {
+    const out = await probe('gsettings', ['get', schema, 'action-double-click-titlebar'])
+    return out === undefined ? undefined : parseGsettingsDoubleClick(out)
+  }
+  const clickReaders: Partial<Record<LayoutSource, () => Promise<boolean | undefined>>> = {
+    kwin: async () => kwinDoubleClickMaximizes(await cascadeInis('kwinrc')),
+    xfwm4: () => firstIn([xfwmFile], parseXfwmDoubleClick),
+    marco: () => gsettingsDoubleClick('org.mate.Marco.general'),
+    cinnamon: () => gsettingsDoubleClick('org.cinnamon.desktop.wm.preferences'),
+  }
+  const clicks: Partial<Record<LayoutSource, boolean>> = {}
+  // The facts with the double-click of the window manager now known, and nothing of another's.
+  const withClick = (facts: DesktopFacts): DesktopFacts => {
+    const source = layoutSource(facts)
+    const { doubleClickMaximizes: _was, ...rest } = facts
+    const now = source === undefined ? undefined : clicks[source]
+    return now === undefined ? rest : { ...rest, doubleClickMaximizes: now }
   }
   // The layout of the desktop as now known, read once per place, the first window waiting for it; called again as the window
   // manager comes to be known (from the cache, or from X11), since that may say it is kept elsewhere.
@@ -254,6 +279,17 @@ export const followDesktopChrome = (sources: ChromeSources): FollowedChrome => {
       .then((layout) => {
         if (layout !== undefined) set({ layouts: { ...look.layouts, [source]: layout } })
         settle(what)
+      })
+    const clickReader = clickReaders[source]
+    if (clickReader === undefined) return
+    const click = `click:${source}`
+    waiting.add(click)
+    void clickReader()
+      .catch(() => undefined)
+      .then((maximizes) => {
+        if (maximizes !== undefined) clicks[source] = maximizes
+        set({ facts: withClick(look.facts) })
+        settle(click)
       })
   }
   if (linux) {
@@ -298,28 +334,43 @@ export const followDesktopChrome = (sources: ChromeSources): FollowedChrome => {
   const cacheRead = sources.cache === undefined ? Promise.resolve(undefined) : sources.cache.read().catch(() => undefined)
   if (linux) readLayout(base)
   void cacheRead.then((kept) => {
-    if (isCached(kept, desktop)) learn(kept.facts)
+    if (isCached(kept, desktop)) set({ facts: withClick(withFacts(look.facts, kept.facts)) })
     if (linux) readLayout(look.facts)
     settle('cache')
   })
   const reads: Array<Promise<unknown>> = []
+  // On X11, the window manager's name and whether it moves a frameless window. The first window waits for it, as its frame hangs
+  // on it and can't change once it is open; xprop answers a live display at once. Undefined where xprop couldn't ask.
+  const probeX11 = async (): Promise<Pick<DesktopFacts, 'wm' | 'wmMoves'> | undefined> => {
+    const checked = await probe('xprop', ['-root', '-notype', '_NET_SUPPORTING_WM_CHECK'])
+    if (checked === undefined) return undefined
+    const id = parseXpropWindow(checked)
+    // No window manager that says so by EWMH: one from before it, by its marks on the root window, or none.
+    if (id === undefined) {
+      const root = await probe('xprop', ['-root', '-notype'])
+      return root === undefined ? undefined : { wmMoves: parseXpropOlderWm(root) }
+    }
+    const [named, supported] = await Promise.all([
+      probe('xprop', ['-id', id, '-notype', '_NET_WM_NAME']),
+      probe('xprop', ['-root', '-notype', '_NET_SUPPORTED']),
+    ])
+    const name = parseXpropName(named ?? '')
+    return { wm: name === undefined ? undefined : wmFromName(name), wmMoves: parseXpropMoves(supported ?? '') }
+  }
   if (linux && base.session === 'x11') {
+    waiting.add('x11')
     reads.push(
       (async () => {
-        const id = parseXpropWindow((await probe('xprop', ['-root', '-notype', '_NET_SUPPORTING_WM_CHECK'])) ?? '')
-        // No window manager that says so (none at all, or one from before EWMH): nothing is known of it.
-        if (id === undefined) return
-        const [named, supported] = await Promise.all([
-          probe('xprop', ['-id', id, '-notype', '_NET_WM_NAME']),
-          probe('xprop', ['-root', '-notype', '_NET_SUPPORTED']),
-        ])
-        const name = parseXpropName(named ?? '')
-        const wm = name === undefined ? undefined : wmFromName(name)
-        const moves = parseXpropMoves(supported ?? '')
-        if (wm !== undefined) found.wm = wm
-        if (moves !== undefined) found.wmMoves = moves
-        if (wm !== undefined) readLayout(withFacts(look.facts, { wm }))
-      })(),
+        const x11 = await probeX11()
+        // After the cache, whose word on this window manager it replaces: what was found last time may be another's.
+        await cacheRead
+        if (x11 === undefined || stopped) return
+        if (x11.wm !== undefined) found.wm = x11.wm
+        if (x11.wmMoves !== undefined) found.wmMoves = x11.wmMoves
+        const { wm: _wm, wmMoves: _moves, ...rest } = look.facts
+        set({ facts: withClick(withFacts({ ...rest, family: base.family }, x11)) })
+        readLayout(look.facts)
+      })().finally(() => settle('x11')),
     )
   }
   if (linux && base.family === 'gnome') {

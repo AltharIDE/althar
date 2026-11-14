@@ -69,6 +69,8 @@ interface Fake {
   readonly portal?: Record<string, string | undefined>
   readonly platform?: string
   readonly cached?: unknown
+  /** How long each probe takes to answer, in ms. */
+  readonly slow?: number
 }
 
 const sourcesOf = (fake: Fake) => {
@@ -85,7 +87,8 @@ const sourcesOf = (fake: Fake) => {
     run: (command, args, timeout) => {
       ran.push({ command, args, timeout })
       const out = fake.prints?.[`${command} ${args.join(' ')}`]
-      return out === undefined ? Promise.reject(new Error('failed')) : Promise.resolve(out)
+      const answer = () => (out === undefined ? Promise.reject(new Error('failed')) : Promise.resolve(out))
+      return fake.slow === undefined ? answer() : new Promise((resolve) => setTimeout(resolve, fake.slow)).then(answer)
     },
     watchPortal: portalOf(fake.portal ?? {}),
     cache: {
@@ -183,10 +186,102 @@ describe('reading the desktop', () => {
       },
     })
     const followed = followDesktopChrome(sources)
-    expect(decideChrome((await followed.first(1000)).facts).kind).toBe('drawn')
-    await settled()
-    expect(decideChrome(followed.current().facts).kind).toBe('bare')
+    // The first window waits for xprop's word: it opens bare already.
+    expect(decideChrome((await followed.first(1000)).facts).kind).toBe('bare')
     expect(ran.map((one) => one.command)).toEqual(['xprop', 'xprop', 'xprop'])
+  })
+
+  const OLD_WM = {
+    'xprop -root -notype _NET_SUPPORTING_WM_CHECK': '_NET_SUPPORTING_WM_CHECK: window id # 0x1e00003',
+    'xprop -id 0x1e00003 -notype _NET_WM_NAME': '_NET_WM_NAME = "oldwm"',
+    'xprop -root -notype _NET_SUPPORTED': '_NET_SUPPORTED = _NET_SUPPORTED, _NET_WM_NAME',
+  }
+
+  it('on X11, first launch: the first window waits for whether the window manager moves it, its frame hanging on it', async () => {
+    const { sources } = sourcesOf({
+      env: { XDG_CURRENT_DESKTOP: 'XFCE', XDG_SESSION_TYPE: 'x11', DISPLAY: ':0' },
+      prints: OLD_WM,
+      slow: 30,
+    })
+    const followed = followDesktopChrome(sources)
+    expect(decideChrome((await followed.first(1000)).facts)).toEqual({ kind: 'frame' })
+  })
+
+  it('on X11: xprop’s word now over what the cache kept of another window manager, either way', async () => {
+    const env = { XDG_CURRENT_DESKTOP: 'XFCE', XDG_SESSION_TYPE: 'x11', DISPLAY: ':0' }
+    const keptMoving = { desktop: 'linux|x11|xfce|XFCE|', facts: { wm: 'xfwm4', wmMoves: true } }
+    const now = followDesktopChrome(sourcesOf({ env, prints: OLD_WM, cached: keptMoving, slow: 10 }).sources)
+    expect(decideChrome((await now.first(1000)).facts)).toEqual({ kind: 'frame' })
+    const keptStill = { desktop: 'linux|x11|xfce|XFCE|', facts: { wm: 'oldwm', wmMoves: false } }
+    const moving = followDesktopChrome(
+      sourcesOf({
+        env,
+        cached: keptStill,
+        prints: {
+          'xprop -root -notype _NET_SUPPORTING_WM_CHECK': '_NET_SUPPORTING_WM_CHECK: window id # 0x1e00003',
+          'xprop -id 0x1e00003 -notype _NET_WM_NAME': '_NET_WM_NAME = "Xfwm4"',
+          'xprop -root -notype _NET_SUPPORTED': '_NET_SUPPORTED = _NET_SUPPORTED, _NET_WM_MOVERESIZE',
+        },
+      }).sources,
+    )
+    expect(decideChrome((await moving.first(1000)).facts)).toMatchObject({ kind: 'drawn' })
+    // No window manager now, where the cache kept one that couldn't move it: one bar.
+    const none = followDesktopChrome(
+      sourcesOf({
+        env,
+        cached: keptStill,
+        prints: {
+          'xprop -root -notype _NET_SUPPORTING_WM_CHECK': '_NET_SUPPORTING_WM_CHECK:  not found.',
+          'xprop -root -notype': '_XKB_RULES_NAMES = "evdev", "pc105", "us", "", ""',
+        },
+      }).sources,
+    )
+    expect(decideChrome((await none.first(1000)).facts)).toMatchObject({ kind: 'drawn' })
+  })
+
+  it('on X11 with a window manager from before EWMH: its marks on the root window keep the system’s frame', async () => {
+    const { sources, ran } = sourcesOf({
+      env: { XDG_SESSION_TYPE: 'x11', DISPLAY: ':0' },
+      prints: {
+        'xprop -root -notype _NET_SUPPORTING_WM_CHECK': '_NET_SUPPORTING_WM_CHECK:  not found.',
+        'xprop -root -notype': '_MOTIF_WM_INFO = 0x2, 0x1a00005\n_XKB_RULES_NAMES = "evdev", "pc105", "us", "", ""',
+      },
+    })
+    expect(decideChrome((await followDesktopChrome(sources).first(1000)).facts)).toEqual({ kind: 'frame' })
+    expect(ran.map((one) => one.args.join(' '))).toEqual(['-root -notype _NET_SUPPORTING_WM_CHECK', '-root -notype'])
+  })
+
+  it('keeps the window manager’s frame where its double-click on the title bar was set to do something else than maximize', async () => {
+    const first = async (desktop: string, fake: Omit<Fake, 'env'>) =>
+      decideChrome(
+        (
+          await followDesktopChrome(sourcesOf({ env: { XDG_CURRENT_DESKTOP: desktop, XDG_SESSION_TYPE: 'x11' }, ...fake }).sources).first(
+            1000,
+          )
+        ).facts,
+      )
+    const kwinrc = (command: string) => ({
+      files: { '/home/someone/.config/kwinrc': `[Windows]\nTitlebarDoubleClickCommand=${command}\n` },
+    })
+    expect(await first('KDE', kwinrc('Shade'))).toEqual({ kind: 'frame' })
+    expect(await first('KDE', kwinrc('Nothing'))).toEqual({ kind: 'frame' })
+    expect(await first('KDE', kwinrc('Maximize'))).toEqual({ kind: 'drawn', look: 'kde' })
+    const xfwm = (action: string) => ({
+      files: {
+        '/home/someone/.config/xfce4/xfconf/xfce-perchannel-xml/xfwm4.xml': `<channel name="xfwm4"><property name="double_click_action" type="string" value="${action}"/></channel>`,
+      },
+    })
+    expect(await first('XFCE', xfwm('shade'))).toEqual({ kind: 'frame' })
+    expect(await first('XFCE', xfwm('maximize'))).toMatchObject({ kind: 'drawn' })
+    const click = (schema: string, value: string) => ({
+      prints: { [`gsettings get ${schema} action-double-click-titlebar`]: `'${value}'\n` },
+    })
+    expect(await first('MATE', click('org.mate.Marco.general', 'toggle_shade'))).toEqual({ kind: 'frame' })
+    expect(await first('MATE', click('org.mate.Marco.general', 'toggle_maximize'))).toMatchObject({ kind: 'drawn' })
+    expect(await first('X-Cinnamon', click('org.cinnamon.desktop.wm.preferences', 'minimize'))).toEqual({ kind: 'frame' })
+    expect(await first('X-Cinnamon', click('org.cinnamon.desktop.wm.preferences', 'toggle-maximize'))).toMatchObject({ kind: 'drawn' })
+    // Unread, the default: maximize, one bar.
+    expect(await first('MATE', {})).toMatchObject({ kind: 'drawn' })
   })
 
   it('on X11: keeps, for the next start, that the window manager can’t move a frameless window', async () => {

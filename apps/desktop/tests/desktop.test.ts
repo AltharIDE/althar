@@ -10,6 +10,7 @@ import {
   type DesktopFacts,
   factsFromEnv,
   kdeFacts,
+  kwinDoubleClickMaximizes,
   kwinLayout,
   layoutSource,
   parseGnomeLayout,
@@ -20,9 +21,12 @@ import {
   parsePortalAccent,
   parseShellVersion,
   parseThemeName,
+  parseGsettingsDoubleClick,
+  parseXfwmDoubleClick,
   parseXfwmLayout,
   parseXpropMoves,
   parseXpropName,
+  parseXpropOlderWm,
   parseXpropWindow,
   sessionOf,
   wayfireLayout,
@@ -106,7 +110,37 @@ describe('the desktop, from the environment', () => {
   })
 })
 
+describe('the double-click on the title bar, as each window manager keeps it', () => {
+  it('reads KWin’s, Maximize by default', () => {
+    expect(kwinDoubleClickMaximizes([])).toBe(true)
+    expect(kwinDoubleClickMaximizes([parseIni('[Windows]\nTitlebarDoubleClickCommand=Maximize\n')])).toBe(true)
+    expect(kwinDoubleClickMaximizes([parseIni('[Windows]\nTitlebarDoubleClickCommand=Shade\n')])).toBe(false)
+    expect(kwinDoubleClickMaximizes([parseIni('[Windows]\nTitlebarDoubleClickCommand=Maximize (vertical only)\n')])).toBe(false)
+  })
+
+  it('reads Xfwm4’s, and Marco’s and Muffin’s from gsettings', () => {
+    const xml = (value: string) => `<property name="double_click_action" type="string" value="${value}"/>`
+    expect(parseXfwmDoubleClick(xml('maximize'))).toBe(true)
+    expect(parseXfwmDoubleClick(xml('none'))).toBe(false)
+    expect(parseXfwmDoubleClick('<channel name="xfwm4"/>')).toBeUndefined()
+    expect(parseGsettingsDoubleClick("'toggle_maximize'\n")).toBe(true)
+    expect(parseGsettingsDoubleClick("'toggle-maximize'\n")).toBe(true)
+    expect(parseGsettingsDoubleClick("'toggle-shade'\n")).toBe(false)
+    expect(parseGsettingsDoubleClick('No such schema')).toBeUndefined()
+  })
+})
+
 describe('the X11 window manager, by its own name', () => {
+  it('tells one from before EWMH by its marks on the root window, and a bare display from it', () => {
+    expect(parseXpropOlderWm('_MOTIF_WM_INFO = 0x2, 0x1a00005')).toBe(false)
+    expect(parseXpropOlderWm('_WIN_SUPPORTING_WM_CHECK = 0x400001\n_WIN_PROTOCOLS = _WIN_LAYER')).toBe(false)
+    expect(parseXpropOlderWm('_WINDOWMAKER_WM_PROTOCOLS = _WINDOWMAKER_MENU')).toBe(false)
+    expect(parseXpropOlderWm('_NET_SUPPORTED = _NET_WM_NAME, _NET_WM_MOVERESIZE\nRESOURCE_MANAGER = "Xft.dpi: 96"')).toBe(true)
+    expect(parseXpropOlderWm('_NET_SUPPORTED = _NET_WM_NAME\n_MOTIF_WM_INFO = 0x2')).toBe(false)
+    expect(parseXpropOlderWm('_XKB_RULES_NAMES = "evdev", "pc105", "us", "", ""\nRESOURCE_MANAGER = "_MOTIF_WM_INFO"')).toBeUndefined()
+    expect(parseXpropOlderWm('')).toBeUndefined()
+  })
+
   it('reads whether it moves and resizes a window on its asking', () => {
     expect(parseXpropMoves('_NET_SUPPORTED = _NET_SUPPORTED, _NET_WM_NAME, _NET_WM_MOVERESIZE, _NET_ACTIVE_WINDOW')).toBe(true)
     expect(parseXpropMoves('_NET_SUPPORTED(ATOM) = _NET_SUPPORTED, _NET_WM_NAME, _NET_ACTIVE_WINDOW')).toBe(false)
@@ -190,6 +224,15 @@ describe('how the window is dressed, by desktop', () => {
     // Every Wayland compositor moves a window on its asking (xdg-shell), and a tiling one has no buttons whatever it says.
     expect(on({ XDG_CURRENT_DESKTOP: 'KDE', XDG_SESSION_TYPE: 'wayland' }, { wmMoves: false })).toMatchObject({ kind: 'drawn' })
     expect(on({ XDG_SESSION_TYPE: 'x11' }, { wm: 'i3', wmMoves: false })).toEqual({ kind: 'bare' })
+  })
+
+  it('keeps the system’s frame where the window manager’s double-click was set to do something else than maximize', () => {
+    expect(on({ XDG_CURRENT_DESKTOP: 'KDE', XDG_SESSION_TYPE: 'wayland' }, { doubleClickMaximizes: false })).toEqual({ kind: 'frame' })
+    expect(on({ XDG_CURRENT_DESKTOP: 'KDE', XDG_SESSION_TYPE: 'wayland' }, { doubleClickMaximizes: true })).toEqual({
+      kind: 'drawn',
+      look: 'kde',
+    })
+    expect(on({ XDG_SESSION_TYPE: 'x11' }, { wm: 'i3', doubleClickMaximizes: false })).toEqual({ kind: 'bare' })
   })
 
   it('draws GNOME’s where GNOME’s window manager runs under another desktop’s name', () => {

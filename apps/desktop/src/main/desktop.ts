@@ -68,6 +68,12 @@ export interface DesktopFacts {
   readonly kdeColorScheme?: string
   /** On X11, whether the window manager moves and resizes a window on its asking (`_NET_WM_MOVERESIZE` in `_NET_SUPPORTED`), as a frameless window's drag and edges ask it. */
   readonly wmMoves?: boolean
+  /**
+   * Whether a double-click on the title bar maximizes, as the window manager's own setting says where it is read (KWin's, Xfwm4's,
+   * Marco's, Muffin's). A frameless window's bar can only maximize there (Chromium's one action), so where the person chose
+   * another (shade, minimize, nothing) the window manager's frame keeps it.
+   */
+  readonly doubleClickMaximizes?: boolean
 }
 
 /** How the window is dressed. mac: the system's traffic lights over Althar's bar. frame: the window manager's own title bar, no buttons of Althar's (only where a frameless window couldn't be moved). drawn: Althar's bar draws them. bare: none at all. */
@@ -257,8 +263,10 @@ export const drawnFor = (facts: DesktopFacts): ChromeDecision =>
  * How the window is dressed on this desktop (ADR-098's table): one bar, Althar's, on every Linux desktop that allows it.
  * - a Mac: the system's traffic lights; Windows: Althar's caption buttons, in Windows' manner.
  * - a tiling compositor or window manager: no buttons at all.
- * - an X11 window manager known not to move or resize a window on its asking (no `_NET_WM_MOVERESIZE`): the system's frame,
- *   since a frameless window could be neither dragged nor resized there.
+ * - an X11 window manager known not to move or resize a window on its asking (no `_NET_WM_MOVERESIZE`, or one from before EWMH
+ *   that says so otherwise): the system's frame, since a frameless window could be neither dragged nor resized there.
+ * - a window manager whose title bar the person set to do something else than maximize on a double-click: its frame, which
+ *   does it, as a frameless bar can't.
  * - every other Linux desktop, stacking window managers that would draw a frame of their own (KWin, xfwm4, Marco, Openbox,
  *   Muffin, labwc, COSMIC's) included: Althar draws the window's buttons in that desktop's manner on its own bar.
  */
@@ -267,6 +275,7 @@ export const decideChrome = (facts: DesktopFacts): ChromeDecision => {
   if (facts.family === 'windows') return { kind: 'drawn', look: 'windows' }
   if (facts.family === 'tiling' || (facts.wm !== undefined && TILING.has(facts.wm))) return { kind: 'bare' }
   if (facts.session !== 'wayland' && facts.wmMoves === false) return { kind: 'frame' }
+  if (facts.doubleClickMaximizes === false) return { kind: 'frame' }
   return drawnFor(facts)
 }
 
@@ -458,6 +467,22 @@ export const kwinLayout = (files: readonly Ini[]): ButtonLayout => {
   return once({ start: buttons(left), end: buttons(right) })
 }
 
+/** Whether KWin maximizes on a double-click of the title bar (`kwinrc [Windows] TitlebarDoubleClickCommand`, `Maximize` by default). */
+export const kwinDoubleClickMaximizes = (files: readonly Ini[]): boolean =>
+  (iniValue(files, 'Windows', 'TitlebarDoubleClickCommand') ?? 'Maximize') === 'Maximize'
+
+/** Whether Xfwm4 maximizes on a double-click of the title bar (its xfconf file's `double_click_action`); undefined where unsaid. */
+export const parseXfwmDoubleClick = (xml: string): boolean | undefined => {
+  const value = /<property\s+name="double_click_action"\s+type="string"\s+value="([^"]*)"/.exec(xml)?.[1]
+  return value === undefined ? undefined : value === 'maximize'
+}
+
+/** Whether Marco or Muffin maximizes on a double-click, from gsettings' `action-double-click-titlebar` (`'toggle_maximize'`, `'toggle-maximize'`). */
+export const parseGsettingsDoubleClick = (text: string): boolean | undefined => {
+  const value = parseQuoted(text)
+  return value === undefined ? undefined : /^toggle[-_]maximize$/.test(value)
+}
+
 /** A name from a KDE file, kept only where it looks like one (`org.kde.breeze`, `BreezeDark`, `__aurorae__svg__Sweet`). */
 const kdeName = (value: string | undefined) => (value !== undefined && NAME.test(value) ? value : undefined)
 
@@ -492,6 +517,20 @@ export const parseXpropMoves = (text: string): boolean | undefined => {
   if (/_NET_SUPPORTED:\s+not found/.test(text)) return false
   if (!/_NET_SUPPORTED(?:\(\w+\))?\s*=/.test(text)) return undefined
   return /\b_NET_WM_MOVERESIZE\b/.test(text)
+}
+
+/**
+ * On X11 where no window manager says it is one by EWMH (no `_NET_SUPPORTING_WM_CHECK`), what the root window's properties
+ * (`xprop -root -notype`) say of an older one: `_NET_SUPPORTED` alone, its word on moving; Motif's, GNOME 1's, Window Maker's or
+ * CDE's marks, one that would take a frameless window's asking to go undecorated but never moves it on its asking, so false. None
+ * of them: undefined, no window manager known (a bare display, as a test's, with nothing to draw a frame; or twm, which frames
+ * every window whatever it asks, so the window moves by its frame still).
+ */
+export const parseXpropOlderWm = (text: string): boolean | undefined => {
+  const supported = /^_NET_SUPPORTED(?:\(\w+\))?\s*=.*$/m.exec(text)?.[0]
+  if (supported !== undefined) return parseXpropMoves(supported)
+  if (/^(?:_MOTIF_WM_INFO|_WIN_SUPPORTING_WM_CHECK|_WIN_PROTOCOLS|_WINDOWMAKER_\w+|_DT_\w+)\b/m.test(text)) return false
+  return undefined
 }
 
 /** A layout from names on each side, by a table of names to buttons; names not in it take no place. */
