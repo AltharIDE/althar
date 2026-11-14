@@ -310,8 +310,12 @@ const SoughtPullRequests = Schema.Struct({
   review_requested: Schema.optional(Schema.Boolean),
   draft: Schema.optional(Schema.Boolean),
 })
-/* A thread to read: a task's, or, with none, the coordinator's own; and, to read further back, where the part read before began. */
-const Reading = Schema.Struct({ task: Schema.optional(Schema.String), before: Schema.optional(Schema.Int) })
+/* A thread to read: a task's, the coordinator's, or the caller's own; and, to read further back, where the part read before began. */
+const Reading = Schema.Struct({
+  task: Schema.optional(Schema.String),
+  coordinator: Schema.optional(Schema.Boolean),
+  before: Schema.optional(Schema.Int),
+})
 /* Another task's change to read: all of it, or some of its paths, and which page of a long one. */
 const DiffAsked = Schema.Struct({
   task: Schema.String,
@@ -863,12 +867,18 @@ export class Coordinator extends Context.Service<
       /** A task's thread, or the coordinator's own conversation: its latest part, or the part before an earlier read. */
       const readThread = (access: ToolAccess, input: unknown) =>
         Effect.gen(function* () {
-          const { task: reference, before } = yield* read(Reading, input)
-          const threadId = reference === undefined ? access.threadId : (yield* taskOf(access, reference)).threadId
+          const { task: reference, coordinator, before } = yield* read(Reading, input)
+          if (coordinator === true && reference !== undefined) return 'Choose either a task or coordinator: true.'
+          const threadId =
+            coordinator === true
+              ? yield* thread(access.projectId)
+              : reference === undefined
+                ? access.threadId
+                : (yield* taskOf(access, reference)).threadId
           const record = yield* transcript(threadId, 30_000, {
             ...(before === undefined ? {} : { before }),
             // In its own conversation, what it said is its own.
-            ...(reference === undefined ? { agent: 'you' } : {}),
+            ...(threadId === access.threadId ? { agent: 'you' } : {}),
           })
           if (record.text === '') return before === undefined ? 'The thread is empty.' : 'Nothing comes before that.'
           return record.omitted > 0
@@ -2492,11 +2502,19 @@ export class Coordinator extends Context.Service<
       )
       const readThreadTool = tool(
         'read_thread',
-        "A thread as text, oldest first: a task's, with what the person, its lead and Althar said, the person's messages included; or, without a task, your own (the coordinator's is its conversation with the person). It reads the latest part; to read further back, pass before as it says. It only reads.",
+        "A thread as text, oldest first: a task's, with what the person, its lead and Althar said, the person's messages included; or the project's coordinator conversation with the person, with coordinator: true. Without either, it reads your own thread. It reads the latest part; to read further back, pass before as it says. It only reads.",
         {
           type: 'object',
           properties: {
-            task: { type: 'string', description: "The task's slug, as list_tasks shows it. Leave it out for your own thread." },
+            task: {
+              type: 'string',
+              description: "The task's slug, as list_tasks shows it. Leave it out for your own thread or coordinator: true.",
+            },
+            coordinator: {
+              type: 'boolean',
+              description:
+                "Read the project's coordinator conversation with the person. Omit task. Keep coordinator: true when paging with before.",
+            },
             before: { type: 'integer', description: 'To read further back: the number an earlier read_thread gave.' },
           },
         },
