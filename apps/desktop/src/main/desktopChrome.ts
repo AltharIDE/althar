@@ -71,6 +71,12 @@ export const PROBE_TIMEOUT = 2000
 /** How long the first window waits for the desktop's first word: the portal answers in a blink, or not at all. */
 export const FIRST_CHROME_WAIT = 1500
 
+/**
+ * How long the first window waits on X11 for xprop's word on the window manager, whatever it was told to wait for the rest: the
+ * frame hangs on it and can't change once the window is open. Its two stages, each killed at PROBE_TIMEOUT, and a little more.
+ */
+export const FIRST_X11_WAIT = 2 * PROBE_TIMEOUT + 500
+
 /** What the slow reads found, kept for the next start, for the same desktop only. */
 export interface CachedFacts {
   readonly desktop: string
@@ -107,7 +113,10 @@ export interface FollowedChrome {
   readonly current: () => DesktopLook
   /** Calls `listener` with each change, until the returned function is called. */
   readonly follow: (listener: (look: DesktopLook) => void) => () => void
-  /** Settles once the cache and the portal have had their first word, or after `within` ms. */
+  /**
+   * Settles once the cache and the portal have had their first word, or after `within` ms; on X11, never before xprop's word on
+   * the window manager (within FIRST_X11_WAIT), which the window's frame hangs on.
+   */
   readonly first: (within: number) => Promise<DesktopLook>
   readonly stop: () => void
 }
@@ -169,7 +178,7 @@ export const followDesktopChrome = (sources: ChromeSources): FollowedChrome => {
   const settledOnes = new Set<() => void>()
   const settle = (what: string) => {
     waiting.delete(what)
-    if (waiting.size === 0) for (const done of settledOnes) done()
+    for (const check of settledOnes) check()
   }
   const set = (next: Partial<DesktopLook>) => {
     if (stopped) return
@@ -404,13 +413,23 @@ export const followDesktopChrome = (sources: ChromeSources): FollowedChrome => {
     first: (within) =>
       new Promise((resolve) => {
         if (waiting.size === 0) return resolve(look)
+        let late = false
         const done = () => {
           clearTimeout(timer)
-          settledOnes.delete(done)
+          clearTimeout(cap)
+          settledOnes.delete(check)
           resolve(look)
         }
-        const timer = setTimeout(done, within)
-        settledOnes.add(done)
+        // Past `within`, only xprop's word is waited for.
+        const check = () => {
+          if (waiting.size === 0 || (late && !waiting.has('x11'))) done()
+        }
+        const timer = setTimeout(() => {
+          late = true
+          check()
+        }, within)
+        const cap = setTimeout(done, Math.max(within, FIRST_X11_WAIT))
+        settledOnes.add(check)
       }),
     stop: () => {
       stopped = true

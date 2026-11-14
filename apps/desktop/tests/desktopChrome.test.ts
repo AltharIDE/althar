@@ -207,6 +207,33 @@ describe('reading the desktop', () => {
     expect(decideChrome((await followed.first(1000)).facts)).toEqual({ kind: 'frame' })
   })
 
+  it('on X11: the first window waits for xprop past the time it was given for the rest, as main.ts gives it', async () => {
+    const { sources } = sourcesOf({
+      env: { XDG_CURRENT_DESKTOP: 'XFCE', XDG_SESSION_TYPE: 'x11', DISPLAY: ':0' },
+      prints: OLD_WM,
+      slow: 150,
+    })
+    const followed = followDesktopChrome(sources)
+    const started = Date.now()
+    // Each of xprop's two stages takes longer than the whole wait: the window still opens framed, never frameless.
+    expect(decideChrome((await followed.first(100)).facts)).toEqual({ kind: 'frame' })
+    expect(Date.now() - started).toBeGreaterThanOrEqual(250)
+    // And with what the cache kept of a window manager that moved it: xprop's word now, not the cache's.
+    const kept = { desktop: 'linux|x11|xfce|XFCE|', facts: { wm: 'xfwm4', wmMoves: true } }
+    const stale = followDesktopChrome(
+      sourcesOf({ env: { XDG_CURRENT_DESKTOP: 'XFCE', XDG_SESSION_TYPE: 'x11', DISPLAY: ':0' }, prints: OLD_WM, cached: kept, slow: 150 })
+        .sources,
+    )
+    expect(decideChrome((await stale.first(100)).facts)).toEqual({ kind: 'frame' })
+  })
+
+  it('off X11, the first window waits no longer than it was given', async () => {
+    const { sources } = sourcesOf({ env: { XDG_CURRENT_DESKTOP: 'MATE', XDG_SESSION_TYPE: 'wayland' }, slow: 400 })
+    const started = Date.now()
+    await followDesktopChrome(sources).first(50)
+    expect(Date.now() - started).toBeLessThan(300)
+  })
+
   it('on X11: xprop’s word now over what the cache kept of another window manager, either way', async () => {
     const env = { XDG_CURRENT_DESKTOP: 'XFCE', XDG_SESSION_TYPE: 'x11', DISPLAY: ':0' }
     const keptMoving = { desktop: 'linux|x11|xfce|XFCE|', facts: { wm: 'xfwm4', wmMoves: true } }

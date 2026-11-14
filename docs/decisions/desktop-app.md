@@ -589,8 +589,12 @@ test holds the list.
   answers) is passed over. The first window waits for these quick reads.
 - **The frame is decided as the first window opens,** since Electron fixes
   it then, so the first window waits for what it hangs on: on X11 xprop's
-  word on the window manager, which a live display gives at once, and the
-  double-click setting beside the button layout. The slow reads (GNOME
+  word on the window manager, past the launch's usual wait if need be, up to
+  xprop's own timeouts (a live display answers at once); and the
+  double-click setting beside the button layout. Where xprop can't answer
+  (not installed, or the display not answering), what was cached of this
+  desktop decides, and else the desktop's name: every stacking window
+  manager it names moves a frameless window. The slow reads (GNOME
   Shell's version, KDE's decoration) don't hold the launch: what they found
   last time is cached in the profile (`window-chrome.json`) for the same
   desktop, and what X11 says now replaces what was cached of it.
