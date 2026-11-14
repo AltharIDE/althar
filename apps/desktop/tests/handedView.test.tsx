@@ -259,6 +259,72 @@ describe('what an agent hands back, on a task', () => {
     await waitFor(() => expect(screen.queryByRole('complementary', { name: 'notes.md' })).toBeNull())
   })
 
+  it('opens a changed markdown document with its change marked, its source a key away, and a file it links to on top of it', async () => {
+    const user = userEvent.setup()
+    const readDocument = vi.fn(async (_threadId: string, path: string) => ({
+      path,
+      body: '# Notes\n\nRefunds share the partner budget, see [the guide](guide.md).\n',
+      bytes: 60,
+      lines: 3,
+    }))
+    const getFileDiff = vi.fn(async (_taskId: string, path: string) => ({
+      file: { path, from: null, status: 'modified' as const, add: 1, del: 1, binary: false, uncommitted: false },
+      lines: [
+        { kind: 'hunk' as const, text: '@@ -1,3 +1,3 @@' },
+        { kind: 'context' as const, old: 1, new: 1, text: '# Notes' },
+        { kind: 'context' as const, old: 2, new: 2, text: '' },
+        { kind: 'removed' as const, old: 3, text: 'Refunds are paid by hand.' },
+        { kind: 'added' as const, new: 3, text: 'Refunds share the partner budget, see [the guide](guide.md).' },
+      ],
+      truncated: false,
+      whole: true,
+    }))
+    const found = {
+      kind: 'file' as const,
+      name: 'docs/guide.md',
+      path: 'docs/guide.md',
+      byName: false,
+      bytes: 20,
+      lines: 1,
+      content: 'text' as const,
+      changed: null,
+      since: null,
+    }
+    const { client } = fakeClient({
+      getThread: vi.fn(async () => handing()),
+      readDocument,
+      getFileDiff,
+      readCode: vi.fn(async (_threadId: string, path: string) => ({ path, text: '# The guide\n', from: 1, total: 1, cut: false })),
+      findCode: vi.fn(async (_threadId: string, messages: ReadonlyArray<{ readonly names: ReadonlyArray<string> }>) => ({
+        place: { kind: 'task' as const, repositories: [{ slug: 'meridian', name: 'meridian', branch: 'althar/retry-the-checkout' }] },
+        messages: messages.map((message) => ({ found: message.names.includes('docs/guide.md') ? [found] : [] })),
+      })),
+    })
+    withServices(<Task />, client)
+    const card = await screen.findByRole('article', { name: 'notes.md' })
+    await user.click(await within(card).findByRole('button', { name: 'Read in the panel' }))
+    const panel = await screen.findByRole('complementary', { name: 'notes.md' })
+    // What the task changed in it, marked on the page.
+    expect(await within(panel).findByRole('group', { name: 'Added' })).toBeTruthy()
+    expect(within(panel).getByRole('group', { name: 'Removed' }).textContent).toContain('Refunds are paid by hand.')
+    expect(getFileDiff).toHaveBeenCalledWith('t1', 'docs/notes.md')
+    // Source is a key away, and the page another.
+    await user.keyboard('m')
+    await waitFor(() =>
+      expect(
+        within(panel)
+          .getByRole('radio', { name: /Source/ })
+          .getAttribute('aria-checked'),
+      ).toBe('true'),
+    )
+    expect(within(panel).queryByRole('group', { name: 'Added' })).toBeNull()
+    await user.keyboard('m')
+    // A file it links to opens in the panel on top of it, from the document's folder, with Back.
+    await user.click(await within(panel).findByRole('button', { name: 'the guide' }))
+    const guide = await screen.findByRole('complementary', { name: 'guide.md' })
+    expect(await within(guide).findByRole('heading', { name: 'The guide' })).toBeTruthy()
+  })
+
   it('reads a document by the whole path it was written at, in the card and the panel, and opens that one in the editor', async () => {
     const user = userEvent.setup()
     // A task of two repositories: the lead wrote the first one's docs/notes.md; the second has one too.

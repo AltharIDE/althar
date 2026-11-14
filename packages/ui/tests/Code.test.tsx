@@ -294,11 +294,25 @@ describe('a markdown file in the panel beside the conversation', () => {
         { kind: DiffLineKind.Added, new: 2, text: '# Plan' },
         { kind: DiffLineKind.Added, new: 3, text: '![flow](flow.png)' },
       ],
+      changeWhole: true,
       markdown: { image: ({ path, alt }) => <img src={`x://${path}`} alt={alt} /> },
     })
     expect(screen.getByRole('radio', { name: 'Rendered' })).toBeChecked()
     expect(within(screen.getByRole('group', { name: 'Added' })).getByRole('heading', { name: 'Plan' })).toBeInTheDocument()
     expect(screen.getByRole('img', { name: 'flow' })).toHaveAttribute('src', 'x://docs/decisions/flow.png')
+  })
+
+  it('marks nothing where what the task changed is only in hunks, though it starts at the first line', () => {
+    panel({
+      read: { ...decisionRead, text: 'Intro.\n# Plan' },
+      change: [
+        { kind: DiffLineKind.Hunk, text: '@@ -1,1 +1,2 @@' },
+        { kind: DiffLineKind.Context, old: 1, new: 1, text: 'Intro.' },
+        { kind: DiffLineKind.Added, new: 2, text: '# Plan' },
+      ],
+    })
+    expect(screen.getByRole('heading', { name: 'Plan' })).toBeInTheDocument()
+    expect(screen.queryByRole('group', { name: 'Added' })).toBeNull()
   })
 
   it('waits for what the task changed before it shows the page, and shows it as it is where that could not be read', () => {

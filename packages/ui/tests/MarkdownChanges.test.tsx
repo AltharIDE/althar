@@ -49,6 +49,25 @@ describe('what a whole-file diff says of a markdown file', () => {
     expect(removed.some((text) => text.includes('Hosting notes'))).toBe(true)
   })
 
+  it('marks the blocks that link through a definition an edit changed, and shows the target it had', () => {
+    const marked = markChanges(
+      diffOf(
+        '\n # Title\n\n See the [Guide][guide] and [more].\n\n Plain words.\n\n-[guide]: https://old.example\n+[guide]: https://new.example\n [more]: https://same.example\n',
+      ),
+    )
+    // Blocks: 0 the title, 1 the paragraph that links through the guide, 2 plain words.
+    expect([...(marked?.marks.added ?? [])]).toEqual([1])
+    expect([...(marked?.marks.removed ?? [])]).toEqual([[3, ['`[guide]: https://old.example`']]])
+  })
+
+  it('marks the links through a definition that was taken out, and one that is new', () => {
+    const gone = markChanges(diffOf('\n # Title\n\n A [link][a] here.\n\n-[a]: https://a.example\n'))
+    expect([...(gone?.marks.added ?? [])]).toEqual([1])
+    expect([...(gone?.marks.removed ?? [])]).toEqual([[2, ['`[a]: https://a.example`']]])
+    const made = markChanges(diffOf('\n # Title\n\n A [link][a] here.\n\n+[a]: https://a.example\n'))
+    expect([...(made?.marks.added ?? [])]).toEqual([1])
+  })
+
   it('marks nothing in a file that did not change', () => {
     const marked = markChanges(diffOf('\n # Title\n\n Body.\n'))
     expect(marked?.marks.added.size).toBe(0)
@@ -173,6 +192,32 @@ describe('what a file names beside it', () => {
 })
 
 describe('a document in the side panel', () => {
+  it('is a page with what changed marked, its source a key away', () => {
+    const marked = markChanges(README_DIFF)
+    if (marked === null) throw new Error('whole')
+    render(<DocPanel doc={{ path: 'README.md', body: marked.source }} onClose={() => {}} change={README_DIFF} />)
+    expect(screen.getAllByRole('group', { name: 'Added' }).length).toBeGreaterThan(0)
+    expect(screen.getByRole('radio', { name: /Rendered/ })).toBeChecked()
+    fireEvent.keyDown(screen.getByRole('complementary', { name: 'README.md' }), { key: 'm' })
+    expect(screen.getByRole('radio', { name: /Source/ })).toBeChecked()
+    expect(screen.queryByRole('group', { name: 'Added' })).toBeNull()
+    expect(screen.queryByRole('heading', { name: 'Limits and reasons' })).toBeNull()
+    fireEvent.click(screen.getByRole('radio', { name: /Rendered/ }))
+    expect(screen.getByRole('heading', { name: 'Limits and reasons' })).toBeInTheDocument()
+  })
+
+  it('opens the file a link names, from its folder', () => {
+    const open = vi.fn()
+    render(<DocPanel doc={{ path: 'docs/plan.md', body: '[guide](guide.md)' }} onClose={() => {}} file={{ folder: 'docs', open }} />)
+    fireEvent.click(screen.getByRole('button', { name: 'guide' }))
+    expect(open).toHaveBeenCalledWith('docs/guide.md')
+  })
+
+  it('has no two ways for a document with no file behind it', () => {
+    render(<DocPanel doc={{ title: 'Plan', body: '# Plan' }} onClose={() => {}} />)
+    expect(screen.queryByRole('radio')).toBeNull()
+  })
+
   it('has its pictures drawn from its folder where the host says where it is', () => {
     render(
       <DocPanel

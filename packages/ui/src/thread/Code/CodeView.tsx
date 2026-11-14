@@ -359,6 +359,7 @@ function Body({
   mode,
   read,
   change,
+  changeWhole = false,
   around,
   markdown,
   onGo,
@@ -369,6 +370,8 @@ function Body({
   mode: CodeMode
   read: CodeRead | null | undefined
   change?: readonly DiffLine[] | null | undefined
+  /** `change` is the whole file's diff, which a page marks its change from; a diff in hunks is only shown as one. */
+  changeWhole?: boolean
   around?: number
   markdown?: CodeMarkdown | undefined
   onGo: (path: string) => void
@@ -424,7 +427,7 @@ function Body({
   if (mode === 'rendered') {
     // What the task changed is marked in it, read from the file's diff: asked for while it is read, and read as it is where it couldn't be.
     if (found.changed !== null && change === undefined) return <Reading />
-    const marked = found.changed === null || change == null ? null : markChanges(change)
+    const marked = found.changed === null || change == null || !changeWhole ? null : markChanges(change)
     return (
       <div className={s.page}>
         <Markdown
@@ -532,6 +535,8 @@ export interface CodePanelProps {
   read?: CodeRead | null
   /** What the task changed in it, for Change: undefined while read, null where it couldn't be. */
   change?: readonly DiffLine[] | null
+  /** `change` is the whole file's diff (the API said so), so a markdown page can mark what changed from it. */
+  changeWhole?: boolean
   /** Open it in the editor, and in another: the host's. */
   actions?: ReactNode
   /** Its place among the conversation's references, to step to the one before or after. */
@@ -559,6 +564,7 @@ export function CodePanel({
   onMode,
   read,
   change,
+  changeWhole = false,
   actions,
   nav,
   onGo,
@@ -596,7 +602,17 @@ export function CodePanel({
       <Meta found={found} where={where} mode={mode} onMode={onMode} t={t} />
       {found.kind === 'file' && <Notes found={found} mode={mode} read={read} onMode={onMode} t={t} />}
       <div className={s.panelBody}>
-        <Body found={found} where={where} mode={mode} read={read} change={change} markdown={markdown} onGo={onGo} t={t} />
+        <Body
+          found={found}
+          where={where}
+          mode={mode}
+          read={read}
+          change={change}
+          changeWhole={changeWhole}
+          markdown={markdown}
+          onGo={onGo}
+          t={t}
+        />
       </div>
     </SidePanel>
   )

@@ -354,7 +354,7 @@ const markdown = {
   args: {
     files: MARKDOWN_FILES,
     selected: 'README.md',
-    view: { state: 'ready', lines: README_DIFF },
+    view: { state: 'ready', lines: README_DIFF, whole: true },
     markdown: { image: picture, open: fn() },
   },
 } satisfies Story
@@ -399,7 +399,7 @@ export const MarkdownNewAndGone: Story = {
         {...args}
         selected={selected}
         onSelect={setSelected}
-        view={{ state: 'ready', lines: selected === 'docs/retries.md' ? NEW_README_DIFF : GONE_README_DIFF }}
+        view={{ state: 'ready', lines: selected === 'docs/retries.md' ? NEW_README_DIFF : GONE_README_DIFF, whole: true }}
       />
     )
   },
@@ -413,7 +413,7 @@ export const MarkdownNewAndGone: Story = {
   },
 }
 
-/** Too long to read whole, a markdown file stays a diff: its lines can't say where a block stands. */
+/** Too long to read whole, a markdown file stays a diff, though its first hunk starts at its first line: only the host says its lines are all of the file. */
 export const MarkdownInHunks: Story = {
   ...markdown,
   args: {
@@ -421,10 +421,11 @@ export const MarkdownInHunks: Story = {
     view: {
       state: 'ready',
       lines: [
-        { kind: DiffLineKind.Hunk, text: '@@ -400,3 +400,3 @@ ## Limits' },
-        { kind: DiffLineKind.Context, old: 400, new: 400, text: 'A merchant may refund' },
-        { kind: DiffLineKind.Removed, old: 401, text: '**20** times a day.' },
-        { kind: DiffLineKind.Added, new: 401, text: 'as often as the plan allows.' },
+        { kind: DiffLineKind.Hunk, text: '@@ -1,3 +1,3 @@' },
+        { kind: DiffLineKind.Context, old: 1, new: 1, text: '# Refunds' },
+        { kind: DiffLineKind.Removed, old: 2, text: '**20** times a day.' },
+        { kind: DiffLineKind.Added, new: 2, text: 'as often as the plan allows.' },
+        { kind: DiffLineKind.Context, old: 3, new: 3, text: 'The rest of the file is not here.' },
       ],
     },
   },

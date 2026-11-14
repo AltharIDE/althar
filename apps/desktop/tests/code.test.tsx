@@ -180,6 +180,7 @@ describe('the code a lead names, on a task’s screen', () => {
           { kind: 'context' as const, old: 5, new: 5, text: '![flow](docs/flow.png)' },
         ],
         truncated: false,
+        whole: true,
       })),
     })
     withServices(<Task />, client)

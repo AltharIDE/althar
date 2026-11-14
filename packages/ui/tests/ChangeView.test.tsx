@@ -75,7 +75,7 @@ describe('a markdown file in the change', () => {
     { path: 'src/refunds/router.ts', status: 'modified', add: 12, del: 1 },
   ]
   const page = (more: Partial<ChangeViewProps> = {}) =>
-    open({ files: MARKDOWN, selected: 'README.md', view: { state: 'ready', lines: README_DIFF }, ...more })
+    open({ files: MARKDOWN, selected: 'README.md', view: { state: 'ready', lines: README_DIFF, whole: true }, ...more })
 
   it('opens as a page, with what changed marked, and Source a click away', () => {
     page()
@@ -111,11 +111,48 @@ describe('a markdown file in the change', () => {
     expect(screen.getByRole('group', { name: 'README.md' })).toBeInTheDocument()
   })
 
+  it('stays a diff where the host does not say its lines are the whole file, though they start at its first line', () => {
+    page({ view: { state: 'ready', lines: README_DIFF } })
+    expect(screen.queryByRole('radio', { name: /Rendered/ })).toBeNull()
+    expect(screen.getByRole('group', { name: 'README.md' })).toBeInTheDocument()
+  })
+
+  it('goes to the source for a finding, after the page was chosen', () => {
+    const finding = (id: string, line: number) => ({
+      id,
+      path: 'README.md',
+      line,
+      weight: 'major' as const,
+      state: 'open' as const,
+      title: `Finding ${id}`,
+      claim: 'It says limits.',
+      reason: null,
+      commit: null,
+    })
+    const props = {
+      files: MARKDOWN,
+      selected: 'README.md',
+      onSelect: () => {},
+      view: { state: 'ready' as const, lines: README_DIFF, whole: true },
+      onClose: () => {},
+      findings: [finding('f1', 3), finding('f2', 9)],
+    }
+    const { rerender } = render(<ChangeView branch="b" {...props} finding={null} />)
+    // The page, as it opens with no finding being looked at; the person keeps it as the page.
+    fireEvent.click(screen.getByRole('radio', { name: /Source/ }))
+    fireEvent.click(screen.getByRole('radio', { name: /Rendered/ }))
+    expect(screen.getByRole('radio', { name: /Rendered/ })).toBeChecked()
+    // Going to a finding, as [ and ] do, shows the source, where its note sits under its line.
+    rerender(<ChangeView branch="b" {...props} finding="f2" />)
+    expect(screen.getByRole('radio', { name: /Source/ })).toBeChecked()
+  })
+
   it('goes to a file the markdown links to: a file of the change is picked, another is the host’s to open', () => {
     const hostOpen = vi.fn()
     const { onSelect } = page({
       view: {
         state: 'ready',
+        whole: true,
         lines: [{ kind: DiffLineKind.Context, old: 1, new: 1, text: '[two](docs/two.md) and [code](src/other.ts)' }],
       },
       markdown: { open: hostOpen },
@@ -130,7 +167,7 @@ describe('a markdown file in the change', () => {
     page({
       files: [{ path: 'docs/guide.md', status: 'added', add: 1, del: 0 }],
       selected: 'docs/guide.md',
-      view: { state: 'ready', lines: [{ kind: DiffLineKind.Added, new: 1, text: '![flow](img/flow.png)' }] },
+      view: { state: 'ready', whole: true, lines: [{ kind: DiffLineKind.Added, new: 1, text: '![flow](img/flow.png)' }] },
       markdown: { image: ({ path, alt }) => <img src={`x://${path}`} alt={alt} /> },
     })
     expect(within(screen.getByRole('region', { name: 'docs/guide.md' })).getByRole('img', { name: 'flow' })).toHaveAttribute(

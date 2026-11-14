@@ -239,8 +239,15 @@ peeks at the lines; pressing it opens the whole file beside the conversation;
   added line are tinted and carry a `+`, what was taken out is drawn where it
   stood, tinted and carrying a `−`, never a stripe at the edge. This is read from
   the file's whole-file diff, which holds every line of it, so nothing more is
-  asked for; a file too long to be read whole, or a finding's note that sits
-  under a line, stays a diff. A relative image or link is the file's
+  asked for. The runtime says it is whole (`FileDiff.whole`), since a diff in
+  hunks starts at line one too and ends before the file does; a file too long to
+  be read whole stays a diff, and going to a finding's note, which sits under a
+  line, opens its file as Source. A change to a link's definition (`[guide]: …`)
+  marks the blocks that link through it and shows the old line where it stood;
+  a markdown file moved with nothing else changed is read as it is and opens as
+  a page. A document an agent handed back opens in the side panel the same way:
+  Rendered or Source, what the task changed marked, a link to a file opening on
+  top of it. A relative image or link is the file's
   neighbour: its path is resolved from the file's folder, an image is read
   from where the task works (`ReadCode` with `image`, only an image, only
   inside the task's folders, not past 8 MB) and drawn in place of its words, and

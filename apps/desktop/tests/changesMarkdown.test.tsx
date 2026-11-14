@@ -51,6 +51,7 @@ describe('a changed markdown file, in the task’s changes', () => {
               { kind: 'added' as const, new: 1, text: 'const tries = 5' },
             ],
       truncated: false,
+      whole: true,
     }))
     const readCode = vi.fn(async (_threadId: string, path: string, _at?: { readonly image?: boolean }) => ({
       path,

@@ -64,7 +64,13 @@ export interface ViewedFinding extends NotedFinding {
 export type FileView =
   | { state: 'loading' }
   | { state: 'failed'; message?: string }
-  | { state: 'ready'; lines: readonly DiffLine[]; truncated?: boolean }
+  | {
+      state: 'ready'
+      lines: readonly DiffLine[]
+      truncated?: boolean
+      /** The lines are the whole file, every one of it and the unchanged ones too, as a page needs; one read in hunks, or cut short, is not. */
+      whole?: boolean
+    }
 
 export interface ChangeViewText {
   title: string
@@ -223,12 +229,16 @@ export function ChangeView({
   const madeFrom = named.length + written.length
   const current = files.find((file) => file.path === selected) ?? files[0]
   const on = findings.find((one) => one.id === finding)
+  // How each markdown file is shown, where the person chose: a page, or its diff.
+  const [chosen, setChosen] = useState<ReadonlyMap<string, 'rendered' | 'source'>>(new Map())
   // On what isn't about a file: where the finding you're on is about none, until a file is picked.
   const [apart, setApart] = useState(on !== undefined && on.path === null)
   const [goneTo, setGoneTo] = useState(finding)
   if (goneTo !== finding) {
     setGoneTo(finding)
     if (on !== undefined) setApart(on.path === null)
+    // A finding's note sits under a line of the file's source: going to one opens it there, whatever way the file was shown.
+    if (on?.path != null) setChosen((now) => new Map(now).set(on.path ?? '', 'source'))
   }
   // With no file to be on, what isn't about one is all there is to show.
   const showingLoose = loose.length > 0 && (apart || current === undefined)
@@ -244,9 +254,11 @@ export function ChangeView({
   const add = files.reduce((sum, file) => sum + file.add, 0)
   const del = files.reduce((sum, file) => sum + file.del, 0)
   // A markdown file as a page, unless asked for as its diff (or a finding's note is in it, which sits under a diff's line).
-  const [chosen, setChosen] = useState<ReadonlyMap<string, 'rendered' | 'source'>>(new Map())
   const markdownFile = current !== undefined && isMarkdownPath(current.path) && current.binary !== true && current.generated !== true
-  const marked = markdownFile && view.state === 'ready' && view.truncated !== true && view.lines.length > 0 ? markChanges(view.lines) : null
+  const marked =
+    markdownFile && view.state === 'ready' && view.whole === true && view.truncated !== true && view.lines.length > 0
+      ? markChanges(view.lines)
+      : null
   const way =
     current === undefined ? undefined : (chosen.get(current.path) ?? (notes.some((note) => note.key === finding) ? 'source' : 'rendered'))
   const asPage = marked !== null && way === 'rendered'

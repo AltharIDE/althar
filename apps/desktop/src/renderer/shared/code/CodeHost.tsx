@@ -103,19 +103,36 @@ const KINDS: Readonly<Record<ApiDiffLine['kind'], DiffLineKind>> = {
   removed: DiffLineKind.Removed,
 }
 
-/** What the task changed in a file, for the panel's Change: read as it is asked for, and again each time. */
-const useCodeChange = (taskId: string | null, found: FoundCode, on: boolean): readonly DiffLine[] | null | undefined => {
+/**
+ * What the task changed in a file, as the diff of it: read as it is asked for, and again each time; undefined while read, null
+ * where it couldn't be. `whole` says the lines are the file's every one, as a page marks its change from; `again` reads it again
+ * as what it follows changes.
+ */
+export const useChangedFile = (
+  taskId: string | null,
+  path: string,
+  on: boolean,
+  again = '',
+): { readonly lines: readonly DiffLine[]; readonly whole: boolean } | null | undefined => {
   const { client } = useServices()
-  const path = found.kind === 'file' ? found.path : ''
   const read = useQuery({
-    queryKey: codeKeys.change(taskId ?? '', path),
-    queryFn: async () =>
-      (await client.getFileDiff(taskId ?? '', path)).lines.map((line) => ({ ...line, kind: KINDS[line.kind] }) as DiffLine),
+    queryKey: [...codeKeys.change(taskId ?? '', path), again],
+    queryFn: async () => {
+      const diff = await client.getFileDiff(taskId ?? '', path)
+      // Whole only where the runtime says so: a diff in hunks starts at line one too, and ends before the file does.
+      return {
+        lines: diff.lines.map((line) => ({ ...line, kind: KINDS[line.kind] }) as DiffLine),
+        whole: diff.whole === true && !diff.truncated,
+      }
+    },
     enabled: on && taskId !== null && path !== '',
     refetchOnMount: 'always',
   })
   return read.isError ? null : read.data
 }
+
+const useCodeChange = (taskId: string | null, found: FoundCode, on: boolean) =>
+  useChangedFile(taskId, found.kind === 'file' ? found.path : '', on)
 
 /** The peek over a name: its lines as it first shows, where they were read from, and the ways on. */
 function CodePeekOf({
@@ -264,7 +281,7 @@ function CodePanelOf({
       mode={mode}
       onMode={(next) => setKept({ key: codeKey(found), mode: next })}
       {...(read === undefined ? {} : { read })}
-      {...(change === undefined ? {} : { change })}
+      {...(change === undefined ? {} : { change: change === null ? null : change.lines, changeWhole: change?.whole ?? false })}
       markdown={{ image: pictureOf(threadId) }}
       actions={<OpenCodeIn found={found} threadId={threadId} compact={width < 400} />}
       {...(nav === null ? {} : { nav: { ...nav, onStep: (by: -1 | 1) => stepFrom(open, by) } })}
@@ -360,6 +377,12 @@ export const useCodeHost = ({
         />
       ),
       open: (found, from) => latest.current.onOpen(found, from),
+      openByName: (name, from) => {
+        void cache.fetchQuery(foundRead(client, cache, threadId, null, [name])).then((found) => {
+          const named = found.get(name)
+          if (named !== undefined) latest.current.onOpen(named, from)
+        })
+      },
       ...(mainId === undefined ? {} : { openInEditor: (found: FoundCode) => latest.current.inEditor(mainId, found) }),
       opened,
       close: () => latest.current.onClose(),

@@ -1417,6 +1417,7 @@ export function TaskView({
                         <DocumentPanel
                           key={host.doc.source ?? host.doc.path ?? host.doc.title}
                           threadId={snapshot.threadId}
+                          taskId={snapshot.task.id}
                           doc={host.doc}
                           version={versionOf(wholePath(host.doc.source ?? host.doc.path ?? '', snapshot.task.worktree))}
                           onClose={host.closeDoc}

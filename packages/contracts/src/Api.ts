@@ -3677,6 +3677,8 @@ export const FileDiff = Schema.Struct({
   file: ChangedFile,
   lines: Schema.Array(DiffLine),
   truncated: Schema.Boolean,
+  /** The lines are the whole file, every one of it from its first, unchanged ones too; not one read in hunks. Where it is absent, they are not known to be. */
+  whole: Schema.optional(Schema.Boolean),
 })
 export type FileDiff = typeof FileDiff.Type
 

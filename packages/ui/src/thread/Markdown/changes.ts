@@ -45,6 +45,26 @@ const whole = (lines: readonly DiffLine[]): boolean => {
 
 const unCarriage = (text: string) => text.replace(/\r$/, '')
 
+/** A reference definition's line: `[label]: target`, the label as a link names it. */
+const DEFINITION = /^ {0,3}\[((?:[^\]\\]|\\.)+)\]:\s*\S/
+const labelOf = (label: string) => label.replace(/\s+/g, ' ').trim().toLowerCase()
+const escaped = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+
+/** Whether a block's text names a definition's label as a link: `[words][label]`, `[label][]` or `[label]`. */
+const refersTo = (block: string, label: string): boolean => {
+  const flat = block.replace(/\s+/g, ' ').toLowerCase()
+  const name = escaped(label)
+  return new RegExp(`\\]\\s?\\[${name}\\]|\\[${name}\\](?!\\()`).test(flat)
+}
+
+/** A removed run as markdown that can be read: a definition is no block of its own, so each is shown as the line it was. */
+const showingDefinitions = (lines: readonly string[]): string => {
+  if (lines.some((line) => /^ {0,3}(```|~~~)/.test(line))) return lines.join('\n')
+  return lines
+    .map((line) => (DEFINITION.test(line) ? `${line.includes('`') ? '`` ' : '`'}${line.trim()}${line.includes('`') ? ' ``' : '`'}` : line))
+    .join('\n')
+}
+
 /** The file as it is now, from a diff of the whole of it: its context and added lines. */
 export const newTextOf = (lines: readonly DiffLine[]): string =>
   lines
@@ -63,6 +83,8 @@ export const markChanges = (lines: readonly DiffLine[]): MarkedMarkdown | null =
   let latest = 0
   let run: { after: number; text: string[] } | null = null
   const addedLines = new Set<number>()
+  // The labels of the definitions an edit touched: a link through one reads another page now, though its own words stand.
+  const touched = new Set<string>()
   for (const line of lines) {
     if (line.kind === DiffLineKind.Hunk) continue
     if (line.kind === DiffLineKind.Removed) {
@@ -71,11 +93,17 @@ export const markChanges = (lines: readonly DiffLine[]): MarkedMarkdown | null =
         runs.push(run)
       }
       run.text.push(unCarriage(line.text))
+      const gone = DEFINITION.exec(line.text)
+      if (gone?.[1] !== undefined) touched.add(labelOf(gone[1]))
       continue
     }
     run = null
     latest = line.new
-    if (line.kind === DiffLineKind.Added) addedLines.add(line.new)
+    if (line.kind === DiffLineKind.Added) {
+      addedLines.add(line.new)
+      const now = DEFINITION.exec(line.text)
+      if (now?.[1] !== undefined) touched.add(labelOf(now[1]))
+    }
   }
   if (addedLines.size === 0 && runs.length === 0) return { source, marks: NOTHING }
   // A file that is new has nothing to tell its change from: the list says it is new, and the page reads as a page.
@@ -103,12 +131,21 @@ export const markChanges = (lines: readonly DiffLine[]): MarkedMarkdown | null =
       }
     }
   })
+  // A block that links through a definition the edit touched is marked, so the change reaches the page where the link is.
+  if (touched.size > 0) {
+    let block = 0
+    for (const token of tokens) {
+      if (token.type === 'space' || token.type === 'def') continue
+      if (!added.has(block) && [...touched].some((label) => refersTo(token.raw, label))) added.add(block)
+      block += 1
+    }
+  }
   const removed = new Map<number, string[]>()
   for (const { after, text } of runs) {
     // Before the first block that starts past the line it follows; after the block it is in the middle of.
     const found = starts.findIndex((start) => start > after)
     const index = found === -1 ? starts.length : found
-    removed.set(index, [...(removed.get(index) ?? []), text.join('\n')])
+    removed.set(index, [...(removed.get(index) ?? []), showingDefinitions(text)])
   }
   return { source, marks: { added, removed } }
 }

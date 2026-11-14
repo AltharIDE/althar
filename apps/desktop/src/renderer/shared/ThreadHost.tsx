@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query'
-import { type CSSProperties, useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
+import { type CSSProperties, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 
 import {
   type CanvasRef,
@@ -9,7 +9,9 @@ import {
   type ImageRef,
   Lightbox,
   type ThreadShell,
+  isMarkdownPath,
   ThreadShellProvider,
+  useThreadShell,
   Workbench,
 } from '@althar/ui'
 
@@ -22,7 +24,7 @@ import { PageView } from '../features/browser/PageView'
 import { CanvasHost, type OpenCanvas } from '../features/canvases/CanvasHost'
 import { type BenchWidth, PAGE_BENCH, useBenchWidth } from './code/bench'
 import { pictureOf } from './code/FilePicture'
-import { type CodeOpen, useCodeHost } from './code/CodeHost'
+import { type CodeOpen, useChangedFile, useCodeHost } from './code/CodeHost'
 
 /*
  * What a thread's screen offers the parts in it (the kit's ThreadShell): a
@@ -240,12 +242,15 @@ const text = { beside: '(opens beside the conversation)' } as const
 /** A document in the side panel: as it was when it opened, then as it is now, read again at each `version`. */
 export function DocumentPanel({
   threadId,
+  taskId,
   doc,
   version,
   onClose,
   onOpen,
 }: {
   threadId: string
+  /** The task whose folder the document is in, for what it changed there; null for none. */
+  taskId?: string | null
   doc: DocRef
   /** What the document was last changed by in the thread: a new one reads it again. */
   version: string
@@ -262,16 +267,32 @@ export function DocumentPanel({
     enabled: source !== undefined,
     refetchOnMount: 'always',
   })
+  // A markdown file the task changed shows what changed, read as the document is: by its path in the task's folder, again as it is edited.
+  const inTask = doc.path !== undefined && !doc.path.startsWith('/') && isMarkdownPath(doc.path)
+  const change = useChangedFile(taskId ?? null, doc.path ?? '', inTask && taskId != null, version)
+  const code = useThreadShell().code
+  const box = useRef<HTMLDivElement>(null)
+  const folder = doc.path === undefined ? '' : doc.path.slice(0, Math.max(0, doc.path.lastIndexOf('/')))
   return (
-    <DocPanel
-      doc={{ ...doc, body: read.data?.body ?? doc.body }}
-      onClose={onClose}
-      {...(onOpen === undefined ? {} : { onOpen })}
-      {...(read.isError ? { error: messageOf(read.error) } : {})}
-      // Its pictures are beside it, in the task's folder.
-      {...(doc.path === undefined
-        ? {}
-        : { file: { folder: doc.path.slice(0, Math.max(0, doc.path.lastIndexOf('/'))), image: pictureOf(threadId) } })}
-    />
+    <div ref={box} style={{ display: 'contents' }}>
+      <DocPanel
+        doc={{ ...doc, body: read.data?.body ?? doc.body }}
+        {...(change == null ? {} : change.whole ? { change: change.lines } : {})}
+        onClose={onClose}
+        {...(onOpen === undefined ? {} : { onOpen })}
+        {...(read.isError ? { error: messageOf(read.error) } : {})}
+        // Its pictures are beside it, in the task's folder.
+        {...(doc.path === undefined
+          ? {}
+          : {
+              file: {
+                folder,
+                image: pictureOf(threadId),
+                // A file it links to opens on top of it, with Back, as one named in the document's words does.
+                ...(code?.openByName === undefined ? {} : { open: (path: string) => code.openByName?.(path, box.current) }),
+              },
+            })}
+      />
+    </div>
   )
 }
