@@ -205,7 +205,7 @@ Switch labs whenever you like: your projects, their history and their decisions 
     <td valign="top">A lab's own app</td>
     <td valign="top">
       <picture><source media="(prefers-color-scheme: dark)" srcset=".github/readme/compare/claude-dark.svg" /><img src=".github/readme/compare/claude.svg" width="20" height="20" alt="" /></picture> Claude app<br />
-      <picture><source media="(prefers-color-scheme: dark)" srcset=".github/readme/compare/codex-dark.svg" /><img src=".github/readme/compare/codex.svg" width="20" height="20" alt="" /></picture> Codex app
+      <picture><source media="(prefers-color-scheme: dark)" srcset=".github/readme/compare/openai-dark.svg" /><img src=".github/readme/compare/openai.svg" width="20" height="20" alt="" /></picture> ChatGPT app, in Codex mode
     </td>
     <td valign="top">Every lab's agents, on your own plans, one reviewing the other.</td>
   </tr>
@@ -213,9 +213,9 @@ Switch labs whenever you like: your projects, their history and their decisions 
     <td valign="top">An AI editor</td>
     <td valign="top">
       <picture><source media="(prefers-color-scheme: dark)" srcset=".github/readme/compare/cursor-dark.svg" /><img src=".github/readme/compare/cursor.svg" width="20" height="20" alt="" /></picture> Cursor<br />
-      <picture><source media="(prefers-color-scheme: dark)" srcset=".github/readme/compare/windsurf-dark.svg" /><img src=".github/readme/compare/windsurf.svg" width="20" height="20" alt="" /></picture> Windsurf
+      <picture><source media="(prefers-color-scheme: dark)" srcset=".github/readme/compare/devin-dark.svg" /><img src=".github/readme/compare/devin.svg" width="20" height="20" alt="" /></picture> Devin Desktop, formerly Windsurf
     </td>
-    <td valign="top">Built round projects and tasks rather than files; open source, and tied to no lab.</td>
+    <td valign="top">Open source, running each lab's agent on the plan you already pay for, not a subscription of its own.</td>
   </tr>
 </table>
 
@@ -268,4 +268,4 @@ The most useful thing you can do right now is use Althar on real work and tell u
 
 Althar is open source under the [Apache License 2.0](LICENSE). See [NOTICE](NOTICE).
 
-Claude, ChatGPT, Codex, Gemini, Google, Antigravity, OpenCode, GitHub, Copilot, JetBrains, Junie, Grok, Kimi, Mistral, Qwen, Cursor, Windsurf, cmux, Paradev, Open WebUI, Cherry Studio, GitLab, Bitbucket, Linear, Jira and Trello are trademarks of their owners. Althar isn't affiliated with or endorsed by them.
+Claude, ChatGPT, Codex, Gemini, Google, Antigravity, OpenCode, GitHub, Copilot, JetBrains, Junie, Grok, Kimi, Mistral, Qwen, Cursor, Devin, Windsurf, cmux, Paradev, Open WebUI, Cherry Studio, GitLab, Bitbucket, Linear, Jira and Trello are trademarks of their owners. Althar isn't affiliated with or endorsed by them.
