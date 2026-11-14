@@ -18,7 +18,7 @@ import type { ReviewBrief, ReviewDraftCard } from '@althar/contracts'
 import { type ActorId, type CommandEnvelope, Ids, newId, type ProjectId, type ReviewDraftState, type ReviewVerdict } from '@althar/domain'
 import { Commands, type Ledger } from '@althar/persistence-sqlite'
 import { removeFully } from '@althar/provider-adapters'
-import { Context, type Crypto, Effect, Layer, Option, Schema } from 'effect'
+import { Cause, Context, type Crypto, Effect, Layer, Option, Result, Schema } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { offScratch, postCard, touchCard } from './cards'
@@ -27,7 +27,8 @@ import { Connections } from './Connections'
 import { envelope } from './envelope'
 import { NotFound } from './errors'
 import { makeKeyedLock } from './keyedLock'
-import { commitOf, fetchRefs, gitOutcome } from './git'
+import { commitOf, fetchedRefs, gitOutcome } from './git'
+import { gitSummary } from './gitSaid'
 import { Instance } from './Instance'
 import { freeSlug, slugify } from './Projects'
 import { logForLead, logPage, LOGS_TO_LEAD, queueDetailOf, readLog } from './checkLogs'
@@ -555,6 +556,19 @@ export class Reviews extends Context.Service<
             : `The host said: ${error.message}`,
         )
 
+      /**
+       * A pull request's head and its target, fetched into `ref`, and its head's commit; where git can't, a
+       * Result's failure with what git said, for the refusal and the log. The host's own refusals go as they are.
+       */
+      const fetchedReview = (working: string, host: CodeHost, repository: Repository, pull: ChangeToReview, ref: string) =>
+        fetchReviewRefs(working, host, repository, pull, ref).pipe(
+          Effect.andThen(commitOf(working, `${ref}/head`)),
+          Effect.map((head) => Result.succeed(head)),
+          Effect.catchTag('GitFailed', (failed) =>
+            Effect.logWarning('Could not fetch a pull request to review', Cause.fail(failed)).pipe(Effect.as(Result.fail(failed))),
+          ),
+        )
+
       const fetchReviewRefs = (working: string, host: CodeHost, repository: Repository, pull: ChangeToReview, ref: string) =>
         Effect.gen(function* () {
           const target = yield* host.pushTarget(repository).pipe(Effect.mapError(hostWords))
@@ -569,10 +583,10 @@ export class Reviews extends Context.Service<
           if (host.product === 'bitbucket_cloud' && pull.fork !== null) {
             const source = yield* host.repository(pull.fork).pipe(Effect.mapError(hostWords))
             const signed = yield* host.pushTarget(source).pipe(Effect.mapError(hostWords))
-            if (!(yield* fetchRefs(working, signed, [{ from: headRef, into: `${ref}/head` }]))) return false
-            return yield* fetchRefs(working, target, [{ from: `refs/heads/${pull.target}`, into: `${ref}/base` }])
+            yield* fetchedRefs(working, signed, [{ from: headRef, into: `${ref}/head` }])
+            return yield* fetchedRefs(working, target, [{ from: `refs/heads/${pull.target}`, into: `${ref}/base` }])
           }
-          return yield* fetchRefs(working, target, [
+          return yield* fetchedRefs(working, target, [
             { from: headRef, into: `${ref}/head` },
             { from: `refs/heads/${pull.target}`, into: `${ref}/base` },
           ])
@@ -612,9 +626,13 @@ export class Reviews extends Context.Service<
 
             // Its head and its target, fetched as a push is signed in, into refs of Althar's own: nothing is a branch here.
             const ref = `refs/althar/reviews/${place.path.join('/')}/${pull.number}`
-            const fetched = yield* fetchReviewRefs(place.binding.repository, host, repository, pull, ref)
-            const head = fetched ? yield* commitOf(place.binding.repository, `${ref}/head`).pipe(Effect.option) : Option.none()
-            if (Option.isNone(head)) return yield* refused(`Althar couldn’t fetch the ${name}’s code. Try again, or tell the person.`)
+            const fetched = yield* fetchedReview(place.binding.repository, host, repository, pull, ref)
+            // Where it can't be fetched, what git said goes with the refusal, and all of it to the log.
+            if (Result.isFailure(fetched))
+              return yield* refused(
+                `Althar couldn’t fetch the ${name}’s code (${gitSummary(fetched.failure)}). Try again, or tell the person.`,
+              )
+            const head = { value: fetched.success }
             if (pull.headSha !== null && !reviewCommitMatches(head.value, pull.headSha))
               return yield* refused(`The ${name}'s head moved while fetching it. Read the current change and start its review again.`)
             // Where its change starts: where its head meets its base; or, for histories that never meet, its base.
@@ -1633,9 +1651,12 @@ export class Reviews extends Context.Service<
               SELECT path FROM workspaces WHERE task_id = ${input.taskId} AND reviewing = ${pull.url} AND state = 'ready'`
             if (already !== undefined) return { path: already.path, name, already: true }
             const ref = `refs/althar/reviews/${place.path.join('/')}/${pull.number}`
-            const fetched = yield* fetchReviewRefs(place.binding.repository, host, repository, pull, ref)
-            const head = fetched ? yield* commitOf(place.binding.repository, `${ref}/head`).pipe(Effect.option) : Option.none()
-            if (Option.isNone(head)) return yield* refused(`Althar couldn’t fetch the ${name}’s code. Try again, or tell the person.`)
+            const fetched = yield* fetchedReview(place.binding.repository, host, repository, pull, ref)
+            if (Result.isFailure(fetched))
+              return yield* refused(
+                `Althar couldn’t fetch the ${name}’s code (${gitSummary(fetched.failure)}). Try again, or tell the person.`,
+              )
+            const head = { value: fetched.success }
             if (pull.headSha !== null && !reviewCommitMatches(head.value, pull.headSha))
               return yield* refused(`The ${name}'s head moved while fetching it. Read the current change and start its review again.`)
             const met = yield* gitOutcome(place.binding.repository, 'merge-base', `${ref}/base`, head.value)

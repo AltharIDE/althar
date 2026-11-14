@@ -555,13 +555,17 @@ describe('a branch the person makes from a branch list', () => {
       assert.strictEqual(git(bare, 'rev-parse', 'release/0.7.1'), elsewhere)
       assert.strictEqual(git(working, 'rev-parse', 'refs/remotes/origin/release/0.7.1'), elsewhere)
 
-      // One the host's rules refuse is refused, as git said it, and the lists never have it.
-      writeFileSync(join(bare, 'hooks', 'pre-receive'), '#!/bin/sh\necho "release branches are protected" >&2\nexit 1\n', {
-        mode: 0o755,
-      })
+      // One the host's rules refuse is refused, as git said it but for a secret it echoed, and the lists never have it.
+      const token = 'ghp_' + 'A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r8'
+      writeFileSync(
+        join(bare, 'hooks', 'pre-receive'),
+        `#!/bin/sh\necho "release branches are protected" >&2\necho "Authorization: Bearer ${token}" >&2\nexit 1\n`,
+        { mode: 0o755 },
+      )
       const declined = yield* Effect.flip(makeBranch({ projectId, repositoryId, branch: 'release/1.0.0' }))
       assert.strictEqual(declined._tag, 'BranchRefused')
       assert.include('message' in declined ? declined.message : '', 'release branches are protected')
+      assert.notInclude('message' in declined ? declined.message : '', token)
       assert.strictEqual(spawnSync('git', ['rev-parse', '--verify', '-q', 'refs/remotes/origin/release/1.0.0'], { cwd: working }).status, 1)
       assert.strictEqual(spawnSync('git', ['rev-parse', '--verify', '-q', 'refs/althar/start/release/1.0.0'], { cwd: working }).status, 1)
       assert.notInclude((yield* (yield* Projects).repositories(projectId))[0]?.branches ?? [], 'release/1.0.0')

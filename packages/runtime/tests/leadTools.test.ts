@@ -211,7 +211,8 @@ describe('a task’s pull request, as the person acts on it', () => {
       const kept = execFileSync('git', ['rev-parse', 'althar/add-a-retry'], { cwd: bare }).toString().trim()
       execFileSync('git', ['update-ref', '-d', 'refs/heads/althar/add-a-retry'], { cwd: bare })
       const unfetched = yield* Effect.flip(changes.mergeNote(taskId))
-      assert.strictEqual((unfetched as { stderr?: string }).stderr, "Couldn't fetch althar/add-a-retry from the host.")
+      // What git said of it, not a sentence of Althar's in its place.
+      assert.strictEqual((unfetched as { stderr?: string }).stderr, "fatal: couldn't find remote ref refs/heads/althar/add-a-retry")
       execFileSync('git', ['update-ref', 'refs/heads/althar/add-a-retry', kept], { cwd: bare })
       // Someone merged it on the host before the person pressed Merge: nothing is merged twice, and the task settles.
       github.mergeByHand(1)

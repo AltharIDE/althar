@@ -1,17 +1,18 @@
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs'
 import { copyFile, mkdtemp, readFile, stat } from 'node:fs/promises'
 import { homedir, tmpdir } from 'node:os'
-import { dirname, join, posix, resolve } from 'node:path'
+import { dirname, join, posix, resolve, sep } from 'node:path'
 
 import type { ChangeTarget } from '@althar/domain'
 import { cleanUp } from '@althar/provider-adapters'
-import { Cause, Context, Deferred, Duration, Effect } from 'effect'
+import { Cause, Clock, Context, Deferred, Duration, Effect } from 'effect'
 
 import { afterOpen, startup } from './startup'
 import { GitFailed } from './errors'
 import { refStamp } from './refStamps'
 import { Foreground, reachesRemote, startApart } from './spawner'
 import { forkOf } from './forks'
+import { linkBroke } from './worktreeLinks'
 
 /*
  * The git commands the runtime runs itself, outside any agent. They never
@@ -245,6 +246,63 @@ export const patchIdsOf = (cwd: string, commits: ReadonlyArray<string>) =>
 /** What every git command in an effect runs with besides, as `untouched` sets it for a folder someone else works in. */
 const Untouched = Context.Reference<Readonly<Record<string, string>>>('@althar/runtime/git/Untouched', { defaultValue: () => ({}) })
 
+/** A git command's failure as GitFailed: what it said, and how it ended. */
+const failedWith = (args: ReadonlyArray<string>, cwd: string, result: GitProcessResult) =>
+  new GitFailed({
+    args: [...args],
+    cwd,
+    stderr: result.stderr.trim(),
+    ...(result.reason === undefined ? {} : { reason: result.reason }),
+    ...(result.code === undefined ? {} : { code: result.code }),
+    ...(result.signal === undefined ? {} : { signal: result.signal }),
+    ...(result.timedOut === undefined ? {} : { timedOut: result.timedOut, timeout: result.timeout }),
+  })
+
+const runOnce = (
+  timeout: number,
+  cwd: string,
+  args: ReadonlyArray<string>,
+  env: Readonly<Record<string, string>>,
+  trim: boolean,
+  input: string | undefined,
+): Effect.Effect<string, GitFailed> =>
+  runProcess(timeout, cwd, args, env, input)
+    .pipe(
+      Effect.flatMap((result) =>
+        result.error === null ? Effect.succeed(trim ? result.stdout.trim() : result.stdout) : Effect.fail(failedWith(args, cwd, result)),
+      ),
+    )
+    .pipe((effect) => (args[0] === 'fetch' || args[0] === 'ls-remote' ? afterOpen(startup('repository-fetch', effect)) : effect))
+
+/**
+ * What repairs a worktree whose link to its repository broke, for the
+ * worktrees under a folder: whether it did. The runtime sets one for its
+ * worktrees (WorktreeRepair.ts), which knows where each one's repository is.
+ * Whether a command that failed `since` (by the clock, in ms) should run
+ * again: one it repaired, or that was repaired after the command started. A
+ * mender runs git with `runProcess`, never `run`, which would come back to it.
+ */
+export type Mender = (cwd: string, since: number) => Effect.Effect<boolean>
+
+/** Each folder's mender, by the folder its worktrees are under. */
+const menders = new Map<string, Mender>()
+
+/** Has `mender` repair the worktrees under `within` while the scope lasts. */
+export const mendingUnder = (within: string, mender: Mender) => {
+  const key = resolve(within)
+  return Effect.acquireRelease(
+    Effect.sync(() => void menders.set(key, mender)),
+    () => Effect.sync(() => void (menders.get(key) === mender && menders.delete(key))),
+  )
+}
+
+/** Repairs the worktree `cwd` is in, where a mender knows it: whether it did. */
+const mendAt = (cwd: string, since: number): Effect.Effect<boolean> => {
+  const at = resolve(cwd)
+  for (const [within, mender] of menders) if (at === within || at.startsWith(`${within}${sep}`)) return mender(at, since)
+  return Effect.succeed(false)
+}
+
 const run = (
   timeout: number,
   cwd: string,
@@ -254,25 +312,31 @@ const run = (
   /** What the command reads, for one such as `cat-file --batch-check`. */
   input?: string,
 ): Effect.Effect<string, GitFailed> =>
-  runProcess(timeout, cwd, args, env, input)
-    .pipe(
-      Effect.flatMap((result) =>
-        result.error === null
-          ? Effect.succeed(trim ? result.stdout.trim() : result.stdout)
-          : Effect.fail(
-              new GitFailed({
-                args: [...args],
-                cwd,
-                stderr: result.stderr.trim(),
-                ...(result.reason === undefined ? {} : { reason: result.reason }),
-                ...(result.code === undefined ? {} : { code: result.code }),
-                ...(result.signal === undefined ? {} : { signal: result.signal }),
-                ...(result.timedOut === undefined ? {} : { timedOut: result.timedOut, timeout: result.timeout }),
-              }),
-            ),
+  // A worktree git can't open for its link to its repository is repaired, where Althar knows it, and the command runs once more.
+  Effect.flatMap(Clock.currentTimeMillis, (since) =>
+    runOnce(timeout, cwd, args, env, trim, input).pipe(
+      Effect.catchTag('GitFailed', (failed) =>
+        linkBroke(failed.stderr)
+          ? Effect.flatMap(mendAt(cwd, since), (mended) => (mended ? runOnce(timeout, cwd, args, env, trim, input) : Effect.fail(failed)))
+          : Effect.fail(failed),
       ),
-    )
-    .pipe((effect) => (args[0] === 'fetch' || args[0] === 'ls-remote' ? afterOpen(startup('repository-fetch', effect)) : effect))
+    ),
+  )
+
+/**
+ * Has git repair the link between a worktree and its repository, from the
+ * repository's main checkout (`git worktree repair`): both sides, the
+ * worktree's `.git` file and the repository's record of it. Nothing is
+ * moved, removed or reset. What git said of it, or its failure.
+ */
+export const repairWorktree = (root: string, folder: string): Effect.Effect<string, GitFailed> =>
+  runProcess(60_000, root, ['worktree', 'repair', folder], {}, undefined).pipe(
+    Effect.flatMap((result) =>
+      result.error === null
+        ? Effect.succeed(`${result.stdout}\n${result.stderr}`.trim())
+        : Effect.fail(failedWith(['worktree', 'repair', folder], root, result)),
+    ),
+  )
 
 /** Runs a git process with a clock-controlled timeout and stops it when its caller leaves. */
 const runProcess = (
@@ -448,25 +512,38 @@ export const askedRemoteTip = (cwd: string, target: { readonly url: string; read
 
 /**
  * Fetches a remote's branch by URL into a ref here, as a push is signed in:
- * the commit it is at, or null where it can't be fetched.
+ * the commit it is at, or git's failure where it can't be fetched.
  */
-export const fetchInto = (cwd: string, target: { readonly url: string; readonly header: string | null }, branch: string, ref: string) =>
+export const fetchedInto = (cwd: string, target: { readonly url: string; readonly header: string | null }, branch: string, ref: string) =>
   run(
     120_000,
     cwd,
     ['fetch', '--quiet', '--no-tags', '--no-write-fetch-head', target.url, `+refs/heads/${branch}:${ref}`],
-    target.header === null ? {} : { GIT_CONFIG_COUNT: '1', GIT_CONFIG_KEY_0: 'http.extraHeader', GIT_CONFIG_VALUE_0: target.header },
-  ).pipe(
-    Effect.andThen(commitOf(cwd, ref)),
+    signedIn(target),
+  ).pipe(Effect.andThen(commitOf(cwd, ref)))
+
+/**
+ * A fetch that failed, kept in the debug log with all git said (its fields,
+ * redacted, by the logger) where its caller goes on without it: some ask for
+ * what may not be there, as a branch before a tag, and a miss is no failure.
+ * A caller to which it is one uses `fetchedInto`, and has git's reason.
+ */
+const loggedFetch = (what: string) => (failed: GitFailed) =>
+  Effect.logDebug(`Althar couldn't fetch ${what}; going on without it`, Cause.fail(failed))
+
+/** As fetchedInto, but null where it can't be fetched, the reason only in the log. */
+export const fetchInto = (cwd: string, target: { readonly url: string; readonly header: string | null }, branch: string, ref: string) =>
+  fetchedInto(cwd, target, branch, ref).pipe(
+    Effect.tapError(loggedFetch(`a branch, ${branch}`)),
     Effect.orElseSucceed(() => null),
   )
 
 /**
  * Fetches refs from a remote by URL into refs here, as a push is signed in,
- * each `from` into its `into`, forced: whether git could. Tags aren't
+ * each `from` into its `into`, forced, or git's failure. Tags aren't
  * fetched, and nothing is written to FETCH_HEAD.
  */
-export const fetchRefs = (
+export const fetchedRefs = (
   cwd: string,
   target: { readonly url: string; readonly header: string | null },
   refs: ReadonlyArray<{ readonly from: string; readonly into: string }>,
@@ -476,8 +553,17 @@ export const fetchRefs = (
     cwd,
     ['fetch', '--quiet', '--no-tags', '--no-write-fetch-head', target.url, ...refs.map((ref) => `+${ref.from}:${ref.into}`)],
     signedIn(target),
-  ).pipe(
+  ).pipe(Effect.asVoid)
+
+/** As fetchedRefs: whether git could, the reason only in the log. */
+export const fetchRefs = (
+  cwd: string,
+  target: { readonly url: string; readonly header: string | null },
+  refs: ReadonlyArray<{ readonly from: string; readonly into: string }>,
+) =>
+  fetchedRefs(cwd, target, refs).pipe(
     Effect.as(true),
+    Effect.tapError(loggedFetch('refs')),
     Effect.orElseSucceed(() => false),
   )
 

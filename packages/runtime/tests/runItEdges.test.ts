@@ -259,9 +259,10 @@ describe('a task’s review of a related pull request, at its edges', () => {
         yield* refusal(reviews.reviewIn({ taskId: own.taskId, pullRequest: '#1', actorId })),
         'That PR #1 is closed, so there’s nothing to review.',
       )
-      assert.strictEqual(
-        yield* refusal(reviews.reviewIn({ taskId: own.taskId, pullRequest: '#2', actorId })),
-        'Althar couldn’t fetch the PR #2’s code. Try again, or tell the person.',
+      // What git said goes with it.
+      assert.match(
+        String(yield* refusal(reviews.reviewIn({ taskId: own.taskId, pullRequest: '#2', actorId }))),
+        /^Althar couldn’t fetch the PR #2’s code \(git fetch: .+\)\. Try again, or tell the person\.$/,
       )
       yield* (yield* Tasks).abandon({ envelope: yield* Runtime.envelope('task.abandon', { taskId: own.taskId }), taskId: own.taskId })
       assert.strictEqual(

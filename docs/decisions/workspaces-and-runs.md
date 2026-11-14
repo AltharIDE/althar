@@ -276,6 +276,52 @@ Off by default was turned down because nobody would turn it on.
 Right-away removal was turned down because a merged task is often run or
 followed up in the next days.
 
+## A worktree whose link broke
+
+A worktree and its repository name each other: the worktree's `.git` file
+names its git directory under the repository's `.git/worktrees/`, and that
+directory's `gitdir` file names the worktree back. Moving either side, as a
+profile moved from the Flatpak to a native build does, breaks the link, and
+every git command in the folder fails with `fatal: gitfile does not point to
+a valid repository` while `git worktree list` still shows it healthy.
+
+- **Althar repairs it by itself**, for a task's worktree or its review copy
+  (`.review/<task>/<repository>`) whose `.git` file names no git directory,
+  one that isn't there, or whose record names another place. It runs `git
+  worktree repair <folder>` from the main checkout of the repository the
+  worktree was made from.
+- **When:** as Althar starts, for every worktree it keeps that isn't
+  cleaned, and the first time git's own `fatal:`/`error:` line in a worktree
+  says its link broke. That command runs once more, only after a repair that
+  finished while it ran. A repository's broken worktrees are repaired and
+  recorded together, as git repairs them together.
+- **Judged by the link, not git's exit code:** git can exit 1 having
+  repaired it; what counts is whether the link reads right afterwards.
+- **Never another worktree's record.** Records are named by folder name
+  (`<name>`, `<name>1`, …), and a prune frees a moved folder's name for the
+  next worktree, so a moved folder's `.git` can name another task's record.
+  Before running git, Althar finds the record the repair would join the
+  folder to, and repairs only where it names this folder or one that isn't
+  there, and isn't on a branch other than the task's (for a review copy, on
+  no branch). Otherwise it changes nothing and says why.
+- **What it records:** a `workspace.repaired` or `workspace.repair_failed`
+  fact, one line in the task's thread ("Folder link repaired", "…, and its
+  review copy's"), and an INFO line in the log.
+- **What it never does:** move, remove, reset or prune anything. Where git
+  can't repair a folder, or the repair would take another's record, the
+  folder stays as it is and the thread says so with a way out: the task's
+  commits are on its branch and the folder can be moved aside and added back;
+  a review copy can be removed, as the next review makes it again; an old
+  profile's copy can be removed. Git's line comes after, redacted, and goes
+  to the log. A failure is recorded, said and logged once, not at each
+  start. A worktree whose folder is missing is left to "its folder isn't on
+  this computer".
+
+Asking first was turned down: the repair only rewrites two pointer files to
+what they must be, and the task can't work until it's done. `git worktree
+prune` and adding again was turned down, as prune drops what the worktree
+held but hadn't committed.
+
 ## Running the project
 
 Althar runs the project itself, with no agent: running it needs no model,
@@ -451,4 +497,5 @@ sweep finds the rest.
 
 - 8 Nov 2026: written from the ADRs under Replaces.
 - 8 Nov 2026: the limits sweep (#696) opened every sandbox's network.
+- 8 Nov 2026: Althar repairs a worktree whose link to its repository broke (#654).
 - 10 Nov 2026: a running task moves between a worktree and Local, and changes the branch it works toward at any time (a task is a conversation plus parts, [tasks](tasks.md#changing-parts)).

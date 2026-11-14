@@ -825,3 +825,32 @@ export const BranchWithPictures: Story = {
 }
 export const PullRequestWithPictures: Story = { args: CHANGE_PR_PICTURES }
 export const RepliedWithPictures: Story = { args: CHANGE_REPLIED_PICTURES }
+
+/** A card's foot where Althar couldn't look at a conflict for a git failure, with what git said. */
+const unsentFoot = (why: string): Story => ({
+  args: {
+    ...CHANGE_CONFLICT,
+    why: undefined,
+    foot: (
+      <FactLine>
+        <Fact icon="branch" tone="warm">
+          {why}
+        </Fact>
+      </FactLine>
+    ),
+    next: (
+      <NextStep signal onPress={resolveNow}>
+        Resolve now
+      </NextStep>
+    ),
+  },
+})
+export const CouldntFetch: Story = unsentFoot(
+  "Althar couldn’t fetch main to merge it with the branch here: could not read Username for 'https://github.com': terminal prompts disabled.",
+)
+export const CouldntFetchDark: Story = { ...CouldntFetch, globals: { theme: 'dark' } }
+/** Git's line, as when the folder's link to its repository broke. */
+export const CouldntRead: Story = unsentFoot(
+  'Althar couldn’t read the branch here: gitfile does not point to a valid repository: ~/.local/share/althar/worktrees/orchy/fix-login/orchy/.git.',
+)
+export const CouldntReadDark: Story = { ...CouldntRead, globals: { theme: 'dark' } }

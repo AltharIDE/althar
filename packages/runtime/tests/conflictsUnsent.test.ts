@@ -11,6 +11,7 @@ import { SqlClient } from 'effect/sql'
 
 import { Changes } from '../src/Changes'
 import type { Conflict } from '../src/conflicts'
+import { homeShortened } from '../src/gitSaid'
 import { Instance } from '../src/Instance'
 import { Policies } from '../src/Policies'
 import { Projects } from '../src/Projects'
@@ -214,7 +215,11 @@ describe('a task Althar can’t look at here, where its host says it merges clea
       const { projectId, taskId, threadId } = yield* opened(working, '[lead:resolve]')
       url = join(tmpdir(), 'althar-nowhere', randomBytes(4).toString('hex'))
       moveHostMainOn(working, bare)
-      assert.strictEqual(yield* uncheckedOf(projectId), 'Althar couldn’t fetch main to merge it with the branch here.')
+      // What git said comes with it, its home folder shortened.
+      assert.strictEqual(
+        yield* uncheckedOf(projectId),
+        `Althar couldn’t fetch main to merge it with the branch here: '${homeShortened(url)}' does not appear to be a git repository.`,
+      )
       assert.deepStrictEqual(yield* rounds(taskId), [])
       // Back: Look again fetches anew, finds the conflict, and the card says no more of why.
       url = bare

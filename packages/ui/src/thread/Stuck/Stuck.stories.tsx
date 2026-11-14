@@ -558,3 +558,14 @@ export const AllStates: Story = {
     />
   ),
 }
+
+/** An agent that couldn't start for a git failure: the git subcommand and git's own line, the home folder shortened to ~ and any secret redacted. */
+export const CouldntStartGit: Story = {
+  args: {
+    tried: [],
+    read: undefined,
+    output: undefined,
+    what: "Codex couldn't start. git rev-parse: gitfile does not point to a valid repository: ~/.local/share/althar/worktrees/orchy/fix-login/orchy/.git.",
+  },
+}
+export const CouldntStartGitDark: Story = { ...CouldntStartGit, globals: { theme: 'dark' } }
