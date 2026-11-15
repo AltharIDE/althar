@@ -131,6 +131,48 @@ describe('times', () => {
 })
 
 describe('reads that come back out of order', () => {
+  it('publishes a head with only the newest of its buffered item reads', async () => {
+    const newest = newestReads('head')
+    const head = Promise.withResolvers<string>()
+    const kept: Array<string> = []
+    const fail = vi.fn()
+    const reading = newest('head', head.promise, (value) => kept.push(value), fail)
+    await newest('item', Promise.resolve('old'), (value) => kept.push(value), fail)
+    await newest('item', Promise.resolve('new'), (value) => kept.push(value), fail)
+    expect(kept).toEqual([])
+    head.resolve('head')
+    await reading
+    expect(kept).toEqual(['head', 'new'])
+    expect(fail).not.toHaveBeenCalled()
+  })
+
+  it('keeps items buffered when a head needs a new whole conversation or a read fails', async () => {
+    const newest = newestReads('head')
+    const first = Promise.withResolvers<string>()
+    const fresh = Promise.withResolvers<string>()
+    const kept: Array<string> = []
+    const fail = vi.fn()
+    let readingFresh: Promise<void> | undefined
+    const reading = newest(
+      'head',
+      first.promise,
+      () => {
+        readingFresh = newest('head', fresh.promise, (value) => kept.push(value), fail)
+      },
+      fail,
+    )
+    await newest('item', Promise.resolve('item'), (value) => kept.push(value), fail)
+    first.resolve('rewritten')
+    await reading
+    expect(kept).toEqual([])
+    fresh.reject(new Error('The port closed'))
+    await readingFresh
+    expect(fail).toHaveBeenCalledOnce()
+    expect(kept).toEqual([])
+    await newest('head', Promise.resolve('reconnected'), (value) => kept.push(value), fail)
+    expect(kept).toEqual(['reconnected', 'item'])
+  })
+
   it('keep only the newest answer for each thing read', async () => {
     const newest = newestReads()
     const kept: Array<string> = []
@@ -248,24 +290,27 @@ describe('what the person sends', () => {
 })
 
 describe('the composer queue', () => {
-  it('leaves what the person is sending out of the queue, while what waited before it is there', () => {
+  it('shows what the person is sending in the queue with what waited before it', () => {
     const onItsWay = sending([{ ...items.you('Add a retry'), sequence: 4 }], {
       text: 'Retry',
       queued: true,
       interrupting: false,
     })
-    expect(queuedOf(onItsWay.items, true)).toEqual([])
+    expect(queuedOf(onItsWay.items, true).map((one) => one.text)).toEqual(['Retry'])
     const waited = { ...items.you('Also this'), id: 'i5', sequence: 5, input: { state: 'queued' as const, interrupting: false } }
-    expect(queuedOf([...onItsWay.items, waited], true).map((one) => one.text)).toEqual(['Also this'])
+    expect(queuedOf([...onItsWay.items, waited], true).map((one) => one.text)).toEqual(['Retry', 'Also this'])
   })
 
-  it('shows behind a turn running, or with no agent to take what waits, but not while the person is sending', () => {
+  it('shows behind a turn running, or with no agent to take what waits, including while the person is sending behind a running turn', () => {
     expect(queueShown({ turnRunning: true }, false)).toBe(true)
     expect(queueShown({ turnRunning: false }, false)).toBe(false)
     expect(queueShown(null, false)).toBe(true)
     expect(queueShown(null, true)).toBe(false)
-    // What the person just sent goes straight to the thread though a turn runs, rather than flash in the queue.
-    expect(queueShown({ turnRunning: true }, true)).toBe(false)
+    // Sending behind a running turn never puts the message in the thread.
+    expect(queueShown({ turnRunning: true }, true)).toBe(true)
+    // The runtime's accepting is enough, even when the cached turnRunning is stale.
+    expect(queueShown({ turnRunning: false }, true, 'queued')).toBe(true)
+    expect(queueShown({ turnRunning: false }, true, 'now')).toBe(false)
   })
 
   it('has what waits read now while the person sends, or the agent holds the thread or starts, but not behind a turn or a wait', () => {

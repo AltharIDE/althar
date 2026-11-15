@@ -6,7 +6,7 @@ import { join } from 'node:path'
 import { expect, type Locator, type Page, test } from '@playwright/test'
 
 import { repository } from '../tests/repository'
-import { connectGitHub, launch, openFirstProject, say, showPanes, shown, still, toConversation } from './support'
+import { connectGitHub, launch, openFirstProject, reveal, say, showPanes, shown, still, toConversation } from './support'
 
 /*
  * Every part of a task changes either way, just by the person telling its lead (a task is a conversation plus parts; the
@@ -64,8 +64,7 @@ const line = (page: Page, words: RegExp) => page.locator('p').filter({ hasText: 
 /** A line of the thread, at 1×, across the thread's column (as wide as its composer), with what stands above it. */
 const shoot = async (page: Page, what: Locator, name: string) => {
   await page.mouse.move(1190, 300)
-  await what.scrollIntoViewIfNeeded()
-  await still(page)
+  await reveal(page, what)
   const box = await what.boundingBox()
   const column = await page.getByRole('textbox', { name: /^(Tell .* something|Add to the queue)/ }).boundingBox()
   const x = Math.max(0, (column?.x ?? 200) - 40)

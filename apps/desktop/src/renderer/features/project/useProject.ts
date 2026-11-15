@@ -26,7 +26,7 @@ import { useOutputs } from '../../shared/useOutputs'
 import { useDrafts } from '../../shared/useDrafts'
 import { useStreamed } from '../../shared/useStreamed'
 import { canPick } from '../../shared/agents'
-import { inView, isSending, mergeItems, newestReads, sending, takenBack, unsent, waiting } from '../../shared/items'
+import { inView, isSending, mergeItems, newestReads, queueShown, sending, takenBack, unsent, waiting } from '../../shared/items'
 import { type Choice, moveTo, runningOn, startOf, upcomingOn } from '../../shared/models'
 import type { Streamed } from '../../shared/thread'
 
@@ -152,7 +152,7 @@ export const useProject = (projectId: string): ProjectModel => {
   const [pending, setPending] = useState(false)
   const [loadingEarlier, setLoadingEarlier] = useState(false)
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
-  const [newest] = useState(newestReads)
+  const [newest] = useState(() => newestReads('head'))
   const changed = useRef({ head: false, cards: false, automations: false, items: new Set<string>() })
   const threadId = coordinator?.threadId ?? null
   // What the coordinator's commands have printed so far, while they run.
@@ -240,10 +240,9 @@ export const useProject = (projectId: string): ProjectModel => {
   /**
    * The thread's head again: the agent working, the one it would start on.
    * Its items stay as they are, but for those it may have moved on, read after
-   * it and landing before it: what still waits its turn, and what else is
-   * asked. The runtime has a message delivered before it says the turn on it
-   * runs, so the thread never shows the turn running while what it took still
-   * waits in the queue.
+   * it and published with it: what still waits its turn, and what else is
+   * asked. The thread never shows new work under an idle head, nor the turn
+   * running while what it took still waits in the queue.
    */
   const readHead = useCallback(
     (also: Iterable<string> = []) =>
@@ -401,7 +400,7 @@ export const useProject = (projectId: string): ProjectModel => {
     disposition: 'after_current' | 'interrupt_and_continue',
     action: () => Promise<unknown>,
     images: Outgoing | undefined,
-    queued = disposition === 'interrupt_and_continue' || coordinator?.session?.turnRunning === true,
+    queued = disposition === 'interrupt_and_continue' || queueShown(coordinator?.session ?? null, true, coordinator?.accepting),
   ) => {
     let id = ''
     setCoordinator((current) => {

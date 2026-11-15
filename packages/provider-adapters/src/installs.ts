@@ -210,7 +210,9 @@ export const usingLocated = (
       ...(signIn.status === undefined ? {} : { status: pointed(signIn.status) }),
       ...(signIn.statusFallback === undefined ? {} : { statusFallback: pointed(signIn.statusFallback) }),
       ...(signIn.credentials === undefined ? {} : { credentials: pointed(signIn.credentials) }),
-      ...(signIn.inApp === undefined ? {} : { inApp: { ...signIn.inApp, run: pointed(signIn.inApp.run) } }),
+      ...(signIn.inApp === undefined || signIn.inApp.kind === 'copilot-device'
+        ? {}
+        : { inApp: { ...signIn.inApp, run: pointed(signIn.inApp.run) } }),
       ...(signIn.logout === undefined ? {} : { logout: { ...signIn.logout, run: pointed(signIn.logout.run) } }),
     },
     ...(definition.version === undefined ? {} : { version: pointed(definition.version) }),

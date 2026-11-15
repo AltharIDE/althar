@@ -235,14 +235,24 @@ test('an aside’s × clears it in the frame it is pressed, for good, and Make i
       const pill = `[data-aside="${CSS.escape(taskId)}"]`
       const button = document.querySelector<HTMLButtonElement>(`${pill} button[aria-label^="Clear"]`)
       if (button === null) return { pill: false, coordinator: false, found: false }
-      const back = { seen: false }
+      const back = { seen: false, first: null as Record<string, unknown> | null }
+      const pressedAt = performance.now()
       button.click()
       // Before the frame after the press is painted: what the person sees next. From then, no frame may draw it again.
       await new Promise((painted) => requestAnimationFrame(painted))
       new MutationObserver(() => {
-        if (document.querySelector(pill) !== null) back.seen = true
+        const returned = document.querySelector<HTMLElement>(pill)
+        if (returned === null) return
+        back.seen = true
+        back.first ??= {
+          afterMs: performance.now() - pressedAt,
+          visible: returned.getClientRects().length > 0,
+          node: returned.outerHTML.slice(0, 800),
+          parent: returned.parentElement?.outerHTML.slice(0, 1000),
+          alerts: [...document.querySelectorAll<HTMLElement>('[role="alert"]')].map((one) => one.innerText),
+        }
       }).observe(document.body, { childList: true, subtree: true })
-      Object.assign(window, { clearedBack: () => back.seen })
+      Object.assign(window, { clearedBack: () => back.seen, clearedBackDetails: () => back.first })
       return {
         found: true,
         pill: document.querySelector(`[data-aside="${CSS.escape(taskId)}"]`) === null,
@@ -252,8 +262,10 @@ test('an aside’s × clears it in the frame it is pressed, for good, and Make i
     expect(gone).toEqual({ found: true, pill: true, coordinator: true })
     // Althar catches up behind: the board's own read says it settled, and still nothing of it came back.
     const clearedBack = () => page.evaluate(() => (window as unknown as { clearedBack: () => boolean }).clearedBack())
+    const details = () =>
+      page.evaluate(() => JSON.stringify((window as unknown as { clearedBackDetails: () => unknown }).clearedBackDetails()))
     await expect(page.getByRole('region', { name: 'The project’s work' }).getByText('Which file holds the retry?')).toBeVisible()
-    expect(await clearedBack()).toBe(false)
+    expect(await clearedBack(), await details()).toBe(false)
     await expect(page.getByRole('alert').filter({ visible: true })).toHaveCount(0)
 
     // Make it a task: its pill goes and its card is on the board in the frame it is pressed.
@@ -277,7 +289,7 @@ test('an aside’s × clears it in the frame it is pressed, for good, and Make i
     await expect(shown(page, 'An aside became a task: Shorten the retry wait')).toBeVisible()
     await expect(work).toHaveCount(0)
     // Through every read of the board since, the cleared one never came back.
-    expect(await clearedBack()).toBe(false)
+    expect(await clearedBack(), await details()).toBe(false)
   } finally {
     await electronApp.close()
   }

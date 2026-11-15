@@ -121,7 +121,7 @@ describe('what waits on the person', () => {
     expect(shownQueued([change({ queued: true }), change()])).toBe(true)
   })
 
-  it('counts a stopped task, and leaves out an aside but for its call, and what is kept for later', () => {
+  it('holds stopped tasks outside Needs you, and leaves out an aside but for its call, and what is kept for later', () => {
     const tasks = [
       card('t1', 'stopped'),
       card('t2', 'ready', { scratch: true }),
@@ -134,8 +134,18 @@ describe('what waits on the person', () => {
       stopped: 1,
       ready: 0,
       waiting: 1,
-      count: 2,
+      count: 1,
     })
+  })
+
+  it('keeps a stopped task with an open question in Needs you once, rather than offering Resume', () => {
+    const task = card('stopped', 'stopped')
+    const on = waitingOn([task], [call('first', 'stopped'), call('second', 'stopped', '2026-11-12T09:05:00.000Z')])
+    expect(on.stopped).toEqual([])
+    expect(on.waiting.map((one) => one.call.id)).toEqual(['first'])
+    expect(on.calls).toEqual([])
+    expect(waitingCount(on)).toBe(1)
+    expect(Object.fromEntries(waitingIn([task], []))).toEqual({ p1: 0 })
   })
 
   it('counts each project apart, as its tab does', () => {

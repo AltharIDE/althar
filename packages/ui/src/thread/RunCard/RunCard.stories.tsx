@@ -83,6 +83,10 @@ export const NothingToOpen: Story = { args: { onOpen: undefined } }
 
 /** Its console: the command at its head, read for a person; what it printed under it, following the end. */
 export const Console: Story = { args: { defaultOutputOpen: true, output: { text: SERVED } } }
+/** Its console, run from a deep folder: the folder gives up whole folders from its start, the last kept, before the command wraps. */
+export const ConsoleInADeepFolder: Story = {
+  args: { defaultOutputOpen: true, command: 'cd apps/desktop/src/renderer/features/task/parts && bun run dev', output: { text: SERVED } },
+}
 /** Its console, as a long command and a failure show it. */
 export const ConsoleFailed: Story = {
   args: {

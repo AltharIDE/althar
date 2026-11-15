@@ -1,7 +1,17 @@
 import { useState } from 'react'
 
 import type { AgentStatus, ChangeSummary, PlanStep, TaskEnd as End, WorksIn as Where } from '@althar/contracts'
-import { type IssueRefProps, type LaunchStep, PresetOffer, TaskCard, TaskEnd, TaskLaunch, TaskStatus, WorksIn } from '@althar/ui'
+import {
+  type IssueRefProps,
+  type LaunchStep,
+  LinkButton,
+  PresetOffer,
+  TaskCard,
+  TaskEnd,
+  TaskLaunch,
+  TaskStatus,
+  WorksIn,
+} from '@althar/ui'
 import { useQueryClient } from '@tanstack/react-query'
 
 import { useServices } from '../../data/services'
@@ -38,6 +48,8 @@ export const text = {
     [TaskStatus.Stopped]: 'Stopped',
   } satisfies Record<TaskStatus, string>,
   now: stepText.now,
+  /** A small change's card, as Team's dialog entry elsewhere is named. */
+  changeTeam: 'Change the team…',
 }
 
 const STATUS: Readonly<Record<TaskCardContent['phase'], TaskStatus>> = {
@@ -71,6 +83,8 @@ export interface CardActions {
   /** Makes a branch its list doesn't have, in the plan's repository, and points the plan at it (ADR-093). */
   readonly onCreateBranch: (planId: string, steps: ReadonlyArray<PlanStep>, end: End | null, repositoryId: string, branch: string) => void
   readonly onOpen: (threadId: string) => void
+  /** Opens a task's team dialog: a small change's card, which starts at once, offers it from the start. */
+  readonly onChangeTeam?: (taskId: string) => void
   /** Stops a command a task's lead left running, from the task that waits for the place it keeps. */
   readonly onStopBackground: (threadId: string, id: string) => void
   /** The one waiting task that shows who holds the places, the newest: the others only wait. */
@@ -323,7 +337,14 @@ function Shown({ card, actions }: { card: TaskCardContent; actions: CardActions 
                   : text.now[card.step]
   const from = fromOf(card)
   // How hard its lead thinks, whoever chose it: what its session is on, or the plan's until it has started.
-  const effort = effortOf(card.lead, card.leadModel, card.leadEffort)
+  // A small change's card names who leads from its next turn, which its plan's lead is as the runtime reads it, so a team just changed shows.
+  const small = card.plan?.preset === 'Small change' && card.reviewing == null
+  const next = small ? card.plan?.steps.find((step) => step.key === 'implement') : undefined
+  const effort =
+    next === undefined ? effortOf(card.lead, card.leadModel, card.leadEffort) : effortOf(next.agentId, next.model, next.effort ?? null)
+  // A small change has no countdown to change its team in: once it is at work its card still offers it, until it is settled.
+  const changeTeam =
+    actions.onChangeTeam !== undefined && small && card.phase !== 'drafting' && card.phase !== 'settled' ? actions.onChangeTeam : undefined
   return (
     <TaskCard
       errands={card.errands}
@@ -334,11 +355,20 @@ function Shown({ card, actions }: { card: TaskCardContent; actions: CardActions 
       at={status === TaskStatus.Done || handedBack !== null ? steps.length - 1 : at}
       {...(now === undefined ? {} : { now })}
       started={card.startedAt === null || card.externalWait !== undefined ? '' : ago(card.startedAt)}
-      lead={named(card.lead, card.leadModel)}
+      lead={next === undefined ? named(card.lead, card.leadModel) : named(next.agentId, next.model)}
       {...(effort === null ? {} : { effort })}
       {...(from === undefined ? {} : { from })}
       {...(card.change === null ? {} : { pr: pullRequestOf(card.change) })}
-      {...(card.presetOffer === undefined ? {} : { footNote: <Offer card={card} /> })}
+      {...(card.presetOffer === undefined && changeTeam === undefined
+        ? {}
+        : {
+            footNote: (
+              <>
+                {changeTeam !== undefined && <LinkButton onClick={() => changeTeam(card.taskId)}>{text.changeTeam}</LinkButton>}
+                {card.presetOffer === undefined ? null : <Offer card={card} />}
+              </>
+            ),
+          })}
       onOpen={() => actions.onOpen(card.threadId)}
       text={{ status: text.status }}
     />

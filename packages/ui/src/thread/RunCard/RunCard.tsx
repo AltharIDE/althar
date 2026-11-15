@@ -6,6 +6,7 @@ import { cx } from '../../lib/cx'
 import { Rhythm } from '../../lib/rhythm'
 import { commandAtGlance, type CommandOption, readCommand } from '../../lib/runCommand'
 import { useStickToBottom } from '../../lib/stick'
+import { Path } from '../../primitives/Path/Path'
 import { Button } from '../../primitives/Button/Button'
 import { CopyButton } from '../../primitives/CopyButton/CopyButton'
 import { IconButton } from '../../primitives/IconButton/IconButton'
@@ -221,8 +222,8 @@ function ReadCommand({ command }: { command: string }) {
   return (
     <span className={s.prompt}>
       {read.dir !== undefined && (
-        <span className={s.dir} title={read.dir}>
-          {read.dir}
+        <span className={s.dir}>
+          <Path path={read.dir} />
         </span>
       )}
       <code className={s.typed}>

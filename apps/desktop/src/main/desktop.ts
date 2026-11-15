@@ -1,14 +1,14 @@
 /*
  * Which desktop Althar's window sits on, and how its window is dressed for
  * it (ADR-098). The facts come from the environment, the Settings portal,
- * the desktop's own config files and, on X11, the window manager's name;
- * this file reads none of them itself, it only says what they mean: the
- * desktop and its window manager, and from them whether the window manager
- * draws the window's frame (the system's own title bar, where it draws a
- * good one that matches its theme), whether Althar draws its own buttons in
- * that desktop's manner, or whether there are none at all (a tiling
- * compositor). Nothing here touches Node, so the window may read the types
- * too.
+ * gsettings, the desktop's own config files and, on X11, the window
+ * manager's name and what it supports; this file reads none of them itself,
+ * it only says what they mean: the desktop and its window manager, and from
+ * them whether Althar draws the window's buttons on its own bar, in that
+ * desktop's manner, order and side (one bar, everywhere it can be), whether
+ * there are none at all (a tiling compositor), or, only where a frameless
+ * window couldn't be moved, the window manager's own frame. Nothing here
+ * touches Node, so the window may read the types too.
  */
 
 /** Whether the session is Wayland or X11, where it says. */
@@ -66,9 +66,17 @@ export interface DesktopFacts {
   readonly kdeDecoration?: string
   /** KDE's colour scheme (`kdeglobals [General] ColorScheme`). */
   readonly kdeColorScheme?: string
+  /** On X11, whether the window manager moves and resizes a window on its asking (`_NET_WM_MOVERESIZE` in `_NET_SUPPORTED`), as a frameless window's drag and edges ask it. */
+  readonly wmMoves?: boolean
+  /**
+   * Whether a double-click on the title bar maximizes, as the window manager's own setting says where it is read (KWin's, Xfwm4's,
+   * Marco's, Muffin's). A frameless window's bar can only maximize there (Chromium's one action), so where the person chose
+   * another (shade, minimize, nothing) the window manager's frame keeps it.
+   */
+  readonly doubleClickMaximizes?: boolean
 }
 
-/** How the window is dressed. mac: the system's traffic lights over Althar's bar. frame: the window manager's own title bar, no buttons of Althar's. drawn: Althar's bar draws them. bare: none at all. */
+/** How the window is dressed. mac: the system's traffic lights over Althar's bar. frame: the window manager's own title bar, no buttons of Althar's (only where a frameless window couldn't be moved). drawn: Althar's bar draws them. bare: none at all. */
 export type ChromeKind = 'mac' | 'frame' | 'drawn' | 'bare'
 
 /** Whose manner drawn buttons follow. */
@@ -235,50 +243,6 @@ export const withFacts = (facts: DesktopFacts, more: Partial<Omit<DesktopFacts, 
 
 // ---- the decision ---------------------------------------------------------------------------------------------------------
 
-/** X11 window managers that draw a frame of their own round a window that asks for one, matching their theme. */
-const X11_FRAMES = new Set([
-  'kwin',
-  'xfwm4',
-  'marco',
-  'openbox',
-  'muffin',
-  'metacity',
-  'compiz',
-  'fluxbox',
-  'icewm',
-  'enlightenment',
-  'deepin-kwin',
-])
-
-/**
- * Wayland compositors that draw a window's frame where it asks (xdg-decoration): KWin, labwc, Wayfire, COSMIC's. Mutter and the
- * compositors built on it (Muffin, Gala, Budgie's) don't: there an app draws its own, and a frame Electron drew would be a second,
- * plain bar above Althar's.
- */
-const WAYLAND_FRAMES = new Set(['kwin', 'labwc', 'wayfire', 'cosmic-comp', 'deepin-kwin'])
-
-/** GNOME's window manager and those built on it, which expect an app to draw its own title bar. */
-const CLIENT_SIDE_WMS = new Set(['mutter', 'gala', 'budgie-wm'])
-
-/** Families whose own apps draw their title bars (GTK header bars): Althar draws its own there too, on X11 as well. */
-const CLIENT_SIDE: ReadonlySet<Family> = new Set(['gnome', 'budgie', 'pantheon'])
-
-/** Families whose window manager draws the frame, and which one where nothing named it. */
-const FRAME_FAMILIES: Readonly<Partial<Record<Family, string>>> = {
-  kde: 'kwin',
-  xfce: 'xfwm4',
-  mate: 'marco',
-  cinnamon: 'muffin',
-  lxqt: 'openbox',
-  lxde: 'openbox',
-  unity: 'compiz',
-  cosmic: 'cosmic-comp',
-  deepin: 'deepin-kwin',
-}
-
-/** Whether a window manager draws a frame in this session; an unknown session counts as X11, where every one named here does. */
-const framesHere = (wm: string, session: Session) => (session === 'wayland' ? WAYLAND_FRAMES.has(wm) : X11_FRAMES.has(wm))
-
 /** The GNOME look's tuning: Yaru's orange close wherever Yaru is the theme; libadwaita's discs on GNOME 40 and later, or where the version is unknown; GTK 3's plain buttons elsewhere. */
 const toneFor = (facts: DesktopFacts): ButtonsTone => {
   if (facts.gtkTheme !== undefined && /^yaru/i.test(facts.gtkTheme)) return 'yaru'
@@ -286,37 +250,38 @@ const toneFor = (facts: DesktopFacts): ButtonsTone => {
   return facts.gnomeVersion !== undefined && facts.gnomeVersion < 40 ? 'legacy' : 'adwaita'
 }
 
-/** The buttons Althar draws on a Linux desktop: KDE's manner for the Qt desktops, GNOME's (tuned for the theme) for the rest. */
+/** The Qt desktops, whose window managers draw KDE's manner of buttons (KWin, Deepin's KWin, LXQt's usual ones). */
+const QT_FAMILIES: ReadonlySet<Family> = new Set(['kde', 'lxqt', 'deepin'])
+
+/** The buttons Althar draws on a Linux desktop: KDE's manner for the Qt desktops and wherever KWin runs, GNOME's (tuned for the theme) for the rest. */
 export const drawnFor = (facts: DesktopFacts): ChromeDecision =>
-  facts.family === 'kde' || facts.family === 'lxqt' || facts.family === 'deepin'
+  QT_FAMILIES.has(facts.family) || facts.wm === 'kwin' || facts.wm === 'deepin-kwin'
     ? { kind: 'drawn', look: 'kde' }
     : { kind: 'drawn', look: 'gnome', tone: toneFor(facts) }
 
 /**
- * How the window is dressed on this desktop (ADR-098's table):
+ * How the window is dressed on this desktop (ADR-098's table): one bar, Althar's, on every Linux desktop that allows it.
  * - a Mac: the system's traffic lights; Windows: Althar's caption buttons, in Windows' manner.
  * - a tiling compositor or window manager: no buttons at all.
- * - GNOME and the GTK desktops whose apps draw their own title bars (Budgie, Pantheon), or GNOME's window manager under any name:
- *   Althar draws GNOME's buttons, on X11 too, where Mutter would put a second bar above Althar's.
- * - a window manager that draws good frames of its own in this session (KWin, xfwm4, Marco, Openbox, Muffin on X11, labwc, COSMIC's):
- *   the system's frame, and no buttons of Althar's.
- * - a desktop that would, on a compositor that can't (Cinnamon on Wayland): Althar draws them, in its family's manner.
- * - anything else: Althar draws neutral ones.
+ * - an X11 window manager known not to move or resize a window on its asking (no `_NET_WM_MOVERESIZE`, or one from before EWMH
+ *   that says so otherwise): the system's frame, since a frameless window could be neither dragged nor resized there.
+ * - a window manager whose title bar the person set to do something else than maximize on a double-click: its frame, which
+ *   does it, as a frameless bar can't.
+ * - every other Linux desktop, stacking window managers that would draw a frame of their own (KWin, xfwm4, Marco, Openbox,
+ *   Muffin, labwc, COSMIC's) included: Althar draws the window's buttons in that desktop's manner on its own bar.
  */
 export const decideChrome = (facts: DesktopFacts): ChromeDecision => {
   if (facts.family === 'mac') return { kind: 'mac' }
   if (facts.family === 'windows') return { kind: 'drawn', look: 'windows' }
   if (facts.family === 'tiling' || (facts.wm !== undefined && TILING.has(facts.wm))) return { kind: 'bare' }
-  const drawn = drawnFor(facts)
-  if (CLIENT_SIDE.has(facts.family)) return drawn
-  const wm = facts.wm ?? FRAME_FAMILIES[facts.family]
-  if (wm === undefined || CLIENT_SIDE_WMS.has(wm)) return drawn
-  return framesHere(wm, facts.session) ? { kind: 'frame' } : drawn
+  if (facts.session !== 'wayland' && facts.wmMoves === false) return { kind: 'frame' }
+  if (facts.doubleClickMaximizes === false) return { kind: 'frame' }
+  return drawnFor(facts)
 }
 
 /**
  * The decision for a window that already has, or hasn't, the system's frame: the frame can't be put on or taken off a window
- * once it is open, so where what is now known says otherwise (the X11 window manager's name came after the window opened), a
+ * once it is open, so where what is now known says otherwise (the X11 window manager's word came after the window opened), a
  * framed window keeps its frame and draws nothing, and an unframed one draws its desktop's buttons.
  */
 export const decideFor = (facts: DesktopFacts, framed: boolean): ChromeDecision => {
@@ -325,13 +290,80 @@ export const decideFor = (facts: DesktopFacts, framed: boolean): ChromeDecision 
   return decision.kind === 'frame' ? drawnFor(facts) : decision
 }
 
-/** Where each desktop puts the window's buttons out of the box, for where its own setting can't be read. */
-export const defaultLayout = (family: Family): ButtonLayout => {
-  if (family === 'gnome') return { start: [], end: ['close'] }
-  if (family === 'pantheon') return { start: ['close'], end: ['maximize'] }
-  if (family === 'mac') return { start: ['close', 'minimize', 'maximize'], end: [] }
-  return { start: [], end: ['minimize', 'maximize', 'close'] }
+/** Where a desktop keeps its window buttons' layout, by the window manager that reads it. */
+export type LayoutSource = 'gnome' | 'kwin' | 'cinnamon' | 'marco' | 'xfwm4' | 'openbox' | 'labwc' | 'wayfire' | 'cosmic'
+
+/** Window managers by where their layout is kept: GNOME's key for Mutter and those built on or beside it. */
+const WM_SOURCES: Readonly<Record<string, LayoutSource>> = {
+  mutter: 'gnome',
+  gala: 'gnome',
+  'budgie-wm': 'gnome',
+  metacity: 'gnome',
+  compiz: 'gnome',
+  kwin: 'kwin',
+  muffin: 'cinnamon',
+  marco: 'marco',
+  xfwm4: 'xfwm4',
+  openbox: 'openbox',
+  labwc: 'labwc',
+  wayfire: 'wayfire',
+  'cosmic-comp': 'cosmic',
 }
+
+/** Desktops by where their layout is kept, where nothing names the window manager: their own one's. */
+const FAMILY_SOURCES: Readonly<Partial<Record<Family, LayoutSource>>> = {
+  gnome: 'gnome',
+  budgie: 'gnome',
+  pantheon: 'gnome',
+  unity: 'gnome',
+  kde: 'kwin',
+  cinnamon: 'cinnamon',
+  mate: 'marco',
+  xfce: 'xfwm4',
+  lxde: 'openbox',
+  cosmic: 'cosmic',
+}
+
+/**
+ * Where this desktop's own button layout is read from: its window manager's, where something named it, else its desktop's own
+ * one's. LXQt's is Openbox on X11 and unsaid on Wayland, where it runs on several; Deepin's isn't read. Nothing on a Mac or Windows.
+ */
+export const layoutSource = (facts: DesktopFacts): LayoutSource | undefined => {
+  if (facts.platform !== 'linux') return undefined
+  if (facts.wm !== undefined && Object.hasOwn(WM_SOURCES, facts.wm)) return WM_SOURCES[facts.wm]
+  if (facts.family === 'lxqt') return facts.session === 'wayland' ? undefined : 'openbox'
+  return FAMILY_SOURCES[facts.family]
+}
+
+const RIGHT: ButtonLayout = { start: [], end: ['minimize', 'maximize', 'close'] }
+
+/**
+ * Where each desktop puts the window's buttons out of the box, for where its own setting can't be read: GNOME close alone on the
+ * right; Pantheon close on the left and maximize on the right; Unity all three on the left, close first; a Mac its lights on the
+ * left; and every other one (KDE, Xfce, MATE, Cinnamon, Budgie, COSMIC, Deepin, LXQt, LXDE, Openbox, labwc, Wayfire, Windows,
+ * one it doesn't know) minimize, maximize and close on the right.
+ */
+export const DEFAULT_LAYOUTS: Readonly<Record<Family, ButtonLayout>> = {
+  gnome: { start: [], end: ['close'] },
+  pantheon: { start: ['close'], end: ['maximize'] },
+  unity: { start: ['close', 'minimize', 'maximize'], end: [] },
+  mac: { start: ['close', 'minimize', 'maximize'], end: [] },
+  kde: RIGHT,
+  cinnamon: RIGHT,
+  mate: RIGHT,
+  xfce: RIGHT,
+  budgie: RIGHT,
+  cosmic: RIGHT,
+  lxqt: RIGHT,
+  lxde: RIGHT,
+  deepin: RIGHT,
+  tiling: RIGHT,
+  unknown: RIGHT,
+  windows: RIGHT,
+}
+
+/** Where each desktop puts the window's buttons out of the box, for where its own setting can't be read (`DEFAULT_LAYOUTS`). */
+export const defaultLayout = (family: Family): ButtonLayout => DEFAULT_LAYOUTS[family]
 
 // ---- reading what the desktop's settings say ------------------------------------------------------------------------------
 
@@ -435,6 +467,22 @@ export const kwinLayout = (files: readonly Ini[]): ButtonLayout => {
   return once({ start: buttons(left), end: buttons(right) })
 }
 
+/** Whether KWin maximizes on a double-click of the title bar (`kwinrc [Windows] TitlebarDoubleClickCommand`, `Maximize` by default). */
+export const kwinDoubleClickMaximizes = (files: readonly Ini[]): boolean =>
+  (iniValue(files, 'Windows', 'TitlebarDoubleClickCommand') ?? 'Maximize') === 'Maximize'
+
+/** Whether Xfwm4 maximizes on a double-click of the title bar (its xfconf file's `double_click_action`); undefined where unsaid. */
+export const parseXfwmDoubleClick = (xml: string): boolean | undefined => {
+  const value = /<property\s+name="double_click_action"\s+type="string"\s+value="([^"]*)"/.exec(xml)?.[1]
+  return value === undefined ? undefined : value === 'maximize'
+}
+
+/** Whether Marco or Muffin maximizes on a double-click, from gsettings' `action-double-click-titlebar` (`'toggle_maximize'`, `'toggle-maximize'`). */
+export const parseGsettingsDoubleClick = (text: string): boolean | undefined => {
+  const value = parseQuoted(text)
+  return value === undefined ? undefined : /^toggle[-_]maximize$/.test(value)
+}
+
 /** A name from a KDE file, kept only where it looks like one (`org.kde.breeze`, `BreezeDark`, `__aurorae__svg__Sweet`). */
 const kdeName = (value: string | undefined) => (value !== undefined && NAME.test(value) ? value : undefined)
 
@@ -459,6 +507,101 @@ export const parseXpropWindow = (text: string): string | undefined => /window id
 
 /** The name in `xprop -id … _NET_WM_NAME`: `_NET_WM_NAME(UTF8_STRING) = "Xfwm4"`. */
 export const parseXpropName = (text: string): string | undefined => /_NET_WM_NAME(?:\(\w+\))?\s*=\s*"([^"]{1,80})"/.exec(text)?.[1]
+
+/**
+ * Whether the X11 window manager moves and resizes a window on its asking, from `xprop -root -notype _NET_SUPPORTED`: yes where
+ * the list names `_NET_WM_MOVERESIZE`, no where it doesn't or the root has no such list (a window manager from before EWMH, as
+ * twm is); nothing where xprop printed something else.
+ */
+export const parseXpropMoves = (text: string): boolean | undefined => {
+  if (/_NET_SUPPORTED:\s+not found/.test(text)) return false
+  if (!/_NET_SUPPORTED(?:\(\w+\))?\s*=/.test(text)) return undefined
+  return /\b_NET_WM_MOVERESIZE\b/.test(text)
+}
+
+/**
+ * On X11 where no window manager says it is one by EWMH (no `_NET_SUPPORTING_WM_CHECK`), what the root window's properties
+ * (`xprop -root -notype`) say of an older one: `_NET_SUPPORTED` alone, its word on moving; Motif's, GNOME 1's, Window Maker's or
+ * CDE's marks, one that would take a frameless window's asking to go undecorated but never moves it on its asking, so false. None
+ * of them: undefined, no window manager known (a bare display, as a test's, with nothing to draw a frame; or twm, which frames
+ * every window whatever it asks, so the window moves by its frame still).
+ */
+export const parseXpropOlderWm = (text: string): boolean | undefined => {
+  const supported = /^_NET_SUPPORTED(?:\(\w+\))?\s*=.*$/m.exec(text)?.[0]
+  if (supported !== undefined) return parseXpropMoves(supported)
+  if (/^(?:_MOTIF_WM_INFO|_WIN_SUPPORTING_WM_CHECK|_WIN_PROTOCOLS|_WINDOWMAKER_\w+|_DT_\w+)\b/m.test(text)) return false
+  return undefined
+}
+
+/** A layout from names on each side, by a table of names to buttons; names not in it take no place. */
+const byNames = (start: readonly string[], end: readonly string[], names: Readonly<Record<string, WindowButton>>): ButtonLayout => {
+  const buttons = (side: readonly string[]) =>
+    side
+      .map((name) => (Object.hasOwn(names, name) ? names[name] : undefined))
+      .filter((button): button is WindowButton => button !== undefined)
+  return once({ start: buttons(start), end: buttons(end) })
+}
+
+/** Xfwm4's layout: its letters and one bar (the title), short. */
+const LETTERS = /^[A-Za-z|_ ]{0,20}$/
+
+/**
+ * Xfwm4's `button_layout`, from its xfconf channel's file (`xfwm4.xml`, `<property name="button_layout" type="string" value="O|HMC"/>`):
+ * a letter each, H minimize (hide), M maximize, C close, and others (O menu, T stick, S shade) that take no place here; what is
+ * before the bar (the title) is on the left. Nothing where the file doesn't say, or says something that isn't a layout.
+ */
+export const parseXfwmLayout = (xml: string): ButtonLayout | undefined => {
+  const value = /<property\s+name="button_layout"\s+type="string"\s+value="([^"]*)"/.exec(xml)?.[1]
+  if (value === undefined || !LETTERS.test(value) || (value.match(/\|/g)?.length ?? 0) > 1) return undefined
+  const [left = '', right = ''] = value.split('|')
+  return byNames(left.split(''), right.split(''), { H: 'minimize', M: 'maximize', C: 'close' })
+}
+
+/**
+ * Openbox's `<titleLayout>` (`NLIMC`), from its rc file: a letter each, I minimize (iconify), M maximize, C close, and others
+ * (N icon, D all desktops, S shade) that take no place here; what is before L (the title) is on the left, and without an L all are.
+ */
+export const parseOpenboxLayout = (xml: string): ButtonLayout | undefined => {
+  const value = /<titleLayout>\s*([^<]*?)\s*<\/titleLayout>/.exec(xml)?.[1]
+  if (value === undefined || !/^[A-Za-z]{0,12}$/.test(value)) return undefined
+  const at = value.toUpperCase().indexOf('L')
+  const letters = value.toUpperCase().split('')
+  const names = { I: 'minimize', M: 'maximize', C: 'close' } as const
+  return at < 0 ? byNames(letters, [], names) : byNames(letters.slice(0, at), letters.slice(at + 1), names)
+}
+
+/**
+ * labwc's `<titlebar><layout>` (`icon:iconify,max,close`), from its rc file: GNOME's form, iconify minimize, max maximize, close,
+ * and others (icon, menu, shade, desk) that take no place here. Nothing where the file doesn't say.
+ */
+export const parseLabwcLayout = (xml: string): ButtonLayout | undefined => {
+  const value = /<titlebar>[\s\S]*?<layout>\s*([^<]*?)\s*<\/layout>/.exec(xml)?.[1]?.replace(/\s+/g, '')
+  if (value === undefined || !/^[a-z_-]*(?:,[a-z_-]*)*(?::[a-z_-]*(?:,[a-z_-]*)*)?$/.test(value)) return undefined
+  const [left = '', right = ''] = value.split(':')
+  return byNames(left.split(','), right.split(','), { iconify: 'minimize', max: 'maximize', close: 'close' })
+}
+
+/** Wayfire's `[decoration] button_order` (`minimize maximize close`), from wayfire.ini: all on the right, in the order written. */
+export const wayfireLayout = (files: readonly Ini[]): ButtonLayout | undefined => {
+  const value = iniValue(files, 'decoration', 'button_order')
+  if (value === undefined) return undefined
+  return byNames([], value.trim().split(/\s+/), GNOME_BUTTONS)
+}
+
+/**
+ * COSMIC's buttons, from its toolkit's `show_minimize` and `show_maximize` (`~/.config/cosmic/com.system76.CosmicTk/v1/`, each
+ * `true` or `false`): each shown unless it says false, with close always, all on the right. Nothing where neither file says.
+ */
+export const cosmicLayout = (minimize: string | undefined, maximize: string | undefined): ButtonLayout | undefined => {
+  if (minimize === undefined && maximize === undefined) return undefined
+  const shown = (text: string | undefined) => text?.trim() !== 'false'
+  const end: WindowButton[] = [
+    ...(shown(minimize) ? ['minimize' as const] : []),
+    ...(shown(maximize) ? ['maximize' as const] : []),
+    'close',
+  ]
+  return { start: [], end }
+}
 
 /**
  * The portal's `org.freedesktop.appearance` `accent-color`, as gdbus prints it (`(<<(0.21, 0.52, 0.89)>>,)`, or the change signal's

@@ -27,6 +27,7 @@ import {
 
 import { piecesOf, shotsOf } from '../../shared/evidence'
 import { handedBy } from '../../shared/handed'
+import { linkedWords } from '../../shared/noteLinks'
 import { HandedBack } from '../../shared/HandedBack'
 import { useModelNames } from '../../shared/modelNames'
 import { type Round as RoundModel, type RoundBlock, type Said, type Shown, type WorkStep, withoutShotList } from '../../shared/rounds'
@@ -500,13 +501,13 @@ export function TaskThread({
       case 'althar':
         if (block.task !== undefined && started !== undefined) return <Fragment key={block.id}>{started(block.task)}</Fragment>
         return (
-          <AltharLine key={block.id} tone={block.tone}>
+          <AltharLine key={block.id} tone={block.tone} {...(block.details === undefined ? {} : { details: block.details })}>
             {block.task !== undefined && onOpenTask !== undefined ? (
               <>
                 {STARTED} <LinkButton onClick={() => onOpenTask(block.task?.threadId ?? '')}>{block.task.title}</LinkButton>
               </>
             ) : (
-              block.text
+              linkedWords(block.text, block.links)
             )}
           </AltharLine>
         )

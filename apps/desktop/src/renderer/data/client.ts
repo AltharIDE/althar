@@ -1,4 +1,5 @@
 import type { SearchDocuments } from '@althar/contracts'
+import type { AcpCatalog, AcpConnection } from '@althar/contracts'
 
 import {
   type PlaceId,
@@ -202,7 +203,11 @@ export interface Client {
     messages: ReadonlyArray<{ readonly itemId?: string; readonly names: ReadonlyArray<string> }>,
   ) => Promise<{ readonly place: CodePlace; readonly messages: ReadonlyArray<{ readonly found: ReadonlyArray<CodeFound> }> }>
   /** A file a thread's agent named, by its path as findCode named it: as it is now, or at the commit it was when a message was said. */
-  readonly readCode: (threadId: string, path: string, at?: { readonly commit?: string; readonly line?: number }) => Promise<CodeText>
+  readonly readCode: (
+    threadId: string,
+    path: string,
+    at?: { readonly commit?: string; readonly line?: number; readonly image?: boolean },
+  ) => Promise<CodeText>
   /** A project's board: its tasks, by card, and the calls that wait on the person. */
   readonly getBoard: (projectId: string) => Promise<BoardSnapshot>
   /** The next page of a project's settled tasks, older than the one settled at `before` (`taskId` breaking a tie). */
@@ -287,6 +292,7 @@ export interface Client {
   readonly setPostTeamReviews: (on: boolean) => Promise<void>
   /** What "Run it" on code from outside the team does without asking. */
   readonly setRunOutside: (to: 'ask' | 'safe' | 'full') => Promise<void>
+  readonly setSendMidTurn: (to: 'queue' | 'steer') => Promise<void>
   /** Puts a task on Scratch, or on the board with null. */
   readonly shelveTask: (taskId: string, shelf: 'scratch' | null) => Promise<void>
   /** Stops a helper the task's lead started. */
@@ -473,7 +479,8 @@ export interface Client {
     readonly taskId?: string
   }) => Promise<TaskSummary>
   readonly startPlan: (planId: string) => Promise<void>
-  readonly holdPlan: (planId: string) => Promise<void>
+  /** Whether it was held: false where the task had begun already. */
+  readonly holdPlan: (planId: string) => Promise<boolean>
   /** Holds a task the coordinator is drafting, by its draft's key: its plan comes held. */
   readonly holdDraft: (threadId: string, key: string) => Promise<void>
   /** Changes a plan before its first step starts: who does its steps, how it ends, and where it works (ADR-091). */
@@ -643,6 +650,10 @@ export interface Client {
   readonly getMissedReports: () => Promise<ReadonlyArray<MissedReports>>
   /** Downloads an agent for the person, checks it, and keeps it for Althar to run; done once it is ready. */
   readonly installAgent: (agentId: string) => Promise<void>
+  readonly getAgentCatalog: (refresh?: boolean) => Promise<AcpCatalog>
+  readonly saveAcpConnection: (connection: AcpConnection) => Promise<number>
+  readonly startAcpCheck: (agentId: string) => Promise<number>
+  readonly removeAcpConnection: (agentId: string) => Promise<number>
   /** Opens a task's folder in an editor, at one of its files and a line; whether it could. */
   readonly openInEditor: (input: {
     readonly taskId: string
@@ -869,6 +880,7 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
           path,
           ...(at.commit === undefined ? {} : { commit: at.commit }),
           ...(at.line === undefined ? {} : { line: at.line }),
+          ...(at.image === true ? { image: true } : {}),
         }),
       ),
     getBoard: (projectId) => settle(api.GetBoard({ projectId })),
@@ -903,6 +915,7 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
     setCoAuthor: (on) => command((commandId) => api.SetCoAuthor({ commandId, on })),
     setPostTeamReviews: (on) => command((commandId) => api.SetPostTeamReviews({ commandId, on })),
     setRunOutside: (to) => command((commandId) => api.SetRunOutside({ commandId, to })),
+    setSendMidTurn: (to) => command((commandId) => api.SetSendMidTurn({ commandId, to })),
     shelveTask: (taskId, shelf) => command((commandId) => api.ShelveTask({ commandId, taskId, shelf })),
     stopHelper: (taskId, helper) => command((commandId) => api.StopHelper({ commandId, taskId, helper })),
     joinChanges: (taskId, change, into) =>
@@ -1093,6 +1106,10 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
     openInEditor: (input) => command((commandId) => api.OpenInEditor({ commandId, ...input })),
     openCode: (input) => command((commandId) => api.OpenCode({ commandId, ...input })),
     installAgent: (agentId) => command((commandId) => api.InstallAgent({ commandId, agentId })),
+    getAgentCatalog: (refresh = false) => settle(api.GetAgentCatalog({ refresh })),
+    saveAcpConnection: (connection) => command((commandId) => api.SaveAcpConnection({ commandId, connection })),
+    startAcpCheck: (agentId) => command((commandId) => api.CheckAcpConnection({ commandId, agentId })),
+    removeAcpConnection: (agentId) => command((commandId) => api.RemoveAcpConnection({ commandId, agentId })),
     push: (taskId, head, url) => command((commandId) => api.Push({ commandId, taskId, head, ...(url === undefined ? {} : { url }) })),
     ship: (taskId, change) => command((commandId) => api.Ship({ commandId, taskId, ...(change === undefined ? {} : { change }) })),
     fixAfterMerge: (taskId, url) => command((commandId) => api.FixAfterMerge({ commandId, taskId, ...(url === undefined ? {} : { url }) })),

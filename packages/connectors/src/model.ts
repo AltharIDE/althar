@@ -82,6 +82,8 @@ export const ChangeRequest = Schema.Struct({
   source: Schema.String,
   target: Schema.String,
   headSha: Schema.NullOr(Schema.String),
+  /** The commit that landed this change, absent until the host can identify it. */
+  mergeCommit: Schema.optional(Schema.NullOr(Schema.String)),
   author: Schema.NullOr(Person),
   additions: Schema.NullOr(Schema.Number),
   deletions: Schema.NullOr(Schema.Number),

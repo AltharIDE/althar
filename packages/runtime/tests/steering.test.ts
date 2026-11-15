@@ -271,10 +271,9 @@ describe('a settle step on a lead that fell nearly out since it worked', () => {
       )
       const [held] = yield* until(cardOf(projectId), (cards) => cards[0]?.waits != null)
       assert.deepStrictEqual([held?.step, held?.waits?.agentId, held?.waits?.left, held?.waits?.why], ['settle', 'claude-code', 3, 'waits'])
-      assert.isTrue(
-        (yield* said(task.threadId)).some((title) =>
-          title.startsWith('Fake claude-code has 3% of its five-hour limit left. The fixes wait until '),
-        ),
+      // The waiting card is recorded before its explanation: wait for the notice itself.
+      yield* until(said(task.threadId), (titles) =>
+        titles.some((title) => title.startsWith('Fake claude-code has 3% of its five-hour limit left. The fixes wait until ')),
       )
       assert.deepStrictEqual(
         (yield* sessionsOn(task.threadId)).map((session) => session.agentId),

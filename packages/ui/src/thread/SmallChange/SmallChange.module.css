@@ -35,6 +35,24 @@
   color: inherit;
 }
 
+/* who is on it, and the way to change them */
+.team {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0 10px;
+  margin: 3px 0 0;
+  font-size: 12.5px;
+  line-height: 18px;
+  color: var(--t-3);
+}
+.who {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* The route: a knot per stop, the track from each to the next */
 .route {
   display: grid;

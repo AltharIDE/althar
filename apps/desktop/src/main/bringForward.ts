@@ -4,6 +4,12 @@ export const focusedLast = <T>(windows: Set<T>, window: T) => {
   windows.add(window)
 }
 
+/** A closing or destroyed window may still be tracked until `closed`, but it can no longer answer an activation. */
+export const availableWindows = <T extends { isDestroyed: () => boolean; webContents: { isDestroyed: () => boolean } }>(
+  windows: ReadonlySet<T>,
+  closing: WeakSet<T>,
+): Set<T> => new Set([...windows].filter((window) => !closing.has(window) && !window.isDestroyed() && !window.webContents.isDestroyed()))
+
 export const openFromEdge = (open: () => void, settle: () => void) => {
   open()
   settle()

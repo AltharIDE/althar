@@ -7,6 +7,7 @@ import { MessageChannel } from 'node:worker_threads'
 import { Api, clientProtocol, emitterPort } from '@althar/contracts'
 import { makeFakeService } from '@althar/connectors/testing'
 import type { ProjectId } from '@althar/domain'
+import type { FakeAgentOptions } from '@althar/provider-adapters/testing'
 import { assert, describe, it } from '@effect/vitest'
 import { Context, Duration, Effect, Layer } from 'effect'
 import { RpcClient } from 'effect/rpc'
@@ -15,9 +16,14 @@ import { until } from '@althar/testing/effect'
 
 import { connection, services } from '../src/Api'
 import { Busy } from '../src/Busy'
+import { Changes } from '../src/Changes'
 import { Folders } from '../src/Folders'
+import { Instance } from '../src/Instance'
 import { Secrets } from '../src/Secrets'
 import { Setups } from '../src/Setups'
+import { Plans } from '../src/Plans'
+import * as Runtime from '../src/Runtime'
+import { Tasks } from '../src/Tasks'
 import { addItem } from '../src/threads'
 import type { ToolAccess } from '../src/ToolServer'
 
@@ -38,39 +44,42 @@ const ASIDE_PROMPT_MOST = 6_000
 
 const commandId = () => `cmd_${randomBytes(16).toString('hex')}`
 
-const connected = Effect.gen(function* () {
-  const channel = new MessageChannel()
-  yield* Effect.addFinalizer(() => Effect.sync(() => channel.port1.close()))
-  const context = yield* Layer.build(
-    services({
-      database: ':memory:',
-      worktreeRoot: mkdtempSync(join(tmpdir(), 'althar-worktrees-')),
-      appVersion: '0.0.0-test',
-      deviceName: 'Test Mac',
-      agents: fakeAgents(),
-      secrets: Secrets.memory(),
-      connectors: fakeConnectors({ github: makeFakeService() }),
-      accountsRoot: mkdtempSync(join(tmpdir(), 'althar-accounts-')),
-      artifactsRoot: mkdtempSync(join(tmpdir(), 'althar-artifacts-')),
-      busy: { machine: ROOMY },
-      checksAppear: Duration.zero,
-    }),
-  )
-  yield* Effect.forkScoped(
-    Layer.launch(
-      connection(
-        emitterPort(channel.port1, (data) => data),
-        { kind: 'window' },
-      ),
-    ).pipe(Effect.provideContext(context)),
-  )
-  const protocol = yield* Layer.build(clientProtocol(emitterPort(channel.port2, (data) => data)))
-  const client = yield* RpcClient.make(Api).pipe(Effect.provideContext(protocol))
-  const store = <A, E, R>(effect: Effect.Effect<A, E, R>) => effect.pipe(Effect.provideContext(context as Context.Context<R>))
-  const grant = yield* Context.get(context, Folders).allow(repository())
-  const project = yield* client.OpenProject({ commandId: commandId(), grant })
-  return { client, store, project }
-})
+const connectedWith = (options: FakeAgentOptions = {}) =>
+  Effect.gen(function* () {
+    const channel = new MessageChannel()
+    yield* Effect.addFinalizer(() => Effect.sync(() => channel.port1.close()))
+    const context = yield* Layer.build(
+      services({
+        database: ':memory:',
+        worktreeRoot: mkdtempSync(join(tmpdir(), 'althar-worktrees-')),
+        appVersion: '0.0.0-test',
+        deviceName: 'Test Mac',
+        agents: fakeAgents(options),
+        secrets: Secrets.memory(),
+        connectors: fakeConnectors({ github: makeFakeService() }),
+        accountsRoot: mkdtempSync(join(tmpdir(), 'althar-accounts-')),
+        artifactsRoot: mkdtempSync(join(tmpdir(), 'althar-artifacts-')),
+        busy: { machine: ROOMY },
+        checksAppear: Duration.zero,
+      }),
+    )
+    yield* Effect.forkScoped(
+      Layer.launch(
+        connection(
+          emitterPort(channel.port1, (data) => data),
+          { kind: 'window' },
+        ),
+      ).pipe(Effect.provideContext(context)),
+    )
+    const protocol = yield* Layer.build(clientProtocol(emitterPort(channel.port2, (data) => data)))
+    const client = yield* RpcClient.make(Api).pipe(Effect.provideContext(protocol))
+    const store = <A, E, R>(effect: Effect.Effect<A, E, R>) => effect.pipe(Effect.provideContext(context as Context.Context<R>))
+    const grant = yield* Context.get(context, Folders).allow(repository())
+    const project = yield* client.OpenProject({ commandId: commandId(), grant })
+    return { client, store, project }
+  })
+
+const connected = connectedWith()
 
 const sqlOf = <A extends object>(query: (sql: SqlClient.SqlClient) => Effect.Effect<ReadonlyArray<A>, unknown>) =>
   Effect.flatMap(SqlClient.SqlClient, query)
@@ -292,7 +301,14 @@ describe('an aside opened with +', () => {
     () =>
       Effect.scoped(
         Effect.gen(function* () {
-          const { client, store, project } = yield* connected
+          let resumeReminder = () => {}
+          const reminder = new Promise<void>((resolve) => {
+            resumeReminder = resolve
+          })
+          const { client, store, project } = yield* connectedWith({
+            promptAsked: (prompt) => (prompt.startsWith("Your step isn't done") ? reminder : undefined),
+          })
+          yield* Effect.addFinalizer(() => Effect.sync(resumeReminder))
           // A note the coordinator kept: an aside reads the project's notes, as the coordinator does.
           const coordinator = { role: 'coordinator' as const, projectId: project.id, threadId: 'none', sessionId: 'none', taskId: null }
           yield* store(callTool(coordinator, 'keep_note', { note: 'Retries live in the queue package.' }))
@@ -306,9 +322,10 @@ describe('an aside opened with +', () => {
             chat: true,
             taskId,
           })
-          const said = (body: string) =>
+          const said = (body: string, queued?: () => void) =>
             Effect.gen(function* () {
               yield* client.Send({ commandId: commandId(), threadId: aside.threadId, body, disposition: 'after_current' })
+              yield* Effect.sync(() => queued?.())
               const delivered = store(
                 sqlOf(
                   (sql) => sql<{ prompt: string; state: string }>`
@@ -351,9 +368,26 @@ describe('an aside opened with +', () => {
           assert.include(work, SANDBOX)
           assert.notInclude(work, 'The thread so far')
           assert.isTrue(work.endsWith('Fix it then.'))
-          // A report reminder can share this turn with the person's words; the full brief must not be repeated.
-          const next = yield* said('And the tests?')
-          assert.isTrue(next.endsWith('And the tests?'))
+          // Delivery completes before Runs handles its end. Let it settle the round or queue its report reminder
+          // before sending again: prompts preserve send order, so a later reminder would follow the person's words.
+          yield* until(
+            store(
+              sqlOf(
+                (sql) => sql<{ state: string; reminded: number }>`
+                  SELECT state, EXISTS(SELECT 1 FROM user_inputs WHERE thread_id = ${aside.threadId}
+                    AND sender_kind = 'internal' AND body LIKE 'Your step isn%done%') AS reminded
+                  FROM runs WHERE task_id = ${taskId} ORDER BY created_at DESC, rowid DESC LIMIT 1`,
+              ),
+            ),
+            (rows) => rows[0]?.state === 'succeeded' || rows[0]?.reminded === 1,
+          )
+          // Hold the echo agent's reminder response until the question is queued: ending it without a report
+          // would correctly hand the task to another model, whose takeover brief this case isn't testing.
+          const next = yield* said('And the tests?', resumeReminder)
+          assert.isTrue(
+            next.endsWith('And the tests?'),
+            `The delivered prompt began:\n${next.slice(0, 160)}\nand ended:\n${next.slice(-800)}`,
+          )
           assert.notInclude(next, WORK)
           assert.notInclude(next, SANDBOX)
           assert.notInclude(next, 'gather evidence')
@@ -381,6 +415,63 @@ describe('an aside opened with +', () => {
         const [task] = yield* store(sqlOf((sql) => sql<{ state: string }>`SELECT state FROM tasks WHERE id = ${aside.id}`))
         assert.strictEqual(task?.state, 'done')
         assert.isTrue((yield* asks()).every((row) => row.state === 'withdrawn'))
+        const card = (yield* client.GetBoard({ projectId: project.id })).tasks.find((one) => one.taskId === aside.id)
+        assert.strictEqual(card?.phase, 'settled')
+      }),
+    ),
+  )
+
+  it.live('clears an aside when a plan opens between the Done eligibility reads', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { client, store, project } = yield* connected
+        const aside = yield* client.StartTask({
+          commandId: commandId(),
+          projectId: project.id,
+          title: 'Which retry?',
+          description: 'Answer it. [lead:finish] [lead:answered]',
+          steps: [{ key: 'implement', agentId: 'codex', model: null, skipped: false }],
+          chat: true,
+        })
+        yield* until(store(sqlOf((sql) => sql<{ state: string }>`SELECT state FROM runs WHERE task_id = ${aside.id}`)), (rows) =>
+          rows.some((row) => row.state === 'succeeded'),
+        )
+        const changes = yield* store(Changes)
+        const plans = yield* store(Plans)
+        const instance = yield* store(Instance)
+        let reads = 0
+        let opened: string | undefined
+        const tasks = Context.get(
+          yield* store(
+            Layer.build(Layer.fresh(Tasks.layer)).pipe(
+              Effect.provideService(Changes, {
+                ...changes,
+                nothingBuilt: (taskId) =>
+                  Effect.gen(function* () {
+                    if (++reads === 2)
+                      opened = yield* plans.propose({
+                        projectId: project.id as ProjectId,
+                        taskId,
+                        steps: [{ key: 'implement', agentId: 'codex', model: null, skipped: false }],
+                        reason: 'A plan arrived while Done was checked.',
+                        actorId: instance.personId,
+                        held: true,
+                      })
+                    return yield* changes.nothingBuilt(taskId)
+                  }),
+              }),
+            ),
+          ),
+          Tasks,
+        )
+        assert.isTrue(
+          yield* tasks.markDone({ envelope: yield* store(Runtime.envelope('task.mark_done', {})), taskId: aside.id, clear: true }),
+        )
+        assert.strictEqual(reads, 2)
+        const [task] = yield* store(sqlOf((sql) => sql<{ state: string }>`SELECT state FROM tasks WHERE id = ${aside.id}`))
+        const [plan] = yield* store(sqlOf((sql) => sql<{ state: string }>`SELECT state FROM task_plans WHERE id = ${opened ?? ''}`))
+        assert.strictEqual(task?.state, 'done')
+        assert.strictEqual(plan?.state, 'declined')
         const card = (yield* client.GetBoard({ projectId: project.id })).tasks.find((one) => one.taskId === aside.id)
         assert.strictEqual(card?.phase, 'settled')
       }),

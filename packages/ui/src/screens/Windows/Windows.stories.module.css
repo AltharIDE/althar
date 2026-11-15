@@ -1,0 +1,40 @@
+/* A window as the desktop draws it (apps/desktop's Task.module.css, Project.module.css): its bar, then what it shows below. */
+.window {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--n-2);
+}
+
+/* A task's face, under its bar. */
+.face {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+}
+/* A story's face that stands the height of the screen stands the height left under the bar. */
+.face > div {
+  height: 100% !important;
+}
+
+/* The Graph face: the graph filling it, under a line, as GraphFace draws it. */
+.graph {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+  border-top: 1px solid var(--line);
+}
+.graph > * {
+  flex: 1;
+  min-height: 0;
+}
+
+/* A project's room under its header: the automations, scrolled where they're longer. */
+.room {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}

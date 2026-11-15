@@ -9,6 +9,7 @@ import { RevisionConflict, RowNotFound } from './errors'
  * checks this list against the schema.
  */
 export const revisionedTables = [
+  'client_devices',
   'errands',
   'followed_pulls',
   'projects',
@@ -58,7 +59,7 @@ export type RevisionedTable = (typeof revisionedTables)[number]
  */
 export const bumpRevision = Effect.fn('bumpRevision')(function* (table: RevisionedTable, id: string, expected: number) {
   const sql = yield* SqlClient.SqlClient
-  const key = table === 'project_settings' ? 'project_id' : 'id'
+  const key = table === 'project_settings' ? 'project_id' : table === 'client_devices' ? 'device_id' : 'id'
   const [updated] = yield* sql<{ revision: number }>`
     UPDATE ${sql(table)} SET revision = revision + 1
     WHERE ${sql(key)} = ${id} AND revision = ${expected}

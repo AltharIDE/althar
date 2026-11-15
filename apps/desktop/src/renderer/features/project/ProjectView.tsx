@@ -1,3 +1,4 @@
+import { MessageMotion } from '../../shared/MessageMotion'
 import { useSearchReveal } from '../finder/revealSearch'
 import { reveal } from '../task/reveal'
 import { EarlierTurns } from '../../shared/EarlierTurns'
@@ -48,7 +49,7 @@ import { ThreadBlocks } from '../../shared/ThreadBlocks'
 import { useThreadHost } from '../../shared/ThreadHost'
 import { type Outgoing, outgoingOf, takesImages, useAttachments } from '../../shared/useAttachments'
 import { PageOpenerProvider, useOpener } from '../browser/opener'
-import { pages } from '../browser/pages'
+import { pages, usePage } from '../browser/pages'
 import { useCanvasArrivals } from '../canvases/arrivals'
 import { ArtifactsView } from '../canvases/ArtifactsView'
 import {
@@ -65,8 +66,9 @@ import { AutomationInThread } from '../automations/AutomationInThread'
 import { AutomationsView } from '../automations/AutomationsView'
 import { useAutomationActions, useAutomations } from '../automations/useAutomations'
 import { BoardView } from '../board/BoardView'
-import { ChangeTeam, teamChangeOf } from '../team/Team'
+import { TeamOf } from '../team/Team'
 import type { SettingsWays } from '../settings/open'
+import { useSendMidTurn } from '../settings/useSendMidTurn'
 import { useFolds } from '../board/folds'
 import { useClosePullRequests } from '../board/useClosePullRequests'
 import { lanesOf, yoursOf } from '../board/lanes'
@@ -137,6 +139,7 @@ export const text = {
   queued: 'Queued',
   queue: (n: number) => (n === 1 ? 'Queued' : `${n} queued`),
   placeholderBusy: 'Add to the queue, or interrupt the coordinator',
+  placeholderBusySteer: 'Steer the coordinator, or add to the queue',
   /** Whose usage the composer's ring says, under the context. */
   usageHeading: 'Today',
   signedOut: (agent: string, instead: string) => `${agent} isn't signed in. Using ${instead}.`,
@@ -377,7 +380,26 @@ export function ProjectView({
   const draftOf = draftKey.coordinator(about ?? '')
   const [draft, setDraft] = useDraft(draftOf)
   // A page beside the coordinator's conversation (ADR-100): the project goes to its conversation, the board stepping aside for it.
+  // The room it stepped aside from is kept with the page, in the window's storage, so closing the page brings the board back even after a reload.
+  const beforeKey = `althar.before.${about ?? ''}`
+  const rememberRoom = useCallback(
+    (was: Room) => {
+      if (was === Room.Talk || about === null) return
+      try {
+        window.localStorage.setItem(beforeKey, String(was))
+      } catch {
+        // Kept for nothing.
+      }
+    },
+    [about, beforeKey],
+  )
   const showTalk = useCallback(() => setRoom(Room.Talk), [])
+  const showTalkForPage = useCallback(() => {
+    setRoom((was) => {
+      rememberRoom(was)
+      return Room.Talk
+    })
+  }, [rememberRoom])
   const latestSearch = useRef(model)
   latestSearch.current = model
   useSearchReveal(model.coordinator?.threadId, (itemId) => {
@@ -389,7 +411,27 @@ export function ProjectView({
       return true
     })
   })
-  const opener = useOpener(about, showTalk)
+  const opener = useOpener(about, showTalkForPage)
+  const { where: pageWhere } = usePage(about, useServices().host.pages)
+  const wasBeside = useRef(false)
+  useEffect(() => {
+    // Only a page that was beside the conversation and went is a close; a view that opens with none is not.
+    const closed = wasBeside.current && pageWhere !== 'beside'
+    wasBeside.current = pageWhere === 'beside'
+    if (!closed) return
+    // The page went from beside the conversation: the right side returns to what was there before it opened.
+    // A page its window's storage kept, main yet to say it still has it, isn't closed.
+    if (about !== null && pages.waking(about)) return
+    let back: Room | null = null
+    try {
+      const kept = window.localStorage.getItem(beforeKey)
+      window.localStorage.removeItem(beforeKey)
+      back = kept === String(Room.Both) ? Room.Both : kept === String(Room.Board) ? Room.Board : null
+    } catch {
+      // Nothing kept.
+    }
+    if (back !== null && pageWhere === null) setRoom((now) => (now === Room.Talk ? (back as Room) : now))
+  }, [pageWhere, beforeKey, about])
   const navigate = useNavigate()
   const comments = useComments(draftOf)
   // A picture the coordinator handed back opens in the lightbox; it writes no documents, so none opens beside it.
@@ -457,7 +499,8 @@ export function ProjectView({
   const session = coordinator?.session ?? null
   const suggested = coordinator?.suggested ?? null
   const busy = session?.turnRunning ?? false
-  const queue = queueShown(session, model.pending)
+  const steers = useSendMidTurn()?.to === 'steer'
+  const queue = queueShown(session, model.pending, coordinator?.accepting)
   const agentName = (id: string | null) =>
     model.agents.find((agent) => agent.id === id)?.name ?? (id === session?.agentId ? session.agentName : (id ?? ''))
   // Whatever it ran on last, while that agent can; otherwise the first that can.
@@ -498,6 +541,8 @@ export function ProjectView({
     queryFn: () => client.listPresets(about ?? undefined),
   }).data
 
+  // The team of a task, open from its row up next or from a small change's card, while it can still change.
+  const [teamFor, setTeamFor] = useState<string | null>(null)
   const actions: CardActions = {
     project: name,
     ...(about === null ? {} : { projectId: about }),
@@ -509,6 +554,7 @@ export function ProjectView({
     onCreateBranch: (planId, steps, end, repositoryId, branch) =>
       void model.changePlanToNewBranch(planId, steps, end, repositoryId, branch),
     onOpen: onTask,
+    onChangeTeam: setTeamFor,
     onStopBackground: (threadId, id) => void model.stopBackground(threadId, id),
     // Every waiting card has the same holders, so only the newest says them.
     holdersOn: newestWaiting(coordinator?.items ?? []),
@@ -691,13 +737,17 @@ export function ProjectView({
         }
         onSubmit={(body) => send(body, false)}
         onSendNow={(body) => send(body, true)}
+        steer={steers}
         {...images.props(receiver)}
         comments={comments.map((comment, index) => composerComment(comment, index + 1))}
         onOpenComment={(id) => {
           if (about === null) return
           // Pressed, a comment opens again on its page beside the conversation.
           pages.place(about, 'beside')
-          setRoom(Room.Talk)
+          setRoom((was) => {
+            rememberRoom(was)
+            return Room.Talk
+          })
           pages.reopen(about, id)
         }}
         onRemoveComment={(id) => drop(draftOf, id)}
@@ -714,7 +764,9 @@ export function ProjectView({
               ? asidesText.newPlaceholder
               : asidesText.quotePlaceholder
             : busy
-              ? text.placeholderBusy
+              ? steers
+                ? text.placeholderBusySteer
+                : text.placeholderBusy
               : text.placeholder
         }
         // A new aside has used nothing of the coordinator's context.
@@ -742,9 +794,6 @@ export function ProjectView({
 
   /** Into the coordinator's composer, from an empty board: beside it, or under it where the conversation is hidden. */
   const talkToCoordinator = () => requestAnimationFrame(() => voice.inputRef.current?.focus())
-  // The team of a plan up next, open from its row, while it can still change.
-  const [teamFor, setTeamFor] = useState<string | null>(null)
-  const teamTask = teamFor === null || lanes === null ? null : (lanes.next.find((one) => one.taskId === teamFor) ?? null)
   /** The first thing that waits on you, in its task. */
   const openYours = () => {
     const first = lanes === null ? null : firstNeedOf(lanes)
@@ -828,7 +877,7 @@ export function ProjectView({
 
   return (
     <PageOpenerProvider value={opener}>
-      <div className={s.window}>
+      <MessageMotion className={s.window}>
         {header}
         {room === Room.Automations ? (
           <AutomationsView
@@ -1063,15 +1112,6 @@ export function ProjectView({
                       }}
                       {...(board.moreSettled ? { onShowOlder: board.showOlder } : {})}
                     />
-                    {teamFor !== null && (
-                      <ChangeTeam
-                        key={teamFor}
-                        projectId={projectId}
-                        task={teamTask !== null && teamChangeOf(teamTask) !== null ? teamTask : null}
-                        agents={model.agents}
-                        onClose={() => setTeamFor(null)}
-                      />
-                    )}
                   </>
                 ) : board.error === null ? (
                   <PartPending label={text.boardReading} />
@@ -1086,7 +1126,11 @@ export function ProjectView({
             )}
           </div>
         )}
-      </div>
+        {/* A team opened from a card in the conversation or a row of the board: whichever of them is on show, and before the board is. */}
+        {teamFor !== null && (
+          <TeamOf key={teamFor} projectId={projectId} taskId={teamFor} agents={model.agents} onClose={() => setTeamFor(null)} />
+        )}
+      </MessageMotion>
     </PageOpenerProvider>
   )
 }

@@ -1,3 +1,4 @@
+import { MessageMotion } from '../../shared/MessageMotion'
 import { EarlierTurns } from '../../shared/EarlierTurns'
 import { ThreadWaysContext } from '../../shared/ThreadBlocks'
 import { useTurnUndo } from './useTurnUndo'
@@ -83,6 +84,7 @@ import { DraftCard } from '../../shared/DraftCard'
 import { PermissionCalls } from './PermissionCall'
 import { reachOf, reachText, ReviewCard, reviewedUnfurl } from './ReviewCard'
 import { usePostTeamReviews } from '../settings/usePostTeamReviews'
+import { useSendMidTurn } from '../settings/useSendMidTurn'
 import { HeldLimit } from './LimitCall'
 import { StuckCall } from './StuckCall'
 import { coordinatorSigned } from '../../shared/signed'
@@ -124,6 +126,7 @@ import { reveal } from './reveal'
 import { useSearchReveal } from '../finder/revealSearch'
 import { turnsById } from '../../shared/turnTime'
 import { ReadFailed } from '../../shared/ReadFailed'
+import { pictureOf } from '../../shared/code/FilePicture'
 
 /*
  * A task, with its faces under its header, as in the prototype: the
@@ -154,6 +157,7 @@ export const text = {
   noLead: 'No lead yet',
   lead: 'Lead',
   placeholderBusy: 'Add to the queue, or interrupt the lead',
+  placeholderBusySteer: 'Steer the lead, or add to the queue',
   /** Whose usage the composer's ring says, under the context. */
   usageHeading: 'This task',
   placeholder: (lead: string) => (lead === '' ? 'Tell the lead something' : `Tell ${lead} something`),
@@ -434,6 +438,7 @@ export function TaskView({
   const models = useModels()
   // Whether the person has their team's reviews posted once drafted: what a review's reach says it posts.
   const postsTeamReviews = usePostTeamReviews()?.on === true
+  const steers = useSendMidTurn()?.to === 'steer'
   const [pick, setPick] = useState<Choice | null>(null)
   // A model or effort of the lead's own agent, picked and not yet taken by the runtime.
   const [moving, setMoving] = useState<Choice | null>(null)
@@ -692,7 +697,7 @@ export function TaskView({
   const busy = session?.turnRunning ?? false
   // A step that waits on the person: its call, not the thread, has the ways on.
   const stuckOpen = snapshot.attention.some((request) => request.kind === 'stuck')
-  const queue = queueShown(session, model.pending)
+  const queue = queueShown(session, model.pending, snapshot?.accepting)
   const listening = listeningOf(snapshot)
   const wait = waitOf(snapshot.task, upNextWords)
   // What its lead left running, and what Althar runs of it itself (ADR-096); a run's output is in its card.
@@ -1009,7 +1014,6 @@ export function TaskView({
               },
             }
           : {})}
-        {...(snapshot.task.skipReview === true ? { onSkipReview: () => void model.skipReview() } : {})}
         // A prototype, a chat or a quick task made a change in one move: a reviewer on, and its pull request ending.
         {...(snapshot.task.toChange === true ? { onMakeChange: () => void model.makeChange() } : {})}
         // Its parts kept as a preset, named for it; and a chat moved between Scratch and the board, either way.
@@ -1165,6 +1169,7 @@ export function TaskView({
         }
         onSubmit={(body) => submit(body, false)}
         onSendNow={(body) => submit(body, true)}
+        steer={steers}
         {...images.props(receiver)}
         comments={comments.map((comment, index) => composerComment(comment, index + 1))}
         onOpenComment={(id) => {
@@ -1182,7 +1187,9 @@ export function TaskView({
         onSendQueuedNow={(id) => void sendQueuedNow(id)}
         onUnqueue={(id) => void model.takeBack(id)}
         // An aside's is the coordinator's, in a word: its lead is named in the picker.
-        placeholder={busy ? text.placeholderBusy : embedded ? text.reply : text.placeholder(receiver.name)}
+        placeholder={
+          busy ? (steers ? text.placeholderBusySteer : text.placeholderBusy) : embedded ? text.reply : text.placeholder(receiver.name)
+        }
         meter={contextMeter(session, named, model.compact, { usage: snapshot.usage, heading: text.usageHeading })}
         // Another agent's model hands the task to that agent.
         picker={
@@ -1256,7 +1263,7 @@ export function TaskView({
   return (
     <PageOpenerProvider value={opener}>
       <OpenFinding.Provider value={changes.showFindings}>
-        <div className={embedded ? s.aside : s.window}>
+        <MessageMotion className={embedded ? s.aside : s.window}>
           {/* The bar is the header: the way back and which task, then where it stands, its faces and what it opens. */}
           {!embedded && (
             <TitleBar
@@ -1409,6 +1416,8 @@ export function TaskView({
                         <DocumentPanel
                           key={host.doc.source ?? host.doc.path ?? host.doc.title}
                           threadId={snapshot.threadId}
+                          taskId={snapshot.task.id}
+                          worktree={snapshot.task.worktree}
                           doc={host.doc}
                           version={versionOf(wholePath(host.doc.source ?? host.doc.path ?? '', snapshot.task.worktree))}
                           onClose={host.closeDoc}
@@ -1539,6 +1548,8 @@ export function TaskView({
                         <SmallChangeOf
                           card={card}
                           named={named}
+                          projectId={snapshot.project.id}
+                          agents={model.agents}
                           busy={model.pending}
                           onMerge={(change) => void model.accept([change])}
                           {...(onOpenTask === undefined ? {} : { onOpen: onOpenTask })}
@@ -1724,6 +1735,8 @@ export function TaskView({
               view={changes.view}
               onRetry={changes.retry}
               onClose={changes.close}
+              // A markdown file's pictures are read where the task works; a file it links to that isn't in the change opens in the editor.
+              markdown={{ image: pictureOf(snapshot.threadId), ...(openFile === undefined ? {} : { open: openFile }) }}
               // An editor opens the task's folder there, at the file and its first change.
               actions={
                 <OpenIn
@@ -1734,7 +1747,7 @@ export function TaskView({
               }
             />
           )}
-        </div>
+        </MessageMotion>
       </OpenFinding.Provider>
     </PageOpenerProvider>
   )

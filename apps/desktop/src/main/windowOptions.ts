@@ -22,8 +22,9 @@ export const PAGE = { light: '#f4f2ec', dark: '#1c1a17' } as const
 export const RAISED = { light: '#fcfbf8', dark: '#25231f' } as const
 
 /**
- * `framed`, on Linux, is where the window manager draws a good frame of its own (KWin, xfwm4, Marco, Openbox: desktop.ts decides,
- * ADR-098): the system's title bar goes round the window, server-side, and the page draws no buttons of its own.
+ * `framed`, on Linux, is only where an X11 window manager can't move or resize a frameless window (desktop.ts decides, ADR-098):
+ * the system's title bar goes round the window there, and the page draws no buttons of its own. Everywhere else the window is
+ * frameless and its strip is its one bar.
  */
 export const windowOptions = (platform: NodeJS.Platform, icon: NativeImage, dark = false, framed = false) => ({
   backgroundColor: dark ? PAGE.dark : PAGE.light,

@@ -12,6 +12,7 @@
 import { execFileSync } from 'node:child_process'
 import { appendFileSync, existsSync, readFileSync } from 'node:fs'
 
+import { afterFix } from './afterFix'
 import { type Flaky, LABEL, titleOf } from './flaky'
 import { held, summary } from './quarantine'
 
@@ -78,9 +79,26 @@ if (tests.size > 0) {
         test.error === undefined ? '' : `\n\n${quarantined ? 'It' : 'The first run'} failed with:\n\n\`\`\`\n${test.error}\n\`\`\``
       const issue = known.find((one) => one.title === title)
       if (issue?.state === 'OPEN') gh('issue', 'comment', String(issue.number), '--body', `${said}${failed}`)
-      else if (issue)
-        gh('issue', 'reopen', String(issue.number), '--comment', `${quarantined ? 'Failed again' : 'Flaky again'}.\n\n${said}${failed}`)
-      else
+      else if (issue) {
+        let containsFix = true
+        try {
+          containsFix = afterFix(gh, process.env.GITHUB_REPOSITORY ?? '', issue.number, process.env.GITHUB_SHA)
+        } catch (error) {
+          process.stdout.write(
+            `::warning title=Flaky tests::Couldn't check whether #${issue.number}'s fix was tested: ${String(error).split('\n')[0]}\n`,
+          )
+        }
+        if (containsFix)
+          gh('issue', 'reopen', String(issue.number), '--comment', `${quarantined ? 'Failed again' : 'Flaky again'}.\n\n${said}${failed}`)
+        else
+          gh(
+            'issue',
+            'comment',
+            String(issue.number),
+            '--body',
+            `This run did not contain the change that closed this issue; leaving it closed.\n\n${said}${failed}`,
+          )
+      } else
         gh(
           'issue',
           'create',

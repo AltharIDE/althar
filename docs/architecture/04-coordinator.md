@@ -419,7 +419,12 @@ a new action. `read_turn` gives the agent the same facts.
 `Errands` owns durable ordered steps. `keep_errand` requires a person's
 message in the live turn and keeps its exact words and id, each tool and its
 semantic arguments, target, head, target branch, task and waits. Kept, paused,
-resumed and completed errands leave lines in the thread. Task cards show the
+resumed and completed errands leave lines in the thread, in plain words
+(`errandNotes.ts`): each step's and wait's `says`, as the agent put it, else
+words Althar derives from the tool, target and wait kind, never the raw record.
+The kept line names the steps in order and what the first waits for, the
+person's own words folded under it; each step's note says what comes next, or
+that the errand is done. Task cards show the
 open wait, and fresh coordinator and lead briefs include the open records.
 `read_errands` reads the complete steps. Resuming records the fresh message
 separately, preserving the original request. An objection uses `pause_errand`;
