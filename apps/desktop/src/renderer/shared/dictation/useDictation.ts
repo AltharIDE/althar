@@ -1,14 +1,6 @@
 import { type RefObject, useEffect, useEffectEvent, useRef, useState } from 'react'
 
-import {
-  chord,
-  commandDown,
-  type Dictation,
-  type DictationState as TrayState,
-  DictationSetup,
-  type DictationTrayProps,
-  keys,
-} from '@althar/ui'
+import { commandDown, type Dictation, type DictationState as TrayState, DictationSetup, type DictationTrayProps } from '@althar/ui'
 
 import { reads } from '../../data/reads'
 import { type DictationEvent, type DictationHost, type DictationState, type DownloadStop, useServices } from '../../data/services'
@@ -29,7 +21,7 @@ import {
   sessionOf,
   useSession,
 } from './sessions'
-import { bytes, lengthOf, timeLeft, trayText } from './text'
+import { bytes, lengthOf, SHORTCUT, timeLeft, trayText } from './text'
 import { NO_VOCABULARY, respell, type Vocabulary, vocabularyOf } from './vocabulary'
 
 /*
@@ -48,7 +40,8 @@ import { NO_VOCABULARY, respell, type Vocabulary, vocabularyOf } from './vocabul
  *
  * ⌘⇧D (Ctrl+Shift+D elsewhere) starts and stops it from anywhere in the
  * window; held down, letting go stops it. Where two composers dictate, the
- * one shown last has it.
+ * one shown last has it; where none shows (the home, the board, the settings,
+ * a page), the window's own loose dictation has it (`Loose.tsx`).
  *
  * Asking where things stand happens on the first press, not as the composer
  * shows, so a window that never dictates never starts the speech process.
@@ -72,13 +65,15 @@ type Problem =
   | { readonly kind: 'stopped'; readonly got: number; readonly size: number }
   | { readonly kind: 'noRoom'; readonly need: number; readonly free: number }
 
-/* The shortcut, as the window's own system writes it. */
-export const SHORTCUT = chord(keys.mod, keys.shift, 'D')
+export { SHORTCUT }
 /* Held this long, the shortcut is held to talk: letting go stops. */
 const HELD = 500
 
-/* The composers that dictate, the one shown last at the end: the shortcut is its. */
-const claims: Array<symbol> = []
+/* Who hears the shortcut, the one shown last at the end: the composers that dictate, and under them all the window's own, for where none shows (`Loose.tsx`). */
+const claims: Array<{ readonly press: () => void }> = []
+
+/** The shortcut, pressed somewhere the window can't hear it (a page beside the conversation): it goes to whoever has it. */
+export const pressDictationShortcut = () => claims.at(-1)?.press()
 
 /* A host with no dictation: never called, since its window shows no microphone. */
 const NONE: DictationHost = {
@@ -139,6 +134,11 @@ export interface DictationOptions {
   readonly to?: Destination | null
   /** The microphone; tests give a fake. */
   readonly record?: Record
+  /**
+   * Dictation with no composer to say it to (`Loose.tsx`): always carried with the person, its words kept in the draft
+   * until they place them, and the shortcut its where no composer shows.
+   */
+  readonly loose?: boolean
 }
 
 /** What was heard at one rate, as heard at another, each sample between the two nearest. */
@@ -255,11 +255,12 @@ const fieldRef = (onField: (field: HTMLTextAreaElement | null) => void): RefObje
 
 /** Dictation into the draft kept under `key` (`drafts.ts`): the thread's, which it outlives its composer for. */
 export function useDictation(key: string, options: DictationOptions = {}): Voice {
-  const { record = recordMicrophone, projectId = null, to = null } = options
+  const { record = recordMicrophone, projectId = null, to = null, loose = false } = options
   const { host, client, cache } = useServices()
   const voice = host.dictation ?? NONE
   /* Whether the composer's field is on screen: a view can keep its dictation while it shows something else, its board or a task's outputs. */
-  const [showing, setShowing] = useState(false)
+  const [fieldShown, setShowing] = useState(false)
+  const showing = loose || fieldShown
   const [inputRef] = useState(() => fieldRef((field) => setShowing(field !== null)))
   const [known, setKnown] = useState<DictationState | null>(null)
   const [download, setDownload] = useState<Download | null>(null)
@@ -366,11 +367,12 @@ export function useDictation(key: string, options: DictationOptions = {}): Voice
     // The system names its microphones once one may be used.
     refreshMicrophones()
     changeSession(key, {
-      at: held.field?.current?.selectionStart ?? held.field?.current?.value.length ?? 0,
+      at: held.field?.current?.selectionStart ?? held.field?.current?.value.length ?? draftOf(key).text.length,
       interim: '',
       seconds: 0,
       arrived: null,
-      away: null,
+      // With no composer of its own, it is carried from the first word.
+      away: loose ? Date.now() : null,
       phase: 'listening',
     })
     startClock(key)
@@ -457,7 +459,7 @@ export function useDictation(key: string, options: DictationOptions = {}): Voice
   // Escape while listening throws it away, before anything else hears it (going back from a task); only where its composer shows, so a pill carrying it is never lost by a key.
   const escape = useEffectEvent(() => cancelIn(key))
   useEffect(() => {
-    if (!listening || !showing) return
+    if (!listening || !fieldShown) return
     const onKey = (event: KeyboardEvent) => {
       // Escape in the list of microphones closes the list, not what is being said.
       if (event.key !== 'Escape' || (event.target instanceof Element && event.target.closest('[role="menu"]') !== null)) return
@@ -467,7 +469,7 @@ export function useDictation(key: string, options: DictationOptions = {}): Voice
     }
     window.addEventListener('keydown', onKey, true)
     return () => window.removeEventListener('keydown', onKey, true)
-  }, [listening, showing])
+  }, [listening, fieldShown])
 
   // Whose it is, for the pill that carries it once the person leaves; said again as its composer shows, its dictation forgotten meanwhile.
   useEffect(() => {
@@ -476,7 +478,7 @@ export function useDictation(key: string, options: DictationOptions = {}): Voice
 
   // The thread's composer shows: what is written down lands at its cursor, and nothing is carried. Leaving it, for another view or another face of this one, goes on listening, or writing down, carried with the person.
   useEffect(() => {
-    if (!showing) return
+    if (!fieldShown) return
     const held = handlesOf(key)
     held.shown += 1
     held.field = inputRef
@@ -489,7 +491,25 @@ export function useDictation(key: string, options: DictationOptions = {}): Voice
       if (held.shown === 0 && sessionOf(key).phase !== 'idle') changeSession(key, { away: Date.now() })
       letGoIfIdle(key)
     }
-  }, [key, showing, inputRef])
+  }, [key, fieldShown, inputRef])
+
+  // With no composer to say it to, the window itself is what shows: it listens wherever the person is, and is carried from the first word.
+  useEffect(() => {
+    if (!loose) return
+    const held = handlesOf(key)
+    held.shown += 1
+    return () => {
+      held.shown -= 1
+      if (held.shown === 0) {
+        held.recording?.cancel()
+        held.recording = null
+        held.writer?.close()
+        held.writer = null
+        stopClock(held)
+      }
+      letGoIfIdle(key)
+    }
+  }, [key, loose])
 
   // The shortcut: pressed, it starts or stops; held down, letting go stops. Only the composer shown last hears it.
   const pressedAt = useRef<number | null>(null)
@@ -508,8 +528,10 @@ export function useDictation(key: string, options: DictationOptions = {}): Voice
   })
   useEffect(() => {
     if (host.dictation === undefined || !showing) return
-    const me = Symbol('dictation')
-    claims.push(me)
+    const me = { press: () => shortcutDown() }
+    // The window's own sits under every composer's: it hears the shortcut only where none shows.
+    if (loose) claims.unshift(me)
+    else claims.push(me)
     const mine = () => claims.at(-1) === me
     const onDown = (event: KeyboardEvent) => {
       if (!mine() || event.key.toLowerCase() !== 'd' || !commandDown(event) || !event.shiftKey || event.altKey) return
@@ -527,7 +549,7 @@ export function useDictation(key: string, options: DictationOptions = {}): Voice
       window.removeEventListener('keydown', onDown)
       window.removeEventListener('keyup', onUp)
     }
-  }, [host.dictation, showing])
+  }, [host.dictation, showing, loose])
 
   if (host.dictation === undefined) return { dictation: undefined, tray: null, inputRef }
 

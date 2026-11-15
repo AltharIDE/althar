@@ -22,10 +22,15 @@ import { cancelIn, SHORTCUT, stopIn, writeIn } from './useDictation'
 
 export const carriedText = {
   didntSend: "Didn't send.",
+  /** Dictation said from anywhere, with no composer to say it to: where it goes is chosen once it is written. */
+  place: 'Place it in…',
 }
 
 /** Goes back to a thread's composer: the window's router, given by its frame. */
 export const CarriedBack = createContext<(back: Destination['back']) => void>(() => {})
+
+/** Opens the window's own chooser of where dictation said from anywhere goes: a project's coordinator, a task, an aside. */
+export const CarriedPlace = createContext<() => void>(() => {})
 
 /** Over the composer of `here`: dictation carried from another thread, if any. */
 export function CarriedOver({ here }: { here: string }) {
@@ -50,6 +55,7 @@ const isShortcut = (event: KeyboardEvent) =>
 
 function Carried({ thread, here }: { thread: string; here: string | null }) {
   const goBack = useContext(CarriedBack)
+  const choosePlace = useContext(CarriedPlace)
   const { client } = useServices()
   const session = useSession(thread)
   const draft = useDraftOf(thread)
@@ -130,9 +136,19 @@ function Carried({ thread, here }: { thread: string; here: string | null }) {
       kbd={SHORTCUT}
       onStop={() => stopIn(thread)}
       onDiscard={() => (phase === 'failed' ? changeSession(thread, { failed: null, away: null }) : cancelIn(thread))}
-      onBack={() => goBack(to.back)}
-      // Kept, its composer still says it came while the person was away.
-      onKeep={() => changeSession(thread, { away: null })}
+      {...(to.back === null
+        ? {
+            // No composer to say it to: it is placed, or thrown away.
+            onThrow: () => {
+              setDraftText(thread, '')
+              done()
+            },
+          }
+        : {
+            onBack: () => goBack(to.back!),
+            // Kept, its composer still says it came while the person was away.
+            onKeep: () => changeSession(thread, { away: null }),
+          })}
       onRetry={() => {
         if (failed === null) return
         changeSession(thread, { failed: null })
@@ -140,6 +156,9 @@ function Carried({ thread, here }: { thread: string; here: string | null }) {
       }}
       {...(target !== null && draft.images.length === 0 && draft.files.length === 0
         ? { send: { label: to.send, busy: sending !== null, onSend: () => send(target) } }
+        : {})}
+      {...(to.back === null && draft.images.length === 0 && draft.files.length === 0
+        ? { place: { label: carriedText.place, onPlace: choosePlace } }
         : {})}
       {...(there !== null && here !== null && sending === null ? { move: { label: there.take, onMove: move } } : {})}
       error={error}
