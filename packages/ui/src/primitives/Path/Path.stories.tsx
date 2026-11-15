@@ -32,7 +32,7 @@ export const Shortening: Story = {
   ),
   play: async ({ canvasElement }) => {
     const c = within(canvasElement)
-    const shown = c.getAllByTitle('packages/runtime/tests/coordinatorTools.test.ts').map((one) => one.lastElementChild as HTMLElement)
+    const shown = c.getAllByTitle('packages/runtime/tests/coordinatorTools.test.ts').map((one) => one.firstElementChild as HTMLElement)
     for (const one of shown) {
       await expect(one).toHaveTextContent(/^(…\/)?(packages\/)?(runtime\/)?(tests\/)?coordinatorTools\.test\.ts$/)
       await expect(one.scrollWidth).toBeLessThanOrEqual(one.clientWidth)

@@ -53,14 +53,6 @@ export function Path({ path, dirClassName, nameClassName, className, hover = tru
   const dir = (shown > 0 ? ELLIPSIS : '') + folders.slice(shown).join('')
   return (
     <span ref={root} className={cx(s.path, className)} title={hover ? path : undefined}>
-      {/* Whole, and not seen: its folders each apart, drawn from their text so they are measured and not found as text. */}
-      <span ref={whole} className={s.whole} aria-hidden="true">
-        <span className={dirClassName} data-text={ELLIPSIS} />
-        {folders.map((folder, at) => (
-          <span key={at} className={dirClassName} data-text={folder} />
-        ))}
-        <span className={nameClassName} data-text={end} />
-      </span>
       <span className={s.shown}>
         {dirClassName === nameClassName ? (
           <span className={nameClassName}>{dir + end}</span>
@@ -70,6 +62,14 @@ export function Path({ path, dirClassName, nameClassName, className, hover = tru
             <span className={nameClassName}>{end}</span>
           </>
         )}
+      </span>
+      {/* Whole, after it (rows line up by the first), and not seen: its folders each apart, drawn from their text so they are measured and not found as text. */}
+      <span ref={whole} className={s.whole} aria-hidden="true">
+        <span className={dirClassName} data-text={ELLIPSIS} />
+        {folders.map((folder, at) => (
+          <span key={at} className={dirClassName} data-text={folder} />
+        ))}
+        <span className={nameClassName} data-text={end} />
       </span>
     </span>
   )

@@ -341,7 +341,7 @@ export const RefusedHere: Story = {
     await expect(c.getByRole('alert')).toHaveTextContent('Your main checkout has uncommitted changes to middleware.ts.')
     // Each file's path as folders, from the left, that fit: the folders go whole, never part of a name; the whole path on hover. Where
     // there is layout (Storybook, not jsdom), it fits its room.
-    const shown = (path: string) => c.getByTitle(path).lastElementChild as HTMLElement
+    const shown = (path: string) => c.getByTitle(path).firstElementChild as HTMLElement
     const path = shown('tests/unit/middleware.test.js')
     await expect(path).toHaveTextContent(/^(…\/)?(tests\/)?(unit\/)?middleware\.test\.js$/)
     await expect(path.scrollWidth).toBeLessThanOrEqual(path.clientWidth)
