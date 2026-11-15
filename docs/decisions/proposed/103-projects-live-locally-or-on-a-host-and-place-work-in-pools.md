@@ -373,14 +373,26 @@ New hosts and protocols named here still have to be built.
 | `packages/provider-adapters`, `packages/skills` | [`AgentConnection.ts`](../../../packages/provider-adapters/src/AgentConnection.ts) and [`projection.ts`](../../../packages/skills/src/projection.ts): run ACP beside the agent, host capability probes, supported headless auth and portable skill projection. Extend #684's `agentTools.ts`, `mcpSync.ts`, `skillSync.ts` and `agentServers.ts` when it lands; those files are still on its branch at this writing. |
 | Managed services (later) | Connect relay, pairing/discovery, Hosted lifecycle, regional storage and optional cloud capacity. Same client/worker contracts; service routing and billing do not grant person authority. |
 
-The current desktop host waits for the first screen before connector fetches,
-seals through main, sends nudges through `parentPort`, and asks main to draw
-screenshots. The headless host must replace all four, including delivery of
-attention on the durable API, or it will still depend on an open window.
+The desktop host waits for the first screen before connector fetches,
+seals through main, and asks main to draw screenshots. The headless host must
+replace those dependencies or it will still depend on an open window.
+Native attention now uses the shared typed API; pending asks remain durable
+in the home rather than depending on notification delivery.
 The CLI's present in-process layer uses `Secrets.none`; it is not a complete
 remote host just by exposing a socket.
 
 ## Delivery phases and proof
+
+**Foundation implemented, 14 Nov 2026:** the shared versioned API now has
+persistent home/client identity, signed device attachment and revocation,
+an opt-in private local socket, durable command admission/results, checked
+home/cursor/checkpoint reconnect and typed native attention. See
+[architecture 02](../../architecture/02-desktop-runtime.md#local-transport)
+for the contracts and limits. This does not accept the rest of this proposal
+or complete phase 1: headless lifecycle, SSH bootstrap, protected client keys,
+remote files/previews, provider validation, pools and workers remain ahead.
+Registered devices currently act for one profile owner; they are not a
+multiplayer permission model. Pricing and entitlements remain separate.
 
 1. **One usable personal Linux host.** Build `apps/host`, sealing, versioned
    private-socket RPC, pairing and SSH bootstrap. Co-locate a remote project
@@ -420,8 +432,8 @@ remote host just by exposing a socket.
 
 Each slice includes focused contract/failure tests. Fake agents prove protocol
 behavior, not Linux isolation, provider sign-in, real Git credentials or
-preview behavior; those need live host checks. This document implements none
-of them.
+preview behavior; those need live host checks. The foundation above does not
+provide those deployment proofs.
 
 ## What stays as it is
 

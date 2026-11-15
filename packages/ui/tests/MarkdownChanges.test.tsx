@@ -119,6 +119,45 @@ describe('the paths a file names beside it', () => {
   })
 })
 
+describe('HTML taken out of the middle of a block', () => {
+  const diff = diffOf(
+    [
+      ' # Logo',
+      ' ',
+      ' <picture>',
+      '-  <source media="(prefers-color-scheme: dark)" srcset="dark.png">',
+      '   <img src="light.png" alt="Logo">',
+      ' </picture>',
+      ' ',
+      ' Last.',
+    ].join('\n'),
+  )
+
+  it('marks the block it was taken from, and keeps the lines as the code they were, since a piece of a tag draws nothing', () => {
+    const marked = markChanges(diff)
+    // Blocks: 0 the title, 1 the picture, 2 Last.
+    expect([...(marked?.marks.added ?? [])]).toEqual([1])
+    expect(marked?.marks.removed.get(1)?.[0]).toContain('<source media="(prefers-color-scheme: dark)" srcset="dark.png">')
+    expect(marked?.marks.removed.get(1)?.[0]?.startsWith('```html\n')).toBe(true)
+  })
+
+  it('is readable on the page: the picture marked as changed, and the source line shown among what was removed', () => {
+    const marked = markChanges(diff)
+    if (marked === null) throw new Error('whole')
+    render(<Markdown file={{ folder: '', image: ({ alt }) => <img alt={alt} /> }} source={marked.source} marks={marked.marks} />)
+    const removed = screen.getByRole('group', { name: 'Removed' })
+    expect(removed.textContent).toContain('prefers-color-scheme: dark')
+    expect(within(screen.getByRole('group', { name: 'Added' })).getByRole('img', { name: 'Logo' })).toBeInTheDocument()
+  })
+
+  it('shows a run of tags left open as code, and a whole balanced piece of HTML as what it drew', () => {
+    const open = markChanges(diffOf(' # T\n \n-<div align="center">\n- Words.\n \n Body.\n'))
+    expect(open?.marks.removed.get(1)?.[0]).toContain('```html')
+    const whole = markChanges(diffOf(' # T\n \n-<p align="center">Words.</p>\n \n Body.\n'))
+    expect(whole?.marks.removed.get(1)).toEqual(['<p align="center">Words.</p>'])
+  })
+})
+
 describe('a markdown file drawn with its change', () => {
   it('groups added blocks and what was taken out, each named for a screen reader, and draws the removed text as markdown', () => {
     const marked = markChanges(README_DIFF)

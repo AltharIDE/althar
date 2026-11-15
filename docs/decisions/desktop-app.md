@@ -239,7 +239,13 @@ peeks at the lines; pressing it opens the whole file beside the conversation;
   where the task changed it; a file it wrote new has nothing to mark, so it is
   Rendered and Source only, and one it deleted Changes and Source only. The page is the kit's
   `Markdown`, as in the thread, with code, tables, task lists and diagrams as
-  they are there. Where the task changed it, the page says what: blocks with an
+  they are there. A file's HTML is drawn as GitHub draws it, since a README is
+  often mostly HTML (a banner's `<picture>`, centred lines, tables of pictures):
+  read inertly and drawn from an allow-list of tags and of the attributes that
+  set a page out (align, width, spans), never a script, a style, a handler or a
+  frame, its links and pictures going the markdown's own way. In what is said in
+  a thread, HTML stays words. GitHub's alerts (`> [!NOTE]`) are callouts, and a
+  file's headings step down in size, `#` to `###`. Where the task changed it, the page says what: blocks with an
   added line are tinted and carry a `+`, what was taken out is drawn where it
   stood, tinted and carrying a `−`, never a stripe at the edge. This is read from
   the file's whole-file diff, which holds every line of it, so nothing more is
