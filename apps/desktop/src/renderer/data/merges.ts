@@ -1,5 +1,5 @@
 import { type Mutation, useMutation, useMutationState } from '@tanstack/react-query'
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 
 import { type BoardTask, type ChangeSummary, queuedToMerge } from '@althar/contracts'
 import type { MergeStanding } from '@althar/ui'
@@ -145,6 +145,44 @@ export const usePressedMerges = (
     }
     return under
   }, [last, changes, now])
+}
+
+const WAITS = ['merge-waits'] as const
+
+/** Pull requests a press merges in turn, each once the one before has landed, held for that press while it lasts. */
+interface Waits {
+  readonly taskId: string
+  readonly urls: ReadonlyArray<string>
+  readonly done: Promise<void>
+}
+
+/**
+ * Holds pull requests for a press that merges them in turn, window-wide, for
+ * as long as the press lasts: left and come back to, the task offers none of
+ * them a Merge of its own meanwhile. Gives back what lets them go.
+ */
+export const useHoldMerges = (): ((taskId: string, urls: ReadonlyArray<string>) => () => void) => {
+  const { mutate } = useMutation({ mutationKey: WAITS, mutationFn: (waits: Waits) => waits.done })
+  return useCallback(
+    (taskId, urls) => {
+      let release: () => void = () => {}
+      const done = new Promise<void>((resolve) => {
+        release = resolve
+      })
+      if (urls.length > 0) mutate({ taskId, urls, done })
+      return release
+    },
+    [mutate],
+  )
+}
+
+/** The pull requests held for a press under way anywhere in the window, by address, until each one's turn comes. */
+export const useHeldMerges = (): ReadonlySet<string> => {
+  const held = useMutationState({
+    filters: { mutationKey: WAITS, status: 'pending' },
+    select: (mutation) => (mutation.state.variables as Waits | undefined)?.urls ?? [],
+  })
+  return useMemo(() => new Set(held.flat()), [held])
 }
 
 /** Where each task's merges stand, as `tasks` read them, the last pressed for each. */

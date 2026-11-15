@@ -214,6 +214,7 @@ export function Outputs({
   merging = null,
   mergeRefused = null,
   mergeStanding,
+  mergeAwaits,
   onPostScreenshots,
   onOpenFile,
   conflict = null,
@@ -253,6 +254,8 @@ export function Outputs({
   mergeRefused?: string | null
   /** Where the merge of its pull request at this address stands from the press on: shown in Merge's place, never Merge again. */
   mergeStanding?: (url: string) => MergeStanding | null
+  /** Whether it merges later in a press under way, wherever pressed, once the one before it lands: waiting, nothing to press. */
+  mergeAwaits?: (url: string) => boolean
   onMergeHere: () => void
   onOpenChange: () => void
   onPush: (head: string, url: string) => void
@@ -383,21 +386,23 @@ export function Outputs({
             state === ChangeState.Ready &&
             first.state === 'open' &&
             !first.draft
-              ? [
-                  <SplitButton
-                    key="merge-waiting"
-                    moreLabel={text.mergeWays}
-                    {...pressed(doing.mergeWaiting)}
-                    onClick={() => onMergeWaiting('review')}
-                    menu={(trigger) => (
-                      <Menu trigger={trigger} label={text.mergeWays} align="end">
-                        <MenuItem onSelect={() => onMergeWaiting('now')}>{text.mergeNow}</MenuItem>
-                      </Menu>
-                    )}
-                  >
-                    {text.reviewAndMerge}
-                  </SplitButton>,
-                ]
+              ? firstStanding === 'merging'
+                ? [<MergeButton key="merge-waiting" variant="signal" standing="merging" />]
+                : [
+                    <SplitButton
+                      key="merge-waiting"
+                      moreLabel={text.mergeWays}
+                      {...pressed(doing.mergeWaiting)}
+                      onClick={() => onMergeWaiting('review')}
+                      menu={(trigger) => (
+                        <Menu trigger={trigger} label={text.mergeWays} align="end">
+                          <MenuItem onSelect={() => onMergeWaiting('now')}>{text.mergeNow}</MenuItem>
+                        </Menu>
+                      )}
+                    >
+                      {text.reviewAndMerge}
+                    </SplitButton>,
+                  ]
               : []
           const actions: ReactNode[] = [
             ...(shipAction === null ? [] : [shipAction]),
@@ -436,14 +441,19 @@ export function Outputs({
                   ]
                 : []),
             ...(first.queued === true && first.canBypassQueue === true && first.unpushed === 0 && held === undefined
-              ? [
-                  <MergeButton
-                    key="queued"
-                    queued
-                    {...pressed(doing.accept)}
-                    onBypassQueue={() => onAccept([{ head: first.head ?? '', url: first.url, bypassQueue: true }])}
-                  />,
-                ]
+              ? // Its bypass under way, wherever pressed: Merging in its place, not the bypass again.
+                firstStanding === 'merging'
+                ? accepting
+                  ? []
+                  : [<MergeButton key="queued" variant="signal" standing="merging" />]
+                : [
+                    <MergeButton
+                      key="queued"
+                      queued
+                      {...pressed(doing.accept)}
+                      onBypassQueue={() => onAccept([{ head: first.head ?? '', url: first.url, bypassQueue: true }])}
+                    />,
+                  ]
               : []),
             ...drafts.map((one) => (
               <Button key={`ready-${one.url}`} {...pressed(doing.markReady(one.url))} onClick={() => onMarkReady(one.url)}>
@@ -491,7 +501,7 @@ export function Outputs({
           ? 'refused'
           : merging === one.url || mergeStanding?.(one.url) === 'merging'
             ? 'merging'
-            : at !== -1 && i > at && acting === doing.accept
+            : (at !== -1 && i > at && acting === doing.accept) || mergeAwaits?.(one.url) === true
               ? 'waiting'
               : one.queued === true
                 ? 'queued'
@@ -550,6 +560,9 @@ export function Outputs({
             {left.length === open.length ? text.accept(left.length) : text.acceptLeft(left.map((one) => labelOf(one)))}
           </SplitButton>
         )
+      ) : next !== undefined && mergeStanding?.(next.url) === 'merging' ? (
+        // Pressed, here or anywhere in the window: Merging in its place, never the press again meanwhile.
+        <MergeButton key="accept" variant="signal" standing="merging" />
       ) : next?.queued === true && next.canBypassQueue === true && next.unpushed === 0 && held === undefined ? (
         <MergeButton
           key="queued"

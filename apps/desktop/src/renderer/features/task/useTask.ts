@@ -22,6 +22,8 @@ import {
   type Pressing,
   mergeStandingOf,
   shownChangeOf,
+  useHeldMerges,
+  useHoldMerges,
   useMerge,
   useMerging,
   usePressedMerges,
@@ -319,11 +321,19 @@ export const useTask = (threadId: string): TaskModel => {
   // Each of its pull requests' merges as the window keeps them, by address: pressed on any screen, this one left and back included.
   const pressedByUrl = usePressedMerges(snapshot?.task.changes ?? null)
   const underWay = useRef(pressedByUrl)
-  underWay.current = pressedByUrl
   // The pull requests pressed here, Merging at once, until the window's own record of the press takes over.
   const [pressedMerges, setPressedMerges] = useState<ReadonlyMap<string, Pressing>>(new Map())
   // Those a press here merges after the one before has landed: waiting, not merging, and not to be merged on their own meanwhile.
   const [awaitingMerges, setAwaitingMerges] = useState<ReadonlySet<string>>(new Set())
+  // The same, held by the window for the press's whole life, wherever it was pressed: back on the task, still not Merge.
+  const holdMerges = useHoldMerges()
+  const heldMerges = useHeldMerges()
+  const heldNow = useRef(heldMerges)
+  // Read by a press, not in render: what the window holds as of the last render.
+  useEffect(() => {
+    underWay.current = pressedByUrl
+    heldNow.current = heldMerges
+  })
   const agents = useMemo(() => status?.agents.filter(canPick) ?? [], [status])
   // What its lead is still saying, while the window hears it.
   const streaming = useStreamed(threadId, snapshot?.items ?? NO_ITEMS, undefined, snapshot?.conversationVersion)
@@ -452,8 +462,16 @@ export const useTask = (threadId: string): TaskModel => {
   )
 
   /** Whether its pull request at `url` has merged, as the runtime has it now. */
-  const landed = async (url: string) =>
-    (await client.getThread(threadId, { limit: 0 })).task.changes.some((change) => change.url === url && change.state === 'merged')
+  /** Whether its pull request at `url` has merged, as its host reads it now; merged, the task's head shown says so at once. */
+  const landed = async (url: string) => {
+    const head = await client.getThread(threadId, { limit: 0 })
+    const merged = head.task.changes.some((change) => change.url === url && change.state === 'merged')
+    if (merged)
+      cache.setQueryData<ThreadSnapshot>(keys.thread(threadId), (current) =>
+        current === undefined ? head : { ...head, items: current.items, earlier: current.earlier },
+      )
+    return merged
+  }
 
   const readFiles = useCallback(
     () =>
@@ -655,7 +673,8 @@ export const useTask = (threadId: string): TaskModel => {
         pressing === 'bypass',
       )
     },
-    mergeAwaits: (url) => awaitingMerges.has(url),
+    mergeAwaits: (url) =>
+      (awaitingMerges.has(url) || heldMerges.has(url)) && merging !== url && !pressedMerges.has(url) && !pressedByUrl.has(url),
     pending,
     doing: acting,
     loadingEarlier,
@@ -907,12 +926,19 @@ export const useTask = (threadId: string): TaskModel => {
     },
     accept: (pressed) => {
       // One already under way, wherever it was pressed, isn't merged again.
-      const changes = pressed.filter((change) => !underWay.current.has(change.url))
+      const changes = pressed.filter((change) => !underWay.current.has(change.url) && !heldNow.current.has(change.url))
       const [first, ...later] = changes
       if (first === undefined) return Promise.resolve()
       const urls = changes.map((change) => change.url)
       setPressedMerges((now) => new Map([...now, [first.url, first.bypassQueue === true ? 'bypass' : 'merge']]))
       setAwaitingMerges((now) => new Set([...now, ...later.map((change) => change.url)]))
+      const release =
+        snapshot === null
+          ? () => {}
+          : holdMerges(
+              snapshot.task.id,
+              later.map((change) => change.url),
+            )
       return act(async () => {
         setMergeFailed(null)
         if (snapshot === null) return
@@ -940,11 +966,16 @@ export const useTask = (threadId: string): TaskModel => {
             // The next builds on this one, so it merges only once this one has landed: not while its host's merge queue still
             // holds it, nor while its host is still landing it. Pressed again, what is left merges from there.
             if (at < changes.length - 1 && !(await landed(change.url))) return
+            // Landed: it says Merged from the read that found it so, not Merging till the press ends.
+            forget([change.url])
           }
         } finally {
           setMerging(null)
         }
-      }, doing.accept).finally(() => forget(urls))
+      }, doing.accept).finally(() => {
+        release()
+        forget(urls)
+      })
     },
     push: (head, url) =>
       act(

@@ -7,6 +7,7 @@ import { useTask } from '../src/renderer/features/task/useTask'
 import { change, fakeClient, items, snapshot } from './fixtures'
 import type { ChangeSummary } from '@althar/contracts'
 import { ServicesProvider } from '../src/renderer/data/services'
+import { useMerge } from '../src/renderer/data/merges'
 import { servicesFor, withServices } from './render'
 
 /*
@@ -419,6 +420,138 @@ describe('a task’s parts', () => {
       // The first in its queue holds the rest: the press ends there, and the second is the person's again.
       expect(await popover.findByText('In the merge queue')).toBeTruthy()
       await waitFor(() => expect(popover.getAllByRole('button', { name: 'Merge' })).toHaveLength(1))
+      expect(merge).toHaveBeenCalledOnce()
+    })
+
+    it('holds the second of Accept both across leaving the task and coming back, until the first lands', async () => {
+      const { merge, answers } = held()
+      let queued = false
+      const { client } = fakeClient({
+        getThread: reading((one) => (queued && one.url === first.url ? { ...one, queued: true } : one)),
+        merge,
+      })
+      const services = servicesFor(client)
+      const both = (model: ReturnType<typeof useTask>) =>
+        void model.accept([
+          { head: 'aaa111', url: first.url },
+          { head: 'bbb222', url: second.url },
+        ])
+      const view = (shown: boolean) => <ServicesProvider value={services}>{shown ? <TaskWith press={both} /> : null}</ServicesProvider>
+      const { rerender } = render(view(true))
+      await screen.findByRole('button', { name: /^Parts, \d+/ })
+      await userEvent.click(screen.getByRole('button', { name: 'Accept both' }))
+      await waitFor(() => expect(merge).toHaveBeenCalledOnce())
+      // Away and back before the first lands: the second is still held, nothing to merge on its own.
+      rerender(view(false))
+      rerender(view(true))
+      const popover = await parts()
+      expect(await popover.findByText('Merging')).toBeTruthy()
+      expect(popover.queryByRole('button', { name: 'Merge' })).toBeNull()
+      // The first goes in its queue: the press ends there, and the second is the person's again.
+      act(() => {
+        queued = true
+        answers[0]!.resolve()
+      })
+      await waitFor(() => expect(popover.getAllByRole('button', { name: 'Merge' })).toHaveLength(1))
+      expect(merge).toHaveBeenCalledOnce()
+    })
+
+    it('stops saying the first is Merging once its landed read finds it merged, while the second merges, though the head shown is older', async () => {
+      const { merge, answers } = held()
+      let landed = false
+      // Only the read that asks whether it landed is fresh: the head shown stays as it was until the press ends.
+      const getThread = vi.fn(async (_threadId: string, page?: { limit?: number }) =>
+        snapshot({
+          task: { ...base.task, changes: [landed && page?.limit === 0 ? { ...first, state: 'merged' as const } : first, second] },
+        }),
+      )
+      const { client } = fakeClient({ getThread, merge })
+      withServices(
+        <TaskWith
+          press={(model) =>
+            void model.accept([
+              { head: 'aaa111', url: first.url },
+              { head: 'bbb222', url: second.url },
+            ])
+          }
+        />,
+        client,
+      )
+      await screen.findByRole('button', { name: /^Parts, \d+/ })
+      await userEvent.click(screen.getByRole('button', { name: 'Accept both' }))
+      await waitFor(() => expect(merge).toHaveBeenCalledOnce())
+      act(() => {
+        landed = true
+        answers[0]!.resolve()
+      })
+      await waitFor(() => expect(merge).toHaveBeenCalledTimes(2))
+      const popover = await parts()
+      // Only the second, the one under way: the first's row no longer says Merging, from the read that found it merged.
+      expect(popover.getAllByText('Merging')).toHaveLength(1)
+      expect(popover.getByRole('button', { name: /PR #715/ }).textContent).toContain('Merging')
+    })
+  })
+
+  describe('Outputs, as a merge pressed anywhere stands', () => {
+    const QUEUED = { queued: true, canBypassQueue: true, draft: false } as const
+    const PASSED = { outcome: 'passed' as const, passed: 1, failed: 0, running: 0, total: 1, failing: [], list: [] }
+    const one = change({ ...QUEUED, head: 'aaa111', checks: PASSED, repository: 'meridian/api', slug: 'api' })
+    const other = change({
+      draft: false,
+      head: 'bbb222',
+      checks: PASSED,
+      number: 27,
+      repository: 'meridian/web',
+      slug: 'web',
+      url: 'https://github.com/meridian/web/pull/27',
+    })
+    /** The Dock's Merge without queue, pressed in the same window. */
+    function Dock() {
+      const merge = useMerge()
+      return (
+        <button onClick={() => void merge({ taskId: base.task.id, head: 'aaa111', url: one.url, bypassQueue: true })}>
+          Bypass from the Dock
+        </button>
+      )
+    }
+
+    it.each([
+      ['one pull request', [one]],
+      ['several', [one, other]],
+    ] as const)('says Merging, not the bypass again, while a bypass from the Dock is under way (%s)', async (_, changes) => {
+      const { client } = fakeClient({
+        getThread: vi.fn(async () => snapshot({ task: { ...base.task, phase: 'ready', changes: [...changes] } })),
+        merge: vi.fn(() => new Promise<void>(() => {})),
+      })
+      const services = servicesFor(client)
+      const view = (task: boolean) => (
+        <ServicesProvider value={services}>
+          <Dock />
+          {task ? <Task /> : null}
+        </ServicesProvider>
+      )
+      const { rerender } = render(view(false))
+      await userEvent.click(screen.getByRole('button', { name: 'Bypass from the Dock' }))
+      rerender(view(true))
+      await waitFor(() => expect(screen.getAllByRole('status').some((status) => status.textContent?.includes('Merging'))).toBe(true))
+      expect(screen.queryByRole('button', { name: 'Other ways to merge' })).toBeNull()
+      expect(client.merge).toHaveBeenCalledOnce()
+    })
+
+    it('replaces Review and merge with Merging at once, pressed there or elsewhere', async () => {
+      const waiting = change({ draft: false, head: 'aaa111', checks: PASSED, localHead: 'def456', unpushed: 2 })
+      const merge = vi.fn(() => new Promise<void>(() => {}))
+      const { client } = fakeClient({
+        getThread: vi.fn(async () =>
+          snapshot({ task: { ...base.task, phase: 'ready', changes: [waiting], held: { since: '2026-11-10T09:00:00.000Z', commits: 2 } } }),
+        ),
+        merge,
+      })
+      withServices(<Task />, client)
+      await userEvent.click(await screen.findByRole('button', { name: 'Review and merge' }))
+      expect(screen.queryByRole('button', { name: 'Review and merge' })).toBeNull()
+      expect(screen.getAllByRole('status').some((status) => status.textContent?.includes('Merging'))).toBe(true)
+      await userEvent.click(screen.getByRole('button', { name: /^Parts, \d+/ }))
       expect(merge).toHaveBeenCalledOnce()
     })
   })

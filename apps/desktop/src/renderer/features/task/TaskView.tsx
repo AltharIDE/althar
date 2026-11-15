@@ -1385,6 +1385,7 @@ export function TaskView({
                   merging={model.merging}
                   mergeRefused={model.mergeRefused}
                   mergeStanding={model.mergeStanding}
+                  mergeAwaits={model.mergeAwaits}
                   onPostScreenshots={model.postScreenshots}
                   onOpenFile={changes.show}
                   conflict={model.conflict}
