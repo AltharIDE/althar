@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process'
 import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -142,4 +143,42 @@ test('A runtime killed twice while the step runs pauses it, offering only what f
     await quit(electronApp)
   }
   expect(restarts(home)).toEqual({ unended: 0, carried: 2, calls: [{ kind: 'stuck', state: 'withdrawn', why: 'restarted' }] })
+})
+
+test('a suspended runtime keeps its task through wake and a later clean restart', async () => {
+  test.skip(process.platform === 'win32', 'SIGSTOP and SIGCONT model process suspension on Unix')
+  const home = mkdtempSync(join(tmpdir(), 'althar-e2e-'))
+  const first = await launch(home)
+  let paused: number | undefined
+  try {
+    await working(first.electronApp, first.page, home)
+    const pid = await runtimePid(first.electronApp)
+    expect(pid).toBeDefined()
+    if (pid === undefined) throw new Error('The runtime must be running before suspension.')
+    paused = pid
+    process.kill(pid, 'SIGSTOP')
+    await expect.poll(() => execFileSync('ps', ['-o', 'stat=', '-p', String(pid)], { encoding: 'utf8' }).trim()).toMatch(/T/)
+    await first.electronApp.evaluate(({ powerMonitor }) => powerMonitor.emit('suspend'))
+    // Main remains responsive while the runtime cannot process a turn. Waking resumes the same process and task.
+    await expect(first.page.getByText('Implementing', { exact: true }).first()).toBeVisible()
+    await first.electronApp.evaluate(({ powerMonitor }) => powerMonitor.emit('resume'))
+    process.kill(pid, 'SIGCONT')
+    paused = undefined
+    await expect.poll(() => runtimePid(first.electronApp)).toBe(pid)
+    await expect(shown(first.page, CARRIED)).toHaveCount(0)
+    await expect(first.page.getByText('Implementing', { exact: true }).first()).toBeVisible()
+  } finally {
+    if (paused !== undefined) process.kill(paused, 'SIGCONT')
+    await quit(first.electronApp)
+  }
+  expect(restarts(home)).toEqual({ unended: 0, carried: 0, calls: [] })
+  const again = await launch(home)
+  try {
+    await openTask(again.page)
+    await expect(shown(again.page, CARRIED)).toHaveCount(1)
+    await expect(shown(again.page, CRASHED)).toHaveCount(0)
+  } finally {
+    await quit(again.electronApp)
+  }
+  expect(restarts(home)).toEqual({ unended: 0, carried: 1, calls: [] })
 })

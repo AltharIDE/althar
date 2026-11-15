@@ -460,7 +460,7 @@ export const makeFakeService = (options: FakeServiceOptions = {}): FakeService =
     inQueue.delete(number)
     autoMerging.delete(number)
     if (change.state !== 'open') return
-    update(number, { state: 'merged' })
+    update(number, { state: 'merged', mergeCommit: `merge-${number}` })
     historyOf(repositoryOf.get(number) ?? '', change.target).push(`merge-${number}`)
   }
 

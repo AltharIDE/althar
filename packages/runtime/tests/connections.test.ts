@@ -1154,7 +1154,11 @@ describe('the agents', () => {
       const agents = yield* Agents
       for (const entry of agents.list) {
         const transport = entry.transport('/w')
-        const env = transport._tag === 'Process' ? (transport.spec.env ?? {}) : {}
+        if (transport._tag !== 'Process') {
+          assert.strictEqual(entry.definition.native, 'copilot')
+          continue // Its shell's actual environment is exercised by the native transport test.
+        }
+        const env = transport.spec.env ?? {}
         assert.isUndefined(env.GH_CONFIG_DIR)
         assert.isUndefined(env.GLAB_CONFIG_DIR)
         assert.deepInclude(env, agentGit)

@@ -14,10 +14,11 @@ import { FIRST_SCHEME_WAIT, firstScheme, followDesktopScheme, type Scheme, theme
 import { CHROME_ARG, decideChrome, type DesktopChrome, parseHexAccent } from './desktop'
 import { chromeOf, FIRST_CHROME_WAIT, type FollowedChrome, followDesktopChrome, systemSources } from './desktopChrome'
 import { keepingAwake } from './awake'
-import { bringForward as raiseWindow, focusedLast, openFromEdge } from './bringForward'
+import { availableWindows, bringForward as raiseWindow, focusedLast, openFromEdge } from './bringForward'
 import { attachedOf, clipboardPaths, pastedOf, rawFormat } from './attachments'
 import { tokenIn } from './clipboard'
 import { childKind, type CrashReports, crashReports, goneBadly, type HiddenNames, namesLearned, newDumps } from './crashReports'
+import { crashConsent } from './crashConsent'
 import { startDictation } from './dictation'
 import { isEdgePlace } from './edge'
 import { type Edge, startEdge } from './edgeWindows'
@@ -28,7 +29,8 @@ import { dockCount, notificationsShown, soundOf, tells } from './notify'
 import { idle, isQuitAnswer, type QuitAnswer, type QuitQuestion, type Work, workIn } from './quitWork'
 import { readAppPreferences, writeAppPreference } from './preferences'
 import { PICTURE_SCHEME } from './pictureAddress'
-import { CANVAS_SCHEME } from '@althar/contracts'
+import { CANVAS_SCHEME, emitterPort, type AttentionEvent } from '@althar/contracts'
+import { watchRuntimeAttention } from './runtimeAttention'
 import { handleCanvases } from './canvases/ipc'
 import { canvasTokens } from './canvases/tokens'
 import { type Canvases, startCanvases } from './canvases/views'
@@ -308,15 +310,6 @@ interface RuntimeMessage {
   readonly owners?: unknown
   /** The ports the runtime listens on, which no canvas may reach (ADR-104). */
   readonly ports?: unknown
-  readonly event?: {
-    readonly _tag?: string
-    readonly kind?: unknown
-    readonly count?: unknown
-    readonly working?: unknown
-    readonly title?: unknown
-    readonly body?: unknown
-    readonly threadId?: unknown
-  }
 }
 
 /* Notifications the person may still click: kept, so they aren't collected before then. */
@@ -340,6 +333,7 @@ let waiting = 0
  * as kept. A change waits for that read, so the read can't undo it.
  */
 let preferences: AppPreferences = DEFAULT_PREFERENCES
+const crashPolicy = crashConsent(() => preferences.crashReports && !doNotTrack(process.env))
 
 /*
  * Light, dark or as the system is (Settings › Appearance): Electron's nativeTheme is told, and every window's page
@@ -440,7 +434,8 @@ const crashes = Promise.all([install, ready]).then(([install]) => {
     ...usageTarget,
     installId: install.id,
     app: { version: app.getVersion(), platform: process.platform, arch: process.arch },
-    allowed: () => preferences.crashReports && !doNotTrack(process.env),
+    allowed: crashPolicy.allowed,
+    generation: crashPolicy.generation,
     fetch: (url, options) => net.fetch(url, options),
     mask: maskHere,
   })
@@ -452,7 +447,15 @@ const crashes = Promise.all([install, ready]).then(([install]) => {
   return sender
 })
 /** Reports a crash once the sender is there; reporting never fails into what failed. */
-const reportCrash = (report: (sender: CrashReports) => void) => void crashes.then(report).catch(() => undefined)
+const reportCrash = (report: (sender: CrashReports) => void) => {
+  if (!crashPolicy.allowed()) return
+  const accepted = crashPolicy.generation()
+  void crashes
+    .then((sender) => {
+      if (crashPolicy.allowed() && crashPolicy.generation() === accepted) report(sender)
+    })
+    .catch(() => undefined)
+}
 /** Lets crash reports and usage data on their way go, a few seconds at most. */
 const sendersStopped = () =>
   Promise.race([
@@ -477,6 +480,7 @@ app.on('child-process-gone', (_event, details) => {
 
 /* Althar's own windows, apart from the edge's pages. */
 const windows = new Set<BrowserWindow>()
+const closingWindows = new WeakSet<BrowserWindow>()
 let edge: Edge | undefined
 
 /* The pages beside the conversations (browser/pages.ts), once the app is ready. */
@@ -503,7 +507,7 @@ const ownersIn = (said: unknown): ReadonlyArray<string> =>
 
 /** Brings Althar's window forward, a window there is or a new one, from wherever the person is. */
 const bringForward = () => {
-  return raiseWindow(windows, openWindow, () => app.focus({ steal: true }), quiet)
+  return raiseWindow(availableWindows(windows, closingWindows), openWindow, () => app.focus({ steal: true }), quiet)
 }
 
 /** Opens the window on a thread, as a notification or the edge asks. */
@@ -520,7 +524,7 @@ const openThread = (threadId: string) => {
  * and how many things wait, on the Dock while its count is on. Never for
  * progress. And whether any work runs, to keep the Mac awake by.
  */
-const nudged = (event: NonNullable<RuntimeMessage['event']>) => {
+const nudged = (event: AttentionEvent) => {
   if (event._tag === 'Working' && typeof event.working === 'boolean') {
     // Nothing restarts into an update while work runs.
     updates?.working(event.working)
@@ -623,6 +627,11 @@ const startRuntime = () => {
     },
   })
   logs.keepOutput(child)
+  const attention = new MessageChannelMain()
+  const stopAttention = watchRuntimeAttention(emitterPort(attention.port1), nudged, (reason) => {
+    if (runtime === child && !quitting) logs.error('Runtime attention connection failed', { reason })
+  })
+  child.postMessage({ type: 'connect', role: 'internal' }, [attention.port2])
   child.once('spawn', () => logs.info('Runtime started', { pid: child.pid }))
   // Whether the computer is online, so work waits out a lost connection rather than fail on it (ADR-060).
   const stopWatchingOnline = watchOnline(
@@ -665,7 +674,6 @@ const startRuntime = () => {
     if (message.type === 'facts') return facts.answer(message)
     if (message.type === 'names') return names.answer(message)
     if (message.type === 'work') return works.answer(message)
-    if (message.type === 'nudge' && message.event !== undefined) return nudged(message.event)
     if (message.type === 'usage') return recordUsage(message.usage)
     if (message.type === 'crash') return reportCrash((sender) => sender.fromRuntime(message.crash))
     if (message.type === 'store-failed' || message.type === 'profile-in-use') {
@@ -683,6 +691,7 @@ const startRuntime = () => {
     granting.delete(message.requestId)
   })
   child.once('exit', (code) => {
+    stopAttention()
     stopWatchingOnline()
     runtime = undefined
     if (quitting) logs.info('Runtime exited', { code })
@@ -866,6 +875,7 @@ const openWindow = () => {
   }
   windows.add(window)
   window.on('focus', () => focusedLast(windows, window))
+  window.on('close', () => closingWindows.add(window))
   // The window's own buttons say maximize or restore by what the window is (windowOptions.ts).
   window.on('maximize', () => window.webContents.send('althar:maximized', true))
   window.on('unmaximize', () => window.webContents.send('althar:maximized', false))
@@ -1032,10 +1042,16 @@ ipcMain.handle('althar:set-preference', async (_event, key: unknown, value: unkn
   if (!isPreferenceKey(key)) throw new Error(`Althar has no preference ${String(key)}.`)
   // Checked before it is kept, so it goes through choose-task-folder.
   if (key === 'worktrees') throw new Error('The task folder is chosen with its own dialog.')
-  await preferencesRead
-  // Merged into the preferences as they stand once it is kept, so changes made together each stay.
-  const kept = await writeAppPreference(locations().profile, key, value)
-  preferences = { ...preferences, [key]: kept }
+  // Stop crash reporting before any asynchronous work, including the preference's disk write.
+  const finish = key === 'crashReports' && typeof value === 'boolean' ? crashPolicy.changing() : undefined
+  try {
+    await preferencesRead
+    // Merged into the preferences as they stand once it is kept, so changes made together each stay.
+    const kept = await writeAppPreference(locations().profile, key, value)
+    preferences = { ...preferences, [key]: kept }
+  } finally {
+    finish?.()
+  }
   if (key === 'openAtLogin') startAtLogin(preferences.openAtLogin)
   if (key === 'keepWorkingOnClose') keepingOn = preferences.keepWorkingOnClose
   awake.wants(preferences)
@@ -1321,7 +1337,7 @@ void ready.then(() => {
   app.on('browser-window-blur', focusChanged)
   focusChanged()
   app.on('activate', () => {
-    if (windows.size === 0) openWindow()
+    if (availableWindows(windows, closingWindows).size === 0) openWindow()
   })
 })
 

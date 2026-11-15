@@ -354,7 +354,7 @@ export const usagePairs: ReadonlyArray<UsagePair> = deepFreeze([
     provider: 'github',
     pays: 'plan',
     classification: 'status',
-    sources: [none('The OpenCode engine does not report Copilot plan usage. Check your GitHub settings.')],
+    sources: [none('Copilot does not report plan usage through this connection. Check your GitHub settings.')],
   },
   {
     agent: 'copilot',
