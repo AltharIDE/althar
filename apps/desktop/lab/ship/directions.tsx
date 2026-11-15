@@ -19,6 +19,7 @@ import {
 } from '@althar/ui'
 
 import type { Moment } from './moments'
+import { onto } from './onto'
 import s from './lab.module.css'
 
 /*
@@ -29,7 +30,7 @@ import s from './lab.module.css'
  * the app's own, from the moment's snapshot.
  */
 
-export type DirectionKey = 'today' | 'a' | 'b' | 'c'
+export type DirectionKey = 'today' | 'a' | 'b' | 'b2' | 'c'
 
 export interface Lab {
   readonly direction: DirectionKey
@@ -151,7 +152,7 @@ const someoneElse = 'Someone else pushed to PR #820 first. The lead’s commit g
 
 /* A: the next step, always in one place ---------------------------------------------------------------------------- */
 
-const a = (moment: Moment, real: ChangeSetProps, hover: boolean): Card => {
+export const a = (moment: Moment, real: ChangeSetProps, hover: boolean): Card => {
   const n = heldOf(moment)
   switch (moment.key) {
     case 'held':
@@ -454,6 +455,12 @@ export const DIRECTIONS: ReadonlyArray<Direction> = [
     label: 'B · How far',
     idea: 'Say once how far it goes: Ship and merge carries it through, and stops only where you’re needed.',
     cardOf: shipping(b),
+  },
+  {
+    key: 'b2',
+    label: 'B′ · Onto main',
+    idea: 'B, taken further: one control whose label is the route (review or not, then push, ready or merged), from your own default, bent only where the project makes it pointless. T swaps the project between shared and solo.',
+    cardOf: shipping(onto),
   },
   {
     key: 'c',

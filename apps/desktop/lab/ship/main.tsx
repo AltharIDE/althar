@@ -16,6 +16,7 @@ import { fakeClient, fakeHost } from '../../tests/fixtures'
 import { servicesFor } from '../../tests/render'
 import { DIRECTIONS, type DirectionKey, LabContext } from './directions'
 import { MOMENTS, momentOf, type Moment } from './moments'
+import { toggleShared, useOnto } from './onto'
 import s from './lab.module.css'
 
 /*
@@ -88,6 +89,7 @@ function Lab() {
       else if (event.key === 'ArrowLeft') step(-1)
       else if (event.key === 'h') setHover((on) => !on)
       else if (event.key === 'n') setNarrow((on) => !on)
+      else if (event.key === 't') toggleShared()
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
@@ -97,6 +99,7 @@ function Lab() {
   useEffect(() => write('hover', hover ? '1' : null), [hover])
   useEffect(() => write('narrow', narrow ? '1' : null), [narrow])
 
+  const onto = useOnto()
   const chosen = DIRECTIONS.find((one) => one.key === direction) ?? DIRECTIONS[0]!
   const lab = useMemo(() => ({ direction, moment, hover }), [direction, moment, hover])
   return (
@@ -145,6 +148,11 @@ function Lab() {
           <button type="button" aria-pressed={narrow} onClick={() => setNarrow((on) => !on)}>
             <kbd>N</kbd> Narrow
           </button>
+          {direction === 'b2' && (
+            <button type="button" onClick={toggleShared}>
+              <kbd>T</kbd> {onto.shared ? 'Shared main' : 'Solo main'}
+            </button>
+          )}
         </div>
       </nav>
     </div>

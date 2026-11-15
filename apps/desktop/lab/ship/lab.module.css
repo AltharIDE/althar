@@ -105,3 +105,30 @@
   max-width: 340px;
   margin: 2px 0 4px;
 }
+
+/* B′'s line under the buttons: what Ship does, the first time, or the offer to change the default. */
+.tip {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--n-2);
+  color: var(--t-2);
+}
+.tip b {
+  color: var(--t-1);
+  font-weight: 600;
+}
+.tip > span:first-child {
+  flex: 1;
+}
+.tipActions {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
+}
+.tipStack {
+  flex-direction: column;
+}

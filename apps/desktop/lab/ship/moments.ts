@@ -219,6 +219,16 @@ export const MOMENTS: ReadonlyArray<Moment> = [
     ),
   },
   {
+    key: 'heldLater',
+    label: 'Tweaks wait, weeks later',
+    what: 'The same moment on a later task. Three Ships in a row, the person chose Push and merge over their default, Review and merge.',
+    today: 'Ship 2 commits, as every time. Nothing learns from what the person keeps choosing.',
+    snapshot: base(
+      { phase: 'ready', held: { since: '2026-12-02T10:05:00.000Z', commits: 2 }, changes: [draftHeld(2)] },
+      { items: history([]) },
+    ),
+  },
+  {
     key: 'reviewing',
     label: 'Ship: review reads them',
     what: 'Ship pressed. The task is running again: GPT-6.1 Sol reviews the 2 commits.',

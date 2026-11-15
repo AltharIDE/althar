@@ -1,6 +1,7 @@
 import { ChangeSet as Real, type ChangeSetProps, ChangeState } from '@althar/ui'
 
 import { DIRECTIONS, useLab } from './directions'
+import { useOnto } from './onto'
 
 /*
  * The kit as the task's Outputs see it in the lab (vite.config.ts points
@@ -13,6 +14,8 @@ export * from '@althar/ui'
 
 export function ChangeSet(props: ChangeSetProps) {
   const lab = useLab()
+  // B′ keeps its route along the path: the card follows it.
+  useOnto()
   const direction = DIRECTIONS.find((one) => one.key === lab?.direction)
   if (lab === null || direction?.cardOf === undefined || props.state === ChangeState.Branch) return <Real {...props} />
   const { actions, ...card } = direction.cardOf(lab.moment, props, lab.hover)

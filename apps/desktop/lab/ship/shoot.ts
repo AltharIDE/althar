@@ -70,6 +70,36 @@ if (mode === 'cards') {
       process.stdout.write(`${file}\n`)
     }
   writeFileSync(join(out, 'cards.json'), JSON.stringify(shots, null, 2))
+} else if (mode === 'onto') {
+  // B′ at the moments it changes, with its menu open where that is what to see.
+  const crop = async (file: string) => {
+    const bottom = await page.evaluate((title) => {
+      const card = document.querySelector(`[data-lab-scene] article[aria-label="${title}"]`)
+      const files = card?.querySelector('[class*="files"]')
+      const open = [...document.querySelectorAll('[data-radix-popper-content-wrapper]')].map((one) => one.getBoundingClientRect().bottom)
+      return Math.max((files ?? card)?.getBoundingClientRect()[files ? 'top' : 'bottom'] ?? 400, ...open)
+    }, TITLE)
+    await page.screenshot({ path: join(out, file), clip: { x: 610, y: 52, width: 646, height: Math.min(748, bottom - 52 + 14) } })
+    process.stdout.write(`${file}\n`)
+  }
+  const menu = async () => {
+    await page.click('[data-lab-scene] button[aria-label="How far it goes"]')
+    await page.waitForTimeout(400)
+  }
+  const shots: Array<[string, string, boolean]> = [
+    ['held', '', false],
+    ['held', '', true],
+    ['held', '&solo=1', true],
+    ['heldLater', '', false],
+    ['reviewing', '', true],
+    ['readyChecks', '', false],
+    ['readyChecks', '&solo=1', false],
+  ]
+  for (const [m, extra, withMenu] of shots) {
+    await open('b2', m, extra)
+    if (withMenu) await menu()
+    await crop(`onto-${m}${extra === '' ? '' : '-solo'}${withMenu ? '-menu' : ''}.png`)
+  }
 } else {
   const [d = 'a', m = 'readyChecks', narrow] = rest
   await open(d, m, narrow === 'narrow' ? '&narrow=1' : '')
