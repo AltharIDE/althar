@@ -45,7 +45,21 @@ Every option lets the person:
 - **C · Over the composer.** The plan docked over the composer for the whole talk, never scrolling away. Folded, one line with Launch; open, a wave a row, and pointing at a step keeps what it waits for and what waits for it while the rest steps back. Launched, the line follows the run and holds the one thing that needs the person.
 - **D · Beside the talk.** While it's planned, the plan takes the board's half: every step whole, with what it does, top to bottom. Beside a narrow window, one step across. Launched, the board comes back and the conversation holds a small card that follows the run.
 
-**Board** (`board/`) and **Task** (`task/`): each folder's `options.ts` names its options and what they bet on.
+**Board** (`board/`), while it runs
+
+- **A · One card.** The whole mission is one card in the lane of its loudest task: a segment a task, what runs now, how many merged. Its tasks leave the lanes, except what needs the person, which keeps its own card marked with the mission. Pressing it opens every task in place.
+- **B · Its own row.** A band across the four lanes under their heads: running tasks and asks as the app's own cards, waiting and merged ones a line each. Everyone else's work sits below a rule.
+- **C · Marked cards.** Cards stay where they'd be; each of the mission's carries its name and step. Pointing at one dims everything else and, after a moment, opens the mission's small graph with that task ringed.
+- **D · Its own lane.** A lane before Up next lists the tasks top to bottom as stops on one line, solid through what merged and dashed ahead. Pointing at a stop lights what it waits for and what waits on it. With no room it becomes a rail.
+
+**Task** (`task/`), from inside one of its tasks
+
+- **A · In the header.** Beside the title, a strip: what it waits for, this step, what waits on it, and "step 6 of 12". Pressing it opens the step's what, why and note, its lead, and the mission drawn small.
+- **B · In the thread.** The thread opens with the step's card where an issue's would be: the mission, what, why, the note, what it came after and its lead. Althar's line says what started it, and the thread ends on what merging starts.
+- **C · Its own view.** A view beside Conversation and Outputs (key **r**): the request in a line, this step's brief, and the whole graph under it with this task ringed. A task in it goes to its page.
+- **D · A path.** A slim line under the header: the steps before, the mission as a bead a task with this one ringed, the steps after. **[** and **]** walk it.
+
+Each folder's `options.ts` names its options and what they bet on.
 
 ## Pictures
 
@@ -55,8 +69,10 @@ Every option lets the person:
 node lab/graph/shoot.ts a-planned 'chat=A&s=cloud&stage=plan'
 node lab/graph/shoot.ts a-detail 'chat=A&s=cloud&stage=plan' 'click=[data-node="hosts"] button'
 node lab/graph/shoot.ts b-typed 'chat=B&s=cloud&stage=plan' 'click=textarea' 'type=Runs should use Sonnet'
-node lab/graph/shoot.ts board-a 'board=A&s=cloud&stage=run&t=40&paused=1'
-node lab/graph/shoot.ts task-a 'task=A&s=cloud&stage=run&t=40&paused=1' 'hash=#/threads/th_cloud-hosts'
+node lab/graph/shoot.ts board-a 'board=A&part=board&s=cloud&stage=run&t=40&paused=1' 'click=text=All 12 tasks'
+node lab/graph/shoot.ts board-c 'board=C&part=board&s=cloud&stage=run&t=70&paused=1' 'hover=[data-move="t_cloud-hosts"]'
+node lab/graph/shoot.ts task-a 'task=A&s=cloud&stage=run&t=55&paused=1#/threads/th_cloud-hosts' 'click=button[aria-label^="Althar Cloud, step"]'
+node lab/graph/shoot.ts task-c 'task=C&s=cloud&stage=run&t=55&paused=1&face=request#/threads/th_cloud-hosts'
 node lab/graph/shoot.ts run-a 'chat=A&s=cloud&stage=run' 'frames=0,90,1.5'   # frames for a recording, into shots/run-a/
 ```
 

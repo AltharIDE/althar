@@ -1,0 +1,126 @@
+/* A slim line under the header, as what a review's lead can reach is: before on the left, the mission in the middle, after on the right. */
+.path {
+  flex: none;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: center;
+  gap: 16px;
+  height: 36px;
+  padding: 0 18px;
+  border-bottom: 1px solid var(--line);
+  font-size: 12.5px;
+  color: var(--t-2);
+}
+.before,
+.after {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+}
+.after {
+  justify-content: flex-end;
+}
+.back {
+  flex: none;
+  margin-right: 4px;
+  transform: scaleX(-1);
+  color: var(--t-3);
+}
+.on {
+  flex: none;
+  margin-left: 4px;
+  color: var(--t-3);
+}
+
+/* a neighbour: its mark and its name, quiet until pointed at */
+.step {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  height: 26px;
+  padding: 0 7px;
+  border-radius: var(--r);
+  color: var(--t-2);
+  transition:
+    background var(--fast) var(--ease),
+    color var(--fast) var(--ease);
+}
+.step:hover {
+  color: var(--t-1);
+  background: var(--line);
+}
+.more {
+  flex: none;
+  padding: 0 4px;
+  font-size: 12px;
+  color: var(--t-3);
+}
+.name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* the mission: its name, its tasks as beads, and this step's number */
+.mission {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+.missionName {
+  font-weight: 500;
+  color: var(--t-2);
+  white-space: nowrap;
+}
+.beads {
+  display: flex;
+  align-items: center;
+  gap: 1px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.bead {
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 22px;
+  border-radius: var(--r-sm);
+  transition: background var(--fast) var(--ease);
+}
+.bead:hover {
+  background: var(--line);
+}
+/* this task: ringed in ink */
+.here,
+.here:hover {
+  cursor: default;
+  background: transparent;
+  box-shadow: inset 0 0 0 1.5px var(--t-1);
+}
+.number {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 26px;
+  padding: 0 7px;
+  border-radius: var(--r);
+  font-variant-numeric: tabular-nums;
+  color: var(--t-3);
+  white-space: nowrap;
+  transition:
+    background var(--fast) var(--ease),
+    color var(--fast) var(--ease);
+}
+.number:hover,
+.number[data-state='open'] {
+  color: var(--t-1);
+  background: var(--line);
+}
+.pin {
+  color: var(--t-3);
+}

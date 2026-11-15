@@ -1,0 +1,72 @@
+/* The mission drawn small: its tasks top to bottom, this one's lines in and out. */
+.map {
+  position: relative;
+  flex: none;
+}
+.place {
+  position: absolute;
+  top: 0;
+  left: 0;
+  transition: transform var(--move) var(--ease-move);
+}
+
+/* a task: its mark and its short name, quiet until pointed at */
+.spot {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  height: 100%;
+  padding: 0 9px 0 7px;
+  border-radius: var(--r);
+  background: var(--paper);
+  box-shadow: inset 0 0 0 1px var(--line-2);
+  font-size: 12px;
+  color: var(--t-1);
+  text-align: left;
+  cursor: pointer;
+  transition:
+    background-color var(--fast) var(--ease),
+    box-shadow var(--fast) var(--ease);
+}
+.spot:hover {
+  background: var(--n-3);
+  box-shadow: inset 0 0 0 1px var(--line-3);
+}
+.name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* not started: drawn as an outline, its name a step back */
+.waits,
+.held,
+.stuck {
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--line-2);
+  color: var(--t-2);
+}
+/* merged: it steps back */
+.done {
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--line);
+  color: var(--t-2);
+}
+.yours {
+  background: var(--signal-paper);
+  box-shadow: inset 0 0 0 1px var(--signal-line);
+}
+.failed {
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--danger) 40%, transparent);
+}
+
+/* this task: ringed in ink, its name in ink */
+.here,
+.here:hover {
+  cursor: default;
+  color: var(--t-1);
+  font-weight: 600;
+  box-shadow: inset 0 0 0 1.5px var(--t-1);
+}
