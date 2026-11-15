@@ -49,6 +49,70 @@ const place = () => {
 }
 
 describe("the coordinator's copies", () => {
+  for (const marker of ['empty', 'missing record', 'person’s git folder'] as const)
+    it.effect(`rebuild a copy with a git marker naming ${marker} without touching the person’s repository`, () =>
+      Effect.gen(function* () {
+        const { person, copy } = place()
+        const before = git(person, 'rev-parse', 'HEAD')
+        mkdirSync(copy, { recursive: true })
+        writeFileSync(
+          join(copy, '.git'),
+          marker === 'empty'
+            ? ''
+            : `gitdir: ${asGit(marker === 'missing record' ? join(person, '.git', 'worktrees', 'missing') : join(person, '.git'))}\n`,
+        )
+        yield* freshCopy(person, copy, 'main')
+        assert.strictEqual(git(copy, 'rev-parse', '--path-format=absolute', '--git-common-dir'), asGit(join(copy, '.git')))
+        assert.strictEqual(git(copy, 'rev-parse', 'HEAD'), before)
+        assert.strictEqual(git(person, 'rev-parse', 'HEAD'), before)
+        assert.strictEqual(readFileSync(join(person, 'README.md'), 'utf8'), '# Meridian\n')
+        assert.strictEqual(readFileSync(join(copy, 'README.md'), 'utf8'), '# Meridian\n')
+      }),
+    )
+
+  it.effect('return a typed failure when the copy’s parent is a file, and release the refresh lock for recovery', () =>
+    Effect.gen(function* () {
+      const { home, person } = place()
+      const obstruction = join(home, 'blocked')
+      const copy = join(obstruction, 'copy')
+      writeFileSync(obstruction, 'Keep this file.\n')
+      const before = git(person, 'rev-parse', 'HEAD')
+      const error = yield* Effect.flip(freshCopy(person, copy, 'main'))
+      assert.strictEqual(error._tag, 'GitFailed')
+      assert.strictEqual(error.cwd, copy)
+      assert.deepStrictEqual(error.args, ['init'])
+      assert.strictEqual(readFileSync(obstruction, 'utf8'), 'Keep this file.\n')
+      assert.strictEqual(git(person, 'rev-parse', 'HEAD'), before)
+      rmSync(obstruction)
+      yield* freshCopy(person, copy, 'main')
+      assert.strictEqual(git(copy, 'rev-parse', 'HEAD'), before)
+      assert.strictEqual(readFileSync(join(copy, 'README.md'), 'utf8'), '# Meridian\n')
+    }),
+  )
+
+  it.effect('return a typed failure when a mirror cannot borrow objects, and refresh after the obstruction is removed', () =>
+    Effect.gen(function* () {
+      const { home, person, copy } = place()
+      const mirror = join(home, 'mirror.git')
+      git(home, 'init', '-q', '--bare', mirror)
+      const obstruction = join(mirror, 'objects', 'info', 'alternates')
+      mkdirSync(obstruction)
+      const before = git(person, 'rev-parse', 'HEAD')
+      const error = yield* Effect.flip(freshCopy(person, copy, 'main', mirror))
+      assert.strictEqual(error._tag, 'GitFailed')
+      assert.strictEqual(error.cwd, mirror)
+      assert.deepStrictEqual(error.args, ['init'])
+      assert.isFalse(existsSync(copy))
+      assert.strictEqual(git(person, 'rev-parse', 'HEAD'), before)
+      assert.strictEqual(readFileSync(join(person, 'README.md'), 'utf8'), '# Meridian\n')
+      removeTreeSync(obstruction)
+      yield* freshCopy(person, copy, 'main', mirror)
+      assert.strictEqual(git(copy, 'rev-parse', 'HEAD'), before)
+      assert.strictEqual(git(copy, 'remote', 'get-url', 'origin'), mirror)
+      assert.strictEqual(readFileSync(join(copy, 'README.md'), 'utf8'), '# Meridian\n')
+    }),
+  )
+
   it.effect('finish overlapping refreshes without removing another refresh’s git files', () =>
     Effect.gen(function* () {
       const { home, person, copy } = place()
