@@ -8,7 +8,7 @@
 </p>
 
 <p align="center">
-  <b>Stop babysitting terminals.</b><br />
+  <b>Stop babysitting tabs and terminals.</b><br />
   Tell Althar's coordinator what you want. It puts agents to work, can have a model from another lab review them, and brings you back finished work, with the proof.
 </p>
 
@@ -29,21 +29,23 @@
 
 ## You manage the project. Not the agents.
 
-Eight terminals, eight chats, and you in the middle: approving, re-explaining, checking. Agents got good; working with them didn't.
+Stop re-explaining your project every time you start a new chat.
 
-In Althar you organise your work in projects, each one repository or many. On top of each sits a coordinator, and you talk to it as you would to any project manager. It turns what you say into tasks, picks a lead for each, keeps the board, and comes back to you only when something needs your decision.
+In Althar your work lives in projects, each with one repository or several. Each project has a coordinator, and you tell it what you want as you would a project manager:
 
-Change its plan, or hold it. Leave it, and it starts.
+- It reads the project's repositories and rules before it plans, and keeps the decisions you make as notes it starts every session with.
+- It splits what you ask into tasks, picks an agent and a model to lead each, and runs several side by side.
+- You hear from it when something needs you: a question, a permission, or work to accept.
 
 <img src="brand/export/screenshots/framed/plan.jpg" width="100%" alt="You ask for a fix to the VAT rate on EU invoices; the coordinator answers with one task: one agent implements, another reviews, then a draft pull request. It starts on its own unless changed or held." />
 
-## A second opinion, built in.
+## Review by a model from another lab.
 
-Any change can be checked by a model from another lab, where you have one signed in: Claude's work reviewed by GPT, or the other way round. The lead fixes each finding or sets it aside with its reason.
+A task's work can be reviewed by a model from another lab you're signed in to: Claude's work checked by GPT, or GPT's by Claude. The lead fixes each finding or sets it aside with its reason.
 
-The task lands in Needs you with its diff, its checks, screenshots of it working, and, where it was reviewed, the findings with how each was settled. You decide whether it merges.
+When the work is done, the task comes to Needs you with its diff, its checks, screenshots of it working and, where it was reviewed, each finding and how it was settled. You decide whether it merges.
 
-Review is optional: change the reviewer, skip a round, or take it off.
+Review is optional: pick another reviewer, skip it once, or turn it off.
 
 <img src="brand/export/screenshots/framed/review.jpg" width="100%" alt="A review settled: what two reviewers found, by severity and file, and what the lead fixed in the second round or set aside, with its reason." />
 
@@ -158,11 +160,15 @@ Switch labs whenever you like: your projects, their history and their decisions 
 
 ## And everything around it
 
-- **See it running.** The page a task is building opens beside it, in a browser session of its own, and the lead tries its work there.
-- **Canvases.** Leads draw pages and diagrams; comment on a version, and the next one answers it.
+- **See it running.** Run the project from the window, with no agent. The page a task builds opens beside it, in a browser session of its own, and the lead tries its work there.
+- **Review pull requests.** Paste a pull request's link and ask: a lead reads a copy of it, runs nothing of it, and drafts a review you post in one press.
+- **Presets.** Start work as a chat, a prototype, a small change, a full change or a pull request review, and change any part of it later, such as its reviewer or how it ends, by saying so.
+- **Canvases.** Leads draw pages, mockups and diagrams; comment on a version, and the next one answers it.
 - **Your tracker.** Issues come in from Linear, Jira, Trello or GitHub; pull requests go out to GitHub, GitLab or Bitbucket.
 - **Merge line.** Pull requests merge one at a time, in the order you asked, or through the host's own merge queue.
-- **Automations.** Ask once, for a time of day: it runs on your computer while Althar is open, once you turn it on.
+- **Automations.** Work on a schedule, at set times or every hour, such as a review of each new pull request. It runs on your computer while Althar is open, once you turn it on.
+- **Asks only before what can't be undone.** Agents work without asking about each command; a force push or a push to the default branch waits for you. Your project's rules can ask about more.
+- **Your skills and MCP servers.** Every agent Althar starts gets the skills and MCP servers you set up for your agents.
 - **Voice.** Dictate to the coordinator or any task, transcribed on your computer.
 - **Always in reach.** Round the notch or in the menu bar on a Mac, in the tray on Windows and Linux: answer a permission or open a pull request without leaving what you're in.
 
@@ -181,9 +187,9 @@ Switch labs whenever you like: your projects, their history and their decisions 
 
 <table>
   <tr>
-    <th align="left">If you use</th>
-    <th align="left">Such as</th>
-    <th align="left">Althar is</th>
+    <th align="left" width="26%">If you use</th>
+    <th align="left" width="30%">Such as</th>
+    <th align="left" width="44%">Althar is</th>
   </tr>
   <tr>
     <td valign="top">A terminal manager</td>
@@ -194,25 +200,42 @@ Switch labs whenever you like: your projects, their history and their decisions 
     <td valign="top">A project you talk to, not a grid of terminals to watch.</td>
   </tr>
   <tr>
-    <td valign="top">A chat front-end for agents</td>
+    <td valign="top">A chat app for agents</td>
     <td valign="top">
       <img src=".github/readme/compare/t3code.png" width="20" height="20" alt="" /> T3 Code<br />
       <img src=".github/readme/compare/conductor.png" width="20" height="20" alt="" /> Conductor
     </td>
-    <td valign="top">One coordinator and a board, not a chat to keep up with for every agent.</td>
+    <td valign="top">A coordinator that splits the work into tasks and hands them out, not chats you start and keep up with yourself.</td>
   </tr>
   <tr>
-    <td valign="top">A lab's own app</td>
+    <td valign="top">An agent harness or workflow engine</td>
+    <td valign="top">
+      <img src=".github/readme/compare/archon.png" width="20" height="20" alt="" /> Archon<br />
+      Ruflo
+    </td>
+    <td valign="top">An app you tell what you want, not workflows or swarms to set up and run yourself.</td>
+  </tr>
+  <tr>
+    <td valign="top">An agent platform in its maker's cloud</td>
+    <td valign="top">
+      <picture><source media="(prefers-color-scheme: dark)" srcset=".github/readme/compare/amp-dark.svg" /><img src=".github/readme/compare/amp.svg" width="20" height="20" alt="" /></picture> Amp<br />
+      <picture><source media="(prefers-color-scheme: dark)" srcset=".github/readme/compare/devin-dark.svg" /><img src=".github/readme/compare/devin.svg" width="20" height="20" alt="" /></picture> Devin
+    </td>
+    <td valign="top">On your computer: your projects and their history stay there, and there's no Althar account.</td>
+  </tr>
+  <tr>
+    <td valign="top">A lab's own app, or one a lab owns</td>
     <td valign="top">
       <picture><source media="(prefers-color-scheme: dark)" srcset=".github/readme/compare/claude-dark.svg" /><img src=".github/readme/compare/claude.svg" width="20" height="20" alt="" /></picture> Claude app<br />
-      <picture><source media="(prefers-color-scheme: dark)" srcset=".github/readme/compare/openai-dark.svg" /><img src=".github/readme/compare/openai.svg" width="20" height="20" alt="" /></picture> ChatGPT app (Codex)
+      <picture><source media="(prefers-color-scheme: dark)" srcset=".github/readme/compare/openai-dark.svg" /><img src=".github/readme/compare/openai.svg" width="20" height="20" alt="" /></picture> ChatGPT app (Codex)<br />
+      <picture><source media="(prefers-color-scheme: dark)" srcset=".github/readme/compare/cursor-dark.svg" /><img src=".github/readme/compare/cursor.svg" width="20" height="20" alt="" /></picture> Cursor (SpaceX)
     </td>
-    <td valign="top">Every lab's agents, on your own plans, one reviewing the other.</td>
+    <td valign="top">Every lab's agents, on the plans you already pay for, one able to review another's work.</td>
   </tr>
   <tr>
     <td valign="top">An AI editor</td>
     <td valign="top">
-      <picture><source media="(prefers-color-scheme: dark)" srcset=".github/readme/compare/cursor-dark.svg" /><img src=".github/readme/compare/cursor.svg" width="20" height="20" alt="" /></picture> Cursor<br />
+      <picture><source media="(prefers-color-scheme: dark)" srcset=".github/readme/compare/zed-dark.svg" /><img src=".github/readme/compare/zed.svg" width="20" height="20" alt="" /></picture> Zed<br />
       <picture><source media="(prefers-color-scheme: dark)" srcset=".github/readme/compare/copilot-dark.svg" /><img src=".github/readme/compare/copilot.svg" width="20" height="20" alt="" /></picture> VS Code with Copilot
     </td>
     <td valign="top">Where you manage the work, not an editor with an agent beside your code.</td>
@@ -222,27 +245,17 @@ Switch labs whenever you like: your projects, their history and their decisions 
 ## Get started
 
 > [!NOTE]
-> **Early.** Althar runs on macOS, Windows and Linux, and is tested most on macOS. Things will change, and some will break. [Tell us when they do](https://github.com/AltharIDE/althar/issues), or, in the app, Report a problem (in Help on a Mac, or at the foot of the quick settings), which sends what happened with the app's logs, paths and repository names hidden. Crash reports go on their own, masked the same way and never with your code, until you turn them off on the first screen or in Settings.
+> **Early-ish.** Althar runs on macOS, Windows and Linux, and is tested most on macOS and Linux. Things will change, and some will break. [Tell us when they do](https://github.com/AltharIDE/althar/issues), or, in the app, Report a problem (in Help on a Mac, or at the foot of the quick settings), which sends what happened with the app's logs, paths and repository names hidden. Crash reports go on their own, masked the same way and never with your code, until you turn them off on the first screen or in Settings.
 
-Install it with Homebrew, or [download it](https://github.com/AltharIDE/althar/releases/latest) for your system:
+[Download it](https://github.com/AltharIDE/althar/releases/latest) for your system: a `.dmg` for macOS, the installer for Windows, or an AppImage, `.deb` or `.rpm` for Linux. On a Mac you can use Homebrew instead:
 
 ```bash
 brew install --cask altharide/tap/althar
 ```
 
-Open it. The first screen finds the agents on your computer and shows which are signed in; then you pick the repositories your first project works in.
+Open it. The first screen finds the agents on your computer and signs in the ones that aren't yet, each with its own sign-in. Then you pick the repositories your first project works in.
 
 <img src="brand/export/screenshots/framed/first-run.jpg" width="100%" alt="The first screen: Your agents. Claude Code, Codex, GitHub Copilot and OpenCode are signed in, each on its own plan, and Kimi Code and Junie aren't on this computer yet." />
-
-Claude Code, Codex, GitHub Copilot and Google Antigravity sign in from inside Althar. The others sign in with their own tools:
-
-```bash
-opencode auth login
-```
-
-Copilot signs in inside Althar, for personal and work accounts. Its optional CLI connection uses `copilot login`.
-
-And `junie`, `grok login`, `kimi login`, `vibe --setup`, and `qwen` then `/auth`.
 
 Want a hand getting set up? Book 20 minutes with me: [althar.ai/office-hours](https://althar.ai/office-hours). To build it from source instead, see [DEVELOPMENT.md](DEVELOPMENT.md).
 
@@ -268,4 +281,4 @@ The most useful thing you can do right now is use Althar on real work and tell u
 
 Althar is open source under the [Apache License 2.0](LICENSE). See [NOTICE](NOTICE).
 
-Claude, ChatGPT, Codex, Gemini, Google, Antigravity, OpenCode, GitHub, Copilot, JetBrains, Junie, Grok, Kimi, Mistral, Qwen, Cursor, Visual Studio Code, cmux, Claude Squad, T3 Code, Conductor, GitLab, Bitbucket, Linear, Jira and Trello are trademarks of their owners. Althar isn't affiliated with or endorsed by them.
+Claude, ChatGPT, Codex, Gemini, Google, Antigravity, OpenCode, GitHub, Copilot, JetBrains, Junie, Grok, Kimi, Mistral, Qwen, Cursor, SpaceX, Zed, Visual Studio Code, cmux, Claude Squad, T3 Code, Conductor, Archon, Ruflo, Amp, Devin, GitLab, Bitbucket, Linear, Jira and Trello are trademarks of their owners. Althar isn't affiliated with or endorsed by them.
