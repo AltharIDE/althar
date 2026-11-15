@@ -7,17 +7,17 @@
   background: var(--n-2);
 }
 .head {
-  display: flex;
-  align-items: flex-end;
-  gap: 16px;
-  padding: 18px 28px 16px;
+  display: grid;
+  gap: 2px;
+  padding: 16px 28px 16px;
   border-bottom: 1px solid var(--line);
 }
-.heading {
-  display: grid;
-  gap: 4px;
-  flex: 1;
-  min-width: 0;
+.headTop {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 32px;
 }
 .title {
   margin: 2px 0 0;
@@ -143,6 +143,34 @@
 .dropped {
   justify-self: stretch;
   max-width: 720px;
+}
+
+/* beside a narrow window: one step across, a wave at a time */
+.compact {
+  padding: 16px 14px 32px;
+  justify-items: stretch;
+}
+.column {
+  display: grid;
+  gap: 22px;
+}
+.columnWave {
+  position: relative;
+  display: grid;
+  gap: 8px;
+}
+.columnWave + .columnWave::before {
+  content: '';
+  position: absolute;
+  top: -18px;
+  left: 50%;
+  width: 1px;
+  height: 14px;
+  background: var(--t-4);
+}
+.inColumn {
+  height: auto;
+  min-height: 96px;
 }
 
 /* once launched: the plan in the conversation, small */

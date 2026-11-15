@@ -97,8 +97,21 @@ export function LeadMenu({ step, disabled = false }: { step: Step; disabled?: bo
 
 /* ——— a step's notes: the person's words for its lead ——— */
 
-export function Notes({ step, editable, addClassName }: { step: Step; editable: boolean; addClassName?: string }) {
-  const [adding, setAdding] = useState(false)
+export function Notes({
+  step,
+  editable,
+  adding: held,
+  onAddingChange,
+}: {
+  step: Step
+  editable: boolean
+  /** Whether the note form is open, where the caller has its own button for it; without, the notes have theirs. */
+  adding?: boolean
+  onAddingChange?: (adding: boolean) => void
+}) {
+  const [own, setOwn] = useState(false)
+  const adding = held ?? own
+  const setAdding = onAddingChange ?? setOwn
   const notes = step.notes ?? []
   return (
     <div className={s.notes}>
@@ -113,23 +126,23 @@ export function Notes({ step, editable, addClassName }: { step: Step; editable: 
           )}
         </p>
       ))}
-      {editable &&
-        (adding ? (
-          <NoteForm
-            className={s.noteForm}
-            text={{ placeholder: `A note for its lead`, submit: 'Add' }}
-            onSubmit={(note) => {
-              addNote(step.key, note)
-              setAdding(false)
-            }}
-            onCancel={() => setAdding(false)}
-          />
-        ) : (
-          <button type="button" className={[s.addNote, addClassName].filter(Boolean).join(' ')} onClick={() => setAdding(true)}>
-            <Icon name="plus" size={12} />
-            Add a note
-          </button>
-        ))}
+      {editable && adding && (
+        <NoteForm
+          className={s.noteForm}
+          text={{ placeholder: `A note for its lead`, submit: 'Add' }}
+          onSubmit={(note) => {
+            addNote(step.key, note)
+            setAdding(false)
+          }}
+          onCancel={() => setAdding(false)}
+        />
+      )}
+      {editable && !adding && held === undefined && (
+        <button type="button" className={s.addNote} onClick={() => setAdding(true)}>
+          <Icon name="plus" size={12} />
+          Add a note
+        </button>
+      )}
     </div>
   )
 }

@@ -71,6 +71,7 @@ function Shape({ steps }: { steps: ReadonlyArray<Step> }) {
 
 function Row({ step, number, steps, graph }: { step: Step; number: number; steps: ReadonlyArray<Step>; graph: GraphView | null }) {
   const lit = useStore(flash)
+  const [adding, setAdding] = useState(false)
   const node = graph?.byKey.get(step.key) ?? null
   const short = (key: string) => steps.find((one) => one.key === key)?.short ?? key
   const after = step.deps.filter((dep) => steps.some((one) => one.key === dep && !one.dropped))
@@ -94,14 +95,19 @@ function Row({ step, number, steps, graph }: { step: Step; number: number; steps
         <p className={s.rowTitle}>{step.title}</p>
         <p className={s.what}>{step.what}</p>
         <p className={s.why}>{step.why}</p>
-        <Notes step={step} editable addClassName={s.addNote} />
+        <Notes step={step} editable adding={adding} onAddingChange={setAdding} />
       </div>
       <div className={s.side}>
         <LeadMenu step={step} />
         {after.length > 0 && <span className={s.after}>After {listed(after.map(short))}</span>}
-        <button type="button" className={s.drop} onClick={() => setDropped(step.key, true)}>
-          Drop
-        </button>
+        <span className={s.rowActs}>
+          <button type="button" className={s.act} onClick={() => setAdding(true)}>
+            Note
+          </button>
+          <button type="button" className={[s.act, s.drop].join(' ')} onClick={() => setDropped(step.key, true)}>
+            Drop
+          </button>
+        </span>
       </div>
     </li>
   )
