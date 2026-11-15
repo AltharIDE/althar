@@ -14,6 +14,7 @@ import { Plans } from '../src/Plans'
 import { Projects } from '../src/Projects'
 import { Queries } from '../src/Queries'
 import * as Runtime from '../src/Runtime'
+import { Sessions } from '../src/Sessions'
 import { addItem, updateItem } from '../src/threads'
 import { repository, runtime, until } from './support'
 
@@ -77,6 +78,7 @@ const ready = Effect.gen(function* () {
     Effect.map(queries.board(project.projectId), (board) => board.tasks),
     (tasks) => tasks[0]?.phase === 'ready',
   )
+  yield* until((yield* Sessions).busy(task.threadId), (busy) => !busy)
   const [workspace] = yield* sql<{ path: string }>`SELECT path FROM workspaces WHERE task_id = ${task.taskId}`
   return { projectId: project.projectId, taskId: task.taskId, threadId: task.threadId, worktree: workspace?.path ?? '', root }
 })
@@ -164,11 +166,11 @@ describe('what screens read from git', () => {
       )
       assert.strictEqual((yield* queries.thread(threadId)).task.commits, 1)
 
-      // Merged by hand, outside Althar: the board and the thread see it, and nothing is left that is the task's own.
-      git(root, 'merge', '-q', '--ff-only', head)
       // Where git can't tell, as with the repository's folder gone, it isn't merged, and that isn't kept for when it can.
+      // Hide the location before merging so a background read cannot observe the merge through the old location.
       const sql = yield* SqlClient.SqlClient
       yield* sql`UPDATE repository_locations SET path = ${join(root, 'gone')}`
+      git(root, 'merge', '-q', '--ff-only', head)
       assert.deepStrictEqual(
         (yield* card)?.here.map((one) => one.head),
         [head],

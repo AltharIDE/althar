@@ -20,7 +20,7 @@ import { messageOf, type StuckAnswer } from '../../data/client'
 import { useMerge } from '../../data/merges'
 import { keys, reads } from '../../data/reads'
 import { canPick } from '../../shared/agents'
-import { isSending, mergeItems, newestReads, sending, takenBack, unsent, waiting } from '../../shared/items'
+import { isSending, mergeItems, newestReads, queueShown, sending, takenBack, unsent, waiting } from '../../shared/items'
 import { headsOf } from '../../shared/mergeHere'
 import { commitsToShip } from '../../shared/shipping'
 import { type Choice, moveTo, runningOn, startOf, upcomingOn } from '../../shared/models'
@@ -225,7 +225,9 @@ export interface TaskModel {
    * the person saw, and stops at the first that is refused, so the rest
    * wait; pending throughout.
    */
-  readonly accept: (changes: ReadonlyArray<{ readonly head: string; readonly url: string }>) => Promise<void>
+  readonly accept: (
+    changes: ReadonlyArray<{ readonly head: string; readonly url: string; readonly bypassQueue?: boolean }>,
+  ) => Promise<void>
   /**
    * Merge, with commits not shipped (a task is a conversation plus parts): `review`, Review and merge, one review of what
    * waits, then it goes up and merges; `now`, Merge now, up and merged at once, reviewed after the merge.
@@ -311,7 +313,7 @@ export const useTask = (threadId: string): TaskModel => {
   const [mergeFailed, setMergeFailed] = useState<string | null>(null)
   const [loadingEarlier, setLoadingEarlier] = useState(false)
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
-  const [newest] = useState(newestReads)
+  const [newest] = useState(() => newestReads('head'))
   const changed = useRef({ head: false, items: new Set<string>() })
   const taskId = snapshot?.task.id ?? null
   const hasChange = (snapshot?.task.changes.length ?? 0) > 0
@@ -397,10 +399,9 @@ export const useTask = (threadId: string): TaskModel => {
   /**
    * The thread's head again: its task, the agent working, the calls waiting.
    * Its items stay as they are, but for those it may have moved on, read after
-   * it and landing before it: what still waits its turn, and what else is
-   * asked. The runtime has a message delivered before it says the turn on it
-   * runs, so the thread never shows the turn running while what it took still
-   * waits in the queue.
+   * it and published with it: what still waits its turn, and what else is
+   * asked. The thread never shows new work under an idle head, nor the turn
+   * running while what it took still waits in the queue.
    */
   const readHead = useCallback(
     (also: Iterable<string> = []) =>
@@ -567,7 +568,7 @@ export const useTask = (threadId: string): TaskModel => {
     action: (accepted: () => void) => Promise<unknown>,
     images: Outgoing | undefined,
     // Behind a turn running it waits its turn; handed to another agent, it is that one's first.
-    queued = disposition === 'interrupt_and_continue' || snapshot?.session?.turnRunning === true,
+    queued = disposition === 'interrupt_and_continue' || queueShown(snapshot?.session ?? null, true, snapshot?.accepting),
   ) => {
     let id = ''
     setSnapshot((current) => {
@@ -865,7 +866,12 @@ export const useTask = (threadId: string): TaskModel => {
           for (const [at, change] of changes.entries()) {
             setMerging(change.url)
             try {
-              await merge({ taskId: snapshot.task.id, head: change.head, url: change.url })
+              await merge({
+                taskId: snapshot.task.id,
+                head: change.head,
+                url: change.url,
+                ...(change.bypassQueue ? { bypassQueue: true } : {}),
+              })
             } catch (failure) {
               setMergeFailed(change.url)
               throw failure

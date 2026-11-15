@@ -51,6 +51,8 @@ export type Transport =
       readonly _tag: 'Process'
       readonly spec: LaunchSpec
       readonly cwd: string
+      /** External connections are checked again when their reported version changes. */
+      readonly expectedVersion?: string
       readonly capture?: (frame: CapturedFrame) => void
       readonly stderr?: (chunk: string, pid: number) => void
     }
@@ -769,6 +771,16 @@ export const connect = (options: ConnectOptions): Effect.Effect<AgentConnection,
       images: capabilities.promptCapabilities?.image === true,
       embeddedContext: capabilities.promptCapabilities?.embeddedContext === true,
     }
+    if (
+      options.transport._tag === 'Process' &&
+      options.transport.expectedVersion !== undefined &&
+      info.version !== options.transport.expectedVersion
+    )
+      return yield* new AgentRequestFailed({
+        method: 'initialize',
+        failure: 'invalid_request',
+        message: 'This agent changed version. Check its compatibility again in Settings → Agents.',
+      })
 
     /** Asks the agent to stop a command a session left running; whether it did. */
     const stopBackground = (sessionId: string, id: string) =>

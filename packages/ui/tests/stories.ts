@@ -1,4 +1,5 @@
 import { composeStories } from '@storybook/react-vite'
+import { render } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 
 /*
@@ -9,7 +10,7 @@ import { describe, expect, it } from 'vitest'
 export type StoryFile = Parameters<typeof composeStories>[0]
 /* What composeStories gives back, as far as this suite uses it; its own type is lost to Object.entries. */
 interface Runnable {
-  run: () => Promise<void>
+  run: (context: { testingLibraryRender: typeof render }) => Promise<void>
 }
 
 /*
@@ -59,7 +60,7 @@ export const runStories = (files: Record<string, StoryFile>) => {
       for (const [name, Story] of Object.entries<Runnable>(composeStories(file))) {
         const id = `${rel}#${name}`
         it.skipIf(BROWSER_ONLY.has(id))(name, async () => {
-          await Story.run()
+          await Story.run({ testingLibraryRender: render })
           expect(document.body.childElementCount).toBeGreaterThan(0)
         })
       }

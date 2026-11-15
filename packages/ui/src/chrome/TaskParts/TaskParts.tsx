@@ -3,7 +3,9 @@ import { type ReactNode, useState } from 'react'
 import { Brand } from '../../foundations/brands/brands'
 import { Icon, type IconName } from '../../foundations/Icon/Icon'
 import { BrandMark } from '../../foundations/Marks/Marks'
+import { Path } from '../../primitives/Path/Path'
 import { Button } from '../../primitives/Button/Button'
+import { MergeButton } from '../../primitives/MergeButton/MergeButton'
 import { KeyValues } from '../../primitives/KeyValues/KeyValues'
 import { Popover } from '../../primitives/Popover/Popover'
 import s from './TaskParts.module.css'
@@ -25,6 +27,7 @@ export type PartTone = 'you' | 'bad' | 'live'
 export interface PartAction {
   label: string
   onClick: () => void
+  onBypassQueue?: () => void
   variant?: 'signal' | 'quiet' | 'danger' | 'default'
   icon?: IconName
   /** It loses something: it says what first, with a way to keep it. */
@@ -74,15 +77,23 @@ export function PartShots({ shots }: { shots: ReadonlyArray<{ id: string; src: s
   )
 }
 
-/** A part's lines of text, as a changed file or a failing check's last lines show. */
-export function PartLines({ lines, log = false }: { lines: ReadonlyArray<readonly [string, string]>; log?: boolean }) {
+/**
+ * A part's lines, as a changed file or a failing check's last lines show: the
+ * text, what it says beside it, and what it is: a 'path' (shortened by whole
+ * folders where narrow) or 'text' (as it comes). Without one, a line with
+ * something beside it is a path, as a file with its lines is; a binary file,
+ * with nothing beside it, says 'path'.
+ */
+export type PartLine = readonly [text: string, beside: string, kind?: 'path' | 'text']
+
+export function PartLines({ lines, log = false }: { lines: ReadonlyArray<PartLine>; log?: boolean }) {
   if (log) return <pre className={s.log}>{lines.map(([line]) => line).join('\n')}</pre>
   return (
     <ul className={s.files}>
-      {lines.map(([path, delta]) => (
-        <li key={path}>
-          <span className={delta === '' ? s.plain : s.path}>{path}</span>
-          <span className={s.delta}>{delta}</span>
+      {lines.map(([text, beside, kind = beside === '' ? 'text' : 'path']) => (
+        <li key={text}>
+          {kind === 'path' ? <Path path={text} className={s.path} /> : <span className={s.plain}>{text}</span>}
+          <span className={s.delta}>{beside}</span>
         </li>
       ))}
     </ul>
@@ -105,6 +116,17 @@ const waits = (part: TaskPartModel) => part.tone === 'you' || part.tone === 'bad
 /** One action of an open part; one that loses something asks first, in place. */
 function Act({ action, sure, onSure }: { action: PartAction; sure: boolean; onSure: (on: boolean) => void }) {
   const variant = action.variant ?? 'default'
+  if (action.onBypassQueue !== undefined)
+    return (
+      <MergeButton
+        size="small"
+        variant={variant === 'danger' ? 'default' : variant}
+        onMerge={action.onClick}
+        onBypassQueue={action.onBypassQueue}
+      >
+        {action.label}
+      </MergeButton>
+    )
   return (
     <Button
       size="small"

@@ -190,9 +190,9 @@ describe('a usage limit, in words', () => {
 
 describe('a new step on an agent nearly out', () => {
   it('says how little it has left, not that it ran out, with the agent itself among the ways on', () => {
-    expect(limitText.what('Codex', '14:00', 3.4)).toBe('Codex has 3% of its usage left, until 14:00.')
-    expect(limitText.what('Codex', null, 2)).toBe('Codex has 2% of its usage left.')
-    expect(limitText.held('Codex', '14:00', 3)).toBe('Codex has 3% of its usage left, until 14:00.')
+    expect(limitText.what('Codex', '14:00', 3.4)).toBe('Waiting for Codex.')
+    expect(limitText.what('Codex', null, 2)).toBe('Waiting for Codex.')
+    expect(limitText.held('Codex', '14:00', 3)).toBe('Waiting for Codex until 14:00.')
     // Out, as before.
     expect(limitText.held('Codex', '14:00')).toBe('Codex is out of usage until 14:00.')
   })

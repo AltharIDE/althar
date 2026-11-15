@@ -41,9 +41,9 @@ import { documentVersions } from './handed'
 import { fileAttachments } from './files'
 import { sentAttachments } from './images'
 import { useModelNames } from './modelNames'
-import { useServices } from '../data/services'
 import { FailedTurn } from './WayOut'
 import { serverBrand } from './mcpServers'
+import { linkedWords } from './noteLinks'
 import { keyOf, pastedIn } from './pasted'
 import { RuleReceipt } from './RuleReceipt'
 import { SaidIn } from './code/CodeHost'
@@ -642,6 +642,7 @@ export function ThreadBlocks({
           <You
             key={block.id}
             data-item={block.id}
+            data-move={block.move}
             at={block.at}
             delivery={block.delivery}
             {...(onUndoFrom === undefined || !undoable?.includes(block.id) ? {} : { onUndo: () => onUndoFrom(block.id) })}
@@ -671,8 +672,8 @@ export function ThreadBlocks({
         )
       case 'divider':
         return (
-          <ThreadDivider key={block.id} icon="agents">
-            {block.text}
+          <ThreadDivider key={block.id} icon="agents" {...(block.details === undefined ? {} : { details: block.details })}>
+            {linkedWords(block.text, block.links)}
           </ThreadDivider>
         )
       case 'offer':
@@ -732,6 +733,7 @@ export function ThreadBlocks({
         const working = block.live && !block.answering
         const onTheWay = working ? block.work.flatMap((part) => (part.kind === 'message' && part.text.trim() !== '' ? [part] : [])) : []
         const doing = block.doing
+        const workTime = block.spent === null ? null : { ...block.spent, total: block.spent.work, place: 0, session: 0 }
         return (
           <Turn
             key={block.id}
@@ -743,9 +745,9 @@ export function ThreadBlocks({
           >
             {block.work.length > 0 && (
               <WorkedFor
-                took={block.spent === null ? block.took : duration(block.spent.total)}
+                took={workTime === null ? block.took : duration(workTime.work)}
                 {...(block.spent === null ? {} : { spent: spentWords(block.spent) })}
-                {...(block.spent === null || lineOf(block.spent) === undefined ? {} : { most: lineOf(block.spent) })}
+                {...(workTime === null || lineOf(workTime) === undefined ? {} : { most: lineOf(workTime) })}
                 live={working}
                 {...(onTheWay.length === 0
                   ? {}

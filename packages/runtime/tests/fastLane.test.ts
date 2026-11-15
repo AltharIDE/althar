@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { assert, describe, it } from '@effect/vitest'
 import type { ProjectId } from '@althar/domain'
 import { isoAfter } from '@althar/testing'
-import { Duration, Effect, Layer } from 'effect'
+import { Duration, Effect, Layer, Option } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { FastLane } from '../src/fastLane'
@@ -235,7 +235,6 @@ describe('keeping the model Auto moved from', () => {
   it.effect('records the keep for the task, and Undo takes it back', () =>
     Effect.gen(function* () {
       const projects = yield* Projects
-      const instance = yield* Instance
       const sql = yield* SqlClient.SqlClient
       const project = yield* projects.open({ envelope: yield* Runtime.envelope('project.open', {}), path: repository() })
       const created = yield* projects.createTask({
@@ -260,9 +259,13 @@ describe('keeping the model Auto moved from', () => {
         SELECT agent_id AS agentId, model FROM task_model_keeps WHERE task_id = ${created.taskId}`
       assert.deepStrictEqual(kept, { agentId: 'claude-code', model: 'large' })
       // Keep puts the lead that is running back too, not only the steps after it.
-      const [now] = yield* sql<{ model: string | null }>`
-        SELECT model FROM provider_sessions WHERE thread_id = ${created.threadId} ORDER BY started_at DESC, rowid DESC LIMIT 1`
-      assert.strictEqual(now?.model, 'large')
+      const live = yield* sessions.running(created.threadId)
+      if (Option.isSome(live) && live.value.nextLead !== undefined) assert.strictEqual(live.value.nextLead.model, 'large')
+      else {
+        const [now] = yield* sql<{ model: string | null }>`
+          SELECT model FROM provider_sessions WHERE thread_id = ${created.threadId} ORDER BY started_at DESC, rowid DESC LIMIT 1`
+        assert.strictEqual(now?.model, 'large')
+      }
       const afterKeep = yield* (yield* Queries).item(created.threadId, itemId)
       assert.strictEqual(afterKeep.kind === 'model_move' && afterKeep.content.kept, true)
       yield* fastLane.undoTheModelMove(itemId)

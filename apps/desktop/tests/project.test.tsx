@@ -1157,6 +1157,110 @@ describe('the Talk room', () => {
     }
   })
 
+  it.each([false, true])('keeps a mid-turn send queued while the runtime accepts it (turnRunning=%s)', async (turnRunning) => {
+    let accept: () => void = () => undefined
+    const sent = new Promise<void>((resolve) => (accept = resolve))
+    const { client } = fakeClient({
+      getCoordinator: vi.fn(async () =>
+        coordinatorSnapshot({ accepting: 'queued', session: { ...session, accepting: 'queued', turnRunning }, items: [] }),
+      ),
+      send: vi.fn(async () => sent),
+    })
+    withServices(<Project room={Room.Talk} />, client)
+    const box = await screen.findByRole('textbox', { name: /^(Add to the queue|Tell Claude Code|Tell the coordinator)/ })
+    await userEvent.type(box, 'Then the changelog.{Enter}')
+    await waitFor(() => expect(client.send).toHaveBeenCalled())
+    const queue = screen.getByRole('region', { name: /queued/i })
+    expect(within(queue).getByText('Then the changelog.')).toBeTruthy()
+    expect(screen.getAllByText('Then the changelog.')).toHaveLength(1)
+    await act(async () => accept())
+  })
+
+  it('corrects a stale now-prediction into the queue without a second copy', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    try {
+      const idle = coordinatorSnapshot({ session: { ...session, accepting: 'now', turnRunning: false }, accepting: 'now', items: [] })
+      const stored = {
+        ...items.you('Then the changelog.', { state: 'queued', interrupting: false }),
+        sequence: (idle.items.at(-1)?.sequence ?? 0) + 1,
+      }
+      const getCoordinator = vi.fn(async () => idle)
+      const { client, emit } = fakeClient({
+        getCoordinator,
+        getThreadItem: vi.fn(async () => stored),
+        send: vi.fn(async () => undefined),
+      })
+      withServices(<Project room={Room.Talk} />, client)
+      const box = await screen.findByRole('textbox', { name: /^(Add to the queue|Tell Claude Code|Tell the coordinator)/ })
+      await userEvent.type(box, 'Then the changelog.{Enter}')
+      await waitFor(() => expect(client.send).toHaveBeenCalled())
+      expect(screen.queryByRole('region', { name: /queued/i })).toBeNull()
+      expect(screen.getAllByText('Then the changelog.')).toHaveLength(1)
+      const move = screen.getByText('Then the changelog.').closest('[data-move]')?.getAttribute('data-move')
+      expect(move).toMatch(/^message:sending:/)
+      getCoordinator.mockImplementation(async () => ({
+        ...idle,
+        accepting: 'queued' as const,
+        session: { ...session, accepting: 'queued', turnRunning: true },
+      }))
+      act(() => {
+        emit(changed('thread_item', stored.id, 'thc'))
+        emit(changed('turn_delivery', 'd1', 'thc'))
+      })
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(80)
+      })
+      const queue = await screen.findByRole('region', { name: /queued/i })
+      expect(within(queue).getByText('Then the changelog.')).toBeTruthy()
+      expect(screen.getAllByText('Then the changelog.')).toHaveLength(1)
+      expect(within(queue).getByText('Then the changelog.').closest('[data-move]')?.getAttribute('data-move')).toBe(move)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('corrects a stale queued-prediction into the thread without a second copy', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    try {
+      const busy = coordinatorSnapshot({ session: { ...session, accepting: 'queued', turnRunning: true }, accepting: 'queued', items: [] })
+      const stored = {
+        ...items.you('Then the changelog.', { state: 'delivered', interrupting: false }),
+        sequence: (busy.items.at(-1)?.sequence ?? 0) + 1,
+      }
+      const getCoordinator = vi.fn(async () => busy)
+      const { client, emit } = fakeClient({
+        getCoordinator,
+        getThreadItem: vi.fn(async () => stored),
+        send: vi.fn(async () => undefined),
+      })
+      withServices(<Project room={Room.Talk} />, client)
+      const box = await screen.findByRole('textbox', { name: /^(Add to the queue|Tell Claude Code|Tell the coordinator)/ })
+      await userEvent.type(box, 'Then the changelog.{Enter}')
+      await waitFor(() => expect(client.send).toHaveBeenCalled())
+      const queue = screen.getByRole('region', { name: /queued/i })
+      expect(within(queue).getByText('Then the changelog.')).toBeTruthy()
+      const move = within(queue).getByText('Then the changelog.').closest('[data-move]')?.getAttribute('data-move')
+      expect(move).toMatch(/^message:sending:/)
+      getCoordinator.mockImplementation(async () => ({
+        ...busy,
+        accepting: 'now' as const,
+        session: { ...session, accepting: 'now', turnRunning: false },
+      }))
+      act(() => {
+        emit(changed('thread_item', stored.id, 'thc'))
+        emit(changed('turn_delivery', 'd1', 'thc'))
+      })
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(80)
+      })
+      await waitFor(() => expect(screen.queryByRole('region', { name: /queued/i })).toBeNull())
+      expect(screen.getAllByText('Then the changelog.')).toHaveLength(1)
+      expect(screen.getByText('Then the changelog.').closest('[data-move]')?.getAttribute('data-move')).toBe(move)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('shows the coordinator thinking on what waits for it idle, and the turn on it only once that is read as delivered', async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true })
     try {

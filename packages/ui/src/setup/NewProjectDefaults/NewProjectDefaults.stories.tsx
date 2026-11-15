@@ -35,7 +35,7 @@ const meta = {
   title: 'Setup/NewProjectDefaults',
   component: NewProjectDefaults,
   parameters: { layout: 'centered' },
-  decorators: [(Story) => <div style={{ width: 680 }}>{Story()}</div>],
+  decorators: [(Story) => <div style={{ width: 680, maxWidth: 'calc(100vw - 32px)' }}>{Story()}</div>],
   args: { value: newProjectDefault, onChange },
 } satisfies Meta<typeof NewProjectDefaults>
 export default meta
@@ -54,7 +54,7 @@ export const Starting: Story = {
     await expect(c.getByRole('combobox', { name: 'When an account runs out' })).toHaveTextContent(
       'Move to the strongest model with usage left',
     )
-    await expect(c.getByRole('switch', { name: 'Try an agent’s other accounts first' })).not.toBeChecked()
+    await expect(c.getByRole('combobox', { name: 'Account strategy' })).toHaveTextContent('Least depleted first')
     await expect(c.queryByRole('button', { name: /^Use / })).toBeNull()
   },
 }
@@ -73,6 +73,16 @@ export const Changed: Story = {
   },
 }
 
+/** Every account strategy is available in Settings. */
+export const AccountStrategies: Story = {
+  render: () => <Rows />,
+  play: async ({ canvasElement }) => {
+    await userEvent.click(within(canvasElement).getByRole('combobox', { name: 'Account strategy' }))
+    for (const name of ['Stay on the first account', 'Least depleted first', 'Most depleted first', 'Random', 'Account order'])
+      await expect(page.getByRole('option', { name })).toBeInTheDocument()
+  },
+}
+
 /** Each switch goes out at once. */
 export const Switches: Story = {
   render: () => <Rows onChange={onChange} />,
@@ -80,8 +90,9 @@ export const Switches: Story = {
     const c = within(canvasElement)
     await userEvent.click(c.getByRole('switch', { name: 'Post screenshots to pull requests automatically' }))
     await expect(onChange).toHaveBeenLastCalledWith({ postScreenshots: true })
-    await userEvent.click(c.getByRole('switch', { name: 'Try an agent’s other accounts first' }))
-    await expect(onChange).toHaveBeenLastCalledWith({ rotateAccounts: true })
+    await userEvent.click(c.getByRole('combobox', { name: 'Account strategy' }))
+    await userEvent.click(await page.findByRole('option', { name: 'Random' }))
+    await expect(onChange).toHaveBeenLastCalledWith({ accountStrategy: 'random' })
   },
 }
 
@@ -130,6 +141,7 @@ export const AllStates: Story = {
                 moveIssues: false,
                 usageLimit: 'wait',
                 rotateAccounts: true,
+                accountStrategy: 'random',
                 afterMergeReview: 'none',
               }}
               onChange={fn()}

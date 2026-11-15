@@ -125,7 +125,7 @@ export interface PartsActions {
   readonly changesKey?: string
   readonly openInEditor?: { readonly name: string; readonly open: () => void }
   readonly removeFolder?: () => void
-  readonly merge: (change: ChangeSummary) => void
+  readonly merge: (change: ChangeSummary, bypassQueue?: boolean) => void
   readonly postReview: (draftId: string) => void
   readonly stopLaunch: (id: string) => void
   readonly openUrl: (url: string) => void
@@ -204,7 +204,9 @@ export const partsOf = (snapshot: ThreadSnapshot, act: PartsActions): ReadonlyAr
                 {task.files.length > 0 && (
                   <PartLines
                     lines={[
-                      ...task.files.slice(0, SHOWN).map((file) => [file.path, file.binary ? '' : `+${file.add} −${file.del}`] as const),
+                      ...task.files
+                        .slice(0, SHOWN)
+                        .map((file) => [file.path, file.binary ? '' : `+${file.add} −${file.del}`, 'path'] as const),
                       ...(task.files.length > SHOWN ? [[t.more(task.files.length - SHOWN), ''] as const] : []),
                     ]}
                   />
@@ -317,7 +319,18 @@ export const partsOf = (snapshot: ThreadSnapshot, act: PartsActions): ReadonlyAr
           }
         : {}),
       actions: [
-        ...(ready ? [{ label: mergeLabel(change), onClick: () => act.merge(change), variant: 'signal' as const }] : []),
+        ...(ready
+          ? [
+              {
+                label: mergeLabel(change),
+                onClick: () => act.merge(change),
+                ...(change.canBypassQueue === true && change.unpushed === 0 && task.held === undefined && line?.waiting !== true
+                  ? { onBypassQueue: () => act.merge(change, true) }
+                  : {}),
+                variant: 'signal' as const,
+              },
+            ]
+          : []),
         ...(line === undefined ? [] : shipOf(line)),
         ...(failing && change.checks !== null
           ? [{ label: t.fixIt, onClick: () => act.askLead(t.fixAsk(change.checks?.failing ?? [], change.short)) }]

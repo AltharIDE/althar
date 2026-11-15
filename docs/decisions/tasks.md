@@ -496,6 +496,17 @@ lead's last turn had completed is judged as that turn's end would have been.
 
 ## Needs you and settling
 
+Stopped work without an open question waits in Up next with **Resume**.
+It does not count in Needs you, the project dot, Home or the native badge.
+An open question, sign-in or permission stays in Needs you until answered.
+Checks, queue rework and conflict resolution stay in Running while Althar
+or the lead handles them; a failure handed back to the person needs them.
+
+Review choices live in **Change the team**. Choosing no review stops a
+waiting or running review through the existing skip-review command; a
+reviewer can be added back. Stuck and usage-limit cards keep their in-place
+skip action, and the coordinator keeps its `skip_review` tool.
+
 **Opening a task moves nothing.** Only the person moves a finished task
 on.
 

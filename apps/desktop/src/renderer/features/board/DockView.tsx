@@ -173,6 +173,9 @@ export function DockView({
           checks={(change.checks?.list ?? []).map(checkOf)}
           // The head the dock showed: a pull request that moved on since isn't merged unseen.
           onAccept={() => void model.merge(task.taskId, change.head ?? '', change.url)}
+          {...(change.canBypassQueue === true
+            ? { onBypassQueue: () => void model.merge(task.taskId, change.head ?? '', change.url, true) }
+            : {})}
           onSendBack={(note) => void model.sendBack(task, note)}
           // What the lead committed since, up to the head the dock showed: pushed first, as the person says.
           // Going up on their own as the lead's turn ends, where the project's rules say so, they aren't the person's (ADR-072),

@@ -2336,6 +2336,19 @@ export class Runs extends Context.Service<
           }
           // A quick task's writes still acquire their own branch when its turn ends, even when it yielded to a wait.
           yield* firstWriteOn(event.threadId)
+          // A turn can end after its task settled while it was working. It owes no further report: a reminder would race
+          // settling, keep its agent alive, and prevent a waiting Local task from taking the checkout.
+          // A new conversation after Done still carries on normally; only the turn already under way as it settled ends here.
+          if (event._tag === 'TurnEnded') {
+            const [settledTask] = yield* sql<{ id: string }>`SELECT k.id FROM threads t JOIN tasks k ON k.id = t.task_id
+              JOIN turn_deliveries d ON d.id = ${event.turnId}
+              WHERE t.id = ${event.threadId} AND t.kind = 'task' AND k.state IN ('done', 'abandoned')
+                AND d.requested_at <= k.settled_at`
+            if (settledTask !== undefined) {
+              yield* leftBehind.settled(settledTask.id)
+              return
+            }
+          }
           // A declared external wait is a valid end of turn, not a missing report or a blank answer.
           const [watching] = yield* sql<{ id: string }>`
             SELECT a.id FROM threads t JOIN runs r ON r.task_id = t.task_id AND r.state = 'running'
@@ -4101,11 +4114,13 @@ export class Runs extends Context.Service<
             planModel !== null && Option.isSome(live) && !spent && (yield* modelOf(live.value.sessionId)) === planModel
               ? yield* lighterModel(run, live.value.agentId, planModel)
               : undefined
+          const nextAccountId = accountId ?? moved?.accountId
+          const nextModel = moved?.model ?? model
           if (
             Option.isSome(live) &&
             !spent &&
             (agentId === undefined || live.value.agentId === agentId) &&
-            (accountId === undefined || live.value.accountId === accountId)
+            (nextAccountId === undefined || live.value.accountId === nextAccountId)
           ) {
             // Kept, it moves to a model asked for now, or the lighter one Auto picked; the plan's, or one the person set on it since, stays.
             // One that won't move starts afresh.
@@ -4118,15 +4133,23 @@ export class Runs extends Context.Service<
               ...(wantedModel == null ? {} : { model: wantedModel }),
             })
           }
-          if (Option.isSome(live))
+          if (Option.isSome(live)) {
+            // Moving the same model to another account also keeps the person's effort choice.
+            const sql = yield* SqlClient.SqlClient
+            const [current] =
+              moved?.accountId !== undefined && effort == null
+                ? yield* sql<{ effort: string | null }>`SELECT effort FROM provider_sessions WHERE id = ${live.value.sessionId}`
+                : []
+            const nextEffort = effort ?? current?.effort
             return yield* sessions.switchAgent({
               threadId: run.threadId,
               agentId: wanted,
-              ...(model == null ? {} : { model }),
-              ...(effort == null ? {} : { effort }),
+              ...(nextModel == null ? {} : { model: nextModel }),
+              ...(nextEffort == null ? {} : { effort: nextEffort }),
               ...(said === undefined ? {} : { said, about }),
-              ...(accountId === undefined ? {} : { accountId }),
+              ...(nextAccountId === undefined ? {} : { accountId: nextAccountId }),
             })
+          }
           if (said !== undefined) yield* sayOut(run.threadId, run.projectId, said, about)
           // The plan's lead, unless it is out of usage and the project moves on: the next free agent instead.
           const instead = agentId === undefined && implement !== undefined ? yield* insteadOf(run, implement) : undefined
@@ -4137,12 +4160,13 @@ export class Runs extends Context.Service<
           const chosenAccount = accountId ?? instead?.accountId
           // Nearly out, the lead's next step moves to a lighter model of its agent, and the thread says why (README 7).
           const auto = planned ? yield* lighterModel(run, wanted, chosen) : undefined
+          const startingAccountId = chosenAccount ?? auto?.accountId
           return yield* sessions.start({
             threadId: run.threadId,
             agentId: instead?.agentId ?? auto?.agentId ?? wanted,
             ...((auto?.model ?? chosen) === null ? {} : { model: (auto?.model ?? chosen) as string }),
             ...(thinks === null ? {} : { effort: thinks }),
-            ...(chosenAccount === undefined ? {} : { accountId: chosenAccount }),
+            ...(startingAccountId === undefined ? {} : { accountId: startingAccountId }),
           })
         })
 
@@ -8173,7 +8197,9 @@ export class Runs extends Context.Service<
                 review !== undefined &&
                 (!alike(review, wantedReview) || (before.reviewAfterMerge === true && wantedReview.skipped !== true))))
           if (!leadChanges && !reviewChanges) return {} as TeamChanged
-          const reviewWhen: ReviewerChange = !reviewChanges ? 'now' : merged ? 'next_ship' : yield* reviewerChange(input.taskId)
+          const reviewAt: ReviewerChange = !reviewChanges ? 'now' : merged ? 'next_ship' : yield* reviewerChange(input.taskId)
+          // Removing it ends the current round now; choosing another reviewer takes effect at the next round.
+          const reviewWhen: ReviewerChange = !reviews && reviewAt === 'next_round' ? 'now' : reviewAt
           // A review put on before the work ships, where the plan read it only once it merged (the fast lane): it reads it before now.
           const clearsAfterMerge = reviewChanges && before.reviewAfterMerge === true
           const at = yield* timestamp
@@ -8275,6 +8301,12 @@ export class Runs extends Context.Service<
               }
             }),
           )
+          // No review in the team dialog also ends the review already under way, through the same command as its stuck card.
+          if (reviewChanges && !reviews && reviewWhen !== 'next_ship')
+            yield* skipReview({
+              taskId: input.taskId,
+              envelope: yield* envelope('task.skip_review', { taskId: input.taskId }, undefined, input.actorId),
+            })
           // The lead it has now takes over from its next turn, never in the one it is in.
           const leadWhen =
             leadChanges && wantedLead !== undefined

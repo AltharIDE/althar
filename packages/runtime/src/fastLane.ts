@@ -191,13 +191,16 @@ export class FastLane extends Context.Service<
           yield* sql`
             INSERT INTO task_model_keeps ${sql.insert({ taskId, agentId, model, keptAt: yield* timestamp })}
             ON CONFLICT (task_id) DO UPDATE SET agent_id = excluded.agent_id, model = excluded.model, kept_at = excluded.kept_at`
-          yield* updateItem(found.projectId, itemId, { ...found.content, kept: true })
-          // The lead on it now goes back too, not only the steps after it.
+          // Record the choice at once, as the composer does. A running turn keeps its actual model;
+          // the next turn takes this choice, without blocking on a mid-turn set-model request.
           const threadId = yield* threadOf(taskId)
-          if (threadId !== undefined && Option.isSome(yield* sessions.running(threadId)))
-            yield* sessions
-              .setModel({ threadId, model })
-              .pipe(Effect.catchCause((cause) => Effect.logWarning('Could not move a running lead back to its kept model', cause)))
+          if (threadId !== undefined) {
+            const running = yield* sessions.running(threadId)
+            if (Option.isSome(running) && running.value.agentId === agentId)
+              yield* sessions.chooseLead({ threadId, model }).pipe(Effect.catchTag('NoSession', () => Effect.void))
+            else yield* sessions.changeLead({ threadId, agentId, model })
+          }
+          yield* updateItem(found.projectId, itemId, { ...found.content, kept: true })
         })
 
       const undoTheModelMove = (itemId: string) =>

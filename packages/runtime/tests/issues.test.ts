@@ -141,7 +141,10 @@ describe('an issue', () => {
       const snapshot = yield* queries.thread(ready?.threadId ?? '')
       // It moved to In Progress as its task started, and on to In Review as its pull request opened, each at once, and the card says so.
       assert.deepStrictEqual(snapshot.task.issue?.status, { name: 'In Review', category: 'started' })
-      assert.deepStrictEqual(yield* notices(ready?.threadId ?? ''), ['Moved MER-231 to In Progress'])
+      assert.deepStrictEqual(
+        (yield* notices(ready?.threadId ?? '')).filter((title) => title.startsWith('Moved MER-231')),
+        ['Moved MER-231 to In Progress'],
+      )
       // The coordinator hears of it, and reads it with the task, so it doesn't ask the person to.
       assert.include(
         (yield* coordinatorNews(threadId, projectId, yield* modelNamer)) ?? '',

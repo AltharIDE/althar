@@ -397,7 +397,7 @@ describe('the home', () => {
     // person, in Needs you, as on its board.
     expect(within(projects).getByText('1 waiting')).toBeTruthy()
     const needs = screen.getByRole('region', { name: /needs? you/ })
-    expect(within(within(needs).getByRole('article', { name: 'Stopped work' })).getByText('Stopped')).toBeTruthy()
+    expect(within(needs).queryByRole('article', { name: 'Stopped work' })).toBeNull()
     // Which agents are signed in is for settings, not the home.
     expect(within(projects).queryByText(/Claude Code|Codex|OpenCode/)).toBeNull()
   })

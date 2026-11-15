@@ -131,10 +131,18 @@ describe('Codex’s plan, asked of its app-server', () => {
     Effect.gen(function* () {
       let open = 0
       let most = 0
+      let hold = false
+      let both!: () => void
+      const started = new Promise<void>((resolve) => (both = resolve))
+      let release!: () => void
+      const answered = new Promise<void>((resolve) => (release = resolve))
       const layer = withUsage({
         readAgent: async () => {
           most = Math.max(most, ++open)
-          await new Promise((resolve) => setTimeout(resolve, 20))
+          if (hold) {
+            if (open === 2) both()
+            await answered
+          }
           open--
           return read(used(10))
         },
@@ -142,7 +150,14 @@ describe('Codex’s plan, asked of its app-server', () => {
       yield* Effect.gen(function* () {
         const accounts = yield* Accounts
         yield* accounts.add({ agentId: 'codex', name: 'Work' })
-        yield* (yield* PlanUsage).now(true)
+        const usage = yield* PlanUsage
+        yield* usage.now(true)
+        hold = true
+        most = 0
+        const reading = yield* Effect.forkChild(usage.now(true))
+        yield* Effect.promise(() => started)
+        release()
+        yield* Fiber.join(reading)
         assert.strictEqual(most, 2)
       }).pipe(Effect.provide(layer))
     }),

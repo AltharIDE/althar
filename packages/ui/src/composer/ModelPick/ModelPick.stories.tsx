@@ -125,8 +125,7 @@ export const HandingOver: Story = {
 }
 
 /**
- * Each model's room where work on it would start, at its row's end: from a
- * quarter down, until when too. Codex, nearly out, says so beside the chip.
+ * Account usage stays out of the picker, even if an older caller supplies it.
  */
 export const Room: Story = {
   args: {
@@ -142,14 +141,14 @@ export const Room: Story = {
   },
   play: async ({ canvasElement }) => {
     const page = within(document.body)
-    await expect(page.getByText('Side · 62%')).toBeInTheDocument()
-    await expect(page.getByText('3% · until 14:00')).toBeInTheDocument()
+    await expect(page.queryByText('Side · 62%')).toBeNull()
+    await expect(page.queryByText('3% · until 14:00')).toBeNull()
     await expect(page.queryByText('no reading')).toBeNull()
-    await expect(within(canvasElement).getByText('3% left · until 14:00')).toBeInTheDocument()
+    await expect(within(canvasElement).queryByText('3% left · until 14:00')).toBeNull()
   },
 }
 
-/** A low plan balance and account leave the model's full name readable. */
+/** A low plan balance and account never enter the picker. */
 export const CrowdedRow: Story = {
   args: {
     model: OPUS,
@@ -160,15 +159,13 @@ export const CrowdedRow: Story = {
   play: async () => {
     const row = within(document.body).getByRole('radio', { name: /GPT-5.2 Codex/ })
     const name = within(row).getByText('GPT-5.2 Codex')
-    const room = within(row).getByText('Main · 17% · until Sat 23:39')
+    await expect(within(row).queryByText(/Main|17%|Sat 23:39/)).toBeNull()
     await expect(name.clientWidth).toBeGreaterThan(0)
     await expect(name.scrollWidth).toBeLessThanOrEqual(name.clientWidth)
-    await expect(room.getBoundingClientRect().top).toBeGreaterThanOrEqual(name.getBoundingClientRect().bottom)
-    await expect(room.getBoundingClientRect().right).toBeLessThanOrEqual(row.getBoundingClientRect().right)
   },
 }
 
-/** Nearly out, beside the chip: one run in the chip's ink, deeper as it runs down; out says so. */
+/** Even low usage leaves the model chip alone. */
 const nearly = (left: number): Story => ({
   args: {
     model: model('gpt-5.2-codex'),
@@ -177,7 +174,7 @@ const nearly = (left: number): Story => ({
   },
   play: async ({ canvasElement }) => {
     const said = left === 0 ? 'Out · until Mon 11:00' : `${left}% left · until Mon 11:00`
-    await expect(within(canvasElement).getByText(said)).toBeInTheDocument()
+    await expect(within(canvasElement).queryByText(said)).toBeNull()
   },
 })
 export const TenPercentLeft: Story = nearly(10)

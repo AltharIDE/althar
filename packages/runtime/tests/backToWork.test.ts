@@ -274,13 +274,24 @@ describe('a conflict and failed checks at once', () => {
   it.live('are one ask of the lead, and the merge goes up with its fix for them', () => {
     const { working, bare } = hosted()
     let broken = false
+    let held = false
+    const reading = Effect.runSync(Deferred.make<void>())
+    const updated = Effect.runSync(Deferred.make<void>())
     // The checks fail until the fix the lead makes on top of the merge.
-    const github = hostOf(bare, (sha) => (broken && !holdsTestsFix(bare, sha) ? FAILED : PASSED))
+    const github = hostOf(bare, (sha) => (broken && !holdsTestsFix(bare, sha) ? FAILED : PASSED), undefined, {
+      waitsFor: (method) =>
+        held && method === 'change' ? Effect.andThen(Deferred.succeed(reading, undefined), Deferred.await(updated)) : Effect.void,
+    })
     return Effect.gen(function* () {
       const { taskId, threadId } = yield* opened(working, '[lead:resolve-fix]')
       // Both at once, as PR #563 had them: its checks fail, and main moves on, conflicting.
+      // Hold the next poll before it reads either, so a read in flight can't see just half the update.
+      held = true
+      yield* Deferred.await(reading)
       broken = true
       moveHostMainOn(working, bare)
+      held = false
+      yield* Deferred.succeed(updated, undefined)
       yield* titled(threadId, 'PR #1 conflicts with main, in change.txt, and test failed.')
       const asks = yield* until(given(threadId), (all) => all.some((body) => body.includes('Bring the branch up to date')))
       const both = asks.filter((body) => body.includes('Bring the branch up to date'))
@@ -351,8 +362,8 @@ describe('a task the person stopped', () => {
     const github = hostOf(bare, () => (broken ? FAILED : PASSED))
     return Effect.gen(function* () {
       const { projectId, taskId, threadId } = yield* opened(working, '[lead:resolve] [lead:fix]')
-      const before = (yield* given(threadId)).length
       yield* stopped(taskId, threadId)
+      const before = (yield* given(threadId)).length
       broken = true
       moveHostMainOn(working, bare)
       const [why] = yield* until(

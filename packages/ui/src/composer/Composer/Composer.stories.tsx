@@ -314,7 +314,7 @@ export const Suggesting: Story = {
     await expect(field).toHaveValue('Mark this as done')
   },
 }
-/** A model nearly out, beside its chip: one muted run, warmer as it runs down. */
+/** Legacy quota props leave the composer quiet, at every remaining share. */
 export const NearlyOut: Story = {
   render: () => (
     <div style={{ display: 'grid', gap: 16, width: 520 }}>
@@ -324,7 +324,7 @@ export const NearlyOut: Story = {
     </div>
   ),
 }
-/** The same at the narrowest feet: the note is cut, never wrapped, and send stays put. */
+/** The same at the narrowest feet: models and effort only, and send stays put. */
 export const NearlyOutNarrow: Story = {
   render: () => (
     <div style={{ display: 'grid', gap: 16 }}>
@@ -370,6 +370,11 @@ export const SendingNow: Story = {
     await userEvent.click(c.getByRole('button', { name: /Send now/ }))
     await expect(args.onSendNow).toHaveBeenLastCalledWith('And keep the test.')
   },
+}
+/** Set to steer: Enter sends now, and Queue, beside it, waits for the turn to end. */
+export const Steering: Story = {
+  args: { onSendNow: fn() },
+  render: (args) => <Example busy steer onSendNow={args.onSendNow} initial="Stop, the limiter belongs in charges." />,
 }
 /** A transcriber that streams: the words arrive faint in the field as you say them. */
 export const DictatingWordByWord: Story = { render: () => <Example recording streaming initial="Keep the limiter where it is." /> }

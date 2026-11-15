@@ -97,8 +97,7 @@ describe('nudges', () => {
         Effect.sync(() => counts(events)),
         (seen) => seen.at(-1) === 2,
       )
-      // Its step given up, the call is answered, and the task stopped waits on the person still, as its board's Needs you
-      // shows it; abandoned, it waits no more.
+      // Its step given up, the call is answered: stopped work waits Up next and leaves Needs you.
       const sql = yield* SqlClient.SqlClient
       const [call] = yield* sql<{ id: string; taskId: string }>`SELECT id, task_id FROM attention_requests WHERE state = 'open'`
       const runs = yield* Runs
@@ -114,7 +113,7 @@ describe('nudges', () => {
       )
       yield* until(
         Effect.sync(() => counts(events)),
-        (seen) => seen.at(-1) === 2,
+        (seen) => seen.at(-1) === 1,
       )
       const taskId = call?.taskId ?? ''
       yield* (yield* Tasks).abandon({ envelope: yield* Runtime.envelope('task.abandon', { taskId }), taskId })
@@ -314,7 +313,7 @@ describe('nudges', () => {
     })
   })
 
-  it.live('count a task whose lead stopped with no agent on it, as its board puts it in Needs you, and say nothing of it', () =>
+  it.live('leave stopped work out of the badge, as its board holds it Up next, and say nothing of it', () =>
     Effect.gen(function* () {
       const { events, stop } = yield* heard
       const queries = yield* Queries
@@ -328,10 +327,10 @@ describe('nudges', () => {
         Effect.map(queries.card(held.taskId), (card) => [card.phase]),
         ([phase]) => phase === 'stopped',
       )
-      // One thing waits on the person, as the board's Needs you and its tab count it; the person stopped it, so none is said.
+      // The stopped task is held Up next, with no open call: no badge and no nudge.
       yield* until(
         Effect.sync(() => counts(events)),
-        (seen) => seen.at(-1) === 1,
+        (seen) => seen.at(-1) === 0,
       )
       assert.deepStrictEqual(nudged(events), [])
       yield* stop

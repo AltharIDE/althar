@@ -1,4 +1,5 @@
-import { type QueryClient, queryOptions } from '@tanstack/react-query'
+import { type QueryClient, queryOptions, useQueryClient } from '@tanstack/react-query'
+import { useEffect, useRef } from 'react'
 
 import { CODE_NAMES, type CodeFound, type CodePlace } from '@althar/contracts'
 
@@ -20,7 +21,26 @@ export const codeKeys = {
   place: (threadId: string) => ['code-place', threadId] as const,
   text: (threadId: string, path: string, commit: string | null, line: number | null) =>
     ['code-text', threadId, path, commit ?? 'now', line ?? 0] as const,
+  image: (threadId: string, path: string) => ['code-image', threadId, path] as const,
   change: (taskId: string, path: string) => ['code-change', taskId, path] as const,
+}
+
+/**
+ * A document's pictures are read again as it is: each time a read of what the page is drawn from completes (`readAt` is when
+ * the last did, a query's `dataUpdatedAt`: a read of the same words completes too, and a picture at the same path may have
+ * changed under them), the pictures it names are asked for afresh, so one the agent replaced follows. The first read is no
+ * change: the pictures ask for themselves as they come.
+ */
+export const useImagesFollow = (readAt: number | object | undefined): void => {
+  const cache = useQueryClient()
+  const seen = useRef(readAt)
+  useEffect(() => {
+    if (Object.is(seen.current, readAt)) return
+    const before = seen.current
+    seen.current = readAt
+    // From nothing read yet to the first read, the pictures are asking for themselves.
+    if (before !== undefined && before !== 0) void cache.invalidateQueries({ queryKey: ['code-image'] })
+  }, [cache, readAt])
 }
 
 /** How long what a name names, or a file read, is taken as it is: a peek over the same name again isn't asked again. */

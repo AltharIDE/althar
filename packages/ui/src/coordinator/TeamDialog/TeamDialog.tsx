@@ -14,8 +14,7 @@ import s from './TeamDialog.module.css'
  * numbered and joined by a line as the plan card shows them, each with its
  * picker and why it was picked, then how the work ends. Nothing changes until
  * the person saves; a held task can start with its new team at once. The
- * pickers are the consumer's, the composer's own, so a model's usage shows
- * beside it as it does there.
+ * pickers are the consumer's, the composer's own, for models and effort.
  */
 
 export interface TeamDialogStep {
@@ -69,8 +68,8 @@ export interface TeamDialogProps {
   /** Saves and starts it, for a task held before it started; absent where it starts by itself. */
   onStart?: () => void
   onClose: () => void
-  /** Saving or starting is under way: its buttons show it, and a press outside doesn't close it. */
-  busy?: boolean
+  /** Only the action pressed shows progress; the other actions wait. */
+  busy?: 'save' | 'start' | null
   /** Why the last save failed, under the steps; Save, still there, tries again. */
   error?: string | null
   /** Why its team can't change any more, where it can't: said quietly under the steps, in Save's place. Not a failure. */
@@ -80,7 +79,7 @@ export interface TeamDialogProps {
 
 const ENDS = [TaskEnd.DraftPr, TaskEnd.ReadyPr, TaskEnd.PushOnly] as const
 
-export function TeamDialog({ task, steps, end, onSave, onStart, onClose, busy = false, error, settled, text }: TeamDialogProps) {
+export function TeamDialog({ task, steps, end, onSave, onStart, onClose, busy = null, error, settled, text }: TeamDialogProps) {
   const t = { ...teamDialogText, ...text }
   const shown = [
     ...steps.map((step) => ({
@@ -124,19 +123,19 @@ export function TeamDialog({ task, steps, end, onSave, onStart, onClose, busy = 
       description={task}
       width={560}
       onClose={onClose}
-      holding={busy}
+      holding={busy !== null}
       actions={
         <>
-          <Button variant="quiet" onClick={onClose}>
+          <Button variant="quiet" disabled={busy !== null} onClick={onClose}>
             {onSave === undefined && onStart === undefined ? t.close : t.cancel}
           </Button>
           {onSave !== undefined && (
-            <Button variant={onStart === undefined ? 'ink' : 'default'} busy={busy} onClick={onSave}>
+            <Button variant={onStart === undefined ? 'ink' : 'default'} busy={busy === 'save'} disabled={busy === 'start'} onClick={onSave}>
               {t.save}
             </Button>
           )}
           {onStart !== undefined && (
-            <Button variant="ink" busy={busy} onClick={onStart}>
+            <Button variant="ink" busy={busy === 'start'} disabled={busy === 'save'} onClick={onStart}>
               {t.start}
             </Button>
           )}

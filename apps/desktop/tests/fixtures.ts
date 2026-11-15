@@ -78,7 +78,8 @@ export const projectRules: ProjectRulesView = {
   postScreenshots: false,
   leadsReachWeb: true,
   usageLimit: 'move',
-  rotateAccounts: false,
+  rotateAccounts: true,
+  accountStrategy: 'most_room',
   onlyAccounts: null,
   branchPattern: null,
   titlePattern: null,
@@ -296,7 +297,7 @@ export const project: ProjectSummary = {
   yours: 0,
   working: 1,
   usageLimit: 'move',
-  rotateAccounts: false,
+  rotateAccounts: true,
   onlyAccounts: null,
 }
 
@@ -1149,6 +1150,10 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
     })),
     readCode: vi.fn(async (_threadId: string, path: string) => ({ path, text: 'const tries = 5\n', from: 1, total: 1, cut: false })),
     installAgent: vi.fn(async () => {}),
+    getAgentCatalog: vi.fn(async () => ({ revision: 0, items: [], connections: [], problem: null, refreshing: false })),
+    saveAcpConnection: vi.fn(async () => 1),
+    startAcpCheck: vi.fn(async () => 1),
+    removeAcpConnection: vi.fn(async () => 1),
     getFileDiff: vi.fn(async (_taskId: string, path: string) => ({
       file: { path, from: null, status: 'modified' as const, add: 1, del: 1, binary: false, uncommitted: false },
       lines: [
@@ -1189,7 +1194,8 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
       plansAndReviews: { countdown: 25, rounds: 3, roundsOut: 'settled' } as const,
       newProjects: {
         usageLimit: 'move',
-        rotateAccounts: false,
+        rotateAccounts: true,
+        accountStrategy: 'most_room',
         end: 'draft',
         pushCommits: true,
         postScreenshots: false,
@@ -1200,6 +1206,7 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
     })),
     setCoAuthor: vi.fn(async () => {}),
     setPostTeamReviews: vi.fn(async () => {}),
+    setSendMidTurn: vi.fn(async () => {}),
     setRunOutside: vi.fn(async () => {}),
     shelveTask: vi.fn(async () => {}),
     stopHelper: vi.fn(async () => {}),
@@ -1276,7 +1283,7 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
     getCoordinator: vi.fn(async () => coordinatorSnapshot()),
     startTask: vi.fn(async () => task),
     startPlan: vi.fn(async () => {}),
-    holdPlan: vi.fn(async () => {}),
+    holdPlan: vi.fn(async () => true),
     holdDraft: vi.fn(async () => {}),
     changePlan: vi.fn(async () => {}),
     changeTeam: vi.fn(async () => {}),

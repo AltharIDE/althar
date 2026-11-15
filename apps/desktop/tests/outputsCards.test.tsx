@@ -74,6 +74,77 @@ const show = (
 }
 
 describe('what a task changed, card by card', () => {
+  it('keeps the queue default and sends bypass only from the secondary action at the viewed head', async () => {
+    const one = pr('api', 12, { canBypassQueue: true })
+    const { onAccept } = show(task({ changes: [one] }))
+    await userEvent.click(screen.getByRole('button', { name: 'Accept and merge' }))
+    expect(onAccept).toHaveBeenLastCalledWith([{ head: one.head, url: one.url }])
+    await userEvent.click(screen.getByRole('button', { name: 'Other ways to merge' }))
+    await userEvent.click(screen.getByRole('menuitem', { name: 'Merge without queue' }))
+    expect(onAccept).toHaveBeenLastCalledWith([{ head: one.head, url: one.url, bypassQueue: true }])
+  })
+
+  it.each([false, undefined])('has no override when bypass permission is %s', (canBypassQueue) => {
+    show(task({ changes: [pr('api', 12, canBypassQueue === undefined ? {} : { canBypassQueue })] }))
+    expect(screen.queryByRole('button', { name: 'Other ways to merge' })).toBeNull()
+  })
+
+  it('keeps a queued PR in place and offers an authorized bypass instead of another normal merge', async () => {
+    const one = pr('api', 12, { queued: true, canBypassQueue: true })
+    const { onAccept } = show(task({ changes: [one], phase: 'running' }))
+    expect(screen.getByText('In the merge queue')).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Accept and merge' })).toBeNull()
+    await userEvent.click(screen.getByRole('button', { name: 'Other ways to merge' }))
+    await userEvent.click(screen.getByRole('menuitem', { name: 'Merge without queue' }))
+    expect(onAccept).toHaveBeenCalledWith([{ head: one.head, url: one.url, bypassQueue: true }])
+  })
+
+  it('bypasses only the named next repository in a stack, preserving the default for the rest', async () => {
+    const first = pr('api', 12, { canBypassQueue: true })
+    const second = pr('web', 18, { canBypassQueue: true })
+    const { onAccept } = show(task({ changes: [first, second] }))
+    await userEvent.click(screen.getByRole('button', { name: 'Each on its own' }))
+    await userEvent.click(screen.getByRole('menuitem', { name: 'Merge api without queue' }))
+    expect(onAccept).toHaveBeenCalledWith([{ head: first.head, url: first.url, bypassQueue: true }])
+  })
+
+  it.each(['draft', 'working', 'merged', 'closed'] as const)('has no bypass action for work that is %s', (state) => {
+    const one = pr('api', 12, {
+      canBypassQueue: true,
+      draft: state === 'draft',
+      ...(state === 'merged' || state === 'closed' ? { state } : {}),
+    })
+    show(task({ changes: [one], phase: state === 'working' ? 'running' : state === 'merged' || state === 'closed' ? 'settled' : 'ready' }))
+    expect(screen.queryByRole('button', { name: 'Other ways to merge' })).toBeNull()
+  })
+
+  it('keeps queue bypass unavailable while commits wait for Ship', async () => {
+    const one = pr('api', 12, { canBypassQueue: true })
+    show(task({ changes: [one], held: { commits: 2, since: '2026-10-01T10:00:00Z' } }))
+    const more = screen.queryByRole('button', { name: 'Other ways to merge' })
+    if (more !== null) await userEvent.click(more)
+    expect(screen.queryByRole('menuitem', { name: 'Merge without queue' })).toBeNull()
+  })
+
+  it.each([false, true])('keeps a sibling’s published PR available while another repository needs Ship (queued: %s)', async (queued) => {
+    const published = pr('web', 18, { canBypassQueue: true, queued })
+    const { onAccept } = show(
+      task({
+        end: 'draft',
+        changes: [pr('api', 12, { state: 'merged' }), published],
+        unshipped: { commits: 1, add: 4, del: 0 },
+      }),
+    )
+    expect(screen.getByRole('button', { name: 'Ship 1 commit' })).toBeTruthy()
+    if (!queued) {
+      await userEvent.click(screen.getByRole('button', { name: 'Accept and merge web' }))
+      expect(onAccept).toHaveBeenLastCalledWith([{ head: published.head, url: published.url }])
+    }
+    await userEvent.click(screen.getByRole('button', { name: 'Other ways to merge' }))
+    await userEvent.click(screen.getByRole('menuitem', { name: queued ? 'Merge web without queue' : 'Merge without queue' }))
+    expect(onAccept).toHaveBeenLastCalledWith([{ head: published.head, url: published.url, bypassQueue: true }])
+  })
+
   it.each(['draft', 'ready'] as const)('offers Ship for committed work ending in a %s pull request before any hold exists', async (end) => {
     const here = [
       {

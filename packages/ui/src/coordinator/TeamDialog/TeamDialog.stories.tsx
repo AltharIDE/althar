@@ -169,5 +169,28 @@ export const SaveFailed: Story = {
 /** Started, waiting for a free agent: it starts by itself, so only Save. */
 export const Waiting: Story = { args: { held: false } }
 
+/** Starting holds the form, with progress only on the action pressed. */
+export const Starting: Story = {
+  render: () => (
+    <TeamDialog
+      task="Bring a PR’s branch up to date with main"
+      steps={[
+        { id: 'implement', label: 'Implement', picker: <Pick owner="Lead" value={CODEX} onChange={() => {}} /> },
+        { id: 'review', label: 'Review', picker: <Pick owner="Review" value={OPUS} onChange={() => {}} /> },
+      ]}
+      onSave={() => {}}
+      onStart={() => {}}
+      onClose={() => {}}
+      busy="start"
+    />
+  ),
+  play: async () => {
+    const page = within(document.body)
+    await expect(page.getByRole('button', { name: 'Start' })).toHaveAttribute('aria-busy', 'true')
+    await expect(page.getByRole('button', { name: 'Save' })).not.toHaveAttribute('aria-busy')
+    await expect(page.getByRole('button', { name: 'Save' })).toBeDisabled()
+  },
+}
+
 /** Where the repository's host isn't connected, the task ends on its branch, with no ending to pick. */
 export const OnItsBranch: Story = { args: { ends: false } }

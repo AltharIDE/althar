@@ -16,8 +16,8 @@ export const refOf = (project: ProjectSummary): ProjectRef => ({ seed: project.i
  * board's lanes put it (`lanesOf`, by `waitingOn`), so the home, the edge and
  * the tabs count what the board's Needs you and Running show: a task that
  * waits on a call has its call, not a line again among what is in progress;
- * one that waits on issues to file, one whose lead stopped, and one ready to
- * accept wait too; an aside, a chat on Scratch, is in neither.
+ * one that waits on issues to file and one ready to accept wait too; stopped
+ * work without a call is held Up next; an aside, a chat on Scratch, is in neither.
  */
 
 /** Where the board's lanes put the home's tasks and calls, across every project. */
@@ -26,8 +26,6 @@ export interface HomeWaits {
   readonly calls: HomeSnapshot['calls']
   /** Tasks that wait on issues their lead drafted, or changes to their issue. */
   readonly issues: ReadonlyArray<HomeTask>
-  /** Tasks whose lead stopped with no agent on them, the latest stopped first. */
-  readonly stopped: ReadonlyArray<HomeTask>
   /** Work ready for the person. */
   readonly ready: ReadonlyArray<HomeTask>
   /** What is in progress: Running's and Up next's, and what waits on a call, in the home's order. */
@@ -51,7 +49,6 @@ export const waitsOf = (home: HomeSnapshot | null, merging: ReadonlySet<string> 
   return {
     calls: standingCalls(tasks, calls),
     issues: homeOf(lanes.issues),
-    stopped: homeOf(lanes.stopped),
     ready: homeOf(lanes.ready),
     working: tasks.filter((task) => under.has(task.taskId)),
     waiting: yoursOf(lanes),
@@ -85,13 +82,13 @@ export const homeGlanceOf = (
   },
 ): HomeGlance => {
   const refs = new Map((home?.projects ?? []).map((project) => [project.id, refOf(project)]))
-  const { calls: standing, issues, stopped, ready, working: all, waiting } = waitsOf(home, merging)
+  const { calls: standing, issues, ready, working: all, waiting } = waitsOf(home, merging)
   const calls = standing.filter((call) => !answered.some((one) => one.call.id === call.id))
   // What has a card above isn't listed again under it: a task whose call was answered here is, until it goes on.
   const carded = new Set(calls.map((call) => call.threadId))
   // A project not known yet has none of its work shown, nor counted as in progress.
   const working = all.filter((task) => refs.has(task.projectId) && !carded.has(task.threadId))
-  const needs = needsOf({ calls: standing, answered, issues, stopped, ready, refs, agentName, modelName })
+  const needs = needsOf({ calls: standing, answered, issues, ready, refs, agentName, modelName })
   return {
     calls,
     working,

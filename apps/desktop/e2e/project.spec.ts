@@ -77,7 +77,8 @@ test('renames a project, adds and leaves out a repository, and removes it, all w
     await chooseFolder(electronApp, web)
     await page.getByRole('button', { name: 'Add a folder' }).click()
     const here = page.getByRole('list', { name: HERE })
-    await expect(here.getByText('meridian-web', { exact: true })).toBeVisible()
+    // The name, first in its card; its folder, which ends the same, follows.
+    await expect(here.getByText('meridian-web', { exact: true }).first()).toBeVisible()
     await expect(here.getByRole('combobox', { name: 'Role of meridian-web' })).toHaveText(/Frontend/)
     const github = page.getByRole('region', { name: 'GitHub' })
     await expect(github.getByText('meridian/web')).toBeVisible()
@@ -105,7 +106,7 @@ test('renames a project, adds and leaves out a repository, and removes it, all w
     await page.screenshot({ path: 'test-results/project-repositories-connected.png', animations: 'disabled' })
     await here.getByRole('button', { name: 'More for meridian-web' }).click()
     await page.getByRole('menuitem', { name: /Leave out of Refunds v2/ }).click()
-    await expect(here.getByText('meridian-web', { exact: true })).toBeHidden()
+    await expect(here.getByText('meridian-web', { exact: true })).toHaveCount(0)
     // The last one stays: with no remote, it has nothing more to offer.
     await expect(here.getByRole('button', { name: /More for/ })).toBeHidden()
     // Back to its work.

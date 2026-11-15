@@ -6,6 +6,6 @@ import { limitText } from '../src/renderer/features/task/LimitCall'
 describe('a held step in words', () => {
   it('says whose usage ran out, and until when, in a line', () => {
     expect(limitText.held('Codex', '14:00')).toBe('Codex is out of usage until 14:00.')
-    expect(limitText.held('Codex', '14:00', 3)).toBe('Codex has 3% of its usage left, until 14:00.')
+    expect(limitText.held('Codex', '14:00', 3)).toBe('Waiting for Codex until 14:00.')
   })
 })

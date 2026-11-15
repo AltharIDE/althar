@@ -1,5 +1,5 @@
 import type { Decorator, Meta, StoryObj } from '@storybook/react-vite'
-import { expect, fn, within } from 'storybook/test'
+import { expect, fn, waitFor, within } from 'storybook/test'
 
 import { diagramDoc } from '../../fixtures/diagrams'
 import { refDoc, reviewDoc } from '../../fixtures/meridian'
@@ -33,7 +33,7 @@ export const WithDiagrams: Story = {
   decorators: [beside],
   play: async ({ canvasElement }) => {
     const c = within(canvasElement)
-    await expect(await c.findAllByRole('img', { name: 'Diagram' })).toHaveLength(2)
+    await waitFor(() => expect(c.getAllByRole('img', { name: 'Diagram' })).toHaveLength(2))
   },
 }
 

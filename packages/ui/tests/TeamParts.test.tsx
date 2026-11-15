@@ -116,9 +116,9 @@ describe('starting a plan, or changing its team, before it begins', () => {
     expect(onStart).toHaveBeenCalledOnce()
     expect(onSave).not.toHaveBeenCalled()
 
-    rerender(<TeamDialog task="Coordinator merges" steps={steps} onClose={vi.fn()} error="It started with the team it had." />)
+    rerender(<TeamDialog task="Coordinator merges" steps={steps} onClose={vi.fn()} error="This task is no longer available to change." />)
     expect(screen.queryByRole('button', { name: 'Start' })).toBeNull()
     expect(screen.queryByRole('button', { name: 'Save' })).toBeNull()
-    expect(screen.getByRole('alert').textContent).toBe('It started with the team it had.')
+    expect(screen.getByRole('alert').textContent).toBe('This task is no longer available to change.')
   })
 })

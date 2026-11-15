@@ -130,3 +130,35 @@ export const AllStates: Story = {
     />
   ),
 }
+
+const RAW_ANSWER = JSON.stringify(
+  {
+    status: 200,
+    body: {
+      html_url: 'https://github.com/AltharIDE/althar/pull/698',
+      body: 'The note an errand step leaves was the person’s whole message and the host’s whole answer. '.repeat(10),
+      user: { login: 'ninemate', url: 'https://api.github.com/users/ninemate' },
+    },
+  },
+  null,
+  2,
+)
+
+/** A coordinator thread's note of an errand step: one wrapping line, its raw answer folded under Details. */
+export const LongNoteWithDetails: Story = {
+  args: {
+    icon: 'agents',
+    action: undefined,
+    onAction: undefined,
+    details: RAW_ANSWER,
+    children: (
+      <>
+        Asked balazsotakomaiya to review <a href="https://github.com/AltharIDE/althar/pull/698">#698</a>
+      </>
+    ),
+  },
+  play: async ({ canvasElement }) => {
+    await userEvent.click(within(canvasElement).getByRole('button', { name: 'Details' }))
+    await expect(await within(canvasElement).findByText(/"status": 200/)).toBeVisible()
+  },
+}

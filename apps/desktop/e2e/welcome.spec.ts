@@ -51,23 +51,24 @@ const fitsItsCard = async (page: Page) =>
       const out: string[] = []
       for (const el of Array.from(card.querySelectorAll<HTMLElement>('*'))) {
         const r = el.getBoundingClientRect()
-        if (r.width === 0 || r.height === 0 || getComputedStyle(el).visibility === 'hidden') continue
+        const style = getComputedStyle(el)
+        // Screen-reader-only labels have a 1px layout box but clip all their ink.
+        if (r.width === 0 || r.height === 0 || style.visibility === 'hidden' || style.clip === 'rect(0px, 0px, 0px, 0px)') continue
         // What a scroller or the scene's frame clips is inside: only what would show past the card counts.
-        let clip: DOMRect = box
+        const shown = { left: r.left, right: r.right, top: r.top, bottom: r.bottom }
         for (let up = el.parentElement; up && up !== card; up = up.parentElement)
           if (getComputedStyle(up).overflow !== 'visible') {
-            clip = up.getBoundingClientRect()
-            break
+            const clip = up.getBoundingClientRect()
+            shown.left = Math.max(shown.left, clip.left)
+            shown.right = Math.min(shown.right, clip.right)
+            shown.top = Math.max(shown.top, clip.top)
+            shown.bottom = Math.min(shown.bottom, clip.bottom)
           }
-        const shown = {
-          left: Math.max(r.left, clip.left),
-          right: Math.min(r.right, clip.right),
-          top: Math.max(r.top, clip.top),
-          bottom: Math.min(r.bottom, clip.bottom),
-        }
         if (shown.right <= shown.left || shown.bottom <= shown.top) continue
         if (shown.left < box.left - 0.5 || shown.right > box.right + 0.5 || shown.top < box.top - 0.5 || shown.bottom > box.bottom + 0.5)
-          out.push(`${el.tagName.toLowerCase()}.${el.className}`)
+          out.push(
+            `${el.tagName.toLowerCase()}.${el.className}: ${el.textContent?.slice(0, 60)} ${JSON.stringify({ shown, box: box.toJSON() })}`,
+          )
       }
       return out
     }),
@@ -81,6 +82,7 @@ const shoot = async (electronApp: ElectronApplication, page: Page, name: string)
       await page.evaluate((one) => {
         document.documentElement.dataset.theme = one
       }, theme)
+      await still(page)
       await fitsItsCard(page)
       await shootCard(page, `${name}-${size}-${theme}`)
     }

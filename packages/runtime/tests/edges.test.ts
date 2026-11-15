@@ -8,6 +8,7 @@ import type { ProjectId } from '@althar/domain'
 import { assert, describe, it } from '@effect/vitest'
 import { Duration, Effect, Layer } from 'effect'
 import { SqlClient } from 'effect/sql'
+import { TestClock } from 'effect/testing'
 
 import { Changes } from '../src/Changes'
 import { Connections } from '../src/Connections'
@@ -18,7 +19,7 @@ import { outward } from '../src/outward'
 import { Projects } from '../src/Projects'
 import { Queries } from '../src/Queries'
 import * as Runtime from '../src/Runtime'
-import { callTool, fakeConnectors, HOST, hosted, items, runtime, until } from './support'
+import { callTool, fakeConnectors, HOST, hosted, items, onTestClock, runtime, until } from './support'
 
 /*
  * The edges of reaching code hosts and trackers: an outward action's receipt
@@ -120,7 +121,7 @@ describe('an outward action', () => {
 })
 
 describe('listening', () => {
-  it.live('waits as long as the host says, hears a pull request made ready or closed by hand, and stops', () => {
+  it.effect('waits as long as the host says, hears a pull request made ready or closed by hand, and stops', () => {
     const { working, bare } = hosted()
     const github = makeFakeService({ pushUrl: () => bare })
     github.addRepository(['meridian', 'api'])
@@ -128,10 +129,14 @@ describe('listening', () => {
       const { threadId, cards } = yield* withPullRequest(github, bare, working)
       const changes = yield* Changes
       // Told to wait a minute, it doesn't ask again until then, even asked to.
+      const before = github.calls.filter((call) => call === 'change').length
       github.failNext('change', 'rate_limited', new Date(Date.now() + 60_000).toISOString())
-      yield* Effect.sleep('300 millis')
+      yield* until(
+        Effect.sync(() => github.calls.filter((call) => call === 'change').length),
+        (asked) => asked > before,
+      )
       const asked = github.calls.filter((call) => call === 'change').length
-      yield* Effect.sleep('300 millis')
+      yield* TestClock.adjust('10 seconds')
       assert.strictEqual(github.calls.filter((call) => call === 'change').length, asked)
       // Asked about its own task, it asks the host at once.
       github.readyByHand(1)
@@ -149,10 +154,10 @@ describe('listening', () => {
       assert.strictEqual(card?.change?.state, 'closed')
       assert.isFalse(card?.change?.listening)
       assert.notStrictEqual(card?.phase, 'settled', 'a closed pull request leaves the task as it was')
-    }).pipe(Effect.provide(runtimeWith({ github })))
+    }).pipe(Effect.provide(runtimeWith({ github })), onTestClock)
   })
 
-  it.live('stops when the person says: the task shows it, and nothing said after arrives', () => {
+  it.effect('stops when the person says: the task shows it, and nothing said after arrives', () => {
     const { working, bare } = hosted()
     const github = makeFakeService({ pushUrl: () => bare })
     github.addRepository(['meridian', 'api'])
@@ -174,12 +179,12 @@ describe('listening', () => {
       const asked = github.calls.filter((call) => call === 'activity').length
       github.commentAs(1, 'dana', 'Anyone there?')
       yield* changes.refresh(taskId)
-      yield* Effect.sleep('400 millis')
+      yield* TestClock.adjust('1 second')
       assert.strictEqual(github.calls.filter((call) => call === 'activity').length, asked)
       assert.lengthOf(yield* arrivals(threadId), 0)
       // Stopping again does nothing more.
       yield* changes.stopListening(taskId, listened?.url ?? '')
-    }).pipe(Effect.provide(runtimeWith({ github })))
+    }).pipe(Effect.provide(runtimeWith({ github })), onTestClock)
   })
 
   it.live('keeps going when the host fails, and goes quiet when the connection is removed', () => {

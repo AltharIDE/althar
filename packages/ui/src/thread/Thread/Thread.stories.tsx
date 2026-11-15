@@ -13,6 +13,7 @@ import { Terminal } from '../Terminal/Terminal'
 import { Tool } from '../Tool/Tool'
 import { Prose, Turn } from '../Turn/Turn'
 import { WorkedFor } from '../WorkedFor/WorkedFor'
+import { ModelMove } from '../ModelMove/ModelMove'
 import { You } from '../You/You'
 import { ThreadMeasure, Thread } from './Thread'
 
@@ -41,6 +42,35 @@ export const Conversation: Story = {
   render: (args) => (
     <ThreadMeasure>
       <Thread {...args}>{turns}</Thread>
+    </ThreadMeasure>
+  ),
+}
+
+/** Earlier turns keep their model; the next turn uses the kept choice and counts only its work. */
+export const KeptModelAndWorkTime: Story = {
+  render: (args) => (
+    <ThreadMeasure>
+      <Thread {...args}>
+        <Turn model={{ ...CODEX, id: 'gpt-6.1-terra', name: 'GPT-6.1 Terra', short: 'GPT-6.1 Terra' }} at="Earlier">
+          <Prose>Checked the existing account selection.</Prose>
+        </Turn>
+        <ModelMove
+          from="GPT-6.1 Sol"
+          to="GPT-6.1 Terra"
+          plan="ChatGPT"
+          percent={94}
+          window="the week"
+          resetsAt={null}
+          kept
+          onUndo={() => {}}
+        />
+        <Turn model={{ ...CODEX, id: 'gpt-6.1-sol', name: 'GPT-6.1 Sol', short: 'GPT-6.1 Sol' }} at="Now">
+          <WorkedFor took="20s" spent={['50h 0m waiting for a place', '20s thinking and writing']}>
+            <Prose>Checked the requested model on the account with quota available.</Prose>
+          </WorkedFor>
+          <Prose>The requested model is preserved on the next turn.</Prose>
+        </Turn>
+      </Thread>
     </ThreadMeasure>
   ),
 }

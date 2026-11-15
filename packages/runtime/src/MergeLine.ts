@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto'
 import { type ChangeRequest, type CodeHost, ConnectorFailed, MergeMethod, type MergeWays, type Repository } from '@althar/connectors'
 import { Ids, newId, type ProjectId } from '@althar/domain'
 import { Ledger } from '@althar/persistence-sqlite'
-import { Clock, Context, Crypto, Duration, Effect, Layer, Option, Queue, Schema } from 'effect'
+import { Cause, Clock, Context, Crypto, Duration, Effect, Layer, Option, Queue, Schema } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { keepUpdate } from './branchUpdates'
@@ -19,6 +19,8 @@ import { envelope } from './envelope'
 import { type AskedAction, type AskedResult, type ErrandStep, Errands, type FreshAction } from './Errands'
 import { contained } from './Failures'
 import { Instance } from './Instance'
+import { errandTaskPull } from './errandTask'
+import { watchReleaseErrands } from './errandWatch'
 import { makeKeyedLock } from './keyedLock'
 import { checksOf, nameOf } from './pullRequestWords'
 import { timestamp } from './records'
@@ -255,6 +257,8 @@ const entriesOf = (projectId: string) =>
       SELECT e.id AS errand_id, e.thread_id, e.state, e.created_at, s.task_id, s.target, s.head, s.target_branch AS branch, s.request
       FROM errands e JOIN errand_steps s ON s.errand_id = e.id
       WHERE e.project_id = ${projectId} AND e.state IN ('open', 'paused') AND s.tool = ${MERGE_TOOL} AND s.state = 'waiting'
+        AND NOT EXISTS (SELECT 1 FROM errand_steps earlier WHERE earlier.errand_id = e.id
+          AND earlier.position < s.position AND earlier.state <> 'done')
       ORDER BY e.created_at, e.rowid`
     const entries = rows.flatMap((row): Array<Entry> => {
       const request = decodeRequest(row.request)
@@ -974,7 +978,7 @@ export class MergeLine extends Context.Service<
                 yield* errands.pause(
                   access,
                   entry.errandId,
-                  'Taken out of the merge line with leave_queue: it goes back in on the person’s word.',
+                  'It was taken out of the merge line. It goes back in on the person’s word (resume_errand).',
                 )
                 said.push(`Took ${name} out of Althar’s line for ${entry.branch}: resume_errand puts it back on the person’s word.`)
               }
@@ -1250,11 +1254,72 @@ export class MergeLine extends Context.Service<
           )
         })
 
+      /** Task slugs can be kept before a PR exists. Bind it once ready; the usual line then reads checks and review gates. */
+      const bindTaskMerges = (projectId: string) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const pending = yield* sql<{ errandId: string; stepKey: string; taskId: string; request: string; threadId: string }>`
+          SELECT s.errand_id, s.step_key, s.task_id, s.request, e.thread_id FROM errand_steps s JOIN errands e ON e.id = s.errand_id
+          WHERE e.project_id = ${projectId} AND e.state = 'open' AND s.state = 'waiting' AND s.tool = ${MERGE_TOOL}
+            AND s.target LIKE 'task:%' AND NOT EXISTS (SELECT 1 FROM errand_steps earlier
+              WHERE earlier.errand_id = e.id AND earlier.position < s.position AND earlier.state <> 'done')`
+          for (const kept of pending)
+            yield* Effect.gen(function* () {
+              const pull = yield* errandTaskPull(projectId, kept.taskId)
+              if (pull === null) return
+              if (pull.change.state === 'closed')
+                return yield* errands
+                  .pause(
+                    {
+                      role: 'coordinator',
+                      projectId,
+                      threadId: kept.threadId,
+                      taskId: null,
+                      sessionId: '',
+                    },
+                    kept.errandId,
+                    'The task’s pull request was closed before its merge step.',
+                  )
+                  .pipe(Effect.asVoid)
+              if (pull.change.draft || pull.change.headSha === null) return
+              const asked = JSON.parse(kept.request) as { method?: typeof MergeMethod.Type; now?: boolean }
+              const request: MergeRequest = {
+                repository: `${pull.host.product}:${pull.repository.path.join('/')}`,
+                number: pull.number,
+                method: asked.method ?? pull.repository.merges[0] ?? 'merge',
+                now: asked.now === true,
+                title: pull.change.title,
+              }
+              yield* sql`UPDATE errand_steps SET target = ${pull.change.url}, head = ${pull.change.headSha},
+            target_branch = ${pull.change.target}, request = ${JSON.stringify(Object.fromEntries(Object.entries(request).sort(([a], [b]) => a.localeCompare(b))))}
+            WHERE errand_id = ${kept.errandId} AND step_key = ${kept.stepKey} AND target LIKE 'task:%'`
+              yield* note(projectId, `${kept.errandId}/${kept.stepKey}`, 'bound', 'task-pr', {
+                target: pull.change.url,
+                head: pull.change.headSha,
+                branch: pull.change.target,
+                request,
+              })
+            }).pipe(
+              Effect.catchCause((cause) =>
+                Effect.gen(function* () {
+                  const reason = Cause.pretty(cause)
+                  if (yield* note(projectId, `${kept.errandId}/${kept.stepKey}`, 'binding_failed', reason)) {
+                    yield* line(projectId, kept.threadId, `The task’s merge errand could not bind its pull request: ${reason}`)
+                    yield* wake(kept.threadId, [
+                      `- Errand ${kept.errandId} could not bind its task’s pull request: ${reason}. Say why to the person; it will be read again.`,
+                    ])
+                  }
+                }),
+              ),
+            )
+        })
+
       const tickProject = (projectId: string) =>
         locks.withLock(
           projectId,
           provide(
             Effect.gen(function* () {
+              yield* bindTaskMerges(projectId)
               const entries = yield* entriesOf(projectId)
               const wakes = new Map<string, Array<string>>()
               const wakeOf = (threadId: string) => {
@@ -1384,6 +1449,7 @@ export class MergeLine extends Context.Service<
                   Effect.catchCause((cause) => Effect.logWarning('Could not show the merge line', cause)),
                 )
               }
+              yield* watchReleaseErrands(projectId, errands, (threadId, said) => wakeOf(threadId).push(said))
               for (const [threadId, said] of wakes) yield* wake(threadId, said)
             }),
           ),
@@ -1395,7 +1461,7 @@ export class MergeLine extends Context.Service<
           const projects =
             projectId === undefined
               ? yield* sql<{ id: string }>`
-                  SELECT DISTINCT project_id AS id FROM errand_steps WHERE tool = ${MERGE_TOOL} AND state = 'waiting'
+                  SELECT DISTINCT project_id AS id FROM errand_steps WHERE state = 'waiting'
                   UNION SELECT DISTINCT project_id AS id FROM observations WHERE subject_type = 'merge_line' AND kind = 'landed'`
               : [{ id: projectId }]
           for (const project of projects) yield* tickProject(project.id).pipe(contained('MergeLine.tick', () => undefined))

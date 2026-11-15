@@ -20,6 +20,60 @@ function TaskRead() {
 
 describe('thread reads that outlive a cache update', () => {
   for (const kind of ['coordinator', 'task'] as const) {
+    it(`publishes a ${kind} head with its fast and slow items together`, async () => {
+      vi.useFakeTimers({ shouldAdvanceTime: true })
+      const slow = Promise.withResolvers<ReturnType<typeof items.you>>()
+      try {
+        const queued = items.you('Already waiting', { state: 'queued', interrupting: false })
+        if (queued.kind !== 'user_message') throw new Error('The fixture must be a queued message.')
+        const arrived = { ...items.says('New work'), id: 'new-work' }
+        const session = snapshot().session!
+        const first = kind === 'coordinator' ? coordinatorSnapshot({ session, items: [queued] }) : snapshot({ session, items: [queued] })
+        const head = { ...first, session: { ...session, turnRunning: true } }
+        const fake = fakeClient({
+          getCoordinator: vi.fn(async (_id, options) => (options?.limit === 0 ? head : first) as CoordinatorSnapshot),
+          getThread: vi.fn(async (_id, options) => (options?.limit === 0 ? head : first) as ThreadSnapshot),
+          getThreadItem: vi.fn(async (_id, itemId) => (itemId === queued.id ? slow.promise : arrived)),
+        })
+        const seen: Array<string> = []
+        function capture(current: ThreadSnapshot | CoordinatorSnapshot | null) {
+          const input = current?.items.find((item) => item.id === queued.id)
+          const state = input?.kind === 'user_message' ? input.input?.state : ''
+          const value =
+            current === null
+              ? 'Loading'
+              : `${current.session?.turnRunning ? 'Running' : 'Idle'}:${current.items.map((item) => item.id).join(',')}:${state}`
+          seen.push(value)
+          return <span>{value}</span>
+        }
+        function TaskRead() {
+          return capture(useTask(first.threadId).snapshot)
+        }
+        function CoordinatorRead() {
+          return capture(useProject('p1').coordinator)
+        }
+        const services = servicesFor(fake.client)
+        render(<ServicesProvider value={services}>{kind === 'task' ? <TaskRead /> : <CoordinatorRead />}</ServicesProvider>)
+        await screen.findByText(`Idle:${queued.id}:queued`)
+        act(() => {
+          fake.emit(changed('provider_session', 's1', first.threadId))
+          fake.emit(changed('thread_item', arrived.id, first.threadId))
+        })
+        await vi.advanceTimersByTimeAsync(50)
+        await waitFor(() => expect(fake.client.getThreadItem).toHaveBeenCalledWith(first.threadId, arrived.id))
+        expect(seen.some((value) => value.startsWith('Idle:') && value.includes(arrived.id))).toBe(false)
+        slow.resolve({ ...queued, kind: 'user_message', input: { state: 'delivered', interrupting: false } })
+        await vi.advanceTimersByTimeAsync(0)
+        await waitFor(() => expect(screen.getByText(/^Running:/).textContent).toContain(arrived.id))
+        expect(seen.some((value) => value.startsWith('Running:') && value.endsWith(':queued'))).toBe(false)
+      } finally {
+        slow.resolve(items.you('Already waiting'))
+        vi.useRealTimers()
+      }
+    })
+  }
+
+  for (const kind of ['coordinator', 'task'] as const) {
     it(`rereads newly queued input before a ${kind} head arrives, even before the next render`, async () => {
       vi.useFakeTimers({ shouldAdvanceTime: true })
       try {

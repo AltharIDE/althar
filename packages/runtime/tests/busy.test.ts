@@ -1152,11 +1152,11 @@ describe('Agents at once, across a restart', () => {
         yield* working(second.taskId)
         yield* tell(first.threadId, 'The checks failed.')
         yield* queuedOn(projectId, first.taskId)
-        return { projectId, first, second, turns: (yield* turnsOn(first.threadId)).length }
+        return { projectId, first, second }
       }).pipe(Effect.provide(machine(1, file)))
 
       yield* Effect.gen(function* () {
-        const { projectId, first, second, turns } = before
+        const { projectId, first, second } = before
         const tasks = yield* Tasks
         yield* until(sessionsOn(second.threadId), (rows) => rows.length === 2)
         // Nothing is on the first, but it waits: the person can stop it, and then it waits no more.
@@ -1165,6 +1165,7 @@ describe('Agents at once, across a restart', () => {
         assert.isNull(yield* waitsOn(first.threadId))
         assert.isNull((yield* cardOf(projectId, first.taskId))?.queued)
         const sessions = (yield* sessionsOn(first.threadId)).length
+        const turns = (yield* turnsOn(first.threadId)).length
         // A place frees: the first isn't started for it.
         yield* tasks.stop({ envelope: yield* Runtime.envelope('task.stop', {}), taskId: second.taskId })
         yield* Effect.sleep('1 second')

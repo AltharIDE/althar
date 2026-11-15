@@ -1,4 +1,4 @@
-import { removeTreeSync } from '@althar/testing'
+import { removeTree } from '@althar/testing'
 import { execFileSync } from 'node:child_process'
 import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -424,10 +424,12 @@ describe('the review after a merge, at its edges', () => {
       yield* sessions.send({
         envelope: yield* Runtime.envelope('thread.send', { threadId: task.threadId }),
         threadId: task.threadId,
-        body: 'One more thing: rename it.',
+        body: 'One more thing: rename it. [answers-after:5s]',
         sender: { kind: 'window' },
       })
       assert.strictEqual((yield* standingOf(task.threadId)).phase, 'running')
+      yield* until(watched.seen, (phases) => phases.includes('running'))
+      place.open('[answers-after:5s]')
       yield* until(standingOf(task.threadId), (now) => now.phase !== 'running')
       const phases = yield* watched.stop
       assert.notInclude(
@@ -618,7 +620,7 @@ describe('the review after a merge, at its edges', () => {
       // Its lead stopped first: on Windows no folder an agent works in can be removed.
       yield* Effect.ignore((yield* Sessions).stop(task.threadId))
       yield* gone(task.threadId)
-      removeTreeSync(task.path)
+      yield* Effect.promise(() => removeTree(task.path))
       yield* mergeIt(bare, github, task.taskId)
       yield* until(reviewOf(task.url), (row) => row?.state === 'running')
       yield* reviewing(yield* reviewerThread(task.taskId))

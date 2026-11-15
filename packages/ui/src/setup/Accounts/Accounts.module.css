@@ -144,6 +144,9 @@
 /* a sign-in under way, in the line it is for, across the list */
 .signing {
   grid-column: 1 / -1;
+  /* Its full-width form must not size the shared account columns from a long error or command. */
+  contain: inline-size;
+  min-width: 0;
   margin: 2px 0 6px;
 }
 

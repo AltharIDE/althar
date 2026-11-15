@@ -78,7 +78,7 @@ export class AutoModels extends Context.Service<
       readonly agentId: string
       /** The model the step planned, as the agent's id for it; null for the agent's own. */
       readonly model: string | null
-    }): Effect.Effect<{ readonly agentId: string; readonly model: string } | undefined, unknown>
+    }): Effect.Effect<{ readonly agentId: string; readonly model: string; readonly accountId?: string } | undefined, unknown>
   }
 >()('@althar/runtime/AutoModels') {
   static readonly layer: Layer.Layer<AutoModels, never, Store> = Layer.effect(
@@ -103,7 +103,6 @@ export class AutoModels extends Context.Service<
           // The model the person kept for this task is the one it stays on.
           const [kept] = yield* sql<{ model: string }>`
             SELECT model FROM task_model_keeps WHERE task_id = ${input.taskId} AND agent_id = ${input.agentId}`
-          if (kept !== undefined) return undefined
           if (input.model === null) return undefined
           const entry = agents.list.find((one) => one.definition.id === input.agentId)
           const offered = (yield* models.catalog).find((one) => one.agentId === input.agentId)
@@ -112,13 +111,21 @@ export class AutoModels extends Context.Service<
           if (current === undefined) return undefined
           // A model's own window counts beside the plan's, by its id or its name (Limits.room does the naming).
           const named = `${current.id} ${modelName(entry.definition.name, current).name}`
-          const account = yield* limits
+          const previous = yield* limits
             .pick({ agentId: input.agentId, projectId: input.projectId, threadId: input.threadId, model: named })
             .pipe(Effect.option)
+          const account = yield* limits
+            .pick({ agentId: input.agentId, projectId: input.projectId, threadId: input.threadId, model: named, reserve: 100 - MOVE_AT })
+            .pipe(Effect.option)
           if (Option.isNone(account)) return undefined
+          const selected = { agentId: input.agentId, model: input.model, accountId: account.value.id }
+          const switched = Option.isSome(previous) && previous.value.id !== account.value.id ? selected : undefined
+          // Spend another allowed account's quota before lowering the requested model.
+          // Keep also preserves the model without pinning it to a depleted account.
+          if (kept !== undefined) return switched
           const room = yield* limits.room(account.value.id, named)
-          if (Option.isNone(room)) return undefined
-          if (room.value.leftPercent > 100 - MOVE_AT) return undefined
+          if (Option.isNone(room)) return switched
+          if (room.value.leftPercent > 100 - MOVE_AT) return switched
           const lighter = lighterOf(
             { intelligence: facts.of(entry.definition, current)?.intelligence ?? null },
             offered.models.map((model) => ({
@@ -128,14 +135,14 @@ export class AutoModels extends Context.Service<
               blocked: offered.blocked.includes(model.id),
             })),
           )
-          if (lighter === undefined) return undefined
+          if (lighter === undefined) return switched
           // One line a move: a step after it on the same two models says nothing new.
           const [said] = yield* sql<{ content: string }>`
             SELECT content FROM thread_items WHERE thread_id = ${input.threadId} AND kind = 'model_move'
             ORDER BY sequence DESC LIMIT 1`.pipe(Effect.catchCause(() => Effect.succeed([] as ReadonlyArray<{ content: string }>)))
           const moved =
             said === undefined ? undefined : (JSON.parse(said.content) as { from?: { model?: string }; to?: { model?: string } })
-          if (moved?.from?.model === input.model && moved.to?.model === lighter.id) return { agentId: input.agentId, model: lighter.id }
+          if (moved?.from?.model === input.model && moved.to?.model === lighter.id) return { ...selected, model: lighter.id }
           const used = usedPercent(room.value.leftPercent)
           yield* addItem({ projectId: input.projectId, threadId: input.threadId }, 'model_move', {
             taskId: input.taskId,
@@ -149,7 +156,7 @@ export class AutoModels extends Context.Service<
             },
             kept: false,
           })
-          return { agentId: input.agentId, model: lighter.id }
+          return { ...selected, model: lighter.id }
         })
 
       return AutoModels.of({ lighter: (input) => provide(lighter(input)) })
