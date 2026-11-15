@@ -17,7 +17,15 @@ import {
 } from '@althar/contracts'
 
 import { messageOf, type StuckAnswer } from '../../data/client'
-import { type MergeStanding, mergeStandingOf, shownChangeOf, useMerge, useMerging } from '../../data/merges'
+import {
+  type MergeStanding,
+  type Pressing,
+  mergeStandingOf,
+  shownChangeOf,
+  useMerge,
+  useMerging,
+  usePressedMerges,
+} from '../../data/merges'
 import { keys, reads } from '../../data/reads'
 import { canPick } from '../../shared/agents'
 import { isSending, mergeItems, newestReads, queueShown, sending, takenBack, unsent, waiting } from '../../shared/items'
@@ -97,6 +105,8 @@ export interface TaskModel {
    * merging from the press, in the queue or merged as the runtime reads it; null where it is the person's to merge.
    */
   readonly mergeStanding: (url: string) => MergeStanding | null
+  /** Whether the pull request at this address merges later in a press under way, after one before it lands: no Merge of its own meanwhile. */
+  readonly mergeAwaits: (url: string) => boolean
   /** An action is on its way to the runtime. */
   readonly pending: boolean
   /** Which of them, where it is one of the outputs' (see `doing`): the others wait, but aren't working. */
@@ -306,8 +316,14 @@ export const useTask = (threadId: string): TaskModel => {
   // Its merges as the window keeps them: pressed and not answered, or answered and not yet read back merged, wherever pressed.
   const shownChange = snapshot === null ? null : shownChangeOf(snapshot.task.changes)
   const windowMerges = useMerging(snapshot === null ? null : [{ taskId: snapshot.task.id, change: shownChange }])
-  // The pull requests pressed here, Merging at once, until the head read after the press lands, or the press fails.
-  const [pressedMerges, setPressedMerges] = useState<ReadonlySet<string>>(new Set())
+  // Each of its pull requests' merges as the window keeps them, by address: pressed on any screen, this one left and back included.
+  const pressedByUrl = usePressedMerges(snapshot?.task.changes ?? null)
+  const underWay = useRef(pressedByUrl)
+  underWay.current = pressedByUrl
+  // The pull requests pressed here, Merging at once, until the window's own record of the press takes over.
+  const [pressedMerges, setPressedMerges] = useState<ReadonlyMap<string, Pressing>>(new Map())
+  // Those a press here merges after the one before has landed: waiting, not merging, and not to be merged on their own meanwhile.
+  const [awaitingMerges, setAwaitingMerges] = useState<ReadonlySet<string>>(new Set())
   const agents = useMemo(() => status?.agents.filter(canPick) ?? [], [status])
   // What its lead is still saying, while the window hears it.
   const streaming = useStreamed(threadId, snapshot?.items ?? NO_ITEMS, undefined, snapshot?.conversationVersion)
@@ -560,6 +576,13 @@ export const useTask = (threadId: string): TaskModel => {
     [readHead, newest, fail],
   )
 
+  /** A press here is over: the window's record of each merge, by its address, says where it stands from here. */
+  const forget = (urls: ReadonlyArray<string>) => {
+    const drop = <T>(now: ReadonlyMap<string, T>) => new Map([...now].filter(([url]) => !urls.includes(url)))
+    setPressedMerges(drop)
+    setAwaitingMerges((now) => new Set([...now].filter((url) => !urls.includes(url))))
+  }
+
   /** Runs an action on the task, once it has been read. */
   const onTask = (action: (taskId: string) => Promise<unknown>) =>
     act(async () => (snapshot === null ? undefined : action(snapshot.task.id)))
@@ -621,13 +644,18 @@ export const useTask = (threadId: string): TaskModel => {
     refused,
     merging,
     mergeRefused: error === null ? null : mergeFailed,
-    mergeStanding: (url) =>
-      mergeStandingOf(
+    mergeStanding: (url) => {
+      const pressing = pressedMerges.get(url) ?? pressedByUrl.get(url)
+      return mergeStandingOf(
         snapshot?.task.changes.find((change) => change.url === url),
         merging === url ||
-          pressedMerges.has(url) ||
-          (snapshot !== null && shownChange?.url === url && windowMerges.merging.has(snapshot.task.id)),
-      ),
+          pressing !== undefined ||
+          // A merge pressed without its address, on a screen that knew only the task: its shown pull request's.
+          (snapshot !== null && shownChange?.url === url && windowMerges.unaddressed.has(snapshot.task.id)),
+        pressing === 'bypass',
+      )
+    },
+    mergeAwaits: (url) => awaitingMerges.has(url),
     pending,
     doing: acting,
     loadingEarlier,
@@ -867,21 +895,36 @@ export const useTask = (threadId: string): TaskModel => {
         )
         await client.pushBranch(snapshot.task.id, heads)
       }, doing.pushBranch),
-    mergeWaiting: (how) =>
-      act(async () => {
+    mergeWaiting: (how) => {
+      const open = snapshot?.task.changes.find((one) => one.state === 'open')
+      if (open === undefined || underWay.current.has(open.url)) return Promise.resolve()
+      // Kept by the window like any merge: Merging in every place at once, never Merge again meanwhile.
+      setPressedMerges((now) => new Map([...now, [open.url, 'merge']]))
+      return act(async () => {
         if (snapshot === null) return
-        const open = snapshot.task.changes.find((one) => one.state === 'open')
-        if (open === undefined) return
-        await client.merge(snapshot.task.id, open.head ?? '', open.url, how)
-      }, doing.mergeWaiting),
-    accept: (changes) => {
+        await merge({ taskId: snapshot.task.id, head: open.head ?? '', url: open.url, how })
+      }, doing.mergeWaiting).finally(() => forget([open.url]))
+    },
+    accept: (pressed) => {
+      // One already under way, wherever it was pressed, isn't merged again.
+      const changes = pressed.filter((change) => !underWay.current.has(change.url))
+      const [first, ...later] = changes
+      if (first === undefined) return Promise.resolve()
       const urls = changes.map((change) => change.url)
-      setPressedMerges((now) => new Set([...now, ...urls]))
+      setPressedMerges((now) => new Map([...now, [first.url, first.bypassQueue === true ? 'bypass' : 'merge']]))
+      setAwaitingMerges((now) => new Set([...now, ...later.map((change) => change.url)]))
       return act(async () => {
         setMergeFailed(null)
         if (snapshot === null) return
         try {
           for (const [at, change] of changes.entries()) {
+            setAwaitingMerges((now) => {
+              const next = new Set(now)
+              next.delete(change.url)
+              return next
+            })
+            // Pressed on its own meanwhile, wherever: not merged twice.
+            if (at > 0 && underWay.current.has(change.url)) continue
             setMerging(change.url)
             try {
               await merge({
@@ -901,13 +944,7 @@ export const useTask = (threadId: string): TaskModel => {
         } finally {
           setMerging(null)
         }
-      }, doing.accept).finally(() =>
-        setPressedMerges((now) => {
-          const next = new Set(now)
-          for (const url of urls) next.delete(url)
-          return next
-        }),
-      )
+      }, doing.accept).finally(() => forget(urls))
     },
     push: (head, url) =>
       act(

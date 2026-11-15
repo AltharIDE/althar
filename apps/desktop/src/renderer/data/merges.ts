@@ -35,6 +35,8 @@ export interface Merge {
   readonly head: string
   readonly url?: string | undefined
   readonly bypassQueue?: boolean
+  /** Outputs' Review and merge or Merge now, with commits waiting for Ship: a Ship first for `review` where they wait. */
+  readonly how?: 'review' | 'now'
 }
 
 /** Merges a task's pull request, as every screen in the window sees it go; fails as the runtime said. */
@@ -43,9 +45,11 @@ export const useMerge = (): ((merge: Merge) => Promise<void>) => {
   return useMutation({
     mutationKey: KEY,
     mutationFn: (merge: Merge) =>
-      merge.bypassQueue === true
-        ? client.merge(merge.taskId, merge.head, merge.url, undefined, true)
-        : client.merge(merge.taskId, merge.head, merge.url),
+      merge.how !== undefined
+        ? client.merge(merge.taskId, merge.head, merge.url, merge.how)
+        : merge.bypassQueue === true
+          ? client.merge(merge.taskId, merge.head, merge.url, undefined, true)
+          : client.merge(merge.taskId, merge.head, merge.url),
   }).mutateAsync
 }
 
@@ -54,6 +58,8 @@ export interface Merging {
   readonly merging: ReadonlySet<string>
   /** Why each task's last merge failed, where it did, until it is tried again. */
   readonly failed: Readonly<Record<string, string>>
+  /** Of those merging, the tasks whose merge was pressed without its pull request's address: by its head, so its shown one's. */
+  readonly unaddressed: ReadonlySet<string>
 }
 
 interface Pressed {
@@ -61,6 +67,9 @@ interface Pressed {
   /** The pull request merged, by its address where it was said, or else by its head. */
   readonly url: string | undefined
   readonly head: string
+  readonly bypass: boolean
+  /** Whether, gone through, it may still be landing: Review and merge may only have sent its commits up for review. */
+  readonly lands: boolean
   readonly status: 'idle' | 'pending' | 'success' | 'error'
   readonly at: number
   readonly error: unknown
@@ -70,17 +79,29 @@ const pressedOf = (mutation: Mutation<unknown, unknown, unknown>): Pressed => ({
   taskId: (mutation.state.variables as Merge | undefined)?.taskId ?? '',
   url: (mutation.state.variables as Merge | undefined)?.url,
   head: (mutation.state.variables as Merge | undefined)?.head ?? '',
+  bypass: (mutation.state.variables as Merge | undefined)?.bypassQueue === true,
+  lands: (mutation.state.variables as Merge | undefined)?.how !== 'review',
   status: mutation.state.status,
   at: mutation.state.submittedAt,
   error: mutation.state.error,
 })
 
-/** Where each task's merges stand, as `tasks` read them, the last pressed for each. */
-export const useMerging = (tasks: ReadonlyArray<Pick<BoardTask, 'taskId' | 'change'>> | null): Merging => {
+/** The last merge pressed for each key, and the time now, read again as each one that went through stops landing. */
+// `keyOf` is one of the two below, the same each render.
+const usePressed = (keyOf: (one: Pressed) => string | undefined): { last: ReadonlyMap<string, Pressed>; now: number } => {
   const pressed = useMutationState({ filters: { mutationKey: KEY }, select: pressedOf })
   // When a merge that went through stops showing as merging, though it still reads open: read again as each one's time ends.
   const [now, setNow] = useState(() => Date.now())
-  const last = useMemo(() => new Map(pressed.map((one) => [one.taskId, one])), [pressed])
+  const last = useMemo(
+    () =>
+      new Map(
+        pressed.flatMap((one) => {
+          const key = keyOf(one)
+          return key === undefined ? [] : [[key, one] as const]
+        }),
+      ),
+    [pressed, keyOf],
+  )
   const landing = [...last.values()].filter((one) => one.status === 'success' && one.at + LANDS_WITHIN > now)
   const next = landing.length === 0 ? null : Math.min(...landing.map((one) => one.at + LANDS_WITHIN))
   useEffect(() => {
@@ -88,6 +109,47 @@ export const useMerging = (tasks: ReadonlyArray<Pick<BoardTask, 'taskId' | 'chan
     const timer = setTimeout(() => setNow(Date.now()), Math.max(0, next - Date.now()))
     return () => clearTimeout(timer)
   }, [next])
+  return { last, now }
+}
+
+const byTask = (one: Pressed) => one.taskId
+const byUrl = (one: Pressed) => one.url
+
+/** A pull request's merge under way, wherever in the window it was pressed: a bypass of its queue, or a merge. */
+export type Pressing = 'merge' | 'bypass'
+
+/**
+ * The pull requests, by address, whose merge is under way wherever in the
+ * window it was pressed: pressed and not answered, or gone through and not yet
+ * read back queued or merged, as `changes` read them. Kept by each pull
+ * request, not by its task, so a task's second pull request is never merged
+ * twice, whichever screen is open.
+ */
+export const usePressedMerges = (
+  changes: ReadonlyArray<Pick<ChangeSummary, 'url' | 'state' | 'queued'>> | null,
+): ReadonlyMap<string, Pressing> => {
+  const { last, now } = usePressed(byUrl)
+  return useMemo(() => {
+    const read = new Map((changes ?? []).map((change) => [change.url, change]))
+    const under = new Map<string, Pressing>()
+    for (const [url, one] of last) {
+      const change = read.get(url)
+      // Gone through, it lands while it still reads open: in its queue already, only a bypass is still landing.
+      const landing =
+        one.status === 'success' &&
+        one.lands &&
+        one.at + LANDS_WITHIN > now &&
+        change?.state === 'open' &&
+        (change.queued !== true || one.bypass)
+      if (one.status === 'pending' || landing) under.set(url, one.bypass ? 'bypass' : 'merge')
+    }
+    return under
+  }, [last, changes, now])
+}
+
+/** Where each task's merges stand, as `tasks` read them, the last pressed for each. */
+export const useMerging = (tasks: ReadonlyArray<Pick<BoardTask, 'taskId' | 'change'>> | null): Merging => {
+  const { last, now } = usePressed(byTask)
   return useMemo(() => {
     // The pull request each task shows, while it is open: another of the task's, once one merged, is the person's to accept.
     const open = new Map((tasks ?? []).flatMap((task) => (task.change?.state === 'open' ? [[task.taskId, task.change] as const] : [])))
@@ -96,13 +158,15 @@ export const useMerging = (tasks: ReadonlyArray<Pick<BoardTask, 'taskId' | 'chan
       return shown !== undefined && (one.url === undefined ? shown.head === one.head : shown.url === one.url)
     }
     const merging = new Set<string>()
+    const unaddressed = new Set<string>()
     const failed: Record<string, string> = {}
     for (const one of last.values()) {
       if (one.status === 'pending') merging.add(one.taskId)
-      else if (one.status === 'success' && landing(one) && one.at + LANDS_WITHIN > now) merging.add(one.taskId)
+      else if (one.status === 'success' && one.lands && landing(one) && one.at + LANDS_WITHIN > now) merging.add(one.taskId)
       else if (one.status === 'error') failed[one.taskId] = messageOf(one.error)
     }
-    return { merging, failed }
+    for (const one of last.values()) if (one.url === undefined && merging.has(one.taskId)) unaddressed.add(one.taskId)
+    return { merging, failed, unaddressed }
   }, [last, tasks, now])
 }
 
@@ -118,11 +182,13 @@ export type { MergeStanding }
 export const mergeStandingOf = (
   change: Pick<ChangeSummary, 'state' | 'queued'> | null | undefined,
   merging: boolean,
+  /** The merge under way bypasses its queue: Merging, though it still reads queued, so nothing offers the bypass again. */
+  bypassing = false,
 ): MergeStanding | null => {
   if (change == null) return merging ? 'merging' : null
   if (change.state === 'merged') return 'merged'
   if (change.state !== 'open') return null
-  if (change.queued === true) return 'queued'
+  if (change.queued === true && !(merging && bypassing)) return 'queued'
   return merging ? 'merging' : null
 }
 

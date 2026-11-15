@@ -971,6 +971,7 @@ export function TaskView({
         ? undefined
         : void model.accept([{ head: change.head, url: change.url, ...(bypassQueue ? { bypassQueue: true } : {}) }]),
     mergeStanding: model.mergeStanding,
+    mergeAwaits: model.mergeAwaits,
     postReview: (draftId) => void model.postReview(draftId),
     stopLaunch: (id) => void model.stopLaunch(id),
     openUrl: (url) => void window.open(url, '_blank'),

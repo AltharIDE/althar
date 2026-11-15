@@ -133,6 +133,8 @@ export interface PartsActions {
   readonly merge: (change: ChangeSummary, bypassQueue?: boolean) => void
   /** Where the merge of its pull request at this address stands from the press on: no Merge while it is under way. */
   readonly mergeStanding?: (url: string) => MergeStanding | null
+  /** Whether it merges later in a press under way, once the one before it lands: no Merge of its own meanwhile. */
+  readonly mergeAwaits?: (url: string) => boolean
   readonly postReview: (draftId: string) => void
   readonly stopLaunch: (id: string) => void
   readonly openUrl: (url: string) => void
@@ -295,7 +297,12 @@ export const partsOf = (snapshot: ThreadSnapshot, act: PartsActions): ReadonlyAr
     const failing = change.state === 'open' && change.checks?.outcome === 'failed'
     const merge = act.mergeStanding?.(change.url) ?? null
     const ready =
-      merge === null && change.state === 'open' && !change.draft && change.checks?.outcome === 'passed' && change.queued !== true
+      merge === null &&
+      act.mergeAwaits?.(change.url) !== true &&
+      change.state === 'open' &&
+      !change.draft &&
+      change.checks?.outcome === 'passed' &&
+      change.queued !== true
     const line = lines.find((one) => one.url === change.url)
     const standing = change.change?.waitsFor === undefined || merge !== null ? t.stands(change, merge) : t.waitsFor(change.change.waitsFor)
     parts.push({

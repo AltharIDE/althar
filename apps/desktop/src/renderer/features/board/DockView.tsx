@@ -4,7 +4,7 @@ import { useEffect } from 'react'
 import type { AgentStatus, BoardTask, ThreadSnapshot } from '@althar/contracts'
 import { AcceptPeek, ActionButton, Dock, type PeekStep, TaskStatus, TrackStep, WorkPeek, Problem } from '@althar/ui'
 
-import { mergeStandingOf } from '../../data/merges'
+import { mergeStandingOf, usePressedMerges } from '../../data/merges'
 import { keys, reads } from '../../data/reads'
 import { useServices } from '../../data/services'
 import { externalWaitWords, queuedWords, reconnectsWords, waitsWords } from '../../shared/agents'
@@ -120,6 +120,8 @@ export function DockView({
   )
   useThreadAhead(call?.threadId ?? task?.threadId ?? null)
   const named = useModelNames()
+  // Its pull request's merge as the window keeps it, wherever pressed: a bypass under way stays Merging, not In the queue.
+  const pressed = usePressedMerges(task?.change == null ? null : [task.change])
   const name = (id: string | null) => agents.find((agent) => agent.id === id)?.name ?? id ?? ''
   const open = (threadId: string) => (
     <div className={s.actions}>
@@ -192,7 +194,11 @@ export function DockView({
           onOpenFile={(path) => onChanges(task, path)}
           accepting={model.merging.has(task.taskId)}
           // Pressed here or anywhere in the window: Merging at once, then In the queue as the runtime reads it, never Accept again.
-          standing={mergeStandingOf(change, model.merging.has(task.taskId))}
+          standing={mergeStandingOf(
+            change,
+            model.merging.has(task.taskId) || pressed.has(change.url),
+            pressed.get(change.url) === 'bypass',
+          )}
           sendingBack={model.sending.has(task.taskId)}
           {...(model.error === null ? {} : { error: model.error })}
           text={{ number: (n: number) => `${change.prefix}${n}` }}
