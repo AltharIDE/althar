@@ -61,6 +61,8 @@ Althar runs each one under your own sign-in: your Claude plan, your ChatGPT plan
 
 Switch labs whenever you like: your projects, their history and their decisions stay with you, on your computer.
 
+The agents below are built in. Other agents that speak the [Agent Client Protocol](https://agentclientprotocol.com) can join from Settings.
+
 <table>
   <tr>
     <td width="20%" align="center" valign="top">
@@ -147,13 +149,13 @@ Switch labs whenever you like: your projects, their history and their decisions 
     </td>
   </tr>
   <tr>
-    <td width="20%" align="center" valign="top">
+    <td colspan="5" align="center" valign="top">
       <picture>
         <source media="(prefers-color-scheme: dark)" srcset=".github/readme/agents/on-the-way-dark.svg" />
         <img src=".github/readme/agents/on-the-way.svg" width="72" alt="Cursor and Gemini CLI" />
       </picture><br />
-      <b>More on the way</b><br />
-      Any agent that speaks the <a href="https://agentclientprotocol.com">Agent Client Protocol</a> and can be held to asking can join (<a href="docs/decisions/agents.md#which-agents-join">which, and why</a>)
+      <b>Other ACP agents</b><br />
+      From the ACP registry, such as Cursor, Gemini CLI or Goose, or your own command, once it passes a check that it asks before it acts (<a href="docs/decisions/agents.md#which-agents-join">which, and why</a>)
     </td>
   </tr>
 </table>
@@ -281,4 +283,4 @@ The most useful thing you can do right now is use Althar on real work and tell u
 
 Althar is open source under the [Apache License 2.0](LICENSE). See [NOTICE](NOTICE).
 
-Claude, ChatGPT, Codex, Gemini, Google, Antigravity, OpenCode, GitHub, Copilot, JetBrains, Junie, Grok, Kimi, Mistral, Qwen, Cursor, SpaceX, Zed, Visual Studio Code, cmux, Claude Squad, T3 Code, Conductor, Archon, Ruflo, Amp, Devin, GitLab, Bitbucket, Linear, Jira and Trello are trademarks of their owners. Althar isn't affiliated with or endorsed by them.
+Claude, ChatGPT, Codex, Gemini, Google, Antigravity, Goose, OpenCode, GitHub, Copilot, JetBrains, Junie, Grok, Kimi, Mistral, Qwen, Cursor, SpaceX, Zed, Visual Studio Code, cmux, Claude Squad, T3 Code, Conductor, Archon, Ruflo, Amp, Devin, GitLab, Bitbucket, Linear, Jira and Trello are trademarks of their owners. Althar isn't affiliated with or endorsed by them.
