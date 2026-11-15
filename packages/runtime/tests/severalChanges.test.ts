@@ -378,7 +378,8 @@ describe('a task with several changes', () => {
         (item) => item.kind === 'notice' && (item.content as { step?: unknown }).step !== undefined,
       )
       assert.strictEqual((started?.content as { step?: { by?: string } } | undefined)?.step?.by, 'lead')
-      assert.include(yield* callTool(task.lead, 'join_changes', { change: 'Lane heights' }), 'Kept “Lane heights” together')
+      const together = yield* callTool(task.lead, 'join_changes', { change: 'Lane heights' })
+      assert.include(together, 'Kept “Lane heights” together', together)
       // Its commit is on the change that hadn't shipped's branch; its folder went, its branch stays.
       assert.strictEqual(git(colours?.path ?? '', 'log', '-1', '--format=%s'), 'Taller lanes')
       assert.isFalse(existsSync(second?.path ?? ''))
