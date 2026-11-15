@@ -664,7 +664,8 @@ export class Tasks extends Context.Service<
               return true
             }),
           )
-          if (!settled) return false
+          // The person's clear still applies if something opened between the two eligibility reads.
+          if (!settled) return input.clear === true ? yield* clearing(input) : false
           // Settled by the person, it is read: an answer of its lead's they hadn't opened doesn't bring it back to Needs you.
           yield* see({ taskId: input.taskId })
           // What waited for Ship stays on its branch, settled with it: nothing holds it any more.

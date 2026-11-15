@@ -43,6 +43,35 @@ describe('what a follow-up pull request says of itself', () => {
     assert.notInclude(followUpBody({ follows: '#763', state: 'closed', findings: [], commits: [] }), 'which merged')
   })
 
+  it('takes a finding’s own title, skips words that say nothing, and cuts one long word where it must', () => {
+    const titled = { ...finding, title: 'Timing counted twice' }
+    assert.strictEqual(followUpWords({ written: '', commits: [], findings: [titled] }, [], null, 60), 'Timing counted twice')
+    const blank = { ...finding, title: '  ', claim: 'Timing counted twice' }
+    assert.strictEqual(followUpWords({ commits: [], findings: [blank] }, [], null, 60), 'Timing counted twice')
+    assert.strictEqual(followUpWords({ written: 'Supercalifragilistic', commits: [], findings: [] }, [], null, 10), 'Supercali…')
+  })
+
+  it('lists every finding and commit after one closed, with its place where it has one', () => {
+    const body = followUpBody({
+      follows: '#763',
+      state: 'closed',
+      findings: [
+        { ...finding, title: 'Timing counted twice' },
+        { ...finding, title: '', file: 'src/totals.ts', line: null, claim: 'Totals drift.' },
+        { ...finding, file: null, line: null, claim: 'Nothing resets them.' },
+      ],
+      commits: [
+        { subject: 'Count timing once', body: '' },
+        { subject: 'Reset totals', body: 'On each run.' },
+      ],
+    })
+    assert.include(body, 'The review after #763 closed found 3 problems in it. This answers them:')
+    assert.include(body, '- Timing counted twice: Task timing is summed into every snapshot. It doubles the totals. (`src/usage.ts:12`)')
+    assert.include(body, '- Totals drift. (`src/totals.ts`)')
+    assert.include(body, '- Nothing resets them.\n')
+    assert.include(body, 'What changed, commit by commit:\n\n- Count timing once\n- Reset totals: On each run.')
+  })
+
   it('reads the findings a review kept, and none from what it can’t read', () => {
     assert.lengthOf(answersOf(JSON.stringify([finding])), 1)
     assert.lengthOf(answersOf('not json'), 0)

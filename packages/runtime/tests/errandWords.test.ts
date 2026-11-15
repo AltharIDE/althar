@@ -107,6 +107,89 @@ describe('the card says an errand from what Althar knows', () => {
   })
 })
 
+describe('a merge says each place the merge line can read it at', () => {
+  const read = (stands: string, over: Partial<ErrandRecord> = {}, card: CardChange | null = change()) =>
+    errandCardLines([merge({ stands, ...over })], card)
+  const other = { target: 'https://github.com/AltharIDE/althar/pull/801' }
+
+  it('its own pull request goes unnamed', () => {
+    assert.deepStrictEqual(read('queued'), ['In the merge queue'])
+    assert.deepStrictEqual(read('update'), ['Bringing its branch up to date'])
+    assert.deepStrictEqual(read('automerge'), ['Auto-merges once checks pass'])
+    assert.deepStrictEqual(read('merge'), ['Merging'])
+    assert.deepStrictEqual(read('auto'), ['Merging'])
+    assert.deepStrictEqual(read('enqueue'), ['Going into the merge queue'])
+    assert.deepStrictEqual(read('empty'), ['No commits to merge'])
+    assert.deepStrictEqual(read('red'), ['Merges once checks pass'])
+  })
+
+  it('another pull request is named short', () => {
+    assert.deepStrictEqual(read('queued', other), ['In the merge queue: #801'])
+    assert.deepStrictEqual(read('stuck', other), ['Can’t bring #801’s branch up to date'])
+    assert.deepStrictEqual(read('update', other), ['Bringing #801’s branch up to date'])
+    assert.deepStrictEqual(read('enqueue', other), ['Going into the merge queue: #801'])
+    assert.deepStrictEqual(read('empty', other), ['No commits to merge #801'])
+  })
+
+  it('a merge train is said as one', () => {
+    const train = { waits: [{ kind: 'merge_train', target: 'group/app main' }] }
+    assert.deepStrictEqual(read('enqueue', train), ['Going into the merge train'])
+    assert.deepStrictEqual(errandCardLines([merge(train)], change({ checks: { outcome: 'none' } })), ['Going into the merge train'])
+    // Another pull request's checks are not the card's: it waits on them.
+    const named = { ...train, ...other }
+    assert.deepStrictEqual(errandCardLines([merge(named)], change({ checks: { outcome: 'passed' } })), ['Merges #801 once checks pass'])
+  })
+
+  it('an unread stand falls back to the pull request, with no checks at all', () => {
+    assert.deepStrictEqual(read('wait', {}, change({ checks: null })), ['Merges once checks pass'])
+    assert.deepStrictEqual(errandCardLines([merge({ stands: null, waits: [] })], change({ checks: { outcome: 'none' } })), ['Merges next'])
+  })
+
+  it('a held merge of another pull request names it, and keeps its number', () => {
+    assert.deepStrictEqual(read('queued', { ...other, paused: true }), ['Merge #801 on hold'])
+    const held = merge({ ...other, paused: true, reason: '#801 went back to a draft.' })
+    assert.deepStrictEqual(errandCardLines([held], change()), ['On hold: #801 went back to a draft'])
+    // A reason with nothing plain left says only that it is held.
+    assert.deepStrictEqual(errandCardLines([merge({ paused: true, reason: 'https://example.com/x' })], change()), ['Merge on hold'])
+  })
+})
+
+describe('another tool says its waits in Althar’s words', () => {
+  const tool = (kinds: ReadonlyArray<string>, name = 'publish_release'): ErrandRecord => ({
+    tool: name,
+    target: 'https://github.com/AltharIDE/althar/pull/801',
+    paused: false,
+    waits: kinds.map((kind) => ({ kind, target: 'o/r main' })),
+  })
+
+  it('names each known wait, and each once', () => {
+    assert.deepStrictEqual(errandCardLines([tool(['review', 'approval'])], null), ['Publish release #801 waits for a review'])
+    assert.deepStrictEqual(errandCardLines([tool(['merge_queue'])], null), ['Publish release #801 waits for the merge queue'])
+    assert.deepStrictEqual(errandCardLines([tool(['merge_train'])], null), ['Publish release #801 waits for the merge train'])
+    assert.deepStrictEqual(errandCardLines([tool(['merge_line', 'merge_in_flight'])], null), [
+      'Publish release #801 waits for its turn to merge',
+    ])
+    assert.deepStrictEqual(errandCardLines([tool(['checks', 'review'], 'tag')], null), ['Tag #801 waits for checks and a review'])
+  })
+
+  it('with no waits it goes next, and an MCP tool reads as its own name', () => {
+    assert.deepStrictEqual(errandCardLines([tool([], 'mcp__github__create_release')], null), ['Create release #801 next'])
+    // A wait with nothing plain in it says nothing.
+    assert.deepStrictEqual(errandCardLines([tool(['https://example.com/x'])], null), ['Publish release #801 next'])
+  })
+})
+
+describe('free text at its edges', () => {
+  it('cuts a word longer than the line where it must, and says nothing for dots alone', () => {
+    assert.strictEqual(oneLine('a supercalifragilisticexpialidocious-word', 10), 'a supercal…')
+    assert.strictEqual(plainText('...'), '')
+  })
+
+  it('keeps a word that only looks like a hash', () => {
+    assert.strictEqual(plainText('fixed deadbeef cafe'), 'Fixed deadbeef cafe')
+  })
+})
+
 describe('free text is made plain for a card', () => {
   it('turns a pull request’s address into its number and drops the repository, branch and commit', () => {
     assert.strictEqual(

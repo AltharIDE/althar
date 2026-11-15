@@ -259,6 +259,8 @@ Open it. The first screen finds the agents on your computer and signs in the one
 
 <img src="brand/export/screenshots/framed/first-run.jpg" width="100%" alt="The first screen: Your agents. Claude Code, Codex, GitHub Copilot and OpenCode are signed in, each on its own plan, and Kimi Code and Junie aren't on this computer yet." />
 
+Copilot signs in inside Althar, for personal and work accounts, with no Copilot CLI to install; your organization's application and model policies still apply.
+
 Want a hand getting set up? Book 20 minutes with me: [althar.ai/office-hours](https://althar.ai/office-hours). To build it from source instead, see [DEVELOPMENT.md](DEVELOPMENT.md).
 
 ## Learn more

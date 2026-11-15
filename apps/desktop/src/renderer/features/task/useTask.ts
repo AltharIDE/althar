@@ -313,7 +313,7 @@ export const useTask = (threadId: string): TaskModel => {
   const [mergeFailed, setMergeFailed] = useState<string | null>(null)
   const [loadingEarlier, setLoadingEarlier] = useState(false)
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
-  const [newest] = useState(newestReads)
+  const [newest] = useState(() => newestReads('head'))
   const changed = useRef({ head: false, items: new Set<string>() })
   const taskId = snapshot?.task.id ?? null
   const hasChange = (snapshot?.task.changes.length ?? 0) > 0
@@ -399,10 +399,9 @@ export const useTask = (threadId: string): TaskModel => {
   /**
    * The thread's head again: its task, the agent working, the calls waiting.
    * Its items stay as they are, but for those it may have moved on, read after
-   * it and landing before it: what still waits its turn, and what else is
-   * asked. The runtime has a message delivered before it says the turn on it
-   * runs, so the thread never shows the turn running while what it took still
-   * waits in the queue.
+   * it and published with it: what still waits its turn, and what else is
+   * asked. The thread never shows new work under an idle head, nor the turn
+   * running while what it took still waits in the queue.
    */
   const readHead = useCallback(
     (also: Iterable<string> = []) =>

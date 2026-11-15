@@ -123,6 +123,62 @@ describe('the switch', () => {
     expect(fetch).not.toHaveBeenCalled()
   })
 
+  it('drops an old report across an off/on cycle while its mask is being prepared', async () => {
+    const { fetch, requests } = posthog()
+    const ready = Promise.withResolvers<void>()
+    const started = Promise.withResolvers<void>()
+    let on = true
+    let generation = 0
+    const reports = sender(() => on, fetch, {
+      generation: () => generation,
+      mask: async () => {
+        started.resolve()
+        await ready.promise
+        return mask()
+      },
+    })
+    reports.thrown(new TypeError('Before consent was revoked'), 'window', 'uncaught')
+    await started.promise
+    on = false
+    generation += 1
+    on = true
+    generation += 1
+    ready.resolve()
+    reports.thrown(new Error('After consent was renewed'), 'window', 'uncaught')
+    await reports.stop()
+    expect(sent(requests).map((event) => event.properties.$exception_list[0]?.value)).toEqual(['After consent was renewed'])
+  })
+
+  it('never retries an old request after consent has been revoked and renewed', async () => {
+    const { fetch: answer, requests } = posthog()
+    const first = Promise.withResolvers<void>()
+    const retry = Promise.withResolvers<void>()
+    let on = true
+    let generation = 0
+    let attempts = 0
+    const fetch = vi.fn<CrashReportsOptions['fetch']>(async (url, options) => {
+      attempts += 1
+      if (attempts === 1) {
+        first.resolve()
+        await retry.promise
+        throw new Error('The network dropped the first request')
+      }
+      return answer(url, options)
+    })
+    const reports = sender(() => on, fetch, { generation: () => generation, retryDelay: 1 })
+    reports.thrown(new TypeError('Old request'), 'window', 'uncaught')
+    await first.promise
+    on = false
+    generation += 1
+    on = true
+    generation += 1
+    retry.resolve()
+    reports.thrown(new Error('New request'), 'window', 'uncaught')
+    await reports.stop()
+    expect(attempts).toBe(2)
+    expect(sent(requests).map((event) => event.properties.$exception_list[0]?.value)).toEqual(['New request'])
+  })
+
   it('waits, as Althar quits, for the request itself to be answered, the last fatal one too', async () => {
     const { fetch: answer, requests } = posthog()
     let answered = false

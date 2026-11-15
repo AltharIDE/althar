@@ -131,6 +131,48 @@ describe('times', () => {
 })
 
 describe('reads that come back out of order', () => {
+  it('publishes a head with only the newest of its buffered item reads', async () => {
+    const newest = newestReads('head')
+    const head = Promise.withResolvers<string>()
+    const kept: Array<string> = []
+    const fail = vi.fn()
+    const reading = newest('head', head.promise, (value) => kept.push(value), fail)
+    await newest('item', Promise.resolve('old'), (value) => kept.push(value), fail)
+    await newest('item', Promise.resolve('new'), (value) => kept.push(value), fail)
+    expect(kept).toEqual([])
+    head.resolve('head')
+    await reading
+    expect(kept).toEqual(['head', 'new'])
+    expect(fail).not.toHaveBeenCalled()
+  })
+
+  it('keeps items buffered when a head needs a new whole conversation or a read fails', async () => {
+    const newest = newestReads('head')
+    const first = Promise.withResolvers<string>()
+    const fresh = Promise.withResolvers<string>()
+    const kept: Array<string> = []
+    const fail = vi.fn()
+    let readingFresh: Promise<void> | undefined
+    const reading = newest(
+      'head',
+      first.promise,
+      () => {
+        readingFresh = newest('head', fresh.promise, (value) => kept.push(value), fail)
+      },
+      fail,
+    )
+    await newest('item', Promise.resolve('item'), (value) => kept.push(value), fail)
+    first.resolve('rewritten')
+    await reading
+    expect(kept).toEqual([])
+    fresh.reject(new Error('The port closed'))
+    await readingFresh
+    expect(fail).toHaveBeenCalledOnce()
+    expect(kept).toEqual([])
+    await newest('head', Promise.resolve('reconnected'), (value) => kept.push(value), fail)
+    expect(kept).toEqual(['reconnected', 'item'])
+  })
+
   it('keep only the newest answer for each thing read', async () => {
     const newest = newestReads()
     const kept: Array<string> = []

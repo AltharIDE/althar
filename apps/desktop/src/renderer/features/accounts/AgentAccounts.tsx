@@ -88,7 +88,7 @@ export function AgentSignIn({
       agent={agent.name}
       text={{
         folder: `A folder on ${device.this}`,
-        ...(agent.id === 'copilot-direct' ? { checking: () => 'Preparing GitHub Copilot…' } : {}),
+        ...(agent.id === 'copilot-direct' ? { checking: () => 'Connecting to GitHub…' } : {}),
       }}
       position={position}
       {...(account === undefined ? {} : { account })}
@@ -134,7 +134,11 @@ export function AgentAccounts({ agent, start, signIn }: { agent: AgentStatus; st
     <Accounts
       agent={agent.name}
       accounts={accounts.map((account) =>
-        accountEntry(agent.id === 'copilot-direct' && !agent.installed ? { ...account, signIn: 'signed_out' } : account),
+        accountEntry(
+          agent.id === 'copilot-direct' && (!agent.installed || account.signIn === 'unknown')
+            ? { ...account, signIn: 'signed_out' }
+            : account,
+        ),
       )}
       // An agent whose sign-in every folder shares has its one account (the registry's `home.accounts`).
       {...(agent.addsAccounts ? { onAdd: () => signIn.add(agent.id) } : {})}

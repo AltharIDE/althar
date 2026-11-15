@@ -9,11 +9,13 @@ import { Fact, FactLine } from '../src/board/BoardCard/Chips'
  */
 
 describe('FactLine', () => {
-  const sizes = { scroll: 300, room: 200 }
   let notify: () => void = () => {}
-  afterEach(() => vi.unstubAllGlobals())
+  afterEach(() => {
+    vi.restoreAllMocks()
+    vi.unstubAllGlobals()
+  })
 
-  const measure = () => {
+  const measure = (sizes: { scroll: number; room: number }) => {
     vi.stubGlobal(
       'ResizeObserver',
       class {
@@ -24,13 +26,14 @@ describe('FactLine', () => {
         disconnect() {}
       },
     )
-    Object.defineProperty(HTMLElement.prototype, 'scrollWidth', { configurable: true, get: () => sizes.scroll })
+    vi.spyOn(HTMLElement.prototype, 'scrollWidth', 'get').mockImplementation(() => sizes.scroll)
     // The line fills the room it is in, as a block does.
-    Object.defineProperty(HTMLElement.prototype, 'clientWidth', { configurable: true, get: () => sizes.room })
+    vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockImplementation(() => sizes.room)
   }
 
   it('becomes a list where its facts overflow, and a line again once there is room', () => {
-    measure()
+    const sizes = { scroll: 300, room: 200 }
+    measure(sizes)
     const { container } = render(
       <div data-room="">
         <FactLine>

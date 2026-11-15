@@ -107,37 +107,41 @@ describe('Copilot sign-in without a terminal', () => {
     expect(client.startAccountSignIn).not.toHaveBeenCalled()
   })
 
-  it('prepares the engine first and does not start a sign-in that was cancelled during download', async () => {
+  it('starts native sign-in without downloading an engine and cancels a late flow', async () => {
     const { client } = fakeClient()
-    let finish: () => void = () => {}
-    const installing = new Promise<void>((resolve) => {
+    let finish: (value: { flowId: string; state: { state: 'starting' } }) => void = () => {}
+    const starting = new Promise<{ flowId: string; state: { state: 'starting' } }>((resolve) => {
       finish = resolve
     })
-    vi.spyOn(client, 'installAgent').mockReturnValue(installing)
+    const install = vi.spyOn(client, 'installAgent')
+    const cancel = vi.spyOn(client, 'cancelAccountSignIn')
+    vi.spyOn(client, 'startAccountSignIn').mockReturnValue(starting)
     const { result } = signInOf(client, startOf(copilotStatus(false)))
     act(() => result.current.again('copilot-direct', 'acc_copilot'))
     act(() => result.current.way(SignInWay.Browser))
     expect(result.current.signingIn?.step.kind).toBe('checking')
-    expect(client.installAgent).toHaveBeenCalledWith('copilot-direct')
-    expect(client.startAccountSignIn).not.toHaveBeenCalled()
+    expect(install).not.toHaveBeenCalled()
+    await waitFor(() => expect(client.startAccountSignIn).toHaveBeenCalled())
     act(() => result.current.cancel())
     await act(async () => {
-      finish()
-      await installing
+      finish({ flowId: 'late-native-flow', state: { state: 'starting' } })
+      await starting
     })
-    expect(client.startAccountSignIn).not.toHaveBeenCalled()
+    expect(cancel).toHaveBeenCalledWith('late-native-flow')
     expect(result.current.signingIn).toBeNull()
   })
 
-  it('explains a download failure and returns to a usable sign-in', async () => {
+  it('explains a native sign-in failure and returns to a usable sign-in', async () => {
     const { client } = fakeClient()
-    vi.spyOn(client, 'installAgent').mockRejectedValue(
-      new ApiError({ reason: 'InstallFailed', message: 'The download stopped. Try again.' }),
+    vi.spyOn(client, 'startAccountSignIn').mockRejectedValue(
+      new ApiError({ reason: 'CopilotFailed', message: 'GitHub did not approve this application.' }),
     )
     const { result } = signInOf(client, startOf(copilotStatus(false)))
     act(() => result.current.again('copilot-direct', 'acc_copilot'))
     act(() => result.current.way(SignInWay.Browser))
-    await waitFor(() => expect(result.current.signingIn?.step).toEqual({ kind: 'failed', said: 'The download stopped. Try again.' }))
+    await waitFor(() =>
+      expect(result.current.signingIn?.step).toEqual({ kind: 'failed', said: 'GitHub did not approve this application.' }),
+    )
     act(() => result.current.back())
     expect(result.current.signingIn?.step.kind).toBe('choose')
   })

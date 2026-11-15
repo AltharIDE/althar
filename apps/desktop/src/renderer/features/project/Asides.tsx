@@ -58,7 +58,13 @@ const BELIEVED = 10_000
  * on the board as work, from the press until the board's own read says so. One the runtime refused comes back, and `failed`
  * says why. `over` is the board as the person sees it, which the lanes, the pills and the flights are drawn from.
  */
-export function useAsideMoves(client: Client, board: BoardSnapshot | null, projectId: string | null = null) {
+export function useAsideMoves(client: Client, read: BoardSnapshot | null, projectId: string | null = null) {
+  // Once the board acknowledged a move, its optimistic mask goes. A slower read started before it must not undo that
+  // acknowledgement; a later cursor can still reopen an aside. Each project has its own remembered board.
+  const [newest, setNewest] = useState({ projectId, board: read })
+  const newer = newest.projectId !== projectId || (read !== null && (newest.board === null || read.cursor > newest.board.cursor))
+  if (newer) setNewest({ projectId, board: read })
+  const board = read !== null && !newer && newest.board !== null && read.cursor < newest.board.cursor ? newest.board : read
   const [moves, setMoves] = useState<ReadonlyMap<string, Move>>(new Map())
   const [failed, setFailed] = useState<string | null>(null)
   const drop = (taskId: string) =>

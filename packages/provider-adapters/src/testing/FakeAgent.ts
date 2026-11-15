@@ -373,8 +373,8 @@ export interface FakeAgentOptions {
   readonly leavesForGood?: boolean
   /** Called as it is asked to set its model or effort, before it answers. */
   readonly optionAsked?: (configId: string, value: string) => void
-  /** Called as it is given a prompt, before it answers. */
-  readonly promptAsked?: () => void
+  /** Called as it is given a prompt; an async callback holds its answer until the test lets it go on. */
+  readonly promptAsked?: (prompt: string) => void | Promise<void>
   /**
    * Whether it holds its answer to a request to set its model or effort, asked while one waits: as an agent does that answers
    * one request at a time and is at its turn. It answers once this says no.
@@ -1850,7 +1850,7 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
       // What it was given in the prompts it did nothing with, it reads with this one, as its transcript keeps them.
       const prompted = `${session.unread}${params.prompt.map((block) => (block.type === 'text' ? block.text : '')).join('')}`
       session.prompts += 1
-      options.promptAsked?.()
+      if (options.promptAsked !== undefined) await options.promptAsked(prompted)
       const blank = options.blank ?? 0
       if (
         typeof blank === 'number'
