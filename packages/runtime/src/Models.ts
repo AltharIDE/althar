@@ -15,6 +15,7 @@ import { Instance } from './Instance'
 import { blockedModelsOf, defaultEffortsOf, setDefaultEffort, setModelBlocked } from './preferences'
 import { change, timestamp } from './records'
 import { SignIns } from './SignIns'
+import { Accounts } from './Accounts'
 
 /*
  * The models each agent offers, and how hard each can be asked to think, in
@@ -51,7 +52,7 @@ export interface AgentModels {
   readonly images: boolean | null
 }
 
-type Store = SqlClient.SqlClient | Ledger | Crypto.Crypto | Instance | Agents | SignIns | Installs | RuntimeConfig
+type Store = SqlClient.SqlClient | Ledger | Crypto.Crypto | Instance | Agents | SignIns | Installs | RuntimeConfig | Accounts
 
 export interface OfferedModel {
   readonly id: string
@@ -210,6 +211,7 @@ export class Models extends Context.Service<
       const sql = yield* SqlClient.SqlClient
       const agents = yield* Agents
       const signIns = yield* SignIns
+      const accounts = yield* Accounts
       const installs = yield* Installs
       const instance = yield* Instance
       const context = yield* Effect.context<Store>()
@@ -254,7 +256,9 @@ export class Models extends Context.Service<
           (folder) =>
             Effect.gen(function* () {
               const { definition } = entry
-              const transport = entry.transport(folder)
+              // Copilot CLI's probe must use the same account host as its login and sessions.
+              const account = entry.definition.id === 'copilot' ? (yield* accounts.of('copilot'))[0] : undefined
+              const transport = account === undefined ? entry.transport(folder) : entry.transport(folder, accounts.env(account))
               const processId = transport._tag === 'Process' ? yield* newId(Ids.process) : undefined
               if (transport._tag === 'Process' && processId !== undefined)
                 yield* sql`INSERT INTO processes ${sql.insert({

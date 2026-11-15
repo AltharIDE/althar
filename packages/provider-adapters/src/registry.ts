@@ -1447,8 +1447,8 @@ const cliAgents: Readonly<Record<Exclude<AgentId, 'copilot-direct'>, AgentDefini
       command: 'copilot',
       args: ['--acp', '--no-auto-update', '--excluded-tools', 'task'],
       env: { COPILOT_AUTO_UPDATE: 'false', COPILOT_DISABLE_LOGIN_SHELL_ENV: '1' },
-      // GH_HOST names a GHE.com tenant (`yourorg.ghe.com`) for those whose Copilot is there, as `copilot login --host` does.
-      inheritEnv: ['COPILOT_HOME', 'GH_HOST'],
+      // The host variables name a GHE.com tenant (`yourorg.ghe.com`), as `copilot login --host` does.
+      inheritEnv: ['COPILOT_HOME', 'GH_HOST', 'COPILOT_GH_HOST'],
     }),
     modes: {
       ask: 'https://agentclientprotocol.com/protocol/session-modes#agent',

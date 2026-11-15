@@ -17,7 +17,7 @@ The mark is the section through an architect's triangular scale ruler, bored thr
 | [`export/emoji`](export/emoji) | The mark on its cobalt tile, and the two signals as dots: cobalt for work running now, violet for something that needs a person | SVG; PNG at 128, for Slack and Discord |
 | [`export/web`](export/web) | The favicon kit: SVG, `.ico`, Apple touch icon, and the 192 and 512 icons | |
 | [`export/screenshots`](export/screenshots) | Screens of the app on the demo projects, at twice their size: whole screens (a project's home, the home, the board, a task as a graph, a task with its canvas and with the browser beside it, a review's findings in the code, automations, project rules, the first run), and pieces cut to their own box (the coordinator's plan, dictation in a composer, a review). In [`framed/`](export/screenshots/framed), each as a window on the Aurora wallpaper at night, for the README and posts | PNG; JPEG framed |
-| [`export/reels`](export/reels) | Short loops of the app on the demo projects: the island dropping open, for the README, and its details (the launch, agents and accounts, the app icon, the home at rest) | GIF |
+| [`export/reels`](export/reels) | Short loops of the app on the demo projects, zoomed into one feature each, for the README's feature table: the coordinator's plan, a review settled, the board, a task out of usage, an automation, a skill, the canvas, dictation and the island, each in the light (`name.gif`) and the dark (`name-dark.gif`); and the details (the launch, agents and accounts, the app icon, the home at rest) | GIF |
 | [`export/drawings`](export/drawings) | The landing page's feature drawings (accounts in turn, work that starts itself, conflicts settled, worktrees, workspaces), each still, at 1600 × 1000, light and `-dark`, for posts | JPEG |
 | [`export/crew`](export/crew) | The crew, one figure each: project, coordinator, task, lead and a step (the reviewer). They blink and fidget, in an `<img>` too. The `-dark` copies stand in a pool of paper light, for dark pages. Drawn by the site's docs figures, not this package: `bun apps/site/scripts/figures-svg.ts brand/export/crew` | SVG |
 | [`export/palette`](export/palette) | The colours, with what each is for | JSON |
@@ -86,7 +86,7 @@ bun --filter @althar/brand export             # marks, lockups, avatars, emoji, 
 bun --filter @althar/brand export:banners     # just the banners and the printed avatar; name some to draw only those
 bun --filter @althar/brand export:wallpapers  # just the wallpapers
 bun --filter @althar/brand export:screenshots # the screenshots (builds the UI package's Storybook first if it isn't built)
-bun --filter @althar/brand export:reels       # the reels, recorded from the same Storybook; needs ffmpeg
+bun --filter @althar/brand export:reels       # the reels, recorded from the same Storybook; needs ffmpeg. Name some to record only those; REELS_PREVIEW=1 tries one quickly, in the light, into test-results/reels
 bun --filter @althar/brand export:drawings    # the landing page's feature drawings, from apps/site, light and dark
 ```
 
