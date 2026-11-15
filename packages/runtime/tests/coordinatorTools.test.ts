@@ -214,6 +214,51 @@ describe('the coordinator’s tools, at their other turns', () => {
     }).pipe(Effect.provide(runtime())),
   )
 
+  it.live('lets a lead read the coordinator conversation and page back without changing its own default', () =>
+    Effect.gen(function* () {
+      const project = yield* open
+      const task = yield* (yield* Projects).createTask({
+        envelope: yield* Runtime.envelope('task.create', {}),
+        projectId: project.projectId,
+        title: 'Read the draft',
+      })
+      const threadId = yield* (yield* Coordinator).thread(project.projectId)
+      yield* addItem({ projectId: project.projectId as ProjectId, threadId: task.threadId }, 'agent_message', { text: 'Own task note' })
+      yield* (yield* Sessions).send({
+        envelope: yield* Runtime.envelope('thread.send', {}),
+        threadId,
+        body: 'Use my draft',
+        disposition: 'after_current',
+        sender: { kind: 'window' },
+      })
+      for (let at = 0; at < 40; at += 1)
+        yield* addItem({ projectId: project.projectId as ProjectId, threadId }, 'agent_message', {
+          text: `Draft ${at}: ${'Coordinator wording. '.repeat(50)}`,
+        })
+      const lead: ToolAccess = {
+        role: 'lead',
+        projectId: project.projectId,
+        threadId: task.threadId,
+        sessionId: 'none',
+        taskId: task.taskId,
+      }
+      assert.include(yield* callTool(lead, 'read_thread', {}), 'Own task note')
+      assert.include(yield* callTool(lead, 'read_thread', { task: task.slug }), 'Own task note')
+      const latest = yield* callTool(lead, 'read_thread', { coordinator: true })
+      assert.include(latest, 'Draft 39:')
+      assert.notInclude(latest, 'Own task note')
+      assert.notInclude(latest, '[you]')
+      const omitted = Number(/The (\d+) earliest items/.exec(latest)?.[1])
+      assert.isAbove(omitted, 0)
+      const earlier = yield* callTool(lead, 'read_thread', { coordinator: true, before: omitted })
+      assert.include(earlier, 'Use my draft')
+      assert.include(earlier, 'Draft 0:')
+      assert.notInclude(earlier, 'Draft 39:')
+      assert.strictEqual(yield* callTool(lead, 'read_thread', { coordinator: true, before: 0 }), 'Nothing comes before that.')
+      assert.include(yield* callTool(lead, 'read_thread', { coordinator: true, task: task.slug }), 'Choose either')
+    }).pipe(Effect.provide(runtime())),
+  )
+
   it.live('reads a long conversation from its latest part, saying how to read further back', () =>
     Effect.gen(function* () {
       const project = yield* open
