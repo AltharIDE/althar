@@ -137,9 +137,15 @@ const start = (job, lane) => {
   child.once('exit', () => { if (stopped) closePipes() })
   const stop = () => {
     stopped = true
+    // Windows can know the root is gone before libuv has delivered exit. TerminateProcess then replaces its real code
+    // with a signal: leave that already-dead process alone and let exit release its inherited pipes.
+    let gone = child.exitCode !== null || child.signalCode !== null
+    if (!gone && process.platform === 'win32' && child.pid !== undefined) {
+      try { process.kill(child.pid, 0) } catch (error) { gone = error.code === 'ESRCH' }
+    }
     try {
       if (job.detached && child.pid !== undefined) process.kill(-child.pid, 'SIGTERM')
-      else child.kill()
+      else if (!gone) child.kill()
     } catch {
       child.kill()
     }
@@ -282,9 +288,17 @@ export const startHere = (command: Command): Started => {
   })
   const stop = () => {
     stopped = true
+    let gone = child.exitCode !== null || child.signalCode !== null
+    if (!gone && process.platform === 'win32' && child.pid !== undefined) {
+      try {
+        process.kill(child.pid, 0)
+      } catch (error) {
+        gone = (error as NodeJS.ErrnoException).code === 'ESRCH'
+      }
+    }
     try {
       if (command.detached && child.pid !== undefined) process.kill(-child.pid, 'SIGTERM')
-      else child.kill()
+      else if (!gone) child.kill()
     } catch {
       child.kill()
     }

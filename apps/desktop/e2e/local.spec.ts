@@ -114,7 +114,8 @@ test('works Local: asks before it takes the checkout, waits for it, and gives it
     await expect(next.getByText('After Fix the login')).toBeVisible()
     await expect(next.getByText('Waits for Local', { exact: true })).toBeVisible()
     await expect(next.getByText('Paused', { exact: true })).toHaveCount(0)
-    await expect(work.getByText('Change · Local')).toHaveCount(2)
+    // Change is the usual kind and is no longer repeated on a board row; both tasks still name Local.
+    await expect(work.getByText('Local', { exact: true })).toHaveCount(2)
     await shoot(page, work, 'board')
 
     // The first abandoned: the checkout goes back to main, and the second takes it.
