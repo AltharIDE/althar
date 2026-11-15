@@ -10,9 +10,10 @@ import {
 } from '@althar/contracts'
 import {
   Board,
-  BoardCard,
+  BoardCard as KitBoardCard,
   boardCardText,
   type BoardCardProps,
+  useTypedTitle,
   BoardColumn,
   BoardDivider,
   BoardEmpty,
@@ -408,6 +409,11 @@ const findingsOf = (reviewing: ReviewBrief) => {
 }
 
 /** The card's own props, without how it opens. */
+/** The kit's card, its title typed in where an agent renames the task (the person's own rename shows at once). */
+function BoardCard(props: BoardCardProps) {
+  return <KitBoardCard {...props} title={useTypedTitle(props.title)} />
+}
+
 type Card = Omit<BoardCardProps, 'onOpen' | 'current' | 'text'>
 
 /** What a task handed back, as its card shows it: a row of pictures, or else a few files; nothing where it handed back none. */

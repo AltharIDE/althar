@@ -12,6 +12,7 @@ import {
   AttachPullRequest,
   ChangeView,
   BackCrumb,
+  useTypedTitle,
   Button,
   Delivery,
   DiffLineKind,
@@ -650,6 +651,8 @@ export function TaskView({
   // What its pull request says while the task is open shows on the pill over the composer for a moment.
   const heard = useHeard(model.snapshot?.items ?? null)
   const snapshot = model.snapshot
+  // An agent's rename types itself into the title; the person's own shows at once.
+  const typedTitle = useTypedTitle(snapshot?.task.title ?? '')
   if (snapshot === null) {
     return (
       <div className={embedded ? s.aside : s.window}>
@@ -1295,7 +1298,7 @@ export function TaskView({
               <BackCrumb
                 to={snapshot.project.name}
                 kbd="esc"
-                title={snapshot.task.title}
+                title={typedTitle}
                 titleLevel={1}
                 maxLength={TITLE_LENGTH}
                 editing={renaming}
