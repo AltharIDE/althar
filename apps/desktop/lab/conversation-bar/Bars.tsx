@@ -221,7 +221,7 @@ function Clear({ aside, bar, className }: { aside: Aside; bar: Bar; className: s
   const { onClear, t } = bar
   if (onClear === undefined) return null
   return (
-    <Tooltip label={t.clear}>
+    <Tooltip label="Clear">
       <button type="button" className={className} aria-label={t.clearOne(nameOf(aside, t))} onClick={() => onClear(aside.id)}>
         <Icon name="close" size={9} />
       </button>
@@ -236,7 +236,7 @@ function Older({ bar, className, chevron = false }: { bar: Bar; className: strin
   return (
     <Menu
       label={t.older(older.length)}
-      note={t.olderNote}
+      note="Untouched for over a week. Cleared, ⌘K still finds them."
       align="end"
       trigger={
         <button type="button" className={className}>

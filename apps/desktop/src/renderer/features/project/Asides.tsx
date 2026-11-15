@@ -420,7 +420,7 @@ export function useAsides({
   }
 }
 
-/** The pills over the coordinator's conversation, flying one that left for the board to its card there. */
+/** The heading over the coordinator's conversation, flying an aside that left for the board to its card there. */
 export function AsidesBar({
   scratch,
   open,
@@ -452,13 +452,35 @@ export function AsidesBar({
   })
   const strip = useRef<HTMLDivElement>(null)
   useFlights(strip, scratch, board)
+  const [searching, setSearching] = useState(false)
+  // ⌘J, from anywhere in the window, opens the search over every conversation, or shuts it. A project kept behind another
+  // tab runs no effects (KeptScreens' Activity), so this is the one in front; with its conversation's pane closed, it waits.
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (!(event.metaKey || event.ctrlKey) || event.shiftKey || event.altKey || event.key.toLowerCase() !== 'j') return
+      if (strip.current?.checkVisibility?.() === false) return
+      event.preventDefault()
+      setSearching((was) => !was)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [])
+  // When each was last spoken in, as the search says it.
+  const dated = (one: Aside): Aside => {
+    const task = scratch.find((candidate) => candidate.taskId === one.id)
+    const at = task === undefined ? '' : ago(task.latest?.at ?? task.createdAt, new Date(now))
+    return at === '' ? one : { ...one, ago: at }
+  }
   return (
     <AsideTabs
       ref={strip}
       className={s.bar}
       mark={coordinatorSigned.mark}
-      asides={recent}
-      older={older}
+      asides={recent.map(dated)}
+      older={older.map(dated)}
+      searching={searching}
+      onSearchingChange={setSearching}
+      searchKbd="⌘J"
       current={open.kind === 'coordinator' ? null : open.taskId}
       onPick={onPick}
       onNew={onNew}
@@ -469,8 +491,9 @@ export function AsidesBar({
 }
 
 /**
- * An aside that left Scratch for the board flies from its pill to its card
- * there, or to the Board tab with the board closed; one cleared just goes.
+ * An aside that left Scratch for the board flies from where the bar shows it
+ * (the heading, or its word among the latest) to its card there, or to the
+ * Board tab with the board closed; one cleared just goes.
  */
 function useFlights(strip: RefObject<HTMLDivElement | null>, scratch: ReadonlyArray<BoardTask>, board: ReadonlyArray<BoardTask>) {
   // Where each pill was, last drawn, and the pill: once it leaves, it is gone from the page, and only then copied to fly.
