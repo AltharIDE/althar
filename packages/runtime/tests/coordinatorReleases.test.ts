@@ -4,9 +4,9 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import { ConnectorFailed } from '@althar/connectors'
-import { type FakeService, makeFakeService } from '@althar/connectors/testing'
+import { type FakeService, type FakeServiceOptions, makeFakeService } from '@althar/connectors/testing'
 import type { MessageSender } from '@althar/contracts'
-import { Ids, newId } from '@althar/domain'
+import { Ids, newId, type ProjectId } from '@althar/domain'
 import { assert, describe, it } from '@effect/vitest'
 import { Effect } from 'effect'
 import { SqlClient } from 'effect/sql'
@@ -15,6 +15,7 @@ import { Connections } from '../src/Connections'
 import { Coordinator } from '../src/Coordinator'
 import { coordinatorFolder } from '../src/coordinatorFolder'
 import { Instance } from '../src/Instance'
+import { MergeLine } from '../src/MergeLine'
 import { Projects } from '../src/Projects'
 import { timestamp } from '../src/records'
 import * as Runtime from '../src/Runtime'
@@ -86,13 +87,110 @@ const lines = (access: ToolAccess) =>
     (rows) => rows.map((row) => (JSON.parse(row.content) as { title: string }).title),
   )
 
-const github = () => {
-  const host = makeFakeService()
+const github = (options: FakeServiceOptions = {}) => {
+  const host = makeFakeService(options)
   const repository = host.addRepository(PATH)
   return { host, repository, working: hosted(PATH).working }
 }
 
 describe('the coordinator tagging', () => {
+  it.live('keeps a task slug before its PR exists, wakes on green, merges, and then tags that exact merge on news alone', () => {
+    let green = false
+    const raw = makeFakeService({ checksFor: () => [{ name: 'test', state: green ? 'passed' : 'running' }] })
+    const host: FakeService = {
+      ...raw,
+      change: (...args) =>
+        Effect.map(raw.change(...args), (change) => ({ ...change, url: change.url.replace('https://github.com', HOST) })),
+    }
+    const repository = host.addRepository(PATH)
+    const { working } = hosted(PATH)
+    return Effect.gen(function* () {
+      const { coordinator, sql } = yield* project(working)
+      const task = yield* (yield* Projects).createTask({
+        envelope: yield* Runtime.envelope('task.create', {}),
+        projectId: coordinator.projectId as ProjectId,
+        title: 'Release prep',
+        draft: true,
+      })
+      const [row] = yield* sql<{ slug: string }>`SELECT slug FROM tasks WHERE id = ${task.taskId}`
+      const slug = row!.slug
+      const message = yield* turn(coordinator, 'Once the release task’s PR is ready and green, merge it then tag its merge commit v0.9.0')
+      const errand = yield* callTool(coordinator, 'keep_errand', {
+        message,
+        steps: [
+          {
+            key: 'merge',
+            tool: 'merge_pull_request',
+            taskId: slug,
+            target: `task:${slug}`,
+            request: {},
+            waits: [{ kind: 'task_pull_request', target: slug }],
+          },
+          {
+            key: 'tag',
+            tool: 'push_tag',
+            taskId: slug,
+            target: 'meridian/api tag v0.9.0',
+            request: { tag: 'v0.9.0', commit: `task:${slug}` },
+            waits: [{ kind: 'task_merged', target: slug }],
+          },
+        ],
+      })
+      assert.match(errand, /^errand_/)
+      const line = yield* MergeLine
+      const heard = () =>
+        sql<{
+          id: string
+          body: string
+        }>`SELECT id, body FROM user_inputs WHERE thread_id = ${coordinator.threadId} AND input_origin = 'news' ORDER BY sequence DESC`
+      // No PR yet; keeping and watching do not occupy a coordinator turn or take any action.
+      yield* line.tick(coordinator.projectId)
+      assert.lengthOf(yield* heard(), 0)
+      const pull = host.addPullRequest({ path: PATH, title: 'Release 0.9.0', author: 'you', draft: true })
+      const at = yield* timestamp
+      yield* sql`INSERT INTO external_links ${sql.insert({ id: yield* newId(Ids.externalLink), projectId: coordinator.projectId, taskId: task.taskId, product: 'github', kind: 'change', externalId: pull.id, ref: String(pull.number), key: String(pull.number), url: pull.url.replace('https://github.com', HOST), snapshot: JSON.stringify({ ...pull, repository: PATH }), listening: 1, createdAt: at, updatedAt: at })}`
+      yield* line.tick(coordinator.projectId)
+      assert.lengthOf(yield* heard(), 0, 'a draft is not bound')
+      yield* host.markReady(repository, pull)
+      yield* line.tick(coordinator.projectId)
+      assert.lengthOf(yield* heard(), 0, 'running checks do not wake a merge')
+      assert.lengthOf(host.tagsPushed, 0)
+      // Deliver the actual watcher's news as the next turn, as the session host does. No fresh person message.
+      const deliver = (id: string) =>
+        Effect.gen(function* () {
+          yield* sql`UPDATE turn_deliveries SET state = 'completed' WHERE thread_id = ${coordinator.threadId}`
+          const turnId = yield* newId(Ids.turnDelivery)
+          yield* sql`INSERT INTO turn_deliveries ${sql.insert({ id: turnId, projectId: coordinator.projectId, threadId: coordinator.threadId, providerSessionId: coordinator.sessionId, controllerGeneration: 1, state: 'delivered', origin: 'news', requestedAt: yield* timestamp, deliveredAt: yield* timestamp })}`
+          yield* sql`INSERT INTO turn_delivery_inputs ${sql.insert({ projectId: coordinator.projectId, deliveryId: turnId, userInputId: id, position: 1 })}`
+        })
+      green = true
+      yield* line.tick(coordinator.projectId)
+      const [mergeNews] = yield* heard()
+      assert.include(mergeNews!.body, `merge_pull_request with errand "${errand}" and step "merge"`)
+      yield* deliver(mergeNews!.id)
+      assert.include(yield* callTool(coordinator, 'merge_pull_request', { errand, step: 'merge' }), 'Merged')
+      const landed = (yield* host.change(repository, pull.number)).mergeCommit
+      assert.isNotNull(landed)
+      // Main moves again before the tag. The release must still tag the first PR's landed commit.
+      const later = host.addPullRequest({ path: PATH, title: 'Another change', author: 'you' })
+      yield* host.merge(repository, later)
+      assert.notStrictEqual(yield* host.commitOf(repository, 'main'), landed)
+      // Even a new PR attached to this same task cannot retarget the tag step.
+      yield* sql`INSERT INTO external_links ${sql.insert({ id: yield* newId(Ids.externalLink), projectId: coordinator.projectId, taskId: task.taskId, product: 'github', kind: 'change', externalId: later.id, ref: String(later.number), key: String(later.number), url: later.url.replace('https://github.com', HOST), snapshot: JSON.stringify({ ...later, repository: PATH }), listening: 1, createdAt: yield* timestamp, updatedAt: yield* timestamp })}`
+      yield* line.tick(coordinator.projectId)
+      const [tagNews] = yield* heard()
+      assert.include(tagNews!.body, 'Take it now: push_tag with ')
+      yield* deliver(tagNews!.id)
+      const args = JSON.parse(tagNews!.body.split('Take it now: push_tag with ')[1]!.split('}.')[0]! + '}') as Record<string, unknown>
+      assert.include(yield* callTool(coordinator, 'push_tag', args), 'Pushed the tag v0.9.0')
+      assert.deepStrictEqual(host.tagsPushed, [{ name: 'v0.9.0', commit: landed!, moved: false }])
+      assert.strictEqual((yield* sql<{ state: string }>`SELECT state FROM errands WHERE id = ${errand}`)[0]?.state, 'done')
+      yield* callTool(coordinator, 'push_tag', args)
+      yield* line.tick(coordinator.projectId)
+      assert.lengthOf(host.tagsPushed, 1, 'news retries cannot push the tag twice')
+    }).pipe(Effect.provide(withHost(host)))
+  })
+
   it.live('tags the default branch’s head on the person’s word, once, says so in its chat, and refuses news', () => {
     const { host, repository, working } = github()
     return Effect.gen(function* () {
@@ -470,7 +568,7 @@ describe('a release errand', () => {
   it.live('goes on across a restart in the middle, reading back what it did and doing nothing twice', () =>
     Effect.gen(function* () {
       const database = join(mkdtempSync(join(tmpdir(), 'althar-release-restart-')), 'profile.sqlite')
-      const { host, repository, working } = github()
+      const { host, repository, working } = github({ checksOn: () => [{ name: 'post-merge', state: 'passed' }] })
       // The approval reaches GitHub, and its answer is lost on the way back, once.
       let lose = true
       const lossy: FakeService = {
@@ -515,13 +613,24 @@ describe('a release errand', () => {
         const kept = yield* callTool(coordinator, 'keep_errand', { message: word, steps })
         const errand = /^errand_[0-9a-f]+$/.test(kept) ? kept : ''
         assert.isNotEmpty(errand, kept)
-        // News starts the next turns: only the errand's steps go.
+        // The real sweep watches post-merge checks, and wakes only the next step.
+        yield* (yield* MergeLine).tick(coordinator.projectId)
+        const sql = yield* SqlClient.SqlClient
+        assert.lengthOf(
+          yield* sql`SELECT id FROM user_inputs WHERE thread_id = ${coordinator.threadId} AND input_origin = 'news' AND body LIKE '%Take it now: push_tag with%'`,
+          1,
+        )
         yield* turn(coordinator, 'post-merge passed on main', { kind: 'internal' })
         assert.include(
           yield* callTool(coordinator, 'push_tag', { tag: 'v0.7.0', commit: head, errand, step: 'tag' }),
           'Pushed the tag v0.7.0',
         )
         host.startRun(PATH, { ref: 'v0.7.0', name: 'release', gates: [{ name: 'release' }] })
+        yield* (yield* MergeLine).tick(coordinator.projectId)
+        assert.lengthOf(
+          yield* sql`SELECT id FROM user_inputs WHERE thread_id = ${coordinator.threadId} AND input_origin = 'news' AND body LIKE '%Take it now: approve_release_run with%'`,
+          1,
+        )
         yield* turn(coordinator, 'The release run waits for approval', { kind: 'internal' })
         const lost = yield* callTool(coordinator, 'approve_release_run', {
           tag: 'v0.7.0',
@@ -550,6 +659,11 @@ describe('a release errand', () => {
         const [run] = yield* host.runs(repository, 'v0.7.0')
         host.finishRun(run!.id, 'passed')
         host.draftRelease(PATH, 'v0.7.0', ['Althar-0.7.0-arm64.dmg'])
+        yield* (yield* MergeLine).tick(coordinator.projectId)
+        assert.lengthOf(
+          yield* sql`SELECT id FROM user_inputs WHERE thread_id = ${coordinator.threadId} AND input_origin = 'news' AND body LIKE '%Take it now: publish_release with%'`,
+          1,
+        )
         yield* turn(coordinator, 'The draft is there', { kind: 'internal' })
         assert.include(
           yield* callTool(coordinator, 'publish_release', { tag: 'v0.7.0', errand: before.errand, step: 'publish' }),
