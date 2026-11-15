@@ -19,7 +19,7 @@ import { Fresh, FreshWhole, useFreshly, useFreshness } from './fresh'
 import { isRelative, type MarkdownMarks, resolvePath } from './changes'
 import { CodeBlock, Diagram, type DiagramText } from './Diagram'
 import { drawHtml, type HtmlParts, tagOf } from './html'
-import { blocksOf, type Lexed, lexAll, lexOn } from './lexed'
+import { blocksOf, type Lexed, lexAll, lexOn, lexWith } from './lexed'
 import s from './Markdown.module.css'
 import { streamable } from './streaming'
 
@@ -376,7 +376,7 @@ function BlockOf({ token, defs, base, t }: BlockProps): ReactNode {
         return (
           <div className={s.alert} data-alert={alert.kind} role="note" aria-label={t.alerts?.[alert.kind] ?? ALERTS[alert.kind]}>
             <p className={s.alertName}>{t.alerts?.[alert.kind] ?? ALERTS[alert.kind]}</p>
-            {new Lexer().lex(alert.rest).map((c, j) => (
+            {lexWith(alert.rest, defs).map((c, j) => (
               <Block key={j} token={c} defs={defs} base={base} t={t} />
             ))}
           </div>

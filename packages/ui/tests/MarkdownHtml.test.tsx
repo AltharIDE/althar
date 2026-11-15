@@ -80,6 +80,21 @@ describe('a markdown file written with HTML', () => {
     expect(document.body.textContent).toContain('<p align="center">Hi</p>')
   })
 
+  it('keeps the document’s link definitions in an alert, in a file and in what is said', () => {
+    const source = '> [!NOTE]\n> See [the guide][g].\n\n[g]: docs/guide.md'
+    const open = vi.fn()
+    const { unmount } = render(<Markdown file={file(open)} source={source} />)
+    fireEvent.click(within(screen.getByRole('note', { name: 'Note' })).getByRole('button', { name: 'the guide' }))
+    expect(open).toHaveBeenCalledWith('docs/guide.md')
+    unmount()
+    render(<Markdown source={'> [!NOTE]\n> See [the guide][g].\n\n[g]: https://example.com/guide'} />)
+    expect(
+      within(screen.getByRole('note', { name: 'Note' }))
+        .getByRole('link', { name: /the guide/ })
+        .getAttribute('href'),
+    ).toBe('https://example.com/guide')
+  })
+
   it('draws a GitHub alert as a callout under its name', () => {
     render(<Markdown file={file()} source={'> [!NOTE]\n> **Early.** Things will change.'} />)
     const note = screen.getByRole('note', { name: 'Note' })

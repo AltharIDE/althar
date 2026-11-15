@@ -5,6 +5,7 @@ import { type DiffLine, DiffLineKind, type FileView, type ViewedFinding, worstFi
 
 import { messageOf } from '../../data/client'
 import { useServices } from '../../data/services'
+import { useImagesFollow } from '../../shared/code/finds'
 
 /*
  * A task's change, over the whole window: whether it's open, the file you're
@@ -151,6 +152,7 @@ export const useChanges = (taskId: string | null, first: string | null, moved = 
     }
   }, [client, open, waiting, taskId, path, whole, key])
 
+  useImagesFollow(read?.view)
   return {
     open,
     selected: path,

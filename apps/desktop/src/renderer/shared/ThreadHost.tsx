@@ -24,6 +24,7 @@ import { PageView } from '../features/browser/PageView'
 import { CanvasHost, type OpenCanvas } from '../features/canvases/CanvasHost'
 import { type BenchWidth, PAGE_BENCH, useBenchWidth } from './code/bench'
 import { pictureOf } from './code/FilePicture'
+import { useImagesFollow } from './code/finds'
 import { foundRead } from './code/finds'
 import { wholePath } from './handed'
 import { type CodeOpen, useChangedFile, useCodeHost } from './code/CodeHost'
@@ -284,6 +285,7 @@ export function DocumentPanel({
   const file = located?.kind === 'file' ? located : null
   // A markdown file the task changed shows what changed, read as the document is, again as it is edited.
   const change = useChangedFile(taskId ?? null, file?.path ?? '', file !== null && file.changed !== null && taskId != null, version)
+  useImagesFollow(read.data)
   const code = useThreadShell().code
   const box = useRef<HTMLDivElement>(null)
   // Its pictures and links are beside it, where it is.

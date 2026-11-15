@@ -29,7 +29,7 @@ import { useServices } from '../../data/services'
 import { text as openInText, useEditorList } from '../OpenIn'
 import { ago } from '../time'
 import { usePreferences } from '../usePreferences'
-import { CODE_FRESH, codeKeys, foundRead, placeRead } from './finds'
+import { CODE_FRESH, codeKeys, foundRead, placeRead, useImagesFollow } from './finds'
 import { pictureOf } from './FilePicture'
 
 /*
@@ -96,6 +96,7 @@ const useCodeRead = (threadId: string, found: FoundCode, mode: CodeMode, fresh: 
     // The panel reads the file again as it opens: it shows the file as it is now.
     ...(fresh ? { refetchOnMount: 'always' as const } : {}),
   })
+  useImagesFollow(read.data)
   return read.isError ? null : read.data
 }
 
@@ -131,6 +132,7 @@ export const useChangedFile = (
     enabled: on && taskId !== null && path !== '',
     refetchOnMount: 'always',
   })
+  useImagesFollow(read.data)
   return read.isError ? null : read.data
 }
 

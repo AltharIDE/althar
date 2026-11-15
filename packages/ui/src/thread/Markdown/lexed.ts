@@ -56,6 +56,17 @@ const lex = (text: string, links?: Links) => {
   return lexer.lex(text)
 }
 
+/** A text read with the definitions another was read with, as a word of them (`Read.defs`) holds them: a quote's body, say. */
+export const lexWith = (text: string, defs: string): ReadonlyArray<Token> => {
+  let links: Links | undefined
+  try {
+    links = Object.assign(noLinks(), JSON.parse(defs) as Links)
+  } catch {
+    links = undefined
+  }
+  return lex(text, links)
+}
+
 /** A text read whole, as it is once it is done. */
 export const lexAll = (text: string): Read => {
   const tokens = lex(text)

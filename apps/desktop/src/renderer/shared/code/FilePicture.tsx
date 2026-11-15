@@ -31,6 +31,8 @@ export function FilePicture({
     staleTime: CODE_FRESH,
     gcTime: 5 * 60_000,
     retry: false,
+    // A document opened again shows its pictures as they are now, as it shows its text.
+    refetchOnMount: 'always',
   })
   const image = read.data?.image
   if (image === undefined) return alt
