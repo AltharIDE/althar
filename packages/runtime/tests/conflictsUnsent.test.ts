@@ -1,6 +1,6 @@
 import { removeTree } from '@althar/testing'
 import { randomBytes } from 'node:crypto'
-import { mkdtempSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -400,32 +400,50 @@ describe('a branch merging here, with no pull request', () => {
 
   it.live('says so where its folder was already gone as main moves, and where git can’t merge it', () => {
     const working = repository()
+    const file = join(mkdtempSync(join(tmpdir(), 'althar-offline-conflict-')), 'althar.sqlite')
+    const launch = () => Queries.layer.pipe(Layer.provideMerge(runtime(file)))
+    const kept = join(mkdtempSync(join(tmpdir(), 'althar-kept-')), 'folder')
+    const move = (from: string, to: string) =>
+      runGit(working, 'worktree', 'move', from, to).pipe(
+        Effect.mapError((error) => new Error(`Could not move the fixture from ${from} to ${to}: ${error.stderr}`)),
+      )
     return Effect.gen(function* () {
-      const projectId = yield* ask(
-        working,
-        'Add a retry. [coordinator:plan-no-review] [coordinator:plan] [lead:finish] [lead:edit] [lead:resolve]',
-        true,
-      )
-      const [task] = yield* until(cards(projectId), (all) => all[0]?.phase === 'ready')
-      const taskId = task?.taskId ?? ''
-      const { path } = yield* worktreeOf(taskId)
-      const kept = join(mkdtempSync(join(tmpdir(), 'althar-kept-')), 'folder')
-      // Ready can precede the lead releasing its cwd; move the fixture only once that process has stopped.
-      yield* (yield* Sessions).stop(task?.threadId ?? '')
-      yield* runGit(working, 'worktree', 'move', path, kept)
+      const { projectId, taskId, path } = yield* Effect.gen(function* () {
+        const projectId = yield* ask(
+          working,
+          'Add a retry. [coordinator:plan-no-review] [coordinator:plan] [lead:finish] [lead:edit] [lead:resolve]',
+          true,
+        )
+        const [task] = yield* until(cards(projectId), (all) => all[0]?.phase === 'ready')
+        const taskId = task?.taskId ?? ''
+        const { path } = yield* worktreeOf(taskId)
+        return { projectId, taskId, path }
+      }).pipe(Effect.provide(launch()))
+
+      // Change the external fixture between launches: stopping only the lead left background Git inspections holding
+      // Windows directory handles. Both moves happen with the runtime closed, as work that was already gone on launch.
+      yield* move(path, kept)
+      assert.isFalse(existsSync(path))
       moveMainOn(working)
-      assert.strictEqual(yield* uncheckedOf(projectId), 'Its folder isn’t on this computer, so Althar can’t merge main into it here.')
-      assert.deepStrictEqual(yield* rounds(taskId), [])
+      yield* Effect.gen(function* () {
+        yield* (yield* Changes).resolveNow({ taskId }, true)
+        assert.strictEqual(yield* uncheckedOf(projectId), 'Its folder isn’t on this computer, so Althar can’t merge main into it here.')
+        assert.deepStrictEqual(yield* rounds(taskId), [])
+      }).pipe(Effect.provide(launch()))
+
       // Back, but with main gone from here: git has nothing to merge it with.
-      yield* runGit(working, 'worktree', 'move', kept, path)
+      yield* move(kept, path)
+      assert.isTrue(existsSync(path))
       git(working, 'branch', '-m', 'main', 'elsewhere')
-      yield* (yield* Changes).resolveNow({ taskId }, true)
-      yield* until(
-        Effect.map(cards(projectId), ([card]) => [card?.conflictUnchecked ?? null]),
-        ([one]) => one === 'Git couldn’t merge main with the branch here.',
-      )
-      assert.deepStrictEqual(yield* rounds(taskId), [])
-    }).pipe(Effect.provide(runtimeWith()))
+      yield* Effect.gen(function* () {
+        yield* (yield* Changes).resolveNow({ taskId }, true)
+        yield* until(
+          Effect.map(cards(projectId), ([card]) => [card?.conflictUnchecked ?? null]),
+          ([one]) => one === 'Git couldn’t merge main with the branch here.',
+        )
+        assert.deepStrictEqual(yield* rounds(taskId), [])
+      }).pipe(Effect.provide(launch()))
+    })
   })
 })
 
