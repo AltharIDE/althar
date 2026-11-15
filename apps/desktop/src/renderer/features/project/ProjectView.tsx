@@ -380,15 +380,26 @@ export function ProjectView({
   const draftOf = draftKey.coordinator(about ?? '')
   const [draft, setDraft] = useDraft(draftOf)
   // A page beside the coordinator's conversation (ADR-100): the project goes to its conversation, the board stepping aside for it.
-  // The room it stepped aside from is kept, so closing the page brings the board back.
-  const before = useRef<Room | null>(null)
+  // The room it stepped aside from is kept with the page, in the window's storage, so closing the page brings the board back even after a reload.
+  const beforeKey = `althar.before.${about ?? ''}`
+  const rememberRoom = useCallback(
+    (was: Room) => {
+      if (was === Room.Talk || about === null) return
+      try {
+        window.localStorage.setItem(beforeKey, String(was))
+      } catch {
+        // Kept for nothing.
+      }
+    },
+    [about, beforeKey],
+  )
   const showTalk = useCallback(() => setRoom(Room.Talk), [])
   const showTalkForPage = useCallback(() => {
     setRoom((was) => {
-      if (was !== Room.Talk) before.current = was
+      rememberRoom(was)
       return Room.Talk
     })
-  }, [])
+  }, [rememberRoom])
   const latestSearch = useRef(model)
   latestSearch.current = model
   useSearchReveal(model.coordinator?.threadId, (itemId) => {
@@ -404,11 +415,18 @@ export function ProjectView({
   const { where: pageWhere } = usePage(about, useServices().host.pages)
   useEffect(() => {
     // The page went from beside the conversation: the right side returns to what was there before it opened.
-    if (pageWhere === 'beside') return
-    const back = before.current
-    before.current = null
-    if (back !== null && pageWhere === null) setRoom((now) => (now === Room.Talk ? back : now))
-  }, [pageWhere])
+    // A page its window's storage kept, main yet to say it still has it, isn't closed.
+    if (pageWhere === 'beside' || (about !== null && pages.waking(about))) return
+    let back: Room | null = null
+    try {
+      const kept = window.localStorage.getItem(beforeKey)
+      window.localStorage.removeItem(beforeKey)
+      back = kept === String(Room.Both) ? Room.Both : kept === String(Room.Board) ? Room.Board : null
+    } catch {
+      // Nothing kept.
+    }
+    if (back !== null && pageWhere === null) setRoom((now) => (now === Room.Talk ? (back as Room) : now))
+  }, [pageWhere, beforeKey, about])
   const navigate = useNavigate()
   const comments = useComments(draftOf)
   // A picture the coordinator handed back opens in the lightbox; it writes no documents, so none opens beside it.
@@ -718,7 +736,10 @@ export function ProjectView({
           if (about === null) return
           // Pressed, a comment opens again on its page beside the conversation.
           pages.place(about, 'beside')
-          setRoom(Room.Talk)
+          setRoom((was) => {
+            rememberRoom(was)
+            return Room.Talk
+          })
           pages.reopen(about, id)
         }}
         onRemoveComment={(id) => drop(draftOf, id)}

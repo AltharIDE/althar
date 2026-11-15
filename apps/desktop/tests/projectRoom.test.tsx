@@ -574,6 +574,21 @@ describe('a page beside the coordinator’s conversation', () => {
     act(() => pages.hide('p1'))
     expect(await screen.findByRole('separator', { name: 'Width of the conversation' })).toBeTruthy()
   })
+
+  it('brings the board back after the window reloaded with the page open', async () => {
+    forgetPages()
+    window.localStorage.setItem('althar.before.p1', 'both')
+    const { client } = fakeClient()
+    render(
+      <ServicesProvider value={servicesFor(client, fakeHost({ pages: fakePagesHost() }))}>
+        <Project room={Room.Talk} />
+      </ServicesProvider>,
+    )
+    act(() => pages.place('p1', 'beside'))
+    expect(screen.queryByRole('separator', { name: 'Width of the conversation' })).toBeNull()
+    act(() => pages.hide('p1'))
+    expect(await screen.findByRole('separator', { name: 'Width of the conversation' })).toBeTruthy()
+  })
 })
 
 describe('the conversation beside the board', () => {
