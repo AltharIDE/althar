@@ -133,7 +133,7 @@ export const text = {
   } satisfies Record<TaskStatus, string>,
   /** Why a stopped task's lead stopped, in a card's words, where something says; else the card says nothing more. */
   stoppedBy: stepText.stoppedBy,
-  carryOn: 'Carry on',
+  carryOn: 'Resume',
   carryingOn: 'Telling the lead',
   /** What the lead is told to carry on. */
   carryOnNote: 'Carry on.',
@@ -1214,7 +1214,7 @@ export function BoardView({
       <BoardColumn
         lane={BoardLane.Next}
         count={shown.upNext}
-        filled={shown.next.length > 0}
+        filled={shown.next.length > 0 || lanes.stopped.length > 0}
         // Chats on Scratch, off the lanes: one chip, opened in place, by their latest exchange; Clear settles one. It heads
         // Up next whether anything waits there or not.
         lead={
@@ -1235,7 +1235,7 @@ export function BoardView({
           />
         }
         // Whenever nothing is in Up next, it says where work comes from.
-        {...(shown.next.length === 0
+        {...(shown.next.length === 0 && lanes.stopped.length === 0
           ? {
               empty: (
                 <BoardEmpty
@@ -1291,6 +1291,20 @@ export function BoardView({
                 })}
           />
         )}
+        {lanes.stopped.length > 0 && (
+          <BoardList>
+            {lanes.stopped.map((work) => (
+              <BoardCard
+                key={work.taskId}
+                data-move={work.taskId}
+                {...stoppedCardOf(work, now, actions)}
+                {...parentOf(work, onOpen)}
+                errands={work.errands}
+                onOpen={() => onOpen(work.threadId)}
+              />
+            ))}
+          </BoardList>
+        )}
         {[halted, forLocal].map(
           (rows, at) =>
             rows.length > 0 && (
@@ -1340,15 +1354,6 @@ export function BoardView({
             key={work.taskId}
             data-move={work.taskId}
             {...issuesCardOf(work)}
-            {...parentOf(work, onOpen)}
-            errands={work.errands}
-            onOpen={() => onOpen(work.threadId)}
-          />
-        ))}
-        {lanes.stopped.map((work) => (
-          <BoardCard
-            key={work.taskId}
-            {...stoppedCardOf(work, now, actions)}
             {...parentOf(work, onOpen)}
             errands={work.errands}
             onOpen={() => onOpen(work.threadId)}
