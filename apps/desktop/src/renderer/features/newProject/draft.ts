@@ -482,6 +482,8 @@ export const draftActions = ({ client, host, cache }: { client: Client; host: Ho
         store.change(at.id, (now) => ({ ...now, steps: { ...now.steps, [part]: state } }))
       store.change(at.id, (now) => ({
         ...now,
+        // The way it is made from is kept, so what it brings stays under it whatever else is there.
+        way,
         creating: true,
         error: null,
         homeError: null,

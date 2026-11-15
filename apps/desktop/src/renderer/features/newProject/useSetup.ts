@@ -124,7 +124,9 @@ export const useSetup = (draft: Draft, store: DraftStore, list: ConnectionList |
 
   const codeHosts = ready(list, (service) => HOST_SERVICES.includes(service))
   const trackers = ready(list, (service) => TRACKER_SERVICES.includes(service))
-  const way: SetupWay = draft.way ?? (draft.folders.length > 0 || draft.reading.length > 0 ? 'folder' : 'clone')
+  // Folders chosen, or being read, start it on A folder; otherwise Clone.
+  const way: SetupWay =
+    draft.way ?? (draft.folders.some((folder) => folder.came === undefined) || draft.reading.length > 0 ? 'folder' : 'clone')
   const listed = useQueries({ queries: codeHosts.map((connection) => read.hostRepositories(connection.id)) })
   const words = draft.name
     .toLowerCase()
