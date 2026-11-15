@@ -83,6 +83,35 @@ const silent = {
 }
 
 describe('an account marked out of usage', () => {
+  it.live('uses the last exhausted plan window when the error gives no reset, ignoring spend and expired windows', () =>
+    Effect.gen(function* () {
+      yield* ready
+      const account = yield* codexAccount
+      const limits = yield* Limits
+      const sql = yield* SqlClient.SqlClient
+      const at = ago(MINUTE)
+      yield* limitedAt(account.id, at, from(DAY))
+      yield* sql`UPDATE account_statuses SET windows = '[{"kind":"usage"}]'`
+      const weekly = from(7 * DAY)
+      yield* read(
+        account.id,
+        [
+          { ...window(0, at), resetsAt: from(DAY) },
+          { ...window(0, at, 'weekly'), resetsAt: weekly },
+          { ...window(0, at), spend: true, resetsAt: from(30 * DAY) },
+          { ...window(0, at), resetsAt: ago(2 * MINUTE) },
+          { ...window(50, at), resetsAt: from(60 * DAY) },
+        ],
+        at,
+      )
+      assert.deepInclude(Option.getOrNull(yield* limits.outAccount(account.id)), { resetsAt: weekly, until: weekly })
+      // An explicit error reset is authoritative even when an older plan reading says a later time.
+      const explicit = from(2 * DAY)
+      yield* sql`UPDATE account_statuses SET windows = ${JSON.stringify([{ kind: 'usage', resetsAt: explicit }])}`
+      assert.strictEqual(Option.getOrNull(yield* limits.outAccount(account.id))?.resetsAt, explicit)
+    }).pipe(Effect.provide(runtime(':memory:', {}, { usage: silent }))),
+  )
+
   it.live('is usable at once when a reading taken after shows room in every window, where the pickers show it too', () =>
     Effect.gen(function* () {
       const limits = yield* Limits

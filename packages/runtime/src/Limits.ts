@@ -19,9 +19,10 @@ import { Installs, isInstalled } from './Installs'
  * Usage limits (docs/architecture/03 and 05, ADR-012): which accounts are
  * out, until when, and which account a session runs on. An account is out
  * from the turn that reached its limit until the reset its error gave, or,
- * without one, for an hour, when it is tried again; an agent is out when all
- * its accounts are. What the work does meanwhile is one of the project's
- * rules (Policies): move on (the default), to the agent's next account and
+ * without one, until its exhausted plan windows reset (or for an hour if
+ * unknown), when it is tried again; an agent is out when all its accounts
+ * are. What the work does meanwhile is one of the project's rules (Policies):
+ * move on (the default), to the agent's next account and
  * then the next free agent; wait for the reset; or ask the person, with who
  * could take it over.
  *
@@ -350,7 +351,20 @@ export class Limits extends Context.Service<
             WHERE p.account_id = ${account.id} ORDER BY s.observed_at DESC LIMIT 1`
           if (latest === undefined || latest.state !== 'limited') return Option.none<Out>()
           const windows = JSON.parse(latest.windows) as ReadonlyArray<{ readonly resetsAt?: string }>
-          const resetsAt = windows.find((window) => window.resetsAt !== undefined)?.resetsAt ?? null
+          const errorReset = windows.find((window) => window.resetsAt !== undefined)?.resetsAt
+          // Some agents report only that usage ran out. PlanUsage already knows the windows; wait until every exhausted
+          // window has reset, rather than asking the person or retrying during an exhausted week. Keep expired resets in
+          // this calculation so the same reading clears the limit after a restart, instead of inventing another hour.
+          const [reading] =
+            errorReset === undefined
+              ? yield* sql<{ windows: string }>`SELECT windows FROM plan_usage_readings WHERE account_id = ${account.id}`
+              : []
+          const resets = (reading === undefined ? [] : (JSON.parse(reading.windows) as ReadonlyArray<UsageWindow>))
+            .filter((window) => window.spend !== true && leftOf(window) <= 0)
+            .flatMap((window) =>
+              window.resetsAt !== undefined && Date.parse(window.resetsAt) > Date.parse(latest.observedAt) ? [window.resetsAt] : [],
+            )
+          const resetsAt = errorReset ?? resets.toSorted((a, b) => Date.parse(b) - Date.parse(a))[0] ?? null
           const until = resetsAt ?? new Date(Date.parse(latest.observedAt) + Duration.toMillis(UNKNOWN_RESET)).toISOString()
           if (until <= (yield* timestamp)) return Option.none<Out>()
           // Marked out, and not yet back by its reset: unless the account has shown since that it works again.

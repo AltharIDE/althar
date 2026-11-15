@@ -27,6 +27,7 @@ import { type PlanStep, Runs, type StuckAnswer } from '../src/Runs'
 import * as Runtime from '../src/Runtime'
 import { RULES } from '../src/rules'
 import { Sessions } from '../src/Sessions'
+import { Tasks } from '../src/Tasks'
 import { atReset, callTool, fakeAgents, items, later, onTestClock, repository, runtime, until, withWork } from './support'
 import type { ToolAccess } from '../src/ToolServer'
 
@@ -299,6 +300,75 @@ describe('an agent out of usage', () => {
       assert.strictEqual(ready?.lead, 'claude-code')
     }).pipe(onTestClock)
   })
+
+  for (const action of ['resume', 'stop', 'abandon'] as const) {
+    it.effect(`uses Plan usage's reset without an error reset after a restart: ${action}`, () => {
+      const back = later()
+      const database = join(mkdtempSync(join(tmpdir(), 'althar-plan-reset-')), 'profile.sqlite')
+      let record = async () => {}
+      const layer = (limited: boolean) =>
+        Queries.layer.pipe(
+          Layer.provideMerge(
+            runtime(
+              database,
+              {},
+              {
+                each: limited
+                  ? {
+                      'claude-code': {
+                        outOfUsage: {
+                          beforeLimit: () => record(),
+                        },
+                      },
+                    }
+                  : {},
+              },
+            ),
+          ),
+        )
+      return Effect.gen(function* () {
+        const kept = yield* Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const { projectId, task, start } = yield* planned([lead('claude-code')])
+          yield* waits(projectId)
+          // The plan reading arrives during the turn, before its error with no reset time.
+          const accountId = yield* usual('claude-code')
+          const observedAt = new Date(yield* Clock.currentTimeMillis).toISOString()
+          record = () =>
+            Effect.runPromise(
+              Effect.gen(function* () {
+                const windows = [{ kind: 'weekly', usedPercent: 100, resetsAt: reset(back), observedAt }]
+                yield* sql`INSERT INTO plan_usage_readings ${sql.insert({ accountId, agentId: 'claude-code', source: 'agent', plan: 'max', windows: JSON.stringify(windows), observedAt })}
+              ON CONFLICT (account_id) DO UPDATE SET windows = excluded.windows, observed_at = excluded.observed_at`
+              }),
+            )
+          yield* start
+          const [held] = yield* until(cardOf(projectId), (cards) => cards[0]?.waits != null)
+          assert.strictEqual(held?.waits?.until, reset(back))
+          assert.strictEqual(held?.phase, 'running')
+          assert.isEmpty(yield* sql`SELECT id FROM attention_requests WHERE state = 'open'`)
+          if (action === 'stop') yield* (yield* Tasks).stop({ envelope: yield* Runtime.envelope('task.stop', {}), taskId: task.taskId })
+          if (action === 'abandon')
+            yield* (yield* Tasks).abandon({ envelope: yield* Runtime.envelope('task.abandon', {}), taskId: task.taskId })
+          return { projectId, task }
+        }).pipe(Effect.provide(layer(true)))
+        yield* Effect.gen(function* () {
+          // Starting Althar before the reset must not run the task early.
+          if (action === 'resume') assert.strictEqual((yield* cardOf(kept.projectId))[0]?.waits?.until, reset(back))
+          yield* atReset(back)
+          if (action === 'resume') {
+            const [ready] = yield* until(cardOf(kept.projectId), (cards) => cards[0]?.phase === 'ready')
+            assert.strictEqual(ready?.lead, 'claude-code')
+          } else {
+            const sql = yield* SqlClient.SqlClient
+            yield* TestClock.adjust(Duration.seconds(1))
+            const [count] = yield* sql<{ n: number }>`SELECT count(*) AS n FROM provider_sessions WHERE thread_id = ${kept.task.threadId}`
+            assert.strictEqual(count?.n, 1)
+          }
+        }).pipe(Effect.provide(layer(false)))
+      }).pipe(onTestClock)
+    })
+  }
 
   it.effect('runs the other held steps at their reset past one it can’t read and one that can’t go on, which waits a while', () => {
     const back = later()
