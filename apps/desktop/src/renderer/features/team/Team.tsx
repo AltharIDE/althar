@@ -246,10 +246,20 @@ export function ChangeTeam({
   // A small change whose review reads after its merge keeps that timing: its review is changed from its Review stop, not here.
   const leadOnly = only || (plan.preset === 'Small change' && plan.reviewAfterMerge === true)
   const read = task === null ? null : teamChangeOf(task)
-  // Held here, it can start with its new team even before the board says so; found begun by the hold, it only changes.
-  const how = read === null ? null : hold === 'lost' ? 'begun' : hold === 'held' && read === 'waits' ? 'starts' : read
+  // What this dialog holds (or is holding) is a held plan, though the board still reads it as at work: a small change waiting for
+  // a place or, Local, its checkout, which the board calls begun. It starts with its new team, and saves as a plan. Found begun
+  // by the hold, it only changes.
+  const heldHere = holdsFor(first) && hold !== 'lost'
+  const how =
+    read === null
+      ? null
+      : hold === 'lost'
+        ? 'begun'
+        : heldHere && (read === 'waits' || (read === 'begun' && task?.holdable === true))
+          ? 'starts'
+          : read
   // A task that has begun changes through ChangeTeam, until it is merged or settled.
-  const begun = how === 'begun' || teamChangeOf(first) === 'begun'
+  const begun = how === 'begun' || (teamChangeOf(first) === 'begun' && !heldHere)
   const gone = how === null
   // A plan made with no review has no review step: a change that can still have one shows it, off, for the person to add.
   const lead = plan.steps.find((step) => step.key === 'implement')

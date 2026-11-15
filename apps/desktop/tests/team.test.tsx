@@ -521,6 +521,47 @@ describe('changing a plan’s team before it begins', () => {
     await waitFor(() => expect(client.startPlan).toHaveBeenCalledWith('plq'))
   })
 
+  it.each([
+    ['waits for its checkout', true],
+    ['waits for a free agent', false],
+  ] as const)(
+    'starts a held small change that %s, through its plan: a checkout wait reads as begun, with nothing queued',
+    async (_, checkout) => {
+      const { client } = fakeClient()
+      const waiting = { ...queued, ...(checkout ? { queued: null } : {}), plan: { ...queued.plan!, preset: 'Small change' } }
+      expect(teamChangeOf(waiting)).toBe(checkout ? 'begun' : 'waits')
+      withServices(<ChangeTeam projectId="p1" task={waiting} agents={agents} onClose={vi.fn()} />, client)
+      const dialog = within(screen.getByRole('dialog'))
+      await waitFor(() => expect(client.holdPlan).toHaveBeenCalledWith('plq'))
+      await userEvent.click(await dialog.findByRole('button', { name: /^Review:/ }))
+      await userEvent.click(await screen.findByRole('button', { name: 'Remove from this step' }))
+      await userEvent.click(dialog.getByRole('button', { name: 'Start' }))
+      await waitFor(() => expect(client.startPlan).toHaveBeenCalledWith('plq'))
+      expect(client.changePlan).toHaveBeenCalledWith(
+        'plq',
+        expect.arrayContaining([expect.objectContaining({ key: 'review', skipped: true })]),
+        null,
+      )
+      expect(client.changeTeam).not.toHaveBeenCalled()
+    },
+  )
+
+  it('saves a held checkout wait as a plan too, and offers Start before the hold has answered', async () => {
+    let answer: (held: boolean) => void = () => {}
+    const { client } = fakeClient({ holdPlan: vi.fn(() => new Promise<boolean>((resolve) => (answer = resolve))) })
+    const waiting = { ...queued, queued: null, plan: { ...queued.plan!, preset: 'Small change' } }
+    withServices(<ChangeTeam projectId="p1" task={waiting} agents={agents} onClose={vi.fn()} />, client)
+    const dialog = within(screen.getByRole('dialog'))
+    expect(dialog.getByRole('button', { name: 'Start' })).toBeTruthy()
+    await userEvent.click(dialog.getByRole('button', { name: /^Review:/ }))
+    await userEvent.click(await screen.findByRole('button', { name: 'Remove from this step' }))
+    await userEvent.click(dialog.getByRole('button', { name: 'Save' }))
+    act(() => answer(true))
+    await waitFor(() => expect(client.changePlan).toHaveBeenCalled())
+    expect(client.changeTeam).not.toHaveBeenCalled()
+    expect(client.startPlan).not.toHaveBeenCalled()
+  })
+
   it('leaves another task waiting for a place as it was: changed, not held', async () => {
     const { client } = fakeClient()
     withServices(<ChangeTeam projectId="p1" task={queued} agents={agents} onClose={vi.fn()} />, client)
