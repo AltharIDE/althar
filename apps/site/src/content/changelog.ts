@@ -39,7 +39,7 @@ export const RELEASES: readonly Release[] = [
     changes: [
       {
         kind: 'new',
-        text: 'Undo from here: a message and the replies after it leave the conversation, the files they changed go back, and the prompt returns to your draft.',
+        text: 'Undo from here, in a task with its own worktree: a message and the replies after it leave, the files they changed go back, and the prompt returns to your draft.',
       },
       { kind: 'new', text: 'Markdown files open rendered, with what changed marked and the source a click away.' },
       { kind: 'new', text: 'Steer or queue: choose what a message sent while an agent works does.' },

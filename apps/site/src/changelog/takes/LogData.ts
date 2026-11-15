@@ -52,7 +52,7 @@ export const HIGHLIGHTS: Record<string, readonly Highlight[]> = {
   '0.9.0': [
     {
       title: 'Undo, files and all',
-      why: 'Take back any message you sent a task: it and every reply after it leave the conversation, the files those turns changed go back as they were, and your prompt returns to the draft, to ask again another way.',
+      why: 'Take back a message you sent a task in its own worktree: it and every reply after it leave the conversation, the files those turns changed go back as they were, and your prompt returns to the draft, to ask again another way.',
       picture: 'undo',
       covers: [0],
     },
