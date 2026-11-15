@@ -32,13 +32,15 @@ test('starts a project from nothing, with a new repository made as the project i
     await still(page)
     await page.screenshot({ path: 'test-results/new-repository-offered.png' })
 
-    // Where it goes, by the picker: placed there, named after the project, and nothing made yet.
+    // Start empty: where it goes, by the picker, placed there, named after the project, and nothing made yet.
+    await page
+      .getByRole('radiogroup', { name: 'Where its code comes from' })
+      .getByRole('radio', { name: /^Start empty/ })
+      .click()
     await chooseFolder(electronApp, code)
-    await page.getByRole('button', { name: 'New repository…' }).click()
-    const folders = page.getByRole('list', { name: 'Its folders' })
-    await expect(folders.getByText('new repository')).toBeVisible()
-    await expect(folders.getByText('northwind-ops', { exact: true })).toBeVisible()
-    await expect(page.getByRole('button', { name: 'New repository…' })).toHaveCount(0)
+    await page.getByRole('button', { name: 'Choose where it goes…' }).click()
+    await expect(page.getByText('A new repository, on main')).toBeVisible()
+    await expect(page.getByText('northwind-ops', { exact: true }).first()).toBeVisible()
     expect(existsSync(join(code, 'northwind-ops'))).toBe(false)
     await still(page)
     await page.screenshot({ path: 'test-results/new-repository-placed.png' })

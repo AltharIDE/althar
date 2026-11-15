@@ -499,6 +499,22 @@ export function NewProject({
             </h2>
           )}
           {side}
+          {/* Beside a setup of the consumer's own, what reading its folders found, and what this computer has named like it, under it. */}
+          {side !== undefined && (findings.length > 0 || (found !== null && found.first.length + found.more.length > 0)) && (
+            <div className={s.below}>
+              {findings.length > 0 && <Findings findings={findings} t={t} {...(onConnect === undefined ? {} : { onConnect })} />}
+              {found !== null && (
+                <Found
+                  found={found}
+                  t={t}
+                  onAdd={(id, at) => {
+                    refocus.current = { list: 'found', at }
+                    onAdd(id)
+                  }}
+                />
+              )}
+            </div>
+          )}
           {side === undefined && (
             <>
               {over && !empty && <div className={s.empty} aria-hidden="true" />}

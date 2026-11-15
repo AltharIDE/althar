@@ -298,8 +298,10 @@ function First({
   const services = useServices()
   const store = draftsOf(services.client)
   const draft = useSyncExternalStore(store.subscribe, store.get)
+  // The welcome's own draft, for a clone or a new repository: it goes with the welcome, so no New project tab is left behind.
   useEffect(() => {
     if (store.get() === null) store.start()
+    return () => store.end()
   }, [store])
   const setup = useSetup(draft ?? HOLDING, store, connections.list)
   const codeHosts = (connections.list?.connections ?? []).filter((connection) => {
@@ -313,7 +315,9 @@ function First({
     void (
       folderWay || draft === null ? project.make() : draftActions(services).create(inkOf(draft, []), { publish: null, tracker: null })
     ).then((one) => {
-      if (one !== null) setMade(one)
+      if (one === null) return
+      store.end()
+      setMade(one)
     })
   const open = () => {
     if (made === null) return

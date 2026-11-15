@@ -5,6 +5,8 @@ import { NewProject } from '@althar/ui/screens'
 
 import { useServices } from '../../data/services'
 import { device, platform } from '../../shared/device'
+import { codeHostOf } from '../../shared/remotes'
+import { ConnectDialog, type Opening, openingFor } from '../connections/ConnectDialog'
 import type { ConnectionsModel } from '../connections/useConnections'
 import type { DraftError } from './draft'
 import s from './NewProject.module.css'
@@ -68,12 +70,13 @@ function ErrorLine({
 
 export function NewProjectView({
   model,
+  connections,
   onCreated,
   onOpen,
   onClose,
 }: {
   model: NewProjectModel
-  /** Kept for the page's callers; connecting is in place, in the setup. */
+  /** What a folder's host, not connected, opens on. */
   connections?: ConnectionsModel
   /** It was made: its tab opens on it. */
   onCreated: (projectId: string) => void
@@ -84,6 +87,7 @@ export function NewProjectView({
 }) {
   const { host } = useServices()
   const [dropping, setDropping] = useState(false)
+  const [opening, setOpening] = useState<Opening | null>(null)
   const { draft, setup } = model
   if (draft === null || setup === null) return null
   const chooseFolder = () => void model.choose()
@@ -113,9 +117,15 @@ export function NewProjectView({
           setup.onWay('folder')
           void model.drop(files)
         }}
-        found={null}
+        // Beside the folders chosen: what this computer has named like it, each added in a press.
+        found={setup.way === 'folder' ? model.found : null}
         onAdd={(id) => void model.add(id)}
         findings={model.findings}
+        // A folder's host, not connected: its walk in, over the page, as a project's settings open it.
+        onConnect={(host) => {
+          const product = codeHostOf({ host, path: '' }, connections?.list ?? null).product
+          setOpening(product === null ? 'all' : openingFor(connections?.list ?? null, product, host))
+        }}
         side={
           <SetupSide
             setup={setup}
@@ -148,6 +158,9 @@ export function NewProjectView({
             })}
         text={text.page()}
       />
+      {opening !== null && connections !== undefined && (
+        <ConnectDialog model={connections} opening={opening} onClose={() => setOpening(null)} />
+      )}
     </div>
   )
 }

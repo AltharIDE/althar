@@ -6,7 +6,17 @@ import { join } from 'node:path'
 import { expect, type Page, test } from '@playwright/test'
 
 import { repository } from '../tests/repository'
-import { backToWork, chooseFolder, launch, openFirstProject, projectSettings, startTask, still } from './support'
+import {
+  backToWork,
+  chooseFolder,
+  launch,
+  openFirstProject,
+  openMadeProject,
+  projectSettings,
+  startTask,
+  still,
+  toFirstProject,
+} from './support'
 
 /*
  * A project set up where it starts, on the New project page: its code from
@@ -230,6 +240,31 @@ test('a task finished in a project only on this computer merges here, or puts th
     expect(git(meridian, 'config', 'remote.origin.url')).toBe(address)
     await still(page)
     await page.screenshot({ path: 'test-results/setup-12-task-on-github.png', scale: 'css' })
+  } finally {
+    await electronApp.close()
+  }
+})
+
+test('the first run takes a folder with no git yet, among three ways in, and makes it a repository as the project is made', async () => {
+  const home = mkdtempSync(join(tmpdir(), 'althar-e2e-'))
+  const notes = join(home, 'Documents', 'notes')
+  mkdirSync(notes, { recursive: true })
+  writeFileSync(join(notes, 'ideas.md'), '# Ideas\n')
+  const { electronApp, page } = await launch(home)
+  try {
+    await toFirstProject(page)
+    await expect(way(page, /^A folder/)).toHaveAttribute('aria-checked', 'true')
+    await expect(way(page, /^Clone/)).toBeVisible()
+    await expect(way(page, /^Start empty/)).toBeVisible()
+    await chooseFolder(electronApp, notes)
+    await page.getByRole('button', { name: /Choose a folder/ }).click()
+    await expect(page.getByText('no git yet, git starts in it')).toBeVisible()
+    await shoot(page, '13-first-run-folder-no-git')
+    await page.getByRole('button', { name: /^Make the project/ }).click()
+    await openMadeProject(page)
+    await expect(page.getByRole('heading', { name: 'notes', level: 1 })).toBeVisible()
+    expect(git(notes, 'branch', '--show-current')).toBe('main')
+    expect(git(notes, 'ls-files').split('\n').toSorted()).toEqual(['.gitignore', 'ideas.md'])
   } finally {
     await electronApp.close()
   }
