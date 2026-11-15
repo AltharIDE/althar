@@ -122,11 +122,8 @@
   color: var(--t-1);
 }
 .repoWhere {
-  overflow: hidden;
   font: 11.5px/1.4 var(--mono);
   color: var(--t-3);
-  white-space: nowrap;
-  text-overflow: ellipsis;
 }
 .repoFacts {
   font-size: 12px;

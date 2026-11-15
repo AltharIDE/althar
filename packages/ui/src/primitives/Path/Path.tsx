@@ -1,7 +1,7 @@
 import { useLayoutEffect, useRef, useState } from 'react'
 
 import { cx } from '../../lib/cx'
-import { ELLIPSIS, foldersToDrop, partsOf } from '../../lib/shortPath'
+import { ellipsisOf, foldersToDrop, partsOf } from '../../lib/shortPath'
 import s from './Path.module.css'
 
 /*
@@ -10,10 +10,14 @@ import s from './Path.module.css'
  * measures what the browser drew, so it holds for any font and as the room
  * is resized. Give it the room by where you put it (a grid column, a flex
  * item with the rest fixed); it asks for what the whole path needs.
+ *
+ * The whole path stays in the page, as text: the folders that gave way are
+ * only out of sight, so a screen reader, a button's name and a copy all have
+ * it, and two files that shorten alike are still told apart.
  */
 
 export interface PathProps {
-  /** Folders and a file: "packages/runtime/src/Coordinator.ts"; or a folder, with its slash or not: "packages/runtime/src". */
+  /** Folders and a file: "packages/runtime/src/Coordinator.ts"; or a folder, with its slash or not: "packages/runtime/src". Windows paths too. */
   path: string
   /** The folders in front. */
   dirClassName?: string
@@ -24,11 +28,23 @@ export interface PathProps {
   hover?: boolean
 }
 
+/** What a path shows now: its "…/" and the folders in view, then its end; not the folders out of sight. */
+export function visiblePath(path: Element): string {
+  const shown = path.firstElementChild
+  return shown === null
+    ? ''
+    : [...shown.children]
+        .filter((one) => !one.hasAttribute('data-out'))
+        .map((one) => one.textContent)
+        .join('')
+}
+
 export function Path({ path, dirClassName, nameClassName, className, hover = true }: PathProps) {
   const { folders, end } = partsOf(path)
   const root = useRef<HTMLSpanElement>(null)
   const whole = useRef<HTMLSpanElement>(null)
   const [dropped, setDropped] = useState(0)
+  const mark = ellipsisOf(folders)
 
   useLayoutEffect(() => {
     const room = root.current
@@ -49,23 +65,31 @@ export function Path({ path, dirClassName, nameClassName, className, hover = tru
     return () => watch.disconnect()
   }, [path, folders.length])
 
-  const shown = Math.min(dropped, folders.length)
-  const dir = (shown > 0 ? ELLIPSIS : '') + folders.slice(shown).join('')
+  const out = Math.min(dropped, folders.length)
   return (
     <span ref={root} className={cx(s.path, className)} title={hover ? path : undefined}>
       <span className={s.shown}>
-        {dirClassName === nameClassName ? (
-          <span className={nameClassName}>{dir + end}</span>
+        {out > 0 && (
+          <span className={dirClassName} aria-hidden="true">
+            {mark}
+          </span>
+        )}
+        {out === 0 && dirClassName === nameClassName ? (
+          <span className={nameClassName}>{path}</span>
         ) : (
           <>
-            {dir !== '' && <span className={dirClassName}>{dir}</span>}
+            {folders.map((folder, at) => (
+              <span key={at} className={cx(dirClassName, at < out && s.out)} {...(at < out ? { 'data-out': '' } : {})}>
+                {folder}
+              </span>
+            ))}
             <span className={nameClassName}>{end}</span>
           </>
         )}
       </span>
       {/* Whole, after it (rows line up by the first), and not seen: its folders each apart, drawn from their text so they are measured and not found as text. */}
       <span ref={whole} className={s.whole} aria-hidden="true">
-        <span className={dirClassName} data-text={ELLIPSIS} />
+        <span className={dirClassName} data-text={mark} />
         {folders.map((folder, at) => (
           <span key={at} className={dirClassName} data-text={folder} />
         ))}

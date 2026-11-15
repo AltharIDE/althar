@@ -18,6 +18,7 @@ import {
 import { States, statesParameters } from '../../storybook/States'
 import { ChangeState, CheckState } from '../../foundations/vocabulary'
 import { Button } from '../../primitives/Button/Button'
+import { visiblePath } from '../../primitives/Path/Path'
 import { ChangeSet, foldersOf, groupsOf } from './ChangeSet'
 
 const accept = fn()
@@ -341,11 +342,11 @@ export const RefusedHere: Story = {
     await expect(c.getByRole('alert')).toHaveTextContent('Your main checkout has uncommitted changes to middleware.ts.')
     // Each file's path as folders, from the left, that fit: the folders go whole, never part of a name; the whole path on hover. Where
     // there is layout (Storybook, not jsdom), it fits its room.
-    const shown = (path: string) => c.getByTitle(path).firstElementChild as HTMLElement
-    const path = shown('tests/unit/middleware.test.js')
-    await expect(path).toHaveTextContent(/^(…\/)?(tests\/)?(unit\/)?middleware\.test\.js$/)
-    await expect(path.scrollWidth).toBeLessThanOrEqual(path.clientWidth)
-    await expect(shown('middleware.ts')).toHaveTextContent(/^middleware\.ts$/)
+    const path = c.getByTitle('tests/unit/middleware.test.js')
+    await expect(visiblePath(path)).toMatch(/^(…\/)?(tests\/)?(unit\/)?middleware\.test\.js$/)
+    const shown = path.firstElementChild as HTMLElement
+    await expect(shown.scrollWidth).toBeLessThanOrEqual(shown.clientWidth)
+    await expect(visiblePath(c.getByTitle('middleware.ts'))).toBe('middleware.ts')
   },
 }
 

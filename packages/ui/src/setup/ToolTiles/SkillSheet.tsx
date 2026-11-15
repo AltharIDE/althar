@@ -4,6 +4,7 @@ import { Brand } from '../../foundations/brands/brands'
 import { Icon } from '../../foundations/Icon/Icon'
 import { BrandMark } from '../../foundations/Marks/Marks'
 import { cx } from '../../lib/cx'
+import { Path } from '../../primitives/Path/Path'
 import type { HeadingLevel } from '../../primitives/Heading/Heading'
 import { Button } from '../../primitives/Button/Button'
 import { Dialog } from '../../primitives/Dialog/Dialog'
@@ -102,7 +103,9 @@ export function SkillSheet({
                 <Icon name="file" size={12} />
               </span>
               <Tooltip label={path}>
-                <code className={cx(s.filePath, s.truncate)}>{path}</code>
+                <code className={s.filePath}>
+                  <Path path={path} hover={false} />
+                </code>
               </Tooltip>
             </div>
             <pre className={s.front}>

@@ -3,7 +3,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { foldersToDrop, partsOf } from '../src/lib/shortPath'
 import { FileChanges } from '../src/primitives/FileChanges/FileChanges'
-import { Path } from '../src/primitives/Path/Path'
+import { Path, visiblePath } from '../src/primitives/Path/Path'
+import { PartLines } from '../src/chrome/TaskParts/TaskParts'
 
 /*
  * A path shortens by whole folders from its start. jsdom has no layout, so
@@ -18,6 +19,18 @@ describe('partsOf', () => {
   it('splits a path in its folders and its end', () => {
     expect(partsOf('packages/runtime/src/Coordinator.ts')).toEqual({ folders: ['packages/', 'runtime/', 'src/'], end: 'Coordinator.ts' })
     expect(partsOf('README.md')).toEqual({ folders: [], end: 'README.md' })
+  })
+
+  it('parts a Windows path at its backslashes, and a mixed one at both', () => {
+    expect(partsOf('C:\\Users\\alice\\project')).toEqual({ folders: ['C:\\', 'Users\\', 'alice\\'], end: 'project' })
+    expect(partsOf('C:\\Users/alice\\src\\')).toEqual({ folders: ['C:\\', 'Users/', 'alice\\'], end: 'src\\' })
+    expect(partsOf('\\\\server\\share\\a.ts').end).toBe('a.ts')
+    expect(partsOf('packages\\ui\\a.ts')).toEqual({ folders: ['packages\\', 'ui\\'], end: 'a.ts' })
+  })
+
+  it('leaves a backslash in a name where the path is not a Windows one', () => {
+    expect(partsOf('src/we\\ird.ts')).toEqual({ folders: ['src/'], end: 'we\\ird.ts' })
+    expect(partsOf('we\\ird')).toEqual({ folders: ['we\\'], end: 'ird' })
   })
 
   it('ends a folder with its last folder, with its slash or not', () => {
@@ -67,7 +80,7 @@ describe('Path', () => {
     })
   }
 
-  const shown = (container: HTMLElement) => container.querySelector('[class*="shown"]')!.textContent
+  const shown = (container: HTMLElement) => visiblePath(container.querySelector('[title]')!)
 
   it('shows the whole path where it fits', () => {
     draw({ width: 400 })
@@ -112,6 +125,30 @@ describe('Path', () => {
     expect(shown(container)).toBe('…/runtime/src')
   })
 
+  it('drops the leading folders of a Windows path, keeping the last folder, with its own mark', () => {
+    const path = 'C:\\Users\\alice\\project\\packages\\ui'
+    draw({ width: widthOf('…\\packages\\ui') })
+    const { container } = render(<Path path={path} />)
+    expect(shown(container)).toBe('…\\packages\\ui')
+  })
+
+  it('has the whole path as text, though folders gave way, so two files that shorten alike are told apart', () => {
+    draw({ width: widthOf('…/Foo.ts') })
+    const { getByRole } = render(
+      <>
+        <button type="button">
+          <Path path="packages/a/Foo.ts" />
+        </button>
+        <button type="button">
+          <Path path="packages/b/Foo.ts" />
+        </button>
+      </>,
+    )
+    expect(getByRole('button', { name: 'packages/a/Foo.ts' })).toBeTruthy()
+    expect(getByRole('button', { name: 'packages/b/Foo.ts' })).toBeTruthy()
+    expect(visiblePath(getByRole('button', { name: 'packages/a/Foo.ts' }).firstElementChild!)).toBe('…/Foo.ts')
+  })
+
   it('has nothing to give way where it has no folders', () => {
     draw({ width: 20 })
     const { container } = render(<Path path="README.md" />)
@@ -124,6 +161,22 @@ describe('Path', () => {
     expect(container.querySelector('[title]')?.getAttribute('title')).toBe('packages/runtime/src/Coordinator.ts')
   })
 
+  it('shortens a part’s file line, a binary file with nothing beside it too, and leaves its other lines as they come', () => {
+    draw({ width: widthOf('…/logo.png') })
+    const { container } = render(
+      <PartLines
+        lines={[
+          ['assets/images/brand/logo.png', '', 'path'],
+          ['assets/images/brand/logo.png', '+1 −0'],
+          ['2 more', ''],
+        ]}
+      />,
+    )
+    // Both files, one with nothing beside it, are paths; the "2 more" is text, with no path in it to shorten.
+    expect([...container.querySelectorAll('[title]')].map(visiblePath)).toEqual(['…/logo.png', '…/logo.png'])
+    expect(container.textContent).toContain('2 more')
+  })
+
   it('is what a changed file shows, as on a narrow task card', () => {
     draw({ width: widthOf('…/tests/coordinatorTools.test.ts') })
     const { container } = render(
@@ -134,7 +187,7 @@ describe('Path', () => {
         ]}
       />,
     )
-    expect([...container.querySelectorAll('[class*="shown"]')].map((one) => one.textContent)).toEqual([
+    expect([...container.querySelectorAll('[title]')].map(visiblePath)).toEqual([
       '…/runtime/src/Coordinator.ts',
       '…/tests/coordinatorTools.test.ts',
     ])

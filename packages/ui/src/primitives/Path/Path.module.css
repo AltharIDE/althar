@@ -27,6 +27,15 @@
 }
 /* where even the end doesn't fit, it is the end of the name that gives way, as the last thing to */
 .shown {
+  position: relative;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+/* a folder that gave way: out of sight, in the page for whoever reads it */
+.out {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
 }

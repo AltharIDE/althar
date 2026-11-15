@@ -5,6 +5,7 @@ import { device } from '../../foundations/device'
 import { Icon } from '../../foundations/Icon/Icon'
 import { modKey } from '../../foundations/keys'
 import { cx } from '../../lib/cx'
+import { Path } from '../../primitives/Path/Path'
 import { Button } from '../../primitives/Button/Button'
 import s from './RepositoryPick.module.css'
 
@@ -154,9 +155,7 @@ export function RepositoryPick({ repositories, picked, onPick, onAdd, className,
                   </Checkbox.Indicator>
                 </Checkbox.Root>
                 <span className={s.repoName}>{r.name}</span>
-                <span className={s.repoWhere} title={r.where}>
-                  {r.where}
-                </span>
+                <Path path={r.where} className={s.repoWhere} />
                 {r.facts !== undefined && <span className={s.repoFacts}>{r.facts}</span>}
               </label>
             </li>
