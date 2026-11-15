@@ -116,8 +116,16 @@ export function HomeView({
   const now = useNow(true)
   // Calls answered here: each stays its line, quiet, where it was, until the person leaves.
   const [answered, setAnswered] = useState<ReadonlyArray<AnsweredCall>>([])
+  // Ready changes merged from their lines here: each stays its line while its merge is under way, its Merge answering the press.
+  const [mergedHere, setMergedHere] = useState<ReadonlySet<string>>(new Set())
   // The home's screen is kept while the person is elsewhere: leaving is when those lines go.
-  useEffect(() => () => setAnswered([]), [])
+  useEffect(
+    () => () => {
+      setAnswered([])
+      setMergedHere(new Set())
+    },
+    [],
+  )
   const agents = start.status?.agents ?? []
   const named = useModelNames()
   const name = (id: string | null) => agents.find((agent) => agent.id === id)?.name ?? id ?? ''
@@ -128,6 +136,7 @@ export function HomeView({
   const { working, waiting, needs } = homeGlanceOf(home, {
     answered,
     merging: model.merging,
+    mergedHere,
     agentName: name,
     modelName: (agentId, model) => named(agentId, model).name,
   })
@@ -148,6 +157,7 @@ export function HomeView({
     if (next.kind === 'fix_after_merge') return void model.fixAfterMerge(task.taskId)
     const change = task.change
     if (change === null) return
+    if (next.kind === 'merge') setMergedHere((now) => new Set([...now, task.taskId]))
     return void (next.kind === 'merge'
       ? bypassQueue === true
         ? model.merge(task.taskId, change.head ?? '', change.url, true)
@@ -161,7 +171,8 @@ export function HomeView({
   const waits: ReadonlyArray<HomeNeed> = needs.map((need) => ({
     key: need.id,
     project: need.project,
-    ...(need.answer === undefined ? {} : { answered: true }),
+    // Answered, or merging from its line: it stays where it was, no longer waiting.
+    ...(need.answer === undefined && (need.ready === undefined || !model.merging.has(need.ready.task.taskId)) ? {} : { answered: true }),
     line: needLineOf(need, {
       onOpen: onTask,
       onAnswer: (call, _project, decision) => answer(call, { decision }),

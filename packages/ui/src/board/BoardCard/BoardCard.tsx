@@ -6,6 +6,7 @@ import { cx } from '../../lib/cx'
 import type { RootProps } from '../../lib/props'
 import { LinkButton } from '../../primitives/LinkButton/LinkButton'
 import { LiveDot } from '../../primitives/LiveDot/LiveDot'
+import { MergeFeel, type MergeFeelStage } from '../../primitives/MergeFeel/MergeFeel'
 import { NextSteps } from '../../primitives/NextStep/NextStep'
 import { Problem } from '../../primitives/Problem/Problem'
 import { StepTrack, type TrackItem } from '../../primitives/StepTrack/StepTrack'
@@ -131,6 +132,8 @@ export type BoardCardProps = RootProps<
     changes?: number
     /** A mark for each of its several changes, beside the count, in the task's order. */
     marks?: ReadonlyArray<BoardChangeMark>
+    /** Where its merge stands, where its strip is Merge: pressed, a ring spreads from the whole card, its strip the button. */
+    merge?: MergeFeelStage | null
     /** Open beside the board. */
     current?: boolean
     onOpen?: () => void
@@ -213,6 +216,7 @@ export function BoardCard({
   toward,
   changes,
   marks,
+  merge,
   current,
   onOpen,
   text,
@@ -289,6 +293,7 @@ export function BoardCard({
       {startedBy !== undefined && startedBy !== '' && <StartedBy task={startedBy} onOpen={onOpenStartedBy} text={text} />}
       {next !== undefined && next !== null && next !== false && <NextSteps className={b.strip}>{next}</NextSteps>}
       {corner !== undefined && corner !== null && <div className={s.corner}>{corner}</div>}
+      {merge !== undefined && <MergeFeel stage={merge} ringCard />}
     </article>
   )
 }
