@@ -111,15 +111,14 @@ describe('a task with a pull request in each of two repositories, the first in i
 })
 
 describe('a task its lead stopped, with no agent on it, as each count says it', () => {
-  // Finding (sanity pass): a stopped task is in the board's Needs you, and counted on its project's tab and the home's tab
-  // (yoursByProject), but the home's own heading, its project rows and the edge leave it out (homeGlanceOf counts calls and ready
-  // tasks only): the home tab says 1 and the home it opens says nothing needs you.
-  // Fixed: the home and the edge go by the board's lanes (waitsOf).
+  // Stopped work is held Up next, so every attention surface leaves it uncounted (DEV-218).
   it('is counted the same on the tabs as on the home and the edge', () => {
     const stopped = task({ phase: 'stopped', stopped: { by: 'interrupted', at: '2026-10-07T09:30:00.000Z' } })
     const snapshot = home({ tasks: [stopped] })
-    expect(yoursByProject(snapshot).get('p1')).toBe(1)
+    expect(yoursByProject(snapshot).get('p1')).toBe(0)
     const glance = homeGlanceOf(snapshot, { agentName, modelName: () => '' })
     expect(glance.waiting).toBe(yoursByProject(snapshot).get('p1'))
+    expect(glance.needs).toEqual([])
+    expect(barKindOf(stopped)).toBeUndefined()
   })
 })
