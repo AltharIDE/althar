@@ -94,16 +94,16 @@
   stroke: color-mix(in srgb, var(--danger) 60%, transparent);
   stroke-dasharray: 3 4;
 }
-.head_met {
+.headMet {
   fill: var(--t-4);
 }
-.head_waits {
+.headWaits {
   fill: var(--line-3);
 }
-.head_you {
+.headYou {
   fill: color-mix(in srgb, var(--signal) 55%, transparent);
 }
-.head_stuck {
+.headStuck {
   fill: color-mix(in srgb, var(--danger) 60%, transparent);
 }
 .lit {

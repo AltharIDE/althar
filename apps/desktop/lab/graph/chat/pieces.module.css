@@ -1,0 +1,367 @@
+/* ——— a step's lead, as a quiet menu button ——— */
+.lead {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 24px;
+  margin: -3px 0 -3px -6px;
+  padding: 0 6px;
+  border-radius: 6px;
+  font-size: 12px;
+  color: var(--t-1);
+  white-space: nowrap;
+}
+.lead:not(:disabled):hover {
+  background: var(--hover-paper);
+}
+.lead:disabled {
+  cursor: default;
+}
+.chevron {
+  color: var(--t-4);
+}
+
+/* ——— a step's detail ——— */
+.detail {
+  display: grid;
+  gap: 12px;
+}
+.detailTitle {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 560;
+  line-height: 1.35;
+  color: var(--t-1);
+}
+.what {
+  margin: 4px 0 0;
+  font-size: 12.5px;
+  line-height: 1.45;
+  color: var(--t-2);
+  text-wrap: pretty;
+}
+.afters {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+}
+.after {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+.unlink {
+  display: inline-grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 4px;
+  color: var(--t-4);
+  opacity: 0;
+  transition: opacity var(--fast) var(--ease);
+}
+.after:hover .unlink,
+.unlink:focus-visible {
+  opacity: 1;
+}
+.unlink:hover {
+  background: var(--hover-paper);
+  color: var(--t-2);
+}
+.detailActs {
+  display: flex;
+  justify-content: flex-start;
+  margin: 0 -8px -4px;
+  padding-top: 8px;
+  border-top: 1px solid var(--line);
+}
+
+/* ——— notes: the person's words for a step's lead ——— */
+.notes {
+  display: grid;
+  gap: 6px;
+}
+.notes:empty {
+  display: none;
+}
+.note {
+  display: grid;
+  grid-template-columns: 14px minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 8px;
+  margin: 0;
+  padding: 7px 8px 7px 9px;
+  border-radius: 8px;
+  background: var(--n-2);
+  font-size: 12.5px;
+  line-height: 1.45;
+  color: var(--t-1);
+}
+.noteMark {
+  margin-top: 2px;
+  color: var(--t-3);
+}
+.unnote {
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 5px;
+  color: var(--t-4);
+  opacity: 0;
+  transition: opacity var(--fast) var(--ease);
+}
+.note:hover .unnote,
+.unnote:focus-visible {
+  opacity: 1;
+}
+.unnote:hover {
+  background: var(--hover-paper);
+  color: var(--t-2);
+}
+.addNote {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  justify-self: start;
+  height: 26px;
+  margin-left: -6px;
+  padding: 0 8px 0 6px;
+  border-radius: 6px;
+  font-size: 12px;
+  color: var(--t-2);
+}
+.addNote:hover {
+  background: var(--hover-paper);
+  color: var(--t-1);
+}
+.noteForm {
+  margin: 0;
+}
+
+/* ——— a step drawn small ——— */
+.pill {
+  --behind: color-mix(in srgb, var(--n-2) 55%, var(--paper));
+  display: grid;
+  align-content: center;
+  gap: 2px;
+  width: 100%;
+  height: 100%;
+  padding: 0 10px 0 8px;
+  border-radius: 9px;
+  background: var(--paper);
+  box-shadow:
+    inset 0 0 0 1px var(--line-2),
+    var(--lift-card);
+  text-align: left;
+  cursor: pointer;
+  transition:
+    background-color var(--move) var(--ease),
+    box-shadow var(--move) var(--ease);
+}
+.pill:hover {
+  box-shadow:
+    inset 0 0 0 1px var(--line-3),
+    var(--lift-2);
+}
+.pill:focus-visible {
+  outline: 2px solid var(--live);
+  outline-offset: 2px;
+}
+.pill[data-state='open'] {
+  box-shadow:
+    inset 0 0 0 1.5px var(--t-3),
+    var(--lift-2);
+}
+.name {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  font-size: 12.5px;
+  font-weight: 560;
+  color: var(--t-1);
+}
+.markBox {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  width: 14px;
+  height: 14px;
+}
+.short {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.hasNote {
+  flex: none;
+  color: var(--t-3);
+}
+.changedDot {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  margin-left: auto;
+  margin-right: 1px;
+  border-radius: 99px;
+  background: var(--signal);
+}
+.pr {
+  margin-left: auto;
+  flex: none;
+  font-family: var(--mono);
+  font-size: 10.5px;
+  font-weight: 400;
+  color: var(--t-3);
+}
+.word {
+  min-width: 0;
+  padding-left: 20px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11.5px;
+  color: var(--t-3);
+}
+.word.live {
+  color: var(--t-2);
+}
+.word.quiet {
+  color: var(--t-3);
+}
+.word.signal {
+  color: var(--signal-ink);
+}
+.word.danger {
+  color: var(--danger);
+}
+/* planned: on paper, its lead under its name, and its marks after the lead */
+.planned .word {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--t-3);
+}
+/* not started: an outline of where it will be */
+.waits,
+.held,
+.stuck {
+  background: var(--behind);
+  box-shadow: none;
+  outline: 1px dashed var(--line-3);
+  outline-offset: -1px;
+}
+.waits .name,
+.held .name,
+.stuck .name {
+  color: var(--t-2);
+}
+.stuck {
+  outline-color: color-mix(in srgb, var(--danger) 45%, transparent);
+}
+/* waits on the person: violet, like every ask */
+.yours {
+  background: var(--signal-paper);
+  box-shadow: inset 0 0 0 1px var(--signal-line);
+}
+.failed {
+  background: color-mix(in srgb, var(--danger) 5%, var(--paper));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--danger) 35%, transparent);
+}
+/* merged: it steps back */
+.done {
+  background: var(--behind);
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+.done .name {
+  color: var(--t-2);
+}
+
+/* ——— what's dropped ——— */
+.dropped {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 14px;
+  margin: 0;
+  font-size: 12px;
+  color: var(--t-3);
+}
+.droppedLabel {
+  font-weight: 560;
+  color: var(--t-2);
+}
+.droppedOne {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.struck {
+  text-decoration-color: var(--t-4);
+}
+.putBack {
+  color: var(--t-2);
+  text-decoration: underline;
+  text-decoration-color: var(--line-3);
+  text-underline-offset: 2px;
+}
+.putBack:hover {
+  color: var(--t-1);
+}
+
+/* ——— the plan's kicker ——— */
+.kicker {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--t-2);
+}
+.kickerMark {
+  color: var(--t-3);
+}
+.kicker.live {
+  color: var(--live);
+}
+.kicker.signal {
+  color: var(--signal);
+}
+.kicker.danger {
+  color: var(--danger);
+}
+.kicker.quiet {
+  color: var(--t-2);
+}
+
+/* ——— how far the run is: a segment a task ——— */
+.progress {
+  display: inline-flex;
+  gap: 2px;
+  flex: none;
+}
+.segment {
+  width: 10px;
+  height: 6px;
+  border-radius: 2px;
+  background: var(--track);
+  transition: background-color var(--move) var(--ease);
+}
+.segStarting,
+.segRunning {
+  background: var(--live);
+}
+.segYours {
+  background: var(--signal);
+}
+.segFailed,
+.segStuck {
+  background: var(--danger);
+}
+.segDone {
+  background: var(--t-3);
+}

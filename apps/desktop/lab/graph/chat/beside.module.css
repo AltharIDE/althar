@@ -1,0 +1,181 @@
+/* The plan in the board's half: the board's ground, a head, and the steps whole. */
+.beside {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  height: 100%;
+  min-height: 0;
+  background: var(--n-2);
+}
+.head {
+  display: flex;
+  align-items: flex-end;
+  gap: 16px;
+  padding: 18px 28px 16px;
+  border-bottom: 1px solid var(--line);
+}
+.heading {
+  display: grid;
+  gap: 4px;
+  flex: 1;
+  min-width: 0;
+}
+.title {
+  margin: 2px 0 0;
+  font-size: 20px;
+  font-weight: 600;
+  letter-spacing: -0.015em;
+  line-height: 1.25;
+  color: var(--t-1);
+}
+.facts {
+  margin: 0;
+  font-size: 12.5px;
+  color: var(--t-3);
+}
+.canvas {
+  display: grid;
+  justify-items: center;
+  align-content: start;
+  gap: 20px;
+  padding: 28px 28px 40px;
+  overflow: auto;
+  background-image: radial-gradient(circle at 1px 1px, var(--line-2) 1px, transparent 0);
+  background-size: 18px 18px;
+}
+.world {
+  position: relative;
+  flex: none;
+}
+.place {
+  position: absolute;
+  top: 0;
+  left: 0;
+  transition: transform var(--move) var(--ease-move);
+}
+
+/* a step whole */
+.step {
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+  gap: 6px;
+  width: 100%;
+  height: 100%;
+  padding: 11px 12px 10px;
+  border-radius: 11px;
+  background: var(--paper);
+  box-shadow:
+    inset 0 0 0 1px var(--line-2),
+    var(--lift-card);
+  text-align: left;
+  cursor: pointer;
+  transition: box-shadow var(--move) var(--ease);
+}
+.step:hover {
+  box-shadow:
+    inset 0 0 0 1px var(--line-3),
+    var(--lift-2);
+}
+.step[data-state='open'] {
+  box-shadow:
+    inset 0 0 0 1.5px var(--t-3),
+    var(--lift-2);
+}
+.step:focus-visible {
+  outline: 2px solid var(--live);
+  outline-offset: 2px;
+}
+.step.flash {
+  box-shadow:
+    inset 0 0 0 1.5px var(--signal),
+    var(--lift-2);
+}
+.stepHead {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+}
+.number {
+  flex: none;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--t-4);
+}
+.stepName {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--t-1);
+}
+.noted {
+  flex: none;
+  color: var(--t-3);
+}
+.dot {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  margin-left: auto;
+  border-radius: 99px;
+  background: var(--signal);
+}
+.stepWhat {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  align-self: start;
+  max-height: calc(12px * 1.4 * 2);
+  overflow: hidden;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--t-2);
+}
+.stepLead {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11.5px;
+  color: var(--t-3);
+}
+.dropped {
+  justify-self: stretch;
+  max-width: 720px;
+}
+
+/* once launched: the plan in the conversation, small */
+.launched {
+  padding: 14px 16px 0;
+  border-radius: var(--r-lg);
+  background: var(--paper);
+  box-shadow:
+    inset 0 0 0 1px var(--line-2),
+    var(--lift-card);
+  overflow: hidden;
+}
+.launchedTop {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 12px;
+}
+.launchedAt {
+  margin-left: auto;
+  font-variant-numeric: tabular-nums;
+  color: var(--t-3);
+}
+.launchedTitle {
+  margin: 8px 0 0;
+  font-size: 16px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--t-1);
+}
+.launchedProgress {
+  margin: 12px 0 14px;
+}
+.launchedSteps {
+  margin: 0 -16px;
+}

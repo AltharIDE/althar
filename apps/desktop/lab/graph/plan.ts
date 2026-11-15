@@ -1,4 +1,5 @@
 import { store } from './store'
+import { columnsOf, listed } from './view'
 import { SCENARIOS, type Scenario, type ScenarioKey, type TaskSpec } from './world'
 
 /*
@@ -224,40 +225,40 @@ export const unlinkStep = (key: string, dep: string) => {
 
 const NUMBERS = ['one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten', 'eleven', 'twelve']
 
-/** The steps a message names, in the order it names them: by their name, a word of their title, or "step three". */
+/** The steps a message names, in the order it names them: by their name, a word of their title, or "step three" as the plan numbers them, in the order they can start. */
 const named = (text: string, steps: ReadonlyArray<Step>): Step[] => {
   const lower = text.toLowerCase()
+  const order = columnsOf(steps).flat()
   const found: Array<{ step: Step; at: number }> = []
-  for (const [i, step] of steps.entries()) {
+  for (const step of steps) {
+    const n = order.indexOf(step.key)
+    // Its name, or a long word of it, as a whole word: "hosts" names the Hosts screen, "a host" names nothing.
     const words = [
       step.short.toLowerCase(),
-      step.key,
       ...step.short
         .toLowerCase()
         .split(/[\s&]+/)
         .filter((one) => one.length > 4),
     ]
-    const at = Math.min(...words.map((one) => (one.length > 2 ? lower.indexOf(one) : -1)).map((one) => (one < 0 ? Infinity : one)))
-    const byNumber = new RegExp(`step (${i + 1}|${NUMBERS[i]})\\b`).exec(lower)
+    const at = Math.min(
+      ...words.map((one) => new RegExp(`\\b${one.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`).exec(lower)?.index ?? Infinity),
+    )
+    const byNumber = new RegExp(`step (${n + 1}|${NUMBERS[n]})\\b`).exec(lower)
     const where = Math.min(at, byNumber === null ? Infinity : byNumber.index)
     if (where !== Infinity) found.push({ step, at: where })
   }
   return found.toSorted((a, b) => a.at - b.at).map((one) => one.step)
 }
 
-/** What the coordinator makes of a message: the plan's next steps and what changed, in words, or a question back. */
-const read = (text: string, now: Plan): { steps: ReadonlyArray<Step>; changes: string[]; notes: string[]; reply: string } => {
-  const lower = text.toLowerCase()
-  const last = latest(now)
-  const steps = last.steps.filter((one) => !one.dropped)
-  const mentioned = named(text, steps)
-  const target = mentioned[0]
-  const changes: string[] = []
-  let next = last.steps
-  const put = (key: string, change: (step: Step) => Step) => {
-    next = next.map((one) => (one.key === key ? change(one) : one))
-  }
-  const model = /sonnet/.test(lower)
+/** A message in clauses: "drop the guide, and step 8 should use Sonnet" is two. */
+const clausesOf = (text: string): string[] =>
+  text
+    .split(/(?:[,;:]\s*(?:and\s+|but\s+)?|\s+and\s+|\.\s+)/i)
+    .map((one) => one.trim().replace(/\.$/, ''))
+    .filter((one) => one.length > 0)
+
+const MODEL_OF = (lower: string): string | null =>
+  /sonnet/.test(lower)
     ? 'claude-sonnet-5-5'
     : /terra/.test(lower)
       ? 'gpt-6.1-terra'
@@ -266,59 +267,96 @@ const read = (text: string, now: Plan): { steps: ReadonlyArray<Step>; changes: s
         : /\b(opus|claude)\b/.test(lower)
           ? 'claude-opus-5-5'
           : null
-  const effort = /extra high|xhigh/.test(lower) ? 'xhigh' : /\bhigh\b/.test(lower) ? 'high' : /\bmedium\b/.test(lower) ? 'medium' : null
-  const drop = /\b(drop|remove|skip|cut|no need for|don.t need)\b/.test(lower)
-  const after = /\b(after|wait(s)? for|once)\b/.exec(lower)
-  if (target === undefined) {
-    if (model !== null || drop) return { steps: last.steps, changes: [], notes: [], reply: 'Which step should that go on?' }
+const EFFORT_OF = (lower: string): NonNullable<Step['effort']> | null =>
+  /extra high|xhigh/.test(lower) ? 'xhigh' : /\bhigh\b/.test(lower) ? 'high' : /\bmedium\b/.test(lower) ? 'medium' : null
+const NOTE_WORDS = /\b(use|make sure|remember|note|should|must|keep|don.t|never|always|want|make)\b/
+
+/**
+ * What the coordinator makes of a message: the plan's next steps and what changed, in words, or a question back. Each
+ * clause acts on the step it names, or on the one named before it.
+ */
+const read = (text: string, now: Plan): { steps: ReadonlyArray<Step>; changes: string[]; notes: string[]; reply: string } => {
+  const last = latest(now)
+  const live = last.steps.filter((one) => !one.dropped)
+  // What this answer changes is marked; what the one before changed isn't any more.
+  let next: ReadonlyArray<Step> = last.steps.map((one) => ({ ...one, changed: [] }))
+  const put = (key: string, change: (step: Step) => Step) => {
+    next = next.map((one) => (one.key === key ? change(one) : one))
+  }
+  const mark = (step: Step, what: Step['changed'][number]): Step['changed'] =>
+    step.changed.includes(what) ? step.changed : [...step.changed, what]
+  const changes: string[] = []
+  const notes: string[] = []
+  const said: string[] = []
+  let target: Step | undefined
+  let asked = false
+  for (const clause of clausesOf(text)) {
+    const lower = clause.toLowerCase()
+    const mentioned = named(clause, live)
+    if (mentioned[0] !== undefined) target = next.find((one) => one.key === mentioned[0]?.key)
+    const model = MODEL_OF(lower)
+    const effort = EFFORT_OF(lower)
+    const drop = /\b(drop|remove|skip|cut|no need for|don.t need)\b/.test(lower)
+    const after = /\b(after|wait(s)? for|once)\b/.exec(lower)
+    if (target === undefined) {
+      if (model !== null || drop || effort !== null) asked = true
+      else if (NOTE_WORDS.test(lower)) {
+        notes.push(clause)
+        changes.push(`A note on every step: “${clause}”`)
+      }
+      continue
+    }
+    const step = target
+    if (drop) {
+      put(step.key, (one) => ({ ...one, dropped: true, changed: ['dropped'] }))
+      changes.push(`Dropped ${step.short}`)
+      const left = live.filter((one) => one.deps.includes(step.key))
+      said.push(
+        left.length === 0
+          ? `Dropped ${step.short}: nothing else waited for it`
+          : `Dropped ${step.short}, so ${listed(left.map((one) => one.short))} start${left.length === 1 ? 's' : ''} sooner`,
+      )
+      continue
+    }
+    let acted = false
+    if (after !== null && mentioned.length > 1) {
+      const other = mentioned.find((one) => one.key !== step.key && lower.indexOf(one.short.toLowerCase()) > after.index)
+      if (other !== undefined && !step.deps.includes(other.key)) {
+        put(step.key, (one) => ({ ...one, deps: [...one.deps, other.key], changed: mark(one, 'after') }))
+        changes.push(`${step.short} waits for ${other.short}`)
+        said.push(`${step.short} now waits for ${other.short}`)
+        acted = true
+      }
+    }
+    if (model !== null && model !== step.model) {
+      put(step.key, (one) => ({ ...one, model, lead: leadOf(model).lead, changed: mark(one, 'lead') }))
+      changes.push(`${step.short}: ${leadOf(model).name}`)
+      said.push(`${step.short} goes to ${leadOf(model).name}`)
+      acted = true
+    }
+    if (effort !== null && effort !== step.effort) {
+      put(step.key, (one) => ({ ...one, effort, changed: mark(one, 'effort') }))
+      changes.push(`${step.short}: ${EFFORTS[effort]} effort`)
+      said.push(`${step.short} thinks at ${EFFORTS[effort]}`)
+      acted = true
+    }
+    if (!acted && (NOTE_WORDS.test(lower) || mentioned.length === 0)) {
+      const clean = clause.replace(/^(on |for |in )?(step \w+|the [\w\s&]+? step)\s*/i, '')
+      const note = clean.charAt(0).toUpperCase() + clean.slice(1) + (/[.!?]$/.test(clean) ? '' : '.')
+      put(step.key, (one) => ({ ...one, notes: [...(one.notes ?? []), note], changed: mark(one, 'note') }))
+      changes.push(`Note on ${step.short}: “${note}”`)
+      said.push(`${step.short}’s lead will have your note`)
+    }
+  }
+  if (changes.length === 0)
     return {
       steps: last.steps,
-      changes: [`A note on every step: “${text.trim()}”`],
-      notes: [text.trim()],
-      reply: 'Every step’s lead will have that as a note.',
-    }
-  }
-  if (drop) {
-    put(target.key, (one) => ({ ...one, dropped: true, changed: ['dropped'] }))
-    const left = steps.filter((one) => one.deps.includes(target.key) && one.key !== target.key)
-    changes.push(`Dropped ${target.short}`)
-    return {
-      steps: next,
-      changes,
+      changes: [],
       notes: [],
-      reply:
-        left.length === 0
-          ? `Dropped ${target.short}. Nothing else waited for it.`
-          : `Dropped ${target.short}. ${left.map((one) => one.short).join(' and ')} no longer wait for it, and start sooner.`,
+      reply: asked ? 'Which step should that go on?' : 'Nothing in the plan changes for that.',
     }
-  }
-  if (after !== null && mentioned.length > 1) {
-    const other = mentioned.find((one) => one.key !== target.key && text.toLowerCase().indexOf(one.short.toLowerCase()) > after.index)
-    if (other !== undefined && !target.deps.includes(other.key)) {
-      put(target.key, (one) => ({ ...one, deps: [...one.deps, other.key], changed: ['after'] }))
-      changes.push(`${target.short} waits for ${other.short}`)
-    }
-  }
-  if (model !== null && model !== target.model) {
-    put(target.key, (one) => ({ ...one, model, lead: leadOf(model).lead, changed: [...one.changed, 'lead'] }))
-    changes.push(`${target.short}: ${leadOf(model).name}`)
-  }
-  if (effort !== null && effort !== target.effort) {
-    put(target.key, (one) => ({ ...one, effort, changed: [...one.changed, 'effort'] }))
-    changes.push(`${target.short}: ${EFFORTS[effort]} effort`)
-  }
-  if (changes.length === 0 || /\b(use|make sure|remember|note|should|must|keep|don.t|never|always)\b/.test(lower)) {
-    const note = text.trim().replace(/^(on |for )?(step \w+|the [\w\s&]+? step)[,:]?\s*/i, '')
-    const clean = note.charAt(0).toUpperCase() + note.slice(1)
-    put(target.key, (one) => ({ ...one, notes: [...(one.notes ?? []), clean], changed: [...one.changed, 'note'] }))
-    changes.push(`Note on ${target.short}: “${clean}”`)
-  }
-  return {
-    steps: next.map((one) => (one.key === target.key ? one : { ...one, changed: [] })),
-    changes,
-    notes: [],
-    reply: `Done. ${changes.join('; ')}.`,
-  }
+  const reply = said.length === 0 ? 'Every step’s lead will have that as a note.' : `Done. ${said.map((one) => `${one}.`).join(' ')}`
+  return { steps: next, changes, notes, reply }
 }
 
 let told = 0

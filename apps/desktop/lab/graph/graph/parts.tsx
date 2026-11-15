@@ -207,7 +207,7 @@ export function Wires({
             markerHeight="6"
             orient="auto-start-reverse"
           >
-            <path d="M 0 0.6 L 5.6 3 L 0 5.4 z" className={s[`head_${look}`]} />
+            <path d="M 0 0.6 L 5.6 3 L 0 5.4 z" className={s[`head${look.charAt(0).toUpperCase()}${look.slice(1)}`]} />
           </marker>
         ))}
       </defs>

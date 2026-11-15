@@ -1,0 +1,84 @@
+/* The plan's card, a sibling of the coordinator's task card: the same paper, edge and head. */
+.card {
+  position: relative;
+  padding: 14px 16px 0;
+  border-radius: var(--r-lg);
+  background: var(--paper);
+  box-shadow:
+    inset 0 0 0 1px var(--line-2),
+    var(--lift-card);
+  overflow: hidden;
+}
+.top {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 12px;
+}
+.at {
+  margin-left: auto;
+  flex: none;
+  font-variant-numeric: tabular-nums;
+  color: var(--t-3);
+}
+.title {
+  margin: 8px 0 0;
+  font-size: 16px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  line-height: 1.35;
+  color: var(--t-1);
+}
+
+/* the graph, in a quiet well the card's width, centred */
+.well {
+  --behind: color-mix(in srgb, var(--n-2) 55%, var(--paper));
+  display: grid;
+  place-items: center;
+  margin: 14px -16px 0;
+  padding: 22px 16px 24px;
+  border-top: 1px solid var(--line);
+  background: var(--behind);
+  overflow-x: auto;
+}
+.canvas {
+  position: relative;
+  flex: none;
+}
+.place {
+  position: absolute;
+  top: 0;
+  left: 0;
+  transition: transform var(--move) var(--ease-move);
+}
+
+.steps {
+  margin: 0 -16px;
+}
+
+.below {
+  margin: 0 -16px;
+  padding: 10px 16px;
+  border-top: 1px solid var(--line);
+  background: var(--behind, var(--paper));
+}
+
+/* An earlier version, folded to a line where a later one took its place. */
+.folded {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 36px;
+  padding: 0 14px;
+  border-radius: var(--r-lg);
+  box-shadow: inset 0 0 0 1px var(--line-2);
+  font-size: 12.5px;
+  color: var(--t-3);
+}
+.foldedName {
+  font-weight: 560;
+  color: var(--t-2);
+}
+.foldedMark {
+  color: var(--t-4);
+}
