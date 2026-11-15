@@ -66,7 +66,7 @@ import { AutomationInThread } from '../automations/AutomationInThread'
 import { AutomationsView } from '../automations/AutomationsView'
 import { useAutomationActions, useAutomations } from '../automations/useAutomations'
 import { BoardView } from '../board/BoardView'
-import { ChangeTeam, useTeamed } from '../team/Team'
+import { TeamOf } from '../team/Team'
 import type { SettingsWays } from '../settings/open'
 import { useSendMidTurn } from '../settings/useSendMidTurn'
 import { useFolds } from '../board/folds'
@@ -504,7 +504,6 @@ export function ProjectView({
 
   // The team of a task, open from its row up next or from a small change's card, while it can still change.
   const [teamFor, setTeamFor] = useState<string | null>(null)
-  const teamTask = useTeamed(about, teamFor)
   const actions: CardActions = {
     project: name,
     ...(about === null ? {} : { projectId: about }),
@@ -1071,15 +1070,6 @@ export function ProjectView({
                       }}
                       {...(board.moreSettled ? { onShowOlder: board.showOlder } : {})}
                     />
-                    {teamFor !== null && (
-                      <ChangeTeam
-                        key={teamFor}
-                        projectId={projectId}
-                        task={teamTask}
-                        agents={model.agents}
-                        onClose={() => setTeamFor(null)}
-                      />
-                    )}
                   </>
                 ) : board.error === null ? (
                   <PartPending label={text.boardReading} />
@@ -1093,6 +1083,10 @@ export function ProjectView({
               </div>
             )}
           </div>
+        )}
+        {/* A team opened from a card in the conversation or a row of the board: whichever of them is on show, and before the board is. */}
+        {teamFor !== null && (
+          <TeamOf key={teamFor} projectId={projectId} taskId={teamFor} agents={model.agents} onClose={() => setTeamFor(null)} />
         )}
       </MessageMotion>
     </PageOpenerProvider>

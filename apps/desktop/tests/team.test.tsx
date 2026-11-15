@@ -3,11 +3,12 @@ import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 
 import { ApiError, type BoardSnapshot, type BoardTask } from '@althar/contracts'
+import { Room } from '@althar/ui'
 
 import { BoardView } from '../src/renderer/features/board/BoardView'
 import { lanesOf } from '../src/renderer/features/board/lanes'
 import { canHold, ChangeTeam, TeamMenu, teamChangeOf, useTeamed } from '../src/renderer/features/team/Team'
-import { agents, card, change, changed, fakeClient } from './fixtures'
+import { agents, card, change, changed, coordinatorSnapshot, fakeClient, items } from './fixtures'
 import { servicesFor, withServices } from './render'
 import { ServicesProvider } from '../src/renderer/data/services'
 import { ProjectView } from '../src/renderer/features/project/ProjectView'
@@ -557,7 +558,7 @@ describe('changing a plan’s team before it begins', () => {
   })
 })
 
-function Project() {
+function Project({ room }: { room?: Room }) {
   return (
     <ProjectView
       model={useProject('p1')}
@@ -565,6 +566,64 @@ function Project() {
       connections={useConnections()}
       settings={useSettingsOf('p1')}
       onTask={vi.fn()}
+      {...(room === undefined ? {} : { room })}
     />
   )
 }
+
+describe("a small change's card in the coordinator's thread", () => {
+  const small = (over: Partial<NonNullable<BoardTask['plan']>> = {}) =>
+    task({
+      phase: 'running',
+      plan: { ...card().plan!, startsAt: null, preset: 'Small change', ...over },
+    })
+  const talking = (current: BoardTask, getBoard = vi.fn(async () => board([current]))) => {
+    const fake = fakeClient({
+      getBoard,
+      getCoordinator: vi.fn(async () =>
+        coordinatorSnapshot({ items: [items.card(card({ phase: 'running', plan: current.plan, step: 'implement' }), 'c0')] }),
+      ),
+    })
+    withServices(<Project room={Room.Talk} />, fake.client)
+    return fake
+  }
+
+  it('opens its team with only the conversation on show, with no board beside it', async () => {
+    talking(small())
+    await userEvent.click(await screen.findByRole('button', { name: 'Change the team…' }))
+    expect(await screen.findByRole('dialog', { name: 'Team' })).toBeTruthy()
+  })
+
+  it('opens its team once the board has read, if it was pressed before', async () => {
+    let read: (snapshot: BoardSnapshot) => void = () => {}
+    const current = small()
+    const pending = new Promise<BoardSnapshot>((resolve) => {
+      read = resolve
+    })
+    talking(
+      current,
+      vi.fn(() => pending),
+    )
+    await userEvent.click(await screen.findByRole('button', { name: 'Change the team…' }))
+    expect(screen.queryByRole('dialog', { name: 'Team' })).toBeNull()
+    act(() => read(board([current])))
+    expect(await screen.findByRole('dialog', { name: 'Team' })).toBeTruthy()
+  })
+
+  it('changes only the lead of one whose review reads after its merge, with no review to add', async () => {
+    talking(
+      small({
+        reviewAfterMerge: true,
+        steps: [
+          { key: 'implement', agentId: 'claude-code', model: null, skipped: false },
+          { key: 'review', agentId: 'codex', model: null, skipped: true },
+        ],
+      }),
+    )
+    await userEvent.click(await screen.findByRole('button', { name: 'Change the team…' }))
+    const dialog = within(await screen.findByRole('dialog', { name: 'Team' }))
+    expect(dialog.getByRole('button', { name: /^Implement:/ })).toBeTruthy()
+    expect(dialog.queryByRole('button', { name: /^Review:/ })).toBeNull()
+    expect(dialog.queryByRole('button', { name: 'Add a review' })).toBeNull()
+  })
+})

@@ -89,6 +89,29 @@ export const useTeamed = (projectId: string | null, taskId: string | null): Team
   return task === undefined || teamChangeOf(task) === null ? null : task
 }
 
+/**
+ * A task's team dialog, opened from wherever its card or row is: it waits for the board to read the task before it opens, and
+ * stays once it has, saying so where the team can no longer change.
+ */
+export function TeamOf({
+  projectId,
+  taskId,
+  agents,
+  onClose,
+}: {
+  projectId: string
+  taskId: string
+  agents: ReadonlyArray<AgentStatus>
+  onClose: () => void
+}) {
+  const task = useTeamed(projectId, taskId)
+  const [opened, setOpened] = useState(false)
+  useEffect(() => {
+    if (task !== null) setOpened(true)
+  }, [task])
+  return opened ? <ChangeTeam projectId={projectId} task={task} agents={agents} onClose={onClose} /> : null
+}
+
 /** Its team in a line: who leads, how hard, and who reviews. */
 const useTeamLine = (plan: Plan) => {
   const named = useModelNames()
@@ -162,7 +185,7 @@ export function ChangeTeam({
   agents,
   onClose,
   onSaved,
-  leadOnly = false,
+  leadOnly: only = false,
 }: {
   projectId: string
   task: Teamed | null
@@ -193,6 +216,8 @@ export function ChangeTeam({
   if (first === null || firstPlan === null) return null
   const now = task ?? first
   const plan = now.plan ?? firstPlan
+  // A small change whose review reads after its merge keeps that timing: its review is changed from its Review stop, not here.
+  const leadOnly = only || (plan.preset === 'Small change' && plan.reviewAfterMerge === true)
   const how = task === null ? null : teamChangeOf(task)
   // A task that has begun changes through ChangeTeam, until it is merged or settled.
   const begun = how === 'begun' || teamChangeOf(first) === 'begun'

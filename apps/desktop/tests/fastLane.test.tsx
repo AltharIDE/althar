@@ -136,6 +136,69 @@ describe("a small change's team", () => {
     expect(screen.queryByText('Review before Ship')).toBeNull()
   })
 
+  /** A board that reads its lead's effort as the test says, and tells the window it changed. */
+  const live = (over: Parameters<typeof fakeClient>[0] = {}) => {
+    let effort: string | null = 'low'
+    const make = () =>
+      board({
+        ...small,
+        steps: [{ key: 'implement' as const, agentId: 'claude-code', model: null, effort, skipped: false }, small.steps[1]!],
+      })
+    const fake = fakeClient({ getBoard: vi.fn(async () => make()), ...over })
+    withServices(
+      <SmallChangeOf
+        card={content()}
+        named={(id) => ({ id: id ?? '', name: id ?? '', short: id ?? '', runtime: id ?? '', efforts: [] })}
+        projectId="p1"
+        agents={agents}
+        busy={false}
+        onMerge={vi.fn()}
+      />,
+      fake.client,
+    )
+    return {
+      ...fake,
+      set: (next: string) => {
+        effort = next
+        act(() => fake.emit(changed('card', 't1', 'th1')))
+      },
+    }
+  }
+  const line = () => screen.getByText(/claude-code ·/).textContent
+
+  it('lets a saved lead go once the board reads it, even before the command answers, so a later change shows', async () => {
+    let answer: () => void = () => {}
+    const fake = live({ changeTeam: vi.fn(() => new Promise<void>((resolve) => (answer = resolve))) })
+    await userEvent.click(await screen.findByRole('button', { name: 'Change the team…' }))
+    const dialog = within(await screen.findByRole('dialog', { name: 'Team' }))
+    await userEvent.click(dialog.getByRole('button', { name: /^Implement:/ }))
+    await userEvent.click(await screen.findByRole('radio', { name: /^High$/ }))
+    await userEvent.keyboard('{Escape}')
+    await userEvent.click(dialog.getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(fake.client.changeTeam).toHaveBeenCalled())
+    // The read that says it comes first; then the command answers; then the lead changes again, by the composer or Auto.
+    fake.set('high')
+    await waitFor(() => expect(line()).toMatch(/High/))
+    act(() => answer())
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Team' })).toBeNull())
+    fake.set('medium')
+    await waitFor(() => expect(line()).toMatch(/Medium/))
+  })
+
+  it('keeps a saved reviewer removal through a read that changes only the lead', async () => {
+    const fake = live()
+    await userEvent.click(await screen.findByRole('button', { name: 'Change the team…' }))
+    const dialog = within(await screen.findByRole('dialog', { name: 'Team' }))
+    await userEvent.click(dialog.getByRole('button', { name: /^Review:/ }))
+    await userEvent.click(await screen.findByRole('button', { name: 'Remove from this step' }))
+    await userEvent.click(dialog.getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Team' })).toBeNull())
+    fake.set('high')
+    await waitFor(() => expect(line()).toMatch(/High/))
+    expect(screen.getByText(/no review/)).toBeTruthy()
+    expect(screen.queryByText('Review before Ship')).toBeNull()
+  })
+
   it('names who leads from the next turn, as the board reads it, not only the plan its card was made from', async () => {
     const lead = { key: 'implement' as const, agentId: 'codex', model: null, effort: 'high', skipped: false }
     const fake = fakeClient({ getBoard: vi.fn(async () => board({ ...small, steps: [lead, small.steps[1]!] })) })
