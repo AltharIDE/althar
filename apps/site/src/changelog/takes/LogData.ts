@@ -8,6 +8,7 @@
 
 /** When each release was published on GitHub, UTC. The mission's clock starts at 0.1.0's. */
 export const PUBLISHED: Record<string, string> = {
+  '0.8.0': '2026-11-13T23:31:00Z',
   '0.7.0': '2026-11-04T20:56:43Z',
   '0.6.0': '2026-10-30T23:31:15Z',
   '0.5.0': '2026-10-20T18:18:17Z',
@@ -20,6 +21,7 @@ export const PUBLISHED: Record<string, string> = {
 
 /** The pictures the highlights are shown with (LogPictures.tsx). */
 export type Picture =
+  | 'undo'
   | 'browser'
   | 'canvas'
   | 'findings'
@@ -47,6 +49,14 @@ export interface Highlight {
  * opens the page, so its entry shows the rest and keeps the lead's lines.
  */
 export const HIGHLIGHTS: Record<string, readonly Highlight[]> = {
+  '0.9.0': [
+    {
+      title: 'Undo, files and all',
+      why: 'Take back any message you sent a task: it and every reply after it leave the conversation, the files those turns changed go back as they were, and your prompt returns to the draft, to ask again another way.',
+      picture: 'undo',
+      covers: [0],
+    },
+  ],
   '0.8.0': [
     {
       title: 'A browser, built in',

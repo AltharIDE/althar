@@ -33,6 +33,31 @@ export const releaseUrl = (version: string) => `${REPO}/releases/tag/v${version}
 /** The releases, newest first. */
 export const RELEASES: readonly Release[] = [
   {
+    version: '0.9.0',
+    date: '2026-11-15',
+    title: 'Take back a turn',
+    changes: [
+      {
+        kind: 'new',
+        text: 'Undo from here: a message and the replies after it leave the conversation, the files they changed go back, and the prompt returns to your draft.',
+      },
+      { kind: 'new', text: 'Markdown files open rendered, with what changed marked and the source a click away.' },
+      { kind: 'new', text: 'Steer or queue: choose what a message sent while an agent works does.' },
+      { kind: 'new', text: 'Choose how new work takes turns among an agent’s accounts, for each project.' },
+      { kind: 'new', text: 'Merge without queue, where GitHub lets you bypass it.' },
+      { kind: 'improved', text: 'GitHub Copilot runs inside Althar, on your Copilot sign-in, no longer through OpenCode.' },
+      { kind: 'improved', text: 'A message sent mid-turn shows in the queue at once.' },
+      { kind: 'improved', text: 'Leads read the coordinator’s conversation with you.' },
+      { kind: 'improved', text: 'Model pickers show models and effort; usage stays in Plan usage.' },
+      { kind: 'improved', text: 'One title bar on every Linux desktop that allows it.' },
+      { kind: 'improved', text: 'Closing the window remembers whether you chose to keep work running.' },
+      { kind: 'fixed', text: 'Moving to another account when one runs out keeps the model and effort you chose.' },
+      { kind: 'fixed', text: 'Turning crash reports off stops the reports still waiting to be sent.' },
+      { kind: 'fixed', text: 'Asides clear when you clear them, and stay where you moved them.' },
+      { kind: 'fixed', text: 'Dropping or joining a change cleans up its folder, on Windows too.' },
+    ],
+  },
+  {
     version: '0.8.0',
     date: '2026-11-13',
     title: 'Your app, beside the conversation',

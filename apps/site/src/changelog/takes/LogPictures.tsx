@@ -1,4 +1,4 @@
-import { Brand, BrandMark, Icon, Logo, planPeekText, reportProblemText } from '@althar/ui'
+import { Brand, BrandMark, Icon, Logo, planPeekText, reportProblemText, undoTurnText } from '@althar/ui'
 import { sealSvg } from '@althar/ui/seal'
 import { type CSSProperties, type ReactNode, useEffect, useRef, useState } from 'react'
 
@@ -1042,7 +1042,132 @@ function Canvas() {
   )
 }
 
+/* ---- 0.9.0: undo from a message ---- */
+
+/*
+ * The beats: a task's two turns, and the four files they changed; the person
+ * points at their second message, and its Undo from here shows; the question,
+ * over the window; it's pressed; the message and its reply leave, the two
+ * files that turn made go back, and the prompt is back in the draft. Then it
+ * holds, and clears.
+ */
+const UNDONE: Timeline = { beats: [0, 1500, 2700, 5600, 6300, 11600], loop: 12400, rest: 2 }
+
+/** The files the task changed, and the turn that changed each. */
+const TOUCHED = [
+  { path: 'src/refunds/refund.ts', ins: 31, del: 3, turn: 1 },
+  { path: 'src/refunds/refund.test.ts', ins: 15, del: 0, turn: 1 },
+  { path: 'src/emails/refund-email.ts', ins: 52, del: 0, turn: 2 },
+  { path: 'src/webhooks/settled.ts', ins: 9, del: 1, turn: 2 },
+] as const
+
+const ASKED = 'Also email the customer each time.'
+
+function Undo() {
+  const ref = useRef<HTMLDivElement>(null)
+  const beat = useBeat(ref, UNDONE)
+  const out = beat === UNDONE.beats.length - 1
+  const at = (from: number) => beat >= from && !out
+  const pointed = beat === 1 || beat === 2 || beat === 3
+  const asking = beat === 2 || beat === 3
+  const undone = at(4)
+  const kept = TOUCHED.filter((file) => !undone || file.turn === 1)
+  const ins = kept.reduce((sum, file) => sum + file.ins, 0)
+  const del = kept.reduce((sum, file) => sum + file.del, 0)
+  return (
+    <Frame
+      label="Undo from here, in a task: the person undoes their second message, its reply leaves the conversation, the two files that turn made go back, and the prompt returns to the draft"
+      w={64}
+      n={32}
+      foot
+    >
+      <div ref={ref} className={cx(p.win, p.unWin)}>
+        <Bar>
+          <Tabs />
+        </Bar>
+        <div className={p.unBody} data-asking={asking}>
+          <div className={p.unTalk}>
+            <div className={p.brTask}>
+              <b>Partial refunds</b>
+              <code>althar/partial-refunds</code>
+            </div>
+            <div className={p.unYou}>
+              <p>Let a refund be for part of a payment.</p>
+            </div>
+            <div className={p.brLead}>
+              <span className={p.mk}>
+                <AgentMark agent={Agent.Claude} size={13} />
+              </span>
+              <p>A refund takes an amount now, up to what’s left on the payment.</p>
+            </div>
+            <div className={p.unTurn} data-gone={undone}>
+              <div className={p.unYou}>
+                <p data-at={pointed}>{ASKED}</p>
+                <span className={p.unUndo} data-shown={pointed}>
+                  Undo from here
+                </span>
+              </div>
+              <div className={p.brLead}>
+                <span className={p.mk}>
+                  <AgentMark agent={Agent.Claude} size={13} />
+                </span>
+                <p>Added a refund email, sent when the refund settles.</p>
+              </div>
+            </div>
+            <div className={p.unDraft} data-back={undone}>
+              <span key={String(undone)} className={p.unDraftWords}>
+                {undone ? (
+                  <>
+                    {ASKED}
+                    <i className={p.caret} />
+                  </>
+                ) : (
+                  'Message the lead'
+                )}
+              </span>
+            </div>
+          </div>
+          <div className={p.unChanges}>
+            <div className={p.unTabs}>
+              <span>Outputs</span>
+              <b>Changes</b>
+              <span key={ins} className={cx(p.diff, p.unSum)}>
+                <ins>+{ins}</ins> <del>−{del}</del>
+              </span>
+            </div>
+            <ul className={p.unFiles}>
+              {TOUCHED.map((file) => (
+                <li key={file.path} data-gone={undone && file.turn === 2}>
+                  <code>
+                    <span>{file.path.slice(0, file.path.lastIndexOf('/') + 1)}</span>
+                    {file.path.slice(file.path.lastIndexOf('/') + 1)}
+                  </code>
+                  <span className={p.diff}>
+                    <ins>+{file.ins}</ins>
+                    {file.del > 0 && <del>−{file.del}</del>}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </div>
+          <div className={p.unAsk} data-shown={asking}>
+            <b className={p.dialogTitle}>{undoTurnText.title}</b>
+            <span className={p.unSay}>{undoTurnText.description}</span>
+            <blockquote className={p.unQuote}>{ASKED}</blockquote>
+            <span className={p.unSay}>{undoTurnText.draft}</span>
+            <span className={p.unWords}>
+              <span>{undoTurnText.cancel}</span>
+              <b data-pressed={beat === 3}>{undoTurnText.undo}</b>
+            </span>
+          </div>
+        </div>
+      </div>
+    </Frame>
+  )
+}
+
 const PICTURES: Record<Picture, () => ReactNode> = {
+  undo: Undo,
   browser: Browser,
   canvas: Canvas,
   findings: Findings,
