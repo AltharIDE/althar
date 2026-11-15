@@ -1,7 +1,7 @@
 import { execFileSync } from 'node:child_process'
-import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { dirname, join } from 'node:path'
+import { dirname, join, resolve } from 'node:path'
 import { deflateSync } from 'node:zlib'
 
 import { expect, test } from '@playwright/test'
@@ -140,6 +140,70 @@ test('a changed markdown file opens rendered from the change set and from the th
     await expect(panel.getByRole('heading', { name: 'meridian' })).toHaveCount(0)
     // Source is what the task changed, as a diff: what it took out too.
     await expect(panel.getByRole('group', { name: 'README.md' })).toContainText('Refunds are paid by hand.')
+  } finally {
+    await electronApp.close()
+  }
+})
+
+test('this repository’s own README, written mostly in HTML, opens as GitHub draws it, its pictures read from the task', async () => {
+  const home = mkdtempSync(join(tmpdir(), 'althar-e2e-'))
+  const repo = repository(home)
+  const top = resolve(process.cwd(), '../..')
+  const readme = readFileSync(join(top, 'README.md'), 'utf8')
+  // The pictures it names, from where they are in this repository.
+  for (const [, path] of readme.matchAll(/(?:src|srcset)="([^"]+)"/g))
+    if (path !== undefined && !/^[a-z]+:/i.test(path) && existsSync(join(top, path))) {
+      mkdirSync(dirname(join(repo, path)), { recursive: true })
+      copyFileSync(join(top, path), join(repo, path))
+    }
+  write(repo, 'README.md', readme)
+  git(repo, 'add', '.')
+  git(repo, 'commit', '-q', '-m', 'README')
+  const { electronApp, page } = await launch(home)
+  try {
+    await sizeWindow(electronApp, page, 1300, 900)
+    await openFirstProject(electronApp, page, repo)
+    await startTask(page, 'Say it is early', '[lead:finish]')
+    const worktree = git(repo, 'worktree', 'list', '--porcelain')
+      .split('\n\n')
+      .find((one) => /branch refs\/heads\/althar\/say-it-is-early/.test(one))
+      ?.split('\n')[0]
+      ?.slice('worktree '.length)
+    if (worktree === undefined) throw new Error('No worktree for the task')
+    write(worktree, 'README.md', readme.replace('## Get started', '## Get started\n\nIt is early: try it on real work.'))
+    git(worktree, 'add', '.')
+    git(worktree, 'commit', '-q', '-m', 'Say it is early')
+
+    await page
+      .getByRole('button', { name: /Open task/ })
+      .last()
+      .click()
+    await page
+      .getByRole('radiogroup', { name: 'Face' })
+      .getByRole('radio', { name: /Outputs/ })
+      .click()
+    await page.getByRole('button', { name: 'Open the diff of README.md' }).click()
+    const changes = page.getByRole('dialog', { name: 'Changes' })
+    await changes.getByRole('radio', { name: /Rendered/ }).click()
+    // None of its HTML is left as words: its banner, its table of agents and of features are drawn.
+    await expect(changes.getByRole('img', { name: /Building software has never felt so fast/ })).toHaveAttribute(
+      'src',
+      /^data:image\/png;base64,/,
+    )
+    await expect(changes.getByRole('heading', { name: 'Tell it what. It picks the team.' })).toBeVisible()
+    await expect(changes.getByRole('note', { name: 'Note' })).toContainText('Early.')
+    await expect(changes.getByText(/<\/?(p|a|img|picture|table|td)\b/)).toHaveCount(0)
+    await still(page)
+    await page.screenshot({ path: 'test-results/readme-top.png', scale: 'css', animations: 'disabled' })
+    await changes.getByRole('heading', { name: 'Fall in love with building again.' }).scrollIntoViewIfNeeded()
+    await expect(changes.getByRole('img', { name: /The first screen/ })).toHaveAttribute('src', /^data:image\/jpeg;base64,/)
+    await page.screenshot({ path: 'test-results/readme-features.png', scale: 'css', animations: 'disabled' })
+    await changes.getByRole('note', { name: 'Note' }).scrollIntoViewIfNeeded()
+    await page.screenshot({ path: 'test-results/readme-get-started.png', scale: 'css', animations: 'disabled' })
+
+    // What the task changed is marked on the same page.
+    await changes.getByRole('radio', { name: /Changes/ }).click()
+    await expect(changes.getByRole('group', { name: 'Added' })).toContainText('It is early')
   } finally {
     await electronApp.close()
   }

@@ -11,7 +11,19 @@ import { CODE_FRESH, codeKeys } from './finds'
  */
 
 /** The picture at `path` of a thread's place, or its words while it is read and where it can't be. */
-export function FilePicture({ threadId, path, alt, title }: { threadId: string; path: string; alt: string; title?: string }) {
+export function FilePicture({
+  threadId,
+  path,
+  alt,
+  title,
+  width,
+}: {
+  threadId: string
+  path: string
+  alt: string
+  title?: string
+  width?: string
+}) {
   const { client } = useServices()
   const read = useQuery({
     queryKey: codeKeys.image(threadId, path),
@@ -22,12 +34,29 @@ export function FilePicture({ threadId, path, alt, title }: { threadId: string; 
   })
   const image = read.data?.image
   if (image === undefined) return alt
-  return <img src={`data:${image.type};base64,${image.data}`} alt={alt} title={title} />
+  // As wide as the file says (`<img width="48">`), never past the page.
+  return <img src={`data:${image.type};base64,${image.data}`} alt={alt} title={title} style={width === undefined ? undefined : { width }} />
 }
 
 /** What the kit's markdown draws a file's images with, for a thread. */
 export const pictureOf =
   (threadId: string) =>
-  ({ path, alt, title }: { readonly path: string; readonly alt: string; readonly title?: string }): ReactNode => (
-    <FilePicture threadId={threadId} path={path} alt={alt} {...(title === undefined ? {} : { title })} />
+  ({
+    path,
+    alt,
+    title,
+    width,
+  }: {
+    readonly path: string
+    readonly alt: string
+    readonly title?: string
+    readonly width?: string
+  }): ReactNode => (
+    <FilePicture
+      threadId={threadId}
+      path={path}
+      alt={alt}
+      {...(title === undefined ? {} : { title })}
+      {...(width === undefined ? {} : { width })}
+    />
   )

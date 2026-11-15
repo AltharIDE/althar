@@ -246,3 +246,74 @@
 .removed > .heading:first-child {
   margin-top: 0;
 }
+
+/* a GitHub alert (`> [!NOTE]`): a sheet of its own, its name first; a warning in the note's tint */
+.alert {
+  padding: 10px 14px;
+  border: 1px solid var(--line-2);
+  border-radius: 8px;
+  background: var(--sunk);
+}
+.alert[data-alert='warning'],
+.alert[data-alert='caution'] {
+  border-color: var(--note-line);
+  background: var(--note-paper);
+}
+.alert > * {
+  margin: 0 0 6px;
+}
+.alert > :last-child {
+  margin-bottom: 0;
+}
+.alertName {
+  font-weight: 600;
+  color: var(--t-1);
+}
+
+/* a file's own HTML table (html.ts), as GitHub draws one: cells ruled, at the top unless it says otherwise */
+.md table:not([class]) {
+  border-collapse: collapse;
+  max-width: 100%;
+}
+.md table:not([class]) td,
+.md table:not([class]) th {
+  padding: 8px 12px;
+  border: 1px solid var(--line-2);
+  vertical-align: top;
+}
+.md table:not([class]) th {
+  font-weight: 600;
+  color: var(--t-1);
+}
+.md :is(td, th, div, p) > :first-child:is(h1, h2, h3, h4, h5, h6, p) {
+  margin-top: 0;
+}
+.md :is(td, th) > p {
+  margin: 0 0 8px;
+}
+.md :is(td, th) > :last-child {
+  margin-bottom: 0;
+}
+.md details > summary {
+  cursor: pointer;
+  color: var(--t-1);
+}
+
+/* a file's page, read as a document: its headings step down, `#` to `###` */
+.file .title {
+  font-size: 20px;
+  line-height: 1.3;
+}
+.file .section {
+  margin-top: 28px;
+  font-size: 16px;
+  line-height: 1.35;
+}
+.file .heading:where(:not(.section)) {
+  margin-top: 20px;
+  font-size: 14px;
+}
+.md :is(td, th) :is(h1, h2, h3, h4, h5, h6),
+.file :is(td, th) .heading {
+  margin: 0 0 6px;
+}
