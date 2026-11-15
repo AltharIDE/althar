@@ -628,6 +628,7 @@ export const handlers = apiLayer(
           paidBy: check.paidBy,
           outUntil: Option.getOrNull(Option.map(out, (each) => each.until)),
           adoptedFrom: account.adoptedFrom,
+          ...(account.signInHost === undefined ? {} : { signInHost: account.signInHost }),
           ...(check.endsAt === undefined ? {} : { endsAt: check.endsAt, endsSoon: ending !== undefined && ending !== 'later' }),
           ...(providers === undefined ? {} : { providers }),
         } satisfies AccountStatus
@@ -642,6 +643,7 @@ export const handlers = apiLayer(
             paidBy: 'unknown',
             outUntil: null,
             adoptedFrom: account.adoptedFrom,
+            ...(account.signInHost === undefined ? {} : { signInHost: account.signInHost }),
           }),
           account.agentId,
         ),
@@ -2019,12 +2021,13 @@ export const handlers = apiLayer(
             }
           }),
         ),
-      SignInAccount: ({ commandId, accountId }) =>
+      SignInAccount: ({ commandId, accountId, host }) =>
         once(
           commandId,
           api(
             Effect.gen(function* () {
-              const line = yield* accounts.login(accountId)
+              const line = yield* accounts.login(accountId, host)
+              if (host !== undefined) yield* models.forget('copilot')
               // Opened where the app can, in Terminal; elsewhere the person runs it.
               return { line, opened: config.openTerminal === undefined ? false : yield* config.openTerminal(line) }
             }),
