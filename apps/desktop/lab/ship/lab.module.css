@@ -1,0 +1,107 @@
+/* The lab's own frame: a line on the moment over the app's screen, and the bar that swaps it along the bottom. */
+.lab {
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+  height: 100%;
+  background: var(--n-1);
+}
+.about {
+  display: grid;
+  gap: 2px;
+  padding: 8px 14px;
+  border-bottom: 1px solid var(--line);
+  background: var(--n-2);
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--t-2);
+}
+.about p {
+  margin: 0;
+}
+.where strong {
+  color: var(--t-1);
+  font-weight: 600;
+}
+.count {
+  display: inline-block;
+  min-width: 3.2em;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--t-4);
+}
+.idea {
+  padding-left: 3.6em;
+  color: var(--t-3);
+}
+.scene {
+  min-height: 0;
+  display: flex;
+  justify-content: center;
+}
+.scene > * {
+  flex: 1;
+  min-width: 0;
+}
+.scene[data-narrow] > * {
+  flex: 0 1 760px;
+  border-inline: 1px solid var(--line);
+}
+.bar {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 6px 10px;
+  border-top: 1px solid var(--line);
+  background: var(--n-2);
+  font-size: 12px;
+}
+.group {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.bar button {
+  padding: 4px 10px;
+  border-radius: 6px;
+  color: var(--t-2);
+}
+.bar button:disabled {
+  opacity: 0.4;
+}
+.bar button[aria-pressed='true'] {
+  background: var(--n-0);
+  color: var(--t-1);
+}
+.bar select {
+  min-width: 230px;
+  padding: 3px 6px;
+  border: 1px solid var(--line-2);
+  border-radius: 6px;
+  background: var(--n-0);
+  color: var(--t-1);
+  font: inherit;
+}
+.bar kbd {
+  font-family: var(--mono);
+  color: var(--t-4);
+}
+
+/* What the directions add to the card. The kit's Button greys out only when `disabled`, which takes away its hover too; a step
+   that isn't the person's yet keeps its hover, so it says what it waits for. The kit would take a prop for it. */
+.why {
+  display: inline-flex;
+}
+.waiting {
+  opacity: 0.45;
+  cursor: default;
+}
+.waitingSplit > button:first-child {
+  opacity: 0.45;
+  cursor: default;
+}
+.track {
+  display: block;
+  width: 100%;
+  max-width: 340px;
+  margin: 2px 0 4px;
+}
