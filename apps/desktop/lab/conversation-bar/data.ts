@@ -37,7 +37,10 @@ interface Said {
 
 interface WorldAside {
   readonly slug: string
+  /** Its title as today: the person's first line, cut to fit. */
   readonly title: string
+  /** The name it would give itself, in a few words ("Self-named" in the lab's bar). */
+  readonly short?: string
   readonly ago: number
   readonly running?: boolean
   readonly thread: ReadonlyArray<Said>
@@ -50,6 +53,7 @@ const ASIDES: ReadonlyArray<WorldAside> = [
   {
     slug: 'dock-flicker',
     title: 'Why does the dock flicker on wake?',
+    short: 'Dock flicker on wake',
     ago: 2,
     running: true,
     thread: [
@@ -73,6 +77,7 @@ const ASIDES: ReadonlyArray<WorldAside> = [
   {
     slug: 'merge-queue-reruns',
     title: 'Why the merge queue reran every check after the rebase on main',
+    short: 'Merge queue reruns',
     ago: 34,
     thread: [
       { who: 'you', text: 'Why the merge queue reran every check after the rebase on main', ago: 36 },
@@ -105,14 +110,22 @@ const ASIDES: ReadonlyArray<WorldAside> = [
       { who: 'lead', text: 'Three lines narrate. The rest say what changed.', ago: 200 },
     ],
   },
-  { slug: 'sqlite-wal', title: 'SQLite WAL size after a week', ago: 260, many: true, thread: [] },
-  { slug: 'codex-sandbox', title: 'Does Codex keep its sandbox between turns?', ago: 300, many: true, running: true, thread: [] },
+  { slug: 'sqlite-wal', title: 'SQLite WAL size after a week', short: 'SQLite WAL size', ago: 260, many: true, thread: [] },
+  {
+    slug: 'codex-sandbox',
+    title: 'Does Codex keep its sandbox between turns?',
+    short: 'Codex sandbox',
+    ago: 300,
+    many: true,
+    running: true,
+    thread: [],
+  },
   { slug: 'font-weights', title: 'Inter weights on Windows', ago: 420, many: true, thread: [] },
-  { slug: 'signing', title: 'Notarization failing on the Intel build', ago: 600, many: true, thread: [] },
-  { slug: 'tray-icon', title: 'Tray icon in dark menu bars', ago: 900, many: true, thread: [] },
+  { slug: 'signing', title: 'Notarization failing on the Intel build', short: 'Intel notarization', ago: 600, many: true, thread: [] },
+  { slug: 'tray-icon', title: 'Tray icon in dark menu bars', short: 'Dark tray icon', ago: 900, many: true, thread: [] },
   // A week and more: folded into "N older".
-  { slug: 'old-export', title: 'Export a thread as Markdown', ago: 60 * 24 * 9, thread: [] },
-  { slug: 'old-ports', title: 'Which ports the lab servers use', ago: 60 * 24 * 12, thread: [] },
+  { slug: 'old-export', title: 'Export a thread as Markdown', short: 'Thread export', ago: 60 * 24 * 9, thread: [] },
+  { slug: 'old-ports', title: 'Which ports the lab servers use', short: 'Lab ports', ago: 60 * 24 * 12, thread: [] },
 ]
 
 interface WorldTask {
@@ -142,6 +155,17 @@ export const asideAgo = (taskId: string) => {
   return one.ago < 60 ? `${one.ago}m` : one.ago < 60 * 24 ? `${Math.round(one.ago / 60)}h` : `${Math.round(one.ago / 60 / 24)}d`
 }
 
+/** Its title, as today's first line or the name it gave itself. */
+const titleOf = (one: WorldAside) => (lab.get().named ? (one.short ?? one.title) : one.title)
+
+/** What was said in a conversation, by its id (null for the coordinator's): what the conversations' search reads. */
+export const wordsOf = (id: string | null): readonly string[] => {
+  if (id === null) return COORDINATOR.map((line) => line.text.replaceAll('**', ''))
+  const one = ASIDES.find((candidate) => taskIdOf(candidate.slug) === id)
+  if (one === undefined) return []
+  return one.thread.length === 0 ? [one.title] : one.thread.map((line) => line.text)
+}
+
 const threadIdOf = (slug: string) => `th_${slug}`
 const taskIdOf = (slug: string) => `t_${slug}`
 const coordinatorOf = (projectId: string) => `thc_${projectId}`
@@ -163,7 +187,7 @@ const asideCard = (one: WorldAside): BoardTask => {
     ...card({
       taskId: taskIdOf(one.slug),
       threadId: threadIdOf(one.slug),
-      title: one.title,
+      title: titleOf(one),
       slug: one.slug,
       phase: one.running === true ? 'running' : 'ready',
       kind: 'plain',
@@ -274,7 +298,7 @@ const asideThread = (threadId: string): ThreadSnapshot => {
   const one = ASIDES.find((candidate) => threadIdOf(candidate.slug) === threadId)
   const task = TASKS.find((candidate) => threadIdOf(candidate.slug) === threadId)
   const base = snapshot()
-  const title = one?.title ?? task?.title ?? 'New aside'
+  const title = (one === undefined ? undefined : titleOf(one)) ?? task?.title ?? 'New aside'
   const slug = one?.slug ?? task?.slug ?? 'new'
   const running = one?.running === true || task?.phase === 'running'
   return snapshot({

@@ -20,8 +20,9 @@ import s from './lab.module.css'
  * The conversation bar lab (README.md): the desktop app's window, whole, in
  * the browser, on made-up data, with the page's bar under it. The bar swaps
  * the direction of the bar over the coordinator's conversation in place
- * (0 today's, A–E, with keys too), adds asides for the crowded case (M), and
- * narrows the window to the app's narrowest (N).
+ * (0 today's, A–E, and C again in 1–4, with keys too), adds asides for the
+ * crowded case (M), narrows the window to the app's narrowest (N), and gives
+ * the asides the short names they would give themselves (S).
  */
 
 // The tabs this window keeps, the same at every load.
@@ -40,7 +41,7 @@ const router = makeRouter({ client, cache })
 lab.subscribe(() => void cache.invalidateQueries())
 
 function Bar() {
-  const { d, many, narrow } = useLab()
+  const { d, many, narrow, named } = useLab()
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       const target = event.target as HTMLElement | null
@@ -51,23 +52,33 @@ function Bar() {
       if (direction !== undefined) return lab.set({ d: direction.key })
       if (key === 'm') return lab.set({ many: !lab.get().many })
       if (key === 'n') return lab.set({ narrow: !lab.get().narrow })
+      if (key === 's') return lab.set({ named: !lab.get().named })
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [])
   return (
     <div className={s.bar} role="toolbar" aria-label="Directions">
-      {DIRECTIONS.map((one) => (
+      {DIRECTIONS.filter((one) => one.round === 1).map((one) => (
+        <button key={one.key} type="button" aria-pressed={d === one.key} onClick={() => lab.set({ d: one.key })}>
+          <kbd>{one.kbd}</kbd> {one.label}
+        </button>
+      ))}
+      <span className={s.round}>C again</span>
+      {DIRECTIONS.filter((one) => one.round === 2).map((one) => (
         <button key={one.key} type="button" aria-pressed={d === one.key} onClick={() => lab.set({ d: one.key })}>
           <kbd>{one.kbd}</kbd> {one.label}
         </button>
       ))}
       <span className={s.gap} />
       <button type="button" aria-pressed={many} onClick={() => lab.set({ many: !many })}>
-        <kbd>M</kbd> Many asides
+        <kbd>M</kbd> Many
       </button>
       <button type="button" aria-pressed={narrow} onClick={() => lab.set({ narrow: !narrow })}>
-        <kbd>N</kbd> Narrow window
+        <kbd>N</kbd> Narrow
+      </button>
+      <button type="button" aria-pressed={named} onClick={() => lab.set({ named: !named })}>
+        <kbd>S</kbd> Self-named
       </button>
     </div>
   )

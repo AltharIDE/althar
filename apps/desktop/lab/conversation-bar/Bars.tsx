@@ -1,4 +1,16 @@
-import { type ReactElement, type ReactNode, type Ref, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react'
+import {
+  Fragment,
+  type KeyboardEvent,
+  type ReactElement,
+  type ReactNode,
+  type Ref,
+  useEffect,
+  useId,
+  useLayoutEffect,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from 'react'
 import { createPortal } from 'react-dom'
 
 import {
@@ -9,6 +21,7 @@ import {
   type AsideTabsText,
   Icon,
   IconButton,
+  Kbd,
   LiveDot,
   Menu,
   MenuGroup,
@@ -16,12 +29,13 @@ import {
   MenuRadioGroup,
   MenuRadioItem,
   MenuSeparator,
+  Popover,
   ProjectHeader as TodayHeader,
   type ProjectHeaderProps,
   Tooltip,
 } from '@althar/ui'
 
-import { asideAgo } from './data'
+import { asideAgo, wordsOf } from './data'
 import { useLab } from './state'
 import s from './bars.module.css'
 
@@ -58,7 +72,8 @@ interface Direction {
 
 const nameOf = (aside: Aside, t: AsideTabsText) => aside.title || t.newAside
 
-// ?open=<aside's slug> opens that aside once, ?new=1 starts one, ?menu=1 opens C's menu: for screenshots of each state.
+// ?open=<aside's slug> opens that aside once, ?new=1 starts one, ?menu=1 opens C's menu (or C again's search), ?q= types in
+// that search: for screenshots of each state.
 const scene = new URLSearchParams(window.location.search)
 let staged = false
 
@@ -97,23 +112,28 @@ export function AsideTabs(props: AsideTabsProps) {
       return <InProjectRow bar={bar} root={ref} />
     case 'e':
       return <FolderTabs bar={bar} root={ref} />
+    case 'c1':
+      return <SearchHeading bar={bar} root={ref} />
+    case 'c2':
+      return <Recents bar={bar} root={ref} />
+    case 'c3':
+      return <LaneHeading bar={bar} root={ref} />
+    case 'c4':
+      return <PanelHeading bar={bar} root={ref} />
   }
 }
 
 /* ---------- What the directions share ---------- */
 
 /**
- * As many asides' tabs as fit, the open one always among them, the rest in "N more": the tabs are drawn, and while they
- * overflow their place one fewer is, before the frame is painted; the place grown, all are tried again. Only with no other
- * tab left does the open one give way, down to its least.
+ * How many of `total` things fit their place: they are drawn, and while they overflow it one fewer is, before the frame
+ * is painted; the place grown, all are tried again. `key` names what they are, so new ones are all tried.
  */
-function useFit(bar: Bar) {
+function useFitCount(key: string, total: number) {
   const ref = useRef<HTMLDivElement>(null)
-  const others = bar.shown.filter((one) => one.id !== bar.current)
-  const key = `${bar.shown.map((one) => `${one.id}:${one.title}`).join('|')}#${bar.current ?? ''}`
-  const [fit, setFit] = useState({ key, count: others.length, width: 0 })
-  if (fit.key !== key) setFit({ key, count: others.length, width: fit.width })
-  const count = Math.min(fit.key === key ? fit.count : others.length, others.length)
+  const [fit, setFit] = useState({ key, count: total, width: 0 })
+  if (fit.key !== key) setFit({ key, count: total, width: fit.width })
+  const count = Math.min(fit.key === key ? fit.count : total, total)
   useLayoutEffect(() => {
     const place = ref.current
     if (place !== null && count > 0 && place.scrollWidth > place.clientWidth + 1) setFit((was) => ({ ...was, count: count - 1 }))
@@ -131,6 +151,17 @@ function useFit(bar: Bar) {
     sizes.observe(place)
     return () => sizes.disconnect()
   }, [])
+  return { ref, count }
+}
+
+/**
+ * As many asides' tabs as fit, the open one always among them, the rest in "N more". Only with no other tab left does the
+ * open one give way, down to its least.
+ */
+function useFit(bar: Bar) {
+  const others = bar.shown.filter((one) => one.id !== bar.current)
+  const key = `${bar.shown.map((one) => `${one.id}:${one.title}`).join('|')}#${bar.current ?? ''}`
+  const { ref, count } = useFitCount(key, others.length)
   const kept = new Set(others.slice(0, count).map((one) => one.id))
   return {
     ref,
@@ -524,6 +555,554 @@ function FolderTabs({ bar, root }: Direction) {
       <span className={s.eEnd}>
         <IconButton icon="plus" size="small" label={bar.t.add} tooltipAlign="end" onClick={bar.onNew} />
       </span>
+    </div>
+  )
+}
+
+/* ---------- C again: what 1–4 share, a search over every conversation ---------- */
+
+/** A stretch of a name or of what was said: the words that begin with what was typed are `hit`. */
+interface Part {
+  readonly text: string
+  readonly hit: boolean
+}
+
+/** A conversation as the search lists it, or the new aside at its foot. */
+interface Row {
+  readonly key: string
+  /** null for the coordinator's. */
+  readonly id: string | null
+  readonly kind: 'coordinator' | 'aside' | 'new'
+  readonly name: string
+  readonly untitled: boolean
+  readonly running: boolean
+  readonly older: boolean
+  readonly ago: string | null
+  /** What was said last in it, its first line. */
+  readonly said: string | undefined
+  readonly nameParts: readonly Part[]
+  /** What was said that matched, where its name doesn't hold every word typed. */
+  readonly matched: readonly Part[] | null
+  readonly byName: boolean
+}
+
+const WORD = /[\p{L}\p{N}]+(?:['’.-][\p{L}\p{N}]+)*/gu
+const tokensOf = (query: string) => query.toLowerCase().split(/\s+/).filter(Boolean)
+const holds = (text: string, token: string) => [...text.matchAll(WORD)].some((word) => word[0].toLowerCase().startsWith(token))
+
+/** A text in parts, the words that begin with one of the tokens marked. */
+const partsOf = (text: string, tokens: readonly string[]): Part[] => {
+  const parts: Part[] = []
+  let at = 0
+  for (const match of text.matchAll(WORD)) {
+    const word = match[0]
+    if (!tokens.some((token) => word.toLowerCase().startsWith(token))) continue
+    if (match.index > at) parts.push({ text: text.slice(at, match.index), hit: false })
+    parts.push({ text: word, hit: true })
+    at = match.index + word.length
+  }
+  if (at < text.length) parts.push({ text: text.slice(at), hit: false })
+  return parts
+}
+
+/** A line from a few words before its first match, so the match is in sight. */
+const around = (line: string, tokens: readonly string[]): Part[] => {
+  const words = [...line.matchAll(WORD)]
+  const first = words.findIndex((word) => tokens.some((token) => word[0].toLowerCase().startsWith(token)))
+  const from = first > 4 ? (words[first - 3]?.index ?? 0) : 0
+  return partsOf(from > 0 ? `…${line.slice(from)}` : line, tokens)
+}
+
+/**
+ * Every conversation, as the search lists it: with nothing typed the coordinator's, the asides latest first and the older
+ * ones; with words typed those whose name or whose words hold them all, those by name first. The new aside at the foot.
+ */
+function rowsOf(bar: Bar, query: string): Row[] {
+  const tokens = tokensOf(query)
+  const everyone = [
+    {
+      id: null,
+      kind: 'coordinator' as const,
+      name: bar.t.coordinator,
+      untitled: false,
+      running: false,
+      older: false,
+      said: wordsOf(null).at(-1),
+    },
+    ...[...bar.asides.map((one) => ({ one, older: false })), ...bar.older.map((one) => ({ one, older: true }))].map(({ one, older }) => ({
+      id: one.id,
+      kind: 'aside' as const,
+      name: nameOf(one, bar.t),
+      untitled: one.title === '',
+      running: one.running === true,
+      older,
+      said: one.said,
+    })),
+  ]
+  const rows: Row[] = []
+  for (const one of everyone) {
+    const base = { ...one, key: one.id ?? 'coordinator', ago: one.id === null ? null : asideAgo(one.id) }
+    if (tokens.length === 0) {
+      rows.push({ ...base, nameParts: [{ text: one.name, hit: false }], matched: null, byName: true })
+      continue
+    }
+    const words = wordsOf(one.id)
+    const missing = tokens.filter((token) => !holds(one.name, token))
+    if (missing.some((token) => !words.some((line) => holds(line, token)))) continue
+    const line = missing.length === 0 ? undefined : words.find((said) => missing.some((token) => holds(said, token)))
+    rows.push({
+      ...base,
+      nameParts: partsOf(one.name, tokens),
+      matched: line === undefined ? null : around(line, tokens),
+      byName: missing.length === 0,
+    })
+  }
+  if (tokens.length > 0) rows.sort((a, b) => Number(b.byName) - Number(a.byName))
+  const add = bar.t.add
+  rows.push({
+    key: 'new',
+    id: null,
+    kind: 'new',
+    name: add,
+    untitled: false,
+    running: false,
+    older: false,
+    ago: null,
+    said: undefined,
+    nameParts: [{ text: add, hit: false }],
+    matched: null,
+    byName: true,
+  })
+  return rows
+}
+
+/** The search's words, the row the keys are on, and what a row does when chosen: the field keeps focus throughout. */
+function useSearch(bar: Bar, close: () => void) {
+  const [query, setQuery] = useState(scene.get('q') ?? '')
+  const [active, setActive] = useState<number | null>(null)
+  const rows = rowsOf(bar, query)
+  // With nothing typed, the keys start on the conversation open; with words, on what they found first.
+  const here = rows.findIndex((row) => row.kind !== 'new' && row.id === bar.current)
+  const at = Math.min(active ?? (query.trim() === '' && here >= 0 ? here : 0), rows.length - 1)
+  const list = useRef<HTMLDivElement>(null)
+  const ids = useId()
+  const choose = (row: Row) => {
+    close()
+    if (row.kind === 'new') bar.onNew()
+    else bar.onPick(row.id)
+  }
+  const move = (to: number) => {
+    setActive(to)
+    list.current?.querySelector(`#${CSS.escape(`${ids}-${to}`)}`)?.scrollIntoView({ block: 'nearest' })
+  }
+  const onKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
+    if (event.nativeEvent.isComposing) return
+    if (event.key === 'ArrowDown') move(Math.min(at + 1, rows.length - 1))
+    else if (event.key === 'ArrowUp') move(Math.max(at - 1, 0))
+    else if (event.key === 'Enter') {
+      const row = rows[at]
+      if (row !== undefined) choose(row)
+    } else return
+    event.preventDefault()
+  }
+  const type = (words: string) => {
+    setQuery(words)
+    setActive(null)
+  }
+  return { query, type, rows, at, setActive, choose, onKeyDown, list, ids }
+}
+type Search = ReturnType<typeof useSearch>
+
+/** ⌘J, from anywhere in the window: opens the conversations' search, or shuts it. */
+function useJump(toggle: () => void) {
+  const latest = useRef(toggle)
+  useEffect(() => {
+    latest.current = toggle
+  })
+  useEffect(() => {
+    const onKey = (event: globalThis.KeyboardEvent) => {
+      if (!(event.metaKey || event.ctrlKey) || event.shiftKey || event.altKey || event.key.toLowerCase() !== 'j') return
+      event.preventDefault()
+      latest.current()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [])
+}
+
+/** A press outside the bar shuts what it opened (C again's 3 and 4, which draw it themselves). */
+function useOutside(open: boolean, close: () => void) {
+  const latest = useRef(close)
+  useEffect(() => {
+    latest.current = close
+  })
+  useEffect(() => {
+    if (!open) return
+    const onDown = (event: PointerEvent) => {
+      if (event.target instanceof Element && event.target.closest('[data-conversation-bar]') === null) latest.current()
+    }
+    document.addEventListener('pointerdown', onDown)
+    return () => document.removeEventListener('pointerdown', onDown)
+  }, [open])
+}
+
+function Parts({ parts }: { parts: readonly Part[] }) {
+  return parts.map((part, n) =>
+    part.hit ? (
+      <mark key={n} className={s.sHit}>
+        {part.text}
+      </mark>
+    ) : (
+      <Fragment key={n}>{part.text}</Fragment>
+    ),
+  )
+}
+
+function SearchField({
+  search,
+  onKeyDown,
+  className,
+}: {
+  search: Search
+  onKeyDown?: (event: KeyboardEvent<HTMLInputElement>) => void
+  className?: string
+}) {
+  const { query, type, rows, at, ids } = search
+  return (
+    <div className={cx(s.sField, className)}>
+      <Icon name="search" size={14} />
+      <input
+        type="text"
+        role="combobox"
+        aria-label="Search conversations"
+        placeholder="Search conversations"
+        aria-expanded
+        aria-controls={`${ids}-list`}
+        aria-autocomplete="list"
+        aria-activedescendant={`${ids}-${at}`}
+        autoComplete="off"
+        spellCheck={false}
+        // oxlint-disable-next-line jsx-a11y/no-autofocus -- opened to type in, as the finder is
+        autoFocus
+        value={query}
+        onChange={(event) => type(event.target.value)}
+        onKeyDown={onKeyDown ?? search.onKeyDown}
+      />
+      {rows.length > 0 && <Kbd>⌘J</Kbd>}
+    </div>
+  )
+}
+
+/* oxlint-disable jsx-a11y/prefer-tag-over-role, jsx-a11y/click-events-have-key-events, jsx-a11y/interactive-supports-focus -- a
+ * listbox the field owns, as the finder's: focus stays in the field, which takes the keys; a press on a row opens it. */
+/** The conversations found: each with a dot while at work, when it was last spoken in, and what matched under its name. */
+function SearchList({ bar, search, rich = false }: { bar: Bar; search: Search; rich?: boolean }) {
+  const { rows, at, setActive, choose, list, ids, query } = search
+  const typed = query.trim() !== ''
+  return (
+    <div ref={list} id={`${ids}-list`} role="listbox" aria-label={bar.t.label} className={cx(s.sList, rich && s.sRich)}>
+      {rows.map((row, index) => {
+        const current = row.kind !== 'new' && row.id === bar.current
+        const under = row.matched ?? (rich && row.said !== undefined ? [{ text: row.said, hit: false }] : null)
+        return (
+          <Fragment key={row.key}>
+            {!typed && row.older && rows[index - 1]?.older !== true && (
+              <div className={s.sGroup}>
+                <span>{bar.t.older(bar.older.length)}</span>
+                {bar.onClearOlder !== undefined && (
+                  <button type="button" onClick={() => bar.onClearOlder?.(bar.older.map((one) => one.id))}>
+                    {bar.t.clearOlder(bar.older.length)}
+                  </button>
+                )}
+              </div>
+            )}
+            {row.kind === 'new' && typed && index === 0 && <p className={s.sNone}>No conversation says “{query.trim()}”</p>}
+            {row.kind === 'new' && <div className={s.sRule} aria-hidden />}
+            {/* A press opens it; focus stays in the field, which owns the keys. */}
+            <div
+              id={`${ids}-${index}`}
+              role="option"
+              aria-selected={index === at}
+              data-current={current || undefined}
+              className={s.sRow}
+              onMouseDown={(event) => event.preventDefault()}
+              onMouseMove={() => {
+                if (index !== at) setActive(index)
+              }}
+              onClick={() => choose(row)}
+            >
+              <span className={s.sLead}>
+                {row.kind === 'coordinator' ? (
+                  bar.mark
+                ) : row.kind === 'new' ? (
+                  <Icon name="plus" size={13} />
+                ) : row.running ? (
+                  <LiveDot pulse />
+                ) : null}
+              </span>
+              <span className={s.sText}>
+                <span className={s.sName} data-new={row.untitled || undefined}>
+                  <Parts parts={row.nameParts} />
+                </span>
+                {under !== null && (
+                  <span className={s.sSaid}>
+                    <Parts parts={under} />
+                  </span>
+                )}
+              </span>
+              {row.ago !== null && <span className={s.sAgo}>{row.ago}</span>}
+              <span className={s.sCheck}>{current && <Icon name="check" size={12} />}</span>
+            </div>
+          </Fragment>
+        )
+      })}
+    </div>
+  )
+}
+
+/* oxlint-enable jsx-a11y/prefer-tag-over-role, jsx-a11y/click-events-have-key-events, jsx-a11y/interactive-supports-focus */
+
+/** The field over the list: what a popover, the lane heading's drop and the panel hold. */
+function SearchBody({ bar, close, rich = false, onEscape }: { bar: Bar; close: () => void; rich?: boolean; onEscape?: () => void }) {
+  const search = useSearch(bar, close)
+  return (
+    <>
+      <SearchField
+        search={search}
+        onKeyDown={(event) => {
+          if (event.key !== 'Escape' || onEscape === undefined) return search.onKeyDown(event)
+          event.preventDefault()
+          onEscape()
+        }}
+      />
+      <SearchList bar={bar} search={search} rich={rich} />
+    </>
+  )
+}
+
+/** The heading: the open conversation's name, which opens the search; a dot by the chevron while another is at work. */
+const headingTrigger = (
+  bar: Bar,
+  open: Aside | null,
+  extra: { onClick?: () => void; expanded?: boolean; inSight?: ReadonlySet<string | null> } = {},
+) => {
+  const elsewhere = [...bar.asides, ...bar.older].some(
+    (one) => one.running === true && one.id !== bar.current && extra.inSight?.has(one.id) !== true,
+  )
+  return (
+    <button
+      type="button"
+      className={s.cTrigger}
+      data-new={open?.title === '' || undefined}
+      onClick={extra.onClick}
+      {...(extra.expanded === undefined ? {} : { 'aria-expanded': extra.expanded })}
+    >
+      {open === null ? bar.mark : open.running === true ? <LiveDot pulse /> : null}
+      <span className={s.cTitle}>{open === null ? bar.t.coordinator : nameOf(open, bar.t)}</span>
+      <Icon name="chevronD" size={12} className={s.chev} />
+      {elsewhere && <LiveDot pulse />}
+    </button>
+  )
+}
+
+/** "Coordinator /", before an open aside's name: back in one press. */
+function Crumb({ bar }: { bar: Bar }) {
+  return (
+    <>
+      <button type="button" className={s.cCrumb} onClick={() => bar.onPick(null)}>
+        {bar.mark}
+        {bar.t.coordinator}
+      </button>
+      <span className={s.cSlash} aria-hidden>
+        /
+      </span>
+    </>
+  )
+}
+
+/** The × for an open aside, and +. */
+function Ends({ bar, open }: { bar: Bar; open: Aside | null }) {
+  return (
+    <>
+      {open !== null && bar.onClear !== undefined && (
+        <IconButton icon="close" size="small" label={bar.t.clearOne(nameOf(open, bar.t))} onClick={() => bar.onClear?.(open.id)} />
+      )}
+      <IconButton icon="plus" size="small" label={bar.t.add} tooltipAlign="end" onClick={bar.onNew} />
+    </>
+  )
+}
+
+/** The popover the heading opens: the search over every conversation, in the menu's place. */
+function SearchPopover({
+  bar,
+  trigger,
+  open,
+  setOpen,
+}: {
+  bar: Bar
+  trigger: ReactElement
+  open: boolean
+  setOpen: (open: boolean) => void
+}) {
+  return (
+    <Popover label={bar.t.label} trigger={trigger} width={360} padded={false} open={open} onOpenChange={setOpen} className={s.sPop}>
+      <SearchBody bar={bar} close={() => setOpen(false)} />
+    </Popover>
+  )
+}
+
+/* ---------- C1 · Search: C, its menu a search over every conversation ---------- */
+
+function SearchHeading({ bar, root }: Direction) {
+  const open = bar.shown.find((one) => one.id === bar.current) ?? null
+  const [searching, setSearching] = useState(scene.get('menu') === '1')
+  useJump(() => setSearching((was) => !was))
+  return (
+    <div ref={root} className={cx(s.strip, s.c)} data-conversation-bar>
+      {open !== null && <Crumb bar={bar} />}
+      <SearchPopover bar={bar} open={searching} setOpen={setSearching} trigger={headingTrigger(bar, open)} />
+      <span className={s.gap} />
+      <Ends bar={bar} open={open} />
+    </div>
+  )
+}
+
+/* ---------- C2 · Recents: the heading, then the latest few conversations as quiet words, one press each ---------- */
+
+function Recents({ bar, root }: Direction) {
+  const open = bar.shown.find((one) => one.id === bar.current) ?? null
+  const [searching, setSearching] = useState(scene.get('menu') === '1')
+  useJump(() => setSearching((was) => !was))
+  // Where else to go: the coordinator's first while an aside is open, then the latest asides, three at most.
+  const others = [
+    ...(open === null ? [] : [{ id: null, title: bar.t.coordinator, running: false } as const]),
+    ...bar.asides.filter((one) => one.id !== bar.current && one.title !== ''),
+  ].slice(0, 3)
+  const { ref, count } = useFitCount(`${others.map((one) => `${one.id}:${one.title}`).join('|')}`, others.length)
+  const inSight = new Set(others.slice(0, count).map((one) => one.id))
+  return (
+    <div ref={root} className={cx(s.strip, s.c, s.c2)} data-conversation-bar>
+      <SearchPopover bar={bar} open={searching} setOpen={setSearching} trigger={headingTrigger(bar, open, { inSight })} />
+      <div ref={ref} className={s.c2Fill}>
+        {others.slice(0, count).map((one) => (
+          <button key={one.id ?? 'coordinator'} type="button" className={s.c2Word} title={one.title} onClick={() => bar.onPick(one.id)}>
+            {one.id === null ? bar.mark : one.running === true ? <LiveDot pulse /> : null}
+            <span className={s.title}>{one.title}</span>
+          </button>
+        ))}
+      </div>
+      <Ends bar={bar} open={open} />
+    </div>
+  )
+}
+
+/* ---------- C3 · Lane heading: set as a lane's, a count at its end; its name turns into the search ---------- */
+
+function LaneHeading({ bar, root }: Direction) {
+  const { t } = bar
+  const open = bar.shown.find((one) => one.id === bar.current) ?? null
+  const [searching, setSearching] = useState(scene.get('menu') === '1')
+  const name = useRef<HTMLButtonElement>(null)
+  const close = (focus = false) => {
+    setSearching(false)
+    if (focus) requestAnimationFrame(() => name.current?.focus())
+  }
+  useJump(() => (searching ? close(true) : setSearching(true)))
+  useOutside(searching, close)
+  const count = bar.asides.filter((one) => one.title !== '').length + bar.older.length
+  const working = [...bar.asides, ...bar.older].some((one) => one.running === true && one.id !== bar.current)
+  return (
+    <div ref={root} className={cx(s.strip, s.c, s.c3)} data-conversation-bar data-searching={searching || undefined}>
+      {searching ? (
+        <span className={s.c3Glyph}>
+          <Icon name="search" size={14} />
+        </span>
+      ) : open === null ? (
+        <span className={s.c3Glyph}>{bar.mark}</span>
+      ) : (
+        <IconButton icon="chevronL" size="small" label={`Back to ${t.coordinator}`} onClick={() => bar.onPick(null)} />
+      )}
+      {searching ? (
+        <LaneSearch bar={bar} close={close} />
+      ) : (
+        <Tooltip label="Search conversations" kbd="⌘J">
+          <button
+            ref={name}
+            type="button"
+            className={s.c3Name}
+            data-new={open?.title === '' || undefined}
+            onClick={() => setSearching(true)}
+          >
+            <span className={s.cTitle}>{open === null ? t.coordinator : nameOf(open, t)}</span>
+          </button>
+        </Tooltip>
+      )}
+      <span className={s.gap} />
+      {!searching && (
+        <Tooltip label={count === 1 ? '1 aside' : `${count} asides`}>
+          <button type="button" className={s.c3Count} onClick={() => setSearching(true)}>
+            {working && <LiveDot pulse />}
+            {count}
+          </button>
+        </Tooltip>
+      )}
+      <Ends bar={bar} open={open} />
+    </div>
+  )
+}
+
+/** The lane heading's name, as a field: what it finds drops under it. Escape gives the name back. */
+function LaneSearch({ bar, close }: { bar: Bar; close: (focus?: boolean) => void }) {
+  const search = useSearch(bar, () => close())
+  return (
+    <>
+      <SearchField
+        search={search}
+        className={s.c3Field}
+        onKeyDown={(event) => {
+          if (event.key !== 'Escape') return search.onKeyDown(event)
+          event.preventDefault()
+          close(true)
+        }}
+      />
+      <div className={s.c3Drop}>
+        <SearchList bar={bar} search={search} />
+      </div>
+    </>
+  )
+}
+
+/* ---------- C4 · Panel: the heading opens every conversation over this one, each with what was said last ---------- */
+
+function PanelHeading({ bar, root }: Direction) {
+  const open = bar.shown.find((one) => one.id === bar.current) ?? null
+  const [shown, setShown] = useState(scene.get('menu') === '1')
+  useJump(() => setShown((was) => !was))
+  useOutside(shown, () => setShown(false))
+  const panel = useRef<HTMLDivElement>(null)
+  // As tall as the conversation under the heading: it takes the conversation's place while it is open.
+  const [height, setHeight] = useState(0)
+  useLayoutEffect(() => {
+    const node = panel.current
+    const column = node?.parentElement?.parentElement
+    if (!shown || node == null || column == null) return
+    const measure = () => setHeight(Math.max(0, column.getBoundingClientRect().bottom - node.getBoundingClientRect().top))
+    measure()
+    const sizes = new ResizeObserver(measure)
+    sizes.observe(column)
+    return () => sizes.disconnect()
+  }, [shown])
+  return (
+    <div ref={root} className={cx(s.strip, s.c, s.c4)} data-conversation-bar>
+      {open !== null && <Crumb bar={bar} />}
+      {headingTrigger(bar, open, { onClick: () => setShown((was) => !was), expanded: shown })}
+      <span className={s.gap} />
+      <Ends bar={bar} open={open} />
+      {shown && (
+        <div ref={panel} className={s.c4Panel} style={height > 0 ? { height } : undefined}>
+          <SearchBody bar={bar} close={() => setShown(false)} onEscape={() => setShown(false)} rich />
+        </div>
+      )}
     </div>
   )
 }

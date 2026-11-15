@@ -45,6 +45,7 @@
   font-size: 12px;
 }
 .bar button {
+  flex-shrink: 0;
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -71,4 +72,15 @@
 }
 .gap {
   flex: 1;
+}
+/* the second round, on C: set off from the first */
+.round {
+  margin: 0 2px 0 10px;
+  padding-left: 12px;
+  border-left: 1px solid var(--line-2);
+  font: 500 10.5px/1 var(--mono);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--t-3);
+  white-space: nowrap;
 }

@@ -61,10 +61,13 @@
   color: var(--t-1);
   background: var(--line);
 }
-/* A new aside, not named yet: its words are a placeholder's */
+/*
+ * A new aside, not named yet: its words are a placeholder's, quiet and leaning a little. The app loads Inter's upright
+ * face only, so italic is the browser's own slant, steep at this size; a slight skew leans half as far.
+ */
 [data-new] .title {
   color: var(--t-3);
-  font-style: italic;
+  transform: skewX(-6deg);
 }
 
 /*
@@ -275,8 +278,11 @@
   font-weight: 500;
 }
 .cTrigger:hover,
-.cTrigger[aria-expanded='true'],
 .cCrumb:hover {
+  background: var(--line);
+}
+/* open, its chevron turns (C again); C's own menu keeps the fill it had */
+.c .cTrigger[aria-expanded='true']:not(:has(> .chev)) {
   background: var(--line);
 }
 .cCrumb:hover {
@@ -287,10 +293,11 @@
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.cTrigger[data-new] .cTitle {
+.cTrigger[data-new] .cTitle,
+.c3Name[data-new] .cTitle {
   color: var(--t-3);
-  font-style: italic;
   font-weight: 500;
+  transform: skewX(-6deg);
 }
 .cSlash,
 .dSlash {
@@ -459,4 +466,336 @@
   align-items: center;
   gap: 2px;
   height: 35px;
+}
+
+/* ---------- C again: the conversations' search ---------- */
+/* The finder's field and rows (Finder), at a menu's size: the field keeps focus, the words that matched darker. */
+.sPop {
+  overflow: hidden;
+}
+.sField {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 10px 10px 10px 14px;
+  border-bottom: 1px solid var(--line);
+  color: var(--t-3);
+}
+.sField input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  font-size: 13px;
+  color: var(--t-1);
+}
+.sField input::placeholder {
+  color: var(--t-3);
+}
+.sField:focus-within {
+  box-shadow: inset 0 -1.5px 0 var(--signal);
+}
+.sList {
+  display: flex;
+  flex-direction: column;
+  max-height: 380px;
+  padding: 5px;
+  overflow-y: auto;
+}
+.sGroup {
+  display: flex;
+  align-items: center;
+  padding: 10px 9px 5px;
+  font: 500 10.5px/1 var(--mono);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--t-3);
+}
+.sGroup button {
+  margin-left: auto;
+  font: inherit;
+  letter-spacing: inherit;
+  color: var(--t-3);
+}
+.sGroup button:hover {
+  color: var(--t-1);
+}
+.sRule {
+  flex: none;
+  height: 1px;
+  margin: 4px -5px;
+  background: var(--line);
+}
+.sNone {
+  margin: 0;
+  padding: 10px 9px 8px;
+  font-size: 12px;
+  color: var(--t-3);
+}
+.sList > * {
+  flex-shrink: 0;
+}
+.sRow {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-height: 30px;
+  padding: 0 9px;
+  border-radius: 6px;
+  font-size: 12.5px;
+  color: var(--t-1);
+  cursor: default;
+  user-select: none;
+}
+.sRow:has(.sSaid) {
+  padding-block: 6px;
+}
+.sRow[aria-selected='true'] {
+  background: var(--hover-paper);
+}
+.sRow:active {
+  background: var(--pressed-paper);
+}
+.sRow[data-current] .sName {
+  font-weight: 550;
+}
+.sLead {
+  flex: none;
+  display: inline-flex;
+  justify-content: center;
+  width: 14px;
+  color: var(--t-3);
+}
+.sText {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.sName,
+.sSaid {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.sName[data-new] {
+  color: var(--t-3);
+  transform: skewX(-6deg);
+}
+.sSaid {
+  font-size: 11.5px;
+  color: var(--t-3);
+}
+/* the words that matched: darker, never a highlighter */
+.sHit {
+  background: none;
+  color: var(--t-1);
+  font-weight: 600;
+}
+.sAgo {
+  flex: none;
+  font-size: 11px;
+  color: var(--t-3);
+  font-variant-numeric: tabular-nums;
+}
+.sCheck {
+  flex: none;
+  display: inline-flex;
+  width: 12px;
+  color: var(--t-1);
+}
+/* the panel's rows: a name and what was said last under it, as Scratch lists its chats */
+.sRich {
+  flex: 1;
+  min-height: 0;
+  max-height: none;
+  padding: 6px 8px 10px;
+}
+.sRich .sRow {
+  align-items: flex-start;
+  gap: 10px;
+  padding: 9px 10px;
+  border-radius: 8px;
+}
+.sRich .sName {
+  font-size: 13px;
+  font-weight: 500;
+}
+.sRich .sRow[data-current] .sName {
+  font-weight: 600;
+}
+.sRich .sSaid {
+  font-size: 12px;
+}
+.sRich .sLead,
+.sRich .sAgo,
+.sRich .sCheck {
+  margin-top: 2px;
+}
+.chev {
+  transition: transform var(--fast) var(--ease);
+}
+.cTrigger[aria-expanded='true'] > .chev {
+  transform: rotate(180deg);
+}
+
+/* ---------- C2 · Recents ---------- */
+/* the heading keeps its name; the latest few after it, quiet words as "N older" is, one press each, give way first */
+.c2 .cTrigger {
+  flex-shrink: 0;
+  max-width: 60%;
+}
+.c2Fill {
+  flex: 1 1 0;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: 8px;
+  overflow: hidden;
+}
+.c2Word {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  max-width: 170px;
+  height: 28px;
+  padding: 0 8px;
+  border-radius: 7px;
+  color: var(--t-3);
+  font-size: 12.5px;
+  font-weight: 500;
+  white-space: nowrap;
+  transition:
+    color var(--fast) var(--ease),
+    background var(--fast) var(--ease);
+}
+.c2Word:hover {
+  color: var(--t-1);
+  background: var(--line);
+}
+
+/* ---------- C3 · Lane heading ---------- */
+/* As the board's lanes head themselves: a glyph, the name, and at the end a count in the lane's mono. */
+.c3 {
+  gap: 2px;
+}
+/* searching, the field runs up to + */
+.c3[data-searching] .gap {
+  display: none;
+}
+.c3Glyph {
+  flex: none;
+  display: inline-flex;
+  justify-content: center;
+  width: 24px;
+  color: var(--t-3);
+}
+.c3Name {
+  flex: 0 1 auto;
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  height: 30px;
+  padding: 0 8px 0 4px;
+  border-radius: 7px;
+  color: var(--t-1);
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+  transition: background var(--fast) var(--ease);
+}
+.c3Name:hover {
+  background: var(--line);
+}
+/* the name, as a field in its place: no frame, the finder's line under it while it is typed in */
+.c3Field {
+  flex: 1;
+  min-width: 0;
+  height: 30px;
+  padding: 0 4px;
+  border: 0;
+}
+.c3Field > svg {
+  display: none;
+}
+.c3Field input {
+  font-weight: 500;
+}
+.c3Count {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 26px;
+  margin-right: 2px;
+  padding: 0 8px;
+  border-radius: 7px;
+  font: 500 11.5px/1 var(--mono);
+  font-variant-numeric: tabular-nums;
+  color: var(--t-3);
+}
+.c3Count:hover {
+  color: var(--t-1);
+  background: var(--line);
+}
+.c3Drop {
+  position: absolute;
+  top: calc(100% + 2px);
+  left: 10px;
+  width: min(380px, calc(100% - 20px));
+  background: var(--paper);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-lg);
+  box-shadow: var(--lift-pop);
+  overflow: hidden;
+  transform-origin: top left;
+  animation: drop var(--enter) var(--ease-out);
+}
+@keyframes drop {
+  from {
+    opacity: 0;
+    transform: scale(var(--scale-pop));
+  }
+}
+
+/* ---------- C4 · Panel ---------- */
+/* open, over all the conversation draws, its own bars on it included */
+.c4:has(.c4Panel) {
+  z-index: 20;
+}
+/* Every conversation in this one's place, from under the heading to the pane's foot; the board beside it stays. */
+.c4Panel {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  background: var(--face-surface, var(--n-1));
+  border-top: 1px solid var(--line);
+  animation: settle var(--enter) var(--ease-out);
+}
+.c4Panel .sField {
+  margin: 8px 12px 2px;
+  padding: 9px 12px;
+  border: 1px solid var(--line-2);
+  border-radius: 9px;
+  background: var(--paper);
+}
+.c4Panel .sField:focus-within {
+  box-shadow: 0 0 0 3px var(--signal-dim);
+  border-color: var(--signal);
+}
+@keyframes settle {
+  from {
+    opacity: 0;
+    transform: translateY(-6px);
+  }
 }
