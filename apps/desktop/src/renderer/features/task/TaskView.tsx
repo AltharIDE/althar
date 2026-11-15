@@ -977,6 +977,8 @@ export function TaskView({
       change.head === null
         ? undefined
         : void model.accept([{ head: change.head, url: change.url, ...(bypassQueue ? { bypassQueue: true } : {}) }]),
+    mergeStanding: model.mergeStanding,
+    mergeAwaits: model.mergeAwaits,
     postReview: (draftId) => void model.postReview(draftId),
     stopLaunch: (id) => void model.stopLaunch(id),
     openUrl: (url) => void window.open(url, '_blank'),
@@ -1389,6 +1391,8 @@ export function TaskView({
                   onMarkAllReady={(urls) => void model.markAllReady(urls)}
                   merging={model.merging}
                   mergeRefused={model.mergeRefused}
+                  mergeStanding={model.mergeStanding}
+                  mergeAwaits={model.mergeAwaits}
                   onPostScreenshots={model.postScreenshots}
                   onOpenFile={changes.show}
                   conflict={model.conflict}
@@ -1566,6 +1570,9 @@ export function TaskView({
                           agents={model.agents}
                           busy={model.pending}
                           onMerge={(change) => void model.accept([change])}
+                          {...(card.taskId === snapshot.task.id
+                            ? { changes: snapshot.task.changes, mergeStanding: model.mergeStanding }
+                            : {})}
                           {...(onOpenTask === undefined ? {} : { onOpen: onOpenTask })}
                           onShow={showInThread}
                         />

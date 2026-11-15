@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from 'react'
 
-import type { AgentStatus, PlanStep } from '@althar/contracts'
+import type { AgentStatus, ChangeSummary, PlanStep } from '@althar/contracts'
 import { Model, SmallChange, type SmallChangeChecks, type SmallChangeReview, type SmallChangeReviewWhen, Problem } from '@althar/ui'
 
 import { messageOf } from '../../data/client'
+import { type MergeStanding, mergeStandingOf } from '../../data/merges'
 import { useServices } from '../../data/services'
 import { type NameModel, useEffortNames } from '../../shared/modelNames'
 import type { SmallChangeContent } from '../../shared/thread'
@@ -22,6 +23,12 @@ import s from './FastLaneOf.module.css'
  * opens, a new lead taking over from its next turn, a new reviewer applying until
  * its review starts. What the person saved shows at once, until the card read
  * again says it.
+ *
+ * Its pull request is read from the task's head as it stands, not only from
+ * the card as it was made: the head is read again after Merge, the card
+ * isn't. Merge shows Merging at once, then In the queue or merged as the
+ * runtime says, and goes back to Merge, with the task's line saying why,
+ * where it failed: never Merge again while its host holds it.
  */
 
 export const text = {
@@ -35,8 +42,8 @@ const stepOf = (card: SmallChangeContent, key: Step['key']) => card.steps.find((
 const wordsOf = (what: string | undefined) => (what === undefined ? null : what.replace(/^Changed /, ''))
 
 /** Its checks, from its pull request as last seen. */
-function checksOf(card: SmallChangeContent): SmallChangeChecks {
-  const summary = card.change?.checks ?? null
+function checksOf(card: SmallChangeContent, change: ChangeSummary | null): SmallChangeChecks {
+  const summary = change?.checks ?? null
   const at = stepOf(card, 'checks')?.at ?? null
   if (summary === null) return { state: 'waiting', passed: 0, total: 0, failing: null, at }
   const state = summary.outcome === 'none' ? (summary.total === 0 ? 'none' : 'waiting') : summary.outcome
@@ -92,6 +99,8 @@ export function SmallChangeOf({
   onMerge,
   onOpen,
   onShow,
+  changes,
+  mergeStanding,
 }: {
   card: SmallChangeContent
   named: NameModel
@@ -104,6 +113,10 @@ export function SmallChangeOf({
   onOpen?: (threadId: string) => void
   /** Brings an item of this thread into view: its review's report. */
   onShow?: (itemId: string) => void
+  /** The task's pull requests as its head reads them now, fresher than the card's. */
+  changes?: ReadonlyArray<ChangeSummary>
+  /** Where the merge of the pull request at this address stands, as the task keeps it from the press on. */
+  mergeStanding?: (url: string) => MergeStanding | null
 }) {
   const { client } = useServices()
   const [error, setError] = useState<string | null>(null)
@@ -146,10 +159,11 @@ export function SmallChangeOf({
   const [chosen, setChosen] = useState<SmallChangeReviewWhen | null>(null)
   const kept = whenOf(card, reviewStep)
   useEffect(() => setChosen(null), [kept])
-  const change = card.change
+  const change = (card.change === null ? undefined : changes?.find((one) => one.url === card.change?.url)) ?? card.change
   const head = change?.head ?? null
-  const merged = change?.state === 'merged'
-  const checks = checksOf(card)
+  const standing = change === null ? null : (mergeStanding?.(change.url) ?? mergeStandingOf(change, false))
+  const merged = standing === 'merged'
+  const checks = checksOf(card, change)
   const changed = stepOf(card, 'changed')
   const reported = changed?.done === true
   const after = card.reviewAfter
@@ -187,7 +201,12 @@ export function SmallChangeOf({
   // A full task merges once its review comes back clear, as its own task's review holds it.
   const reviewed = when !== 'before' || before?.state === 'clear' || (beforeShip && beforeStep?.what === 'Review skipped')
   const ready =
-    change !== null && change.state === 'open' && head !== null && reviewed && (checks.state === 'passed' || checks.state === 'none')
+    standing === null &&
+    change !== null &&
+    change.state === 'open' &&
+    head !== null &&
+    reviewed &&
+    (checks.state === 'passed' || checks.state === 'none')
   const choose = (next: SmallChangeReviewWhen) => {
     if (next === when) return
     setError(null)
@@ -245,7 +264,7 @@ export function SmallChangeOf({
         }}
         checks={checks}
         merge={{
-          state: merged ? 'merged' : change?.queued === true ? 'queued' : ready ? 'ready' : 'waiting',
+          state: standing ?? (ready ? 'ready' : 'waiting'),
           at: stepOf(card, 'merged')?.at ?? null,
         }}
         review={review}
@@ -254,7 +273,7 @@ export function SmallChangeOf({
         {...(teamed === null ? {} : { onTeam: () => setChangingTeam(true) })}
         busy={busy}
         {...(ready ? { onMerge: () => onMerge({ head, url: change.url }) } : {})}
-        {...(ready && change.canBypassQueue === true && change.unpushed === 0
+        {...((ready || standing === 'queued') && change !== null && head !== null && change.canBypassQueue === true && change.unpushed === 0
           ? { onBypassQueue: () => onMerge({ head, url: change.url, bypassQueue: true }) }
           : {})}
         {...(beforeShip
