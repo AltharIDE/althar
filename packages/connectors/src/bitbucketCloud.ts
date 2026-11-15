@@ -6,7 +6,7 @@ import { updateInCopy } from './branchUpdate'
 import { ConnectorFailed } from './errors'
 import { tail } from './github'
 import { CloudParticipants, CloudRestrictions, cloudRulesOf } from './bitbucketRules'
-import { makeHttp, withoutTrailingSlashes } from './http'
+import { makeHttp, paged, withoutTrailingSlashes } from './http'
 import { makeBitbucketCloudReleases } from './bitbucketCloudReleases'
 import { postHostReview } from './hostReviews'
 import type {
@@ -20,6 +20,7 @@ import type {
   CodeHost,
   Comment,
   ListedChange,
+  ListedRepository,
   MergeHow,
   MergeMethod,
   Person,
@@ -71,6 +72,36 @@ const RepositoryAnswer = Schema.Struct({
   mainbranch: Schema.optional(Schema.NullOr(Schema.Struct({ name: Schema.String }))),
   links: Schema.Struct({ html: Schema.Struct({ href: Schema.String }) }),
 })
+
+/** A repository the account can reach, as a list of them says it, for choosing one to clone. Bitbucket archives none. */
+const ReachedRepository = Schema.Struct({
+  full_name: Schema.String,
+  description: Schema.optional(Schema.NullOr(Schema.String)),
+  is_private: Schema.Boolean,
+  updated_on: Schema.optional(Schema.NullOr(Schema.String)),
+  links: Schema.Struct({ html: Schema.Struct({ href: Schema.String }) }),
+})
+
+/** A workspace the account is a member of: its own, or a team's. */
+const WorkspaceAccess = Schema.Struct({ workspace: Schema.Struct({ slug: Schema.String, name: Schema.String }) })
+
+/**
+ * The slug Bitbucket makes a repository's name into, as its own form does:
+ * lower case, each run of anything but letters, digits, `.`, `_` and `-`
+ * one dash, and none at either end. Bitbucket takes the slug in the address
+ * it is made at, so it is made here.
+ */
+export const slugOf = (name: string): string => {
+  const dashed = name
+    .toLowerCase()
+    .replace(/[^a-z0-9._-]+/g, '-')
+    .replace(/-{2,}/g, '-')
+  let start = 0
+  let end = dashed.length
+  while (start < end && dashed[start] === '-') start++
+  while (end > start && dashed[end - 1] === '-') end--
+  return dashed.slice(start, end)
+}
 
 const Permissions = Schema.Struct({
   values: Schema.Array(Schema.Struct({ permission: Schema.String, repository: Schema.Struct({ full_name: Schema.String }) })),
@@ -423,6 +454,17 @@ export const makeBitbucketCloud = (options: AdapterOptions): CodeHost => {
       }
       return found
     })
+
+  /** Every page of a list asked anew, by its `next`, as far as `paged` follows. */
+  const pages = <A>(item: Schema.Codec<A, unknown>, first: string) =>
+    paged(first, (url) =>
+      Effect.map(http.json(Page(item), 'GET', url), (answer) => ({ items: answer.values, next: onApi(answer.next) ?? undefined })),
+    )
+
+  /** The workspaces the account is a member of: Bitbucket lists them for it alone, since the list of every workspace went. */
+  const workspaces = Effect.map(pages(WorkspaceAccess, `${api}/user/workspaces?pagelen=100`), (found) =>
+    found.map((access) => access.workspace),
+  )
 
   const findChange = (repository: Repository, source: string, from?: Repository) =>
     Effect.map(
@@ -832,6 +874,79 @@ export const makeBitbucketCloud = (options: AdapterOptions): CodeHost => {
       }),
     postReview: (repository, number, review) => postHostReview(product, http, pull(repository, number), review, account),
     pushTarget,
+    /*
+     * Each workspace's repositories the account is a member of, all of them
+     * last updated first: Bitbucket keeps no time of the last push, and lists
+     * them a workspace at a time, since its list across workspaces went.
+     */
+    repositories: () =>
+      Effect.gen(function* () {
+        const found = yield* Effect.forEach(
+          yield* workspaces,
+          (workspace) =>
+            pages(ReachedRepository, `${api}/repositories/${encodeURIComponent(workspace.slug)}?role=member&sort=-updated_on&pagelen=100`),
+          { concurrency: 4 },
+        )
+        return found
+          .flat()
+          .map((one): ListedRepository => ({
+            path: one.full_name.split('/'),
+            description: one.description == null || one.description === '' ? null : one.description,
+            private: one.is_private,
+            pushedAt: one.updated_on ?? null,
+            webUrl: one.links.html.href,
+            archived: false,
+          }))
+          .toSorted((a, b) => (b.pushedAt ?? '').localeCompare(a.pushedAt ?? ''))
+      }),
+    // Every workspace the account is a member of, its own among them: Bitbucket keeps no repository outside one.
+    owners: () =>
+      Effect.map(workspaces, (found) =>
+        found.map((workspace) => ({ id: workspace.slug, name: workspace.name, kind: 'workspace' as const })),
+      ),
+    /*
+     * Empty: no README, so the project's own first commit is pushed as it is.
+     * Bitbucket puts it in the workspace's oldest project, as none is named.
+     */
+    createRepository: (made) =>
+      Effect.gen(function* () {
+        const slug = slugOf(made.name)
+        if (slug === '' || slug === '.' || slug === '..')
+          return yield* new ConnectorFailed({
+            product,
+            reason: 'rejected',
+            message: `“${made.name}” has no letters or digits for Bitbucket to make the repository’s slug of`,
+          })
+        const answer = yield* http
+          .json(RepositoryAnswer, 'POST', repo([made.owner.id, slug]), {
+            scm: 'git',
+            name: made.name,
+            is_private: made.private,
+            ...(made.description === undefined || made.description === '' ? {} : { description: made.description }),
+          })
+          .pipe(
+            // A workspace Bitbucket hides from the account is one it may not make a repository in.
+            Effect.mapError((error) =>
+              error.reason === 'not_found'
+                ? new ConnectorFailed({
+                    product,
+                    reason: 'forbidden',
+                    ...(error.status === undefined ? {} : { status: error.status }),
+                    message: `The account may not make a repository in ${made.owner.name}`,
+                  })
+                : error,
+            ),
+          )
+        // As `repository` reads an empty one: no main branch yet, so no branch's strategies either. The account made it, so may push to it.
+        return {
+          id: answer.uuid,
+          path: answer.full_name.split('/'),
+          defaultBranch: answer.mainbranch?.name ?? 'main',
+          webUrl: answer.links.html.href,
+          canPush: true,
+          merges: mergesOf([]),
+        } satisfies Repository
+      }),
   }
 }
 
